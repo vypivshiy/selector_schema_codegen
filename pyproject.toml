@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "scrape_yaml"
+version = "0.1.0"
+description = ""
+authors = ["georgiy <59173419+vypivshiy@users.noreply.github.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+PyYAML = "^6.0.1"
+Jinja2 = "^3.1.2"
+
+[tool.poetry.dev-dependencies]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
