@@ -24,25 +24,26 @@ class TokenType(Enum):
     OP_STRING_R_TRIM = 12
     OP_STRING_REPLACE = 13
     OP_STRING_FORMAT = 14
+    OP_STRING_SPLIT = 15
 
     # ARRAY
-    OP_INDEX = 15
-    OP_FIRST = 16
-    OP_LAST = 17
-    OP_SLICE = 18
-    OP_JOIN = 19
+    OP_INDEX = 16
+    OP_FIRST = 17
+    OP_LAST = 18
+    OP_SLICE = 19
+    OP_JOIN = 20
 
     # ANY
-    OP_COMMENT = 20
-    OP_DEFAULT = 21
-    OP_NEW_LINE = 22
-    OP_CUSTOM_FORMATTER = 23
+    OP_COMMENT = 21
+    OP_DEFAULT = 22
+    OP_NEW_LINE = 23
+    OP_CUSTOM_FORMATTER = 24
 
 
 ########
-# LEXERS
+# LEXERS key: pattern, Enum
 ########
-LEXERS_MAP = {
+TOKENS = {
     # css/xpath
     "xpath": ('''^xpath (:?['"])(.*)(:?['"])$''', TokenType.OP_XPATH),
     "xpathAll": ("""^xpathAll (:?['"])(.*)(:?['"])$""", TokenType.OP_XPATH_ALL),
@@ -54,7 +55,7 @@ LEXERS_MAP = {
     # REGEX
     "re": ('''^re (:?['"])(.*)(:?['"])$''', TokenType.OP_REGEX),
     "reAll": ("""^reAll (:?['"])(.*)(:?['"])$""", TokenType.OP_REGEX_ALL),
-    "reSub": ("""^reSub (:?['"])(.*)(:?['"])$""", TokenType.OP_REGEX_SUB),
+    "reSub": ("""^reSub (:?['"])(.*)(:?['"]) (:?['"])(.*)(:?['"])$""", TokenType.OP_REGEX_SUB),
     # STRING
     "strip": ("""^strip (:?['"])(.*)(:?['"])""", TokenType.OP_STRING_TRIM),
     "lstrip": ("""^lstrip (:?['"])(.*)(:?['"])""", TokenType.OP_STRING_L_TRIM),
@@ -63,6 +64,7 @@ LEXERS_MAP = {
     # format string
     "format": (r'''^format ((:?['"]).*{{\w*?}}.*(:?['"]))$''',  # |^format ((:?""").*{{\w*?}}.*(:?"""))$,
                TokenType.OP_STRING_FORMAT),
+    "split": (r'''^split (:?['"])(.*)(:?['"]) -?(\d+)''', TokenType.OP_STRING_SPLIT),
     # any
     "default": ("^default (.*)?", TokenType.OP_DEFAULT),
     "formatter": ("^formatter (.*?)$", TokenType.OP_CUSTOM_FORMATTER),
@@ -86,12 +88,18 @@ class Token:
                  token_type: TokenType,
                  args: tuple[str, ...],
                  line: int,
-                 pos: int
+                 pos: int,
+                 code: str
                  ):
         self.token_type = token_type
         self.args = args
         self.line = line
         self.pos = pos
+        self._code = code
+
+    @property
+    def code(self):
+        return self._code
 
     @property
     def values(self) -> Optional[tuple[str]]:
@@ -107,25 +115,29 @@ def tokenize(source_str: str):
     tokens: list[Token] = []
     line: str
     for i, line in enumerate(source_str.split(TT_NEW_LINE), 1):
-        if not line:
-            tokens.append(Token(TokenType.OP_NEW_LINE, (), i, 0))
-            continue
         line = line.strip()
+        if not line:
+            tokens.append(Token(TokenType.OP_NEW_LINE, (), i, 0, line))
+            continue
 
         if line.startswith(TT_COMMENT):
-            tokens.append(Token(TokenType.OP_COMMENT, (line, ), i, 0))
+            tokens.append(Token(TokenType.OP_COMMENT, (line, ), i, 0, line))
             continue
 
-        for start_token, ctx in LEXERS_MAP.items():
+        for start_token, ctx in TOKENS.items():
             pattern, token_type = ctx
             if line.startswith(start_token):
                 if not (result := re.match(pattern, line)):
                     msg = f"Error! line: {i}, command: {line}"
-                    raise RuntimeError(msg)
+                    raise SyntaxError(msg)
                 value = result.groups()
-                tokens.append(Token(token_type, value, i, result.endpos))
+                tokens.append(Token(token_type, value, i, result.endpos, line))
+                break
+        else:
+            msg = f"{i}::0: {line} Unknown command"
+            raise SyntaxError(msg)
 
-    print(*tokens, sep="\n")
+    return tokens
 
 
 if __name__ == '__main__':
