@@ -137,6 +137,10 @@ class Token:
             return ()
         return tuple(i for i in self.args if i not in ("'", '"'))
 
+    @values.setter
+    def values(self, value: tuple[..., ]):
+        self.args = value
+
     def __repr__(self):
         return f"{self.line}:{self.pos} - {self.token_type}, args={self.args}, values={self.values}"
 
