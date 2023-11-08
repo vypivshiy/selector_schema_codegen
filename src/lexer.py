@@ -1,9 +1,12 @@
 import re
+import warnings
 from enum import Enum
-from typing import Optional
+
+__all__ = ["TokenType", "TOKENS", "TT_COMMENT", "TT_NEW_LINE", "Token", "tokenize"]
 
 
 class TokenType(Enum):
+    """all command enum representation"""
     # SELECTORS
     OP_XPATH = 0
     OP_XPATH_ALL = 1
@@ -12,12 +15,10 @@ class TokenType(Enum):
     OP_ATTR = 4
     OP_ATTR_TEXT = 5
     OP_ATTR_RAW = 6
-
     # REGEX
     OP_REGEX = 7
     OP_REGEX_ALL = 8
     OP_REGEX_SUB = 9
-
     # STRINGS
     OP_STRING_TRIM = 10
     OP_STRING_L_TRIM = 11
@@ -25,19 +26,25 @@ class TokenType(Enum):
     OP_STRING_REPLACE = 13
     OP_STRING_FORMAT = 14
     OP_STRING_SPLIT = 15
-
     # ARRAY
     OP_INDEX = 16
     OP_FIRST = 17
     OP_LAST = 18
     OP_SLICE = 19
     OP_JOIN = 20
-
     # ANY
     OP_COMMENT = 21
     OP_DEFAULT = 22
     OP_NEW_LINE = 23
     OP_CUSTOM_FORMATTER = 24
+    # VALIDATORS
+    OP_ASSERT = 25
+    OP_ASSERT_CONTAINS = 26
+    OP_ASSERT_STARTSWITH = 27
+    OP_ASSERT_ENDSWITH = 28
+    OP_ASSERT_MATCH = 29
+    OP_ASSERT_CSS = 30
+    OP_ASSERT_XPATH = 31
 
 
 ########
@@ -75,7 +82,17 @@ TOKENS = {
     "first": (r"^first$", TokenType.OP_FIRST),
     "last": (r"^last$", TokenType.OP_LAST),
     # convert array to string
-    "join": (r"""^join ((:?['"])(.*)(:?['"]))$""", TokenType.OP_JOIN)
+    "join": (r"""^join ((:?['"])(.*)(:?['"]))$""", TokenType.OP_JOIN),
+
+    # validate
+    "assertEqual": (r"""^assertEqual ((:?['"])(.*)(:?['"]))$""", TokenType.OP_ASSERT),
+    "assertContains": (r"""^assertContains ((:?['"])(.*)(:?['"]))$""", TokenType.OP_ASSERT),
+    "assertStarts": (r"""^assertStarts ((:?['"])(.*)(:?['"]))$""", TokenType.OP_ASSERT_STARTSWITH),
+    "assertEnds": (r"""^assertEnds ((:?['"])(.*)(:?['"]))$""", TokenType.OP_ASSERT_STARTSWITH),
+    "assertMatch": (r"""^assertMatch ((:?['"])(.*)(:?['"]))$""", TokenType.OP_ASSERT_MATCH),
+    "assertCss": (r"""^assertCss ((:?['"])(.*)(:?['"]))$""", TokenType.OP_ASSERT_CSS),
+    "assertXpath": (r"""^assertXpath ((:?['"])(.*)(:?['"]))$""", TokenType.OP_ASSERT_XPATH),
+
 }
 
 
@@ -91,6 +108,14 @@ class Token:
                  pos: int,
                  code: str
                  ):
+        """Token model
+
+        :param token_type: token type, enum
+        :param args: command arguments. tuple of strings
+        :param line: line num
+        :param pos: line position
+        :param code: raw line command
+        """
         self.token_type = token_type
         self.args = args
         self.line = line
@@ -102,17 +127,20 @@ class Token:
         return self._code
 
     @property
-    def values(self) -> Optional[tuple[str]]:
+    def values(self) -> tuple[str, ...]:
+        """remove quotes matched groups `'"` """
         if not self.args:
-            return None
+            return ()
         return tuple(i for i in self.args if i not in ("'", '"'))
 
     def __repr__(self):
         return f"{self.line}:{self.pos} - {self.token_type}, args={self.args}, values={self.values}"
 
 
-def tokenize(source_str: str):
+def tokenize(source_str: str) -> list[Token]:
+    """convert source script code to tokens"""
     tokens: list[Token] = []
+    _have_default_op = False
     line: str
     for i, line in enumerate(source_str.split(TT_NEW_LINE), 1):
         line = line.strip()
@@ -126,35 +154,22 @@ def tokenize(source_str: str):
 
         for start_token, ctx in TOKENS.items():
             pattern, token_type = ctx
+            if token_type == TokenType.OP_DEFAULT:
+                _have_default_op = TokenType
+
+            elif _have_default_op and token_type in (TokenType.OP_ASSERT, TokenType.OP_ASSERT_STARTSWITH, TokenType.OP_ASSERT_ENDSWITH, TokenType.OP_ASSERT_CSS, TokenType.OP_ASSERT_XPATH, TokenType.OP_ASSERT_CONTAINS):
+                warnings.warn("Detect default and validator operator. "
+                              "`default` operator ignores `validator`", category=SyntaxWarning, stacklevel=2)
+
             if line.startswith(start_token):
                 if not (result := re.match(pattern, line)):
-                    msg = f"Error! line: {i}, command: {line}"
+                    msg = f"{i}::0 {line} Arguments error. Maybe missing quotas `'\"` symbols or wrong args passed?"
                     raise SyntaxError(msg)
                 value = result.groups()
                 tokens.append(Token(token_type, value, i, result.endpos, line))
                 break
         else:
-            msg = f"{i}::0: {line} Unknown command"
+            msg = f"{i}::0 `{line}` Unknown command"
             raise SyntaxError(msg)
 
     return tokens
-
-
-if __name__ == '__main__':
-    example = """
-// whitespaces allowed
-
-
-// end
-// xpath command
-xpath '//div[@class="image_container"]/a'
-
-// extract attribute `href`
-attr "href"
-rstrip "//"
-// format string 'https://books.toscrape.com/catalogue/' + last value
-format "https://books.toscrape.com/catalogue/{{}}"
-// any mark or skip value    
-format "https://books.toscrape.com/catalogue/{{my_value}}"    
-"""
-    tokenize(example)
