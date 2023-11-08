@@ -1,8 +1,10 @@
 import warnings
-from typing import TYPE_CHECKING, Generator
+from typing import TYPE_CHECKING, Generator, Optional
 from enum import Enum
 
 from src.lexer import TokenType
+from src.tools import css_to_xpath, xpath_to_css
+
 
 if TYPE_CHECKING:
     from src.lexer import Token
@@ -45,6 +47,29 @@ class Analyzer:
         self.code_tokens = [token for token in tokens if token.token_type not in COMMENT_TOKENS]
         self.__variable_state: VariableState = VariableState.SELECTOR
 
+    def convert_xpath_to_css(self):
+        warnings.warn("This feature not guaranteed correct convert xpath to css", category=RuntimeWarning)
+        for token in self.code_tokens:
+            if token.token_type == TokenType.OP_XPATH:
+                token.token_type = TokenType.OP_CSS
+                query = xpath_to_css(token.values[0])
+                token.values = (query,)
+            elif token.token_type == TokenType.OP_XPATH_ALL:
+                token.token_type = TokenType.OP_CSS_ALL
+                query = xpath_to_css(token.values[0])
+                token.values = (query,)
+
+    def convert_css_to_xpath(self, prefix: str = "descendant-or-self::"):
+        for token in self.code_tokens:
+            if token.token_type == TokenType.OP_CSS:
+                token.token_type = TokenType.OP_XPATH
+                query = token.values[0]
+                token.values = (css_to_xpath(query, prefix),)
+            elif token.token_type == TokenType.OP_CSS_ALL:
+                token.token_type = TokenType.OP_XPATH_ALL
+                query = token.values[0]
+                token.values = (css_to_xpath(query, prefix),)
+
     def lazy_analyze(self) -> Generator[tuple["Token", VariableState], None, None]:
         """lazy analyzer. returns token and variable state in every iteration"""
         for index, token in enumerate(self.code_tokens):
@@ -63,9 +88,11 @@ class Analyzer:
                     self._selector_methods(index, token)
                     if token.token_type in SELECTOR_METHODS:
                         self.__variable_state = VariableState.TEXT
-                    elif token.token_type in SELECTOR_ARRAY_METHODS:
+
+                    if index != 0 and self.code_tokens[index-1].token_type in SELECTOR_ARRAY_METHODS:
                         self.__variable_state = VariableState.ARRAY
                     yield token, self.__variable_state
+
                 # strings
                 case TokenType.OP_STRING_FORMAT | TokenType.OP_STRING_REPLACE | TokenType.OP_STRING_TRIM \
                         | TokenType.OP_STRING_L_TRIM | TokenType.OP_STRING_R_TRIM | TokenType.OP_STRING_SPLIT:
@@ -73,6 +100,7 @@ class Analyzer:
                     if token.token_type is TokenType.OP_STRING_SPLIT:
                         self.__variable_state = VariableState.ARRAY
                     yield token, self.__variable_state
+
                 # array
                 case TokenType.OP_INDEX | TokenType.OP_FIRST | TokenType.OP_LAST \
                         | TokenType.OP_SLICE | TokenType.OP_JOIN:
