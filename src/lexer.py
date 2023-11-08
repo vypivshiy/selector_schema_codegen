@@ -35,6 +35,7 @@ class TokenType(Enum):
     # ANY
     OP_COMMENT = 21
     OP_DEFAULT = 22
+    OP_DEFAULT_CODE = 32  # without wrap try/catch mark
     OP_NEW_LINE = 23
     OP_CUSTOM_FORMATTER = 24
     # VALIDATORS
@@ -46,6 +47,9 @@ class TokenType(Enum):
     OP_ASSERT_CSS = 30
     OP_ASSERT_XPATH = 31
 
+
+ASSERT_ENUMS = (TokenType.OP_ASSERT, TokenType.OP_ASSERT_STARTSWITH, TokenType.OP_ASSERT_ENDSWITH,
+                TokenType.OP_ASSERT_CSS, TokenType.OP_ASSERT_XPATH, TokenType.OP_ASSERT_CONTAINS)
 
 ########
 # LEXERS key: pattern, Enum
@@ -62,7 +66,7 @@ TOKENS = {
     # REGEX
     "re": ('''^re (:?['"])(.*)(:?['"])$''', TokenType.OP_REGEX),
     "reAll": ("""^reAll (:?['"])(.*)(:?['"])$""", TokenType.OP_REGEX_ALL),
-    "reSub": ("""^reSub (:?['"])(.*)(:?['"]) (:?['"])(.*)(:?['"])$""", TokenType.OP_REGEX_SUB),
+    "reSub": (r"""^reSub (:?['"])(.*)(:?['"]) (:?['"])(.*)(:?['"]) (\d*)$""", TokenType.OP_REGEX_SUB),
     # STRING
     "strip": ("""^strip (:?['"])(.*)(:?['"])""", TokenType.OP_STRING_TRIM),
     "lstrip": ("""^lstrip (:?['"])(.*)(:?['"])""", TokenType.OP_STRING_L_TRIM),
@@ -157,11 +161,12 @@ def tokenize(source_str: str) -> list[Token]:
             if token_type == TokenType.OP_DEFAULT:
                 _have_default_op = TokenType
 
-            elif _have_default_op and token_type in (TokenType.OP_ASSERT, TokenType.OP_ASSERT_STARTSWITH, TokenType.OP_ASSERT_ENDSWITH, TokenType.OP_ASSERT_CSS, TokenType.OP_ASSERT_XPATH, TokenType.OP_ASSERT_CONTAINS):
+            elif _have_default_op and token_type in ASSERT_ENUMS:
                 warnings.warn("Detect default and validator operator. "
                               "`default` operator ignores `validator`", category=SyntaxWarning, stacklevel=2)
 
-            if line.startswith(start_token):
+            command_directive = line.split(" ", 1)[0]
+            if command_directive == start_token:
                 if not (result := re.match(pattern, line)):
                     msg = f"{i}::0 {line} Arguments error. Maybe missing quotas `'\"` symbols or wrong args passed?"
                     raise SyntaxError(msg)
