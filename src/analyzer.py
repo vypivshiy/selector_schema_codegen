@@ -1,12 +1,13 @@
-import re
 import warnings
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Generator
 from enum import Enum
 
-from lexer import tokenize, TokenType
+from src.lexer import TokenType
 
 if TYPE_CHECKING:
-    from lexer import Token
+    from src.lexer import Token
+
+__all__ = ["VariableState", "Analyzer"]
 
 SELECTOR_TOKENS = (TokenType.OP_XPATH, TokenType.OP_XPATH_ALL,
                    TokenType.OP_CSS, TokenType.OP_CSS_ALL)
@@ -21,8 +22,12 @@ ARRAY_METHODS = (TokenType.OP_INDEX, TokenType.OP_FIRST, TokenType.OP_LAST, Toke
 
 COMMENT_TOKENS = (TokenType.OP_NEW_LINE, TokenType.OP_COMMENT)
 
+VALIDATE_TOKENS = (TokenType.OP_ASSERT, TokenType.OP_ASSERT_STARTSWITH,
+                   TokenType.OP_ASSERT_ENDSWITH, TokenType.OP_ASSERT_MATCH)
+
 
 class VariableState(Enum):
+    """variable states in Syntax analyzer representation"""
     SELECTOR = 0
     TEXT = 1
     ARRAY = 2
@@ -31,20 +36,28 @@ class VariableState(Enum):
 class Analyzer:
 
     def __init__(self, tokens: list["Token"]):
-        self.tokens = tokens
+        """Analyze tokens to correct syntax rules
+
+        :param tokens: tokenized code
+        """
+        self.all_tokens = tokens
         # remove comments, empty lines tokens
         self.code_tokens = [token for token in tokens if token.token_type not in COMMENT_TOKENS]
         self.__variable_state: VariableState = VariableState.SELECTOR
 
-    def analyze(self) -> list["Token"]:
+    def lazy_analyze(self) -> Generator[tuple["Token", VariableState], None, None]:
+        """lazy analyzer. returns token and variable state in every iteration"""
         for index, token in enumerate(self.code_tokens):
-            token_type = TokenType[token.token_type.name]
             match token.token_type:
                 case TokenType.OP_DEFAULT:
                     self._default(index, token)
+                    yield token, self.__variable_state
+
                 # selector
                 case TokenType.OP_CSS | TokenType.OP_CSS_ALL | TokenType.OP_XPATH | TokenType.OP_XPATH_ALL:
                     self._selector(index, token)
+                    yield token, self.__variable_state
+
                 # selector end methods
                 case TokenType.OP_ATTR | TokenType.OP_ATTR_RAW | TokenType.OP_ATTR_TEXT:
                     self._selector_methods(index, token)
@@ -52,33 +65,64 @@ class Analyzer:
                         self.__variable_state = VariableState.TEXT
                     elif token.token_type in SELECTOR_ARRAY_METHODS:
                         self.__variable_state = VariableState.ARRAY
+                    yield token, self.__variable_state
                 # strings
                 case TokenType.OP_STRING_FORMAT | TokenType.OP_STRING_REPLACE | TokenType.OP_STRING_TRIM \
                         | TokenType.OP_STRING_L_TRIM | TokenType.OP_STRING_R_TRIM | TokenType.OP_STRING_SPLIT:
                     self._string_methods(index, token)
                     if token.token_type is TokenType.OP_STRING_SPLIT:
                         self.__variable_state = VariableState.ARRAY
+                    yield token, self.__variable_state
                 # array
                 case TokenType.OP_INDEX | TokenType.OP_FIRST | TokenType.OP_LAST \
                         | TokenType.OP_SLICE | TokenType.OP_JOIN:
                     self._array_methods(index, token)
                     if token.token_type in (TokenType.OP_JOIN, TokenType.OP_INDEX, TokenType.OP_FIRST, TokenType.OP_LAST):
                         self.__variable_state = VariableState.TEXT
+                    yield token, self.__variable_state
+
+                # validators
+                case TokenType.OP_ASSERT | TokenType.OP_ASSERT_STARTSWITH | TokenType.OP_ASSERT_ENDSWITH \
+                        | TokenType.OP_ASSERT_MATCH | TokenType.OP_ASSERT_CONTAINS:
+                    self._validator_str_methods(index, token)
+                    yield token, self.__variable_state
+                case TokenType.OP_ASSERT_CSS | TokenType.OP_ASSERT_XPATH:
+                    self._validator_selector_methods(index, token)
+                    yield token, self.__variable_state
                 case _:
-                    warnings.warn("Some analyzer issue: missing step check")
-        return self.code_tokens
+                    warnings.warn("Some analyzer issue: missing analyze step check", category=RuntimeWarning,
+                                  stacklevel=2)
+                    yield token, self.__variable_state
+
+    def analyze_and_extract_tokens(self) -> list["Token"]:
+        tokens = [token for token, _ in self.lazy_analyze()]
+        return tokens
+
+    @staticmethod
+    def __err_msg(token: "Token", msg: str) -> str:
+        return f"\n{token.line}:{token.pos} :: {token.code}\n{msg}"
+
+    def _validator_selector_methods(self, index: int, token: "Token"):
+        if self.__variable_state == VariableState.SELECTOR:
+            return
+        msg = self.__err_msg(token, 'Validator command should be accept selector')
+        raise SyntaxError(msg)
+
+    def _validator_str_methods(self, index: int, token: "Token"):
+        if self.__variable_state == VariableState.TEXT:
+            return
+        msg = self.__err_msg(token, f"Validator command should be accept string")
+        raise SyntaxError(msg)
 
     def _default(self, index: int, token: "Token"):
         if index == 0:
             return
-        msg = (f"\n{token.line}:{token.pos} :: {token.code}\n"
-               f"default command should be a first")
+        msg = self.__err_msg(token, f"`default` command should be a first")
         raise SyntaxError(msg)
 
     def _selector(self, index: int, token: "Token"):
         if self.__variable_state != VariableState.SELECTOR:
-            msg = (f"\n{token.line}:{token.pos} :: {token.code}\n"
-                   f"prev variable is not selector type")
+            msg = self.__err_msg(token, "Prev variable is not selector type")
             raise SyntaxError(msg)
 
         for second_token in self.code_tokens[index:]:
@@ -86,14 +130,12 @@ class Analyzer:
                 continue
             elif second_token.token_type in SELECTOR_METHODS:
                 return
-        msg = (f"\n{token.line}:{token.pos} :: {token.code}\n"
-               f"Selector missing extract attribute "
-               f"('attr <expr>', 'raw' or 'text')")
+        msg = self.__err_msg(token, "Selector missing extract attribute ('attr <expr>', 'raw' or 'text')")
         raise SyntaxError(msg)
 
     def _selector_methods(self, index: int, token: "Token"):
         prev_token_i = index - 1
-        # convert first chunk to text
+        # convert first chunk to text case
         if index == 0 and token.token_type == TokenType.OP_ATTR_TEXT:
             return
 
@@ -101,58 +143,15 @@ class Analyzer:
               self.__variable_state == VariableState.SELECTOR):
             return
 
-        msg = (f"\n{token.line}:{token.pos} :: {token.code}\n"
-               f"Missing selector command: "
-               f"(xpath, xpathAll, css, cssAll)")
+        msg = self.__err_msg(token, f"Missing selector command: (xpath, xpathAll, css, cssAll)")
         raise SyntaxError(msg)
 
     def _string_methods(self, index: int, token: "Token"):
         if self.__variable_state != VariableState.TEXT:
-            msg = (f"\n{token.line}:{token.pos} :: {token.code}\n"
-                   f"prev variable is not string")
+            msg = self.__err_msg(token, f"Prev variable is not string")
             raise SyntaxError(msg)
 
     def _array_methods(self, index: int, token: "Token"):
         if self.__variable_state != VariableState.ARRAY:
-            msg = (f"\n{token.line}:{token.pos} :: {token.code}\n"
-                   f"prev variable is not array")
+            msg = self.__err_msg(token, f"Prev variable is not array")
             raise SyntaxError(msg)
-
-
-def dummy_codegen(tokens: list["Token"]):
-    code = """
-from parsel import Selector
-
-
-def dummy_parser(value: Selector):
-"""
-    code += "\t"
-    for token in tokens:
-        if token.token_type == TokenType.OP_XPATH:
-            code += f"value = value.xpath({token.values[0]!r})"
-        elif token.token_type == TokenType.OP_ATTR:
-            code += f"value = value.attrib.get({token.values[0]!r})"
-        elif token.token_type == TokenType.OP_ATTR_TEXT:
-            code += f"value = value.xpath('//text()').get()"
-        elif token.token_type == TokenType.OP_STRING_R_TRIM:
-            code += f"value = value.rstrip({token.values[0]!r})"
-        elif token.token_type == TokenType.OP_STRING_FORMAT:
-            val = token.values[0]
-            val = re.sub(r'\{\{.*}}', '{}', val)
-            code += f"value = {val}.format(value)"
-        code += '\n\t'
-    code += "return value\n\n"
-    return code
-
-
-if __name__ == '__main__':
-    example = """xpath '//div[@class="image_container"]/a'
-    xpath '//a/a'
-    text
-    rstrip "//"
-    format "https://books.toscrape.com/catalogue/{{}}"
-    format "https://books.toscrape.com/catalogue/{{my_value}}"    
-    """
-    tokens_ = tokenize(example)
-    checked_tokens = Analyzer(tokens_).analyze()
-    print(dummy_codegen(checked_tokens))
