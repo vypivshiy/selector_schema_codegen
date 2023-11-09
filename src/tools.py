@@ -23,17 +23,14 @@ def xpath_to_css(query: str) -> str:
 
     """
     # https://stackoverflow.com/a/18421383
-    css = re.sub(r'\[(\d+?)\]', lambda m: '[' + str(int(m.group(1)) - 1) + ']', query)
-    css = re.sub(r'/{2}', '', css)
-    css = re.sub(r'/+', ' > ', css)
-    css = css.replace('@', '')
-    css = re.sub(r'\[(\d+)\]', lambda m: f':eq({m.group(1)})', css)
+    css = re.sub(
+        r"\[(\d+?)\]", lambda m: "[" + str(int(m.group(1)) - 1) + "]", query
+    )
+    css = re.sub(r"/{2}", "", css)
+    css = re.sub(r"/+", " > ", css)
+    css = css.replace("@", "")
+    css = re.sub(r"\[(\d+)\]", lambda m: f":eq({m.group(1)})", css)
     css = re.sub(r"\[@(.*?)='(. *?)\]", r'[\1 = "\2"]', css)
     css = css.lstrip()
 
     return css
-
-
-if __name__ == '__main__':
-    print(css_to_xpath("head > title"))
-    print(xpath_to_css('//div[@class="product_price"]/p[@class="instock availability"]/i'))

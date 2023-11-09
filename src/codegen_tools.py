@@ -1,20 +1,21 @@
 import warnings
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Callable, Optional, overload
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Callable, Optional, overload
 
+from src.analyzer import Analyzer, VariableState
 from src.lexer import TokenType
-from src.analyzer import VariableState, Analyzer
 
 if TYPE_CHECKING:
     from src.lexer import Token
 
 
-__all__ = ['ABCExpressionTranslator', 'generate_code']
+__all__ = ["ABCExpressionTranslator", "generate_code"]
 
 
 class ABCExpressionTranslator(ABC):
     """collection rules HOW NEED translate tokens to code"""
+
     # variable name (be overwritten step-by-step)
     VAR_NAME: str = NotImplemented
     # first variable assigment (if needed)
@@ -33,12 +34,20 @@ class ABCExpressionTranslator(ABC):
 
     @classmethod
     @abstractmethod
-    def op_wrap_code_with_default_value(cls, state: Optional[VariableState], var_i: int, code: str, default_value: str) -> str:
+    def op_wrap_code_with_default_value(
+        cls,
+        state: Optional[VariableState],
+        var_i: int,
+        code: str,
+        default_value: str,
+    ) -> str:
         pass
 
     @classmethod
     @abstractmethod
-    def op_wrap_code(cls, state: Optional[VariableState], var_i: int, code: str) -> str:
+    def op_wrap_code(
+        cls, state: Optional[VariableState], var_i: int, code: str
+    ) -> str:
         pass
 
     @classmethod
@@ -78,22 +87,30 @@ class ABCExpressionTranslator(ABC):
 
     @classmethod
     @abstractmethod
-    def op_string_split(cls, state: VariableState, var_i: int, substr: str, count=None) -> str:
+    def op_string_split(
+        cls, state: VariableState, var_i: int, substr: str, count=None
+    ) -> str:
         pass
 
     @classmethod
     @abstractmethod
-    def op_string_format(cls, state: VariableState, var_i: int, substr: str) -> str:
+    def op_string_format(
+        cls, state: VariableState, var_i: int, substr: str
+    ) -> str:
         pass
 
     @classmethod
     @abstractmethod
-    def op_string_trim(cls, state: VariableState, var_i: int, substr: str) -> str:
+    def op_string_trim(
+        cls, state: VariableState, var_i: int, substr: str
+    ) -> str:
         pass
 
     @classmethod
     @abstractmethod
-    def op_string_ltrim(cls, state: VariableState, var_i: int, substr: str) -> str:
+    def op_string_ltrim(
+        cls, state: VariableState, var_i: int, substr: str
+    ) -> str:
         pass
 
     @classmethod
@@ -103,12 +120,16 @@ class ABCExpressionTranslator(ABC):
 
     @classmethod
     @abstractmethod
-    def op_string_replace(cls, state: VariableState, var_i: int, old: str, new: str, count=None) -> str:
+    def op_string_replace(
+        cls, state: VariableState, var_i: int, old: str, new: str, count=None
+    ) -> str:
         pass
 
     @classmethod
     @abstractmethod
-    def op_string_join(cls, state: VariableState, var_i: int, string: str) -> str:
+    def op_string_join(
+        cls, state: VariableState, var_i: int, string: str
+    ) -> str:
         pass
 
     @classmethod
@@ -118,17 +139,28 @@ class ABCExpressionTranslator(ABC):
 
     @classmethod
     @abstractmethod
-    def op_regex_all(cls, state: VariableState, var_i: int, pattern: str) -> str:
+    def op_regex_all(
+        cls, state: VariableState, var_i: int, pattern: str
+    ) -> str:
         pass
 
     @classmethod
     @abstractmethod
-    def op_regex_sub(cls, state: VariableState, var_i: int, pattern: str, repl: str, count=None) -> str:
+    def op_regex_sub(
+        cls,
+        state: VariableState,
+        var_i: int,
+        pattern: str,
+        repl: str,
+        count=None,
+    ) -> str:
         pass
 
     @classmethod
     @abstractmethod
-    def op_slice(cls, state: VariableState, var_i: int, start: str, end: str) -> str:
+    def op_slice(
+        cls, state: VariableState, var_i: int, start: str, end: str
+    ) -> str:
         pass
 
     @classmethod
@@ -158,31 +190,43 @@ class ABCExpressionTranslator(ABC):
 
     @classmethod
     @abstractmethod
-    def op_assert_xpath(cls, state: VariableState, var_i: int, query: str) -> str:
+    def op_assert_xpath(
+        cls, state: VariableState, var_i: int, query: str
+    ) -> str:
         pass
 
     @classmethod
     @abstractmethod
-    def op_assert_re_match(cls, state: VariableState, var_i: int, pattern: str) -> str:
+    def op_assert_re_match(
+        cls, state: VariableState, var_i: int, pattern: str
+    ) -> str:
         pass
 
     @classmethod
     @abstractmethod
-    def op_assert_starts_with(cls, state: VariableState, var_i: int, prefix: str) -> str:
+    def op_assert_starts_with(
+        cls, state: VariableState, var_i: int, prefix: str
+    ) -> str:
         pass
 
     @classmethod
     @abstractmethod
-    def op_assert_ends_with(cls, state: VariableState, var_i: int, suffix: str) -> str:
+    def op_assert_ends_with(
+        cls, state: VariableState, var_i: int, suffix: str
+    ) -> str:
         pass
 
     @classmethod
     @abstractmethod
-    def op_assert_contains(cls, state: VariableState, var_i: int, substring: str) -> str:
+    def op_assert_contains(
+        cls, state: VariableState, var_i: int, substring: str
+    ) -> str:
         pass
 
     @property
-    def tokens_map(self) -> dict[TokenType: Callable[[VariableState, int, ...], str]]:
+    def tokens_map(
+        self,
+    ) -> dict[TokenType : Callable[[VariableState, int, ...], str]]:
         """return dict by token_type : cast_token_to_code method"""
         return {
             TokenType.OP_XPATH: self.op_xpath,
@@ -219,13 +263,14 @@ class ABCExpressionTranslator(ABC):
             TokenType.OP_ASSERT_ENDSWITH: self.op_assert_ends_with,
             TokenType.OP_ASSERT_MATCH: self.op_assert_re_match,
             TokenType.OP_ASSERT_CSS: self.op_assert_css,
-            TokenType.OP_ASSERT_XPATH: self.op_assert_xpath
+            TokenType.OP_ASSERT_XPATH: self.op_assert_xpath,
         }
 
 
 @dataclass
 class BlockCode:
     """generated block code structure"""
+
     code: str
     selector_import: str
     selector_type: str
@@ -236,30 +281,34 @@ class BlockCode:
 
 
 @overload
-def generate_code(tokens: list["Token"],
-                  translator: ABCExpressionTranslator,
-                  *,
-                  convert_to_css: bool = False) -> BlockCode:
+def generate_code(
+    tokens: list["Token"],
+    translator: ABCExpressionTranslator,
+    *,
+    convert_to_css: bool = False,
+) -> BlockCode:
     pass
 
 
 @overload
-def generate_code(tokens: list["Token"],
-                  translator: ABCExpressionTranslator,
-                  *,
-                  convert_to_xpath: bool = False,
-                  xpath_prefix: Optional[str] = None) -> BlockCode:
+def generate_code(
+    tokens: list["Token"],
+    translator: ABCExpressionTranslator,
+    *,
+    convert_to_xpath: bool = False,
+    xpath_prefix: Optional[str] = None,
+) -> BlockCode:
     pass
 
 
-def generate_code(tokens: list["Token"],
-                  translator: ABCExpressionTranslator,
-                  *,
-                  convert_to_css: bool = False,
-                  convert_to_xpath: bool = False,
-                  xpath_prefix: Optional[str] = None
-                  ) -> BlockCode:
-
+def generate_code(
+    tokens: list["Token"],
+    translator: ABCExpressionTranslator,
+    *,
+    convert_to_css: bool = False,
+    convert_to_xpath: bool = False,
+    xpath_prefix: Optional[str] = None,
+) -> BlockCode:
     default_token = None  # default token detect var
     lines = []
     regex_import: Optional[str] = None
@@ -268,13 +317,18 @@ def generate_code(tokens: list["Token"],
 
     analyze = Analyzer(tokens)
     if convert_to_css and convert_to_xpath:
-        warnings.warn("Passed css and xpath converters, ignore operation", category=RuntimeWarning)
+        warnings.warn(
+            "Passed css and xpath converters, ignore operation",
+            category=RuntimeWarning,
+        )
 
     elif convert_to_css:
         analyze.convert_xpath_to_css()
 
     elif convert_to_xpath:
-        analyze.convert_css_to_xpath(xpath_prefix) if xpath_prefix else analyze.convert_css_to_xpath()
+        analyze.convert_css_to_xpath(
+            xpath_prefix
+        ) if xpath_prefix else analyze.convert_css_to_xpath()
 
     for i, ctx_token in enumerate(analyze.lazy_analyze()):
         token, var_state = ctx_token
@@ -295,13 +349,17 @@ def generate_code(tokens: list["Token"],
     # assembly
     code = translator.DELIM_LINES.join(lines)
     if default_token:
-        full_code = translator.op_wrap_code_with_default_value(None, i + 1, code, *default_token.values)
+        full_code = translator.op_wrap_code_with_default_value(
+            None, i + 1, code, *default_token.values
+        )
     else:
         full_code = translator.op_wrap_code(None, i + 1, code)
 
-    return BlockCode(code=full_code,
-                     regex_import=regex_import,
-                     selector_import=selector_import,
-                     selector_type=selector_type,
-                     var_name=translator.VAR_NAME,
-                     translator_instance=translator)
+    return BlockCode(
+        code=full_code,
+        regex_import=regex_import,
+        selector_import=selector_import,
+        selector_type=selector_type,
+        var_name=translator.VAR_NAME,
+        translator_instance=translator,
+    )

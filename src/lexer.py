@@ -2,11 +2,19 @@ import re
 import warnings
 from enum import Enum
 
-__all__ = ["TokenType", "TOKENS", "TT_COMMENT", "TT_NEW_LINE", "Token", "tokenize"]
+__all__ = [
+    "TokenType",
+    "TOKENS",
+    "TT_COMMENT",
+    "TT_NEW_LINE",
+    "Token",
+    "tokenize",
+]
 
 
 class TokenType(Enum):
     """all command enum representation"""
+
     # SELECTORS
     OP_XPATH = 0
     OP_XPATH_ALL = 1
@@ -49,7 +57,12 @@ class TokenType(Enum):
 
     @classmethod
     def tokens_selector_all(cls):
-        return TokenType.OP_CSS, TokenType.OP_XPATH, TokenType.OP_CSS_ALL, TokenType.OP_XPATH_ALL
+        return (
+            TokenType.OP_CSS,
+            TokenType.OP_XPATH,
+            TokenType.OP_CSS_ALL,
+            TokenType.OP_XPATH_ALL,
+        )
 
     @classmethod
     def tokens_selector_fetch_one(cls):
@@ -65,21 +78,43 @@ class TokenType(Enum):
 
     @classmethod
     def tokens_regex(cls):
-        return TokenType.OP_REGEX, TokenType.OP_REGEX_ALL, TokenType.OP_REGEX_SUB
+        return (
+            TokenType.OP_REGEX,
+            TokenType.OP_REGEX_ALL,
+            TokenType.OP_REGEX_SUB,
+        )
 
     @classmethod
     def tokens_string(cls):
-        return (TokenType.OP_STRING_FORMAT, TokenType.OP_STRING_REPLACE, TokenType.OP_STRING_SPLIT,
-                TokenType.OP_STRING_L_TRIM, TokenType.OP_STRING_R_TRIM, TokenType.OP_STRING_TRIM)
+        return (
+            TokenType.OP_STRING_FORMAT,
+            TokenType.OP_STRING_REPLACE,
+            TokenType.OP_STRING_SPLIT,
+            TokenType.OP_STRING_L_TRIM,
+            TokenType.OP_STRING_R_TRIM,
+            TokenType.OP_STRING_TRIM,
+        )
 
     @classmethod
     def tokens_array(cls):
-        return TokenType.OP_INDEX, TokenType.OP_FIRST, TokenType.OP_LAST, TokenType.OP_SLICE, TokenType.OP_JOIN
+        return (
+            TokenType.OP_INDEX,
+            TokenType.OP_FIRST,
+            TokenType.OP_LAST,
+            TokenType.OP_SLICE,
+            TokenType.OP_JOIN,
+        )
 
     @classmethod
     def tokens_asserts(cls):
-        return  (TokenType.OP_ASSERT, TokenType.OP_ASSERT_STARTSWITH, TokenType.OP_ASSERT_ENDSWITH,
-                TokenType.OP_ASSERT_CSS, TokenType.OP_ASSERT_XPATH, TokenType.OP_ASSERT_CONTAINS)
+        return (
+            TokenType.OP_ASSERT,
+            TokenType.OP_ASSERT_STARTSWITH,
+            TokenType.OP_ASSERT_ENDSWITH,
+            TokenType.OP_ASSERT_CSS,
+            TokenType.OP_ASSERT_XPATH,
+            TokenType.OP_ASSERT_CONTAINS,
+        )
 
 
 ########
@@ -87,7 +122,7 @@ class TokenType(Enum):
 ########
 TOKENS = {
     # css/xpath
-    "xpath": ('''^xpath (?:['"])(.*)(?:['"])$''', TokenType.OP_XPATH),
+    "xpath": ("""^xpath (?:['"])(.*)(?:['"])$""", TokenType.OP_XPATH),
     "xpathAll": ("""^xpathAll (?:['"])(.*)(?:['"])$""", TokenType.OP_XPATH_ALL),
     "css": ("""^css (?:['"])(.*)(?:['"])$""", TokenType.OP_CSS),
     "cssAll": ("""^cssAll (?:['"])(.*)(?:['"])$""", TokenType.OP_CSS_ALL),
@@ -95,22 +130,32 @@ TOKENS = {
     "text": ("^text$", TokenType.OP_ATTR_TEXT),
     "raw": ("^raw$", TokenType.OP_ATTR_RAW),
     # REGEX
-    "re": ('''^re (?:['"])(.*)(?:['"])$''', TokenType.OP_REGEX),
+    "re": ("""^re (?:['"])(.*)(?:['"])$""", TokenType.OP_REGEX),
     "reAll": ("""^reAll (?:['"])(.*)(?:['"])$""", TokenType.OP_REGEX_ALL),
-    "reSub": (r"""^reSub (?:['"])(.*)(?:['"]) (?:['"])(.*)(?:['"])\s?-?(\d*)$""", TokenType.OP_REGEX_SUB),
+    "reSub": (
+        r"""^reSub (?:['"])(.*)(?:['"]) (?:['"])(.*)(?:['"])\s?-?(\d*)$""",
+        TokenType.OP_REGEX_SUB,
+    ),
     # STRING
     "strip": ("""^strip (?:['"])(.*)(?:['"])$""", TokenType.OP_STRING_TRIM),
     "lstrip": ("""^lstrip (?:['"])(.*)(?:['"])$""", TokenType.OP_STRING_L_TRIM),
     "rstrip": ("""^rstrip (?:['"])(.*)(?:['"])$""", TokenType.OP_STRING_R_TRIM),
-    "replace": (r"""^replace (?:['"])(.*?)(?:['"]) (?:['"])(.*?)(?:['"])\s?-?(\d*)$""", TokenType.OP_STRING_REPLACE),
+    "replace": (
+        r"""^replace (?:['"])(.*?)(?:['"]) (?:['"])(.*?)(?:['"])\s?-?(\d*)$""",
+        TokenType.OP_STRING_REPLACE,
+    ),
     # format string
-    "format": (r'''^format (?:['"])(.*{{\w*?}}.*)(?:['"])$''',  # |^format ((?:""").*{{\w*?}}.*(?:"""))$,
-               TokenType.OP_STRING_FORMAT),
-    "split": (r'''^split (?:['"])(.*)(?:['"])\s?-?(\d+)$''', TokenType.OP_STRING_SPLIT),
+    "format": (
+        r"""^format (?:['"])(.*{{\w*?}}.*)(?:['"])$""",
+        TokenType.OP_STRING_FORMAT,
+    ),
+    "split": (
+        r"""^split (?:['"])(.*)(?:['"])\s?-?(\d+)$""",
+        TokenType.OP_STRING_SPLIT,
+    ),
     # any
     "default": ("^default (.+)?$", TokenType.OP_DEFAULT),
     "formatter": ("^formatter (.*?)$", TokenType.OP_CUSTOM_FORMATTER),
-
     # array
     "slice": (r"^slice -?(\d+) -?(\d*)$", TokenType.OP_SLICE),
     "index": (r"^index -?(\d+)$", TokenType.OP_INDEX),
@@ -118,16 +163,35 @@ TOKENS = {
     "last": (r"^last$", TokenType.OP_LAST),
     # convert array to string
     "join": (r"""^join ((?:['"])(.*)(?:['"]))$""", TokenType.OP_JOIN),
-
     # validate
-    "assertEqual": (r"""^assertEqual (?:['"])(.*)(?:['"])$""", TokenType.OP_ASSERT),
-    "assertContains": (r"""^assertContains (?:['"])(.*)(?:['"])$""", TokenType.OP_ASSERT_CONTAINS),
-    "assertStarts": (r"""^assertStarts (?:['"])(.*)(?:['"])$""", TokenType.OP_ASSERT_STARTSWITH),
-    "assertEnds": (r"""^assertEnds (?:['"])(.*)(?:['"])$""", TokenType.OP_ASSERT_ENDSWITH),
-    "assertMatch": (r"""^assertMatch (?:['"])(.*)(?:['"])$""", TokenType.OP_ASSERT_MATCH),
-    "assertCss": (r"""^assertCss (?:['"])(.*)(?:['"])$""", TokenType.OP_ASSERT_CSS),
-    "assertXpath": (r"""^assertXpath (?:['"])(.*)(?:['"])$""", TokenType.OP_ASSERT_XPATH),
-
+    "assertEqual": (
+        r"""^assertEqual (?:['"])(.*)(?:['"])$""",
+        TokenType.OP_ASSERT,
+    ),
+    "assertContains": (
+        r"""^assertContains (?:['"])(.*)(?:['"])$""",
+        TokenType.OP_ASSERT_CONTAINS,
+    ),
+    "assertStarts": (
+        r"""^assertStarts (?:['"])(.*)(?:['"])$""",
+        TokenType.OP_ASSERT_STARTSWITH,
+    ),
+    "assertEnds": (
+        r"""^assertEnds (?:['"])(.*)(?:['"])$""",
+        TokenType.OP_ASSERT_ENDSWITH,
+    ),
+    "assertMatch": (
+        r"""^assertMatch (?:['"])(.*)(?:['"])$""",
+        TokenType.OP_ASSERT_MATCH,
+    ),
+    "assertCss": (
+        r"""^assertCss (?:['"])(.*)(?:['"])$""",
+        TokenType.OP_ASSERT_CSS,
+    ),
+    "assertXpath": (
+        r"""^assertXpath (?:['"])(.*)(?:['"])$""",
+        TokenType.OP_ASSERT_XPATH,
+    ),
 }
 
 
@@ -136,13 +200,14 @@ TT_NEW_LINE = "\n"
 
 
 class Token:
-    def __init__(self,
-                 token_type: TokenType,
-                 args: tuple[str, ...],
-                 line: int,
-                 pos: int,
-                 code: str
-                 ):
+    def __init__(
+        self,
+        token_type: TokenType,
+        args: tuple[str, ...],
+        line: int,
+        pos: int,
+        code: str,
+    ):
         """Token model
 
         :param token_type: token type, enum
@@ -163,13 +228,13 @@ class Token:
 
     @property
     def values(self) -> tuple[str, ...]:
-        """remove quotes matched groups `'"` """
+        """remove quotes matched groups `'"`"""
         if not self.args:
             return ()
         return self.args
 
     @values.setter
-    def values(self, value: tuple[..., ]):
+    def values(self, value: tuple[...,]):
         self.args = value
 
     def __repr__(self):
@@ -189,15 +254,19 @@ def tokenize(source_str: str) -> list[Token]:
             continue
 
         if line.startswith(TT_COMMENT):
-            tokens.append(Token(TokenType.OP_COMMENT, (line, ), i, 0, line))
+            tokens.append(Token(TokenType.OP_COMMENT, (line,), i, 0, line))
             continue
 
         for start_token, ctx in TOKENS.items():
             pattern, token_type = ctx
 
             if _have_default_op and token_type in TokenType.tokens_asserts():
-                warnings.warn("Detect default and validator operator. "
-                              "`default` operator ignores `validator` checks", category=SyntaxWarning, stacklevel=2)
+                warnings.warn(
+                    "Detect default and validator operator. "
+                    "`default` operator ignores `validator` checks",
+                    category=SyntaxWarning,
+                    stacklevel=2,
+                )
 
             command_directive = line.split(" ", 1)[0]
             if command_directive == start_token:
