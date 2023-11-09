@@ -89,13 +89,13 @@ TOKENS = {
     "join": (r"""^join ((:?['"])(.*)(:?['"]))$""", TokenType.OP_JOIN),
 
     # validate
-    "assertEqual": (r"""^assertEqual ((:?['"])(.*)(:?['"]))$""", TokenType.OP_ASSERT),
-    "assertContains": (r"""^assertContains ((:?['"])(.*)(:?['"]))$""", TokenType.OP_ASSERT),
-    "assertStarts": (r"""^assertStarts ((:?['"])(.*)(:?['"]))$""", TokenType.OP_ASSERT_STARTSWITH),
-    "assertEnds": (r"""^assertEnds ((:?['"])(.*)(:?['"]))$""", TokenType.OP_ASSERT_STARTSWITH),
-    "assertMatch": (r"""^assertMatch ((:?['"])(.*)(:?['"]))$""", TokenType.OP_ASSERT_MATCH),
-    "assertCss": (r"""^assertCss ((:?['"])(.*)(:?['"]))$""", TokenType.OP_ASSERT_CSS),
-    "assertXpath": (r"""^assertXpath ((:?['"])(.*)(:?['"]))$""", TokenType.OP_ASSERT_XPATH),
+    "assertEqual": (r"""^assertEqual (:?['"])(.*)(:?['"])$""", TokenType.OP_ASSERT),
+    "assertContains": (r"""^assertContains (:?['"])(.*)(:?['"])$""", TokenType.OP_ASSERT_CONTAINS),
+    "assertStarts": (r"""^assertStarts (:?['"])(.*)(:?['"])$""", TokenType.OP_ASSERT_STARTSWITH),
+    "assertEnds": (r"""^assertEnds (:?['"])(.*)(:?['"])$""", TokenType.OP_ASSERT_ENDSWITH),
+    "assertMatch": (r"""^assertMatch (:?['"])(.*)(:?['"])$""", TokenType.OP_ASSERT_MATCH),
+    "assertCss": (r"""^assertCss (:?['"])(.*)(:?['"])$""", TokenType.OP_ASSERT_CSS),
+    "assertXpath": (r"""^assertXpath (:?['"])(.*)(:?['"])$""", TokenType.OP_ASSERT_XPATH),
 
 }
 
@@ -150,6 +150,7 @@ def tokenize(source_str: str) -> list[Token]:
     tokens: list[Token] = []
     _have_default_op = False
     line: str
+
     for i, line in enumerate(source_str.split(TT_NEW_LINE), 1):
         line = line.strip()
         if not line:
@@ -162,18 +163,20 @@ def tokenize(source_str: str) -> list[Token]:
 
         for start_token, ctx in TOKENS.items():
             pattern, token_type = ctx
-            if token_type == TokenType.OP_DEFAULT:
-                _have_default_op = TokenType
 
-            elif _have_default_op and token_type in ASSERT_ENUMS:
+            if _have_default_op and token_type in ASSERT_ENUMS:
                 warnings.warn("Detect default and validator operator. "
-                              "`default` operator ignores `validator`", category=SyntaxWarning, stacklevel=2)
+                              "`default` operator ignores `validator` checks", category=SyntaxWarning, stacklevel=2)
 
             command_directive = line.split(" ", 1)[0]
             if command_directive == start_token:
                 if not (result := re.match(pattern, line)):
                     msg = f"{i}::0 {line} Arguments error. Maybe missing quotas `'\"` symbols or wrong args passed?"
                     raise SyntaxError(msg)
+
+                if token_type is TokenType.OP_DEFAULT:
+                    _have_default_op = True
+
                 value = result.groups()
                 tokens.append(Token(token_type, value, i, result.endpos, line))
                 break
