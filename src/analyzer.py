@@ -116,14 +116,27 @@ class Analyzer:
                 case TokenType.OP_ASSERT_CSS | TokenType.OP_ASSERT_XPATH:
                     self._validator_selector_methods(index, token)
                     yield token, self.__variable_state
+
+                # regex
+                case TokenType.OP_REGEX | TokenType.OP_REGEX_ALL | TokenType.OP_REGEX_SUB:
+                    self._regex(index, token)
+                    if token.token_type == TokenType.OP_REGEX_ALL:
+                        self.__variable_state = VariableState.ARRAY
+                    yield token, self.__variable_state
                 case _:
-                    warnings.warn("Some analyzer issue: missing analyze step check", category=RuntimeWarning,
-                                  stacklevel=2)
+                    msg = f"Some analyzer issue: missing analyze step check:\n{token}"
+                    warnings.warn(msg, category=RuntimeWarning)
                     yield token, self.__variable_state
 
     def analyze_and_extract_tokens(self) -> list["Token"]:
         tokens = [token for token, _ in self.lazy_analyze()]
         return tokens
+
+    def _regex(self, index: int, token: "Token"):
+        if self.__variable_state == VariableState.TEXT:
+            return
+        msg = self.__err_msg(token, "Regex command should be accept TEXT")
+        raise SyntaxError(msg)
 
     def _selector_array(self, index: int, token: "Token"):
         return
@@ -135,24 +148,24 @@ class Analyzer:
     def _validator_selector_methods(self, index: int, token: "Token"):
         if self.__variable_state == VariableState.SELECTOR:
             return
-        msg = self.__err_msg(token, 'Validator command should be accept selector')
+        msg = self.__err_msg(token, 'Validator command should be accept selector-like object')
         raise SyntaxError(msg)
 
     def _validator_str_methods(self, index: int, token: "Token"):
         if self.__variable_state == VariableState.TEXT:
             return
-        msg = self.__err_msg(token, f"Validator command should be accept string")
+        msg = self.__err_msg(token, f"Validator command should be accept string-like object")
         raise SyntaxError(msg)
 
     def _default(self, index: int, token: "Token"):
         if index == 0:
             return
-        msg = self.__err_msg(token, f"`default` command should be a first")
+        msg = self.__err_msg(token, f"Default command should be a first")
         raise SyntaxError(msg)
 
     def _selector(self, index: int, token: "Token"):
         if self.__variable_state != VariableState.SELECTOR:
-            msg = self.__err_msg(token, "Prev variable is not selector type")
+            msg = self.__err_msg(token, "Prev variable is not selector-like type")
             raise SyntaxError(msg)
 
         for second_token in self.code_tokens[index:]:
@@ -160,7 +173,7 @@ class Analyzer:
                 continue
             elif second_token.token_type in TokenType.tokens_selector_extract():
                 return
-        msg = self.__err_msg(token, "Selector missing extract attribute ('attr <expr>', 'raw' or 'text')")
+        msg = self.__err_msg(token, "Selector missing extract attribute ('attr \"<expr>\"', 'raw' or 'text')")
         raise SyntaxError(msg)
 
     def _selector_methods(self, index: int, token: "Token"):
