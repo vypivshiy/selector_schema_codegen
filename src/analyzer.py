@@ -9,10 +9,16 @@ from src.tools import css_to_xpath, xpath_to_css
 if TYPE_CHECKING:
     from src.lexer import Token
 
-__all__ = ["VariableState", "Analyzer"]
+__all__ = ["VariableState",
+           "Analyzer",
+           "VALIDATE_TOKENS"]
 
 SELECTOR_TOKENS = (TokenType.OP_XPATH, TokenType.OP_XPATH_ALL,
                    TokenType.OP_CSS, TokenType.OP_CSS_ALL)
+
+SELECTOR_ONE = (TokenType.OP_XPATH, TokenType.OP_CSS)
+SELECTOR_ALL = (TokenType.OP_XPATH_ALL, TokenType.OP_CSS_ALL)
+
 SELECTOR_METHODS = (TokenType.OP_ATTR, TokenType.OP_ATTR_RAW, TokenType.OP_ATTR_TEXT)
 
 SELECTOR_ARRAY_METHODS = (TokenType.OP_XPATH_ALL, TokenType.OP_CSS_ALL)
@@ -31,6 +37,8 @@ VALIDATE_TOKENS = (TokenType.OP_ASSERT, TokenType.OP_ASSERT_STARTSWITH,
 class VariableState(Enum):
     """variable states in Syntax analyzer representation"""
     SELECTOR = 0
+    # same as a SELECTOR var. if selectors lib returns build-in containers. python bs4 for example
+    SELECTOR_ARRAY = 4
     TEXT = 1
     ARRAY = 2
 
@@ -79,17 +87,26 @@ class Analyzer:
                     yield token, self.__variable_state
 
                 # selector
-                case TokenType.OP_CSS | TokenType.OP_CSS_ALL | TokenType.OP_XPATH | TokenType.OP_XPATH_ALL:
+                case TokenType.OP_CSS | TokenType.OP_XPATH:
                     self._selector(index, token)
+                    yield token, self.__variable_state
+
+                case TokenType.OP_CSS_ALL | TokenType.OP_XPATH_ALL:
+                    # TODO add syntax analyze for this type
+                    self._selector_array(index, token)
+                    self.__variable_state = VariableState.SELECTOR_ARRAY
                     yield token, self.__variable_state
 
                 # selector end methods
                 case TokenType.OP_ATTR | TokenType.OP_ATTR_RAW | TokenType.OP_ATTR_TEXT:
                     self._selector_methods(index, token)
                     if token.token_type in SELECTOR_METHODS:
-                        self.__variable_state = VariableState.TEXT
 
-                    if index != 0 and self.code_tokens[index-1].token_type in SELECTOR_ARRAY_METHODS:
+                        if self.__variable_state == VariableState.SELECTOR_ARRAY:
+                            self.__variable_state = VariableState.ARRAY
+                        else:
+                            self.__variable_state = VariableState.TEXT
+                    if self.__variable_state == VariableState.SELECTOR_ARRAY:
                         self.__variable_state = VariableState.ARRAY
                     yield token, self.__variable_state
 
@@ -125,6 +142,9 @@ class Analyzer:
     def analyze_and_extract_tokens(self) -> list["Token"]:
         tokens = [token for token, _ in self.lazy_analyze()]
         return tokens
+
+    def _selector_array(self, index: int, token: "Token"):
+        return
 
     @staticmethod
     def __err_msg(token: "Token", msg: str) -> str:
@@ -162,24 +182,24 @@ class Analyzer:
         raise SyntaxError(msg)
 
     def _selector_methods(self, index: int, token: "Token"):
-        prev_token_i = index - 1
         # convert first chunk to text case
         if index == 0 and token.token_type == TokenType.OP_ATTR_TEXT:
             return
 
-        elif (self.code_tokens[prev_token_i].token_type in SELECTOR_TOKENS and
-              self.__variable_state == VariableState.SELECTOR):
+        elif self.__variable_state in (VariableState.SELECTOR, VariableState.SELECTOR_ARRAY):
             return
 
         msg = self.__err_msg(token, f"Missing selector command: (xpath, xpathAll, css, cssAll)")
         raise SyntaxError(msg)
 
     def _string_methods(self, index: int, token: "Token"):
-        if self.__variable_state != VariableState.TEXT:
-            msg = self.__err_msg(token, f"Prev variable is not string")
-            raise SyntaxError(msg)
+        if self.__variable_state is VariableState.TEXT:
+            return
+        msg = self.__err_msg(token, f"Prev variable is not string")
+        raise SyntaxError(msg)
 
     def _array_methods(self, index: int, token: "Token"):
-        if self.__variable_state != VariableState.ARRAY:
-            msg = self.__err_msg(token, f"Prev variable is not array")
-            raise SyntaxError(msg)
+        if self.__variable_state in (VariableState.ARRAY, VariableState.SELECTOR_ARRAY):
+            return
+        msg = self.__err_msg(token, f"Prev variable is not array")
+        raise SyntaxError(msg)
