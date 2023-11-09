@@ -50,7 +50,7 @@ class Translator(ABCExpressionTranslator):
     @classmethod
     def op_css(cls, state: VariableState, var_i: int, query: str) -> str:
         var_name = cls.get_var_name(var_i)
-        return f"{var_name}.select_one({query!r})"
+        return f"{var_name}.select_one({query})"
 
     @classmethod
     def op_xpath(cls, state: VariableState, var_i: int, query: str) -> str:
@@ -59,7 +59,7 @@ class Translator(ABCExpressionTranslator):
     @classmethod
     def op_css_all(cls, state: VariableState, var_i: int, query: str) -> str:
         var_name = cls.get_var_name(var_i)
-        return f"{var_name}.select({query!r})"
+        return f"{var_name}.select({query})"
 
     @classmethod
     def op_xpath_all(cls, state: VariableState, var_i: int, query: str) -> str:
@@ -69,8 +69,8 @@ class Translator(ABCExpressionTranslator):
     def op_attr(cls, state: VariableState, var_i: int, attr_name: str) -> str:
         var_name = cls.get_var_name(var_i)
         if state is VariableState.ARRAY:
-            return f"{var_name}.get({attr_name!r})"
-        return f"[i.get({attr_name!r}) for i {var_name}]"
+            return f"{var_name}.get({attr_name})"
+        return f"[i.get({attr_name}) for i {var_name}]"
 
     @classmethod
     def op_text(cls, state: VariableState, var_i: int) -> str:
@@ -92,8 +92,8 @@ class Translator(ABCExpressionTranslator):
     ) -> str:
         var_name = cls.get_var_name(var_i)
         if count and count not in ("-1", -1):
-            return f"{var_name}.split({substr!r}, {count})"
-        return f"{var_name}.split({substr!r})"
+            return f"{var_name}.split({substr}, {count})"
+        return f"{var_name}.split({substr})"
 
     @classmethod
     def op_string_format(
@@ -108,19 +108,19 @@ class Translator(ABCExpressionTranslator):
         cls, state: VariableState, var_i: int, substr: str
     ) -> str:
         var_name = cls.get_var_name(var_i)
-        return f"{var_name}.strip({substr!r})"
+        return f"{var_name}.strip({substr})"
 
     @classmethod
     def op_string_ltrim(
         cls, state: VariableState, var_i: int, substr: str
     ) -> str:
         var_name = cls.get_var_name(var_i)
-        return f"{var_name}.lstrip({substr!r})"
+        return f"{var_name}.lstrip({substr})"
 
     @classmethod
     def op_string_rtrim(cls, state: VariableState, var_i: int, substr) -> str:
         var_name = cls.get_var_name(var_i)
-        return f"{var_name}.rstrip({substr!r})"
+        return f"{var_name}.rstrip({substr})"
 
     @classmethod
     def op_string_replace(
@@ -128,27 +128,27 @@ class Translator(ABCExpressionTranslator):
     ) -> str:
         var_name = cls.get_var_name(var_i)
         if count and count not in ("-1", -1):
-            return f"{var_name}.replace({old!r}, {new!r}, {count})"
-        return f"{var_name}.replace({old!r}, {new!r})"
+            return f"{var_name}.replace({old}, {new}, {count})"
+        return f"{var_name}.replace({old}, {new})"
 
     @classmethod
     def op_string_join(
         cls, state: VariableState, var_i: int, string: str
     ) -> str:
         var_name = cls.get_var_name(var_i)
-        return f"{string!r}.join({var_name})"
+        return f"{string}.join({var_name})"
 
     @classmethod
     def op_regex(cls, state: VariableState, var_i: int, pattern: str) -> str:
         var_name = cls.get_var_name(var_i)
-        return f"re.search({pattern!r}, {var_name})[1]"
+        return f"re.search(r{pattern}, {var_name})[1]"
 
     @classmethod
     def op_regex_all(
         cls, state: VariableState, var_i: int, pattern: str
     ) -> str:
         var_name = cls.get_var_name(var_i)
-        return f"re.findall({pattern!r}, {var_name})"
+        return f"re.findall(r{pattern}, {var_name})"
 
     @classmethod
     def op_regex_sub(
@@ -161,8 +161,8 @@ class Translator(ABCExpressionTranslator):
     ) -> str:
         var_name = cls.get_var_name(var_i)
         if count:
-            return f"re.sub({pattern!r}, {repl!r}, {var_name}, {count})"
-        return f"re.sub({pattern!r}, {repl!r}, {var_name})"
+            return f"re.sub(r{pattern}, {repl}, {var_name}, {count})"
+        return f"re.sub(r{pattern}, {repl}, {var_name})"
 
     @classmethod
     def op_slice(
@@ -189,7 +189,7 @@ class Translator(ABCExpressionTranslator):
     @classmethod
     def op_assert_equal(cls, state: VariableState, var_i: int, substring: str):
         var_name = cls.get_var_name(var_i)
-        return f"assert {var_name} == {substring!r}"
+        return f"assert {var_name} == {substring}"
 
     @classmethod
     def op_assert_css(cls, state: VariableState, var_i: int, query: str):
@@ -212,21 +212,21 @@ class Translator(ABCExpressionTranslator):
         cls, state: VariableState, var_i: int, prefix: str
     ) -> str:
         var_name = cls.get_var_name(var_i)
-        return f"assert {var_name}.startswith({prefix!r})"
+        return f"assert {var_name}.startswith({prefix})"
 
     @classmethod
     def op_assert_ends_with(
         cls, state: VariableState, var_i: int, suffix: str
     ) -> str:
         var_name = cls.get_var_name(var_i)
-        return f"assert {var_name}.endswith({suffix!r})"
+        return f"assert {var_name}.endswith({suffix})"
 
     @classmethod
     def op_assert_contains(
         cls, state: VariableState, var_i: int, substring: str
     ) -> str:
         var_name = cls.get_var_name(var_i)
-        return f"assert {substring!r} in {var_name}"
+        return f"assert {substring} in {var_name}"
 
 
 if __name__ == "__main__":
@@ -235,11 +235,11 @@ if __name__ == "__main__":
     source = """
 assertCss "head > title"
 
-css 'head > title'
+css "head > title"
 text
 assertContains "spam"
 
-format 'https://books.toscrape.com/catalogue/{{}}'
+format "https://books.toscrape.com/catalogue/{{}}"
 """
     raw_tokens = tokenize(source)
     block = generate_code(raw_tokens, Translator())
