@@ -1,0 +1,78 @@
+# meta information
+id: books.to_scrape
+info:
+  name: books.to_scrape
+  author: username
+  description: books.to_scrape schema
+  source: source_link
+  tags: shop, books
+
+# class name
+Book:
+  # optional class docstrings
+  doc: |
+    example book object parser
+  # optional class constants. you can represent to view too
+  constants:
+    - items:
+        - 1
+        - 2
+        - 3
+    - COOL_CONSTANT: "YES"
+    - DICT_CONST:
+        one: 1
+        two: 2
+        three: 3
+  # init steps
+  steps:
+    # optional first pre-validation
+    validate: |
+      css "title"
+      text
+      assertMatch "Books to Scrape - Sandbox"
+    # split html document to parts
+    split: |
+      cssAll "ol.row > li"
+    parser:
+      - name: url
+        # optional key alias for view
+        # alias: page
+        # optional documentation key
+        doc: |
+          url book
+        # parse steps procedure
+        run: |
+          css "div.image_container > a"
+          attr "href"
+          format "https://books.toscrape.com/catalogue/{{}}"
+      - name: image
+        doc: book image
+        run: |
+          css "div.image_container > a > img"
+          attr "src"
+      - name: price
+        run: |
+          default "0"
+          css "div.product_price > p.price_color"
+          text
+      - name: name
+        run: |
+          css "h3 > a"
+          attr "title"
+      - name: available
+        run: |
+          css "div.product_price > p.availability > i"
+          attr "class"
+      - name: rating
+        run: |
+          css "p.star-rating"
+          attr "class"
+          lstrip "star-rating "
+    # how to represent schema output
+    view:
+      - url
+      - image
+      - price
+      - name
+      - rating
+      - items
