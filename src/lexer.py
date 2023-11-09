@@ -47,9 +47,40 @@ class TokenType(Enum):
     OP_ASSERT_CSS = 30
     OP_ASSERT_XPATH = 31
 
+    @classmethod
+    def tokens_selector_all(cls):
+        return TokenType.OP_CSS, TokenType.OP_XPATH, TokenType.OP_CSS_ALL, TokenType.OP_XPATH_ALL
 
-ASSERT_ENUMS = (TokenType.OP_ASSERT, TokenType.OP_ASSERT_STARTSWITH, TokenType.OP_ASSERT_ENDSWITH,
+    @classmethod
+    def tokens_selector_fetch_one(cls):
+        return TokenType.OP_CSS, TokenType.OP_XPATH
+
+    @classmethod
+    def tokens_selector_fetch_all(cls):
+        return TokenType.OP_CSS_ALL, TokenType.OP_XPATH_ALL
+
+    @classmethod
+    def tokens_selector_extract(cls):
+        return TokenType.OP_ATTR, TokenType.OP_ATTR_TEXT, TokenType.OP_ATTR_RAW
+
+    @classmethod
+    def tokens_regex(cls):
+        return TokenType.OP_REGEX, TokenType.OP_REGEX_ALL, TokenType.OP_REGEX_SUB
+
+    @classmethod
+    def tokens_string(cls):
+        return (TokenType.OP_STRING_FORMAT, TokenType.OP_STRING_REPLACE, TokenType.OP_STRING_SPLIT,
+                TokenType.OP_STRING_L_TRIM, TokenType.OP_STRING_R_TRIM, TokenType.OP_STRING_TRIM)
+
+    @classmethod
+    def tokens_array(cls):
+        return TokenType.OP_INDEX, TokenType.OP_FIRST, TokenType.OP_LAST, TokenType.OP_SLICE, TokenType.OP_JOIN
+
+    @classmethod
+    def tokens_asserts(cls):
+        return  (TokenType.OP_ASSERT, TokenType.OP_ASSERT_STARTSWITH, TokenType.OP_ASSERT_ENDSWITH,
                 TokenType.OP_ASSERT_CSS, TokenType.OP_ASSERT_XPATH, TokenType.OP_ASSERT_CONTAINS)
+
 
 ########
 # LEXERS key: pattern, Enum
@@ -164,7 +195,7 @@ def tokenize(source_str: str) -> list[Token]:
         for start_token, ctx in TOKENS.items():
             pattern, token_type = ctx
 
-            if _have_default_op and token_type in ASSERT_ENUMS:
+            if _have_default_op and token_type in TokenType.tokens_asserts():
                 warnings.warn("Detect default and validator operator. "
                               "`default` operator ignores `validator` checks", category=SyntaxWarning, stacklevel=2)
 

@@ -11,27 +11,7 @@ if TYPE_CHECKING:
 
 __all__ = ["VariableState",
            "Analyzer",
-           "VALIDATE_TOKENS"]
-
-SELECTOR_TOKENS = (TokenType.OP_XPATH, TokenType.OP_XPATH_ALL,
-                   TokenType.OP_CSS, TokenType.OP_CSS_ALL)
-
-SELECTOR_ONE = (TokenType.OP_XPATH, TokenType.OP_CSS)
-SELECTOR_ALL = (TokenType.OP_XPATH_ALL, TokenType.OP_CSS_ALL)
-
-SELECTOR_METHODS = (TokenType.OP_ATTR, TokenType.OP_ATTR_RAW, TokenType.OP_ATTR_TEXT)
-
-SELECTOR_ARRAY_METHODS = (TokenType.OP_XPATH_ALL, TokenType.OP_CSS_ALL)
-
-STRING_METHODS = (TokenType.OP_STRING_FORMAT, TokenType.OP_STRING_REPLACE, TokenType.OP_STRING_TRIM,
-                  TokenType.OP_STRING_L_TRIM, TokenType.OP_STRING_R_TRIM, TokenType.OP_STRING_SPLIT)
-ARRAY_METHODS = (TokenType.OP_INDEX, TokenType.OP_FIRST, TokenType.OP_LAST, TokenType.OP_SLICE,
-                 TokenType.OP_JOIN)
-
-COMMENT_TOKENS = (TokenType.OP_NEW_LINE, TokenType.OP_COMMENT)
-
-VALIDATE_TOKENS = (TokenType.OP_ASSERT, TokenType.OP_ASSERT_STARTSWITH,
-                   TokenType.OP_ASSERT_ENDSWITH, TokenType.OP_ASSERT_MATCH)
+           ]
 
 
 class VariableState(Enum):
@@ -52,7 +32,9 @@ class Analyzer:
         """
         self.all_tokens = tokens
         # remove comments, empty lines tokens
-        self.code_tokens = [token for token in tokens if token.token_type not in COMMENT_TOKENS]
+        self.code_tokens = [token for token in tokens
+                            if token.token_type not in (TokenType.OP_NEW_LINE, TokenType.OP_COMMENT)]
+        # first argument - selector-like value
         self.__variable_state: VariableState = VariableState.SELECTOR
 
     def convert_xpath_to_css(self):
@@ -100,7 +82,7 @@ class Analyzer:
                 # selector end methods
                 case TokenType.OP_ATTR | TokenType.OP_ATTR_RAW | TokenType.OP_ATTR_TEXT:
                     self._selector_methods(index, token)
-                    if token.token_type in SELECTOR_METHODS:
+                    if token.token_type in TokenType.tokens_selector_extract():
 
                         if self.__variable_state == VariableState.SELECTOR_ARRAY:
                             self.__variable_state = VariableState.ARRAY
@@ -174,9 +156,9 @@ class Analyzer:
             raise SyntaxError(msg)
 
         for second_token in self.code_tokens[index:]:
-            if second_token.token_type in SELECTOR_TOKENS:
+            if second_token.token_type in TokenType.tokens_selector_all():
                 continue
-            elif second_token.token_type in SELECTOR_METHODS:
+            elif second_token.token_type in TokenType.tokens_selector_extract():
                 return
         msg = self.__err_msg(token, "Selector missing extract attribute ('attr <expr>', 'raw' or 'text')")
         raise SyntaxError(msg)
