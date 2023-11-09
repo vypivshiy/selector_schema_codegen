@@ -114,6 +114,7 @@ class TokenType(Enum):
             TokenType.OP_ASSERT_CSS,
             TokenType.OP_ASSERT_XPATH,
             TokenType.OP_ASSERT_CONTAINS,
+            TokenType.OP_ASSERT_MATCH
         )
 
 
