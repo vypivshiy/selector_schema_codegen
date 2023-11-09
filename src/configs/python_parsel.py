@@ -32,7 +32,7 @@ class Translator(ABCExpressionTranslator):
     ) -> str:
         d = cls.DELIM_DEFAULT_WRAPPER
         code = d.join([line for line in code.split(cls.DELIM_LINES)])
-        return f"try:{d}{code}\nexcept Exception:{d}return {default_value}"
+        return f"try:{d}{code}{d}return {cls.VAR_NAME}\nexcept Exception:{d}return {default_value}"
 
     @classmethod
     def op_wrap_code(
@@ -64,11 +64,13 @@ class Translator(ABCExpressionTranslator):
     @classmethod
     def op_text(cls, state: VariableState, var_i: int) -> str:
         if state is VariableState.ARRAY:
-            return f'{cls.VAR_NAME}.xpath("//text()").getall()'
-        return f'{cls.VAR_NAME}.xpath("//text()").get()'
+            return f'{cls.VAR_NAME}.xpath("./text()").getall()'
+        return f'{cls.VAR_NAME}.xpath("./text()").get()'
 
     @classmethod
     def op_raw(cls, state: VariableState, var_i: int) -> str:
+        if state == VariableState.ARRAY:
+            return f"{cls.VAR_NAME}.getall()"
         return f"{cls.VAR_NAME}.get()"
 
     @classmethod
@@ -175,7 +177,7 @@ class Translator(ABCExpressionTranslator):
     def op_assert_re_match(
         cls, state: VariableState, var_i: int, pattern: str
     ) -> str:
-        return f"assert {cls.op_regex(state, var_i, pattern)}"
+        return f"assert re.search(r{pattern}, {cls.VAR_NAME})"
 
     @classmethod
     def op_assert_starts_with(
