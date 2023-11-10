@@ -32,7 +32,7 @@ class Translator(ABCExpressionTranslator):
     ) -> str:
         d = self.DELIM_DEFAULT_WRAPPER
         code = d.join([line for line in code.split(self.DELIM_LINES)])
-        return f"try:{d}{code}{d}{self.op_ret(state, var_i)}{self.DELIM_LINES}except Exception:{d}"
+        return f"try:{d}{code}{d}{self.op_ret(state, var_i)}{self.DELIM_LINES}except Exception:{d}return {default_value}"
 
     def op_wrap_code(
             self, state: Optional[VariableState], var_i: int, code: str
