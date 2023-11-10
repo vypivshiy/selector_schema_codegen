@@ -6,196 +6,166 @@ from src.codegen_tools import ABCExpressionTranslator, generate_code
 
 
 class Translator(ABCExpressionTranslator):
-    # variable name (be overwritten step-by-step)
+    FIRST_VAR_ASSIGMENT = "val"
     VAR_NAME = "val"
-    # first variable assigment (if needed)
     FIRST_ASSIGMENT = "="
-    # next assignments
     ASSIGMENT = "="
-    # \n, ; for example
     DELIM_LINES = "\n"
-    # delim for try\catch constructions
-    DELIM_DEFAULT_WRAPPER = "\n\t"
-    # imports
+    DELIM_DEFAULT_WRAPPER = "\n    "
     REGEX_IMPORT = "import re"
     SELECTOR_IMPORT = "from parsel import Selector"
-    # selector type
     SELECTOR_TYPE = "Selector"
 
-    @classmethod
+    def op_no_ret(self, state, i):
+        return ""
+
+    def op_ret(self, state, i):
+        return f"return {self.VAR_NAME}"
+
     def op_wrap_code_with_default_value(
-        cls,
-        state: Optional[VariableState],
-        var_i: int,
-        code: str,
-        default_value: str,
+            self,
+            state: Optional[VariableState],
+            var_i: int,
+            code: str,
+            default_value: str,
     ) -> str:
-        d = cls.DELIM_DEFAULT_WRAPPER
-        code = d.join([line for line in code.split(cls.DELIM_LINES)])
-        return f"try:{d}{code}{d}return {cls.VAR_NAME}\nexcept Exception:{d}return {default_value}"
+        d = self.DELIM_DEFAULT_WRAPPER
+        code = d.join([line for line in code.split(self.DELIM_LINES)])
+        return f"try:{d}{code}{d}{self.op_ret(state, var_i)}\nexcept Exception:{d}return {default_value}"
 
-    @classmethod
     def op_wrap_code(
-        cls, state: Optional[VariableState], var_i: int, code: str
+            self, state: Optional[VariableState], var_i: int, code: str
     ) -> str:
-        d = cls.DELIM_LINES
-        return f"{code}{d}return {cls.VAR_NAME}"
+        d = self.DELIM_LINES
+        return f"{code}{d}"
 
-    @classmethod
-    def op_css(cls, state: VariableState, var_i: int, query: str) -> str:
-        return f"{cls.VAR_NAME}.css({query})"
+    def op_css(self, state: VariableState, var_i: int, query: str) -> str:
+        return f".css({query})"
 
-    @classmethod
-    def op_xpath(cls, state: VariableState, var_i: int, query: str) -> str:
-        return f"{cls.VAR_NAME}.xpath({query})"
+    def op_xpath(self, state: VariableState, var_i: int, query: str) -> str:
+        return f".xpath({query})"
 
-    @classmethod
-    def op_css_all(cls, state: VariableState, var_i: int, query: str) -> str:
-        return f"{cls.VAR_NAME}.css({query})"
+    def op_css_all(self, state: VariableState, var_i: int, query: str) -> str:
+        return f".css({query})"
 
-    @classmethod
-    def op_xpath_all(cls, state: VariableState, var_i: int, query: str) -> str:
-        return f"{cls.VAR_NAME}.xpath({query})"
+    def op_xpath_all(self, state: VariableState, var_i: int, query: str) -> str:
+        return f".xpath({query})"
 
-    @classmethod
-    def op_attr(cls, state: VariableState, var_i: int, attr_name: str) -> str:
-        return f"{cls.VAR_NAME}.attrib[{attr_name}]"
+    def op_attr(self, state: VariableState, var_i: int, attr_name: str) -> str:
+        return f".attrib[{attr_name}]"
 
-    @classmethod
-    def op_text(cls, state: VariableState, var_i: int) -> str:
+    def op_text(self, state: VariableState, var_i: int) -> str:
         if state is VariableState.ARRAY:
-            return f'{cls.VAR_NAME}.xpath("./text()").getall()'
-        return f'{cls.VAR_NAME}.xpath("./text()").get()'
+            return f'.xpath("./text()").getall()'
+        return f'.xpath("./text()").get()'
 
-    @classmethod
-    def op_raw(cls, state: VariableState, var_i: int) -> str:
+    def op_raw(self, state: VariableState, var_i: int) -> str:
         if state == VariableState.ARRAY:
-            return f"{cls.VAR_NAME}.getall()"
-        return f"{cls.VAR_NAME}.get()"
+            return f".getall()"
+        return f".get()"
 
-    @classmethod
     def op_string_split(
-        cls, state: VariableState, var_i: int, substr: str, count=None
+            self, state: VariableState, var_i: int, substr: str, count=None
     ) -> str:
         if count and count not in ("-1", -1):
-            return f"{cls.VAR_NAME}.split({substr}, {count})"
-        return f"{cls.VAR_NAME}.split({substr})"
+            return f".split({substr}, {count})"
+        return f".split({substr})"
 
-    @classmethod
     def op_string_format(
-        cls, state: VariableState, var_i: int, substr: str
+            self, state: VariableState, var_i: int, substr: str
     ) -> str:
         f_string = re.sub(r"\{\{.*}}", "{}", substr)
-        return f"{f_string}.format({cls.VAR_NAME})"
+        return f"{f_string}.format({self.VAR_NAME})"
 
-    @classmethod
     def op_string_trim(
-        cls, state: VariableState, var_i: int, substr: str
+            self, state: VariableState, var_i: int, substr: str
     ) -> str:
-        return f"{cls.VAR_NAME}.strip({substr})"
+        return f".strip({substr})"
 
-    @classmethod
     def op_string_ltrim(
-        cls, state: VariableState, var_i: int, substr: str
+            self, state: VariableState, var_i: int, substr: str
     ) -> str:
-        return f"{cls.VAR_NAME}.lstrip({substr})"
+        return f".lstrip({substr})"
 
-    @classmethod
-    def op_string_rtrim(cls, state: VariableState, var_i: int, substr) -> str:
-        return f"{cls.VAR_NAME}.rstrip({substr})"
+    def op_string_rtrim(self, state: VariableState, var_i: int, substr) -> str:
+        return f".rstrip({substr})"
 
-    @classmethod
     def op_string_replace(
-        cls, state: VariableState, var_i: int, old: str, new: str, count=None
+            self, state: VariableState, var_i: int, old: str, new: str, count=None
     ) -> str:
         if count and count not in ("-1", -1):
-            return f"{cls.VAR_NAME}.replace({old}, {new}, {count})"
-        return f"{cls.VAR_NAME}.replace({old}, {new})"
+            return f".replace({old}, {new}, {count})"
+        return f".replace({old}, {new})"
 
-    @classmethod
     def op_string_join(
-        cls, state: VariableState, var_i: int, string: str
+            self, state: VariableState, var_i: int, string: str
     ) -> str:
-        return f"{string}.join({cls.VAR_NAME})"
+        return f"{string}.join({self.VAR_NAME})"
 
-    @classmethod
-    def op_regex(cls, state: VariableState, var_i: int, pattern: str) -> str:
-        return f"re.search(r{pattern}, {cls.VAR_NAME})[1]"
+    def op_regex(self, state: VariableState, var_i: int, pattern: str) -> str:
+        return f"re.search(r{pattern}, {self.VAR_NAME})[1]"
 
-    @classmethod
     def op_regex_all(
-        cls, state: VariableState, var_i: int, pattern: str
+            self, state: VariableState, var_i: int, pattern: str
     ) -> str:
-        return f"re.findall(r{pattern}, {cls.VAR_NAME})"
+        return f"re.findall(r{pattern}, {self.VAR_NAME})"
 
-    @classmethod
     def op_regex_sub(
-        cls,
-        state: VariableState,
-        var_i: int,
-        pattern: str,
-        repl: str,
-        count=None,
+            self,
+            state: VariableState,
+            var_i: int,
+            pattern: str,
+            repl: str,
+            count=None,
     ) -> str:
         if count:
-            return f"re.sub(r{pattern}, {repl}, {cls.VAR_NAME}, {count})"
-        return f"re.sub(r{pattern}, {repl}, {cls.VAR_NAME})"
+            return f"re.sub(r{pattern}, {repl}, {self.VAR_NAME}, {count})"
+        return f"re.sub(r{pattern}, {repl}, {self.VAR_NAME})"
 
-    @classmethod
     def op_slice(
-        cls, state: VariableState, var_i: int, start: str, end: str
+            self, state: VariableState, var_i: int, start: str, end: str
     ) -> str:
-        return f"{cls.VAR_NAME}[{start}, {end}]"
+        return f"[{start}, {end}]"
 
-    @classmethod
-    def op_index(cls, state: VariableState, var_i: int, index: str) -> str:
-        return f"{cls.VAR_NAME}[{index}]"
+    def op_index(self, state: VariableState, var_i: int, index: str) -> str:
+        return f"[{index}]"
 
-    @classmethod
-    def op_first_index(cls, state: VariableState, var_i: int):
-        return f"{cls.VAR_NAME}[0]"
+    def op_first_index(self, state: VariableState, var_i: int):
+        return f"[0]"
 
-    @classmethod
-    def op_last_index(cls, state: VariableState, var_i: int):
-        return f"{cls.VAR_NAME}[-1]"
+    def op_last_index(self, state: VariableState, var_i: int):
+        return f"[-1]"
 
-    @classmethod
-    def op_assert_equal(cls, state: VariableState, var_i: int, substring: str):
-        return f"assert {cls.VAR_NAME} == {substring}"
+    def op_assert_equal(self, state: VariableState, var_i: int, substring: str):
+        return f"assert {self.VAR_NAME} == {substring}"
 
-    @classmethod
-    def op_assert_css(cls, state: VariableState, var_i: int, query: str):
-        return f"assert {cls.op_css(state, var_i, query)}"
+    def op_assert_css(self, state: VariableState, var_i: int, query: str):
+        return f"assert {self.VAR_NAME}{self.op_css(state, var_i, query)}"
 
-    @classmethod
     def op_assert_xpath(
-        cls, state: VariableState, var_i: int, query: str
+            self, state: VariableState, var_i: int, query: str
     ) -> str:
-        return f"assert {cls.op_xpath(state, var_i, query)}"
+        return f"assert {self.VAR_NAME}{self.op_xpath(state, var_i, query)}"
 
-    @classmethod
     def op_assert_re_match(
-        cls, state: VariableState, var_i: int, pattern: str
+            self, state: VariableState, var_i: int, pattern: str
     ) -> str:
-        return f"assert re.search(r{pattern}, {cls.VAR_NAME})"
+        return f"assert re.search(r{pattern}, {self.VAR_NAME})"
 
-    @classmethod
     def op_assert_starts_with(
-        cls, state: VariableState, var_i: int, prefix: str
+            self, state: VariableState, var_i: int, prefix: str
     ) -> str:
-        return f"assert {cls.VAR_NAME}.startswith({prefix})"
+        return f"assert {self.VAR_NAME}.startswith({prefix})"
 
-    @classmethod
     def op_assert_ends_with(
-        cls, state: VariableState, var_i: int, suffix: str
+            self, state: VariableState, var_i: int, suffix: str
     ) -> str:
-        return f"assert {cls.VAR_NAME}.endswith({suffix})"
+        return f"assert {self.VAR_NAME}.endswith({suffix})"
 
-    @classmethod
     def op_assert_contains(
-        cls, state: VariableState, var_i: int, substring: str
+            self, state: VariableState, var_i: int, substring: str
     ) -> str:
-        return f"assert {substring} in {cls.VAR_NAME}"
+        return f"assert {substring} in {self.VAR_NAME}"
 
 
 if __name__ == "__main__":
