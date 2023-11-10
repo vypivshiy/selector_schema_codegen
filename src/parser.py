@@ -62,12 +62,16 @@ class Parser:
         default_token = False
         selector_code = ""
         lines_of_code: list[str] = []
-
+        asserts_code_indexes: list[int] = []
         last_index = 0
 
         for num, (token, var_state) in ast_tree.items():
             if token.token_type == TokenType.OP_TRANSLATE_DEFAULT_CODE:
                 default_token = token
+                continue
+            # detect asserts and store indexes
+            elif token.token_type in TokenType.tokens_asserts():
+                asserts_code_indexes.append(num)
                 continue
 
             translate_method = self.translator.tokens_map.get(token.token_type)
@@ -82,7 +86,13 @@ class Parser:
             else:
                 break
 
-        first_assigment = True
+        if asserts_code_indexes:
+            for num in asserts_code_indexes:
+                token, var_state = ast_tree.get(num)
+                translate_method = self.translator.tokens_map.get(token.token_type)
+                line = translate_method(var_state, num, *token.values)
+                lines_of_code.append(line)
+
         line = (f"{self.translator.FIRST_VAR_ASSIGMENT} {self.translator.FIRST_ASSIGMENT} "
                 f"{self.translator.VAR_NAME}{selector_code}")
         lines_of_code.append(line)
@@ -175,6 +185,7 @@ if __name__ == '__main__':
     fluent_optimization = True
     src_code = """
 default "0"
+assertCss "head > title"
 xpathAll "//div/a"
 attr "href"
 // format "spam{{}}"
