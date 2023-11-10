@@ -1,11 +1,12 @@
 from dataclasses import dataclass, field
 from os import PathLike
-from typing import Any, Optional, Callable, TYPE_CHECKING
+from typing import Any, Optional, Callable, TYPE_CHECKING, Type
 
 import yaml
 
 from src.codegen_tools import ABCExpressionTranslator, generate_code, BlockCode
-from src.lexer import tokenize, Token
+from src.lexer import Token
+from src.parser import Parser
 
 
 __all__ = ["Info", "SchemaAttribute", "Schema", "parse_config"]
@@ -30,25 +31,25 @@ class SchemaAttribute:
     alias: Optional[str]
     doc: Optional[str]
     raw_code: str
+    translator: Type["ABCExpressionTranslator"]
+    generate_keys: dict[str, bool] = field(default_factory=dict)
 
-    def generate_code(self,
-                      translator: ABCExpressionTranslator,
-                      code_generator: Optional[CODEGEN_STRATEGY] = None):
-        code_generator = code_generator or generate_code
-
-        tokens = tokenize(self.raw_code)
-        return code_generator(tokens, translator)
+    @property
+    def code(self):
+        return Parser(self.raw_code, self.translator, **self.generate_keys).parse()
 
 
 @dataclass
 class Schema:
     name: str
     constants: list[Any]
-    pre_validate_code: Optional[str]
-    split_code: Optional[str]
-    doc: Optional[str]
+    pre_validate_code_raw: Optional[str]
+    split_code_raw: Optional[str]
     view_keys: list[str]
+    translator: Type[ABCExpressionTranslator]
+    doc: Optional[str]
     attrs: list[SchemaAttribute] = field(default_factory=list)
+    generate_keys: dict[str, bool] = field(default_factory=dict)
 
     @property
     def aliases(self) -> dict[str, str]:
@@ -58,44 +59,39 @@ class Schema:
     def attrs_names(self) -> list[str]:
         return [a.name for a in self.attrs]
 
-    def generate_pre_validate_code(self,
-                                   translator: ABCExpressionTranslator,
-                                   code_generator: Optional[CODEGEN_STRATEGY] = None):
-        code_generator = code_generator or generate_code
-
-        if self.pre_validate_code:
-            tokens = tokenize(self.pre_validate_code)
-            return code_generator(tokens, translator)
+    @property
+    def pre_validate_code(self):
+        if self.pre_validate_code_raw:
+            return Parser(self.pre_validate_code_raw, self.translator, **self.generate_keys).parse()
         return ""
 
-    def generate_split_code(self,
-                            translator: ABCExpressionTranslator,
-                            code_generator: Optional[CODEGEN_STRATEGY] = None
-                            ):
-        code_generator = code_generator or generate_code
-        if self.split_code:
-            tokens = tokenize(self.split_code)
-            return code_generator(tokens, translator)
+    @property
+    def split_code(self):
+        if self.split_code_raw:
+            return Parser(self.split_code_raw, self.translator, **self.generate_keys).parse()
         return ""
 
 
-def _parse_class(class_name: str, content: dict[str:Any]) -> Schema:
+def _parse_class(class_name: str, content: dict[str:Any],
+                 translator: Type["ABCExpressionTranslator"],
+                 generate_keys: dict[str, bool]) -> Schema:
     assert content.get("steps", None)
     assert content.get("steps").get("parser", None)
     assert content.get("steps").get("view", None)
 
     steps = content.get("steps")
-    parser_attrs = steps.get("parser")
-
     schema = Schema(
-        constants=content.get("constants", []),
-        pre_validate_code=steps.get("validate", None),
-        split_code=steps.get("split", None),
-        doc=content.get("doc"),
         name=class_name,
-        view_keys=content.get("steps").get("view")
+        constants=content.get("constants", []),
+        pre_validate_code_raw=steps.get("validate", None),
+        split_code_raw=steps.get("split", None),
+        doc=content.get("doc", None),
+        view_keys=content.get("steps").get("view"),
+        translator=translator,
+        generate_keys=generate_keys
     )
 
+    parser_attrs = steps.get("parser")
     for attr in parser_attrs:
         assert attr.get("name")
         attr_struct = SchemaAttribute(
@@ -103,12 +99,16 @@ def _parse_class(class_name: str, content: dict[str:Any]) -> Schema:
             alias=attr.get("alias", None),
             doc=attr.get("doc", None),
             raw_code=attr.get("run"),
+            translator=translator,
+            generate_keys=generate_keys
         )
         schema.attrs.append(attr_struct)
     return schema
 
 
-def parse_config(file: str | PathLike[str]) -> tuple[Info, list[Schema]]:
+def parse_config(file: str | PathLike[str],
+                 translator: Type["ABCExpressionTranslator"],
+                 generate_keys: dict[str, bool]) -> tuple[Info, list[Schema]]:
     with open(file, "r") as f:
         yaml_data = yaml.safe_load(f)
 
@@ -116,7 +116,7 @@ def parse_config(file: str | PathLike[str]) -> tuple[Info, list[Schema]]:
 
     info = Info(id=yaml_data.pop("id"), **yaml_data.pop("info"))
     schemas: list[Schema] = [
-        _parse_class(class_name, content)
+        _parse_class(class_name, content, translator, generate_keys)
         for class_name, content in yaml_data.items()
     ]
     return info, schemas
