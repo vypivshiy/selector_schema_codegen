@@ -42,8 +42,8 @@ class TokenType(Enum):
     OP_JOIN = 20
     # ANY
     OP_COMMENT = 21
-    OP_DEFAULT = 22
-    OP_DEFAULT_CODE = 32  # without wrap try/catch mark
+    OP_TRANSLATE_DEFAULT_CODE = 22  # wrap try/catch mark
+    OP_TRANSLATE_CODE = 32
     OP_NEW_LINE = 23
     OP_CUSTOM_FORMATTER = 24
     # VALIDATORS
@@ -54,6 +54,8 @@ class TokenType(Enum):
     OP_ASSERT_MATCH = 29
     OP_ASSERT_CSS = 30
     OP_ASSERT_XPATH = 31
+    # declare skip return statement for translator
+    OP_NO_RET = 33
 
     @classmethod
     def tokens_selector_all(cls):
@@ -117,6 +119,17 @@ class TokenType(Enum):
             TokenType.OP_ASSERT_MATCH
         )
 
+    @classmethod
+    def token_fluent_optimization(cls):
+        return (TokenType.OP_CSS,
+                TokenType.OP_XPATH,
+                TokenType.OP_XPATH_ALL,
+                TokenType.OP_CSS_ALL,
+                TokenType.OP_INDEX,
+                TokenType.OP_ATTR,
+                TokenType.OP_ATTR_RAW,
+                TokenType.OP_ATTR_TEXT)
+
 
 ########
 # LEXERS key: pattern, Enum
@@ -155,7 +168,7 @@ TOKENS = {
         TokenType.OP_STRING_SPLIT,
     ),
     # any
-    "default": ("^default (.+)?$", TokenType.OP_DEFAULT),
+    "default": ("^default (.+)?$", TokenType.OP_TRANSLATE_DEFAULT_CODE),
     # "formatter": ("^formatter (.*?)$", TokenType.OP_CUSTOM_FORMATTER),
     # array
     "slice": (r"^slice -?(\d+) -?(\d*)$", TokenType.OP_SLICE),
@@ -193,6 +206,8 @@ TOKENS = {
         r"""^assertXpath (".*")$""",
         TokenType.OP_ASSERT_XPATH,
     ),
+    # declare no return for translator
+    "noRet": (r"^noRet$", TokenType.OP_NO_RET)
 }
 
 
@@ -272,10 +287,10 @@ def tokenize(source_str: str) -> list[Token]:
             command_directive = line.split(" ", 1)[0]
             if command_directive == start_token:
                 if not (result := re.match(pattern, line)):
-                    msg = f"{i}::0 {line} Arguments error. Maybe missing quotas `'\"` symbols or wrong args passed?"
+                    msg = f"{i}::0 {line} Argument(s) error. Maybe missing quote `\"` symbol or wrong args passed?"
                     raise SyntaxError(msg)
 
-                if token_type is TokenType.OP_DEFAULT:
+                if token_type is TokenType.OP_TRANSLATE_DEFAULT_CODE:
                     _have_default_op = True
 
                 value = result.groups()

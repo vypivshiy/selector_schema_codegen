@@ -1,6 +1,6 @@
 import warnings
 from enum import Enum
-from typing import TYPE_CHECKING, Generator
+from typing import TYPE_CHECKING, Generator, Type, Optional
 
 from src.lexer import TokenType
 from src.tools import css_to_xpath, xpath_to_css
@@ -41,39 +41,13 @@ class Analyzer:
         # first argument - selector-like value
         self.__variable_state: VariableState = VariableState.SELECTOR
 
-    def convert_xpath_to_css(self):
-        warnings.warn(
-            "This feature not guaranteed correct convert xpath to css",
-            category=RuntimeWarning,
-        )
-        for token in self.code_tokens:
-            if token.token_type == TokenType.OP_XPATH:
-                token.token_type = TokenType.OP_CSS
-                query = xpath_to_css(token.values[0])
-                token.values = (query,)
-            elif token.token_type == TokenType.OP_XPATH_ALL:
-                token.token_type = TokenType.OP_CSS_ALL
-                query = xpath_to_css(token.values[0])
-                token.values = (query,)
-
-    def convert_css_to_xpath(self, prefix: str = "descendant-or-self::"):
-        for token in self.code_tokens:
-            if token.token_type == TokenType.OP_CSS:
-                token.token_type = TokenType.OP_XPATH
-                query = token.values[0]
-                token.values = (css_to_xpath(query, prefix),)
-            elif token.token_type == TokenType.OP_CSS_ALL:
-                token.token_type = TokenType.OP_XPATH_ALL
-                query = token.values[0]
-                token.values = (css_to_xpath(query, prefix),)
-
     def lazy_analyze(
         self,
     ) -> Generator[tuple["Token", VariableState], None, None]:
         """lazy analyzer. returns token and variable state in every iteration"""
         for index, token in enumerate(self.code_tokens):
             match token.token_type:
-                case TokenType.OP_DEFAULT:
+                case TokenType.OP_TRANSLATE_DEFAULT_CODE:
                     self._default(index, token)
                     yield token, self.__variable_state
 
@@ -114,12 +88,20 @@ class Analyzer:
                 case TokenType.OP_INDEX | TokenType.OP_FIRST | TokenType.OP_LAST | TokenType.OP_SLICE | TokenType.OP_JOIN:
                     self._array_methods(index, token)
                     if token.token_type in (
-                        TokenType.OP_JOIN,
                         TokenType.OP_INDEX,
                         TokenType.OP_FIRST,
                         TokenType.OP_LAST,
                     ):
-                        self.__variable_state = VariableState.TEXT
+                        if self.__variable_state == VariableState.SELECTOR_ARRAY:
+                            self.__variable_state = VariableState.SELECTOR
+                        elif self.__variable_state == VariableState.ARRAY:
+                            self.__variable_state = VariableState.TEXT
+                    elif token.token_type == TokenType.OP_JOIN:
+                        if self.__variable_state == VariableState.ARRAY:
+                            self.__variable_state = VariableState.TEXT
+                        else:
+                            msg = self.__err_msg(token, "prev variable is not ARRAY")
+                            raise SyntaxError(msg)
                     yield token, self.__variable_state
 
                 # validators
@@ -135,6 +117,9 @@ class Analyzer:
                     self._regex(index, token)
                     if token.token_type == TokenType.OP_REGEX_ALL:
                         self.__variable_state = VariableState.ARRAY
+                    yield token, self.__variable_state
+
+                case TokenType.OP_NO_RET:
                     yield token, self.__variable_state
                 case _:
                     msg = f"Some analyzer issue: missing analyze step check:\n{token}"
@@ -181,20 +166,22 @@ class Analyzer:
         raise SyntaxError(msg)
 
     def _selector(self, index: int, token: "Token"):
-        if self.__variable_state != VariableState.SELECTOR:
+        if self.__variable_state in (VariableState.SELECTOR, VariableState.SELECTOR_ARRAY):
+            for second_token in self.code_tokens[index:]:
+                if second_token.token_type in TokenType.tokens_selector_all():
+                    if token.token_type in (TokenType.OP_INDEX, TokenType.OP_FIRST, TokenType.OP_LAST):
+                        return
+                    continue
+                elif second_token.token_type in TokenType.tokens_selector_extract():
+                    return
             msg = self.__err_msg(
-                token, "Prev variable is not selector-like type"
+                token,
+                "Selector missing extract attribute ('attr \"<expr>\"', 'raw' or 'text')",
             )
             raise SyntaxError(msg)
 
-        for second_token in self.code_tokens[index:]:
-            if second_token.token_type in TokenType.tokens_selector_all():
-                continue
-            elif second_token.token_type in TokenType.tokens_selector_extract():
-                return
         msg = self.__err_msg(
-            token,
-            "Selector missing extract attribute ('attr \"<expr>\"', 'raw' or 'text')",
+            token, "Prev variable is not selector-like type"
         )
         raise SyntaxError(msg)
 
