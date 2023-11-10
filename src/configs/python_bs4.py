@@ -77,8 +77,8 @@ class Translator(ABCExpressionTranslator):
             self, state: VariableState, var_i: int, substr: str, count=None
     ) -> str:
         if count and count not in ("-1", -1):
-            return f"{self.VAR_NAME}.split({substr}, {count})"
-        return f"{self.VAR_NAME}.split({substr})"
+            return f".split({substr}, {count})"
+        return f".split({substr})"
 
     def op_string_format(
             self, state: VariableState, var_i: int, substr: str
@@ -89,22 +89,22 @@ class Translator(ABCExpressionTranslator):
     def op_string_trim(
             self, state: VariableState, var_i: int, substr: str
     ) -> str:
-        return f"{self.VAR_NAME}.strip({substr})"
+        return f".strip({substr})"
 
     def op_string_ltrim(
             self, state: VariableState, var_i: int, substr: str
     ) -> str:
-        return f"{self.VAR_NAME}.lstrip({substr})"
+        return f".lstrip({substr})"
 
     def op_string_rtrim(self, state: VariableState, var_i: int, substr) -> str:
-        return f"{self.VAR_NAME}.rstrip({substr})"
+        return f".rstrip({substr})"
 
     def op_string_replace(
             self, state: VariableState, var_i: int, old: str, new: str, count=None
     ) -> str:
         if count and count not in ("-1", -1):
-            return f"{self.VAR_NAME}.replace({old}, {new}, {count})"
-        return f"{self.VAR_NAME}.replace({old}, {new})"
+            return f".replace({old}, {new}, {count})"
+        return f".replace({old}, {new})"
 
     def op_string_join(
             self, state: VariableState, var_i: int, string: str
@@ -159,7 +159,7 @@ class Translator(ABCExpressionTranslator):
     def op_assert_re_match(
             self, state: VariableState, var_i: int, pattern: str
     ) -> str:
-        return f"assert {self.VAR_NAME}{self.op_regex(state, var_i, pattern)}"
+        return f"assert {self.op_regex(state, var_i, pattern)}"
 
     def op_assert_starts_with(
             self, state: VariableState, var_i: int, prefix: str
