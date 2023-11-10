@@ -4,24 +4,27 @@ from src.lexer import TokenType, tokenize
 import warnings
 
 from src.tools import xpath_to_css, css_to_xpath
+from src.codegen_tools import ABCExpressionTranslator
 
 if TYPE_CHECKING:
     from src.lexer import Token
-    from src.codegen_tools import ABCExpressionTranslator
 
 
 class Parser:
     def __init__(self,
                  source_code: str,
-                 translator: Type["ABCExpressionTranslator"],
+                 translator: Type["ABCExpressionTranslator"] | "ABCExpressionTranslator",
                  analyzer: Type[Analyzer] = Analyzer,
                  *,
                  fluent_optimization: bool = False):
         self.raw_tokens = tokenize(source_code)
         self.analyzer = analyzer
         self._fluent_optimization = fluent_optimization
-        self.translator = translator(
-            fluent_optimisation=fluent_optimization)
+        if isinstance(translator, ABCExpressionTranslator):
+            self.translator = translator
+        else:
+            self.translator = translator(
+                fluent_optimisation=fluent_optimization)
 
     def xpath_to_css(self) -> None:
         warnings.warn(
@@ -62,20 +65,18 @@ class Parser:
         default_token = False
         selector_code = ""
         lines_of_code: list[str] = []
-        asserts_code_indexes: list[int] = []
         last_index = 0
 
         for num, (token, var_state) in ast_tree.items():
             if token.token_type == TokenType.OP_TRANSLATE_DEFAULT_CODE:
                 default_token = token
                 continue
-            # detect asserts and store indexes
-            elif token.token_type in TokenType.tokens_asserts():
-                asserts_code_indexes.append(num)
-                continue
 
             translate_method = self.translator.tokens_map.get(token.token_type)
             line = translate_method(var_state, num, *token.values)
+            if token.token_type in TokenType.tokens_asserts() and num < last_index:
+                lines_of_code.append(line)
+                continue
 
             if token.token_type in (TokenType.OP_FIRST, TokenType.OP_LAST, TokenType.OP_INDEX,
                                     TokenType.OP_CSS, TokenType.OP_CSS_ALL, TokenType.OP_XPATH_ALL,
@@ -86,19 +87,12 @@ class Parser:
             else:
                 break
 
-        if asserts_code_indexes:
-            for num in asserts_code_indexes:
-                token, var_state = ast_tree.get(num)
-                translate_method = self.translator.tokens_map.get(token.token_type)
-                line = translate_method(var_state, num, *token.values)
-                lines_of_code.append(line)
-
         line = (f"{self.translator.FIRST_VAR_ASSIGMENT} {self.translator.FIRST_ASSIGMENT} "
                 f"{self.translator.VAR_NAME}{selector_code}")
         lines_of_code.append(line)
 
         for num, (token, var_state) in ast_tree.items():
-            if num <= last_index or token.token_type == TokenType.OP_TRANSLATE_DEFAULT_CODE:
+            if num <= last_index:
                 continue
 
             translate_method = self.translator.tokens_map.get(token.token_type)
@@ -110,9 +104,12 @@ class Parser:
             else:
                 if token.token_type == TokenType.OP_STRING_FORMAT:
                     line = f"{self.translator.VAR_NAME} {self.translator.ASSIGMENT} {line}"
+                    lines_of_code.append(line)
+                elif token.token_type in TokenType.tokens_asserts():
+                    lines_of_code.append(line)
                 else:
                     line = f"{self.translator.VAR_NAME} {self.translator.ASSIGMENT} {self.translator.VAR_NAME}{line}"
-                lines_of_code.append(line)
+                    lines_of_code.append(line)
 
         if default_token:
             code = self.translator.DELIM_LINES.join(lines_of_code)
@@ -169,7 +166,7 @@ class Parser:
             code = self.translator.op_wrap_code(None, 0, code)
 
         if no_ret_token:
-            return code + self.translator.DELIM_LINES + code + self.translator.op_no_ret(None, 0)
+            return code + self.translator.DELIM_LINES + self.translator.op_no_ret(None, 0)
         return code + self.translator.DELIM_LINES + self.translator.op_ret(None, 0)
 
     def parse(self):
@@ -182,14 +179,12 @@ class Parser:
 if __name__ == '__main__':
     from src.configs.python_parsel import Translator
 
-    fluent_optimization = True
+    fluent_optimization_ = False
     src_code = """
-default "0"
-assertCss "head > title"
-xpathAll "//div/a"
-attr "href"
-// format "spam{{}}"
-"""
-    p = Parser(src_code, Translator, fluent_optimization=fluent_optimization)
-    p.xpath_to_css()
+cssAll "title"
+text
+index 0
+assertMatch "Books to Scrape - Sandbox"
+noRet"""
+    p = Parser(src_code, Translator, fluent_optimization=fluent_optimization_)
     print(p.parse())
