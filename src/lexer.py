@@ -136,74 +136,74 @@ class TokenType(Enum):
 ########
 TOKENS = {
     # css/xpath
-    "xpath": ("""^xpath (".*")$""", TokenType.OP_XPATH),
-    "xpathAll": ("""^xpathAll (".*")$""", TokenType.OP_XPATH_ALL),
-    "css": ("""^css (".*")$""", TokenType.OP_CSS),
-    "cssAll": ("""^cssAll (".*")$""", TokenType.OP_CSS_ALL),
-    "attr": ("""^attr (".*")$""", TokenType.OP_ATTR),
+    "xpath": (r'^xpath\s+(".*")$', TokenType.OP_XPATH),
+    "xpathAll": (r'^xpathAll\s+(".*")$', TokenType.OP_XPATH_ALL),
+    "css": (r'^css\s+(".*")$', TokenType.OP_CSS),
+    "cssAll": (r'^cssAll\s+(".*")$', TokenType.OP_CSS_ALL),
+    "attr": (r'^attr\s+(".*")$', TokenType.OP_ATTR),
     "text": ("^text$", TokenType.OP_ATTR_TEXT),
     "raw": ("^raw$", TokenType.OP_ATTR_RAW),
     # REGEX
-    "re": ("""^re (".*")$""", TokenType.OP_REGEX),
-    "reAll": ("""^reAll (".*")$""", TokenType.OP_REGEX_ALL),
+    "re": (r'^re\s+(".*")$', TokenType.OP_REGEX),
+    "reAll": (r'^reAll\s+(".*")$', TokenType.OP_REGEX_ALL),
     "reSub": (
-        r"""^reSub (".*") (".*")\s?-?(\d*)$""",
+        r'^reSub\s+(".*")\s+(".*")\s+?-?(\d*)$',
         TokenType.OP_REGEX_SUB,
     ),
     # STRING
-    "strip": ("""^strip (".*")$""", TokenType.OP_STRING_TRIM),
-    "lstrip": ("""^lstrip (".*")$""", TokenType.OP_STRING_L_TRIM),
-    "rstrip": ("""^rstrip (".*")$""", TokenType.OP_STRING_R_TRIM),
+    "strip": (r'^strip\s+(".*")$', TokenType.OP_STRING_TRIM),
+    "lstrip": (r'^lstrip\s+(".*")$', TokenType.OP_STRING_L_TRIM),
+    "rstrip": (r'^rstrip\s+(".*")$', TokenType.OP_STRING_R_TRIM),
     "replace": (
-        r"""^replace (".*") (".*")\s?-?(\d*)$""",
+        r'^replace\s+(".*")\s+(".*")\s+?-?(\d*)$',
         TokenType.OP_STRING_REPLACE,
     ),
     # format string
     "format": (
-        r"""^format (".*{{\w*?}}.*")$""",
+        r'^format\s+(".*{{\w*?}}.*")$',
         TokenType.OP_STRING_FORMAT,
     ),
     "split": (
-        r"""^split (".*")\s?-?(\d+)$""",
+        r'^split\s+(".*")\s?-?(\d+)$',
         TokenType.OP_STRING_SPLIT,
     ),
     # any
-    "default": ("^default (.+)?$", TokenType.OP_TRANSLATE_DEFAULT_CODE),
+    "default": (r"^default\s+(.+)?$", TokenType.OP_TRANSLATE_DEFAULT_CODE),
     # "formatter": ("^formatter (.*?)$", TokenType.OP_CUSTOM_FORMATTER),
     # array
-    "slice": (r"^slice -?(\d+) -?(\d*)$", TokenType.OP_SLICE),
-    "index": (r"^index -?(\d+)$", TokenType.OP_INDEX),
+    "slice": (r"^slice\s+-?(\d+) -?(\d*)$", TokenType.OP_SLICE),
+    "index": (r"^index\s+-?(\d+)$", TokenType.OP_INDEX),
     "first": (r"^first$", TokenType.OP_FIRST),
     "last": (r"^last$", TokenType.OP_LAST),
     # convert array to string
-    "join": (r"""^join (".*")$""", TokenType.OP_JOIN),
+    "join": (r'^join\s+(".*")$', TokenType.OP_JOIN),
     # validate
     "assertEqual": (
-        r"""^assertEqual (".*")$""",
+        r'^assertEqual\s+(".*")$',
         TokenType.OP_ASSERT,
     ),
     "assertContains": (
-        r"""^assertContains (".*")$""",
+        r'^assertContains\s+(".*")$',
         TokenType.OP_ASSERT_CONTAINS,
     ),
     "assertStarts": (
-        r"""^assertStarts (".*")$""",
+        r'^assertStarts\s+(".*")$',
         TokenType.OP_ASSERT_STARTSWITH,
     ),
     "assertEnds": (
-        r"""^assertEnds (".*")$""",
+        r'^assertEnds\s+(".*")$',
         TokenType.OP_ASSERT_ENDSWITH,
     ),
     "assertMatch": (
-        r"""^assertMatch (".*")$""",
+        r'^assertMatch\s+(".*")$',
         TokenType.OP_ASSERT_MATCH,
     ),
     "assertCss": (
-        r"""^assertCss (".*")$""",
+        r'^assertCss\s+(".*")$',
         TokenType.OP_ASSERT_CSS,
     ),
     "assertXpath": (
-        r"""^assertXpath (".*")$""",
+        r'^assertXpath\s+(".*")$',
         TokenType.OP_ASSERT_XPATH,
     ),
     # declare no return for translator
