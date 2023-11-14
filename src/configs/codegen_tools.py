@@ -7,16 +7,16 @@ from src.analyzer import Analyzer, VariableState
 from src.lexer import TokenType
 
 if TYPE_CHECKING:
-    from src.lexer import Token
+    from src.objects import Node, Token
 
 __all__ = ["ABCExpressionTranslator", "generate_code"]
 
 
 class ABCExpressionTranslator(ABC):
-    """collection rules HOW NEED translate tokens to code"""
-    FIRST_VAR_ASSIGMENT: str = NotImplemented
-
-    # variable name (be overwritten step-by-step)
+    """collection rules and hooks for translate to programming languages"""
+    # method arg
+    METHOD_ARG_NAME: str = NotImplemented
+    # variable prefix
     VAR_NAME: str = NotImplemented
     # first variable assigment (if needed)
     FIRST_ASSIGMENT: str = NotImplemented
@@ -29,26 +29,34 @@ class ABCExpressionTranslator(ABC):
     # imports
     REGEX_IMPORT: str = NotImplemented
     SELECTOR_IMPORT: str = NotImplemented
-    # selector type
+    #######
+    # types
+    #######
+    # SELECTOR
     SELECTOR_TYPE: str = NotImplemented
+    ELEMENT_TYPE: str = NotImplemented
+    # SELECTOR_ARRAY
+    LIST_OF_ELEMENTS_TYPE: str = NotImplemented
+    # ARRAY
+    LIST_OF_STRING_TYPE: str = NotImplemented
+    # TEXT
+    STRING_TYPE: str = NotImplemented
 
-    def __init__(self, *,
-                 fluent_optimisation: bool = False):
-        self.FLUENT_OPTIMISATION = fluent_optimisation
+    # generators config TODO
+    ALLOW_FLUENT_OPTIMIZATION: bool = False
 
     @abstractmethod
-    def op_no_ret(self, state, i):
+    def op_no_ret(self, node: "Node") -> str:
         pass
 
     @abstractmethod
-    def op_ret(self, state, i):
+    def op_ret(self, node: "Node") -> str:
         pass
 
     @abstractmethod
     def op_wrap_code_with_default_value(
             self,
-            state: Optional[VariableState],
-            i: int,
+            node: "Node",
             code: str,
             default_value: str,
     ) -> str:
@@ -56,93 +64,92 @@ class ABCExpressionTranslator(ABC):
 
     @abstractmethod
     def op_wrap_code(
-            self, state: Optional[VariableState], i: int, code: str
+            self, node: "Node", code: str
     ) -> str:
         pass
 
     @abstractmethod
-    def op_css(self, state: VariableState, i: int, query: str) -> str:
+    def op_css(self, node: "Node", query: str) -> str:
         pass
 
     @abstractmethod
-    def op_xpath(self, state: VariableState, i: int, query: str) -> str:
+    def op_xpath(self, node: "Node", query: str) -> str:
         pass
 
     @abstractmethod
-    def op_css_all(self, state: VariableState, i: int, query: str) -> str:
+    def op_css_all(self, node: "Node", query: str) -> str:
         pass
 
     @abstractmethod
-    def op_xpath_all(self, state: VariableState, i: int, query: str) -> str:
+    def op_xpath_all(self, node: "Node", query: str) -> str:
         pass
 
     @abstractmethod
-    def op_attr(self, state: VariableState, i: int, attr_name: str) -> str:
+    def op_attr(self, node: "Node", attr_name: str) -> str:
         pass
 
     @abstractmethod
-    def op_text(self, state: VariableState, i: int) -> str:
+    def op_text(self, node: "Node") -> str:
         pass
 
     @abstractmethod
-    def op_raw(self, state: VariableState, i: int) -> str:
+    def op_raw(self, node: "Node") -> str:
         pass
 
     @abstractmethod
     def op_string_split(
-            self, state: VariableState, i: int, substr: str, count=None
+            self, node: "Node", substr: str, count=None
     ) -> str:
         pass
 
     @abstractmethod
     def op_string_format(
-            self, state: VariableState, i: int, substr: str
+            self, node: "Node", substr: str
     ) -> str:
         pass
 
     @abstractmethod
     def op_string_trim(
-            self, state: VariableState, i: int, substr: str
+            self, node: "Node", substr: str
     ) -> str:
         pass
 
     @abstractmethod
     def op_string_ltrim(
-            self, state: VariableState, i: int, substr: str
+            self, node: "Node", substr: str
     ) -> str:
         pass
 
     @abstractmethod
-    def op_string_rtrim(self, state: VariableState, i: int, substr) -> str:
+    def op_string_rtrim(self, node: "Node", substr) -> str:
         pass
 
     @abstractmethod
     def op_string_replace(
-            self, state: VariableState, i: int, old: str, new: str, count=None
+            self, node: "Node", old: str, new: str, count=None
     ) -> str:
         pass
 
     @abstractmethod
     def op_string_join(
-            self, state: VariableState, i: int, string: str
+            self, node: "Node", string: str
     ) -> str:
         pass
 
     @abstractmethod
-    def op_regex(self, state: VariableState, i: int, pattern: str) -> str:
+    def op_regex(self, node: "Node", pattern: str) -> str:
         pass
 
     @abstractmethod
     def op_regex_all(
-            self, state: VariableState, i: int, pattern: str
+            self, node: "Node", pattern: str
     ) -> str:
         pass
 
     @abstractmethod
     def op_regex_sub(
             self,
-            state: VariableState,
-            i: int,
+            node: "Node",
             pattern: str,
             repl: str,
             count=None,
@@ -151,64 +158,64 @@ class ABCExpressionTranslator(ABC):
 
     @abstractmethod
     def op_slice(
-            self, state: VariableState, i: int, start: str, end: str
+            self, node: "Node", start: str, end: str
     ) -> str:
         pass
 
     @abstractmethod
-    def op_index(self, state: VariableState, i: int, index: str) -> str:
+    def op_index(self, node: "Node", index: str) -> str:
         pass
 
     @abstractmethod
-    def op_first_index(self, state: VariableState, i: int):
+    def op_first_index(self, node: "Node"):
         pass
 
     @abstractmethod
-    def op_last_index(self, state: VariableState, i: int):
+    def op_last_index(self, node: "Node"):
         pass
 
     @abstractmethod
-    def op_assert_equal(self, state: VariableState, i: int, substring: str):
+    def op_assert_equal(self, node: "Node", substring: str):
         pass
 
     @abstractmethod
-    def op_assert_css(self, state: VariableState, i: int, query: str):
+    def op_assert_css(self, node: "Node", query: str):
         pass
 
     @abstractmethod
     def op_assert_xpath(
-            self, state: VariableState, i: int, query: str
+            self, node: "Node", query: str
     ) -> str:
         pass
 
     @abstractmethod
     def op_assert_re_match(
-            self, state: VariableState, i: int, pattern: str
+            self, node: "Node", pattern: str
     ) -> str:
         pass
 
     @abstractmethod
     def op_assert_starts_with(
-            self, state: VariableState, i: int, prefix: str
+            self, node: "Node", prefix: str
     ) -> str:
         pass
 
     @abstractmethod
     def op_assert_ends_with(
-            self, state: VariableState, i: int, suffix: str
+            self, node: "Node", suffix: str
     ) -> str:
         pass
 
     @abstractmethod
     def op_assert_contains(
-            self, state: VariableState, i: int, substring: str
+            self, node: "Node", substring: str
     ) -> str:
         pass
 
     @property
     def tokens_map(
             self,
-    ) -> dict[TokenType: Callable[[VariableState, int, ...], str]]:
+    ) -> dict[TokenType: Callable[["Node", ...], str]]:
         """return dict by token_type : cast_token_to_code method"""
         return {
             TokenType.OP_XPATH: self.op_xpath,
@@ -247,7 +254,8 @@ class ABCExpressionTranslator(ABC):
             TokenType.OP_ASSERT_CSS: self.op_assert_css,
             TokenType.OP_ASSERT_XPATH: self.op_assert_xpath,
 
-            TokenType.OP_NO_RET: self.op_no_ret
+            TokenType.OP_NO_RET: self.op_no_ret,
+            TokenType.OP_RET: self.op_ret
         }
 
 
@@ -264,87 +272,11 @@ class BlockCode:
     name: str = "dummy"
 
 
-@overload
 def generate_code(
         tokens: list["Token"],
-        translator: ABCExpressionTranslator,
-        *,
-        convert_to_css: bool = False,
-) -> BlockCode:
-    pass
-
-
-@overload
-def generate_code(
-        tokens: list["Token"],
-        translator: ABCExpressionTranslator,
-        *,
-        convert_to_xpath: bool = False,
-        xpath_prefix: Optional[str] = None,
-) -> BlockCode:
-    pass
-
-
-def generate_code(
-        tokens: list["Token"],
-        translator: ABCExpressionTranslator,
-        *,
-        convert_to_css: bool = False,
-        convert_to_xpath: bool = False,
-        xpath_prefix: Optional[str] = None,
-) -> BlockCode:
-    default_token = None  # default token detect var
+        translator: ABCExpressionTranslator) -> list[str]:
     lines = []
-    regex_import: Optional[str] = None
-    selector_import = translator.SELECTOR_IMPORT
-    selector_type = translator.SELECTOR_TYPE
-
     analyze = Analyzer(tokens)
-    if convert_to_css and convert_to_xpath:
-        warnings.warn(
-            "Passed css and xpath converters, ignore operation",
-            category=RuntimeWarning,
-        )
-
-    elif convert_to_css:
-        analyze.convert_xpath_to_css()
-
-    elif convert_to_xpath:
-        analyze.convert_css_to_xpath(
-            xpath_prefix
-        ) if xpath_prefix else analyze.convert_css_to_xpath()
-
-    for i, ctx_token in enumerate(analyze.lazy_analyze()):
-        token, var_state = ctx_token
-        if i == 0 and token.token_type == TokenType.OP_TRANSLATE_DEFAULT_CODE:
-            default_token = token
-            continue
-
-        if token.token_type in TokenType.tokens_regex():
-            regex_import = translator.REGEX_IMPORT
-
-        # generate line code
-        translator_method = translator.tokens_map.get(token.token_type)
-        c = translator_method(var_state, i, *token.values)
-        if token.token_type not in TokenType.tokens_asserts():
-            c = f"{translator.VAR_NAME} {translator.ASSIGMENT} {c}"
-
-        lines.append(c)
-
-    # assembly
-    code = translator.DELIM_LINES.join(lines)
-    if default_token:
-        full_code = translator.op_wrap_code_with_default_value(
-            None, i + 1, code, *default_token.values
-        )
-    else:
-        full_code = translator.op_wrap_code(None, i + 1, code)
-
-    return BlockCode(
-        code=full_code,
-        regex_import=regex_import,
-        selector_import=selector_import,
-        selector_type=selector_type,
-        var_name=translator.VAR_NAME,
-        translator_instance=translator,
-    )
+    for i, node in analyze.build_ast().items():
+        lines.append(translator.tokens_map[node.token.token_type](node, *node.token.values))
+    return lines
