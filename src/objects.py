@@ -201,17 +201,31 @@ class Node:
         return f"Node_{self.num}_{self.count}(prev={self.prev}, next={self.next}, var={self.var_state}, token={self.token})"
 
     @property
-    def id(self):
-        return self.token.id
+    def id(self) -> Optional[int]:
+        # exclude enumerate assert tokens
+        if self.token.token_type not in TokenType.tokens_asserts():
+            return self.num
+
+        prev_node = self.prev_node
+        # scan non-assert token and return id
+        while True:
+            if prev_node is None:
+                return None
+
+            elif prev_node.token.token_type in TokenType.tokens_asserts():
+                prev_node = prev_node.prev_node
+                continue
+            else:
+                return prev_node.id
 
     @property
     def next_node(self) -> Optional["Node"]:
-        if self.next and self.next < self.count:
+        if self.next is not None:
             return self.ast_tree[self.next]
         return None
 
     @property
     def prev_node(self) -> Optional["Node"]:
-        if self.prev and self.prev >= 0:
+        if self.prev is not None:
             return self.ast_tree[self.prev]
         return None
