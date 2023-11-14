@@ -4,7 +4,6 @@ from typing import TYPE_CHECKING, Generator
 from src.exceptions import SyntaxVariableTypeError, SyntaxCommandError, SyntaxAttributeError
 from src.objects import Token, TokenType, VariableState, Node
 
-
 if TYPE_CHECKING:
     from src.lexer import Token
 
@@ -68,14 +67,16 @@ class Analyzer:
                     yield token, self.__variable_state
 
                 # strings
-                case TokenType.OP_STRING_FORMAT | TokenType.OP_STRING_REPLACE | TokenType.OP_STRING_TRIM | TokenType.OP_STRING_L_TRIM | TokenType.OP_STRING_R_TRIM | TokenType.OP_STRING_SPLIT:
+                case TokenType.OP_STRING_FORMAT | TokenType.OP_STRING_REPLACE | TokenType.OP_STRING_TRIM | (
+                TokenType.OP_STRING_L_TRIM) | TokenType.OP_STRING_R_TRIM | TokenType.OP_STRING_SPLIT:
                     self._string_methods(index, token)
                     if token.token_type is TokenType.OP_STRING_SPLIT:
                         self.__variable_state = VariableState.ARRAY
                     yield token, self.__variable_state
 
                 # array
-                case TokenType.OP_INDEX | TokenType.OP_FIRST | TokenType.OP_LAST | TokenType.OP_SLICE | TokenType.OP_JOIN:
+                case TokenType.OP_INDEX | TokenType.OP_FIRST | TokenType.OP_LAST | TokenType.OP_SLICE | (
+                TokenType.OP_JOIN):
                     self._array_methods(index, token)
                     if token.token_type in (
                             TokenType.OP_INDEX,
@@ -95,7 +96,8 @@ class Analyzer:
                     yield token, self.__variable_state
 
                 # validators
-                case TokenType.OP_ASSERT | TokenType.OP_ASSERT_STARTSWITH | TokenType.OP_ASSERT_ENDSWITH | TokenType.OP_ASSERT_MATCH | TokenType.OP_ASSERT_CONTAINS:
+                case TokenType.OP_ASSERT | TokenType.OP_ASSERT_STARTSWITH | TokenType.OP_ASSERT_ENDSWITH | (
+                TokenType.OP_ASSERT_MATCH) | TokenType.OP_ASSERT_CONTAINS:
                     self._validator_str_methods(index, token)
                     yield token, self.__variable_state
                 case TokenType.OP_ASSERT_CSS | TokenType.OP_ASSERT_XPATH:
@@ -141,10 +143,10 @@ class Analyzer:
                         prev=None,
                         next=None,
                         ast_tree=_tree)
-            if i-1 >= 0:
-                node.prev = i-1
-            if i+1 < count:
-                node.next = i+1
+            if i - 1 >= 0:
+                node.prev = i - 1
+            if i + 1 < count:
+                node.next = i + 1
 
             _tree[i] = node
         return _tree
@@ -160,7 +162,10 @@ class Analyzer:
         raise SyntaxVariableTypeError(msg)
 
     def _selector_array(self, index: int, token: "Token"):
-        return
+        if self.__variable_state in (VariableState.SELECTOR, VariableState.SELECTOR_ARRAY):
+            return
+        msg = self.__err_msg(token, "SELECTOR_ARRAY should be accept SELECTOR or SELECTOR_ARRAY, not TEXT")
+        raise SyntaxVariableTypeError(msg)
 
     @staticmethod
     def __err_msg(token: "Token", msg: str) -> str:
@@ -242,6 +247,7 @@ class Analyzer:
 
 if __name__ == '__main__':
     from src.lexer import tokenize
+
     src = """
 raw
 format "raw attr {{}}"
