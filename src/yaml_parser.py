@@ -1,10 +1,10 @@
 from dataclasses import dataclass, field
 from os import PathLike
-from typing import Any, Optional, Callable, TYPE_CHECKING, Type
+from typing import Any, Optional, Callable, Type
 
 import yaml
 
-from src.codegen_tools import ABCExpressionTranslator, generate_code, BlockCode
+from src.configs.codegen_tools import ABCExpressionTranslator, BlockCode
 from src.lexer import Token
 from src.parser import Parser
 
@@ -23,6 +23,7 @@ class Info:
     description: str
     source: str
     tags: str
+    schemas: list["Schema"] = field(default_factory=list)
 
 
 @dataclass
@@ -82,7 +83,7 @@ def _parse_class(class_name: str, content: dict[str:Any],
     steps = content.get("steps")
     schema = Schema(
         name=class_name,
-        constants=content.get("constants", []),
+        constants=content.get("constants", []),  # TODO: provide constants
         pre_validate_code_raw=steps.get("validate", None),
         split_code_raw=steps.get("split", None),
         doc=content.get("doc", None),
@@ -108,7 +109,7 @@ def _parse_class(class_name: str, content: dict[str:Any],
 
 def parse_config(file: str | PathLike[str],
                  translator: Type["ABCExpressionTranslator"],
-                 generate_keys: dict[str, bool]) -> tuple[Info, list[Schema]]:
+                 generate_keys: dict[str, bool]) -> Info:
     with open(file, "r") as f:
         yaml_data = yaml.safe_load(f)
 
@@ -119,4 +120,5 @@ def parse_config(file: str | PathLike[str],
         _parse_class(class_name, content, translator, generate_keys)
         for class_name, content in yaml_data.items()
     ]
-    return info, schemas
+    info.schemas = schemas
+    return info
