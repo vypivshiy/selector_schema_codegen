@@ -1,10 +1,10 @@
-from typing import Type, Optional, TYPE_CHECKING
+from typing import Type, TYPE_CHECKING
 from src.analyzer import Analyzer, VariableState
 from src.lexer import TokenType, tokenize
 import warnings
 
 from src.tools import xpath_to_css, css_to_xpath
-from src.codegen_tools import ABCExpressionTranslator
+from src.configs.codegen_tools import ABCExpressionTranslator
 
 if TYPE_CHECKING:
     from src.lexer import Token
@@ -15,16 +15,13 @@ class Parser:
                  source_code: str,
                  translator: Type["ABCExpressionTranslator"] | "ABCExpressionTranslator",
                  analyzer: Type[Analyzer] = Analyzer,
-                 *,
-                 fluent_optimization: bool = False):
+                 ):
         self.raw_tokens = tokenize(source_code)
         self.analyzer = analyzer
-        self._fluent_optimization = fluent_optimization
         if isinstance(translator, ABCExpressionTranslator):
             self.translator = translator
         else:
-            self.translator = translator(
-                fluent_optimisation=fluent_optimization)
+            self.translator = translator()
 
     def xpath_to_css(self) -> None:
         warnings.warn(
@@ -52,139 +49,36 @@ class Parser:
                 query = token.values[0]
                 token.values = (css_to_xpath(query, prefix),)
 
-    def _build_ast(self) -> dict[int, tuple["Token", VariableState]]:
-        i: int
-        ast_tokens: dict[int, tuple["Token", VariableState]] = {}
-        for i, (token, var_state) in enumerate(self.analyzer(self.raw_tokens).lazy_analyze()):
-            ast_tokens[i] = (token, var_state)
-        return ast_tokens
-
-    def _fluent_parse(self):
-        ast_tree = self._build_ast()
-        no_ret_token = False
-        default_token = False
-        selector_code = ""
-        lines_of_code: list[str] = []
-        last_index = 0
-
-        for num, (token, var_state) in ast_tree.items():
-            if token.token_type == TokenType.OP_TRANSLATE_DEFAULT_CODE:
-                default_token = token
+    def parse(self) -> str:
+        tree = self.analyzer(self.raw_tokens).build_ast()
+        lines = []
+        default_node = None
+        for node in tree.values():
+            if node.token.token_type == TokenType.OP_TRANSLATE_DEFAULT_CODE:
+                default_node = node
                 continue
-
-            translate_method = self.translator.tokens_map.get(token.token_type)
-            line = translate_method(var_state, num, *token.values)
-            if token.token_type in TokenType.tokens_asserts() and num < last_index:
-                lines_of_code.append(line)
-                continue
-
-            if token.token_type in (TokenType.OP_FIRST, TokenType.OP_LAST, TokenType.OP_INDEX,
-                                    TokenType.OP_CSS, TokenType.OP_CSS_ALL, TokenType.OP_XPATH_ALL,
-                                    TokenType.OP_XPATH,
-                                    TokenType.OP_ATTR, TokenType.OP_ATTR_RAW, TokenType.OP_ATTR_TEXT):
-                selector_code += line
-                last_index = num
-            else:
-                break
-
-        line = (f"{self.translator.FIRST_VAR_ASSIGMENT} {self.translator.FIRST_ASSIGMENT} "
-                f"{self.translator.VAR_NAME}{selector_code}")
-        lines_of_code.append(line)
-
-        for num, (token, var_state) in ast_tree.items():
-            if num <= last_index:
-                continue
-
-            translate_method = self.translator.tokens_map.get(token.token_type)
-            line = translate_method(var_state, num, *token.values)
-
-            if token.token_type == TokenType.OP_NO_RET:
-                no_ret_token = token
-
-            else:
-                if token.token_type == TokenType.OP_STRING_FORMAT:
-                    line = f"{self.translator.VAR_NAME} {self.translator.ASSIGMENT} {line}"
-                    lines_of_code.append(line)
-                elif token.token_type in TokenType.tokens_asserts():
-                    lines_of_code.append(line)
-                else:
-                    line = f"{self.translator.VAR_NAME} {self.translator.ASSIGMENT} {self.translator.VAR_NAME}{line}"
-                    lines_of_code.append(line)
-
-        if default_token:
-            code = self.translator.DELIM_LINES.join(lines_of_code)
-            code = self.translator.op_wrap_code_with_default_value(None, 0, code, *default_token.values)
-            return code
-        else:
-            code = self.translator.DELIM_LINES.join(lines_of_code)
-            code = self.translator.op_wrap_code(None, 0, code)
-        if no_ret_token:
-            return code + self.translator.DELIM_LINES + self.translator.op_no_ret(None, 0)
-        return code + self.translator.DELIM_LINES + self.translator.op_ret(None, 0)
-
-    def _default_parse(self):
-        ast_tree = self._build_ast()
-        lines_of_code: list[str] = []
-        last_index = list(ast_tree.keys())[-1]
-        first_index = list(ast_tree.keys())[0]
-
-        first_assigment = False
-        no_ret_token = None
-        default_token = None
-
-        for num, (token, var_state) in ast_tree.items():
-            if token.token_type == TokenType.OP_TRANSLATE_DEFAULT_CODE:
-                default_token = token
-                continue
-
-            translate_method = self.translator.tokens_map.get(token.token_type)
-            line = translate_method(var_state, num, *token.values)
-
-            if token.token_type in TokenType.tokens_asserts():
-                lines_of_code.append(line)
-
-            elif not first_assigment:
-                first_assigment = True
-                line = (f"{self.translator.FIRST_VAR_ASSIGMENT} {self.translator.FIRST_ASSIGMENT} "
-                        f"{self.translator.VAR_NAME}{line}")
-                lines_of_code.append(line)
-            elif token.token_type == TokenType.OP_NO_RET and num == last_index:
-                no_ret_token = token
-            else:
-                if token.token_type == TokenType.OP_STRING_FORMAT:
-                    line = f"{self.translator.VAR_NAME} {self.translator.ASSIGMENT} {line}"
-                else:
-                    line = f"{self.translator.VAR_NAME} {self.translator.ASSIGMENT} {self.translator.VAR_NAME}{line}"
-                lines_of_code.append(line)
-
-        if default_token:
-            code = self.translator.DELIM_LINES.join(lines_of_code)
-            code = self.translator.op_wrap_code_with_default_value(None, 0, code, *default_token.values)
-            return code
-        else:
-            code = self.translator.DELIM_LINES.join(lines_of_code)
-            code = self.translator.op_wrap_code(None, 0, code)
-
-        if no_ret_token:
-            return code + self.translator.DELIM_LINES + self.translator.op_no_ret(None, 0)
-        return code + self.translator.DELIM_LINES + self.translator.op_ret(None, 0)
-
-    def parse(self):
-        if self._fluent_optimization:
-            return self._fluent_parse()
-        else:
-            return self._default_parse()
+            token_args = node.token.values
+            translator_method = self.translator.tokens_map[node.token.token_type]
+            line = translator_method(node, *token_args)
+            lines.append(line)
+        code = self.translator.DELIM_LINES.join(lines)
+        if default_node:
+            code = self.translator.op_wrap_code_with_default_value(default_node, code, *default_node.token.values)
+        return code
 
 
 if __name__ == '__main__':
-    from src.configs.python_parsel import Translator
+    from src.configs.python.python_parsel import Translator
+    # from src.configs.python.python_bs4 import Translator
 
-    fluent_optimization_ = False
     src_code = """
-cssAll "title"
-text
-index 0
+default "0"
+raw
+//cssAll "title"
+//text
+//index 0
 assertMatch "Books to Scrape - Sandbox"
-noRet"""
-    p = Parser(src_code, Translator, fluent_optimization=fluent_optimization_)
+"""
+    p = Parser(src_code, Translator)
+    p.xpath_to_css()
     print(p.parse())
