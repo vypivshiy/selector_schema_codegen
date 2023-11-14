@@ -38,6 +38,8 @@ class Translator(ABCExpressionTranslator):
 
     def _gen_var_name(self, node: "Node") -> str:
         """assert <name> <expr"""
+        if node is None:
+            return self.METHOD_ARG_NAME
         _id = node.id
         if _id is None:
             return self.METHOD_ARG_NAME
@@ -51,7 +53,7 @@ class Translator(ABCExpressionTranslator):
         return ""
 
     def op_ret(self, node: "Node"):
-        return f"return {self.VAR_NAME}_{node.prev_node.id}"
+        return f"return {self._gen_var_name(node.prev_node)}"
 
     def op_wrap_code_with_default_value(
             self,
@@ -61,8 +63,7 @@ class Translator(ABCExpressionTranslator):
     ) -> str:
         d = self.DELIM_DEFAULT_WRAPPER
         code = d.join([line for line in code.split(self.DELIM_LINES)])
-        return ""
-        # return f"try:{d}{code}{d}{self.op_ret(state, var_i)}\nexcept Exception:{d}return {default_value}"
+        return f"try:{d}{code}{d}\nexcept Exception:{d}return {default_value}"
 
     def op_wrap_code(
             self, node: "Node", code: str
