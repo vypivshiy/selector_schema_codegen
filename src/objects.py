@@ -203,7 +203,8 @@ class Node:
     @property
     def id(self) -> Optional[int]:
         # exclude enumerate assert tokens
-        if self.token.token_type not in TokenType.tokens_asserts():
+        if (self.token.token_type not in TokenType.tokens_asserts()
+                and self.token.token_type != TokenType.OP_TRANSLATE_DEFAULT_CODE):
             return self.num
 
         prev_node = self.prev_node
