@@ -1,9 +1,9 @@
 import warnings
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, Optional, overload
+from typing import TYPE_CHECKING, Callable, Optional
 
-from src.analyzer import Analyzer, VariableState
+from src.analyzer import Analyzer
 from src.lexer import TokenType
 
 if TYPE_CHECKING:
@@ -157,9 +157,10 @@ class ABCExpressionTranslator(ABC):
         pass
 
     @abstractmethod
-    def op_slice(
-            self, node: "Node", start: str, end: str
+    def op_limit(
+            self, node: "Node", max_: str
     ) -> str:
+        # TODO rename to OP_LIMIT
         pass
 
     @abstractmethod
@@ -240,7 +241,7 @@ class ABCExpressionTranslator(ABC):
             TokenType.OP_INDEX: self.op_index,
             TokenType.OP_FIRST: self.op_first_index,
             TokenType.OP_LAST: self.op_last_index,
-            TokenType.OP_SLICE: self.op_slice,
+            TokenType.OP_LIMIT: self.op_limit,
             TokenType.OP_JOIN: self.op_string_join,
             # CODE WRAPPERS
             TokenType.OP_TRANSLATE_DEFAULT_CODE: self.op_wrap_code_with_default_value,
@@ -259,22 +260,10 @@ class ABCExpressionTranslator(ABC):
         }
 
 
-@dataclass
-class BlockCode:
-    """generated block code structure"""
-
-    code: str
-    selector_import: str
-    selector_type: str
-    var_name: str
-    translator_instance: ABCExpressionTranslator
-    regex_import: Optional[str] = None
-    name: str = "dummy"
-
-
 def generate_code(
         tokens: list["Token"],
         translator: ABCExpressionTranslator) -> list[str]:
+    # TODO deprecated: remove
     lines = []
     analyze = Analyzer(tokens)
     for i, node in analyze.build_ast().items():

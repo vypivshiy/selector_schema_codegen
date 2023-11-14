@@ -153,10 +153,9 @@ class Translator(ABCExpressionTranslator):
             return f"{self._gen_var_name(node)} = re.sub(r{pattern}, {repl}, {self._gen_var_name(node.prev_node)}, {count})"
         return f"{self._gen_var_name(node)} = re.sub(r{pattern}, {repl}, {self._gen_var_name(node.prev_node)})"
 
-    def op_slice(
-            self, node: "Node", start: str, end: str
-    ) -> str:
-        return f"{self._assign_nodes_expr(node)}[{start}, {end}]"
+    def op_limit(
+            self, node: "Node", max_: str) -> str:
+        return f"{self._assign_nodes_expr(node)}[:{max_}]"
 
     def op_index(self, node: "Node", index: str) -> str:
         return f"{self._assign_nodes_expr(node)}[{index}]"

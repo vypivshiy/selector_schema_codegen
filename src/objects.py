@@ -29,7 +29,7 @@ class TokenType(Enum):
     OP_INDEX = 16
     OP_FIRST = 17
     OP_LAST = 18
-    OP_SLICE = 19
+    OP_LIMIT = 19
     OP_JOIN = 20
     # ANY
     OP_COMMENT = 21
@@ -95,7 +95,7 @@ class TokenType(Enum):
             TokenType.OP_INDEX,
             TokenType.OP_FIRST,
             TokenType.OP_LAST,
-            TokenType.OP_SLICE,
+            TokenType.OP_LIMIT,
             TokenType.OP_JOIN,
         )
 

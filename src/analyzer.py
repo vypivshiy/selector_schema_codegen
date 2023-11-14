@@ -75,7 +75,7 @@ class Analyzer:
                     yield token, self.__variable_state
 
                 # array
-                case TokenType.OP_INDEX | TokenType.OP_FIRST | TokenType.OP_LAST | TokenType.OP_SLICE | (
+                case TokenType.OP_INDEX | TokenType.OP_FIRST | TokenType.OP_LAST | TokenType.OP_LIMIT | (
                 TokenType.OP_JOIN):
                     self._array_methods(index, token)
                     if token.token_type in (

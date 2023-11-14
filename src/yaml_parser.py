@@ -1,17 +1,14 @@
 from dataclasses import dataclass, field
 from os import PathLike
-from typing import Any, Optional, Callable, Type
+from typing import Any, Optional, Type
 
 import yaml
 
-from src.configs.codegen_tools import ABCExpressionTranslator, BlockCode
-from src.lexer import Token
+from src.configs.codegen_tools import ABCExpressionTranslator
 from src.parser import Parser
 
 
 __all__ = ["Info", "SchemaAttribute", "Schema", "parse_config"]
-
-CODEGEN_STRATEGY = Callable[[list[Token], ABCExpressionTranslator], BlockCode]
 
 
 @dataclass

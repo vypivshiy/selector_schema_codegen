@@ -3,7 +3,7 @@ import re
 from typing import TYPE_CHECKING
 
 from src.analyzer import VariableState
-from src.configs.codegen_tools import ABCExpressionTranslator, generate_code
+from src.configs.codegen_tools import ABCExpressionTranslator
 
 if TYPE_CHECKING:
     from src.objects import Node
@@ -154,10 +154,10 @@ class Translator(ABCExpressionTranslator):
             return f"{self._gen_var_name(node)} = re.sub(r{pattern}, {repl}, {self._gen_var_name(node.prev_node)}, {count})"
         return f"{self._gen_var_name(node)} = re.sub(r{pattern}, {repl}, {self._gen_var_name(node.prev_node)})"
 
-    def op_slice(
-            self, node: "Node", start: str, end: str
+    def op_limit(
+            self, node: "Node", max_: str
     ) -> str:
-        return f"{self._assign_nodes_expr(node)}[{start}, {end}]"
+        return f"{self._assign_nodes_expr(node)}[:{max_}]"
 
     def op_index(self, node: "Node", index: str) -> str:
         return f"{self._assign_nodes_expr(node)}[{index}]"
@@ -202,7 +202,7 @@ class Translator(ABCExpressionTranslator):
 
 if __name__ == "__main__":
     from src.lexer import tokenize
-
+    from src.configs.codegen_tools import generate_code
     source = """
 assertCss "head > title"
 
