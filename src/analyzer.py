@@ -1,9 +1,9 @@
 import warnings
-from enum import Enum
-from typing import TYPE_CHECKING, Generator, Type, Optional
+from typing import TYPE_CHECKING, Generator
 
-from src.lexer import TokenType
-from src.tools import css_to_xpath, xpath_to_css
+from src.exceptions import SyntaxVariableTypeError, SyntaxCommandError, SyntaxAttributeError
+from src.objects import Token, TokenType, VariableState, Node
+
 
 if TYPE_CHECKING:
     from src.lexer import Token
@@ -12,16 +12,6 @@ __all__ = [
     "VariableState",
     "Analyzer",
 ]
-
-
-class VariableState(Enum):
-    """variable states in Syntax analyzer representation"""
-
-    SELECTOR = 0
-    # same as a SELECTOR var. if selectors lib returns build-in containers. python bs4 for example
-    SELECTOR_ARRAY = 4
-    TEXT = 1
-    ARRAY = 2
 
 
 class Analyzer:
@@ -36,13 +26,13 @@ class Analyzer:
             token
             for token in tokens
             if token.token_type
-            not in (TokenType.OP_NEW_LINE, TokenType.OP_COMMENT)
+               not in (TokenType.OP_NEW_LINE, TokenType.OP_COMMENT)
         ]
         # first argument - selector-like value
         self.__variable_state: VariableState = VariableState.SELECTOR
 
     def lazy_analyze(
-        self,
+            self,
     ) -> Generator[tuple["Token", VariableState], None, None]:
         """lazy analyzer. returns token and variable state in every iteration"""
         for index, token in enumerate(self.code_tokens):
@@ -67,8 +57,8 @@ class Analyzer:
                     self._selector_methods(index, token)
                     if token.token_type in TokenType.tokens_selector_extract():
                         if (
-                            self.__variable_state
-                            == VariableState.SELECTOR_ARRAY
+                                self.__variable_state
+                                == VariableState.SELECTOR_ARRAY
                         ):
                             self.__variable_state = VariableState.ARRAY
                         else:
@@ -88,9 +78,9 @@ class Analyzer:
                 case TokenType.OP_INDEX | TokenType.OP_FIRST | TokenType.OP_LAST | TokenType.OP_SLICE | TokenType.OP_JOIN:
                     self._array_methods(index, token)
                     if token.token_type in (
-                        TokenType.OP_INDEX,
-                        TokenType.OP_FIRST,
-                        TokenType.OP_LAST,
+                            TokenType.OP_INDEX,
+                            TokenType.OP_FIRST,
+                            TokenType.OP_LAST,
                     ):
                         if self.__variable_state == VariableState.SELECTOR_ARRAY:
                             self.__variable_state = VariableState.SELECTOR
@@ -101,7 +91,7 @@ class Analyzer:
                             self.__variable_state = VariableState.TEXT
                         else:
                             msg = self.__err_msg(token, "prev variable is not ARRAY")
-                            raise SyntaxError(msg)
+                            raise SyntaxVariableTypeError(msg)
                     yield token, self.__variable_state
 
                 # validators
@@ -126,6 +116,37 @@ class Analyzer:
                     warnings.warn(msg, category=RuntimeWarning)
                     yield token, self.__variable_state
 
+    def build_ast(self) -> dict[int, Node]:
+        """build hash map commands representation
+        ast structure:
+
+            0 : Node(... count=n, prev=None, next=1)
+            1: Node(..., count=n, prev=0, next=2),
+            ...
+            n: Node(..., prev=n-1, next=None)
+
+        :return: ast-like structure
+        """
+        _tree: dict[int, Node] = {}
+        count = len(self.code_tokens)
+
+        i: int
+        for i, (token, var_state) in enumerate(self.lazy_analyze()):
+            node = Node(num=i,
+                        count=count,
+                        token=token,
+                        var_state=var_state,
+                        prev=None,
+                        next=None,
+                        ast_tree=_tree)
+            if i-1 >= 0:
+                node.prev = i-1
+            if i+1 < count:
+                node.next = i+1
+
+            _tree[i] = node
+        return _tree
+
     def analyze_and_extract_tokens(self) -> list["Token"]:
         tokens = [token for token, _ in self.lazy_analyze()]
         return tokens
@@ -134,14 +155,14 @@ class Analyzer:
         if self.__variable_state == VariableState.TEXT:
             return
         msg = self.__err_msg(token, "Regex command should be accept TEXT")
-        raise SyntaxError(msg)
+        raise SyntaxVariableTypeError(msg)
 
     def _selector_array(self, index: int, token: "Token"):
         return
 
     @staticmethod
     def __err_msg(token: "Token", msg: str) -> str:
-        return f"\n{token.line}:{token.pos} :: {token.code}\n{msg}"
+        return f"\n{token.line}:{token.pos} :: {token.raw_code}\n{msg}"
 
     def _validator_selector_methods(self, index: int, token: "Token"):
         if self.__variable_state == VariableState.SELECTOR:
@@ -149,7 +170,7 @@ class Analyzer:
         msg = self.__err_msg(
             token, "Validator command should be accept selector-like object"
         )
-        raise SyntaxError(msg)
+        raise SyntaxVariableTypeError(msg)
 
     def _validator_str_methods(self, index: int, token: "Token"):
         if self.__variable_state == VariableState.TEXT:
@@ -157,13 +178,13 @@ class Analyzer:
         msg = self.__err_msg(
             token, "Validator command should be accept string-like object"
         )
-        raise SyntaxError(msg)
+        raise SyntaxVariableTypeError(msg)
 
     def _default(self, index: int, token: "Token"):
         if index == 0:
             return
-        msg = self.__err_msg(token, "Default command should be a first")
-        raise SyntaxError(msg)
+        msg = self.__err_msg(token, "`default` command should be a first")
+        raise SyntaxCommandError(msg)
 
     def _selector(self, index: int, token: "Token"):
         if self.__variable_state in (VariableState.SELECTOR, VariableState.SELECTOR_ARRAY):
@@ -178,40 +199,52 @@ class Analyzer:
                 token,
                 "Selector missing extract attribute ('attr \"<expr>\"', 'raw' or 'text')",
             )
-            raise SyntaxError(msg)
+            raise SyntaxAttributeError(msg)
 
         msg = self.__err_msg(
-            token, "Prev variable is not selector-like type"
+            token, "Prev variable is not SELECTOR/SELECTOR_ARRAY type"
         )
-        raise SyntaxError(msg)
+        raise SyntaxVariableTypeError(msg)
 
     def _selector_methods(self, index: int, token: "Token"):
         # convert first chunk to text case
-        if index == 0 and token.token_type == TokenType.OP_ATTR_TEXT:
+        if index == 0 and token.token_type in (TokenType.OP_ATTR_TEXT, TokenType.OP_ATTR_RAW):
             return
 
         elif self.__variable_state in (
-            VariableState.SELECTOR,
-            VariableState.SELECTOR_ARRAY,
+                VariableState.SELECTOR,
+                VariableState.SELECTOR_ARRAY,
         ):
             return
 
         msg = self.__err_msg(
             token, "Missing selector command: (xpath, xpathAll, css, cssAll)"
         )
-        raise SyntaxError(msg)
+        raise SyntaxCommandError(msg)
 
     def _string_methods(self, index: int, token: "Token"):
         if self.__variable_state is VariableState.TEXT:
             return
-        msg = self.__err_msg(token, "Prev variable is not string")
-        raise SyntaxError(msg)
+        msg = self.__err_msg(token, "Prev variable is not TEXT")
+        raise SyntaxVariableTypeError(msg)
 
     def _array_methods(self, index: int, token: "Token"):
         if self.__variable_state in (
-            VariableState.ARRAY,
-            VariableState.SELECTOR_ARRAY,
+                VariableState.ARRAY,
+                VariableState.SELECTOR_ARRAY,
         ):
             return
-        msg = self.__err_msg(token, "Prev variable is not array")
-        raise SyntaxError(msg)
+        msg = self.__err_msg(token, "Prev variable is not ARRAY")
+        raise SyntaxVariableTypeError(msg)
+
+
+if __name__ == '__main__':
+    from src.lexer import tokenize
+    src = """
+raw
+format "raw attr {{}}"
+"""
+    toks = tokenize(src)
+    a = Analyzer(toks)
+    tree = a.build_ast()
+    print()
