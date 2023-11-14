@@ -93,6 +93,7 @@ def tokenize(source_str: str) -> list[Token]:
     """convert source script code to tokens"""
     tokens: list[Token] = []
     _have_default_op = False
+    _have_no_ret = False
     line: str
 
     for i, line in enumerate(source_str.split(TT_NEW_LINE), 1):
@@ -126,12 +127,18 @@ def tokenize(source_str: str) -> list[Token]:
                 if token_type is TokenType.OP_TRANSLATE_DEFAULT_CODE:
                     _have_default_op = True
 
+                if token_type is TokenType.OP_NO_RET:
+                    _have_no_ret = True
+
                 value = result.groups()
                 tokens.append(Token(token_type, value, i, result.endpos, line))
                 break
         else:
             msg = f"{i}::0 `{line}` Unknown command"
             raise UnknownCommandError(msg)
+
+    if _have_no_ret and _have_default_op:
+        raise SyntaxError("`default` token not allowed with `noRet` token")
 
     # auto add return operator
     if all(t.token_type != TokenType.OP_NO_RET for t in tokens):
