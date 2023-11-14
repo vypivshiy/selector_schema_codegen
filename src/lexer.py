@@ -1,134 +1,11 @@
 import re
 import warnings
-from enum import Enum
-
-__all__ = [
-    "TokenType",
-    "TOKENS",
-    "TT_COMMENT",
-    "TT_NEW_LINE",
-    "Token",
-    "tokenize",
-]
 
 
-class TokenType(Enum):
-    """all command enum representation"""
+from typing import Optional
 
-    # SELECTORS
-    OP_XPATH = 0
-    OP_XPATH_ALL = 1
-    OP_CSS = 2
-    OP_CSS_ALL = 3
-    OP_ATTR = 4
-    OP_ATTR_TEXT = 5
-    OP_ATTR_RAW = 6
-    # REGEX
-    OP_REGEX = 7
-    OP_REGEX_ALL = 8
-    OP_REGEX_SUB = 9
-    # STRINGS
-    OP_STRING_TRIM = 10
-    OP_STRING_L_TRIM = 11
-    OP_STRING_R_TRIM = 12
-    OP_STRING_REPLACE = 13
-    OP_STRING_FORMAT = 14
-    OP_STRING_SPLIT = 15
-    # ARRAY
-    OP_INDEX = 16
-    OP_FIRST = 17
-    OP_LAST = 18
-    OP_SLICE = 19
-    OP_JOIN = 20
-    # ANY
-    OP_COMMENT = 21
-    OP_TRANSLATE_DEFAULT_CODE = 22  # wrap try/catch mark
-    OP_TRANSLATE_CODE = 32
-    OP_NEW_LINE = 23
-    OP_CUSTOM_FORMATTER = 24
-    # VALIDATORS
-    OP_ASSERT = 25
-    OP_ASSERT_CONTAINS = 26
-    OP_ASSERT_STARTSWITH = 27
-    OP_ASSERT_ENDSWITH = 28
-    OP_ASSERT_MATCH = 29
-    OP_ASSERT_CSS = 30
-    OP_ASSERT_XPATH = 31
-    # declare skip return statement for translator
-    OP_NO_RET = 33
-
-    @classmethod
-    def tokens_selector_all(cls):
-        return (
-            TokenType.OP_CSS,
-            TokenType.OP_XPATH,
-            TokenType.OP_CSS_ALL,
-            TokenType.OP_XPATH_ALL,
-        )
-
-    @classmethod
-    def tokens_selector_fetch_one(cls):
-        return TokenType.OP_CSS, TokenType.OP_XPATH
-
-    @classmethod
-    def tokens_selector_fetch_all(cls):
-        return TokenType.OP_CSS_ALL, TokenType.OP_XPATH_ALL
-
-    @classmethod
-    def tokens_selector_extract(cls):
-        return TokenType.OP_ATTR, TokenType.OP_ATTR_TEXT, TokenType.OP_ATTR_RAW
-
-    @classmethod
-    def tokens_regex(cls):
-        return (
-            TokenType.OP_REGEX,
-            TokenType.OP_REGEX_ALL,
-            TokenType.OP_REGEX_SUB,
-        )
-
-    @classmethod
-    def tokens_string(cls):
-        return (
-            TokenType.OP_STRING_FORMAT,
-            TokenType.OP_STRING_REPLACE,
-            TokenType.OP_STRING_SPLIT,
-            TokenType.OP_STRING_L_TRIM,
-            TokenType.OP_STRING_R_TRIM,
-            TokenType.OP_STRING_TRIM,
-        )
-
-    @classmethod
-    def tokens_array(cls):
-        return (
-            TokenType.OP_INDEX,
-            TokenType.OP_FIRST,
-            TokenType.OP_LAST,
-            TokenType.OP_SLICE,
-            TokenType.OP_JOIN,
-        )
-
-    @classmethod
-    def tokens_asserts(cls):
-        return (
-            TokenType.OP_ASSERT,
-            TokenType.OP_ASSERT_STARTSWITH,
-            TokenType.OP_ASSERT_ENDSWITH,
-            TokenType.OP_ASSERT_CSS,
-            TokenType.OP_ASSERT_XPATH,
-            TokenType.OP_ASSERT_CONTAINS,
-            TokenType.OP_ASSERT_MATCH
-        )
-
-    @classmethod
-    def token_fluent_optimization(cls):
-        return (TokenType.OP_CSS,
-                TokenType.OP_XPATH,
-                TokenType.OP_XPATH_ALL,
-                TokenType.OP_CSS_ALL,
-                TokenType.OP_INDEX,
-                TokenType.OP_ATTR,
-                TokenType.OP_ATTR_RAW,
-                TokenType.OP_ATTR_TEXT)
+from src.objects import TokenType, Token, TT_COMMENT, TT_NEW_LINE
+from src.exceptions import CommandArgumentsError, UnknownCommandError
 
 
 ########
@@ -206,55 +83,10 @@ TOKENS = {
         r'^assertXpath\s+(".*")$',
         TokenType.OP_ASSERT_XPATH,
     ),
-    # declare no return for translator
-    "noRet": (r"^noRet$", TokenType.OP_NO_RET)
+    # declare return statement for translator
+    "noRet": (r"^noRet$", TokenType.OP_NO_RET),
+    "ret": (r"^ret$", TokenType.OP_RET)
 }
-
-
-TT_COMMENT = "//"
-TT_NEW_LINE = "\n"
-
-
-class Token:
-    def __init__(
-        self,
-        token_type: TokenType,
-        args: tuple[str, ...],
-        line: int,
-        pos: int,
-        code: str,
-    ):
-        """Token model
-
-        :param token_type: token type, enum
-        :param args: command arguments. tuple of strings
-        :param line: line num
-        :param pos: line position
-        :param code: raw line command
-        """
-        self.token_type = token_type
-        self.args = args
-        self.line = line
-        self.pos = pos
-        self._code = code
-
-    @property
-    def code(self):
-        return self._code
-
-    @property
-    def values(self) -> tuple[str, ...]:
-        """remove quotes matched groups `'"`"""
-        if not self.args:
-            return ()
-        return self.args
-
-    @values.setter
-    def values(self, value: tuple[...,]):
-        self.args = value
-
-    def __repr__(self):
-        return f"{self.line}:{self.pos} - {self.token_type}, args={self.args}, values={self.values}"
 
 
 def tokenize(source_str: str) -> list[Token]:
@@ -264,13 +96,13 @@ def tokenize(source_str: str) -> list[Token]:
     line: str
 
     for i, line in enumerate(source_str.split(TT_NEW_LINE), 1):
-        line = line.strip()
+        line = line.rstrip()
         if not line:
             tokens.append(Token(TokenType.OP_NEW_LINE, (), i, 0, line))
             continue
 
         if line.startswith(TT_COMMENT):
-            tokens.append(Token(TokenType.OP_COMMENT, (line,), i, 0, line))
+            tokens.append(Token(TokenType.OP_COMMENT, (), i, 0, line))
             continue
 
         for start_token, ctx in TOKENS.items():
@@ -287,9 +119,10 @@ def tokenize(source_str: str) -> list[Token]:
             command_directive = line.split(" ", 1)[0]
             if command_directive == start_token:
                 if not (result := re.match(pattern, line)):
-                    msg = f"{i}::0 {line} Argument(s) error. Maybe missing quote `\"` symbol or wrong args passed?"
-                    raise SyntaxError(msg)
+                    msg = f"{i}::0 `{line}` Maybe missing quote `\"` symbol or wrong arguments passed?"
+                    raise CommandArgumentsError(msg)
 
+                # detect asserts + default stmts
                 if token_type is TokenType.OP_TRANSLATE_DEFAULT_CODE:
                     _have_default_op = True
 
@@ -298,6 +131,27 @@ def tokenize(source_str: str) -> list[Token]:
                 break
         else:
             msg = f"{i}::0 `{line}` Unknown command"
-            raise SyntaxError(msg)
+            raise UnknownCommandError(msg)
 
-    return tokens
+    # auto add return operator
+    if all(t.token_type != TokenType.OP_NO_RET for t in tokens):
+        tokens.append(Token(TokenType.OP_RET, (), len(tokens) + 1, 0, "ret"))
+
+    # crop tokens list to OP_RET/OP_NO_RET command
+    complete_tokens: list[Token] = []
+    for t in tokens:
+        if t.token_type in (TokenType.OP_RET, TokenType.OP_NO_RET):
+            complete_tokens.append(t)
+            break
+        complete_tokens.append(t)
+    return complete_tokens
+
+
+if __name__ == '__main__':
+    src = """
+cssAll   "div > a"
+attr     "href"
+
+"""
+    toks = tokenize(src)
+    print()
