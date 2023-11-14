@@ -24,7 +24,7 @@ TOKENS = {
     "re": (r'^re\s+(".*")$', TokenType.OP_REGEX),
     "reAll": (r'^reAll\s+(".*")$', TokenType.OP_REGEX_ALL),
     "reSub": (
-        r'^reSub\s+(".*")\s+(".*")\s+?-?(\d*)$',
+        r'^reSub\s+(".*")\s+(".*")\s*?(-?\d*)?$',
         TokenType.OP_REGEX_SUB,
     ),
     # STRING
@@ -32,7 +32,7 @@ TOKENS = {
     "lstrip": (r'^lstrip\s+(".*")$', TokenType.OP_STRING_L_TRIM),
     "rstrip": (r'^rstrip\s+(".*")$', TokenType.OP_STRING_R_TRIM),
     "replace": (
-        r'^replace\s+(".*")\s+(".*")\s+?-?(\d*)$',
+        r'^replace\s+(".*")\s+(".*")\s*?(\d*)$',
         TokenType.OP_STRING_REPLACE,
     ),
     # format string
@@ -41,14 +41,14 @@ TOKENS = {
         TokenType.OP_STRING_FORMAT,
     ),
     "split": (
-        r'^split\s+(".*")\s?-?(\d+)$',
+        r'^split\s+(".*")\s*?(-?\d+)?$',
         TokenType.OP_STRING_SPLIT,
     ),
     # any
     "default": (r"^default\s+(.+)?$", TokenType.OP_TRANSLATE_DEFAULT_CODE),
     # "formatter": ("^formatter (.*?)$", TokenType.OP_CUSTOM_FORMATTER),
     # array
-    "slice": (r"^slice\s+-?(\d+) -?(\d*)$", TokenType.OP_SLICE),
+    "slice": (r"^slice\s+-?(\d+) (\d*)$", TokenType.OP_SLICE),
     "index": (r"^index\s+-?(\d+)$", TokenType.OP_INDEX),
     "first": (r"^first$", TokenType.OP_FIRST),
     "last": (r"^last$", TokenType.OP_LAST),
