@@ -111,6 +111,8 @@ class Analyzer:
 
                 case TokenType.OP_NO_RET:
                     yield token, self.__variable_state
+                case TokenType.OP_RET:
+                    yield token, self.__variable_state
                 case _:
                     msg = f"Some analyzer issue: missing analyze step check:\n{token}"
                     warnings.warn(msg, category=RuntimeWarning)
