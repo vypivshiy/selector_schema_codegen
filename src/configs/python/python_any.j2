@@ -1,21 +1,16 @@
-"""{{ meta_info(info) }}"""
+"""{{ generate_meta_info(ctx) }}"""
 
 from typing import Any
 {{ translator.REGEX_IMPORT }}
 
 {{ translator.SELECTOR_IMPORT }}
 
-
-{% for schema in schemas %}
+{% for schema in ctx.schemas %}
 class {{ schema.name }}:
     """
     {{ schema.doc }}
+    {{ generate_attr_signature(schema.attr_signature) }}
     """
-    {% for const in schema.constants -%}
-    {%- for key, value in const.items() -%}
-    {{ const_adapter.convert(key, value) -}}
-    {% endfor %}
-    {% endfor %}
     def __init__(self, document: str):
         self.__raw__ = document
         self.__selector__ = {{ translator.SELECTOR_TYPE }}(document)
@@ -23,26 +18,30 @@ class {{ schema.name }}:
         self.__view_keys = {{ schema.view_keys }}
         self.__cached_result: list[dict[str, Any]] = []
 
+    def parse(self):
+        self.__pre_validate(self.__selector__)
         self.__start_parse()
 
     @staticmethod
-    def __pre_validate(val: {{ translator.SELECTOR_TYPE }}):
+    def __pre_validate({{ translator.METHOD_ARG_NAME }}: {{ translator.SELECTOR_TYPE }}):
         {{ sep_code("\n        ", schema.pre_validate_code.split("\n")) }}
-    def __part_document(self, val: {{ translator.SELECTOR_TYPE }}):
+    def __part_document(self, {{ translator.METHOD_ARG_NAME }}: {{ translator.SELECTOR_TYPE }}):
         self.__pre_validate(self.__selector__)
         {{ sep_code("\n        ", schema.split_code.split("\n")) }}
     {% for attr in schema.attrs %}
     @staticmethod
-    def __parse_{{ attr.name }}(val: {{ translator.SELECTOR_TYPE }}):
+    def __parse_{{ attr.name }}({{ translator.METHOD_ARG_NAME }}: {{ translator.SELECTOR_TYPE }}):
         {{ sep_code("\n        ", attr.code.split("\n")) }}
     {% endfor %}
     def __start_parse(self):
+        # clear cache
+        self.__cached_result.clear()
         for part in self.__part_document(self.__selector__):
-            result: dict[str, Any] = {}
-            {% for key in schema.attrs_names -%}
-                 result[{{ repr_str(key) }}] = self.__parse_{{ key }}(part)
-            {% endfor -%}
-            self.__cached_result.append(result)
+            self.__cached_result.append({
+            {%- for key in schema.attrs_names %}
+                {{ repr_str(key) }}: self.__parse_{{ key }}({{ translator.METHOD_ARG_NAME }}),
+            {%- endfor -%}
+            })
 
     def view(self) -> list[dict[str, Any]]:
         def map_fields(result):
@@ -50,8 +49,6 @@ class {{ schema.name }}:
             for k in self.__view_keys:
                 if v := result.get(k):
                     k = self.__aliases.get(k, k)
-                    view_dict[k] = v
-                elif v := getattr(self, k, None):
                     view_dict[k] = v
             return view_dict
 

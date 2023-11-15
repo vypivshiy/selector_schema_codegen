@@ -36,19 +36,9 @@ class Translator(ABCExpressionTranslator):
     # TEXT
     STRING_TYPE: str = "str"
 
-    def _gen_var_name(self, node: "Node") -> str:
-        """assert <name> <expr"""
-        if node is None:
-            return self.METHOD_ARG_NAME
-
-        _id = node.id
-        if _id is None:
-            return self.METHOD_ARG_NAME
-        return f"{self.VAR_NAME}_{_id}"
-
     def _assign_nodes_expr(self, node: "Node") -> str:
         """var_node.id = var_node_prev.id"""
-        return f'{self._gen_var_name(node)} = {self._gen_var_name(node.prev_node)}'
+        return f'{self._VAR(node)} = {self._VAR_P(node)}'
 
     def op_no_ret(self, node: "Node"):
         return ""
