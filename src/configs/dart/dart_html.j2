@@ -1,0 +1,81 @@
+/**
+{{ generate_meta_info(ctx) }}
+**/
+import 'dart:core';
+{{ translator.SELECTOR_IMPORT }}
+
+// TODO change dynamic to generic with String OR List<String>
+typedef ParsedValue = Map<String, dynamic>;
+
+{% for schema in ctx.schemas %}
+class {{ schema.name }}{
+    {%- for line in schema.doc.split("\n") %}
+    /// {{ line -}}
+    {% endfor -%}
+    {% for line in generate_attr_signature(schema.attr_signature, sep='\n').split('\n') %}
+    /// {{ line -}}
+    {% endfor %}
+    final String document;
+    final html.Document selector;
+    final Map<String, String> _aliases = {{ schema.aliases }};
+    final List<String> _viewKeys = {{ schema.view_keys }};
+    final List<ParsedValue> _cachedResult = [];
+
+    {{ schema.name }}(
+        this.document,
+        {this.selector = html.parse(document)}
+    );
+
+    void parse(){
+        this._preValidate(selector);
+        this._startParse();
+    }
+
+    void _preValidate({{ translator.SELECTOR_TYPE }} {{ translator.METHOD_ARG_NAME }}){
+        {{ sep_code(";\n        ", schema.pre_validate_code.split(";\n")) }}
+    }
+
+    // TODO typing better
+    List<dynamic> _partDocument(dynamic part){
+        this._preValidate(this.selector);
+        {{ sep_code(";\n        ", schema.split_code.split(";\n")) }}
+    }
+
+    {% for attr in schema.attrs %}
+    dynamic _parse{{ attr.name.title() }}(dynamic {{ translator.METHOD_ARG_NAME }}){
+        {{ sep_code(";\n        ", attr.code.split(";\n")) }}
+    }
+    {% endfor %}
+
+    void _startParse(){
+        // clear cache
+        this._cachedResult.clear();
+        for (var {{ translator.METHOD_ARG_NAME }} in this._partDocument(this.selector)){
+            this._cachedResult.add({
+            {%- for key in schema.attrs_names %}
+                {{ repr_str(key) }}: this._parse{{ key.title() }}({{ translator.METHOD_ARG_NAME }}),
+            {%- endfor -%}
+            });
+        }
+    }
+
+    List<ParsedValue> view() {
+      ParsedValue mapFields(ParsedValue result) {
+      ParsedValue viewDict = {};
+      for (String k in _viewKeys) {
+      var v = result[k];
+      if (v != null) {
+          k = _aliases[k] ?? k;
+          viewDict[k] = v;
+        }
+      }
+      return viewDict;
+      }
+
+    if (_cachedResult.length == 1) {
+        return [mapFields(_cachedResult[0])];
+    }
+    return _cachedResult.map(mapFields).toList();
+    }
+}
+{% endfor %}
