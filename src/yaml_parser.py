@@ -76,13 +76,13 @@ class Schema:
         return ""
 
     @property
-    def attr_signature(self) -> dict[str, tuple["VariableState", str]]:
+    def attr_signature(self) -> dict[str, tuple["VariableState", str, str]]:
         attrs = [a for a in self.attrs if a.name in self.view_keys]
         map_signature = {}
         for a in attrs:
             nodes: list["Node"] = [_ for _ in a.ast.values()]
             if nodes[-1].token.token_type == TokenType.OP_RET:
-                map_signature[a.name] = (nodes[-1].prev_node.var_state, a.doc or "")
+                map_signature[a.name] = (nodes[-1].prev_node.var_state, a.alias, a.doc or "")
         return map_signature
 
 
