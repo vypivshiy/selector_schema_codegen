@@ -7,29 +7,45 @@ info:
   source: source_link
   tags: shop, books
 
+
+UselessElements:
+  doc: |
+    useless elements extractor
+  steps:
+    parser:
+      - name: title
+        doc: a title page
+        run: |
+          css "title"
+          text
+      - name: meta
+        doc: all meta elements tags
+        run: |
+          css "head > meta"
+          raw
+      - name: hrefs
+        doc: all a [href] elements
+        run: |
+          cssAll "a"
+          attr "href"
+    view:
+      - title
+      - meta
+      - hrefs
+
 # class name
 Book:
   # optional class docstrings
   doc: |
     example book object parser
-  # optional class constants. you can represent to view too
-  constants:
-    - items:
-        - 1
-        - 2
-        - 3
-    - COOL_CONSTANT: "YES"
-    - DICT_CONST:
-        one: 1
-        two: 2
-        three: 3
   # init steps
   steps:
     # optional first pre-validation
     validate: |
-      css "title"
-      text
-      assertMatch "Books to Scrape - Sandbox"
+      css "div > a"
+      attr "href"
+      assertMatch "cyka cyka.jpg"
+      noRet
     # split html document to parts
     split: |
       cssAll "ol.row > li"
@@ -38,8 +54,8 @@ Book:
         # optional key alias for view
         # alias: page
         # optional documentation key
-        doc: |
-          url book
+        doc: page url to book
+        alias: url_page
         # parse steps procedure
         run: |
           css "div.image_container > a"
@@ -51,19 +67,23 @@ Book:
           css "div.image_container > a > img"
           attr "src"
       - name: price
+        doc: book price
         run: |
           default "0"
           css "div.product_price > p.price_color"
           text
       - name: name
+        doc: book name
         run: |
           css "h3 > a"
           attr "title"
       - name: available
+        doc: in stock?
         run: |
           css "div.product_price > p.availability > i"
           attr "class"
       - name: rating
+        doc: book rating
         run: |
           css "p.star-rating"
           attr "class"
@@ -75,4 +95,3 @@ Book:
       - price
       - name
       - rating
-      - items

@@ -3,38 +3,43 @@
 Парсер yaml-DSL конфигурации со встроенным декларативным языком-спецификацией
 для генерации схем парсеров (преимущественно под html) на различные языки программирования.
 
+Разработан для портирования парсеров на разные языки программирования
+
+
 ## Минимальные требования к целевому портируемому ЯП:
 - есть регулярные выражения
 - есть css/xpath библиотека
-- базовые методы работы со строками
+- базовые методы работы со строками (format string, trim/left trim/right trim/split/replace)
 
 ## Рекомендации
-- использовать css селекторы: их можно **гарантированно** конвертировать в xpath
-- есть конвертер xpath в css простых запросов: например, в css нет аналога `contains` из xpath и тд
+- использовать css селекторы: их можно **гарантированно** конвертировать в xpath. 
+Это может пригодиться, например, если отсутствует поддержка xpath
+- есть конвертер xpath в css простых запросов **без гарантий работоспособности**. 
+Например, в css нет аналога `contains` из xpath и тд
+## Схематичное представление работы генератора
+
+![img.png](img.png)
 
 ## Спецификация синтаксиса
 
 ### Особенности языка
 
-- Декларативный (отсутствия присвоения, арифметики, операций приоритетов)
-- Процедурный
+- DSL (Domain-Specific Language), Декларативный (отсутствуют операции присвоения, арифметики, приоритетов)
 - Минималистичный синтаксис, для работы с селекторами, регулярными выражениями и простыми операциями со строками
 - Принимает на вход **один** аргумент и он всегда selector-like типа
-- Есть 3 типа данных: 
-  - `SELECTOR` - инстанс класс для работы с css/xpath селекторами.
-  - `TEXT` - строка
-  - `ARRAY` - динамический массив строк
+- 4 типа данных
 - Синтаксис регулярных выражений как в python. Для максимальной совместимости используйте, например, `[0-9]` вместо `\d`
 - Пустые строки и комментарии (`//`) игнорируются анализатором.
 
 ### Описание типов
-Для данного скриптового языка существуют 3 типа данных
+Для данного скриптового языка существуют 4 типа данных
 
-| Тип      | Описание                                                                           |
-|----------|------------------------------------------------------------------------------------|
-| SELECTOR | инстанс класса, из которого вызываются css/xpath селекторы. Всегда первый аргумент |
-| TEXT     | строка                                                                             |
-| ARRAY    | динамический массив строк.                                                         |
+| Тип            | Описание                                                                           |
+|----------------|------------------------------------------------------------------------------------|
+| SELECTOR       | инстанс класса, из которого вызываются css/xpath селекторы. Всегда первый аргумент |
+| SELECTOR_ARRAY | репрезентация списка узлов всех найденных элементов из инстанса SELECTOR           |
+| TEXT           | строка                                                                             |
+| ARRAY          | список строк.                                                                      |
 
 
 ### Описание директив
@@ -55,12 +60,17 @@
 | lstrip   | "<string>"                | Удаляет заданную строку СЛЕВА. Аргумент должен быть TEXT                                                                                          | TEXT                  | lstrip " "                          |
 | rstrip   | "<string>"                | Удаляет заданную строку СПРАВА. Аргумент должен быть TEXT                                                                                         | TEXT                  | rstrip " "                          |
 | format   | "<string>"                | Format string. Аргумент подстановки указывать с помощью `{{}}` оператора. Аргумент должен быть TEXT                                               | TEXT                  | format "spam {{}} egg"              |
-| split    | "<value>" <count>         | Разделение строки. Если count = -1 - делить на максимально доступное. Аргумент должен быть TEXT                                                   | ARRAY                 | default "empty"                     |
-| slice    | <start> <end>             | Срез массива. Аргумент должен быть ARRAY. поддерживает отрицательные индексы                                                                      | ARRAY                 | slice 1 5 / slice 1 # `[1..]` алиас |
+| split    | "<value>" <count>         | Разделение строки. Если count = -1 или не передан - делить на максимально доступное. Аргумент должен быть TEXT                                    | ARRAY                 | split ", "                          |
+| replace  | "<old>" "<old>" <count>   | Замена строки. Если count = -1 или не передан - заменять на максимально доступное. Аргумент должен быть TEXT                                      | ARRAY                 | split ", "                          |
+| limit    | <count>                   | Максимальное число элементов                                                                                                                      | ARRAY                 | slice 1 5 / slice 1 # `[1..]` алиас |
 | index    | <index>                   | Взять элемент по индекса. Аргумент должен быть ARRAY                                                                                              | TEXT                  | index 1                             |
 | first    |                           | `index 1` alias                                                                                                                                   | TEXT                  | first                               |
 | last     |                           | `index -1` alias                                                                                                                                  | TEXT                  | last                                |
 | join     | "<string>"                | Собирает ARRAY в строку. Аргумент должен быть ARRAY                                                                                               | TEXT                  | join ", "                           |
+| ret      |                           | Указать транслятору вернуть значение. Автоматически добавляется если не указан в скрипте                                                          |                       | ret                                 |
+| noRet    | "<string>"                | Указать транслятору ничего не возвращать. Добавлено для предварительной валидации документа                                                       |                       | noRet                               |
+| //       | ...                       | Однострочный комментарий. Игнорируется конечным кодогенератором                                                                                   |                       | // this is comment line             |
+
 
 ### Токены валидации
 
@@ -87,7 +97,7 @@
 | assertXpath    | Проверка валидности запроса в `SELECTOR`.             | assertXpath "//head/title"      |
 
 
-### examples
+### Generation examples
 
 ```
 // set default value if parse process is failing
@@ -96,24 +106,36 @@ text
 format "Cool title: {{}}"
 ```
 
-python generated equivalent code:
+generated python equivalent code:
 
 ```python
 from parsel import Selector
 
 
-def dummy_parse(val: Selector):
-    val = val.xpath('//title')
-    val = val.xpath('/text()').get()
-    val = "Cool title: {}".format(val)
-    return val
+def dummy_parse(part: Selector):
+    val_0 = part.xpath('//title')
+    val_1 = val_0.xpath('/text()').get()
+    val_2 = "Cool title: {}".format(val_1)
+    return val_2
 ```
 
-add default value
+generated dart equivalent code:
+
+```dart
+import 'package:html/parser.dart' as html;
+
+dummy_parse(html.Document part){
+    var val_0 = part.querySelector('title');
+    String val_1 = val_0.text;
+    var val_2 = "Cool title: $val_1";
+    return val_2;
+}
+```
+add default value:
 
 ```
 // set default value if parse process is failing
-default "0"
+default "spam egg"
 xpath "//title"
 text
 format "Cool title: {{}}"
@@ -123,20 +145,35 @@ format "Cool title: {{}}"
 from parsel import Selector
 
 
-def dummy_parse(val: Selector):
+def dummy_parse(part: Selector):
     try:  
-      val = val.xpath('//title')
-      val = val.xpath('/text()').get()
-      val = "Cool title: {}".format(val)
-      return val
+      val_1 = part.xpath('//title')
+      val_2 = val_1.xpath('/text()').get()
+      val_3 = "Cool title: {}".format(val_2)
+      return val_3
     except Exception:
-        return "0"
+        return "spam egg"
 ```
 
-add validator
+```dart
+import 'package:html/parser.dart' as html;
+
+dummy_parse(html.Document part){
+  try{
+    var val_0 = part.querySelector('title');
+    String val_1 = val_0.text;
+    var val_2 = "Cool title: $val_1";
+    return val_2;
+  } catch (e){
+    return "spam egg";
+  }
+    
+}
+```
+add assert validator
 
 ```
-// set default value if parse process is failing
+// not null check operation
 assertCss "head > title"
 xpath "//title"
 text
@@ -148,26 +185,157 @@ format "Cool title: {{}}"
 from parsel import Selector
 
 
-def dummy_parse(val: Selector):
-    assert val.css("head > title")
-    val = val.xpath('//title')
-    val = val.xpath('/text()').get()
-    val = "Cool title: {}".format(val)
-    return val
+def dummy_parse(part: Selector):
+    assert part.css("head > title")
+    val_1 = part.xpath('//title')
+    val_2 = val_1.xpath('/text()').get()
+    val_3 = "Cool title: {}".format(val_2)
+    return val_3
+```
+
+```dart
+import 'package:html/parser.dart' as html;
+
+dummy_parse(html.Document part){
+    assert(part.querySelector('title') != null);
+    var val_0 = part.querySelector('title');
+    String val_1 = val_0.text;
+    var val_2 = "Cool title: $val_1";
+    return val_2;
+}
 ```
 
 ## yaml config
-TODO
+Для упрощения синтаксиса в этом решении используется yaml файл конфигурации, чтобы
+упростить токенизацию команд.
+
+Пример псевдокода структуры сгенерированного файла:
+```
+# meta information
+- html parser, regex modules imports
+
+class Klass1:
+    # class docstring
+    # view() structure docstring
+    
+    // required string html document in constructor
+    init(string: document)
+    
+    _splitDocument() // split document to parts (OPTIONAL)
+    
+    parse() // parse public method entrypoint
+        _preValidate() // first validation
+        _startParse() // parse document
+    
+    ... // generated parse methods for every key
+    
+    view() 
+       // public method
+       // returns List<Map<String, String || List<String>>> representation
+       
+class Klass2:
+    ...
+
+class KlassN:
+    ...
+```
+
+Usage example:
+
+```
+document = ... // extracted html document
+instance = Klass1(document)
+instance.parse()
+print(instance.view())
+```
+
+Пример файла конфигурации
+```yaml
+# meta information
+id: books.to_scrape
+info:
+  name: books.to_scrape
+  author: username
+  description: books.to_scrape schema
+  source: source_link
+  tags: shop, books
+
+# class name
+Book:
+  # optional class docstrings
+  doc: |
+    example book object parser from http://books.toscrape.com
+  # init steps
+  steps:
+    # optional first document validation
+    validate: |
+      css "div > a"
+      attr "href"
+      assertMatch "example\.com"
+      // we don't need return a value in this section
+      noRet
+    # split html document to parts (if needed)
+    split: |
+      cssAll "ol.row > li"
+    # parse values configuration
+    parser:
+      # key name
+      - name: url
+        # optional key alias for view() method
+        alias: page
+        # optional docstring key
+        doc: page url to book
+        # parse steps procedure
+        run: |
+          css "div.image_container > a"
+          attr "href"
+          format "https://books.toscrape.com/catalogue/{{}}"
+      - name: image
+        doc: book image
+        run: |
+          css "div.image_container > a > img"
+          attr "src"
+      - name: price
+        doc: book price
+        run: |
+          default "0"
+          css "div.product_price > p.price_color"
+          text
+      - name: name
+        doc: book name
+        run: |
+          css "h3 > a"
+          attr "title"
+      - name: available
+        doc: in stock?
+        run: |
+          css "div.product_price > p.availability > i"
+          attr "class"
+      - name: rating
+        doc: book rating
+        run: |
+          css "p.star-rating"
+          attr "class"
+          lstrip "star-rating "
+    # configuration of return keys for the view() method
+    view:
+      - url
+      - image
+      - price
+      - name
+      - rating
+```
 
 ## dev 
 TODO
 
 
 ## TODO
+- filter operations (?)
+- constants support
 - more languages, libs support
-- template generator refactoring
-- generation code optimizations
-- css/xpath check in analyzer
-- slices syntax analyze
-- retranslate regex expressions. Eg: `\d` to `[0-9]`
-- string methods: `title`, `upper`, `lower`, `capitalize`
+- codegen optimizations (usage SELECTOR fluent interfaces, one-line code generation)
+- css/xpath analyzer in pre-generate step
+- css/xpath patches (for example, if css selectors in target language not support `:nt_child` operation?)
+- translate regex expressions. Eg: `\d` to `[0-9]`
+- string methods: `title`, `upper`, `lower`, `capitalize` or any useful

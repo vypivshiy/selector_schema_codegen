@@ -1,0 +1,11 @@
+@startuml
+Main -> Lexer: script code
+Lexer -> Lexer: generate tokens, base syntax checks
+Main <-- Lexer: list of tokens
+Main -> Analyzer: list of tokens
+Analyzer -> Analyzer: syntax rules checks
+Main <-- Analyzer: ast-like tree
+Main -> Translator: ast-tree with nodes
+Translator -> Translator: translate code to target language
+Main <-- Translator: generated code
+@enduml
