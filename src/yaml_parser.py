@@ -1,12 +1,16 @@
 from dataclasses import dataclass, field
 from os import PathLike
-from typing import Any, Optional, Type
+from typing import Any, Optional, Type, TYPE_CHECKING
 
 import yaml
 
 from src.configs.codegen_tools import ABCExpressionTranslator
 from src.parser import Parser
 
+from src.objects import TokenType
+
+if TYPE_CHECKING:
+    from src.objects import Node, VariableState
 
 __all__ = ["Info", "SchemaAttribute", "Schema", "parse_config"]
 
@@ -30,11 +34,14 @@ class SchemaAttribute:
     doc: Optional[str]
     raw_code: str
     translator: Type["ABCExpressionTranslator"]
-    generate_keys: dict[str, bool] = field(default_factory=dict)
 
     @property
     def code(self):
-        return Parser(self.raw_code, self.translator, **self.generate_keys).parse()
+        return Parser(self.raw_code, self.translator).parse()
+
+    @property
+    def ast(self) -> dict[int, "Node"]:
+        return Parser(self.raw_code, self.translator).tree_ast
 
 
 @dataclass
@@ -47,7 +54,6 @@ class Schema:
     translator: Type[ABCExpressionTranslator]
     doc: Optional[str]
     attrs: list[SchemaAttribute] = field(default_factory=list)
-    generate_keys: dict[str, bool] = field(default_factory=dict)
 
     @property
     def aliases(self) -> dict[str, str]:
@@ -60,19 +66,28 @@ class Schema:
     @property
     def pre_validate_code(self):
         if self.pre_validate_code_raw:
-            return Parser(self.pre_validate_code_raw, self.translator, **self.generate_keys).parse()
+            return Parser(self.pre_validate_code_raw, self.translator).parse()
         return ""
 
     @property
     def split_code(self):
         if self.split_code_raw:
-            return Parser(self.split_code_raw, self.translator, **self.generate_keys).parse()
+            return Parser(self.split_code_raw, self.translator).parse()
         return ""
+
+    @property
+    def attr_signature(self) -> dict[str, tuple["VariableState", str]]:
+        attrs = [a for a in self.attrs if a.name in self.view_keys]
+        map_signature = {}
+        for a in attrs:
+            nodes: list["Node"] = [_ for _ in a.ast.values()]
+            if nodes[-1].token.token_type == TokenType.OP_RET:
+                map_signature[a.name] = (nodes[-1].prev_node.var_state, a.doc or "")
+        return map_signature
 
 
 def _parse_class(class_name: str, content: dict[str:Any],
-                 translator: Type["ABCExpressionTranslator"],
-                 generate_keys: dict[str, bool]) -> Schema:
+                 translator: Type["ABCExpressionTranslator"]) -> Schema:
     assert content.get("steps", None)
     assert content.get("steps").get("parser", None)
     assert content.get("steps").get("view", None)
@@ -86,7 +101,6 @@ def _parse_class(class_name: str, content: dict[str:Any],
         doc=content.get("doc", None),
         view_keys=content.get("steps").get("view"),
         translator=translator,
-        generate_keys=generate_keys
     )
 
     parser_attrs = steps.get("parser")
@@ -98,15 +112,13 @@ def _parse_class(class_name: str, content: dict[str:Any],
             doc=attr.get("doc", None),
             raw_code=attr.get("run"),
             translator=translator,
-            generate_keys=generate_keys
         )
         schema.attrs.append(attr_struct)
     return schema
 
 
 def parse_config(file: str | PathLike[str],
-                 translator: Type["ABCExpressionTranslator"],
-                 generate_keys: dict[str, bool]) -> Info:
+                 translator: Type["ABCExpressionTranslator"]) -> Info:
     with open(file, "r") as f:
         yaml_data = yaml.safe_load(f)
 
@@ -114,7 +126,7 @@ def parse_config(file: str | PathLike[str],
 
     info = Info(id=yaml_data.pop("id"), **yaml_data.pop("info"))
     schemas: list[Schema] = [
-        _parse_class(class_name, content, translator, generate_keys)
+        _parse_class(class_name, content, translator)
         for class_name, content in yaml_data.items()
     ]
     info.schemas = schemas
