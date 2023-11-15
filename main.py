@@ -1,3 +1,4 @@
+# TODO cli script
 import jinja2
 
 from src.yaml_parser import parse_config
@@ -42,7 +43,7 @@ def main(choice: int):
         ctx=info,
         translator=translator,
     )
-    with open(f"example/{out}", "w") as f:
+    with open(f"examples/{out}", "w") as f:
         f.write(result)
 
 

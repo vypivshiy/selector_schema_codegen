@@ -22,7 +22,7 @@ class ABCExpressionTranslator(ABC):
     FIRST_ASSIGMENT: str = NotImplemented
     # next assignments
     ASSIGMENT: str = NotImplemented
-    # \n, ; for example
+    # \n, ; for examples
     DELIM_LINES: str = NotImplemented
     # delim for try\catch constructions: maybe `\n\t`, `;\n\t`
     DELIM_DEFAULT_WRAPPER: str = NotImplemented
