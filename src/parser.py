@@ -6,9 +6,6 @@ import warnings
 from src.tools import xpath_to_css, css_to_xpath
 from src.configs.codegen_tools import ABCExpressionTranslator
 
-if TYPE_CHECKING:
-    from src.lexer import Token
-
 
 class Parser:
     def __init__(self,
@@ -18,6 +15,7 @@ class Parser:
                  ):
         self.raw_tokens = tokenize(source_code)
         self.analyzer = analyzer
+        self.tree_ast = self.analyzer(self.raw_tokens).build_ast()
         if isinstance(translator, ABCExpressionTranslator):
             self.translator = translator
         else:
@@ -50,10 +48,10 @@ class Parser:
                 token.values = (css_to_xpath(query, prefix),)
 
     def parse(self) -> str:
-        tree = self.analyzer(self.raw_tokens).build_ast()
+        self.tree_ast = self.analyzer(self.raw_tokens).build_ast()
         lines = []
         default_node = None
-        for node in tree.values():
+        for node in self.tree_ast.values():
             if node.token.token_type == TokenType.OP_TRANSLATE_DEFAULT_CODE:
                 default_node = node
                 continue
@@ -68,17 +66,21 @@ class Parser:
 
 
 if __name__ == '__main__':
-    from src.configs.python.python_parsel import Translator
-    # from src.configs.python.python_bs4 import Translator
+    # from src.configs.python.python_parsel import Translator
+    from src.configs.python.python_bs4 import Translator
 
     src_code = """
-default "0"
-raw
-//cssAll "title"
-//text
-//index 0
-assertMatch "Books to Scrape - Sandbox"
+assertCss "head > title"
+
+css "head > title"
+text
+assertContains "spam"
+format "https://books.toscrape.com/catalogue/{{}}"
+rstrip "https://"
+replace "o" "a"
+re "b[oa][oa]ks\."
+reSub "\w+" "lol"
 """
     p = Parser(src_code, Translator)
-    p.xpath_to_css()
+    # p.xpath_to_css()
     print(p.parse())
