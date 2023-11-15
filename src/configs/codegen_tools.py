@@ -45,6 +45,25 @@ class ABCExpressionTranslator(ABC):
     # generators config TODO
     ALLOW_FLUENT_OPTIMIZATION: bool = False
 
+    def _gen_var_name(self, node: "Node") -> str:
+        """generate variable name shortcut"""
+        """assert <name> <expr"""
+        if node is None:
+            return self.METHOD_ARG_NAME
+
+        _id = node.id
+        if _id is None:
+            return self.METHOD_ARG_NAME
+        return f"{self.VAR_NAME}_{_id}"
+
+    def _VAR(self, node: "Node") -> str:
+        """alias of _gen_var_name(node)"""
+        return self._gen_var_name(node)
+
+    def _VAR_P(self, node: "Node") -> str:
+        """alias of _gen_var_name(node.prev_node)"""
+        return self._gen_var_name(node.prev_node)
+
     @abstractmethod
     def op_no_ret(self, node: "Node") -> str:
         pass
