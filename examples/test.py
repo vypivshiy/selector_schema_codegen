@@ -46,10 +46,10 @@ class UselessElements:
 
     @staticmethod
     def __pre_validate(part: Selector):
-        
+        return
     def __part_document(self, part: Selector):
         self.__pre_validate(self.__selector__)
-        
+        return [part]
     
     @staticmethod
     def __parse_title(part: Selector):
@@ -93,7 +93,7 @@ class UselessElements:
 
 class Book:
     """
-    examples book object parser
+    example book object parser
 
     view() elements signature:
 

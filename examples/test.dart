@@ -21,17 +21,105 @@ import 'package:html/parser.dart' as html;
 typedef ParsedValue = Map<String, dynamic>;
 
 
+class UselessElements{
+    /// useless elements extractor
+    /// 
+    /// view() elements signature:
+    /// title <TEXT> - a title page
+    /// meta <TEXT> - all meta elements tags
+    /// hrefs <ARRAY> - all a [href] elements
+    /// 
+    final String document;
+    final html.Document selector;
+    final Map<String, String> _aliases = {};
+    final List<String> _viewKeys = ['title', 'meta', 'hrefs'];
+    final List<ParsedValue> _cachedResult = [];
+
+    UselessElements(
+        this.document,
+        {this.selector = html.parse(document)}
+    );
+
+    void parse(){
+        this._preValidate(selector);
+        this._startParse();
+    }
+
+    void _preValidate(html.Document part){
+        null;
+    }
+
+    // TODO typing better
+    List<dynamic> _partDocument(dynamic part){
+        this._preValidate(this.selector);
+        return [part];
+    }
+
+    
+    dynamic _parseTitle(dynamic part){
+        var val_0 = part.querySelector("title");
+        String val_1 = val_0.text;
+        return val_1;
+    }
+    
+    dynamic _parseMeta(dynamic part){
+        var val_0 = part.querySelector("head > meta");
+        String val_1 = val_0.innerHtml;
+        return val_1;
+    }
+    
+    dynamic _parseHrefs(dynamic part){
+        var val_0 = part.querySelectorAll("a");
+        List<String> val_1 = val_0.map((el) => el.attributes["href"]).toList();
+        return val_1;
+    }
+    
+
+    void _startParse(){
+        // clear cache
+        this._cachedResult.clear();
+        for (var part in this._partDocument(this.selector)){
+            this._cachedResult.add({
+                'title': this._parseTitle(part),
+                'meta': this._parseMeta(part),
+                'hrefs': this._parseHrefs(part),});
+        }
+    }
+
+    List<ParsedValue> view() {
+      ParsedValue mapFields(ParsedValue result) {
+      ParsedValue viewDict = {};
+      for (String k in _viewKeys) {
+      var v = result[k];
+      if (v != null) {
+          k = _aliases[k] ?? k;
+          viewDict[k] = v;
+        }
+      }
+      return viewDict;
+      }
+
+    if (_cachedResult.length == 1) {
+        return [mapFields(_cachedResult[0])];
+    }
+    return _cachedResult.map(mapFields).toList();
+    }
+}
+
 class Book{
-    /// examples book object parser
+    /// example book object parser
     /// 
     /// view() elements signature:
     /// url_page (url) <TEXT> - page url to book
     /// image <TEXT> - book image
+    /// price <TEXT> - book price
+    /// name <TEXT> - book name
+    /// rating <TEXT> - book rating
     /// 
     final String document;
     final html.Document selector;
     final Map<String, String> _aliases = {'url': 'url_page'};
-    final List<String> _viewKeys = ['url', 'image'];
+    final List<String> _viewKeys = ['url', 'image', 'price', 'name', 'rating'];
     final List<ParsedValue> _cachedResult = [];
 
     Book(
