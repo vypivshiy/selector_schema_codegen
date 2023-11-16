@@ -164,3 +164,9 @@ class Translator(ABCExpressionTranslator):
 
     def op_assert_contains(self, node: "Node", substring: str) -> str:
         return f"assert({self._VAR(node)}.contains({substring}))"
+
+    def op_skip_pre_validate(self) -> str:
+        return "null;"
+
+    def op_skip_part_document(self) -> str:
+        return f"return [{self.METHOD_ARG_NAME}];"

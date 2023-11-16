@@ -232,6 +232,16 @@ class ABCExpressionTranslator(ABC):
     ) -> str:
         pass
 
+    @abstractmethod
+    def op_skip_pre_validate(self) -> str:
+        """stub if `pre_validate` key not provided in config"""
+        pass
+
+    @abstractmethod
+    def op_skip_part_document(self) -> str:
+        """stub if `split` key not provided in config"""
+        pass
+
     @property
     def tokens_map(
             self,

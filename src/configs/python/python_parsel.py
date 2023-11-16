@@ -189,6 +189,12 @@ class Translator(ABCExpressionTranslator):
     ) -> str:
         return f"assert {substring} in {self._gen_var_name(node)}"
 
+    def op_skip_pre_validate(self) -> str:
+        return "return"
+
+    def op_skip_part_document(self) -> str:
+        return f"return [{self.METHOD_ARG_NAME}]"
+
 
 if __name__ == "__main__":
     from src.lexer import tokenize

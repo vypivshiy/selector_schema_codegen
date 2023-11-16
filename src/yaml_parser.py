@@ -67,13 +67,13 @@ class Schema:
     def pre_validate_code(self):
         if self.pre_validate_code_raw:
             return Parser(self.pre_validate_code_raw, self.translator).parse()
-        return ""
+        return self.translator().op_skip_pre_validate()
 
     @property
     def split_code(self):
         if self.split_code_raw:
             return Parser(self.split_code_raw, self.translator).parse()
-        return ""
+        return self.translator().op_skip_part_document()
 
     @property
     def attr_signature(self) -> dict[str, tuple["VariableState", str, str]]:
