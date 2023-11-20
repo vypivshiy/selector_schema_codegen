@@ -1,0 +1,108 @@
+# meta information
+id: books.to_scrape
+info:
+  name: books.to_scrape
+  author: vypivshiy
+  description: books.toscrape selectors schema example
+  source: http://books.toscrape.com
+  tags: shop, books, example
+
+
+BookCatalogue:
+  doc: |
+    parse books from catalogue
+  steps:
+    validate: |
+      css "title"
+      text
+      assertMatch "Books to Scrape - Sandbox"
+      noRet
+    split: |
+      cssAll ".col-lg-3"
+    parser:
+      - name: url
+        doc: page url to product
+        run: |
+          css    "h3 > a"
+          attr   "href"
+          format "https://books.toscrape.com/catalogue/{{}}"
+      - name: title
+        doc: product title
+        run: |
+          css  "h3 > a"
+          attr "title"
+      - name: price
+        doc: product price
+        run: |
+          default "0"
+          css     ".price_color"
+          text
+          lstrip  "£"
+      - name: image
+        doc: product image
+        run: |
+          css "img.thumbnail"
+          attr "src"
+          lstrip ".."
+          format "https://books.toscrape.com{{}}"
+      - name: rating
+        doc: product rating
+        run: |
+          css ".star-rating"
+          attr "class"
+          lstrip "star-rating "
+    # how to represent schema output
+    view:
+      - url
+      - title
+      - price
+      - image
+      - rating
+
+Book:
+  doc: |
+    Book from product page
+  steps:
+    validate: |
+      css "title"
+      text
+      assertMatch "Books to Scrape - Sandbox"
+      noRet
+    parser:
+      - name: description
+        doc: product description
+        run: |
+          css    "#product_description+ p"
+          text
+      - name: title
+        doc: product title
+        run: |
+          css  "h1"
+          text
+      - name: price
+        doc: product price
+        run: |
+          default "0"
+          css     ".product_main .price_color"
+          text
+      - name: upc
+        doc: product UPC
+        run: |
+          css "tr:nth-child(1) td"
+          text
+      # TODO add table elements parse features?
+      - name: table_values
+        run: |
+          cssAll "tr > td"
+          text
+      - name: table_keys
+        run: |
+          cssAll "tr"
+          text
+    view:
+      - title
+      - description
+      - price
+      - upc
+      - table_values
+      - table_keys
