@@ -3,12 +3,12 @@
 # REGEX
 # RAW STRINGS
 import re
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
-from src.configs.codegen_tools import ABCExpressionTranslator
-from src.objects import VariableState
+from src.ssc_codegen.configs.codegen_tools import ABCExpressionTranslator
+from src.ssc_codegen.objects import VariableState
 if TYPE_CHECKING:
-    from src.objects import Node
+    from src.ssc_codegen.objects import Node
 
 
 class Translator(ABCExpressionTranslator):

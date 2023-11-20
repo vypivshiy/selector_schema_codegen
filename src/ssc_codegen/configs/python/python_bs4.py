@@ -2,11 +2,11 @@
 import re
 from typing import TYPE_CHECKING
 
-from src.analyzer import VariableState
-from src.configs.codegen_tools import ABCExpressionTranslator
+from src.ssc_codegen.analyzer import VariableState
+from src.ssc_codegen.configs.codegen_tools import ABCExpressionTranslator
 
 if TYPE_CHECKING:
-    from src.objects import Node
+    from src.ssc_codegen.objects import Node
 
 
 class Translator(ABCExpressionTranslator):
@@ -205,8 +205,8 @@ class Translator(ABCExpressionTranslator):
 
 
 if __name__ == "__main__":
-    from src.lexer import tokenize
-    from src.configs.codegen_tools import generate_code
+    from src.ssc_codegen.lexer import tokenize
+    from src.ssc_codegen.configs.codegen_tools import generate_code
     source = """
 assertCss "head > title"
 

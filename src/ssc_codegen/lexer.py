@@ -1,11 +1,8 @@
 import re
 import warnings
 
-
-from typing import Optional
-
-from src.objects import TokenType, Token, TT_COMMENT, TT_NEW_LINE
-from src.exceptions import CommandArgumentsError, UnknownCommandError
+from src.ssc_codegen.objects import TokenType, Token, TT_COMMENT, TT_NEW_LINE
+from src.ssc_codegen.exceptions import CommandArgumentsError, UnknownCommandError
 
 
 ########

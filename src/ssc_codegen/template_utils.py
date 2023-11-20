@@ -2,10 +2,10 @@
 from typing import TYPE_CHECKING
 import re
 
-from src.objects import VariableState
+from src.ssc_codegen.objects import VariableState
 
 if TYPE_CHECKING:
-    from src.yaml_parser import Info
+    from src.ssc_codegen.yaml_parser import Info
 
 
 def camelcase(s: str) -> str:

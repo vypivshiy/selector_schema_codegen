@@ -1,13 +1,11 @@
-import warnings
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, Optional
+from typing import TYPE_CHECKING, Callable
 
-from src.analyzer import Analyzer
-from src.lexer import TokenType
+from src.ssc_codegen.analyzer import Analyzer
+from src.ssc_codegen.lexer import TokenType
 
 if TYPE_CHECKING:
-    from src.objects import Node, Token
+    from src.ssc_codegen.objects import Node, Token
 
 __all__ = ["ABCExpressionTranslator", "generate_code"]
 

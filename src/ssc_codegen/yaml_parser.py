@@ -4,13 +4,13 @@ from typing import Any, Optional, Type, TYPE_CHECKING
 
 import yaml
 
-from src.configs.codegen_tools import ABCExpressionTranslator
-from src.parser import Parser
+from src.ssc_codegen.configs.codegen_tools import ABCExpressionTranslator
+from src.ssc_codegen.parser import Parser
 
-from src.objects import TokenType
+from src.ssc_codegen.objects import TokenType
 
 if TYPE_CHECKING:
-    from src.objects import Node, VariableState
+    from src.ssc_codegen.objects import Node, VariableState
 
 __all__ = ["Info", "SchemaAttribute", "Schema", "parse_config"]
 
