@@ -1,7 +1,7 @@
 [tool.poetry]
-name = "yh_parser"
+name = "ssc_codegen"
 version = "0.1.0"
-description = ""
+description = "generate selector schemas classes from yaml config and DSL-lang script"
 authors = ["georgiy <59173419+vypivshiy@users.noreply.github.com>"]
 
 [tool.poetry.dependencies]
