@@ -48,7 +48,7 @@ TOKENS = {
     "default": (r"^default\s+(.+)?$", TokenType.OP_TRANSLATE_DEFAULT_CODE),
     # "formatter": ("^formatter (.*?)$", TokenType.OP_CUSTOM_FORMATTER),
     # array
-    "limit": (r"^limit\s+(\d+)$", TokenType.OP_LIMIT),  # TODO rename to OP_LIMIT
+    "limit": (r"^limit\s+(\d+)$", TokenType.OP_LIMIT),
     "index": (r"^index\s+-?(\d+)$", TokenType.OP_INDEX),
     "first": (r"^first$", TokenType.OP_FIRST),
     "last": (r"^last$", TokenType.OP_LAST),
