@@ -1,4 +1,4 @@
-"""https://pub.dev/packages/html"""
+"""https://pub.dev/packages/universal_html"""
 # TODO ISSUES
 # REGEX
 # RAW STRINGS
@@ -19,11 +19,11 @@ class Translator(ABCExpressionTranslator):
     DELIM_DEFAULT_WRAPPER = ";\n  "
     # don't needed import
     REGEX_IMPORT = ""
-    SELECTOR_IMPORT = "import 'package:html/parser.dart' as html;"
+    SELECTOR_IMPORT = "import 'package:universal_html/html.dart' show Document;\nimport 'package:universal_html/parsing.dart' as html;"
     #######
     # types
     #######
-    SELECTOR_TYPE = "html.Document"
+    SELECTOR_TYPE = "Document"
     STRING_TYPE = "String"
     ELEMENT_TYPE = "var"  # TODO typing element
     LIST_OF_STRING_TYPE = "List<String>"
@@ -65,7 +65,7 @@ class Translator(ABCExpressionTranslator):
     def op_text(self, node: "Node") -> str:
         if node.var_state == VariableState.ARRAY:
             return f"List<String> {self._VAR(node)} = {self._VAR_P(node)}.map((el) => el.text).toList()"
-        return f"String {self._VAR(node)} = {self._VAR_P(node)}.text"
+        return f'String {self._VAR(node)} = {self._VAR_P(node)}?.text ?? ""'
 
     def op_raw(self, node: "Node") -> str:
         if node.var_state == VariableState.ARRAY:
