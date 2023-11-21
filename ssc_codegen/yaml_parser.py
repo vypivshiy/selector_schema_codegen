@@ -1,13 +1,12 @@
 from dataclasses import dataclass, field
 from os import PathLike
-from typing import Any, Optional, Type, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional, Type
 
 import yaml
 
-from configs.codegen_tools import ABCExpressionTranslator
-from parser import Parser
-
-from objects import TokenType
+from ssc_codegen.configs.codegen_tools import ABCExpressionTranslator
+from ssc_codegen.objects import TokenType
+from ssc_codegen.parser import Parser
 
 if TYPE_CHECKING:
     from objects import Node, VariableState
@@ -18,6 +17,7 @@ __all__ = ["Info", "SchemaAttribute", "Schema", "parse_config"]
 @dataclass
 class Info:
     """meta information"""
+
     id: str
     name: str
     author: str
@@ -76,35 +76,43 @@ class Schema:
         return self.translator().op_skip_part_document()
 
     @property
-    def attr_signature(self) -> dict[str, tuple["VariableState", str, str]]:
+    def attr_signature(self) -> dict[str, tuple["VariableState", Optional[str], str]]:
         attrs = [a for a in self.attrs if a.name in self.view_keys]
         map_signature = {}
         for a in attrs:
             nodes: list["Node"] = [_ for _ in a.ast.values()]
             if nodes[-1].token.token_type == TokenType.OP_RET:
-                map_signature[a.name] = (nodes[-1].prev_node.var_state, a.alias, a.doc or "")
+                map_signature[a.name] = (
+                    nodes[-1].prev_node.var_state,
+                    a.alias,
+                    a.doc or "",
+                )
         return map_signature
 
 
-def _parse_class(class_name: str, content: dict[str:Any],
-                 translator: Type["ABCExpressionTranslator"]) -> Schema:
-    assert content.get("steps", None)
-    assert content.get("steps").get("parser", None)
-    assert content.get("steps").get("view", None)
+def _parse_class(
+    class_name: str,
+    content: dict[str, Any],
+    translator: Type["ABCExpressionTranslator"],
+) -> Schema:
+    assert content.get("steps", None)  # type: ignore
+    assert content.get("steps").get("parser", None)  # type: ignore
+    assert content.get("steps").get("view", None)  # type: ignore
 
     steps = content.get("steps")
     schema = Schema(
         name=class_name,
-        constants=content.get("constants", []),  # TODO: provide constants
-        pre_validate_code_raw=steps.get("validate", None),
-        split_code_raw=steps.get("split", None),
+        # TODO: provide constants
+        constants=content.get("constants", []),  # type: ignore
+        pre_validate_code_raw=steps.get("validate", None),  # type: ignore
+        split_code_raw=steps.get("split", None),  # type: ignore
         doc=content.get("doc", None),
-        view_keys=content.get("steps").get("view"),
+        view_keys=content.get("steps").get("view"),  # type: ignore
         translator=translator,
     )
 
-    parser_attrs = steps.get("parser")
-    for attr in parser_attrs:
+    parser_attrs = steps.get("parser")  # type: ignore
+    for attr in parser_attrs:  # type: ignore
         assert attr.get("name")
         attr_struct = SchemaAttribute(
             name=attr.get("name"),
@@ -117,8 +125,9 @@ def _parse_class(class_name: str, content: dict[str:Any],
     return schema
 
 
-def parse_config(*, file: str | PathLike[str],
-                 translator: Type["ABCExpressionTranslator"]) -> Info:
+def parse_config(
+    *, file: str | PathLike[str], translator: Type["ABCExpressionTranslator"]
+) -> Info:
     with open(file, "r") as f:
         yaml_data = yaml.safe_load(f)
 

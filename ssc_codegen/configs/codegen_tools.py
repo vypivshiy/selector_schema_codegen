@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Callable, Any
 
 from ssc_codegen.analyzer import Analyzer
 from ssc_codegen.lexer import TokenType
@@ -12,6 +12,7 @@ __all__ = ["ABCExpressionTranslator", "generate_code"]
 
 class ABCExpressionTranslator(ABC):
     """collection rules and hooks for translate to programming languages"""
+
     # method arg
     METHOD_ARG_NAME: str = NotImplemented
     # variable prefix
@@ -72,17 +73,15 @@ class ABCExpressionTranslator(ABC):
 
     @abstractmethod
     def op_wrap_code_with_default_value(
-            self,
-            node: "Node",
-            code: str,
-            default_value: str,
+        self,
+        node: "Node",
+        code: str,
+        default_value: str,
     ) -> str:
         pass
 
     @abstractmethod
-    def op_wrap_code(
-            self, node: "Node", code: str
-    ) -> str:
+    def op_wrap_code(self, node: "Node", code: str) -> str:
         pass
 
     @abstractmethod
@@ -114,27 +113,19 @@ class ABCExpressionTranslator(ABC):
         pass
 
     @abstractmethod
-    def op_string_split(
-            self, node: "Node", substr: str, count=None
-    ) -> str:
+    def op_string_split(self, node: "Node", substr: str, count=None) -> str:
         pass
 
     @abstractmethod
-    def op_string_format(
-            self, node: "Node", substr: str
-    ) -> str:
+    def op_string_format(self, node: "Node", substr: str) -> str:
         pass
 
     @abstractmethod
-    def op_string_trim(
-            self, node: "Node", substr: str
-    ) -> str:
+    def op_string_trim(self, node: "Node", substr: str) -> str:
         pass
 
     @abstractmethod
-    def op_string_ltrim(
-            self, node: "Node", substr: str
-    ) -> str:
+    def op_string_ltrim(self, node: "Node", substr: str) -> str:
         pass
 
     @abstractmethod
@@ -143,14 +134,12 @@ class ABCExpressionTranslator(ABC):
 
     @abstractmethod
     def op_string_replace(
-            self, node: "Node", old: str, new: str, count=None
+        self, node: "Node", old: str, new: str, count=None
     ) -> str:
         pass
 
     @abstractmethod
-    def op_string_join(
-            self, node: "Node", string: str
-    ) -> str:
+    def op_string_join(self, node: "Node", string: str) -> str:
         pass
 
     @abstractmethod
@@ -158,25 +147,21 @@ class ABCExpressionTranslator(ABC):
         pass
 
     @abstractmethod
-    def op_regex_all(
-            self, node: "Node", pattern: str
-    ) -> str:
+    def op_regex_all(self, node: "Node", pattern: str) -> str:
         pass
 
     @abstractmethod
     def op_regex_sub(
-            self,
-            node: "Node",
-            pattern: str,
-            repl: str,
-            count=None,
+        self,
+        node: "Node",
+        pattern: str,
+        repl: str,
+        count=None,
     ) -> str:
         pass
 
     @abstractmethod
-    def op_limit(
-            self, node: "Node", max_: str
-    ) -> str:
+    def op_limit(self, node: "Node", max_: str) -> str:
         # TODO rename to OP_LIMIT
         pass
 
@@ -185,49 +170,39 @@ class ABCExpressionTranslator(ABC):
         pass
 
     @abstractmethod
-    def op_first_index(self, node: "Node"):
+    def op_first_index(self, node: "Node") -> str:
         pass
 
     @abstractmethod
-    def op_last_index(self, node: "Node"):
+    def op_last_index(self, node: "Node") -> str:
         pass
 
     @abstractmethod
-    def op_assert_equal(self, node: "Node", substring: str):
+    def op_assert_equal(self, node: "Node", substring: str) -> str:
         pass
 
     @abstractmethod
-    def op_assert_css(self, node: "Node", query: str):
+    def op_assert_css(self, node: "Node", query: str) -> str:
         pass
 
     @abstractmethod
-    def op_assert_xpath(
-            self, node: "Node", query: str
-    ) -> str:
+    def op_assert_xpath(self, node: "Node", query: str) -> str:
         pass
 
     @abstractmethod
-    def op_assert_re_match(
-            self, node: "Node", pattern: str
-    ) -> str:
+    def op_assert_re_match(self, node: "Node", pattern: str) -> str:
         pass
 
     @abstractmethod
-    def op_assert_starts_with(
-            self, node: "Node", prefix: str
-    ) -> str:
+    def op_assert_starts_with(self, node: "Node", prefix: str) -> str:
         pass
 
     @abstractmethod
-    def op_assert_ends_with(
-            self, node: "Node", suffix: str
-    ) -> str:
+    def op_assert_ends_with(self, node: "Node", suffix: str) -> str:
         pass
 
     @abstractmethod
-    def op_assert_contains(
-            self, node: "Node", substring: str
-    ) -> str:
+    def op_assert_contains(self, node: "Node", substring: str) -> str:
         pass
 
     @abstractmethod
@@ -242,8 +217,8 @@ class ABCExpressionTranslator(ABC):
 
     @property
     def tokens_map(
-            self,
-    ) -> dict[TokenType: Callable[["Node", ...], str]]:
+        self,
+    ) -> dict[TokenType, Callable[["Node", Any, ...], str]]:
         """return dict by token_type : cast_token_to_code method"""
         return {
             TokenType.OP_XPATH: self.op_xpath,
@@ -281,18 +256,21 @@ class ABCExpressionTranslator(ABC):
             TokenType.OP_ASSERT_MATCH: self.op_assert_re_match,
             TokenType.OP_ASSERT_CSS: self.op_assert_css,
             TokenType.OP_ASSERT_XPATH: self.op_assert_xpath,
-
             TokenType.OP_NO_RET: self.op_no_ret,
-            TokenType.OP_RET: self.op_ret
+            TokenType.OP_RET: self.op_ret,
         }
 
 
 def generate_code(
-        tokens: list["Token"],
-        translator: ABCExpressionTranslator) -> list[str]:
+    tokens: list["Token"], translator: ABCExpressionTranslator
+) -> list[str]:
     # TODO deprecated: remove
     lines = []
     analyze = Analyzer(tokens)
     for i, node in analyze.build_ast().items():
-        lines.append(translator.tokens_map[node.token.token_type](node, *node.token.values))
+        lines.append(
+            translator.tokens_map[node.token.token_type](
+                node, *node.token.values
+            )
+        )
     return lines

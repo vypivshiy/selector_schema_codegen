@@ -108,19 +108,21 @@ class TokenType(Enum):
             TokenType.OP_ASSERT_CSS,
             TokenType.OP_ASSERT_XPATH,
             TokenType.OP_ASSERT_CONTAINS,
-            TokenType.OP_ASSERT_MATCH
+            TokenType.OP_ASSERT_MATCH,
         )
 
     @classmethod
     def token_fluent_optimization(cls):
-        return (TokenType.OP_CSS,
-                TokenType.OP_XPATH,
-                TokenType.OP_XPATH_ALL,
-                TokenType.OP_CSS_ALL,
-                TokenType.OP_INDEX,
-                TokenType.OP_ATTR,
-                TokenType.OP_ATTR_RAW,
-                TokenType.OP_ATTR_TEXT)
+        return (
+            TokenType.OP_CSS,
+            TokenType.OP_XPATH,
+            TokenType.OP_XPATH_ALL,
+            TokenType.OP_CSS_ALL,
+            TokenType.OP_INDEX,
+            TokenType.OP_ATTR,
+            TokenType.OP_ATTR_RAW,
+            TokenType.OP_ATTR_TEXT,
+        )
 
 
 class Token:
@@ -180,6 +182,7 @@ TT_NEW_LINE = "\n"
 
 class VariableState(Enum):
     """variable states in Syntax analyzer and codegen representation"""
+
     SELECTOR = 0
     SELECTOR_ARRAY = 1  # dynamic list/vector of node elements
     TEXT = 2
@@ -189,6 +192,7 @@ class VariableState(Enum):
 @dataclass(repr=False)
 class Node:
     """node representation like. AST structure have linked list struct"""
+
     num: int
     count: int
     token: Token
@@ -203,8 +207,10 @@ class Node:
     @property
     def id(self) -> Optional[int]:
         # exclude enumerate assert tokens
-        if (self.token.token_type not in TokenType.tokens_asserts()
-                and self.token.token_type != TokenType.OP_TRANSLATE_DEFAULT_CODE):
+        if (
+            self.token.token_type not in TokenType.tokens_asserts()
+            and self.token.token_type != TokenType.OP_TRANSLATE_DEFAULT_CODE
+        ):
             return self.num
 
         prev_node = self.prev_node

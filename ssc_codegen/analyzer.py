@@ -1,9 +1,12 @@
 import warnings
 from typing import Generator
 
-from ssc_codegen.exceptions import SyntaxVariableTypeError, SyntaxCommandError, SyntaxAttributeError
-from ssc_codegen.objects import Token, TokenType, VariableState, Node
-
+from ssc_codegen.exceptions import (
+    SyntaxAttributeError,
+    SyntaxCommandError,
+    SyntaxVariableTypeError,
+)
+from ssc_codegen.objects import Node, Token, TokenType, VariableState
 
 __all__ = [
     "VariableState",
@@ -23,13 +26,13 @@ class Analyzer:
             token
             for token in tokens
             if token.token_type
-               not in (TokenType.OP_NEW_LINE, TokenType.OP_COMMENT)
+            not in (TokenType.OP_NEW_LINE, TokenType.OP_COMMENT)
         ]
         # first argument - selector-like value
         self.__variable_state: VariableState = VariableState.SELECTOR
 
     def lazy_analyze(
-            self,
+        self,
     ) -> Generator[tuple["Token", VariableState], None, None]:
         """lazy analyzer. returns token and variable state in every iteration"""
         for index, token in enumerate(self.code_tokens):
@@ -54,8 +57,8 @@ class Analyzer:
                     self._selector_methods(index, token)
                     if token.token_type in TokenType.tokens_selector_extract():
                         if (
-                                self.__variable_state
-                                == VariableState.SELECTOR_ARRAY
+                            self.__variable_state
+                            == VariableState.SELECTOR_ARRAY
                         ):
                             self.__variable_state = VariableState.ARRAY
                         else:
@@ -66,7 +69,8 @@ class Analyzer:
 
                 # strings
                 case TokenType.OP_STRING_FORMAT | TokenType.OP_STRING_REPLACE | TokenType.OP_STRING_TRIM | (
-                TokenType.OP_STRING_L_TRIM) | TokenType.OP_STRING_R_TRIM | TokenType.OP_STRING_SPLIT:
+                    TokenType.OP_STRING_L_TRIM
+                ) | TokenType.OP_STRING_R_TRIM | TokenType.OP_STRING_SPLIT:
                     self._string_methods(index, token)
                     if token.token_type is TokenType.OP_STRING_SPLIT:
                         self.__variable_state = VariableState.ARRAY
@@ -74,14 +78,18 @@ class Analyzer:
 
                 # array
                 case TokenType.OP_INDEX | TokenType.OP_FIRST | TokenType.OP_LAST | TokenType.OP_LIMIT | (
-                TokenType.OP_JOIN):
+                    TokenType.OP_JOIN
+                ):
                     self._array_methods(index, token)
                     if token.token_type in (
-                            TokenType.OP_INDEX,
-                            TokenType.OP_FIRST,
-                            TokenType.OP_LAST,
+                        TokenType.OP_INDEX,
+                        TokenType.OP_FIRST,
+                        TokenType.OP_LAST,
                     ):
-                        if self.__variable_state == VariableState.SELECTOR_ARRAY:
+                        if (
+                            self.__variable_state
+                            == VariableState.SELECTOR_ARRAY
+                        ):
                             self.__variable_state = VariableState.SELECTOR
                         elif self.__variable_state == VariableState.ARRAY:
                             self.__variable_state = VariableState.TEXT
@@ -89,13 +97,16 @@ class Analyzer:
                         if self.__variable_state == VariableState.ARRAY:
                             self.__variable_state = VariableState.TEXT
                         else:
-                            msg = self.__err_msg(token, "prev variable is not ARRAY")
+                            msg = self.__err_msg(
+                                token, "prev variable is not ARRAY"
+                            )
                             raise SyntaxVariableTypeError(msg)
                     yield token, self.__variable_state
 
                 # validators
                 case TokenType.OP_ASSERT | TokenType.OP_ASSERT_STARTSWITH | TokenType.OP_ASSERT_ENDSWITH | (
-                TokenType.OP_ASSERT_MATCH) | TokenType.OP_ASSERT_CONTAINS:
+                    TokenType.OP_ASSERT_MATCH
+                ) | TokenType.OP_ASSERT_CONTAINS:
                     self._validator_str_methods(index, token)
                     yield token, self.__variable_state
                 case TokenType.OP_ASSERT_CSS | TokenType.OP_ASSERT_XPATH:
@@ -134,13 +145,15 @@ class Analyzer:
 
         i: int
         for i, (token, var_state) in enumerate(self.lazy_analyze()):
-            node = Node(num=i,
-                        count=count,
-                        token=token,
-                        var_state=var_state,
-                        prev=None,
-                        next=None,
-                        ast_tree=_tree)
+            node = Node(
+                num=i,
+                count=count,
+                token=token,
+                var_state=var_state,
+                prev=None,
+                next=None,
+                ast_tree=_tree,
+            )
             if i - 1 >= 0:
                 node.prev = i - 1
             if i + 1 < count:
@@ -160,9 +173,15 @@ class Analyzer:
         raise SyntaxVariableTypeError(msg)
 
     def _selector_array(self, index: int, token: "Token"):
-        if self.__variable_state in (VariableState.SELECTOR, VariableState.SELECTOR_ARRAY):
+        if self.__variable_state in (
+            VariableState.SELECTOR,
+            VariableState.SELECTOR_ARRAY,
+        ):
             return
-        msg = self.__err_msg(token, "SELECTOR_ARRAY should be accept SELECTOR or SELECTOR_ARRAY, not TEXT")
+        msg = self.__err_msg(
+            token,
+            "SELECTOR_ARRAY should be accept SELECTOR or SELECTOR_ARRAY, not TEXT",
+        )
         raise SyntaxVariableTypeError(msg)
 
     @staticmethod
@@ -192,13 +211,23 @@ class Analyzer:
         raise SyntaxCommandError(msg)
 
     def _selector(self, index: int, token: "Token"):
-        if self.__variable_state in (VariableState.SELECTOR, VariableState.SELECTOR_ARRAY):
+        if self.__variable_state in (
+            VariableState.SELECTOR,
+            VariableState.SELECTOR_ARRAY,
+        ):
             for second_token in self.code_tokens[index:]:
                 if second_token.token_type in TokenType.tokens_selector_all():
-                    if token.token_type in (TokenType.OP_INDEX, TokenType.OP_FIRST, TokenType.OP_LAST):
+                    if token.token_type in (
+                        TokenType.OP_INDEX,
+                        TokenType.OP_FIRST,
+                        TokenType.OP_LAST,
+                    ):
                         return
                     continue
-                elif second_token.token_type in TokenType.tokens_selector_extract():
+                elif (
+                    second_token.token_type
+                    in TokenType.tokens_selector_extract()
+                ):
                     return
             msg = self.__err_msg(
                 token,
@@ -213,12 +242,15 @@ class Analyzer:
 
     def _selector_methods(self, index: int, token: "Token"):
         # convert first chunk to text case
-        if index == 0 and token.token_type in (TokenType.OP_ATTR_TEXT, TokenType.OP_ATTR_RAW):
+        if index == 0 and token.token_type in (
+            TokenType.OP_ATTR_TEXT,
+            TokenType.OP_ATTR_RAW,
+        ):
             return
 
         elif self.__variable_state in (
-                VariableState.SELECTOR,
-                VariableState.SELECTOR_ARRAY,
+            VariableState.SELECTOR,
+            VariableState.SELECTOR_ARRAY,
         ):
             return
 
@@ -235,15 +267,15 @@ class Analyzer:
 
     def _array_methods(self, index: int, token: "Token"):
         if self.__variable_state in (
-                VariableState.ARRAY,
-                VariableState.SELECTOR_ARRAY,
+            VariableState.ARRAY,
+            VariableState.SELECTOR_ARRAY,
         ):
             return
         msg = self.__err_msg(token, "Prev variable is not ARRAY")
         raise SyntaxVariableTypeError(msg)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     from ssc_codegen.lexer import tokenize
 
     src = """

@@ -2,12 +2,15 @@
 
 import jinja2
 
+from ssc_codegen.template_utils import (
+    camelcase,
+    generate_attr_signature,
+    generate_meta_info,
+    snake_case,
+)
 from ssc_codegen.yaml_parser import Info
 
-from ssc_codegen.template_utils import camelcase, snake_case, generate_meta_info, generate_attr_signature
-
-
-ENV = jinja2.Environment(loader=jinja2.FileSystemLoader('src/ssc_codegen/configs'))
+ENV = jinja2.Environment(loader=jinja2.FileSystemLoader("ssc_codegen/configs"))
 ENV.globals.update(
     {
         "snake_case": snake_case,
@@ -16,7 +19,7 @@ ENV.globals.update(
         "repr_str": lambda s: repr(s) if isinstance(s, str) else s,
         "generate_meta_info": generate_meta_info,
         "sep_code": lambda sep, lines: sep.join(lines),
-        "generate_attr_signature": generate_attr_signature
+        "generate_attr_signature": generate_attr_signature,
     }
 )
 

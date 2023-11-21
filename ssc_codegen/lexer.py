@@ -1,9 +1,8 @@
 import re
 import warnings
 
-from ssc_codegen.objects import TokenType, Token, TT_COMMENT, TT_NEW_LINE
 from ssc_codegen.exceptions import CommandArgumentsError, UnknownCommandError
-
+from ssc_codegen.objects import TT_COMMENT, TT_NEW_LINE, Token, TokenType
 
 ########
 # LEXERS key: pattern, Enum
@@ -82,7 +81,7 @@ TOKENS = {
     ),
     # declare return statement for translator
     "noRet": (r"^noRet$", TokenType.OP_NO_RET),
-    "ret": (r"^ret$", TokenType.OP_RET)
+    "ret": (r"^ret$", TokenType.OP_RET),
 }
 
 
@@ -117,7 +116,7 @@ def tokenize(source_str: str) -> list[Token]:
             command_directive = line.split(" ", 1)[0]
             if command_directive == start_token:
                 if not (result := re.match(pattern, line)):
-                    msg = f"{i}::0 `{line}` Maybe missing quote `\"` symbol or wrong arguments passed?"
+                    msg = f'{i}::0 `{line}` Maybe missing quote `"` symbol or wrong arguments passed?'
                     raise CommandArgumentsError(msg)
 
                 # detect asserts + default stmts
@@ -151,7 +150,7 @@ def tokenize(source_str: str) -> list[Token]:
     return complete_tokens
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     src = """
 cssAll   "div > a"
 attr     "href"

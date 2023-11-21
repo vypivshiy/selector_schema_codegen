@@ -1,18 +1,19 @@
-from typing import Type
-from ssc_codegen.analyzer import Analyzer
-from ssc_codegen.lexer import TokenType, tokenize
 import warnings
+from typing import Type
 
-from ssc_codegen.tools import xpath_to_css, css_to_xpath
+from ssc_codegen.analyzer import Analyzer
 from ssc_codegen.configs.codegen_tools import ABCExpressionTranslator
+from ssc_codegen.lexer import TokenType, tokenize
+from ssc_codegen.tools import css_to_xpath, xpath_to_css
 
 
 class Parser:
-    def __init__(self,
-                 source_code: str,
-                 translator: Type["ABCExpressionTranslator"] | "ABCExpressionTranslator",
-                 analyzer: Type[Analyzer] = Analyzer,
-                 ):
+    def __init__(
+        self,
+        source_code: str,
+        translator: Type["ABCExpressionTranslator"] | "ABCExpressionTranslator",
+        analyzer: Type[Analyzer] = Analyzer,
+    ):
         self.raw_tokens = tokenize(source_code)
         self.analyzer = analyzer
         self.tree_ast = self.analyzer(self.raw_tokens).build_ast()
@@ -56,16 +57,20 @@ class Parser:
                 default_node = node
                 continue
             token_args = node.token.values
-            translator_method = self.translator.tokens_map[node.token.token_type]
+            translator_method = self.translator.tokens_map[
+                node.token.token_type
+            ]
             line = translator_method(node, *token_args)
             lines.append(line)
         code = self.translator.DELIM_LINES.join(lines)
         if default_node:
-            code = self.translator.op_wrap_code_with_default_value(default_node, code, *default_node.token.values)
+            code = self.translator.op_wrap_code_with_default_value(
+                default_node, code, *default_node.token.values
+            )
         return code
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # from src.configs.python.python_parsel import Translator
     from ssc_codegen.configs.python.python_bs4 import Translator
 
