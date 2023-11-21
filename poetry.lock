@@ -90,7 +90,7 @@ typing = ["typing-extensions (>=4.8)"]
 
 [[package]]
 name = "identify"
-version = "2.5.31"
+version = "2.5.32"
 description = "File identification library for Python"
 category = "dev"
 optional = false
@@ -145,7 +145,7 @@ python-versions = ">=3.7"
 
 [[package]]
 name = "mypy"
-version = "1.6.1"
+version = "1.7.0"
 description = "Optional static typing for Python"
 category = "dev"
 optional = false
@@ -159,6 +159,7 @@ typing-extensions = ">=4.1.0"
 [package.extras]
 dmypy = ["psutil (>=4.0)"]
 install-types = ["pip"]
+mypyc = ["setuptools (>=50)"]
 reports = ["lxml"]
 
 [[package]]
@@ -261,7 +262,7 @@ python-versions = ">=3.6"
 
 [[package]]
 name = "ruff"
-version = "0.1.4"
+version = "0.1.6"
 description = "An extremely fast Python linter and code formatter, written in Rust."
 category = "dev"
 optional = false
