@@ -1,4 +1,4 @@
-# meta information
+# will be added at the beginning of the file as a docstring
 id: books.to_scrape
 info:
   name: books.to_scrape
@@ -7,25 +7,38 @@ info:
   source: http://books.toscrape.com
   tags: shop, books, example
 
-
+# Schema configurations
 BookCatalogue:
+  # class docstring
+  # also will be added all keys information signature
   doc: |
     parse books from catalogue
+  # class logic
   steps:
+    # optional pre-validate document
     validate: |
+      // this is comment string
       css "title"
       text
       assertMatch "Books to Scrape - Sandbox"
       noRet
+    # optional split document for simple interaction with similar HTML elements
     split: |
       cssAll ".col-lg-3"
+    # attributes configuration
     parser:
       - name: url
+        # optional you can reassigned view key name
+        # alias: url_page
+
+        # optional docstring method
         doc: page url to product
+        # parse logic steps
         run: |
           css    "h3 > a"
           attr   "href"
           format "https://books.toscrape.com/catalogue/{{}}"
+        # and repeat...
       - name: title
         doc: product title
         run: |
@@ -51,7 +64,7 @@ BookCatalogue:
           css ".star-rating"
           attr "class"
           lstrip "star-rating "
-    # how to represent schema output
+    # how to represent schema output/ or exclude keys
     view:
       - url
       - title

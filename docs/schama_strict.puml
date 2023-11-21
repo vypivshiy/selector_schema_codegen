@@ -1,0 +1,20 @@
+@startuml
+
+class Klass {
+  - _aliases: Map<String, String>
+  - _viewKeys: Map<String, String>
+  - _cachedResult: List<Map<String, String | List<String>>>
+  - selector: Selector
+
+  + Klass(document: String)
+  + parse(): void
+  + view(): List<Map<String, String | List<String>>>
+
+  - _preValidate(): void
+  - _partDocument(): List<Selector | Element>
+  - _parseA(part: Selector | Element): String | List<String>
+  - _parseB(part: Selector | Element): String | List<String>
+  - _parseC(part: Selector | Element): String | List<String>
+}
+
+@enduml

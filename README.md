@@ -1,30 +1,28 @@
 # Selector schema codegen
 
-Парсер yaml-DSL конфигурации со встроенным декларативным языком-спецификацией
-для генерации схем парсеров (преимущественно под html) на различные языки программирования.
+ssc_codegen - генератор парсеров на различные языки программирования (преимущественно под html) с помощью 
+yaml-DSL конфигурации со встроенным декларативным языком. 
 
-Разработан для портирования парсеров на разные языки программирования
-
+Разработан для портирования парсеров на различные языки программирования
 
 ## Минимальные требования к целевому портируемому ЯП:
 - есть регулярные выражения
-- есть css/xpath библиотека
+- есть css/xpath библиотека с большинством поддерживаемых конструкций
 - базовые методы работы со строками (format string, trim/left trim/right trim/split/replace)
 
 ## Рекомендации
-- использовать css селекторы: их можно **гарантированно** конвертировать в xpath. 
-Это может пригодиться, например, если отсутствует поддержка xpath
+- использовать css селекторы: их можно **гарантированно** конвертировать в xpath.
 - есть конвертер xpath в css простых запросов **без гарантий работоспособности**. 
 Например, в css нет аналога `contains` из xpath и тд
 ## Схематичное представление работы генератора
 
-![img.png](img.png)
+![img.png](docs/img.png)
 
 ## Спецификация синтаксиса
 
 ### Особенности языка
 
-- DSL (Domain-Specific Language), Декларативный (отсутствуют операции присвоения, арифметики, приоритетов)
+- DSL (Domain-Specific Language), декларативный (отсутствуют операции присвоения, арифметики, приоритетов)
 - Минималистичный синтаксис, для работы с селекторами, регулярными выражениями и простыми операциями со строками
 - Принимает на вход **один** аргумент и он всегда selector-like типа
 - 4 типа данных
@@ -34,18 +32,22 @@
 ### Описание типов
 Для данного скриптового языка существуют 4 типа данных
 
-| Тип            | Описание                                                                           |
-|----------------|------------------------------------------------------------------------------------|
-| SELECTOR       | инстанс класса, из которого вызываются css/xpath селекторы. Всегда первый аргумент |
-| SELECTOR_ARRAY | репрезентация списка узлов всех найденных элементов из инстанса SELECTOR           |
-| TEXT           | строка                                                                             |
-| ARRAY          | список строк.                                                                      |
+| Тип            | Описание                                                                                               |
+|----------------|--------------------------------------------------------------------------------------------------------|
+| SELECTOR       | инстанс класса (Document, Element), из которого вызываются css/xpath селекторы. Всегда первый аргумент |
+| SELECTOR_ARRAY | репрезентация списка узлов (Element nodes) всех найденных элементов из инстанса SELECTOR               |
+| TEXT           | строка                                                                                                 |
+| ARRAY          | список строк.                                                                                          |
 
 
 ### Описание директив
+- операторы разделяются отступом строки `\n`
+- Все строковые аргументы указываются **двойными** `"` кавычками.
+- Игнорируются пробелы
+
 | Оператор | Аргументы                 | Описание                                                                                                                                          | Возвращаемое значение | Пример                     |
 |----------|---------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------|----------------------------|
-| default  | <value>                   | Значение по умолчанию, если произошла ошибка во время парсинга. **Указывается первым**                                                            | -                     | default "empty"            |
+| default  | "<value>"                 | Значение по умолчанию, если произошла ошибка во время парсинга. **Указывается первым**                                                            | -                     | default "empty"            |
 | xpath    | "<expr>"                  | xpath селектор, возвращает первое найденное значение                                                                                              | SELECTOR              | xpath "//title"            |
 | xpathAll | "<expr>"                  | xpath селектор, возвращает все значения                                                                                                           | SELECTOR              | xpathAll "//div"           |
 | css      | "<expr>"                  | css селектор, возвращает первое найденное значение                                                                                                | SELECTOR              | css "title"                |
@@ -74,10 +76,11 @@
 
 ### Токены валидации
 
-Следующие команды нужны для предварительной валидации входного документа и они **не изменяют** конечные
-и промежуточные значения.
+Следующие команды нужны для предварительной валидации входного документа при помощи `assert` и они **не изменяют** 
+конечные и промежуточные значения.
 
-В данном языке `boolean` тип отсутствует, поэтому при ложном (false) результате будет выбрасывать ошибку.
+В данном DSL языке `boolean`, `null` типы отсутствуют, поэтому при ложном (false) результате будет выбрасывать ошибку
+вида `AssertionError`.
 
 Операторы принимают `SELECTOR`:
 - assertCss
@@ -97,7 +100,7 @@
 | assertXpath    | Проверка валидности запроса в `SELECTOR`.             | assertXpath "//head/title"      |
 
 
-### Generation examples
+### Примеры генерации
 
 ```
 // set default value if parse process is failing
@@ -124,9 +127,9 @@ generated dart equivalent code:
 ```dart
 import 'package:html/parser.dart' as html;
 
-dummy_parse(html.Document part){
+dummy_parse(part){
     var val_0 = part.querySelector('title');
-    String val_1 = val_0.text;
+    String val_1 = val_0?.text ?? "";
     var val_2 = "Cool title: $val_1";
     return val_2;
 }
@@ -161,7 +164,7 @@ import 'package:html/parser.dart' as html;
 dummy_parse(html.Document part){
   try{
     var val_0 = part.querySelector('title');
-    String val_1 = val_0.text;
+    String val_1 = val_0?.text ?? "";
     var val_2 = "Cool title: $val_1";
     return val_2;
   } catch (e){
@@ -199,132 +202,35 @@ import 'package:html/parser.dart' as html;
 dummy_parse(html.Document part){
     assert(part.querySelector('title') != null);
     var val_0 = part.querySelector('title');
-    String val_1 = val_0.text;
+    String val_1 = val_0?.text ?? "";
     var val_2 = "Cool title: $val_1";
     return val_2;
 }
 ```
 
 ## yaml config
-Для упрощения синтаксиса в этом решении используется yaml файл конфигурации, чтобы
-упростить токенизацию команд.
+Пример структуры сгенерированного класса-парсера:
+![img_2.png](docs/img_2.png)
 
-Пример псевдокода структуры сгенерированного файла:
-```
-# meta information
-- html parser, regex modules imports
+- selector - Selector/Document инстанс, инициализируется с помощью document
+- _aliases - ключи переназначения для метода view()
+- _viewKeys - ключи вывода для метода view()
+- _cachedResult - кеш полученных значений из метода parse()
+- parse() - запуск парсера
+- view() - получение полученных значений
+- _preValidate() - опциональный метод предварительной валидации входного документа по правилам из конфигурации. Если результат false/null - выбрасывает `AssertError`
+- _partDocument() - опциональный метод разделения документа на части по заданному селектору. Полезен, например, для получения однотипных элементов (карточек товара и тд)
+- _parseA, _parseB, _parseC, ... - автоматически генерируемые методы парсера для каждого ключа (A,B,C) по правилам из конфигурации
 
-class Klass1:
-    # class docstring
-    # view() structure docstring
-    
-    // required string html document in constructor
-    init(string: document)
-    
-    _splitDocument() // split document to parts (OPTIONAL)
-    
-    parse() // parse public method entrypoint
-        _preValidate() // first validation
-        _startParse() // parse document
-    
-    ... // generated parse methods for every key
-    
-    view() 
-       // public method
-       // returns List<Map<String, String || List<String>>> representation
-       
-class Klass2:
-    ...
-
-class KlassN:
-    ...
-```
-
-Usage example:
-
+### Usage pseudocode example:
 ```
 document = ... // extracted html document
-instance = Klass1(document)
+instance = Klass(document)
 instance.parse()
 print(instance.view())
 ```
 
-Пример файла конфигурации
-```yaml
-# meta information
-id: books.to_scrape
-info:
-  name: books.to_scrape
-  author: username
-  description: books.to_scrape schema
-  source: source_link
-  tags: shop, books
-
-# class name
-Book:
-  # optional class docstrings
-  doc: |
-    example book object parser from http://books.toscrape.com
-  # init steps
-  steps:
-    # optional first document validation
-    validate: |
-      css "div > a"
-      attr "href"
-      assertMatch "example\.com"
-      // we don't need return a value in this section
-      noRet
-    # split html document to parts (if needed)
-    split: |
-      cssAll "ol.row > li"
-    # parse values configuration
-    parser:
-      # key name
-      - name: url
-        # optional key alias for view() method
-        alias: page
-        # optional docstring key
-        doc: page url to book
-        # parse steps procedure
-        run: |
-          css "div.image_container > a"
-          attr "href"
-          format "https://books.toscrape.com/catalogue/{{}}"
-      - name: image
-        doc: book image
-        run: |
-          css "div.image_container > a > img"
-          attr "src"
-      - name: price
-        doc: book price
-        run: |
-          default "0"
-          css "div.product_price > p.price_color"
-          text
-      - name: name
-        doc: book name
-        run: |
-          css "h3 > a"
-          attr "title"
-      - name: available
-        doc: in stock?
-        run: |
-          css "div.product_price > p.availability > i"
-          attr "class"
-      - name: rating
-        doc: book rating
-        run: |
-          css "p.star-rating"
-          attr "class"
-          lstrip "star-rating "
-    # configuration of return keys for the view() method
-    view:
-      - url
-      - image
-      - price
-      - name
-      - rating
-```
+Пример файла конфигурации, конечное значение смотрите в [examples](examples)
 
 ## dev 
 TODO
@@ -337,6 +243,6 @@ TODO
 - more languages, libs support
 - codegen optimizations (usage SELECTOR fluent interfaces, one-line code generation)
 - css/xpath analyzer in pre-generate step
-- css/xpath patches (for example, if css selectors in target language not support `:nt_child` operation?)
+- css/xpath patches (for example, if css selectors in target language not support `:nth-child` operation?)
 - translate regex expressions. Eg: `\d` to `[0-9]`
 - string methods: `title`, `upper`, `lower`, `capitalize` or any useful
