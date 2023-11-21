@@ -5,10 +5,10 @@
 import re
 from typing import TYPE_CHECKING
 
-from src.ssc_codegen.configs.codegen_tools import ABCExpressionTranslator
-from src.ssc_codegen.objects import VariableState
+from ssc_codegen.configs.codegen_tools import ABCExpressionTranslator
+from ssc_codegen.objects import VariableState
 if TYPE_CHECKING:
-    from src.ssc_codegen.objects import Node
+    from ssc_codegen.objects import Node
 
 
 class Translator(ABCExpressionTranslator):

@@ -4,13 +4,13 @@ from typing import Any, Optional, Type, TYPE_CHECKING
 
 import yaml
 
-from src.ssc_codegen.configs.codegen_tools import ABCExpressionTranslator
-from src.ssc_codegen.parser import Parser
+from configs.codegen_tools import ABCExpressionTranslator
+from parser import Parser
 
-from src.ssc_codegen.objects import TokenType
+from objects import TokenType
 
 if TYPE_CHECKING:
-    from src.ssc_codegen.objects import Node, VariableState
+    from objects import Node, VariableState
 
 __all__ = ["Info", "SchemaAttribute", "Schema", "parse_config"]
 
@@ -117,7 +117,7 @@ def _parse_class(class_name: str, content: dict[str:Any],
     return schema
 
 
-def parse_config(file: str | PathLike[str],
+def parse_config(*, file: str | PathLike[str],
                  translator: Type["ABCExpressionTranslator"]) -> Info:
     with open(file, "r") as f:
         yaml_data = yaml.safe_load(f)

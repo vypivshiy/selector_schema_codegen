@@ -1,11 +1,11 @@
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Callable
 
-from src.ssc_codegen.analyzer import Analyzer
-from src.ssc_codegen.lexer import TokenType
+from ssc_codegen.analyzer import Analyzer
+from ssc_codegen.lexer import TokenType
 
 if TYPE_CHECKING:
-    from src.ssc_codegen.objects import Node, Token
+    from ssc_codegen.objects import Node, Token
 
 __all__ = ["ABCExpressionTranslator", "generate_code"]
 

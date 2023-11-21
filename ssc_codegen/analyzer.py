@@ -1,8 +1,8 @@
 import warnings
 from typing import Generator
 
-from src.ssc_codegen.exceptions import SyntaxVariableTypeError, SyntaxCommandError, SyntaxAttributeError
-from src.ssc_codegen.objects import Token, TokenType, VariableState, Node
+from ssc_codegen.exceptions import SyntaxVariableTypeError, SyntaxCommandError, SyntaxAttributeError
+from ssc_codegen.objects import Token, TokenType, VariableState, Node
 
 
 __all__ = [
@@ -244,7 +244,7 @@ class Analyzer:
 
 
 if __name__ == '__main__':
-    from src.ssc_codegen.lexer import tokenize
+    from ssc_codegen.lexer import tokenize
 
     src = """
 raw

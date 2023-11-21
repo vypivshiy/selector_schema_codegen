@@ -1,10 +1,10 @@
 from typing import Type
-from src.ssc_codegen.analyzer import Analyzer
-from src.ssc_codegen.lexer import TokenType, tokenize
+from ssc_codegen.analyzer import Analyzer
+from ssc_codegen.lexer import TokenType, tokenize
 import warnings
 
-from src.ssc_codegen.tools import xpath_to_css, css_to_xpath
-from src.ssc_codegen.configs.codegen_tools import ABCExpressionTranslator
+from ssc_codegen.tools import xpath_to_css, css_to_xpath
+from ssc_codegen.configs.codegen_tools import ABCExpressionTranslator
 
 
 class Parser:
@@ -67,7 +67,7 @@ class Parser:
 
 if __name__ == '__main__':
     # from src.configs.python.python_parsel import Translator
-    from src.ssc_codegen.configs.python.python_bs4 import Translator
+    from ssc_codegen.configs.python.python_bs4 import Translator
 
     src_code = """
 assertCss "head > title"
