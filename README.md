@@ -1,106 +1,107 @@
 # Selector schema codegen
+[RUSSIAN](README_RU.md) [ENGLISH](README.md)
 
-ssc_codegen - генератор парсеров на различные языки программирования (преимущественно под html) с помощью 
-yaml-DSL конфигурации со встроенным декларативным языком. 
+ssc_codegen - generator of parsers for various programming languages (for html priority) using
+yaml-DSL configurations with built-in declarative language.
 
-Разработан для портирования парсеров на различные языки программирования
+Designed to port parsers to various programming languages
 
-## Минимальные требования к целевому портируемому ЯП:
-- есть регулярные выражения
-- есть css/xpath библиотека с большинством поддерживаемых конструкций
-- базовые методы работы со строками (format string, trim/left trim/right trim/split/replace)
+## Minimum requirements for the target portable language:
+- include regular expressions
+- include css/xpath libs for more supports queries (nth-child, ...)
+- basic methods for works with strings (format string, trim/left trim/right trim/split/replace)
 
-## Рекомендации
-- использовать css селекторы: их можно **гарантированно** конвертировать в xpath.
-- есть конвертер xpath в css простых запросов **без гарантий работоспособности**. 
-Например, в css нет аналога `contains` из xpath и тд
-## Схематичное представление работы генератора
+## Recommendations
+- usage css selector: they can be **guaranteed** converted to xpath
+- there is an xpath to css converter for simple queries **without guarantees of functionality**. 
+For example, in css there is no analogue of `contains` from xpath, etc.
+## Schematic representation of generator operation
 
 ![img.png](docs/img.png)
 
-## Спецификация синтаксиса
+## Syntax specs
 
-### Особенности языка
+### Language features
 
-- DSL (Domain-Specific Language), декларативный (отсутствуют операции присвоения, арифметики, приоритетов)
-- Минималистичный синтаксис, для работы с селекторами, регулярными выражениями и простыми операциями со строками
-- Принимает на вход **один** аргумент и он всегда selector-like типа
-- 4 типа данных
-- Синтаксис регулярных выражений как в python. Для максимальной совместимости используйте, например, `[0-9]` вместо `\d`
-- Пустые строки и комментарии (`//`) игнорируются анализатором.
+- DSL (Domain-Specific Language), declarative (no assignment, arithmetic, priority operations)
+- Minimalistic syntax for working with selectors, regular expressions and simple string operations
+- All methods take **one** argument as input and it is always selector-like type
+- 4 types
+- Regular expression syntax is like in python. For maximum compatibility, use for example `[0-9]` instead of `\d`
+- Empty lines and comments (`//`) are ignored by the parser.
 
-### Описание типов
-Для данного скриптового языка существуют 4 типа данных
+### Types description
+There are 4 data types for this scripting language
 
-| Тип            | Описание                                                                                               |
-|----------------|--------------------------------------------------------------------------------------------------------|
-| SELECTOR       | инстанс класса (Document, Element), из которого вызываются css/xpath селекторы. Всегда первый аргумент |
-| SELECTOR_ARRAY | репрезентация списка узлов (Element nodes) всех найденных элементов из инстанса SELECTOR               |
-| TEXT           | строка                                                                                                 |
-| ARRAY          | список строк.                                                                                          |
+| Тип            | Описание                                                                                                |
+|----------------|---------------------------------------------------------------------------------------------------------|
+| SELECTOR       | class instance (Document, Element) from which css/xpath selectors are called. Always the first argument |
+| SELECTOR_ARRAY | representation of a list of nodes of all found elements from the SELECTOR instance                      |
+| TEXT           | string                                                                                                  |
+| ARRAY          | array of strings                                                                                        |
 
 
-### Описание директив
-- операторы разделяются отступом строки `\n`
-- Все строковые аргументы указываются **двойными** `"` кавычками.
-- Игнорируются пробелы
+### Description of directives
+- statements are separated by line indentation `\n`
+- All string arguments are specified with **double** `"` quotes.
+- Space are ignored
 
-| Оператор | Аргументы                 | Описание                                                                                                                                          | Возвращаемое значение | Пример                     |
-|----------|---------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------|----------------------------|
-| default  | "<value>"                 | Значение по умолчанию, если произошла ошибка во время парсинга. **Указывается первым**                                                            | -                     | default "empty"            |
-| xpath    | "<expr>"                  | xpath селектор, возвращает первое найденное значение                                                                                              | SELECTOR              | xpath "//title"            |
-| xpathAll | "<expr>"                  | xpath селектор, возвращает все значения                                                                                                           | SELECTOR              | xpathAll "//div"           |
-| css      | "<expr>"                  | css селектор, возвращает первое найденное значение                                                                                                | SELECTOR              | css "title"                |
-| cssAll   | "<expr>"                  | css селектор, возвращает все значения                                                                                                             | SELECTOR              | cssAll "div > a"           |
-| attr     | "<tag attr>"              | получить тег(и). Вызывается после xpath/xpathAll/css/cssAll                                                                                       | TEXT/ARRAY            | attr "href"                |
-| text     |                           | получить текст внутри тега. Вызывается после xpath/xpathAll/css/cssAll. Может быть вызван первым для полного перевода объекта `SELECTOR` в `TEXT` | TEXT/ARRAY            | text                       |
-| raw      |                           | получить сырой тег в виде текста. Вызывается после xpath/xpathAll/css/cssAll                                                                      | TEXT/ARRAY            | raw                        |
-| re       | "<exrp>"                  | регулярное выражение. Возвращает первый найденный элемент. Аргумент должен быть TEXT                                                              | TEXT                  | re "(\d+)"                 |
-| reAll    | "<expr>"                  | регулярное выражение. Возвращает все найденные элементы. Аргумент должен быть TEXT                                                                | ARRAY                 | reAll "(\d+)"              |
-| reSub    | "<expr>" "<repl>" <count> | Замена по регулярному выражение. Аргумент должен быть TEXT                                                                                        | TEXT                  | reSub "(\d+)" "digit(lol)" |
-| strip    | "<string>"                | Удаляет заданную строку СЛЕВА и СПРАВА. Аргумент должен быть TEXT                                                                                 | TEXT                  | strip "\n"                 |
-| lstrip   | "<string>"                | Удаляет заданную строку СЛЕВА. Аргумент должен быть TEXT                                                                                          | TEXT                  | lstrip " "                 |
-| rstrip   | "<string>"                | Удаляет заданную строку СПРАВА. Аргумент должен быть TEXT                                                                                         | TEXT                  | rstrip " "                 |
-| format   | "<string>"                | Format string. Аргумент подстановки указывать с помощью `{{}}` оператора. Аргумент должен быть TEXT                                               | TEXT                  | format "spam {{}} egg"     |
-| split    | "<value>" <count>         | Разделение строки. Если count = -1 или не передан - делить на максимально доступное. Аргумент должен быть TEXT                                    | ARRAY                 | split ", "                 |
-| replace  | "<old>" "<old>" <count>   | Замена строки. Если count = -1 или не передан - заменять на максимально доступное. Аргумент должен быть TEXT                                      | ARRAY                 | split ", "                 |
-| limit    | <count>                   | Максимальное число элементов                                                                                                                      | ARRAY                 | limit 50                   |
-| index    | <index>                   | Взять элемент по индекса. Аргумент должен быть ARRAY                                                                                              | TEXT                  | index 1                    |
-| first    |                           | `index 1` alias                                                                                                                                   | TEXT                  | first                      |
-| last     |                           | `index -1` alias                                                                                                                                  | TEXT                  | last                       |
-| join     | "<string>"                | Собирает ARRAY в строку. Аргумент должен быть ARRAY                                                                                               | TEXT                  | join ", "                  |
-| ret      |                           | Указать транслятору вернуть значение. Автоматически добавляется если не указан в скрипте                                                          |                       | ret                        |
-| noRet    | "<string>"                | Указать транслятору ничего не возвращать. Добавлено для предварительной валидации документа                                                       |                       | noRet                      |
-| //       | ...                       | Однострочный комментарий. Игнорируется конечным кодогенератором                                                                                   |                       | // this is comment line    |
+| Operator | Arguments                 | Description                                                                                                                                  | Return type value | Example                    |
+|----------|---------------------------|----------------------------------------------------------------------------------------------------------------------------------------------|-------------------|----------------------------|
+| default  | "<value>"                 | Default value if an error occurred during parsing. **Listed first**                                                                          | -                 | default "empty"            |
+| xpath    | "<expr>"                  | xpath selector, returns the first value found                                                                                                | SELECTOR          | xpath "//title"            |
+| xpathAll | "<expr>"                  | xpath selector, returns all values                                                                                                           | SELECTOR          | xpathAll "//div"           |
+| css      | "<expr>"                  | css selector, returns the first value found                                                                                                  | SELECTOR          | css "title"                |
+| cssAll   | "<expr>"                  | css selector, returns all values                                                                                                             | SELECTOR          | cssAll "div > a"           |
+| attr     | "<tag attr>"              | get tag(s). Called after xpath/xpathAll/css/cssAll                                                                                           | TEXT/ARRAY        | attr "href"                |
+| text     |                           | get the text inside the tag. Called after xpath/xpathAll/css/cssAll. Can be called first to completely convert a `SELECTOR` object to `TEXT` | TEXT/ARRAY        | text                       |
+| raw      |                           | get the raw tag as text. Called after xpath/xpathAll/css/cssAll                                                                              | TEXT/ARRAY        | raw                        |
+| re       | "<exrp>"                  | regular expression. Returns the first element found. Argument must be TEXT                                                                   | TEXT              | re "(\d+)"                 |
+| reAll    | "<expr>"                  | regular expression. Returns all found elements. Argument must be TEXT                                                                        | ARRAY             | reAll "(\d+)"              |
+| reSub    | "<expr>" "<repl>" <count> | Replacement by regular expression. Argument must be TEXT                                                                                     | TEXT              | reSub "(\d+)" "digit(lol)" |
+| strip    | "<string>"                | Removes the given string LEFT and RIGHT. Argument must be TEXT                                                                               | TEXT              | strip "\n"                 |
+| lstrip   | "<string>"                | Deletes the specified line from the LEFT. Argument must be TEXT                                                                              | TEXT              | lstrip " "                 |
+| rstrip   | "<string>"                | Deletes the specified row on the RIGHT. Argument must be TEXT                                                                                | TEXT              | rstrip " "                 |
+| format   | "<string>"                | Format string. Specify a substitution argument using the `{{}}` operator. Argument must be TEXT                                              | TEXT              | format "spam {{}} egg"     |
+| split    | "<value>" <count>         | Splitting a line. If count = -1 or not transmitted, divide by the maximum available. Argument must be TEXT                                   | ARRAY             | split ", "                 |
+| replace  | "<old>" "<old>" <count>   | String replacement. If count = -1 or not passed, replace it with the maximum available one. Argument must be TEXT                            | ARRAY             | split ", "                 |
+| limit    | <count>                   | Maximum number of elements                                                                                                                   | ARRAY             | limit 50                   |
+| index    | <index>                   | Take element by index. Argument must be ARRAY                                                                                                | TEXT              | index 1                    |
+| first    |                           | `index 1` alias                                                                                                                              | TEXT              | first                      |
+| last     |                           | `index -1` alias                                                                                                                             | TEXT              | last                       |
+| join     | "<string>"                | Collects ARRAY into a string. Argument must be ARRAY                                                                                         | TEXT              | join ", "                  |
+| ret      |                           | Tell the translator to return a value. Automatically added if not specified in the script                                                    |                   | ret                        |
+| noRet    | "<string>"                | Tell the translator not to return anything. Added for document pre-validation                                                                |                   | noRet                      |
+| //       | ...                       | One line comment. Ignored by the final code generator                                                                                        |                   | // this is comment line    |
 
 
 ### Токены валидации
 
-Следующие команды нужны для предварительной валидации входного документа при помощи `assert` и они **не изменяют** 
-конечные и промежуточные значения.
+The following commands are needed to pre-validate the input document using `assert` and they **do not change**
+final and intermediate values.
 
-В данном DSL языке `boolean`, `null` типы отсутствуют, поэтому при ложном (false) результате будет выбрасывать ошибку
-вида `AssertionError`.
+In this DSL language there are no `boolean`, `null` types, so if the result is false it will throw an error
+like `AssertionError`.
 
-Операторы принимают `SELECTOR`:
+The operators accept `SELECTOR`:
 - assertCss
 - assertXpath
 
 
-Все остальные операторы принимают `TEXT`:
+All other operators accept `TEXT`:
 
-| Оператор       | Описание                                              | Пример                          |
-|----------------|-------------------------------------------------------|---------------------------------|
-| assertEqual    | Сравнение по полной строке (`==`) (с учетом регистра) | assertEqual "lorem upsum dolor" |
-| assertContains | Сравнение по наличию части строки в `TEXT`            | assertContains "sum"            |
-| assertStarts   | Сравнение по наличию части строки в начале `TEXT`     | assertStarts "lorem"            |
-| assertEnds     | Сравнение по наличию части строки в конце `TEXT`      | assertEnds "dolor"              |
-| assertMatch    | Сравнение `TEXT` по регулярному выражению             | assertMatch "lorem \w+ dolor"   |
-| assertCss      | Проверка валидности запроса в `SELECTOR`.             | assertCss "head > title"        |
-| assertXpath    | Проверка валидности запроса в `SELECTOR`.             | assertXpath "//head/title"      |
+| Оператор       | Описание                                                                        | Пример                          |
+|----------------|---------------------------------------------------------------------------------|---------------------------------|
+| assertEqual    | Full string comparison (`==`) (case sensitive)                                  | assertEqual "lorem upsum dolor" |
+| assertContains | Comparison by presence of part of a string in `TEXT`                            | assertContains "sum"            |
+| assertStarts   | Comparison based on the presence of part of a string at the beginning of `TEXT` | assertStarts "lorem"            |
+| assertEnds     | Comparison based on the presence of part of a string at the end of `TEXT`       | assertEnds "dolor"              |
+| assertMatch    | Compare `TEXT` by regular expression                                            | assertMatch "lorem \w+ dolor"   |
+| assertCss      | Checking the validity of the query in `SELECTOR`.                               | assertCss "head > title"        |
+| assertXpath    | Checking the validity of the query in `SELECTOR`.                               | assertXpath "//head/title"      |
 
 
-### Примеры генерации
+### Example code generation
 
 ```
 // set default value if parse process is failing
@@ -209,18 +210,18 @@ dummy_parse(html.Document part){
 ```
 
 ## yaml config
-Пример структуры сгенерированного класса-парсера:
+An example of the structure of the generated parser class:
 ![img_2.png](docs/img_2.png)
 
-- selector - Selector/Document инстанс, инициализируется с помощью document
-- _aliases - ключи переназначения для метода view()
-- _viewKeys - ключи вывода для метода view()
-- _cachedResult - кеш полученных значений из метода parse()
-- parse() - запуск парсера
-- view() - получение полученных значений
-- _preValidate() - опциональный метод предварительной валидации входного документа по правилам из конфигурации. Если результат false/null - выбрасывает `AssertError`
-- _partDocument() - опциональный метод разделения документа на части по заданному селектору. Полезен, например, для получения однотипных элементов (карточек товара и тд)
-- _parseA, _parseB, _parseC, ... - автоматически генерируемые методы парсера для каждого ключа (A,B,C) по правилам из конфигурации
+- selector - Selector/Document instance, initialized using document
+- _aliases - remapping keys for the view() method
+- _viewKeys - output keys for the view() method
+- _cachedResult - cache of obtained values from the parse() method
+- parse() - launching the parser
+- view() - getting the received values
+- _preValidate() - an optional method of preliminary validation of the input document according to the rules from the configuration. If the result is false/null, it throws `AssertError`
+- _partDocument() - an optional method of dividing a document into parts using a given selector. Useful, for example, for obtaining elements of the same type (product cards, etc.)
+- _parseA, _parseB, _parseC, ... - automatically generated parser methods for each key (A,B,C) according to the rules from the configuration
 
 ### Usage pseudocode example:
 ```
@@ -230,7 +231,7 @@ instance.parse()
 print(instance.view())
 ```
 
-Пример файла конфигурации, конечное значение смотрите в [examples](examples)
+Example configuration file, see in [examples](examples)
 
 ## dev 
 TODO
