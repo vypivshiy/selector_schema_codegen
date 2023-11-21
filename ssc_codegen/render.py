@@ -10,7 +10,7 @@ from ssc_codegen.template_utils import (
 )
 from ssc_codegen.yaml_parser import Info
 
-ENV = jinja2.Environment(loader=jinja2.FileSystemLoader("ssc_codegen/configs"))
+ENV = jinja2.Environment(loader=jinja2.PackageLoader("ssc_codegen.configs", ''))
 ENV.globals.update(
     {
         "snake_case": snake_case,
