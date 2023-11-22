@@ -59,6 +59,22 @@ class TokenType(Enum):
         )
 
     @classmethod
+    def tokens_selector_css(cls):
+        return (
+            TokenType.OP_CSS,
+            TokenType.OP_CSS_ALL,
+            TokenType.OP_ASSERT_CSS
+        )
+
+    @classmethod
+    def tokens_selector_xpath(cls):
+        return (
+            TokenType.OP_XPATH,
+            TokenType.OP_XPATH_ALL,
+            TokenType.OP_ASSERT_XPATH
+        )
+
+    @classmethod
     def tokens_selector_fetch_one(cls):
         return TokenType.OP_CSS, TokenType.OP_XPATH
 
@@ -187,6 +203,7 @@ class VariableState(Enum):
     SELECTOR_ARRAY = 1  # dynamic list/vector of node elements
     TEXT = 2
     ARRAY = 3  # dynamic list/vector of string types
+    NO_RETURN = 4  # return nothing
 
 
 @dataclass(repr=False)
@@ -224,6 +241,14 @@ class Node:
                 continue
             else:
                 return prev_node.id
+
+    @property
+    def return_arg_type(self) -> VariableState:
+        # return variable state of return value
+        node = self.ast_tree[self.count-1]
+        if node.token.token_type == TokenType.OP_NO_RET:
+            return VariableState.NO_RETURN
+        return node.var_state
 
     @property
     def next_node(self) -> Optional["Node"]:
