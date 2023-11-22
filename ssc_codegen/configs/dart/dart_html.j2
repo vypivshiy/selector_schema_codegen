@@ -25,12 +25,13 @@ class {{ schema.name }}{
       selector = html.parseHtmlDocument(document);
     }
 
-    void parse(){
+    parse(){
         _preValidate(selector);
         _startParse();
+        return this;
     }
 
-    void _preValidate({{ translator.SELECTOR_TYPE }} {{ translator.METHOD_ARG_NAME }}){
+    _preValidate({{ translator.SELECTOR_TYPE }} {{ translator.METHOD_ARG_NAME }}){
         {{ sep_code(";\n        ", schema.pre_validate_code.split(";\n")) }}
     }
 
@@ -41,12 +42,12 @@ class {{ schema.name }}{
     }
 
     {% for attr in schema.attrs %}
-    dynamic _parse{{ attr.name.title() }}(dynamic {{ translator.METHOD_ARG_NAME }}){
+    _parse{{ attr.name.title() }}(dynamic {{ translator.METHOD_ARG_NAME }}){
         {{ sep_code(";\n        ", attr.code.split(";\n")) }}
     }
     {% endfor %}
 
-    void _startParse(){
+    _startParse(){
         // clear cache
         _cachedResult.clear();
         for (var {{ translator.METHOD_ARG_NAME }} in _partDocument(selector)){

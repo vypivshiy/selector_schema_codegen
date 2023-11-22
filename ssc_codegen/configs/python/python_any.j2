@@ -21,6 +21,7 @@ class {{ schema.name }}:
     def parse(self):
         self.__pre_validate(self.__selector__)
         self.__start_parse()
+        return self
 
     @staticmethod
     def __pre_validate({{ translator.METHOD_ARG_NAME }}: {{ translator.SELECTOR_TYPE }}):
@@ -43,7 +44,7 @@ class {{ schema.name }}:
             {%- endfor -%}
             })
 
-    def view(self) -> list[dict[str, Any]]:
+    def view(self) -> list[dict[str, list[str] | str]]:
         def map_fields(result):
             view_dict = {}
             for k in self.__view_keys:
