@@ -168,24 +168,3 @@ class Translator(ABCExpressionTranslator):
 
     def op_skip_part_document(self) -> str:
         return f"return [{self.METHOD_ARG_NAME}]"
-
-
-if __name__ == "__main__":
-    from ssc_codegen.configs.codegen_tools import generate_code
-    from ssc_codegen.lexer import tokenize
-
-    source = """
-assertCss "head > title"
-
-css "head > title"
-text
-assertContains "spam"
-format "https://books.toscrape.com/catalogue/{{}}"
-rstrip "https://"
-replace "o" "a"
-re "b[oa][oa]ks\."
-reSub "\w+" "lol"
-"""
-    raw_tokens = tokenize(source)
-    block = generate_code(raw_tokens, Translator())
-    print(*block, sep="\n")

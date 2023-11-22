@@ -29,6 +29,7 @@ class Translator(ABCExpressionTranslator):
     ELEMENT_TYPE = "var"  # TODO typing element
     LIST_OF_STRING_TYPE = "List<String>"
     LIST_OF_ELEMENTS_TYPE = "var"  # TODO typing list of elements
+    AUTO_CONVERT_TO_CSS = True
 
     def _assign_nodes_expr(self, node: "Node") -> str:
         """var_node.id = var_node_prev.id"""

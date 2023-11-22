@@ -43,6 +43,11 @@ class ABCExpressionTranslator(ABC):
 
     # generators config TODO
     ALLOW_FLUENT_OPTIMIZATION: bool = False
+    # convert commands to css queries
+    AUTO_CONVERT_TO_CSS: bool = False
+    # convert commands to xpath queries
+    AUTO_CONVERT_TO_XPATH: bool = False
+    XPATH_START_PREFIX: str = "descendant-or-self::"
 
     def _gen_var_name(self, node: "Node") -> str:
         """generate variable name shortcut"""
@@ -259,18 +264,3 @@ class ABCExpressionTranslator(ABC):
             TokenType.OP_NO_RET: self.op_no_ret,
             TokenType.OP_RET: self.op_ret,
         }
-
-
-def generate_code(
-    tokens: list["Token"], translator: ABCExpressionTranslator
-) -> list[str]:
-    # TODO deprecated: remove
-    lines = []
-    analyze = Analyzer(tokens)
-    for i, node in analyze.build_ast().items():
-        lines.append(
-            translator.tokens_map[node.token.token_type](
-                node, *node.token.values
-            )
-        )
-    return lines
