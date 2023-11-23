@@ -42,7 +42,7 @@ class {{ schema.name }}{
     }
 
     {% for attr in schema.attrs %}
-    _parse{{ attr.name.title() }}(dynamic {{ translator.METHOD_ARG_NAME }}){
+    {{ ret_type(attr, translator)}} _parse{{ attr.name.title() }}(dynamic {{ translator.METHOD_ARG_NAME }}){
         {{ sep_code(";\n        ", attr.code.split(";\n")) }}
     }
     {% endfor %}

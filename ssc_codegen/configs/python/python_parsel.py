@@ -22,7 +22,7 @@ class Translator(ABCExpressionTranslator):
     DELIM_DEFAULT_WRAPPER = "\n    "
     # imports
     REGEX_IMPORT = "import re"
-    SELECTOR_IMPORT = "from parsel import Selector"
+    SELECTOR_IMPORT = "from parsel import Selector, SelectorList"
     #######
     # types
     #######
@@ -164,7 +164,22 @@ class Translator(ABCExpressionTranslator):
         return f"assert {substring} in {self._gen_var_name(node)}"
 
     def op_skip_pre_validate(self) -> str:
-        return "return"
+        return "pass"
 
     def op_skip_part_document(self) -> str:
         return f"return [{self.METHOD_ARG_NAME}]"
+
+    def op_ret_nothing(self) -> str:
+        return ""
+
+    def op_ret_text(self) -> str:
+        return " -> str"
+
+    def op_ret_array(self) -> str:
+        return " -> list[str]"
+
+    def op_ret_selector(self) -> str:
+        return " -> Selector"
+
+    def op_ret_selector_array(self) -> str:
+        return " -> SelectorList"

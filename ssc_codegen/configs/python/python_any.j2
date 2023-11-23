@@ -31,7 +31,7 @@ class {{ schema.name }}:
         {{ sep_code("\n        ", schema.split_code.split("\n")) }}
     {% for attr in schema.attrs %}
     @staticmethod
-    def __parse_{{ attr.name }}({{ translator.METHOD_ARG_NAME }}: {{ translator.SELECTOR_TYPE }}):
+    def __parse_{{ attr.name }}({{ translator.METHOD_ARG_NAME }}: {{ translator.SELECTOR_TYPE }}){{ ret_type(attr, translator)}}:
         {{ sep_code("\n        ", attr.code.split("\n")) }}
     {% endfor %}
     def __start_parse(self):

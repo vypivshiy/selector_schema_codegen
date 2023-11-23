@@ -3,11 +3,11 @@ from typing import TYPE_CHECKING, Callable, Any
 
 from ssc_codegen.analyzer import Analyzer
 from ssc_codegen.lexer import TokenType
-
+from ssc_codegen.objects import VariableState
 if TYPE_CHECKING:
-    from ssc_codegen.objects import Node, Token
+    from ssc_codegen.objects import Node
 
-__all__ = ["ABCExpressionTranslator", "generate_code"]
+__all__ = ["ABCExpressionTranslator"]
 
 
 class ABCExpressionTranslator(ABC):
@@ -219,6 +219,40 @@ class ABCExpressionTranslator(ABC):
     def op_skip_part_document(self) -> str:
         """stub if `split` key not provided in config"""
         pass
+
+    @abstractmethod
+    def op_ret_nothing(self) -> str:
+        pass
+
+    @abstractmethod
+    def op_ret_text(self) -> str:
+        pass
+
+    @abstractmethod
+    def op_ret_array(self) -> str:
+        pass
+
+    @abstractmethod
+    def op_ret_selector(self) -> str:
+        pass
+
+    @abstractmethod
+    def op_ret_selector_array(self) -> str:
+        pass
+
+    def op_ret_type(self, node: "Node") -> str:
+        val_state = node.return_arg_type
+        match val_state:
+            case VariableState.NO_RETURN:
+                return self.op_ret_nothing()
+            case VariableState.TEXT:
+                return self.op_ret_text()
+            case VariableState.ARRAY:
+                return self.op_ret_array()
+            case VariableState.SELECTOR:
+                return self.op_ret_selector()
+            case VariableState.SELECTOR_ARRAY:
+                return self.op_ret_selector_array()
 
     @property
     def tokens_map(

@@ -193,3 +193,23 @@ class Translator(ABCExpressionTranslator):
 
     def op_skip_part_document(self) -> str:
         return f"return [{self.METHOD_ARG_NAME}];"
+
+    # RET TYPES
+    def op_ret_nothing(self) -> str:
+        return ""
+
+    def op_ret_text(self) -> str:
+        return "String"
+
+    def op_ret_array(self) -> str:
+        return "List<String>"
+
+    def op_ret_selector(self) -> str:
+        return ""  # TODO TYPING
+
+    def op_ret_selector_array(self) -> str:
+        return ""  # TODO TYPING
+
+
+if __name__ == '__main__':
+    print(*[f"- {t}\n" for t in dir(Translator) if not t.startswith("__")], sep='\n')
