@@ -7,6 +7,7 @@ from ssc_codegen.template_utils import (
     generate_attr_signature,
     generate_meta_info,
     snake_case,
+    ret_type
 )
 from ssc_codegen.yaml_parser import Info
 
@@ -20,6 +21,7 @@ ENV.globals.update(
         "generate_meta_info": generate_meta_info,
         "sep_code": lambda sep, lines: sep.join(lines),
         "generate_attr_signature": generate_attr_signature,
+        "ret_type": ret_type
     }
 )
 
