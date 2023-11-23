@@ -26,6 +26,8 @@ TOKENS = {
     # STRING
     "strip": (r'^strip\s+(".*")$', TokenType.OP_STRING_TRIM),
     "lstrip": (r'^lstrip\s+(".*")$', TokenType.OP_STRING_L_TRIM),
+    "lStrip": (r'^lStrip\s+(".*")$', TokenType.OP_STRING_L_TRIM),
+    "rStrip": (r'^rStrip\s+(".*")$', TokenType.OP_STRING_R_TRIM),
     "rstrip": (r'^rstrip\s+(".*")$', TokenType.OP_STRING_R_TRIM),
     "replace": (
         r'^replace\s+(".*")\s+(".*")\s*?(\d*)$',
