@@ -1,6 +1,9 @@
 import re
 import warnings
 
+from cssselect import HTMLTranslator
+from lxml import etree
+
 from ssc_codegen.exceptions import CommandArgumentsError, UnknownCommandError
 from ssc_codegen.objects import TT_COMMENT, TT_NEW_LINE, Token, TokenType
 
@@ -87,6 +90,22 @@ TOKENS = {
 }
 
 
+def _check_css_query(query: str):
+    try:
+        HTMLTranslator().css_to_xpath(query.strip('"'))
+    except Exception:
+        msg = f"{query} is not valid CSS selector"
+        raise CommandArgumentsError(msg)
+
+
+def _check_xpath_query(query: str):
+    try:
+        etree.XPath(query.strip('"'))
+    except Exception:
+        msg = f"{query} is not valid XPATH selector"
+        raise CommandArgumentsError(msg)
+
+
 def tokenize(source_str: str) -> list[Token]:
     """convert source script code to tokens"""
     tokens: list[Token] = []
@@ -129,6 +148,12 @@ def tokenize(source_str: str) -> list[Token]:
                     _have_no_ret = True
 
                 value = result.groups()
+                # validate CSS, XPATH
+                if token_type in TokenType.tokens_selector_css():
+                    _check_css_query(*value)
+                elif token_type in TokenType.tokens_selector_xpath():
+                    _check_xpath_query(*value)
+
                 tokens.append(Token(token_type, value, i, result.endpos, line))
                 break
         else:
