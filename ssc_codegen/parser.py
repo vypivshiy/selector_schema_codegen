@@ -79,24 +79,3 @@ class Parser:
                 default_node, code, *default_node.token.values
             )
         return code
-
-
-if __name__ == "__main__":
-    # from src.configs.python.python_parsel import Translator
-    from ssc_codegen.configs.python.python_bs4 import Translator
-
-    src_code = """
-assertCss "head > title"
-
-css "head > title"
-text
-assertContains "spam"
-format "https://books.toscrape.com/catalogue/{{}}"
-rstrip "https://"
-replace "o" "a"
-re "b[oa][oa]ks\."
-reSub "\w+" "lol"
-"""
-    p = Parser(src_code, Translator)
-    # p.xpath_to_css()
-    print(p.parse())
