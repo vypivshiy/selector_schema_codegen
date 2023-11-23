@@ -234,7 +234,7 @@ print(instance.view())
 Example configuration file, see in [examples](examples)
 
 ## dev 
-TODO
+[DEV](README_DEV.md)
 
 
 ## TODO

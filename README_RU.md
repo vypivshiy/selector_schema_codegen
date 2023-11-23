@@ -234,7 +234,7 @@ print(instance.view())
 Пример файла конфигурации, конечное значение смотрите в [examples](examples)
 
 ## dev 
-TODO
+[DEV](README_DEV.md)
 
 
 ## TODO
