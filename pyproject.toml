@@ -28,6 +28,7 @@ python = "^3.10"
 PyYAML = "^6.0.1"
 Jinja2 = "^3.1.2"
 cssselect = "^1.2.0"
+lxml = "^4.9.3"
 
 [tool.poetry.dev-dependencies]
 mypy = "^1.6.1"
