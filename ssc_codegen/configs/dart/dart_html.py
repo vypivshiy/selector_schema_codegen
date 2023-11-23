@@ -211,5 +211,8 @@ class Translator(ABCExpressionTranslator):
         return ""  # TODO TYPING
 
 
-if __name__ == '__main__':
-    print(*[f"- {t}\n" for t in dir(Translator) if not t.startswith("__")], sep='\n')
+if __name__ == "__main__":
+    print(
+        *[f"- {t}\n" for t in dir(Translator) if not t.startswith("__")],
+        sep="\n",
+    )

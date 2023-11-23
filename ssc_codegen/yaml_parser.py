@@ -76,7 +76,9 @@ class Schema:
         return self.translator().op_skip_part_document()
 
     @property
-    def attr_signature(self) -> dict[str, tuple["VariableState", Optional[str], str]]:
+    def attr_signature(
+        self,
+    ) -> dict[str, tuple["VariableState", Optional[str], str]]:
         attrs = [a for a in self.attrs if a.name in self.view_keys]
         map_signature = {}
         for a in attrs:

@@ -60,18 +60,14 @@ class TokenType(Enum):
 
     @classmethod
     def tokens_selector_css(cls):
-        return (
-            TokenType.OP_CSS,
-            TokenType.OP_CSS_ALL,
-            TokenType.OP_ASSERT_CSS
-        )
+        return (TokenType.OP_CSS, TokenType.OP_CSS_ALL, TokenType.OP_ASSERT_CSS)
 
     @classmethod
     def tokens_selector_xpath(cls):
         return (
             TokenType.OP_XPATH,
             TokenType.OP_XPATH_ALL,
-            TokenType.OP_ASSERT_XPATH
+            TokenType.OP_ASSERT_XPATH,
         )
 
     @classmethod
@@ -245,7 +241,7 @@ class Node:
     @property
     def return_arg_type(self) -> VariableState:
         # return variable state of return value
-        node = self.ast_tree[self.count-1]
+        node = self.ast_tree[self.count - 1]
         if node.token.token_type == TokenType.OP_NO_RET:
             return VariableState.NO_RETURN
         return node.var_state

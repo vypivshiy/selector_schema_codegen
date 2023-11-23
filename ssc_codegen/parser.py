@@ -23,14 +23,21 @@ class Parser:
             self.translator = translator()
 
         # convert selectors
-        if self.translator.AUTO_CONVERT_TO_CSS and self.translator.AUTO_CONVERT_TO_XPATH:
+        if (
+            self.translator.AUTO_CONVERT_TO_CSS
+            and self.translator.AUTO_CONVERT_TO_XPATH
+        ):
             raise TypeError("Should be one config mode set")
 
         elif self.translator.AUTO_CONVERT_TO_CSS and any(
-                t.token_type in TokenType.tokens_selector_xpath() for t in self.raw_tokens):
+            t.token_type in TokenType.tokens_selector_xpath()
+            for t in self.raw_tokens
+        ):
             self.xpath_to_css()
         elif self.translator.AUTO_CONVERT_TO_XPATH and any(
-                t.token_type in TokenType.tokens_selector_css() for t in self.raw_tokens):
+            t.token_type in TokenType.tokens_selector_css()
+            for t in self.raw_tokens
+        ):
             self.css_to_xpath(prefix=self.translator.XPATH_START_PREFIX)
 
     def xpath_to_css(self) -> None:

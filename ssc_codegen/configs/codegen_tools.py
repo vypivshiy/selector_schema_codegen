@@ -1,9 +1,9 @@
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Callable, Any
+from typing import TYPE_CHECKING, Any, Callable
 
-from ssc_codegen.analyzer import Analyzer
 from ssc_codegen.lexer import TokenType
 from ssc_codegen.objects import VariableState
+
 if TYPE_CHECKING:
     from ssc_codegen.objects import Node
 

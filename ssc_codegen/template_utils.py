@@ -5,11 +5,13 @@ from typing import TYPE_CHECKING, Type
 from ssc_codegen.objects import VariableState
 
 if TYPE_CHECKING:
-    from ssc_codegen.yaml_parser import Info, SchemaAttribute
     from ssc_codegen.configs.codegen_tools import ABCExpressionTranslator
+    from ssc_codegen.yaml_parser import Info, SchemaAttribute
 
 
-def ret_type(attr: "SchemaAttribute", translator: Type["ABCExpressionTranslator"]) -> str:
+def ret_type(
+    attr: "SchemaAttribute", translator: Type["ABCExpressionTranslator"]
+) -> str:
     node = attr.ast[0]
     return translator().op_ret_type(node)
 
