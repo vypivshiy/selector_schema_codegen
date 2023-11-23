@@ -1,11 +1,17 @@
 """helper function for templates"""
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Type
 
 from ssc_codegen.objects import VariableState
 
 if TYPE_CHECKING:
-    from ssc_codegen.yaml_parser import Info
+    from ssc_codegen.yaml_parser import Info, SchemaAttribute
+    from ssc_codegen.configs.codegen_tools import ABCExpressionTranslator
+
+
+def ret_type(attr: "SchemaAttribute", translator: Type["ABCExpressionTranslator"]) -> str:
+    node = attr.ast[0]
+    return translator().op_ret_type(node)
 
 
 def camelcase(s: str) -> str:
