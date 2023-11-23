@@ -1,4 +1,5 @@
 import argparse
+import subprocess
 from pathlib import Path
 
 # TODO
@@ -14,7 +15,9 @@ def _parse_arguments():
 
     parser.add_argument("cfg", help="YAML config file path")
     parser.add_argument(
-        "lang", choices=["python.bs4", "python.parsel", "dart"], help="Programming language and lib choice"
+        "lang",
+        choices=["python.bs4", "python.parsel", "dart"],
+        help="Programming language and lib choice",
     )
 
     parser.add_argument(
@@ -29,6 +32,13 @@ def _parse_arguments():
         default=False,
         action="store_true",
         help="Suggest overwrite file",
+    )
+    parser.add_argument(
+        "--no-format",
+        dest="NO_FORMAT",
+        default=False,
+        action="store_true",
+        help="Disable code format by third party solutions",
     )
 
     namespace = parser.parse_args()
@@ -51,7 +61,6 @@ def main():
                 output_dir = output_dir.format(".py")
             case "dart":
                 output_dir = output_dir.format(".dart")
-
             case _:
                 print("Not supported, exit")
                 exit(1)
@@ -74,14 +83,20 @@ def main():
             from ssc_codegen.configs.python.python_parsel import Translator
 
             template = "python/python_any.j2"
+            format_cli = f"black {output_dir!r}"
 
         case "python.bs4":
             from ssc_codegen.configs.python.python_bs4 import Translator
 
             template = "python/python_any.j2"
+            format_cli = f"black {output_dir!r}"
+
         case "dart":
             from ssc_codegen.configs.dart.dart_html import Translator
+
             template = "dart/dart_html.j2"
+            format_cli = f"dart format {output_dir!r}"
+
         case _:
             print("Unknown prog lang, exit")
             exit(1)
@@ -93,6 +108,10 @@ def main():
     print(f"Write to {output_dir}")
     with open(output_dir, "w") as f:
         f.write(code)
+
+    if not args.NO_FORMAT:
+        print("Run code formatter")
+        subprocess.call(format_cli, shell=True)
     print("Done")
 
 
