@@ -3,6 +3,27 @@ name = "ssc_codegen"
 version = "0.1.2"
 description = "generate selector schemas classes from yaml config and DSL-lang script"
 authors = ["georgiy <59173419+vypivshiy@users.noreply.github.com>"]
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+keywords = []
+authors = [{name="vypivshiy", email=""}]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Topic :: Internet",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Topic :: Text Processing"
+]
+
+[project.urls]
+Documentation = "https://github.com/vypivshiy/selector_schema_codegen#readme"
+Issues = "https://github.com/vypivshiy/selector_schema_codegen/issues"
+Source = "https://github.com/vypivshiy/selector_schema_codegen"
+Examples = "https://github.com/vypivshiy/selector_schema_codegen/examples"
 
 [tool.poetry.dependencies]
 python = "^3.10"
