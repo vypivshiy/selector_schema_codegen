@@ -44,7 +44,7 @@ class Translator(ABCExpressionTranslator):
         return f"return {self._VAR_P(node)};"
 
     def op_wrap_code_with_default_value(
-        self, node: "Node", code: str, default_value: str
+            self, node: "Node", code: str, default_value: str
     ) -> str:
         return (
             f"try {{\n  {code} }} catch (e) {{\n  return {default_value};\n}}"
@@ -88,6 +88,12 @@ class Translator(ABCExpressionTranslator):
             f"{self._VAR(node)} = {self._VAR(node)}.sublist(0, {count})"
         )
 
+    @staticmethod
+    def _trim_escape(substr: str) -> str:
+        special_chars = ['.', ')', '(']
+        pattern = r'([' + re.escape(''.join(special_chars)) + '])'
+        return re.sub(pattern, r'\\\1', substr)
+
     def op_string_format(self, node: "Node", substr: str) -> str:
         substr = re.sub(r"\{\{.*}}", f"${self._VAR_P(node)}", substr, 1)
         return f"String {self._VAR(node)} = {substr}"
@@ -97,6 +103,10 @@ class Translator(ABCExpressionTranslator):
         substr = substr.strip('"')
         substr_left = "r" + repr(f"^{substr}")
         substr_right = "r" + repr(f"{substr}$")
+
+        substr_left = self._trim_escape(substr_left)
+        substr_right = self._trim_escape(substr_right)
+
         return (
             f'String {self._VAR(node)} = {self._VAR_P(node)}.replaceFirst(RegExp({substr_left}), "");\n'
             f'{self._VAR(node)} = {self._VAR(node)}.replaceFirst(RegExp({substr_right}), "")'
@@ -106,18 +116,24 @@ class Translator(ABCExpressionTranslator):
         # https://stackoverflow.com/a/14107914
         substr = substr.strip('"')
         substr_left = "r" + repr(f"^{substr}")
+        substr_left = self._trim_escape(substr_left)
+
         return f'String {self._VAR(node)} = {self._VAR_P(node)}.replaceFirst(RegExp({substr_left}), "")'
 
     def op_string_rtrim(self, node: "Node", substr) -> str:
         # https://stackoverflow.com/a/14107914
         substr = substr.strip('"')
         substr_right = "r" + repr(f"{substr}$")
-        return f'String {self._VAR(node)} = {self._VAR(node)}.replaceFirst(RegExp({substr_right}), "")'
+        substr_right = self._trim_escape(substr_right)
+        return f'String {self._VAR(node)} = {self._VAR_P(node)}.replaceFirst(RegExp({substr_right}), "")'
 
     def op_string_replace(
-        self, node: "Node", old: str, new: str, count=None
+            self, node: "Node", old: str, new: str, count=None
     ) -> str:
-        # TODO add chars escape
+
+        old = self._trim_escape(old)
+        new = self._trim_escape(new)
+
         if count is None:
             return f"String {self._VAR(node)} = {self._VAR_P(node)}.replaceAll(RegExp({old}), {new})"
         return f"String {self._VAR(node)} = {self._VAR_P(node)}.replaceRange({count}, {old}, {new})"
@@ -130,7 +146,7 @@ class Translator(ABCExpressionTranslator):
         return (
             f"RegExp {reg_var} = RegExp(r{pattern});\n"
             # TODO add ? symbol ???
-            f"String {self._VAR(node)} = {reg_var}.firstMatch({self._VAR_P(node)}).group(0)"
+            f"String {self._VAR(node)} = {reg_var}.firstMatch({self._VAR_P(node)})?.group(0) ?? ''"
         )
 
     def op_regex_all(self, node: "Node", pattern: str) -> str:
@@ -141,7 +157,7 @@ class Translator(ABCExpressionTranslator):
         )
 
     def op_regex_sub(
-        self, node: "Node", pattern: str, repl: str, count=None
+            self, node: "Node", pattern: str, repl: str, count=None
     ) -> str:
         if count is None or count in (-1, "-1"):
             return ""
