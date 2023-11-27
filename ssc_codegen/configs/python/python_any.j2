@@ -20,6 +20,9 @@ class __BaseViewModel:
     def __start_parse(self):
         pass
 
+    def __part_document(self, part: {{ translator.SELECTOR_TYPE }}):
+        pass
+
     def parse(self):
         self.__pre_validate(self.__selector__)
         self.__start_parse()
