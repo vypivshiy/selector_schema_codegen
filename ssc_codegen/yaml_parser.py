@@ -99,9 +99,15 @@ def _parse_class(
 ) -> Schema:
     assert content.get("steps", None)  # type: ignore
     assert content.get("steps").get("parser", None)  # type: ignore
-    assert content.get("steps").get("view", None)  # type: ignore
+    # assert content.get("steps").get("view", None)  # type: ignore
 
     steps = content.get("steps")
+    parser_attrs = steps.get("parser")  # type: ignore
+
+    # if not view config - get all attrs name
+    if not steps.get("view"):
+        steps["view"] = [attr["name"] for attr in parser_attrs]
+
     schema = Schema(
         name=class_name,
         # TODO: provide constants
@@ -113,7 +119,6 @@ def _parse_class(
         translator=translator,
     )
 
-    parser_attrs = steps.get("parser")  # type: ignore
     for attr in parser_attrs:  # type: ignore
         assert attr.get("name")
         attr_struct = SchemaAttribute(
