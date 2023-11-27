@@ -5,23 +5,50 @@ from typing import Any
 
 {{ translator.SELECTOR_IMPORT }}
 
-{% for schema in ctx.schemas %}
-class {{ schema.name }}:
-    """
-    {{ schema.doc }}
-    {{ generate_attr_signature(schema.attr_signature) }}
-    """
+class __BaseViewModel:
     def __init__(self, document: str):
         self.__raw__ = document
         self.__selector__ = {{ translator.SELECTOR_TYPE }}(document)
-        self.__aliases = {{ schema.aliases }}
-        self.__view_keys = {{ schema.view_keys }}
         self.__cached_result: list[dict[str, Any]] = []
+        self.__aliases = {}
+        self.__view_keys = []
+
+    @staticmethod
+    def __pre_validate(doc):
+        pass
+
+    def __start_parse(self):
+        pass
 
     def parse(self):
         self.__pre_validate(self.__selector__)
         self.__start_parse()
         return self
+
+    def view(self) -> list[dict[str, list[str] | str]]:
+        def map_fields(result):
+            view_dict = {}
+            for k in self.__view_keys:
+                if v := result.get(k):
+                    k = self.__aliases.get(k, k)
+                    view_dict[k] = v
+            return view_dict
+
+        if len(self.__cached_result) == 1:
+            return [map_fields(self.__cached_result[0])]
+        return [map_fields(result) for result in self.__cached_result]
+
+
+{% for schema in ctx.schemas %}
+class {{ schema.name }}(__BaseViewModel):
+    """
+    {{ schema.doc }}
+    {{ generate_attr_signature(schema.attr_signature) }}
+    """
+    def __init__(self, document: str):
+        super().__init__(document)
+        self.__aliases = {{ schema.aliases }}
+        self.__view_keys = {{ schema.view_keys }}
 
     @staticmethod
     def __pre_validate({{ translator.METHOD_ARG_NAME }}: {{ translator.SELECTOR_TYPE }}):
@@ -43,17 +70,4 @@ class {{ schema.name }}:
                 {{ repr_str(key) }}: self.__parse_{{ key }}({{ translator.METHOD_ARG_NAME }}),
             {%- endfor -%}
             })
-
-    def view(self) -> list[dict[str, list[str] | str]]:
-        def map_fields(result):
-            view_dict = {}
-            for k in self.__view_keys:
-                if v := result.get(k):
-                    k = self.__aliases.get(k, k)
-                    view_dict[k] = v
-            return view_dict
-
-        if len(self.__cached_result) == 1:
-            return [map_fields(self.__cached_result[0])]
-        return [map_fields(result) for result in self.__cached_result]
 {% endfor %}
