@@ -7,75 +7,93 @@ import 'dart:core';
 // TODO change dynamic to generic with String OR List<String>
 typedef ParsedValue = Map<String, dynamic>;
 
+class __BaseViewModel {
+  final String document;
+  late final Document selector;
+  final Map<String, String> _aliases = {};
+  final List<String> _viewKeys = [];
+  final List<ParsedValue> _cachedResult = [];
+
+  __BaseViewModel(this.document){
+    selector = html.parseHtmlDocument(document);
+  }
+
+  parse() {
+    _preValidate(selector);
+    _startParse();
+    return this;
+  }
+
+  _preValidate(Document part) { }
+
+  _startParse() { }
+
+  // TODO typing better
+  List<dynamic> _partDocument(dynamic part) {return [];}
+
+  List<ParsedValue> view() {
+    ParsedValue mapFields(ParsedValue result) {
+      ParsedValue viewDict = {};
+      for (String k in _viewKeys) {
+        var v = result[k];
+        if (v != null) {
+          k = _aliases[k] ?? k;
+          viewDict[k] = v;
+        }
+      }
+      return viewDict;
+    }
+
+    if (_cachedResult.length == 1) {
+      return [mapFields(_cachedResult[0])];
+    }
+    return _cachedResult.map(mapFields).toList();
+  }
+}
+
+
 {% for schema in ctx.schemas %}
-class {{ schema.name }}{
+class {{ schema.name }} extends __BaseViewModel {
     {%- for line in schema.doc.split("\n") %}
     /// {{ line -}}
     {% endfor -%}
     {% for line in generate_attr_signature(schema.attr_signature, sep='\n').split('\n') %}
     /// {{ line -}}
     {% endfor %}
-    final String document;
-    late final Document selector;
-    final Map<String, String> _aliases = {{ schema.aliases }};
-    final List<String> _viewKeys = {{ schema.view_keys }};
-    final List<ParsedValue> _cachedResult = [];
+    @override
+    Map<String, String> get _aliases => {{ schema.aliases }};
+    @override
+    List<String> get _viewKeys => {{ schema.view_keys }};
+    {{ schema.name }}(super.document);
 
-    {{ schema.name }}(this.document) {
-      selector = html.parseHtmlDocument(document);
-    }
-
-    parse(){
-        _preValidate(selector);
-        _startParse();
-        return this;
-    }
-
+    @override
     _preValidate({{ translator.SELECTOR_TYPE }} {{ translator.METHOD_ARG_NAME }}){
         {{ sep_code(";\n        ", schema.pre_validate_code.split(";\n")) }}
     }
 
-    // TODO typing better
+    @override
     List<dynamic> _partDocument(dynamic part){
         _preValidate(selector);
         {{ sep_code(";\n        ", schema.split_code.split(";\n")) }}
     }
 
     {% for attr in schema.attrs %}
-    {{ ret_type(attr, translator)}} _parse{{ attr.name.title() }}(dynamic {{ translator.METHOD_ARG_NAME }}){
+    {{ ret_type(attr, translator)}} _parse{{ camelcase(attr.name) }}(dynamic {{ translator.METHOD_ARG_NAME }}){
         {{ sep_code(";\n        ", attr.code.split(";\n")) }}
     }
     {% endfor %}
 
+    @override
     _startParse(){
         // clear cache
         _cachedResult.clear();
         for (var {{ translator.METHOD_ARG_NAME }} in _partDocument(selector)){
             _cachedResult.add({
             {%- for key in schema.attrs_names %}
-                {{ repr_str(key) }}: _parse{{ key.title() }}({{ translator.METHOD_ARG_NAME }}),
+                {{ repr_str(key) }}: _parse{{ camelcase(key) }}({{ translator.METHOD_ARG_NAME }}),
             {%- endfor -%}
             });
         }
-    }
-
-    List<ParsedValue> view() {
-      ParsedValue mapFields(ParsedValue result) {
-      ParsedValue viewDict = {};
-      for (String k in _viewKeys) {
-      var v = result[k];
-      if (v != null) {
-          k = _aliases[k] ?? k;
-          viewDict[k] = v;
-        }
-      }
-      return viewDict;
-      }
-
-    if (_cachedResult.length == 1) {
-        return [mapFields(_cachedResult[0])];
-    }
-    return _cachedResult.map(mapFields).toList();
     }
 }
 {% endfor %}
