@@ -6,20 +6,29 @@ yaml-DSL configurations with built-in declarative language.
 
 Designed to port parsers to various programming languages
 
-## Minimum requirements for the target portable language:
-- include regular expressions
-- include css/xpath libs for more supports queries (nth-child, ...)
-- basic methods for works with strings (format string, trim/left trim/right trim/split/replace)
+## Install
 
-## Recommendations
-- usage css selector: they can be **guaranteed** converted to xpath
-- there is an xpath to css converter for simple queries **without guarantees of functionality**. 
-For example, in css there is no analogue of `contains` from xpath, etc.
-## Schematic representation of generator operation
+### pipx (recommended)
 
-![img.png](docs/img.png)
+```shell
+pipx install ssc_codegen
+```
 
-## Syntax specs
+### pip
+
+```shell
+pip install ssc_codegen
+```
+
+## Supported languages
+
+| language | lib            | xpath | css | formatter   |
+|----------|----------------|-------|-----|-------------|
+| python   | bs4            | NO    | YES | black       |
+| python   | parsel         | YES   | YES | black       |
+| dart     | universal_html | NO    | YES | dart format |
+
+## User guide
 
 ### Language features
 
@@ -33,12 +42,22 @@ For example, in css there is no analogue of `contains` from xpath, etc.
 ### Types description
 There are 4 data types for this scripting language
 
-| Тип            | Описание                                                                                                |
-|----------------|---------------------------------------------------------------------------------------------------------|
-| SELECTOR       | class instance (Document, Element) from which css/xpath selectors are called. Always the first argument |
-| SELECTOR_ARRAY | representation of a list of nodes of all found elements from the SELECTOR instance                      |
-| TEXT           | string                                                                                                  |
-| ARRAY          | array of strings                                                                                        |
+| type           | Description                                                                                                       |
+|----------------|-------------------------------------------------------------------------------------------------------------------|
+| SELECTOR       | class instance (Document, Element, Selector) from which css/xpath selectors are called. Always the first argument |
+| SELECTOR_ARRAY | representation of a list of nodes (elements?) of all found elements from the SELECTOR instance                    |
+| TEXT           | string                                                                                                            |
+| ARRAY          | array of strings                                                                                                  |
+
+### Recommendations
+
+- usage css selector: they can be **guaranteed** converted to xpath (if target language not support CSS selectors)
+- there is a xpath to css converter for simple queries **without guarantees of functionality**. 
+For example, in css there is no analogue of `contains` from xpath, etc.
+
+### Schematic representation of generator operation
+
+![img.png](docs/img.png)
 
 
 ### Description of directives
@@ -73,33 +92,6 @@ There are 4 data types for this scripting language
 | ret      |                           | Tell the translator to return a value. Automatically added if not specified in the script                                                    |                   | ret                        |
 | noRet    | "<string>"                | Tell the translator not to return anything. Added for document pre-validation                                                                |                   | noRet                      |
 | //       | ...                       | One line comment. Ignored by the final code generator                                                                                        |                   | // this is comment line    |
-
-
-### Токены валидации
-
-The following commands are needed to pre-validate the input document using `assert` and they **do not change**
-final and intermediate values.
-
-In this DSL language there are no `boolean`, `null` types, so if the result is false it will throw an error
-like `AssertionError`.
-
-The operators accept `SELECTOR`:
-- assertCss
-- assertXpath
-
-
-All other operators accept `TEXT`:
-
-| Оператор       | Описание                                                                        | Пример                          |
-|----------------|---------------------------------------------------------------------------------|---------------------------------|
-| assertEqual    | Full string comparison (`==`) (case sensitive)                                  | assertEqual "lorem upsum dolor" |
-| assertContains | Comparison by presence of part of a string in `TEXT`                            | assertContains "sum"            |
-| assertStarts   | Comparison based on the presence of part of a string at the beginning of `TEXT` | assertStarts "lorem"            |
-| assertEnds     | Comparison based on the presence of part of a string at the end of `TEXT`       | assertEnds "dolor"              |
-| assertMatch    | Compare `TEXT` by regular expression                                            | assertMatch "lorem \w+ dolor"   |
-| assertCss      | Checking the validity of the query in `SELECTOR`.                               | assertCss "head > title"        |
-| assertXpath    | Checking the validity of the query in `SELECTOR`.                               | assertXpath "//head/title"      |
-
 
 ### Example code generation
 
@@ -209,7 +201,32 @@ dummy_parse(html.Document part){
 }
 ```
 
-## yaml config
+### Document validation
+
+The following commands are needed to pre-validate the input document using `assert` and they **do not change**
+final and intermediate values.
+
+In this DSL language there are no `boolean`, `null` types, so if the result is false it will throw an error
+like `AssertionError`.
+
+The operators accept `SELECTOR`:
+- assertCss
+- assertXpath
+
+
+All other operators accept `TEXT`:
+
+| Command        | Description                                                                     | Example                         |
+|----------------|---------------------------------------------------------------------------------|---------------------------------|
+| assertEqual    | Full string comparison (`==`) (case sensitive)                                  | assertEqual "lorem upsum dolor" |
+| assertContains | Comparison by presence of part of a string in `TEXT`                            | assertContains "sum"            |
+| assertStarts   | Comparison based on the presence of part of a string at the beginning of `TEXT` | assertStarts "lorem"            |
+| assertEnds     | Comparison based on the presence of part of a string at the end of `TEXT`       | assertEnds "dolor"              |
+| assertMatch    | Compare `TEXT` by regular expression                                            | assertMatch "lorem \w+ dolor"   |
+| assertCss      | Checking the validity of the query in `SELECTOR`.                               | assertCss "head > title"        |
+| assertXpath    | Checking the validity of the query in `SELECTOR`.                               | assertXpath "//head/title"      |
+
+### yaml config
 An example of the structure of the generated parser class:
 ![img_2.png](docs/img_2.png)
 
@@ -223,6 +240,10 @@ An example of the structure of the generated parser class:
 - _partDocument() - an optional method of dividing a document into parts using a given selector. Useful, for example, for obtaining elements of the same type (product cards, etc.)
 - _parseA, _parseB, _parseC, ... - automatically generated parser methods for each key (A,B,C) according to the rules from the configuration
 
+
+Example configuration file, see in [examples](examples)
+
+
 ### Usage pseudocode example:
 ```
 document = ... // extracted html document
@@ -230,8 +251,6 @@ instance = Klass(document)
 instance.parse()
 print(instance.view())
 ```
-
-Example configuration file, see in [examples](examples)
 
 ## dev 
 [DEV](README_DEV.md)

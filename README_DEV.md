@@ -1,145 +1,162 @@
+# DEV
+## install
+TODO
+
+## Minimum requirements for the target portable language:
+- include regular expressions
+- include css/xpath libs  (better - supports queries like nth-child, etc)
+- basic methods for works with strings (format string, trim/left trim/right trim/split/replace)
+
+
 ## Translator customization
-Транслятор работает по принципу перехвата значений токена и на основе этой информации генерирует код по шаблона
-### Description
+The translator works on the principle of hook token values and based on this information, 
+generates code according to the jinja2 template.
 
-#### Constants
+### Translator methods
 
-- AUTO_CONVERT_TO_CSS bool - автоматическая конвертация XPATH в CSS
+### Constants
 
-- AUTO_CONVERT_TO_XPATH bool - автоматическая конвертация CSS в XPATH
+- AUTO_CONVERT_TO_CSS bool - auto convert XPATH to CSS (not stable), default `false`
 
-- XPATH_START_PREFIX - префикс xpath для автоматической конвертации CSS в XPATH
+- AUTO_CONVERT_TO_XPATH bool - auto convert CSS to XPATH, default `false`
 
-- DELIM_DEFAULT_WRAPPER - разделитель для конструкции try/catch, try/except
+- XPATH_START_PREFIX - XPATH prefix (for XPATH converter)
 
-- DELIM_LINES - разделитель
+- DELIM_DEFAULT_WRAPPER - try/catch, try/except statements
 
-- ELEMENT_TYPE - тип node элемента из селектора
+- DELIM_LINES - line delimiter (for example in python `\n`, C#, Dart - `;\n` )
 
-- FIRST_ASSIGMENT - оператор первого присвоения
+- ELEMENT_TYPE - Node (Element) type in selector
 
-- LIST_OF_ELEMENTS_TYPE - список node элементлв из селектора
+- FIRST_ASSIGMENT - first assigment operator
 
-- LIST_OF_STRING_TYPE - тип списка со строками
+- LIST_OF_ELEMENTS_TYPE - list of node (elements)
 
-- METHOD_ARG_NAME - имя первого аргумента
+- LIST_OF_STRING_TYPE - list of strings
 
-- REGEX_IMPORT - импорт библиотеки regex
+- METHOD_ARG_NAME - first argument name, default `part`
 
-- SELECTOR_IMPORT - импорт библиотеки для разбора html
+- REGEX_IMPORT - regex lib import
 
-- SELECTOR_TYPE - тип селектора
+- SELECTOR_IMPORT - html parser lib import
 
-- STRING_TYPE - тип строки
+- SELECTOR_TYPE - selector (Document) type
 
-- VAR_NAME - префикс промежуточной переменной
+- STRING_TYPE - string type
 
-#### методы
-- _gen_var_name создать имя переменной 
+- VAR_NAME - var name prefix, default `val`
 
-- _VAR алиас _gen_var_name(node)
+### methods
 
-- _VAR_P алиас _gen_var_name(node.prev)
+#### Private (utils)
 
-- op_assert_contains трансляция команды `assertContains`
+- _gen_var_name - generate var name 
 
-- op_assert_css трансляция команды `assertCss`
+- _VAR - shortcut of _gen_var_name(node)
 
-- op_assert_ends_with трансляция команды `assertEnds`
+- _VAR_P - shortcut _gen_var_name(node.prev)
 
-- op_assert_equal трансляция команды `assertEqual`
+#### hooks translations
 
-- op_assert_re_match трансляция команды `assertRe`
+- op_assert_contains - translate `assertContains`
 
-- op_assert_starts_with трансляция команды `assertStarts`
+- op_assert_css - translate `assertCss`
 
-- op_assert_xpath трансляция команды `assertXpath`
+- op_assert_ends_with - translate `assertEnds`
 
-- op_attr - трансляция команды `attr`
+- op_assert_equal - translate `assertEqual`
 
-- op_css - трансляция команды `css`
+- op_assert_re_match - translate `assertRe`
 
-- op_css_all - трансляция команды `cssAll`
+- op_assert_starts_with - translate `assertStarts`
 
-- op_first_index - трансляция команды `first`
+- op_assert_xpath - translate `assertXpath`
 
-- op_index - трансляция команды `index`
+- op_attr - - translate `attr`
 
-- op_last_index - трансляция команды `last`
+- op_css - - translate `css`
 
-- op_limit - трансляция команды `limit`
+- op_css_all - - translate `cssAll`
 
-- op_no_ret - трансляция команды `noRet`
+- op_first_index - - translate `first`
 
-- op_raw - трансляция команды `raw`
+- op_index - - translate `index`
 
-- op_regex - трансляция команды `re`
+- op_last_index - - translate `last`
 
-- op_regex_all - трансляция команды `reAll`
+- op_limit - - translate `limit`
 
-- op_regex_sub - трансляция команды `reSub`
+- op_no_ret - - translate `noRet`
 
-- op_ret - трансляция команды `ret` (return)
+- op_raw - - translate `raw`
 
-- op_ret_array - трансляция возвращение типа List<String>
+- op_regex - - translate `re`
 
-- op_ret_nothing - трансляция отсутствия возвращения значения
+- op_regex_all - - translate `reAll`
 
-- op_ret_selector - трансляция возвращение типа SELECTOR
+- op_regex_sub - - translate `reSub`
 
-- op_ret_selector_array - трансляция возвращение типа List<Selector> 
+- op_ret - - translate `ret` (return)
 
-- op_ret_text - трансляция возвращение типа String
+- op_ret_array - translate `ARRAY` (List<String>, list[str\]) type
 
-- op_ret_type - входная точка для трансляции возвращаемого типа
+- op_ret_nothing - translate return nothing
 
-- op_skip_part_document - трансляция пропуска конфигурации `split`
+- op_ret_selector - translate return `SELECTOR` type
 
-- op_skip_pre_validate - трансляция пропуска конфигурации `validate`
+- op_ret_selector_array - translate `SELECTOR_ARRAY` type 
 
-- op_string_format  - трансляция команды `format`
+- op_ret_text - translate `TEXT` (str, String) type
 
-- op_string_join - трансляция команды `join`
+- op_ret_type - return statement entrypoint
 
-- op_string_ltrim - трансляция команды `lStrip`
+- op_skip_part_document - translate skip `split` from configuration
 
-- op_string_replace - трансляция команды `replace`
+- op_skip_pre_validate - translate skip `validate` from configuration
 
-- op_string_rtrim - трансляция команды `rStrip`
+- op_string_format  - - translate `TEXT` (string) `format`
 
-- op_string_split - трансляция команды `split`
+- op_string_join - - translate `join` ARRAY by delimiter. EG: `array=["1", "2", "3"], join=", " -> "1, 2, 3"` 
 
-- op_string_trim - трансляция команды `strip`
+- op_string_ltrim - - translate `lStrip` (left trim) operation
 
-- op_text - трансляция команды `text`
+- op_string_replace - - translate `replace` operation (regex matching exclude)
 
-- op_wrap_code - трансляция добавления отступов в сгенерированный блок кода
+- op_string_rtrim - - translate `rStrip` (right trim) operation
 
-- op_wrap_code_with_default_value - трансляция добавления отступов в сгенерированный блок кода в try/catch, try/except
+- op_string_split - - translate `split` (split string by delimiter and convert list of string type)
 
-- op_xpath - трансляция команды `xpath`
+- op_string_trim - - translate `strip` (trim) string (LEFT and RIGHT)
 
-- op_xpath_all - трансляция команды `xpathAll`
+- op_text - - translate `text`: `SELECTOR` to `TEXT` or `SELECTOR_ARRAY` to `ARRAY`
 
-- tokens_map - входная точка получения метода трансляции токена для кодогенератора
+- op_wrap_code - translate add delimiter to line of code
+
+- op_wrap_code_with_default_value - translate add delimiters to try/catch/try/except statements
+
+- op_xpath - - translate `xpath`
+
+- op_xpath_all - - translate `xpathAll`
+
+- tokens_map - codegen entrypoint: get translate methods from this method
 
 
 ## Jinja2
 
 ### Macros
-Вызываются в шаблоне `*.j2`
+Include in `*.j2` templates
 
-- snake_case перевод строки в snake_case
+- snake_case convert to snake_case
 
-- camelcase перевод строки в camelCase
+- camelcase convert to camelCase
 
-- repr_str - оборачивает строку в кавычки
+- repr_str - wrap string to quotes: `"`, `'`
 
-- generate_meta_info - генерирует мета информацию на основе файла конфигурации
+- generate_meta_info - generate meta information from configuration
 
-- generate_attr_signature - генерация сигнатуры атрибутов для документации
+- generate_attr_signature - generate attrs signature from schema
 
-- ret_type - генерация типа возвращаемого значения
+- ret_type - generate return type (for static typing or typehints)
 
 
 ### Write template
