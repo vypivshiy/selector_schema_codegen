@@ -50,14 +50,14 @@ class Translator(ABCExpressionTranslator):
     def _assign_nodes_expr(self, node: "Node") -> str:
         """var_node.id = var_node_prev.id"""
         return (
-            f"{self._gen_var_name(node)} = {self._gen_var_name(node.prev_node)}"
+            f"{self._VAR(node)} = {self._VAR_P(node)}"
         )
 
     def op_no_ret(self, node: "Node"):
         return ""
 
     def op_ret(self, node: "Node"):
-        return f"return {self._gen_var_name(node.prev_node)}"
+        return f"return {self._VAR_P(node)}"
 
     def op_wrap_code_with_default_value(
         self,
@@ -90,12 +90,12 @@ class Translator(ABCExpressionTranslator):
 
     def op_text(self, node: "Node") -> str:
         if node.var_state == VariableState.ARRAY:
-            return f"{self._gen_var_name(node)} = [el.text() for el in {self._gen_var_name(node)}]"
-        return f"{self._assign_nodes_expr(node)}.text()"
+            return f"{self._VAR(node)} = [el.text for el in {self._VAR_P(node)}]"
+        return f"{self._assign_nodes_expr(node)}.text"
 
     def op_raw(self, node: "Node") -> str:
         if node.var_state == VariableState.ARRAY:
-            return f"{self._gen_var_name(node)} = [el.__str__() for el in {self._gen_var_name(node)}]"
+            return f"{self._VAR(node)} = [el.__str__() for el in {self._VAR_P(node)}]"
         return f"{self._assign_nodes_expr(node)}.__str__()"
 
     def op_string_split(self, node: "Node", substr: str, count=None) -> str:
@@ -105,7 +105,7 @@ class Translator(ABCExpressionTranslator):
 
     def op_string_format(self, node: "Node", substr: str) -> str:
         f_string = re.sub(r"\{\{.*}}", "{}", substr)
-        return f"{self.VAR_NAME}_{node.id} = {f_string}.format({self.VAR_NAME}_{node.prev_node.id})"
+        return f"{self._VAR(node)} = {f_string}.format({self._VAR_P(node)})"
 
     def op_string_trim(self, node: "Node", substr: str) -> str:
         return f"{self._assign_nodes_expr(node)}.strip({substr})"
@@ -124,13 +124,13 @@ class Translator(ABCExpressionTranslator):
         return f"{self._assign_nodes_expr(node)}.replace({old}, {new})"
 
     def op_string_join(self, node: "Node", string: str) -> str:
-        return f"{self._gen_var_name(node)} = {string}.join({self._gen_var_name(node.prev_node)})"
+        return f"{self._VAR(node)} = {string}.join({self._VAR_P(node)})"
 
     def op_regex(self, node: "Node", pattern: str) -> str:
-        return f"{self._gen_var_name(node)} = re.search(r{pattern}, {self._gen_var_name(node.prev_node)})[1]"
+        return f"{self._VAR(node)} = re.search(r{pattern}, {self._VAR_P(node)})[1]"
 
     def op_regex_all(self, node: "Node", pattern: str) -> str:
-        return f"{self._gen_var_name(node)} = re.findall(r{pattern}, {self._gen_var_name(node.prev_node)})"
+        return f"{self._VAR(node)} = re.findall(r{pattern}, {self._VAR_P(node)})"
 
     def op_regex_sub(
         self,
@@ -140,8 +140,8 @@ class Translator(ABCExpressionTranslator):
         count=None,
     ) -> str:
         if count:
-            return f"{self._gen_var_name(node)} = re.sub(r{pattern}, {repl}, {self._gen_var_name(node.prev_node)}, {count})"
-        return f"{self._gen_var_name(node)} = re.sub(r{pattern}, {repl}, {self._gen_var_name(node.prev_node)})"
+            return f"{self._VAR(node)} = re.sub(r{pattern}, {repl}, {self._VAR_P(node)}, {count})"
+        return f"{self._VAR(node)} = re.sub(r{pattern}, {repl}, {self._VAR_P(node)})"
 
     def op_limit(self, node: "Node", max_: str) -> str:
         return f"{self._assign_nodes_expr(node)}[:{max_}]"
@@ -156,25 +156,25 @@ class Translator(ABCExpressionTranslator):
         return f"{self._assign_nodes_expr(node)}[-1]"
 
     def op_assert_equal(self, node: "Node", substring: str):
-        return f"assert {self._gen_var_name(node)} == {substring}"
+        return f"assert {self._VAR(node)} == {substring}"
 
     def op_assert_css(self, node: "Node", query: str):
-        return f"assert {self._gen_var_name(node)}.select_one({query})"
+        return f"assert {self._VAR(node)}.select_one({query})"
 
     def op_assert_xpath(self, node: "Node", query: str) -> str:
         raise NotImplementedError
 
     def op_assert_re_match(self, node: "Node", pattern: str) -> str:
-        return f"assert re.search(r{pattern}, {self._gen_var_name(node)})"
+        return f"assert re.search(r{pattern}, {self._VAR(node)})"
 
     def op_assert_starts_with(self, node: "Node", prefix: str) -> str:
-        return f"assert {self._gen_var_name(node)}.startswith({prefix})"
+        return f"assert {self._VAR(node)}.startswith({prefix})"
 
     def op_assert_ends_with(self, node: "Node", suffix: str) -> str:
-        return f"assert {self._gen_var_name(node)}.endswith({suffix})"
+        return f"assert {self._VAR(node)}.endswith({suffix})"
 
     def op_assert_contains(self, node: "Node", substring: str) -> str:
-        return f"assert {substring} in {self._gen_var_name(node)}"
+        return f"assert {substring} in {self._VAR(node)}"
 
     def op_skip_pre_validate(self) -> str:
         return "pass"
