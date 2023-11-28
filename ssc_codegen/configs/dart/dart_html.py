@@ -44,7 +44,7 @@ class Translator(ABCExpressionTranslator):
         return f"return {self._VAR_P(node)};"
 
     def op_wrap_code_with_default_value(
-            self, node: "Node", code: str, default_value: str
+        self, node: "Node", code: str, default_value: str
     ) -> str:
         return (
             f"try {{\n  {code} }} catch (e) {{\n  return {default_value};\n}}"
@@ -91,9 +91,9 @@ class Translator(ABCExpressionTranslator):
 
     @staticmethod
     def _trim_escape(substr: str) -> str:
-        special_chars = ['.', ')', '(']
-        pattern = r'([' + re.escape(''.join(special_chars)) + '])'
-        return re.sub(pattern, r'\\\1', substr)
+        special_chars = [".", ")", "("]
+        pattern = r"([" + re.escape("".join(special_chars)) + "])"
+        return re.sub(pattern, r"\\\1", substr)
 
     def op_string_format(self, node: "Node", substr: str) -> str:
         substr = re.sub(r"\{\{.*}}", f"${self._VAR_P(node)}", substr, 1)
@@ -129,9 +129,8 @@ class Translator(ABCExpressionTranslator):
         return f'String {self._VAR(node)} = {self._VAR_P(node)}.replaceFirst(RegExp({substr_right}), "")'
 
     def op_string_replace(
-            self, node: "Node", old: str, new: str, count=None
+        self, node: "Node", old: str, new: str, count=None
     ) -> str:
-
         old = self._trim_escape(old)
         new = self._trim_escape(new)
 
@@ -145,7 +144,11 @@ class Translator(ABCExpressionTranslator):
     def op_regex(self, node: "Node", pattern: str) -> str:
         reg_var = f"regex_{node.id}"
         # try swap quotas
-        if pattern.startswith('"') and pattern.endswith('"') and '"' in pattern[1:-1]:
+        if (
+            pattern.startswith('"')
+            and pattern.endswith('"')
+            and '"' in pattern[1:-1]
+        ):
             pattern = f"""'{pattern.strip('"')}'"""
         return (
             f"RegExp {reg_var} = RegExp(r{pattern});\n"
@@ -154,7 +157,11 @@ class Translator(ABCExpressionTranslator):
 
     def op_regex_all(self, node: "Node", pattern: str) -> str:
         reg_var = f"regex_{node.id}"
-        if pattern.startswith('"') and pattern.endswith('"') and '"' in pattern[1:-1]:
+        if (
+            pattern.startswith('"')
+            and pattern.endswith('"')
+            and '"' in pattern[1:-1]
+        ):
             pattern = f"""'{pattern.strip('"')}'"""
 
         return (
@@ -163,12 +170,16 @@ class Translator(ABCExpressionTranslator):
         )
 
     def op_regex_sub(
-            self, node: "Node", pattern: str, repl: str, count=None
+        self, node: "Node", pattern: str, repl: str, count=None
     ) -> str:
         if count is None or count in (-1, "-1"):
             return ""
         reg_var = f"regex_{node.id}"
-        if pattern.startswith('"') and pattern.endswith('"') and '"' in pattern[1:-1]:
+        if (
+            pattern.startswith('"')
+            and pattern.endswith('"')
+            and '"' in pattern[1:-1]
+        ):
             pattern = f"""'{pattern.strip('"')}'"""
 
         return (

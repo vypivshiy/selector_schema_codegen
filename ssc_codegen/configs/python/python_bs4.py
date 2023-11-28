@@ -49,9 +49,7 @@ class Translator(ABCExpressionTranslator):
 
     def _assign_nodes_expr(self, node: "Node") -> str:
         """var_node.id = var_node_prev.id"""
-        return (
-            f"{self._VAR(node)} = {self._VAR_P(node)}"
-        )
+        return f"{self._VAR(node)} = {self._VAR_P(node)}"
 
     def op_no_ret(self, node: "Node"):
         return ""
@@ -90,7 +88,9 @@ class Translator(ABCExpressionTranslator):
 
     def op_text(self, node: "Node") -> str:
         if node.var_state == VariableState.ARRAY:
-            return f"{self._VAR(node)} = [el.text for el in {self._VAR_P(node)}]"
+            return (
+                f"{self._VAR(node)} = [el.text for el in {self._VAR_P(node)}]"
+            )
         return f"{self._assign_nodes_expr(node)}.text"
 
     def op_raw(self, node: "Node") -> str:
@@ -127,10 +127,14 @@ class Translator(ABCExpressionTranslator):
         return f"{self._VAR(node)} = {string}.join({self._VAR_P(node)})"
 
     def op_regex(self, node: "Node", pattern: str) -> str:
-        return f"{self._VAR(node)} = re.search(r{pattern}, {self._VAR_P(node)})[1]"
+        return (
+            f"{self._VAR(node)} = re.search(r{pattern}, {self._VAR_P(node)})[1]"
+        )
 
     def op_regex_all(self, node: "Node", pattern: str) -> str:
-        return f"{self._VAR(node)} = re.findall(r{pattern}, {self._VAR_P(node)})"
+        return (
+            f"{self._VAR(node)} = re.findall(r{pattern}, {self._VAR_P(node)})"
+        )
 
     def op_regex_sub(
         self,
