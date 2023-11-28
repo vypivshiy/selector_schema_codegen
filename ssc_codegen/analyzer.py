@@ -42,18 +42,22 @@ class Analyzer:
                     yield token, self.__variable_state
 
                 # selector
-                case TokenType.OP_CSS | TokenType.OP_XPATH:
+                case (TokenType.OP_CSS | TokenType.OP_XPATH):
                     self._selector(index, token)
                     yield token, self.__variable_state
 
-                case TokenType.OP_CSS_ALL | TokenType.OP_XPATH_ALL:
+                case (TokenType.OP_CSS_ALL | TokenType.OP_XPATH_ALL):
                     # TODO add syntax analyze for this type
                     self._selector_array(index, token)
                     self.__variable_state = VariableState.SELECTOR_ARRAY
                     yield token, self.__variable_state
 
                 # selector end methods
-                case TokenType.OP_ATTR | TokenType.OP_ATTR_RAW | TokenType.OP_ATTR_TEXT:
+                case (
+                    TokenType.OP_ATTR  # attr
+                    | TokenType.OP_ATTR_RAW  # raw
+                    | TokenType.OP_ATTR_TEXT  # text
+                ):
                     self._selector_methods(index, token)
                     if token.token_type in TokenType.tokens_selector_extract():
                         if (
@@ -68,17 +72,26 @@ class Analyzer:
                     yield token, self.__variable_state
 
                 # strings
-                case TokenType.OP_STRING_FORMAT | TokenType.OP_STRING_REPLACE | TokenType.OP_STRING_TRIM | (
-                    TokenType.OP_STRING_L_TRIM
-                ) | TokenType.OP_STRING_R_TRIM | TokenType.OP_STRING_SPLIT:
+                case (
+                    TokenType.OP_STRING_FORMAT
+                    | TokenType.OP_STRING_REPLACE
+                    | TokenType.OP_STRING_TRIM
+                    | TokenType.OP_STRING_L_TRIM
+                    | TokenType.OP_STRING_R_TRIM
+                    | TokenType.OP_STRING_SPLIT
+                ):
                     self._string_methods(index, token)
                     if token.token_type is TokenType.OP_STRING_SPLIT:
                         self.__variable_state = VariableState.ARRAY
                     yield token, self.__variable_state
 
                 # array
-                case TokenType.OP_INDEX | TokenType.OP_FIRST | TokenType.OP_LAST | TokenType.OP_LIMIT | (
-                    TokenType.OP_JOIN
+                case (
+                    TokenType.OP_INDEX
+                    | TokenType.OP_FIRST
+                    | TokenType.OP_LAST
+                    | TokenType.OP_LIMIT
+                    | TokenType.OP_JOIN
                 ):
                     self._array_methods(index, token)
                     if token.token_type in (
@@ -104,25 +117,33 @@ class Analyzer:
                     yield token, self.__variable_state
 
                 # validators
-                case TokenType.OP_ASSERT | TokenType.OP_ASSERT_STARTSWITH | TokenType.OP_ASSERT_ENDSWITH | (
-                    TokenType.OP_ASSERT_MATCH
-                ) | TokenType.OP_ASSERT_CONTAINS:
+                case (
+                    TokenType.OP_ASSERT  # assertEqual (==)
+                    | TokenType.OP_ASSERT_STARTSWITH  # assertStarts
+                    | TokenType.OP_ASSERT_ENDSWITH  # assertEnds
+                    | TokenType.OP_ASSERT_MATCH  # assertMatch (regex first)
+                    | TokenType.OP_ASSERT_CONTAINS  # assertContains (in)
+                ):
                     self._validator_str_methods(index, token)
                     yield token, self.__variable_state
-                case TokenType.OP_ASSERT_CSS | TokenType.OP_ASSERT_XPATH:
+                case (TokenType.OP_ASSERT_CSS | TokenType.OP_ASSERT_XPATH):
                     self._validator_selector_methods(index, token)
                     yield token, self.__variable_state
 
                 # regex
-                case TokenType.OP_REGEX | TokenType.OP_REGEX_ALL | TokenType.OP_REGEX_SUB:
+                case (
+                    TokenType.OP_REGEX  # re
+                    | TokenType.OP_REGEX_ALL  # reAll
+                    | TokenType.OP_REGEX_SUB  # reSub
+                ):
                     self._regex(index, token)
                     if token.token_type == TokenType.OP_REGEX_ALL:
                         self.__variable_state = VariableState.ARRAY
                     yield token, self.__variable_state
 
-                case TokenType.OP_NO_RET:
+                case TokenType.OP_NO_RET:  # noRet
                     yield token, self.__variable_state
-                case TokenType.OP_RET:
+                case TokenType.OP_RET:  # ret
                     yield token, self.__variable_state
                 case _:
                     msg = f"Some analyzer issue: missing analyze step check:\n{token}"
