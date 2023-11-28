@@ -166,7 +166,7 @@ class Translator(ABCExpressionTranslator):
 
         return (
             f"RegExp {reg_var} = RegExp(r{pattern});\n"
-            f"List<String> {self._VAR(node)} = {reg_var}.allMatches({self._VAR_P(node)}).map((m) => m.group(0)!).toList())"
+            f"List<String> {self._VAR(node)} = {reg_var}.allMatches({self._VAR_P(node)}).map((m) => m.group(0)!).toList()"
         )
 
     def op_regex_sub(
