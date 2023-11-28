@@ -72,7 +72,8 @@ class Translator(ABCExpressionTranslator):
 
     def op_text(self, node: "Node") -> str:
         if node.var_state == VariableState.ARRAY:
-            return f"List<String> {self._VAR(node)} = {self._VAR_P(node)}.map((el) => el.text).toList()"
+            # TODO type
+            return f"var {self._VAR(node)} = {self._VAR_P(node)}.map((el) => el.text).toList()"
         return f'String {self._VAR(node)} = {self._VAR_P(node)}?.text ?? ""'
 
     def op_raw(self, node: "Node") -> str:
@@ -143,14 +144,19 @@ class Translator(ABCExpressionTranslator):
 
     def op_regex(self, node: "Node", pattern: str) -> str:
         reg_var = f"regex_{node.id}"
+        # try swap quotas
+        if pattern.startswith('"') and pattern.endswith('"') and '"' in pattern[1:-1]:
+            pattern = f"""'{pattern.strip('"')}'"""
         return (
             f"RegExp {reg_var} = RegExp(r{pattern});\n"
-            # TODO add ? symbol ???
             f"String {self._VAR(node)} = {reg_var}.firstMatch({self._VAR_P(node)})?.group(0) ?? ''"
         )
 
     def op_regex_all(self, node: "Node", pattern: str) -> str:
         reg_var = f"regex_{node.id}"
+        if pattern.startswith('"') and pattern.endswith('"') and '"' in pattern[1:-1]:
+            pattern = f"""'{pattern.strip('"')}'"""
+
         return (
             f"RegExp {reg_var} = RegExp(r{pattern});\n"
             f"List<String> {self._VAR(node)} = {reg_var}.allMatches({self._VAR_P(node)}).map((m) => m.group(0)!).toList())"
@@ -162,6 +168,9 @@ class Translator(ABCExpressionTranslator):
         if count is None or count in (-1, "-1"):
             return ""
         reg_var = f"regex_{node.id}"
+        if pattern.startswith('"') and pattern.endswith('"') and '"' in pattern[1:-1]:
+            pattern = f"""'{pattern.strip('"')}'"""
+
         return (
             f"RegExp {reg_var} = RegExp(r{pattern});\n"
             f"String {self._VAR(node)} = {self._VAR_P(node)}.replaceAllMapped({reg_var}, (m) => {count}-- > 0) : match.group(0)!"
