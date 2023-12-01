@@ -1,8 +1,10 @@
 import re
 import warnings
+from contextlib import suppress
 
-from cssselect import HTMLTranslator
+from cssselect import HTMLTranslator, SelectorSyntaxError
 from lxml import etree
+from lxml.etree import XPathSyntaxError
 
 from ssc_codegen.exceptions import CommandArgumentsError, UnknownCommandError
 from ssc_codegen.objects import TT_COMMENT, TT_NEW_LINE, Token, TokenType
@@ -93,7 +95,12 @@ TOKENS = {
 def _check_css_query(query: str):
     try:
         HTMLTranslator().css_to_xpath(query.strip('"'))
-    except Exception:
+    except SelectorSyntaxError:
+        # maybe is XPATH?
+        with suppress(XPathSyntaxError):
+            etree.XPath(query.strip('"'))
+            msg = f"{query} looks like XPATH selector, not CSS"
+            raise CommandArgumentsError(msg)
         msg = f"{query} is not valid CSS selector"
         raise CommandArgumentsError(msg)
 
@@ -101,16 +108,37 @@ def _check_css_query(query: str):
 def _check_xpath_query(query: str):
     try:
         etree.XPath(query.strip('"'))
-    except Exception:
+        # etree.XPath accept CSS-like queries without throw exception, check it!
+        with suppress(SelectorSyntaxError):
+            HTMLTranslator().css_to_xpath(query.strip('"'))
+            msg = f"{query} looks like CSS selector, not XPATH"
+            raise CommandArgumentsError(msg)
+    except XPathSyntaxError:
         msg = f"{query} is not valid XPATH selector"
         raise CommandArgumentsError(msg)
+
+
+def _check_regex_escape_quotas(pattern: str):
+    pattern = pattern[1:-1]  # remove quotas
+
+    start = 0
+    while True:
+        start = pattern.find('"', start)
+        if start != -1:
+            if pattern[start - 1] != "\\":
+                msg = f'\n`{pattern}` missing escape quote (add escape char `\\"`) or rewrite expression\n'
+                msg += " " * (start + 1) + "^\n"
+                warnings.warn(msg, category=SyntaxWarning)
+            start += 1
+            continue
+        return
 
 
 def tokenize(source_str: str) -> list[Token]:
     """convert source script code to tokens"""
     tokens: list[Token] = []
-    _have_default_op = False
-    _have_no_ret = False
+    _have_default_op = False  # `default` stmt catch flag
+    _have_no_ret = False  # `noRet` stmt catch flag
     line: str
 
     for i, line in enumerate(source_str.split(TT_NEW_LINE), 1):
@@ -123,9 +151,7 @@ def tokenize(source_str: str) -> list[Token]:
             tokens.append(Token(TokenType.OP_COMMENT, (), i, 0, line))
             continue
 
-        for start_token, ctx in TOKENS.items():
-            pattern, token_type = ctx
-
+        for start_token, (pattern, token_type) in TOKENS.items():
             if _have_default_op and token_type in TokenType.tokens_asserts():
                 warnings.warn(
                     "Detect default and validator operator. "
@@ -153,6 +179,8 @@ def tokenize(source_str: str) -> list[Token]:
                     _check_css_query(*value)
                 elif token_type in TokenType.tokens_selector_xpath():
                     _check_xpath_query(*value)
+                elif token_type in TokenType.tokens_regex():
+                    _check_regex_escape_quotas(*value)
 
                 tokens.append(Token(token_type, value, i, result.endpos, line))
                 break
@@ -178,10 +206,11 @@ def tokenize(source_str: str) -> list[Token]:
 
 
 if __name__ == "__main__":
-    src = """
-cssAll   "div > a"
-attr     "href"
+    src = r"""
+xpath  "//div/a"
+text
+re "spam="(\d+)""
 
 """
     toks = tokenize(src)
-    print()
+    print(*toks, sep="\n")
