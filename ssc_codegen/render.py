@@ -4,6 +4,7 @@ import jinja2
 
 from ssc_codegen.template_utils import (
     camelcase,
+    cfg_block_signature,
     generate_attr_signature,
     generate_meta_info,
     ret_type,
@@ -22,6 +23,7 @@ ENV.globals.update(
         "sep_code": lambda sep, lines: sep.join(lines),
         "generate_attr_signature": generate_attr_signature,
         "ret_type": ret_type,
+        "cfg_block_signature": cfg_block_signature,
     }
 )
 

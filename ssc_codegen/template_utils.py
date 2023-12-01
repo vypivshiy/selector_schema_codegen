@@ -24,6 +24,18 @@ def snake_case(s: str) -> str:
     return re.sub(r"(?<!^)(?=[A-Z])", "_", s).lower()
 
 
+def cfg_block_signature(
+    attr: "SchemaAttribute",
+    comment_prefix: str,
+    header: str = "script signature:",
+    sep: str = "\n",
+) -> str:
+    header += sep
+    return f"{comment_prefix}{header}" + sep.join(
+        f"{comment_prefix}{line}" for line in attr.raw_code.split("\n")
+    )
+
+
 def generate_meta_info(
     info: "Info",
     *,
