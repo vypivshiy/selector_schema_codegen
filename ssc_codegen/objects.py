@@ -60,7 +60,7 @@ class TokenType(Enum):
 
     @classmethod
     def tokens_selector_css(cls):
-        return (TokenType.OP_CSS, TokenType.OP_CSS_ALL, TokenType.OP_ASSERT_CSS)
+        return TokenType.OP_CSS, TokenType.OP_CSS_ALL, TokenType.OP_ASSERT_CSS
 
     @classmethod
     def tokens_selector_xpath(cls):
