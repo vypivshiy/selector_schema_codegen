@@ -77,6 +77,7 @@ class {{ schema.name }} extends __BaseViewModel {
 
     {% for attr in schema.attrs %}
     {{ ret_type(attr, translator)}} _parse{{ camelcase(attr.name) }}(dynamic {{ translator.METHOD_ARG_NAME }}){
+        {{ cfg_block_signature(attr, "// ") }}
         {{ sep_code(";\n        ", attr.code.split(";\n")) }}
     }
     {% endfor %}

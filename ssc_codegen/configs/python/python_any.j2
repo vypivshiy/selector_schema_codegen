@@ -1,5 +1,6 @@
 """{{ generate_meta_info(ctx) }}"""
 
+from __future__ import annotations  # python 3.7, 3.8 typing comp
 from typing import Any
 {{ translator.REGEX_IMPORT }}
 
@@ -61,6 +62,7 @@ class {{ schema.name }}(__BaseViewModel):
     {% for attr in schema.attrs %}
     @staticmethod
     def _parse_{{ attr.name }}({{ translator.METHOD_ARG_NAME }}: {{ translator.SELECTOR_TYPE }}){{ ret_type(attr, translator)}}:
+        {{ cfg_block_signature(attr, "# ") }}
         {{ sep_code("\n        ", attr.code.split("\n")) }}
     {% endfor %}
     def _start_parse(self):
