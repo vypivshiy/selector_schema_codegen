@@ -23,7 +23,7 @@ def _parse_arguments():
     parser.add_argument(
         "-o",
         "--out",
-        default=f"{Path.cwd()}/schema.{{}}",
+        default=f"{Path.cwd()}/schema{{}}",
         help="Output directory (default: current working directory/schema.<ext>)",
     )
     parser.add_argument(
@@ -73,7 +73,7 @@ def main():
         sep="\n",
     )
     if Path(output_dir).exists() and not args.OVERWRITE:
-        choice = input("Overwrite? (y/n)?")
+        choice = input("Overwrite? (y/n)? ")
         if choice.lower() != "y":
             print("Cancel operation")
             exit(1)
