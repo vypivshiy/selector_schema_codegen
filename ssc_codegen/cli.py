@@ -10,7 +10,7 @@ def _parse_arguments():
     parser = argparse.ArgumentParser(
         prog="Selector schema generator",
         description="Generate selector schemas from config file",
-        usage="cli my_conf.yaml python out_file",
+        usage="ssc-gen my_conf.yaml python.bs4 -o out_file",
     )
 
     parser.add_argument("cfg", help="YAML config file path")
