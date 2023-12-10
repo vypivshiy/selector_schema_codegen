@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "ssc_codegen"
-version = "0.1.10"
+version = "0.1.11"
 description = "generate selector schemas classes from yaml config and DSL-lang script"
 authors = ["vypivshiy"]
 readme = "README.md"
