@@ -14,8 +14,7 @@ class __BaseViewModel:
         self._aliases = {}
         self._view_keys = []
 
-    @staticmethod
-    def _pre_validate(doc):
+    def _pre_validate(self, doc):
         pass
 
     def _start_parse(self):
@@ -54,14 +53,12 @@ class {{ schema.name }}(__BaseViewModel):
         self._aliases = {{ schema.aliases }}
         self._view_keys = {{ schema.view_keys }}
 
-    @staticmethod
-    def _pre_validate({{ translator.METHOD_ARG_NAME }}: {{ translator.SELECTOR_TYPE }}):
+    def _pre_validate(self, {{ translator.METHOD_ARG_NAME }}: {{ translator.SELECTOR_TYPE }}):
         {{ sep_code("\n        ", schema.pre_validate_code.split("\n")) }}
     def _part_document(self, {{ translator.METHOD_ARG_NAME }}: {{ translator.SELECTOR_TYPE }}):
         {{ sep_code("\n        ", schema.split_code.split("\n")) }}
     {% for attr in schema.attrs %}
-    @staticmethod
-    def _parse_{{ attr.name }}({{ translator.METHOD_ARG_NAME }}: {{ translator.SELECTOR_TYPE }}){{ ret_type(attr, translator)}}:
+    def _parse_{{ attr.name }}(self, {{ translator.METHOD_ARG_NAME }}: {{ translator.SELECTOR_TYPE }}){{ ret_type(attr, translator)}}:
         {{ cfg_block_signature(attr, "# ") }}
         {{ sep_code("\n        ", attr.code.split("\n")) }}
     {% endfor %}
