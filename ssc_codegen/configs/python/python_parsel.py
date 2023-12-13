@@ -77,8 +77,8 @@ class Translator(ABCExpressionTranslator):
 
     def op_text(self, node: "Node") -> str:
         if node.var_state == VariableState.ARRAY:
-            return f'{self._assign_nodes_expr(node)}.xpath("./text()").getall()'
-        return f'{self._assign_nodes_expr(node)}.xpath("./text()").get()'
+            return f'{self._assign_nodes_expr(node)}.css("::text").getall()'
+        return f'{self._assign_nodes_expr(node)}.xpath("::text").get()'
 
     def op_raw(self, node: "Node") -> str:
         if node.var_state == VariableState.ARRAY:
