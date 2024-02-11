@@ -1,0 +1,26 @@
+{# DictStruct #}
+class {{ klass_name }}:
+    """{{ klass_docstring }}"""
+
+    {% if method_pre_validate %}
+    {{ method_pre_validate }}
+    {% endif %}
+
+    def _part_document(self):
+        {# method crop doc #}
+        doc = self.__selector__
+        {{ code }}
+
+    def _start_parse(self):
+        self._cached_result.clear()
+        for part in self._part_document():
+            self._cached_result[self._key(part)] = self._value(part)
+
+    def view(self) -> _T_DICT_ITEM:
+        return self._cached_result
+
+    def _key(self, doc) -> str:
+        {{ code_key }}
+
+    def _value(self, doc) -> str | list[str]:
+        {{ code_value }}

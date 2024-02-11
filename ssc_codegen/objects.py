@@ -1,11 +1,23 @@
 from dataclasses import dataclass
-from enum import Enum
-from typing import Optional
+from enum import IntEnum
+from typing import NamedTuple, Any, Optional, TYPE_CHECKING
 
 
-class TokenType(Enum):
+if TYPE_CHECKING:
+    from ssc_codegen.document import Document
+
+
+class VariableState(IntEnum):
+    DOCUMENT = 0
+    LIST_DOCUMENT = 1
+    STRING = 2
+    LIST_STRING = 3
+    NONE = 4
+    DOCSTRING = 5  # ///
+
+
+class TokenType(IntEnum):
     """all command enum representation"""
-
     # SELECTORS
     OP_XPATH = 0
     OP_XPATH_ALL = 1
@@ -27,202 +39,82 @@ class TokenType(Enum):
     OP_STRING_SPLIT = 15
     # ARRAY
     OP_INDEX = 16
-    OP_FIRST = 17
-    OP_LAST = 18
-    OP_LIMIT = 19
     OP_JOIN = 20
     # ANY
-    OP_COMMENT = 21
-    OP_TRANSLATE_DEFAULT_CODE = 22  # wrap try/catch mark
-    OP_TRANSLATE_CODE = 23
-    OP_NEW_LINE = 24
-    OP_CUSTOM_FORMATTER = 25
+    OP_DEFAULT = 22  # wrap try/catch mark
     # VALIDATORS
-    OP_ASSERT = 26
+    OP_ASSERT_EQUAL = 26
     OP_ASSERT_CONTAINS = 27
-    OP_ASSERT_STARTSWITH = 28
-    OP_ASSERT_ENDSWITH = 29
-    OP_ASSERT_MATCH = 30
+    OP_ASSERT_RE_MATCH = 30
     OP_ASSERT_CSS = 31
     OP_ASSERT_XPATH = 32
-    # declare return statements for translator
-    OP_NO_RET = 33
-    OP_RET = 34
-
-    @classmethod
-    def tokens_selector_all(cls):
-        return (
-            TokenType.OP_CSS,
-            TokenType.OP_XPATH,
-            TokenType.OP_CSS_ALL,
-            TokenType.OP_XPATH_ALL,
-        )
-
-    @classmethod
-    def tokens_selector_css(cls):
-        return TokenType.OP_CSS, TokenType.OP_CSS_ALL, TokenType.OP_ASSERT_CSS
-
-    @classmethod
-    def tokens_selector_xpath(cls):
-        return (
-            TokenType.OP_XPATH,
-            TokenType.OP_XPATH_ALL,
-            TokenType.OP_ASSERT_XPATH,
-        )
-
-    @classmethod
-    def tokens_selector_fetch_one(cls):
-        return TokenType.OP_CSS, TokenType.OP_XPATH
-
-    @classmethod
-    def tokens_selector_fetch_all(cls):
-        return TokenType.OP_CSS_ALL, TokenType.OP_XPATH_ALL
-
-    @classmethod
-    def tokens_selector_extract(cls):
-        return TokenType.OP_ATTR, TokenType.OP_ATTR_TEXT, TokenType.OP_ATTR_RAW
-
-    @classmethod
-    def tokens_regex(cls):
-        return (
-            TokenType.OP_REGEX,
-            TokenType.OP_REGEX_ALL,
-            TokenType.OP_REGEX_SUB,
-        )
-
-    @classmethod
-    def tokens_string(cls):
-        return (
-            TokenType.OP_STRING_FORMAT,
-            TokenType.OP_STRING_REPLACE,
-            TokenType.OP_STRING_SPLIT,
-            TokenType.OP_STRING_L_TRIM,
-            TokenType.OP_STRING_R_TRIM,
-            TokenType.OP_STRING_TRIM,
-        )
-
-    @classmethod
-    def tokens_array(cls):
-        return (
-            TokenType.OP_INDEX,
-            TokenType.OP_FIRST,
-            TokenType.OP_LAST,
-            TokenType.OP_LIMIT,
-            TokenType.OP_JOIN,
-        )
-
-    @classmethod
-    def tokens_asserts(cls):
-        return (
-            TokenType.OP_ASSERT,
-            TokenType.OP_ASSERT_STARTSWITH,
-            TokenType.OP_ASSERT_ENDSWITH,
-            TokenType.OP_ASSERT_CSS,
-            TokenType.OP_ASSERT_XPATH,
-            TokenType.OP_ASSERT_CONTAINS,
-            TokenType.OP_ASSERT_MATCH,
-        )
-
-    @classmethod
-    def token_fluent_optimization(cls):
-        return (
-            TokenType.OP_CSS,
-            TokenType.OP_XPATH,
-            TokenType.OP_XPATH_ALL,
-            TokenType.OP_CSS_ALL,
-            TokenType.OP_INDEX,
-            TokenType.OP_ATTR,
-            TokenType.OP_ATTR_RAW,
-            TokenType.OP_ATTR_TEXT,
-        )
+    # UTILS HELPER TOKENS
+    OP_DOCSTRING = 100
+    OP_FUNCTION_HEAD = 101
+    OP_INIT = 103  # for init first var
+    OP_NO_RET = 104  # for validators: try/catch wraps
+    OP_RET = 105
+    # try/except or try/catch tokens
+    OP_DEFAULT_START = 106
+    OP_DEFAULT_END = 107
+    # tokens for build struct classes
+    OP_STRUCT = 200
+    OP_STRUCT_INIT = 201
+    # pre-validate method before init
+    OP_STRUCT_VALIDATOR = 202
+    # private parse method
+    # OP_STRUCT_METHOD = 203
+    # public parse method. should be allowed override
+    OP_STRUCT_PARSE = 204
 
 
-class Token:
-    def __init__(
-        self,
-        token_type: TokenType,
-        args: Optional[tuple[str, ...]],
-        line: int,
-        pos: int,
-        code: str,
-    ):
-        """Token model
-
-        :param token_type: token type, enum
-        :param args: command arguments. tuple of strings
-        :param line: line num
-        :param pos: line position
-        :param code: raw line command
-        """
-        self.token_type = token_type
-        self._args = args
-        self.line = line
-        self.pos = pos
-        self._code = code
-
-    @property
-    def id(self):
-        return hash(self)
-
-    def __hash__(self):
-        hash_ = hash(self._code) + hash(self.values) + self.line + self.pos
-        # hash should be positive for generate variables names
-        return hash_ * -1 if hash_ < 0 else hash_
-
-    @property
-    def raw_code(self):
-        return self._code
-
-    @property
-    def values(self) -> tuple[str, ...]:
-        """remove quotes matched groups `'"`"""
-        if not self._args:
-            return ()
-        return self._args
-
-    @values.setter
-    def values(self, value: tuple[str, ...]):
-        self._args = value
-
-    def __repr__(self):
-        return f"{self.line}::{self.pos}: val_{self.id} = {self.token_type}, args={self.values}"
-
-
-TT_COMMENT = "//"
-TT_NEW_LINE = "\n"
-
-
-class VariableState(Enum):
-    """variable states in Syntax analyzer and codegen representation"""
-
-    SELECTOR = 0
-    SELECTOR_ARRAY = 1  # dynamic list/vector of node elements
-    TEXT = 2
-    ARRAY = 3  # dynamic list/vector of string types
-    NO_RETURN = 4  # return nothing
+class Expression(NamedTuple):
+    num: int
+    variable_state: VariableState
+    token_type: TokenType
+    arguments: tuple[Any, ...]
+    message: Optional[str] = None  # FOR ASSERT
 
 
 @dataclass(repr=False)
 class Node:
-    """node representation like. AST structure have linked list struct"""
+    """AST node representation"""
 
     num: int
     count: int
-    token: Token
-    var_state: VariableState
+    expression: Expression
     ast_tree: dict[int, "Node"]
     prev: Optional[int]
     next: Optional[int]
 
+    @property
+    def var_state(self):
+        return self.expression.variable_state
+
+    @property
+    def token(self) -> TokenType:
+        return self.expression.token_type
+
     def __repr__(self):
-        return f"Node_{self.num}_{self.count}(prev={self.prev}, next={self.next}, var={self.var_state}, token={self.token})"
+        return (f"Node_[{self.num},{self.count}](prev={self.prev}, next={self.next}, var_state={self.var_state.name!r}, "
+                f"token={self.token.name!r})")
 
     @property
     def id(self) -> Optional[int]:
-        # exclude enumerate assert tokens
+        # exclude enumerate assert, system tokens
         if (
-            self.token.token_type not in TokenType.tokens_asserts()
-            and self.token.token_type != TokenType.OP_TRANSLATE_DEFAULT_CODE
+                self.token not in (TokenType.OP_ASSERT_CSS,
+                                   TokenType.OP_ASSERT_XPATH,
+                                   TokenType.OP_ASSERT_CONTAINS,
+                                   TokenType.OP_ASSERT_EQUAL,
+                                   TokenType.OP_ASSERT_RE_MATCH,
+                                   # SYSTEM
+                                   TokenType.OP_FUNCTION_HEAD,
+                                   TokenType.OP_DEFAULT_START,
+                                   TokenType.OP_DEFAULT_END,
+                                   TokenType.OP_RET,
+                                   TokenType.OP_NO_RET
+                                   )
         ):
             return self.num
 
@@ -232,7 +124,7 @@ class Node:
             if prev_node is None:
                 return None
 
-            elif prev_node.token.token_type in TokenType.tokens_asserts():
+            elif prev_node.token in ():
                 prev_node = prev_node.prev_node
                 continue
             else:
@@ -242,8 +134,8 @@ class Node:
     def return_arg_type(self) -> VariableState:
         # return variable state of return value
         node = self.ast_tree[self.count - 1]
-        if node.token.token_type == TokenType.OP_NO_RET:
-            return VariableState.NO_RETURN
+        if node.token == TokenType.OP_NO_RET:
+            return VariableState.NONE
         return node.var_state
 
     @property
@@ -257,3 +149,42 @@ class Node:
         if self.prev is not None:
             return self.ast_tree[self.prev]
         return None
+
+
+# CONSTANTS EXPR
+EXPR_INIT = Expression(
+    -1,
+    VariableState.NONE,
+    TokenType.OP_INIT,
+    arguments=()
+)
+
+EXPR_RET = Expression(-1,
+                      VariableState.NONE,
+                      TokenType.OP_RET,
+                      arguments=(), )
+
+EXPR_NO_RET = Expression(-1,
+                         VariableState.NONE,
+                         TokenType.OP_NO_RET,
+                         arguments=())
+
+
+def create_default_expr(doc: "Document") -> "Document":
+    default_expr = doc.pop(0)
+    value = default_expr.arguments[0]
+    start_default_expr = Expression(
+        -1,
+        VariableState.NONE,
+        TokenType.OP_DEFAULT_START,
+        arguments=()
+    )
+    end_default_expr = Expression(
+        -1,
+        VariableState.NONE,
+        TokenType.OP_DEFAULT_END,
+        arguments=(value,)
+    )
+    doc.insert(0, start_default_expr)
+    doc.append(end_default_expr)
+    return doc

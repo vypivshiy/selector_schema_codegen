@@ -1,0 +1,31 @@
+{# ListStruct #}
+class {{ klass_name }}(_BaseStructParser):
+    """{{ klass_docstring }}"""
+
+    {% if method_pre_validate %}
+    {{ method_pre_validate }}
+    {% endif %}
+
+    def _part_document(self) -> SelectorList:
+        {# method crop doc #}
+        var_1 = self.__selector__
+        {{ code }}
+
+    def _start_parse(self):
+        self._cached_result.clear()
+        for part in self._part_document():
+            self._cached_result.append({
+        {% for method in methods %}
+            "{{ method.name }}" = self._parse_{{ method.name }}(part)
+        {% endfor %}
+        })
+
+    def view(self) -> _T_LIST_ITEMS:
+        """struct signature: ..."""
+        return self._cached_result
+
+    {% for method in methods %}
+    def _parse_{{ method.name }}(self, doc: Selector) -> str | list[str]:
+        """{{ method.docstring }}"""
+        {{ method.code }}
+    {% endfor %}
