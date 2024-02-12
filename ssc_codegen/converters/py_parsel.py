@@ -4,7 +4,9 @@ __all__ = ["converter"]
 
 from ssc_codegen.objects import TokenType, Node, VariableState
 
-converter = CodeConverter()
+converter = CodeConverter(
+    templates_path="ssc_codegen.templates.python.parsel"
+)
 
 
 @converter(TokenType.OP_XPATH)

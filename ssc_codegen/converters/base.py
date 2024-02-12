@@ -25,12 +25,14 @@ class CodeConverter:
     def __init__(self,
                  indent: str = " " * 4,
                  end: str = "",
-                 intent_inner_try: str = " " * 4 * 2):
+                 intent_inner_try: str = " " * 4 * 2,
+                 templates_path: str = ""):
 
         self.indent = indent
         self.end = end
         self.indent_inner_try = intent_inner_try
         self.definitions: Dict[TokenType, Callable[[Node], str]] = {}  # type: ignore
+        self.templates_path: str = templates_path
 
         self._in_inner_try: bool = False
 
