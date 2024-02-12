@@ -1,10 +1,11 @@
-from typing import Optional, TypeVar
+from typing import Optional, TypeVar, TYPE_CHECKING
 
 from ssc_codegen.objects import VariableState, TokenType, Expression
+from ssc_codegen.document import Document
 
 __all__ = ["assert_"]
 
-T_DOCUMENT = TypeVar("T_DOCUMENT", bound="Document")
+T_DOCUMENT = TypeVar("T_DOCUMENT", bound=Document)
 
 
 class Assert:
