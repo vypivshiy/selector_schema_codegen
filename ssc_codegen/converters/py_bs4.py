@@ -4,7 +4,9 @@ __all__ = ["converter"]
 
 from ssc_codegen.objects import TokenType, Node, VariableState
 
-converter = CodeConverter()
+converter = CodeConverter(
+    templates_path="ssc_codegen.templates.python.bs4"
+)
 
 
 @converter(TokenType.OP_XPATH)
@@ -38,11 +40,18 @@ def op_css_all(node: Node) -> str:
 
 @converter(TokenType.OP_ATTR)
 def op_attr(node: Node) -> str:
+    attr = node.expression.arguments[0]
+    if node.var_state == VariableState.DOCUMENT:
+        return (
+                VAR_L(node)
+                + " = "
+                + VAR_R(node)
+                + f"[{attr!r}]"
+        )
     return (
             VAR_L(node)
             + " = "
-            + VAR_R(node)
-            + f"[{node.expression.arguments[0]!r}]"
+            + f'[el[{attr!r}] for el in {VAR_R(node)}]'
     )
 
 
@@ -68,7 +77,7 @@ def op_attr_raw(node: Node) -> str:
                 VAR_L(node)
                 + " = "
                 + VAR_R(node)
-                + '__str__()'
+                + '.__str__()'
         )
     return (
             VAR_L(node)
@@ -237,7 +246,7 @@ def op_assert_css(node: Node) -> str:
             "assert"
             + " "
             + VAR_R(node)
-            + f".css({query!r}).get()"
+            + f".select_one({query!r}).get()"
     )
 
 
