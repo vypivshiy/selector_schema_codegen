@@ -1,0 +1,52 @@
+class {{ struct.name }} extends _BaseStructParser {
+  {%- if struct.docstring %}
+  {%- for line in struct.docstring.split('\n') %}
+  /// {{ line.strip() }}
+  {%- endfor %}
+  {%- endif %}
+  @override
+  ListItem get _cachedResult => [];
+  {{ struct.name }}(super.document);
+
+  {% if struct.pre_validate -%}
+  @override
+  _preValidate(Document doc){
+    {%- for line in struct.pre_validate.code(converter) %}
+    {{ line }}
+    {%- endfor %}
+  }
+  {% endif %}
+
+  _partDocument(Document doc){
+    {%- for line in struct.split_document.code(converter) %}
+    {{ line }}
+    {%- endfor %}
+  }
+
+  @override
+  _startParse(){
+    _cachedResult.clear();
+    for (var part in _partDocument(selector)){
+      _cachedResult.add(
+        {
+      {%- for method in struct.methods %}
+        '{{ method.name }}': _parse{{ method.name.title() }}(part),
+      {%- endfor %}
+        });
+    }
+
+
+  }
+  {% for method in struct.methods %}
+  _parse{{ method.name.title() }}(Document doc){
+  {%- if method.docstring %}
+  {%- for line in method.docstring.split('\n') %}
+  /// {{ line.strip() }}
+  {%- endfor %}
+  {%- endif %}
+  {%- for line in method.code(converter) %}
+  {{ line }}
+  {%- endfor -%}
+  }
+  {% endfor %}
+}

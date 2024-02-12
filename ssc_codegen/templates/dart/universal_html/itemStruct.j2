@@ -1,0 +1,40 @@
+class {{ struct.name }} extends _BaseStructParser {
+  {%- if struct.docstring %}
+  {%- for line in struct.docstring.split('\n') %}
+  /// {{ line.strip() }}
+  {%- endfor %}
+  {%- endif %}
+  @override
+  DictItem get _cachedResult => {};
+  {{ struct.name }}(super.document);
+
+  {% if struct.pre_validate -%}
+  @override
+  _preValidate(Document doc){
+    {%- for line in struct.pre_validate.code(converter) %}
+    {{ line }}
+    {%- endfor %}
+  }
+  {% endif %}
+
+  @override
+  _startParse(){
+    _cachedResult.clear();
+    {%- for method in struct.methods %}
+    _cachedResult['{{ method.name }}'] = _parse{{ method.name.title() }}(selector);
+    {%- endfor %}
+
+  }
+  {% for method in struct.methods %}
+  _parse{{ method.name.title() }}(Document doc){
+  {%- if method.docstring %}
+  {%- for line in method.docstring.split('\n') %}
+  /// {{ line.strip() }}
+  {%- endfor %}
+  {%- endif %}
+  {%- for line in method.code(converter) %}
+  {{ line }}
+  {%- endfor -%}
+  }
+  {% endfor %}
+}

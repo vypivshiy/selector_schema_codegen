@@ -1,19 +1,29 @@
+import random
+import re
+
 from ssc_codegen.converters.base import CodeConverter, VAR_R, VAR_L
 
 __all__ = ["converter"]
 
 from ssc_codegen.objects import TokenType, Node, VariableState
 
-converter = CodeConverter()
+converter = CodeConverter(
+    templates_path="ssc_codegen.templates.dart.universal_html",
+    end=';',
+    indent=" " * 2,
+    intent_inner_try=" " * 4
+)
 
 
 @converter(TokenType.OP_XPATH)
-def op_xpath(node: Node):
-    raise NotImplementedError('Not supported xpah')
+def op_xpath(_: Node):
+    raise NotImplementedError('Not supported xpath')
+
 
 @converter(TokenType.OP_XPATH_ALL)
-def op_xpath_all(node: Node):
-    raise NotImplementedError('Not supported xpah')
+def op_xpath_all(_: Node):
+    raise NotImplementedError('Not supported xpath')
+
 
 @converter(TokenType.OP_CSS)
 def op_css(node: Node) -> str:
@@ -37,19 +47,20 @@ def op_css_all(node: Node) -> str:
 
 @converter(TokenType.OP_ATTR)
 def op_attr(node: Node) -> str:
+    attr_name = node.expression.arguments[0]
     if node.var_state == VariableState.LIST_DOCUMENT:
         return ("var "
                 + VAR_L(node)
                 + " = "
                 + VAR_R(node)
-                + ".map((el) => el.attributes[{attr_name}]).toList()"
+                + f".map((el) => el.attributes[{attr_name!r}]).toList()"
         )
 
     return ("var "
             + VAR_L(node)
             + " = "
             + VAR_R(node)
-            + f".attributes[{node.expression.arguments[0]!r}]"
+            + f".attributes[{attr_name!r}]"
     )
 
 
@@ -77,7 +88,7 @@ def op_attr_raw(node: Node) -> str:
                 + VAR_L(node)
                 + " = "
                 + VAR_R(node)
-                + '.innerHtml()'
+                + '.innerHtml'
         )
     return ("var "
             + VAR_L(node)
@@ -90,21 +101,24 @@ def op_attr_raw(node: Node) -> str:
 @converter(TokenType.OP_REGEX)
 def op_regex(node: Node) -> str:
     pattern = node.expression.arguments[0]
-    return ("var "
+    reg_var = f"regex_{VAR_L(node)}"
+    return (f"RegExp {reg_var} = RegExp(r{pattern});\n"
+            + "var "
             + VAR_L(node)
             + " = "
-            + f"re.search(r{pattern!r}, {VAR_R(node)})"
-            + "[1]"
+            + f"{reg_var}.firstMatch({VAR_R(node)})?.group(0) ?? ''"
     )
 
 
 @converter(TokenType.OP_REGEX_ALL)
 def op_regex_all(node: Node) -> str:
     pattern = node.expression.arguments[0]
-    return (
-            VAR_L(node)
+    reg_var = f"regex_{VAR_L(node)}"
+    return (f"RegExp {reg_var} = RegExp(r{pattern});\n"
+            + "var "
+            + VAR_L(node)
             + " = "
-            + f"re.findall(r{pattern!r}, {VAR_R(node)})"
+            + f"{reg_var}.allMatches({VAR_R(node)}).map((m) => m.group(0)!).toList()"
     )
 
 
@@ -112,69 +126,92 @@ def op_regex_all(node: Node) -> str:
 def op_regex_sub(node: Node) -> str:
     pattern = node.expression.arguments[0]
     repl = node.expression.arguments[1]
-    return (
-            f"{VAR_L(node)} = "
-            + f"re.sub(r{pattern!r}, {repl!r}, {VAR_R(node)})"
+
+    reg_var = f"f regex_{VAR_L(node)}"
+    return (f"RegExp {reg_var} = RegExp(r{pattern});\n"
+            + "var "
+            + VAR_L(node)
+            + " = "
+            + VAR_R(node)
+            + f".replaceAll(r{pattern!r}, {repl!r})"
     )
+
+
+# TRIM signatures based by:
+# https://stackoverflow.com/a/14107914
 
 
 @converter(TokenType.OP_STRING_TRIM)
 def op_string_trim(node: Node) -> str:
     substr = node.expression.arguments[0]
-    return (
-            VAR_L(node)
+
+    substr_left = f"^{substr}"
+    substr_right = f"{substr}$"
+
+    return ("var "
+            + VAR_L(node)
             + " = "
-            + f"{VAR_R(node)}.strip({substr!r})"
-    )
+            + VAR_R(node)
+            + f'.replaceFirst(RegExp({substr_left!r}), "")'
+            + f'.replaceFirst(RegExp({substr_right!r}), "")'
+            )
 
 
 @converter(TokenType.OP_STRING_L_TRIM)
 def op_string_l_trim(node: Node) -> str:
     substr = node.expression.arguments[0]
-    return (
-            VAR_L(node)
+
+    substr_left = f"^{substr}"
+
+    return ("var "
+            + VAR_L(node)
             + " = "
-            + f"{VAR_R(node)}.lstrip({substr!r})"
-    )
+            + VAR_R(node)
+            + f'.replaceFirst(RegExp({substr_left!r}), "")'
+            )
 
 
 @converter(TokenType.OP_STRING_R_TRIM)
 def op_string_r_trim(node: Node) -> str:
     substr = node.expression.arguments[0]
-    return (
-            VAR_L(node)
+
+    substr_right = f"{substr}$"
+
+    return ("var "
+            + VAR_L(node)
             + " = "
-            + f"{VAR_R(node)}.rstrip({substr!r})"
-    )
+            + VAR_R(node)
+            + f'.replaceFirst(RegExp({substr_right!r}), "")'
+            )
 
 
 @converter(TokenType.OP_STRING_REPLACE)
 def op_string_replace(node: Node) -> str:
     old = node.expression.arguments[0]
     new = node.expression.arguments[1]
-    return (
-            VAR_L(node)
+    return ("var "
+            + VAR_L(node)
             + " = "
-            + f"{VAR_R(node)}.replace({old!r}, {new!r})"
+            + f"{VAR_R(node)}.replaceAll(RegExp({old!r}), {new!r}"
     )
 
 
 @converter(TokenType.OP_STRING_FORMAT)
 def op_string_format(node: Node) -> str:
-    fmt_str = node.expression.arguments[0].replace("{{", "{").replace("}}", "}")
-    return (
-            VAR_L(node)
+    fmt_str = node.expression.arguments[0]
+    fmt_str = re.sub(r'\{\{}}', f"${VAR_R(node)}", fmt_str)
+    return ("var"
+            + VAR_L(node)
             + " = "
-            + repr(fmt_str)
-            + f".format({VAR_R(node)})"
+            + fmt_str
     )
 
 
 @converter(TokenType.OP_STRING_SPLIT)
 def op_string_split(node: Node) -> str:
     sep = node.expression.arguments[0]
-    return (
-            VAR_L(node)
+    return ("var "
+            + VAR_L(node)
             + " = "
             + VAR_R(node)
             + f".split({sep!r})"
@@ -184,8 +221,8 @@ def op_string_split(node: Node) -> str:
 @converter(TokenType.OP_INDEX)
 def op_string_index(node: Node) -> str:
     i = node.expression.arguments[0]
-    return (
-            VAR_L(node)
+    return ("var "
+            + VAR_L(node)
             + " = "
             + VAR_R(node)
             + f"[{i}]"
@@ -195,11 +232,11 @@ def op_string_index(node: Node) -> str:
 @converter(TokenType.OP_JOIN)
 def op_join(node: Node) -> str:
     prefix = node.expression.arguments[0]
-    return (
-            VAR_L(node)
+    return ("var "
+            + VAR_L(node)
             + " = "
-            + prefix
-            + f".join({VAR_R(node)})"
+            + VAR_R(node)
+            + f".join({prefix!r})"
     )
 
 
@@ -209,11 +246,11 @@ def op_join(node: Node) -> str:
 def op_assert_equal(node: Node) -> str:
     value = node.expression.arguments[0]
     return (
-            "assert"
-            + " "
+            "assert("
             + VAR_R(node)
             + " == "
             + repr(value)
+            + ")"
     )
 
 
@@ -221,21 +258,26 @@ def op_assert_equal(node: Node) -> str:
 def op_assert_contains(node: Node) -> str:
     value = node.expression.arguments[0]
     return (
-            "assert"
-            + " "
-            + repr(value)
-            + " in "
+            "assert("
             + VAR_R(node)
+            + ".contains("
+            + f"{value!r})"
+            + ")"
     )
 
 
 @converter(TokenType.OP_ASSERT_RE_MATCH)
 def op_assert_re_match(node: Node) -> str:
     pattern = node.expression.arguments[0]
+    re_var = f"re_{node.num}"
     return (
-            "assert"
-            + " "
-            + f"re.search(r{pattern!r}, {VAR_R(node)})"
+            f"RegExp {re_var} = RegExp(r{pattern!r});\n"
+            + "assert("
+            + re_var
+            + ".firstMatch("
+            + VAR_R(node)
+            + ")"
+            + " != null)"
     )
 
 
@@ -243,27 +285,21 @@ def op_assert_re_match(node: Node) -> str:
 def op_assert_css(node: Node) -> str:
     query = node.expression.arguments[0]
     return (
-            "assert"
-            + " "
+            "assert("
             + VAR_R(node)
-            + f".css({query!r}).get()"
+            + f".querySelector({query!r})"
+            + " != null)"
     )
 
 
 @converter(TokenType.OP_ASSERT_XPATH)
-def op_assert_xpath(node: Node) -> str:
-    query = node.expression.arguments[0]
-    return (
-            "assert"
-            + " "
-            + VAR_R(node)
-            + f".xpath({query!r}).get()"
-    )
+def op_assert_xpath(_: Node) -> str:
+    raise NotImplementedError("dart universal html not support xpath")
 
 
 @converter(TokenType.OP_INIT)
 def op_init(_: Node) -> str:
-    return "var_0 = doc"
+    return "var var_0 = doc"
 
 
 @converter(TokenType.OP_RET)
