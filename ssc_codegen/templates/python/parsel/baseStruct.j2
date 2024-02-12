@@ -16,7 +16,7 @@ class _BaseStructParser:
     def __init__(self, document: str):
         self.__raw__ = document
         self.__selector__ = Selector(document)
-        self._cached_result: _T_DICT_ITEM | _T_LIST_ITEMS  = {}
+        self._cached_result: Union[_T_DICT_ITEM, _T_LIST_ITEMS]  = {}
 
     def _pre_validate(self, document: Selector) -> None:
         # pre validate entrypoint, contain assert expressions
