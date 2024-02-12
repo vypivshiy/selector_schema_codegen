@@ -1,0 +1,39 @@
+class {{ struct.name }}(_BaseStructParser):
+    {%- if struct.docstring %}
+    """{{ struct.docstring }}"""
+    {%- endif %}
+    def __init__(self, document: str):
+        super().__init__(document)
+        self._cached_result: _T_DICT_ITEM = {}
+
+    {% if struct.pre_validate -%}
+    def _pre_validate(self, doc: HTMLParser) -> None:
+    {%- for line in struct.pre_validate.code(converter) %}
+    {{ line }}
+    {%- endfor %}
+    {%- endif %}
+
+    def _part_document(self) -> List[Node]:
+        doc = self.__selector__
+    {%- for line in struct.split_document.code(converter) %}
+    {{ line }}
+    {%- endfor %}
+
+    def _start_parse(self):
+        self._cached_result.clear()
+        for part in self._part_document():
+            self._cached_result[self._parse_key(part)] = self._parse_value(part)
+
+    def view(self) -> _T_DICT_ITEM:
+        return self._cached_result
+{% for method in struct.methods %}
+    def _parse_{{ method.name }}(self, doc: Node):
+    {%- if method.docstring %}
+        """{{ method.docstring }}
+        """
+    {% endif %}
+    {%- for line in method.code(converter) %}
+    {{ line }}
+    {%- endfor -%}
+
+{% endfor %}
