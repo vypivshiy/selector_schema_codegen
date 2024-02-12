@@ -6,9 +6,6 @@ class {{ struct.name }}(_BaseStructParser):
         super().__init__(document)
         self._cached_result: _T_DICT_ITEM = {}
 
-    {% if method_pre_validate -%}
-    {{ method_pre_validate }}
-    {%- endif %}
     {% if struct.pre_validate -%}
     def _pre_validate(self, doc: Selector) -> None:
     {%- for line in struct.pre_validate.code(converter) %}
