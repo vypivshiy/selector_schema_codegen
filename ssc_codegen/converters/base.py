@@ -32,9 +32,13 @@ class CodeConverter:
         self.end = end
         self.indent_inner_try = intent_inner_try
         self.definitions: Dict[TokenType, Callable[[Node], str]] = {}  # type: ignore
-        self.templates_path: str = templates_path
+        self._templates_path: str = templates_path
 
         self._in_inner_try: bool = False
+
+    @property
+    def templates_path(self) -> str:
+        return self._templates_path
 
     def __call__(self, for_definition: TokenType):
         def decorator(func):
