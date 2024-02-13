@@ -7,15 +7,15 @@ from ssc_codegen.document import Document
 from ssc_codegen.validate import assert_
 
 
-class StructType(IntEnum):
+class SchemaType(IntEnum):
     BASE = 0
     LIST = 1
     DICT = 2
     ITEM = 3
 
 
-class BaseStructStrategy:
-    TYPE: StructType = StructType.BASE
+class BaseSchemaStrategy:
+    TYPE: SchemaType = SchemaType.BASE
 
     def __init__(self):
         self.assert_ = assert_
@@ -29,19 +29,19 @@ class BaseStructStrategy:
         pass
 
 
-class ListStruct(BaseStructStrategy):
+class ListSchema(BaseSchemaStrategy):
     """Generate structure like: [{K1: V1, ..., KN, VN}, ...]
 
     should be provided split document logic (should be return LIST_DOCUMENT type)
     """
-    TYPE = StructType.LIST
+    TYPE = SchemaType.LIST
 
     @abstractmethod
     def __split_document_entrypoint__(self, doc: Document) -> Document:
         pass
 
 
-class DictStruct(BaseStructStrategy):
+class DictSchema(BaseSchemaStrategy):
     """Generate structure like: {K1: V2, ..., KN, VN}
 
        should be provided:
@@ -53,7 +53,7 @@ class DictStruct(BaseStructStrategy):
         3. get value logic
 
     """
-    TYPE = StructType.DICT
+    TYPE = SchemaType.DICT
 
     # struct for generate
 
@@ -70,10 +70,10 @@ class DictStruct(BaseStructStrategy):
         pass
 
 
-class ItemStruct(BaseStructStrategy):
+class ItemSchema(BaseSchemaStrategy):
     """generate dict structure with first founded element
 
     {K1: V2, K2: V2, ..., KN: VN}"""
-    TYPE = StructType.ITEM
+    TYPE = SchemaType.ITEM
     #
     pass

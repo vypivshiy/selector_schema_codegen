@@ -7,7 +7,7 @@ from ssc_codegen.converters.base import CodeConverter
 from ssc_codegen.document import Document
 from ssc_codegen.objects import Node, TokenType, EXPR_INIT, EXPR_RET, EXPR_NO_RET, \
     create_default_expr
-from ssc_codegen.structs import BaseStructStrategy, StructType
+from ssc_codegen.schemas import BaseSchemaStrategy, SchemaType
 
 
 @dataclass(repr=False, kw_only=True)
@@ -40,7 +40,7 @@ class StructParser:
     _ATTR_PRE_VALIDATE = "__pre_validate_document__"
     _ATTR_SPLIT_DOCUMENT = "__split_document_entrypoint__"
 
-    instance: BaseStructStrategy
+    instance: BaseSchemaStrategy
 
     @property
     def pre_validate(self) -> Optional[Method]:
@@ -54,7 +54,7 @@ class StructParser:
 
     @property
     def split_document(self) -> Optional[Method]:
-        if self.instance.TYPE is StructType.ITEM:
+        if self.instance.TYPE is SchemaType.ITEM:
             warnings.warn('ItemStruct type not allowed split method, skip')
         elif method := getattr(self.instance, self._ATTR_SPLIT_DOCUMENT, None):
             if method(Document()):
@@ -134,6 +134,6 @@ def build_ast(doc: Document, name: Optional[str] = None, is_validator: bool = Fa
     return document_to_ast(doc)
 
 
-def translate_to_struct(obj: BaseStructStrategy):
+def translate_to_struct(obj: BaseSchemaStrategy):
     return StructParser(
         instance=obj)
