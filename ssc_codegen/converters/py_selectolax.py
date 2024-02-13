@@ -122,30 +122,48 @@ def op_regex_sub(node: Node) -> str:
 @converter(TokenType.OP_STRING_TRIM)
 def op_string_trim(node: Node) -> str:
     substr = node.expression.arguments[0]
+    if node.var_state == VariableState.STRING:
+        return (
+                VAR_L(node)
+                + " = "
+                + f"{VAR_R(node)}.strip({substr!r})"
+        )
     return (
-            VAR_L(node)
-            + " = "
-            + f"{VAR_R(node)}.strip({substr!r})"
+        VAR_L(node)
+        + " = "
+        + f"[s.strip({substr!r}) for s in {VAR_R(node)}]"
     )
 
 
 @converter(TokenType.OP_STRING_L_TRIM)
 def op_string_l_trim(node: Node) -> str:
     substr = node.expression.arguments[0]
+    if node.var_state == VariableState.STRING:
+        return (
+                VAR_L(node)
+                + " = "
+                + f"{VAR_R(node)}.lstrip({substr!r})"
+        )
     return (
             VAR_L(node)
             + " = "
-            + f"{VAR_R(node)}.lstrip({substr!r})"
+            + f"[s.lstrip({substr!r}) for s in {VAR_R(node)}]"
     )
 
 
 @converter(TokenType.OP_STRING_R_TRIM)
 def op_string_r_trim(node: Node) -> str:
     substr = node.expression.arguments[0]
+    if node.var_state == VariableState.STRING:
+        return (
+                VAR_L(node)
+                + " = "
+                + f"{VAR_R(node)}.rstrip({substr!r})"
+        )
     return (
             VAR_L(node)
             + " = "
-            + f"{VAR_R(node)}.rstrip({substr!r})"
+            + f"[s.lstrip({substr!r}) for s in {VAR_R(node)}]"
     )
 
 
@@ -153,21 +171,33 @@ def op_string_r_trim(node: Node) -> str:
 def op_string_replace(node: Node) -> str:
     old = node.expression.arguments[0]
     new = node.expression.arguments[1]
+    if node.var_state == VariableState.STRING:
+        return (
+                VAR_L(node)
+                + " = "
+                + f"{VAR_R(node)}.replace({old!r}, {new!r})"
+        )
     return (
             VAR_L(node)
             + " = "
-            + f"{VAR_R(node)}.replace({old!r}, {new!r})"
+            + f"[s.replace({old!r}, {new!r}) for s in {VAR_R(node)}]"
     )
 
 
 @converter(TokenType.OP_STRING_FORMAT)
 def op_string_format(node: Node) -> str:
     fmt_str = node.expression.arguments[0].replace("{{", "{").replace("}}", "}")
+    if node.var_state == VariableState.STRING:
+        return (
+                VAR_L(node)
+                + " = "
+                + repr(fmt_str)
+                + f".format({VAR_R(node)})"
+        )
     return (
             VAR_L(node)
             + " = "
-            + repr(fmt_str)
-            + f".format({VAR_R(node)})"
+            + f"[{fmt_str!r}.format(s) for s in {VAR_R(node)}]"
     )
 
 

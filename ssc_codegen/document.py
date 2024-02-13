@@ -123,7 +123,7 @@ class RegexOpDocument(BaseDocumentOperations):
 class StringOpDocument(BaseDocumentOperations):
     def lstrip(self, prefix: str):
         """remove prefix from string (from left)"""
-        self._is_valid_variable(VariableState.STRING)
+        self._is_valid_variable(VariableState.STRING, VariableState.LIST_STRING)
         e = Expression(self.counter,
                        self.variable_state,
                        TokenType.OP_STRING_L_TRIM,
@@ -133,7 +133,7 @@ class StringOpDocument(BaseDocumentOperations):
 
     def rstrip(self, suffix: str):
         """remove suffix from string (from right)"""
-        self._is_valid_variable(VariableState.STRING)
+        self._is_valid_variable(VariableState.STRING, VariableState.LIST_STRING)
         e = Expression(self.counter,
                        self.variable_state,
                        TokenType.OP_STRING_R_TRIM,
@@ -143,7 +143,7 @@ class StringOpDocument(BaseDocumentOperations):
 
     def strip(self, sting: str):
         """strip string from string (from left and right)"""
-        self._is_valid_variable(VariableState.STRING)
+        self._is_valid_variable(VariableState.STRING, VariableState.LIST_STRING)
         e = Expression(self.counter,
                        self.variable_state,
                        TokenType.OP_STRING_TRIM,
@@ -155,7 +155,7 @@ class StringOpDocument(BaseDocumentOperations):
         """format string by pattern.
 
         fmt argument should be contained {{}} mark"""
-        self._is_valid_variable(VariableState.STRING)
+        self._is_valid_variable(VariableState.STRING, VariableState.LIST_STRING)
         if "{{}}" not in fmt:
             raise Exception("Missing `{{}}` mark")
         e = Expression(self.counter,
@@ -177,7 +177,7 @@ class StringOpDocument(BaseDocumentOperations):
 
     def replace(self, old: str, new: str):
         """replace `old` arg in string in all places to `new` """
-        self._is_valid_variable(VariableState.STRING)
+        self._is_valid_variable(VariableState.STRING, VariableState.LIST_STRING)
         e = Expression(self.counter,
                        self.variable_state,
                        TokenType.OP_STRING_REPLACE,
