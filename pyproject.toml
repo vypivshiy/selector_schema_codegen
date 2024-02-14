@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "ssc_codegen"
-version = "0.1.13"
-description = "generate selector schemas classes from yaml config and DSL-lang script"
+version = "0.2.0"
+description = "generate selector schemas classes from dsl-like language based on python"
 authors = ["vypivshiy"]
 readme = "README.md"
 license = "MIT"
@@ -44,7 +44,7 @@ lxml = "^4.9.3"
 
 
 [tool.poetry.scripts]
-ssc-gen="ssc_codegen.cli:main"
+ssc-gen="ssc_codegen._cli:main"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
