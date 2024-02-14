@@ -15,6 +15,11 @@ class Method:
     IS_VALIDATOR: bool = False
     IS_SPLIT_DOCUMENT: bool = False
 
+    # ast gen config
+    __CSS_TO_XPATH: bool = False
+    __XPATH_TO_CSS: bool = False
+    __XPATH_PREFIX: str = "descendant-or-self::"
+
     @property
     def name(self) -> str:
         return self.instance.__name__
@@ -23,9 +28,25 @@ class Method:
     def docstring(self) -> Optional[str]:
         return self.instance.__doc__
 
+    def set_ast_config(self, *,
+                       css_to_xpath: bool = False,
+                       xpath_to_css: bool = False,
+                       xpath_prefix: str = "descendant-or-self::"
+                       ):
+        if css_to_xpath and xpath_to_css:
+            raise AttributeError("should be choose css_to_xpath OR xpath_to_css")
+
+        self.__XPATH_PREFIX = xpath_prefix
+        self.__CSS_TO_XPATH = css_to_xpath
+        self.__XPATH_TO_CSS = xpath_to_css
+
     @property
     def ast(self) -> dict[int, Node]:
         doc = self.instance(Document())
+        if self.__CSS_TO_XPATH:
+            doc.convert_css_to_xpath(xpath_prefix=self.__XPATH_PREFIX)
+        elif self.__XPATH_TO_CSS:
+            doc.convert_xpath_to_css()
         return build_ast(doc, is_validator=self.IS_VALIDATOR, is_split_document=self.IS_SPLIT_DOCUMENT)
 
     def code(self, converter: CodeConverter):
@@ -42,8 +63,31 @@ class StructParser:
 
     instance: BaseSchemaStrategy
 
-    @property
-    def pre_validate(self) -> Optional[Method]:
+    def __post_init__(self):
+        self.methods = self._parse_methods()
+        self.pre_validate = self._parse_pre_validate()
+        self.split_document = self._parse_split_document()
+
+    def css_to_xpath(self, prefix: str = "descendant-or-self::"):
+        """convert all CSS operations to XPATH"""
+        if self.pre_validate:
+            self.pre_validate.set_ast_config(css_to_xpath=True, xpath_prefix=prefix)
+        if self.split_document:
+            self.split_document.set_ast_config(css_to_xpath=True, xpath_prefix=prefix)
+        for m in self.methods:
+            m.set_ast_config(css_to_xpath=True, xpath_prefix=prefix)
+
+    def xpath_to_css(self):
+        """convert all XPATH operations to CSS (work not guaranteed)"""
+
+        if self.pre_validate:
+            self.pre_validate.set_ast_config(xpath_to_css=True)
+        if self.split_document:
+            self.split_document.set_ast_config(xpath_to_css=True)
+        for m in self.methods:
+            m.set_ast_config(xpath_to_css=True)
+
+    def _parse_pre_validate(self) -> Optional[Method]:
         if method := getattr(self.instance, self._ATTR_PRE_VALIDATE, None):
             if method(Document()):
                 return Method(
@@ -52,12 +96,12 @@ class StructParser:
                 )
         return None
 
-    @property
-    def split_document(self) -> Optional[Method]:
-        if self.instance.TYPE is SchemaType.ITEM:
-            warnings.warn('ItemStruct type not allowed split method, skip')
-        elif method := getattr(self.instance, self._ATTR_SPLIT_DOCUMENT, None):
-            if method(Document()):
+    def _parse_split_document(self) -> Optional[Method]:
+        if method := getattr(self.instance, self._ATTR_SPLIT_DOCUMENT, None):
+            if self.instance.TYPE is SchemaType.ITEM:
+                warnings.warn('ItemStruct type not allowed split method, skip')
+
+            elif method(Document()):
                 return Method(
                     instance=method,
                     IS_SPLIT_DOCUMENT=True
@@ -72,8 +116,7 @@ class StructParser:
     def docstring(self):
         return self.instance.__class__.__doc__
 
-    @property
-    def methods(self) -> list[Method]:
+    def _parse_methods(self) -> list[Method]:
         methods: list[Method] = []
         for attr_name in self.instance.__class__.__dict__.keys():
             if attr_name.startswith("__") and attr_name.endswith("__"):
@@ -83,7 +126,6 @@ class StructParser:
             document_param_name = list(args.keys())[0]
             if (doc_param := args.get(document_param_name)) and doc_param.annotation.__name__ == Document.__name__:
                 doc = method(Document())
-                _ast = build_ast(doc)
                 methods.append(
                     Method(instance=method)
                 )

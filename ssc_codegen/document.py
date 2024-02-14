@@ -1,9 +1,9 @@
+import warnings
 from contextlib import contextmanager
 from typing import Optional
 
 from ssc_codegen.objects import VariableState, Expression, TokenType
-from ssc_codegen.queries import validate_css_query, validate_xpath_query
-
+from ssc_codegen.queries import validate_css_query, validate_xpath_query, css_to_xpath, xpath_to_css
 
 class BaseDocumentOperations:
     def __init__(self):
@@ -187,6 +187,85 @@ class StringOpDocument(BaseDocumentOperations):
 
 
 class HtmlOpDocument(BaseDocumentOperations):
+
+    def convert_css_to_xpath(self, xpath_prefix: str = "descendant-or-self::") -> None:
+        """convert all css operations to XPATH (guaranteed)"""
+        expr: Expression
+
+        stack_copy = self.get_stack.copy()
+        for i, expr in enumerate(stack_copy):
+            if expr.token_type == TokenType.OP_CSS:
+                css_query = expr.arguments[0]
+                new_query = css_to_xpath(css_query, xpath_prefix)
+                stack_copy[i] = Expression(
+                    num=expr.num,
+                    arguments=(new_query,),
+                    token_type=TokenType.OP_XPATH,
+                    message=expr.message,
+                    variable_state=expr.variable_state
+                )
+
+            elif expr.token_type == TokenType.OP_CSS_ALL:
+                css_query = expr.arguments[0]
+                new_query = css_to_xpath(css_query, xpath_prefix)
+                stack_copy[i] = Expression(
+                    num=expr.num,
+                    arguments=(new_query,),
+                    token_type=TokenType.OP_XPATH_ALL,
+                    message=expr.message,
+                    variable_state=expr.variable_state
+                )
+
+            elif expr.token_type == TokenType.OP_ASSERT_CSS:
+                css_query = expr.arguments[0]
+                new_query = css_to_xpath(css_query, xpath_prefix)
+                stack_copy[i] = Expression(
+                    num=expr.num,
+                    arguments=(new_query,),
+                    token_type=TokenType.OP_ASSERT_XPATH,
+                    message=expr.message,
+                    variable_state=expr.variable_state
+                )
+        self._stack = stack_copy
+
+    def convert_xpath_to_css(self):
+        """convert all css operations to XPATH (works with simple expressions)"""
+        expr: Expression
+        stack_copy = self.get_stack.copy()
+        for i, expr in enumerate(stack_copy):
+            if expr.token_type == TokenType.OP_XPATH:
+                xpath_query = expr.arguments[0]
+                new_query = xpath_to_css(xpath_query)
+                stack_copy[i] = Expression(
+                    num=expr.num,
+                    arguments=(new_query,),
+                    token_type=TokenType.OP_CSS,
+                    message=expr.message,
+                    variable_state=expr.variable_state
+                )
+
+            elif expr.token_type == TokenType.OP_XPATH_ALL:
+                xpath_query = expr.arguments[0]
+                new_query = xpath_to_css(xpath_query)
+                stack_copy[i] = Expression(
+                    num=expr.num,
+                    arguments=(new_query,),
+                    token_type=TokenType.OP_CSS_ALL,
+                    message=expr.message,
+                    variable_state=expr.variable_state
+                )
+
+            elif expr.token_type == TokenType.OP_ASSERT_XPATH:
+                xpath_query = expr.arguments[0]
+                new_query = xpath_to_css(xpath_query)
+                stack_copy[i] = Expression(
+                    num=expr.num,
+                    arguments=(new_query,),
+                    token_type=TokenType.OP_ASSERT_CSS,
+                    message=expr.message,
+                    variable_state=expr.variable_state
+                )
+
     def css(self, query: str):
         """get first element by css query"""
         validate_css_query(query)
