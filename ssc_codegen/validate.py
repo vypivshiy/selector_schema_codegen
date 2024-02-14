@@ -21,7 +21,7 @@ class Assert:
             (query,),
             msg
         )
-        doc._push(e)
+        doc.append(e)
         return doc
 
     @classmethod
@@ -35,7 +35,7 @@ class Assert:
             (query,),
             msg
         )
-        doc._push(e)
+        doc.append(e)
         return doc
 
     @classmethod
@@ -49,7 +49,7 @@ class Assert:
             (value,),
             msg
         )
-        doc._push(e)
+        doc.append(e)
         return doc
 
     @classmethod
@@ -63,7 +63,7 @@ class Assert:
             (expr,),
             msg
         )
-        doc._push(e)
+        doc.append(e)
         return doc
 
     @classmethod
@@ -77,7 +77,7 @@ class Assert:
             (value,),
             msg
         )
-        doc._push(e)
+        doc.append(e)
         return doc
 
 
