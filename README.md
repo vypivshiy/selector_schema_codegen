@@ -5,9 +5,18 @@ python-DSL configurations with built-in declarative language.
 
 Designed to port parsers to various programming languages and libs
 
+# Motivation
+- ~~interesting in practice write DSL-like language~~
+- decrease boilerplate code for web-parsers
+- write once - convert to other mainstream http parser libs
+- minimal operations for easy add another libs and languages in future
+  - include css, xpath, attributes operations, regex, minimal string formatting operations
+- pre validate css/xpath queries and logic before generate code
+- standardisation: generate classes with minimal dependencies and documented parsed signature 
+
 ## Install
 
-### pipx (recommended)
+### pipx (recommended for CLI usage)
 
 ```shell
 pipx install ssc_codegen
