@@ -134,8 +134,21 @@ class Node:
     def return_arg_type(self) -> VariableState:
         # return variable state of return value
         node = self.ast_tree[self.count - 1]
-        if node.token == TokenType.OP_NO_RET:
+        # TODO refactoring
+        if node.token == TokenType.OP_RET:
+            node = node.prev_node
+        elif node.token == TokenType.OP_NO_RET:
             return VariableState.NONE
+
+        # OP_DEFAULT_END, OP_RET
+        if node.token == TokenType.OP_DEFAULT_END:
+            node = node.prev_node.prev_node
+
+        if node.var_state == VariableState.DOCUMENT:
+            return VariableState.STRING
+        elif node.var_state == VariableState.LIST_DOCUMENT:
+            return VariableState.LIST_STRING
+
         return node.var_state
 
     @property
