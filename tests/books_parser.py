@@ -1,10 +1,9 @@
 """example test books.toscrape selector schemas"""
 from typing import Optional
 
-from ssc_codegen.document import Document
-from ssc_codegen.schemas import ListSchema, ItemSchema
-from ssc_codegen.template import render_code
+from ssc_codegen import Document, ListSchema, ItemSchema, render_code
 
+# provide required schemas here
 __all__ = ["Book", "BooksCatalogue"]
 
 
