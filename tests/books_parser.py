@@ -5,12 +5,12 @@ from ssc_codegen.document import Document
 from ssc_codegen.schemas import ListSchema, ItemSchema
 from ssc_codegen.template import render_code
 
-
 __all__ = ["Book", "BooksCatalogue"]
 
 
 class BooksCatalogue(ListSchema):
     """parse books from catalogue"""
+
     def __split_document_entrypoint__(self, doc: Document) -> Document:
         return doc.css_all(".col-lg-3")
 
@@ -39,6 +39,12 @@ class BooksCatalogue(ListSchema):
 
 
 class Book(ItemSchema):
+    """sample docstring
+
+    test 123
+
+    - okay
+    """
     def __pre_validate_document__(self, doc: Document) -> Optional[Document]:
         doc.css('title').text()
         self.assert_.contains(doc, "Books to Scrape - Sandbox")
@@ -58,15 +64,11 @@ class Book(ItemSchema):
             return doc.css(".product_main .price_color").text()
 
     def upc(self, doc: Document):
+        """upc
+
+        lorem upsum dolor"""
         return doc.css("tr:nth-child(1) td").text()
 
     def raw_table_values(self, doc: Document):
+        """useless list of values"""
         return doc.css_all("tr > td").text().strip(" ")
-
-
-
-if __name__ == '__main__':
-    from ssc_codegen.converters.py_parsel import converter
-    with open('ex_parser.py', 'w') as f:
-        f.write(render_code(converter, BooksCatalogue(), Book()))
-    # os.system('black ex_parser.py')
