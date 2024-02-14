@@ -26,7 +26,7 @@ class Method:
     @property
     def ast(self) -> dict[int, Node]:
         doc = self.instance(Document())
-        return build_ast(doc, name=self.name, is_validator=self.IS_VALIDATOR, is_split_document=self.IS_SPLIT_DOCUMENT)
+        return build_ast(doc, is_validator=self.IS_VALIDATOR, is_split_document=self.IS_SPLIT_DOCUMENT)
 
     def code(self, converter: CodeConverter):
         return [converter.convert(node) for i, node in self.ast.items()]
@@ -116,7 +116,7 @@ def document_to_ast(doc: Document) -> dict[int, Node]:
     return _tree
 
 
-def build_ast(doc: Document, name: Optional[str] = None, is_validator: bool = False, is_split_document: bool = False):
+def build_ast(doc: Document, is_validator: bool = False, is_split_document: bool = False):
     # head_expr = create_expr_head(name)
     init_expr = EXPR_INIT
     ret_expr = EXPR_NO_RET if is_validator else EXPR_RET
