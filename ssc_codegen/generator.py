@@ -5,8 +5,7 @@ from typing import Optional, Callable
 
 from ssc_codegen.converters.base import CodeConverter
 from ssc_codegen.document import Document
-from ssc_codegen.objects import Node, TokenType, EXPR_INIT, EXPR_RET, EXPR_NO_RET, \
-    create_default_expr
+from ssc_codegen.objects import Node, TokenType, EXPR_INIT, create_default_expr, EXPR_RET, EXPR_NO_RET
 from ssc_codegen.schemas import BaseSchemaStrategy, SchemaType
 
 
@@ -14,6 +13,7 @@ from ssc_codegen.schemas import BaseSchemaStrategy, SchemaType
 class Method:
     instance: Callable[[Document], Document]
     IS_VALIDATOR: bool = False
+    IS_SPLIT_DOCUMENT: bool = False
 
     @property
     def name(self) -> str:
@@ -26,7 +26,7 @@ class Method:
     @property
     def ast(self) -> dict[int, Node]:
         doc = self.instance(Document())
-        return build_ast(doc, name=self.name, is_validator=self.IS_VALIDATOR)
+        return build_ast(doc, name=self.name, is_validator=self.IS_VALIDATOR, is_split_document=self.IS_SPLIT_DOCUMENT)
 
     def code(self, converter: CodeConverter):
         return [converter.convert(node) for i, node in self.ast.items()]
@@ -60,6 +60,7 @@ class StructParser:
             if method(Document()):
                 return Method(
                     instance=method,
+                    IS_SPLIT_DOCUMENT=True
                 )
         return None
 
@@ -115,22 +116,40 @@ def document_to_ast(doc: Document) -> dict[int, Node]:
     return _tree
 
 
-def build_ast(doc: Document, name: Optional[str] = None, is_validator: bool = False):
+def build_ast(doc: Document, name: Optional[str] = None, is_validator: bool = False, is_split_document: bool = False):
     # head_expr = create_expr_head(name)
     init_expr = EXPR_INIT
     ret_expr = EXPR_NO_RET if is_validator else EXPR_RET
+
+    # check correct stack operations
+    if not is_validator and not is_split_document and doc.get_stack[-1].token_type in (TokenType.OP_CSS,
+                                                                                       TokenType.OP_CSS_ALL,
+                                                                                       TokenType.OP_XPATH,
+                                                                                       TokenType.OP_XPATH_ALL):
+        msg = 'Final operation must not end with operations (`css`, `css_all`, `xpath`, `xpath_all`)'
+        raise SyntaxError(msg)
+
+    elif is_split_document and doc.get_stack[-1].token_type not in (TokenType.OP_XPATH_ALL, TokenType.OP_CSS_ALL):
+        msg = 'Split document method should be end with operation `css_all` or `xpath_all`'
+        raise SyntaxError(msg)
 
     # wrap code to try/except
     if doc.get_stack[0].token_type == TokenType.OP_DEFAULT:
         doc = create_default_expr(doc)
 
-    # form function, return expr
-    if doc.get_stack[0].token_type is not TokenType.OP_FUNCTION_HEAD:
-        doc.insert(0, init_expr)
-        # doc.insert(0, head_expr)
+    # push return expr before OP_DEFAULT_END expr
+    if doc.get_stack[0].token_type == TokenType.OP_DEFAULT_START:
+        doc.insert(-1, ret_expr)
 
-    if doc.get_stack[-1].token_type not in (TokenType.OP_RET, TokenType.OP_NO_RET):
+    elif doc.get_stack[-1].token_type not in (TokenType.OP_RET, TokenType.OP_NO_RET):
         doc.append(ret_expr)
+
+    # init constructor (generated variables provider)
+    # eg:
+    # def spam(_, doc: Document):
+    #   var_0 = doc
+    #   ...
+    doc.insert(0, init_expr)
     return document_to_ast(doc)
 
 
