@@ -1,7 +1,7 @@
 class {{ struct.name }}(_BaseStructParser):
-    {%- if struct.docstring %}
-    """{{ struct.docstring }}"""
-    {%- endif %}
+    """{%- if struct.docstring %}{{ struct.docstring }}{%- endif %}
+    {{ schema_doc_signature(struct) }}
+    """
     def __init__(self, document: str):
         super().__init__(document)
         self._cached_result: _T_DICT_ITEM = {}
