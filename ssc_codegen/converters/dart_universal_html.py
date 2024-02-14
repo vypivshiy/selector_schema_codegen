@@ -5,6 +5,8 @@ from ssc_codegen.converters.base import CodeConverter, VAR_R, VAR_L
 
 __all__ = ["converter"]
 
+from ssc_codegen.converters.utils import sanitize_regex
+
 from ssc_codegen.objects import TokenType, Node, VariableState
 
 converter = CodeConverter(
@@ -32,7 +34,7 @@ def op_css(node: Node) -> str:
             + " = "
             + VAR_R(node)
             + f".querySelector({node.expression.arguments[0]!r})"
-    )
+            )
 
 
 @converter(TokenType.OP_CSS_ALL)
@@ -42,7 +44,7 @@ def op_css_all(node: Node) -> str:
             + " = "
             + VAR_R(node)
             + f".querySelectorAll({node.expression.arguments[0]!r})"
-    )
+            )
 
 
 @converter(TokenType.OP_ATTR)
@@ -53,15 +55,15 @@ def op_attr(node: Node) -> str:
                 + VAR_L(node)
                 + " = "
                 + VAR_R(node)
-                + f".map((el) => el.attributes[{attr_name!r}]).toList()"
-        )
+                + f"?.map((el) => el.attributes[{attr_name!r}]).toList()"
+                )
 
     return ("var "
             + VAR_L(node)
             + " = "
             + VAR_R(node)
-            + f".attributes[{attr_name!r}]"
-    )
+            + f"?.attributes[{attr_name!r}]"
+            )
 
 
 @converter(TokenType.OP_ATTR_TEXT)
@@ -71,14 +73,14 @@ def op_text(node: Node):
                 + VAR_L(node)
                 + " = "
                 + VAR_R(node)
-                + '.text'
+                + '?.text'
                 )
     return ("var "
             + VAR_L(node)
             + " = "
             + VAR_R(node)
             + '.map((el) => el.text).toList()'
-    )
+            )
 
 
 @converter(TokenType.OP_ATTR_RAW)
@@ -88,14 +90,14 @@ def op_attr_raw(node: Node) -> str:
                 + VAR_L(node)
                 + " = "
                 + VAR_R(node)
-                + '.innerHtml'
-        )
+                + '?.innerHtml'
+                )
     return ("var "
             + VAR_L(node)
             + " = "
             + VAR_R(node)
             + '.map((el) => el.innerHtml).toList()'
-    )
+            )
 
 
 @converter(TokenType.OP_REGEX)
@@ -106,20 +108,20 @@ def op_regex(node: Node) -> str:
             + "var "
             + VAR_L(node)
             + " = "
-            + f"{reg_var}.firstMatch({VAR_R(node)})?.group(0) ?? ''"
-    )
+            + f"{reg_var}?.firstMatch({VAR_R(node)})?.group(0)"
+            )
 
 
 @converter(TokenType.OP_REGEX_ALL)
 def op_regex_all(node: Node) -> str:
     pattern = node.expression.arguments[0]
     reg_var = f"regex_{VAR_L(node)}"
-    return (f"RegExp {reg_var} = RegExp(r{pattern});\n"
+    return (f"RegExp {reg_var} = RegExp(r{pattern!r});\n"
             + "var "
             + VAR_L(node)
             + " = "
-            + f"{reg_var}.allMatches({VAR_R(node)}).map((m) => m.group(0)!).toList()"
-    )
+            + f"{reg_var}?.allMatches({VAR_R(node)}).map((m) => m.group(0)!).toList()"
+            )
 
 
 @converter(TokenType.OP_REGEX_SUB)
@@ -127,14 +129,12 @@ def op_regex_sub(node: Node) -> str:
     pattern = node.expression.arguments[0]
     repl = node.expression.arguments[1]
 
-    reg_var = f"f regex_{VAR_L(node)}"
-    return (f"RegExp {reg_var} = RegExp(r{pattern});\n"
-            + "var "
+    return ("var "
             + VAR_L(node)
             + " = "
             + VAR_R(node)
-            + f".replaceAll(r{pattern!r}, {repl!r})"
-    )
+            + f"?.replaceAll(RegExp(r{pattern!r}), {repl!r})"
+            )
 
 
 # TRIM signatures based by:
@@ -145,15 +145,24 @@ def op_regex_sub(node: Node) -> str:
 def op_string_trim(node: Node) -> str:
     substr = node.expression.arguments[0]
 
-    substr_left = f"^{substr}"
-    substr_right = f"{substr}$"
-
+    substr_left = repr('^' + sanitize_regex(substr)).replace('\\\\', '\\')
+    substr_right = repr(sanitize_regex(substr) + '$').replace('\\\\', '\\')
+    if node.var_state == VariableState.STRING:
+        return ("var "
+                + VAR_L(node)
+                + " = "
+                + VAR_R(node)
+                + f'?.replaceFirst(RegExp(r{substr_left}), "")'
+                + f'.replaceFirst(RegExp(r{substr_right}), "")'
+                )
     return ("var "
             + VAR_L(node)
             + " = "
             + VAR_R(node)
-            + f'.replaceFirst(RegExp({substr_left!r}), "")'
-            + f'.replaceFirst(RegExp({substr_right!r}), "")'
+            + '.map('
+            + f'(s) => s?.replaceFirst(RegExp(r{substr_left}), "")'
+            + f'.replaceFirst(RegExp(r{substr_right}), "")'
+            + ').toList()'
             )
 
 
@@ -161,13 +170,21 @@ def op_string_trim(node: Node) -> str:
 def op_string_l_trim(node: Node) -> str:
     substr = node.expression.arguments[0]
 
-    substr_left = f"^{substr}"
-
+    substr_left = repr('^' + sanitize_regex(substr)).replace('\\\\', '\\')
+    if node.var_state == VariableState.STRING:
+        return ("var "
+                + VAR_L(node)
+                + " = "
+                + VAR_R(node)
+                + f'?.replaceFirst(RegExp(r{substr_left}), "")'
+                )
     return ("var "
             + VAR_L(node)
             + " = "
             + VAR_R(node)
-            + f'.replaceFirst(RegExp({substr_left!r}), "")'
+            + f'.map('
+            + f'(s) => s?.replaceFirst(RegExp(r{substr_left}), "")'
+            + ').toList()'
             )
 
 
@@ -175,13 +192,20 @@ def op_string_l_trim(node: Node) -> str:
 def op_string_r_trim(node: Node) -> str:
     substr = node.expression.arguments[0]
 
-    substr_right = f"{substr}$"
-
+    substr_right = repr(sanitize_regex(substr) + '$').replace('\\\\', '\\')
+    if node.var_state == VariableState.STRING:
+        return ("var "
+                + VAR_L(node)
+                + " = "
+                + VAR_R(node)
+                + f'?.replaceFirst(RegExp(r{substr_right}), "")'
+                )
     return ("var "
             + VAR_L(node)
             + " = "
             + VAR_R(node)
-            + f'.replaceFirst(RegExp({substr_right!r}), "")'
+            + f'.map((s) => s?.replaceFirst(RegExp(r{substr_right}), "")'
+            + '.toList()'
             )
 
 
@@ -189,22 +213,40 @@ def op_string_r_trim(node: Node) -> str:
 def op_string_replace(node: Node) -> str:
     old = node.expression.arguments[0]
     new = node.expression.arguments[1]
+    if node.var_state == VariableState.STRING:
+        return ("var "
+                + VAR_L(node)
+                + " = "
+                + f"{VAR_R(node)}?.replaceAll(RegExp({old!r}), {new!r})"
+                )
     return ("var "
             + VAR_L(node)
             + " = "
-            + f"{VAR_R(node)}.replaceAll(RegExp({old!r}), {new!r}"
-    )
+            + VAR_R(node)
+            + f'.map((s) => s?.replaceAll(RegExp({old!r}), {new!r})'
+            + '.toList()'
+            )
 
 
 @converter(TokenType.OP_STRING_FORMAT)
 def op_string_format(node: Node) -> str:
     fmt_str = node.expression.arguments[0]
-    fmt_str = re.sub(r'\{\{}}', f"${VAR_R(node)}", fmt_str)
-    return ("var"
+
+    if node.var_state == VariableState.STRING:
+        fmt_str = re.sub(r'\{\{}}', f"${VAR_R(node)}", fmt_str)
+        return ("var "
+                + VAR_L(node)
+                + " = "
+                + repr(fmt_str)
+                )
+
+    fmt_str = re.sub(r'\{\{}}', f"$_repl", fmt_str)
+    return ("var "
             + VAR_L(node)
             + " = "
-            + fmt_str
-    )
+            + VAR_R(node)
+            + f'.map((_repl) => {fmt_str!r})'
+            )
 
 
 @converter(TokenType.OP_STRING_SPLIT)
@@ -215,7 +257,7 @@ def op_string_split(node: Node) -> str:
             + " = "
             + VAR_R(node)
             + f".split({sep!r})"
-    )
+            )
 
 
 @converter(TokenType.OP_INDEX)
@@ -226,7 +268,7 @@ def op_string_index(node: Node) -> str:
             + " = "
             + VAR_R(node)
             + f"[{i}]"
-    )
+            )
 
 
 @converter(TokenType.OP_JOIN)
@@ -237,7 +279,7 @@ def op_join(node: Node) -> str:
             + " = "
             + VAR_R(node)
             + f".join({prefix!r})"
-    )
+            )
 
 
 # TODO add assert errors msg
@@ -245,11 +287,13 @@ def op_join(node: Node) -> str:
 @converter(TokenType.OP_ASSERT_EQUAL)
 def op_assert_equal(node: Node) -> str:
     value = node.expression.arguments[0]
+    value = "null" if value == None else repr(value)
+
     return (
             "assert("
             + VAR_R(node)
             + " == "
-            + repr(value)
+            + value
             + ")"
     )
 
@@ -259,6 +303,9 @@ def op_assert_contains(node: Node) -> str:
     value = node.expression.arguments[0]
     return (
             "assert("
+            + VAR_R(node)
+            + "!= null"
+            + " && "
             + VAR_R(node)
             + ".contains("
             + f"{value!r})"
@@ -273,6 +320,9 @@ def op_assert_re_match(node: Node) -> str:
     return (
             f"RegExp {re_var} = RegExp(r{pattern!r});\n"
             + "assert("
+            + VAR_R(node)
+            + " != null"
+            + " && "
             + re_var
             + ".firstMatch("
             + VAR_R(node)
@@ -286,6 +336,9 @@ def op_assert_css(node: Node) -> str:
     query = node.expression.arguments[0]
     return (
             "assert("
+            + VAR_R(node)
+            + " != null "
+            + " && "
             + VAR_R(node)
             + f".querySelector({query!r})"
             + " != null)"
@@ -312,24 +365,18 @@ def op_no_ret(_: Node):
     return 'return'
 
 
-@converter(TokenType.OP_FUNCTION_HEAD)
-def op_function_head(node: Node):
-    name = node.expression.arguments[0]
-    return f"def _parse_{name}(doc):"
-
-
 @converter(TokenType.OP_DEFAULT_START)
 def op_default_start(_: Node) -> str:
-    return "try:"
+    return "try {"
 
 
 @converter(TokenType.OP_DEFAULT_END)
 def op_default_end(node: Node) -> str:
     value = node.expression.arguments[0]
-    # empty STR set as pytonic None
-    if value != None:
-        value = repr(value)
+    value = "null" if value == None else repr(value)
+
     return (
-            "except Exception as e:"
-            + f" return {value}"
+            "} catch (e) {"
+            + f" return {value};"
+            + "}"
     )
