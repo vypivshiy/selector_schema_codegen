@@ -39,6 +39,23 @@ class _BaseStructParser:
 
 
 class Book(_BaseStructParser):
+    """sample docstring
+
+        test 123
+
+        - okay
+
+        Book view() item signature:
+
+    {
+        "description": "String",
+        "title": "String",
+        "price": "String",
+        "upc": "String",
+        "raw_table_values": "Array['String']"
+    }
+    """
+
     def __init__(self, document: str):
         super().__init__(document)
         self._cached_result: _T_DICT_ITEM = {}
@@ -84,17 +101,24 @@ class Book(_BaseStructParser):
         try:
             var_2 = var_0.select_one(".product_main .price_color")
             var_3 = var_2.text
+            return var_3
         except Exception as e:
             return "0"
-        return var_3
 
     def _parse_upc(self, doc: Tag):
+        """upc
+
+        lorem upsum dolor
+        """
+
         var_0 = doc
         var_1 = var_0.select_one("tr:nth-child(1) td")
         var_2 = var_1.text
         return var_2
 
     def _parse_raw_table_values(self, doc: Tag):
+        """useless list of values"""
+
         var_0 = doc
         var_1 = var_0.select("tr > td")
         var_2 = [el.text for el in var_1]
@@ -103,7 +127,17 @@ class Book(_BaseStructParser):
 
 
 class BooksCatalogue(_BaseStructParser):
-    """parse books from catalogue"""
+    """parse books from catalogue
+        BooksCatalogue view() item signature:
+
+    {
+        "url": "String",
+        "title": "String",
+        "price": "String",
+        "image": "String",
+        "rating": "String"
+    }
+    """
 
     def __init__(self, document: str):
         super().__init__(document)
@@ -167,9 +201,9 @@ class BooksCatalogue(_BaseStructParser):
             var_2 = var_0.select_one(".price_color")
             var_3 = var_2.text
             var_4 = var_3.lstrip("£")
+            return var_4
         except Exception as e:
             return "0"
-        return var_4
 
     def _parse_image(self, doc: Tag):
         var_0 = doc

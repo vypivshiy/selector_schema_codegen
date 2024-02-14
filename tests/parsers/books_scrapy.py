@@ -4,22 +4,24 @@
 
 from __future__ import annotations  # python 3.7, 3.8 comp
 import re
-from typing import Any, Union, List
+from typing import Any, Union, TYPE_CHECKING
 
-from selectolax.parser import HTMLParser, Node
+from scrapy.selector import Selector, SelectorList
+
+if TYPE_CHECKING:
+    from scrapy.http.response import Response
 
 _T_DICT_ITEM = dict[str, Union[str, list[str]]]
 _T_LIST_ITEMS = list[dict[str, Union[str, list[str]]]]
 
 
 class _BaseStructParser:
-    # TODO: add kwargs for config selector
-    def __init__(self, document: str):
-        self.__raw__ = document
-        self.__selector__ = HTMLParser(document)
+    def __init__(self, response: "Response"):
+        self.__raw__ = response.text
+        self.__selector__ = response.selector
         self._cached_result: Union[_T_DICT_ITEM, _T_LIST_ITEMS] = {}
 
-    def _pre_validate(self, document: HTMLParser) -> None:
+    def _pre_validate(self, document: Selector) -> None:
         # pre validate entrypoint, contain assert expressions
         pass
 
@@ -56,14 +58,14 @@ class Book(_BaseStructParser):
     }
     """
 
-    def __init__(self, document: str):
+    def __init__(self, document: "Response"):
         super().__init__(document)
         self._cached_result: _T_DICT_ITEM = {}
 
-    def _pre_validate(self, doc: HTMLParser) -> None:
+    def _pre_validate(self, doc: Selector) -> None:
         var_0 = doc
-        var_1 = var_0.css_first("title")
-        var_2 = var_1.text()
+        var_1 = var_0.css("title")
+        var_2 = var_1.css("::text").get()
         assert "Books to Scrape - Sandbox" in var_2
         return
 
@@ -82,46 +84,46 @@ class Book(_BaseStructParser):
     def view(self) -> _T_DICT_ITEM:
         return self._cached_result
 
-    def _parse_description(self, doc: HTMLParser):
+    def _parse_description(self, doc: Selector):
         """product description"""
 
         var_0 = doc
-        var_1 = var_0.css_first("#content_inner > article > p")
-        var_2 = var_1.text()
+        var_1 = var_0.css("#content_inner > article > p")
+        var_2 = var_1.css("::text").get()
         return var_2
 
-    def _parse_title(self, doc: HTMLParser):
+    def _parse_title(self, doc: Selector):
         var_0 = doc
-        var_1 = var_0.css_first("h1")
-        var_2 = var_1.text()
+        var_1 = var_0.css("h1")
+        var_2 = var_1.css("::text").get()
         return var_2
 
-    def _parse_price(self, doc: HTMLParser):
+    def _parse_price(self, doc: Selector):
         var_0 = doc
         try:
-            var_2 = var_0.css_first(".product_main .price_color")
-            var_3 = var_2.text()
+            var_2 = var_0.css(".product_main .price_color")
+            var_3 = var_2.css("::text").get()
             return var_3
         except Exception as e:
             return "0"
 
-    def _parse_upc(self, doc: HTMLParser):
+    def _parse_upc(self, doc: Selector):
         """upc
 
         lorem upsum dolor
         """
 
         var_0 = doc
-        var_1 = var_0.css_first("tr:nth-child(1) td")
-        var_2 = var_1.text()
+        var_1 = var_0.css("tr:nth-child(1) td")
+        var_2 = var_1.css("::text").get()
         return var_2
 
-    def _parse_raw_table_values(self, doc: HTMLParser):
+    def _parse_raw_table_values(self, doc: Selector):
         """useless list of values"""
 
         var_0 = doc
         var_1 = var_0.css("tr > td")
-        var_2 = [el.text() for el in var_1]
+        var_2 = var_1.css("::text").getall()
         var_3 = [s.strip(" ") for s in var_2]
         return var_3
 
@@ -139,18 +141,18 @@ class BooksCatalogue(_BaseStructParser):
     }
     """
 
-    def __init__(self, document: str):
+    def __init__(self, document: "Response"):
         super().__init__(document)
         self._cached_result: _T_LIST_ITEMS = []
 
-    def _pre_validate(self, doc: HTMLParser) -> None:
+    def _pre_validate(self, doc: Selector) -> None:
         var_0 = doc
-        var_1 = var_0.css_first("title")
-        var_2 = var_1.text()
+        var_1 = var_0.css("title")
+        var_2 = var_1.css("::text").get()
         assert "Books to Scrape - Sandbox" in var_2
         return
 
-    def _part_document(self) -> List[Node]:
+    def _part_document(self) -> SelectorList:
         doc = self.__selector__
         var_0 = doc
         var_1 = var_0.css(".col-lg-3")
@@ -172,42 +174,42 @@ class BooksCatalogue(_BaseStructParser):
     def view(self) -> _T_LIST_ITEMS:
         return self._cached_result
 
-    def _parse_url(self, doc: Node):
+    def _parse_url(self, doc: Selector):
         """page url to product"""
 
         var_0 = doc
-        var_1 = var_0.css_first("h3 > a")
-        var_2 = var_1.attributes["href"]
+        var_1 = var_0.css("h3 > a")
+        var_2 = var_1.attrib["href"]
         var_3 = "https://books.toscrape.com/catalogue/{}".format(var_2)
         return var_3
 
-    def _parse_title(self, doc: Node):
+    def _parse_title(self, doc: Selector):
         var_0 = doc
-        var_1 = var_0.css_first("h3 > a")
-        var_2 = var_1.attributes["title"]
+        var_1 = var_0.css("h3 > a")
+        var_2 = var_1.attrib["title"]
         return var_2
 
-    def _parse_price(self, doc: Node):
+    def _parse_price(self, doc: Selector):
         var_0 = doc
         try:
-            var_2 = var_0.css_first(".price_color")
-            var_3 = var_2.text()
+            var_2 = var_0.css(".price_color")
+            var_3 = var_2.css("::text").get()
             var_4 = var_3.lstrip("£")
             return var_4
         except Exception as e:
             return "0"
 
-    def _parse_image(self, doc: Node):
+    def _parse_image(self, doc: Selector):
         var_0 = doc
-        var_1 = var_0.css_first("img.thumbnail")
-        var_2 = var_1.attributes["src"]
+        var_1 = var_0.css("img.thumbnail")
+        var_2 = var_1.attrib["src"]
         var_3 = var_2.lstrip("..")
         var_4 = "https://books.toscrape.com{}".format(var_3)
         return var_4
 
-    def _parse_rating(self, doc: Node):
+    def _parse_rating(self, doc: Selector):
         var_0 = doc
-        var_1 = var_0.css_first(".star-rating")
-        var_2 = var_1.attributes["class"]
+        var_1 = var_0.css(".star-rating")
+        var_2 = var_1.attrib["class"]
         var_3 = var_2.lstrip("star-rating ")
         return var_3
