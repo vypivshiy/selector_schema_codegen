@@ -234,7 +234,7 @@ def op_join(node: Node) -> str:
     return (
             VAR_L(node)
             + " = "
-            + prefix
+            + repr(prefix)
             + f".join({VAR_R(node)})"
     )
 

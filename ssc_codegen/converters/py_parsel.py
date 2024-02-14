@@ -132,9 +132,9 @@ def op_string_trim(node: Node) -> str:
                 + f"{VAR_R(node)}.strip({substr!r})"
         )
     return (
-        VAR_L(node)
-        + " = "
-        + f"[s.strip({substr!r}) for s in {VAR_R(node)}]"
+            VAR_L(node)
+            + " = "
+            + f"[s.strip({substr!r}) for s in {VAR_R(node)}]"
     )
 
 
@@ -232,7 +232,7 @@ def op_join(node: Node) -> str:
     return (
             VAR_L(node)
             + " = "
-            + prefix
+            + repr(prefix)
             + f".join({VAR_R(node)})"
     )
 
@@ -308,7 +308,6 @@ def op_ret(node: Node):
 @converter(TokenType.OP_NO_RET)
 def op_no_ret(_: Node):
     return 'return'
-
 
 
 @converter(TokenType.OP_DEFAULT_START)
