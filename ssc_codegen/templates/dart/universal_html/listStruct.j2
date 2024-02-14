@@ -1,12 +1,16 @@
+{%- if struct.docstring %}
+{%- for line in struct.docstring.split('\n') %}
+/// {{ line.strip() }}
+{%- endfor %}
+{%- endif %}
+{{ schema_doc_signature(struct, prefix='///') }}
 class {{ struct.name }} extends _BaseStructParser {
-  {%- if struct.docstring %}
-  {%- for line in struct.docstring.split('\n') %}
-  /// {{ line.strip() }}
-  {%- endfor %}
-  {%- endif %}
-  @override
-  ListItem get _cachedResult => [];
   {{ struct.name }}(super.document);
+
+  @override
+  ListItems view(){
+    return _cachedResult;
+  }
 
   {% if struct.pre_validate -%}
   @override
@@ -30,20 +34,19 @@ class {{ struct.name }} extends _BaseStructParser {
       _cachedResult.add(
         {
       {%- for method in struct.methods %}
-        '{{ method.name }}': _parse{{ method.name.title() }}(part),
+        '{{ method.name }}': _parse{{ toCamel(method.name) }}(part),
       {%- endfor %}
         });
     }
 
-
   }
   {% for method in struct.methods %}
-  _parse{{ method.name.title() }}(Document doc){
   {%- if method.docstring %}
   {%- for line in method.docstring.split('\n') %}
   /// {{ line.strip() }}
   {%- endfor %}
   {%- endif %}
+  _parse{{ toCamel(method.name) }}(LIElement doc){
   {%- for line in method.code(converter) %}
   {{ line }}
   {%- endfor -%}
