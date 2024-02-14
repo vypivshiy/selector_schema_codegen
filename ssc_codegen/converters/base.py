@@ -7,10 +7,12 @@ __all__ = ['CodeConverter', "VAR_L", "VAR_R"]
 
 
 def var_left(node: Node, prefix: str) -> str:
+    """get next variable name"""
     return prefix.format(node.id or 0)
 
 
 def var_right(node: Node, prefix: str) -> str:
+    """get previous variable name"""
     return prefix.format(node.prev_node.id or 0)
 
 
@@ -51,11 +53,11 @@ class CodeConverter:
         if callback := self.definitions.get(node.token):
             if node.token == TokenType.OP_DEFAULT_START:
                 self._in_inner_try = True
-                return self.indent + callback(node) + self.end
+                return self.indent + callback(node)
 
             elif node.token == TokenType.OP_DEFAULT_END:
                 self._in_inner_try = False
-                return self.indent + callback(node) + self.end
+                return self.indent + callback(node)
 
             if self._in_inner_try:
                 return self.indent_inner_try + callback(node) + self.end
