@@ -359,7 +359,7 @@ class HtmlOpDocument(BaseDocumentOperations):
             VariableState.DOCUMENT, VariableState.LIST_DOCUMENT
         )
         e = Expression(
-            self.counter, self.variable_state, TokenType.OP_ATTR_TEXT, ()
+            self.counter, self.variable_state, TokenType.OP_ATTR_RAW, ()
         )
         if self.variable_state is VariableState.DOCUMENT:
             self._push(e, var_state=VariableState.STRING)
