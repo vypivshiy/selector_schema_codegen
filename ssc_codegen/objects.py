@@ -18,6 +18,7 @@ class VariableState(IntEnum):
 
 class TokenType(IntEnum):
     """all command enum representation"""
+
     # SELECTORS
     OP_XPATH = 0
     OP_XPATH_ALL = 1
@@ -96,25 +97,26 @@ class Node:
         return self.expression.token_type
 
     def __repr__(self):
-        return (f"Node_[{self.num},{self.count}](prev={self.prev}, next={self.next}, var_state={self.var_state.name!r}, "
-                f"token={self.token.name!r})")
+        return (
+            f"Node_[{self.num},{self.count}](prev={self.prev}, next={self.next}, var_state={self.var_state.name!r}, "
+            f"token={self.token.name!r})"
+        )
 
     @property
     def id(self) -> Optional[int]:
         # exclude enumerate assert, system tokens
-        if (
-                self.token not in (TokenType.OP_ASSERT_CSS,
-                                   TokenType.OP_ASSERT_XPATH,
-                                   TokenType.OP_ASSERT_CONTAINS,
-                                   TokenType.OP_ASSERT_EQUAL,
-                                   TokenType.OP_ASSERT_RE_MATCH,
-                                   # SYSTEM
-                                   TokenType.OP_FUNCTION_HEAD,
-                                   TokenType.OP_DEFAULT_START,
-                                   TokenType.OP_DEFAULT_END,
-                                   TokenType.OP_RET,
-                                   TokenType.OP_NO_RET
-                                   )
+        if self.token not in (
+            TokenType.OP_ASSERT_CSS,
+            TokenType.OP_ASSERT_XPATH,
+            TokenType.OP_ASSERT_CONTAINS,
+            TokenType.OP_ASSERT_EQUAL,
+            TokenType.OP_ASSERT_RE_MATCH,
+            # SYSTEM
+            TokenType.OP_FUNCTION_HEAD,
+            TokenType.OP_DEFAULT_START,
+            TokenType.OP_DEFAULT_END,
+            TokenType.OP_RET,
+            TokenType.OP_NO_RET,
         ):
             return self.num
 
@@ -165,38 +167,28 @@ class Node:
 
 
 # CONSTANTS EXPR
-EXPR_INIT = Expression(
+EXPR_INIT = Expression(-1, VariableState.NONE, TokenType.OP_INIT, arguments=())
+
+EXPR_RET = Expression(
     -1,
     VariableState.NONE,
-    TokenType.OP_INIT,
-    arguments=()
+    TokenType.OP_RET,
+    arguments=(),
 )
 
-EXPR_RET = Expression(-1,
-                      VariableState.NONE,
-                      TokenType.OP_RET,
-                      arguments=(), )
-
-EXPR_NO_RET = Expression(-1,
-                         VariableState.NONE,
-                         TokenType.OP_NO_RET,
-                         arguments=())
+EXPR_NO_RET = Expression(
+    -1, VariableState.NONE, TokenType.OP_NO_RET, arguments=()
+)
 
 
 def create_default_expr(doc: "Document") -> "Document":
     default_expr = doc.pop(0)
     value = default_expr.arguments[0]
     start_default_expr = Expression(
-        -1,
-        VariableState.NONE,
-        TokenType.OP_DEFAULT_START,
-        arguments=()
+        -1, VariableState.NONE, TokenType.OP_DEFAULT_START, arguments=()
     )
     end_default_expr = Expression(
-        -1,
-        VariableState.NONE,
-        TokenType.OP_DEFAULT_END,
-        arguments=(value,)
+        -1, VariableState.NONE, TokenType.OP_DEFAULT_END, arguments=(value,)
     )
     doc.insert(0, start_default_expr)
     doc.append(end_default_expr)

@@ -3,7 +3,7 @@ from functools import partial
 from ssc_codegen.objects import TokenType, Node
 
 
-__all__ = ['CodeConverter', "VAR_L", "VAR_R"]
+__all__ = ["CodeConverter", "VAR_L", "VAR_R"]
 
 
 def var_left(node: Node, prefix: str) -> str:
@@ -17,19 +17,20 @@ def var_right(node: Node, prefix: str) -> str:
 
 
 # Shortcuts hooks variable name
-VAR_L = partial(var_left, prefix='var_{}')
-VAR_R = partial(var_right, prefix='var_{}')
+VAR_L = partial(var_left, prefix="var_{}")
+VAR_R = partial(var_right, prefix="var_{}")
 
 
 class CodeConverter:
     """Translate Expressions into the parser code"""
 
-    def __init__(self,
-                 indent: str = " " * 4,
-                 end: str = "",
-                 intent_inner_try: str = " " * 4 * 2,
-                 templates_path: str = ""):
-
+    def __init__(
+        self,
+        indent: str = " " * 4,
+        end: str = "",
+        intent_inner_try: str = " " * 4 * 2,
+        templates_path: str = "",
+    ):
         self.indent = indent
         self.end = end
         self.indent_inner_try = intent_inner_try

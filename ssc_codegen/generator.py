@@ -5,7 +5,14 @@ from typing import Optional, Callable
 
 from ssc_codegen.converters.base import CodeConverter
 from ssc_codegen.document import Document
-from ssc_codegen.objects import Node, TokenType, EXPR_INIT, create_default_expr, EXPR_RET, EXPR_NO_RET
+from ssc_codegen.objects import (
+    Node,
+    TokenType,
+    EXPR_INIT,
+    create_default_expr,
+    EXPR_RET,
+    EXPR_NO_RET,
+)
 from ssc_codegen.schemas import BaseSchemaStrategy, SchemaType
 
 
@@ -28,13 +35,17 @@ class Method:
     def docstring(self) -> Optional[str]:
         return self.instance.__doc__
 
-    def set_ast_config(self, *,
-                       css_to_xpath: bool = False,
-                       xpath_to_css: bool = False,
-                       xpath_prefix: str = "descendant-or-self::"
-                       ):
+    def set_ast_config(
+        self,
+        *,
+        css_to_xpath: bool = False,
+        xpath_to_css: bool = False,
+        xpath_prefix: str = "descendant-or-self::",
+    ):
         if css_to_xpath and xpath_to_css:
-            raise AttributeError("should be choose css_to_xpath OR xpath_to_css")
+            raise AttributeError(
+                "should be choose css_to_xpath OR xpath_to_css"
+            )
 
         self.__XPATH_PREFIX = xpath_prefix
         self.__CSS_TO_XPATH = css_to_xpath
@@ -47,7 +58,11 @@ class Method:
             doc.convert_css_to_xpath(xpath_prefix=self.__XPATH_PREFIX)
         elif self.__XPATH_TO_CSS:
             doc.convert_xpath_to_css()
-        return build_ast(doc, is_validator=self.IS_VALIDATOR, is_split_document=self.IS_SPLIT_DOCUMENT)
+        return build_ast(
+            doc,
+            is_validator=self.IS_VALIDATOR,
+            is_split_document=self.IS_SPLIT_DOCUMENT,
+        )
 
     def code(self, converter: CodeConverter):
         return [converter.convert(node) for i, node in self.ast.items()]
@@ -71,9 +86,13 @@ class StructParser:
     def css_to_xpath(self, prefix: str = "descendant-or-self::"):
         """convert all CSS operations to XPATH"""
         if self.pre_validate:
-            self.pre_validate.set_ast_config(css_to_xpath=True, xpath_prefix=prefix)
+            self.pre_validate.set_ast_config(
+                css_to_xpath=True, xpath_prefix=prefix
+            )
         if self.split_document:
-            self.split_document.set_ast_config(css_to_xpath=True, xpath_prefix=prefix)
+            self.split_document.set_ast_config(
+                css_to_xpath=True, xpath_prefix=prefix
+            )
         for m in self.methods:
             m.set_ast_config(css_to_xpath=True, xpath_prefix=prefix)
 
@@ -90,22 +109,16 @@ class StructParser:
     def _parse_pre_validate(self) -> Optional[Method]:
         if method := getattr(self.instance, self._ATTR_PRE_VALIDATE, None):
             if method(Document()):
-                return Method(
-                    instance=method,
-                    IS_VALIDATOR=True
-                )
+                return Method(instance=method, IS_VALIDATOR=True)
         return None
 
     def _parse_split_document(self) -> Optional[Method]:
         if method := getattr(self.instance, self._ATTR_SPLIT_DOCUMENT, None):
             if self.instance.TYPE is SchemaType.ITEM:
-                warnings.warn('ItemStruct type not allowed split method, skip')
+                warnings.warn("ItemStruct type not allowed split method, skip")
 
             elif method(Document()):
-                return Method(
-                    instance=method,
-                    IS_SPLIT_DOCUMENT=True
-                )
+                return Method(instance=method, IS_SPLIT_DOCUMENT=True)
         return None
 
     @property
@@ -121,19 +134,23 @@ class StructParser:
         for attr_name in self.instance.__class__.__dict__.keys():
             if attr_name.startswith("__") and attr_name.endswith("__"):
                 continue
-            method: Callable[[Document], Document] = getattr(self.instance, attr_name)
+            method: Callable[[Document], Document] = getattr(
+                self.instance, attr_name
+            )
             args = inspect.signature(method).parameters
             document_param_name = list(args.keys())[0]
-            if (doc_param := args.get(document_param_name)) and doc_param.annotation.__name__ == Document.__name__:
+            if (
+                doc_param := args.get(document_param_name)
+            ) and doc_param.annotation.__name__ == Document.__name__:
                 doc = method(Document())
-                methods.append(
-                    Method(instance=method)
-                )
+                methods.append(Method(instance=method))
         return methods
 
     def __repr__(self):
-        return (f"{self.name}(validate={bool(self.pre_validate) or None}, split={bool(self.split_document) or None} "
-                f"methods={len(self.methods)})")
+        return (
+            f"{self.name}(validate={bool(self.pre_validate) or None}, split={bool(self.split_document) or None} "
+            f"methods={len(self.methods)})"
+        )
 
 
 def document_to_ast(doc: Document) -> dict[int, Node]:
@@ -158,21 +175,33 @@ def document_to_ast(doc: Document) -> dict[int, Node]:
     return _tree
 
 
-def build_ast(doc: Document, is_validator: bool = False, is_split_document: bool = False):
+def build_ast(
+    doc: Document, is_validator: bool = False, is_split_document: bool = False
+):
     # head_expr = create_expr_head(name)
     init_expr = EXPR_INIT
     ret_expr = EXPR_NO_RET if is_validator else EXPR_RET
 
     # check correct stack operations
-    if not is_validator and not is_split_document and doc.get_stack[-1].token_type in (TokenType.OP_CSS,
-                                                                                       TokenType.OP_CSS_ALL,
-                                                                                       TokenType.OP_XPATH,
-                                                                                       TokenType.OP_XPATH_ALL):
-        msg = 'Final operation must not end with operations (`css`, `css_all`, `xpath`, `xpath_all`)'
+    if (
+        not is_validator
+        and not is_split_document
+        and doc.get_stack[-1].token_type
+        in (
+            TokenType.OP_CSS,
+            TokenType.OP_CSS_ALL,
+            TokenType.OP_XPATH,
+            TokenType.OP_XPATH_ALL,
+        )
+    ):
+        msg = "Final operation must not end with operations (`css`, `css_all`, `xpath`, `xpath_all`)"
         raise SyntaxError(msg)
 
-    elif is_split_document and doc.get_stack[-1].token_type not in (TokenType.OP_XPATH_ALL, TokenType.OP_CSS_ALL):
-        msg = 'Split document method should be end with operation `css_all` or `xpath_all`'
+    elif is_split_document and doc.get_stack[-1].token_type not in (
+        TokenType.OP_XPATH_ALL,
+        TokenType.OP_CSS_ALL,
+    ):
+        msg = "Split document method should be end with operation `css_all` or `xpath_all`"
         raise SyntaxError(msg)
 
     # wrap code to try/except
@@ -183,7 +212,10 @@ def build_ast(doc: Document, is_validator: bool = False, is_split_document: bool
     if doc.get_stack[0].token_type == TokenType.OP_DEFAULT_START:
         doc.insert(-1, ret_expr)
 
-    elif doc.get_stack[-1].token_type not in (TokenType.OP_RET, TokenType.OP_NO_RET):
+    elif doc.get_stack[-1].token_type not in (
+        TokenType.OP_RET,
+        TokenType.OP_NO_RET,
+    ):
         doc.append(ret_expr)
 
     # init constructor (generated variables provider)
@@ -196,5 +228,4 @@ def build_ast(doc: Document, is_validator: bool = False, is_split_document: bool
 
 
 def translate_to_struct(obj: BaseSchemaStrategy):
-    return StructParser(
-        instance=obj)
+    return StructParser(instance=obj)

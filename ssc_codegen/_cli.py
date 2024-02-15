@@ -5,21 +5,29 @@ import argparse
 import importlib.util
 
 from ssc_codegen import render_code
-from ssc_codegen.converters import py_scrapy, py_bs4, py_parsel, py_selectolax, dart_universal_html
+from ssc_codegen.converters import (
+    py_scrapy,
+    py_bs4,
+    py_parsel,
+    py_selectolax,
+    dart_universal_html,
+)
 from ssc_codegen.schemas import BaseSchemaStrategy
 
 
 _CONVERTER_NAMESPACES = {
-        "py.bs4": py_bs4.converter,
-        "py.parsel": py_parsel.converter,
-        "py.selectolax": py_selectolax.converter,
-        "py.scrapy": py_scrapy.converter,
-        "dart": dart_universal_html.converter,
-    }
+    "py.bs4": py_bs4.converter,
+    "py.parsel": py_parsel.converter,
+    "py.selectolax": py_selectolax.converter,
+    "py.scrapy": py_scrapy.converter,
+    "dart": dart_universal_html.converter,
+}
 
 
 _EXT_PYTONIC = {"py.bs4", "py.parsel", "py.selectolax", "py.scrapy"}
-_EXT_DART = {"dart", }
+_EXT_DART = {
+    "dart",
+}
 
 # formatters
 _FMT_DART = "dart format {}"
@@ -64,22 +72,28 @@ def parse_arguments() -> ArgsNamespace:
         action="store_true",
         help="Suggest overwrite file",
     )
-    parser.add_argument("--xpath-to-css",
-                        dest="XPATH_TO_CSS",
-                        default=False,
-                        action="store_true",
-                        help="Convert xpath selectors to css (work not guaranteed)")
+    parser.add_argument(
+        "--xpath-to-css",
+        dest="XPATH_TO_CSS",
+        default=False,
+        action="store_true",
+        help="Convert xpath selectors to css (work not guaranteed)",
+    )
 
-    parser.add_argument("--css-to-xpath",
-                        dest="CSS_TO_XPATH",
-                        default=False,
-                        action="store_true",
-                        help="convert css selectors to xpath")
-    parser.add_argument("--xpath-prefix",
-                        dest="XPATH_PREFIX",
-                        default='descendant-or-self::',
-                        type=str,
-                        help="Xpath prefix for --css-to-xpath autoconverter. Default `descendant-or-self::`")
+    parser.add_argument(
+        "--css-to-xpath",
+        dest="CSS_TO_XPATH",
+        default=False,
+        action="store_true",
+        help="convert css selectors to xpath",
+    )
+    parser.add_argument(
+        "--xpath-prefix",
+        dest="XPATH_PREFIX",
+        default="descendant-or-self::",
+        type=str,
+        help="Xpath prefix for --css-to-xpath autoconverter. Default `descendant-or-self::`",
+    )
 
     parser.add_argument(
         "--no-format",
@@ -99,7 +113,7 @@ def _extract_schemas(path: str):
     spec.loader.exec_module(module)
     schemas: list[BaseSchemaStrategy] = []
     # Check if __all__ is defined in the module
-    if hasattr(module, '__all__'):
+    if hasattr(module, "__all__"):
         for obj_name in module.__all__:
             obj = getattr(module, obj_name)
             if issubclass(obj, BaseSchemaStrategy):
@@ -140,7 +154,7 @@ def _file_out(out: str, lang: str):
 def main():
     args = parse_arguments()
     if args.CSS_TO_XPATH and args.XPATH_TO_CSS:
-        print('Should be choice --css-to-xpath or --xpath-to-css')
+        print("Should be choice --css-to-xpath or --xpath-to-css")
         exit(1)
 
     converter = _CONVERTER_NAMESPACES.get(args.lang)
@@ -151,25 +165,27 @@ def main():
 
     print("Render code")
     if args.CSS_TO_XPATH:
-        print(F"convert CSS to XPATH with prefix '{args.XPATH_PREFIX}'")
+        print(f"convert CSS to XPATH with prefix '{args.XPATH_PREFIX}'")
     elif args.XPATH_TO_CSS:
         print(f"convert XPATH to CSS")
 
-    code = render_code(converter,
-                       *schemas,
-                       css_to_xpath=args.CSS_TO_XPATH,
-                       xpath_to_css=args.XPATH_TO_CSS,
-                       xpath_prefix=args.XPATH_PREFIX)
+    code = render_code(
+        converter,
+        *schemas,
+        css_to_xpath=args.CSS_TO_XPATH,
+        xpath_to_css=args.XPATH_TO_CSS,
+        xpath_prefix=args.XPATH_PREFIX,
+    )
     print(f"Save to {output}")
     Path(output).write_text(code)
     if not args.NO_FORMAT:
         print("Format code...")
-        if args.lang.startswith('py.'):
+        if args.lang.startswith("py."):
             subprocess.call(_FMT_PYTHON.format(output), shell=True)
         elif args.lang == "dart":
             subprocess.call(_FMT_DART.format(output), shell=True)
     print("done.")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

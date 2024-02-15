@@ -34,6 +34,7 @@ class ListSchema(BaseSchemaStrategy):
 
     should be provided split document logic (should be return LIST_DOCUMENT type)
     """
+
     TYPE = SchemaType.LIST
 
     @abstractmethod
@@ -44,21 +45,24 @@ class ListSchema(BaseSchemaStrategy):
 class DictSchema(BaseSchemaStrategy):
     """Generate structure like: {K1: V2, ..., KN, VN}
 
-       should be provided:
+    should be provided:
 
-        1. split document logic (should be return LIST_DOCUMENT type)
+     1. split document logic (should be return LIST_DOCUMENT type)
 
-        2. get key logic
+     2. get key logic
 
-        3. get value logic
+     3. get value logic
 
     """
+
     TYPE = SchemaType.DICT
 
     # struct for generate
 
     @abstractmethod
-    def __split_document_entrypoint__(self, doc: Document) -> Sequence[Document]:
+    def __split_document_entrypoint__(
+        self, doc: Document
+    ) -> Sequence[Document]:
         pass
 
     @abstractmethod
@@ -74,6 +78,7 @@ class ItemSchema(BaseSchemaStrategy):
     """generate dict structure with first founded element
 
     {K1: V2, K2: V2, ..., KN: VN}"""
+
     TYPE = SchemaType.ITEM
     #
     pass

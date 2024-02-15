@@ -3,7 +3,13 @@ from contextlib import contextmanager
 from typing import Optional
 
 from ssc_codegen.objects import VariableState, Expression, TokenType
-from ssc_codegen.queries import validate_css_query, validate_xpath_query, css_to_xpath, xpath_to_css
+from ssc_codegen.queries import (
+    validate_css_query,
+    validate_xpath_query,
+    css_to_xpath,
+    xpath_to_css,
+)
+
 
 class BaseDocumentOperations:
     def __init__(self):
@@ -12,7 +18,9 @@ class BaseDocumentOperations:
         self._stack: list[Expression] = []
 
     def __repr__(self):
-        comma_stack = ", ".join([f"{e.token_type.name}{e.arguments}" for e in self._stack])
+        comma_stack = ", ".join(
+            [f"{e.token_type.name}{e.arguments}" for e in self._stack]
+        )
         return f"Document(len={len(self._stack)}, state={self.variable_state.name}, commands={comma_stack})"
 
     @property
@@ -28,7 +36,9 @@ class BaseDocumentOperations:
     def pop(self, i: int = -1) -> Expression:
         return self._stack.pop(i)
 
-    def _push(self, expression: Expression, var_state: Optional[VariableState] = None):
+    def _push(
+        self, expression: Expression, var_state: Optional[VariableState] = None
+    ):
         if var_state:
             self.variable_state = var_state
         self._stack.append(expression)
@@ -45,10 +55,9 @@ class BaseDocumentOperations:
         """Set default value. Accept string or None"""
         if self.counter != 1:
             raise Exception("default operation should be first")
-        e = Expression(self.counter,
-                       self.variable_state,
-                       TokenType.OP_DEFAULT,
-                       (value,))
+        e = Expression(
+            self.counter, self.variable_state, TokenType.OP_DEFAULT, (value,)
+        )
         self._push(e)
         yield self
 
@@ -67,11 +76,12 @@ class ArrayOpDocument(BaseDocumentOperations):
     # ARRAY
     def index(self, i: int):
         """get element by index"""
-        self._is_valid_variable(VariableState.LIST_STRING, VariableState.LIST_DOCUMENT)
-        e = Expression(self.counter,
-                       self.variable_state,
-                       TokenType.OP_INDEX,
-                       (i,))
+        self._is_valid_variable(
+            VariableState.LIST_STRING, VariableState.LIST_DOCUMENT
+        )
+        e = Expression(
+            self.counter, self.variable_state, TokenType.OP_INDEX, (i,)
+        )
         if self.variable_state is VariableState.LIST_DOCUMENT:
             self._push(e, var_state=VariableState.DOCUMENT)
         else:
@@ -81,10 +91,9 @@ class ArrayOpDocument(BaseDocumentOperations):
     def join(self, prefix: str):
         """join list of sting to array"""
         self._is_valid_variable(VariableState.LIST_STRING)
-        e = Expression(self.counter,
-                       self.variable_state,
-                       TokenType.OP_JOIN,
-                       (prefix,))
+        e = Expression(
+            self.counter, self.variable_state, TokenType.OP_JOIN, (prefix,)
+        )
         self._push(e, var_state=VariableState.STRING)
         return self
 
@@ -93,29 +102,29 @@ class RegexOpDocument(BaseDocumentOperations):
     def re(self, expr: str):
         """get first match by regular expression"""
         self._is_valid_variable(VariableState.STRING)
-        e = Expression(self.counter,
-                       self.variable_state,
-                       TokenType.OP_REGEX,
-                       (expr,))
+        e = Expression(
+            self.counter, self.variable_state, TokenType.OP_REGEX, (expr,)
+        )
         self._push(e)
         return self
 
     def re_all(self, expr: str):
         """get all matches by regular expression"""
         self._is_valid_variable(VariableState.STRING)
-        e = Expression(self.counter,
-                       self.variable_state,
-                       TokenType.OP_REGEX_ALL,
-                       (expr,))
+        e = Expression(
+            self.counter, self.variable_state, TokenType.OP_REGEX_ALL, (expr,)
+        )
         self._push(e, var_state=VariableState.LIST_STRING)
         return self
 
     def re_sub(self, pattern: str, repl: str):
         self._is_valid_variable(VariableState.STRING)
-        e = Expression(self.counter,
-                       self.variable_state,
-                       TokenType.OP_REGEX_SUB,
-                       (pattern, repl))
+        e = Expression(
+            self.counter,
+            self.variable_state,
+            TokenType.OP_REGEX_SUB,
+            (pattern, repl),
+        )
         self._push(e)
         return self
 
@@ -124,30 +133,36 @@ class StringOpDocument(BaseDocumentOperations):
     def lstrip(self, prefix: str):
         """remove prefix from string (from left)"""
         self._is_valid_variable(VariableState.STRING, VariableState.LIST_STRING)
-        e = Expression(self.counter,
-                       self.variable_state,
-                       TokenType.OP_STRING_L_TRIM,
-                       (prefix,))
+        e = Expression(
+            self.counter,
+            self.variable_state,
+            TokenType.OP_STRING_L_TRIM,
+            (prefix,),
+        )
         self._push(e)
         return self
 
     def rstrip(self, suffix: str):
         """remove suffix from string (from right)"""
         self._is_valid_variable(VariableState.STRING, VariableState.LIST_STRING)
-        e = Expression(self.counter,
-                       self.variable_state,
-                       TokenType.OP_STRING_R_TRIM,
-                       (suffix,))
+        e = Expression(
+            self.counter,
+            self.variable_state,
+            TokenType.OP_STRING_R_TRIM,
+            (suffix,),
+        )
         self._push(e)
         return self
 
     def strip(self, sting: str):
         """strip string from string (from left and right)"""
         self._is_valid_variable(VariableState.STRING, VariableState.LIST_STRING)
-        e = Expression(self.counter,
-                       self.variable_state,
-                       TokenType.OP_STRING_TRIM,
-                       (sting,))
+        e = Expression(
+            self.counter,
+            self.variable_state,
+            TokenType.OP_STRING_TRIM,
+            (sting,),
+        )
         self._push(e)
         return self
 
@@ -158,37 +173,41 @@ class StringOpDocument(BaseDocumentOperations):
         self._is_valid_variable(VariableState.STRING, VariableState.LIST_STRING)
         if "{{}}" not in fmt:
             raise Exception("Missing `{{}}` mark")
-        e = Expression(self.counter,
-                       self.variable_state,
-                       TokenType.OP_STRING_FORMAT,
-                       (fmt,))
+        e = Expression(
+            self.counter,
+            self.variable_state,
+            TokenType.OP_STRING_FORMAT,
+            (fmt,),
+        )
         self._push(e)
         return self
 
     def split(self, sep: str):
         """split string by `sep` argument"""
         self._is_valid_variable(VariableState.STRING)
-        e = Expression(self.counter,
-                       self.variable_state,
-                       TokenType.OP_STRING_SPLIT,
-                       (sep,))
+        e = Expression(
+            self.counter, self.variable_state, TokenType.OP_STRING_SPLIT, (sep,)
+        )
         self._push(e, var_state=VariableState.LIST_STRING)
         return self
 
     def replace(self, old: str, new: str):
-        """replace `old` arg in string in all places to `new` """
+        """replace `old` arg in string in all places to `new`"""
         self._is_valid_variable(VariableState.STRING, VariableState.LIST_STRING)
-        e = Expression(self.counter,
-                       self.variable_state,
-                       TokenType.OP_STRING_REPLACE,
-                       (old, new))
+        e = Expression(
+            self.counter,
+            self.variable_state,
+            TokenType.OP_STRING_REPLACE,
+            (old, new),
+        )
         self._push(e)
         return self
 
 
 class HtmlOpDocument(BaseDocumentOperations):
-
-    def convert_css_to_xpath(self, xpath_prefix: str = "descendant-or-self::") -> None:
+    def convert_css_to_xpath(
+        self, xpath_prefix: str = "descendant-or-self::"
+    ) -> None:
         """convert all css operations to XPATH (guaranteed)"""
         expr: Expression
 
@@ -202,7 +221,7 @@ class HtmlOpDocument(BaseDocumentOperations):
                     arguments=(new_query,),
                     token_type=TokenType.OP_XPATH,
                     message=expr.message,
-                    variable_state=expr.variable_state
+                    variable_state=expr.variable_state,
                 )
 
             elif expr.token_type == TokenType.OP_CSS_ALL:
@@ -213,7 +232,7 @@ class HtmlOpDocument(BaseDocumentOperations):
                     arguments=(new_query,),
                     token_type=TokenType.OP_XPATH_ALL,
                     message=expr.message,
-                    variable_state=expr.variable_state
+                    variable_state=expr.variable_state,
                 )
 
             elif expr.token_type == TokenType.OP_ASSERT_CSS:
@@ -224,7 +243,7 @@ class HtmlOpDocument(BaseDocumentOperations):
                     arguments=(new_query,),
                     token_type=TokenType.OP_ASSERT_XPATH,
                     message=expr.message,
-                    variable_state=expr.variable_state
+                    variable_state=expr.variable_state,
                 )
         self._stack = stack_copy
 
@@ -241,7 +260,7 @@ class HtmlOpDocument(BaseDocumentOperations):
                     arguments=(new_query,),
                     token_type=TokenType.OP_CSS,
                     message=expr.message,
-                    variable_state=expr.variable_state
+                    variable_state=expr.variable_state,
                 )
 
             elif expr.token_type == TokenType.OP_XPATH_ALL:
@@ -252,7 +271,7 @@ class HtmlOpDocument(BaseDocumentOperations):
                     arguments=(new_query,),
                     token_type=TokenType.OP_CSS_ALL,
                     message=expr.message,
-                    variable_state=expr.variable_state
+                    variable_state=expr.variable_state,
                 )
 
             elif expr.token_type == TokenType.OP_ASSERT_XPATH:
@@ -263,17 +282,16 @@ class HtmlOpDocument(BaseDocumentOperations):
                     arguments=(new_query,),
                     token_type=TokenType.OP_ASSERT_CSS,
                     message=expr.message,
-                    variable_state=expr.variable_state
+                    variable_state=expr.variable_state,
                 )
 
     def css(self, query: str):
         """get first element by css query"""
         validate_css_query(query)
         self._is_valid_variable(VariableState.DOCUMENT)
-        e = Expression(self.counter,
-                       self.variable_state,
-                       TokenType.OP_CSS,
-                       (query,))
+        e = Expression(
+            self.counter, self.variable_state, TokenType.OP_CSS, (query,)
+        )
         self._push(e)
         return self
 
@@ -281,10 +299,9 @@ class HtmlOpDocument(BaseDocumentOperations):
         """get first element by xpath query"""
         validate_xpath_query(query)
         self._is_valid_variable(VariableState.DOCUMENT)
-        e = Expression(self.counter,
-                       self.variable_state,
-                       TokenType.OP_XPATH,
-                       (query,))
+        e = Expression(
+            self.counter, self.variable_state, TokenType.OP_XPATH, (query,)
+        )
         self._push(e)
         return self
 
@@ -292,10 +309,9 @@ class HtmlOpDocument(BaseDocumentOperations):
         """get all elements by css query"""
         validate_css_query(query)
         self._is_valid_variable(VariableState.DOCUMENT)
-        e = Expression(self.counter,
-                       self.variable_state,
-                       TokenType.OP_CSS_ALL,
-                       (query,))
+        e = Expression(
+            self.counter, self.variable_state, TokenType.OP_CSS_ALL, (query,)
+        )
         self._push(e, var_state=VariableState.LIST_DOCUMENT)
         return self
 
@@ -303,20 +319,20 @@ class HtmlOpDocument(BaseDocumentOperations):
         """get all elements by xpath query"""
         validate_xpath_query(query)
         self._is_valid_variable(VariableState.DOCUMENT)
-        e = Expression(self.counter,
-                       self.variable_state,
-                       TokenType.OP_XPATH_ALL,
-                       (query,))
+        e = Expression(
+            self.counter, self.variable_state, TokenType.OP_XPATH_ALL, (query,)
+        )
         self._push(e, var_state=VariableState.LIST_DOCUMENT)
         return self
 
     def attr(self, name: str):
         """get attribute value from element"""
-        self._is_valid_variable(VariableState.DOCUMENT, VariableState.LIST_DOCUMENT)
-        e = Expression(self.counter,
-                       self.variable_state,
-                       TokenType.OP_ATTR,
-                       (name,))
+        self._is_valid_variable(
+            VariableState.DOCUMENT, VariableState.LIST_DOCUMENT
+        )
+        e = Expression(
+            self.counter, self.variable_state, TokenType.OP_ATTR, (name,)
+        )
         if self.variable_state is VariableState.DOCUMENT:
             self._push(e, var_state=VariableState.STRING)
         else:
@@ -325,11 +341,12 @@ class HtmlOpDocument(BaseDocumentOperations):
 
     def text(self):
         """get inner text from element"""
-        self._is_valid_variable(VariableState.DOCUMENT, VariableState.LIST_DOCUMENT)
-        e = Expression(self.counter,
-                       self.variable_state,
-                       TokenType.OP_ATTR_TEXT,
-                       ())
+        self._is_valid_variable(
+            VariableState.DOCUMENT, VariableState.LIST_DOCUMENT
+        )
+        e = Expression(
+            self.counter, self.variable_state, TokenType.OP_ATTR_TEXT, ()
+        )
         if self.variable_state is VariableState.DOCUMENT:
             self._push(e, var_state=VariableState.STRING)
         else:
@@ -338,11 +355,12 @@ class HtmlOpDocument(BaseDocumentOperations):
 
     def raw(self):
         """get raw element tag"""
-        self._is_valid_variable(VariableState.DOCUMENT, VariableState.LIST_DOCUMENT)
-        e = Expression(self.counter,
-                       self.variable_state,
-                       TokenType.OP_ATTR_TEXT,
-                       ())
+        self._is_valid_variable(
+            VariableState.DOCUMENT, VariableState.LIST_DOCUMENT
+        )
+        e = Expression(
+            self.counter, self.variable_state, TokenType.OP_ATTR_TEXT, ()
+        )
         if self.variable_state is VariableState.DOCUMENT:
             self._push(e, var_state=VariableState.STRING)
         else:
@@ -350,9 +368,9 @@ class HtmlOpDocument(BaseDocumentOperations):
         return self
 
 
-class Document(ArrayOpDocument,
-               RegexOpDocument,
-               StringOpDocument,
-               HtmlOpDocument):
+class Document(
+    ArrayOpDocument, RegexOpDocument, StringOpDocument, HtmlOpDocument
+):
     """Base document-like attribute provide DSL parser logic for generating code"""
+
     pass

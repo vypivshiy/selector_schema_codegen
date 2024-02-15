@@ -10,6 +10,7 @@ T_DOCUMENT = TypeVar("T_DOCUMENT", bound=Document)
 
 class Assert:
     """assert expr realisation"""
+
     @classmethod
     def css(cls, doc: T_DOCUMENT, query: str, msg: Optional[str] = None):
         """pass assert if css not return None/null"""
@@ -19,7 +20,7 @@ class Assert:
             VariableState.NONE,
             TokenType.OP_ASSERT_CSS,
             (query,),
-            msg
+            msg,
         )
         doc.append(e)
         return doc
@@ -33,7 +34,7 @@ class Assert:
             VariableState.NONE,
             TokenType.OP_ASSERT_XPATH,
             (query,),
-            msg
+            msg,
         )
         doc.append(e)
         return doc
@@ -47,7 +48,7 @@ class Assert:
             VariableState.NONE,
             TokenType.OP_ASSERT_EQUAL,
             (value,),
-            msg
+            msg,
         )
         doc.append(e)
         return doc
@@ -61,7 +62,7 @@ class Assert:
             VariableState.NONE,
             TokenType.OP_ASSERT_RE_MATCH,
             (expr,),
-            msg
+            msg,
         )
         doc.append(e)
         return doc
@@ -75,7 +76,7 @@ class Assert:
             VariableState.NONE,
             TokenType.OP_ASSERT_CONTAINS,
             (value,),
-            msg
+            msg,
         )
         doc.append(e)
         return doc
