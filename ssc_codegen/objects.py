@@ -8,19 +8,19 @@ if TYPE_CHECKING:
 
 
 class VariableState(IntEnum):
-    DOCUMENT = 0
-    LIST_DOCUMENT = 1
-    STRING = 2
-    LIST_STRING = 3
-    NONE = 4
-    DOCSTRING = 5  # ///
+    DOCUMENT = 1
+    LIST_DOCUMENT = 2
+    STRING = 3
+    LIST_STRING = 4
+    NONE = 5
+    DOCSTRING = 6  # ///
 
 
 class TokenType(IntEnum):
     """all command enum representation"""
 
     # SELECTORS
-    OP_XPATH = 0
+    OP_XPATH = 300
     OP_XPATH_ALL = 1
     OP_CSS = 2
     OP_CSS_ALL = 3

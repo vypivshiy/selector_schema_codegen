@@ -39,8 +39,7 @@ class BaseDocumentOperations:
     def _push(
         self, expression: Expression, var_state: Optional[VariableState] = None
     ):
-        # TODO reassign state.DOCUMENT 0 to 1
-        if var_state is not None:
+        if var_state:
             self.variable_state = var_state
         self._stack.append(expression)
         self.counter += 1
