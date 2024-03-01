@@ -1,6 +1,6 @@
 import warnings
 from contextlib import contextmanager
-from typing import Optional
+from typing import Optional, Union
 
 from ssc_codegen.objects import VariableState, Expression, TokenType
 from ssc_codegen.queries import (
@@ -39,7 +39,8 @@ class BaseDocumentOperations:
     def _push(
         self, expression: Expression, var_state: Optional[VariableState] = None
     ):
-        if var_state:
+        # TODO reassign state.DOCUMENT 0 to 1
+        if var_state is not None:
             self.variable_state = var_state
         self._stack.append(expression)
         self.counter += 1
@@ -373,4 +374,14 @@ class Document(
 ):
     """Base document-like attribute provide DSL parser logic for generating code"""
 
-    pass
+    def __getitem__(self, item: Union[int, str]):
+        """if item str invoke HtmlOpDocument.attr(item)
+        if item int - ArrayOpDocument.index(item)
+        """
+        if isinstance(item, str):
+            return self.attr(item)
+        elif isinstance(item, int):
+            return self.index(item)
+        wrong_type = type(item).__name__
+        msg = f"should be str or int, not '{wrong_type}'"
+        raise TypeError(msg)
