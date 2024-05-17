@@ -12,7 +12,8 @@ CONST_METHODS = {
     "__SPLIT_DOC__": "def _part_document(self, el):",
     "__ITEM__": "def _parse_item(self, el):",
     "__KEY__": "def _parse_key(self, el):",
-    "__VALUE__": "def _parse_value(self, el):"
+    "__VALUE__": "def _parse_value(self, el):",
+    "__PRE_VALIDATE__": "def _pre_validate(self, el):"
 }
 
 
@@ -249,9 +250,10 @@ if __name__ == '__main__':
 
     class Links(DictSchema):
         __SPLIT_DOC__ = D().css_all('a')
+        __SIGNATURE__ = {"name": "url", "...": "..."}
+
         __KEY__ = D().text().trim(" ")
         __VALUE__ = D().attr('href')
-        __SIGNATURE__ = {"link_name": "link_url", "...": "..."}
 
 
     class Books(ListSchema):
@@ -268,20 +270,7 @@ if __name__ == '__main__':
         books: Books = N().sub_parser(Books)
 
 
-    # t2 = TemplateStruct(Test, converter, {})
-    generate_code_from_schemas("templates/py/parsel", converter, Links, Books, CataloguePage)
-    # print(t2.name)
-    #
-    # print(t2.docstring)
-    # print(t2.methods_names, end='\n\t')
-    # print(*t2.methods_code(), sep='\n\n')
-    # struct = SubSchema.get_ast_struct()
-    # print(struct.docstring().arguments[0])
-    # for f in struct.fields:
-    #     print(converter.convert(f.method))
-    #     code = [converter.convert(e) for e in f.expressions]
-    #     if f.default:
-    #         wrapper = converter.convert(f.default)
-    #         print(wrapper.format('\n'.join(code)))
-    #     else:
-    #         print(*code, sep='\n')
+    generate_code_from_schemas("templates/py/parsel", converter,
+                               Links, Books, CataloguePage,
+                               convert_to_xpath=True,
+                               xpath_prefix="//")

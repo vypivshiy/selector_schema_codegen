@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Type, List
+from typing import TYPE_CHECKING, Type, List, Optional
 
 from ssc_codegen2.schema import ItemSchema, DictSchema, ListSchema, FlattenListSchema
 from ssc_codegen2.schema.constants import SchemaKeywords
@@ -32,6 +32,14 @@ class TemplateStruct:
     def docstring(self) -> str:
         return self.converter.convert(self.klass_schema.__expr_doc__())
 
+    def convert_css_to_xpath(self, xpath_prefix: str):
+        for field in self.ast.fields:
+            field.document.convert_css_to_xpath(xpath_prefix)
+
+    def convert_xpath_to_css(self):
+        for field in self.ast.fields:
+            field.document.convert_xpath_to_css()
+
     def methods_code(self, sep: str = "\n\t", default_wrapper_sep: str = '\n\t\t') -> list[str]:
         codes = []
         for field in self.ast.fields:
@@ -50,17 +58,28 @@ class TemplateStruct:
         return [f.name for f in self.ast.fields if f.name not in SchemaKeywords]
 
 
-def generate_code_from_schemas(path: str, converter: "BaseCodeConverter", *schemas: Type["BaseSchema"]):
+def generate_code_from_schemas(path: str, converter: "BaseCodeConverter", *schemas: Type["BaseSchema"],
+                               convert_to_xpath: bool = False,
+                               convert_to_css: bool = False,
+                               xpath_prefix: str = "descendant-or-self::"
+                               ):
 
     def is_sc_class(sce, base):
         return base.__name__ in  [c.__name__ for c in sce.mro()]
 
     import jinja2
+    if convert_to_xpath and convert_to_css:
+        raise AttributeError("should be css_to_xpath or xpath_to_css")
+
     template_loader = jinja2.FileSystemLoader(searchpath=path)
     env = jinja2.Environment(loader=template_loader)
     for sc in schemas:
         st = TemplateStruct(sc, converter)
         # TODO
+        if convert_to_xpath:
+            st.convert_css_to_xpath(xpath_prefix)
+        elif convert_to_css:
+            st.convert_xpath_to_css()
 
         if is_sc_class(sc, ItemSchema):
             tmp = env.get_template('itemStruct.j2')
