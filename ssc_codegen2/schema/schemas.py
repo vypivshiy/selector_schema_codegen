@@ -35,6 +35,7 @@ class FlattenListSchema(BaseSchema):
     __SCHEMA_TYPE__ = "Array"
     __SPLIT_DOC__: "BaseDocument" = NotImplemented
     __ITEM__: "BaseDocument" = NotImplemented
+    __SIGNATURE__ = ["item", '...']
 
     @classmethod
     def check(cls) -> None:
