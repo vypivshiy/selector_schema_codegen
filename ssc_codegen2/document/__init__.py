@@ -1,4 +1,4 @@
-from ssc_codegen2.document.selector import DocumentOpHtml, DocumentOpHtmlSingle
+from ssc_codegen2.document.selector import DocumentOpHtml, DocumentOpHtmlSingle, DocumentOpSelectorConverter
 from ssc_codegen2.document.regex import DocumentOpRegex
 from ssc_codegen2.document.array import DocumentOpArray
 from ssc_codegen2.document.text import DocumentOpString
@@ -15,7 +15,7 @@ class Document(
     pass
 
 
-class Nested(DocumentOpNested, DocumentOpHtmlSingle, ):
+class Nested(DocumentOpNested, DocumentOpHtmlSingle, DocumentOpSelectorConverter):
     pass
 
 
@@ -25,7 +25,7 @@ def D() -> Document:
 
 
 def N() -> Nested:
-    """Nested document shortcut"""
+    """Nested document object shortcut"""
     return Nested()
 
 

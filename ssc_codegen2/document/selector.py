@@ -12,28 +12,9 @@ from ssc_codegen2.utils.selector_validators import (
 )
 
 
-class DocumentOpHtmlSingle(BaseDocument):
-    """implemented for Nested fields"""
-    def css(self, query: str):
-        """get first element by css query"""
-        validate_css_query(query)
-        self._test_type_state_expr(TypeVariableState.DOCUMENT)
-
-        self._add_expr(TokenType.OP_CSS, args=(query,))
-        return self
-
-    def xpath(self, query: str):
-        """get first element by xpath query"""
-        validate_xpath_query(query)
-        self._test_type_state_expr(TypeVariableState.DOCUMENT)
-
-        self._add_expr(TokenType.OP_XPATH, args=(query,))
-        return self
-
-
-class DocumentOpHtml(BaseDocument):
+class DocumentOpSelectorConverter(BaseDocument):
     def convert_css_to_xpath(
-        self, xpath_prefix: str = "descendant-or-self::"
+            self, xpath_prefix: str = "descendant-or-self::"
     ) -> None:
         """convert all css operations to XPATH (guaranteed)"""
         stack_copy = self._stack_instructions.copy()
@@ -46,7 +27,6 @@ class DocumentOpHtml(BaseDocument):
                     num=expr.num,
                     arguments=(xpath_query,),
                     TOKEN_TYPE=TokenType.OP_XPATH,
-                    assert_message=expr.assert_message,
                     VARIABLE_TYPE=expr.VARIABLE_TYPE,
                 )
 
@@ -57,7 +37,6 @@ class DocumentOpHtml(BaseDocument):
                     num=expr.num,
                     arguments=(xpath_query,),
                     TOKEN_TYPE=TokenType.OP_XPATH_ALL,
-                    assert_message=expr.assert_message,
                     VARIABLE_TYPE=expr.VARIABLE_TYPE,
                 )
 
@@ -68,7 +47,6 @@ class DocumentOpHtml(BaseDocument):
                     num=expr.num,
                     arguments=(xpath_query,),
                     TOKEN_TYPE=TokenType.OP_ASSERT_XPATH,
-                    assert_message=expr.assert_message,
                     VARIABLE_TYPE=expr.VARIABLE_TYPE,
                 )
         self._stack_instructions = stack_copy
@@ -99,7 +77,6 @@ class DocumentOpHtml(BaseDocument):
                     num=expr.num,
                     arguments=(css_query,),
                     TOKEN_TYPE=TokenType.OP_CSS,
-                    assert_message=expr.assert_message,
                     VARIABLE_TYPE=expr.VARIABLE_TYPE,
                 )
 
@@ -111,7 +88,6 @@ class DocumentOpHtml(BaseDocument):
                     num=expr.num,
                     arguments=(css_query,),
                     TOKEN_TYPE=TokenType.OP_CSS_ALL,
-                    assert_message=expr.assert_message,
                     VARIABLE_TYPE=expr.VARIABLE_TYPE,
                 )
 
@@ -128,22 +104,8 @@ class DocumentOpHtml(BaseDocument):
                 )
             self._stack_instructions = stack_copy
 
-    def css(self, query: str):
-        """get first element by css query"""
-        validate_css_query(query)
-        self._test_type_state_expr(TypeVariableState.DOCUMENT)
 
-        self._add_expr(TokenType.OP_CSS, args=(query,))
-        return self
-
-    def xpath(self, query: str):
-        """get first element by xpath query"""
-        validate_xpath_query(query)
-        self._test_type_state_expr(TypeVariableState.DOCUMENT)
-
-        self._add_expr(TokenType.OP_XPATH, args=(query,))
-        return self
-
+class DocumentOpHtmlMany(BaseDocument):
     def css_all(self, query: str):
         """get all elements by css query"""
         validate_css_query(query)
@@ -166,6 +128,28 @@ class DocumentOpHtml(BaseDocument):
             args=(query, )
         )
         return self
+
+
+class DocumentOpHtmlSingle(BaseDocument):
+    """implemented for Nested fields"""
+    def css(self, query: str):
+        """get first element by css query"""
+        validate_css_query(query)
+        self._test_type_state_expr(TypeVariableState.DOCUMENT)
+
+        self._add_expr(TokenType.OP_CSS, args=(query,))
+        return self
+
+    def xpath(self, query: str):
+        """get first element by xpath query"""
+        validate_xpath_query(query)
+        self._test_type_state_expr(TypeVariableState.DOCUMENT)
+
+        self._add_expr(TokenType.OP_XPATH, args=(query,))
+        return self
+
+
+class DocumentOpHtml(DocumentOpHtmlSingle, DocumentOpHtmlMany, DocumentOpSelectorConverter):
 
     def attr(self, name: str):
         """get attribute value from element"""
