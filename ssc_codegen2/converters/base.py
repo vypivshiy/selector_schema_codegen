@@ -18,7 +18,7 @@ class BaseCodeConverter:
                  # default code wrapper
                  default_indent: int = 2,
                  ):
-        self.definitions: dict[TokenType, Callable[[Expression, ...], str]] = {}
+        self.definitions: dict[TokenType, Callable[[Expression], str]] = {}
         self._indent = indent
         self._chr_indent = chr_indent
         self._end = end

@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Type, List, Optional
 
+import jinja2
+
 from ssc_codegen2.schema import ItemSchema, DictSchema, ListSchema, FlattenListSchema
 from ssc_codegen2.schema.constants import SchemaKeywords
 
@@ -58,37 +60,59 @@ class TemplateStruct:
         return [f.name for f in self.ast.fields if f.name not in SchemaKeywords]
 
 
-def generate_code_from_schemas(path: str, converter: "BaseCodeConverter", *schemas: Type["BaseSchema"],
-                               convert_to_xpath: bool = False,
-                               convert_to_css: bool = False,
-                               xpath_prefix: str = "descendant-or-self::"
-                               ):
+class CodeGenerator:
+    def __init__(self,
+                 templates_path: str,
+                 base_struct_path: str,
+                 converter: "BaseCodeConverter",
+                 css_to_xpath: bool = False,
+                 xpath_to_css: bool = False,
+                 xpath_prefix: str = "descendant-or-self::"):
+        if css_to_xpath and xpath_to_css:
+            raise AttributeError("should be css_to_xpath or xpath_to_css")
+        self._css_to_xpath = css_to_xpath
+        self._xpath_to_css = xpath_to_css
 
-    def is_sc_class(sce, base):
-        return base.__name__ in  [c.__name__ for c in sce.mro()]
+        self._xpath_prefix = xpath_prefix
+        self._converter = converter
+        self._template_path = templates_path
+        self.base_class_path = base_struct_path
+        # j2 config
+        self.template_loader = jinja2.PackageLoader(self._template_path, "")
+        self.env = jinja2.Environment(loader=self.template_loader)
 
-    import jinja2
-    if convert_to_xpath and convert_to_css:
-        raise AttributeError("should be css_to_xpath or xpath_to_css")
+    @staticmethod
+    def _is_sc_class(sce, base):
+        return base.__name__ in [c.__name__ for c in sce.mro()]
 
-    template_loader = jinja2.FileSystemLoader(searchpath=path)
-    env = jinja2.Environment(loader=template_loader)
-    for sc in schemas:
-        st = TemplateStruct(sc, converter)
-        # TODO
-        if convert_to_xpath:
-            st.convert_css_to_xpath(xpath_prefix)
-        elif convert_to_css:
-            st.convert_xpath_to_css()
+    def generate_code(self, *schemas: Type["BaseSchema"]) -> list[str]:
+        codes: List[str] = []
+        for sc in schemas:
+            st = TemplateStruct(sc, self._converter)
+            # TODO
+            if self._css_to_xpath:
+                st.convert_css_to_xpath(self._xpath_prefix)
+            elif self._xpath_to_css:
+                st.convert_xpath_to_css()
 
-        if is_sc_class(sc, ItemSchema):
-            tmp = env.get_template('itemStruct.j2')
-        elif is_sc_class(sc, DictSchema):
-            tmp = env.get_template('dictStruct.j2')
-        elif is_sc_class(sc, ListSchema):
-            tmp = env.get_template('listStruct.j2')
-        elif is_sc_class(sc, FlattenListSchema):
-            tmp = env.get_template('flattenListStruct.j2')
-        else:
-            raise Exception
-        print(tmp.render(struct=st))
+            if self._is_sc_class(sc, ItemSchema):
+                tmp = self.env.get_template('itemStruct.j2')
+            elif self._is_sc_class(sc, DictSchema):
+                tmp = self.env.get_template('dictStruct.j2')
+            elif self._is_sc_class(sc, ListSchema):
+                tmp = self.env.get_template('listStruct.j2')
+            elif self._is_sc_class(sc, FlattenListSchema):
+                tmp = self.env.get_template('flattenListStruct.j2')
+            else:
+                raise Exception
+            # TODO: fix tabulation issue
+            codes.append(tmp.render(struct=st).replace('\t', ' ' * 4))
+        return codes
+
+    def generate_base_class(self) -> str:
+        tmp = self.env.get_template(f'{self.base_class_path}/baseStruct.j2')
+        return tmp.render()
+
+    def generate_imports(self) -> str:
+        tmp = self.env.get_template('imports.j2')
+        return tmp.render()
