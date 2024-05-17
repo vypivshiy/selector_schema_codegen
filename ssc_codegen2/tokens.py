@@ -61,11 +61,6 @@ class TokenType(IntEnum):
     OP_ASSERT_XPATH = 24
     OP_NESTED_SCHEMA = 25
 
-    # helper default op wrapper
-    # try/catch
-    OP_DEFAULT_START = 26
-    OP_DEFAULT_END = 27
-
     # BUILDER TOKENS
     ST_DOCSTRING = 100
     ST_INIT = 101  # init first var. should be start at element
@@ -74,12 +69,3 @@ class TokenType(IntEnum):
     ST_METHOD = 104
     ST_NO_RET = 105  # __PRE_VALIDATE__ try/catch wraps
     ST_RET = 106
-
-    # try/except or try/catch tokens
-    # pre-validate method before init
-
-
-if __name__ == '__main__':
-    for i in TokenType:
-        print(f'@converter(TokenType.{i.name})')
-        print(f'def {i.name.lower()}(expr: Expression):\n\tpass')
