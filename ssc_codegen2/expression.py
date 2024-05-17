@@ -7,8 +7,7 @@ class Expression(NamedTuple):
     num: int
     VARIABLE_TYPE: TypeVariableState
     TOKEN_TYPE: TokenType
-    arguments: tuple[Any, ...]
-    assert_message: Optional[str] = None
+    arguments: tuple[Any, ...] = ()
 
     def update_var_type(self, var_type: TypeVariableState) -> "Expression":
         return Expression(
@@ -16,22 +15,4 @@ class Expression(NamedTuple):
             VARIABLE_TYPE=var_type,
             TOKEN_TYPE=self.TOKEN_TYPE,
             arguments=self.arguments,
-            assert_message=self.assert_message
         )
-
-
-class Field:
-    def __init__(self, name: str):
-        self._name = name
-        self._expressions: list["Expression"] = []
-
-    @property
-    def name(self) -> str:
-        return self._name
-
-    @property
-    def expressions(self):
-        return self._expressions
-
-    def add(self, expr: "Expression"):
-        self._expressions.append(expr)

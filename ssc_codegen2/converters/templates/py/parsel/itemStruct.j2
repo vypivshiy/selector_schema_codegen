@@ -1,0 +1,5 @@
+{% from 'macros.j2' import class_header,  parse_item_schema, methods_code %}
+
+{{ class_header(struct) }}
+{{ parse_item_schema(struct) }}
+{{- methods_code(struct) }}

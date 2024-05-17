@@ -4,8 +4,5 @@ try:
 except ImportError:
     from enum import Enum
 
-
     class IntEnum(int, Enum):
         pass
-
-from typing_extensions import Self, deprecated

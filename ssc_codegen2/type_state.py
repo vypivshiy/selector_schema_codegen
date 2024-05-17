@@ -9,3 +9,4 @@ class TypeVariableState(IntEnum):
     LIST_STRING = 4
     NONE = 5
     DOCSTRING = 6  # ///
+    NESTED = 7  # link to another struct

@@ -3,6 +3,7 @@ from ssc_codegen2._compat import IntEnum
 
 class TokenType(IntEnum):
     """Instructions tokens representation"""
+
     # SELECTORS
     OP_XPATH = 1
     "extract first element by xpath query"
@@ -58,20 +59,27 @@ class TokenType(IntEnum):
     OP_ASSERT_RE_MATCH = 22
     OP_ASSERT_CSS = 23
     OP_ASSERT_XPATH = 24
+    OP_NESTED_SCHEMA = 25
 
-    # HELPER TOKENS
-    OP_DOCSTRING = 100
-    OP_METHOD_NAME = 101
-    OP_INIT = 102  # init first var. should be start at element
-    OP_NO_RET = 103  # __PRE_VALIDATE__ try/catch wraps
-    OP_RET = 104
+    # helper default op wrapper
+    # try/catch
+    OP_DEFAULT_START = 26
+    OP_DEFAULT_END = 27
+
+    # BUILDER TOKENS
+    ST_DOCSTRING = 100
+    ST_INIT = 101  # init first var. should be start at element
+    ST_PRE_VALIDATE = 102
+    ST_DEFAULT = 103  # default method wrapper
+    ST_METHOD = 104
+    ST_NO_RET = 105  # __PRE_VALIDATE__ try/catch wraps
+    ST_RET = 106
 
     # try/except or try/catch tokens
-    OP_DEFAULT_START = 105
-    OP_DEFAULT_END = 106
-
-    # tokens for build struct classes
-    OP_SCHEMA_NAME = 200
-    OP_NESTED_SCHEMA = 201
-    OP_SCHEMA_VALIDATOR = 202
     # pre-validate method before init
+
+
+if __name__ == '__main__':
+    for i in TokenType:
+        print(f'@converter(TokenType.{i.name})')
+        print(f'def {i.name.lower()}(expr: Expression):\n\tpass')
