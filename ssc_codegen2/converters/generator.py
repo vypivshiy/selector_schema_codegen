@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, Type, List, Optional
 
 import jinja2
 
+from ssc_codegen2.converters.utils import to_camelcase, to_snake_case
 from ssc_codegen2.schema import ItemSchema, DictSchema, ListSchema, FlattenListSchema
 from ssc_codegen2.schema.constants import SchemaKeywords
 
@@ -82,6 +83,8 @@ class CodeGenerator:
         # j2 config
         self.template_loader = jinja2.PackageLoader(self._template_path, "")
         self.env = jinja2.Environment(loader=self.template_loader)
+        self.env.globals['to_camelcase'] = to_camelcase
+        self.env.globals['to_snakecase'] = to_snake_case
 
     @staticmethod
     def _is_sc_class(sce, base):

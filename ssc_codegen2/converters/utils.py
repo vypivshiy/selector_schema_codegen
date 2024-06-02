@@ -10,9 +10,9 @@ def sanitize_regex(s: str, escape_ch: str = "\\") -> str:
     return re.sub(r"[\-.^$*+?{}\[\]\\|()]", _repl, s)
 
 
-def camelcase(s: str) -> str:
+def to_camelcase(s: str) -> str:
     return "".join(word[0].upper() + word[1:] for word in s.split("_"))
 
 
-def snake_case(s: str) -> str:
+def to_snake_case(s: str) -> str:
     return re.sub(r"(?<!^)(?=[A-Z])", "_", s).lower()
