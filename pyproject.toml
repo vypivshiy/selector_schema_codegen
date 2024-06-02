@@ -23,7 +23,7 @@ selectolax = "^0.3.20"
 parsel = "^1.8.1"
 pytest = "^8.0.0"
 mypy = "^1.6.1"
-black = "^23.10.1"
+black = "^24.4.2"
 isort = "^5.12.0"
 ruff = "^0.1.4"
 pre-commit = "^3.5.0"
@@ -43,6 +43,7 @@ cssselect = "^1.2.0"
 lxml = "^4.9.3"
 
 
+typing-extensions = "^4.11.0"
 [tool.poetry.scripts]
 ssc-gen="ssc_codegen._cli:main"
 
