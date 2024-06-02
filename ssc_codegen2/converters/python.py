@@ -16,12 +16,12 @@ CONST_METHODS = {
 class PythonCodeConverter(BaseCodeConverter):
     def __init__(self,
                  *,
-                 indent: int = 1,  # indent mul
+                 indent_mul: int = 1,  # indent mul
                  chr_indent: str = ' ' * 4,  # indent char
                  end: str = "",  # end line of code
                  default_indent: int = 2,
                  ):
-        super().__init__(indent=indent, chr_indent=chr_indent, end=end, default_indent=default_indent)
+        super().__init__(indent_mul=indent_mul, chr_indent=chr_indent, end=end, default_indent=default_indent)
 
         self(TokenType.OP_XPATH)(op_xpath)
         self(TokenType.OP_XPATH_ALL)(op_xpath_all)

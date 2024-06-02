@@ -1,25 +1,21 @@
-import re
-from dataclasses import dataclass
-from typing import Callable, Tuple, Type, List
+from typing import Callable, Tuple
 
-from ssc_codegen import ItemSchema, DictSchema, ListSchema
-from ssc_codegen2.schema import BaseSchema, FlattenListSchema
-from ssc_codegen2.tokens import TokenType
 from ssc_codegen2.expression import Expression
+from ssc_codegen2.tokens import TokenType
 
 
 class BaseCodeConverter:
     def __init__(self,
                  *,
                  # code
-                 indent: int = 1,  # indent mul
+                 indent_mul: int = 1,  # indent mul
                  chr_indent: str = '\t',  # indent char
                  end: str = "",  # end line of code
                  # default code wrapper
                  default_indent: int = 2,
                  ):
         self.definitions: dict[TokenType, Callable[[Expression], str]] = {}
-        self._indent = indent
+        self._indent = indent_mul
         self._chr_indent = chr_indent
         self._end = end
         self._default_indent = default_indent
@@ -57,5 +53,3 @@ class BaseCodeConverter:
         elif expr.num == 1:
             return f"{prefix}{sep}1", prefix
         return f"{prefix}{sep}{expr.num}", f"{prefix}{sep}{expr.num - 1}"
-
-
