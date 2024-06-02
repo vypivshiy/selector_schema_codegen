@@ -5,6 +5,7 @@ from typing import Optional
 from ssc_codegen.objects import VariableState, Expression, TokenType
 from ssc_codegen.queries import validate_css_query, validate_xpath_query, css_to_xpath, xpath_to_css
 
+
 class BaseDocumentOperations:
     def __init__(self):
         self.counter = 1
@@ -189,7 +190,7 @@ class StringOpDocument(BaseDocumentOperations):
 class HtmlOpDocument(BaseDocumentOperations):
 
     def convert_css_to_xpath(self, xpath_prefix: str = "descendant-or-self::") -> None:
-        """convert all css operations to XPATH (guaranteed)"""
+        """convert all css operations to XPATH (works guaranteed)"""
         expr: Expression
 
         stack_copy = self.get_stack.copy()

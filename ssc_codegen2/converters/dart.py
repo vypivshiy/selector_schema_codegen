@@ -30,12 +30,12 @@ VAR_NAMES = partial(DartCodeConverter.create_var_names, prefix="val", sep='')
 
 @converter(TokenType.OP_XPATH)
 def op_xpath(_):
-    raise NotImplementedError("Not supported")
+    raise NotImplementedError("universal_html doesn't support xpath. Please, use css instead")
 
 
 @converter(TokenType.OP_XPATH_ALL)
 def op_xpath_all(_):
-    raise NotImplementedError("Not supported")
+    raise NotImplementedError("Not supported. Please, use css instead")
 
 
 @converter(TokenType.OP_CSS)

@@ -13,7 +13,7 @@ def css_to_xpath(query: str, prefix: str = "descendant-or-self::") -> str:
 
 
 def xpath_to_css(query: str) -> str:
-    """this is converter for simple xpath queries and exclude check operators like `contains`
+    """this is the converter for simple xpath queries and exclude check operators like `contains`
 
     EG OK:
 
