@@ -13,7 +13,9 @@ class {{ struct.name }} extends BaseParser
 {% endmacro %}
 
 {% macro super_init(struct)%}
-    {{ struct.name }}(super.document);
+    {{ struct.name }}(raw_document) : super(raw_document);
+    {{ struct.name }}.fromDocument(document): super.fromDocument(document);
+    {{ struct.name }}.fromElement(element): super.fromElement(element);
 {% endmacro %}
 
 {# generate parse methods inner class #}
@@ -65,7 +67,7 @@ class {{ struct.name }} extends BaseParser
 {# generate parser method for ListSchema #}
 {% macro parse_list_schema(struct) %}
     @override
-    _runParse() {
+    m_runParse() {
         List<Map<String, dynamic>> items = [];
         for (var el in m_partDocument(selector)){
             Map<String, dynamic> tmpItem = {};

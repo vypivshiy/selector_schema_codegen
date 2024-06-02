@@ -218,7 +218,11 @@ def op_assert_xpath(_):
 def op_nested_schema(expr: Expression):
     VAR_L, VAR_R = VAR_NAMES(expr)
     cls = expr.arguments[0]
-    return f"var {VAR_L} = m_parseNested({VAR_R}, {cls});"
+    # 0 - Document type
+    # 0> - Element type
+    if expr.num == 0:
+        return f"var {VAR_L} = {cls}.fromDocument({VAR_R}).parse();"
+    return f"var {VAR_L} = {cls}.fromElement({VAR_R}).parse();"
 
 
 @converter(TokenType.ST_DOCSTRING)
@@ -233,6 +237,7 @@ def st_method(expr: Expression):
     if c_name := CONST_METHODS.get(name):
         return c_name + \
             '{'  # method body open
+
     return f"_parse{name.lower().capitalize()}(el)" \
         + '{'  # method body open
 
