@@ -71,7 +71,7 @@ class TokenType(IntEnum):
     ST_RET = 106
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     for t in TokenType:
         print(f"@converter(TokenType.{t.name})")
         print(f"def {t.name.lower()}(expr: Expression):")

@@ -1,20 +1,20 @@
 from ssc_codegen.document.base import (
     BaseDocument,
-    TypeVariableState,
-    TokenType,
     Expression,
+    TokenType,
+    TypeVariableState,
 )
 from ssc_codegen.utils.selector_validators import (
     css_to_xpath,
-    xpath_to_css,
     validate_css_query,
     validate_xpath_query,
+    xpath_to_css,
 )
 
 
 class DocumentOpSelectorConverter(BaseDocument):
     def convert_css_to_xpath(
-            self, xpath_prefix: str = "descendant-or-self::"
+        self, xpath_prefix: str = "descendant-or-self::"
     ) -> None:
         """convert all css operations to XPATH (guaranteed)"""
         stack_copy = self._stack_instructions.copy()
@@ -99,7 +99,6 @@ class DocumentOpSelectorConverter(BaseDocument):
                     num=expr.num,
                     arguments=(css_query,),
                     TOKEN_TYPE=TokenType.OP_ASSERT_CSS,
-                    assert_message=expr.assert_message,
                     VARIABLE_TYPE=expr.VARIABLE_TYPE,
                 )
             self._stack_instructions = stack_copy
@@ -112,8 +111,9 @@ class DocumentOpHtmlMany(BaseDocument):
         self._test_type_state_expr(TypeVariableState.DOCUMENT)
 
         self._add_expr(
-            TokenType.OP_CSS_ALL, new_var_state=TypeVariableState.LIST_DOCUMENT,
-            args=(query,)
+            TokenType.OP_CSS_ALL,
+            new_var_state=TypeVariableState.LIST_DOCUMENT,
+            args=(query,),
         )
         return self
 
@@ -125,13 +125,14 @@ class DocumentOpHtmlMany(BaseDocument):
         self._add_expr(
             TokenType.OP_XPATH_ALL,
             new_var_state=TypeVariableState.LIST_DOCUMENT,
-            args=(query, )
+            args=(query,),
         )
         return self
 
 
 class DocumentOpHtmlSingle(BaseDocument):
     """implemented for Nested fields"""
+
     def css(self, query: str):
         """get first element by css query"""
         validate_css_query(query)
@@ -149,7 +150,9 @@ class DocumentOpHtmlSingle(BaseDocument):
         return self
 
 
-class DocumentOpHtml(DocumentOpHtmlSingle, DocumentOpHtmlMany, DocumentOpSelectorConverter):
+class DocumentOpHtml(
+    DocumentOpHtmlSingle, DocumentOpHtmlMany, DocumentOpSelectorConverter
+):
 
     def attr(self, name: str):
         """get attribute value from element"""

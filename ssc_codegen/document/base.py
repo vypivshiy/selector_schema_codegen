@@ -1,6 +1,8 @@
 # high level expression collector
-from typing import Optional, Any, Tuple
+from typing import Any, Optional, Tuple
+
 from typing_extensions import Self
+
 from ssc_codegen.expression import Expression
 from ssc_codegen.tokens import TokenType
 from ssc_codegen.type_state import TypeVariableState

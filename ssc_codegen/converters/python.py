@@ -9,19 +9,25 @@ CONST_METHODS = {
     "__ITEM__": "def _parse_item(self, el):",
     "__KEY__": "def _parse_key(self, el):",
     "__VALUE__": "def _parse_value(self, el):",
-    "__PRE_VALIDATE__": "def _pre_validate(self, el):"
+    "__PRE_VALIDATE__": "def _pre_validate(self, el):",
 }
 
 
 class PythonCodeConverter(BaseCodeConverter):
-    def __init__(self,
-                 *,
-                 indent_mul: int = 1,  # indent mul
-                 chr_indent: str = ' ' * 4,  # indent char
-                 end: str = "",  # end line of code
-                 default_indent: int = 2,
-                 ):
-        super().__init__(indent_mul=indent_mul, chr_indent=chr_indent, end=end, default_indent=default_indent)
+    def __init__(
+        self,
+        *,
+        indent_mul: int = 1,  # indent mul
+        chr_indent: str = " " * 4,  # indent char
+        end: str = "",  # end line of code
+        default_indent: int = 2,
+    ):
+        super().__init__(
+            indent_mul=indent_mul,
+            chr_indent=chr_indent,
+            end=end,
+            default_indent=default_indent,
+        )
 
         self(TokenType.OP_XPATH)(op_xpath)
         self(TokenType.OP_XPATH_ALL)(op_xpath_all)
@@ -153,7 +159,9 @@ def op_string_replace(e: Expression):
     old, new = e.arguments
     if e.VARIABLE_TYPE == TypeVariableState.STRING:
         return f"{VAR_L} = self._str_replace({VAR_R}, {old!r}, {new!r})"
-    return f"[{VAR_L} = self._str_replace(i, {old!r}, {new!r}) for i in {VAR_R}]"
+    return (
+        f"[{VAR_L} = self._str_replace(i, {old!r}, {new!r}) for i in {VAR_R}]"
+    )
 
 
 def op_string_format(e: Expression):
@@ -185,13 +193,15 @@ def op_join(e: Expression):
 
 def st_default(e: Expression):
     default_value = e.arguments[0]
-    default_value = repr(default_value) if isinstance(default_value, str) else default_value
-    t = ' ' * 4
+    default_value = (
+        repr(default_value) if isinstance(default_value, str) else default_value
+    )
+    t = " " * 4
     head = f"{t}try:\n{t * 2}"
     block = "{}"
     footer = f"\n{t}{t}except Exception:"
-    ret = f'\n{t * 3}return {default_value}'
-    return f'{head}{block}{footer}{ret}'
+    ret = f"\n{t * 3}return {default_value}"
+    return f"{head}{block}{footer}{ret}"
 
 
 def op_assert_equal(e: Expression):

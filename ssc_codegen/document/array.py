@@ -1,8 +1,4 @@
-from ssc_codegen.document.base import (
-    BaseDocument,
-    TypeVariableState,
-    TokenType,
-)
+from ssc_codegen.document.base import BaseDocument, TokenType, TypeVariableState
 
 
 class DocumentOpArray(BaseDocument):

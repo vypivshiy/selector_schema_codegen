@@ -23,6 +23,7 @@ def op_assert_xpath(_):
 
 
 code_generator = CodeGenerator(
-    templates_path='ssc_codegen.converters.templates.py',
-    base_struct_path='selectolax',
-    converter=converter)
+    templates_path="ssc_codegen.converters.templates.py",
+    base_struct_path="selectolax",
+    converter=converter,
+)

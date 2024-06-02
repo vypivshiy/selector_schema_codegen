@@ -1,10 +1,10 @@
 from types import NoneType
-from typing import Optional, List, Dict, get_args, Union, Any, NamedTuple, Type
+from typing import Any, Dict, List, NamedTuple, Optional, Type, Union, get_args
 
 from ssc_codegen.document import DocumentOpNested
 from ssc_codegen.document.base import BaseDocument
 from ssc_codegen.expression import Expression
-from ssc_codegen.schema.utils import get_json_signature, get_annotations
+from ssc_codegen.schema.utils import get_annotations, get_json_signature
 from ssc_codegen.tokens import TokenType
 from ssc_codegen.type_state import TypeVariableState
 
@@ -16,43 +16,43 @@ class Field:
     # MAGIC METHODS
     __AUTO_TYPE_RET__ = {
         "__PRE_VALIDATE__": TypeVariableState.NONE,
-        "__SPLIT_DOC__": TypeVariableState.LIST_DOCUMENT
+        "__SPLIT_DOC__": TypeVariableState.LIST_DOCUMENT,
     }
 
     def _insert_return_expr(self):
         self._instructions.append(
-            Expression(len(self._instructions) - 1,
-                       self.RET_TYPE,
-                       TokenType.ST_NO_RET)
+            Expression(
+                len(self._instructions) - 1, self.RET_TYPE, TokenType.ST_NO_RET
+            )
         )
 
     def _insert_no_return_expr(self):
         self._instructions.append(
-            Expression(len(self._instructions) - 1,
-                       self.RET_TYPE,
-                       TokenType.ST_RET)
+            Expression(
+                len(self._instructions) - 1, self.RET_TYPE, TokenType.ST_RET
+            )
         )
 
     def _update_num_instructions(self):
-        tmp_instr = self._instructions.copy()
-        new_instr: List[Expression] = []
-        for i, expr in enumerate(tmp_instr):
-            new_instr.append(
-                Expression(
-                    num=i,
-                    VARIABLE_TYPE=expr.VARIABLE_TYPE,
-                    TOKEN_TYPE=expr.TOKEN_TYPE,
-                    arguments=expr.arguments,
-
-                )
+        tmp_expr = self._instructions.copy()
+        new_expr: List[Expression] = [  # type: ignore
+            Expression(
+                num=i,
+                VARIABLE_TYPE=expr.VARIABLE_TYPE,
+                TOKEN_TYPE=expr.TOKEN_TYPE,
+                arguments=expr.arguments,
             )
-        self._instructions = new_instr.copy()
+            for i, expr in enumerate(tmp_expr)
+        ]
+        self._instructions = new_expr.copy()
 
     def __init__(self, name: str, doc: "BaseDocument"):
         self.name = name
         self.document = doc
         self._instructions = doc.instructions.copy()
-        self.RET_TYPE = self.__AUTO_TYPE_RET__.get(self.name) or doc.last_var_type
+        self.RET_TYPE = (
+            self.__AUTO_TYPE_RET__.get(self.name) or doc.last_var_type
+        )
         self._method = self._method_expr()
 
         # default value wrapper
@@ -81,7 +81,7 @@ class Field:
             -1,
             TypeVariableState.NONE,
             TOKEN_TYPE=TokenType.ST_METHOD,
-            arguments=(self.name,)
+            arguments=(self.name,),
         )
 
     @property
@@ -106,7 +106,9 @@ class AstStruct(NamedTuple):
 
     @property
     def fields(self):
-        return [Field(k, v) for k, v in self.cls_schema.__expr_fields__().items()]
+        return [
+            Field(k, v) for k, v in self.cls_schema.__expr_fields__().items()
+        ]
 
     def docstring(self):
         return self.cls_schema.__expr_doc__()
@@ -115,9 +117,9 @@ class AstStruct(NamedTuple):
 class BaseSchema:
     # auto generate items string signature
     __SCHEMA_TYPE__: str = "BASE"
-    __SIGNATURE__: Union[
-        Dict, List
-    ] = NotImplemented  # optional signature implement
+    __SIGNATURE__: Union[Dict, List] = (
+        NotImplemented  # optional signature implement
+    )
     __REPR_TYPE_NAMES_ALIASES__ = {
         str: "String",
         Optional[str]: "null | String",
@@ -136,7 +138,7 @@ class BaseSchema:
         TypeVariableState.LIST_STRING: "Array[String]",
         TypeVariableState.STRING: "String",
         TypeVariableState.NONE: "null",
-        TypeVariableState.NESTED: "Struct"
+        TypeVariableState.NESTED: "Struct",
     }
 
     __NON_TYPED_FIELDS__ = (
@@ -161,7 +163,7 @@ class BaseSchema:
 
     @staticmethod
     def _is_implemented(value) -> bool:
-        return value != NotImplemented or value != None
+        return value != NotImplemented or value != None  # noqa
 
     @classmethod
     def get_fields(cls) -> Dict[str, "BaseDocument"]:
@@ -170,18 +172,11 @@ class BaseSchema:
         # copy dicts to avoid runtime err:
         # RuntimeError: dictionary changed size during iteration
         cls_attrs = vars(cls).copy()
-
+        # v: "BaseDocument" k: str
         for k, v in cls_attrs.items():
-            v: "BaseDocument"
-            k: str
 
             if k in cls.__MAGIC_METHODS_NAMES__ and cls._is_implemented(v):
                 fields[k] = v
-            # # nested schemas
-            # elif cls.__annotations__.get(k) and issubclass(
-            #     cls.__annotations__.get(k), BaseSchema
-            # ):
-            #     fields[k] = cls.__annotations__.get(k).get_fields()
             elif k.startswith("_"):
                 continue
             else:
@@ -194,7 +189,7 @@ class BaseSchema:
         return len(type_args) == 1 and issubclass(type_args[0], BaseSchema)
 
     @classmethod
-    def get_fields_signature(cls) -> Dict[str, _T_SCHEMA_SIGNATURE]:
+    def get_fields_signature(cls) -> Union[List[str], Dict[str, _T_SCHEMA_SIGNATURE]]:
         signature = {}
         # copy dicts to avoid runtime err:
         # RuntimeError: dictionary changed size during iteration
@@ -209,7 +204,9 @@ class BaseSchema:
                         signature[k] = type_.__SIGNATURE__
                     else:
                         signature[k] = type_.get_fields_signature()
-                elif (type_args := get_args(type_)) and issubclass(type_args[0], BaseSchema):
+                elif (type_args := get_args(type_)) and issubclass(
+                    type_args[0], BaseSchema
+                ):
                     t: BaseSchema = type_args[0]
                     t.check()
                     if t.__SIGNATURE__ != NotImplemented:
@@ -218,14 +215,19 @@ class BaseSchema:
                         signature[k] = t.get_fields_signature()
                 # other
                 else:
-                    signature[k] = cls.__REPR_TYPE_NAMES_ALIASES__.get(type_)
+                    # TODO
+                    signature[k] = cls.__REPR_TYPE_NAMES_ALIASES__.get(type_)  # type: ignore
 
             elif k not in cls.__NON_TYPED_FIELDS__:
-                type_ = cls.__ARG_TYPE_STATE_ALIAS__.get(v.last_var_type, "???")  # TODO
+                type_ = cls.__ARG_TYPE_STATE_ALIAS__.get(
+                    v.last_var_type, "???"
+                )  # TODO
                 signature[k] = type_
 
             elif isinstance(v, DocumentOpNested):
-                signature[k] = v.instructions[-1].arguments[1].get_fields_signature()
+                signature[k] = (
+                    v.instructions[-1].arguments[1].get_fields_signature()
+                )
         return signature
 
     def __repr__(self):
@@ -246,20 +248,26 @@ class BaseSchema:
         return fields
 
     @classmethod
-    def __expr_doc__(cls, indent: int = 2, sep: str = '\n\n') -> Expression:
+    def __expr_doc__(cls, indent: int = 2, sep: str = "\n\n") -> Expression:
         """get docstring token"""
-        docstr = cls.__doc__ or ''
+        docstr = cls.__doc__ or ""
         signature = get_json_signature(cls, indent=indent)
         full_doc = f"{docstr}{sep}{signature}"
-        return Expression(num=-2,
-                          TOKEN_TYPE=TokenType.ST_DOCSTRING,
-                          VARIABLE_TYPE=TypeVariableState.NONE,
-                          arguments=(full_doc,))
+        return Expression(
+            num=-2,
+            TOKEN_TYPE=TokenType.ST_DOCSTRING,
+            VARIABLE_TYPE=TypeVariableState.NONE,
+            arguments=(full_doc,),
+        )
 
     @classmethod
     def __expr_init__(cls):
-        return Expression(-1, TOKEN_TYPE=TokenType.ST_INIT, VARIABLE_TYPE=TypeVariableState.DOCUMENT)
+        return Expression(
+            -1,
+            TOKEN_TYPE=TokenType.ST_INIT,
+            VARIABLE_TYPE=TypeVariableState.DOCUMENT,
+        )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     print(BaseSchema.__expr_doc__())

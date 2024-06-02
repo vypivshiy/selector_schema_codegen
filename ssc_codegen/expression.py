@@ -1,4 +1,5 @@
-from typing import NamedTuple, Optional, Any
+from typing import Any, NamedTuple
+
 from ssc_codegen.tokens import TokenType
 from ssc_codegen.type_state import TypeVariableState
 

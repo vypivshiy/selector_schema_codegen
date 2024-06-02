@@ -1,7 +1,9 @@
-# TODO: check via python version (sys.version)
-try:
+import sys
+
+
+if sys.version_info >= (3, 11):
     from enum import IntEnum
-except ImportError:
+else:
     from enum import Enum
 
     class IntEnum(int, Enum):

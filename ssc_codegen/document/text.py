@@ -1,9 +1,6 @@
 from typing_extensions import deprecated
-from ssc_codegen.document.base import (
-    BaseDocument,
-    TypeVariableState,
-    TokenType,
-)
+
+from ssc_codegen.document.base import BaseDocument, TokenType, TypeVariableState
 
 
 class DocumentOpString(BaseDocument):

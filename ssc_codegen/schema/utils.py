@@ -1,6 +1,6 @@
 import json
 from dataclasses import dataclass
-from typing import Type, Callable, TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable, Type
 
 if TYPE_CHECKING:
     from ssc_codegen.schema import BaseSchema
@@ -10,7 +10,7 @@ T_SCHEMA = Type["BaseSchema"]
 
 def get_annotations(object_) -> dict[str, Type]:
     """extract annotations from object"""
-    return vars(object_).get('__annotations__', {})
+    return vars(object_).get("__annotations__", {})
 
 
 # help signature and AST-like build functions
@@ -26,8 +26,9 @@ def get_doc_signature(schema: Type["BaseSchema"]) -> str:
 class SchemaLike:
     schema: Type["BaseSchema"]
 
-    def items_signature(self,
-                        cb: Callable[[T_SCHEMA], str] = get_json_signature):
+    def items_signature(
+            self, cb: Callable[[T_SCHEMA], str] = get_json_signature
+    ):
         return cb(self.schema)
 
     @property
@@ -35,9 +36,10 @@ class SchemaLike:
         return f"{get_doc_signature(self.schema)}\n\n{self.items_signature()}"
 
     def parse_nodes(self):
-        ast_nodes = {}
-        ast_nodes['__SPLIT_DOC__'] = self.schema.__dict__.get('__SPLIT_DOC__', None)
-        ast_nodes['__PRE_VALIDATE__'] = self.schema.__dict__.get('__PRE_VALIDATE__', None)
+        ast_nodes = {
+            "__SPLIT_DOC__": self.schema.__dict__.get("__SPLIT_DOC__", None),
+            "__PRE_VALIDATE__": self.schema.__dict__.get("__PRE_VALIDATE__", None)
+        }
 
         for i, (k, v) in enumerate(self.schema.get_fields().items()):
             ast_nodes[i] = (k, v)

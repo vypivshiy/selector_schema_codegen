@@ -1,16 +1,16 @@
+from functools import partial
+
 from ssc_codegen.converters.base import BaseCodeConverter
 from ssc_codegen.converters.generator import CodeGenerator
 from ssc_codegen.converters.utils import to_camelcase
 from ssc_codegen.expression import Expression
 from ssc_codegen.tokens import TokenType
 from ssc_codegen.type_state import TypeVariableState
-from functools import partial
 
 CONST_METHODS = {
     "__SPLIT_DOC__": """
 @override
 mPartDocument(el)""",
-
     "__PRE_VALIDATE__": """
 @override
 mPreValidate(el)""",
@@ -24,13 +24,15 @@ class DartCodeConverter(BaseCodeConverter):
     pass
 
 
-converter = DartCodeConverter(chr_indent=' ' * 2)
-VAR_NAMES = partial(DartCodeConverter.create_var_names, prefix="val", sep='')
+converter = DartCodeConverter(chr_indent=" " * 2)
+VAR_NAMES = partial(DartCodeConverter.create_var_names, prefix="val", sep="")
 
 
 @converter(TokenType.OP_XPATH)
 def op_xpath(_):
-    raise NotImplementedError("universal_html doesn't support xpath. Please, use css instead")
+    raise NotImplementedError(
+        "universal_html doesn't support xpath. Please, use css instead"
+    )
 
 
 @converter(TokenType.OP_XPATH_ALL)
@@ -85,7 +87,9 @@ def op_regex(expr: Expression):
     # FIXME: sanitize regex (unescape issue)
     if expr.VARIABLE_TYPE == TypeVariableState.STRING:
         return f"var {VAR_L} = mReMatch({VAR_R}, {pattern!r});"
-    return f"var {VAR_L} = {VAR_R}.map((e) => mReMatch(e, {pattern!r})).toList();"
+    return (
+        f"var {VAR_L} = {VAR_R}.map((e) => mReMatch(e, {pattern!r})).toList();"
+    )
 
 
 @converter(TokenType.OP_REGEX_ALL)
@@ -110,7 +114,9 @@ def op_string_trim(expr: Expression):
     substr = expr.arguments[0]
     if expr.VARIABLE_TYPE.STRING:
         return f"var {VAR_L} = mStrTrim({VAR_R}, {substr!r});"
-    return f"var {VAR_L} = {VAR_R}.map((e) => mStrTrim(e, {substr!r})).toList();"
+    return (
+        f"var {VAR_L} = {VAR_R}.map((e) => mStrTrim(e, {substr!r})).toList();"
+    )
 
 
 @converter(TokenType.OP_STRING_L_TRIM)
@@ -119,7 +125,9 @@ def op_string_l_trim(expr: Expression):
     substr = expr.arguments[0]
     if expr.VARIABLE_TYPE.STRING:
         return f"var {VAR_L} = mStrLTrim({VAR_R}, {substr!r});"
-    return f"var {VAR_L} = {VAR_R}.map((e) => mStrLTrim(e, {substr!r})).toList();"
+    return (
+        f"var {VAR_L} = {VAR_R}.map((e) => mStrLTrim(e, {substr!r})).toList();"
+    )
 
 
 @converter(TokenType.OP_STRING_R_TRIM)
@@ -128,7 +136,9 @@ def op_string_r_trim(expr: Expression):
     substr = expr.arguments[0]
     if expr.VARIABLE_TYPE.STRING:
         return f"var {VAR_L} = mStrRTrim({VAR_R}, {substr!r});"
-    return f"var {VAR_L} = {VAR_R}.map((e) => mStrRTrim(e, {substr!r})).toList();"
+    return (
+        f"var {VAR_L} = {VAR_R}.map((e) => mStrRTrim(e, {substr!r})).toList();"
+    )
 
 
 @converter(TokenType.OP_STRING_REPLACE)
@@ -173,14 +183,16 @@ def op_join(expr: Expression):
 @converter(TokenType.ST_DEFAULT)
 def st_default(expr: Expression):
     default_value = expr.arguments[0]
-    default_value = repr(default_value) if isinstance(default_value, str) else 'null'
-    t = ' ' * 2
-    head = f'{t}try {{ {t * 2}'
+    default_value = (
+        repr(default_value) if isinstance(default_value, str) else "null"
+    )
+    t = " " * 2
+    head = f"{t}try {{ {t * 2}"
     block = "{}"
     footer = f"\n{t} catch(e) {{"
     # close catch and method body ===========vvvv
-    ret = f'\n{t * 3}return {default_value}; }} }}'
-    return f'{head}{block}{footer}{ret}'
+    ret = f"\n{t * 3}return {default_value}; }} }}"
+    return f"{head}{block}{footer}{ret}"
 
 
 @converter(TokenType.OP_ASSERT_EQUAL)
@@ -230,34 +242,31 @@ def op_nested_schema(expr: Expression):
 @converter(TokenType.ST_DOCSTRING)
 def st_docstring(expr: Expression):
     doc = expr.arguments[0]
-    return '\n'.join([f"/// {line}" for line in doc.split('\n')])
+    return "\n".join([f"/// {line}" for line in doc.split("\n")])
 
 
 @converter(TokenType.ST_METHOD)
 def st_method(expr: Expression):
     name = expr.arguments[0]
     if c_name := CONST_METHODS.get(name):
-        return c_name + \
-            '{'  # method body open
+        return c_name + "{"  # method body open
 
-    return f"xxParse{to_camelcase(name)}(el)" \
-        + '{'  # method body open
+    return f"xxParse{to_camelcase(name)}(el)" + "{"  # method body open
 
 
 @converter(TokenType.ST_NO_RET)
 def st_no_ret(_):
-    return "return null;" \
-        + '}'  # method body close
+    return "return null;" + "}"  # method body close
 
 
 @converter(TokenType.ST_RET)
 def st_ret(expr: Expression):
     VAR_L, _ = VAR_NAMES(expr)
-    return f"return {VAR_L};" \
-        + "}"  # method body close
+    return f"return {VAR_L};" + "}"  # method body close
 
 
 code_generator = CodeGenerator(
-    templates_path='ssc_codegen.converters.templates.dart',
-    base_struct_path='universal_html',
-    converter=converter)
+    templates_path="ssc_codegen.converters.templates.dart",
+    base_struct_path="universal_html",
+    converter=converter,
+)
