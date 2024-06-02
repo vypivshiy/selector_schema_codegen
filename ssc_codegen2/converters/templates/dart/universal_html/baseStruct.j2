@@ -6,10 +6,9 @@ import 'dart:core';
 import 'package:universal_html/html.dart' show Document, LIElement;
 import 'package:universal_html/parsing.dart' as html;
 
-
 class BaseParser {
   // TODO constructors for Element, Document objects
-  // TODO better api code
+  // TODO rewrite cringe api
   late final Document selector;
 
   BaseParser(String rawDocument) {
@@ -30,91 +29,94 @@ class BaseParser {
     return mRunParse();
   }
 
-  mPreValidate(el){
+  mPreValidate(el) {
     // pre validate entrypoint
     null;
   }
 
-  mRunParse(){
+  mRunParse() {
     // start parser entrypoint
   }
 
-  mPartDocument(el){
+  mPartDocument(Document el) {
     // dart document to elements entrypoint
   }
 
-  mCss(el, query){
+  mCss(el, String query) {
     return el.querySelector(query);
   }
 
-  mCssAll(el, query){
+  mCssAll(el, String query) {
     return el.querySelectorAll(query);
   }
 
-  mXpath(){
+  /// universal_html doesn't support xpath
+  mXpath(el, query) {
     throw UnimplementedError("Not supported");
   }
 
-  mXpathAll(){
+  /// universal_html doesn't support xpath
+  mXpathAll(el, query) {
     throw UnimplementedError("Not supported");
   }
 
-  mAttrText(el){
+  mAttrText(el) {
     return el.text;
   }
 
-  mAttrTextAll(els){
+  mAttrTextAll(els) {
     return els.map((e) => e.text).toList();
   }
 
-  mAttrRaw(LIElement el){
+  mAttrRaw(el) {
     return el.innerHtml;
   }
 
-  mAttrRawAll(els){
+  mAttrRawAll(els) {
     return els.map((e) => e.innerHtml).toList();
   }
 
-  mAttr(el, String name){
+  mAttr(el, String name) {
     return el.attributes[name];
   }
 
-  mAttrAll(els, name){
+  mAttrAll(els, String name) {
     return els.map((e) => e.attributes[name]).toList();
   }
 
-  mAssertEq(el, val, msg){
+  mAssertEq(el, val, String msg) {
     assert(el == val, msg);
     return el;
   }
 
-  mAssertContains(el, val, msg){
+  mAssertContains(el, val, String msg) {
     assert(el != null && el.contains(val), msg);
     return el;
   }
 
-  mAssertReMatch(el, val, msg){
+  mAssertReMatch(el, val, String msg) {
     assert(el != null && RegExp(val).firstMatch(el) != null, msg);
     return el;
   }
-  mAssertCss(el, query, msg){
+
+  mAssertCss(el, String query, String msg) {
     assert(el.querySelector(query) != null, msg);
     return el;
   }
 
-  mAssertXpath(){
+  mAssertXpath() {
     throw UnimplementedError("Not supported");
   }
 
-  mReMatch(String s, String pattern){
+  mReMatch(String s, String pattern) {
     return RegExp(pattern).firstMatch(s)?.group(0)!;
   }
 
-  mReMatchAll(String s, String pattern){
+  mReMatchAll(String s, String pattern) {
     return RegExp(pattern).allMatches(s).map((e) => e.group(0)!).toList();
   }
 
-  mReSub(String s, String pattern, String repl){
+  mReSub(String s, String pattern, String repl) {
     return s.replaceAll(RegExp(pattern), repl);
   }
 
@@ -137,24 +139,23 @@ class BaseParser {
     return s.replaceFirst(RegExp(replRight), "");
   }
 
-  mStrReplace(String s, String repl, String replNew){
+  mStrReplace(String s, String repl, String replNew) {
     return s.replaceAll(repl, replNew);
   }
 
-  mStrFormat(String variable, String template){
+  mStrFormat(String variable, String template) {
     return template.replaceFirst({% raw %}"{{}}"{% endraw %}, variable);
   }
 
-  mStrSplit(String variable, String sep){
+  mStrSplit(String variable, String sep) {
     return variable.split(sep);
   }
 
-  mArrIndex(variable, int index){
+  mArrIndex(variable, int index) {
     return variable[index];
   }
 
-  mArrJoin(variable, sep){
+  mArrJoin(variable, sep) {
     return variable.join(sep);
   }
-
 }
