@@ -50,14 +50,16 @@ class TemplateStruct:
             if field.default:
                 dws = default_wrapper_sep
                 wrapper = self.converter.convert(field.default)
-                codes.append(head + sep + wrapper.format(dws.join(code)))
+                # str.format does not work in structures with '{', '}' characters
+                codes.append(head + sep + wrapper.replace("{}", dws.join(code), 1))
             else:
                 codes.append(head + sep + sep.join(code))
         return codes
 
     @property
     def methods_names(self) -> List[str]:
-        return [f.name for f in self.ast.fields if f.name not in SchemaKeywords]
+        # python <3.11 version don't have __contains__ method
+        return [f.name for f in self.ast.fields if f.name not in SchemaKeywords.__members__.values()]
 
 
 class CodeGenerator:
