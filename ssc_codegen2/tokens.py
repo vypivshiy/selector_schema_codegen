@@ -51,7 +51,7 @@ class TokenType(IntEnum):
     OP_JOIN = 18
 
     # DEFAULT VALUE IF parse result failed
-    OP_DEFAULT = 19  # wrap try/catch mark
+    ST_DEFAULT = 19  # wrap try/catch mark
 
     # PRE VALIDATE OPERATIONS (assert)
     OP_ASSERT_EQUAL = 20
@@ -65,7 +65,16 @@ class TokenType(IntEnum):
     ST_DOCSTRING = 100
     ST_INIT = 101  # init first var. should be start at element
     ST_PRE_VALIDATE = 102
-    ST_DEFAULT = 103  # default method wrapper
+    # ST_DEFAULT = 103  # default method wrapper
     ST_METHOD = 104
     ST_NO_RET = 105  # __PRE_VALIDATE__ try/catch wraps
     ST_RET = 106
+
+
+if __name__ == '__main__':
+    for t in TokenType:
+        print(f"@converter(TokenType.{t.name})")
+        print(f"def {t.name.lower()}(expr: Expression):")
+        print("    VAR_L, VAR_R = VAR_NAMES(expr)")
+        print()
+        print()
