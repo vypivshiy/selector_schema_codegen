@@ -31,7 +31,7 @@ class {{ struct.name }} extends BaseParser
     mRunParse() {
         Map<String, dynamic> items = {};
     {% for name in struct.methods_names %}
-        items["{{ name }}"] = xxParse{{ name.lower().capitalize() }}(selector);
+        items["{{ name }}"] = xxParse{{ to_camelcase(name) }}(selector);
     {%- endfor %}
         return items;
     }
@@ -72,7 +72,7 @@ class {{ struct.name }} extends BaseParser
         for (var el in mPartDocument(selector)){
             Map<String, dynamic> tmpItem = {};
             {%- for name in struct.methods_names %}
-                tmpItem["{{ name }}"] = xxParse{{ name.lower().capitalize() }}(el);
+                tmpItem["{{ name }}"] = xxParse{{ to_camelcase(name) }}(el);
             {%- endfor %}
             items.add(tmpItem);
         }

@@ -1,5 +1,6 @@
 from ssc_codegen2.converters.base import BaseCodeConverter
 from ssc_codegen2.converters.generator import CodeGenerator
+from ssc_codegen2.converters.utils import to_camelcase
 from ssc_codegen2.expression import Expression
 from ssc_codegen2.tokens import TokenType
 from ssc_codegen2.type_state import TypeVariableState
@@ -239,7 +240,7 @@ def st_method(expr: Expression):
         return c_name + \
             '{'  # method body open
 
-    return f"xxParse{name.lower().capitalize()}(el)" \
+    return f"xxParse{to_camelcase(name)}(el)" \
         + '{'  # method body open
 
 
