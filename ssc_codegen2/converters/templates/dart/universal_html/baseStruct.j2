@@ -12,8 +12,8 @@ class BaseParser {
   // TODO better api code
   late final Document selector;
 
-  BaseParser(String raw_document) {
-    selector = html.parseHtmlDocument(raw_document);
+  BaseParser(String rawDocument) {
+    selector = html.parseHtmlDocument(rawDocument);
   }
 
   BaseParser.fromDocument(Document document) {
@@ -26,148 +26,134 @@ class BaseParser {
   }
 
   parse() {
-    m_preValidate(selector);
-    return m_runParse();
+    mPreValidate(selector);
+    return mRunParse();
   }
 
-  m_preValidate(el){
+  mPreValidate(el){
     // pre validate entrypoint
     null;
   }
 
-  m_runParse(){
+  mRunParse(){
     // start parser entrypoint
   }
 
-  m_partDocument(el){
+  mPartDocument(el){
     // dart document to elements entrypoint
   }
 
-  m_parseNested(el, parserConstructor){
-    // TODO add overload (extra constructors?)
-    if (el is String){
-      return parserConstructor(el).parse();
-    }
-    if (el is LIElement){
-      return parserConstructor(el.outerHtml).parse();
-    }
-
-    if (el is Document){
-      return parserConstructor(el.querySelector('html')?.outerHtml).parse();
-    }
-  }
-
-  m_css(el, query){
+  mCss(el, query){
     return el.querySelector(query);
   }
 
-  m_cssAll(el, query){
+  mCssAll(el, query){
     return el.querySelectorAll(query);
   }
 
-  m_xpath(){
+  mXpath(){
     throw UnimplementedError("Not supported");
   }
 
-  m_xpathAll(){
+  mXpathAll(){
     throw UnimplementedError("Not supported");
   }
 
-  m_attrText(el){
+  mAttrText(el){
     return el.text;
   }
 
-  m_attrTextAll(els){
+  mAttrTextAll(els){
     return els.map((e) => e.text).toList();
   }
 
-  m_attrRaw(LIElement el){
+  mAttrRaw(LIElement el){
     return el.innerHtml;
   }
 
-  m_attrRawAll(els){
+  mAttrRawAll(els){
     return els.map((e) => e.innerHtml).toList();
   }
 
-  m_attr(el, String name){
+  mAttr(el, String name){
     return el.attributes[name];
   }
 
-  m_attrAll(els, name){
+  mAttrAll(els, name){
     return els.map((e) => e.attributes[name]).toList();
   }
 
-  m_assertEq(el, val, msg){
+  mAssertEq(el, val, msg){
     assert(el == val, msg);
     return el;
   }
 
-  m_assertContains(el, val, msg){
+  mAssertContains(el, val, msg){
     assert(el != null && el.contains(val), msg);
     return el;
   }
 
-  m_assertReMatch(el, val, msg){
+  mAssertReMatch(el, val, msg){
     assert(el != null && RegExp(val).firstMatch(el) != null, msg);
     return el;
   }
-  m_assertCss(el, query, msg){
+  mAssertCss(el, query, msg){
     assert(el.querySelector(query) != null, msg);
     return el;
   }
 
-  m_assertXpath(){
+  mAssertXpath(){
     throw UnimplementedError("Not supported");
   }
 
-  m_reMatch(String s, String pattern){
-    return RegExp(pattern).firstMatch(s);
+  mReMatch(String s, String pattern){
+    return RegExp(pattern).firstMatch(s)?.group(0)!;
   }
 
-  m_reMatchAll(String s, String pattern){
+  mReMatchAll(String s, String pattern){
     return RegExp(pattern).allMatches(s).map((e) => e.group(0)!).toList();
   }
 
-  m_reSub(String s, String pattern, String repl){
+  mReSub(String s, String pattern, String repl){
     return s.replaceAll(RegExp(pattern), repl);
   }
 
-  m_strTrim(String s, String repl){
+  mStrTrim(String s, String repl) {
     // https://stackoverflow.com/a/14107914
     var replLeft = "^$repl";
     var replRight = "$repl\$";
-    return s.replaceFirst(replLeft, "").replaceFirst(replRight, "");
+    return s
+        .replaceFirst(RegExp(replLeft), "")
+        .replaceFirst(RegExp(replRight), "");
   }
 
-  m_strLTrim(String s, String repl){
+  mStrLTrim(String s, String repl) {
     var replLeft = "^$repl";
-    return s.replaceFirst(replLeft, "");
+    return s.replaceFirst(RegExp(replLeft), "");
   }
 
-  m_strRTrim(String s, String repl){
+  mStrRTrim(String s, String repl) {
     var replRight = "$repl\$";
-    return s.replaceFirst(replRight, "");
+    return s.replaceFirst(RegExp(replRight), "");
   }
 
-  m_strReplace(String s, String repl, String replNew){
+  mStrReplace(String s, String repl, String replNew){
     return s.replaceAll(repl, replNew);
   }
 
-  m_strFormat(String variable, String template){
-    // mark \{\{\}\}
-    // todo param placeholder
-    return template.replaceFirst("\{\{\}\}", variable);
+  mStrFormat(String variable, String template){
+    return template.replaceFirst({% raw %}"{{}}"{% endraw %}, variable);
   }
 
-  m_strSplit(String variable, String sep){
+  mStrSplit(String variable, String sep){
     return variable.split(sep);
   }
 
-  m_arrIndex(variable, int index){
+  mArrIndex(variable, int index){
     return variable[index];
   }
 
-  m_arrJoin(variable, sep){
+  mArrJoin(variable, sep){
     return variable.join(sep);
   }
 

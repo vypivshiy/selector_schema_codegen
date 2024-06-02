@@ -13,7 +13,7 @@ class {{ struct.name }} extends BaseParser
 {% endmacro %}
 
 {% macro super_init(struct)%}
-    {{ struct.name }}(raw_document) : super(raw_document);
+    {{ struct.name }}(rawDocument) : super(rawDocument);
     {{ struct.name }}.fromDocument(document): super.fromDocument(document);
     {{ struct.name }}.fromElement(element): super.fromElement(element);
 {% endmacro %}
@@ -28,10 +28,10 @@ class {{ struct.name }} extends BaseParser
 {# generate parser method for ItemSchema#}
 {% macro parse_item_schema(struct) %}
     @override
-    m_runParse() {
+    mRunParse() {
         Map<String, dynamic> items = {};
     {% for name in struct.methods_names %}
-        items["{{ name }}"] = _parse{{ name.lower().capitalize() }}(selector);
+        items["{{ name }}"] = xxParse{{ name.lower().capitalize() }}(selector);
     {%- endfor %}
         return items;
     }
@@ -41,10 +41,10 @@ class {{ struct.name }} extends BaseParser
 {# generate parser method for DictSchema #}
 {% macro parse_dict_schema(struct) %}
     @override
-    m_runParse(){
+    mRunParse(){
         Map<String, dynamic> items = {};
-        for (var el in m_partDocument(selector)){
-            items[_parseKey(el)] = _parseValue(el);
+        for (var el in mPartDocument(selector)){
+            items[xxParseKey(el)] = xxParseValue(el);
         }
         return items;
     }
@@ -54,10 +54,10 @@ class {{ struct.name }} extends BaseParser
 {# generate parser method for FlattenListSchema #}
 {% macro parse_flatten_list_schema(struct) %}
     @override
-    m_runParse(){
+    mRunParse(){
         List<dynamic> items = [];
-        for (var el in m_partDocument(selector)){
-            items.add(_parseItem(el));
+        for (var el in mPartDocument(selector)){
+            items.add(xxParseItem(el));
         }
         return items;
     }
@@ -67,13 +67,13 @@ class {{ struct.name }} extends BaseParser
 {# generate parser method for ListSchema #}
 {% macro parse_list_schema(struct) %}
     @override
-    m_runParse() {
+    mRunParse() {
         List<Map<String, dynamic>> items = [];
-        for (var el in m_partDocument(selector)){
+        for (var el in mPartDocument(selector)){
             Map<String, dynamic> tmpItem = {};
-            {% for name in struct.methods_names %}
-                tmpItem["{{ name }}"] = _parse{{ name.lower().capitalize() }}(el);
-            {% endfor %}
+            {%- for name in struct.methods_names %}
+                tmpItem["{{ name }}"] = xxParse{{ name.lower().capitalize() }}(el);
+            {%- endfor %}
             items.add(tmpItem);
         }
         return items;

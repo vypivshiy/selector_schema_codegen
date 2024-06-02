@@ -8,14 +8,14 @@ from functools import partial
 CONST_METHODS = {
     "__SPLIT_DOC__": """
 @override
-m_partDocument(el)""",
+mPartDocument(el)""",
 
     "__PRE_VALIDATE__": """
 @override
-m_preValidate(el)""",
-    "__ITEM__": "_parseItem(el)",
-    "__KEY__": "_parseKey(el)",
-    "__VALUE__": "_parseValue(el)",
+mPreValidate(el)""",
+    "__ITEM__": "xxParseItem(el)",
+    "__KEY__": "xxParseKey(el)",
+    "__VALUE__": "xxParseValue(el)",
 }
 
 
@@ -41,14 +41,14 @@ def op_xpath_all(_):
 def op_css(expr: Expression):
     VAR_L, VAR_R = VAR_NAMES(expr)
     query = expr.arguments[0]
-    return f"var {VAR_L} = m_css({VAR_R}, {query!r});"
+    return f"var {VAR_L} = mCss({VAR_R}, {query!r});"
 
 
 @converter(TokenType.OP_CSS_ALL)
 def op_css_all(expr: Expression):
     VAR_L, VAR_R = VAR_NAMES(expr)
     query = expr.arguments[0]
-    return f"var {VAR_L} = m_cssAll({VAR_R}, {query!r});"
+    return f"var {VAR_L} = mCssAll({VAR_R}, {query!r});"
 
 
 @converter(TokenType.OP_ATTR)
@@ -56,25 +56,25 @@ def op_attr(expr: Expression):
     VAR_L, VAR_R = VAR_NAMES(expr)
     name = expr.arguments[0]
     if expr.VARIABLE_TYPE == TypeVariableState.STRING:
-        return f"var {VAR_L} = m_attr({VAR_R}, {name!r});"
-    return f"var {VAR_L} = m_attrAll({VAR_R}, {name!r});"
+        return f"var {VAR_L} = mAttr({VAR_R}, {name!r});"
+    return f"var {VAR_L} = mAttrAll({VAR_R}, {name!r});"
 
 
 @converter(TokenType.OP_ATTR_TEXT)
 def op_attr_text(expr: Expression):
     VAR_L, VAR_R = VAR_NAMES(expr)
     if expr.VARIABLE_TYPE == TypeVariableState.STRING:
-        return f"var {VAR_L} = m_attrText({VAR_R});"
+        return f"var {VAR_L} = mAttrText({VAR_R});"
 
-    return f"var {VAR_L} = m_attrTextAll({VAR_R});"
+    return f"var {VAR_L} = mAttrTextAll({VAR_R});"
 
 
 @converter(TokenType.OP_ATTR_RAW)
 def op_attr_raw(expr: Expression):
     VAR_L, VAR_R = VAR_NAMES(expr)
     if expr.VARIABLE_TYPE == TypeVariableState.STRING:
-        return f"var {VAR_L} = m_attrRaw({VAR_R});"
-    return f"var {VAR_L} = m_attrRawAll({VAR_R});"
+        return f"var {VAR_L} = mAttrRaw({VAR_R});"
+    return f"var {VAR_L} = mAttrRawAll({VAR_R});"
 
 
 @converter(TokenType.OP_REGEX)
@@ -83,8 +83,8 @@ def op_regex(expr: Expression):
     pattern = expr.arguments[0]
     # FIXME: sanitize regex (unescape issue)
     if expr.VARIABLE_TYPE == TypeVariableState.STRING:
-        return f"var {VAR_L} = m_reMatch({VAR_R}, {pattern!r});"
-    return f"var {VAR_L} = {VAR_R}.map((e) => m_reMatch(e, {pattern!r})).toList();"
+        return f"var {VAR_L} = mReMatch({VAR_R}, {pattern!r});"
+    return f"var {VAR_L} = {VAR_R}.map((e) => mReMatch(e, {pattern!r})).toList();"
 
 
 @converter(TokenType.OP_REGEX_ALL)
@@ -92,7 +92,7 @@ def op_regex_all(expr: Expression):
     VAR_L, VAR_R = VAR_NAMES(expr)
     pattern = expr.arguments[0]
     # FIXME: sanitize regex (unescape issue)
-    return f"var {VAR_L} = m_reMatchAll({VAR_R}, {pattern!r});"
+    return f"var {VAR_L} = mReMatchAll({VAR_R}, {pattern!r});"
 
 
 @converter(TokenType.OP_REGEX_SUB)
@@ -100,7 +100,7 @@ def op_regex_sub(expr: Expression):
     VAR_L, VAR_R = VAR_NAMES(expr)
     pattern = expr.arguments[0]
     # FIXME: sanitize regex (unescape issue)
-    return f"var {VAR_L} = m_reSub({VAR_R}, {pattern!r});"
+    return f"var {VAR_L} = mReSub({VAR_R}, {pattern!r});"
 
 
 @converter(TokenType.OP_STRING_TRIM)
@@ -108,8 +108,8 @@ def op_string_trim(expr: Expression):
     VAR_L, VAR_R = VAR_NAMES(expr)
     substr = expr.arguments[0]
     if expr.VARIABLE_TYPE.STRING:
-        return f"var {VAR_L} = m_strTrim({VAR_R}, {substr!r});"
-    return f"var {VAR_L} = {VAR_R}.map((e) => m_strTrim(e, {substr!r})).toList();"
+        return f"var {VAR_L} = mStrTrim({VAR_R}, {substr!r});"
+    return f"var {VAR_L} = {VAR_R}.map((e) => mStrTrim(e, {substr!r})).toList();"
 
 
 @converter(TokenType.OP_STRING_L_TRIM)
@@ -117,8 +117,8 @@ def op_string_l_trim(expr: Expression):
     VAR_L, VAR_R = VAR_NAMES(expr)
     substr = expr.arguments[0]
     if expr.VARIABLE_TYPE.STRING:
-        return f"var {VAR_L} = m_strLTrim({VAR_R}, {substr!r});"
-    return f"var {VAR_L} = {VAR_R}.map((e) => m_strLTrim(e, {substr!r})).toList();"
+        return f"var {VAR_L} = mStrLTrim({VAR_R}, {substr!r});"
+    return f"var {VAR_L} = {VAR_R}.map((e) => mStrLTrim(e, {substr!r})).toList();"
 
 
 @converter(TokenType.OP_STRING_R_TRIM)
@@ -126,8 +126,8 @@ def op_string_r_trim(expr: Expression):
     VAR_L, VAR_R = VAR_NAMES(expr)
     substr = expr.arguments[0]
     if expr.VARIABLE_TYPE.STRING:
-        return f"var {VAR_L} = m_strRTrim({VAR_R}, {substr!r});"
-    return f"var {VAR_L} = {VAR_R}.map((e) => m_strRTrim(e, {substr!r})).toList();"
+        return f"var {VAR_L} = mStrRTrim({VAR_R}, {substr!r});"
+    return f"var {VAR_L} = {VAR_R}.map((e) => mStrRTrim(e, {substr!r})).toList();"
 
 
 @converter(TokenType.OP_STRING_REPLACE)
@@ -135,8 +135,8 @@ def op_string_replace(expr: Expression):
     VAR_L, VAR_R = VAR_NAMES(expr)
     old, new = expr.arguments
     if expr.VARIABLE_TYPE.STRING:
-        return f"var {VAR_L} = m_strReplace({VAR_R}, {old!r}, {new!r});"
-    return f"var {VAR_L} = {VAR_R}.map((e) => m_strReplace(e, {old!r}, {new!r})).toList();"
+        return f"var {VAR_L} = mStrReplace({VAR_R}, {old!r}, {new!r});"
+    return f"var {VAR_L} = {VAR_R}.map((e) => mStrReplace(e, {old!r}, {new!r})).toList();"
 
 
 @converter(TokenType.OP_STRING_FORMAT)
@@ -144,15 +144,15 @@ def op_string_format(expr: Expression):
     VAR_L, VAR_R = VAR_NAMES(expr)
     template = expr.arguments[0]
     if expr.VARIABLE_TYPE.STRING:
-        return f"var {VAR_L} = m_strFormat({VAR_R}, {template!r});"
-    return f"var {VAR_L} = {VAR_R}.map((e) => m_strFormat({VAR_R}, {template!r})).toList();"
+        return f"var {VAR_L} = mStrFormat({VAR_R}, {template!r});"
+    return f"var {VAR_L} = {VAR_R}.map((e) => mStrFormat({VAR_R}, {template!r})).toList();"
 
 
 @converter(TokenType.OP_STRING_SPLIT)
 def op_string_split(expr: Expression):
     VAR_L, VAR_R = VAR_NAMES(expr)
     sep = expr.arguments[0]
-    return f"var {VAR_L} = m_strSplit({VAR_R}, {sep!r});"
+    return f"var {VAR_L} = mStrSplit({VAR_R}, {sep!r});"
 
 
 @converter(TokenType.OP_INDEX)
@@ -166,7 +166,7 @@ def op_index(expr: Expression):
 def op_join(expr: Expression):
     VAR_L, VAR_R = VAR_NAMES(expr)
     sep = expr.arguments[0]
-    return f"var {VAR_L} = m_arrJoin({VAR_R}, {sep!r});"
+    return f"var {VAR_L} = mArrJoin({VAR_R}, {sep!r});"
 
 
 @converter(TokenType.ST_DEFAULT)
@@ -176,8 +176,9 @@ def st_default(expr: Expression):
     t = ' ' * 2
     head = f'{t}try {{ {t * 2}'
     block = "{}"
-    footer = f"\n{t} }} catch(e) {{"
-    ret = f'\n{t * 3}return {default_value}; }}'
+    footer = f"\n{t} catch(e) {{"
+    # close catch and method body ===========vvvv
+    ret = f'\n{t * 3}return {default_value}; }} }}'
     return f'{head}{block}{footer}{ret}'
 
 
@@ -185,28 +186,28 @@ def st_default(expr: Expression):
 def op_assert_equal(expr: Expression):
     VAR_L, VAR_R = VAR_NAMES(expr)
     val, msg = expr.arguments
-    return f"var {VAR_L} = m_assertEq({VAR_R}, {val!r}, {msg!r});"
+    return f"var {VAR_L} = mAssertEq({VAR_R}, {val!r}, {msg!r});"
 
 
 @converter(TokenType.OP_ASSERT_CONTAINS)
 def op_assert_contains(expr: Expression):
     VAR_L, VAR_R = VAR_NAMES(expr)
     val, msg = expr.arguments
-    return f"var {VAR_L} = m_assertEq({VAR_R}, {val!r}, {msg!r});"
+    return f"var {VAR_L} = mAssertEq({VAR_R}, {val!r}, {msg!r});"
 
 
 @converter(TokenType.OP_ASSERT_RE_MATCH)
 def op_assert_re_match(expr: Expression):
     VAR_L, VAR_R = VAR_NAMES(expr)
     val, msg = expr.arguments
-    return f"var {VAR_L} = m_assertReMatch({VAR_R}, {val!r}, {msg!r});"
+    return f"var {VAR_L} = mAssertReMatch({VAR_R}, {val!r}, {msg!r});"
 
 
 @converter(TokenType.OP_ASSERT_CSS)
 def op_assert_css(expr: Expression):
     VAR_L, VAR_R = VAR_NAMES(expr)
     q, msg = expr.arguments
-    return f"var {VAR_L} = m_assertCss({VAR_R}, {q!r}, {msg!r})"
+    return f"var {VAR_L} = mAssertCss({VAR_R}, {q!r}, {msg!r})"
 
 
 @converter(TokenType.OP_ASSERT_XPATH)
@@ -238,7 +239,7 @@ def st_method(expr: Expression):
         return c_name + \
             '{'  # method body open
 
-    return f"_parse{name.lower().capitalize()}(el)" \
+    return f"xxParse{name.lower().capitalize()}(el)" \
         + '{'  # method body open
 
 
