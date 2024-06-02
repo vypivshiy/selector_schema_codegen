@@ -67,5 +67,5 @@ class BaseDocument:
         """Set default value. Accept string or None"""
         if self.num != 0:
             raise Exception("default expression should be first")
-        self._add_expr(TokenType.OP_DEFAULT, args=(value,))
+        self._add_expr(TokenType.ST_DEFAULT, args=(value,))
         return self

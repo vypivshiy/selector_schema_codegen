@@ -56,7 +56,7 @@ class Field:
         self._method = self._method_expr()
 
         # default value wrapper
-        if self._instructions[0].TOKEN_TYPE == TokenType.OP_DEFAULT:
+        if self._instructions[0].TOKEN_TYPE == TokenType.ST_DEFAULT:
             self._default: Optional[Expression] = self._instructions.pop(0)
             self._update_num_instructions()  # helps correct variables naming
         else:
