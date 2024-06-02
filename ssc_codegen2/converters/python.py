@@ -41,13 +41,13 @@ class PythonCodeConverter(BaseCodeConverter):
         self(TokenType.OP_STRING_SPLIT)(op_string_split)
         self(TokenType.OP_INDEX)(op_index)
         self(TokenType.OP_JOIN)(op_join)
-        self(TokenType.OP_DEFAULT)(op_default)
         self(TokenType.OP_ASSERT_EQUAL)(op_assert_equal)
         self(TokenType.OP_ASSERT_CONTAINS)(op_assert_contains)
         self(TokenType.OP_ASSERT_RE_MATCH)(op_assert_re_match)
         self(TokenType.OP_ASSERT_CSS)(op_assert_css)
         self(TokenType.OP_ASSERT_XPATH)(op_assert_xpath)
         self(TokenType.OP_NESTED_SCHEMA)(op_nested_schema)
+        self(TokenType.ST_DEFAULT)(st_default)
         self(TokenType.ST_DOCSTRING)(st_docstring)
         self(TokenType.ST_METHOD)(st_method)
         self(TokenType.ST_NO_RET)(st_no_ret)
@@ -183,7 +183,7 @@ def op_join(e: Expression):
     return f"{VAR_L} = self._arr_join({VAR_R}, {sep!r})"
 
 
-def op_default(e: Expression):
+def st_default(e: Expression):
     default_value = e.arguments[0]
     default_value = repr(default_value) if isinstance(default_value, str) else default_value
     t = ' ' * 4
@@ -197,7 +197,8 @@ def op_default(e: Expression):
 def op_assert_equal(e: Expression):
     VAR_L, VAR_R = VAR_NAMES(e)
     val, msg = e.arguments
-    return f"{VAR_L} = self._assert_eq({VAR_R}, {val!r}, {msg!r})"
+    val = repr(val) if isinstance(val, str) else val
+    return f"{VAR_L} = self._assert_eq({VAR_R}, {val}, {msg!r})"
 
 
 def op_assert_contains(e: Expression):
