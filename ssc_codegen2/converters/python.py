@@ -189,7 +189,7 @@ def st_default(e: Expression):
     t = ' ' * 4
     head = f"{t}try:\n{t * 2}"
     block = "{}"
-    footer = f"\n{t}except Exception:"
+    footer = f"\n{t}{t}except Exception:"
     ret = f'\n{t * 3}return {default_value}'
     return f'{head}{block}{footer}{ret}'
 
