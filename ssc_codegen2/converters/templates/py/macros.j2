@@ -45,7 +45,7 @@ class {{ struct.name }}(BaseParser):
 {% endmacro %}
 
 
-{# generate parser method for FlattenListSchema #}
+{# generate parser method for ListSchema #}
 {% macro parse_list_schema(struct) %}
     def _run_parse(self):
         return [{
