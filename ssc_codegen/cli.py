@@ -1,7 +1,9 @@
 # TODO refactoring
 import importlib
+import pathlib
 import subprocess
 import sys
+import types
 from enum import Enum
 from pathlib import Path
 from types import ModuleType
@@ -61,6 +63,12 @@ def _version_cb() -> None:
     typer.Abort()
 
 
+def import_from_file(path: Path) -> ModuleType:
+    module = ModuleType('mod')
+    code = pathlib.Path(path.resolve()).read_text()
+    exec(code, module.__dict__)
+    return module
+
 def main(
     configs: A[list[str], typer.Argument(help="ssc-codegen config files")],
     converter: A[
@@ -108,9 +116,6 @@ def main(
     print("Start generate code")
     output_folder.mkdir(exist_ok=True, parents=True)
 
-    configs = [
-        c.rstrip(".py").replace("/", ".").replace("\\", ".") for c in configs
-    ]
     print(f"Start parse {len(configs)} schemas")
     converter = converter.value.replace(".", "_")
     converter_module = importlib.import_module(
@@ -120,7 +125,8 @@ def main(
     print("Load code generator")
 
     for config in configs:
-        module = importlib.import_module(config)
+        module = import_from_file(Path.cwd() / Path(config))
+        # module = importlib.import_module(config)
         schemas = extract_schemas(module)
         if css_to_xpath:
             for s in schemas:
@@ -144,6 +150,7 @@ def main(
             file.write(codegen.generate_base_class())
 
         # TODO detect extension
+        config = config.rstrip('.py')
         parser_module_name = (
             f"{config}.py" if converter.startswith("py_") else f"{config}.dart"
         )
