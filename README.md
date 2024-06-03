@@ -1,18 +1,16 @@
 # Selector schema codegen
 
-ssc_codegen - generator of parsers for various programming languages (for html priority) using
-python-DSL configurations with built-in declarative language.
+ssc_codegen - html parser code generator for different programming languages using class attribute annotations.
 
-Designed to port parsers to various programming languages and libs
 
-# Motivation
-- ~~interesting in practice write DSL-like language~~
-- decrease boilerplate code for web-parsers
-- write once - convert to other mainstream http parser libs
-- minimal operations for easy add another libs and languages in future
-  - include css, xpath, attributes operations, regex, minimal string formatting operations
+# Features
+- easy read, write, documentation
+- standardization: generate classes with minimal dependencies and documented parsed signature
+- decrease boilerplate code
+- write once — convert to other mainstream http parser libs
+- include css, xpath, get attributes, regex, minimal string formatting operations
+- pre validate types, css/xpath queries
 - pre validate css/xpath queries and logic before generate code
-- standardisation: generate classes with minimal dependencies and documented parsed signature 
 
 ## Install
 
@@ -28,6 +26,10 @@ pipx install ssc_codegen
 pip install ssc_codegen
 ```
 
+## Usage
+
+see [example](example)
+
 ## Supported libs and languages
 
 | language | lib                                                          | xpath | css | formatter   |
@@ -38,14 +40,12 @@ pip install ssc_codegen
 | -        | scrapy (based on parsel, but class init argument - Response) | YES   | YES | -           |
 | dart     | universal_html                                               | NO    | YES | dart format |
 
-### Quickstart
 
-see [example](example) and read code with comments
 
 ### Recommendations
 
-- usage css selector: they can be **guaranteed** converted to xpath (if target language not support CSS selectors)
-- usage simple operations for more compatibility other libraries. 
+- usage css selector: they can be **guaranteed** converted to xpath (if target language does not support CSS selectors)
+- usage simple operations for more compatibility with other libraries. 
   - Some libraries may not fully support selector specifications
   - for example, `#product_description+ p` selector in `parsel` works fine, but not works in `selectolax`, `dart` libs
 - there is a xpath to css converter for simple queries **without guarantees of functionality**. 
