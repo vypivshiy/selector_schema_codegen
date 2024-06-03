@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Dict, Union, List
+from typing import TYPE_CHECKING, Dict, List, Union
 
 from ssc_codegen.schema.base import _T_SCHEMA_SIGNATURE, BaseSchema
 from ssc_codegen.type_state import TypeVariableState
@@ -27,7 +27,9 @@ class ListSchema(BaseSchema):
         )
 
     @classmethod
-    def get_fields_signature(cls) -> Union[List[str], Dict[str, _T_SCHEMA_SIGNATURE]]:
+    def get_fields_signature(
+        cls,
+    ) -> Union[List[str], Dict[str, _T_SCHEMA_SIGNATURE]]:
         return [super().get_fields_signature(), "..."]  # type: ignore
 
 

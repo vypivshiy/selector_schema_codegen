@@ -189,7 +189,9 @@ class BaseSchema:
         return len(type_args) == 1 and issubclass(type_args[0], BaseSchema)
 
     @classmethod
-    def get_fields_signature(cls) -> Union[List[str], Dict[str, _T_SCHEMA_SIGNATURE]]:
+    def get_fields_signature(
+        cls,
+    ) -> Union[List[str], Dict[str, _T_SCHEMA_SIGNATURE]]:
         signature = {}
         # copy dicts to avoid runtime err:
         # RuntimeError: dictionary changed size during iteration

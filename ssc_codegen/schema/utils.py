@@ -27,7 +27,7 @@ class SchemaLike:
     schema: Type["BaseSchema"]
 
     def items_signature(
-            self, cb: Callable[[T_SCHEMA], str] = get_json_signature
+        self, cb: Callable[[T_SCHEMA], str] = get_json_signature
     ):
         return cb(self.schema)
 
@@ -38,7 +38,9 @@ class SchemaLike:
     def parse_nodes(self):
         ast_nodes = {
             "__SPLIT_DOC__": self.schema.__dict__.get("__SPLIT_DOC__", None),
-            "__PRE_VALIDATE__": self.schema.__dict__.get("__PRE_VALIDATE__", None)
+            "__PRE_VALIDATE__": self.schema.__dict__.get(
+                "__PRE_VALIDATE__", None
+            ),
         }
 
         for i, (k, v) in enumerate(self.schema.get_fields().items()):

@@ -2,7 +2,7 @@ from functools import partial
 
 from ssc_codegen.converters.base import BaseCodeConverter
 from ssc_codegen.converters.generator import CodeGenerator
-from ssc_codegen.converters.utils import to_camelcase, escape_str
+from ssc_codegen.converters.utils import escape_str, to_camelcase
 from ssc_codegen.expression import Expression
 from ssc_codegen.tokens import TokenType
 from ssc_codegen.type_state import TypeVariableState

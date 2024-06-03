@@ -1,7 +1,9 @@
 import re
 
 
-def escape_str(s: str, pattern: str = r"[\-.^$*+?{}\[\]\\|()]", escape_ch: str = "\\") -> str:
+def escape_str(
+    s: str, pattern: str = r"[\-.^$*+?{}\[\]\\|()]", escape_ch: str = "\\"
+) -> str:
     """Sanitize matching characters. Used, for trim, l_trim, r_trim realizations by regex"""
 
     def _repl(ch: re.Match[str]) -> str:

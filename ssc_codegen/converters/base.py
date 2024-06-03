@@ -35,7 +35,10 @@ class BaseCodeConverter:
 
         if cb := self.definitions.get(expr.TOKEN_TYPE):
             code = cb(expr)
-            if self._indent_state and expr.TOKEN_TYPE is not TokenType.ST_METHOD:
+            if (
+                self._indent_state
+                and expr.TOKEN_TYPE is not TokenType.ST_METHOD
+            ):
                 if expr.TOKEN_TYPE in (TokenType.ST_RET, TokenType.ST_NO_RET):
                     self._indent_state = False
                 return self._indent * self._chr_indent + code + self._end
