@@ -2,7 +2,7 @@ from functools import partial
 
 from ssc_codegen.converters.base import BaseCodeConverter
 from ssc_codegen.converters.generator import CodeGenerator
-from ssc_codegen.converters.utils import to_camelcase
+from ssc_codegen.converters.utils import to_camelcase, escape_str
 from ssc_codegen.expression import Expression
 from ssc_codegen.tokens import TokenType
 from ssc_codegen.type_state import TypeVariableState
@@ -112,6 +112,8 @@ def op_regex_sub(expr: Expression):
 def op_string_trim(expr: Expression):
     VAR_L, VAR_R = VAR_NAMES(expr)
     substr = expr.arguments[0]
+    substr = escape_str(substr)
+
     if expr.VARIABLE_TYPE.STRING:
         return f"var {VAR_L} = mStrTrim({VAR_R}, {substr!r});"
     return (
@@ -123,6 +125,8 @@ def op_string_trim(expr: Expression):
 def op_string_l_trim(expr: Expression):
     VAR_L, VAR_R = VAR_NAMES(expr)
     substr = expr.arguments[0]
+    substr = escape_str(substr)
+
     if expr.VARIABLE_TYPE.STRING:
         return f"var {VAR_L} = mStrLTrim({VAR_R}, {substr!r});"
     return (
@@ -134,6 +138,8 @@ def op_string_l_trim(expr: Expression):
 def op_string_r_trim(expr: Expression):
     VAR_L, VAR_R = VAR_NAMES(expr)
     substr = expr.arguments[0]
+    substr = escape_str(substr)
+
     if expr.VARIABLE_TYPE.STRING:
         return f"var {VAR_L} = mStrRTrim({VAR_R}, {substr!r});"
     return (
