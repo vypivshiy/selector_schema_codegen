@@ -165,6 +165,10 @@ class BaseSchema:
     def _is_implemented(value) -> bool:
         return value != NotImplemented or value != None  # noqa
 
+    @staticmethod
+    def _sc_have_fields(kls) -> bool:
+        return any(not k.startswith('__') for k in vars(kls))
+
     @classmethod
     def get_fields(cls) -> Dict[str, "BaseDocument"]:
         fields = {}
@@ -172,6 +176,20 @@ class BaseSchema:
         # copy dicts to avoid runtime err:
         # RuntimeError: dictionary changed size during iteration
         cls_attrs = vars(cls).copy()
+
+        # if class is inheritance - klass missing fields attributes
+        # get from parent class
+        if not cls._sc_have_fields(cls):
+            for kls in cls.__mro__:
+                if cls._sc_have_fields(kls):
+                    doc = cls_attrs.pop('__doc__', '')
+                    cls_attrs = vars(kls).copy()
+                    cls_attrs['__doc__'] = doc
+                    break
+            else:
+                msg = f'{cls.__name__} has no fields defined.'
+                raise AttributeError(msg)
+
         # v: "BaseDocument" k: str
         for k, v in cls_attrs.items():
 
@@ -184,7 +202,7 @@ class BaseSchema:
         return fields
 
     @staticmethod
-    def _is_list_schema(type_):
+    def _is_list_schema(type_) -> bool:
         type_args = get_args(type_)
         return len(type_args) == 1 and issubclass(type_args[0], BaseSchema)
 
@@ -243,7 +261,7 @@ class BaseSchema:
 
     @classmethod
     def __expr_fields__(cls) -> Dict[str, "BaseDocument"]:
-        dct_copy = vars(cls).copy()  # copy avoid runtime err
+        dct_copy = cls.get_fields().copy()  # copy avoid runtime err
         fields: dict[str, "BaseDocument"] = {
             k: v for k, v in dct_copy.items() if isinstance(v, BaseDocument)
         }
@@ -260,14 +278,6 @@ class BaseSchema:
             TOKEN_TYPE=TokenType.ST_DOCSTRING,
             VARIABLE_TYPE=TypeVariableState.NONE,
             arguments=(full_doc,),
-        )
-
-    @classmethod
-    def __expr_init__(cls):
-        return Expression(
-            -1,
-            TOKEN_TYPE=TokenType.ST_INIT,
-            VARIABLE_TYPE=TypeVariableState.DOCUMENT,
         )
 
 
