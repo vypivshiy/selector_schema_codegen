@@ -2,7 +2,7 @@ from functools import partial
 
 from ssc_codegen.converters.base import BaseCodeConverter
 from ssc_codegen.converters.generator import CodeGenerator
-from ssc_codegen.converters.utils import escape_str, to_camelcase
+from ssc_codegen.converters.utils import escape_str, to_camelcase, wrap_str_q
 from ssc_codegen.expression import Expression
 from ssc_codegen.tokens import TokenType
 from ssc_codegen.type_state import TypeVariableState
@@ -85,10 +85,11 @@ def op_regex(expr: Expression):
     VAR_L, VAR_R = VAR_NAMES(expr)
     pattern = expr.arguments[0]
     # FIXME: sanitize regex (unescape issue)
+
     if expr.VARIABLE_TYPE == TypeVariableState.STRING:
-        return f"var {VAR_L} = mReMatch({VAR_R}, {pattern!r});"
+        return f"var {VAR_L} = mReMatch({VAR_R}, r{wrap_str_q(pattern)});"
     return (
-        f"var {VAR_L} = {VAR_R}.map((e) => mReMatch(e, {pattern!r})).toList();"
+        f"var {VAR_L} = {VAR_R}.map((e) => mReMatch(e, r{wrap_str_q(pattern)})).toList();"
     )
 
 
@@ -97,15 +98,17 @@ def op_regex_all(expr: Expression):
     VAR_L, VAR_R = VAR_NAMES(expr)
     pattern = expr.arguments[0]
     # FIXME: sanitize regex (unescape issue)
-    return f"var {VAR_L} = mReMatchAll({VAR_R}, {pattern!r});"
+
+    return f"var {VAR_L} = mReMatchAll({VAR_R}, r{wrap_str_q(pattern)});"
 
 
 @converter(TokenType.OP_REGEX_SUB)
 def op_regex_sub(expr: Expression):
     VAR_L, VAR_R = VAR_NAMES(expr)
-    pattern = expr.arguments[0]
+    pattern, repl = expr.arguments
     # FIXME: sanitize regex (unescape issue)
-    return f"var {VAR_L} = mReSub({VAR_R}, {pattern!r});"
+
+    return f"var {VAR_L} = mReSub({VAR_R}, r{wrap_str_q(pattern)}, {repl!r});"
 
 
 @converter(TokenType.OP_STRING_TRIM)
