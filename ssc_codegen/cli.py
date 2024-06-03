@@ -30,7 +30,7 @@ class Converters(str, Enum):
     DART = "dart"
 
 
-def _is_template_cls(cls):
+def _is_template_cls(cls: object) -> bool:
     return any(
         cls == base_cls
         for base_cls in (
@@ -54,7 +54,7 @@ def extract_schemas(module: ModuleType) -> List[BaseSchema]:
     ]
 
 
-def _version_cb():
+def _version_cb() -> None:
     from ssc_codegen import __version__
 
     print("ssc-gen", __version__)
@@ -62,7 +62,7 @@ def _version_cb():
 
 
 def main(
-    configs: A[list[str], typer.Argument(help="config files")],
+    configs: A[list[str], typer.Argument(help="ssc-codegen config files")],
     converter: A[
         Converters,
         typer.Option(
@@ -100,7 +100,7 @@ def main(
             "--version", help="print version and exit", callback=_version_cb
         ),
     ] = None,
-):
+) -> None:
     if css_to_xpath and xpath_to_css:
         print("ERROR! Should be passed --to-css OR --to-xpath", file=sys.stderr)
         raise typer.Abort()
@@ -113,7 +113,6 @@ def main(
     ]
     print(f"Start parse {len(configs)} schemas")
     converter = converter.value.replace(".", "_")
-    # todo rename to ssc_codegen
     converter_module = importlib.import_module(
         f"ssc_codegen.converters.{converter}"
     )
@@ -168,5 +167,9 @@ def main(
     exit(0)
 
 
-if __name__ == "__main__":
+def script_entry_point() -> None:
     typer.run(main)
+
+
+if __name__ == "__main__":
+    script_entry_point()
