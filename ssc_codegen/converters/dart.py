@@ -226,7 +226,7 @@ def op_assert_re_match(expr: Expression):
 def op_assert_css(expr: Expression):
     VAR_L, VAR_R = VAR_NAMES(expr)
     q, msg = expr.arguments
-    return f"var {VAR_L} = mAssertCss({VAR_R}, {q!r}, {msg!r})"
+    return f"var {VAR_L} = mAssertCss({VAR_R}, {q!r}, {msg!r});"
 
 
 @converter(TokenType.OP_ASSERT_XPATH)
