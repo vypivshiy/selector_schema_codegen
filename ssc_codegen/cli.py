@@ -150,7 +150,8 @@ def main(
             file.write(codegen.generate_base_class())
 
         # TODO detect extension
-        config = config.rstrip('.py')
+        # path issue
+        config = config.rstrip('.py').split('/')[-1].split('\\')[-1]
         parser_module_name = (
             f"{config}.py" if converter.startswith("py_") else f"{config}.dart"
         )
