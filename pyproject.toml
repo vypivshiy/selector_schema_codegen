@@ -38,7 +38,7 @@ Examples = "https://github.com/vypivshiy/selector_schema_codegen/examples"
 
 
 [project.optional-dependencies]
-dev = ["ruff", "mypy", "isort"]
+dev = ["ruff", "mypy", "isort", "pytest"]
 
 
 [build-system]
