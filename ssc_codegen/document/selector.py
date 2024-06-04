@@ -204,7 +204,8 @@ class DocumentOpHtml(
 
         if self.last_var_type is TypeVariableState.DOCUMENT:
             self._add_expr(
-                TokenType.OP_ATTR_TEXT, new_var_state=TypeVariableState.STRING
+                TokenType.OP_ATTR_TEXT,
+                new_var_state=TypeVariableState.STRING
             )
         elif self.last_var_type is TypeVariableState.LIST_DOCUMENT:
             self._add_expr(
@@ -212,5 +213,5 @@ class DocumentOpHtml(
                 new_var_state=TypeVariableState.LIST_STRING,
             )
         else:
-            raise SyntaxError("TODO")
+            raise SyntaxError("Something wrong")
         return self
