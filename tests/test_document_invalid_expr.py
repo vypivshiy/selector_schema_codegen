@@ -5,6 +5,7 @@ from ssc_codegen import D, N, R, ItemSchema
 class MockParser(ItemSchema):
     pass
 
+
 def test_raw_invalid_expr():
     with pytest.raises(SyntaxError):
         R().css('a')
