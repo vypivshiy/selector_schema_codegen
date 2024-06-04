@@ -9,7 +9,7 @@ from ssc_codegen.document.selector import (
 from ssc_codegen.document.text import DocumentOpString
 from ssc_codegen.document.validate import DocumentOpAssert
 
-__all__ = ["Document", "D", "Nested", "N"]
+__all__ = ["Document", "D", "Nested", "N", "R"]
 
 
 class Document(
@@ -36,6 +36,11 @@ def D() -> Document:
 def N() -> Nested:
     """Nested document object shortcut"""
     return Nested()
+
+
+def R() -> Document:
+    """D().raw() object shortcut alias. Useful for string/regex operations"""
+    return D().raw()
 
 
 if __name__ == "__main__":
