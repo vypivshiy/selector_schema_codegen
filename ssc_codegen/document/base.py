@@ -50,13 +50,18 @@ class BaseDocument:
         self._stack_instructions.append(e)
 
     def _test_type_state_expr(self, *var_types: TypeVariableState) -> None:
-        if self._last_index == 0:
-            return
+        if len(self._stack_instructions) == 0:
+            # first variable always DOCUMENT type
+            if TypeVariableState.DOCUMENT in var_types:
+                return
+            msg = f"Excepted type(s) {tuple(v.name for v in var_types)}, got 'DOCUMENT'"
+            raise SyntaxError(msg)
+
 
         expr = self._stack_instructions[self._last_index]
         if expr.VARIABLE_TYPE in var_types:
             return
-        msg = f"Excepted type(s) {tuple(v.name for v in var_types)}, got {expr.VARIABLE_TYPE.name}"
+        msg = f"Excepted type(s) {tuple(v.name for v in var_types)}, got '{expr.VARIABLE_TYPE.name}'"
         raise SyntaxError(msg)
 
     @property
@@ -68,6 +73,6 @@ class BaseDocument:
     def default(self, value: Optional[str]) -> Self:
         """Set default value. Accept string or None"""
         if self.num != 0:
-            raise Exception("default expression should be first")
+            raise SyntaxError("default expression should be a first")
         self._add_expr(TokenType.ST_DEFAULT, args=(value,))
         return self
