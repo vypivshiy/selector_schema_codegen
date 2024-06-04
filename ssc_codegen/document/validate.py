@@ -1,5 +1,6 @@
 # validation collection
 from ssc_codegen.document.base import BaseDocument, TokenType, TypeVariableState
+from ssc_codegen.utils.re_validator import try_compile_pattern_expr
 from ssc_codegen.utils.selector_validators import (
     validate_css_query,
     validate_xpath_query,
@@ -38,6 +39,6 @@ class DocumentOpAssert(BaseDocument):
 
     def assert_re(self, pattern: str, msg: str = ""):
         self._test_type_state_expr(TypeVariableState.STRING)
-
+        try_compile_pattern_expr(pattern)
         self._add_expr(TokenType.OP_ASSERT_RE_MATCH, args=(pattern, msg))
         return self
