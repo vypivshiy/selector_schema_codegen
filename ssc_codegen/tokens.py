@@ -63,9 +63,7 @@ class TokenType(IntEnum):
 
     # BUILDER TOKENS
     ST_DOCSTRING = 100
-    ST_INIT = 101  # init first var. should be start at element
     ST_PRE_VALIDATE = 102
-    # ST_DEFAULT = 103  # default method wrapper
     ST_METHOD = 104
     ST_NO_RET = 105  # __PRE_VALIDATE__ try/catch wraps
     ST_RET = 106
