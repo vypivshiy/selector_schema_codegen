@@ -41,15 +41,3 @@ def N() -> Nested:
 def R() -> Document:
     """D().raw() object shortcut alias. Useful for string/regex operations"""
     return D().raw()
-
-
-if __name__ == "__main__":
-    d = (
-        D()
-        .css_all("a")
-        .text()
-        .replace("a", "b")
-        .first()
-        .assert_re(r"\w+", "not word")
-    )
-    print(d)
