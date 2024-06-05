@@ -248,7 +248,6 @@ def st_docstring(e: Expression):
 
 def st_method(e):
     name = e.arguments[0]
-    print(name, CONST_METHODS.get(name))
     if magic_method := CONST_METHODS.get(name):
         return magic_method
     return f"def _parse_{name}(self, el):"
