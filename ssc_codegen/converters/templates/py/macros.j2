@@ -92,7 +92,7 @@ class {{ struct.name }}(BaseParser):
 
     @staticmethod
     def _re_sub(s, pattern, repl) -> str:
-        return re.sub(s, pattern, repl)
+        return re.sub(pattern, repl, s)
 
     # ARRAY
     @staticmethod
