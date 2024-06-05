@@ -23,12 +23,12 @@ class ListSchema(BaseSchema):
             )
 
         assert (
-            cls.__SPLIT_DOC__.last_var_type is TypeVariableState.LIST_DOCUMENT
+                cls.__SPLIT_DOC__.last_var_type is TypeVariableState.LIST_DOCUMENT
         )
 
     @classmethod
     def get_fields_signature(
-        cls,
+            cls,
     ) -> Union[List[str], Dict[str, _T_SCHEMA_SIGNATURE]]:
         return [super().get_fields_signature(), "..."]  # type: ignore
 
@@ -38,6 +38,13 @@ class FlattenListSchema(BaseSchema):
     __SPLIT_DOC__: "BaseDocument" = NotImplemented
     __ITEM__: "BaseDocument" = NotImplemented
     __SIGNATURE__ = ["item", "..."]
+
+    @classmethod
+    def get_fields(cls) -> Dict[str, "BaseDocument"]:
+        return {
+            "item": cls.__ITEM__,
+            "__SPLIT_DOC__": cls.__SPLIT_DOC__
+        }
 
     @classmethod
     def check(cls) -> None:
@@ -51,7 +58,7 @@ class FlattenListSchema(BaseSchema):
             )
 
         assert (
-            cls.__SPLIT_DOC__.last_var_type == TypeVariableState.LIST_DOCUMENT
+                cls.__SPLIT_DOC__.last_var_type == TypeVariableState.LIST_DOCUMENT
         ), "Should be return LIST_DOCUMENT type"
 
 
@@ -78,7 +85,7 @@ class DictSchema(BaseSchema):
             )
 
         assert (
-            cls.__SPLIT_DOC__.last_var_type is TypeVariableState.LIST_DOCUMENT
+                cls.__SPLIT_DOC__.last_var_type is TypeVariableState.LIST_DOCUMENT
         ), "Should be return type LIST_DOCUMENT"
 
     @classmethod
@@ -86,7 +93,7 @@ class DictSchema(BaseSchema):
         return {
             "key": cls.__KEY__,
             "value": cls.__VALUE__,
-            "part_document": cls.__SPLIT_DOC__,
+            "__SPLIT_DOC__": cls.__SPLIT_DOC__,
         }
 
     @classmethod
