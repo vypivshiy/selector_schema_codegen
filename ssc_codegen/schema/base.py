@@ -148,7 +148,7 @@ class BaseSchema:
     )
     __MAGIC_METHODS_NAMES__ = (
         "__PRE_VALIDATE__",
-        "__SPLIT__DOC__",
+        "__SPLIT_DOC__",
         # dict list item
         "__KEY__",  # dict
         "__VALUE__",  # dict
@@ -167,7 +167,7 @@ class BaseSchema:
 
     @staticmethod
     def _sc_have_fields(kls) -> bool:
-        return any(not k.startswith('__') for k in vars(kls))
+        return any(not k.startswith("__") for k in vars(kls))
 
     @classmethod
     def get_fields(cls) -> Dict[str, "BaseDocument"]:
@@ -182,12 +182,12 @@ class BaseSchema:
         if not cls._sc_have_fields(cls):
             for kls in cls.__mro__:
                 if cls._sc_have_fields(kls):
-                    doc = cls_attrs.pop('__doc__', '')
+                    doc = cls_attrs.pop("__doc__", "")
                     cls_attrs = vars(kls).copy()
-                    cls_attrs['__doc__'] = doc
+                    cls_attrs["__doc__"] = doc
                     break
             else:
-                msg = f'{cls.__name__} has no fields defined.'
+                msg = f"{cls.__name__} has no fields defined."
                 raise AttributeError(msg)
 
         # v: "BaseDocument" k: str
@@ -279,7 +279,3 @@ class BaseSchema:
             VARIABLE_TYPE=TypeVariableState.NONE,
             arguments=(full_doc,),
         )
-
-
-if __name__ == "__main__":
-    print(BaseSchema.__expr_doc__())
