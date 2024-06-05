@@ -90,9 +90,9 @@ def op_regex(expr: Expression):
 
     # FIXME: sanitize regex (unescape issue)
     if expr.VARIABLE_TYPE == TypeVariableState.STRING:
-        return f"var {VAR_L} = mReMatch({VAR_R}, {dart_re(pattern)}, {group});"
+        return f"var {VAR_L} = mReMatch({VAR_R}, {dart_re(pattern)}, group: {group});"
     return (
-        f"var {VAR_L} = {VAR_R}.map((e) => mReMatch(e, {dart_re(pattern)}, {group})).toList();"
+        f"var {VAR_L} = {VAR_R}.map((e) => mReMatch(e, {dart_re(pattern)}, group: {group})).toList();"
     )
 
 
