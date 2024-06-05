@@ -83,8 +83,8 @@ class {{ struct.name }}(BaseParser):
         return template.format(s)
 
     @staticmethod
-    def _re_match(s, pattern) -> str:
-        return re.search(pattern, s)[1]  # type: ignore
+    def _re_match(s, pattern, group: int = 1) -> str:
+        return re.search(pattern, s)[group]  # type: ignore
 
     @staticmethod
     def _re_match_all(s, pattern) -> list[str]:

@@ -108,12 +108,12 @@ class BaseParser {
     throw UnimplementedError("Not supported");
   }
 
-  mReMatch(String s, String pattern) {
-    return RegExp(pattern).firstMatch(s)?.group(0)!;
+  mReMatch(String s, String pattern, {int group = 1}) {
+    return RegExp(pattern).firstMatch(s)?.group(group)!;
   }
 
-  mReMatchAll(String s, String pattern) {
-    return RegExp(pattern).allMatches(s).map((e) => e.group(0)!).toList();
+  mReMatchAll(String s, String pattern, {int group = 1}) {
+    return RegExp(pattern).allMatches(s).map((e) => e.group(group)!).toList();
   }
 
   mReSub(String s, String pattern, String repl) {
