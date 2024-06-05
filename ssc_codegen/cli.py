@@ -50,9 +50,9 @@ def extract_schemas(module: ModuleType) -> List[BaseSchema]:
         obj
         for name, obj in module.__dict__.items()
         if not name.startswith("__")
-           and hasattr(obj, "__mro__")
-           and BaseSchema in obj.__mro__
-           and not _is_template_cls(obj)
+        and hasattr(obj, "__mro__")
+        and BaseSchema in obj.__mro__
+        and not _is_template_cls(obj)
     ]
 
 
@@ -64,62 +64,70 @@ def _version_cb() -> None:
 
 
 def import_from_file(path: Path) -> ModuleType:
-    module = ModuleType('mod')
+    module = ModuleType("mod")
     code = pathlib.Path(path.resolve()).read_text()
     exec(code, module.__dict__)
     return module
 
 
 def main(
-        configs: A[list[str], typer.Argument(help="ssc-codegen config files")],
-        converter: A[
-            Converters,
-            typer.Option(
-                "-c", "--converter", help="code converter", show_default=False
-            ),
-        ],
-        output_folder: A[
-            Path,
-            typer.Option(
-                "-o",
-                "--output",
-                help="folder output. Default get current working directory and create src/ssc_gen path",
-                show_default=False,
-            ),
-        ] = DEFAULT_PATH,
-        css_to_xpath: A[
-            bool,
-            typer.Option(
-                "--to-xpath",
-                help="convert css queries to xpath (works not guaranteed)",
-            ),
-        ] = False,
-        xpath_to_css: A[
-            bool, typer.Option("--to-css", help="convert xpath queries to css")
-        ] = False,
-        xpath_prefix: A[
-            str, typer.Option(help="xpath prefix (for --to-xpath argument)")
-        ] = "descendant-or-self::",
-        no_format: A[
-            bool, typer.Option("--skip-format", help="skip format code")
-        ] = False,
-        file_prefix: A[
-            Optional[str], typer.Option(
-                "-p", "--prefix", help="file prefix for config output",
-                                        show_default=False)
-        ] = None,
-        file_suffix: A[
-            Optional[str], typer.Option("-s", "--suffix", help="file suffix for config output",
-                                        show_default=False)
-        ] = None,
-        version: A[
-            Optional[bool],
-            typer.Option(
-                "--version", help="print version and exit", callback=_version_cb
-            ),
-        ] = None,
+    configs: A[list[str], typer.Argument(help="ssc-codegen config files")],
+    converter: A[
+        Converters,
+        typer.Option(
+            "-c", "--converter", help="code converter", show_default=False
+        ),
+    ],
+    output_folder: A[
+        Path,
+        typer.Option(
+            "-o",
+            "--output",
+            help="folder output. Default get current working directory and create src/ssc_gen path",
+            show_default=False,
+        ),
+    ] = DEFAULT_PATH,
+    css_to_xpath: A[
+        bool,
+        typer.Option(
+            "--to-xpath",
+            help="convert css queries to xpath (works not guaranteed)",
+        ),
+    ] = False,
+    xpath_to_css: A[
+        bool, typer.Option("--to-css", help="convert xpath queries to css")
+    ] = False,
+    xpath_prefix: A[
+        str, typer.Option(help="xpath prefix (for --to-xpath argument)")
+    ] = "descendant-or-self::",
+    no_format: A[
+        bool, typer.Option("--skip-format", help="skip format code")
+    ] = False,
+    file_prefix: A[
+        Optional[str],
+        typer.Option(
+            "-p",
+            "--prefix",
+            help="file prefix for config output",
+            show_default=False,
+        ),
+    ] = None,
+    file_suffix: A[
+        Optional[str],
+        typer.Option(
+            "-s",
+            "--suffix",
+            help="file suffix for config output",
+            show_default=False,
+        ),
+    ] = None,
+    version: A[
+        Optional[bool],
+        typer.Option(
+            "--version", help="print version and exit", callback=_version_cb
+        ),
+    ] = None,
 ) -> None:
-
     if css_to_xpath and xpath_to_css:
         print("ERROR! Should be passed --to-css OR --to-xpath", file=sys.stderr)
         raise typer.Abort()
@@ -164,9 +172,10 @@ def main(
 
         # TODO detect extension
         # path issue
-        config = config.rstrip('.py').split('/')[-1].split('\\')[-1]
+        config = config.rstrip(".py").split("/")[-1].split("\\")[-1]
         parser_module_name = (
-            f"{file_prefix}{config}{file_suffix}.py" if converter.startswith("py_")
+            f"{file_prefix}{config}{file_suffix}.py"
+            if converter.startswith("py_")
             else f"{file_prefix}{config}{file_suffix}.dart"
         )
 

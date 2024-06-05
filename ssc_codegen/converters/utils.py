@@ -12,9 +12,9 @@ def escape_str(
     return re.sub(pattern, _repl, s)
 
 
-def wrap_str_q(s: str, char: str = '"', escape_ch: str = '\\') -> str:
+def wrap_str_q(s: str, char: str = '"', escape_ch: str = "\\") -> str:
     """alt variant representation string"""
-    return f'{char}{s.replace(char, escape_ch + char)}{char}'
+    return f"{char}{s.replace(char, escape_ch + char)}{char}"
 
 
 def to_camelcase(s: str) -> str:
@@ -27,4 +27,4 @@ def to_snake_case(s: str) -> str:
 
 def dart_re(pattern: str) -> str:
     """convert a python regex pattern to dart RexExp"""
-    return 'r' + repr(pattern).replace('\\\\', '\\')
+    return repr(pattern).replace("$", "\$")

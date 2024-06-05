@@ -113,7 +113,9 @@ def op_regex(e: Expression):
     pattern, group = e.arguments
     if e.VARIABLE_TYPE == TypeVariableState.STRING:
         return f"{VAR_L} = self._re_match({VAR_R}, {pattern!r}, {group})"
-    return f"{VAR_L} = [self._re_match(i, {pattern!r}, {group}) for i in {VAR_R}]"
+    return (
+        f"{VAR_L} = [self._re_match(i, {pattern!r}, {group}) for i in {VAR_R}]"
+    )
 
 
 def op_regex_all(e: Expression):
@@ -246,6 +248,7 @@ def st_docstring(e: Expression):
 
 def st_method(e):
     name = e.arguments[0]
+    print(name, CONST_METHODS.get(name))
     if magic_method := CONST_METHODS.get(name):
         return magic_method
     return f"def _parse_{name}(self, el):"

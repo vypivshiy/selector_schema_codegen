@@ -57,7 +57,6 @@ class BaseDocument:
             msg = f"Excepted type(s) {tuple(v.name for v in var_types)}, got 'DOCUMENT'"
             raise SyntaxError(msg)
 
-
         expr = self._stack_instructions[self._last_index]
         if expr.VARIABLE_TYPE in var_types:
             return

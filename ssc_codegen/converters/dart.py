@@ -2,7 +2,12 @@ from functools import partial
 
 from ssc_codegen.converters.base import BaseCodeConverter
 from ssc_codegen.converters.generator import CodeGenerator
-from ssc_codegen.converters.utils import escape_str, to_camelcase, wrap_str_q, dart_re
+from ssc_codegen.converters.utils import (
+    escape_str,
+    to_camelcase,
+    wrap_str_q,
+    dart_re,
+)
 from ssc_codegen.expression import Expression
 from ssc_codegen.tokens import TokenType
 from ssc_codegen.type_state import TypeVariableState
@@ -26,9 +31,6 @@ class DartCodeConverter(BaseCodeConverter):
 
 converter = DartCodeConverter(chr_indent=" " * 2)
 VAR_NAMES = partial(DartCodeConverter.create_var_names, prefix="val", sep="")
-
-
-
 
 
 @converter(TokenType.OP_XPATH)
@@ -78,7 +80,14 @@ def op_attr_text(expr: Expression):
 @converter(TokenType.OP_ATTR_RAW)
 def op_attr_raw(expr: Expression):
     VAR_L, VAR_R = VAR_NAMES(expr)
-    if expr.VARIABLE_TYPE == TypeVariableState.STRING:
+
+    # dart Document object excludes innerHtml method.
+    # extract full html page by html selector
+    if expr.num == 0:
+        # always non-collection object
+        return f"var {VAR_L} = mAttrRaw({VAR_R}.querySelector('html'));"
+
+    elif expr.VARIABLE_TYPE == TypeVariableState.STRING:
         return f"var {VAR_L} = mAttrRaw({VAR_R});"
     return f"var {VAR_L} = mAttrRawAll({VAR_R});"
 
@@ -91,9 +100,7 @@ def op_regex(expr: Expression):
     # FIXME: sanitize regex (unescape issue)
     if expr.VARIABLE_TYPE == TypeVariableState.STRING:
         return f"var {VAR_L} = mReMatch({VAR_R}, {dart_re(pattern)}, group: {group});"
-    return (
-        f"var {VAR_L} = {VAR_R}.map((e) => mReMatch(e, {dart_re(pattern)}, group: {group})).toList();"
-    )
+    return f"var {VAR_L} = {VAR_R}.map((e) => mReMatch(e, {dart_re(pattern)}, group: {group})).toList();"
 
 
 @converter(TokenType.OP_REGEX_ALL)

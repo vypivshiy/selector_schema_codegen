@@ -4,7 +4,12 @@ from typing import TYPE_CHECKING, List, Type
 import jinja2
 
 from ssc_codegen.converters.utils import to_camelcase, to_snake_case
-from ssc_codegen.schema import DictSchema, FlattenListSchema, ItemSchema, ListSchema
+from ssc_codegen.schema import (
+    DictSchema,
+    FlattenListSchema,
+    ItemSchema,
+    ListSchema,
+)
 from ssc_codegen.schema.constants import SchemaKeywords
 
 if TYPE_CHECKING:
