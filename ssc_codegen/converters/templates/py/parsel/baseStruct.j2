@@ -25,7 +25,7 @@ class BaseParser:
         # split document to elements entrypoint
         pass
 
-    def _pre_validate(self, el: Selector | SelectorList) -> None:
+    def _pre_validate(self, el: Union[Selector, SelectorList]) -> None:
         # pre validate document entrypoint
         pass
 
