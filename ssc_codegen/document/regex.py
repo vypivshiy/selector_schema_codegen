@@ -5,17 +5,14 @@ from ssc_codegen.utils.re_validator import try_compile_pattern_expr
 
 
 class DocumentOpRegex(BaseDocument):
-
-
-
-    def re(self, pattern: str):
+    def re(self, pattern: str, group: int = 1):
         """get first match by regular expression"""
         self._test_type_state_expr(
             TypeVariableState.STRING, TypeVariableState.LIST_STRING
         )
         try_compile_pattern_expr(pattern)
 
-        self._add_expr(TokenType.OP_REGEX, args=(pattern,))
+        self._add_expr(TokenType.OP_REGEX, args=(pattern, group))
         return self
 
     def re_all(self, pattern: str):
