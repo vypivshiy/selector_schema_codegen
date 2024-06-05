@@ -110,10 +110,10 @@ def op_attr_raw(e: Expression):
 
 def op_regex(e: Expression):
     VAR_L, VAR_R = VAR_NAMES(e)
-    pattern = e.arguments[0]
+    pattern, group = e.arguments
     if e.VARIABLE_TYPE == TypeVariableState.STRING:
-        return f"{VAR_L} = self._re_match({VAR_R}, {pattern!r})"
-    return f"{VAR_L} = [self._re_match(i, {pattern!r}) for i in {VAR_R}]"
+        return f"{VAR_L} = self._re_match({VAR_R}, {pattern!r}, {group})"
+    return f"{VAR_L} = [self._re_match(i, {pattern!r}, {group}) for i in {VAR_R}]"
 
 
 def op_regex_all(e: Expression):
