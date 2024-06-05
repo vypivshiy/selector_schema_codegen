@@ -126,10 +126,10 @@ def op_regex_all(e: Expression):
 
 def op_regex_sub(e: Expression):
     VAR_L, VAR_R = VAR_NAMES(e)
-    pattern = e.arguments[0]
+    pattern, repl = e.arguments
     if e.VARIABLE_TYPE == TypeVariableState.STRING:
-        return f"{VAR_L} = self._re_sub({VAR_R}, {pattern!r})"
-    return f"{VAR_L} = [self._re_sub(i, {pattern!r}) for i in {VAR_R}]"
+        return f"{VAR_L} = self._re_sub({VAR_R}, {pattern!r}, {repl!r})"
+    return f"{VAR_L} = [self._re_sub(i, {pattern!r}, {repl!r}) for i in {VAR_R}]"
 
 
 def op_string_trim(e: Expression):
