@@ -11,7 +11,7 @@ from scrapy.http.response import Response
 
 
 class BaseParser:
-    def __init__(self, html: str | SelectorList | Selector | Response):
+    def __init__(self, html: Union[str, SelectorList, Selector, Response]):
         if isinstance(html, Response):
             self.__selector__ = html.selector
         elif isinstance(html, str):

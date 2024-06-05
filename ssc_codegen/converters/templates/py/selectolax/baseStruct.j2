@@ -12,7 +12,7 @@ _T_PARSER = Union[HTMLParser, Node]
 
 
 class BaseParser:
-    def __init__(self, html: str | _T_PARSER):
+    def __init__(self, html: Union[str, _T_PARSER]):
         self.__selector__ = HTMLParser(html) if isinstance(html, str) else html
 
     def parse(self):

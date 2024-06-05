@@ -12,7 +12,7 @@ _T_ELEMENT = Union[Tag, BeautifulSoup, ResultSet]
 
 
 class BaseParser:
-    def __init__(self, html: str | _T_ELEMENT, parser: str = "lxml"):
+    def __init__(self, html: Union[str, _T_ELEMENT], parser: str = "lxml"):
         self.__selector__ = BeautifulSoup(html, parser) if isinstance(html, str) else html
 
     def parse(self):

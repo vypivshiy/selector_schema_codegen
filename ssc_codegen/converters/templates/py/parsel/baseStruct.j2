@@ -10,7 +10,7 @@ from parsel import Selector, SelectorList
 
 
 class BaseParser:
-    def __init__(self, html: str | SelectorList | Selector):
+    def __init__(self, html: Union[str, SelectorList, Selector]):
         self.__selector__ = Selector(html) if isinstance(html, str) else html
 
     def parse(self):
