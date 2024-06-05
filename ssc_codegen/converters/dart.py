@@ -2,7 +2,7 @@ from functools import partial
 
 from ssc_codegen.converters.base import BaseCodeConverter
 from ssc_codegen.converters.generator import CodeGenerator
-from ssc_codegen.converters.utils import escape_str, to_camelcase, wrap_str_q
+from ssc_codegen.converters.utils import escape_str, to_camelcase, wrap_str_q, dart_re
 from ssc_codegen.expression import Expression
 from ssc_codegen.tokens import TokenType
 from ssc_codegen.type_state import TypeVariableState
@@ -26,6 +26,9 @@ class DartCodeConverter(BaseCodeConverter):
 
 converter = DartCodeConverter(chr_indent=" " * 2)
 VAR_NAMES = partial(DartCodeConverter.create_var_names, prefix="val", sep="")
+
+
+
 
 
 @converter(TokenType.OP_XPATH)
@@ -83,13 +86,13 @@ def op_attr_raw(expr: Expression):
 @converter(TokenType.OP_REGEX)
 def op_regex(expr: Expression):
     VAR_L, VAR_R = VAR_NAMES(expr)
-    pattern = expr.arguments[0]
-    # FIXME: sanitize regex (unescape issue)
+    pattern, group = expr.arguments
 
+    # FIXME: sanitize regex (unescape issue)
     if expr.VARIABLE_TYPE == TypeVariableState.STRING:
-        return f"var {VAR_L} = mReMatch({VAR_R}, r{wrap_str_q(pattern)});"
+        return f"var {VAR_L} = mReMatch({VAR_R}, {dart_re(pattern)}, {group});"
     return (
-        f"var {VAR_L} = {VAR_R}.map((e) => mReMatch(e, r{wrap_str_q(pattern)})).toList();"
+        f"var {VAR_L} = {VAR_R}.map((e) => mReMatch(e, {dart_re(pattern)}, {group})).toList();"
     )
 
 
@@ -97,18 +100,18 @@ def op_regex(expr: Expression):
 def op_regex_all(expr: Expression):
     VAR_L, VAR_R = VAR_NAMES(expr)
     pattern = expr.arguments[0]
-    # FIXME: sanitize regex (unescape issue)
 
-    return f"var {VAR_L} = mReMatchAll({VAR_R}, r{wrap_str_q(pattern)});"
+    # FIXME: sanitize regex (unescape issue)
+    return f"var {VAR_L} = mReMatchAll({VAR_R}, {dart_re(pattern)});"
 
 
 @converter(TokenType.OP_REGEX_SUB)
 def op_regex_sub(expr: Expression):
     VAR_L, VAR_R = VAR_NAMES(expr)
     pattern, repl = expr.arguments
-    # FIXME: sanitize regex (unescape issue)
 
-    return f"var {VAR_L} = mReSub({VAR_R}, r{wrap_str_q(pattern)}, {repl!r});"
+    # FIXME: sanitize regex (unescape issue)
+    return f"var {VAR_L} = mReSub({VAR_R}, {dart_re(pattern)}, {repl!r});"
 
 
 @converter(TokenType.OP_STRING_TRIM)

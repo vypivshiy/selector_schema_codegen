@@ -23,3 +23,8 @@ def to_camelcase(s: str) -> str:
 
 def to_snake_case(s: str) -> str:
     return re.sub(r"(?<!^)(?=[A-Z])", "_", s).lower()
+
+
+def dart_re(pattern: str) -> str:
+    """convert a python regex pattern to dart RexExp"""
+    return 'r' + repr(pattern).replace('\\\\', '\\')
