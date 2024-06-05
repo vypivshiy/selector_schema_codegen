@@ -204,12 +204,12 @@ class DocumentOpHtml(
 
         if self.last_var_type is TypeVariableState.DOCUMENT:
             self._add_expr(
-                TokenType.OP_ATTR_TEXT,
+                TokenType.OP_ATTR_RAW,
                 new_var_state=TypeVariableState.STRING
             )
         elif self.last_var_type is TypeVariableState.LIST_DOCUMENT:
             self._add_expr(
-                TokenType.OP_ATTR_TEXT,
+                TokenType.OP_ATTR_RAW,
                 new_var_state=TypeVariableState.LIST_STRING,
             )
         else:
