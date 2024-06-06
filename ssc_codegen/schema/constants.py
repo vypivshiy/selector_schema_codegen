@@ -5,8 +5,17 @@ if sys.version_info >= (3, 11):
 else:
     from enum import Enum
 
+
     class StrEnum(str, Enum):
         pass
+
+
+class SchemaType(StrEnum):
+    BASE = "BASE"  # base
+    ITEM = "Map"
+    LIST_ITEM = "Array[Map]"
+    LIST_FLATTEN = "Array"
+    DICT = "MAP_PAIR"
 
 
 class SchemaKeywords(StrEnum):

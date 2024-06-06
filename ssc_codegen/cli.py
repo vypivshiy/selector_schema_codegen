@@ -25,7 +25,7 @@ DEFAULT_PATH = Path.cwd() / Path("src") / Path("ssc_gen")
 
 
 class Converters(str, Enum):
-    PY_BS4 = ("py.bs4",)
+    PY_BS4 = "py.bs4"
     PY_PARSEL = "py.parsel"
     PY_SLAX = "py.selectolax"
     PY_SCRAPY = "py.scrapy"
@@ -179,7 +179,7 @@ def main(
             else f"{file_prefix}{config}{file_suffix}.dart"
         )
 
-        codes = [codegen.generate_imports()]
+        codes = [codegen.generate_base_imports(), codegen.generate_required_imports()]
         codes.extend(codegen.generate_code(*schemas))  # type: ignore
         output_file = output_folder / Path(parser_module_name)
         with open(output_file, "w") as file:
@@ -192,7 +192,8 @@ def main(
                 f"dart format {output_folder.resolve()}", shell=True
             )
         else:
-            subprocess.Popen(f"black {output_folder.resolve()}", shell=True)
+            subprocess.Popen(f'black {output_folder.resolve()}', shell=True)
+            subprocess.Popen(f'isort {output_folder.resolve()} --profile "black"', shell=True)
 
     print("Done.")
     exit(0)

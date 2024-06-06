@@ -1,9 +1,10 @@
 from types import NoneType
 from typing import Any, Dict, List, NamedTuple, Optional, Type, Union, get_args
 
-from ssc_codegen.document import DocumentOpNested
+from ssc_codegen.document import DocumentOpNested, Document
 from ssc_codegen.document.base import BaseDocument
 from ssc_codegen.expression import Expression
+from ssc_codegen.schema.constants import SchemaType
 from ssc_codegen.schema.utils import get_annotations, get_json_signature
 from ssc_codegen.tokens import TokenType
 from ssc_codegen.type_state import TypeVariableState
@@ -19,21 +20,21 @@ class Field:
         "__SPLIT_DOC__": TypeVariableState.LIST_DOCUMENT,
     }
 
-    def _insert_return_expr(self):
+    def _insert_return_expr(self) -> None:
         self._instructions.append(
             Expression(
                 len(self._instructions) - 1, self.RET_TYPE, TokenType.ST_NO_RET
             )
         )
 
-    def _insert_no_return_expr(self):
+    def _insert_no_return_expr(self) -> None:
         self._instructions.append(
             Expression(
                 len(self._instructions) - 1, self.RET_TYPE, TokenType.ST_RET
             )
         )
 
-    def _update_num_instructions(self):
+    def _update_num_instructions(self) -> None:
         tmp_expr = self._instructions.copy()
         new_expr: List[Expression] = [  # type: ignore
             Expression(
@@ -46,12 +47,12 @@ class Field:
         ]
         self._instructions = new_expr.copy()
 
-    def __init__(self, name: str, doc: "BaseDocument"):
+    def __init__(self, name: str, doc: "Document"):
         self.name = name
         self.document = doc
         self._instructions = doc.instructions.copy()
         self.RET_TYPE = (
-            self.__AUTO_TYPE_RET__.get(self.name) or doc.last_var_type
+                self.__AUTO_TYPE_RET__.get(self.name) or doc.last_var_type
         )
         self._method = self._method_expr()
 
@@ -69,14 +70,14 @@ class Field:
             self._insert_no_return_expr()
 
     @property
-    def method(self):
+    def method(self) -> Expression:
         return self._method
 
     @property
-    def default(self):
+    def default(self) -> Optional[Expression]:
         return self._default
 
-    def _method_expr(self):
+    def _method_expr(self) -> Expression:
         return Expression(
             -1,
             TypeVariableState.NONE,
@@ -96,27 +97,30 @@ class Field:
     def ret_type(self) -> TypeVariableState:
         return self.document.last_var_type
 
+    def __repr__(self):
+        return f"{self.name}(RET_TYPE={self.RET_TYPE}, expr={self.expressions})"
+
 
 class AstStruct(NamedTuple):
     cls_schema: Type["BaseSchema"]
 
     @property
-    def name(self):
+    def name(self) -> str:
         return self.cls_schema.__name__
 
     @property
-    def fields(self):
+    def fields(self) -> List[Field]:
         return [
-            Field(k, v) for k, v in self.cls_schema.__expr_fields__().items()
+            Field(name=name, doc=doc) for name, doc in self.cls_schema.__expr_fields__().items()
         ]
 
-    def docstring(self):
+    def docstring(self) -> Expression:
         return self.cls_schema.__expr_doc__()
 
 
 class BaseSchema:
     # auto generate items string signature
-    __SCHEMA_TYPE__: str = "BASE"
+    __SCHEMA_TYPE__: SchemaType = SchemaType.BASE
     __SIGNATURE__: Union[Dict, List] = (
         NotImplemented  # optional signature implement
     )
@@ -208,7 +212,7 @@ class BaseSchema:
 
     @classmethod
     def get_fields_signature(
-        cls,
+            cls,
     ) -> Union[List[str], Dict[str, _T_SCHEMA_SIGNATURE]]:
         signature = {}
         # copy dicts to avoid runtime err:
@@ -225,7 +229,7 @@ class BaseSchema:
                     else:
                         signature[k] = type_.get_fields_signature()
                 elif (type_args := get_args(type_)) and issubclass(
-                    type_args[0], BaseSchema
+                        type_args[0], BaseSchema
                 ):
                     t: BaseSchema = type_args[0]
                     t.check()
@@ -260,10 +264,10 @@ class BaseSchema:
         return AstStruct(cls)
 
     @classmethod
-    def __expr_fields__(cls) -> Dict[str, "BaseDocument"]:
+    def __expr_fields__(cls) -> Dict[str, "Document"]:
         dct_copy = cls.get_fields().copy()  # copy avoid runtime err
-        fields: dict[str, "BaseDocument"] = {
-            k: v for k, v in dct_copy.items() if isinstance(v, BaseDocument)
+        fields: dict[str, "Document"] = {
+            k: v for k, v in dct_copy.items() if isinstance(v, BaseDocument)  # type: ignore
         }
         return fields
 

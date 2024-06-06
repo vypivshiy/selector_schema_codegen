@@ -1,8 +1,13 @@
 # universal python codegen
+from typing import TYPE_CHECKING
+
 from ssc_codegen.converters.base import BaseCodeConverter
 from ssc_codegen.expression import Expression
 from ssc_codegen.tokens import TokenType
 from ssc_codegen.type_state import TypeVariableState
+from ssc_codegen.schema.constants import SchemaType
+
+from ssc_codegen.converters.generator import TemplateStruct, TypeAnnotation
 
 CONST_METHODS = {
     "__SPLIT_DOC__": "def _part_document(self, el):",
@@ -12,15 +17,23 @@ CONST_METHODS = {
     "__PRE_VALIDATE__": "def _pre_validate(self, el):",
 }
 
+CONST_TYPES = {
+    TypeVariableState.LIST_STRING: "List[str]",
+    TypeVariableState.STRING: "str",
+    # TypeVariableState.NESTED: "Dict",  # todo
+}
+
 
 class PythonCodeConverter(BaseCodeConverter):
+    """universal python code generator"""
+
     def __init__(
-        self,
-        *,
-        indent_mul: int = 1,  # indent mul
-        chr_indent: str = " " * 4,  # indent char
-        end: str = "",  # end line of code
-        default_indent: int = 2,
+            self,
+            *,
+            indent_mul: int = 1,  # indent mul
+            chr_indent: str = " " * 4,  # indent char
+            end: str = "",  # end line of code
+            default_indent: int = 2,
     ):
         super().__init__(
             indent_mul=indent_mul,
@@ -58,10 +71,59 @@ class PythonCodeConverter(BaseCodeConverter):
         self(TokenType.ST_METHOD)(st_method)
         self(TokenType.ST_NO_RET)(st_no_ret)
         self(TokenType.ST_RET)(st_ret)
+        self._cb_type_converter = type_converter
 
 
 # create variable names function
 VAR_NAMES = PythonCodeConverter.create_var_names
+
+
+def _extract_signature(struct: TemplateStruct):
+    result = {}
+
+    for field in struct.ast.fields:
+        if field.RET_TYPE == TypeVariableState.NONE or field.name in CONST_METHODS:
+            continue
+        elif field.RET_TYPE == TypeVariableState.NESTED:
+            # last argument - Schema instance TVS.Nested
+            schema = field.expressions[0].arguments[1]
+            result[field.name] = type_converter(TemplateStruct(schema, struct.converter)).name
+        else:
+            result[field.name] = CONST_TYPES.get(field.RET_TYPE)
+    return result
+
+
+def type_converter(struct: TemplateStruct):
+    # todo customisation huh?
+    items = _extract_signature(struct)
+    t_name = f'T_{struct.name}'
+    signature = '{' + ', '.join(f'{n!r}: {t}' for n, t in items.items()) + '}'
+
+    match struct.klass_schema.__SCHEMA_TYPE__:
+        case SchemaType.ITEM:
+            return TypeAnnotation(
+                t_name,
+                f"{t_name} = TypedDict({t_name!r}, {signature})"
+            )
+
+        case SchemaType.DICT:
+            # todo: Literal['key']
+            value = [f for f in struct.ast.fields if f.name == 'value'][0]
+            ret_t = CONST_TYPES.get(value.RET_TYPE)
+            return TypeAnnotation(t_name, f"{t_name} = Dict[str, {ret_t}]")
+
+        case SchemaType.LIST_ITEM:
+            return TypeAnnotation(t_name, f"{t_name} = TypedDict({t_name!r}, {signature})")
+
+        case SchemaType.LIST_FLATTEN:
+            item = [f for f in struct.ast.fields if f.name == 'item'][0]
+            ret_t = CONST_TYPES.get(item.RET_TYPE)
+            return TypeAnnotation(t_name, f"{t_name} = List[{ret_t}]")
+
+        case SchemaType.BASE:
+            raise TypeError("BaseSchema cannot be converted to type")
+        case _:
+            raise TypeError("Unknown schema type")
 
 
 def op_xpath(e: Expression):

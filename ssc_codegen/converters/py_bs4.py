@@ -26,4 +26,5 @@ code_generator = CodeGenerator(
     templates_path="ssc_codegen.converters.templates.py",
     base_struct_path="bs4",
     converter=converter,
+    allow_typing=True
 )

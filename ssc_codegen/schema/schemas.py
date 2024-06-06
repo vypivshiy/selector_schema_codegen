@@ -1,6 +1,7 @@
 from typing import TYPE_CHECKING, Dict, List, Union
 
 from ssc_codegen.schema.base import _T_SCHEMA_SIGNATURE, BaseSchema
+from ssc_codegen.schema.constants import SchemaType
 from ssc_codegen.type_state import TypeVariableState
 
 if TYPE_CHECKING:
@@ -8,11 +9,11 @@ if TYPE_CHECKING:
 
 
 class ItemSchema(BaseSchema):
-    __SCHEMA_TYPE__ = "Map"
+    __SCHEMA_TYPE__ = SchemaType.ITEM
 
 
 class ListSchema(BaseSchema):
-    __SCHEMA_TYPE__ = "Array[Map]"
+    __SCHEMA_TYPE__ = SchemaType.LIST_ITEM
     __SPLIT_DOC__: "BaseDocument" = NotImplemented
 
     @classmethod
@@ -34,7 +35,7 @@ class ListSchema(BaseSchema):
 
 
 class FlattenListSchema(BaseSchema):
-    __SCHEMA_TYPE__ = "Array"
+    __SCHEMA_TYPE__ = SchemaType.LIST_FLATTEN
     __SPLIT_DOC__: "BaseDocument" = NotImplemented
     __ITEM__: "BaseDocument" = NotImplemented
     __SIGNATURE__ = ["item", "..."]
@@ -45,6 +46,10 @@ class FlattenListSchema(BaseSchema):
             "item": cls.__ITEM__,
             "__SPLIT_DOC__": cls.__SPLIT_DOC__
         }
+
+    @classmethod
+    def get_fields_signature(cls) -> Union[List[str], Dict[str, _T_SCHEMA_SIGNATURE]]:
+        return ["item", "..."]
 
     @classmethod
     def check(cls) -> None:
@@ -63,7 +68,7 @@ class FlattenListSchema(BaseSchema):
 
 
 class DictSchema(BaseSchema):
-    __SCHEMA_TYPE__ = "Map"
+    __SCHEMA_TYPE__ = SchemaType.DICT
     __SPLIT_DOC__: "BaseDocument" = NotImplemented
     __KEY__: "BaseDocument" = NotImplemented
     __VALUE__: "BaseDocument" = NotImplemented

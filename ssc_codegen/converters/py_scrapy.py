@@ -6,4 +6,5 @@ code_generator = CodeGenerator(
     templates_path="ssc_codegen.converters.templates.py",
     base_struct_path="scrapy",
     converter=converter,
+    allow_typing=True
 )
