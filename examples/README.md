@@ -8,4 +8,4 @@ Usage:
 ssc-gen booksToScrape.py -c py.parsel -o parsers/
 ```
 
-main.py - usage example
+main.py example script

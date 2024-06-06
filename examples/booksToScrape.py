@@ -1,7 +1,5 @@
 """Dummy parser config for http://books.toscrape.com/"""
 
-
-
 from ssc_codegen.document import D, N
 from ssc_codegen.schema import (
     ItemSchema,
@@ -12,6 +10,7 @@ from ssc_codegen.schema import (
 
 class Urls(FlattenListSchema):
     """fetch add patches and urls from <a> tag"""
+
     __SPLIT_DOC__ = D().css_all("a")
     __ITEM__ = D().attr("href")
 
