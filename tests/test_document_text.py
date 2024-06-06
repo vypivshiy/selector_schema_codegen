@@ -6,19 +6,24 @@ from ssc_codegen.type_state import TypeVariableState
 
 def test_fail_str_format():
     with pytest.raises(SyntaxError):
-        R().fmt('wow')
+        R().fmt("wow")
 
 
 @pytest.mark.parametrize(
-    'expr',
+    "expr",
     [
-        R().split(' ').index(0),
-        R().trim(''),
-        R().ltrim(''),
-        R().rtrim(''),
-        R().repl('', ''),
-        R().fmt('{{}}'),
-    ]
+        R().split(" ").index(0),
+        R().trim(""),
+        R().ltrim(""),
+        R().rtrim(""),
+        R().repl("", ""),
+        R().fmt("{{}}"),
+        D()
+        .css("#video")
+        .attr("data-parameters")
+        .replace("\\", "")
+        .replace("&quot;", '"'),
+    ],
 )
 def test_string_expr(expr):
     assert expr.last_var_type == TypeVariableState.STRING

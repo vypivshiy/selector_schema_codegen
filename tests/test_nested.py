@@ -14,10 +14,11 @@ class MockParserMain(ItemSchema):
     "expr",
     [
         N().sub_parser(MockParserOne),
-        N().css('a').sub_parser(MockParserMain),
-        N().xpath('//a').sub_parser(MockParserMain),
-        N().default("").sub_parser(MockParserOne)
-    ])
+        N().css("a").sub_parser(MockParserMain),
+        N().xpath("//a").sub_parser(MockParserMain),
+        N().default("").sub_parser(MockParserOne),
+    ],
+)
 def test_nested(expr):
     pass
 

@@ -8,21 +8,21 @@ class MockParser(ItemSchema):
 
 def test_raw_invalid_expr():
     with pytest.raises(SyntaxError):
-        R().css('a')
+        R().css("a")
 
     with pytest.raises(SyntaxError):
-        R().xpath('a')
+        R().xpath("a")
 
     with pytest.raises(SyntaxError):
-        R().xpath_all('a')
+        R().xpath_all("a")
 
     with pytest.raises(SyntaxError):
-        R().css_all('a')
+        R().css_all("a")
 
 
 def test_nested_invalid_expr():
     with pytest.raises(SyntaxError):
-        N().sub_parser(MockParser).css('a')
+        N().sub_parser(MockParser).css("a")
 
     with pytest.raises(SyntaxError):
         N().sub_parser(MockParser).default(None)
@@ -33,13 +33,13 @@ def test_nested_invalid_expr():
 
 def test_invalid_doc_expr():
     with pytest.raises(SyntaxError):
-        D().trim('')
+        D().trim("")
 
     with pytest.raises(SyntaxError):
         D().index(0)
 
     with pytest.raises(SyntaxError):
-        D().assert_re('')
+        D().assert_re("")
 
     with pytest.raises(SyntaxError):
         D().css("a").default(None)
