@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 class TypeAnnotation(NamedTuple):
     name: str
     code: str
+    ret_type: str
 
 
 @dataclass

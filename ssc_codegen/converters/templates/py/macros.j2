@@ -24,10 +24,10 @@ class {{ struct.name }}(BaseParser):
 
 {# generate parser method for ItemSchema#}
 {% macro parse_item_schema(struct) %}
-    def parse(self) -> {{ type_name(struct) }}:
+    def parse(self) -> {{ type_ret(struct) }}:
         return self._run_parse()
 
-    def _run_parse(self) -> {{ type_name(struct) }}:
+    def _run_parse(self) -> {{ type_ret(struct) }}:
         return {{ type_name(struct) }}(
     **{
 {% for name in struct.methods_names %}
@@ -39,10 +39,10 @@ class {{ struct.name }}(BaseParser):
 
 {# generate parser method for DictSchema #}
 {% macro parse_dict_schema(struct) %}
-    def parse(self) -> {{ type_name(struct) }}:
+    def parse(self) -> {{ type_ret(struct) }}:
         return self._run_parse()
 
-    def _run_parse(self) -> {{ type_name(struct) }}:
+    def _run_parse(self) -> {{ type_ret(struct) }}:
         return {{ type_name(struct) }}(
     **{self._parse_key(el): self._parse_value(el) for el in self._part_document(self.__selector__) }
     )
@@ -51,20 +51,20 @@ class {{ struct.name }}(BaseParser):
 
 {# generate parser method for FlattenListSchema #}
 {% macro parse_flatten_list_schema(struct) %}
-    def parse(self) -> {{ type_name(struct) }}:
+    def parse(self) -> {{ type_ret(struct) }}:
         return self._run_parse()
 
-    def _run_parse(self) -> {{ type_name(struct) }}:
+    def _run_parse(self) -> {{ type_ret(struct) }}:
         return [self._parse_item(el) for el in self._part_document(self.__selector__)]
 {% endmacro %}
 
 
 {# generate parser method for ListSchema #}
 {% macro parse_list_schema(struct) %}
-    def parse(self) -> List[{{ type_name(struct) }}]:
+    def parse(self) -> {{ type_ret(struct) }}:
         return self._run_parse()
 
-    def _run_parse(self) -> List[{{ type_name(struct) }}]:
+    def _run_parse(self) -> {{ type_ret(struct) }}:
         return [
     {{ type_name(struct) }}(**{
         {% for name in struct.methods_names %}
@@ -77,6 +77,10 @@ class {{ struct.name }}(BaseParser):
 
 {% macro type_name(struct) %}
     {{- struct.types.name -}}
+{% endmacro %}
+
+{% macro type_ret(struct) %}
+    {{- struct.types.ret_type -}}
 {% endmacro %}
 
 

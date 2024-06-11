@@ -87,7 +87,7 @@ def _extract_signature(struct: TemplateStruct):
         elif field.RET_TYPE == TypeVariableState.NESTED:
             # last argument - Schema instance TVS.Nested
             schema = field.expressions[0].arguments[1]
-            result[field.name] = type_converter(TemplateStruct(schema, struct.converter)).name
+            result[field.name] = type_converter(TemplateStruct(schema, struct.converter)).ret_type
         else:
             result[field.name] = CONST_TYPES.get(field.RET_TYPE)
     return result
@@ -103,22 +103,27 @@ def type_converter(struct: TemplateStruct):
         case SchemaType.ITEM:
             return TypeAnnotation(
                 t_name,
-                f"{t_name} = TypedDict({t_name!r}, {signature})"
+                f"{t_name} = TypedDict({t_name!r}, {signature})",
+                t_name
             )
 
         case SchemaType.DICT:
             # todo: Literal['key']
             value = [f for f in struct.ast.fields if f.name == 'value'][0]
             ret_t = CONST_TYPES.get(value.RET_TYPE)
-            return TypeAnnotation(t_name, f"{t_name} = Dict[str, {ret_t}]")
+            return TypeAnnotation(t_name, f"{t_name} = Dict[str, {ret_t}]", t_name)
 
         case SchemaType.LIST_ITEM:
-            return TypeAnnotation(t_name, f"{t_name} = TypedDict({t_name!r}, {signature})")
+            return TypeAnnotation(t_name,
+                                  f"{t_name} = TypedDict({t_name!r}, {signature})",
+                                  f'List["{t_name}"]')
 
         case SchemaType.LIST_FLATTEN:
             item = [f for f in struct.ast.fields if f.name == 'item'][0]
             ret_t = CONST_TYPES.get(item.RET_TYPE)
-            return TypeAnnotation(t_name, f"{t_name} = List[{ret_t}]")
+            return TypeAnnotation(t_name,
+                                  f"{t_name} = List[{ret_t}]",
+                                  t_name)
 
         case SchemaType.BASE:
             raise TypeError("BaseSchema cannot be converted to type")
