@@ -1,4 +1,5 @@
-{% from 'macros.j2' import default_python_methods, imports %}
+{% from 'macros.j2' import default_python_methods, imports, module_doc %}
+{{ module_doc() }}
 {{ imports() }}
 
 from parsel import Selector, SelectorList
