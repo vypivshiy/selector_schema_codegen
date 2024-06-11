@@ -204,7 +204,7 @@ def op_string_trim(e: Expression):
     substr = e.arguments[0]
     if e.VARIABLE_TYPE == TypeVariableState.STRING:
         return f"{VAR_L} = self._str_trim({VAR_R}, {substr!r})"
-    return f"{VAR_L} = [self._str_trim(i, {substr!r}) for i {VAR_R}]"
+    return f"{VAR_L} = [self._str_trim(i, {substr!r}) for i in {VAR_R}]"
 
 
 def op_string_l_trim(e: Expression):
