@@ -44,8 +44,8 @@ class {{ struct.name }}(BaseParser):
         return self._run_parse()
 
     def _run_parse(self) -> {{ type_ret(struct) }}:
-        return {{ type_name(struct) }}(
-    **{self._parse_key(el): self._parse_value(el) for el in self._part_document(self.__selector__) }
+        return {self._parse_key(el): self._parse_value(el) for el in self._part_document(self.__selector__)
+    }
     )
 {% endmacro %}
 
