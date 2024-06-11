@@ -84,7 +84,7 @@ def import_from_file(path: Path) -> ModuleType:
 
 
 def main(
-    configs: A[list[str], typer.Argument(help="ssc-codegen config files or path folder")],
+    configs: A[list[str], typer.Argument(help="ssc-codegen config files or path folder with configs")],
     converter: A[
         Converters,
         typer.Option(
