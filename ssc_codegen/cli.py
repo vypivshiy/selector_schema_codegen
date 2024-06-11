@@ -4,6 +4,7 @@ import pathlib
 import subprocess
 import sys
 import types
+import warnings
 from enum import Enum
 from pathlib import Path
 from types import ModuleType
@@ -30,6 +31,18 @@ class Converters(str, Enum):
     PY_SLAX = "py.selectolax"
     PY_SCRAPY = "py.scrapy"
     DART = "dart"
+
+
+# detect from converters
+FORMAT_EXTENSIONS = {
+    **{k: 'py' for k in ['py_bs4', 'py_parsel', 'py_selectolax', 'py_scrapy']},
+    'dart': 'dart'
+}
+
+FORMATTERS_CLI = {
+    'py': 'black {}',
+    'dart': 'dart format {}'
+}
 
 
 def _is_template_cls(cls: object) -> bool:
@@ -71,7 +84,7 @@ def import_from_file(path: Path) -> ModuleType:
 
 
 def main(
-    configs: A[list[str], typer.Argument(help="ssc-codegen config files")],
+    configs: A[list[str], typer.Argument(help="ssc-codegen config files or path folder")],
     converter: A[
         Converters,
         typer.Option(
@@ -128,12 +141,10 @@ def main(
         ),
     ] = None,
 ) -> None:
-    if css_to_xpath and xpath_to_css:
-        print("ERROR! Should be passed --to-css OR --to-xpath", file=sys.stderr)
-        raise typer.Abort()
-
-    file_prefix = file_prefix or ""
-    file_suffix = file_suffix or ""
+    if version:
+        exit(0)
+    _check_css_and_xpath_args(css_to_xpath, xpath_to_css)
+    file_prefix, file_suffix = file_prefix or "", file_suffix or ""
     print("Start generate code")
     output_folder.mkdir(exist_ok=True, parents=True)
 
@@ -144,59 +155,93 @@ def main(
     )
     codegen: CodeGenerator = converter_module.code_generator
     print("Load code generator")
+    parse_configs = _get_files_configs(configs)
+    for config in parse_configs:
+        schemas = _extarct_schemas_classes(config, css_to_xpath, xpath_prefix, xpath_to_css)
 
-    for config in configs:
-        module = import_from_file(Path.cwd() / Path(config))
-        # module = importlib.import_module(config)
-        schemas = extract_schemas(module)
-        if css_to_xpath:
-            for s in schemas:
-                for f in s.get_fields().values():
-                    # Document object
-                    f.convert_css_to_xpath(xpath_prefix)  # type: ignore
-        elif xpath_to_css:
-            for s in schemas:
-                for f in s.get_fields().values():
-                    # Document object
-                    f.convert_xpath_to_css()  # type: ignore
-
-        # TODO detect extension
-        base_module_name = (
-            "baseStruct.py"
-            if str(converter).startswith("py_")
-            else "baseStruct.dart"
-        )
-        base_module_output = output_folder / Path(base_module_name)
-        with open(base_module_output, "w") as file:
-            file.write(codegen.generate_base_class())
+        ext = FORMAT_EXTENSIONS[str(converter)]
+        base_module_name = f"baseStruct.{ext}"
+        _save_base_class(base_module_name, codegen, output_folder)
 
         # TODO detect extension
         # path issue
-        config = config.rstrip(".py").split("/")[-1].split("\\")[-1]
+        config = str(config).rstrip(".py").split("/")[-1].split("\\")[-1]
         parser_module_name = (
-            f"{file_prefix}{config}{file_suffix}.py"
+            f"{file_prefix}{config}{file_suffix}.{ext}"
             if converter.startswith("py_")
             else f"{file_prefix}{config}{file_suffix}.dart"
         )
 
-        codes = [codegen.generate_base_imports(), codegen.generate_required_imports()]
-        codes.extend(codegen.generate_code(*schemas))  # type: ignore
-        output_file = output_folder / Path(parser_module_name)
-        with open(output_file, "w") as file:
-            file.write("\n".join(codes))
+        codes = _generate_code(codegen, schemas)
+        _save_generated_code(codes, output_folder, parser_module_name)
 
     if not no_format:
         # TODO detect extension
-        if converter == "dart":
-            subprocess.Popen(
-                f"dart format {output_folder.resolve()}", shell=True
-            )
-        else:
-            subprocess.Popen(f'black {output_folder.resolve()}', shell=True)
-            subprocess.Popen(f'isort {output_folder.resolve()} --profile "black"', shell=True)
+        fmt_cmd = FORMATTERS_CLI.get(ext)
+        if not fmt_cmd:
+            warnings.warn('Not founded required code formatter', stacklevel=1, category=RuntimeWarning)
+        subprocess.Popen(fmt_cmd.format(output_folder.resolve()), shell=True)
 
-    print("Done.")
+    print("Done! 😇😛")
     exit(0)
+
+
+def _extarct_schemas_classes(config, css_to_xpath, xpath_prefix, xpath_to_css):
+    module = import_from_file(Path.cwd() / config)
+    schemas = extract_schemas(module)
+    if css_to_xpath:
+        _convert_css_to_xpath(schemas, xpath_prefix)
+    elif xpath_to_css:
+        _convert_xpath_to_css(schemas)
+    return schemas
+
+
+def _convert_xpath_to_css(schemas):
+    for s in schemas:
+        for f in s.get_fields().values():
+            f.convert_xpath_to_css()  # type: ignore
+
+
+def _convert_css_to_xpath(schemas, xpath_prefix):
+    for s in schemas:
+        for f in s.get_fields().values():
+            f.convert_css_to_xpath(xpath_prefix)  # type: ignore
+
+
+def _save_generated_code(codes, output_folder, parser_module_name):
+    output_file = output_folder / Path(parser_module_name)
+    with open(output_file, "w") as file:
+        file.write("\n".join(codes))
+
+
+def _generate_code(codegen, schemas):
+    codes = [codegen.generate_base_imports(), codegen.generate_required_imports()]
+    codes.extend(codegen.generate_code(*schemas))  # type: ignore
+    return codes
+
+
+def _save_base_class(base_module_name, codegen, output_folder):
+    base_module_output = output_folder / Path(base_module_name)
+    with open(base_module_output, "w") as file:
+        file.write(codegen.generate_base_class())
+
+
+def _get_files_configs(configs):
+    parse_configs: List[Path] = []
+    for cfg in configs:
+        cfg = cfg.rstrip('*')
+        p = Path(cfg)
+        if p.is_dir():
+            parse_configs.extend(i for i in p.iterdir() if not i.name.startswith('_') and i.suffix == '.py')
+        elif p.suffix == '.py':
+            parse_configs.append(p)
+    return parse_configs
+
+
+def _check_css_and_xpath_args(css_to_xpath, xpath_to_css):
+    if css_to_xpath and xpath_to_css:
+        print("ERROR! Should be passed --to-css OR --to-xpath", file=sys.stderr)
+        raise typer.Abort()
 
 
 def script_entry_point() -> None:
