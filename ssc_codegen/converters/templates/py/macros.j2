@@ -24,7 +24,7 @@ class {{ struct.name }}(BaseParser):
 
 {# generate parser method for ItemSchema#}
 {% macro parse_item_schema(struct) %}
-    def parse() -> {{ type_name(struct) }}:
+    def parse(self) -> {{ type_name(struct) }}:
         return self._run_parse()
 
     def _run_parse(self) -> {{ type_name(struct) }}:
