@@ -12,16 +12,16 @@ class Urls(FlattenListSchema):
     """fetch add patches and urls from <a> tag"""
 
     __SPLIT_DOC__ = D().css_all("a")
-    __ITEM__ = D().attr("href")
+    __ITEM__ = D()["href"]
 
 
 class Books(ListSchema):
     __SPLIT_DOC__ = D().css_all(".col-lg-3")
 
-    name = D().css(".thumbnail").attr("alt")
-    image_url = D().css(".thumbnail").attr("src")
-    url = D().css(".image_container > a").attr("href")
-    rating = D().css(".star-rating").attr("class").ltrim("star-rating ")
+    name = D().css(".thumbnail")["alt"]
+    image_url = D().css(".thumbnail")["src"]
+    url = D().css(".image_container > a")["href"]
+    rating = D().css(".star-rating")["class"].ltrim("star-rating ")
     price = D().default("0").css(".price_color").text().re(r"\d+")
 
 
