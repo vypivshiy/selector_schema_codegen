@@ -5,7 +5,6 @@ from ssc_codegen.converters.generator import CodeGenerator
 from ssc_codegen.converters.utils import (
     escape_str,
     to_camelcase,
-    wrap_str_q,
     dart_re,
 )
 from ssc_codegen.expression import Expression
