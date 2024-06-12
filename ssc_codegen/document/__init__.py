@@ -21,6 +21,15 @@ class Document(
 ):
     pass
 
+    def __getitem__(self, item):
+        """Shortcut aliases for index and attr aliases"""
+        if isinstance(item, int):
+            return self.index(item)
+        elif isinstance(item, str):
+            return self.attr(item)
+        msg = f"item should be int or str, not {type(item)}"
+        raise TypeError(msg)
+
 
 class Nested(
     DocumentOpNested, DocumentOpHtmlSingle, DocumentOpSelectorConverter

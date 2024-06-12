@@ -1,4 +1,4 @@
-__version__ = "0.3.0dev3"
+__version__ = "0.3.1"
 from ssc_codegen.schema import (
     ItemSchema,
     DictSchema,
