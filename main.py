@@ -1,3 +1,5 @@
-from ssc_codegen._cli import main
+from ssc_codegen.cli import main
+import typer
 
-main()
+if __name__ == "__main__":
+    typer.run(main)
