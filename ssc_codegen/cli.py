@@ -3,7 +3,6 @@ import importlib
 import pathlib
 import subprocess
 import sys
-import types
 import warnings
 from enum import Enum
 from pathlib import Path
@@ -40,7 +39,7 @@ FORMAT_EXTENSIONS = {
 }
 
 FORMATTERS_CLI = {
-    'py': 'black {}',
+    'py': ('black {}', 'unimport {}'),
     'dart': 'dart format {}'
 }
 
@@ -63,9 +62,9 @@ def extract_schemas(module: ModuleType) -> List[BaseSchema]:
         obj
         for name, obj in module.__dict__.items()
         if not name.startswith("__")
-        and hasattr(obj, "__mro__")
-        and BaseSchema in obj.__mro__
-        and not _is_template_cls(obj)
+           and hasattr(obj, "__mro__")
+           and BaseSchema in obj.__mro__
+           and not _is_template_cls(obj)
     ]
 
 
@@ -84,62 +83,62 @@ def import_from_file(path: Path) -> ModuleType:
 
 
 def main(
-    configs: A[list[str], typer.Argument(help="ssc-codegen config files or path folder with configs")],
-    converter: A[
-        Converters,
-        typer.Option(
-            "-c", "--converter", help="code converter", show_default=False
-        ),
-    ],
-    output_folder: A[
-        Path,
-        typer.Option(
-            "-o",
-            "--output",
-            help="folder output. Default get current working directory and create src/ssc_gen path",
-            show_default=False,
-        ),
-    ] = DEFAULT_PATH,
-    css_to_xpath: A[
-        bool,
-        typer.Option(
-            "--to-xpath",
-            help="convert css queries to xpath (works not guaranteed)",
-        ),
-    ] = False,
-    xpath_to_css: A[
-        bool, typer.Option("--to-css", help="convert xpath queries to css")
-    ] = False,
-    xpath_prefix: A[
-        str, typer.Option(help="xpath prefix (for --to-xpath argument)")
-    ] = "descendant-or-self::",
-    no_format: A[
-        bool, typer.Option("--skip-format", help="skip format code")
-    ] = False,
-    file_prefix: A[
-        Optional[str],
-        typer.Option(
-            "-p",
-            "--prefix",
-            help="file prefix for config output",
-            show_default=False,
-        ),
-    ] = None,
-    file_suffix: A[
-        Optional[str],
-        typer.Option(
-            "-s",
-            "--suffix",
-            help="file suffix for config output",
-            show_default=False,
-        ),
-    ] = None,
-    version: A[
-        Optional[bool],
-        typer.Option(
-            "--version", help="print version and exit", callback=_version_cb
-        ),
-    ] = None,
+        configs: A[list[str], typer.Argument(help="ssc-codegen config files or path folder with configs")],
+        converter: A[
+            Converters,
+            typer.Option(
+                "-c", "--converter", help="code converter", show_default=False
+            ),
+        ],
+        output_folder: A[
+            Path,
+            typer.Option(
+                "-o",
+                "--output",
+                help="folder output. Default get current working directory and create src/ssc_gen path",
+                show_default=False,
+            ),
+        ] = DEFAULT_PATH,
+        css_to_xpath: A[
+            bool,
+            typer.Option(
+                "--to-xpath",
+                help="convert css queries to xpath (works not guaranteed)",
+            ),
+        ] = False,
+        xpath_to_css: A[
+            bool, typer.Option("--to-css", help="convert xpath queries to css")
+        ] = False,
+        xpath_prefix: A[
+            str, typer.Option(help="xpath prefix (for --to-xpath argument)")
+        ] = "descendant-or-self::",
+        no_format: A[
+            bool, typer.Option("--skip-format", help="skip format code")
+        ] = False,
+        file_prefix: A[
+            Optional[str],
+            typer.Option(
+                "-p",
+                "--prefix",
+                help="file prefix for config output",
+                show_default=False,
+            ),
+        ] = None,
+        file_suffix: A[
+            Optional[str],
+            typer.Option(
+                "-s",
+                "--suffix",
+                help="file suffix for config output",
+                show_default=False,
+            ),
+        ] = None,
+        version: A[
+            Optional[bool],
+            typer.Option(
+                "--version", help="print version and exit", callback=_version_cb
+            ),
+        ] = None,
 ) -> None:
     if version:
         exit(0)
@@ -178,9 +177,13 @@ def main(
     if not no_format:
         # TODO detect extension
         fmt_cmd = FORMATTERS_CLI.get(ext)
-        if not fmt_cmd:
-            warnings.warn('Not founded required code formatter', stacklevel=1, category=RuntimeWarning)
-        subprocess.Popen(fmt_cmd.format(output_folder.resolve()), shell=True)
+        if isinstance(fmt_cmd, str):
+            fmt_cmd = (fmt_cmd,)
+
+        for cmd in fmt_cmd:
+            if not fmt_cmd:
+                warnings.warn('Not founded required code formatter', stacklevel=1, category=RuntimeWarning)
+            subprocess.Popen(cmd.format(output_folder.resolve()), shell=True)
 
     print("Done! 😇😛")
     exit(0)

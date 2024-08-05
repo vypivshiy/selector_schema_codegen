@@ -24,7 +24,8 @@ dependencies = [
     'black>=24.4.2',
     'Jinja2>=3.1.4',
     'lxml>=5.0.0',
-    'cssselect>=1.2.0'
+    'cssselect>=1.2.0',
+    'unimport>=1.2.1'
 ]
 
 [project.scripts]
