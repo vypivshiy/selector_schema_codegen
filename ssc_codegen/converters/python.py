@@ -165,14 +165,14 @@ def op_attr_text(e: Expression):
     VAR_L, VAR_R = VAR_NAMES(e)
     if e.VARIABLE_TYPE == TypeVariableState.STRING:
         return f"{VAR_L} = self._attr_text({VAR_R})"
-    return f"{VAR_L} = [self._attr_text(i) for i in {VAR_R}]"
+    return f"{VAR_L} = self._attr_text_all({VAR_R})"
 
 
 def op_attr_raw(e: Expression):
     VAR_L, VAR_R = VAR_NAMES(e)
     if e.VARIABLE_TYPE == TypeVariableState.STRING:
         return f"{VAR_L} = self._attr_raw({VAR_R})"
-    return f"{VAR_L} = [self._attr_raw(i) for i in {VAR_R}]"
+    return f"{VAR_L} = self._attr_raw_all({VAR_R})"
 
 
 def op_regex(e: Expression):
