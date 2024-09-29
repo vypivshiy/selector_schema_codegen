@@ -102,7 +102,7 @@ class {{ struct.name }}(BaseParser):
         return s.replace(old, new)
 
     @staticmethod
-    def _str_split(s, sep) -> list[str]:
+    def _str_split(s, sep) -> List[str]:
         return s.split(sep)
 
     @staticmethod
@@ -114,7 +114,7 @@ class {{ struct.name }}(BaseParser):
         return re.search(pattern, s)[group]  # type: ignore
 
     @staticmethod
-    def _re_match_all(s, pattern) -> list[str]:
+    def _re_match_all(s, pattern) -> List[str]:
         return re.findall(pattern, s)
 
     @staticmethod
