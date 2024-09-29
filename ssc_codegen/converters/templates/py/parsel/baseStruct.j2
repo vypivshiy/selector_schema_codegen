@@ -71,7 +71,7 @@ class BaseParser:
         return item
 
     @staticmethod
-    def _assert_xpath(item: Selector, query, msg: str: str):
+    def _assert_xpath(item: Selector, query, msg: str):
         assert item.xpath(query), msg
         return item
 
