@@ -19,7 +19,7 @@ class BaseParser:
         # start parse entrypoint
         pass
 
-    def _part_document(self, el: _T_PARSER) -> list[Node]:
+    def _part_document(self, el: _T_PARSER) -> List[Node]:
         # split document to elements entrypoint
         pass
 
@@ -62,20 +62,20 @@ class BaseParser:
         return [e.html for e in el]  # type: ignore
 
     @staticmethod
-    def _attr(el: Node, name) -> str:
+    def _attr(el: Node, name: str) -> str:
         return el.attributes[name]  # type: ignore
 
     @staticmethod
-    def _attr_all(els: List[Node], name) -> list[str]:
+    def _attr_all(els: List[Node], name: str) -> List[str]:
         return [el.attributes[name] for el in els]  # type: ignore
 
     @staticmethod
-    def _assert_css(item: Node, query, msg):
+    def _assert_css(item: Node, query: str, msg: str):
         assert item.css(query), msg
         return item
 
     @staticmethod
-    def _assert_xpath(item: Node, query, msg):
+    def _assert_xpath(item: Node, query: str, msg: str):
         raise NotImplementedError("selectolax not support xpath")
 
     {{ default_python_methods() }}

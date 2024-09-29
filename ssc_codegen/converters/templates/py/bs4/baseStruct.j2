@@ -60,23 +60,23 @@ class BaseParser:
         return [e.__str__() for e in el]
 
     @staticmethod
-    def _attr(el, name) -> str:
+    def _attr(el, name: str) -> str:
         # bs4 __getattr__ method returns list of attr values.
         # need standard variable type, because most html parser returns a string
         # eg: <p class="spam egg"> bs4 extract attrs returns ["spam", "egg"]
         return el[name] if isinstance(el[name], str) else " ".join(el[name])
 
     @staticmethod
-    def _attr_all(els, name) -> list[str]:
+    def _attr_all(els, name: str) -> List[str]:
         return [el[name] if isinstance(el[name], str) else " ".join(el[name]) for el in els]
 
     @staticmethod
-    def _assert_css(item: Tag, query, msg):
+    def _assert_css(item: Tag, query: str, msg: str):
         assert item.css(query), msg
         return item
 
     @staticmethod
-    def _assert_xpath(item: Tag, query, msg):
+    def _assert_xpath(item: Tag, query: str, msg: str):
         raise NotImplementedError("bs4 not support xpath")
 
     {{ default_python_methods() }}
