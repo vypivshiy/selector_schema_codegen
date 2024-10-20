@@ -7,6 +7,8 @@ from .ast_ssc import (
     ModuleProgram,
     ModuleImports,
 
+    Variable,
+
     StructParser,
     Docstring,
     StructFieldFunction,
@@ -14,10 +16,10 @@ from .ast_ssc import (
     StartParseFunction,
     PreValidateFunction,
     ReturnExpression,
-    NoReturnExpression)
+    NoReturnExpression, CallStructFunctionExpression, BaseExpression)
 from .document import BaseDocument
 from .schema import BaseSchema, MISSING_FIELD, ItemSchema, DictSchema, ListSchema
-from .tokens import VariableType, StructType
+from .tokens import VariableType, StructType, TokenType
 from .. import FlattenListSchema
 
 
@@ -78,6 +80,24 @@ def check_schema(schema: Type[BaseSchema]) -> Type[BaseSchema]:
     return schema
 
 
+def _fill_stack_variables(stack: list[BaseExpression], *, ret_expr: bool = True) -> list[BaseExpression]:
+    tmp_stack = stack.copy()
+    expr_count = len(stack)
+    ret_type = stack[-1].ret_type
+    for i, expr in enumerate(tmp_stack):
+        expr.variable = Variable(num=i, count=expr_count, type=expr.accept_type)
+
+    if ret_expr:
+        tmp_stack.append(
+            ReturnExpression(variable=Variable(num=expr_count - 1, count=expr_count, type=ret_type))
+        )
+    else:
+        tmp_stack.append(
+            NoReturnExpression(variable=Variable(num=expr_count - 1, count=expr_count, type=VariableType.NULL))
+        )
+    return tmp_stack
+
+
 def build_ast_struct(schema: Type[BaseSchema]) -> StructParser:
     schema = check_schema(schema)
     doc = schema.__doc__ or ""
@@ -90,12 +110,14 @@ def build_ast_struct(schema: Type[BaseSchema]) -> StructParser:
         body=[])
     start_parse_body = []
     for k, f in fields.items():
-        check_field_expr(f)
         match k:
             case '__PRE_VALIDATE__':
                 fn = PreValidateFunction(
                     name=k,
-                    body=f.stack + [NoReturnExpression()]
+                    body=_fill_stack_variables(f.stack, ret_expr=False)
+                )
+                start_parse_body.append(
+                    CallStructFunctionExpression(name=k, ret_type=VariableType.NULL)
                 )
                 ast_struct_parser.body.append(fn)
             case '__SPLIT_DOC__':
@@ -104,18 +126,29 @@ def build_ast_struct(schema: Type[BaseSchema]) -> StructParser:
                     raise SyntaxError(msg)
                 fn = PartDocFunction(
                     name=k,
-                    body=f.stack
+                    body=_fill_stack_variables(f.stack)
+                )
+                start_parse_body.append(
+                    CallStructFunctionExpression(name=k, ret_type=VariableType.LIST_DOCUMENT)
                 )
                 ast_struct_parser.body.append(fn)
             case _:
+                if f.stack[0].kind == TokenType.EXPR_DEFAULT:
+                    _default_expr = f._stack.pop(0) # noqa
+                else:
+                    _default_expr = None
                 fn = StructFieldFunction(
                     name=k,
-                    body=f.stack + [ReturnExpression()]
+                    default=_default_expr,
+                    body=_fill_stack_variables(f.stack)
                 )
                 ast_struct_parser.body.append(fn)
-                start_parse_body.append(fn)
+                start_parse_body.append(
+                    CallStructFunctionExpression(name=k, ret_type=f._last_ret)  # noqa
+                )
     start_fn = StartParseFunction(
-        body=start_parse_body
+        body=start_parse_body,
+        type=schema.__SCHEMA_TYPE__
     )
     ast_struct_parser.body.append(start_fn)
     return ast_struct_parser
@@ -145,7 +178,7 @@ def _extract_schemas(module: ModuleType) -> list[Type[BaseSchema]]:
     ]
 
 
-def build_ast_module(path: str | Path[str]):
+def build_ast_module(path: str | Path[str]) -> ModuleProgram:
     if isinstance(path, str):
         path = Path(path)
     module = ModuleType("mod")

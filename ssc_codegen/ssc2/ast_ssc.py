@@ -22,8 +22,13 @@ class ModuleProgram(BaseAstNode):
 class Variable(BaseAstNode):
     kind: Final[TokenType] = TokenType.VARIABLE
 
-    name: str
+    num: int
+    count: int
     type: VariableType
+
+    @property
+    def num_next(self):
+        return self.num + 1
 
 
 @dataclass(kw_only=True)
@@ -57,7 +62,7 @@ class TypeDef(BaseAstNode):
 # ExpressionS
 @dataclass(kw_only=True)
 class BaseExpression(BaseAstNode):
-    left: Variable | None = None
+    variable: Variable | None = None
     accept_type: VariableType
     ret_type: VariableType
 
@@ -390,6 +395,14 @@ class NoReturnExpression(BaseExpression):
     ret_type: Final[VariableType] = VariableType.NULL
 
 
+@dataclass(kw_only=True)
+class CallStructFunctionExpression(BaseExpression):
+    kind: Final[TokenType] = TokenType.STRUCT_CALL_FUNCTION
+    accept_type: Final[VariableType] = VariableType.DOCUMENT
+    name: str
+    ret_type: VariableType
+
+
 # STRUCT
 
 @dataclass(kw_only=True)
@@ -401,6 +414,7 @@ class __StructNode(BaseAstNode):
 @dataclass(kw_only=True)
 class StructFieldFunction(__StructNode):
     kind: Final[TokenType] = TokenType.STRUCT_FIELD
+    default: DefaultValueWrapper | None = None
 
 
 @dataclass(kw_only=True)
@@ -418,7 +432,8 @@ class StartParseFunction(__StructNode):
     """entrypoint parser"""
     name: str = "__START_PARSE__"  # todo: literal
     kind: Final[TokenType] = TokenType.STRUCT_PARSE_START
-    body: list[StructFieldFunction]
+    body: list[CallStructFunctionExpression]
+    type: StructType
 
 
 @dataclass(kw_only=True)
@@ -428,49 +443,3 @@ class StructParser(BaseAstNode):
     name: str
     doc: Docstring
     body: list[StructFieldFunction | StartParseFunction | PreValidateFunction | PartDocFunction]
-
-
-if __name__ == '__main__':
-    f1 = StructFieldFunction(
-        name="title",
-        body=[
-            HtmlCssExpression(
-                left=Variable(name="val", type=VariableType.DOCUMENT),
-                query="title"
-            ),
-            HtmlTextExpression(
-                left=Variable(name="val", type=VariableType.DOCUMENT),
-            ),
-            ReturnExpression(
-                left=Variable(name="val", type=VariableType.DOCUMENT),
-            )
-        ]
-    )
-    f2 = StructFieldFunction(
-        name="urls",
-        body=[
-            HtmlCssAllExpression(
-                left=Variable(name="val", type=VariableType.DOCUMENT),
-                query="a"
-            ),
-            HtmlAttrAllExpression(
-                left=Variable(name="val", type=VariableType.LIST_DOCUMENT),
-                attr="href"
-            ),
-            MapFormatExpression(
-                left=Variable(name="val", type=VariableType.LIST_STRING),
-                fmt="example.com{{}}"
-            ),
-            ReturnExpression(
-                left=Variable(name="val", type=VariableType.DOCUMENT),
-            )
-        ]
-    )
-    f_entry = StartParseFunction(name="parse",
-                                 body=[f1, f2])
-    p = StructParser(
-        name="Demo", doc=Docstring(value=''), type=StructType.ITEM,
-        body=[f_entry, f1, f2])
-    import pprint
-
-    pprint.pprint(p, compact=True)

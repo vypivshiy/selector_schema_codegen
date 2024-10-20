@@ -17,20 +17,20 @@ def convert_css_to_xpath(doc: "BaseDocument", prefix: str = "descendant-or-self:
             case HtmlCssExpression.kind:
                 expr: HtmlCssExpression
                 new_expr = HtmlXpathExpression(
-                    left=expr.left,
+                    variable=expr.variable,
                     query=css_to_xpath(expr.query, prefix=prefix)
                 )
 
             case HtmlCssAllExpression.kind:
                 expr: HtmlCssAllExpression
                 new_expr = HtmlXpathAllExpression(
-                    left=expr.left,
+                    variable=expr.variable,
                     query=css_to_xpath(expr.query, prefix=prefix)
                 )
             case IsCssExpression.kind:
                 expr: IsCssExpression
                 new_expr = IsXPathExpression(
-                    left=expr.left,
+                    variable=expr.variable,
                     query=css_to_xpath(expr.query, prefix=prefix),
                     msg=expr.msg
                 )
@@ -49,19 +49,19 @@ def convert_xpath_to_css(doc: "BaseDocument") -> "BaseDocument":
             case HtmlXpathExpression.kind:
                 expr: HtmlXpathExpression
                 new_expr = HtmlCssExpression(
-                    left=expr.left,
+                    variable=expr.variable,
                     query=xpath_to_css(expr.query)
                 )
             case HtmlXpathAllExpression.kind:
                 expr: HtmlXpathAllExpression
                 new_expr = HtmlCssAllExpression(
-                    left=expr.left,
+                    variable=expr.variable,
                     query=xpath_to_css(expr.query)
                 )
             case IsXPathExpression.kind:
                 expr: IsXPathExpression
                 new_expr = IsCssExpression(
-                    left=expr.left,
+                    variable=expr.variable,
                     query=xpath_to_css(expr.query),
                     msg=expr.msg
                 )

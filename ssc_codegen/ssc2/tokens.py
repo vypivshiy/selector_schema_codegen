@@ -37,6 +37,7 @@ class TokenType(IntEnum):
     STRUCT_PRE_VALIDATE = auto()
     STRUCT_PART_DOCUMENT = auto()
     STRUCT_PARSE_START = auto()
+    STRUCT_CALL_FUNCTION = auto()
 
     # TYPING
     TYPEDEF = auto()
