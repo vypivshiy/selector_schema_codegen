@@ -34,6 +34,8 @@ def check_field_expr(field: BaseDocument):
         elif expr.accept_type == VariableType.ANY:
             var_cursor = VariableType.DOCUMENT
             continue
+        elif var_cursor == VariableType.NESTED:
+            raise TypeError("sub_parser not allowed next instructions")
 
         msg = f"'{expr.kind.name}' expected type '{expr.accept_type.name}', got '{var_cursor.name}'"
         raise TypeError(msg)
@@ -130,8 +132,8 @@ def build_ast_struct(schema: Type[BaseSchema]) -> StructParser:
                 )
                 ast_struct_parser.body.append(fn)
             case '__SPLIT_DOC__':
-                if f._last_ret != VariableType.LIST_DOCUMENT:  # noqa
-                    msg = f"__SPLIT_DOC__ attribute should be returns LIST_DOCUMENT, not {f._last_ret.name}"  # noqa
+                if f.stack_last_ret != VariableType.LIST_DOCUMENT:  # noqa
+                    msg = f"__SPLIT_DOC__ attribute should be returns LIST_DOCUMENT, not {f.stack_last_ret.name}"  # noqa
                     raise SyntaxError(msg)
                 fn = PartDocFunction(
                     name=k,
@@ -150,7 +152,7 @@ def build_ast_struct(schema: Type[BaseSchema]) -> StructParser:
                 )
                 ast_struct_parser.body.append(fn)
                 start_parse_body.append(
-                    CallStructFunctionExpression(name=k, ret_type=f._last_ret)  # noqa
+                    CallStructFunctionExpression(name=k, ret_type=f.stack_last_ret)  # noqa
                 )
     start_fn = StartParseFunction(
         body=start_parse_body,
@@ -192,9 +194,11 @@ def build_ast_types(*struct_parsers: StructParser):
         ast_typedef = TypeDef(name=p.name, body=[])
         for fn in p.body:
             if fn.kind == TokenType.STRUCT_FIELD:
+
                 ret_expr: ReturnExpression = fn.body[-1]
+                nested_class = fn.body[-2].schema if ret_expr.variable.type == VariableType.NESTED else None
                 ast_typedef.body.append(
-                    TypeDefField(name=fn.name, type=ret_expr.variable.type)
+                    TypeDefField(name=fn.name, type=ret_expr.variable.type, nested_class=nested_class)
                 )
         ast_types.append(ast_typedef)
     return ast_types

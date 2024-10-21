@@ -48,6 +48,7 @@ class TypeDefField(BaseAstNode):
     kind: Final[TokenType] = TokenType.TYPEDEF_FIELD
     name: str
     type: VariableType
+    nested_class: str | None = None
 
 
 @dataclass(kw_only=True)

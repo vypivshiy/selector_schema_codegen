@@ -26,6 +26,7 @@ from ..ast_ssc import (
     ReplaceExpression, MapReplaceExpression,
     SplitExpression,
 
+    NestedExpression,
     RegexExpression, RegexSubExpression, MapRegexSubExpression, RegexAllExpression,
 
     ReturnExpression, NoReturnExpression,
@@ -129,21 +130,31 @@ MAGIC_METHODS = {"__KEY__": "key",
 
 @converter.pre(TokenType.TYPEDEF)
 def tt_typedef(node: TypeDef):
-    # TODO: nested handle
+    def _fetch_node_type(node_):
+        if node_.type == VariableType.NESTED:
+            return f"T_{node_.nested_class}"
+        return TYPES.get(node_.type)
+
     t_name = f'T_{node.name}'
     # DICT schema
     if all(f.name in ["__KEY__", '__VALUE__'] for f in node.body):
         value_ret = [f for f in node.body if f.name == '__VALUE__'][0].type
-        type_ = TYPES.get(value_ret)
+        if node.body[-1].type == VariableType.NESTED:
+            type_ = f"T_{node.body[-1].nested_class}"
+        else:
+            type_ = TYPES.get(value_ret)
         body = f"Dict[str, {type_}]"
 
     # Flat list schema
     elif all(f.name in ["__ITEM__"] for f in node.body):
         value_ret = [f for f in node.body if f.name == '__ITEM__'][0].type
-        type_ = TYPES.get(value_ret)
+        if node.body[-1].type == VariableType.NESTED:
+            type_ = f"T_{node.body[-1].nested_class}"
+        else:
+            type_ = TYPES.get(value_ret)
         body = f"List[{type_}]"
     else:
-        body = f"TypedDict({t_name!r}," + '{' + ', '.join(f'{f.name!r}: {TYPES.get(f.type)}' for f in node.body) + '})'
+        body = f"TypedDict({t_name!r}," + '{' + ', '.join(f'{f.name!r}: {_fetch_node_type(f)}' for f in node.body) + '})'
     return f"T_{node.name} = {body}"
 
 
@@ -155,12 +166,12 @@ def tt_struct(node: StructParser) -> str:
 
 @converter.pre(TokenType.STRUCT_INIT)
 def tt_init(_) -> str:
-    return "def __init__(self, document: str):"
+    return "def __init__(self, document: Union[str, BeautifulSoup, Tag]):"
 
 
 @converter.post(TokenType.STRUCT_INIT)
 def tt_init(_):
-    return "self._doc=BeautifulSoup(document, 'lxml')"
+    return "self._doc=BeautifulSoup(document, 'lxml') if isinstance(document, str) else document"
 
 
 @converter.pre(TokenType.DOCSTRING)
@@ -191,6 +202,12 @@ def tt_no_ret(_: NoReturnExpression) -> str:
     return "return"
 
 
+@converter.pre(TokenType.EXPR_NESTED)
+def tt_nested(node: NestedExpression) -> str:
+    prv, nxt = left_right_var_names("value", node.variable)
+    return f"{nxt} = {node.schema}({prv}).parse()"
+
+
 @converter.pre(TokenType.STRUCT_PRE_VALIDATE)
 def tt_pre_validate(node: PreValidateFunction) -> str:
     return f"def {MAGIC_METHODS.get(node.name)}(self, value) -> None:"
@@ -203,9 +220,11 @@ def tt_part_document(node: PartDocFunction):
 
 @converter.pre(TokenType.STRUCT_FIELD)
 def tt_function(node: StructFieldFunction) -> str:
-    # TODO: nested parse API
     name = MAGIC_METHODS.get(node.name, node.name)
-    type_ = TYPES.get(node.body[-1].variable.type)
+    if node.body[-1].variable.type == VariableType.NESTED:
+        type_ = f"T_{node.body[-2].schema}"  # noqa
+    else:
+        type_ = TYPES.get(node.body[-1].variable.type)
     return f"def _parse_{name}(self, value: Union[BeautifulSoup, Tag]) -> {type_}:"
 
 
