@@ -32,7 +32,7 @@ class TokenType(IntEnum):
 
     # STRUCTS
     STRUCT = auto()
-
+    STRUCT_INIT = auto()  # used for OOP, or init base class/struct attributes
     STRUCT_FIELD = auto()
     STRUCT_PRE_VALIDATE = auto()
     STRUCT_PART_DOCUMENT = auto()

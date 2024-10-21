@@ -41,14 +41,13 @@ class Docstring(BaseAstNode):
 class ModuleImports(BaseAstNode):
     """required imports for generated parser"""
     kind: Final[TokenType] = TokenType.IMPORTS
-    modules: list[str]
 
 
 @dataclass(kw_only=True)
 class TypeDefField(BaseAstNode):
     kind: Final[TokenType] = TokenType.TYPEDEF_FIELD
     name: str
-    value: str
+    type: VariableType
 
 
 @dataclass(kw_only=True)
@@ -437,8 +436,13 @@ class StartParseFunction(__StructNode):
 
 
 @dataclass(kw_only=True)
+class StructInit(BaseAstNode):
+    kind: Final[TokenType] = TokenType.STRUCT_INIT
+
+@dataclass(kw_only=True)
 class StructParser(BaseAstNode):
     kind: Final[TokenType] = TokenType.STRUCT
+    init: Final[StructInit] = StructInit()
     type: StructType
     name: str
     doc: Docstring

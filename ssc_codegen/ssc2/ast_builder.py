@@ -6,7 +6,8 @@ from typing import Type
 from .ast_ssc import (
     ModuleProgram,
     ModuleImports,
-
+    TypeDef,
+    TypeDefField,
     Variable,
 
     StructParser,
@@ -178,17 +179,33 @@ def _extract_schemas(module: ModuleType) -> list[Type[BaseSchema]]:
     ]
 
 
+def build_ast_types(*struct_parsers: StructParser):
+    ast_types = []
+    for p in struct_parsers:
+        ast_typedef = TypeDef(name=p.name, body=[])
+        for fn in p.body:
+            if fn.kind == TokenType.STRUCT_FIELD:
+                ret_expr: ReturnExpression = fn.body[-1]
+                ast_typedef.body.append(
+                    TypeDefField(name=fn.name, type=ret_expr.variable.type)
+                )
+        ast_types.append(ast_typedef)
+    return ast_types
+
 def build_ast_module(path: str | Path[str]) -> ModuleProgram:
     if isinstance(path, str):
         path = Path(path)
-    module = ModuleType("mod")
+    module = ModuleType("_")
     code = Path(path.resolve()).read_text()
     exec(code, module.__dict__)
     module_doc = Docstring(value=module.__dict__.get('__doc__') or "")
     # TODO: inject AST_IMPORTS
-    ast_imports = ModuleImports(modules=[])
+    ast_imports = ModuleImports()
+    ast_structs = [build_ast_struct(sc) for sc in _extract_schemas(module)]
+    ast_types = build_ast_types(*ast_structs)
+
     ast_program = ModuleProgram(
-        body=[module_doc, ast_imports] + [build_ast_struct(sc) for sc in _extract_schemas(module)],
+        body=[module_doc, ast_imports] + ast_types + [build_ast_struct(sc) for sc in _extract_schemas(module)],
     )
     return ast_program
 
