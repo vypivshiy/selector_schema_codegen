@@ -432,6 +432,8 @@ class StartParseFunction(__StructNode):
     name: str = "__START_PARSE__"  # todo: literal
     kind: Final[TokenType] = TokenType.STRUCT_PARSE_START
     body: list[CallStructFunctionExpression]
+    parent: 'StructParser'
+    typedef_signature: TypeDef
     type: StructType
 
 

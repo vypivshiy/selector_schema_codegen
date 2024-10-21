@@ -6,6 +6,10 @@ class VariableType(IntEnum):
     LIST_DOCUMENT = auto()
     STRING = auto()
     LIST_STRING = auto()
+    # default wrapper marks
+    OPTIONAL_STRING = auto()
+    OPTIONAL_LIST_STRING = auto()
+
     NULL = auto()
     # mark accept any variable type
     # used in return and default expr

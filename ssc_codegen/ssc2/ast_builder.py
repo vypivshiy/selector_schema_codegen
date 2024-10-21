@@ -19,9 +19,8 @@ from .ast_ssc import (
     ReturnExpression,
     NoReturnExpression, CallStructFunctionExpression, BaseExpression)
 from .document import BaseDocument
-from .schema import BaseSchema, MISSING_FIELD, ItemSchema, DictSchema, ListSchema
+from .schema import BaseSchema, MISSING_FIELD, ItemSchema, DictSchema, ListSchema, FlatListSchema
 from .tokens import VariableType, StructType, TokenType
-from .. import FlattenListSchema
 
 
 def check_field_expr(field: BaseDocument):
@@ -31,7 +30,7 @@ def check_field_expr(field: BaseDocument):
         if var_cursor == expr.accept_type:
             var_cursor = expr.ret_type
             continue
-        # this type always first (naive)
+        # this type always first (naive, used in DEFAULT and RETURN expr)
         elif expr.accept_type == VariableType.ANY:
             var_cursor = VariableType.DOCUMENT
             continue
@@ -83,18 +82,27 @@ def check_schema(schema: Type[BaseSchema]) -> Type[BaseSchema]:
 
 def _fill_stack_variables(stack: list[BaseExpression], *, ret_expr: bool = True) -> list[BaseExpression]:
     tmp_stack = stack.copy()
-    expr_count = len(stack)
-    ret_type = stack[-1].ret_type
+    ret_type = tmp_stack[-1].ret_type
+    if tmp_stack[0].kind == TokenType.EXPR_DEFAULT and ret_type == VariableType.STRING:
+        ret_type = VariableType.OPTIONAL_STRING
+        tmp_stack.pop(0)
+
+    if tmp_stack[0].kind == TokenType.EXPR_DEFAULT and ret_type == VariableType.STRING:
+        ret_type = VariableType.OPTIONAL_LIST_STRING
+        tmp_stack.pop(0)
+
+    expr_count = len(tmp_stack)
     for i, expr in enumerate(tmp_stack):
         expr.variable = Variable(num=i, count=expr_count, type=expr.accept_type)
 
     if ret_expr:
-        tmp_stack.append(
-            ReturnExpression(variable=Variable(num=expr_count - 1, count=expr_count, type=ret_type))
-        )
+        var = Variable(num=expr_count - 1, count=expr_count, type=ret_type)
+        tmp_stack.append(ReturnExpression(variable=var))
     else:
         tmp_stack.append(
-            NoReturnExpression(variable=Variable(num=expr_count - 1, count=expr_count, type=VariableType.NULL))
+            NoReturnExpression(variable=Variable(num=expr_count - 1,
+                                                 count=expr_count,
+                                                 type=VariableType.NULL))
         )
     return tmp_stack
 
@@ -134,13 +142,10 @@ def build_ast_struct(schema: Type[BaseSchema]) -> StructParser:
                 )
                 ast_struct_parser.body.append(fn)
             case _:
-                if f.stack[0].kind == TokenType.EXPR_DEFAULT:
-                    _default_expr = f._stack.pop(0) # noqa
-                else:
-                    _default_expr = None
+                default_expr = f.stack[0] if f.stack[0].kind == TokenType.EXPR_DEFAULT else None
                 fn = StructFieldFunction(
                     name=k,
-                    default=_default_expr,
+                    default=default_expr,
                     body=_fill_stack_variables(f.stack)
                 )
                 ast_struct_parser.body.append(fn)
@@ -149,7 +154,9 @@ def build_ast_struct(schema: Type[BaseSchema]) -> StructParser:
                 )
     start_fn = StartParseFunction(
         body=start_parse_body,
-        type=schema.__SCHEMA_TYPE__
+        type=schema.__SCHEMA_TYPE__,
+        parent=ast_struct_parser,
+        typedef_signature=build_ast_types(ast_struct_parser)[0]
     )
     ast_struct_parser.body.append(start_fn)
     return ast_struct_parser
@@ -159,7 +166,7 @@ def _is_template_cls(cls: object) -> bool:
     return any(
         cls == base_cls
         for base_cls in (
-            FlattenListSchema,
+            FlatListSchema,
             ItemSchema,
             DictSchema,
             ListSchema,
@@ -192,6 +199,7 @@ def build_ast_types(*struct_parsers: StructParser):
         ast_types.append(ast_typedef)
     return ast_types
 
+
 def build_ast_module(path: str | Path[str]) -> ModuleProgram:
     if isinstance(path, str):
         path = Path(path)
@@ -199,7 +207,7 @@ def build_ast_module(path: str | Path[str]) -> ModuleProgram:
     code = Path(path.resolve()).read_text()
     exec(code, module.__dict__)
     module_doc = Docstring(value=module.__dict__.get('__doc__') or "")
-    # TODO: inject AST_IMPORTS
+
     ast_imports = ModuleImports()
     ast_structs = [build_ast_struct(sc) for sc in _extract_schemas(module)]
     ast_types = build_ast_types(*ast_structs)
