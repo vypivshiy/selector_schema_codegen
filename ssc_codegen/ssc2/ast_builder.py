@@ -109,7 +109,7 @@ def _fill_stack_variables(stack: list[BaseExpression], *, ret_expr: bool = True)
     return tmp_stack
 
 
-def build_ast_struct(schema: Type[BaseSchema]) -> StructParser:
+def build_ast_struct(schema: Type[BaseSchema], *, docstring_class_top: bool = False) -> StructParser:
     schema = check_schema(schema)
     doc = schema.__doc__ or ""
     fields = schema.__get_mro_fields__()
@@ -118,9 +118,12 @@ def build_ast_struct(schema: Type[BaseSchema]) -> StructParser:
         type=schema.__SCHEMA_TYPE__,
         name=schema.__name__,
         doc=Docstring(value=doc),
+        docstring_class_top=docstring_class_top,
         body=[])
+
     start_parse_body = []
     for k, f in fields.items():
+        check_field_expr(f)
         match k:
             case '__PRE_VALIDATE__':
                 fn = PreValidateFunction(
@@ -204,7 +207,7 @@ def build_ast_types(*struct_parsers: StructParser):
     return ast_types
 
 
-def build_ast_module(path: str | Path[str]) -> ModuleProgram:
+def build_ast_module(path: str | Path[str], *, docstring_class_top: bool = False) -> ModuleProgram:
     if isinstance(path, str):
         path = Path(path)
     module = ModuleType("_")
@@ -213,11 +216,10 @@ def build_ast_module(path: str | Path[str]) -> ModuleProgram:
     module_doc = Docstring(value=module.__dict__.get('__doc__') or "")
 
     ast_imports = ModuleImports()
-    ast_structs = [build_ast_struct(sc) for sc in _extract_schemas(module)]
+    ast_structs = [build_ast_struct(sc, docstring_class_top=docstring_class_top) for sc in _extract_schemas(module)]
     ast_types = build_ast_types(*ast_structs)
 
     ast_program = ModuleProgram(
-        body=[module_doc, ast_imports] + ast_types + [build_ast_struct(sc) for sc in _extract_schemas(module)],
+        body=[module_doc, ast_imports] + ast_types + ast_structs,
     )
     return ast_program
-

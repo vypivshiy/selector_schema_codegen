@@ -1,5 +1,5 @@
 """ast containers for representation module structure"""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Final
 
 from ssc_codegen.ssc2.tokens import TokenType, VariableType, StructType
@@ -429,7 +429,6 @@ class PartDocFunction(__StructNode):
 
 @dataclass(kw_only=True)
 class StartParseFunction(__StructNode):
-    """entrypoint parser"""
     name: str = "__START_PARSE__"  # todo: literal
     kind: Final[TokenType] = TokenType.STRUCT_PARSE_START
     body: list[CallStructFunctionExpression]
@@ -441,12 +440,18 @@ class StartParseFunction(__StructNode):
 @dataclass(kw_only=True)
 class StructInit(BaseAstNode):
     kind: Final[TokenType] = TokenType.STRUCT_INIT
+    name: str
+
 
 @dataclass(kw_only=True)
 class StructParser(BaseAstNode):
     kind: Final[TokenType] = TokenType.STRUCT
-    init: Final[StructInit] = StructInit()
+    init: StructInit = field(init=False)
+    docstring_class_top: bool = False
     type: StructType
     name: str
     doc: Docstring
     body: list[StructFieldFunction | StartParseFunction | PreValidateFunction | PartDocFunction]
+
+    def __post_init__(self):
+        self.init = StructInit(name=self.name)
