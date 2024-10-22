@@ -1,14 +1,14 @@
 """ast containers for representation module structure"""
 from dataclasses import dataclass, field
-from typing import Final
+from typing import Final, Optional
 
+from ssc_codegen.ssc2.consts import M_START_PARSE, M_PRE_VALIDATE, M_SPLIT_DOC, M_VALUE, M_KEY, M_ITEM
 from ssc_codegen.ssc2.tokens import TokenType, VariableType, StructType
 
 
 @dataclass(kw_only=True)
 class BaseAstNode:
     kind: TokenType
-    pass
 
 
 @dataclass(kw_only=True)
@@ -39,7 +39,6 @@ class Docstring(BaseAstNode):
 
 @dataclass(kw_only=True)
 class ModuleImports(BaseAstNode):
-    """required imports for generated parser"""
     kind: Final[TokenType] = TokenType.IMPORTS
 
 
@@ -48,7 +47,12 @@ class TypeDefField(BaseAstNode):
     kind: Final[TokenType] = TokenType.TYPEDEF_FIELD
     name: str
     type: VariableType
-    nested_class: str | None = None
+    parent: Optional['TypeDef'] = None
+
+    @property
+    def nested_class(self) -> str | None:
+        # backport TODO remove:
+        return self.parent.struct.name
 
 
 @dataclass(kw_only=True)
@@ -57,12 +61,20 @@ class TypeDef(BaseAstNode):
     kind: Final[TokenType] = TokenType.TYPEDEF
     name: str
     body: list[TypeDefField]
+    struct: Optional['StructParser'] = None
+
+    def __post_init__(self):
+        for f in self.body:
+            f.parent = self
 
 
-# ExpressionS
 @dataclass(kw_only=True)
 class BaseExpression(BaseAstNode):
     variable: Variable | None = None
+    parent: Optional['StructParser'] = None  # LATE INIT
+    prev: Optional['BaseExpression'] = None  # LATE INIT
+    next: Optional['BaseExpression'] = None  # LATE INIT
+
     accept_type: VariableType
     ret_type: VariableType
 
@@ -410,36 +422,46 @@ class __StructNode(BaseAstNode):
     name: str
     body: list[BaseExpression]
 
+    @property
+    def ret_type(self) -> VariableType:
+        if not self.body:
+            raise TypeError("Function body empty")
+        return self.body[-1].variable.type
+
 
 @dataclass(kw_only=True)
 class StructFieldFunction(__StructNode):
+    name: M_ITEM | M_KEY | M_VALUE | str
     kind: Final[TokenType] = TokenType.STRUCT_FIELD
     default: DefaultValueWrapper | None = None
+    parent: Optional['StructParser'] = None  # LATE INIT
 
 
 @dataclass(kw_only=True)
 class PreValidateFunction(__StructNode):
     kind: Final[TokenType] = TokenType.STRUCT_PRE_VALIDATE
+    name: M_PRE_VALIDATE = '__PRE_VALIDATE__'
 
 
 @dataclass(kw_only=True)
 class PartDocFunction(__StructNode):
     kind: Final[TokenType] = TokenType.STRUCT_PART_DOCUMENT
+    name: M_SPLIT_DOC = '__SPLIT_DOC__'
 
 
 @dataclass(kw_only=True)
 class StartParseFunction(__StructNode):
-    name: str = "__START_PARSE__"  # todo: literal
+    name: M_START_PARSE = "__START_PARSE__"
     kind: Final[TokenType] = TokenType.STRUCT_PARSE_START
     body: list[CallStructFunctionExpression]
-    parent: 'StructParser'
-    typedef_signature: TypeDef
+    parent: Optional['StructParser'] = None  # LATE INIT
     type: StructType
 
 
 @dataclass(kw_only=True)
 class StructInit(BaseAstNode):
     kind: Final[TokenType] = TokenType.STRUCT_INIT
+    parent: Optional['StructParser'] = None  # LATE INIT
     name: str
 
 
@@ -449,9 +471,40 @@ class StructParser(BaseAstNode):
     init: StructInit = field(init=False)
     docstring_class_top: bool = False
     type: StructType
+
     name: str
     doc: Docstring
     body: list[StructFieldFunction | StartParseFunction | PreValidateFunction | PartDocFunction]
+    typedef: Optional['TypeDef'] = field(init=False)
+
+    def _build_typedef(self):
+        ast_typedef = TypeDef(
+            name=self.name,
+            struct=self,
+            body=[
+                TypeDefField(name=fn.name, type=fn.ret_type)
+                for fn in self.body if fn.kind == TokenType.STRUCT_FIELD
+            ]
+        )
+        self.typedef = ast_typedef
 
     def __post_init__(self):
-        self.init = StructInit(name=self.name)
+        self.init = StructInit(name=self.name, parent=self)
+        self._build_typedef()
+
+        self.body.append(
+            StartParseFunction(
+                parent=self,
+                type=self.type,
+                body=[CallStructFunctionExpression(name=fn.name, ret_type=VariableType.NULL) for fn in self.body],
+            )
+        )
+        # extend nodes information
+        for fn in self.body:
+            fn.parent = self
+            for i, expr in enumerate(fn.body):
+                expr.parent = fn
+                if i > 0:
+                    expr.prev = fn.body[i - 1]
+                if i + 1 < len(fn.body):
+                    expr.next = fn.body[i + 1]

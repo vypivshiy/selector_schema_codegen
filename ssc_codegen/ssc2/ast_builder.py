@@ -6,21 +6,43 @@ from typing import Type
 from .ast_ssc import (
     ModuleProgram,
     ModuleImports,
-    TypeDef,
-    TypeDefField,
     Variable,
 
     StructParser,
     Docstring,
     StructFieldFunction,
     PartDocFunction,
-    StartParseFunction,
     PreValidateFunction,
     ReturnExpression,
     NoReturnExpression, CallStructFunctionExpression, BaseExpression)
+from .consts import M_SPLIT_DOC, M_VALUE, M_KEY, M_ITEM
 from .document import BaseDocument
 from .schema import BaseSchema, MISSING_FIELD, ItemSchema, DictSchema, ListSchema, FlatListSchema
 from .tokens import VariableType, StructType, TokenType
+
+
+def _is_template_cls(cls: object) -> bool:
+    return any(
+        cls == base_cls
+        for base_cls in (
+            FlatListSchema,
+            ItemSchema,
+            DictSchema,
+            ListSchema,
+            BaseSchema,
+        )
+    )
+
+
+def _extract_schemas(module: ModuleType) -> list[Type[BaseSchema]]:
+    return [
+        obj
+        for name, obj in module.__dict__.items()
+        if not name.startswith("__")
+           and hasattr(obj, "__mro__")
+           and BaseSchema in obj.__mro__
+           and not _is_template_cls(obj)
+    ]
 
 
 def check_field_expr(field: BaseDocument):
@@ -41,7 +63,10 @@ def check_field_expr(field: BaseDocument):
         raise TypeError(msg)
 
 
-def _patch_non_required_attributes(schema: Type[BaseSchema], *fields: str) -> Type[BaseSchema]:
+def _patch_non_required_attributes(
+        schema: Type[BaseSchema],
+        *fields: M_SPLIT_DOC | M_ITEM | M_KEY | M_VALUE | str
+) -> Type[BaseSchema]:
     for f in fields:
         if getattr(schema, f, MISSING_FIELD) == MISSING_FIELD:
             continue
@@ -114,38 +139,34 @@ def build_ast_struct(schema: Type[BaseSchema], *, docstring_class_top: bool = Fa
     doc = schema.__doc__ or ""
     fields = schema.__get_mro_fields__()
     # annotations = schema.__get_mro_annotations__() TODO: build signature
-    ast_struct_parser = StructParser(
-        type=schema.__SCHEMA_TYPE__,
-        name=schema.__name__,
-        doc=Docstring(value=doc),
-        docstring_class_top=docstring_class_top,
-        body=[])
 
-    start_parse_body = []
+    start_parse_body: list[CallStructFunctionExpression] = []
+    struct_parse_functions = []
+
     for k, f in fields.items():
         check_field_expr(f)
         match k:
             case '__PRE_VALIDATE__':
                 fn = PreValidateFunction(
-                    name=k,
+                    name=k,  # noqa
                     body=_fill_stack_variables(f.stack, ret_expr=False)
                 )
                 start_parse_body.append(
                     CallStructFunctionExpression(name=k, ret_type=VariableType.NULL)
                 )
-                ast_struct_parser.body.append(fn)
+                struct_parse_functions.append(fn)
             case '__SPLIT_DOC__':
                 if f.stack_last_ret != VariableType.LIST_DOCUMENT:  # noqa
                     msg = f"__SPLIT_DOC__ attribute should be returns LIST_DOCUMENT, not {f.stack_last_ret.name}"  # noqa
                     raise SyntaxError(msg)
                 fn = PartDocFunction(
-                    name=k,
+                    name=k,  # noqa
                     body=_fill_stack_variables(f.stack)
                 )
                 start_parse_body.append(
                     CallStructFunctionExpression(name=k, ret_type=VariableType.LIST_DOCUMENT)
                 )
-                ast_struct_parser.body.append(fn)
+                struct_parse_functions.append(fn)
             case _:
                 default_expr = f.stack[0] if f.stack[0].kind == TokenType.EXPR_DEFAULT else None
                 fn = StructFieldFunction(
@@ -153,58 +174,18 @@ def build_ast_struct(schema: Type[BaseSchema], *, docstring_class_top: bool = Fa
                     default=default_expr,
                     body=_fill_stack_variables(f.stack)
                 )
-                ast_struct_parser.body.append(fn)
+                struct_parse_functions.append(fn)
                 start_parse_body.append(
                     CallStructFunctionExpression(name=k, ret_type=f.stack_last_ret)  # noqa
                 )
-    start_fn = StartParseFunction(
-        body=start_parse_body,
+    ast_struct_parser = StructParser(
         type=schema.__SCHEMA_TYPE__,
-        parent=ast_struct_parser,
-        typedef_signature=build_ast_types(ast_struct_parser)[0]
-    )
-    ast_struct_parser.body.append(start_fn)
+        name=schema.__name__,
+        doc=Docstring(value=doc),
+        docstring_class_top=docstring_class_top,
+        body=struct_parse_functions)
+
     return ast_struct_parser
-
-
-def _is_template_cls(cls: object) -> bool:
-    return any(
-        cls == base_cls
-        for base_cls in (
-            FlatListSchema,
-            ItemSchema,
-            DictSchema,
-            ListSchema,
-            BaseSchema,
-        )
-    )
-
-
-def _extract_schemas(module: ModuleType) -> list[Type[BaseSchema]]:
-    return [
-        obj
-        for name, obj in module.__dict__.items()
-        if not name.startswith("__")
-           and hasattr(obj, "__mro__")
-           and BaseSchema in obj.__mro__
-           and not _is_template_cls(obj)
-    ]
-
-
-def build_ast_types(*struct_parsers: StructParser):
-    ast_types = []
-    for p in struct_parsers:
-        ast_typedef = TypeDef(name=p.name, body=[])
-        for fn in p.body:
-            if fn.kind == TokenType.STRUCT_FIELD:
-
-                ret_expr: ReturnExpression = fn.body[-1]
-                nested_class = fn.body[-2].schema if ret_expr.variable.type == VariableType.NESTED else None
-                ast_typedef.body.append(
-                    TypeDefField(name=fn.name, type=ret_expr.variable.type, nested_class=nested_class)
-                )
-        ast_types.append(ast_typedef)
-    return ast_types
 
 
 def build_ast_module(path: str | Path[str], *, docstring_class_top: bool = False) -> ModuleProgram:
@@ -217,7 +198,7 @@ def build_ast_module(path: str | Path[str], *, docstring_class_top: bool = False
 
     ast_imports = ModuleImports()
     ast_structs = [build_ast_struct(sc, docstring_class_top=docstring_class_top) for sc in _extract_schemas(module)]
-    ast_types = build_ast_types(*ast_structs)
+    ast_types = [st.typedef for st in ast_structs if st.typedef]
 
     ast_program = ModuleProgram(
         body=[module_doc, ast_imports] + ast_types + ast_structs,
