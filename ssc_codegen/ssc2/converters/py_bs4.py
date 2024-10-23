@@ -34,6 +34,7 @@ from ..ast_ssc import (
     IsCssExpression, IsXPathExpression, IsEqualExpression, IsContainsExpression,
     IsRegexMatchExpression, IsNotEqualExpression
 )
+from ..consts import RESERVED_METHODS
 from ..tokens import TokenType, StructType, VariableType
 
 converter = BaseCodeConverter()
@@ -45,7 +46,6 @@ TYPES = {
     VariableType.OPTIONAL_LIST_STRING: "Optional[List[str]]"
 }
 
-RESERVED = ['__PRE_VALIDATE__', '__SPLIT_DOC__', '__KEY__', '__VALUE__', '__ITEM__']
 MAGIC_METHODS = {"__KEY__": "key",
                  "__VALUE__": "value",
                  "__ITEM__": "item",
@@ -105,7 +105,7 @@ def tt_init(_):
 @converter.pre(TokenType.DOCSTRING)
 def tt_docstring(node: Docstring) -> str:
     if node.value:
-        return f'"""{node.value}"""\n'
+        return f'"""' + node.value + '"""'
     return ''
 
 
@@ -160,8 +160,8 @@ def tt_function(node: StructFieldFunction) -> str:
 def tt_start_parse(node: StartParseFunction) -> str:
     head = f"def {MAGIC_METHODS.get(node.name)}(self)"
     if node.type == StructType.LIST:
-        return f"{head} -> List[T_{node.typedef_signature.name}]:"
-    return f"{head} -> T_{node.typedef_signature.name}:"
+        return f"{head} -> List[T_{node.parent.typedef.name}]:"
+    return f"{head} -> T_{node.parent.typedef.name}:"
 
 
 @converter.post(TokenType.STRUCT_PARSE_START)
@@ -174,11 +174,11 @@ def tt_start_parse(node: StartParseFunction):
     match node.type:
         case StructType.ITEM:
             body = ', '.join(
-                [f'"{f.name}": self._parse_{f.name}(self._doc)' for f in node.body if f.name not in RESERVED])
+                [f'"{f.name}": self._parse_{f.name}(self._doc)' for f in node.body if f.name not in RESERVED_METHODS])
             body = '{' + body + '}'
         case StructType.LIST:
             body = ', '.join(
-                [f'"{f.name}": self._parse_{f.name}(e)' for f in node.body if f.name not in RESERVED]
+                [f'"{f.name}": self._parse_{f.name}(e)' for f in node.body if f.name not in RESERVED_METHODS]
             )
             body = '{' + body + '}'
             n = MAGIC_METHODS.get('__SPLIT_DOC__')
@@ -339,14 +339,18 @@ def tt_join(node: JoinExpression):
 def tt_is_equal(node: IsEqualExpression):
     prv, nxt = left_right_var_names("value", node.variable)
     code = f"assert {prv} == {node.value}, {node.msg!r}"
+    if node.next.kind == TokenType.EXPR_NO_RETURN:
+        return code
     code += f"\n{nxt} = {prv}"
     return code
 
 
 @converter.pre(TokenType.IS_NOT_EQUAL)
-def tt_is_equal(node: IsNotEqualExpression):
+def tt_is_not_equal(node: IsNotEqualExpression):
     prv, nxt = left_right_var_names("value", node.variable)
     code = f"assert {prv} != {node.value}, {node.msg!r}"
+    if node.next.kind == TokenType.EXPR_NO_RETURN:
+        return code
     code += f"\n{nxt} = {prv}"
     return code
 
@@ -355,6 +359,8 @@ def tt_is_equal(node: IsNotEqualExpression):
 def tt_is_contains(node: IsContainsExpression):
     prv, nxt = left_right_var_names("value", node.variable)
     code = f"assert {node.item!r} in {prv}, {node.msg!r}"
+    if node.next.kind == TokenType.EXPR_NO_RETURN:
+        return code
     code += f"\n{nxt} = {prv}"
     return code
 
@@ -363,6 +369,8 @@ def tt_is_contains(node: IsContainsExpression):
 def tt_is_regex(node: IsRegexMatchExpression):
     prv, nxt = left_right_var_names("value", node.variable)
     code = f"assert re.search({node.pattern!r}, {prv}), {node.msg!r}"
+    if node.next.kind == TokenType.EXPR_NO_RETURN:
+        return code
     code += f"\n{nxt} = {prv}"
     return code
 
@@ -437,7 +445,9 @@ def tt_attr_all(node: HtmlAttrAllExpression):
 @converter.pre(TokenType.IS_CSS)
 def tt_is_css(node: IsCssExpression):
     prv, nxt = left_right_var_names("value", node.variable)
-    code = f"assert {prv}.select_one({node.query!r}),   {node.msg!r}"
+    code = f"assert {prv}.select_one({node.query!r}), {node.msg!r}"
+    if node.next.kind == TokenType.EXPR_NO_RETURN:
+        return code
     code += f"\n{nxt} = {prv}"
     return code
 

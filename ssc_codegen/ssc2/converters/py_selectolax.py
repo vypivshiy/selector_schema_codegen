@@ -105,7 +105,7 @@ def tt_init(_):
 @converter.pre(TokenType.DOCSTRING)
 def tt_docstring(node: Docstring) -> str:
     if node.value:
-        return f'"""{node.value}"""\n'
+        return f'"""' + node.value + '"""'
     return ''
 
 
@@ -160,8 +160,8 @@ def tt_function(node: StructFieldFunction) -> str:
 def tt_start_parse(node: StartParseFunction) -> str:
     head = f"def {MAGIC_METHODS.get(node.name)}(self)"
     if node.type == StructType.LIST:
-        return f"{head} -> List[T_{node.typedef_signature.name}]:"
-    return f"{head} -> T_{node.typedef_signature.name}:"
+        return f"{head} -> List[T_{node.parent.typedef.name}]:"
+    return f"{head} -> T_{node.parent.typedef.name}:"
 
 
 @converter.post(TokenType.STRUCT_PARSE_START)
@@ -339,6 +339,8 @@ def tt_join(node: JoinExpression):
 def tt_is_equal(node: IsEqualExpression):
     prv, nxt = left_right_var_names("value", node.variable)
     code = f"assert {prv} == {node.value}, {node.msg!r}"
+    if node.next.kind == TokenType.EXPR_NO_RETURN:
+        return code
     code += f"\n{nxt} = {prv}"
     return code
 
@@ -347,6 +349,8 @@ def tt_is_equal(node: IsEqualExpression):
 def tt_is_equal(node: IsNotEqualExpression):
     prv, nxt = left_right_var_names("value", node.variable)
     code = f"assert {prv} != {node.value}, {node.msg!r}"
+    if node.next.kind == TokenType.EXPR_NO_RETURN:
+        return code
     code += f"\n{nxt} = {prv}"
     return code
 
@@ -355,6 +359,8 @@ def tt_is_equal(node: IsNotEqualExpression):
 def tt_is_contains(node: IsContainsExpression):
     prv, nxt = left_right_var_names("value", node.variable)
     code = f"assert {node.item!r} in {prv}, {node.msg!r}"
+    if node.next.kind == TokenType.EXPR_NO_RETURN:
+        return code
     code += f"\n{nxt} = {prv}"
     return code
 
@@ -363,6 +369,8 @@ def tt_is_contains(node: IsContainsExpression):
 def tt_is_regex(node: IsRegexMatchExpression):
     prv, nxt = left_right_var_names("value", node.variable)
     code = f"assert re.search({node.pattern!r}, {prv}), {node.msg!r}"
+    if node.next.kind == TokenType.EXPR_NO_RETURN:
+        return code
     code += f"\n{nxt} = {prv}"
     return code
 
@@ -420,8 +428,6 @@ def tt_raw_all(node: HtmlRawAllExpression) -> str:
 def tt_attr(node: HtmlAttrExpression):
     n = node.attr
     prv, nxt = left_right_var_names("value", node.variable)
-    # bs4 auto convert multiattr values to list
-    # most libs return attr value as string
     return f"{nxt} = {prv}.attributes[{n!r}]"
 
 
@@ -429,8 +435,6 @@ def tt_attr(node: HtmlAttrExpression):
 def tt_attr_all(node: HtmlAttrAllExpression):
     n = node.attr
     prv, nxt = left_right_var_names("value", node.variable)
-    # bs4 auto convert multiattr values to list
-    # most libs return attr value as string
     return f"{nxt} = [e.attributes[{n!r}] for e in {prv}]"
 
 
@@ -438,6 +442,8 @@ def tt_attr_all(node: HtmlAttrAllExpression):
 def tt_is_css(node: IsCssExpression):
     prv, nxt = left_right_var_names("value", node.variable)
     code = f"assert {prv}.css({node.query!r}), {node.msg!r}"
+    if node.next.kind == TokenType.EXPR_NO_RETURN:
+        return code
     code += f"\n{nxt} = {prv}"
     return code
 
