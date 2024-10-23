@@ -18,6 +18,10 @@ def wrap_double_quotes(s: str, escape_ch: str = "\\") -> str:
     return '"' + s.replace('"', escape_ch + '"') + '"'
 
 
+def wrap_backtick(s: str, escape_ch: str = "\\") -> str:
+    return '`' + s.replace('`', escape_ch + '`') + '`'
+
+
 def escape_str(
     s: str, pattern: str = r"[\-.^$*+?{}\[\]\\|()]", escape_ch: str = "\\"
 ) -> str:
