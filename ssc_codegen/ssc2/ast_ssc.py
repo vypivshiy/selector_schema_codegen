@@ -54,7 +54,11 @@ class TypeDefField(BaseAstNode):
     @property
     def nested_class(self) -> str | None:
         # backport TODO remove:
-        return self.parent.struct.name
+        if self.type == VariableType.NESTED:
+            nested_fn = [fn for fn in self.parent.struct.body if fn.name == self.name][0]
+            nested_class = [e for e in nested_fn.body if e.ret_type == VariableType.NESTED][0].schema
+            return nested_class
+        return None
 
 
 @dataclass(kw_only=True)
