@@ -152,7 +152,8 @@ def replace_enum_values(item):
 
 def build_fields_signature(raw_signature: Any) -> str:
     raw_signature = replace_enum_values(raw_signature)
-    return json.dumps(raw_signature, indent=2)
+    return json.dumps(raw_signature, indent=4)
+
 
 def build_ast_struct(schema: Type[BaseSchema], *, docstring_class_top: bool = False) -> StructParser:
     schema = check_schema(schema)
@@ -161,7 +162,7 @@ def build_ast_struct(schema: Type[BaseSchema], *, docstring_class_top: bool = Fa
     raw_signature = schema.__class_signature__()
     text_signature = build_fields_signature(raw_signature)
     doc = schema.__doc__ or ""
-    doc += '\n' + text_signature
+    doc += '\n\n' + text_signature
 
     start_parse_body: list[CallStructFunctionExpression] = []
     struct_parse_functions = []
