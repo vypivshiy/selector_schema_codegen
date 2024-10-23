@@ -75,7 +75,7 @@ def tt_typedef(node: TypeDef):
             type_ = f"T{node.body[-1].nested_class}"
         else:
             type_ = TYPES.get(value_ret)
-        code += f"final String key;\n"
+        code += "final String key;\n"
         code += f"final {type_} value;\n"
         code += f"T{node.name}" + '({required this.key, required this.value});\n'
         code += f'Map<String, {type_}> toMap()' + '{ return {key: value}; }\n'

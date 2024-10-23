@@ -2,7 +2,7 @@ from typing import TYPE_CHECKING, TypeAlias, Union, Type, Any
 
 from .tokens import StructType, VariableType, TokenType
 from .consts import RESERVED_METHODS, SIGNATURE_MAP
-from ..schema import BaseSchema
+from ssc_codegen.schema import BaseSchema
 
 if TYPE_CHECKING:
     from .document import BaseDocument

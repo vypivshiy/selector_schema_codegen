@@ -1,6 +1,6 @@
 from typing import Literal, TypeAlias
 
-from ssc_codegen.ssc2.tokens import VariableType
+from ssc_codegen.tokens import VariableType
 
 RESERVED_METHODS = {
     '__PRE_VALIDATE__', '__SPLIT_DOC__', '__KEY__', '__VALUE__', '__ITEM__', '__START_PARSE__'

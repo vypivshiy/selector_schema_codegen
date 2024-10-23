@@ -1,7 +1,0 @@
-{% macro typing(structs) %}
-    {% for st in structs %}
-{{ st.types.code }}
-    {% endfor %}
-{% endmacro %}
-
-{{ typing(structs) }}

@@ -1,84 +1,92 @@
-from typing import Callable, Tuple, TYPE_CHECKING, Optional
+from typing import Callable
 
-from ssc_codegen.expression import Expression
-from ssc_codegen.tokens import TokenType
-
-if TYPE_CHECKING:
-    from ssc_codegen.converters.generator import TemplateStruct
+from ..ast_ssc import (
+    BaseAstNode,
+    ModuleProgram,
+    StructParser,
+    Variable
+)
+from ..tokens import TokenType
 
 
 class BaseCodeConverter:
-    def __init__(
-            self,
-            *,
-            # code
-            indent_mul: int = 1,  # indent mul
-            chr_indent: str = "\t",  # indent char
-            end: str = "",  # end line of code
-            # default code wrapper
-            default_indent: int = 2,
-            type_prefix: str = "T_"
-    ):
-        self.type_prefix = type_prefix
-        self.definitions: dict[TokenType, Callable[[Expression], str]] = {}
-        self._cb_type_converter: Optional[Callable[["TemplateStruct"], str]] = None
-        self._indent = indent_mul
-        self._chr_indent = chr_indent
-        self._end = end
-        self._default_indent = default_indent
-        self._indent_state = False
+    """base code class converter"""
 
-    def __call__(self, for_definition: TokenType):
-        def decorator(func):
-            self.definitions[for_definition] = func
+    def __init__(self):
+        self.pre_definitions: dict[TokenType, Callable[[BaseAstNode], str]] = {}
+        self.post_definitions: dict[TokenType, Callable[[BaseAstNode], str]] = {}
+
+    def pre(self, for_definition: TokenType):
+        """before translate ast to code"""
+
+        def decorator(func: Callable[[BaseAstNode], str]):
+            self.pre_definitions[for_definition] = func
             return func
 
         return decorator
 
-    @property
-    def cb_type_converter(self):
-        return self._cb_type_converter
+    def post(self, for_definition: TokenType):
+        """after translate ast to code"""
 
-    @cb_type_converter.setter
-    def cb_type_converter(self, cb: Callable[["TemplateStruct"], str]):
-        self._cb_type_converter = cb
+        def decorator(func: Callable[[BaseAstNode], str]):
+            self.post_definitions[for_definition] = func
+            return func
 
-    def convert_types(self, struct: "TemplateStruct") -> str:
-        if not self.cb_type_converter:
-            raise AttributeError("Missing type_converter callback")
-        return self._cb_type_converter(struct)
+        return decorator
 
-    def convert(self, expr: Expression) -> str:
-        if expr.TOKEN_TYPE == TokenType.ST_METHOD:
-            self._indent_state = True
+    def _pre_convert_node(self, node: BaseAstNode) -> str:
+        if self.pre_definitions.get(node.kind):
+            return self.pre_definitions[node.kind](node)
+        return ""
 
-        if cb := self.definitions.get(expr.TOKEN_TYPE):
-            code = cb(expr)
-            if (
-                    self._indent_state
-                    and expr.TOKEN_TYPE is not TokenType.ST_METHOD
-            ):
-                if expr.TOKEN_TYPE in (TokenType.ST_RET, TokenType.ST_NO_RET):
-                    self._indent_state = False
-                return self._indent * self._chr_indent + code + self._end
-            return code + self._end
-        raise KeyError(f"Missing {expr.VARIABLE_TYPE!r} converter rule")
+    def _post_convert_node(self, node: BaseAstNode) -> str:
+        if self.post_definitions.get(node.kind):
+            return self.post_definitions[node.kind](node)
+        return ""
 
-    def convert_types(self, struct: "TemplateStruct", prefix: str = "T_") -> str:
-        pass
+    def convert_program(self,
+                        ast_program: ModuleProgram,
+                        comment: str = '') -> list[str]:
+        """convert module AST to code parts"""
+        acc = [comment]
+        result = self.convert(ast_program, acc)
+        return result
 
-    @staticmethod
-    def create_var_names(
-            expr: Expression, prefix: str = "var", sep: str = "_"
-    ) -> Tuple[str, str]:
-        """create var names aliases
+    def convert(self, ast_entry: BaseAstNode, acc: list[str] | None = None) -> list[str]:
+        """convert ast to code parts"""
+        acc = acc or []
+        if ast_entry.kind == TokenType.STRUCT and getattr(ast_entry, "docstring_class_top", False):
+            ast_entry: StructParser
+            acc.append(self._pre_convert_node(ast_entry.doc))
+            acc.append(self._post_convert_node(ast_entry.doc))
 
-        - 0 - LEFT VAR
-        - 1 - RIGHT VAR
+        acc.append(self._pre_convert_node(ast_entry))
+        if ast_entry.kind == TokenType.STRUCT:
+            ast_entry: StructParser
+            if not ast_entry.docstring_class_top:
+                acc.append(self._pre_convert_node(ast_entry.doc))
+                acc.append(self._post_convert_node(ast_entry.doc))
 
-        """
-        if expr.num == 0:
-            return prefix, "el"
-        elif expr.num == 1:
-            return f"{prefix}{sep}1", prefix
-        return f"{prefix}{sep}{expr.num}", f"{prefix}{sep}{expr.num - 1}"
+            acc.append(self._pre_convert_node(ast_entry.init))
+            acc.append(self._post_convert_node(ast_entry.init))
+        if getattr(ast_entry, "body", None):
+            if ast_entry.kind == TokenType.STRUCT_FIELD and ast_entry.default:
+                acc.append(self._pre_convert_node(ast_entry.default))
+
+            for ast_node in ast_entry.body:
+                self.convert(ast_node, acc)
+
+            if ast_entry.kind == TokenType.STRUCT_FIELD and ast_entry.default:
+                acc.append(self._post_convert_node(ast_entry.default))
+        acc.append(self._post_convert_node(ast_entry))
+        return acc
+
+
+def left_right_var_names(name: str, variable: Variable) -> tuple[str, str]:
+    """helper generate variable names"""
+    if variable.num == 0:
+        prev = name
+    else:
+        prev = f"{name}{variable.num}"
+    next_ = f"{name}{variable.num_next}"
+    return prev, next_

@@ -2,11 +2,11 @@
 from dataclasses import dataclass, field
 from typing import Final, Optional, Type, TYPE_CHECKING
 
-from ssc_codegen.ssc2.consts import M_START_PARSE, M_PRE_VALIDATE, M_SPLIT_DOC, M_VALUE, M_KEY, M_ITEM
-from ssc_codegen.ssc2.tokens import TokenType, VariableType, StructType
+from ssc_codegen.consts import M_START_PARSE, M_PRE_VALIDATE, M_SPLIT_DOC, M_VALUE, M_KEY, M_ITEM
+from ssc_codegen.tokens import TokenType, VariableType, StructType
 
 if TYPE_CHECKING:
-    from .schema import BaseSchema
+    pass
 
 @dataclass(kw_only=True)
 class BaseAstNode:
