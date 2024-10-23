@@ -1,4 +1,5 @@
 """high-level AST builder interface"""
+import re
 from typing import Optional, Type
 
 from typing_extensions import deprecated, Self
@@ -270,14 +271,28 @@ class StringDocument(BaseDocument):
         return self
 
     def re(self, pattern: str, group: int = 1) -> Self:
+        try:
+            re.compile(pattern)
+        except re.error as e:
+            raise SyntaxError("Wrong regular expression pattern") from e
         self._add(RegexExpression(pattern=pattern, group=group))
         return self
 
     def re_all(self, pattern: str) -> Self:
+        try:
+            re.compile(pattern)
+        except re.error as e:
+            raise SyntaxError("Wrong regular expression pattern") from e
+
         self._add(RegexAllExpression(pattern=pattern))
         return self
 
     def re_sub(self, pattern: str, repl: str = "") -> Self:
+        try:
+            re.compile(pattern)
+        except re.error as e:
+            raise SyntaxError("Wrong regular expression pattern") from e
+
         match self.stack_last_index:
             case VariableType.LIST_STRING:
                 self._add(MapRegexSubExpression(pattern=pattern, repl=repl))
