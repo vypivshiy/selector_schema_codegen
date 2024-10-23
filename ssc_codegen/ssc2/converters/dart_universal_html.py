@@ -1,6 +1,6 @@
 # TODO: required enchant, not tested
 from .base import BaseCodeConverter, left_right_var_names
-
+from .utils import to_upper_camel_case as up_camel, escape_str, wrap_double_quotes as wrap_q
 from ..ast_ssc import (
     StructParser,
     ModuleImports,
@@ -35,6 +35,7 @@ from ..ast_ssc import (
     IsCssExpression, IsXPathExpression, IsEqualExpression, IsContainsExpression,
     IsRegexMatchExpression, IsNotEqualExpression, StructInit
 )
+from ..consts import RESERVED_METHODS
 from ..tokens import TokenType, StructType, VariableType
 
 converter = BaseCodeConverter()
@@ -46,10 +47,9 @@ TYPES = {
     VariableType.OPTIONAL_LIST_STRING: "List<String>?"
 }
 
-RESERVED = ['__PRE_VALIDATE__', '__SPLIT_DOC__', '__KEY__', '__VALUE__', '__ITEM__']
-MAGIC_METHODS = {"__KEY__": "key",
-                 "__VALUE__": "value",
-                 "__ITEM__": "item",
+MAGIC_METHODS = {"__KEY__": "Key",
+                 "__VALUE__": "Value",
+                 "__ITEM__": "Item",
                  "__PRE_VALIDATE__": "_preValidate",
                  "__SPLIT_DOC__": "_splitDoc",
                  "__START_PARSE__": "parse"
@@ -58,8 +58,66 @@ MAGIC_METHODS = {"__KEY__": "key",
 
 @converter.pre(TokenType.TYPEDEF)
 def tt_typedef(node: TypeDef):
-    # TODO: implement generate structs, typing
+    t_name = f'class T{node.name}'
+
+    code = f"{t_name}" + '{\n'
+    if node.struct.type == StructType.DICT:
+        # class TNAME {
+        #   final String key;
+        #   final TYPE value;
+        #   TSubExampleStruct({required this.key, required this.value});
+        #   Map<String, String> toMap() {return {key: value};}
+        #   factory TNAME.fromMap(Map<String, dynamic> map) {
+        #     return TNAME(key: map.keys.first, text: map.values.first,);}
+        # }
+        value_ret = [f for f in node.body if f.name == '__VALUE__'][0].type
+        if node.body[-1].type == VariableType.NESTED:
+            type_ = f"T{node.body[-1].nested_class}"
+        else:
+            type_ = TYPES.get(value_ret)
+        code += f"final String key;\n"
+        code += f"final {type_} value;\n"
+        code += f"T{node.name}" + '({required this.key, required this.value});\n'
+        code += f'Map<String, {type_}> toMap()' + '{ return {key: value}; }\n'
+        code += f'factory T{node.name}.fromMap(Map<String, ' + type_ + '> map) { '
+        code += f'return T{node.name}(key: map.keys.first, value: map.values.first);' + '}'
+
+    elif node.struct.type in {StructType.ITEM, StructType.LIST}:
+        constructor_code = f"T{node.name}(" + "{"
+        to_map_code = "Map<String, dynamic> toMap() { return {"
+        from_map_code = f"factory T{node.name}.fromMap(Map<String, dynamic> map) " + "{ return " + f"T{node.name}("
+        for field in node.body:
+            if field.name in RESERVED_METHODS:
+                continue
+            if field.type == VariableType.NESTED:
+                type_ = f"T{node.body[-1].nested_class}"
+            else:
+                type_ = TYPES.get(field.type)
+            code += f"final {type_} {field.name}; "
+            constructor_code += f"required this.{field.name}, "
+            to_map_code += f'"{field.name}": {field.name}, '
+            from_map_code += f'{field.name}: map["{field.name}"], '
+        constructor_code += '});'
+        to_map_code += '};}'
+        from_map_code += ');}'
+        code += constructor_code + to_map_code + from_map_code
+
+    elif node.struct.type == StructType.FLAT_LIST:
+        value_ret = [f for f in node.body if f.name == '__ITEM__'][0].type
+        if node.body[-1].type == VariableType.NESTED:
+            type_ = f"T{node.body[-1].nested_class}"
+        else:
+            type_ = TYPES.get(value_ret)
+        code = f'typedef T{node.name} = List<{type_}>; '
+    return code
+
+
+@converter.post(TokenType.TYPEDEF)
+def tt_typedef(node: TypeDef):
+    if node.struct.type != StructType.FLAT_LIST:
+        return '}'
     return ''
+
 
 # dart API
 @converter.pre(TokenType.STRUCT)
@@ -147,7 +205,8 @@ def tt_part_document(_: PartDocFunction):
 @converter.pre(TokenType.STRUCT_FIELD)
 def tt_function(node: StructFieldFunction) -> str:
     name = MAGIC_METHODS.get(node.name, node.name)
-    # TODO: nested
+    if name == node.name:
+        name = up_camel(node.name)
     return f"_parse{name}(value)" + ' {'
 
 
@@ -158,7 +217,7 @@ def tt_function(_: StructFieldFunction) -> str:
 
 @converter.pre(TokenType.STRUCT_PARSE_START)
 def tt_start_parse(node: StartParseFunction) -> str:
-    code = f"{MAGIC_METHODS.get(node.name)}() " + '{\n'
+    code = f"T{node.parent.name} {MAGIC_METHODS.get(node.name)}() " + '{\n'
     if any(f.name == '__PRE_VALIDATE__' for f in node.body):
         n = MAGIC_METHODS.get('__PRE_VALIDATE__')
         code += f"{n}(selector);\n"
@@ -167,20 +226,23 @@ def tt_start_parse(node: StartParseFunction) -> str:
         case StructType.ITEM:
             body = 'Map<String, dynamic> items = {};\n'
             for f in node.body:
-                if f.name in RESERVED:
+                if f.name in RESERVED_METHODS:
                     continue
-                body += f'items[{f.name!r}] = _parse{f.name}(selector);\n'
-            return code + body + 'return items;'
+                name = up_camel(f.name)
+                body += f'items[{f.name!r}] = _parse{name}(selector);\n'
+            return code + body + f'return T{node.parent.name}.fromMap(items);'
         case StructType.LIST:
-            body = 'List<Map<String, dynamic>> items = [];\n'
+            # old signature: 'List<Map<String, dynamic>> items = [];\n'
+            body = f'List<T{node.name}> items = [];\n'
             n = MAGIC_METHODS.get('__SPLIT_DOC__')
             body += f'for (var e in {n}(selector)) ' + '{\n'
             body += 'Map<String, dynamic> tmpItem = {};\n'
             for f in node.body:
-                if f.name in RESERVED:
+                if f.name in RESERVED_METHODS:
                     continue
-                body += f'tmpItem[{f.name!r}] = _parse{f.name}(e);\n'
-            body += 'items.add(tmpItem); }'
+                name = up_camel(f.name)
+                body += f'tmpItem[{f.name!r}] = _parse{name}(e);\n'
+            body += f'items.add(T{node.parent.name}.fromMap(tmpItem)); ' + '}'
             return code + body + 'return items;'
         case StructType.DICT:
             body = "Map<String, dynamic> items = {};\n"
@@ -191,14 +253,15 @@ def tt_start_parse(node: StartParseFunction) -> str:
             body += f'for (var e in {part_m}(selector))' + '{'
             body += f'items[{key_m}(e)] = _parse{value_m}(e);'
             body += '}\n'
-            body += 'return items;'
+            body += f'return T{node.parent.name}.fromMap(items);'
             return code + body
         case StructType.FLAT_LIST:
-            body = 'List<dynamic> items = [];\n'
+            body = f'T{node.parent.name} items = [];\n'
             item_m = MAGIC_METHODS.get('__ITEM__')
             part_m = MAGIC_METHODS.get('__SPLIT_DOC__')
             body += f'for (var e in {part_m}(selector))' + '{\n'
-            body += f'items.add({item_m}(el));\n'
+            body += "Map<String, dynamic> tmpItem = {};\n"
+            body += f'items.add(_parse{item_m}(e));\n'
             body += '}\n'
             return code + body + 'return items;'
         case _:
@@ -239,9 +302,8 @@ def tt_string_format_all(node: MapFormatExpression) -> str:
 def tt_string_trim(node: TrimExpression) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
     chars = node.value
-    # FIXME: check regex failure, mirror chars
-    left = repr('^' + chars)
-    right = repr(chars + '$')
+    left = wrap_q('^' + escape_str(chars))
+    right = wrap_q(escape_str(chars + '$'))
     return f'var {nxt} = {prv}.replaceFirst(RegExp({left}), "").replaceFirst(RegExp({right}), "");'
 
 
@@ -249,9 +311,8 @@ def tt_string_trim(node: TrimExpression) -> str:
 def tt_string_trim_all(node: MapTrimExpression) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
     chars = node.value
-    # FIXME: check regex failure, mirror chars
-    left = repr('^' + chars)
-    right = repr(chars + '$')
+    left = wrap_q('^' + escape_str(chars))
+    right = wrap_q(escape_str(chars + '$'))
     return f'var {nxt} = {prv}.map((e) => e.replaceFirst(RegExp({left}), "").replaceFirst({right}, ""));'
 
 
@@ -259,8 +320,7 @@ def tt_string_trim_all(node: MapTrimExpression) -> str:
 def tt_string_ltrim(node: LTrimExpression) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
     chars = node.value
-    # FIXME: check regex failure, mirror chars
-    left = repr('^' + chars)
+    left = wrap_q('^' + escape_str(chars))
 
     return f'var {nxt} = {prv}.replaceFirst(RegExp({left}), "");'
 
@@ -269,7 +329,7 @@ def tt_string_ltrim(node: LTrimExpression) -> str:
 def tt_string_ltrim_all(node: MapLTrimExpression) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
     chars = node.value
-    left = repr('^' + chars)
+    left = wrap_q('^' + escape_str(chars))
 
     return f'var {nxt} = {prv}.map((e) => e.replaceFirst(RegExp({left}), ""));'
 
@@ -278,7 +338,7 @@ def tt_string_ltrim_all(node: MapLTrimExpression) -> str:
 def tt_string_rtrim(node: RTrimExpression) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
     chars = node.value
-    right = repr(chars + '$')
+    right = wrap_q(escape_str(chars + '$'))
 
     return f'var {nxt} = {prv}.replaceFirst(RegExp({right}), "");'
 
@@ -287,7 +347,7 @@ def tt_string_rtrim(node: RTrimExpression) -> str:
 def tt_string_rtrim_all(node: MapRTrimExpression) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
     chars = node.value
-    right = repr(chars + '$')
+    right = wrap_q(escape_str(chars + '$'))
 
     return f'var {nxt} = {prv}.map((e) => e.replaceFirst(RegExp({right}), ""));'
 
@@ -310,7 +370,7 @@ def tt_string_replace_all(node: MapReplaceExpression) -> str:
 def tt_string_split(node: SplitExpression) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
     sep = node.sep
-    return f"var {nxt} = {prv}.split({sep!r})"
+    return f"var {nxt} = {prv}.split({sep!r});"
 
 
 @converter.pre(TokenType.EXPR_REGEX)
@@ -368,6 +428,8 @@ def tt_join(node: JoinExpression):
 def tt_is_equal(node: IsEqualExpression):
     prv, nxt = left_right_var_names("value", node.variable)
     code = f"assert({prv} == {node.value}, {node.msg!r});\n"
+    if node.next.kind == TokenType.EXPR_NO_RETURN:
+        return code
     code += f"var {nxt} = {prv};"
     return code
 
@@ -376,6 +438,8 @@ def tt_is_equal(node: IsEqualExpression):
 def tt_is_not_equal(node: IsNotEqualExpression):
     prv, nxt = left_right_var_names("value", node.variable)
     code = f"assert({prv} != {node.value}, {node.msg!r});\n"
+    if node.next.kind == TokenType.EXPR_NO_RETURN:
+        return code
     code += f"var {nxt} = {prv};"
     return code
 
@@ -384,6 +448,8 @@ def tt_is_not_equal(node: IsNotEqualExpression):
 def tt_is_contains(node: IsContainsExpression):
     prv, nxt = left_right_var_names("value", node.variable)
     code = f"assert({prv} != null && {prv}.contains({node.item!r}), {node.msg!r});\n"
+    if node.next.kind == TokenType.EXPR_NO_RETURN:
+        return code
     code += f"var {nxt} = {prv};"
     return code
 
@@ -392,6 +458,8 @@ def tt_is_contains(node: IsContainsExpression):
 def tt_is_regex(node: IsRegexMatchExpression):
     prv, nxt = left_right_var_names("value", node.variable)
     code = f"assert({prv} != null && RegExp({node.pattern!r}).firstMatch({prv}) != null, {node.msg!r});\n"
+    if node.next.kind == TokenType.EXPR_NO_RETURN:
+        return code
     code += f"var {nxt} = {prv};"
     return code
 
@@ -463,10 +531,12 @@ def tt_attr_all(node: HtmlAttrAllExpression):
 def tt_is_css(node: IsCssExpression):
     prv, nxt = left_right_var_names("value", node.variable)
     code = f"assert({prv}.querySelector({node.query!r}), {node.msg!r});"
+    if node.next.kind == TokenType.EXPR_NO_RETURN:
+        return code
     code += f"\nvar {nxt} = {prv};"
     return code
 
 
 @converter.pre(TokenType.IS_XPATH)
 def tt_is_xpath(_: IsXPathExpression):
-    raise NotImplementedError("dart universal html not support xpath")
+    raise NotImplementedError("dart universal_html not support xpath")
