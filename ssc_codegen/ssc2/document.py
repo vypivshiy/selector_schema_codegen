@@ -319,9 +319,6 @@ class AssertDocument(BaseDocument):
 
 
 class NestedDocument(BaseDocument):
-    def sub_parser(self, schema: Type['BaseSchema'] | str) -> Self:
-        if isinstance(schema, str):
-            self._add(NestedExpression(schema=schema))
-        else:
-            self._add(NestedExpression(schema=schema.__name__))
+    def sub_parser(self, schema: Type['BaseSchema']) -> Self:
+        self._add(NestedExpression(schema_cls=schema))
         return self

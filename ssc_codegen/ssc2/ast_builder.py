@@ -1,7 +1,8 @@
+import json
 import warnings
 from pathlib import Path
 from types import ModuleType
-from typing import Type
+from typing import Type, Any
 
 from .ast_ssc import (
     ModuleProgram,
@@ -15,7 +16,7 @@ from .ast_ssc import (
     PreValidateFunction,
     ReturnExpression,
     NoReturnExpression, CallStructFunctionExpression, BaseExpression)
-from .consts import M_SPLIT_DOC, M_VALUE, M_KEY, M_ITEM
+from .consts import M_SPLIT_DOC, M_VALUE, M_KEY, M_ITEM, SIGNATURE_MAP
 from .document import BaseDocument
 from .schema import BaseSchema, MISSING_FIELD, ItemSchema, DictSchema, ListSchema, FlatListSchema
 from .tokens import VariableType, StructType, TokenType
@@ -134,11 +135,33 @@ def _fill_stack_variables(stack: list[BaseExpression], *, ret_expr: bool = True)
     return tmp_stack
 
 
+def replace_enum_values(item):
+    """
+    Recursively replaces Enum values with their underlying values.
+    Ignores strings and traverses dicts and lists.
+    """
+    if isinstance(item, VariableType):
+        return SIGNATURE_MAP.get(item)
+    elif isinstance(item, dict):
+        return {key: replace_enum_values(value) for key, value in item.items()}
+    elif isinstance(item, list):
+        return [replace_enum_values(element) for element in item]
+    else:
+        return item
+
+
+def build_fields_signature(raw_signature: Any) -> str:
+    raw_signature = replace_enum_values(raw_signature)
+    return json.dumps(raw_signature, indent=2)
+
 def build_ast_struct(schema: Type[BaseSchema], *, docstring_class_top: bool = False) -> StructParser:
     schema = check_schema(schema)
-    doc = schema.__doc__ or ""
     fields = schema.__get_mro_fields__()
-    # annotations = schema.__get_mro_annotations__() TODO: build signature
+
+    raw_signature = schema.__class_signature__()
+    text_signature = build_fields_signature(raw_signature)
+    doc = schema.__doc__ or ""
+    doc += '\n' + text_signature
 
     start_parse_body: list[CallStructFunctionExpression] = []
     struct_parse_functions = []

@@ -1,10 +1,12 @@
 """ast containers for representation module structure"""
 from dataclasses import dataclass, field
-from typing import Final, Optional
+from typing import Final, Optional, Type, TYPE_CHECKING
 
 from ssc_codegen.ssc2.consts import M_START_PARSE, M_PRE_VALIDATE, M_SPLIT_DOC, M_VALUE, M_KEY, M_ITEM
 from ssc_codegen.ssc2.tokens import TokenType, VariableType, StructType
 
+if TYPE_CHECKING:
+    from .schema import BaseSchema
 
 @dataclass(kw_only=True)
 class BaseAstNode:
@@ -387,11 +389,13 @@ class IsRegexMatchExpression(BaseExpression):
 @dataclass(kw_only=True)
 class NestedExpression(BaseExpression):
     kind: Final[TokenType] = TokenType.EXPR_NESTED
-    schema: str
-
+    schema_cls: Type['BaseSchema']
     accept_type: Final[VariableType] = VariableType.DOCUMENT
     ret_type: Final[VariableType] = VariableType.NESTED
 
+    @property
+    def schema(self):
+        return self.schema_cls.__name__
 
 @dataclass(kw_only=True)
 class ReturnExpression(BaseExpression):
