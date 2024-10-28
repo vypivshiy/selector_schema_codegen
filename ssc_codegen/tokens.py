@@ -37,20 +37,26 @@ class TokenType(IntEnum):
     # STRUCTS
     STRUCT = auto()
     STRUCT_INIT = auto()  # used for OOP, or init base class/struct attributes
-    STRUCT_FIELD = auto()
-    STRUCT_PRE_VALIDATE = auto()
-    STRUCT_PART_DOCUMENT = auto()
-    STRUCT_PARSE_START = auto()
-    STRUCT_CALL_FUNCTION = auto()
+    STRUCT_FIELD = auto()  # PARSE FUNCTION KEY
+    STRUCT_PRE_VALIDATE = auto()  # VALIDATE DOC INPUT BEFORE PARSE
+    STRUCT_PART_DOCUMENT = auto()  # SPLIT DOCUMENT TO PARTS
+    STRUCT_PARSE_START = auto()  # START PARSE ENTRYPOINT
+    STRUCT_CALL_FUNCTION = auto()  # CALL STRUCT_FIELD EXPR
 
-    # TYPING
+    # TYPES
     TYPEDEF = auto()
     TYPEDEF_FIELD = auto()
 
-    # EXPR
+    # FIRST
     EXPR_DEFAULT = auto()
+
+    # NESTED STRUCTS
     EXPR_NESTED = auto()
+
+    # RETURN EXPR (AUTO SET)
     EXPR_RETURN = auto()
+    # RETURN EXPR (AUTO SET)
+    # USED IN __PRE_VALIDATE__ ATTR
     EXPR_NO_RETURN = auto()
 
     # DOCUMENT
