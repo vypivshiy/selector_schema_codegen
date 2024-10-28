@@ -261,7 +261,7 @@ class StringDocument(BaseDocument):
         return self.repl(old, new)
 
     def repl(self, old: str, new: str) -> Self:
-        match self.stack_last_index:
+        match self.stack_last_ret:
             case VariableType.LIST_STRING:
                 self._add(MapReplaceExpression(old=old, new=new))
             case VariableType.STRING:
@@ -293,7 +293,7 @@ class StringDocument(BaseDocument):
         except re.error as e:
             raise SyntaxError("Wrong regular expression pattern") from e
 
-        match self.stack_last_index:
+        match self.stack_last_ret:
             case VariableType.LIST_STRING:
                 self._add(MapRegexSubExpression(pattern=pattern, repl=repl))
             case VariableType.STRING:
