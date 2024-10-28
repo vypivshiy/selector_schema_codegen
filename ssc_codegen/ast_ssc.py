@@ -1,12 +1,13 @@
 """ast containers for representation module structure"""
 from dataclasses import dataclass, field
-from typing import Final, Optional, Type, TYPE_CHECKING
+from typing import Final, Optional, Type, TYPE_CHECKING, Union
 
 from ssc_codegen.consts import M_START_PARSE, M_PRE_VALIDATE, M_SPLIT_DOC, M_VALUE, M_KEY, M_ITEM
 from ssc_codegen.tokens import TokenType, VariableType, StructType
 
 if TYPE_CHECKING:
-    pass
+    from .schema import BaseSchema
+
 
 @dataclass(kw_only=True)
 class BaseAstNode:
@@ -37,6 +38,7 @@ class Variable(BaseAstNode):
 class Docstring(BaseAstNode):
     kind: Final[TokenType] = TokenType.DOCSTRING
     value: str
+    parent: Optional[Union['StructParser', 'ModuleProgram']] = None  # LATE INIT in builder
 
 
 @dataclass(kw_only=True)
@@ -77,7 +79,7 @@ class TypeDef(BaseAstNode):
 @dataclass(kw_only=True)
 class BaseExpression(BaseAstNode):
     variable: Variable | None = None
-    parent: Optional['StructParser'] = None  # LATE INIT
+    parent: Optional[Union['StructFieldFunction', 'StartParseFunction', 'PreValidateFunction', 'PartDocFunction']] = None  # LATE INIT
     prev: Optional['BaseExpression'] = None  # LATE INIT
     next: Optional['BaseExpression'] = None  # LATE INIT
 
@@ -401,6 +403,7 @@ class NestedExpression(BaseExpression):
     def schema(self):
         return self.schema_cls.__name__
 
+
 @dataclass(kw_only=True)
 class ReturnExpression(BaseExpression):
     kind: Final[TokenType] = TokenType.EXPR_RETURN
@@ -449,12 +452,14 @@ class StructFieldFunction(__StructNode):
 class PreValidateFunction(__StructNode):
     kind: Final[TokenType] = TokenType.STRUCT_PRE_VALIDATE
     name: M_PRE_VALIDATE = '__PRE_VALIDATE__'
+    parent: Optional['StructParser'] = None  # LATE INIT
 
 
 @dataclass(kw_only=True)
 class PartDocFunction(__StructNode):
     kind: Final[TokenType] = TokenType.STRUCT_PART_DOCUMENT
     name: M_SPLIT_DOC = '__SPLIT_DOC__'
+    parent: Optional['StructParser'] = None  # LATE INIT
 
 
 @dataclass(kw_only=True)
@@ -484,6 +489,7 @@ class StructParser(BaseAstNode):
     doc: Docstring
     body: list[StructFieldFunction | StartParseFunction | PreValidateFunction | PartDocFunction]
     typedef: Optional['TypeDef'] = field(init=False)
+    parent: Optional[ModuleProgram] = None  # LATE INIT in builder
 
     def _build_typedef(self):
         ast_typedef = TypeDef(
