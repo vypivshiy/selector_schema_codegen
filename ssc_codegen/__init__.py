@@ -1,4 +1,5 @@
-from ssc_codegen.document import HTMLDocument, StringDocument, ArrayDocument, AssertDocument, NestedDocument, DefaultDocument
+from .document import HTMLDocument, StringDocument, ArrayDocument, AssertDocument, NestedDocument, DefaultDocument
+from .schema import ItemSchema, DictSchema, ListSchema, FlatListSchema
 
 
 class Document(HTMLDocument, StringDocument, ArrayDocument, AssertDocument, DefaultDocument):
@@ -17,5 +18,5 @@ def N() -> Nested:  # noqa
     return Nested()
 
 
-def R() -> Document():  # noqa
+def R() -> Document: # noqa
     return D().raw()
