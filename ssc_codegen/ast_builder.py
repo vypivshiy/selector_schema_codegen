@@ -15,9 +15,11 @@ from .ast_ssc import (
     PartDocFunction,
     PreValidateFunction,
     ReturnExpression,
-    NoReturnExpression, CallStructFunctionExpression, BaseExpression)
+    NoReturnExpression, CallStructFunctionExpression, BaseExpression, TypeDef
+)
 from .consts import M_SPLIT_DOC, M_VALUE, M_KEY, M_ITEM, SIGNATURE_MAP
 from .document import BaseDocument
+from .document_utlis import convert_css_to_xpath, convert_xpath_to_css
 from .schema import BaseSchema, MISSING_FIELD, ItemSchema, DictSchema, ListSchema, FlatListSchema
 from .tokens import VariableType, StructType, TokenType
 
@@ -155,7 +157,12 @@ def build_fields_signature(raw_signature: Any) -> str:
     return json.dumps(raw_signature, indent=4)
 
 
-def build_ast_struct(schema: Type[BaseSchema], *, docstring_class_top: bool = False) -> StructParser:
+def build_ast_struct(schema: Type[BaseSchema],
+                     *,
+                     docstring_class_top: bool = False,
+                     css_to_xpath: bool = False,
+                     xpath_to_css: bool = False,
+                     ) -> StructParser:
     schema = check_schema(schema)
     fields = schema.__get_mro_fields__()
 
@@ -169,6 +176,10 @@ def build_ast_struct(schema: Type[BaseSchema], *, docstring_class_top: bool = Fa
 
     for k, f in fields.items():
         check_field_expr(f)
+        if css_to_xpath:
+            f = convert_css_to_xpath(f)
+        elif xpath_to_css:
+            f = convert_xpath_to_css(f)
         match k:
             case '__PRE_VALIDATE__':
                 fn = PreValidateFunction(
@@ -212,7 +223,18 @@ def build_ast_struct(schema: Type[BaseSchema], *, docstring_class_top: bool = Fa
     return ast_struct_parser
 
 
-def build_ast_module(path: str | Path[str], *, docstring_class_top: bool = False) -> ModuleProgram:
+def build_ast_module(path: str | Path[str],
+                     *,
+                     docstring_class_top: bool = False,
+                     css_to_xpath: bool = False,
+                     xpath_to_css: bool = False,
+                     ) -> ModuleProgram:
+    if css_to_xpath and xpath_to_css:
+        raise AttributeError("Should be chosen one variant")
+
+    if xpath_to_css:
+        warnings.warn("Correct result output not guaranteed", category=RuntimeWarning)
+
     if isinstance(path, str):
         path = Path(path)
     module = ModuleType("_")
@@ -221,10 +243,17 @@ def build_ast_module(path: str | Path[str], *, docstring_class_top: bool = False
     module_doc = Docstring(value=module.__dict__.get('__doc__') or "")
 
     ast_imports = ModuleImports()
-    ast_structs = [build_ast_struct(sc, docstring_class_top=docstring_class_top) for sc in _extract_schemas(module)]
+    ast_structs = [build_ast_struct(sc, docstring_class_top=docstring_class_top,
+                                    xpath_to_css=xpath_to_css,
+                                    css_to_xpath=css_to_xpath)
+                   for sc in _extract_schemas(module)]
     ast_types = [st.typedef for st in ast_structs if st.typedef]
 
     ast_program = ModuleProgram(
         body=[module_doc, ast_imports] + ast_types + ast_structs,
     )
+    # links module
+    for node in ast_program.body:
+        if node.kind in (Docstring.kind, StructParser.kind, TypeDef.kind):
+            node.parent = ast_program
     return ast_program
