@@ -29,3 +29,7 @@ def py_naive_fix_indentation(code: list[str]) -> str:
         fixed_lines.append(ch * indent_size * indent_level + line)
         prev_line = line
     return '\n'.join(fixed_lines)
+
+
+def go_naive_fix_docstring(code: list[str]) -> str:
+    return '\n'.join([i for i in code if i])
