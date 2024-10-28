@@ -344,7 +344,7 @@ def tt_join(node: JoinExpression):
 @converter.pre(TokenType.IS_EQUAL)
 def tt_is_equal(node: IsEqualExpression):
     prv, nxt = left_right_var_names("value", node.variable)
-    code = f"assert {prv} == {node.value}, {node.msg!r}"
+    code = f"assert {prv} == {node.value!r}, {node.msg!r}"
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return code
     code += f"\n{nxt} = {prv}"
@@ -354,7 +354,7 @@ def tt_is_equal(node: IsEqualExpression):
 @converter.pre(TokenType.IS_NOT_EQUAL)
 def tt_is_not_equal(node: IsNotEqualExpression):
     prv, nxt = left_right_var_names("value", node.variable)
-    code = f"assert {prv} != {node.value}, {node.msg!r}"
+    code = f"assert {prv} != {node.value!r}, {node.msg!r}"
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return code
     code += f"\n{nxt} = {prv}"
