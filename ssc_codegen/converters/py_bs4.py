@@ -1,5 +1,4 @@
 from .py_base import BasePyCodeConverter, lr_var_names
-from .py_base import BasePyCodeConverter, lr_var_names
 from .templates import py
 from .utils import have_default_expr, find_nested_associated_typedef_by_st_field_fn
 from ..ast_ssc import (
@@ -13,7 +12,7 @@ from ..ast_ssc import (
     HtmlRawExpression, HtmlRawAllExpression,
     HtmlXpathExpression, HtmlXpathAllExpression,
 
-    IsCssExpression, IsXPathExpression
+    IsCssExpression, IsXPathExpression, PreValidateFunction
 )
 from ..tokens import TokenType, StructType, VariableType
 
@@ -48,6 +47,11 @@ def tt_init(_):
 @converter.pre(TokenType.IMPORTS)
 def tt_imports(_: ModuleImports) -> str:
     return py.BASE_IMPORTS + BS4_IMPORTS
+
+
+@converter.pre(TokenType.STRUCT_PRE_VALIDATE)
+def tt_pre_validate(node: PreValidateFunction) -> str:
+    return py.INDENT_METHOD + f"def {py.MAGIC_METHODS.get(node.name)}(self, value: Union[BeautifulSoup, Tag]) -> None:"
 
 
 @converter.pre(TokenType.STRUCT_PART_DOCUMENT)

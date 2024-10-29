@@ -1,13 +1,11 @@
-from .base import BaseCodeConverter, left_right_var_names
-
+from .base import BaseCodeConverter
+from .py_base import lr_var_names
+from .templates import py
+from .utils import find_nested_associated_typedef_by_st_field_fn, have_default_expr
 from ..ast_ssc import (
-    StructParser,
     ModuleImports,
     PreValidateFunction,
     StructFieldFunction,
-    Docstring,
-    StartParseFunction,
-    DefaultValueWrapper,
     PartDocFunction,
 
     HtmlCssExpression, HtmlCssAllExpression,
@@ -16,378 +14,156 @@ from ..ast_ssc import (
     HtmlRawExpression, HtmlRawAllExpression,
     HtmlXpathExpression, HtmlXpathAllExpression,
 
-    FormatExpression, MapFormatExpression,
-    TrimExpression, MapTrimExpression,
-    LTrimExpression, MapLTrimExpression,
-    RTrimExpression, MapRTrimExpression,
-    ReplaceExpression, MapReplaceExpression,
-    SplitExpression,
-
-    NestedExpression,
-    RegexExpression, RegexSubExpression, MapRegexSubExpression, RegexAllExpression,
-
-    ReturnExpression, NoReturnExpression,
-
-    TypeDef,
-    IndexDocumentExpression, IndexStringExpression, JoinExpression,
-
-    IsCssExpression, IsXPathExpression, IsEqualExpression, IsContainsExpression,
-    IsRegexMatchExpression, IsNotEqualExpression
+    IsCssExpression, IsXPathExpression
 )
 from ..tokens import TokenType, StructType, VariableType
 
 converter = BaseCodeConverter()
 
-TYPES = {
-    VariableType.STRING: "str",
-    VariableType.LIST_STRING: "List[str]",
-    VariableType.OPTIONAL_STRING: "Optional[str]",
-    VariableType.OPTIONAL_LIST_STRING: "Optional[List[str]]"
-}
-
-RESERVED = ['__PRE_VALIDATE__', '__SPLIT_DOC__', '__KEY__', '__VALUE__', '__ITEM__']
-MAGIC_METHODS = {"__KEY__": "key",
-                 "__VALUE__": "value",
-                 "__ITEM__": "item",
-                 "__PRE_VALIDATE__": "_pre_validate",
-                 "__SPLIT_DOC__": "_split_doc",
-                 "__START_PARSE__": "parse"
-                 }
-
-
-@converter.pre(TokenType.TYPEDEF)
-def tt_typedef(node: TypeDef):
-    def _fetch_node_type(node_):
-        if node_.type == VariableType.NESTED:
-            return f"T_{node_.nested_class}"
-        return TYPES.get(node_.type)
-
-    t_name = f'T_{node.name}'
-    # DICT schema
-    if all(f.name in ["__KEY__", '__VALUE__'] for f in node.body):
-        value_ret = [f for f in node.body if f.name == '__VALUE__'][0].type
-        if node.body[-1].type == VariableType.NESTED:
-            type_ = f"T_{node.body[-1].nested_class}"
-        else:
-            type_ = TYPES.get(value_ret)
-        body = f"Dict[str, {type_}]"
-
-    # Flat list schema
-    elif all(f.name in ["__ITEM__"] for f in node.body):
-        value_ret = [f for f in node.body if f.name == '__ITEM__'][0].type
-        if node.body[-1].type == VariableType.NESTED:
-            type_ = f"T_{node.body[-1].nested_class}"
-        else:
-            type_ = TYPES.get(value_ret)
-        body = f"List[{type_}]"
-    else:
-        body = f"TypedDict({t_name!r}," + '{' + ', '.join(
-            f'{f.name!r}: {_fetch_node_type(f)}' for f in node.body) + '})'
-    return f"T_{node.name} = {body}"
-
-
-# python API
-@converter.pre(TokenType.STRUCT)
-def tt_struct(node: StructParser) -> str:
-    return f"class {node.name}:"
+SLAX_IMPORTS = "from selectolax.parser import HTMLParser, Node"
+SLAX_INIT_BODY = "self._doc=HTMLParser(document) if isinstance(document, str) else document"
+E_SLAX_CSS = "{} = {}.css_first({})"
+E_SLAX_CSS_ALL = "{} = {}.css({})"
+E_SLAX_TEXT = "{} = {}.text()"
+E_SLAX_TEXT_ALL = "{} = [e.text() for e in {}]"
+E_SLAX_RAW = "{} = {}.html"
+E_SLAX_RAW_ALL = "{} = [e.html for e in {}]"
+E_SLAX_ATTR = "{} = {}.attributes[{}]"
+E_SLAX_ATTR_ALL = "{} = [e.attributes[{}] for e in {}]"
+E_IS_CSS = "assert {}.css_first({}), {}"
 
 
 @converter.pre(TokenType.STRUCT_INIT)
 def tt_init(_) -> str:
-    return "def __init__(self, document: Union[str, HTMLParser, Node]):"
+    return py.CLS_INIT_HEAD.format('Union[str, HTMLParser, Node]')
 
 
 @converter.post(TokenType.STRUCT_INIT)
 def tt_init(_):
-    return "self._doc=HTMLParser(document) if isinstance(document, str) else document"
-
-
-@converter.pre(TokenType.DOCSTRING)
-def tt_docstring(node: Docstring) -> str:
-    if node.value:
-        return f'"""' + node.value + '"""'
-    return ''
+    return py.INDENT_METHOD_BODY + SLAX_INIT_BODY
 
 
 @converter.pre(TokenType.IMPORTS)
 def tt_imports(_: ModuleImports) -> str:
-    buildin_imports = "from __future__ import annotations\n"
-    buildin_imports += "import re\n"
-    buildin_imports += "from typing import List, Dict, TypedDict, Union, Optional\n"
-    buildin_imports += "from contextlib import suppress\n"
-    buildin_imports += "from selectolax.parser import HTMLParser, Node\n"
-    return buildin_imports
-
-
-@converter.pre(TokenType.EXPR_RETURN)
-def tt_ret(node: ReturnExpression) -> str:
-    _, nxt = left_right_var_names("value", node.variable)
-    return f"return {nxt}"
-
-
-@converter.pre(TokenType.EXPR_NO_RETURN)
-def tt_no_ret(_: NoReturnExpression) -> str:
-    return "return"
-
-
-@converter.pre(TokenType.EXPR_NESTED)
-def tt_nested(node: NestedExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    return f"{nxt} = {node.schema}({prv}).parse()"
+    imports = py.BASE_IMPORTS + SLAX_IMPORTS
+    return imports
 
 
 @converter.pre(TokenType.STRUCT_PRE_VALIDATE)
 def tt_pre_validate(node: PreValidateFunction) -> str:
-    return f"def {MAGIC_METHODS.get(node.name)}(self, value) -> None:"
+    return py.INDENT_METHOD + f"def {py.MAGIC_METHODS.get(node.name)}(self, value: Union[HTMLParser, Node]) -> None:"
 
 
 @converter.pre(TokenType.STRUCT_PART_DOCUMENT)
 def tt_part_document(node: PartDocFunction):
-    return f"def {MAGIC_METHODS.get('__SPLIT_DOC__')}(self, value: Union[str, HTMLParser, Node]) -> List[Node]:"
+    name = py.MAGIC_METHODS.get(node.name)
+    return py.INDENT_METHOD + py.CLS_PART_DOC_HEAD.format(name, 'Union[str, HTMLParser, Node]', 'List[Node]')
 
 
 @converter.pre(TokenType.STRUCT_FIELD)
 def tt_function(node: StructFieldFunction) -> str:
-    name = MAGIC_METHODS.get(node.name, node.name)
-    if node.body[-1].variable.type == VariableType.NESTED:
-        type_ = f"T_{node.body[-2].schema}"  # noqa
+    name = py.MAGIC_METHODS.get(node.name, node.name)
+    if node.ret_type == VariableType.NESTED:
+        t_def = find_nested_associated_typedef_by_st_field_fn(node)
+        if t_def.struct.type == StructType.LIST:
+            t_name = py.TYPE_PREFIX.format(t_def.struct.name)
+            type_ = py.TYPE_LIST.format(t_name)
+        else:
+            type_ = py.TYPE_PREFIX.format(t_def.struct.name)
     else:
-        type_ = TYPES.get(node.body[-1].variable.type)
-    return f"def _parse_{name}(self, value: Union[str, HTMLParser, Node]) -> {type_}:"
-
-
-@converter.pre(TokenType.STRUCT_PARSE_START)
-def tt_start_parse(node: StartParseFunction) -> str:
-    head = f"def {MAGIC_METHODS.get(node.name)}(self)"
-    if node.type == StructType.LIST:
-        return f"{head} -> List[T_{node.parent.typedef.name}]:"
-    return f"{head} -> T_{node.parent.typedef.name}:"
-
-
-@converter.post(TokenType.STRUCT_PARSE_START)
-def tt_start_parse(node: StartParseFunction):
-    code = ""
-    if any(f.name == '__PRE_VALIDATE__' for f in node.body):
-        n = MAGIC_METHODS.get('__PRE_VALIDATE__')
-        code += f"self.{n}(self._doc)\n"
-
-    match node.type:
-        case StructType.ITEM:
-            body = ', '.join(
-                [f'"{f.name}": self._parse_{f.name}(self._doc)' for f in node.body if f.name not in RESERVED])
-            body = '{' + body + '}'
-        case StructType.LIST:
-            body = ', '.join(
-                [f'"{f.name}": self._parse_{f.name}(e)' for f in node.body if f.name not in RESERVED]
-            )
-            body = '{' + body + '}'
-            n = MAGIC_METHODS.get('__SPLIT_DOC__')
-            body = f"[{body} for e in self.{n}(self._doc)]\n"
-        case StructType.DICT:
-            key_m = MAGIC_METHODS.get('__KEY__')
-            value_m = MAGIC_METHODS.get('__VALUE__')
-            part_m = MAGIC_METHODS.get('__SPLIT_DOC__')
-            body = '{' + f'self._parse_{key_m}(e): self._parse_{value_m}(e) for e in self.{part_m}(self._doc)' + '}'
-        case StructType.FLAT_LIST:
-            item_m = MAGIC_METHODS.get('__ITEM__')
-            part_m = MAGIC_METHODS.get('__SPLIT_DOC__')
-            body = f'[self._parse_{item_m}(e) for e in self.{part_m}(self._doc)]'
-        case _:
-            raise NotImplementedError("Unknown struct type")
-    return code + f"return {body}"
-
-
-@converter.pre(TokenType.EXPR_DEFAULT)
-def tt_default(node: DefaultValueWrapper) -> str:
-    return "with suppress(Exception):"
-
-
-@converter.post(TokenType.EXPR_DEFAULT)
-def tt_default(node: DefaultValueWrapper) -> str:
-    val = repr(node.value) if isinstance(node.value, str) else node.value
-    return f"return {val}"
-
-
-@converter.pre(TokenType.EXPR_STRING_FORMAT)
-def tt_string_format(node: FormatExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    template = node.fmt.replace('{{}}', "{}")
-    return nxt + ' = ' + f"{template!r}.format({prv})"
-
-
-@converter.pre(TokenType.EXPR_LIST_STRING_FORMAT)
-def tt_string_format_all(node: MapFormatExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    template = node.fmt.replace('{{}}', "{}")
-    return nxt + ' = ' + f"[{template!r}.format(e) for e in {prv}]"
-
-
-@converter.pre(TokenType.EXPR_STRING_TRIM)
-def tt_string_trim(node: TrimExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    chars = node.value
-    return f"{nxt} = {prv}.strip({chars!r})"
-
-
-@converter.pre(TokenType.EXPR_LIST_STRING_TRIM)
-def tt_string_trim_all(node: MapTrimExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    chars = node.value
-    return f"{nxt} = [e.strip({chars!r}) for e in {prv}]"
-
-
-@converter.pre(TokenType.EXPR_STRING_LTRIM)
-def tt_string_ltrim(node: LTrimExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    chars = node.value
-    return f"{nxt} = {prv}.lstrip({chars!r})"
-
-
-@converter.pre(TokenType.EXPR_LIST_STRING_LTRIM)
-def tt_string_ltrim_all(node: MapLTrimExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    chars = node.value
-    return f"{nxt} = [e.lstrip({chars!r}) for e in {prv}]"
-
-
-@converter.pre(TokenType.EXPR_STRING_RTRIM)
-def tt_string_rtrim(node: RTrimExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    chars = node.value
-    return f"{nxt} = {prv}.rstrip({chars!r})"
-
-
-@converter.pre(TokenType.EXPR_LIST_STRING_RTRIM)
-def tt_string_rtrim_all(node: MapRTrimExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    chars = node.value
-    return f"{nxt} = [e.rstrip({chars!r}) for e in {prv}]"
-
-
-@converter.pre(TokenType.EXPR_STRING_REPLACE)
-def tt_string_replace(node: ReplaceExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    old, new = node.old, node.new
-    return f"{nxt} = {prv}.replace({old!r}, {new!r})"
-
-
-@converter.pre(TokenType.EXPR_LIST_STRING_REPLACE)
-def tt_string_replace_all(node: MapReplaceExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    old, new = node.old, node.new
-    return f"{nxt} = [e.replace({old!r}, {new!r}) for e in {prv}]"
-
-
-@converter.pre(TokenType.EXPR_STRING_SPLIT)
-def tt_string_split(node: SplitExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    sep = node.sep
-    return f"{nxt} = {prv}.split({sep!r})"
-
-
-@converter.pre(TokenType.EXPR_REGEX)
-def tt_regex(node: RegexExpression):
-    prv, nxt = left_right_var_names("value", node.variable)
-    pattern = node.pattern
-    group = node.group
-    return f"{nxt} = re.search({pattern!r}, {prv})[{group}]"
-
-
-@converter.pre(TokenType.EXPR_REGEX_ALL)
-def tt_regex_all(node: RegexAllExpression):
-    prv, nxt = left_right_var_names("value", node.variable)
-    pattern = node.pattern
-    return f"{nxt} = re.findall({pattern!r}, {prv})"
-
-
-@converter.pre(TokenType.EXPR_REGEX_SUB)
-def tt_regex_sub(node: RegexSubExpression):
-    prv, nxt = left_right_var_names("value", node.variable)
-    pattern = node.pattern
-    repl = node.repl
-    return f"{nxt} = re.sub({pattern!r}, {repl!r}, {prv})"
-
-
-@converter.pre(TokenType.EXPR_LIST_REGEX_SUB)
-def tt_regex_sub_all(node: MapRegexSubExpression):
-    prv, nxt = left_right_var_names("value", node.variable)
-    pattern = node.pattern
-    repl = node.repl
-    return f"{nxt} = [re.sub({pattern!r}, {repl!r}, e) for e in {prv}]"
-
-
-@converter.pre(TokenType.EXPR_LIST_STRING_INDEX)
-def tt_string_index(node: IndexStringExpression):
-    prv, nxt = left_right_var_names("value", node.variable)
-    return f"{nxt} = {prv}[{node.value}]"
-
-
-@converter.pre(TokenType.EXPR_LIST_DOCUMENT_INDEX)
-def tt_doc_index(node: IndexDocumentExpression):
-    prv, nxt = left_right_var_names("value", node.variable)
-    return f"{nxt} = {prv}[{node.value}]"
-
-
-@converter.pre(TokenType.EXPR_LIST_JOIN)
-def tt_join(node: JoinExpression):
-    prv, nxt = left_right_var_names("value", node.variable)
-    sep = node.sep
-    return f"{nxt} = {sep!r}.join({prv})"
-
-
-@converter.pre(TokenType.IS_EQUAL)
-def tt_is_equal(node: IsEqualExpression):
-    prv, nxt = left_right_var_names("value", node.variable)
-    code = f"assert {prv} == {node.value!r}, {node.msg!r}"
-    if node.next.kind == TokenType.EXPR_NO_RETURN:
-        return code
-    code += f"\n{nxt} = {prv}"
-    return code
-
-
-@converter.pre(TokenType.IS_NOT_EQUAL)
-def tt_is_equal(node: IsNotEqualExpression):
-    prv, nxt = left_right_var_names("value", node.variable)
-    code = f"assert {prv} != {node.value!r}, {node.msg!r}"
-    if node.next.kind == TokenType.EXPR_NO_RETURN:
-        return code
-    code += f"\n{nxt} = {prv}"
-    return code
-
-
-@converter.pre(TokenType.IS_CONTAINS)
-def tt_is_contains(node: IsContainsExpression):
-    prv, nxt = left_right_var_names("value", node.variable)
-    code = f"assert {node.item!r} in {prv}, {node.msg!r}"
-    if node.next.kind == TokenType.EXPR_NO_RETURN:
-        return code
-    code += f"\n{nxt} = {prv}"
-    return code
-
-
-@converter.pre(TokenType.IS_REGEX_MATCH)
-def tt_is_regex(node: IsRegexMatchExpression):
-    prv, nxt = left_right_var_names("value", node.variable)
-    code = f"assert re.search({node.pattern!r}, {prv}), {node.msg!r}"
-    if node.next.kind == TokenType.EXPR_NO_RETURN:
-        return code
-    code += f"\n{nxt} = {prv}"
-    return code
+        type_ = py.TYPES.get(node.ret_type)
+    p_type = "Union[str, HTMLParser, Node]"
+    return py.INDENT_METHOD + py.FN_PARSE.format(name, p_type, type_)
 
 
 # selectolax API
 @converter.pre(TokenType.EXPR_CSS)
 def tt_css(node: HtmlCssExpression) -> str:
-    q = node.query
-    prv, nxt = left_right_var_names("value", node.variable)
-    return f"{nxt} = {prv}.css_first({q!r})"
+    q = repr(node.query)
+    prv, nxt = lr_var_names(variable=node.variable)
+    code = E_SLAX_CSS.format(nxt, prv, q)
+    if have_default_expr(node):
+        return py.INDENT_DEFAULT_BODY + code
+    return py.INDENT_METHOD_BODY + code
 
 
 @converter.pre(TokenType.EXPR_CSS_ALL)
 def tt_css_all(node: HtmlCssAllExpression) -> str:
-    q = node.query
-    prv, nxt = left_right_var_names("value", node.variable)
-    return f"{nxt} = {prv}.css({q!r})"
+    q = repr(node.query)
+    prv, nxt = lr_var_names(variable=node.variable)
+    code = E_SLAX_CSS_ALL.format(nxt, prv, q)
+    if have_default_expr(node):
+        return py.INDENT_DEFAULT_BODY + code
+    return py.INDENT_METHOD_BODY + code
+
+
+@converter.pre(TokenType.EXPR_TEXT)
+def tt_text(node: HtmlTextExpression) -> str:
+    prv, nxt = lr_var_names(variable=node.variable)
+    code = E_SLAX_TEXT.format(nxt, prv)
+    if have_default_expr(node):
+        return py.INDENT_DEFAULT_BODY + code
+    return py.INDENT_METHOD_BODY + code
+
+
+@converter.pre(TokenType.EXPR_TEXT_ALL)
+def tt_text_all(node: HtmlTextAllExpression) -> str:
+    prv, nxt = lr_var_names(variable=node.variable)
+    code = E_SLAX_TEXT_ALL.format(nxt, prv)
+    if have_default_expr(node):
+        return py.INDENT_DEFAULT_BODY + code
+    return py.INDENT_METHOD_BODY + code
+
+
+@converter.pre(TokenType.EXPR_RAW)
+def tt_raw(node: HtmlRawExpression) -> str:
+    prv, nxt = lr_var_names(variable=node.variable)
+    code = E_SLAX_RAW.format(nxt, prv)
+    if have_default_expr(node):
+        return py.INDENT_DEFAULT_BODY + code
+    return py.INDENT_METHOD_BODY + code
+
+
+@converter.pre(TokenType.EXPR_RAW_ALL)
+def tt_raw_all(node: HtmlRawAllExpression) -> str:
+    prv, nxt = lr_var_names(variable=node.variable)
+    code = E_SLAX_RAW_ALL.format(nxt, prv)
+    if have_default_expr(node):
+        return py.INDENT_DEFAULT_BODY + code
+    return py.INDENT_METHOD_BODY + code
+
+
+@converter.pre(TokenType.EXPR_ATTR)
+def tt_attr(node: HtmlAttrExpression):
+    attr = repr(node.attr)
+    prv, nxt = lr_var_names(variable=node.variable)
+    code = E_SLAX_ATTR.format(nxt, prv, attr)
+    if have_default_expr(node):
+        return py.INDENT_DEFAULT_BODY + code
+    return py.INDENT_METHOD_BODY + code
+
+
+@converter.pre(TokenType.EXPR_ATTR_ALL)
+def tt_attr_all(node: HtmlAttrAllExpression):
+    attr = repr(node.attr)
+    prv, nxt = lr_var_names(variable=node.variable)
+
+    code = E_SLAX_ATTR_ALL.format(nxt, attr, prv)
+    if have_default_expr(node):
+        return py.INDENT_DEFAULT_BODY + code
+    return py.INDENT_METHOD_BODY + code
+
+
+@converter.pre(TokenType.IS_CSS)
+def tt_is_css(node: IsCssExpression):
+    prv, nxt = lr_var_names(variable=node.variable)
+    q = repr(node.query)
+    msg = repr(node.msg)
+    code = E_IS_CSS.format(prv, q, msg)
+    indent = py.INDENT_DEFAULT_BODY if have_default_expr(node) else py.INDENT_METHOD_BODY
+    if node.next.kind == TokenType.EXPR_NO_RETURN:
+        return indent + code
+    return f'{indent}{code}\n{indent}{nxt} = {prv}'
 
 
 @converter.pre(TokenType.EXPR_XPATH)
@@ -398,54 +174,6 @@ def tt_xpath(_: HtmlXpathExpression) -> str:
 @converter.pre(TokenType.EXPR_XPATH_ALL)
 def tt_xpath_all(_: HtmlXpathAllExpression) -> str:
     raise NotImplementedError("Selectolax not support xpath")
-
-
-@converter.pre(TokenType.EXPR_TEXT)
-def tt_text(node: HtmlTextExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    return f"{nxt} = {prv}.text()"
-
-
-@converter.pre(TokenType.EXPR_TEXT_ALL)
-def tt_text_all(node: HtmlTextAllExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    return f"{nxt} = [e.text() for e in {prv}]"
-
-
-@converter.pre(TokenType.EXPR_RAW)
-def tt_raw(node: HtmlRawExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    return f"{nxt} = {prv}.html"
-
-
-@converter.pre(TokenType.EXPR_RAW_ALL)
-def tt_raw_all(node: HtmlRawAllExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    return f"{nxt} = [e.html for e in {prv}]"
-
-
-@converter.pre(TokenType.EXPR_ATTR)
-def tt_attr(node: HtmlAttrExpression):
-    n = node.attr
-    prv, nxt = left_right_var_names("value", node.variable)
-    return f"{nxt} = {prv}.attributes[{n!r}]"
-
-
-@converter.pre(TokenType.EXPR_ATTR_ALL)
-def tt_attr_all(node: HtmlAttrAllExpression):
-    n = node.attr
-    prv, nxt = left_right_var_names("value", node.variable)
-    return f"{nxt} = [e.attributes[{n!r}] for e in {prv}]"
-
-
-@converter.pre(TokenType.IS_CSS)
-def tt_is_css(node: IsCssExpression):
-    prv, nxt = left_right_var_names("value", node.variable)
-    code = f"assert {prv}.css({node.query!r}), {node.msg!r}"
-    if node.next.kind == TokenType.EXPR_NO_RETURN:
-        return code
-    code += f"\n{nxt} = {prv}"
-    return code
 
 
 @converter.pre(TokenType.IS_XPATH)
