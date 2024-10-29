@@ -1,9 +1,11 @@
+import os
 import sys
+import warnings
 
 from ssc_codegen.cli_utils import import_converter, cb_folder_out, cb_check_ssc_files, PyLIBS, JsLIBS, DartLIBS, GoLIBS, \
-    ConverterLike
+    ConverterLike, create_fmt_cmd
 from ssc_codegen.ast_builder import build_ast_module
-from ssc_codegen.converters.tools import py_naive_fix_indentation, go_naive_fix_docstring
+from ssc_codegen.converters.tools import go_naive_fix_docstring
 
 if sys.version_info <= (3, 10):
     from enum import StrEnum
@@ -29,75 +31,113 @@ def generate_code(converter: ConverterLike,
                   ssc_files: List[Path[str]],
                   suffix: str,
                   comment_str: str,
-                  code_cb: Callable[[list[str]], str] = lambda c: '\n'.join(c)) -> None:
+                  fmt_cmd: list[str],
+                  code_cb: Callable[[list[str]], str] = lambda c: '\n'.join(c),
+                  docstring_class_top: bool = False) -> None:
+    print("Generating code start")
     for file_cfg in ssc_files:
-        out_file = f'{prefix}{file_cfg.name}{suffix}'
-        ast_module = build_ast_module(file_cfg)
+        name = file_cfg.name.split('.')[0]
+        out_file = f'{prefix}{name}{suffix}'
+        print(f"Make AST {file_cfg.name}...")
+        ast_module = build_ast_module(file_cfg, docstring_class_top=docstring_class_top)
+        print(f"Convert to code {file_cfg.name}...")
         code = converter.convert_program(ast_module,
                                          comment=comment_str)
         code = code_cb(code)
         out_path = out / out_file
+        print(f"save {str(out_path)}")
         with open(out_path, 'w') as f:
             f.write(code)
+    if fmt_cmd:
+        print("format code")
+        for cmd in fmt_cmd:
+            os.system(cmd)
+    print("done")
 
 
 @app.command('py', help="generate python modules")
 def gen_py(
         ssc_files: Annotated[List[Path], Argument(help="ssc-gen config files", callback=cb_check_ssc_files)],
-        out: Annotated[Path[str], Option(help="output folder", callback=cb_folder_out)],
-        lib: Annotated[PyLIBS, Option(help='core parser library')],
-        prefix: Annotated[str, Option(help='out files prefix')] = "",
-        suffix: Annotated[str, Option(help='out files suffix')] = ".py",
+        out: Annotated[Path[str], Option("--out", "-o", help="output folder", callback=cb_folder_out)],
+        lib: Annotated[PyLIBS, Option("--lib", "-i", help='core parser library')] = PyLIBS.BS4,
+        prefix: Annotated[str, Option("--prefix", "-p", help='out files prefix')] = "",
+        suffix: Annotated[str, Option("--suffix", "-s", help='out files suffix')] = ".py",
+        fmt: Annotated[bool, Option(help="format code output", is_flag=True)] = True,
 
 ):
-    converter = import_converter(f'py_{lib.value}.py')
-    generate_code(converter, out, prefix, ssc_files, suffix, f'# {COMMENT_STRING}',
-                  py_naive_fix_indentation)
-
-
-
+    converter = import_converter(f'py_{lib.value}')
+    if fmt:
+        commands = ['unimport {}', 'ruff format {}']
+        fmt_cmd = create_fmt_cmd(ssc_files, prefix, suffix, out, commands)
+    else:
+        fmt_cmd = []
+    generate_code(converter,
+                  out,
+                  prefix,
+                  ssc_files,
+                  suffix,
+                  f'# {COMMENT_STRING}',
+                  fmt_cmd,
+                  )
 
 
 @app.command('js', help="generate javascript modules")
 def gen_js(
         ssc_files: Annotated[List[Path], Argument(help="ssc-gen config files", callback=cb_check_ssc_files)],
         out: Annotated[Path[str], Option(help="output folder", callback=cb_folder_out)],
-        lib: Annotated[JsLIBS, Option(help='core parser library')] = JsLIBS.PURE,
-        prefix: Annotated[str, Option(help='out files prefix')] = "",
-        suffix: Annotated[str, Option(help='out files suffix')] = ".js",
+        lib: Annotated[JsLIBS, Option("--lib", "-i", help='core parser library')] = JsLIBS.PURE,
+        prefix: Annotated[str, Option("--prefix", "-p", help='out files prefix')] = "",
+        suffix: Annotated[str, Option("--suffix", "-s", help='out files suffix')] = ".js",
+        fmt: Annotated[bool, Option(help="format code output", is_flag=True)] = True,
 ):
     converter = import_converter(f'js_{lib.value}.py')
-    generate_code(converter, out, prefix, ssc_files, suffix, f'// {COMMENT_STRING}')
+    if fmt:
+        commands = []
+        fmt_cmd = create_fmt_cmd(ssc_files, prefix, suffix, out, commands)
+    else:
+        fmt_cmd = []
+    generate_code(converter, out, prefix, ssc_files, suffix, f'// {COMMENT_STRING}', fmt_cmd)
 
 
 @app.command('dart', help="generate dart modules")
 def gen_dart(
         ssc_files: Annotated[List[Path], Argument(help="ssc-gen config files", callback=cb_check_ssc_files)],
         out: Annotated[Path[str], Option(help="output folder", callback=cb_folder_out)],
-        lib: Annotated[DartLIBS, Option(help='core parser library')] = DartLIBS.UNIVERSAL_HTML,
-        prefix: Annotated[str, Option(help='out files prefix')] = "",
-        suffix: Annotated[str, Option(help='out files suffix')] = ".dart",
+        lib: Annotated[DartLIBS, Option("--lib", "-i", help='core parser library')] = DartLIBS.UNIVERSAL_HTML,
+        prefix: Annotated[str, Option("--prefix", "-p", help='out files prefix')] = "",
+        suffix: Annotated[str, Option("--suffix", "-s", help='out files suffix')] = ".dart",
+        fmt: Annotated[bool, Option(help="format code output", is_flag=True)] = True,
 ):
     converter = import_converter(f'dart_{lib.value}.py')
-    generate_code(converter, out, prefix, ssc_files, suffix, f'// {COMMENT_STRING}')
+    if fmt:
+        commands = ['dart format {}', 'dart fix {}']
+        fmt_cmd = create_fmt_cmd(ssc_files, prefix, suffix, out, commands)
+    else:
+        fmt_cmd = []
+    generate_code(converter, out, prefix, ssc_files, suffix, f'// {COMMENT_STRING}', fmt_cmd,
+                  docstring_class_top=True)
 
 
 @app.command('go', help="generate golang modules")
 def gen_go(
         ssc_files: Annotated[List[Path], Argument(help="ssc-gen config files", callback=cb_check_ssc_files)],
         out: Annotated[Path[str], Option(help="output folder", callback=cb_folder_out)],
-        lib: Annotated[GoLIBS, Option(help='core parser library')] = GoLIBS.GOQUERY,
-        prefix: Annotated[str, Option(help='out files prefix')] = "",
-        suffix: Annotated[str, Option(help='out files suffix')] = ".go",
+        lib: Annotated[GoLIBS, Option("--lib", "-i", help='core parser library')] = GoLIBS.GOQUERY,
+        prefix: Annotated[str, Option("--prefix", "-p", help='out files prefix')] = "",
+        suffix: Annotated[str, Option("--suffix", "-s", help='out files suffix')] = ".go",
+        fmt: Annotated[bool, Option(help="format code output", is_flag=True)] = True,
 ):
     converter = import_converter(f'go_{lib.value}.py')
+    if fmt:
+        commands = ['gofmt {}']
+        fmt_cmd = create_fmt_cmd(ssc_files, prefix, suffix, out, commands)
+    else:
+        fmt_cmd = []
     generate_code(converter, out, prefix, ssc_files, suffix, f'// {COMMENT_STRING}',
-                  go_naive_fix_docstring)
-
-
-def main():
-    app()
+                  fmt_cmd,
+                  go_naive_fix_docstring,
+                  docstring_class_top=True)
 
 
 if __name__ == '__main__':
-    main()
+    app()
