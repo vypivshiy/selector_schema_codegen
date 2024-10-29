@@ -335,5 +335,7 @@ class AssertDocument(BaseDocument):
 
 class NestedDocument(BaseDocument):
     def sub_parser(self, schema: Type['BaseSchema']) -> Self:
+        if self.stack_last_ret == VariableType.NESTED:
+            raise SyntaxError("Nested already used")
         self._add(NestedExpression(schema_cls=schema))
         return self
