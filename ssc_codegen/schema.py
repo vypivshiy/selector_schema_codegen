@@ -1,14 +1,13 @@
 from typing import TYPE_CHECKING, TypeAlias, Union, Type, Any
 
 from .tokens import StructType, VariableType, TokenType
-from .consts import RESERVED_METHODS, SIGNATURE_MAP
-from ssc_codegen.schema import BaseSchema
+from .consts import RESERVED_METHODS
 
 if TYPE_CHECKING:
     from .document import BaseDocument
 
 
-class MISSING_FIELD(object):  # type: ignore
+class MISSING_FIELD(object):  # noqa
     pass
 
 
@@ -22,7 +21,6 @@ class BaseSchema:
 
     __SIGNATURE__: dict | list = NotImplemented
     """manually write signature attribute"""
-    __NESTED_CLASSES__: dict[str, BaseSchema] = {}
 
     __PRE_VALIDATE__: _T_OPT_FIELD = MISSING_FIELD
 
