@@ -1,7 +1,7 @@
 """code parts for python codegen"""
-from ssc_codegen.consts import RESERVED_METHODS
-from ssc_codegen.tokens import VariableType
 from typing import TYPE_CHECKING
+
+from ssc_codegen.tokens import VariableType
 
 if TYPE_CHECKING:
     from ssc_codegen.ast_ssc import StartParseFunction
