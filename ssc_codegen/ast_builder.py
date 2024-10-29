@@ -209,6 +209,9 @@ def build_ast_struct(schema: Type[BaseSchema],
                     default=default_expr,
                     body=_fill_stack_variables(f.stack)
                 )
+                if fn.default:
+                    fn.default.parent = fn
+
                 struct_parse_functions.append(fn)
                 start_parse_body.append(
                     CallStructFunctionExpression(name=k, ret_type=f.stack_last_ret)  # noqa
