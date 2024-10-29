@@ -1,7 +1,8 @@
 import re
 
 from ssc_codegen.ast_ssc import TypeDef, StructFieldFunction, TypeDefField, PartDocFunction, \
-    CallStructFunctionExpression, StructParser, StartParseFunction
+    CallStructFunctionExpression, StructParser, StartParseFunction, BaseExpression, ReturnExpression, \
+    DefaultValueWrapper
 from ssc_codegen.tokens import VariableType, TokenType
 
 
@@ -67,6 +68,35 @@ def have_assert_expr(node: StructFieldFunction | PartDocFunction) -> bool:
                           TokenType.IS_REGEX_MATCH,
                           )
                for t in node.body)
+
+
+def find_default_expr(node: BaseExpression | None) -> BaseExpression | None:
+    # TODO: fix python return in default expr case
+    if node.kind == TokenType.EXPR_DEFAULT:
+        return node
+    if not node.prev:
+        return None
+    return find_default_expr(node.prev)
+
+
+def have_default_expr(node: BaseExpression | None) -> bool:
+    parent = node.parent
+    if parent.kind in (TokenType.STRUCT_PART_DOCUMENT, TokenType.STRUCT_PRE_VALIDATE, TokenType.STRUCT_PARSE_START):
+        return False
+    if parent.default:
+        return True
+    return False
+
+
+def find_return_expr_by_default(node: DefaultValueWrapper | None) -> ReturnExpression | None:
+    if node.kind == TokenType.EXPR_DEFAULT:
+        node = node.parent.body[0]
+
+    if node.kind == TokenType.EXPR_RETURN:
+        return node
+    if not node.next:
+        return None
+    return find_return_expr_by_default(node.next)  # type: ignore
 
 
 def find_st_field_fn_by_call_st_fn(node: CallStructFunctionExpression) -> StructFieldFunction:
