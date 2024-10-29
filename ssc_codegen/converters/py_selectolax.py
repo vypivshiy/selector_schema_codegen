@@ -1,5 +1,5 @@
 from .base import BaseCodeConverter
-from .py_base import lr_var_names
+from .py_base import lr_var_names, BasePyCodeConverter
 from .templates import py
 from .utils import find_nested_associated_typedef_by_st_field_fn, have_default_expr
 from ..ast_ssc import (
@@ -18,7 +18,7 @@ from ..ast_ssc import (
 )
 from ..tokens import TokenType, StructType, VariableType
 
-converter = BaseCodeConverter()
+converter = BasePyCodeConverter()
 
 SLAX_IMPORTS = "from selectolax.parser import HTMLParser, Node"
 SLAX_INIT_BODY = "self._doc=HTMLParser(document) if isinstance(document, str) else document"
@@ -35,7 +35,7 @@ E_IS_CSS = "assert {}.css_first({}), {}"
 
 @converter.pre(TokenType.STRUCT_INIT)
 def tt_init(_) -> str:
-    return py.CLS_INIT_HEAD.format('Union[str, HTMLParser, Node]')
+    return py.INDENT_METHOD + py.CLS_INIT_HEAD.format('Union[str, HTMLParser, Node]')
 
 
 @converter.post(TokenType.STRUCT_INIT)
@@ -51,7 +51,8 @@ def tt_imports(_: ModuleImports) -> str:
 
 @converter.pre(TokenType.STRUCT_PRE_VALIDATE)
 def tt_pre_validate(node: PreValidateFunction) -> str:
-    return py.INDENT_METHOD + f"def {py.MAGIC_METHODS.get(node.name)}(self, value: Union[HTMLParser, Node]) -> None:"
+    # Union[HTMLParser, Node]
+    return py.INDENT_METHOD + py.CLS_PRE_VALIDATE_HEAD.format(py.MAGIC_METHODS.get(node.name))
 
 
 @converter.pre(TokenType.STRUCT_PART_DOCUMENT)

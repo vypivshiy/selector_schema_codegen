@@ -54,12 +54,12 @@ def tt_imports(_: ModuleImports) -> str:
 
 @converter.pre(TokenType.STRUCT_PRE_VALIDATE)
 def tt_pre_validate(node: PreValidateFunction) -> str:
-    return f"def {py.MAGIC_METHODS.get(node.name)}(self, value: Selector) -> None:"
+    return py.INDENT_METHOD + py.CLS_PRE_VALIDATE_HEAD.format(py.MAGIC_METHODS.get(node.name))
 
 
 @converter.pre(TokenType.STRUCT_PART_DOCUMENT)
 def tt_part_document(node: PartDocFunction):
-    p_type = "Union[BeautifulSoup, Tag]"
+    p_type = "Selector"
     ret_type = "Selector"
     name = py.MAGIC_METHODS.get(node.name)
     return py.INDENT_METHOD + py.CLS_PART_DOC_HEAD.format(name, p_type, ret_type)

@@ -1,3 +1,4 @@
+# TODO: NOT TESTED
 from .py_base import BasePyCodeConverter, lr_var_names
 from .templates import py
 from .utils import have_default_expr, find_nested_associated_typedef_by_st_field_fn
@@ -36,7 +37,7 @@ E_PARSEL_IS_XPATH = "assert {}.xpath({}), {}"
 @converter.pre(TokenType.STRUCT_INIT)
 def tt_init(_) -> str:
     type_ = 'Union[str, SelectorList, Selector, Response]'
-    return py.CLS_INIT_HEAD.format(type_)
+    return py.INDENT_METHOD + py.CLS_INIT_HEAD.format(type_)
 
 
 @converter.post(TokenType.STRUCT_INIT)
@@ -57,12 +58,12 @@ def tt_imports(_: ModuleImports) -> str:
 
 @converter.pre(TokenType.STRUCT_PRE_VALIDATE)
 def tt_pre_validate(node: PreValidateFunction) -> str:
-    return f"def {py.MAGIC_METHODS.get(node.name)}(self, value: Selector) -> None:"
+    return py.INDENT_METHOD + py.CLS_PRE_VALIDATE_HEAD.format(py.MAGIC_METHODS.get(node.name))
 
 
 @converter.pre(TokenType.STRUCT_PART_DOCUMENT)
 def tt_part_document(node: PartDocFunction):
-    return f"def {py.MAGIC_METHODS.get(node.name)}(self, value: Selector) -> Selector:"
+    return py.INDENT_METHOD + py.CLS_PART_DOC_HEAD.format(py.MAGIC_METHODS.get(node.name))
 
 
 @converter.pre(TokenType.STRUCT_FIELD)
