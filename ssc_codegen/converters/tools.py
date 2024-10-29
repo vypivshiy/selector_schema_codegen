@@ -1,7 +1,14 @@
+from typing_extensions import deprecated
+
+
+@deprecated("codegen set correct indent")
 def py_naive_fix_indentation(code: list[str]) -> str:
     """NOTE: is not universal solution, it's implemented for fix output code
     """
+    # magic indent fix prepare (ASSERT, CallFunc issues)
+    code = '\n'.join(code).split('\n')
     lines = [i for i in code if i]
+
     ch = " "
     indent_level = 0
     indent_size = 4
@@ -28,6 +35,31 @@ def py_naive_fix_indentation(code: list[str]) -> str:
 
         fixed_lines.append(ch * indent_size * indent_level + line)
         prev_line = line
+    return '\n'.join(fixed_lines)
+
+
+@deprecated("codegen set correct indent")
+def py_fix_indentation(code: list[str]) -> str:
+    code = '\n'.join([i for i in code if i]).split('\n')
+    ch = " "
+    indent_level = 0
+    indent_size = 4
+    fixed_lines = []
+    docstring_chars = '"""'
+    is_docstring = False
+    for line in code:
+        # oneline docstring check
+        if docstring_chars in line and (not line.startswith(docstring_chars) and not line.endswith(docstring_chars)):
+            is_docstring = not is_docstring
+
+        if line.endswith("{") and not is_docstring:
+            indent_level += 1
+            line = line.rstrip('{')
+        elif line.endswith("}") and not is_docstring:
+            indent_level -= 1
+            line = line.rstrip('}')
+
+        fixed_lines.append(ch * indent_size * indent_level + line)
     return '\n'.join(fixed_lines)
 
 
