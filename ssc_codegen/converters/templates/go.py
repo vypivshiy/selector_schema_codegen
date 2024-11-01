@@ -127,7 +127,7 @@ E_STR_SPLIT = "{} := strings.Split({}, {}); "
 E_RE = "{} := regexp.MustCompile({}).FindStringSubmatch({})[{}]; "
 E_RE_ALL = "{} := regexp.MustCompile({}).FindStringSubmatch({}); "
 E_RE_SUB = "{} := string(regexp.MustCompile({}).ReplaceAll([]byte({}), []byte({}))); "
-E_RE_SUB_ALL = "regexp.MustCompile({}).ReplaceAll({}, {})"
+E_RE_SUB_ALL = "string(regexp.MustCompile({}).ReplaceAll([]byte{}, []byte{}))"
 E_INDEX = "{} := {}[{}]; "
 E_JOIN = "{} := strings.Join({}, {}); "
 RET_NIL_FMT_ERR = "return nil, fmt.Errorf({}); "
@@ -212,7 +212,7 @@ def gen_dict_body(node: "StartParseFunction") -> str:
     var_key = f"{key_m}Raw"
     var_value = f"{value_m}Raw"
 
-    body = (f"items := make([]T{node.parent.name}, 0); "
+    body = (f"items := make(T{node.parent.name}, 0); "
             + f'for _, i := range p.{part_m}(p.doc.Selection).EachIter() ' + BRACKET_START
             )
     if have_call_expr_assert_expr(fn_key):
@@ -242,7 +242,7 @@ def gen_flat_list_body(node: "StartParseFunction") -> str:
     part_m = MAGIC_METHODS.get('__SPLIT_DOC__')
     fn_item = [fn for fn in node.body if fn.name == "__ITEM__"][0]
     # fixme: type template
-    body = (f"items := make([]T{node.parent.name}, 0); "
+    body = (f"items := make(T{node.parent.name}, 0); "
             + f'for _, i := range p.{part_m}({FN_CALL_DOC_ARG}).EachIter()'
             + BRACKET_START)
     if have_call_expr_assert_expr(fn_item):
