@@ -67,7 +67,7 @@ def have_assert_expr(node: StructFieldFunction | PartDocFunction) -> bool:
                           TokenType.IS_XPATH,
                           TokenType.IS_REGEX_MATCH,
                           )
-               for t in node.body)
+               for t in node.body if t)
 
 
 def find_default_expr(node: BaseExpression | None) -> BaseExpression | None:
@@ -100,7 +100,7 @@ def find_return_expr_by_default(node: DefaultValueWrapper | None) -> ReturnExpre
 
 
 def find_st_field_fn_by_call_st_fn(node: CallStructFunctionExpression) -> StructFieldFunction:
-    module_body = node.parent.parent
+    module_body = node.parent.parent.parent
     for st_node in module_body.body:
         if st_node.kind != TokenType.STRUCT:
             continue
@@ -108,7 +108,7 @@ def find_st_field_fn_by_call_st_fn(node: CallStructFunctionExpression) -> Struct
         for fn_node in st_node.body:
             if fn_node.name == node.name:
                 return fn_node
-        raise TypeError("Node not founded")
+    raise TypeError("Node not founded")
 
 
 def have_start_parse_assert_expr(node: StartParseFunction) -> bool:
