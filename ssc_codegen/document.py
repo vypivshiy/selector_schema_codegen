@@ -7,7 +7,6 @@ from typing_extensions import deprecated, Self
 from .ast_ssc import (
     BaseExpression,
     DefaultValueWrapper,
-
     HtmlCssExpression,
     HtmlXpathAllExpression,
     HtmlCssAllExpression,
@@ -21,7 +20,6 @@ from .ast_ssc import (
     IndexStringExpression,
     IndexDocumentExpression,
     JoinExpression,
-
     TrimExpression,
     LTrimExpression,
     RTrimExpression,
@@ -37,14 +35,13 @@ from .ast_ssc import (
     MapReplaceExpression,
     MapRegexSubExpression,
     SplitExpression,
-
     IsCssExpression,
     IsXPathExpression,
     IsEqualExpression,
     IsNotEqualExpression,
     IsContainsExpression,
-    IsRegexMatchExpression, NestedExpression,
-
+    IsRegexMatchExpression,
+    NestedExpression,
 )
 from .schema import BaseSchema
 from .selector_utils import validate_css_query, validate_xpath_query
@@ -76,7 +73,7 @@ class BaseDocument:
 
     @staticmethod
     def _raise_wrong_type_error(type_: VariableType, *expected: VariableType):
-        fmt_types = '(' + ','.join(i.name for i in expected) + ')'
+        fmt_types = "(" + ",".join(i.name for i in expected) + ")"
         msg = f"Expected type(s): {fmt_types}, got {type_.name}"
         raise SyntaxError(msg)
 
@@ -84,7 +81,9 @@ class BaseDocument:
         self._stack.append(expr)
 
     def __repr__(self):
-        return f"Document(count={self.count}, ret_type={self.stack_last_ret.name})"
+        return (
+            f"Document(count={self.count}, ret_type={self.stack_last_ret.name})"
+        )
 
 
 class DefaultDocument(BaseDocument):
@@ -105,7 +104,9 @@ class HTMLDocument(BaseDocument):
             case VariableType.ANY:
                 self._add(HtmlCssExpression(query=query))
             case _:
-                self._raise_wrong_type_error(self.stack_last_ret, VariableType.DOCUMENT)
+                self._raise_wrong_type_error(
+                    self.stack_last_ret, VariableType.DOCUMENT
+                )
         return self
 
     def xpath(self, query: str) -> Self:
@@ -116,7 +117,9 @@ class HTMLDocument(BaseDocument):
             case VariableType.ANY:
                 self._add(HtmlXpathExpression(query=query))
             case _:
-                self._raise_wrong_type_error(self.stack_last_ret, VariableType.DOCUMENT)
+                self._raise_wrong_type_error(
+                    self.stack_last_ret, VariableType.DOCUMENT
+                )
         return self
 
     def css_all(self, query: str) -> Self:
@@ -127,7 +130,9 @@ class HTMLDocument(BaseDocument):
             case VariableType.ANY:
                 self._add(HtmlCssAllExpression(query=query))
             case _:
-                self._raise_wrong_type_error(self.stack_last_ret, VariableType.DOCUMENT)
+                self._raise_wrong_type_error(
+                    self.stack_last_ret, VariableType.DOCUMENT
+                )
         return self
 
     def xpath_all(self, query: str) -> Self:
@@ -138,7 +143,9 @@ class HTMLDocument(BaseDocument):
             case VariableType.ANY:
                 self._add(HtmlXpathAllExpression(query=query))
             case _:
-                self._raise_wrong_type_error(self.stack_last_ret, VariableType.DOCUMENT)
+                self._raise_wrong_type_error(
+                    self.stack_last_ret, VariableType.DOCUMENT
+                )
         return self
 
     def attr(self, name: str) -> Self:
@@ -150,7 +157,11 @@ class HTMLDocument(BaseDocument):
             case VariableType.LIST_DOCUMENT:
                 self._add(HtmlAttrAllExpression(attr=name))
             case _:
-                self._raise_wrong_type_error(self.stack_last_ret, VariableType.DOCUMENT, VariableType.LIST_DOCUMENT)
+                self._raise_wrong_type_error(
+                    self.stack_last_ret,
+                    VariableType.DOCUMENT,
+                    VariableType.LIST_DOCUMENT,
+                )
         return self
 
     def text(self) -> Self:
@@ -163,7 +174,11 @@ class HTMLDocument(BaseDocument):
             case VariableType.LIST_DOCUMENT:
                 self._add(HtmlTextAllExpression())
             case _:
-                self._raise_wrong_type_error(self.stack_last_ret, VariableType.DOCUMENT, VariableType.LIST_DOCUMENT)
+                self._raise_wrong_type_error(
+                    self.stack_last_ret,
+                    VariableType.DOCUMENT,
+                    VariableType.LIST_DOCUMENT,
+                )
         return self
 
     def raw(self) -> Self:
@@ -175,7 +190,11 @@ class HTMLDocument(BaseDocument):
             case VariableType.LIST_DOCUMENT:
                 self._add(HtmlRawAllExpression())
             case _:
-                self._raise_wrong_type_error(self.stack_last_ret, VariableType.DOCUMENT, VariableType.LIST_DOCUMENT)
+                self._raise_wrong_type_error(
+                    self.stack_last_ret,
+                    VariableType.DOCUMENT,
+                    VariableType.LIST_DOCUMENT,
+                )
         return self
 
 
@@ -196,7 +215,11 @@ class ArrayDocument(BaseDocument):
             case VariableType.LIST_STRING:
                 self._add(IndexStringExpression(value=i))
             case _:
-                self._raise_wrong_type_error(self.stack_last_ret, VariableType.LIST_STRING, VariableType.LIST_DOCUMENT)
+                self._raise_wrong_type_error(
+                    self.stack_last_ret,
+                    VariableType.LIST_STRING,
+                    VariableType.LIST_DOCUMENT,
+                )
         return self
 
     def join(self, s: str) -> Self:
@@ -212,7 +235,11 @@ class StringDocument(BaseDocument):
             case VariableType.STRING:
                 self._add(TrimExpression(value=string))
             case _:
-                self._raise_wrong_type_error(self.stack_last_ret, VariableType.STRING, VariableType.LIST_STRING)
+                self._raise_wrong_type_error(
+                    self.stack_last_ret,
+                    VariableType.STRING,
+                    VariableType.LIST_STRING,
+                )
         return self
 
     def ltrim(self, string: str = " ") -> Self:
@@ -222,7 +249,11 @@ class StringDocument(BaseDocument):
             case VariableType.STRING:
                 self._add(LTrimExpression(value=string))
             case _:
-                self._raise_wrong_type_error(self.stack_last_ret, VariableType.STRING, VariableType.LIST_STRING)
+                self._raise_wrong_type_error(
+                    self.stack_last_ret,
+                    VariableType.STRING,
+                    VariableType.LIST_STRING,
+                )
         return self
 
     def rtrim(self, string: str = " ") -> Self:
@@ -232,7 +263,11 @@ class StringDocument(BaseDocument):
             case VariableType.STRING:
                 self._add(RTrimExpression(value=string))
             case _:
-                self._raise_wrong_type_error(self.stack_last_ret, VariableType.STRING, VariableType.LIST_STRING)
+                self._raise_wrong_type_error(
+                    self.stack_last_ret,
+                    VariableType.STRING,
+                    VariableType.LIST_STRING,
+                )
         return self
 
     def split(self, sep: str) -> Self:
@@ -253,7 +288,11 @@ class StringDocument(BaseDocument):
             case VariableType.STRING:
                 self._add(FormatExpression(fmt=fmt_string))
             case _:
-                self._raise_wrong_type_error(self.stack_last_ret, VariableType.STRING, VariableType.LIST_STRING)
+                self._raise_wrong_type_error(
+                    self.stack_last_ret,
+                    VariableType.STRING,
+                    VariableType.LIST_STRING,
+                )
         return self
 
     @deprecated("Use repl method instead")
@@ -267,7 +306,11 @@ class StringDocument(BaseDocument):
             case VariableType.STRING:
                 self._add(ReplaceExpression(old=old, new=new))
             case _:
-                self._raise_wrong_type_error(self.stack_last_ret, VariableType.STRING, VariableType.LIST_STRING)
+                self._raise_wrong_type_error(
+                    self.stack_last_ret,
+                    VariableType.STRING,
+                    VariableType.LIST_STRING,
+                )
         return self
 
     def re(self, pattern: str, group: int = 1) -> Self:
@@ -299,7 +342,11 @@ class StringDocument(BaseDocument):
             case VariableType.STRING:
                 self._add(RegexSubExpression(pattern=pattern, repl=repl))
             case _:
-                self._raise_wrong_type_error(self.stack_last_ret, VariableType.STRING, VariableType.LIST_STRING)
+                self._raise_wrong_type_error(
+                    self.stack_last_ret,
+                    VariableType.STRING,
+                    VariableType.LIST_STRING,
+                )
         return self
 
 
@@ -334,7 +381,7 @@ class AssertDocument(BaseDocument):
 
 
 class NestedDocument(BaseDocument):
-    def sub_parser(self, schema: Type['BaseSchema']) -> Self:
+    def sub_parser(self, schema: Type["BaseSchema"]) -> Self:
         if self.stack_last_ret == VariableType.NESTED:
             raise SyntaxError("Nested already used")
         self._add(NestedExpression(schema_cls=schema))

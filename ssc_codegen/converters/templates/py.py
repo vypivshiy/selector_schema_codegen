@@ -10,15 +10,16 @@ TYPES = {
     VariableType.STRING: "str",
     VariableType.LIST_STRING: "List[str]",
     VariableType.OPTIONAL_STRING: "Optional[str]",
-    VariableType.OPTIONAL_LIST_STRING: "Optional[List[str]]"
+    VariableType.OPTIONAL_LIST_STRING: "Optional[List[str]]",
 }
-MAGIC_METHODS = {"__KEY__": "key",
-                 "__VALUE__": "value",
-                 "__ITEM__": "item",
-                 "__PRE_VALIDATE__": "_pre_validate",
-                 "__SPLIT_DOC__": "_split_doc",
-                 "__START_PARSE__": "parse"
-                 }
+MAGIC_METHODS = {
+    "__KEY__": "key",
+    "__VALUE__": "value",
+    "__ITEM__": "item",
+    "__PRE_VALIDATE__": "_pre_validate",
+    "__SPLIT_DOC__": "_split_doc",
+    "__START_PARSE__": "parse",
+}
 
 BASE_IMPORTS = """from __future__ import annotations
 import re
@@ -77,34 +78,49 @@ E_IN = "assert {} in {}, {}"
 E_IS_RE = "assert re.search({}, {}), {}"
 
 
-def gen_item_body(node: 'StartParseFunction') -> str:
-    body = '{' + ', '.join(
-        [f'"{f.name}": ' + E_CALL_PARSE.format(f.name, 'self._doc')
-         for f in node.body if not MAGIC_METHODS.get(f.name)]) + '}'
+def gen_item_body(node: "StartParseFunction") -> str:
+    body = (
+        "{"
+        + ", ".join(
+            [
+                f'"{f.name}": ' + E_CALL_PARSE.format(f.name, "self._doc")
+                for f in node.body
+                if not MAGIC_METHODS.get(f.name)
+            ]
+        )
+        + "}"
+    )
     return body
 
 
-def gen_list_body(node: 'StartParseFunction') -> str:
-    body = ', '.join(
-        [f'"{f.name}": ' + E_CALL_PARSE.format(f.name, 'e')
-         for f in node.body if not MAGIC_METHODS.get(f.name)]
+def gen_list_body(node: "StartParseFunction") -> str:
+    body = ", ".join(
+        [
+            f'"{f.name}": ' + E_CALL_PARSE.format(f.name, "e")
+            for f in node.body
+            if not MAGIC_METHODS.get(f.name)
+        ]
     )
-    body = '{' + body + '}'
-    n = MAGIC_METHODS.get('__SPLIT_DOC__')
+    body = "{" + body + "}"
+    n = MAGIC_METHODS.get("__SPLIT_DOC__")
     return f"[{body} for e in self.{n}(self._doc)]\n"
 
 
-def gen_dict_body(_: 'StartParseFunction') -> str:
-    key_m = E_CALL_PARSE.format(MAGIC_METHODS.get('__KEY__'), 'e')
-    value_m = E_CALL_PARSE.format(MAGIC_METHODS.get('__VALUE__'), 'e')
-    part_m = E_CALL_METHOD.format(MAGIC_METHODS.get('__SPLIT_DOC__'), 'self._doc')
+def gen_dict_body(_: "StartParseFunction") -> str:
+    key_m = E_CALL_PARSE.format(MAGIC_METHODS.get("__KEY__"), "e")
+    value_m = E_CALL_PARSE.format(MAGIC_METHODS.get("__VALUE__"), "e")
+    part_m = E_CALL_METHOD.format(
+        MAGIC_METHODS.get("__SPLIT_DOC__"), "self._doc"
+    )
 
-    body = f'{{ {key_m}: {value_m} for e in {part_m} }}'
+    body = f"{{ {key_m}: {value_m} for e in {part_m} }}"
     return body
 
 
-def get_flat_list_body(_: 'StartParseFunction') -> str:
-    item_m = E_CALL_PARSE.format(MAGIC_METHODS.get('__ITEM__'), 'e')
-    part_m = E_CALL_METHOD.format(MAGIC_METHODS.get('__SPLIT_DOC__'), 'self._doc')
-    body = f'[{item_m} for e in {part_m}]'
+def get_flat_list_body(_: "StartParseFunction") -> str:
+    item_m = E_CALL_PARSE.format(MAGIC_METHODS.get("__ITEM__"), "e")
+    part_m = E_CALL_METHOD.format(
+        MAGIC_METHODS.get("__SPLIT_DOC__"), "self._doc"
+    )
+    body = f"[{item_m} for e in {part_m}]"
     return body

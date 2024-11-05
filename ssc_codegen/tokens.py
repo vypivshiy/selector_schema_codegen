@@ -16,6 +16,8 @@ class VariableType(IntEnum):
     ANY = auto()
     # nested functions
     NESTED = auto()
+    # TODO: add int, array(int), float, array(float) types
+    # TODO: consts provide
 
 
 class StructType(IntEnum):

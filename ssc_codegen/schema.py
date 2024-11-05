@@ -39,8 +39,10 @@ class BaseSchema:
     __ALLOWED_MAGIC__ = RESERVED_METHODS
 
     @staticmethod
-    def _get_nested_signature(field: 'BaseDocument') -> 'BaseSchema':
-        return [e for e in field.stack if e.kind == TokenType.EXPR_NESTED][0].schema_cls  # noqa
+    def _get_nested_signature(field: "BaseDocument") -> "BaseSchema":
+        return [e for e in field.stack if e.kind == TokenType.EXPR_NESTED][
+            0
+        ].schema_cls  # noqa
 
     @classmethod
     def __class_signature__(cls):
@@ -56,7 +58,7 @@ class BaseSchema:
             signature = cls._get_list_signature()
         else:
             # code unreached
-            raise TypeError('Unknown schema type')
+            raise TypeError("Unknown schema type")
         return signature
 
     @classmethod
@@ -71,7 +73,7 @@ class BaseSchema:
                 signature[k] = nested_class.__class_signature__()
             else:
                 signature[k] = v.stack_last_ret
-        signature = [signature, '...']
+        signature = [signature, "..."]
         return signature
 
     @classmethod
@@ -93,11 +95,13 @@ class BaseSchema:
         signature = {}
         field_k, field_v = cls.__KEY__, cls.__VALUE__
         if field_v.stack_last_ret == VariableType.NESTED:
-            nested_class = [e for e in field.stack if e.kind == TokenType.EXPR_NESTED][0].schema_cls  # noqa
+            nested_class = [
+                e for e in field.stack if e.kind == TokenType.EXPR_NESTED
+            ][0].schema_cls  # noqa
             signature["<K>"] = nested_class.__class_signature__()
         else:
-            signature['<K>'] = field_v.stack_last_ret
-        signature['<KN>'] = '...'
+            signature["<K>"] = field_v.stack_last_ret
+        signature["<KN>"] = "..."
         return signature
 
     @classmethod
@@ -109,12 +113,19 @@ class BaseSchema:
             signature.append(nested_class.__class_signature__())
         else:
             signature.append(field.stack_last_ret)
-        signature.append('...')
+        signature.append("...")
         return signature
 
     @classmethod
     def __schema_mro__(cls) -> tuple[Type["BaseSchema"], ...]:
-        return tuple((i for i in cls.__mro__ if issubclass(i, BaseSchema) and i.__SCHEMA_TYPE__ == cls.__SCHEMA_TYPE__))
+        return tuple(
+            (
+                i
+                for i in cls.__mro__
+                if issubclass(i, BaseSchema)
+                and i.__SCHEMA_TYPE__ == cls.__SCHEMA_TYPE__
+            )
+        )
 
     @classmethod
     def __get_mro_annotations__(cls) -> dict[str, Any]:
@@ -124,9 +135,16 @@ class BaseSchema:
         for kls in cls.__schema_mro__():
             if kls.__annotations__:
                 for k, v in kls.__annotations__.items():
-                    if not cls__annotations.get(k) and fields.get(k) != MISSING_FIELD:
+                    if (
+                        not cls__annotations.get(k)
+                        and fields.get(k) != MISSING_FIELD
+                    ):
                         cls__annotations[k] = v
-                    elif k in cls.__ALLOWED_MAGIC__ and fields.get(k) != MISSING_FIELD and not cls__annotations.get(k):
+                    elif (
+                        k in cls.__ALLOWED_MAGIC__
+                        and fields.get(k) != MISSING_FIELD
+                        and not cls__annotations.get(k)
+                    ):
                         cls__annotations[k] = v
         return cls__annotations
 
@@ -140,7 +158,11 @@ class BaseSchema:
             tmp_attrs = vars(klass).copy()
             for k, v in tmp_attrs.items():
                 # if not set docstring - get from parent class
-                if k == '__doc__' and not cls.__doc__ and not cls__dict__.get('__doc__'):
+                if (
+                    k == "__doc__"
+                    and not cls.__doc__
+                    and not cls__dict__.get("__doc__")
+                ):
                     cls__dict__[k] = v
                 elif cls__dict__.get(k):
                     continue

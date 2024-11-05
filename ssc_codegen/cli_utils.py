@@ -11,9 +11,9 @@ if sys.version_info >= (3, 11):
 else:
     from enum import Enum
 
-
     class StrEnum(str, Enum):
         pass
+
 
 if TYPE_CHECKING:
     from ssc_codegen.ast_ssc import BaseAstNode, ModuleProgram
@@ -41,17 +41,19 @@ class GoLIBS(StrEnum):
 
 
 class ConverterLike(Protocol):
-    def convert(self, ast_entry: 'BaseAstNode', acc: list[str] | None = None) -> list[str]:
+    def convert(
+        self, ast_entry: "BaseAstNode", acc: list[str] | None = None
+    ) -> list[str]:
         pass
 
-    def convert_program(self,
-                        ast_program: 'ModuleProgram',
-                        comment: str = '') -> list[str]:
+    def convert_program(
+        self, ast_program: "ModuleProgram", comment: str = ""
+    ) -> list[str]:
         pass
 
 
 def import_converter(converter_name: str) -> ConverterLike:
-    full_import = CONVERTER_PATH + f'.{converter_name}'
+    full_import = CONVERTER_PATH + f".{converter_name}"
     module = importlib.import_module(full_import)
     converter_obj: ConverterLike = module.converter
     return converter_obj
@@ -75,14 +77,20 @@ def cb_folder_out(folder: Path[str]) -> Path[str]:
     return folder
 
 
-def create_fmt_cmd(ssc_files: list[Path[str]], prefix: str, suffix: str, out: Path[str], commands: list[str]) -> list[str]:
+def create_fmt_cmd(
+    ssc_files: list[Path[str]],
+    prefix: str,
+    suffix: str,
+    out: Path[str],
+    commands: list[str],
+) -> list[str]:
     comma: list[str] = []
     if not commands:
         warnings.warn("Missing cmd fmt templates")
         return comma
     for f in ssc_files:
-        name = f.name.split('.')[0]
-        abc_f = out / f'{prefix}{name}{suffix}'
+        name = f.name.split(".")[0]
+        abc_f = out / f"{prefix}{name}{suffix}"
         for cmd in commands:
             comma.append(cmd.format(str(abc_f.absolute())))
     return comma

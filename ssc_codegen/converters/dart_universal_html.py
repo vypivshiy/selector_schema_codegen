@@ -1,6 +1,13 @@
 # TODO: required enchant, not tested
+from functools import partial
+
+from templates import dart
 from .base import BaseCodeConverter, left_right_var_names
-from .utils import to_upper_camel_case as up_camel, escape_str, wrap_double_quotes as wrap_q
+from .utils import (
+    to_upper_camel_case as up_camel,
+    escape_str,
+    wrap_double_quotes as wrap_q,
+)
 from ..ast_ssc import (
     StructParser,
     ModuleImports,
@@ -10,36 +17,48 @@ from ..ast_ssc import (
     StartParseFunction,
     DefaultValueWrapper,
     PartDocFunction,
-
-    HtmlCssExpression, HtmlCssAllExpression,
-    HtmlAttrExpression, HtmlAttrAllExpression,
-    HtmlTextExpression, HtmlTextAllExpression,
-    HtmlRawExpression, HtmlRawAllExpression,
-    HtmlXpathExpression, HtmlXpathAllExpression,
-
-    FormatExpression, MapFormatExpression,
-    TrimExpression, MapTrimExpression,
-    LTrimExpression, MapLTrimExpression,
-    RTrimExpression, MapRTrimExpression,
-    ReplaceExpression, MapReplaceExpression,
+    HtmlCssExpression,
+    HtmlCssAllExpression,
+    HtmlAttrExpression,
+    HtmlAttrAllExpression,
+    HtmlTextExpression,
+    HtmlTextAllExpression,
+    HtmlRawExpression,
+    HtmlRawAllExpression,
+    HtmlXpathExpression,
+    HtmlXpathAllExpression,
+    FormatExpression,
+    MapFormatExpression,
+    TrimExpression,
+    MapTrimExpression,
+    LTrimExpression,
+    MapLTrimExpression,
+    RTrimExpression,
+    MapRTrimExpression,
+    ReplaceExpression,
+    MapReplaceExpression,
     SplitExpression,
-
     NestedExpression,
-    RegexExpression, RegexSubExpression, MapRegexSubExpression, RegexAllExpression,
-
-    ReturnExpression, NoReturnExpression,
-
+    RegexExpression,
+    RegexSubExpression,
+    MapRegexSubExpression,
+    RegexAllExpression,
+    ReturnExpression,
+    NoReturnExpression,
     TypeDef,
-    IndexDocumentExpression, IndexStringExpression, JoinExpression,
-
-    IsCssExpression, IsXPathExpression, IsEqualExpression, IsContainsExpression,
-    IsRegexMatchExpression, IsNotEqualExpression, StructInit
+    IndexDocumentExpression,
+    IndexStringExpression,
+    JoinExpression,
+    IsCssExpression,
+    IsXPathExpression,
+    IsEqualExpression,
+    IsContainsExpression,
+    IsRegexMatchExpression,
+    IsNotEqualExpression,
+    StructInit,
 )
-from ..consts import RESERVED_METHODS
-from ..tokens import TokenType, StructType, VariableType
+from ..tokens import TokenType, StructType
 
-from templates import dart
-from functools import partial
 converter = BaseCodeConverter()
 
 lr_var_names = partial(left_right_var_names, name="value")
@@ -52,7 +71,7 @@ MAGIC_METHODS = dart.MAGIC_METHODS
 def tt_typedef(node: TypeDef):
     # used records from dart 3
     code = ""
-    match node.struct.type:
+    match node.struct_ref.type:
         case StructType.DICT:
             # Map<String, T>
             code = dart.typedef_dict(node)
@@ -73,7 +92,7 @@ def tt_typedef(node: TypeDef):
 # dart API
 @converter.pre(TokenType.STRUCT)
 def tt_struct(node: StructParser) -> str:
-    return dart.CLS_HEAD.format(node.name) + ' ' + dart.START_BRACKET
+    return dart.CLS_HEAD.format(node.name) + " " + dart.START_BRACKET
 
 
 @converter.post(TokenType.STRUCT)
@@ -90,7 +109,7 @@ def tt_init(node: StructInit) -> str:
 def tt_docstring(node: Docstring) -> str:
     if node.value:
         return dart.CLS_DOCSTRING(node.value)
-    return ''
+    return ""
 
 
 @converter.pre(TokenType.IMPORTS)
@@ -121,7 +140,7 @@ def tt_nested(node: NestedExpression) -> str:
 @converter.pre(TokenType.STRUCT_PRE_VALIDATE)
 def tt_pre_validate(node: PreValidateFunction) -> str:
     name = MAGIC_METHODS.get(node.name)
-    return dart.PRE_VALIDATE_HEAD.format(name) + ' ' + dart.START_BRACKET
+    return dart.PRE_VALIDATE_HEAD.format(name) + " " + dart.START_BRACKET
 
 
 @converter.post(TokenType.STRUCT_PRE_VALIDATE)
@@ -132,7 +151,7 @@ def tt_pre_validate(_: PreValidateFunction) -> str:
 @converter.pre(TokenType.STRUCT_PART_DOCUMENT)
 def tt_part_document(node: PartDocFunction):
     name = MAGIC_METHODS.get(node.name)
-    return dart.PART_DOC_HEAD.format(name) + ' ' + dart.START_BRACKET
+    return dart.PART_DOC_HEAD.format(name) + " " + dart.START_BRACKET
 
 
 @converter.post(TokenType.STRUCT_PART_DOCUMENT)
@@ -145,7 +164,7 @@ def tt_function(node: StructFieldFunction) -> str:
     name = MAGIC_METHODS.get(node.name, node.name)
     if name == node.name:
         name = up_camel(node.name)
-    return dart.FN_PARSE.format(name, "value") + ' ' + dart.START_BRACKET
+    return dart.FN_PARSE.format(name, "value") + " " + dart.START_BRACKET
 
 
 @converter.post(TokenType.STRUCT_FIELD)
@@ -157,9 +176,9 @@ def tt_function(_: StructFieldFunction) -> str:
 def tt_start_parse(node: StartParseFunction) -> str:
     ret_t = dart.TYPE_PREFIX.format(node.parent.name)
     name = MAGIC_METHODS.get(node.name)
-    code = dart.FN_PARSE_START.format(ret_t, name) + ' ' + dart.START_BRACKET
-    if any(f.name == '__PRE_VALIDATE__' for f in node.body):
-        pre_val = MAGIC_METHODS.get('__PRE_VALIDATE__')
+    code = dart.FN_PARSE_START.format(ret_t, name) + " " + dart.START_BRACKET
+    if any(f.name == "__PRE_VALIDATE__" for f in node.body):
+        pre_val = MAGIC_METHODS.get("__PRE_VALIDATE__")
         code += dart.FN_PRE_VALIDATE.format(pre_val)
     match node.type:
         case StructType.ITEM:
@@ -184,13 +203,13 @@ def tt_start_parse(_: StartParseFunction) -> str:
 
 
 @converter.pre(TokenType.EXPR_DEFAULT)
-def tt_default(node: DefaultValueWrapper) -> str:
+def tt_default(_: DefaultValueWrapper) -> str:
     return dart.E_DEFAULT_START
 
 
 @converter.post(TokenType.EXPR_DEFAULT)
 def tt_default(node: DefaultValueWrapper) -> str:
-    val = repr(node.value) if isinstance(node.value, str) else 'null'
+    val = repr(node.value) if isinstance(node.value, str) else "null"
     return dart.E_DEFAULT_END(val)
 
 
@@ -204,7 +223,7 @@ def tt_string_format(node: FormatExpression) -> str:
 @converter.pre(TokenType.EXPR_LIST_STRING_FORMAT)
 def tt_string_format_all(node: MapFormatExpression) -> str:
     prv, nxt = lr_var_names(variable=node.variable)
-    template = dart.fmt_template(node.fmt, 'e')
+    template = dart.fmt_template(node.fmt, "e")
     return dart.E_STR_FMT_ALL.format(nxt, prv, repr(template))
 
 
@@ -212,8 +231,8 @@ def tt_string_format_all(node: MapFormatExpression) -> str:
 def tt_string_trim(node: TrimExpression) -> str:
     prv, nxt = lr_var_names(variable=node.variable)
     chars = node.value
-    left = wrap_q('^' + escape_str(chars))
-    right = wrap_q(escape_str(chars + '$'))
+    left = wrap_q("^" + escape_str(chars))
+    right = wrap_q(escape_str(chars + "$"))
     return dart.E_STR_TRIM(nxt, prv, left, right)
 
 
@@ -221,8 +240,8 @@ def tt_string_trim(node: TrimExpression) -> str:
 def tt_string_trim_all(node: MapTrimExpression) -> str:
     prv, nxt = lr_var_names(variable=node.variable)
     chars = node.value
-    left = wrap_q('^' + escape_str(chars))
-    right = wrap_q(escape_str(chars + '$'))
+    left = wrap_q("^" + escape_str(chars))
+    right = wrap_q(escape_str(chars + "$"))
     return dart.E_STR_TRIM_ALL.format(nxt, prv, left, right)
 
 
@@ -230,7 +249,7 @@ def tt_string_trim_all(node: MapTrimExpression) -> str:
 def tt_string_ltrim(node: LTrimExpression) -> str:
     prv, nxt = lr_var_names(variable=node.variable)
     chars = node.value
-    left = wrap_q('^' + escape_str(chars))
+    left = wrap_q("^" + escape_str(chars))
     return dart.E_STR_LTRIM.format(nxt, prv, left)
 
 
@@ -238,7 +257,7 @@ def tt_string_ltrim(node: LTrimExpression) -> str:
 def tt_string_ltrim_all(node: MapLTrimExpression) -> str:
     prv, nxt = lr_var_names(variable=node.variable)
     chars = node.value
-    left = wrap_q('^' + escape_str(chars))
+    left = wrap_q("^" + escape_str(chars))
     return dart.E_STR_LTRIM_ALL.format(nxt, prv, left)
 
 
@@ -246,7 +265,7 @@ def tt_string_ltrim_all(node: MapLTrimExpression) -> str:
 def tt_string_rtrim(node: RTrimExpression) -> str:
     prv, nxt = lr_var_names(variable=node.variable)
     chars = node.value
-    right = wrap_q(escape_str(chars + '$'))
+    right = wrap_q(escape_str(chars + "$"))
     return dart.E_STR_RTRIM.format(nxt, prv, right)
 
 
@@ -254,7 +273,7 @@ def tt_string_rtrim(node: RTrimExpression) -> str:
 def tt_string_rtrim_all(node: MapRTrimExpression) -> str:
     prv, nxt = lr_var_names(variable=node.variable)
     chars = node.value
-    right = wrap_q(escape_str(chars + '$'))
+    right = wrap_q(escape_str(chars + "$"))
     return dart.E_STR_RTRIM_ALL.format(nxt, prv, right)
 
 

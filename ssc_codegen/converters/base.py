@@ -1,11 +1,6 @@
 from typing import Callable
 
-from ..ast_ssc import (
-    BaseAstNode,
-    ModuleProgram,
-    StructParser,
-    Variable
-)
+from ..ast_ssc import BaseAstNode, ModuleProgram, StructParser, Variable
 from ..tokens import TokenType
 
 
@@ -14,7 +9,9 @@ class BaseCodeConverter:
 
     def __init__(self):
         self.pre_definitions: dict[TokenType, Callable[[BaseAstNode], str]] = {}
-        self.post_definitions: dict[TokenType, Callable[[BaseAstNode], str]] = {}
+        self.post_definitions: dict[
+            TokenType, Callable[[BaseAstNode], str]
+        ] = {}
 
     def pre(self, for_definition: TokenType):
         """before translate ast to code"""
@@ -44,18 +41,22 @@ class BaseCodeConverter:
             return self.post_definitions[node.kind](node)
         return ""
 
-    def convert_program(self,
-                        ast_program: ModuleProgram,
-                        comment: str = '') -> list[str]:
+    def convert_program(
+        self, ast_program: ModuleProgram, comment: str = ""
+    ) -> list[str]:
         """convert module AST to code parts"""
         acc = [comment]
         result = self.convert(ast_program, acc)
         return result
 
-    def convert(self, ast_entry: BaseAstNode, acc: list[str] | None = None) -> list[str]:
+    def convert(
+        self, ast_entry: BaseAstNode, acc: list[str] | None = None
+    ) -> list[str]:
         """convert ast to code parts"""
         acc = acc or []
-        if ast_entry.kind == TokenType.STRUCT and getattr(ast_entry, "docstring_class_top", False):
+        if ast_entry.kind == TokenType.STRUCT and getattr(
+            ast_entry, "docstring_class_top", False
+        ):
             ast_entry: StructParser
             acc.append(self._pre_convert_node(ast_entry.doc))
             acc.append(self._post_convert_node(ast_entry.doc))

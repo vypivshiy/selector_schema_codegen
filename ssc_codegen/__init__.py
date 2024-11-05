@@ -3,6 +3,7 @@ from .schema import ItemSchema, DictSchema, ListSchema, FlatListSchema
 
 VERSION = "0.4.0b"
 
+
 class Document(HTMLDocument, StringDocument, ArrayDocument, AssertDocument, DefaultDocument):
     pass
 

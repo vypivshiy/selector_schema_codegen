@@ -5,8 +5,12 @@
 # return value without link
 from .base import BaseCodeConverter, left_right_var_names
 from .templates import go
-from .utils import to_upper_camel_case as up_camel, wrap_double_quotes as wrap_dq, wrap_backtick, \
-    contains_assert_expr_fn
+from .utils import (
+    to_upper_camel_case as up_camel,
+    wrap_double_quotes as wrap_dq,
+    wrap_backtick,
+    contains_assert_expr_fn,
+)
 from ..ast_ssc import (
     StructParser,
     ModuleImports,
@@ -16,30 +20,44 @@ from ..ast_ssc import (
     StartParseFunction,
     DefaultValueWrapper,
     PartDocFunction,
-
-    HtmlCssExpression, HtmlCssAllExpression,
-    HtmlAttrExpression, HtmlAttrAllExpression,
-    HtmlTextExpression, HtmlTextAllExpression,
-    HtmlRawExpression, HtmlRawAllExpression,
-    HtmlXpathExpression, HtmlXpathAllExpression,
-
-    FormatExpression, MapFormatExpression,
-    TrimExpression, MapTrimExpression,
-    LTrimExpression, MapLTrimExpression,
-    RTrimExpression, MapRTrimExpression,
-    ReplaceExpression, MapReplaceExpression,
+    HtmlCssExpression,
+    HtmlCssAllExpression,
+    HtmlAttrExpression,
+    HtmlAttrAllExpression,
+    HtmlTextExpression,
+    HtmlTextAllExpression,
+    HtmlRawExpression,
+    HtmlRawAllExpression,
+    HtmlXpathExpression,
+    HtmlXpathAllExpression,
+    FormatExpression,
+    MapFormatExpression,
+    TrimExpression,
+    MapTrimExpression,
+    LTrimExpression,
+    MapLTrimExpression,
+    RTrimExpression,
+    MapRTrimExpression,
+    ReplaceExpression,
+    MapReplaceExpression,
     SplitExpression,
-
     NestedExpression,
-    RegexExpression, RegexSubExpression, MapRegexSubExpression, RegexAllExpression,
-
-    ReturnExpression, NoReturnExpression,
-
+    RegexExpression,
+    RegexSubExpression,
+    MapRegexSubExpression,
+    RegexAllExpression,
+    ReturnExpression,
+    NoReturnExpression,
     TypeDef,
-    IndexDocumentExpression, IndexStringExpression, JoinExpression,
-
-    IsCssExpression, IsXPathExpression, IsEqualExpression, IsContainsExpression,
-    IsRegexMatchExpression, IsNotEqualExpression
+    IndexDocumentExpression,
+    IndexStringExpression,
+    JoinExpression,
+    IsCssExpression,
+    IsXPathExpression,
+    IsEqualExpression,
+    IsContainsExpression,
+    IsRegexMatchExpression,
+    IsNotEqualExpression,
 )
 from ..tokens import TokenType, StructType, VariableType
 
@@ -53,7 +71,7 @@ E_GOQUERY_CSS = "{} := {}.Find({}).First(); "
 E_GOQUERY_CSS_ALL = "{} := {}.Find({}); "
 E_GOQUERY_TEXT = "{} := {}.Text(); "
 E_GOQUERY_EACH_HEAD = "{}.Each(func(i int, {} *goquery.Selection)"
-E_GOQUERY_EACH_FOOTER = go.BRACKET_END + ');'
+E_GOQUERY_EACH_FOOTER = go.BRACKET_END + ");"
 E_GOQUERY_RAW = "{}, _ := {}.Html(); "
 E_GOQUERY_ATTR = "{}, _ := {}.Attr({}); "
 IS_CSS = "if {}.Find({}).Length() == 0"
@@ -69,7 +87,10 @@ def tt_typedef(node: TypeDef):
         case StructType.DICT:
             # type T_NAME = map[String]T;
             typedef = go.gen_dict_typedef(node)
-        case node.struct_ref.type if node.struct_ref.type in (StructType.ITEM, StructType.LIST):
+        case node.struct_ref.type if node.struct_ref.type in (
+            StructType.ITEM,
+            StructType.LIST,
+        ):
             # type T_NAME struct { F1 String `json:f1`; ... }
             typedef = go.gen_struct_typedef(node)
         case _:
@@ -81,26 +102,36 @@ def tt_typedef(node: TypeDef):
 @converter.pre(TokenType.STRUCT)
 def tt_struct(node: StructParser) -> str:
     # HACK: generate block code immediately, funcs outer scope
-    return go.STRUCT_HEAD.format(node.name) + ' ' + go.BRACKET_START + go.STRUCT_BODY + ' ' + go.BRACKET_END
+    return (
+        go.STRUCT_HEAD.format(node.name)
+        + " "
+        + go.BRACKET_START
+        + go.STRUCT_BODY
+        + " "
+        + go.BRACKET_END
+    )
 
 
 @converter.pre(TokenType.DOCSTRING)
 def tt_docstring(node: Docstring) -> str:
     if node.value:
         return go.DOCSTRING(node.value)
-    return ''
+    return ""
 
 
 @converter.pre(TokenType.IMPORTS)
 def tt_imports(_: ModuleImports) -> str:
     # dependency variable $PACKAGE$
-    return (go.PACKAGE
-            + '\n'
-            + go.IMPORT_HEAD
-            + '\n' + go.BASE_IMPORTS
-            + GOQUERY_IMPORT
-            + '\n' + go.IMPORT_FOOTER
-            )
+    return (
+        go.PACKAGE
+        + "\n"
+        + go.IMPORT_HEAD
+        + "\n"
+        + go.BASE_IMPORTS
+        + GOQUERY_IMPORT
+        + "\n"
+        + go.IMPORT_FOOTER
+    )
 
 
 @converter.pre(TokenType.EXPR_RETURN)
@@ -108,7 +139,7 @@ def tt_ret(node: ReturnExpression) -> str:
     _, nxt = left_right_var_names("value", node.variable)
 
     if node.have_assert_expr():
-        return go.RET_VAL_NIL_ERR.format('&' + nxt)
+        return go.RET_VAL_NIL_ERR.format("&" + nxt)
     elif node.have_default_expr():
         # pointer type (naive)
         return go.RET.format(nxt)
@@ -126,21 +157,25 @@ def tt_nested(node: NestedExpression) -> str:
     # HACK: make selection type as document
 
     code = f"doc{node.variable.num} := goquery.NewDocumentFromNode({prv}.Nodes[0]); "
-    code += f"st{node.variable.num} := {node.schema}{{ doc{node.variable.num} }}; "
+    code += (
+        f"st{node.variable.num} := {node.schema}{{ doc{node.variable.num} }}; "
+    )
     code += f"{nxt} := st{node.variable.num}.Parse(); "
     return (
-            go.E_NESTED_NEW_DOC.format(node.variable.num, prv)
-            + go.E_PARSE_NESTED_ST(node.variable.num, node.schema)
-            + go.E_NESTED_PARSE_CALL.format(nxt, node.variable.num)
+        go.E_NESTED_NEW_DOC.format(node.variable.num, prv)
+        + go.E_PARSE_NESTED_ST(node.variable.num, node.schema)
+        + go.E_NESTED_PARSE_CALL.format(nxt, node.variable.num)
     )
 
 
 @converter.pre(TokenType.STRUCT_PRE_VALIDATE)
 def tt_pre_validate(node: PreValidateFunction) -> str:
     name = go.MAGIC_METHODS.get(node.name)
-    return (go.PRE_VALIDATE_HEAD.format(node.parent.name, name)
-            + ' '
-            + go.BRACKET_START)
+    return (
+        go.PRE_VALIDATE_HEAD.format(node.parent.name, name)
+        + " "
+        + go.BRACKET_START
+    )
 
 
 @converter.post(TokenType.STRUCT_PRE_VALIDATE)
@@ -152,14 +187,13 @@ def tt_pre_validate(_: PreValidateFunction) -> str:
 def tt_part_document(node: PartDocFunction):
     name = MAGIC_METHODS.get(node.name)
     if contains_assert_expr_fn(node):
-        return (go.PART_DOC_HEAD_ERR.format(node.parent.name, name)
-                + ' '
-                + go.BRACKET_START
-                )
-    return (
-            go.PART_DOC_HEAD.format(node.parent.name, name)
-            + ' '
+        return (
+            go.PART_DOC_HEAD_ERR.format(node.parent.name, name)
+            + " "
             + go.BRACKET_START
+        )
+    return (
+        go.PART_DOC_HEAD.format(node.parent.name, name) + " " + go.BRACKET_START
     )
 
 
@@ -182,16 +216,18 @@ def tt_function(node: StructFieldFunction) -> str:
     else:
         type_ = go.TYPES.get(node.ret_type)
     if node.have_default_expr():
-        _, ret = left_right_var_names('value', node.body[-1].variable)
+        _, ret = left_right_var_names("value", node.body[-1].variable)
         if node.have_assert_expr():
             type_ = go.RET_DEFAULT_ERR.format(ret, type_)
         else:
             type_ = go.RET_DEFAULT.format(ret, type_)
     if node.have_assert_expr():
         type_ = go.FN_PARSE_HEAD_RET_ERR.format(type_)
-    return (go.FN_PARSE_HEAD.format(node.parent.name, name, type_)
-            + ' ' + go.BRACKET_START
-            )
+    return (
+        go.FN_PARSE_HEAD.format(node.parent.name, name, type_)
+        + " "
+        + go.BRACKET_START
+    )
 
 
 @converter.post(TokenType.STRUCT_FIELD)
@@ -210,11 +246,17 @@ def tt_start_parse(node: StartParseFunction) -> str:
     # else scan all call functions
     if node.have_assert_expr():
         type_ = go.FN_PARSE_HEAD_RET_ERR.format(type_)
-    elif any(fn.have_assert_expr() for fn in node.parent.body if fn.kind == TokenType.STRUCT_FIELD):
+    elif any(
+        fn.have_assert_expr()
+        for fn in node.parent.body
+        if fn.kind == TokenType.STRUCT_FIELD
+    ):
         type_ = go.FN_PARSE_HEAD_RET_ERR.format(type_)
-    return (go.FN_START_PARSE_HEAD.format(node.parent.name, name, type_)
-            + ' ' + go.BRACKET_START
-            )
+    return (
+        go.FN_START_PARSE_HEAD.format(node.parent.name, name, type_)
+        + " "
+        + go.BRACKET_START
+    )
 
 
 @converter.post(TokenType.STRUCT_PARSE_START)
@@ -238,23 +280,17 @@ def tt_start_parse(node: StartParseFunction):
 
 @converter.pre(TokenType.EXPR_DEFAULT)
 def tt_default(node: DefaultValueWrapper) -> str:
-    value = wrap_dq(node.value) if isinstance(node.value, str) else 'nil'
+    value = wrap_dq(node.value) if isinstance(node.value, str) else "nil"
     _, ret = left_right_var_names("value", node.parent.body[-1].variable)
     if node.value == None:
-        return (go.DEFAULT_HEAD
-                + ret + '=' + value
-                + go.DEFAULT_FOOTER)
-    return (go.DEFAULT_HEAD
-            + '*' + ret + '=' + value
-            + go.DEFAULT_FOOTER)
+        return go.DEFAULT_HEAD + ret + "=" + value + go.DEFAULT_FOOTER
+    return go.DEFAULT_HEAD + "*" + ret + "=" + value + go.DEFAULT_FOOTER
 
 
 @converter.pre(TokenType.EXPR_STRING_FORMAT)
 def tt_string_format(node: FormatExpression) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
-    template = wrap_dq(
-        node.fmt.replace('{{}}', "%s")
-    )
+    template = wrap_dq(node.fmt.replace("{{}}", "%s"))
     code = go.E_STR_FMT.format(nxt, template, prv)
     if node.have_default_expr() and node.next.kind == TokenType.EXPR_RETURN:
         return go.declaration_to_assign(code)
@@ -271,16 +307,16 @@ def tt_string_format_all(node: MapFormatExpression) -> str:
     #         <NEW ARRAY VAR> = append(<NEW ARRAY VAR>, <MAP_CODE>)
     #     }
     prv, nxt = left_right_var_names("value", node.variable)
-    template = wrap_dq(
-        node.fmt.replace('{{}}', "%s")
-    )
+    template = wrap_dq(node.fmt.replace("{{}}", "%s"))
     i_var = f"i{node.variable.num}"
     map_code = go.E_STR_FMT_ALL.format(template, i_var)
     code = (
-            go.E_NXT_ARRAY.format(nxt, TYPES.get(node.next.variable.type))
-            + go.E_FOR_RANGE_HEAD.format(i_var, prv) + ' ' + go.BRACKET_START
-            + go.E_FOR_RANGE_MAP_CODE.format(nxt, nxt, map_code)
-            + go.BRACKET_END
+        go.E_NXT_ARRAY.format(nxt, TYPES.get(node.next.variable.type))
+        + go.E_FOR_RANGE_HEAD.format(i_var, prv)
+        + " "
+        + go.BRACKET_START
+        + go.E_FOR_RANGE_MAP_CODE.format(nxt, nxt, map_code)
+        + go.BRACKET_END
     )
     return code
 
@@ -303,10 +339,12 @@ def tt_string_trim_all(node: MapTrimExpression) -> str:
     i_var = f"i{node.variable.num}"
     map_code = go.E_STR_TRIM_ALL.format(i_var, chars)
     code = (
-            go.E_NXT_ARRAY.format(nxt, TYPES.get(node.next.variable.type))
-            + go.E_FOR_RANGE_HEAD.format(i_var, prv) + ' ' + go.BRACKET_START
-            + go.E_FOR_RANGE_MAP_CODE.format(nxt, nxt, map_code)
-            + go.BRACKET_END
+        go.E_NXT_ARRAY.format(nxt, TYPES.get(node.next.variable.type))
+        + go.E_FOR_RANGE_HEAD.format(i_var, prv)
+        + " "
+        + go.BRACKET_START
+        + go.E_FOR_RANGE_MAP_CODE.format(nxt, nxt, map_code)
+        + go.BRACKET_END
     )
     return code
 
@@ -328,10 +366,12 @@ def tt_string_ltrim_all(node: MapLTrimExpression) -> str:
     i_var = f"i{node.variable.num}"
     map_code = go.E_STR_LTRIM_ALL.format(i_var, chars)
     code = (
-            go.E_NXT_ARRAY.format(nxt, TYPES.get(node.next.variable.type))
-            + go.E_FOR_RANGE_HEAD.format(i_var, prv) + ' ' + go.BRACKET_START
-            + go.E_FOR_RANGE_MAP_CODE.format(nxt, nxt, map_code)
-            + go.BRACKET_END
+        go.E_NXT_ARRAY.format(nxt, TYPES.get(node.next.variable.type))
+        + go.E_FOR_RANGE_HEAD.format(i_var, prv)
+        + " "
+        + go.BRACKET_START
+        + go.E_FOR_RANGE_MAP_CODE.format(nxt, nxt, map_code)
+        + go.BRACKET_END
     )
     return code
 
@@ -353,10 +393,12 @@ def tt_string_rtrim_all(node: MapRTrimExpression) -> str:
     i_var = f"i{node.variable.num}"
     map_code = go.E_STR_RTRIM_ALL.format(i_var, chars)
     code = (
-            go.E_NXT_ARRAY.format(nxt, TYPES.get(node.next.variable.type))
-            + go.E_FOR_RANGE_HEAD.format(i_var, prv) + ' ' + go.BRACKET_START
-            + go.E_FOR_RANGE_MAP_CODE.format(nxt, nxt, map_code)
-            + go.BRACKET_END
+        go.E_NXT_ARRAY.format(nxt, TYPES.get(node.next.variable.type))
+        + go.E_FOR_RANGE_HEAD.format(i_var, prv)
+        + " "
+        + go.BRACKET_START
+        + go.E_FOR_RANGE_MAP_CODE.format(nxt, nxt, map_code)
+        + go.BRACKET_END
     )
     return code
 
@@ -378,10 +420,12 @@ def tt_string_replace_all(node: MapReplaceExpression) -> str:
     i_var = f"i{node.variable.num}"
     map_code = go.E_STR_REPL_ALL.format(i_var, old, new)
     code = (
-            go.E_NXT_ARRAY.format(nxt, TYPES.get(node.next.variable.type))
-            + go.E_FOR_RANGE_HEAD.format(i_var, prv) + ' ' + go.BRACKET_START
-            + go.E_FOR_RANGE_MAP_CODE.format(nxt, nxt, map_code)
-            + go.BRACKET_END
+        go.E_NXT_ARRAY.format(nxt, TYPES.get(node.next.variable.type))
+        + go.E_FOR_RANGE_HEAD.format(i_var, prv)
+        + " "
+        + go.BRACKET_START
+        + go.E_FOR_RANGE_MAP_CODE.format(nxt, nxt, map_code)
+        + go.BRACKET_END
     )
     return code
 
@@ -427,6 +471,7 @@ def tt_regex_sub(node: RegexSubExpression):
         return go.declaration_to_assign(code)
     return code
 
+
 @converter.pre(TokenType.EXPR_LIST_REGEX_SUB)
 def tt_regex_sub_all(node: MapRegexSubExpression):
     prv, nxt = left_right_var_names("value", node.variable)
@@ -435,10 +480,12 @@ def tt_regex_sub_all(node: MapRegexSubExpression):
     i_var = f"i{node.variable.num}"
     map_code = go.E_RE_SUB_ALL.format(pattern, i_var, repl)
     code = (
-            go.E_NXT_ARRAY.format(nxt, TYPES.get(node.next.variable.type))
-            + go.E_FOR_RANGE_HEAD.format(i_var, prv) + ' ' + go.BRACKET_START
-            + go.E_FOR_RANGE_MAP_CODE.format(nxt, nxt, map_code)
-            + go.BRACKET_END
+        go.E_NXT_ARRAY.format(nxt, TYPES.get(node.next.variable.type))
+        + go.E_FOR_RANGE_HEAD.format(i_var, prv)
+        + " "
+        + go.BRACKET_START
+        + go.E_FOR_RANGE_MAP_CODE.format(nxt, nxt, map_code)
+        + go.BRACKET_END
     )
     return code
 
@@ -451,6 +498,7 @@ def tt_string_index(node: IndexStringExpression):
         return go.declaration_to_assign(code)
     return code
 
+
 @converter.pre(TokenType.EXPR_LIST_DOCUMENT_INDEX)
 def tt_doc_index(node: IndexDocumentExpression):
     prv, nxt = left_right_var_names("value", node.variable)
@@ -458,6 +506,7 @@ def tt_doc_index(node: IndexDocumentExpression):
     if node.have_default_expr() and node.next.kind == TokenType.EXPR_RETURN:
         return go.declaration_to_assign(code)
     return code
+
 
 @converter.pre(TokenType.EXPR_LIST_JOIN)
 def tt_join(node: JoinExpression):
@@ -468,15 +517,21 @@ def tt_join(node: JoinExpression):
         return go.declaration_to_assign(code)
     return code
 
+
 @converter.pre(TokenType.IS_EQUAL)
 def tt_is_equal(node: IsEqualExpression):
     prv, nxt = left_right_var_names("value", node.variable)
     value = wrap_dq(node.value)
     msg = wrap_dq(node.msg)
-    ret = go.RET_FMT_ERR.format(
-        msg) if node.parent.kind == TokenType.STRUCT_PRE_VALIDATE else go.RET_NIL_FMT_ERR.format(msg)
+    ret = (
+        go.RET_FMT_ERR.format(msg)
+        if node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
+        else go.RET_NIL_FMT_ERR.format(msg)
+    )
     code = (
-        go.E_EQ.format(prv, value) + ' ' + go.BRACKET_START
+        go.E_EQ.format(prv, value)
+        + " "
+        + go.BRACKET_START
         + ret
         + go.BRACKET_END
     )
@@ -492,12 +547,19 @@ def tt_is_not_equal(node: IsNotEqualExpression):
     prv, nxt = left_right_var_names("value", node.variable)
     value = wrap_dq(node.value)
     msg = wrap_dq(node.msg)
-    ret = go.RET_FMT_ERR.format(
-        msg) if node.parent.kind == TokenType.STRUCT_PRE_VALIDATE else go.RET_NIL_FMT_ERR.format(msg)
+    ret = (
+        go.RET_FMT_ERR.format(msg)
+        if node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
+        else go.RET_NIL_FMT_ERR.format(msg)
+    )
 
-    code = (go.E_NE.format(prv, value) + ' ' + go.BRACKET_START
-            + ret
-            + go.BRACKET_END)
+    code = (
+        go.E_NE.format(prv, value)
+        + " "
+        + go.BRACKET_START
+        + ret
+        + go.BRACKET_END
+    )
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return code
     code += go.E_ASSIGN.format(nxt, prv)
@@ -509,12 +571,19 @@ def tt_is_contains(node: IsContainsExpression):
     prv, nxt = left_right_var_names("value", node.variable)
     item = wrap_dq(node.item)
     msg = wrap_dq(node.msg)
-    ret = go.RET_FMT_ERR.format(
-        msg) if node.parent.kind == TokenType.STRUCT_PRE_VALIDATE else go.RET_NIL_FMT_ERR.format(msg)
+    ret = (
+        go.RET_FMT_ERR.format(msg)
+        if node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
+        else go.RET_NIL_FMT_ERR.format(msg)
+    )
 
-    code = (go.E_IN.format(prv, item) + ' ' + go.BRACKET_START
-            + ret
-            + go.BRACKET_END)
+    code = (
+        go.E_IN.format(prv, item)
+        + " "
+        + go.BRACKET_START
+        + ret
+        + go.BRACKET_END
+    )
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return code
     code += go.E_ASSIGN.format(nxt, prv)
@@ -527,12 +596,18 @@ def tt_is_regex(node: IsRegexMatchExpression):
     pattern = wrap_backtick(node.pattern)
     msg = wrap_dq(node.msg)
     err_var = f"err{node.variable.num}"
-    ret = go.RET_FMT_ERR.format(
-        msg) if node.parent.kind == TokenType.STRUCT_PRE_VALIDATE else go.RET_NIL_FMT_ERR.format(msg)
-    code = (go.E_IS_RE_ASSIGN.format(err_var, pattern, prv)
-            + go.E_IS_RE.format(err_var) + go.BRACKET_START
-            + ret
-            + go.BRACKET_END)
+    ret = (
+        go.RET_FMT_ERR.format(msg)
+        if node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
+        else go.RET_NIL_FMT_ERR.format(msg)
+    )
+    code = (
+        go.E_IS_RE_ASSIGN.format(err_var, pattern, prv)
+        + go.E_IS_RE.format(err_var)
+        + go.BRACKET_START
+        + ret
+        + go.BRACKET_END
+    )
 
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return code
@@ -563,16 +638,21 @@ def tt_text(node: HtmlTextExpression) -> str:
         return go.declaration_to_assign(code)
     return code
 
+
 @converter.pre(TokenType.EXPR_TEXT_ALL)
 def tt_text_all(node: HtmlTextAllExpression) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
     i_var = f"e{node.variable.num}"
     map_code = f"{i_var}.Text()"
 
-    code = (go.E_NXT_ARRAY.format(nxt, go.TYPES.get(node.next.variable.type))
-            + E_GOQUERY_EACH_HEAD.format(prv, i_var) + ' ' + go.BRACKET_START
-            + go.E_FOR_RANGE_MAP_CODE.format(nxt, nxt, map_code)
-            + E_GOQUERY_EACH_FOOTER)
+    code = (
+        go.E_NXT_ARRAY.format(nxt, go.TYPES.get(node.next.variable.type))
+        + E_GOQUERY_EACH_HEAD.format(prv, i_var)
+        + " "
+        + go.BRACKET_START
+        + go.E_FOR_RANGE_MAP_CODE.format(nxt, nxt, map_code)
+        + E_GOQUERY_EACH_FOOTER
+    )
     return code
 
 
@@ -585,17 +665,22 @@ def tt_raw(node: HtmlRawExpression) -> str:
         return go.declaration_to_assign(code)
     return code
 
+
 @converter.pre(TokenType.EXPR_RAW_ALL)
 def tt_raw_all(node: HtmlRawAllExpression) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
     i_var = f"e{node.variable.num}"
     attr_var = f"attr{node.variable.num}"
 
-    return (go.E_NXT_ARRAY.format(nxt, go.TYPES.get(node.next.variable.type))
-            + E_GOQUERY_EACH_HEAD.format(prv, i_var) + ' ' + go.BRACKET_START
-            + E_GOQUERY_RAW.format(attr_var, i_var)
-            + go.E_FOR_RANGE_MAP_CODE.format(nxt, nxt, attr_var)
-            + E_GOQUERY_EACH_FOOTER)
+    return (
+        go.E_NXT_ARRAY.format(nxt, go.TYPES.get(node.next.variable.type))
+        + E_GOQUERY_EACH_HEAD.format(prv, i_var)
+        + " "
+        + go.BRACKET_START
+        + E_GOQUERY_RAW.format(attr_var, i_var)
+        + go.E_FOR_RANGE_MAP_CODE.format(nxt, nxt, attr_var)
+        + E_GOQUERY_EACH_FOOTER
+    )
 
 
 @converter.pre(TokenType.EXPR_ATTR)
@@ -606,6 +691,7 @@ def tt_attr(node: HtmlAttrExpression):
     if node.have_default_expr() and node.next.kind == TokenType.EXPR_RETURN:
         return go.declaration_to_assign(code)
     return code
+
 
 @converter.pre(TokenType.EXPR_ATTR_ALL)
 def tt_attr_all(node: HtmlAttrAllExpression):
@@ -619,11 +705,15 @@ def tt_attr_all(node: HtmlAttrAllExpression):
     # 		attrs = append(attrs, ATTR_VAR)
     # 	})
 
-    return (go.E_NXT_ARRAY.format(nxt, go.TYPES.get(node.next.variable.type))
-            + E_GOQUERY_EACH_HEAD.format(prv, i_var) + ' ' + go.BRACKET_START
-            + E_GOQUERY_ATTR.format(attr_var, i_var, n)
-            + go.E_FOR_RANGE_MAP_CODE.format(nxt, nxt, attr_var)
-            + E_GOQUERY_EACH_FOOTER)
+    return (
+        go.E_NXT_ARRAY.format(nxt, go.TYPES.get(node.next.variable.type))
+        + E_GOQUERY_EACH_HEAD.format(prv, i_var)
+        + " "
+        + go.BRACKET_START
+        + E_GOQUERY_ATTR.format(attr_var, i_var, n)
+        + go.E_FOR_RANGE_MAP_CODE.format(nxt, nxt, attr_var)
+        + E_GOQUERY_EACH_FOOTER
+    )
 
 
 @converter.pre(TokenType.IS_CSS)
@@ -631,10 +721,12 @@ def tt_is_css(node: IsCssExpression):
     prv, nxt = left_right_var_names("value", node.variable)
     q = wrap_dq(node.query)
     msg = wrap_dq(node.msg)
-    ret = go.RET_FMT_ERR.format(msg) if node.parent.kind == TokenType.STRUCT_PRE_VALIDATE else go.RET_NIL_FMT_ERR.format(msg)
-    code = (IS_CSS.format(prv, q) + ' ' + go.BRACKET_START
-            + ret
-            + go.BRACKET_END)
+    ret = (
+        go.RET_FMT_ERR.format(msg)
+        if node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
+        else go.RET_NIL_FMT_ERR.format(msg)
+    )
+    code = IS_CSS.format(prv, q) + " " + go.BRACKET_START + ret + go.BRACKET_END
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return code
     code += go.E_ASSIGN.format(nxt, prv)

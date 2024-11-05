@@ -1,23 +1,28 @@
 from .py_base import BasePyCodeConverter, lr_var_names
 from .templates import py
-from .utils import find_nested_associated_typedef_by_st_field_fn, have_default_expr
 from ..ast_ssc import (
     ModuleImports,
     PreValidateFunction,
     StructFieldFunction,
     PartDocFunction,
-
-    HtmlCssExpression, HtmlCssAllExpression,
-    HtmlAttrExpression, HtmlAttrAllExpression,
-    HtmlTextExpression, HtmlTextAllExpression,
-    HtmlRawExpression, HtmlRawAllExpression,
-    HtmlXpathExpression, HtmlXpathAllExpression,
-
-    IsCssExpression, IsXPathExpression
+    HtmlCssExpression,
+    HtmlCssAllExpression,
+    HtmlAttrExpression,
+    HtmlAttrAllExpression,
+    HtmlTextExpression,
+    HtmlTextAllExpression,
+    HtmlRawExpression,
+    HtmlRawAllExpression,
+    HtmlXpathExpression,
+    HtmlXpathAllExpression,
+    IsCssExpression,
+    IsXPathExpression,
 )
 from ..tokens import TokenType, StructType, VariableType
 
-PARSEL_INIT = "self._doc=Selector(document) if isinstance(document, str) else document"
+PARSEL_INIT = (
+    "self._doc=Selector(document) if isinstance(document, str) else document"
+)
 PARSEL_IMPORTS = "from parsel import Selector, SelectorList"
 E_PARSEL_CSS = "{} = {}.css({})"
 E_PARSEL_CSS_ALL = E_PARSEL_CSS
@@ -37,7 +42,7 @@ converter = BasePyCodeConverter()
 
 @converter.pre(TokenType.STRUCT_INIT)
 def tt_init(_) -> str:
-    p_type = 'Union[str, SelectorList, Selector]'
+    p_type = "Union[str, SelectorList, Selector]"
     return py.INDENT_METHOD + py.CLS_INIT_HEAD.format(p_type)
 
 
@@ -54,7 +59,9 @@ def tt_imports(_: ModuleImports) -> str:
 
 @converter.pre(TokenType.STRUCT_PRE_VALIDATE)
 def tt_pre_validate(node: PreValidateFunction) -> str:
-    return py.INDENT_METHOD + py.CLS_PRE_VALIDATE_HEAD.format(py.MAGIC_METHODS.get(node.name))
+    return py.INDENT_METHOD + py.CLS_PRE_VALIDATE_HEAD.format(
+        py.MAGIC_METHODS.get(node.name)
+    )
 
 
 @converter.pre(TokenType.STRUCT_PART_DOCUMENT)
@@ -62,19 +69,21 @@ def tt_part_document(node: PartDocFunction):
     p_type = "Selector"
     ret_type = "Selector"
     name = py.MAGIC_METHODS.get(node.name)
-    return py.INDENT_METHOD + py.CLS_PART_DOC_HEAD.format(name, p_type, ret_type)
+    return py.INDENT_METHOD + py.CLS_PART_DOC_HEAD.format(
+        name, p_type, ret_type
+    )
 
 
 @converter.pre(TokenType.STRUCT_FIELD)
 def tt_function(node: StructFieldFunction) -> str:
     name = py.MAGIC_METHODS.get(node.name, node.name)
     if node.ret_type == VariableType.NESTED:
-        t_def = find_nested_associated_typedef_by_st_field_fn(node)
-        if t_def.struct.type == StructType.LIST:
-            t_name = py.TYPE_PREFIX.format(t_def.struct.name)
+        t_def = node.find_associated_typedef()
+        if t_def.struct_ref.type == StructType.LIST:
+            t_name = py.TYPE_PREFIX.format(t_def.struct_ref.name)
             type_ = py.TYPE_LIST.format(t_name)
         else:
-            type_ = py.TYPE_PREFIX.format(t_def.struct.name)
+            type_ = py.TYPE_PREFIX.format(t_def.struct_ref.name)
     else:
         type_ = py.TYPES.get(node.ret_type)
     p_type = "Selector"
@@ -87,7 +96,8 @@ def tt_css(node: HtmlCssExpression) -> str:
     q = repr(node.query)
     prv, nxt = lr_var_names(variable=node.variable)
     code = E_PARSEL_CSS.format(nxt, prv, q)
-    if have_default_expr(node):
+
+    if node.have_default_expr():
         return py.INDENT_DEFAULT_BODY + code
     return py.INDENT_METHOD_BODY + code
 
@@ -97,7 +107,7 @@ def tt_css_all(node: HtmlCssAllExpression) -> str:
     q = repr(node.query)
     prv, nxt = lr_var_names(variable=node.variable)
     code = E_PARSEL_CSS_ALL.format(nxt, prv, q)
-    if have_default_expr(node):
+    if node.have_default_expr():
         return py.INDENT_DEFAULT_BODY + code
     return py.INDENT_METHOD_BODY + code
 
@@ -107,7 +117,7 @@ def tt_xpath(node: HtmlXpathExpression) -> str:
     q = repr(node.query)
     prv, nxt = lr_var_names(variable=node.variable)
     code = E_PARSEL_XPATH.format(nxt, prv, q)
-    if have_default_expr(node):
+    if node.have_default_expr():
         return py.INDENT_DEFAULT_BODY + code
     return py.INDENT_METHOD_BODY + code
 
@@ -117,7 +127,7 @@ def tt_xpath_all(node: HtmlXpathAllExpression) -> str:
     q = repr(node.query)
     prv, nxt = lr_var_names(variable=node.variable)
     code = E_PARSEL_XPATH_ALL.format(nxt, prv, q)
-    if have_default_expr(node):
+    if node.have_default_expr():
         return py.INDENT_DEFAULT_BODY + code
     return py.INDENT_METHOD_BODY + code
 
@@ -126,7 +136,7 @@ def tt_xpath_all(node: HtmlXpathAllExpression) -> str:
 def tt_text(node: HtmlTextExpression) -> str:
     prv, nxt = lr_var_names(variable=node.variable)
     code = E_PARSEL_TEXT.format(nxt, prv)
-    if have_default_expr(node):
+    if node.have_default_expr():
         return py.INDENT_DEFAULT_BODY + code
     return py.INDENT_METHOD_BODY + code
 
@@ -135,7 +145,7 @@ def tt_text(node: HtmlTextExpression) -> str:
 def tt_text_all(node: HtmlTextAllExpression) -> str:
     prv, nxt = lr_var_names(variable=node.variable)
     code = E_PARSEL_TEXT_ALL.format(nxt, prv)
-    if have_default_expr(node):
+    if node.have_default_expr():
         return py.INDENT_DEFAULT_BODY + code
     return py.INDENT_METHOD_BODY + code
 
@@ -144,7 +154,7 @@ def tt_text_all(node: HtmlTextAllExpression) -> str:
 def tt_raw(node: HtmlRawExpression) -> str:
     prv, nxt = lr_var_names(variable=node.variable)
     code = E_PARSEL_RAW.format(nxt, prv)
-    if have_default_expr(node):
+    if node.have_default_expr():
         return py.INDENT_DEFAULT_BODY + code
     return py.INDENT_METHOD_BODY + code
 
@@ -153,7 +163,7 @@ def tt_raw(node: HtmlRawExpression) -> str:
 def tt_raw_all(node: HtmlRawAllExpression) -> str:
     prv, nxt = lr_var_names(variable=node.variable)
     code = E_PARSEL_RAW_ALL.format(nxt, prv)
-    if have_default_expr(node):
+    if node.have_default_expr():
         return py.INDENT_DEFAULT_BODY + code
     return py.INDENT_METHOD_BODY + code
 
@@ -163,7 +173,7 @@ def tt_attr(node: HtmlAttrExpression):
     n = node.attr
     prv, nxt = lr_var_names(variable=node.variable)
     code = E_PARSEL_ATTR.format(nxt, prv, n)
-    if have_default_expr(node):
+    if node.have_default_expr():
         return py.INDENT_DEFAULT_BODY + code
     return py.INDENT_METHOD_BODY + code
 
@@ -173,7 +183,7 @@ def tt_attr_all(node: HtmlAttrAllExpression):
     n = node.attr
     prv, nxt = lr_var_names(variable=node.variable)
     code = E_PARSEL_ATTR_ALL.format(nxt, prv, n)
-    if have_default_expr(node):
+    if node.have_default_expr():
         return py.INDENT_DEFAULT_BODY + code
     return py.INDENT_METHOD_BODY + code
 
@@ -184,10 +194,14 @@ def tt_is_css(node: IsCssExpression):
     q = repr(node.query)
     msg = repr(node.msg)
     code = E_PARSEL_IS_CSS.format(prv, q, msg)
-    indent = py.INDENT_DEFAULT_BODY if have_default_expr(node) else py.INDENT_METHOD_BODY
+    indent = (
+        py.INDENT_DEFAULT_BODY
+        if node.have_default_expr()
+        else py.INDENT_METHOD_BODY
+    )
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return indent + code
-    return f'{indent}{code}\n{indent}{nxt} = {prv}'
+    return f"{indent}{code}\n{indent}{nxt} = {prv}"
 
 
 @converter.pre(TokenType.IS_XPATH)
@@ -196,7 +210,11 @@ def tt_is_xpath(node: IsXPathExpression):
     q = repr(node.query)
     msg = repr(node.msg)
     code = E_PARSEL_IS_XPATH.format(prv, q, msg)
-    indent = py.INDENT_DEFAULT_BODY if have_default_expr(node) else py.INDENT_METHOD_BODY
+    indent = (
+        py.INDENT_DEFAULT_BODY
+        if node.have_default_expr()
+        else py.INDENT_METHOD_BODY
+    )
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return indent + code
-    return f'{indent}{code}\n{indent}{nxt} = {prv}'
+    return f"{indent}{code}\n{indent}{nxt} = {prv}"
