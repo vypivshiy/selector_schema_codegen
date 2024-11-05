@@ -1,12 +1,12 @@
-# FIXME Nested return ARRAY
-# FIXME assert return type + err
-# FIXME docstring indent (naive imp)
+# default
+# STRING_OPTIONAL:
+# assingn as pointer *value2 = VAL
+# last operator (penis) := replace as =
+# return value without link
 from .base import BaseCodeConverter, left_right_var_names
 from .templates import go
-from .utils import have_default_expr
 from .utils import to_upper_camel_case as up_camel, wrap_double_quotes as wrap_dq, wrap_backtick, \
-    find_nested_associated_typedef_by_st_field_fn, have_assert_expr, \
-    have_start_parse_assert_expr
+    contains_assert_expr_fn
 from ..ast_ssc import (
     StructParser,
     ModuleImports,
@@ -61,8 +61,7 @@ IS_CSS = "if {}.Find({}).Length() == 0"
 
 @converter.pre(TokenType.TYPEDEF)
 def tt_typedef(node: TypeDef):
-    t_name = go.TYPE_PREFIX.format(node.name)
-    match node.struct.type:
+    match node.struct_ref.type:
         case StructType.FLAT_LIST:
             # type T_NAME = []T;
             typedef = go.gen_flat_list_typedef(node)
@@ -70,7 +69,7 @@ def tt_typedef(node: TypeDef):
         case StructType.DICT:
             # type T_NAME = map[String]T;
             typedef = go.gen_dict_typedef(node)
-        case node.struct.type if node.struct.type in (StructType.ITEM, StructType.LIST):
+        case node.struct_ref.type if node.struct_ref.type in (StructType.ITEM, StructType.LIST):
             # type T_NAME struct { F1 String `json:f1`; ... }
             typedef = go.gen_struct_typedef(node)
         case _:
@@ -81,7 +80,7 @@ def tt_typedef(node: TypeDef):
 
 @converter.pre(TokenType.STRUCT)
 def tt_struct(node: StructParser) -> str:
-    # HACK: generate code immediately, func init outer scope
+    # HACK: generate block code immediately, funcs outer scope
     return go.STRUCT_HEAD.format(node.name) + ' ' + go.BRACKET_START + go.STRUCT_BODY + ' ' + go.BRACKET_END
 
 
@@ -107,10 +106,12 @@ def tt_imports(_: ModuleImports) -> str:
 @converter.pre(TokenType.EXPR_RETURN)
 def tt_ret(node: ReturnExpression) -> str:
     _, nxt = left_right_var_names("value", node.variable)
-    if node.parent.kind == TokenType.STRUCT_PRE_VALIDATE:
-        return go.NO_RET
-    if have_default_expr(node):
-        return go.RET_VAL_NIL_ERR.format(nxt)
+
+    if node.have_assert_expr():
+        return go.RET_VAL_NIL_ERR.format('&' + nxt)
+    elif node.have_default_expr():
+        # pointer type (naive)
+        return go.RET.format(nxt)
     return go.RET.format(nxt)
 
 
@@ -150,7 +151,7 @@ def tt_pre_validate(_: PreValidateFunction) -> str:
 @converter.pre(TokenType.STRUCT_PART_DOCUMENT)
 def tt_part_document(node: PartDocFunction):
     name = MAGIC_METHODS.get(node.name)
-    if have_assert_expr(node):
+    if contains_assert_expr_fn(node):
         return (go.PART_DOC_HEAD_ERR.format(node.parent.name, name)
                 + ' '
                 + go.BRACKET_START
@@ -173,16 +174,24 @@ def tt_function(node: StructFieldFunction) -> str:
     if node.ret_type == VariableType.NESTED:
         # serialize all to structs
         # find associated typedef node by return nested schema name
-        associated_typedef: TypeDef = find_nested_associated_typedef_by_st_field_fn(node)
-        type_ = go.TYPE_PREFIX.format(node.body[-2].schema)  # noqa
-        st_type = associated_typedef.struct.type
+        associated_typedef = node.find_associated_typedef()
+        type_ = go.TYPE_PREFIX.format(node.nested_schema_name())
+        st_type = associated_typedef.struct_ref.type
         if st_type == StructType.LIST:
             type_ = go.TYPE_LIST.format(type_)
     else:
         type_ = go.TYPES.get(node.ret_type)
-    # fixme, check cases in (T, error) signature
-    ret_type = go.FN_PARSE_HEAD_RET_ERR.format(type_) if have_assert_expr(node) else type_
-    return go.FN_PARSE_HEAD.format(node.parent.name, name, ret_type) + ' ' + go.BRACKET_START
+    if node.have_default_expr():
+        _, ret = left_right_var_names('value', node.body[-1].variable)
+        if node.have_assert_expr():
+            type_ = go.RET_DEFAULT_ERR.format(ret, type_)
+        else:
+            type_ = go.RET_DEFAULT.format(ret, type_)
+    if node.have_assert_expr():
+        type_ = go.FN_PARSE_HEAD_RET_ERR.format(type_)
+    return (go.FN_PARSE_HEAD.format(node.parent.name, name, type_)
+            + ' ' + go.BRACKET_START
+            )
 
 
 @converter.post(TokenType.STRUCT_FIELD)
@@ -197,29 +206,29 @@ def tt_start_parse(node: StartParseFunction) -> str:
     type_ = go.TYPE_PREFIX.format(node.parent.name)
     if node.type == StructType.LIST:
         type_ = go.TYPE_LIST.format(type_)
-
-    if have_start_parse_assert_expr(node):
+    # try detect err return in first node
+    # else scan all call functions
+    if node.have_assert_expr():
         type_ = go.FN_PARSE_HEAD_RET_ERR.format(type_)
-    elif any(have_assert_expr(fn) for fn in node.parent.body if fn.kind == TokenType.STRUCT_FIELD):
+    elif any(fn.have_assert_expr() for fn in node.parent.body if fn.kind == TokenType.STRUCT_FIELD):
         type_ = go.FN_PARSE_HEAD_RET_ERR.format(type_)
-    return go.FN_START_PARSE_HEAD.format(node.parent.name, name, type_) + ' ' + go.BRACKET_START
+    return (go.FN_START_PARSE_HEAD.format(node.parent.name, name, type_)
+            + ' ' + go.BRACKET_START
+            )
 
 
 @converter.post(TokenType.STRUCT_PARSE_START)
 def tt_start_parse(node: StartParseFunction):
     code = ""
-    # TODO: add body BRACKET_END
-    if any(f.name == '__PRE_VALIDATE__' for f in node.body):
+    if any(f.kind == TokenType.STRUCT_PRE_VALIDATE for f in node.body):
         code += go.START_PARSE_CALL_PRE_VALIDATE(node)
     match node.type:
         case StructType.ITEM:
             code += go.gen_item_body(node)
-
         case StructType.LIST:
             code += go.gen_list_body(node)
         case StructType.DICT:
             code += go.gen_dict_body(node)
-
         case StructType.FLAT_LIST:
             code += go.gen_flat_list_body(node)
         case _:
@@ -228,16 +237,16 @@ def tt_start_parse(node: StartParseFunction):
 
 
 @converter.pre(TokenType.EXPR_DEFAULT)
-def tt_default(_: DefaultValueWrapper) -> str:
-    # TODO: impl in EXPR
-    pass
-
-
-@converter.post(TokenType.EXPR_DEFAULT)
-def tt_default(_: DefaultValueWrapper) -> str:
-    pass
-    # val = wrap_dq(node.value) if isinstance(node.value, str) else 'nil'
-    # return f"return {val}; "
+def tt_default(node: DefaultValueWrapper) -> str:
+    value = wrap_dq(node.value) if isinstance(node.value, str) else 'nil'
+    _, ret = left_right_var_names("value", node.parent.body[-1].variable)
+    if node.value == None:
+        return (go.DEFAULT_HEAD
+                + ret + '=' + value
+                + go.DEFAULT_FOOTER)
+    return (go.DEFAULT_HEAD
+            + '*' + ret + '=' + value
+            + go.DEFAULT_FOOTER)
 
 
 @converter.pre(TokenType.EXPR_STRING_FORMAT)
@@ -246,17 +255,20 @@ def tt_string_format(node: FormatExpression) -> str:
     template = wrap_dq(
         node.fmt.replace('{{}}', "%s")
     )
-    return go.E_STR_FMT.format(nxt, template, prv)
+    code = go.E_STR_FMT.format(nxt, template, prv)
+    if node.have_default_expr() and node.next.kind == TokenType.EXPR_RETURN:
+        return go.declaration_to_assign(code)
+    return code
 
 
 @converter.pre(TokenType.EXPR_LIST_STRING_FORMAT)
 def tt_string_format_all(node: MapFormatExpression) -> str:
     # https://stackoverflow.com/a/33726830
-    #     list := []int{1,2,3}
+    #     <PREV ARRAY VAR> := []<T1>{1,2,3}
     #
-    #     var list2 []string
-    #     for _, x := range list {
-    #         list2 = append(list2, strconv.Itoa(x * 2))
+    #     var <NEW ARRAY VAR> []<T2>
+    #     for _, x := range <PREV ARRAY VAR> {
+    #         <NEW ARRAY VAR> = append(<NEW ARRAY VAR>, <MAP_CODE>)
     #     }
     prv, nxt = left_right_var_names("value", node.variable)
     template = wrap_dq(
@@ -277,7 +289,10 @@ def tt_string_format_all(node: MapFormatExpression) -> str:
 def tt_string_trim(node: TrimExpression) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
     chars = wrap_dq(node.value)
-    return go.E_STR_TRIM.format(nxt, prv, chars)
+    code = go.E_STR_TRIM.format(nxt, prv, chars)
+    if node.have_default_expr() and node.next.kind == TokenType.EXPR_RETURN:
+        return go.declaration_to_assign(code)
+    return code
 
 
 @converter.pre(TokenType.EXPR_LIST_STRING_TRIM)
@@ -300,7 +315,10 @@ def tt_string_trim_all(node: MapTrimExpression) -> str:
 def tt_string_ltrim(node: LTrimExpression) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
     chars = wrap_dq(node.value)
-    return go.E_STR_LTRIM.format(nxt, prv, chars)
+    code = go.E_STR_LTRIM.format(nxt, prv, chars)
+    if node.have_default_expr() and node.next.kind == TokenType.EXPR_RETURN:
+        return go.declaration_to_assign(code)
+    return code
 
 
 @converter.pre(TokenType.EXPR_LIST_STRING_LTRIM)
@@ -322,7 +340,10 @@ def tt_string_ltrim_all(node: MapLTrimExpression) -> str:
 def tt_string_rtrim(node: RTrimExpression) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
     chars = wrap_dq(node.value)
-    return go.E_STR_RTRIM.format(nxt, prv, chars)
+    code = go.E_STR_RTRIM.format(nxt, prv, chars)
+    if node.have_default_expr() and node.next.kind == TokenType.EXPR_RETURN:
+        return go.declaration_to_assign(code)
+    return code
 
 
 @converter.pre(TokenType.EXPR_LIST_STRING_RTRIM)
@@ -344,7 +365,10 @@ def tt_string_rtrim_all(node: MapRTrimExpression) -> str:
 def tt_string_replace(node: ReplaceExpression) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
     old, new = wrap_dq(node.old), wrap_dq(node.new)
-    return go.E_STR_REPL.format(nxt, prv, old, new)
+    code = go.E_STR_REPL.format(nxt, prv, old, new)
+    if node.have_default_expr() and node.next.kind == TokenType.EXPR_RETURN:
+        return go.declaration_to_assign(code)
+    return code
 
 
 @converter.pre(TokenType.EXPR_LIST_STRING_REPLACE)
@@ -366,7 +390,10 @@ def tt_string_replace_all(node: MapReplaceExpression) -> str:
 def tt_string_split(node: SplitExpression) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
     sep = wrap_dq(node.sep)
-    return go.E_STR_SPLIT.format(nxt, prv, sep)
+    code = go.E_STR_SPLIT.format(nxt, prv, sep)
+    if node.have_default_expr() and node.next.kind == TokenType.EXPR_RETURN:
+        return go.declaration_to_assign(code)
+    return code
 
 
 @converter.pre(TokenType.EXPR_REGEX)
@@ -374,14 +401,20 @@ def tt_regex(node: RegexExpression):
     prv, nxt = left_right_var_names("value", node.variable)
     pattern = wrap_backtick(node.pattern)
     group = node.group - 1
-    return go.E_RE.format(nxt, pattern, prv, group)
+    code = go.E_RE.format(nxt, pattern, prv, group)
+    if node.have_default_expr() and node.next.kind == TokenType.EXPR_RETURN:
+        return go.declaration_to_assign(code)
+    return code
 
 
 @converter.pre(TokenType.EXPR_REGEX_ALL)
 def tt_regex_all(node: RegexAllExpression):
     prv, nxt = left_right_var_names("value", node.variable)
     pattern = wrap_backtick(node.pattern)
-    return go.E_RE_ALL.format(nxt, pattern, prv)
+    code = go.E_RE_ALL.format(nxt, pattern, prv)
+    if node.have_default_expr() and node.next.kind == TokenType.EXPR_RETURN:
+        return go.declaration_to_assign(code)
+    return code
 
 
 @converter.pre(TokenType.EXPR_REGEX_SUB)
@@ -389,8 +422,10 @@ def tt_regex_sub(node: RegexSubExpression):
     prv, nxt = left_right_var_names("value", node.variable)
     pattern = wrap_backtick(node.pattern)
     repl = wrap_dq(node.repl)
-    return go.E_RE_SUB.format(nxt, pattern, prv, repl)
-
+    code = go.E_RE_SUB.format(nxt, pattern, prv, repl)
+    if node.have_default_expr() and node.next.kind == TokenType.EXPR_RETURN:
+        return go.declaration_to_assign(code)
+    return code
 
 @converter.pre(TokenType.EXPR_LIST_REGEX_SUB)
 def tt_regex_sub_all(node: MapRegexSubExpression):
@@ -411,21 +446,27 @@ def tt_regex_sub_all(node: MapRegexSubExpression):
 @converter.pre(TokenType.EXPR_LIST_STRING_INDEX)
 def tt_string_index(node: IndexStringExpression):
     prv, nxt = left_right_var_names("value", node.variable)
-    return go.E_INDEX.format(nxt, prv, node.value)
-
+    code = go.E_INDEX.format(nxt, prv, node.value)
+    if node.have_default_expr() and node.next.kind == TokenType.EXPR_RETURN:
+        return go.declaration_to_assign(code)
+    return code
 
 @converter.pre(TokenType.EXPR_LIST_DOCUMENT_INDEX)
 def tt_doc_index(node: IndexDocumentExpression):
     prv, nxt = left_right_var_names("value", node.variable)
-    return go.E_INDEX.format(nxt, prv, node.value)
-
+    code = go.E_INDEX.format(nxt, prv, node.value)
+    if node.have_default_expr() and node.next.kind == TokenType.EXPR_RETURN:
+        return go.declaration_to_assign(code)
+    return code
 
 @converter.pre(TokenType.EXPR_LIST_JOIN)
 def tt_join(node: JoinExpression):
     prv, nxt = left_right_var_names("value", node.variable)
     sep = wrap_dq(node.sep)
-    return go.E_JOIN.format(nxt, prv, sep)
-
+    code = go.E_JOIN.format(nxt, prv, sep)
+    if node.have_default_expr() and node.next.kind == TokenType.EXPR_RETURN:
+        return go.declaration_to_assign(code)
+    return code
 
 @converter.pre(TokenType.IS_EQUAL)
 def tt_is_equal(node: IsEqualExpression):
@@ -517,8 +558,10 @@ def tt_css_all(node: HtmlCssAllExpression) -> str:
 @converter.pre(TokenType.EXPR_TEXT)
 def tt_text(node: HtmlTextExpression) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
-    return E_GOQUERY_TEXT.format(nxt, prv)
-
+    code = E_GOQUERY_TEXT.format(nxt, prv)
+    if node.have_default_expr() and node.next.kind == TokenType.EXPR_RETURN:
+        return go.declaration_to_assign(code)
+    return code
 
 @converter.pre(TokenType.EXPR_TEXT_ALL)
 def tt_text_all(node: HtmlTextAllExpression) -> str:
@@ -537,8 +580,10 @@ def tt_text_all(node: HtmlTextAllExpression) -> str:
 def tt_raw(node: HtmlRawExpression) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
 
-    return E_GOQUERY_RAW.format(nxt, prv)
-
+    code = E_GOQUERY_RAW.format(nxt, prv)
+    if node.have_default_expr() and node.next.kind == TokenType.EXPR_RETURN:
+        return go.declaration_to_assign(code)
+    return code
 
 @converter.pre(TokenType.EXPR_RAW_ALL)
 def tt_raw_all(node: HtmlRawAllExpression) -> str:
@@ -557,8 +602,10 @@ def tt_raw_all(node: HtmlRawAllExpression) -> str:
 def tt_attr(node: HtmlAttrExpression):
     n = wrap_dq(node.attr)
     prv, nxt = left_right_var_names("value", node.variable)
-    return E_GOQUERY_ATTR.format(nxt, prv, n)
-
+    code = E_GOQUERY_ATTR.format(nxt, prv, n)
+    if node.have_default_expr() and node.next.kind == TokenType.EXPR_RETURN:
+        return go.declaration_to_assign(code)
+    return code
 
 @converter.pre(TokenType.EXPR_ATTR_ALL)
 def tt_attr_all(node: HtmlAttrAllExpression):

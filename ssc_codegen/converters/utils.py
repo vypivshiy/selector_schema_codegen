@@ -48,6 +48,17 @@ def contains_assert_expr_fn(node: StructFieldFunction | PartDocFunction) -> bool
                           TokenType.IS_REGEX_MATCH,
                           )
                for t in node.body if t)
+
+
+def find_nested_associated_typedef_by_t_field(node: TypeDefField) -> TypeDef:
+    if node.ret_type != VariableType.NESTED:
+        raise TypeError("Return type is not NESTED")
+    associated_typedef: TypeDef = [fn for fn in node.parent.parent.body  # type: ignore
+                                   if getattr(fn, 'name', None)
+                                   and fn.name == node.nested_class
+                                   and fn.kind == TokenType.TYPEDEF][0]
+    return associated_typedef
+#
 #
 #
 # def find_nested_associated_typedef_by_st_field_fn(node: StructFieldFunction) -> TypeDef:
@@ -60,15 +71,7 @@ def contains_assert_expr_fn(node: StructFieldFunction | PartDocFunction) -> bool
 #     return associated_typedef
 #
 #
-# def find_nested_associated_typedef_by_typedef_field(node: TypeDefField) -> TypeDef:
-#     if node.ret_type != VariableType.NESTED:
-#         raise TypeError("Return type is not NESTED")
-#     associated_typedef: TypeDef = [fn for fn in node.parent.parent.body  # type: ignore
-#                                    if getattr(fn, 'name', None)
-#                                    and fn.name == node.nested_class
-#                                    and fn.kind == TokenType.TYPEDEF][0]
-#     return associated_typedef
-#
+
 #
 # def have_assert_expr_by_func(node: StructFieldFunction | PartDocFunction) -> bool:
 #     return any(t.kind in (TokenType.IS_CSS,
