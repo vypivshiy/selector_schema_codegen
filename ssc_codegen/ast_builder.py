@@ -15,7 +15,7 @@ from .ast_ssc import (
     PartDocFunction,
     PreValidateFunction,
     ReturnExpression,
-    NoReturnExpression, CallStructFunctionExpression, BaseExpression, TypeDef
+    NoReturnExpression, CallStructFunctionExpression, BaseExpression, TypeDef, StartParseFunction
 )
 from .consts import M_SPLIT_DOC, M_VALUE, M_KEY, M_ITEM, SIGNATURE_MAP
 from .document import BaseDocument
@@ -165,11 +165,8 @@ def build_ast_struct(schema: Type[BaseSchema],
                      ) -> StructParser:
     schema = check_schema(schema)
     fields = schema.__get_mro_fields__()
-
     raw_signature = schema.__class_signature__()
-    text_signature = build_fields_signature(raw_signature)
-    doc = schema.__doc__ or ""
-    doc += '\n\n' + text_signature
+    doc = (schema.__doc__ or "") + '\n\n' + build_fields_signature(raw_signature)
 
     start_parse_body: list[CallStructFunctionExpression] = []
     struct_parse_functions = []
@@ -187,19 +184,18 @@ def build_ast_struct(schema: Type[BaseSchema],
                     body=_fill_stack_variables(f.stack, ret_expr=False)
                 )
                 start_parse_body.append(
-                    CallStructFunctionExpression(name=k, ret_type=VariableType.NULL)
+                    CallStructFunctionExpression(name=k, ret_type=VariableType.NULL, fn_ref=fn)
                 )
                 struct_parse_functions.append(fn)
             case '__SPLIT_DOC__':
-                if f.stack_last_ret != VariableType.LIST_DOCUMENT:  # noqa
-                    msg = f"__SPLIT_DOC__ attribute should be returns LIST_DOCUMENT, not {f.stack_last_ret.name}"  # noqa
-                    raise SyntaxError(msg)
+                _check_split_doc(f)
                 fn = PartDocFunction(
                     name=k,  # noqa
                     body=_fill_stack_variables(f.stack)
                 )
                 start_parse_body.append(
-                    CallStructFunctionExpression(name=k, ret_type=VariableType.LIST_DOCUMENT)
+                    CallStructFunctionExpression(name=k, ret_type=VariableType.LIST_DOCUMENT,
+                                                 fn_ref=fn)
                 )
                 struct_parse_functions.append(fn)
             case _:
@@ -213,9 +209,22 @@ def build_ast_struct(schema: Type[BaseSchema],
                     fn.default.parent = fn
 
                 struct_parse_functions.append(fn)
-                start_parse_body.append(
-                    CallStructFunctionExpression(name=k, ret_type=f.stack_last_ret)  # noqa
-                )
+                if f.stack_last_ret == VariableType.NESTED:
+                    start_parse_body.append(
+                        CallStructFunctionExpression(
+                            name=k,
+                            ret_type=f.stack_last_ret,
+                            fn_ref=fn,
+                            nested_cls_name_ref=f.stack[-1].schema)  # noqa
+                    )
+                else:
+                    start_parse_body.append(
+                        CallStructFunctionExpression(
+                            name=k,
+                            ret_type=f.stack_last_ret,
+                            fn_ref=fn)  # noqa
+                    )
+    # fixme: start_parse_body DEAD CODE?
     ast_struct_parser = StructParser(
         type=schema.__SCHEMA_TYPE__,
         name=schema.__name__,
@@ -224,6 +233,12 @@ def build_ast_struct(schema: Type[BaseSchema],
         body=struct_parse_functions)
 
     return ast_struct_parser
+
+
+def _check_split_doc(f):
+    if f.stack_last_ret != VariableType.LIST_DOCUMENT:  # noqa
+        msg = f"__SPLIT_DOC__ attribute should be returns LIST_DOCUMENT, not {f.stack_last_ret.name}"  # noqa
+        raise SyntaxError(msg)
 
 
 def build_ast_module(path: str | Path[str],

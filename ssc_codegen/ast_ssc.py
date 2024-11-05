@@ -50,14 +50,14 @@ class ModuleImports(BaseAstNode):
 class TypeDefField(BaseAstNode):
     kind: Final[TokenType] = TokenType.TYPEDEF_FIELD
     name: str
-    type: VariableType
+    ret_type: VariableType
     parent: Optional['TypeDef'] = None
 
     @property
     def nested_class(self) -> str | None:
         # backport TODO remove:
-        if self.type == VariableType.NESTED:
-            nested_fn = [fn for fn in self.parent.struct.body if fn.name == self.name][0]
+        if self.ret_type == VariableType.NESTED:
+            nested_fn = [fn for fn in self.parent.struct_ref.body if fn.name == self.name][0]
             nested_class = [e for e in nested_fn.body if e.ret_type == VariableType.NESTED][0].schema
             return nested_class
         return None
@@ -69,7 +69,7 @@ class TypeDef(BaseAstNode):
     kind: Final[TokenType] = TokenType.TYPEDEF
     name: str
     body: list[TypeDefField]
-    struct: Optional['StructParser'] = None
+    struct_ref: Optional['StructParser'] = None
 
     def __post_init__(self):
         for f in self.body:
@@ -79,12 +79,28 @@ class TypeDef(BaseAstNode):
 @dataclass(kw_only=True)
 class BaseExpression(BaseAstNode):
     variable: Variable | None = None
-    parent: Optional[Union['StructFieldFunction', 'StartParseFunction', 'PreValidateFunction', 'PartDocFunction']] = None  # LATE INIT
+    parent: Optional[Union[
+        'StructFieldFunction', 'StartParseFunction', 'PreValidateFunction', 'PartDocFunction']] = None  # LATE INIT
     prev: Optional['BaseExpression'] = None  # LATE INIT
     next: Optional['BaseExpression'] = None  # LATE INIT
 
     accept_type: VariableType
     ret_type: VariableType
+
+    def have_default_expr(self) -> bool:
+        if not self.parent:
+            return False
+        parent = self.parent
+        if parent.kind == TokenType.STRUCT_FIELD and parent.default:
+            return True
+        return False
+
+    def have_assert_expr(self) -> bool:
+        if not self.parent:
+            return False
+        if self.parent.kind in (TokenType.STRUCT_FIELD, TokenType.STRUCT_PRE_VALIDATE):
+            return self.parent.have_assert_expr()
+        return False
 
 
 @dataclass(kw_only=True)
@@ -410,6 +426,30 @@ class ReturnExpression(BaseExpression):
     accept_type: Final[VariableType] = VariableType.ANY
     ret_type: Final[VariableType] = VariableType.ANY
 
+    def have_assert(self) -> bool:
+        if self.parent and self.parent.kind == TokenType.STRUCT_FIELD:
+            return self.parent.have_assert_expr()
+        # try to find by recursion
+        if not self.prev:
+            return False
+        expr = self.prev
+        while expr:
+            if expr.kind in (TokenType.IS_CSS,
+                             TokenType.IS_EQUAL,
+                             TokenType.IS_NOT_EQUAL,
+                             TokenType.IS_CONTAINS,
+                             TokenType.IS_XPATH,
+                             TokenType.IS_REGEX_MATCH,
+                             ):
+                return True
+            expr = expr.prev
+        return False
+
+    def get_default_expr(self) -> None | DefaultValueWrapper:
+        if not self.parent:
+            return None
+        return self.parent.default
+
 
 @dataclass(kw_only=True)
 class NoReturnExpression(BaseExpression):
@@ -422,8 +462,25 @@ class NoReturnExpression(BaseExpression):
 class CallStructFunctionExpression(BaseExpression):
     kind: Final[TokenType] = TokenType.STRUCT_CALL_FUNCTION
     accept_type: Final[VariableType] = VariableType.DOCUMENT
+    fn_ref: Union['StructFieldFunction', 'PreValidateFunction', 'PartDocFunction', None]
+    nested_cls_name_ref: str | None = None
     name: str
     ret_type: VariableType
+
+    def have_assert_expr(self) -> bool:
+        if not self.fn_ref:
+            return False
+        return any(e for e in self.fn_ref.body if e.have_assert_expr())
+
+    def have_default_expr(self) -> bool:
+        if not self.fn_ref:
+            return False
+        return bool(self.fn_ref.default)
+
+    def nested_schema(self) -> Union['StructParser', None]:
+        if not self.nested_cls_name_ref:
+            return None
+        return self.fn_ref.parent
 
 
 # STRUCT
@@ -447,6 +504,38 @@ class StructFieldFunction(__StructNode):
     default: DefaultValueWrapper | None = None
     parent: Optional['StructParser'] = None  # LATE INIT
 
+    def find_associated_typedef(self) -> TypeDef | None:
+        if self.ret_type != VariableType.NESTED:
+            return None
+        elif not self.parent or not self.parent.parent:
+            return None
+
+        associated_typedef = [fn for fn in self.parent.parent.body  # type: ignore
+                              if getattr(fn, 'name', None)
+                              and fn.name == self.nested_schema_name()  # noqa
+                              and fn.kind == TokenType.TYPEDEF][0]
+        return associated_typedef  # type: ignore
+
+    def nested_schema_name(self) -> str | None:
+        if self.ret_type != VariableType.NESTED:
+            return None
+        # type NestedExpression (naive)
+        # last element - ReturnExpr
+        return self.body[-2].schema  # noqa
+
+    def have_assert_expr(self) -> bool:
+        return any(e.kind in (TokenType.IS_CSS,
+                              TokenType.IS_EQUAL,
+                              TokenType.IS_NOT_EQUAL,
+                              TokenType.IS_CONTAINS,
+                              TokenType.IS_XPATH,
+                              TokenType.IS_REGEX_MATCH,
+                              )
+                   for e in self.body if e)
+
+    def have_default_expr(self) -> bool:
+        return self.default is not None
+
 
 @dataclass(kw_only=True)
 class PreValidateFunction(__StructNode):
@@ -467,8 +556,20 @@ class StartParseFunction(__StructNode):
     name: M_START_PARSE = "__START_PARSE__"
     kind: Final[TokenType] = TokenType.STRUCT_PARSE_START
     body: list[CallStructFunctionExpression]
-    parent: Optional['StructParser'] = None  # LATE INIT
     type: StructType
+    parent: Optional['StructParser'] = None  # LATE INIT
+
+    def have_assert_expr(self) -> bool:
+        for expr in self.body:
+            if expr.ret_type == VariableType.NESTED and expr.have_assert_expr():
+                return True
+        return False
+
+    def have_default_expr(self) -> bool:
+        for expr in self.body:
+            if expr.ret_type == VariableType.NESTED and expr.have_default_expr():
+                return True
+        return False
 
 
 @dataclass(kw_only=True)
@@ -489,14 +590,14 @@ class StructParser(BaseAstNode):
     doc: Docstring
     body: list[StructFieldFunction | StartParseFunction | PreValidateFunction | PartDocFunction]
     typedef: Optional['TypeDef'] = field(init=False)
-    parent: Optional[ModuleProgram] = None  # LATE INIT in builder
+    parent: Optional[ModuleProgram] = None  # LATE INIT
 
     def _build_typedef(self):
         ast_typedef = TypeDef(
             name=self.name,
-            struct=self,
+            struct_ref=self,
             body=[
-                TypeDefField(name=fn.name, type=fn.ret_type)
+                TypeDefField(name=fn.name, ret_type=fn.ret_type)
                 for fn in self.body if fn.kind == TokenType.STRUCT_FIELD
             ]
         )
@@ -510,7 +611,12 @@ class StructParser(BaseAstNode):
             StartParseFunction(
                 parent=self,
                 type=self.type,
-                body=[CallStructFunctionExpression(name=fn.name, ret_type=VariableType.NULL) for fn in self.body],
+                body=[CallStructFunctionExpression(
+                    name=fn.name,
+                    ret_type=fn.ret_type,
+                    fn_ref=fn,
+                    nested_cls_name_ref=fn.nested_schema_name() if fn.ret_type == VariableType.NESTED else None)
+                    for fn in self.body],
             )
         )
         # extend nodes information

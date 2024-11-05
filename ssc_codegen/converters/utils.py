@@ -39,27 +39,7 @@ def escape_str(
     return re.sub(pattern, _repl, s)
 
 
-def find_nested_associated_typedef_by_st_field_fn(node: StructFieldFunction) -> TypeDef:
-    if node.ret_type != VariableType.NESTED:
-        raise TypeError("Return type is not NESTED")
-    associated_typedef: TypeDef = [fn for fn in node.parent.parent.body  # type: ignore
-                                   if getattr(fn, 'name', None)
-                                   and fn.name == node.body[-2].schema  # noqa
-                                   and fn.kind == TokenType.TYPEDEF][0]
-    return associated_typedef
-
-
-def find_nested_associated_typedef_by_typedef_field(node: TypeDefField) -> TypeDef:
-    if node.type != VariableType.NESTED:
-        raise TypeError("Return type is not NESTED")
-    associated_typedef: TypeDef = [fn for fn in node.parent.parent.body  # type: ignore
-                                   if getattr(fn, 'name', None)
-                                   and fn.name == node.nested_class
-                                   and fn.kind == TokenType.TYPEDEF][0]
-    return associated_typedef
-
-
-def have_assert_expr(node: StructFieldFunction | PartDocFunction) -> bool:
+def contains_assert_expr_fn(node: StructFieldFunction | PartDocFunction) -> bool:
     return any(t.kind in (TokenType.IS_CSS,
                           TokenType.IS_EQUAL,
                           TokenType.IS_NOT_EQUAL,
@@ -68,65 +48,101 @@ def have_assert_expr(node: StructFieldFunction | PartDocFunction) -> bool:
                           TokenType.IS_REGEX_MATCH,
                           )
                for t in node.body if t)
-
-
-def find_default_expr(node: BaseExpression | None) -> BaseExpression | None:
-    # TODO: fix python return in default expr case
-    if node.kind == TokenType.EXPR_DEFAULT:
-        return node
-    if not node.prev:
-        return None
-    return find_default_expr(node.prev)
-
-
-def have_default_expr(node: BaseExpression | None) -> bool:
-    parent = node.parent
-    if parent.kind in (TokenType.STRUCT_PART_DOCUMENT, TokenType.STRUCT_PRE_VALIDATE, TokenType.STRUCT_PARSE_START):
-        return False
-    if parent.default:
-        return True
-    return False
-
-
-def find_return_expr_by_default(node: DefaultValueWrapper | None) -> ReturnExpression | None:
-    if node.kind == TokenType.EXPR_DEFAULT:
-        node = node.parent.body[0]
-
-    if node.kind == TokenType.EXPR_RETURN:
-        return node
-    if not node.next:
-        return None
-    return find_return_expr_by_default(node.next)  # type: ignore
-
-
-def find_st_field_fn_by_call_st_fn(node: CallStructFunctionExpression) -> StructFieldFunction:
-    module_body = node.parent.parent.parent
-    for st_node in module_body.body:
-        if st_node.kind != TokenType.STRUCT:
-            continue
-        st_node: StructParser
-        for fn_node in st_node.body:
-            if fn_node.name == node.name:
-                return fn_node
-    raise TypeError("Node not founded")
-
-
-def have_start_parse_assert_expr(node: StartParseFunction) -> bool:
-    for expr in node.body:
-        if node.kind == TokenType.STRUCT_CALL_FUNCTION:
-            fn_node = find_st_field_fn_by_call_st_fn(expr)
-            if have_assert_expr(fn_node):
-                return True
-    return False
-
-
-def have_call_expr_assert_expr(node: CallStructFunctionExpression) -> bool:
-    module_body = node.parent.parent
-    parent_st = node.parent
-    for st_node in module_body.body:
-        if st_node.kind != TokenType.STRUCT_FIELD and st_node.name != parent_st.name:
-            continue
-        st_node: StructFieldFunction
-        if have_assert_expr(st_node):
-            return True
-    return False
+#
+#
+# def find_nested_associated_typedef_by_st_field_fn(node: StructFieldFunction) -> TypeDef:
+#     if node.ret_type != VariableType.NESTED:
+#         raise TypeError("Return type is not NESTED")
+#     associated_typedef: TypeDef = [fn for fn in node.parent.parent.body  # type: ignore
+#                                    if getattr(fn, 'name', None)
+#                                    and fn.name == node.body[-2].schema  # noqa
+#                                    and fn.kind == TokenType.TYPEDEF][0]
+#     return associated_typedef
+#
+#
+# def find_nested_associated_typedef_by_typedef_field(node: TypeDefField) -> TypeDef:
+#     if node.ret_type != VariableType.NESTED:
+#         raise TypeError("Return type is not NESTED")
+#     associated_typedef: TypeDef = [fn for fn in node.parent.parent.body  # type: ignore
+#                                    if getattr(fn, 'name', None)
+#                                    and fn.name == node.nested_class
+#                                    and fn.kind == TokenType.TYPEDEF][0]
+#     return associated_typedef
+#
+#
+# def have_assert_expr_by_func(node: StructFieldFunction | PartDocFunction) -> bool:
+#     return any(t.kind in (TokenType.IS_CSS,
+#                           TokenType.IS_EQUAL,
+#                           TokenType.IS_NOT_EQUAL,
+#                           TokenType.IS_CONTAINS,
+#                           TokenType.IS_XPATH,
+#                           TokenType.IS_REGEX_MATCH,
+#                           )
+#                for t in node.body if t)
+#
+#
+# def find_default_expr_by_func(node: StructFieldFunction) -> DefaultValueWrapper | None:
+#     return getattr(node, 'default', None)
+#
+# def find_default_expr(node: BaseExpression | None) -> BaseExpression | None:
+#     # TODO: fix python return in default expr case
+#     if node.kind == TokenType.EXPR_DEFAULT:
+#         return node
+#     if not node.prev:
+#         return None
+#     return find_default_expr(node.prev)
+#
+#
+# def have_default_expr_by_expr(node: BaseExpression | None) -> bool:
+#     """return True if expression ast node have default"""
+#     parent = node.parent
+#     if parent.kind in (TokenType.STRUCT_PART_DOCUMENT, TokenType.STRUCT_PRE_VALIDATE, TokenType.STRUCT_PARSE_START):
+#         return False
+#     if parent.default:
+#         return True
+#     return False
+#
+#
+#
+# def find_return_expr_by_default(node: DefaultValueWrapper | None) -> ReturnExpression | None:
+#     if node.kind == TokenType.EXPR_DEFAULT:
+#         node = node.parent.body[0]
+#
+#     if node.kind == TokenType.EXPR_RETURN:
+#         return node
+#     if not node.next:
+#         return None
+#     return find_return_expr_by_default(node.next)  # type: ignore
+#
+#
+# def find_st_field_fn_by_call_st_fn(node: CallStructFunctionExpression) -> StructFieldFunction:
+#     module_body = node.parent.parent.parent
+#     for st_node in module_body.body:
+#         if st_node.kind != TokenType.STRUCT:
+#             continue
+#         st_node: StructParser
+#         for fn_node in st_node.body:
+#             if fn_node.name == node.name:
+#                 return fn_node
+#     raise TypeError("Node not founded")
+#
+#
+# def have_start_parse_assert_expr(node: StartParseFunction) -> bool:
+#     for expr in node.body:
+#         if node.kind == TokenType.STRUCT_CALL_FUNCTION:
+#             fn_node = find_st_field_fn_by_call_st_fn(expr)
+#             if have_assert_expr_by_func(fn_node):
+#                 return True
+#     return False
+#
+#
+# def have_call_expr_assert_expr(node: CallStructFunctionExpression) -> bool:
+#     module_body = node.parent.parent
+#     parent_st = node.parent
+#     for st_node in module_body.body:
+#         if st_node.kind != TokenType.STRUCT_FIELD and st_node.name != parent_st.name:
+#             continue
+#         st_node: StructFieldFunction
+#         if have_assert_expr_by_func(st_node):
+#             return True
+#     return False
