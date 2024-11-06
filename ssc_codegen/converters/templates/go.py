@@ -26,7 +26,6 @@ MAGIC_METHODS = {
     "__START_PARSE__": "Parse",
 }
 
-# TODO: provide package set API in CLI
 PACKAGE = "package $PACKAGE$"
 
 # TODO: add github.com/antchfx/htmlquery API (xpath)
@@ -94,10 +93,10 @@ PART_DOC_HEAD = "func (p *{}) {}(value *goquery.Selection) *goquery.Selection"
 PART_DOC_HEAD_ERR = (
     "func (p *{}) {}(value *goquery.Selection) (*goquery.Selection, error)"
 )
-FN_PARSE_HEAD = "func (p *{}) Parse{}(value *goquery.Selection) {} "
+FN_PARSE_HEAD = "func (p *{}) parse{}(value *goquery.Selection) {} "
 FN_PARSE_HEAD_RET_ERR = "(*{}, error)"
 FN_START_PARSE_HEAD = "func (p *{}) {}() {}"
-FN_CALL_PARSE = "p.Parse{}({});"
+FN_CALL_PARSE = "p.parse{}({});"
 FN_CALL_DOC_ARG = "p.document.Selection"
 
 
@@ -179,6 +178,7 @@ def gen_item_body(node: "StartParseFunction") -> str:
                 + BRACKET_START
                 + RET_NIL_ERR
                 + BRACKET_END
+                + ';'
             )
             st_args.append("*" + var_name)
         else:
@@ -232,6 +232,7 @@ def gen_list_body(node: "StartParseFunction") -> str:
                 + BRACKET_START
                 + RET_NIL_ERR
                 + BRACKET_END
+                + ';'
             )
             st_args.append("*" + var_name)
         else:
@@ -245,7 +246,7 @@ def gen_list_body(node: "StartParseFunction") -> str:
         + BRACKET_END
         + ";"
     )
-    body += "items = append(items, item); " + BRACKET_END
+    body += "items = append(items, item); " + BRACKET_END + ';'
     body += (
         RET_VAL_NIL_ERR.format("items")
         if node.have_assert_expr()
@@ -277,6 +278,7 @@ def gen_dict_body(node: "StartParseFunction") -> str:
             + BRACKET_START
             + RET_NIL_ERR
             + BRACKET_END
+            + ';'
         )
         st_args.append("*" + var_key)
     else:
@@ -291,13 +293,14 @@ def gen_dict_body(node: "StartParseFunction") -> str:
             + BRACKET_START
             + RET_NIL_ERR
             + BRACKET_END
+            + ';'
         )
         st_args.append("*" + var_value)
     else:
         body += f"{var_value} := {FN_CALL_PARSE.format(value_m, 'i')}"
         st_args.append(var_value)
     # 0 - key, 1 - value
-    body += f"items[{st_args[0]}] = {st_args[1]}; " + BRACKET_END
+    body += f"items[{st_args[0]}] = {st_args[1]}; " + BRACKET_END + ';'
     body += (
         RET_VAL_NIL_ERR.format("items")
         if node.have_assert_expr()
@@ -323,13 +326,14 @@ def gen_flat_list_body(node: "StartParseFunction") -> str:
             + BRACKET_START
             + RET_VAL_NIL_ERR
             + BRACKET_END
+            + ';'
         )
         st_arg = "*rawItem"
     else:
         body += f"rawItem := {FN_CALL_PARSE.format(item_m, 'i')}"
         st_arg = "rawItem"
     # fixme ITEM
-    body += f"items = append(items, {st_arg}); " + BRACKET_END
+    body += f"items = append(items, {st_arg}); " + BRACKET_END + ';'
     body += (
         RET_VAL_NIL_ERR.format("items")
         if node.have_assert_expr()

@@ -26,7 +26,7 @@ else:
 
 
 from pathlib import Path
-from typing import Annotated, List, Callable
+from typing import Annotated, List, Callable, Optional
 
 from typer import Typer, Argument, Option, BadParameter
 
@@ -213,10 +213,11 @@ def gen_go(
     fmt: Annotated[
         bool, Option(help="format code output", is_flag=True)
     ] = True,
+    package: Annotated[Optional[str], Option(help="package name (default - get output folder name)")] = None
 ):
     converter = import_converter(f"go_{lib.value}")
     if fmt:
-        commands = ["gofmt {}"]
+        commands = ["gofmt -w {}"]
         fmt_cmd = create_fmt_cmd(ssc_files, prefix, suffix, out, commands)
     else:
         fmt_cmd = []
@@ -230,7 +231,7 @@ def gen_go(
         fmt_cmd,
         go_naive_fix_docstring,
         docstring_class_top=True,
-        variables_patches={"package": out.name},
+        variables_patches={"PACKAGE": package or out.name},
     )
 
 

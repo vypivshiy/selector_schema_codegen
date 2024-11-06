@@ -115,6 +115,8 @@ def tt_struct(node: StructParser) -> str:
 @converter.pre(TokenType.DOCSTRING)
 def tt_docstring(node: Docstring) -> str:
     if node.value:
+        if node.parent and node.parent.kind == StructParser.kind:
+            return go.DOCSTRING(node.parent.name + ' ' + node.value)
         return go.DOCSTRING(node.value)
     return ""
 
@@ -533,7 +535,7 @@ def tt_is_equal(node: IsEqualExpression):
         + " "
         + go.BRACKET_START
         + ret
-        + go.BRACKET_END
+        + go.BRACKET_END + ';'
     )
 
     if node.next.kind == TokenType.EXPR_NO_RETURN:
@@ -558,7 +560,7 @@ def tt_is_not_equal(node: IsNotEqualExpression):
         + " "
         + go.BRACKET_START
         + ret
-        + go.BRACKET_END
+        + go.BRACKET_END + ';'
     )
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return code
@@ -582,7 +584,7 @@ def tt_is_contains(node: IsContainsExpression):
         + " "
         + go.BRACKET_START
         + ret
-        + go.BRACKET_END
+        + go.BRACKET_END + ';'
     )
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return code
@@ -606,7 +608,7 @@ def tt_is_regex(node: IsRegexMatchExpression):
         + go.E_IS_RE.format(err_var)
         + go.BRACKET_START
         + ret
-        + go.BRACKET_END
+        + go.BRACKET_END + ';'
     )
 
     if node.next.kind == TokenType.EXPR_NO_RETURN:
@@ -726,7 +728,7 @@ def tt_is_css(node: IsCssExpression):
         if node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
         else go.RET_NIL_FMT_ERR.format(msg)
     )
-    code = IS_CSS.format(prv, q) + " " + go.BRACKET_START + ret + go.BRACKET_END
+    code = IS_CSS.format(prv, q) + " " + go.BRACKET_START + ret + go.BRACKET_END + ';'
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return code
     code += go.E_ASSIGN.format(nxt, prv)
