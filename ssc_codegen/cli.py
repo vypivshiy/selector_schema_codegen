@@ -120,7 +120,8 @@ def gen_js(
         Argument(help="ssc-gen config files", callback=cb_check_ssc_files),
     ],
     out: Annotated[
-        Path[str], Option(help="output folder", callback=cb_folder_out)
+        Path[str],
+        Option("--out", "-o", help="output folder", callback=cb_folder_out),
     ],
     lib: Annotated[
         JsLIBS, Option("--lib", "-i", help="core parser library")
@@ -149,6 +150,7 @@ def gen_js(
         suffix,
         f"// {COMMENT_STRING}",
         fmt_cmd,
+        docstring_class_top=True,
     )
 
 
@@ -159,7 +161,8 @@ def gen_dart(
         Argument(help="ssc-gen config files", callback=cb_check_ssc_files),
     ],
     out: Annotated[
-        Path[str], Option(help="output folder", callback=cb_folder_out)
+        Path[str],
+        Option("--out", "-o", help="output folder", callback=cb_folder_out),
     ],
     lib: Annotated[
         DartLIBS, Option("--lib", "-i", help="core parser library")
@@ -188,6 +191,7 @@ def gen_dart(
         suffix,
         f"// {COMMENT_STRING}",
         fmt_cmd,
+        go_naive_fix_docstring,
         docstring_class_top=True,
     )
 
@@ -199,7 +203,8 @@ def gen_go(
         Argument(help="ssc-gen config files", callback=cb_check_ssc_files),
     ],
     out: Annotated[
-        Path[str], Option(help="output folder", callback=cb_folder_out)
+        Path[str],
+        Option("--out", "-o", help="output folder", callback=cb_folder_out),
     ],
     lib: Annotated[
         GoLIBS, Option("--lib", "-i", help="core parser library")
@@ -213,7 +218,10 @@ def gen_go(
     fmt: Annotated[
         bool, Option(help="format code output", is_flag=True)
     ] = True,
-    package: Annotated[Optional[str], Option(help="package name (default - get output folder name)")] = None
+    package: Annotated[
+        Optional[str],
+        Option(help="package name (default - get output folder name)"),
+    ] = None,
 ):
     converter = import_converter(f"go_{lib.value}")
     if fmt:
