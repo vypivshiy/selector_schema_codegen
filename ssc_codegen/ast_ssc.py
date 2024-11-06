@@ -670,7 +670,9 @@ class StructParser(BaseAstNode):
                 ],
             )
         )
-        # extend nodes information
+
+        # add nodes refs, assigns
+        self.doc.parent = self
         for fn in self.body:
             fn.parent = self
             for i, expr in enumerate(fn.body):
