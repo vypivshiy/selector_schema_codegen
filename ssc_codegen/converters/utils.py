@@ -5,12 +5,6 @@ from ssc_codegen.ast_ssc import (
     StructFieldFunction,
     TypeDefField,
     PartDocFunction,
-    CallStructFunctionExpression,
-    StructParser,
-    StartParseFunction,
-    BaseExpression,
-    ReturnExpression,
-    DefaultValueWrapper,
 )
 from ssc_codegen.tokens import VariableType, TokenType
 
@@ -24,8 +18,11 @@ def to_upper_camel_case(s: str):
 
 
 def to_lower_camel_case(s: str):
-    words = s.replace('_', ' ').split()
-    return ''.join(word.capitalize() if i != 0 else word.lower() for i, word in enumerate(words))
+    words = s.replace("_", " ").split()
+    return "".join(
+        word.capitalize() if i != 0 else word.lower()
+        for i, word in enumerate(words)
+    )
 
 
 def wrap_double_quotes(s: str, escape_ch: str = "\\") -> str:

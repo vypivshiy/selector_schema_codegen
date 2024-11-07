@@ -41,7 +41,43 @@ BRACKET_START = "{"
 BRACKET_END = "}"
 
 DEFAULT_HEAD = "defer func() {if r := recover(); r != nil {"
-DEFAULT_FOOTER = "}}()"
+
+
+# func (p *Books) parsePrice(value *goquery.Selection) (value3 *string) {
+# 	defer func() {
+# 		if r := recover(); r != nil {
+# 			// Recover from panic and return the default value
+# 			*value3 = "0"
+# 		}
+# 	}()
+#
+# 	cb := func(value *goquery.Selection) *string {
+#       ...
+# 		return RET
+# 	}
+# 	return cb(value)
+# }
+def DEFAULT_HEAD(ret_var: str, value: str, ret_type: str) -> str:  # noqa
+    ret_var = ret_var if ret_var == "nil" else "*" + ret_var
+    return (
+        "defer func()"
+        + BRACKET_START
+        + "if r := recover(); r != nil"
+        + BRACKET_START
+        + ret_var
+        + " = "
+        + value
+        + ";"
+        + BRACKET_END
+        + BRACKET_END
+        + "();"
+        + "cb := func() "
+        + ret_type
+        + BRACKET_START
+    )
+
+
+DEFAULT_FOOTER = BRACKET_END + ";" + "return cb();"
 RET_DEFAULT = "({} {})"
 """VAR_NAME (RET) TYPE"""
 
@@ -178,7 +214,7 @@ def gen_item_body(node: "StartParseFunction") -> str:
                 + BRACKET_START
                 + RET_NIL_ERR
                 + BRACKET_END
-                + ';'
+                + ";"
             )
             st_args.append("*" + var_name)
         else:
@@ -205,8 +241,8 @@ def gen_item_body(node: "StartParseFunction") -> str:
 
 
 def declaration_to_assign(code: str) -> str:
-    """naive func helper in defalut wrapper cases"""
-    return "*" + code.replace(":=", "=", 1)
+    """naive func helper in default wrapper cases"""
+    return code.replace(":=", "=&", 1)
 
 
 def gen_list_body(node: "StartParseFunction") -> str:
@@ -232,7 +268,7 @@ def gen_list_body(node: "StartParseFunction") -> str:
                 + BRACKET_START
                 + RET_NIL_ERR
                 + BRACKET_END
-                + ';'
+                + ";"
             )
             st_args.append("*" + var_name)
         else:
@@ -246,7 +282,7 @@ def gen_list_body(node: "StartParseFunction") -> str:
         + BRACKET_END
         + ";"
     )
-    body += "items = append(items, item); " + BRACKET_END + ';'
+    body += "items = append(items, item); " + BRACKET_END + ";"
     body += (
         RET_VAL_NIL_ERR.format("items")
         if node.have_assert_expr()
@@ -278,7 +314,7 @@ def gen_dict_body(node: "StartParseFunction") -> str:
             + BRACKET_START
             + RET_NIL_ERR
             + BRACKET_END
-            + ';'
+            + ";"
         )
         st_args.append("*" + var_key)
     else:
@@ -293,14 +329,14 @@ def gen_dict_body(node: "StartParseFunction") -> str:
             + BRACKET_START
             + RET_NIL_ERR
             + BRACKET_END
-            + ';'
+            + ";"
         )
         st_args.append("*" + var_value)
     else:
         body += f"{var_value} := {FN_CALL_PARSE.format(value_m, 'i')}"
         st_args.append(var_value)
     # 0 - key, 1 - value
-    body += f"items[{st_args[0]}] = {st_args[1]}; " + BRACKET_END + ';'
+    body += f"items[{st_args[0]}] = {st_args[1]}; " + BRACKET_END + ";"
     body += (
         RET_VAL_NIL_ERR.format("items")
         if node.have_assert_expr()
@@ -326,14 +362,14 @@ def gen_flat_list_body(node: "StartParseFunction") -> str:
             + BRACKET_START
             + RET_VAL_NIL_ERR
             + BRACKET_END
-            + ';'
+            + ";"
         )
         st_arg = "*rawItem"
     else:
         body += f"rawItem := {FN_CALL_PARSE.format(item_m, 'i')}"
         st_arg = "rawItem"
     # fixme ITEM
-    body += f"items = append(items, {st_arg}); " + BRACKET_END + ';'
+    body += f"items = append(items, {st_arg}); " + BRACKET_END + ";"
     body += (
         RET_VAL_NIL_ERR.format("items")
         if node.have_assert_expr()
