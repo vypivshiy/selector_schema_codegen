@@ -13,6 +13,10 @@ class BaseCodeConverter:
             TokenType, Callable[[BaseAstNode], str]
         ] = {}
 
+    def __call__(self, for_definition: TokenType):
+        """alias of pre decorator"""
+        return self.pre(for_definition)
+
     def pre(self, for_definition: TokenType):
         """before translate ast to code"""
 
