@@ -20,15 +20,18 @@ classifiers = [
     "Topic :: Text Processing"
 ]
 dependencies = [
-    'typer>=0.12.3',
-    'black>=24.4.2',
-    'Jinja2>=3.1.4',
+    'typer>=0.12.5',
     'lxml>=5.0.0',
     'cssselect>=1.2.0'
 ]
 
+[project.optional-dependencies]
+dev = ["ruff", "mypy", "unimport", "pytest"]
+python = ["ruff", "unimport"]
+test_py = ["parsel", "selectolax", "bs4", "scrapy"]
+
 [project.scripts]
-ssc-gen = 'ssc_codegen.cli:script_entry_point'
+ssc-gen = 'ssc_codegen.cli:main'
 
 [project.urls]
 Documentation = "https://github.com/vypivshiy/selector_schema_codegen#readme"
@@ -37,8 +40,6 @@ Source = "https://github.com/vypivshiy/selector_schema_codegen"
 Examples = "https://github.com/vypivshiy/selector_schema_codegen/examples"
 
 
-[project.optional-dependencies]
-dev = ["ruff", "mypy", "isort", "pytest"]
 
 
 [build-system]
@@ -50,7 +51,7 @@ path = "ssc_codegen/__init__.py"
 
 [tool.hatch.envs.style]
 detached=true
-dependencies=['black', 'isort', 'ruff']
+dependencies=['ruff']
 
 [tool.ruff]
 target-version = "py310"
