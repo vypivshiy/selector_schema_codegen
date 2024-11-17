@@ -1,6 +1,6 @@
 import pytest
 from ssc_codegen import D, R
-from ssc_codegen.type_state import TypeVariableState
+from ssc_codegen.ast_ssc import VariableType
 
 
 @pytest.mark.parametrize(
@@ -12,7 +12,7 @@ from ssc_codegen.type_state import TypeVariableState
     ],
 )
 def test_list_document(expr):
-    assert expr.last_var_type == TypeVariableState.LIST_DOCUMENT
+    assert expr.stack_last_ret == VariableType.LIST_DOCUMENT
 
 
 @pytest.mark.parametrize(
@@ -25,8 +25,8 @@ def test_list_document(expr):
         D().css_all("a").raw(),
         D().xpath_all("//a").raw(),
         R().split(" "),
-        R().re_all("*"),
+        R().re_all(".*"),
     ],
 )
 def test_list_str(expr):
-    assert expr.last_var_type == TypeVariableState.LIST_STRING
+    assert expr.stack_last_ret == VariableType.LIST_STRING

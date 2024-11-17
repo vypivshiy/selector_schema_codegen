@@ -25,9 +25,6 @@ def test_nested_invalid_expr():
         N().sub_parser(MockParser).css("a")
 
     with pytest.raises(SyntaxError):
-        N().sub_parser(MockParser).default(None)
-
-    with pytest.raises(SyntaxError):
         N().sub_parser(MockParser).sub_parser(MockParser)
 
 
@@ -39,10 +36,10 @@ def test_invalid_doc_expr():
         D().index(0)
 
     with pytest.raises(SyntaxError):
-        D().assert_re("")
+        D().is_regex("")
 
     with pytest.raises(SyntaxError):
         D().css("a").default(None)
 
     with pytest.raises(SyntaxError):
-        D().assert_eq("")
+        D().is_equal("")

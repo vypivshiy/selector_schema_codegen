@@ -1,7 +1,7 @@
 import pytest
 
 from ssc_codegen import D, N, R, ItemSchema
-from ssc_codegen.type_state import TypeVariableState
+from ssc_codegen.ast_ssc import VariableType
 
 
 @pytest.mark.parametrize(
@@ -29,7 +29,7 @@ def test_document_to_list_document(expr):
     ],
 )
 def test_doc_to_str(expr):
-    assert expr.last_var_type == TypeVariableState.STRING
+    assert expr.last_var_type == VariableType.STRING
 
 
 @pytest.mark.parametrize(
@@ -42,4 +42,4 @@ def test_doc_to_str(expr):
     ],
 )
 def test_do_to_list_str(expr):
-    assert expr.last_var_type == TypeVariableState.LIST_STRING
+    assert expr.stack_last_ret == VariableType.LIST_STRING

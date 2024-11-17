@@ -5,11 +5,11 @@ from ssc_codegen import D, R
 @pytest.mark.parametrize(
     "expr",
     [
-        D().assert_css("a"),
-        D().assert_xpath("//a"),
-        R().assert_eq(""),
-        R().split(" ").assert_in(""),
-        R().assert_re(""),
+        D().is_css("a"),
+        D().is_xpath("//a"),
+        R().is_equal(""),
+        R().split(" ").is_contains(""),
+        R().is_regex(""),
     ],
 )
 def test_assert_expr(expr):
