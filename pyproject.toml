@@ -23,7 +23,6 @@ dependencies = [
     'typer>=0.12.5',
     'lxml>=5.0.0',
     'cssselect>=1.2.0',
-    'unimport>=1.2.1'
 ]
 
 [project.optional-dependencies]
