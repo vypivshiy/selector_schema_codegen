@@ -142,11 +142,11 @@ def tt_struct(node: StructParser) -> str:
 
 
 def tt_docstring(node: Docstring) -> str:
-    # fixme: parent inner Struct None
-    indent = py.INDENT_METHOD if not node.parent else ""
-    if node.value:
-        return indent + py.CLS_DOCSTRING.format(node.value)
-    return ""
+    if not node.value:
+        return ""
+
+    indent = py.INDENT_METHOD if node.parent else ""
+    return indent + py.CLS_DOCSTRING.format(node.value)
 
 
 def tt_ret(node: ReturnExpression) -> str:
