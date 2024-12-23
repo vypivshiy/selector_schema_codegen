@@ -127,7 +127,8 @@ def gen_py(
 ):
     converter = import_converter(f"py_{lib.value}")
     if fmt:
-        commands = ["ruff format {}"]
+        commands = [
+            "ruff format {}", "ruff check {} --fix"]
         fmt_cmd = create_fmt_cmd(ssc_files, prefix, suffix, out, commands)
     else:
         fmt_cmd = []
