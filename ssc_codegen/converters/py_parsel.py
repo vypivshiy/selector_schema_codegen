@@ -67,7 +67,7 @@ def tt_pre_validate(node: PreValidateFunction) -> str:
 @converter.pre(TokenType.STRUCT_PART_DOCUMENT)
 def tt_part_document(node: PartDocFunction):
     p_type = "Selector"
-    ret_type = "Selector"
+    ret_type = "SelectorList"
     name = py.MAGIC_METHODS.get(node.name)
     return py.INDENT_METHOD + py.CLS_PART_DOC_HEAD.format(
         name, p_type, ret_type
