@@ -25,4 +25,8 @@ SIGNATURE_MAP = {
     VariableType.OPTIONAL_STRING: "String | null",
     VariableType.OPTIONAL_LIST_STRING: "Array<String> | null",
     VariableType.NULL: "null",
+    VariableType.INT: "Int",
+    VariableType.LIST_INT: "Array<Int>",
+    VariableType.FLOAT: "Float",
+    VariableType.LIST_FLOAT: "Array<Float>",
 }
