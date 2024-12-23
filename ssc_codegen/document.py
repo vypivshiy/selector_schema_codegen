@@ -87,7 +87,7 @@ class BaseDocument:
 
 
 class DefaultDocument(BaseDocument):
-    def default(self, value: Optional[str]) -> Self:
+    def default(self, value: str | int | float | None) -> Self:
         """Set default value. Accept string or None. raise error if expr is not first"""
         if self.count != 0:
             raise SyntaxError("default expression should be a first")
