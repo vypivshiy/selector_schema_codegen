@@ -18,7 +18,6 @@ from .ast_ssc import (
     CallStructFunctionExpression,
     BaseExpression,
     TypeDef,
-    StartParseFunction,
 )
 from .consts import M_SPLIT_DOC, M_VALUE, M_KEY, M_ITEM, SIGNATURE_MAP
 from .document import BaseDocument
@@ -52,9 +51,9 @@ def _extract_schemas(module: ModuleType) -> list[Type[BaseSchema]]:
         obj
         for name, obj in module.__dict__.items()
         if not name.startswith("__")
-        and hasattr(obj, "__mro__")
-        and BaseSchema in obj.__mro__
-        and not _is_template_cls(obj)
+           and hasattr(obj, "__mro__")
+           and BaseSchema in obj.__mro__
+           and not _is_template_cls(obj)
     ]
 
 
@@ -77,8 +76,8 @@ def check_field_expr(field: BaseDocument):
 
 
 def _patch_non_required_attributes(
-    schema: Type[BaseSchema],
-    *fields: M_SPLIT_DOC | M_ITEM | M_KEY | M_VALUE | str,
+        schema: Type[BaseSchema],
+        *fields: M_SPLIT_DOC | M_ITEM | M_KEY | M_VALUE | str,
 ) -> Type[BaseSchema]:
     for f in fields:
         if getattr(schema, f, MISSING_FIELD) == MISSING_FIELD:
@@ -123,20 +122,20 @@ def check_schema(schema: Type[BaseSchema]) -> Type[BaseSchema]:
 
 
 def _fill_stack_variables(
-    stack: list[BaseExpression], *, ret_expr: bool = True
+        stack: list[BaseExpression], *, ret_expr: bool = True
 ) -> list[BaseExpression]:
     tmp_stack = stack.copy()
     ret_type = tmp_stack[-1].ret_type
     if (
-        tmp_stack[0].kind == TokenType.EXPR_DEFAULT
-        and ret_type == VariableType.STRING
+            tmp_stack[0].kind == TokenType.EXPR_DEFAULT
+            and ret_type == VariableType.STRING
     ):
         ret_type = VariableType.OPTIONAL_STRING
         tmp_stack.pop(0)
 
     if (
-        tmp_stack[0].kind == TokenType.EXPR_DEFAULT
-        and ret_type == VariableType.STRING
+            tmp_stack[0].kind == TokenType.EXPR_DEFAULT
+            and ret_type == VariableType.STRING
     ):
         ret_type = VariableType.OPTIONAL_LIST_STRING
         tmp_stack.pop(0)
@@ -180,22 +179,20 @@ def build_fields_signature(raw_signature: Any) -> str:
 
 
 def build_ast_struct(
-    schema: Type[BaseSchema],
-    *,
-    docstring_class_top: bool = False,
-    css_to_xpath: bool = False,
-    xpath_to_css: bool = False,
+        schema: Type[BaseSchema],
+        *,
+        docstring_class_top: bool = False,
+        css_to_xpath: bool = False,
+        xpath_to_css: bool = False,
 ) -> StructParser:
     schema = check_schema(schema)
     fields = schema.__get_mro_fields__()
     raw_signature = schema.__class_signature__()
     doc = (
-        (schema.__doc__ or "") + "\n\n" + build_fields_signature(raw_signature)
+            (schema.__doc__ or "") + "\n\n" + build_fields_signature(raw_signature)
     )
-
     start_parse_body: list[CallStructFunctionExpression] = []
     struct_parse_functions = []
-
     for k, f in fields.items():
         check_field_expr(f)
         if css_to_xpath:
@@ -275,20 +272,14 @@ def _check_split_doc(f):
 
 
 def build_ast_module(
-    path: str | Path[str],
-    *,
-    docstring_class_top: bool = False,
-    css_to_xpath: bool = False,
-    xpath_to_css: bool = False,
+        path: str | Path[str],
+        *,
+        docstring_class_top: bool = False,
+        css_to_xpath: bool = False,
+        xpath_to_css: bool = False,
 ) -> ModuleProgram:
     if css_to_xpath and xpath_to_css:
-        raise AttributeError("Should be chosen one variant")
-
-    if xpath_to_css:
-        warnings.warn(
-            "Correct result output not guaranteed", category=RuntimeWarning
-        )
-
+        raise AttributeError("Should be chosen one variant (css_to_xpath OR xpath_to_css)")
     if isinstance(path, str):
         path = Path(path)
     module = ModuleType("_")
