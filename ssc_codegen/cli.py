@@ -2,6 +2,7 @@ import os
 import sys
 import warnings
 
+from ssc_codegen.ast_builder import build_ast_module
 from ssc_codegen.cli_utils import (
     import_converter,
     cb_folder_out,
@@ -13,7 +14,6 @@ from ssc_codegen.cli_utils import (
     ConverterLike,
     create_fmt_cmd,
 )
-from ssc_codegen.ast_builder import build_ast_module
 from ssc_codegen.converters.tools import go_naive_fix_docstring
 
 if sys.version_info <= (3, 10):
@@ -21,9 +21,9 @@ if sys.version_info <= (3, 10):
 else:
     from enum import Enum
 
+
     class StrEnum(str, Enum):
         pass
-
 
 from pathlib import Path
 from typing import Annotated, List, Callable, Optional
@@ -40,34 +40,47 @@ _HELP_CORE_LIB = "core parser library"
 _HELP_FILE_PREFIX = "out files prefix (<prefix>+<out>)"
 _HELP_FILE_SUFFIX = "out files suffix (<out>+<suffix>)"
 _HELP_FMT = "format code output"
-
+_HELP_TO_XPATH = "convert all css queries to xpath"
+_HELP_TO_CSS = "convert all xpath queries to css (works not guaranteed)"
 
 @app.command(help="Show version and exit")
 def version() -> None:
     from ssc_codegen import VERSION
     print(f"ssc-gen {VERSION}")
 
+
 def generate_code(
-    converter: ConverterLike,
-    out: Path[str],
-    prefix: str,
-    ssc_files: List[Path[str]],
-    suffix: str,
-    comment_str: str,
-    fmt_cmd: list[str],
-    code_cb: Callable[[list[str]], str] = lambda c: "\n".join(c),
-    docstring_class_top: bool = False,
-    variables_patches: dict[str, str] | None = None,
+        *,
+        converter: ConverterLike,
+        out: Path[str],
+        prefix: str,
+        ssc_files: List[Path[str]],
+        suffix: str,
+        comment_str: str,
+        fmt_cmd: list[str],
+        code_cb: Callable[[list[str]], str] = lambda c: "\n".join(c),
+        docstring_class_top: bool = False,
+        variables_patches: dict[str, str] | None = None,
+        css_to_xpath: bool = False,
+        xpath_to_css: bool = False,
 ) -> None:
     variables_patches = variables_patches or {}
-
+    if css_to_xpath and xpath_to_css:
+        raise BadParameter("Should be passed to-xpath or to-css flag")
+    if css_to_xpath:
+        print("Convert ALL CSS queries to XPATH")
+    elif xpath_to_css:
+        print("Convert ALL XPATH queries to CSS")
     print("Generating code start")
     for file_cfg in ssc_files:
         name = file_cfg.name.split(".")[0]
         out_file = f"{prefix}{name}{suffix}"
         print(f"Make AST {file_cfg.name}...")
         ast_module = build_ast_module(
-            file_cfg, docstring_class_top=docstring_class_top
+            file_cfg,
+            docstring_class_top=docstring_class_top,
+            css_to_xpath=css_to_xpath,
+            xpath_to_css=xpath_to_css
         )
         print(f"Convert to code {file_cfg.name}...")
         code = converter.convert_program(ast_module, comment=comment_str)
@@ -87,107 +100,124 @@ def generate_code(
 
 @app.command("py", help="generate python modules")
 def gen_py(
-    ssc_files: Annotated[
-        List[Path],
-        Argument(help="ssc-gen config files", callback=cb_check_ssc_files),
-    ],
-    out: Annotated[
-        Path[str],
-        Option("--out", "-o", help=_HELP_OUTPUT_FOLDER, callback=cb_folder_out),
-    ],
-    lib: Annotated[
-        PyLIBS, Option("--lib", "-i", help=_HELP_CORE_LIB)
-    ] = PyLIBS.BS4,
-    prefix: Annotated[
-        str, Option("--prefix", "-p", help=_HELP_FILE_PREFIX)
-    ] = "",
-    suffix: Annotated[
-        str, Option("--suffix", "-s", help=_HELP_FILE_SUFFIX)
-    ] = ".py",
-    fmt: Annotated[
-        bool, Option(help=_HELP_FMT, is_flag=True)
-    ] = True,
+        ssc_files: Annotated[
+            List[Path],
+            Argument(help="ssc-gen config files", callback=cb_check_ssc_files),
+        ],
+        out: Annotated[
+            Path[str],
+            Option("--out", "-o", help=_HELP_OUTPUT_FOLDER, callback=cb_folder_out),
+        ],
+        lib: Annotated[
+            PyLIBS, Option("--lib", "-i", help=_HELP_CORE_LIB)
+        ] = PyLIBS.BS4,
+        prefix: Annotated[
+            str, Option("--prefix", "-p", help=_HELP_FILE_PREFIX)
+        ] = "",
+        suffix: Annotated[
+            str, Option("--suffix", "-s", help=_HELP_FILE_SUFFIX)
+        ] = ".py",
+        fmt: Annotated[
+            bool, Option(help=_HELP_FMT, is_flag=True)
+        ] = True,
+        to_xpath: Annotated[
+            bool, Option(help=_HELP_TO_XPATH, is_flag=True)] = False,
+        to_css: Annotated[
+            bool, Option(help=_HELP_TO_CSS, is_flag=True)] = False
 ):
     converter = import_converter(f"py_{lib.value}")
     if fmt:
-        commands = [ "ruff format {}"]
+        commands = ["ruff format {}"]
         fmt_cmd = create_fmt_cmd(ssc_files, prefix, suffix, out, commands)
     else:
         fmt_cmd = []
     generate_code(
-        converter,
-        out,
-        prefix,
-        ssc_files,
-        suffix,
-        f"# {COMMENT_STRING}",
-        fmt_cmd,
+        converter=converter,
+        out=out,
+        prefix=prefix,
+        ssc_files=ssc_files,
+        suffix=suffix,
+        comment_str=f"# {COMMENT_STRING}",
+        fmt_cmd=fmt_cmd,
+        xpath_to_css=to_css,
+        css_to_xpath=to_xpath,
     )
 
 
 @app.command("js", help="generate javascript modules (unstable)")
 def gen_js(
-    ssc_files: Annotated[
-        List[Path],
-        Argument(help="ssc-gen config files", callback=cb_check_ssc_files),
-    ],
-    out: Annotated[
-        Path[str],
-        Option("--out", "-o", help=_HELP_OUTPUT_FOLDER, callback=cb_folder_out),
-    ],
-    lib: Annotated[
-        JsLIBS, Option("--lib", "-i", help=_HELP_CORE_LIB)
-    ] = JsLIBS.PURE,
-    prefix: Annotated[
-        str, Option("--prefix", "-p", help=_HELP_FILE_PREFIX)
-    ] = "",
-    suffix: Annotated[
-        str, Option("--suffix", "-s", help=_HELP_FILE_SUFFIX)
-    ] = ".js",
-    fmt: Annotated[
-        bool, Option(help=_HELP_FMT, is_flag=True)
-    ] = True,
+        ssc_files: Annotated[
+            List[Path],
+            Argument(help="ssc-gen config files", callback=cb_check_ssc_files),
+        ],
+        out: Annotated[
+            Path[str],
+            Option("--out", "-o", help=_HELP_OUTPUT_FOLDER, callback=cb_folder_out),
+        ],
+        lib: Annotated[
+            JsLIBS, Option("--lib", "-i", help=_HELP_CORE_LIB)
+        ] = JsLIBS.PURE,
+        prefix: Annotated[
+            str, Option("--prefix", "-p", help=_HELP_FILE_PREFIX)
+        ] = "",
+        suffix: Annotated[
+            str, Option("--suffix", "-s", help=_HELP_FILE_SUFFIX)
+        ] = ".js",
+        fmt: Annotated[
+            bool, Option(help=_HELP_FMT, is_flag=True)
+        ] = True,
+        to_xpath: Annotated[
+            bool, Option(help=_HELP_TO_XPATH, is_flag=True)] = False,
+        to_css: Annotated[
+            bool, Option(help=_HELP_TO_CSS, is_flag=True)] = False
 ):
     converter = import_converter(f"js_{lib.value}")
     if fmt:
+        # TODO: js formatters
         commands = []
         fmt_cmd = create_fmt_cmd(ssc_files, prefix, suffix, out, commands)
     else:
         fmt_cmd = []
     generate_code(
-        converter,
-        out,
-        prefix,
-        ssc_files,
-        suffix,
-        f"// {COMMENT_STRING}",
-        fmt_cmd,
+        converter=converter,
+        out=out,
+        prefix=prefix,
+        ssc_files=ssc_files,
+        suffix=suffix,
+        comment_str=f"// {COMMENT_STRING}",
+        fmt_cmd=fmt_cmd,
         docstring_class_top=True,
+        xpath_to_css=to_css,
+        css_to_xpath=to_xpath,
     )
 
 
 @app.command("dart", help="generate dart modules (unstable)")
 def gen_dart(
-    ssc_files: Annotated[
-        List[Path],
-        Argument(help="ssc-gen config files", callback=cb_check_ssc_files),
-    ],
-    out: Annotated[
-        Path[str],
-        Option("--out", "-o", help=_HELP_OUTPUT_FOLDER, callback=cb_folder_out),
-    ],
-    lib: Annotated[
-        DartLIBS, Option("--lib", "-i", help=_HELP_CORE_LIB)
-    ] = DartLIBS.UNIVERSAL_HTML,
-    prefix: Annotated[
-        str, Option("--prefix", "-p", help=_HELP_FILE_PREFIX)
-    ] = "",
-    suffix: Annotated[
-        str, Option("--suffix", "-s", help=_HELP_FILE_SUFFIX)
-    ] = ".dart",
-    fmt: Annotated[
-        bool, Option(help=_HELP_FMT, is_flag=True)
-    ] = True,
+        ssc_files: Annotated[
+            List[Path],
+            Argument(help="ssc-gen config files", callback=cb_check_ssc_files),
+        ],
+        out: Annotated[
+            Path[str],
+            Option("--out", "-o", help=_HELP_OUTPUT_FOLDER, callback=cb_folder_out),
+        ],
+        lib: Annotated[
+            DartLIBS, Option("--lib", "-i", help=_HELP_CORE_LIB)
+        ] = DartLIBS.UNIVERSAL_HTML,
+        prefix: Annotated[
+            str, Option("--prefix", "-p", help=_HELP_FILE_PREFIX)
+        ] = "",
+        suffix: Annotated[
+            str, Option("--suffix", "-s", help=_HELP_FILE_SUFFIX)
+        ] = ".dart",
+        fmt: Annotated[
+            bool, Option(help=_HELP_FMT, is_flag=True)
+        ] = True,
+        to_xpath: Annotated[
+            bool, Option(help=_HELP_TO_XPATH, is_flag=True)] = False,
+        to_css: Annotated[
+            bool, Option(help=_HELP_TO_CSS, is_flag=True)] = False
 ):
     converter = import_converter(f"dart_{lib.value}")
     if fmt:
@@ -196,44 +226,50 @@ def gen_dart(
     else:
         fmt_cmd = []
     generate_code(
-        converter,
-        out,
-        prefix,
-        ssc_files,
-        suffix,
-        f"// {COMMENT_STRING}",
-        fmt_cmd,
-        go_naive_fix_docstring,
+        converter=converter,
+        out=out,
+        prefix=prefix,
+        ssc_files=ssc_files,
+        suffix=suffix,
+        comment_str=f"// {COMMENT_STRING}",
+        fmt_cmd=fmt_cmd,
+        code_cb=go_naive_fix_docstring,
         docstring_class_top=True,
+        xpath_to_css=to_css,
+        css_to_xpath=to_xpath,
     )
 
 
 @app.command("go", help="generate golang modules (unstable)")
 def gen_go(
-    ssc_files: Annotated[
-        List[Path],
-        Argument(help="ssc-gen config files", callback=cb_check_ssc_files),
-    ],
-    out: Annotated[
-        Path[str],
-        Option("--out", "-o", help=_HELP_OUTPUT_FOLDER, callback=cb_folder_out),
-    ],
-    lib: Annotated[
-        GoLIBS, Option("--lib", "-i", help=_HELP_CORE_LIB)
-    ] = GoLIBS.GOQUERY,
-    prefix: Annotated[
-        str, Option("--prefix", "-p", help=_HELP_FILE_PREFIX)
-    ] = "",
-    suffix: Annotated[
-        str, Option("--suffix", "-s", help=_HELP_FILE_SUFFIX)
-    ] = ".go",
-    fmt: Annotated[
-        bool, Option(help=_HELP_FMT, is_flag=True)
-    ] = True,
-    package: Annotated[
-        Optional[str],
-        Option(help="package name (default - get output folder name)"),
-    ] = None,
+        ssc_files: Annotated[
+            List[Path],
+            Argument(help="ssc-gen config files", callback=cb_check_ssc_files),
+        ],
+        out: Annotated[
+            Path[str],
+            Option("--out", "-o", help=_HELP_OUTPUT_FOLDER, callback=cb_folder_out),
+        ],
+        lib: Annotated[
+            GoLIBS, Option("--lib", "-i", help=_HELP_CORE_LIB)
+        ] = GoLIBS.GOQUERY,
+        prefix: Annotated[
+            str, Option("--prefix", "-p", help=_HELP_FILE_PREFIX)
+        ] = "",
+        suffix: Annotated[
+            str, Option("--suffix", "-s", help=_HELP_FILE_SUFFIX)
+        ] = ".go",
+        fmt: Annotated[
+            bool, Option(help=_HELP_FMT, is_flag=True)
+        ] = True,
+        package: Annotated[
+            Optional[str],
+            Option(help="package name (default - get output folder name)"),
+        ] = None,
+        to_xpath: Annotated[
+            bool, Option(help=_HELP_TO_XPATH, is_flag=True)] = False,
+        to_css: Annotated[
+            bool, Option(help=_HELP_TO_CSS, is_flag=True)] = False
 ):
     converter = import_converter(f"go_{lib.value}")
     if fmt:
@@ -242,16 +278,18 @@ def gen_go(
     else:
         fmt_cmd = []
     generate_code(
-        converter,
-        out,
-        prefix,
-        ssc_files,
-        suffix,
-        f"// {COMMENT_STRING}",
-        fmt_cmd,
-        go_naive_fix_docstring,
+        converter=converter,
+        out=out,
+        prefix=prefix,
+        ssc_files=ssc_files,
+        suffix=suffix,
+        comment_str=f"// {COMMENT_STRING}",
+        fmt_cmd=fmt_cmd,
+        code_cb=go_naive_fix_docstring,
         docstring_class_top=True,
         variables_patches={"PACKAGE": package or out.name},
+        xpath_to_css=to_css,
+        css_to_xpath=to_xpath,
     )
 
 
