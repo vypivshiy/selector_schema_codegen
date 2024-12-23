@@ -149,8 +149,8 @@ def tt_struct(node: StructParser) -> str:
 def tt_docstring(node: Docstring) -> str:
     if not node.value:
         return ""
-
-    indent = py.INDENT_METHOD if node.parent else ""
+    # in codegen docstrings used in first line and inner classes
+    indent = "" if node.parent.kind == TokenType.MODULE else py.INDENT_METHOD
     return indent + py.CLS_DOCSTRING.format(node.value)
 
 
@@ -218,8 +218,13 @@ def tt_start_parse_post(node: StartParseFunction):
     return f"{code}{py.INDENT_METHOD_BODY}return {body}"
 
 
-def tt_default_pre(_: DefaultValueWrapper) -> str:
-    return py.INDENT_METHOD_BODY + py.E_DEFAULT_WRAP
+def tt_default_pre(node: DefaultValueWrapper) -> str:
+    prv, nxt = lr_var_names(variable=node.variable)
+    return (py.INDENT_METHOD_BODY
+            + f"{nxt} = {prv}"
+            + '\n'
+            + py.INDENT_METHOD_BODY
+            + py.E_DEFAULT_WRAP)
 
 
 def tt_default_post(node: DefaultValueWrapper) -> str:

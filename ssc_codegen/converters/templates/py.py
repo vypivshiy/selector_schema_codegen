@@ -11,7 +11,12 @@ TYPES = {
     VariableType.LIST_STRING: "List[str]",
     VariableType.OPTIONAL_STRING: "Optional[str]",
     VariableType.OPTIONAL_LIST_STRING: "Optional[List[str]]",
+    VariableType.INT: "int",
+    VariableType.FLOAT: "float",
+    VariableType.LIST_INT: "List[int]",
+    VariableType.LIST_FLOAT: "List[float]",
 }
+
 MAGIC_METHODS = {
     "__KEY__": "key",
     "__VALUE__": "value",
