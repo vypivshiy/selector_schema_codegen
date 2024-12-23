@@ -1,11 +1,11 @@
 # ssc-gen Example
 
-This directory provide auto generated parser
+This directory provide auto generated parser and usage example:
 
-Usage:
+Generate code command example:
 
 ```shell
-ssc-gen booksToScrape.py -c py.parsel -o parsers/
+ssc-gen py schemas/booksToScrape.py -i parsel -o parsers
 ```
 
 main.py example script

@@ -1,7 +1,7 @@
 import pytest
 
 from ssc_codegen import D, N, R, ItemSchema
-from ssc_codegen.type_state import TypeVariableState
+from ssc_codegen.ast_ssc import VariableType
 
 
 def test_fail_str_format():
@@ -21,9 +21,9 @@ def test_fail_str_format():
         D()
         .css("#video")
         .attr("data-parameters")
-        .replace("\\", "")
-        .replace("&quot;", '"'),
+        .repl("\\", "")
+        .repl("&quot;", '"'),
     ],
 )
 def test_string_expr(expr):
-    assert expr.last_var_type == TypeVariableState.STRING
+    assert expr.stack_last_ret == VariableType.STRING

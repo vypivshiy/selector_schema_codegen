@@ -1,9 +1,0 @@
-{% from 'macros.j2' import class_header,  parse_item_schema, methods_code, super_init %}
-
-{{ class_header(struct) }} {
-
-{{ super_init(struct) }}
-{{ parse_item_schema(struct) }}
-{{- methods_code(struct) }}
-
-}

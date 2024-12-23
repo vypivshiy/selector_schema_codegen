@@ -1,78 +1,117 @@
-from ssc_codegen._compat import IntEnum
+from enum import IntEnum, auto
+
+
+class VariableType(IntEnum):
+    DOCUMENT = auto()
+    LIST_DOCUMENT = auto()
+    STRING = auto()
+    LIST_STRING = auto()
+    # default wrapper marks
+    OPTIONAL_STRING = auto()
+    OPTIONAL_LIST_STRING = auto()
+
+    NULL = auto()
+    # mark accept any variable type
+    # used in return and default expr
+    ANY = auto()
+    # nested functions
+    NESTED = auto()
+    INT = auto()
+    LIST_INT = auto()
+    FLOAT = auto()
+    LIST_FLOAT = auto()
+    # todo provide consts
+
+
+class StructType(IntEnum):
+    BASE = auto()
+
+    ITEM = auto()
+    DICT = auto()
+    LIST = auto()
+    FLAT_LIST = auto()
 
 
 class TokenType(IntEnum):
-    """Instructions tokens representation"""
+    # UTILS
+    DOCSTRING = auto()
+    IMPORTS = auto()
+    VARIABLE = auto()
+    MODULE = auto()
 
-    # SELECTORS
-    OP_XPATH = 1
-    "extract first element by xpath query"
+    # STRUCTS
+    STRUCT = auto()
+    STRUCT_INIT = auto()  # used for OOP, or init base class/struct attributes
+    STRUCT_FIELD = auto()  # PARSE FUNCTION KEY
+    STRUCT_PRE_VALIDATE = auto()  # VALIDATE DOC INPUT BEFORE PARSE
+    STRUCT_PART_DOCUMENT = auto()  # SPLIT DOCUMENT TO PARTS
+    STRUCT_PARSE_START = auto()  # START PARSE ENTRYPOINT
+    STRUCT_CALL_FUNCTION = auto()  # CALL STRUCT_FIELD EXPR
 
-    OP_XPATH_ALL = 2
-    "extract all elements by xpath query"
+    # TYPES
+    TYPEDEF = auto()
+    TYPEDEF_FIELD = auto()
 
-    OP_CSS = 3
-    "extract first element by css query"
+    # FIRST
+    EXPR_DEFAULT = auto()
 
-    OP_CSS_ALL = 4
-    "extract all elements by css query"
+    # NESTED STRUCTS
+    EXPR_NESTED = auto()
 
-    OP_ATTR = 5
-    "extract attribute from element"
+    # RETURN EXPR (AUTO SET)
+    EXPR_RETURN = auto()
+    # RETURN EXPR (AUTO SET)
+    # USED IN __PRE_VALIDATE__ ATTR
+    EXPR_NO_RETURN = auto()
 
-    OP_ATTR_TEXT = 6
-    "extract text inside attribute"
+    # DOCUMENT
+    EXPR_CSS = auto()
+    EXPR_XPATH = auto()
+    EXPR_ATTR = auto()
+    EXPR_TEXT = auto()
+    EXPR_RAW = auto()
 
-    OP_ATTR_RAW = 7
-    "extract attribute and text"
+    # LIST_DOCUMENT
+    EXPR_CSS_ALL = auto()
+    EXPR_XPATH_ALL = auto()
+    EXPR_ATTR_ALL = auto()
+    EXPR_TEXT_ALL = auto()
+    EXPR_RAW_ALL = auto()
 
-    # REGEX
-    # extract first result match
-    OP_REGEX = 8
-    # extract all result matches
-    OP_REGEX_ALL = 9
-    # crop result by regex pattern
-    # spamegg ('^spam') -> egg
-    OP_REGEX_SUB = 10
-    # STRINGS
-    # split by LEFT and RIGHT match
-    OP_STRING_TRIM = 11
-    # split by LEFT match
-    OP_STRING_L_TRIM = 12
-    # split by RIGHT
-    OP_STRING_R_TRIM = 13
-    # replace string by pattern
-    OP_STRING_REPLACE = 14
-    OP_STRING_FORMAT = 15
-    OP_STRING_SPLIT = 16
+    # STRING
+    EXPR_REGEX = auto()
+    EXPR_REGEX_ALL = auto()
+    EXPR_REGEX_SUB = auto()
+    EXPR_STRING_TRIM = auto()
+    EXPR_STRING_LTRIM = auto()
+    EXPR_STRING_RTRIM = auto()
+    EXPR_STRING_REPLACE = auto()
+    EXPR_STRING_FORMAT = auto()
+    EXPR_STRING_SPLIT = auto()
+
+    # LIST_STRING
+    EXPR_LIST_REGEX_SUB = auto()
+    EXPR_LIST_STRING_TRIM = auto()
+    EXPR_LIST_STRING_LTRIM = auto()
+    EXPR_LIST_STRING_RTRIM = auto()
+    EXPR_LIST_STRING_FORMAT = auto()
+    EXPR_LIST_STRING_REPLACE = auto()
 
     # ARRAY
-    OP_INDEX = 17
-    OP_JOIN = 18
+    EXPR_LIST_STRING_INDEX = auto()
+    EXPR_LIST_DOCUMENT_INDEX = auto()
+    EXPR_LIST_JOIN = auto()
 
-    # DEFAULT VALUE IF parse result failed
-    ST_DEFAULT = 19  # wrap try/catch mark
+    # ASSERT
+    IS_EQUAL = auto()
+    IS_NOT_EQUAL = auto()
+    IS_CONTAINS = auto()
+    IS_CSS = auto()
+    IS_XPATH = auto()
+    IS_REGEX_MATCH = auto()
 
-    # PRE VALIDATE OPERATIONS (assert)
-    OP_ASSERT_EQUAL = 20
-    OP_ASSERT_CONTAINS = 21
-    OP_ASSERT_RE_MATCH = 22
-    OP_ASSERT_CSS = 23
-    OP_ASSERT_XPATH = 24
-    OP_NESTED_SCHEMA = 25
-
-    # BUILDER TOKENS
-    ST_DOCSTRING = 100
-    ST_PRE_VALIDATE = 102
-    ST_METHOD = 104
-    ST_NO_RET = 105  # __PRE_VALIDATE__ try/catch wraps
-    ST_RET = 106
-
-
-if __name__ == "__main__":
-    for t in TokenType:
-        print(f"@converter(TokenType.{t.name})")
-        print(f"def {t.name.lower()}(expr: Expression):")
-        print("    VAR_L, VAR_R = VAR_NAMES(expr)")
-        print()
-        print()
+    # NUMERIC
+    TO_INT = auto()
+    TO_INT_LIST = auto()
+    TO_FLOAT = auto()
+    TO_FLOAT_LIST = auto()
