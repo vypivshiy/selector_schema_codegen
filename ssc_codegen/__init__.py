@@ -1,10 +1,11 @@
-from .document import HTMLDocument, StringDocument, ArrayDocument, AssertDocument, NestedDocument, DefaultDocument
+from .document import HTMLDocument, StringDocument, ArrayDocument, AssertDocument, NestedDocument, DefaultDocument, \
+    NumericDocument
 from .schema import ItemSchema, DictSchema, ListSchema, FlatListSchema
 
 VERSION = "0.4.0"
 
 
-class Document(HTMLDocument, StringDocument, ArrayDocument, AssertDocument, DefaultDocument):
+class Document(HTMLDocument, StringDocument, ArrayDocument, AssertDocument, DefaultDocument, NumericDocument):
     pass
 
 
