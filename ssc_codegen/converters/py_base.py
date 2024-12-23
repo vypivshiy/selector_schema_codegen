@@ -34,7 +34,7 @@ from ..ast_ssc import (
     IsEqualExpression,
     IsNotEqualExpression,
     IsContainsExpression,
-    IsRegexMatchExpression,
+    IsRegexMatchExpression, ToInteger, ToListInteger, ToFloat, ToListFloat,
 )
 from ..tokens import TokenType, VariableType, StructType
 
@@ -100,6 +100,11 @@ class BasePyCodeConverter(BaseCodeConverter):
         self.pre_definitions[TokenType.IS_NOT_EQUAL] = tt_is_not_equal
         self.pre_definitions[TokenType.IS_CONTAINS] = tt_is_contains
         self.pre_definitions[TokenType.IS_REGEX_MATCH] = tt_is_regex
+
+        self.pre_definitions[TokenType.TO_INT] = tt_to_int
+        self.pre_definitions[TokenType.TO_INT_LIST] = tt_to_list_int
+        self.pre_definitions[TokenType.TO_FLOAT] = tt_to_float
+        self.pre_definitions[TokenType.TO_FLOAT_LIST] = tt_to_list_float
 
 
 def tt_typedef(node: TypeDef):
@@ -440,3 +445,47 @@ def tt_is_regex(node: IsRegexMatchExpression):
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return indent + code
     return f"{indent}{code}\n{indent}{nxt} = {prv}"
+
+
+def tt_to_int(node: ToInteger):
+    prv, nxt = lr_var_names(variable=node.variable)
+    indent = (
+        py.INDENT_DEFAULT_BODY
+        if node.have_default_expr()
+        else py.INDENT_METHOD_BODY
+    )
+    code = f"{nxt} = int({prv})"
+    return indent + code
+
+
+def tt_to_list_int(node: ToListInteger):
+    prv, nxt = lr_var_names(variable=node.variable)
+    indent = (
+        py.INDENT_DEFAULT_BODY
+        if node.have_default_expr()
+        else py.INDENT_METHOD_BODY
+    )
+    code = f"{nxt} = [int(i) for i in {prv}]"
+    return indent + code
+
+
+def tt_to_float(node: ToFloat):
+    prv, nxt = lr_var_names(variable=node.variable)
+    indent = (
+        py.INDENT_DEFAULT_BODY
+        if node.have_default_expr()
+        else py.INDENT_METHOD_BODY
+    )
+    code = f"{nxt} = float({prv})"
+    return indent + code
+
+
+def tt_to_list_float(node: ToListFloat):
+    prv, nxt = lr_var_names(variable=node.variable)
+    indent = (
+        py.INDENT_DEFAULT_BODY
+        if node.have_default_expr()
+        else py.INDENT_METHOD_BODY
+    )
+    code = f"{nxt} = [float(i) for i in {prv}]"
+    return indent + code

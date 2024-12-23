@@ -16,8 +16,11 @@ class VariableType(IntEnum):
     ANY = auto()
     # nested functions
     NESTED = auto()
-    # TODO: add int, array(int), float, array(float) types
-    # TODO: consts provide
+    INT = auto()
+    LIST_INT = auto()
+    FLOAT = auto()
+    LIST_FLOAT = auto()
+    # todo provide consts
 
 
 class StructType(IntEnum):
@@ -106,3 +109,9 @@ class TokenType(IntEnum):
     IS_CSS = auto()
     IS_XPATH = auto()
     IS_REGEX_MATCH = auto()
+
+    # NUMERIC
+    TO_INT = auto()
+    TO_INT_LIST = auto()
+    TO_FLOAT = auto()
+    TO_FLOAT_LIST = auto()

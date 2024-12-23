@@ -120,8 +120,8 @@ class BaseExpression(BaseAstNode):
         if not self.parent:
             return False
         if self.parent.kind in (
-            TokenType.STRUCT_FIELD,
-            TokenType.STRUCT_PRE_VALIDATE,
+                TokenType.STRUCT_FIELD,
+                TokenType.STRUCT_PRE_VALIDATE,
         ):
             return self.parent.have_assert_expr()
         return False
@@ -460,12 +460,12 @@ class ReturnExpression(BaseExpression):
         expr = self.prev
         while expr:
             if expr.kind in (
-                TokenType.IS_CSS,
-                TokenType.IS_EQUAL,
-                TokenType.IS_NOT_EQUAL,
-                TokenType.IS_CONTAINS,
-                TokenType.IS_XPATH,
-                TokenType.IS_REGEX_MATCH,
+                    TokenType.IS_CSS,
+                    TokenType.IS_EQUAL,
+                    TokenType.IS_NOT_EQUAL,
+                    TokenType.IS_CONTAINS,
+                    TokenType.IS_XPATH,
+                    TokenType.IS_REGEX_MATCH,
             ):
                 return True
             expr = expr.prev
@@ -511,8 +511,37 @@ class CallStructFunctionExpression(BaseExpression):
         return self.fn_ref.parent
 
 
-# STRUCT
+# NUMERIC
 
+@dataclass(kw_only=True)
+class ToInteger(BaseExpression):
+    kind: Final[TokenType] = TokenType.TO_INT
+    accept_type: Final[VariableType] = VariableType.STRING
+    ret_type: Final[VariableType] = VariableType.INT
+
+
+@dataclass(kw_only=True)
+class ToListInteger(BaseExpression):
+    kind: Final[TokenType] = TokenType.TO_INT_LIST
+    accept_type: Final[VariableType] = VariableType.LIST_STRING
+    ret_type: Final[VariableType] = VariableType.LIST_INT
+
+
+@dataclass(kw_only=True)
+class ToFloat(BaseExpression):
+    kind: Final[TokenType] = TokenType.TO_FLOAT
+    accept_type: Final[VariableType] = VariableType.STRING
+    ret_type: Final[VariableType] = VariableType.FLOAT
+
+
+@dataclass(kw_only=True)
+class ToListFloat(BaseExpression):
+    kind: Final[TokenType] = TokenType.TO_FLOAT_LIST
+    accept_type: Final[VariableType] = VariableType.LIST_STRING
+    ret_type: Final[VariableType] = VariableType.LIST_FLOAT
+
+
+# STRUCT
 
 @dataclass(kw_only=True)
 class __StructNode(BaseAstNode):
@@ -543,8 +572,8 @@ class StructFieldFunction(__StructNode):
             fn
             for fn in self.parent.parent.body  # type: ignore
             if getattr(fn, "name", None)
-            and fn.name == self.nested_schema_name()  # noqa
-            and fn.kind == TokenType.TYPEDEF
+               and fn.name == self.nested_schema_name()  # noqa
+               and fn.kind == TokenType.TYPEDEF
         ][0]
         return associated_typedef  # type: ignore
 
@@ -605,8 +634,8 @@ class StartParseFunction(__StructNode):
     def have_default_expr(self) -> bool:
         for expr in self.body:
             if (
-                expr.ret_type == VariableType.NESTED
-                and expr.have_default_expr()
+                    expr.ret_type == VariableType.NESTED
+                    and expr.have_default_expr()
             ):
                 return True
         return False
@@ -633,7 +662,7 @@ class StructParser(BaseAstNode):
         | StartParseFunction
         | PreValidateFunction
         | PartDocFunction
-    ]
+        ]
     typedef: Optional["TypeDef"] = field(init=False)
     parent: Optional[ModuleProgram] = None  # LATE INIT
 

@@ -41,7 +41,7 @@ from .ast_ssc import (
     IsNotEqualExpression,
     IsContainsExpression,
     IsRegexMatchExpression,
-    NestedExpression,
+    NestedExpression, ToInteger, ToListInteger, ToFloat, ToListFloat,
 )
 from .schema import BaseSchema
 from .selector_utils import validate_css_query, validate_xpath_query
@@ -350,10 +350,6 @@ class StringDocument(BaseDocument):
         return self
 
 
-class IsRegexExpression:
-    pass
-
-
 class AssertDocument(BaseDocument):
     def is_css(self, query: str, msg: str = "") -> Self:
         self._add(IsCssExpression(query=query, msg=msg))
@@ -385,4 +381,36 @@ class NestedDocument(BaseDocument):
         if self.stack_last_ret == VariableType.NESTED:
             raise SyntaxError("Nested already used")
         self._add(NestedExpression(schema_cls=schema))
+        return self
+
+
+class NumericDocument(BaseDocument):
+    def to_int(self) -> Self:
+        last_ret = self.stack[-1].ret_type
+        match last_ret:
+            case VariableType.STRING:
+                self._add(ToInteger())
+            case VariableType.LIST_STRING:
+                self._add(ToListInteger())
+            case _:
+                self._raise_wrong_type_error(
+                    self.stack_last_ret,
+                    VariableType.STRING,
+                    VariableType.LIST_STRING,
+                )
+        return self
+
+    def to_float(self) -> Self:
+        last_ret = self.stack[-1].ret_type
+        match last_ret:
+            case VariableType.STRING:
+                self._add(ToFloat())
+            case VariableType.LIST_STRING:
+                self._add(ToListFloat())
+            case _:
+                self._raise_wrong_type_error(
+                    self.stack_last_ret,
+                    VariableType.STRING,
+                    VariableType.LIST_STRING,
+                )
         return self
