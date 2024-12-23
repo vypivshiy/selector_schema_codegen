@@ -27,8 +27,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["ruff", "mypy", "unimport", "pytest"]
-python = ["ruff", "unimport"]
+dev = ["ruff", "mypy"]
+python = ["ruff"]
 test_py = ["parsel", "selectolax", "bs4", "scrapy"]
 
 [project.scripts]
