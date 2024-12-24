@@ -219,7 +219,11 @@ def tt_start_parse_post(node: StartParseFunction):
 
 
 def tt_default_pre(node: DefaultValueWrapper) -> str:
-    prv, nxt = lr_var_names(variable=node.variable)
+    # is first attr (naive)
+    # todo refactoring, return DefaultValueWrapper to body
+    # issue: not contains variable and prv, nxt properties
+    prv, nxt = "value", "value1"
+    # prv, nxt = lr_var_names(variable=node.variable)
     return (py.INDENT_METHOD_BODY
             + f"{nxt} = {prv}"
             + '\n'
