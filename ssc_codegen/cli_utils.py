@@ -2,7 +2,7 @@ import importlib
 import sys
 import warnings
 from pathlib import Path
-from typing import Protocol, TYPE_CHECKING
+from typing import Protocol, TYPE_CHECKING, Generator
 
 from typer import BadParameter
 
@@ -60,16 +60,22 @@ def import_converter(converter_name: str) -> ConverterLike:
 
 
 # ARG cb
-def cb_check_ssc_files(files: list[Path]) -> list[Path]:
+def cb_check_ssc_files(files: list[Path] | Generator[Path, None, None]) -> list[Path]:
+    tmp_files = []
     for f in files:
-        if not f.exists():
+        if f.is_dir():
+            tmp_files += cb_check_ssc_files(f.iterdir())
+        elif not f.exists():
             raise BadParameter(f"'{f.name}' does not exist")
         elif not f.is_file():
             raise BadParameter(f"'{f.name}' is not file")
-    return files
+        # TODO: change extension???
+        elif f.suffix == '.py':
+            tmp_files.append(f)
+    return tmp_files
 
 
-def cb_folder_out(folder: Path[str]) -> Path[str]:
+def cb_folder_out(folder: Path) -> Path:
     if not folder.exists():
         folder.mkdir(exist_ok=True)
     if folder.is_file():
@@ -78,10 +84,10 @@ def cb_folder_out(folder: Path[str]) -> Path[str]:
 
 
 def create_fmt_cmd(
-    ssc_files: list[Path[str]],
+    ssc_files: list[Path],
     prefix: str,
     suffix: str,
-    out: Path[str],
+    out: Path,
     commands: list[str],
 ) -> list[str]:
     comma: list[str] = []

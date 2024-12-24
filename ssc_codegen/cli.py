@@ -43,6 +43,7 @@ _HELP_FMT = "format code output"
 _HELP_TO_XPATH = "convert all css queries to xpath"
 _HELP_TO_CSS = "convert all xpath queries to css (works not guaranteed)"
 
+
 @app.command(help="Show version and exit")
 def version() -> None:
     from ssc_codegen import VERSION
