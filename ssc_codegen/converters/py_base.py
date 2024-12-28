@@ -41,7 +41,6 @@ from ..tokens import TokenType, VariableType, StructType
 
 lr_var_names = partial(left_right_var_names, name="value")
 
-TYPES = py.TYPES
 MAGIC_METHODS = py.MAGIC_METHODS
 
 
@@ -115,35 +114,52 @@ def tt_typedef(node: TypeDef):
     def _fetch_node_type(node_):
         if node_.ret_type == VariableType.NESTED:
             return py.TYPE_PREFIX.format(node_.nested_class)
-        return TYPES.get(node_.ret_type)
-
+        return py.TYPES.get(node_.ret_type)
     t_name = py.TYPE_PREFIX.format(node.name)
     # DICT schema
-    if all(f.name in ["__KEY__", "__VALUE__"] for f in node.body):
-        value_ret = [f for f in node.body if f.name == "__VALUE__"][0].ret_type
-        if node.body[-1].ret_type == VariableType.NESTED:
-            type_ = py.TYPE_PREFIX.format(node.body[-1].nested_class)
-        else:
-            type_ = TYPES.get(value_ret)
-        body = py.TYPE_DICT.format(type_)
+    match node.struct_ref.type:
+        case StructType.DICT:
+            value_ret = [f for f in node.body if f.name == "__VALUE__"][0].ret_type
+            if node.body[-1].ret_type == VariableType.NESTED:
+                type_ = py.TYPE_PREFIX.format(node.body[-1].nested_class)
+            else:
+                type_ = py.TYPES.get(value_ret)
+            body = py.TYPE_DICT.format(type_)
+        case StructType.FLAT_LIST:
+            value_ret = [f for f in node.body if f.name == "__ITEM__"][0].ret_type
+            if node.body[-1].ret_type == VariableType.NESTED:
+                type_ = py.TYPE_PREFIX.format(node.body[-1].nested_class)
+            else:
+                type_ = py.TYPES.get(value_ret)
+            body = py.TYPE_LIST.format(type_)
 
-    # Flat list schema
-    elif all(f.name in ["__ITEM__"] for f in node.body):
-        value_ret = [f for f in node.body if f.name == "__ITEM__"][0].ret_type
-        if node.body[-1].ret_type == VariableType.NESTED:
-            type_ = py.TYPE_PREFIX.format(node.body[-1].nested_class)
-        else:
-            type_ = TYPES.get(value_ret)
-        body = py.TYPE_LIST.format(type_)
-    # other
-    else:
-        t_dict_body = (
-                "{"
-                + ", ".join(f"{f.name!r}: {_fetch_node_type(f)}" for f in node.body)
-                + "}"
-        )
-        body = py.TYPE_ITEM.format(repr(t_name), t_dict_body)
-    return f"T_{node.name} = {body}"
+        case StructType.ITEM:
+            _dict_body = (
+                    "{"
+                    + ", ".join(f"{f.name!r}: {_fetch_node_type(f)}" for f in node.body)
+                    + "}"
+            )
+            body = py.TYPE_ITEM.format(repr(t_name), _dict_body)
+        case StructType.LIST:
+            item_dict_body = (
+                    "{"
+                    + ", ".join(f"{f.name!r}: {_fetch_node_type(f)}" for f in node.body)
+                    + "}"
+            )
+            item_name = f'{t_name}_ITEM'
+            item_body = (item_name
+                         + ' = '
+                         + py.TYPE_ITEM.format(repr(item_name), item_dict_body))
+            body = (t_name
+                    + " = "
+                    + py.TYPE_LIST.format(item_name)
+                    )
+            return (item_body
+                    + '\n'
+                    + body)
+    return (t_name
+            + ' = '
+            + body)
 
 
 def tt_struct(node: StructParser) -> str:

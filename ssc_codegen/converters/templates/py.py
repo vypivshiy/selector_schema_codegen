@@ -7,10 +7,15 @@ if TYPE_CHECKING:
     from ssc_codegen.ast_ssc import StartParseFunction
 
 TYPES = {
+    VariableType.ANY: "Any",
     VariableType.STRING: "str",
     VariableType.LIST_STRING: "List[str]",
     VariableType.OPTIONAL_STRING: "Optional[str]",
     VariableType.OPTIONAL_LIST_STRING: "Optional[List[str]]",
+    VariableType.OPTIONAL_INT: "Optional[int]",
+    VariableType.OPTIONAL_LIST_INT: "Optional[List[int]]",
+    VariableType.OPTIONAL_FLOAT: "Optional[float]",
+    VariableType.OPTIONAL_LIST_FLOAT: "Optional[List[float]]",
     VariableType.INT: "int",
     VariableType.FLOAT: "float",
     VariableType.LIST_INT: "List[int]",
