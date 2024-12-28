@@ -12,7 +12,8 @@ from ..ast_ssc import (
     NestedExpression,
     PreValidateFunction,
     StartParseFunction,
-    DefaultValueWrapper,
+    DefaultStart,
+    DefaultEnd,
     FormatExpression,
     MapFormatExpression,
     TrimExpression,
@@ -61,8 +62,11 @@ class BasePyCodeConverter(BaseCodeConverter):
             TokenType.STRUCT_PARSE_START
         ] = tt_start_parse_post
 
-        self.pre_definitions[TokenType.EXPR_DEFAULT] = tt_default_pre
-        self.post_definitions[TokenType.EXPR_DEFAULT] = tt_default_post
+        # self.pre_definitions[TokenType.EXPR_DEFAULT] = tt_default_pre
+        # self.post_definitions[TokenType.EXPR_DEFAULT] = tt_default_post
+
+        self.pre_definitions[TokenType.EXPR_DEFAULT_START] = tt_default_start
+        self.pre_definitions[TokenType.EXPR_DEFAULT_END] = tt_default_end
 
         self.pre_definitions[TokenType.EXPR_STRING_FORMAT] = tt_string_format
         self.pre_definitions[
@@ -134,9 +138,9 @@ def tt_typedef(node: TypeDef):
     # other
     else:
         t_dict_body = (
-            "{"
-            + ", ".join(f"{f.name!r}: {_fetch_node_type(f)}" for f in node.body)
-            + "}"
+                "{"
+                + ", ".join(f"{f.name!r}: {_fetch_node_type(f)}" for f in node.body)
+                + "}"
         )
         body = py.TYPE_ITEM.format(repr(t_name), t_dict_body)
     return f"T_{node.name} = {body}"
@@ -155,9 +159,10 @@ def tt_docstring(node: Docstring) -> str:
 
 
 def tt_ret(node: ReturnExpression) -> str:
-    _, nxt = lr_var_names(variable=node.variable)
     if node.have_default_expr():
+        _, nxt = lr_var_names(variable=node.prev.variable)
         return py.INDENT_DEFAULT_BODY + py.RET.format(nxt)
+    _, nxt = lr_var_names(variable=node.variable)
     return py.INDENT_METHOD_BODY + py.RET.format(nxt)
 
 
@@ -199,9 +204,9 @@ def tt_start_parse_post(node: StartParseFunction):
     if any(f.name == "__PRE_VALIDATE__" for f in node.body):
         name = MAGIC_METHODS.get("__PRE_VALIDATE__")
         code += (
-            py.INDENT_METHOD_BODY
-            + py.E_CALL_METHOD.format(name, "self._doc")
-            + "\n"
+                py.INDENT_METHOD_BODY
+                + py.E_CALL_METHOD.format(name, "self._doc")
+                + "\n"
         )
 
     match node.type:
@@ -218,22 +223,18 @@ def tt_start_parse_post(node: StartParseFunction):
     return f"{code}{py.INDENT_METHOD_BODY}return {body}"
 
 
-def tt_default_pre(node: DefaultValueWrapper) -> str:
-    # is first attr (naive)
-    # todo refactoring, return DefaultValueWrapper to body
-    # issue: not contains variable and prv, nxt properties
-    prv, nxt = "value", "value1"
-    # prv, nxt = lr_var_names(variable=node.variable)
+def tt_default_start(node: DefaultStart) -> str:
+    prv, nxt = lr_var_names(variable=node.variable)
     return (py.INDENT_METHOD_BODY
-            + f"{nxt} = {prv}"
-            + '\n'
+            + f"{nxt} = {prv}\n"
             + py.INDENT_METHOD_BODY
             + py.E_DEFAULT_WRAP)
 
 
-def tt_default_post(node: DefaultValueWrapper) -> str:
+def tt_default_end(node: DefaultEnd) -> str:
+    prv, nxt = lr_var_names(variable=node.variable)
     val = repr(node.value) if isinstance(node.value, str) else node.value
-    return py.INDENT_METHOD_BODY + py.RET.format(val)
+    return (py.INDENT_METHOD_BODY + py.RET.format(val))
 
 
 def tt_string_format(node: FormatExpression) -> str:
