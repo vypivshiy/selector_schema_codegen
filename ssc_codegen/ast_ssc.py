@@ -571,6 +571,10 @@ class __StructNode(BaseAstNode):
     def ret_type(self) -> VariableType:
         if not self.body:
             raise TypeError("Function body empty")
+
+        # default expr case
+        if self.body[0].kind == TokenType.EXPR_DEFAULT_START:
+            return self.body[-2].variable.type
         return self.body[-1].variable.type
 
 
@@ -578,7 +582,6 @@ class __StructNode(BaseAstNode):
 class StructFieldFunction(__StructNode):
     name: M_ITEM | M_KEY | M_VALUE | str
     kind: Final[TokenType] = TokenType.STRUCT_FIELD
-    default: DefaultValueWrapper | None = None
     parent: Optional["StructParser"] = None  # LATE INIT
 
     def find_associated_typedef(self) -> TypeDef | None:
@@ -617,9 +620,6 @@ class StructFieldFunction(__StructNode):
             for e in self.body
             if e
         )
-
-    def have_default_expr(self) -> bool:
-        return self.default is not None
 
 
 @dataclass(kw_only=True)

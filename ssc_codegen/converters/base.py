@@ -52,6 +52,11 @@ class BaseCodeConverter:
             if self.debug_instructions:
                 if node.kind == TokenType.EXPR_RETURN:
                     prefix = f"{self.debug_comment_prefix}Token: {node.kind.name} ret_type: {node.ret_type.name}"
+                elif node.kind == TokenType.STRUCT_PARSE_START:
+                    prefix = (f"{self.debug_comment_prefix}Token: {node.kind.name} struct_type: {node.type.name}"
+                              + '\n'
+                              + f"{self.debug_comment_prefix}Call instructions count: {len(node.body)}"
+                              )
                 else:
                     prefix = f"{self.debug_comment_prefix}Token: {node.kind.name}"
                 return f"{prefix}\n{self.pre_definitions[node.kind](node)}"

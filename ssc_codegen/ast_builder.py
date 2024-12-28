@@ -128,24 +128,27 @@ def _fill_stack_variables(
     ret_type = tmp_stack[-1].ret_type
     first_expr = tmp_stack[0]
     if first_expr.kind == TokenType.EXPR_DEFAULT_START:
-        match ret_type:
-            case VariableType.STRING:
-                ret_type = VariableType.OPTIONAL_STRING
-            case VariableType.LIST_STRING:
-                ret_type = VariableType.OPTIONAL_LIST_STRING
-            case VariableType.INT:
-                ret_type = VariableType.OPTIONAL_INT
-            case VariableType.LIST_INT:
-                ret_type = VariableType.OPTIONAL_LIST_INT
-            case VariableType.FLOAT:
-                ret_type = VariableType.OPTIONAL_FLOAT
-            case VariableType.LIST_FLOAT:
-                ret_type = VariableType.OPTIONAL_LIST_FLOAT
-            # ignore cast
-            case t if t in (VariableType.NULL, VariableType.ANY, VariableType.NESTED):
-                pass
-            case _:
-                raise TypeError(f"Unknown variable return type: {ret_type.name} {ret_type.name}")
+        # last token - TT.DefaultEnd
+        ret_type = tmp_stack[-2].ret_type
+        if first_expr.value == None:
+            match ret_type:
+                case VariableType.STRING:
+                    ret_type = VariableType.OPTIONAL_STRING
+                case VariableType.LIST_STRING:
+                    ret_type = VariableType.OPTIONAL_LIST_STRING
+                case VariableType.INT:
+                    ret_type = VariableType.OPTIONAL_INT
+                case VariableType.LIST_INT:
+                    ret_type = VariableType.OPTIONAL_LIST_INT
+                case VariableType.FLOAT:
+                    ret_type = VariableType.OPTIONAL_FLOAT
+                case VariableType.LIST_FLOAT:
+                    ret_type = VariableType.OPTIONAL_LIST_FLOAT
+                # ignore cast
+                case t if t in (VariableType.NULL, VariableType.ANY, VariableType.NESTED):
+                    pass
+                case _:
+                    raise TypeError(f"Unknown variable return type: {ret_type.name} {ret_type.name}")
 
     expr_count = len(tmp_stack)
     for i, expr in enumerate(tmp_stack):
@@ -155,7 +158,6 @@ def _fill_stack_variables(
         var = Variable(num=expr_count - 1, count=expr_count, type=ret_type)
         if first_expr.kind == TokenType.EXPR_DEFAULT_START:
             # before TokenType.EXPR_DEFAULT_END push expr
-
             tmp_stack.insert(len(tmp_stack) - 1,
                              ReturnExpression(variable=var, ret_type=ret_type)
                              )
@@ -211,67 +213,39 @@ def build_ast_struct(
            )
     start_parse_body: list[CallStructFunctionExpression] = []
     struct_parse_functions = []
-    for k, f in fields.items():
-        check_field_expr(f)
+    for name, field in fields.items():
+        check_field_expr(field)
         if css_to_xpath:
-            f = convert_css_to_xpath(f)
+            field = convert_css_to_xpath(field)
         elif xpath_to_css:
-            f = convert_xpath_to_css(f)
-        match k:
+            field = convert_xpath_to_css(field)
+        match name:
             case "__PRE_VALIDATE__":
-                fn = PreValidateFunction(
-                    name=k,  # noqa
-                    body=_fill_stack_variables(f.stack, ret_expr=False),
-                )
-                start_parse_body.append(
-                    CallStructFunctionExpression(
-                        name=k, ret_type=VariableType.NULL, fn_ref=fn
-                    )
-                )
-                struct_parse_functions.append(fn)
+                extract_pre_validate(field, name, start_parse_body, struct_parse_functions)
             case "__SPLIT_DOC__":
-                _check_split_doc(f)
-                fn = PartDocFunction(
-                    name=k,  # noqa
-                    body=_fill_stack_variables(f.stack),
-                )
-                start_parse_body.append(
-                    CallStructFunctionExpression(
-                        name=k, ret_type=VariableType.LIST_DOCUMENT, fn_ref=fn
-                    )
-                )
-                struct_parse_functions.append(fn)
+                extract_split_doc(field, name, start_parse_body, struct_parse_functions)
             case _:
                 # insert default instruction API
-                if f.stack[0].kind == TokenType.EXPR_DEFAULT:
-                    tt_def_val = f.stack.pop(0)
-                    f.stack.insert(0,
-                                   DefaultStart(value=tt_def_val.value))
-                    f.stack.append(
-                        DefaultEnd(value=tt_def_val.value)
-                    )
-
+                extract_default_expr(field)
                 fn = StructFieldFunction(
-                    name=k,
-                    body=_fill_stack_variables(f.stack),
+                    name=name,
+                    body=_fill_stack_variables(field.stack),
                 )
-                if fn.default:
-                    fn.default.parent = fn
 
                 struct_parse_functions.append(fn)
-                if f.stack_last_ret == VariableType.NESTED:
+                if field.stack_last_ret == VariableType.NESTED:
                     start_parse_body.append(
                         CallStructFunctionExpression(
-                            name=k,
-                            ret_type=f.stack_last_ret,
+                            name=name,
+                            ret_type=field.stack_last_ret,
                             fn_ref=fn,
-                            nested_cls_name_ref=f.stack[-1].schema,
+                            nested_cls_name_ref=field.stack[-1].schema,
                         )  # noqa
                     )
                 else:
                     start_parse_body.append(
                         CallStructFunctionExpression(
-                            name=k, ret_type=f.stack_last_ret, fn_ref=fn
+                            name=name, ret_type=field.stack_last_ret, fn_ref=fn
                         )  # noqa
                     )
     # fixme: start_parse_body DEAD CODE?
@@ -284,6 +258,43 @@ def build_ast_struct(
     )
 
     return ast_struct_parser
+
+
+def extract_default_expr(field):
+    if field.stack[0].kind == TokenType.EXPR_DEFAULT:
+        tt_def_val = field.stack.pop(0)
+        field.stack.insert(0,
+                           DefaultStart(value=tt_def_val.value))
+        field.stack.append(
+            DefaultEnd(value=tt_def_val.value)
+        )
+
+
+def extract_split_doc(f, k, start_parse_body, struct_parse_functions):
+    _check_split_doc(f)
+    fn = PartDocFunction(
+        name=k,  # noqa
+        body=_fill_stack_variables(f.stack),
+    )
+    start_parse_body.append(
+        CallStructFunctionExpression(
+            name=k, ret_type=VariableType.LIST_DOCUMENT, fn_ref=fn
+        )
+    )
+    struct_parse_functions.append(fn)
+
+
+def extract_pre_validate(f, k, start_parse_body, struct_parse_functions):
+    fn = PreValidateFunction(
+        name=k,  # noqa
+        body=_fill_stack_variables(f.stack, ret_expr=False),
+    )
+    start_parse_body.append(
+        CallStructFunctionExpression(
+            name=k, ret_type=VariableType.NULL, fn_ref=fn
+        )
+    )
+    struct_parse_functions.append(fn)
 
 
 def _check_split_doc(f):
