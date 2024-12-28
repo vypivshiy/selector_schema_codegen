@@ -111,10 +111,13 @@ class BaseExpression(BaseAstNode):
     def have_default_expr(self) -> bool:
         if not self.parent:
             return False
-        parent = self.parent
-        if parent.kind == TokenType.STRUCT_FIELD and parent.default:
+        if self.parent.body[0].kind == TokenType.EXPR_DEFAULT_START:
             return True
         return False
+
+        # parent = self.parent
+        # if parent.kind == TokenType.STRUCT_FIELD and parent.default:
+        #    return True
 
     def have_assert_expr(self) -> bool:
         if not self.parent:
@@ -134,6 +137,22 @@ class DefaultValueWrapper(BaseExpression):
 
     kind: Final[TokenType] = TokenType.EXPR_DEFAULT
 
+    accept_type: Final[VariableType] = VariableType.ANY
+    ret_type: Final[VariableType] = VariableType.ANY
+    value: str | None
+
+
+@dataclass(kw_only=True)
+class DefaultStart(BaseExpression):
+    kind: Final[TokenType] = TokenType.EXPR_DEFAULT_START
+    accept_type: Final[VariableType] = VariableType.ANY
+    ret_type: Final[VariableType] = VariableType.ANY
+    value: str | None
+
+
+@dataclass(kw_only=True)
+class DefaultEnd(BaseExpression):
+    kind: Final[TokenType] = TokenType.EXPR_DEFAULT_END
     accept_type: Final[VariableType] = VariableType.ANY
     ret_type: Final[VariableType] = VariableType.ANY
     value: str | None

@@ -20,6 +20,10 @@ class VariableType(IntEnum):
     LIST_INT = auto()
     FLOAT = auto()
     LIST_FLOAT = auto()
+    OPTIONAL_INT = auto()
+    OPTIONAL_LIST_INT = auto()
+    OPTIONAL_FLOAT = auto()
+    OPTIONAL_LIST_FLOAT = auto()
     # todo provide consts
 
 
@@ -54,6 +58,10 @@ class TokenType(IntEnum):
 
     # FIRST
     EXPR_DEFAULT = auto()
+
+    # auto marks by EXPR_DEFAULT
+    EXPR_DEFAULT_START = auto()
+    EXPR_DEFAULT_END = auto()
 
     # NESTED STRUCTS
     EXPR_NESTED = auto()

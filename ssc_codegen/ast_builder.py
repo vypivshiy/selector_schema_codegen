@@ -17,7 +17,7 @@ from .ast_ssc import (
     NoReturnExpression,
     CallStructFunctionExpression,
     BaseExpression,
-    TypeDef,
+    TypeDef, DefaultStart, DefaultEnd,
 )
 from .consts import M_SPLIT_DOC, M_VALUE, M_KEY, M_ITEM, SIGNATURE_MAP
 from .document import BaseDocument
@@ -126,19 +126,26 @@ def _fill_stack_variables(
 ) -> list[BaseExpression]:
     tmp_stack = stack.copy()
     ret_type = tmp_stack[-1].ret_type
-    if (
-            tmp_stack[0].kind == TokenType.EXPR_DEFAULT
-            and ret_type == VariableType.STRING
-    ):
-        ret_type = VariableType.OPTIONAL_STRING
-        tmp_stack.pop(0)
-
-    if (
-            tmp_stack[0].kind == TokenType.EXPR_DEFAULT
-            and ret_type == VariableType.STRING
-    ):
-        ret_type = VariableType.OPTIONAL_LIST_STRING
-        tmp_stack.pop(0)
+    first_expr = tmp_stack[0]
+    if first_expr.kind == TokenType.EXPR_DEFAULT_START:
+        match ret_type:
+            case VariableType.STRING:
+                ret_type = VariableType.OPTIONAL_STRING
+            case VariableType.LIST_STRING:
+                ret_type = VariableType.OPTIONAL_LIST_STRING
+            case VariableType.INT:
+                ret_type = VariableType.OPTIONAL_INT
+            case VariableType.LIST_INT:
+                ret_type = VariableType.OPTIONAL_LIST_INT
+            case VariableType.FLOAT:
+                ret_type = VariableType.OPTIONAL_FLOAT
+            case VariableType.LIST_FLOAT:
+                ret_type = VariableType.OPTIONAL_LIST_FLOAT
+            # ignore cast
+            case t if t in (VariableType.NULL, VariableType.ANY, VariableType.NESTED):
+                pass
+            case _:
+                raise TypeError(f"Unknown variable return type: {ret_type.name} {ret_type.name}")
 
     expr_count = len(tmp_stack)
     for i, expr in enumerate(tmp_stack):
@@ -146,8 +153,18 @@ def _fill_stack_variables(
 
     if ret_expr:
         var = Variable(num=expr_count - 1, count=expr_count, type=ret_type)
-        tmp_stack.append(ReturnExpression(variable=var))
+        if first_expr.kind == TokenType.EXPR_DEFAULT_START:
+            # before TokenType.EXPR_DEFAULT_END push expr
+
+            tmp_stack.insert(len(tmp_stack) - 1,
+                             ReturnExpression(variable=var, ret_type=ret_type)
+                             )
+        else:
+            tmp_stack.append(
+                ReturnExpression(variable=var, ret_type=ret_type)
+            )
     else:
+        # actual used in __PRE_VALIDATE__, not need check default expr
         tmp_stack.append(
             NoReturnExpression(
                 variable=Variable(
@@ -188,9 +205,10 @@ def build_ast_struct(
     schema = check_schema(schema)
     fields = schema.__get_mro_fields__()
     raw_signature = schema.__class_signature__()
-    doc = (
-            (schema.__doc__ or "") + "\n\n" + build_fields_signature(raw_signature)
-    )
+    doc = ((schema.__doc__ or "")
+           + "\n\n"
+           + build_fields_signature(raw_signature)
+           )
     start_parse_body: list[CallStructFunctionExpression] = []
     struct_parse_functions = []
     for k, f in fields.items():
@@ -224,14 +242,17 @@ def build_ast_struct(
                 )
                 struct_parse_functions.append(fn)
             case _:
-                default_expr = (
-                    f.stack[0]
-                    if f.stack[0].kind == TokenType.EXPR_DEFAULT
-                    else None
-                )
+                # insert default instruction API
+                if f.stack[0].kind == TokenType.EXPR_DEFAULT:
+                    tt_def_val = f.stack.pop(0)
+                    f.stack.insert(0,
+                                   DefaultStart(value=tt_def_val.value))
+                    f.stack.append(
+                        DefaultEnd(value=tt_def_val.value)
+                    )
+
                 fn = StructFieldFunction(
                     name=k,
-                    default=default_expr,
                     body=_fill_stack_variables(f.stack),
                 )
                 if fn.default:
