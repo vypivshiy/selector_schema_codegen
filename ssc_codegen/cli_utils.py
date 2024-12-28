@@ -41,11 +41,18 @@ class GoLIBS(StrEnum):
 
 
 class ConverterLike(Protocol):
+    debug_instructions: bool = False
+    debug_comment_prefix: str = ""
+
     def convert(
         self, ast_entry: "BaseAstNode", acc: list[str] | None = None
     ) -> list[str]:
         pass
 
+    def set_debug_prefix(self, comment_prefix: str) -> None:
+        pass
+    def disable_debug(self) -> None:
+        pass
     def convert_program(
         self, ast_program: "ModuleProgram", comment: str = ""
     ) -> list[str]:
@@ -53,7 +60,7 @@ class ConverterLike(Protocol):
 
 
 def import_converter(converter_name: str) -> ConverterLike:
-    full_import = CONVERTER_PATH + f".{converter_name}"
+    full_import = f"{CONVERTER_PATH}.{converter_name}"
     module = importlib.import_module(full_import)
     converter_obj: ConverterLike = module.converter
     return converter_obj

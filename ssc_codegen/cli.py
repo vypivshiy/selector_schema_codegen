@@ -42,7 +42,7 @@ _HELP_FILE_SUFFIX = "out files suffix (<out>+<suffix>)"
 _HELP_FMT = "format code output"
 _HELP_TO_XPATH = "convert all css queries to xpath"
 _HELP_TO_CSS = "convert all xpath queries to css (works not guaranteed)"
-
+_HELP_DEBUG_COMM_TOKENS = "add debug token string in comment every generated instruction"
 
 @app.command(help="Show version and exit")
 def version() -> None:
@@ -64,6 +64,8 @@ def generate_code(
         variables_patches: dict[str, str] | None = None,
         css_to_xpath: bool = False,
         xpath_to_css: bool = False,
+        debug_instructions: bool = False,
+        debug_comment_prefix: str = ""
 ) -> None:
     variables_patches = variables_patches or {}
     if css_to_xpath and xpath_to_css:
@@ -72,7 +74,11 @@ def generate_code(
         print("Convert ALL CSS queries to XPATH")
     elif xpath_to_css:
         print("Convert ALL XPATH queries to CSS")
+
     print("Generating code start")
+    if debug_instructions:
+        print("TOGGLE debug generated tokens")
+        converter.set_debug_prefix(debug_comment_prefix)
     for file_cfg in ssc_files:
         name = file_cfg.name.split(".")[0]
         out_file = f"{prefix}{name}{suffix}"
@@ -81,7 +87,7 @@ def generate_code(
             file_cfg,
             docstring_class_top=docstring_class_top,
             css_to_xpath=css_to_xpath,
-            xpath_to_css=xpath_to_css
+            xpath_to_css=xpath_to_css,
         )
         print(f"Convert to code {file_cfg.name}...")
         code = converter.convert_program(ast_module, comment=comment_str)
@@ -124,7 +130,10 @@ def gen_py(
         to_xpath: Annotated[
             bool, Option(help=_HELP_TO_XPATH, is_flag=True)] = False,
         to_css: Annotated[
-            bool, Option(help=_HELP_TO_CSS, is_flag=True)] = False
+            bool, Option(help=_HELP_TO_CSS, is_flag=True)] = False,
+        debug: Annotated[
+        bool, Option(help=_HELP_DEBUG_COMM_TOKENS, is_flag=True)] = False
+
 ):
     converter = import_converter(f"py_{lib.value}")
     if fmt:
@@ -143,6 +152,8 @@ def gen_py(
         fmt_cmd=fmt_cmd,
         xpath_to_css=to_css,
         css_to_xpath=to_xpath,
+        debug_instructions=debug,
+        debug_comment_prefix="# "
     )
 
 
@@ -171,7 +182,9 @@ def gen_js(
         to_xpath: Annotated[
             bool, Option(help=_HELP_TO_XPATH, is_flag=True)] = False,
         to_css: Annotated[
-            bool, Option(help=_HELP_TO_CSS, is_flag=True)] = False
+            bool, Option(help=_HELP_TO_CSS, is_flag=True)] = False,
+        debug: Annotated[
+        bool, Option(help=_HELP_DEBUG_COMM_TOKENS, is_flag=True)] = False
 ):
     converter = import_converter(f"js_{lib.value}")
     if fmt:
@@ -191,6 +204,8 @@ def gen_js(
         docstring_class_top=True,
         xpath_to_css=to_css,
         css_to_xpath=to_xpath,
+        debug_instructions=debug,
+        debug_comment_prefix="// "
     )
 
 
@@ -219,7 +234,9 @@ def gen_dart(
         to_xpath: Annotated[
             bool, Option(help=_HELP_TO_XPATH, is_flag=True)] = False,
         to_css: Annotated[
-            bool, Option(help=_HELP_TO_CSS, is_flag=True)] = False
+            bool, Option(help=_HELP_TO_CSS, is_flag=True)] = False,
+        debug: Annotated[
+        bool, Option(help=_HELP_DEBUG_COMM_TOKENS, is_flag=True)] = False
 ):
     converter = import_converter(f"dart_{lib.value}")
     if fmt:
@@ -239,6 +256,8 @@ def gen_dart(
         docstring_class_top=True,
         xpath_to_css=to_css,
         css_to_xpath=to_xpath,
+        debug_instructions=debug,
+        debug_comment_prefix="// "
     )
 
 
@@ -271,7 +290,9 @@ def gen_go(
         to_xpath: Annotated[
             bool, Option(help=_HELP_TO_XPATH, is_flag=True)] = False,
         to_css: Annotated[
-            bool, Option(help=_HELP_TO_CSS, is_flag=True)] = False
+            bool, Option(help=_HELP_TO_CSS, is_flag=True)] = False,
+        debug: Annotated[
+            bool, Option(help=_HELP_DEBUG_COMM_TOKENS)] = False
 ):
     converter = import_converter(f"go_{lib.value}")
     if fmt:
@@ -292,6 +313,8 @@ def gen_go(
         variables_patches={"PACKAGE": package or out.name},
         xpath_to_css=to_css,
         css_to_xpath=to_xpath,
+        debug_instructions=debug,
+        debug_comment_prefix="// "
     )
 
 
