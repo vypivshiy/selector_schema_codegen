@@ -1,6 +1,8 @@
 from typing import TYPE_CHECKING
 
+from ssc_codegen.converters.templates.utils import TemplateBindings
 from ssc_codegen.converters.utils import to_upper_camel_case
+from ssc_codegen.tokens import TokenType
 
 if TYPE_CHECKING:
     from ssc_codegen.ast_ssc import StartParseFunction
@@ -18,164 +20,192 @@ BRACKET_START = "{"
 BRACKET_END = "}"
 
 
-CLS_HEAD = "class {}"
-CLS_CONSTRUCTOR = (
-    "constructor(doc)"
-    + BRACKET_START
-    + "this._doc = typeof document === 'string' ? new DOMParser().parseFromString(doc, 'text/html') : document;"
-    + BRACKET_END
-)
-
-
-def DOCSTRING(value: str) -> str:  # noqa
+def _make_docstring(value: str) -> str:
+    if not value:
+        return ""
     docstr_start = "/**"
     docstr_parts = "\n".join("* " + line for line in value.split("\n"))
     docstr_end = "*/"
     return docstr_start + "\n" + docstr_parts + "\n" + docstr_end
 
 
-RET = "return {};"
-NO_RET = "return null;"
-EXPR_NESTED = "let {} = (new {}({})).parse();"
-"""NEXT VAR, CLS_NAME, PREV_VAR"""
+BINDINGS = TemplateBindings()
+BINDINGS[TokenType.STRUCT] = "class {}"
+BINDINGS[TokenType.STRUCT_INIT] = lambda: (
+        "constructor(doc)"
+        + BRACKET_START
+        + "this._doc = typeof document === 'string' ? new DOMParser().parseFromString(doc, 'text/html') : doc;"
+        + BRACKET_END
+)
+BINDINGS[TokenType.DOCSTRING] = _make_docstring
+BINDINGS[TokenType.EXPR_RETURN] = "return {};"
+BINDINGS[TokenType.EXPR_NO_RETURN] = "return null;"
+BINDINGS[TokenType.EXPR_NESTED] = "let {} = (new {}({})).parse();"
+BINDINGS[TokenType.STRUCT_PRE_VALIDATE] = "{}(value)"
+BINDINGS[TokenType.STRUCT_PART_DOCUMENT] = "{}(value)"
+BINDINGS[TokenType.STRUCT_FIELD] = "_parse{}(value)"
+BINDINGS[TokenType.STRUCT_PARSE_START] = "{}()"
+BINDINGS[TokenType.EXPR_DEFAULT_START] = lambda: "try {"
+BINDINGS[TokenType.EXPR_DEFAULT_END] = lambda val: "} catch(Error) {" + f"return {val};" + "}"
 
-FUNC_HEAD = "{}(value)"
-FUNC_PARSE_HEAD = "_parse{}(value)"
-FUNC_PARSE_START_HEAD = "{}()"
-PRE_VALIDATE_CALL = "this.{}(this._doc);"
-DEFAULT_HEAD = "try " + BRACKET_START
+# string
+BINDINGS[TokenType.EXPR_STRING_FORMAT] = "let {} = {};"
+BINDINGS[TokenType.EXPR_LIST_STRING_FORMAT] = "let {} = {}.map(e => {});"
 
 
-def DEFAULT_FOOTER(val: str) -> str:  # noqa
-    return "} catch(Error) {" + f"return {val};" + "}"
-
-
-EXPR_STR_FMT = "let {} = {};"
-"""VAR_NXT, TEMPLATE"""
-
-EXPR_STR_FMT_ALL = "let {} = {}.map(e => {});"
-"""VAR_NXT, PRV, TEMPLATE"""
-
-
-# (function (str, chars) {
-#     return str.replace(new RegExp(`^[${chars}]+|[${chars}]+$`, 'g'), '');
-# });
-def EXPR_STR_TRIM(nxt: str, prv: str, chars: str) -> str:
+def _expr_str_trim(nxt: str, prv: str, chars: str):
     return (
-        f"let {nxt}"
-        + " = "
-        + "(function (str, chars){return str.replace(new RegExp(`^[${chars}]+|[${chars}]+$`, 'g'), '');})"
-        + f"({prv}, {chars!r});"
+            f"let {nxt}"
+            + " = "
+            + "(function (str, chars){return str.replace(new RegExp(`^[${chars}]+|[${chars}]+$`, 'g'), '');})"
+            + f"({prv}, {chars!r});"
     )
 
 
-def EXPR_STR_TRIM_ALL(nxt: str, prv: str, chars: str) -> str:
+BINDINGS[TokenType.EXPR_STRING_TRIM] = _expr_str_trim
+
+
+def _expr_str_trim_all(nxt: str, prv: str, chars: str) -> str:
     return (
-        f"let {nxt}"
-        + " = "
-        + f"{prv}.map(e =>"
-        + "(function (str, chars){return str.replace(new RegExp(`^[${chars}]+|[${chars}]+$`, 'g'), '');})"
-        + f"(e, {chars!r})"
-        + ");"
+            f"let {nxt}"
+            + " = "
+            + f"{prv}.map(e =>"
+            + "(function (str, chars){return str.replace(new RegExp(`^[${chars}]+|[${chars}]+$`, 'g'), '');})"
+            + f"(e, {chars!r})"
+            + ");"
     )
+
+
+BINDINGS[TokenType.EXPR_LIST_STRING_TRIM] = _expr_str_trim_all
 
 
 # const ltrim = function (str, chars) {
 #     return str.replace(new RegExp(`^[${chars}]+`, 'g'), '');
 # };
-def EXPR_STR_LTRIM(nxt: str, prv: str, chars: str) -> str:
+def _expr_str_ltrim(nxt: str, prv: str, chars: str) -> str:
     return (
-        f"let {nxt}"
-        + " = "
-        + "(function (str, chars){return str.replace(new RegExp(`^[${chars}]+`, 'g'), '');})"
-        + f"({prv}, {chars!r});"
+            f"let {nxt}"
+            + " = "
+            + "(function (str, chars){return str.replace(new RegExp(`^[${chars}]+`, 'g'), '');})"
+            + f"({prv}, {chars!r});"
     )
 
 
-def EXPR_STR_LTRIM_ALL(nxt: str, prv: str, chars: str) -> str:
+BINDINGS[TokenType.EXPR_STRING_LTRIM] = _expr_str_ltrim
+
+
+def _expr_str_ltrim_all(nxt: str, prv: str, chars: str) -> str:
     return (
-        f"let {nxt}"
-        + " = "
-        + f"{prv}.map(e =>"
-        + "(function (str, chars){return str.replace(new RegExp(`^[${chars}]+`, 'g'), '');})"
-        + f"(e, {chars!r})"
-        + ");"
+            f"let {nxt}"
+            + " = "
+            + f"{prv}.map(e =>"
+            + "(function (str, chars){return str.replace(new RegExp(`^[${chars}]+`, 'g'), '');})"
+            + f"(e, {chars!r})"
+            + ");"
     )
+
+
+BINDINGS[TokenType.EXPR_LIST_STRING_TRIM] = _expr_str_ltrim_all
 
 
 # const rtrim = function (str, chars) {
 #     return str.replace(new RegExp(`[${chars}]+$`, 'g'), '');
 # };
 #
-def EXPR_STR_RTRIM(nxt: str, prv: str, chars: str) -> str:
+def _expr_str_rtrim(nxt: str, prv: str, chars: str) -> str:
     return (
-        f"let {nxt}"
-        + " = "
-        + "(function (str, chars) {return str.replace(new RegExp(`^[${chars}]+`, 'g'), '');})"
-        + f"({prv}, {chars!r}); "
+            f"let {nxt}"
+            + " = "
+            + "(function (str, chars) {return str.replace(new RegExp(`^[${chars}]+`, 'g'), '');})"
+            + f"({prv}, {chars!r}); "
     )
 
 
-def EXPR_STR_RTRIM_ALL(nxt: str, prv: str, chars: str) -> str:
+BINDINGS[TokenType.EXPR_STRING_RTRIM] = _expr_str_rtrim
+
+
+def _expr_str_rtrim_all(nxt: str, prv: str, chars: str) -> str:
     return (
-        f"let {nxt}"
-        + " = "
-        + f"{prv}.map(e =>"
-        + "(function (str, chars){return str.replace(new RegExp(`[${chars}]+$`, 'g'), '');})"
-        + f"(e, {chars!r})"
-        + ");"
+            f"let {nxt}"
+            + " = "
+            + f"{prv}.map(e =>"
+            + "(function (str, chars){return str.replace(new RegExp(`[${chars}]+$`, 'g'), '');})"
+            + f"(e, {chars!r})"
+            + ");"
     )
 
 
-EXPR_STR_REPL = "let {} = {}.replace({}, {});"
-"""NXT, PRV, OLD, NEW"""
-EXPR_STR_REPL_ALL = "let {} = {}.map(e => e.replace({}, {}));"
-"""NXT, PRV, OLD, NEW"""
-EXPR_STR_SPLIT = "let {} = {}.split({});"
-EXPR_RE = "let {} = {}.match({})[{}];"
-"""NXT PRV PATTERN GROUP"""
-EXPR_RE_ALL = "let {} = {}.match({});"
-EXPR_RE_SUB = "let {} = {}.replace({}, {});"
-EXPR_RE_SUB_ALL = "let {} = {}.map(e => e.replace({}, {}));"
-EXPR_INDEX = "let {} = {}[{}];"
-EXPR_JOIN = "let {} = {}.join({});"
+BINDINGS[TokenType.EXPR_LIST_STRING_RTRIM] = _expr_str_rtrim_all
+BINDINGS[TokenType.EXPR_STRING_REPLACE] = "let {} = {}.replace({}, {});"
+BINDINGS[TokenType.EXPR_LIST_STRING_REPLACE] = "let {} = {}.map(e => e.replace({}, {}));"
+BINDINGS[TokenType.EXPR_STRING_SPLIT] = "let {} = {}.split({});"
+BINDINGS[TokenType.EXPR_REGEX] = "let {} = {}.match({})[{}];"
+BINDINGS[TokenType.EXPR_REGEX_ALL] = "let {} = {}.match({});"
+BINDINGS[TokenType.EXPR_REGEX_SUB] = "let {} = {}.replace({}, {});"
+BINDINGS[TokenType.EXPR_LIST_REGEX_SUB] = "let {} = {}.map(e => e.replace({}, {}));"
+BINDINGS[TokenType.EXPR_LIST_STRING_INDEX] = "let {} = {}[{}];"
+BINDINGS[TokenType.EXPR_LIST_DOCUMENT_INDEX] = "let {} = {}[{}];"
+BINDINGS[TokenType.EXPR_LIST_JOIN] = "let {} = {}.join({});"
+BINDINGS[TokenType.IS_EQUAL] = "if ({} != {}) throw new Error({});"
+BINDINGS[TokenType.IS_NOT_EQUAL] = "if ({} == {}) throw new Error({});"
+BINDINGS[TokenType.IS_CONTAINS] = "if (!({} in {})) throw new Error({});"
+BINDINGS[TokenType.IS_REGEX_MATCH] = "if ({}.match({}) === null) throw new Error({});"
+
 EXPR_ASSIGN = "let {} = {};"
-E_EQ = "if ({} != {}) throw new Error({});"
-E_NE = "if ({} == {}) throw new Error({});"
-E_IN = "if (!({} in {})) throw new Error({});"
-E_IS_RE = "if ({}.match({}) === null) throw new Error({});"
 
 # PURE JS API
-EXPR_CSS = "let {} = {}.querySelector({});"
-EXPR_CSS_ALL = "let {} = {}.querySelectorAll({});"
+BINDINGS[TokenType.EXPR_CSS] = "let {} = {}.querySelector({});"
+BINDINGS[TokenType.EXPR_CSS_ALL] = "let {} = {}.querySelectorAll({});"
 # document.evaluate(xpath, element, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-EXPR_XPATH = "let {} = document.evaluate({}, {}, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;"
+BINDINGS[TokenType.EXPR_XPATH] = (
+        "let {} = document.evaluate("
+        + "{}, {}, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null"
+        + ").singleNodeValue;"
+)
 
 
-def EXPR_XPATH_ALL(nxt: str, prv: str, query: str) -> str:  # noqa
+def _expr_xpath_all(nxt: str, prv: str, query: str) -> str:  # noqa
     xpath_eval = f"document.evaluate({query!r}, {prv}, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null)"
     return (
-        f"let {nxt} = "
-        + "Array.from({ length: result.snapshotLength }, (_, i) => "
-        + xpath_eval
-        + ".snapshotItem(i)"
-        + ");"
+            f"let {nxt} = "
+            + "Array.from({ length: result.snapshotLength }, (_, i) => "
+            + xpath_eval
+            + ".snapshotItem(i)"
+            + ");"
     )
 
 
-EXPR_DOC_TEXT = 'let {} = {}.querySelector("html").textContent;'
-EXPR_TEXT = "let {} = {}.textContent;"
-EXPR_TEXT_ALL = "let {} = {}.map(e => e.textContent);"
-EXPR_DOC_RAW = 'let {} = {}.querySelector("html").innerHTML;'
-EXPR_RAW = "let {} = {}.innerHTML;"
-EXPR_RAW_ALL = "let {} = {}.map(e => e.innerHTML);"
-EXPR_ATTR = "let {} = {}.getAttribute({});"
-EXPR_ATTR_ALL = "let {} = {}.map(e => e.getAttribute({}));"
-E_IS_CSS = "if (!{}.querySelector({})) throw new Error({});"
-E_IS_XPATH = (
-    "if("
-    + "!document.evaluate({}, {}, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue"
-    + ") throw new Error({});"
+BINDINGS[TokenType.EXPR_XPATH_ALL] = _expr_xpath_all
+
+
+def _expr_text_doc(var_num: int, nxt: str, prv: str) -> str:
+    # first variable (0) maybe document type, not element
+    if var_num == 0:
+        return f'let {nxt} = {prv}.querySelector("html").textContent;'
+    return f"let {nxt} = {prv}.textContent;"
+
+
+BINDINGS[TokenType.EXPR_TEXT] = _expr_text_doc
+BINDINGS[TokenType.EXPR_TEXT_ALL] = "let {} = {}.map(e => e.textContent);"
+
+
+def _expr_raw(var_num: int, nxt: str, prv: str) -> str:
+    if var_num == 0:
+        return f'let {nxt} = {prv}.querySelector("html").innerHTML;'
+    return f"let {nxt} = {prv}.innerHTML;"
+
+
+BINDINGS[TokenType.EXPR_RAW] = _expr_raw
+
+BINDINGS[TokenType.EXPR_RAW_ALL] = "let {} = {}.map(e => e.innerHTML);"
+BINDINGS[TokenType.EXPR_ATTR] = "let {} = {}.getAttribute({});"
+BINDINGS[TokenType.EXPR_ATTR_ALL] = "let {} = {}.map(e => e.getAttribute({}));"
+BINDINGS[TokenType.IS_CSS] = "if (!{}.querySelector({})) throw new Error({});"
+BINDINGS[TokenType.IS_XPATH] = (
+        "if("
+        + "!document.evaluate("
+        + "{}, {}, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue"
+        + ") throw new Error({});"
 )
 
 
@@ -183,41 +213,41 @@ def gen_item_body(node: "StartParseFunction") -> str:
     # kv property
     # return { k1: this._parseK1(), k2: this._parseK2(), ...}
     return (
-        "let item = "
-        + BRACKET_START
-        + ",".join(
-            f"{f.name}: this._parse{to_upper_camel_case(f.name)}(this._doc)"
-            for f in node.body
-            if f.name not in MAGIC_METHODS
-        )
-        + BRACKET_END
-        + ";"
-        + RET.format("item")
+            "let item = "
+            + BRACKET_START
+            + ",".join(
+        f"{f.name}: this._parse{to_upper_camel_case(f.name)}(this._doc)"
+        for f in node.body
+        if f.name not in MAGIC_METHODS
+    )
+            + BRACKET_END
+            + ";"
+            + "return item;"
     )
 
 
 def gen_list_body(node: "StartParseFunction") -> str:
     # part_m = MAGIC_METHODS.get('__SPLIT_DOC__')
     kv_prop = (
-        BRACKET_START
-        + ",".join(
-            f"{f.name}: this._parse{to_upper_camel_case(f.name)}(e)"
-            for f in node.body
-            if f.name not in MAGIC_METHODS
-        )
-        + BRACKET_END
+            BRACKET_START
+            + ",".join(
+        f"{f.name}: this._parse{to_upper_camel_case(f.name)}(e)"
+        for f in node.body
+        if f.name not in MAGIC_METHODS
+    )
+            + BRACKET_END
     )
     return (
-        "let items = [];"
-        + "Array.from(this._splitDoc(this._doc))"  # todo: split doc const
-        + ".forEach((e) =>"
-        + BRACKET_START
-        + "items.push("
-        + kv_prop
-        + ");"
-        + BRACKET_END
-        + ");"
-        + RET.format("items")
+            "let items = [];"
+            + "Array.from(this._splitDoc(this._doc))"  # todo: split doc const
+            + ".forEach((e) =>"
+            + BRACKET_START
+            + "items.push("
+            + kv_prop
+            + ");"
+            + BRACKET_END
+            + ");"
+            + "return items;"
     )
 
 
@@ -226,15 +256,15 @@ def gen_dict_body(_: "StartParseFunction") -> str:
     value_m = to_upper_camel_case(MAGIC_METHODS.get("__VALUE__"))
     # part_m = MAGIC_METHODS.get('__SPLIT_DOC__')
     return (
-        "let item = {};"
-        + "Array.from(this._splitDoc(this._doc))"  # todo: split doc const
-        + ".forEach((e) =>"
-        + BRACKET_START
-        + f"let k = this._parse{key_m}(e);"
-        + f"item[k] = this._parse{value_m}(e);"
-        + BRACKET_END
-        + ");"
-        + RET.format("item")
+            "let item = {};"
+            + "Array.from(this._splitDoc(this._doc))"  # todo: split doc const
+            + ".forEach((e) =>"
+            + BRACKET_START
+            + f"let k = this._parse{key_m}(e);"
+            + f"item[k] = this._parse{value_m}(e);"
+            + BRACKET_END
+            + ");"
+            + "return item;"
     )
 
 
@@ -242,6 +272,6 @@ def gen_flat_list_body(_: "StartParseFunction") -> str:
     item_m = to_upper_camel_case(MAGIC_METHODS.get("__ITEM__"))
     # part_m = MAGIC_METHODS.get("__SPLIT_DOC__")
     return (
-        f"let items = Array.from(this._splitDoc(this._doc)).map((e) => this._parse{item_m}(e));"
-        + RET.format("items")
+            f"let items = Array.from(this._splitDoc(this._doc)).map((e) => this._parse{item_m}(e));"
+            + "return items;"
     )
