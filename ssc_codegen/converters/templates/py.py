@@ -1,7 +1,8 @@
 """code parts for python codegen"""
 from typing import TYPE_CHECKING
 
-from ssc_codegen.tokens import VariableType
+from ssc_codegen.converters.templates.utils import TemplateBindings, TemplateTypeBindings
+from ssc_codegen.tokens import VariableType, TokenType, StructType
 
 if TYPE_CHECKING:
     from ssc_codegen.ast_ssc import StartParseFunction
@@ -22,7 +23,7 @@ TYPES = {
     VariableType.LIST_FLOAT: "List[float]",
 }
 
-MAGIC_METHODS = {
+MAGIC_METHODS_NAME = {
     "__KEY__": "key",
     "__VALUE__": "value",
     "__ITEM__": "item",
@@ -31,11 +32,79 @@ MAGIC_METHODS = {
     "__START_PARSE__": "parse",
 }
 
-BASE_IMPORTS = """from __future__ import annotations
-import re
-from typing import List, Dict, TypedDict, Union, Optional
-from contextlib import suppress
-"""
+
+BINDINGS = TemplateBindings()
+# build-ins
+BINDINGS[TokenType.DOCSTRING] = '"""{}"""'  # value
+BINDINGS[TokenType.IMPORTS] = (
+        "from __future__ import annotations\n"
+        + "import re\n"
+        + "from typing import List, Dict, TypedDict, Union, Optional\n"
+        + "from contextlib import suppress\n"
+)
+BINDINGS[TokenType.EXPR_RETURN] = "return {}"  # nxt val
+BINDINGS[TokenType.EXPR_NO_RETURN] = "return"
+BINDINGS[TokenType.STRUCT] = "class {}:"
+BINDINGS[TokenType.STRUCT_INIT] = "def __init__(self, document: {}) -> None:"
+BINDINGS[TokenType.EXPR_NESTED] = "{} = {}({}).parse()"
+BINDINGS[TokenType.STRUCT_PRE_VALIDATE] = "def {}(self, value: {}) -> None:"
+BINDINGS[TokenType.STRUCT_PARSE_START] = "def {}(self) -> {}:"
+BINDINGS[TokenType.STRUCT_FIELD] = "def _parse_{}(self, value: {}) -> {}:"
+BINDINGS[TokenType.STRUCT_PART_DOCUMENT] = "def {}(self, value: {}) -> {}:"
+
+BINDINGS[TokenType.EXPR_DEFAULT_START] = "with suppress(Exception):"
+BINDINGS[TokenType.EXPR_DEFAULT_END] = "return {}"  # same as EXPR_RET
+
+# string operations
+BINDINGS[TokenType.EXPR_STRING_FORMAT] = "{} = {}.format({}) if {} else {}"  # nxt = prv, template, prv, prv
+BINDINGS[TokenType.EXPR_LIST_STRING_FORMAT] = "{} = [{}.format(e) for e in {} if e]"
+BINDINGS[TokenType.EXPR_STRING_TRIM] = "{} = {}.strip({})"
+BINDINGS[TokenType.EXPR_LIST_STRING_TRIM] = "{} = [e.strip({}) for e in {}]"
+BINDINGS[TokenType.EXPR_STRING_LTRIM] = "{} = {}.lstrip({})"
+BINDINGS[TokenType.EXPR_LIST_STRING_LTRIM] = "{} = [e.lstrip({}) for e in {}]"
+BINDINGS[TokenType.EXPR_STRING_RTRIM] = "{} = {}.rstrip({})"
+BINDINGS[TokenType.EXPR_LIST_STRING_RTRIM] = "{} = [e.rstrip({}) for e in {}]"
+BINDINGS[TokenType.EXPR_STRING_REPLACE] = "{} = {}.replace({}, {})"
+BINDINGS[TokenType.EXPR_LIST_STRING_REPLACE] = "{} = [e.replace({}, {}) for e in {}]"
+BINDINGS[TokenType.EXPR_STRING_SPLIT] = "{} = {}.split({})"
+# regex
+BINDINGS[TokenType.EXPR_REGEX] = "{} = re.search({}, {})[{}]"
+BINDINGS[TokenType.EXPR_REGEX_ALL] = "{} = re.findall({}, {})"
+BINDINGS[TokenType.EXPR_REGEX_SUB] = "{} = re.sub({}, {}, {})"
+BINDINGS[TokenType.EXPR_LIST_REGEX_SUB] = "{} = [re.sub({}, {}, e) for e in {}]"
+
+# array
+BINDINGS[TokenType.EXPR_LIST_STRING_INDEX] = "{} = {}[{}]"
+BINDINGS[TokenType.EXPR_LIST_DOCUMENT_INDEX] = "{} = {}[{}]"
+BINDINGS[TokenType.EXPR_LIST_JOIN] = "{} = {}.join({})"
+
+# assert
+BINDINGS[TokenType.IS_EQUAL] = "assert {} == {}, {}"
+BINDINGS[TokenType.IS_NOT_EQUAL] = "assert {} != {}, {}"
+BINDINGS[TokenType.IS_CONTAINS] = "assert {} in {}, {}"
+BINDINGS[TokenType.IS_REGEX_MATCH] = "assert re.search({}, {}), {}"
+
+# int, float converters
+BINDINGS[TokenType.TO_INT] = "{} = int({})"
+BINDINGS[TokenType.TO_INT_LIST] = "{} = [int(i) for i in {}]"
+BINDINGS[TokenType.TO_FLOAT] = "{} = float({})"
+BINDINGS[TokenType.TO_FLOAT_LIST] = "{} = [float(i) for i in {}]"
+
+
+TYPE_BINDINGS = TemplateTypeBindings(type_prefix="T_")
+TYPE_BINDINGS[StructType.LIST] = "List[{}]"
+
+
+TOKEN_TEMPLATES = {
+    TokenType.DOCSTRING: '"""{}"""',
+    TokenType.IMPORTS: ("from __future__ import annotations\n"
+                        + "import re\n"
+                        + "from typing import List, Dict, TypedDict, Union, Optional\n"
+                        + "from contextlib import suppress\n"),
+    TokenType.EXPR_RETURN: "return {}",
+    TokenType.EXPR_NO_RETURN: "return",
+}
+
 INDENT_CH = " "
 INDENT_METHOD = INDENT_CH * 4
 INDENT_METHOD_BODY = INDENT_CH * (4 * 2)
@@ -45,60 +114,30 @@ TYPE_PREFIX = "T_{}"
 TYPE_DICT = "Dict[str, {}]"
 TYPE_LIST = "List[{}]"
 TYPE_ITEM = "TypedDict({}, {})"
-CLS_HEAD = "class {}:"
-CLS_INIT_HEAD = "def __init__(self, document: {}):"
-CLS_PRE_VALIDATE_HEAD = "def {}(self, value) -> None:"
 CLS_PART_DOC_HEAD = "def {}(self, value: {}) -> {}:"
-CLS_DOCSTRING = '"""{}"""'
 
-RET = "return {}"
-NO_RET = "return"
-# f"def _parse_{name}(self, value: Union[BeautifulSoup, Tag]) -> {type_}:"
-FN_PARSE = "def _parse_{}(self, value: {}) -> {}:"
-FN_PARSE_START = "def {}(self) -> {}:"
-
-E_PARSE_NESTED = "{} = {}({}).parse()"
 E_CALL_METHOD = "self.{}({})"
 E_CALL_PARSE = "self._parse_{}({})"
-E_DEFAULT_WRAP = "with suppress(Exception):"
-E_STR_FMT = "{} = {}.format({}) if {} else {}"
-# nxt + ' = ' + f"[{template!r}.format(e) for e in {prv} if e]"
-E_STR_FMT_ALL = "{} = [{}.format(e) for e in {} if e]"
-E_STR_TRIM = "{} = {}.strip({})"
-E_STR_LTRIM = "{} = {}.lstrip({})"
-E_STR_RTRIM = "{} = {}.rstrip({})"
-# f"{nxt} = [e.strip({chars!r}) for e in {prv}]"
-E_STR_TRIM_ALL = "{} = [e.strip({}) for e in {}]"
-E_STR_LTRIM_ALL = "{} = [e.lstrip({}) for e in {}]"
-E_STR_RTRIM_ALL = "{} = [e.rstrip({}) for e in {}]"
-# f"{nxt} = {prv}.replace({old!r}, {new!r})"
-E_STR_REPL = "{} = {}.replace({}, {})"
-# f"{nxt} = [e.replace({old!r}, {new!r}) for e in {prv}]"
-E_STR_REPL_ALL = "{} = [e.replace({}, {}) for e in {}]"
-E_STR_SPLIT = "{} = {}.split({})"
-E_RE = "{} = re.search({}, {})[{}]"
-E_RE_ALL = "{} = re.findall({}, {})"
-E_RE_SUB = "{} = re.sub({}, {}, {})"
-E_RE_SUB_ALL = "{} = [re.sub({}, {}, e) for e in {}]"
-E_INDEX = "{} = {}[{}]"
-E_JOIN = "{} = {}.join({})"
-E_EQ = "assert {} == {}, {}"
-E_NE = "assert {} != {}, {}"
-E_IN = "assert {} in {}, {}"
-E_IS_RE = "assert re.search({}, {}), {}"
+
+
+def suggest_indent(node) -> str:
+    """helper function get current indent"""
+    if node.have_default_expr():
+        return INDENT_DEFAULT_BODY
+    return INDENT_METHOD_BODY
 
 
 def gen_item_body(node: "StartParseFunction") -> str:
     body = (
-        "{"
-        + ", ".join(
-            [
-                f'"{f.name}": ' + E_CALL_PARSE.format(f.name, "self._doc")
-                for f in node.body
-                if not MAGIC_METHODS.get(f.name)
-            ]
-        )
-        + "}"
+            "{"
+            + ", ".join(
+        [
+            f'"{f.name}": ' + E_CALL_PARSE.format(f.name, "self._doc")
+            for f in node.body
+            if not MAGIC_METHODS_NAME.get(f.name)
+        ]
+    )
+            + "}"
     )
     return body
 
@@ -108,19 +147,19 @@ def gen_list_body(node: "StartParseFunction") -> str:
         [
             f'"{f.name}": ' + E_CALL_PARSE.format(f.name, "e")
             for f in node.body
-            if not MAGIC_METHODS.get(f.name)
+            if not MAGIC_METHODS_NAME.get(f.name)
         ]
     )
     body = "{" + body + "}"
-    n = MAGIC_METHODS.get("__SPLIT_DOC__")
+    n = MAGIC_METHODS_NAME.get("__SPLIT_DOC__")
     return f"[{body} for e in self.{n}(self._doc)]\n"
 
 
 def gen_dict_body(_: "StartParseFunction") -> str:
-    key_m = E_CALL_PARSE.format(MAGIC_METHODS.get("__KEY__"), "e")
-    value_m = E_CALL_PARSE.format(MAGIC_METHODS.get("__VALUE__"), "e")
+    key_m = E_CALL_PARSE.format(MAGIC_METHODS_NAME.get("__KEY__"), "e")
+    value_m = E_CALL_PARSE.format(MAGIC_METHODS_NAME.get("__VALUE__"), "e")
     part_m = E_CALL_METHOD.format(
-        MAGIC_METHODS.get("__SPLIT_DOC__"), "self._doc"
+        MAGIC_METHODS_NAME.get("__SPLIT_DOC__"), "self._doc"
     )
 
     body = f"{{ {key_m}: {value_m} for e in {part_m} }}"
@@ -128,9 +167,9 @@ def gen_dict_body(_: "StartParseFunction") -> str:
 
 
 def get_flat_list_body(_: "StartParseFunction") -> str:
-    item_m = E_CALL_PARSE.format(MAGIC_METHODS.get("__ITEM__"), "e")
+    item_m = E_CALL_PARSE.format(MAGIC_METHODS_NAME.get("__ITEM__"), "e")
     part_m = E_CALL_METHOD.format(
-        MAGIC_METHODS.get("__SPLIT_DOC__"), "self._doc"
+        MAGIC_METHODS_NAME.get("__SPLIT_DOC__"), "self._doc"
     )
     body = f"[{item_m} for e in {part_m}]"
     return body

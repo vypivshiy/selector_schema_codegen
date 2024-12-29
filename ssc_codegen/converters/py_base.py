@@ -41,13 +41,14 @@ from ..tokens import TokenType, VariableType, StructType
 
 lr_var_names = partial(left_right_var_names, name="value")
 
-MAGIC_METHODS = py.MAGIC_METHODS
+MAGIC_METHODS = py.MAGIC_METHODS_NAME
 
 
 class BasePyCodeConverter(BaseCodeConverter):
     def __init__(self):
         super().__init__()
         # TODO link converters
+        self.pre_definitions[TokenType.IMPORTS] = tt_imports
         self.pre_definitions[TokenType.TYPEDEF] = tt_typedef
         self.pre_definitions[TokenType.STRUCT] = tt_struct
         self.pre_definitions[TokenType.DOCSTRING] = tt_docstring
@@ -55,14 +56,10 @@ class BasePyCodeConverter(BaseCodeConverter):
         self.pre_definitions[TokenType.EXPR_NO_RETURN] = tt_no_ret
         self.pre_definitions[TokenType.EXPR_NESTED] = tt_nested
         self.pre_definitions[TokenType.STRUCT_PRE_VALIDATE] = tt_pre_validate
-
         self.pre_definitions[TokenType.STRUCT_PARSE_START] = tt_start_parse_pre
         self.post_definitions[
             TokenType.STRUCT_PARSE_START
         ] = tt_start_parse_post
-
-        # self.pre_definitions[TokenType.EXPR_DEFAULT] = tt_default_pre
-        # self.post_definitions[TokenType.EXPR_DEFAULT] = tt_default_post
 
         self.pre_definitions[TokenType.EXPR_DEFAULT_START] = tt_default_start
         self.pre_definitions[TokenType.EXPR_DEFAULT_END] = tt_default_end
@@ -109,12 +106,15 @@ class BasePyCodeConverter(BaseCodeConverter):
         self.pre_definitions[TokenType.TO_FLOAT] = tt_to_float
         self.pre_definitions[TokenType.TO_FLOAT_LIST] = tt_to_list_float
 
+def tt_imports(node):
+    return py.BINDINGS[node.kind]
 
 def tt_typedef(node: TypeDef):
     def _fetch_node_type(node_):
         if node_.ret_type == VariableType.NESTED:
             return py.TYPE_PREFIX.format(node_.nested_class)
         return py.TYPES.get(node_.ret_type)
+
     t_name = py.TYPE_PREFIX.format(node.name)
     # DICT schema
     match node.struct_ref.type:
@@ -163,7 +163,7 @@ def tt_typedef(node: TypeDef):
 
 
 def tt_struct(node: StructParser) -> str:
-    return py.CLS_HEAD.format(node.name)
+    return py.BINDINGS[node.kind, node.name]
 
 
 def tt_docstring(node: Docstring) -> str:
@@ -171,48 +171,48 @@ def tt_docstring(node: Docstring) -> str:
         return ""
     # in codegen docstrings used in first line and inner classes
     indent = "" if node.parent.kind == TokenType.MODULE else py.INDENT_METHOD
-    return indent + py.CLS_DOCSTRING.format(node.value)
+    return indent + py.BINDINGS[node.kind, node.value]
 
 
 def tt_ret(node: ReturnExpression) -> str:
     if node.have_default_expr():
+        indent = py.INDENT_DEFAULT_BODY
         _, nxt = lr_var_names(variable=node.prev.variable)
-        return py.INDENT_DEFAULT_BODY + py.RET.format(nxt)
-    _, nxt = lr_var_names(variable=node.variable)
-    return py.INDENT_METHOD_BODY + py.RET.format(nxt)
+    else:
+        indent = py.INDENT_METHOD_BODY
+        _, nxt = lr_var_names(variable=node.variable)
+    return indent + py.BINDINGS[node.kind, nxt]
 
 
-def tt_no_ret(_: NoReturnExpression) -> str:
+def tt_no_ret(node: NoReturnExpression) -> str:
     # used in __pre_validate__ case, ignore default wrap
-    return py.INDENT_METHOD_BODY + py.NO_RET
+    indent = py.suggest_indent(node)
+    return indent + py.BINDINGS[node.kind]
 
 
 def tt_nested(node: NestedExpression) -> str:
     prv, nxt = lr_var_names(variable=node.variable)
     if node.have_default_expr():
-        return py.INDENT_DEFAULT_BODY + py.E_PARSE_NESTED.format(
-            nxt, node.schema, prv
-        )
-    return py.INDENT_METHOD_BODY + py.E_PARSE_NESTED.format(
-        nxt, node.schema, prv
-    )
+        indent = py.INDENT_DEFAULT_BODY
+    else:
+        indent = py.INDENT_METHOD_BODY
+    return indent + py.BINDINGS[node.kind, nxt, node.schema, prv]
 
 
 def tt_pre_validate(node: PreValidateFunction) -> str:
-    return py.INDENT_METHOD + py.CLS_PRE_VALIDATE_HEAD.format(
-        MAGIC_METHODS.get(node.name)
-    )
+    name = MAGIC_METHODS.get(node.name)
+    return py.INDENT_METHOD + py.BINDINGS[node.kind, name]
 
 
 def tt_start_parse_pre(node: StartParseFunction) -> str:
     name = MAGIC_METHODS.get(node.name)
+    t_name = py.TYPE_BINDINGS.create_name(node.parent.typedef.name)
+
     if node.type == StructType.LIST:
-        t_name = py.TYPE_LIST.format(
-            py.TYPE_PREFIX.format(node.parent.typedef.name)
-        )
-    else:
-        t_name = py.TYPE_PREFIX.format(node.parent.typedef.name)
-    return py.INDENT_METHOD + py.FN_PARSE_START.format(name, t_name)
+        t_name = py.TYPE_BINDINGS.create_name(node.parent.typedef.name)
+        t_name = py.TYPE_BINDINGS[node.type, t_name]
+
+    return py.INDENT_METHOD + py.BINDINGS[node.kind, name, t_name]
 
 
 def tt_start_parse_post(node: StartParseFunction):
@@ -244,274 +244,267 @@ def tt_default_start(node: DefaultStart) -> str:
     return (py.INDENT_METHOD_BODY
             + f"{nxt} = {prv}\n"
             + py.INDENT_METHOD_BODY
-            + py.E_DEFAULT_WRAP)
+            + py.BINDINGS[node.kind])
 
 
 def tt_default_end(node: DefaultEnd) -> str:
-    prv, nxt = lr_var_names(variable=node.variable)
+    # prv, nxt = lr_var_names(variable=node.variable)
     val = repr(node.value) if isinstance(node.value, str) else node.value
-    return (py.INDENT_METHOD_BODY + py.RET.format(val))
+    return py.INDENT_METHOD_BODY + py.BINDINGS[node.kind, val]
 
 
 def tt_string_format(node: FormatExpression) -> str:
+    indent = py.suggest_indent(node)
+
     prv, nxt = lr_var_names(variable=node.variable)
     template = node.fmt.replace("{{}}", "{}")
-    code = py.E_STR_FMT.format(nxt, repr(template), prv, prv, prv)
-    if node.have_default_expr():
-        return py.INDENT_DEFAULT_BODY + code
-    return py.INDENT_METHOD_BODY + code
+    return indent + py.BINDINGS[node.kind, nxt, repr(template), prv, prv, prv]
 
 
 def tt_string_format_all(node: MapFormatExpression) -> str:
+    indent = py.suggest_indent(node)
+
     prv, nxt = lr_var_names(variable=node.variable)
     template = node.fmt.replace("{{}}", "{}")
-    code = py.E_STR_FMT_ALL.format(nxt, repr(template), prv)
-    if node.have_default_expr():
-        return py.INDENT_DEFAULT_BODY + code
-    return py.INDENT_METHOD_BODY + code
+    code = py.BINDINGS[node.kind, nxt, repr(template), prv]
+    return indent + code
 
 
 def tt_string_trim(node: TrimExpression) -> str:
+    indent = py.suggest_indent(node)
+
     prv, nxt = lr_var_names(variable=node.variable)
     chars = repr(node.value)
-    code = py.E_STR_TRIM.format(nxt, prv, chars)
-    if node.have_default_expr():
-        return py.INDENT_DEFAULT_BODY + code
-    return py.INDENT_METHOD_BODY + code
+    code = py.BINDINGS[node.kind, nxt, prv, chars]
+    return indent + code
 
 
 def tt_string_trim_all(node: MapTrimExpression) -> str:
+    indent = py.suggest_indent(node)
+
     prv, nxt = lr_var_names(variable=node.variable)
     chars = repr(node.value)
-    code = py.E_STR_TRIM_ALL.format(nxt, chars, prv)
-    if node.have_default_expr():
-        return py.INDENT_DEFAULT_BODY + code
-    return py.INDENT_METHOD_BODY + code
+    code = py.BINDINGS[node.kind, nxt, chars, prv]
+    return indent + code
 
 
 def tt_string_ltrim(node: LTrimExpression) -> str:
+    indent = py.suggest_indent(node)
+
     prv, nxt = lr_var_names(variable=node.variable)
     chars = repr(node.value)
-    code = py.E_STR_LTRIM.format(nxt, prv, chars)
-    if node.have_default_expr():
-        return py.INDENT_DEFAULT_BODY + code
-    return py.INDENT_METHOD_BODY + code
+    code = py.BINDINGS[node.kind, nxt, prv, chars]
+    return indent + code
 
 
 def tt_string_ltrim_all(node: MapLTrimExpression) -> str:
+    indent = py.suggest_indent(node)
+
     prv, nxt = lr_var_names(variable=node.variable)
     chars = repr(node.value)
-    code = py.E_STR_LTRIM_ALL.format(nxt, chars, prv)
-    if node.have_default_expr():
-        return py.INDENT_DEFAULT_BODY + code
-    return py.INDENT_METHOD_BODY + code
+    code = py.BINDINGS[node.kind, nxt, chars, prv]
+    return indent + code
 
 
 def tt_string_rtrim(node: RTrimExpression) -> str:
+    indent = py.suggest_indent(node)
+
     prv, nxt = lr_var_names(variable=node.variable)
     chars = repr(node.value)
-    code = py.E_STR_RTRIM.format(nxt, prv, chars)
-    if node.have_default_expr():
-        return py.INDENT_DEFAULT_BODY + code
-    return py.INDENT_METHOD_BODY + code
+    code = py.BINDINGS[node.kind, nxt, prv, chars]
+    return indent + code
 
 
 def tt_string_rtrim_all(node: MapRTrimExpression) -> str:
+    indent = py.suggest_indent(node)
+
     prv, nxt = lr_var_names(variable=node.variable)
     chars = repr(node.value)
-    code = py.E_STR_RTRIM_ALL.format(nxt, chars, prv)
-    if node.have_default_expr():
-        return py.INDENT_DEFAULT_BODY + code
-    return py.INDENT_METHOD_BODY + code
+    code = py.BINDINGS[node.kind, nxt, prv, chars]
+    return indent + code
 
 
 def tt_string_replace(node: ReplaceExpression) -> str:
+    indent = py.suggest_indent(node)
+
     prv, nxt = lr_var_names(variable=node.variable)
     old, new = repr(node.old), repr(node.new)
-    code = py.E_STR_REPL.format(nxt, prv, old, new)
-    if node.have_default_expr():
-        return py.INDENT_DEFAULT_BODY + code
-    return py.INDENT_METHOD_BODY + code
+    code = py.BINDINGS[node.kind, nxt, prv, old, new]
+    return indent + code
 
 
 def tt_string_replace_all(node: MapReplaceExpression) -> str:
+    indent = py.suggest_indent(node)
+
     prv, nxt = lr_var_names(variable=node.variable)
     old, new = repr(node.old), repr(node.new)
-    code = py.E_STR_REPL_ALL.format(nxt, old, new, prv)
-    if node.have_default_expr():
-        return py.INDENT_DEFAULT_BODY + code
-    return py.INDENT_METHOD_BODY + code
+    code = py.BINDINGS[node.kind, nxt, old, new, prv]
+    return indent + code
 
 
 def tt_string_split(node: SplitExpression) -> str:
+    indent = py.suggest_indent(node)
+
     prv, nxt = lr_var_names(variable=node.variable)
     sep = repr(node.sep)
-    code = py.E_STR_SPLIT.format(nxt, prv, sep)
-    if node.have_default_expr():
-        return py.INDENT_DEFAULT_BODY + code
-    return py.INDENT_METHOD_BODY + code
+    code = py.BINDINGS[node.kind, nxt, prv, sep]
+    return indent + code
 
 
-def tt_regex(node: RegexExpression):
+def tt_regex(node: RegexExpression) -> str:
+    indent = py.suggest_indent(node)
+
     prv, nxt = lr_var_names(variable=node.variable)
     pattern = repr(node.pattern)
     group = node.group
-    code = py.E_RE.format(nxt, pattern, prv, group)
-    if node.have_default_expr():
-        return py.INDENT_DEFAULT_BODY + code
-    return py.INDENT_METHOD_BODY + code
+    code = py.BINDINGS[node.kind, nxt, pattern, prv, group]
+    return indent + code
 
 
-def tt_regex_all(node: RegexAllExpression):
+def tt_regex_all(node: RegexAllExpression) -> str:
+    indent = py.suggest_indent(node)
+
     prv, nxt = lr_var_names(variable=node.variable)
     pattern = repr(node.pattern)
-    code = py.E_RE_ALL.format(nxt, pattern, prv)
-    if node.have_default_expr():
-        return py.INDENT_DEFAULT_BODY + code
-    return py.INDENT_METHOD_BODY + code
+    code = py.BINDINGS[node.kind, nxt, pattern, prv]
+    return indent + code
 
 
-def tt_regex_sub(node: RegexSubExpression):
-    prv, nxt = lr_var_names(variable=node.variable)
-    pattern = repr(node.pattern)
-    repl = repr(node.repl)
-    code = py.E_RE_SUB.format(nxt, pattern, repl, prv)
-    if node.have_default_expr():
-        return py.INDENT_DEFAULT_BODY + code
-    return py.INDENT_METHOD_BODY + code
+def tt_regex_sub(node: RegexSubExpression) -> str:
+    indent = py.suggest_indent(node)
 
-
-def tt_regex_sub_all(node: MapRegexSubExpression):
     prv, nxt = lr_var_names(variable=node.variable)
     pattern = repr(node.pattern)
     repl = repr(node.repl)
-    code = py.E_RE_SUB_ALL.format(nxt, pattern, repl, prv)
-    if node.have_default_expr():
-        return py.INDENT_DEFAULT_BODY + code
-    return py.INDENT_METHOD_BODY + code
+    code = py.BINDINGS[node.kind, nxt, pattern, repl, prv]
+    return indent + code
 
 
-def tt_index(node: IndexStringExpression | IndexDocumentExpression):
+def tt_regex_sub_all(node: MapRegexSubExpression) -> str:
+    indent = py.suggest_indent(node)
+
+    prv, nxt = lr_var_names(variable=node.variable)
+    pattern = repr(node.pattern)
+    repl = repr(node.repl)
+    code = py.BINDINGS[node.kind, nxt, pattern, repl, prv]
+    return indent + code
+
+
+def tt_index(node: IndexStringExpression | IndexDocumentExpression) -> str:
+    indent = py.suggest_indent(node)
+
     prv, nxt = lr_var_names(variable=node.variable)
     i = node.value
-    code = py.E_INDEX.format(nxt, prv, i)
-    if node.have_default_expr():
-        return py.INDENT_DEFAULT_BODY + code
-    return py.INDENT_METHOD_BODY + code
+    code = py.BINDINGS[node.kind, nxt, prv, i]
+    return indent + code
 
 
-def tt_join(node: JoinExpression):
+def tt_join(node: JoinExpression) -> str:
+    indent = py.suggest_indent(node)
+
     prv, nxt = lr_var_names(variable=node.variable)
     sep = repr(node.sep)
-    code = py.E_JOIN.format(nxt, sep, prv)
-    if node.have_default_expr():
-        return py.INDENT_DEFAULT_BODY + code
-    return py.INDENT_METHOD_BODY + code
+    code = py.BINDINGS[nxt, sep, prv]
+    return indent + code
 
 
-def tt_is_equal(node: IsEqualExpression):
+def tt_is_equal(node: IsEqualExpression) -> str:
+    indent = py.suggest_indent(node)
+
     prv, nxt = lr_var_names(variable=node.variable)
     value = repr(node.value)
     msg = repr(node.msg)
-    indent = (
-        py.INDENT_DEFAULT_BODY
-        if node.have_default_expr()
-        else py.INDENT_METHOD_BODY
-    )
-    code = py.E_EQ.format(prv, value, msg)
-
+    code = py.BINDINGS[node.kind, prv, value, msg]
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return indent + code
-    return f"{indent}{code}\n{indent}{nxt} = {prv}"
+    return (indent
+            + code
+            + "\n"
+            + indent
+            + f"{nxt} = {prv}"
+            )
 
 
-def tt_is_not_equal(node: IsNotEqualExpression):
+def tt_is_not_equal(node: IsNotEqualExpression) -> str:
+    indent = py.suggest_indent(node)
+
     prv, nxt = lr_var_names(variable=node.variable)
     value = repr(node.value)
     msg = repr(node.msg)
-    indent = (
-        py.INDENT_DEFAULT_BODY
-        if node.have_default_expr()
-        else py.INDENT_METHOD_BODY
-    )
-    code = py.E_NE.format(prv, value, msg)
-
+    code = py.BINDINGS[node.kind, prv, value, msg]
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return indent + code
-    return f"{indent}{code}\n{indent}{nxt} = {prv}"
+    return (indent
+            + code
+            + "\n"
+            + indent
+            + f"{nxt} = {prv}"
+            )
 
 
-def tt_is_contains(node: IsContainsExpression):
+def tt_is_contains(node: IsContainsExpression) -> str:
+    indent = py.suggest_indent(node)
+
     prv, nxt = lr_var_names(variable=node.variable)
     item = repr(node.item)
     msg = repr(node.msg)
-    indent = (
-        py.INDENT_DEFAULT_BODY
-        if node.have_default_expr()
-        else py.INDENT_METHOD_BODY
-    )
 
-    code = py.E_IN.format(item, prv, msg)
+    code = py.BINDINGS[node.kind, item, prv, msg]
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return indent + code
-    return f"{indent}{code}\n{indent}{nxt} = {prv}"
+    return (indent
+            + code
+            + "\n"
+            + indent
+            + f"{nxt} = {prv}"
+            )
 
 
-def tt_is_regex(node: IsRegexMatchExpression):
+def tt_is_regex(node: IsRegexMatchExpression) -> str:
+    indent = py.suggest_indent(node)
+
     prv, nxt = lr_var_names(variable=node.variable)
     pattern = repr(node.pattern)
     msg = repr(node.msg)
-    indent = (
-        py.INDENT_DEFAULT_BODY
-        if node.have_default_expr()
-        else py.INDENT_METHOD_BODY
-    )
 
-    code = py.E_IS_RE.format(pattern, prv, msg)
+    code = py.BINDINGS[node.kind, pattern, prv, msg]
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return indent + code
-    return f"{indent}{code}\n{indent}{nxt} = {prv}"
+    return (indent
+            + code
+            + "\n"
+            + indent
+            + f"{nxt} = {prv}"
+            )
 
 
-def tt_to_int(node: ToInteger):
+def tt_to_int(node: ToInteger) -> str:
+    indent = py.suggest_indent(node)
+
     prv, nxt = lr_var_names(variable=node.variable)
-    indent = (
-        py.INDENT_DEFAULT_BODY
-        if node.have_default_expr()
-        else py.INDENT_METHOD_BODY
-    )
-    code = f"{nxt} = int({prv})"
+    code = py.BINDINGS[node.kind, nxt, prv]
     return indent + code
 
 
-def tt_to_list_int(node: ToListInteger):
+def tt_to_list_int(node: ToListInteger) -> str:
+    indent = py.suggest_indent(node)
+
     prv, nxt = lr_var_names(variable=node.variable)
-    indent = (
-        py.INDENT_DEFAULT_BODY
-        if node.have_default_expr()
-        else py.INDENT_METHOD_BODY
-    )
-    code = f"{nxt} = [int(i) for i in {prv}]"
+    code = py.BINDINGS[node.kind, nxt, prv]
     return indent + code
 
 
-def tt_to_float(node: ToFloat):
+def tt_to_float(node: ToFloat) -> str:
+    indent = py.suggest_indent(node)
+
     prv, nxt = lr_var_names(variable=node.variable)
-    indent = (
-        py.INDENT_DEFAULT_BODY
-        if node.have_default_expr()
-        else py.INDENT_METHOD_BODY
-    )
-    code = f"{nxt} = float({prv})"
+    code = py.BINDINGS[node.kind, nxt, prv]
     return indent + code
 
 
-def tt_to_list_float(node: ToListFloat):
+def tt_to_list_float(node: ToListFloat) -> str:
+    indent = py.suggest_indent(node)
+
     prv, nxt = lr_var_names(variable=node.variable)
-    indent = (
-        py.INDENT_DEFAULT_BODY
-        if node.have_default_expr()
-        else py.INDENT_METHOD_BODY
-    )
-    code = f"{nxt} = [float(i) for i in {prv}]"
+    code = py.BINDINGS[node.kind, nxt, prv]
     return indent + code
