@@ -4,8 +4,8 @@ from typing import TYPE_CHECKING, Callable, Union, TypeAlias
 if TYPE_CHECKING:
     from ssc_codegen.tokens import TokenType, StructType
 
-T_TEMPLATE_BIND: TypeAlias = Union[str, Callable[[tuple[str, ...]], str]]
-T_GETITEM_BIND: TypeAlias = Union["TokenType", tuple["TokenType", str, ...]]
+T_TEMPLATE_BIND: TypeAlias = Union[str, Callable[..., str]]
+T_GETITEM_BIND: TypeAlias = Union["TokenType", tuple["TokenType", ...]]
 
 
 class TemplateBindings:
@@ -69,7 +69,7 @@ class TemplateTypeBindings:
     def bind(self, key: "StructType", template: str | Callable[[str], str]) -> None:
         return self.__setitem__(key, template)
 
-    def __getitem__(self, key: Union["StructType", tuple["StructType", str, ...]]) -> str:
+    def __getitem__(self, key: Union["StructType", tuple["StructType", ...]]) -> str:
         if isinstance(key, tuple):
             key, args = key[0], key[1:]
         else:
