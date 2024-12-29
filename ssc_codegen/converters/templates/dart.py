@@ -1,6 +1,8 @@
-from ssc_codegen.converters.utils import to_upper_camel_case
-from ssc_codegen.tokens import VariableType
 from typing import TYPE_CHECKING
+
+from ssc_codegen.converters.templates.utils import TemplateBindings
+from ssc_codegen.converters.utils import to_upper_camel_case
+from ssc_codegen.tokens import VariableType, TokenType
 
 if TYPE_CHECKING:
     from ssc_codegen.ast_ssc import StartParseFunction, TypeDef
@@ -21,105 +23,117 @@ MAGIC_METHODS = {
     "__START_PARSE__": "parse",
 }
 
-
 START_BRACKET = "{"
 END_BRACKET = "}"
-CLS_HEAD = "class {} "
+
+BINDINGS = TemplateBindings()
+BINDINGS[TokenType.STRUCT] = "class {} "
 
 
-def CLS_INIT(cls_name: str) -> str:  # noqa
+def _cls_init(cls_name: str) -> str:  # noqa
     code = "late final Document selector;"
     code += (
-        cls_name
-        + "(String rawDocument) { selector = html.parseHtmlDocument(rawDocument); }"
+            cls_name
+            + "(String rawDocument) { selector = html.parseHtmlDocument(rawDocument); }"
     )
     code += (
-        cls_name + ".fromDocument(Document document) {selector = document; }"
+            cls_name + ".fromDocument(Document document) {selector = document; }"
     )
     code += (
-        cls_name
-        + ".fromElement(LIElement element) { selector = html.parseHtmlDocument(element.innerHtml as String); }"
+            cls_name
+            + ".fromElement(LIElement element) { selector = html.parseHtmlDocument(element.innerHtml as String); }"
     )
     return code
 
 
-def CLS_DOCSTRING(docstring: str) -> str:  # noqa
-    return "\n".join("/// " + line for line in docstring.split("\n"))
+BINDINGS[TokenType.STRUCT_INIT] = _cls_init
+BINDINGS[TokenType.DOCSTRING] = lambda docstring: "\n".join(
+    f"/// {line}" for line in docstring.split("\n")
+)
+
+# IN CURRENT LANGUAGE HAVE THIS STABLE PARSER LIB ONLY
+BINDINGS[TokenType.IMPORTS] = (
+        "import 'dart:core';\n"
+        + "import 'package:universal_html/html.dart' show Document, LIElement;\n"
+        + "import 'package:universal_html/parsing.dart' as html;"
+)
+BINDINGS[TokenType.EXPR_RETURN] = "return {};"
+BINDINGS[TokenType.EXPR_NO_RETURN] = "return null;"
 
 
+def _nested_expr(var_num: int, nxt: str, schema: str, prv: str) -> str:
+    # first element as document type (naive)
+    # first element always doc (if StructType.ITEM)
+    if var_num == 0:
+        return f"var {nxt} = {schema}.fromDocument({prv}).parse();"
+    return f"var {nxt} = {schema}.fromElement({prv}).parse();"
+
+
+BINDINGS[TokenType.EXPR_NESTED] = _nested_expr
+BINDINGS[TokenType.STRUCT_PRE_VALIDATE] = "{}(value)"
+BINDINGS[TokenType.STRUCT_PART_DOCUMENT] = "{}(value)"
+BINDINGS[TokenType.STRUCT_FIELD] = "_parse{}({})"
+BINDINGS[TokenType.STRUCT_PARSE_START] = "{} {}()"
+
+BINDINGS[TokenType.EXPR_DEFAULT_START] = lambda: "try {"
+BINDINGS[TokenType.EXPR_DEFAULT_END] = lambda value: "} catch(_){\n" + f"return {value};" + "}"
+# string
+BINDINGS[TokenType.EXPR_STRING_FORMAT] = "var {} = {};"
+BINDINGS[TokenType.EXPR_LIST_STRING_FORMAT] = "var {} = {}.map((e) => {});"
+BINDINGS[TokenType.EXPR_STRING_TRIM] = "var {} = {}.replaceFirst(RegExp({}), "").replaceFirst(RegExp({}), "");"
+BINDINGS[TokenType.EXPR_LIST_STRING_TRIM] = (
+        'var {} = {}.map((e) => e.replaceFirst(RegExp({}), ""'
+        + ').replaceFirst(RegExp({}), ""));'
+)
+BINDINGS[TokenType.EXPR_STRING_LTRIM] = "var {} = {}.replaceFirst(RegExp({}), "");"
+BINDINGS[TokenType.EXPR_LIST_STRING_LTRIM] = "var {} = {}.map((e) => e.replaceFirst(RegExp({}), ""));"
+BINDINGS[TokenType.EXPR_STRING_RTRIM] = "var {} = {}.replaceFirst(RegExp({}), "");"
+BINDINGS[TokenType.EXPR_LIST_STRING_RTRIM] = "var {} = {}.map((e) => e.replaceFirst(RegExp({}), ""));"
+BINDINGS[TokenType.EXPR_STRING_REPLACE] = "var {} = {}.replaceAll({}, {});"
+BINDINGS[TokenType.EXPR_LIST_STRING_REPLACE] = "var {} = {}.map((e) => e.replaceAll({}, {}));"
+BINDINGS[TokenType.EXPR_STRING_SPLIT] = "var {} = {}.split({});"
+# regex
+BINDINGS[TokenType.EXPR_REGEX] = "var {} = RegExp({}).firstMatch({})?.group({})!;"
+BINDINGS[TokenType.EXPR_REGEX_ALL] = "var {} = RegExp({}).allMatches({}).map((e) => e.group(1)!).toList();"
+BINDINGS[TokenType.EXPR_REGEX_SUB] = "var {} = {}.replaceAll(RegExp({}), {});"
+BINDINGS[TokenType.EXPR_LIST_REGEX_SUB] = "var {} = {}.map((e) => e.replaceAll(RegExp({}), {})));"
+BINDINGS[TokenType.EXPR_LIST_STRING_INDEX] = "var {} = {}[{}];"
+BINDINGS[TokenType.EXPR_LIST_DOCUMENT_INDEX] = "var {} = {}[{}];"
+BINDINGS[TokenType.EXPR_LIST_JOIN] = "var {} = {}.join({});"
+# assert
+BINDINGS[TokenType.IS_EQUAL] = "assert({} == {}, {});"
+BINDINGS[TokenType.IS_NOT_EQUAL] = "assert({} != {}, {});"
+BINDINGS[TokenType.IS_CONTAINS] = "assert({} != null && {}.contains({}), {});"
+BINDINGS[TokenType.IS_REGEX_MATCH] = "assert({} != null && RegExp({}).firstMatch({}) != null, {});"
+
+# universal html API
+BINDINGS[TokenType.EXPR_CSS] = "var {} = {}.querySelector({});"
+BINDINGS[TokenType.EXPR_CSS_ALL] = "var {} = {}.querySelectorAll({});"
+BINDINGS[TokenType.EXPR_TEXT] = "var {} = {}.text;"
+BINDINGS[TokenType.EXPR_TEXT_ALL] = "var {} = {}.map((e) => e.text).toList();"
+
+
+def _expr_raw(var_num: int, nxt: str, prv: str) -> str:
+    # HACK: document object not contains innerHtml property
+    if var_num == 0:
+        return f"var {nxt} = {prv}.querySelector('html').innerHtml;"
+    return f"var {nxt} = {prv}.innerHtml;"
+
+BINDINGS[TokenType.EXPR_RAW] = _expr_raw
+BINDINGS[TokenType.EXPR_RAW_ALL] = "var {} = {}.map((e) => e.innerHtml).toList();"
+BINDINGS[TokenType.EXPR_ATTR] = "var {} = {}.attributes[{}];"
+BINDINGS[TokenType.EXPR_ATTR_ALL] = "var {} = {}.map((e) => e.attributes[{}]).toList();"
+BINDINGS[TokenType.IS_CSS] = "assert({}.querySelector({}), {});"
 TYPE_PREFIX = "T{}"
 TYPEDEF = "typedef {} = {}; "
 TYPE_DICT = "Map<String, {}>"
 FLAT_LIST = "List<{}>"
-# IN CURRENT LANGUAGE HAVE THIS PARSER LIB ONLY
-BASE_IMPORTS = """"import 'dart:core';
-"import 'package:universal_html/html.dart' show Document, LIElement;
-import 'package:universal_html/parsing.dart' as html;
-"""
-RET = "return {};"
-NO_RET = "return null;"
-# first element always doc (if StructType.ITEM)
-NESTED_FROM_DOC = "var {} = {}.fromDocument({}).parse();"
-NESTED_FROM_ELEMENT = "var {} = {}.fromElement({}).parse();"
-PRE_VALIDATE_HEAD = "{}(value)"
-PART_DOC_HEAD = PRE_VALIDATE_HEAD
-FN_PRE_VALIDATE = "{}(selector); "
-FN_PARSE = "_parse{}({})"
-FN_PARSE_START = "{} {}()"
-FN_PART_DOC = "{}({})"
-E_DEFAULT_START = "try {"
-
-
-def E_DEFAULT_END(value: str) -> str:  # noqa
-    return "} catch(_){\n" + f"return {value};" + "}"
-
-
-def fmt_template(template: str, prv_variable: str):
-    return template.replace("{{}}", f"${prv_variable}")
-
 
 PARSE_VAR = "selector"
-E_STR_FMT = "var {} = {};"
-E_STR_FMT_ALL = "var {} = {}' + nxt + ' = ' + f'{prv}.map((e) => {});"
-E_STR_TRIM = (
-    "var {} = {}.replaceFirst(RegExp({}), " ").replaceFirst(RegExp({}), " ");"
-)
-E_STR_TRIM_ALL = (
-    "var {} = {}.map((e) => e.replaceFirst(RegExp({}), "
-    ").replaceFirst({}, "
-    "));"
-)
-E_STR_LTRIM = "var {} = {}.replaceFirst(RegExp({}), " ");"
-E_STR_LTRIM_ALL = "var {} = {}.map((e) => e.replaceFirst(RegExp({}), " "));"
-E_STR_RTRIM = E_STR_LTRIM
-E_STR_RTRIM_ALL = E_STR_LTRIM_ALL
-E_STR_REPL = "var {} = {}.replaceAll({}, {});"
-E_STR_REPL_ALL = "var {} = {}.map((e) => e.replaceAll({}, {}));"
-E_STR_SPLIT = "var {} = {}.split({});"
-E_RE = "var {} = RegExp({}).firstMatch({})?.group({})!;"
-E_RE_ALL = (
-    "var {} = RegExp({}).allMatches({}).map((e) => e.group(1)!).toList();"
-)
-E_RE_SUB = "var {} = {}.replaceAll(RegExp({}), {});"
-E_RE_SUB_ALL = "var {} = {}.map((e) => e.replaceAll(RegExp({}), {})));"
-E_INDEX = "var {} = {}[{}];"
-E_JOIN = "var {} = {}.join({});"
-E_EQ = "assert({} == {}, {});"
-E_NE = "assert({} != {}, {});"
-E_IN = "assert({} != null && {}.contains({}), {});"
-E_IS_RE = "assert({} != null && RegExp({}).firstMatch({}) != null, {});"
-E_CSS = "var {} = {}.querySelector({});"
-E_CSS_ALL = "var {} = {}.querySelectorAll({});"
-E_TEXT = "var {} = {}.text;"
-E_TEXT_ALL = "var {} = {}.map((e) => e.text).toList();"
-E_RAW = "var {} = {}.innerHtml;"
-# HACK: document object not contains innerHtml property
-E_DOC_RAW = "var {} = {}.querySelector('html').innerHtml;"
-E_RAW_ALL = "var {} = {}.map((e) => e.innerHtml).toList();"
-E_ATTR = "var {} = {}.attributes[{}];"
-E_ATTR_ALL = "var {} = {}.map((e) => e.attributes[{}]).toList();"
-E_IS_CSS = "assert({}.querySelector({}), {});"
+
 E_ASSIGN = "var {} = {}; "  # used in assert cases
+
+
 # used record types
 # typedef TNestedStructO = List<List<String>>; flat list
 # typedef TSubExampleStruct = ({String href, String text, TNestedStructO chars}); item
@@ -160,7 +174,7 @@ def typedef_item_record(node: "TypeDef") -> str:
             type_ = TYPES.get(f.ret_type)
         record_body[f.name] = type_
     record_code = (
-        "({" + ", ".join(f"{v} {k}" for k, v in record_body.items()) + "})"
+            "({" + ", ".join(f"{v} {k}" for k, v in record_body.items()) + "})"
     )
     return TYPEDEF.format(t_name, record_code)
 
@@ -176,7 +190,7 @@ def typedef_list_record(node: "TypeDef") -> str:
         else:
             type_ = TYPES.get(field.ret_type)
     record_code = (
-        "({" + ", ".join(f"{v} {k}" for k, v in record_body.items()) + "})"
+            "({" + ", ".join(f"{v} {k}" for k, v in record_body.items()) + "})"
     )
     return TYPEDEF.format(t_name, record_code)
 
@@ -191,10 +205,10 @@ def parse_item_code(node: "StartParseFunction") -> str:
         name = to_upper_camel_case(f.name)
         body_fields[f.name] = FN_PARSE.format(name, PARSE_VAR)
     body = (
-        f"{t_name} item = ("
-        + ", ".join(f"{k}: {v}" for k, v in body_fields.items())
-        + ");"
-        + RET.format("item")
+            f"{t_name} item = ("
+            + ", ".join(f"{k}: {v}" for k, v in body_fields.items())
+            + ");"
+            + RET.format("item")
     )
     return body
 
@@ -245,7 +259,11 @@ def parse_flat_list_code(node: "StartParseFunction") -> str:
     part_m = MAGIC_METHODS.get("__SPLIT_DOC__")
     item_m = MAGIC_METHODS.get("__ITEM__")
 
-    part_call = FN_PART_DOC.format(part_m, PARSE_VAR)
+    return (t_name + " items = [];"
+            + f"for (var e in {part_call}) " + START_BRACKET
+        )
+
+    part_call = f"{part_m}({PARSE_VAR})"
     item_call = FN_PARSE.format(item_m, "e")
 
     body = t_name + " items = [];"
