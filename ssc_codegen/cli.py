@@ -209,7 +209,7 @@ def gen_js(
     )
 
 
-@app.command("dart", help="generate dart modules (unstable)")
+@app.command("dart", help="generate dart modules (BROKEN)")
 def gen_dart(
         ssc_files: Annotated[
             List[Path],
@@ -261,7 +261,7 @@ def gen_dart(
     )
 
 
-@app.command("go", help="generate golang modules (unstable)")
+@app.command("go", help="generate golang modules (BROKEN)")
 def gen_go(
         ssc_files: Annotated[
             List[Path],
