@@ -14,7 +14,7 @@ class TemplateBindings:
     Accepts string with template format positions (call str.format) or callable
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._bindings: dict["TokenType", T_TEMPLATE_BIND] = {}
 
     @property
@@ -27,11 +27,14 @@ class TemplateBindings:
     def bind(self, key: "TokenType", template: T_TEMPLATE_BIND) -> None:
         return self.__setitem__(key, template)
 
-    def __getitem__(self, key: T_GETITEM_BIND) -> str:
-        if isinstance(key, tuple):
-            key, args = key[0], key[1:]
+    def __getitem__(self, keys: T_GETITEM_BIND) -> str:
+
+        if isinstance(keys, tuple):
+            key, args = keys[0], keys[1:]
         else:
+            key = keys
             args = ()
+
         if not self._bindings.get(key):
             msg = f"Missing {key.name} binding"
             raise KeyError(msg)
@@ -74,11 +77,12 @@ class TemplateTypeBindings:
         return self.__setitem__(key, template)
 
     def __getitem__(
-        self, key: Union["StructType", tuple["StructType", ...]]
+        self, keys: Union["StructType", tuple["StructType", ...]]
     ) -> str:
-        if isinstance(key, tuple):
-            key, args = key[0], key[1:]
+        if isinstance(keys, tuple):
+            key, args = keys[0], keys[1:]
         else:
+            key = keys
             args = ()
         if not self._bindings.get(key):
             msg = f"Missing {key.name} binding"
@@ -91,5 +95,6 @@ class TemplateTypeBindings:
                 raise TypeError(msg)
             return template.format(*args)
         elif callable(template):
-            return template(*args)
+            # TODO: fix type?
+            return template(*args)  # type: ignore
         raise TypeError(f"Unsupported type {type(template).__name__}")
