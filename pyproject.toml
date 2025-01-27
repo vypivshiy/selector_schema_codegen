@@ -1,37 +1,14 @@
 [project]
-name = "ssc-codegen"
-description = "generate web scrapers structures by dsl-like language based on python"
-dynamic = ["version"]
-authors = [{ name = "vypivshiy" }]
+name = "selector-schema-codegen"
+version = "0.4.3"
+description = "Add your description here"
 readme = "README.md"
-license = "MIT"
-requires-python = ">=3.10"
-keywords = []
-classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Programming Language :: Python",
-    "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: Implementation :: CPython",
-    "Topic :: Internet",
-    "Topic :: Software Development :: Libraries :: Python Modules",
-    "Topic :: Text Processing"
-]
+requires-python = ">=3.12"
 dependencies = [
-    'typer>=0.12.5',
-    'lxml>=5.0.0',
-    'cssselect>=1.2.0',
+    "cssselect>=1.2.0",
+    "lxml>=5.3.0",
+    "typer>=0.15.1",
 ]
-
-[project.optional-dependencies]
-dev = ["ruff", "mypy"]
-python = ["ruff"]
-test_py = ["parsel", "selectolax", "bs4", "scrapy"]
-
-[project.scripts]
-ssc-gen = 'ssc_codegen.cli:main'
 
 [project.urls]
 Documentation = "https://github.com/vypivshiy/selector_schema_codegen#readme"
@@ -40,16 +17,24 @@ Source = "https://github.com/vypivshiy/selector_schema_codegen"
 Examples = "https://github.com/vypivshiy/selector_schema_codegen/examples"
 
 
-[build-system]
-requires = ["hatchling>=1.27.0"]
-build-backend = "hatchling.build"
+[project.scripts]
+ssc-gen = 'ssc_codegen.cli:main'
 
-[tool.hatch.version]
-path = "ssc_codegen/__init__.py"
 
-[tool.hatch.envs.style]
-detached=true
-dependencies=['ruff']
+[dependency-groups]
+dev = [
+    "mypy>=1.14.1",
+    "ruff>=0.9.3",
+    "toml>=0.10.2",
+    "types-toml>=0.10.8.20240310",
+]
+# python generated code tests
+tests = [
+    "bs4>=0.0.2",
+    "parsel>=1.10.0",
+    "pytest>=8.3.4",
+    "selectolax>=0.3.27",
+]
 
 [tool.ruff]
 target-version = "py310"
