@@ -1,51 +1,74 @@
 """ast containers for representation module structure"""
 
 from dataclasses import dataclass, field
-from typing import Final, Optional, Type, TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, ClassVar, Optional, Type, Union, Sequence
 
 from ssc_codegen.consts import (
-    M_START_PARSE,
+    M_ITEM,
+    M_KEY,
     M_PRE_VALIDATE,
     M_SPLIT_DOC,
+    M_START_PARSE,
     M_VALUE,
-    M_KEY,
-    M_ITEM,
 )
-from ssc_codegen.tokens import TokenType, VariableType, StructType
+from ssc_codegen.tokens import StructType, TokenType, VariableType
 
 if TYPE_CHECKING:
     from .schema import BaseSchema
 
 
+_EXPR_I_START = 0
+"""marks first expression in body"""
+_EXPR_I_RETURN = -1
+"""default return expression in body"""
+_EXPR_I_DEFAULT_END = -2
+"""default return expression if body wrapped in DEFAULT_START and DEFAULT_END"""
+
 @dataclass(kw_only=True)
 class BaseAstNode:
-    kind: TokenType
+    """base AST container"""
+    kind: ClassVar[TokenType]
 
 
 @dataclass(kw_only=True)
 class ModuleProgram(BaseAstNode):
     """Main module entrypoint"""
 
-    kind: Final[TokenType] = TokenType.MODULE
-    body: list[BaseAstNode]
+    kind: ClassVar[TokenType] = TokenType.MODULE
+    body: Sequence[BaseAstNode]
 
 
 @dataclass(kw_only=True)
 class Variable(BaseAstNode):
-    kind: Final[TokenType] = TokenType.VARIABLE
+    """represent Variable object
+
+    - num - number of variable
+    - count - count of variables in body expressions
+    - type - type of variable
+    """
+    kind: ClassVar[TokenType] = TokenType.VARIABLE
 
     num: int
     count: int
     type: VariableType
 
     @property
-    def num_next(self):
+    def num_next(self) -> int:
+        """return next variable number in body.
+
+        used for counter var name
+        """
         return self.num + 1
 
 
 @dataclass(kw_only=True)
 class Docstring(BaseAstNode):
-    kind: Final[TokenType] = TokenType.DOCSTRING
+    """represent docstring Node. Required formatting for language target
+
+    - value - docstring value
+    - parent - link to the node to which the docstring belongs
+    """
+    kind: ClassVar[TokenType] = TokenType.DOCSTRING
     value: str
     parent: Optional[Union["StructParser", "ModuleProgram"]] = (
         None  # LATE INIT in builder
@@ -54,46 +77,68 @@ class Docstring(BaseAstNode):
 
 @dataclass(kw_only=True)
 class ModuleImports(BaseAstNode):
-    kind: Final[TokenType] = TokenType.IMPORTS
+    """represent imports node. Always constant value, later fix code formatter"""
+    kind: ClassVar[TokenType] = TokenType.IMPORTS
 
 
 @dataclass(kw_only=True)
 class TypeDefField(BaseAstNode):
-    kind: Final[TokenType] = TokenType.TYPEDEF_FIELD
+    """represent type definition field or structure
+
+    name - field name in schema
+    ret_type - field's type
+    parent - link to the parent 'TypeDef' node
+    """
+    kind: ClassVar[TokenType] = TokenType.TYPEDEF_FIELD
     name: str
     ret_type: VariableType
     parent: Optional["TypeDef"] = None
 
     @property
     def nested_class(self) -> str | None:
+        """return name link of original schema"""
         # backport TODO remove:
         if self.ret_type == VariableType.NESTED:
             nested_fn = [
                 fn for fn in self.parent.struct_ref.body if fn.name == self.name
-            ][0]
+            ][_EXPR_I_START]  # type: ignore
             nested_class = [
                 e for e in nested_fn.body if e.ret_type == VariableType.NESTED
-            ][0].schema
+            ][_EXPR_I_START].schema # type: ignore
             return nested_class
         return None
 
 
 @dataclass(kw_only=True)
 class TypeDef(BaseAstNode):
-    """Contains information for typing/annotations"""
+    """Helper node for generate typing or annotations
 
-    kind: Final[TokenType] = TokenType.TYPEDEF
+    - name - typedef name (without prefix, get link of original schema target
+    - body - typedef fields for annotating
+    - struct_ref - link to the parent 'StructParser' node
+    """
+
+    kind: ClassVar[TokenType] = TokenType.TYPEDEF
     name: str
     body: list[TypeDefField]
     struct_ref: Optional["StructParser"] = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         for f in self.body:
             f.parent = self
 
 
 @dataclass(kw_only=True)
 class BaseExpression(BaseAstNode):
+    """build-in Expression node
+
+    - variable - container with Variable node
+    - parent - link to parent node
+    - prev - shortcut for get previous Expression node
+    - next - shortcut for get next Expression node
+    - accept_type - expression accept type marks
+    - ret_type - return type after expression calls
+    """
     variable: Variable | None = None
     parent: Optional[
         Union[
@@ -110,9 +155,10 @@ class BaseExpression(BaseAstNode):
     ret_type: VariableType
 
     def have_default_expr(self) -> bool:
+        """return true if body of expressions has default wrapper"""
         if not self.parent:
             return False
-        if self.parent.body[0].kind == TokenType.EXPR_DEFAULT_START:
+        if self.parent.body[_EXPR_I_START].kind == TokenType.EXPR_DEFAULT_START:
             return True
         return False
 
@@ -121,359 +167,651 @@ class BaseExpression(BaseAstNode):
         #    return True
 
     def have_assert_expr(self) -> bool:
+        """return true if body of expressions has assertion expressions"""
         if not self.parent:
             return False
         if self.parent.kind in (
             TokenType.STRUCT_FIELD,
             TokenType.STRUCT_PRE_VALIDATE,
         ):
-            return self.parent.have_assert_expr()
+            return self.parent.have_assert_expr()  # type: ignore
         return False
 
 
 @dataclass(kw_only=True)
 class DefaultValueWrapper(BaseExpression):
-    """return default value if expressions in target code fails.
-    Should be a first"""
+    """return default value if expressions in target code fails. in AST auto insert in start position
+    DefaultStart and in end position DefaultEnd
 
-    kind: Final[TokenType] = TokenType.EXPR_DEFAULT
+    - Should be a first
 
-    accept_type: Final[VariableType] = VariableType.ANY
-    ret_type: Final[VariableType] = VariableType.ANY
+    """
+
+    kind: ClassVar[TokenType] = TokenType.EXPR_DEFAULT
+
+    accept_type: VariableType = VariableType.ANY
+    ret_type: VariableType = VariableType.ANY
     value: str | None
 
 
 @dataclass(kw_only=True)
 class DefaultStart(BaseExpression):
-    kind: Final[TokenType] = TokenType.EXPR_DEFAULT_START
-    accept_type: Final[VariableType] = VariableType.ANY
-    ret_type: Final[VariableType] = VariableType.ANY
+    """mark node were stats default expression
+
+    it is assumed that the statement will start with `try` stmt or analogs
+
+    if block of instructions throws any exception - returns default value
+    """
+    kind: ClassVar[TokenType] = TokenType.EXPR_DEFAULT_START
+    accept_type: VariableType = VariableType.ANY
+    ret_type: VariableType = VariableType.ANY
     value: str | None
 
 
 @dataclass(kw_only=True)
 class DefaultEnd(BaseExpression):
-    kind: Final[TokenType] = TokenType.EXPR_DEFAULT_END
-    accept_type: Final[VariableType] = VariableType.ANY
-    ret_type: Final[VariableType] = VariableType.ANY
+    """mark node were ends default expression
+
+    it is assumed that the statement will start with `catch | exception` stmt or analogs
+
+    if block of instructions throws any exception - returns default value
+
+    """
+    kind: ClassVar[TokenType] = TokenType.EXPR_DEFAULT_END
+    accept_type: VariableType = VariableType.ANY
+    ret_type: VariableType = VariableType.ANY
     value: str | None
 
 
 # DOCUMENT
 @dataclass(kw_only=True)
 class HtmlCssExpression(BaseExpression):
-    kind: Final[TokenType] = TokenType.EXPR_CSS
+    """mark node were calls `CSS` query and extract first founded element
+
+    """
+    kind: ClassVar[TokenType] = TokenType.EXPR_CSS
     query: str
-    accept_type: Final[VariableType] = VariableType.DOCUMENT
-    ret_type: Final[VariableType] = VariableType.DOCUMENT
+    accept_type: VariableType = VariableType.DOCUMENT
+    ret_type: VariableType = VariableType.DOCUMENT
 
 
 @dataclass(kw_only=True)
 class HtmlCssAllExpression(BaseExpression):
-    kind: Final[TokenType] = TokenType.EXPR_CSS_ALL
+    """mark node were calls `CSS` query and extract all founded element"""
+
+    kind: ClassVar[TokenType] = TokenType.EXPR_CSS_ALL
 
     query: str
-    accept_type: Final[VariableType] = VariableType.DOCUMENT
-    ret_type: Final[VariableType] = VariableType.LIST_DOCUMENT
+    accept_type: VariableType = VariableType.DOCUMENT
+    ret_type: VariableType = VariableType.LIST_DOCUMENT
 
 
 @dataclass(kw_only=True)
 class HtmlXpathExpression(BaseExpression):
-    kind: Final[TokenType] = TokenType.EXPR_XPATH
+    """mark node where calls `XPATH` query and extract first founded element"""
+    kind: ClassVar[TokenType] = TokenType.EXPR_XPATH
 
     query: str
-    accept_type: Final[VariableType] = VariableType.DOCUMENT
-    ret_type: Final[VariableType] = VariableType.DOCUMENT
+    accept_type: VariableType = VariableType.DOCUMENT
+    ret_type: VariableType = VariableType.DOCUMENT
 
 
 @dataclass(kw_only=True)
 class HtmlXpathAllExpression(BaseExpression):
-    kind: Final[TokenType] = TokenType.EXPR_XPATH_ALL
+    """mark node where calls `XPATH` query and extract all founded element"""
+    kind: ClassVar[TokenType] = TokenType.EXPR_XPATH_ALL
 
     query: str
-    accept_type: Final[VariableType] = VariableType.DOCUMENT
-    ret_type: Final[VariableType] = VariableType.LIST_DOCUMENT
+    accept_type: VariableType = VariableType.DOCUMENT
+    ret_type: VariableType = VariableType.LIST_DOCUMENT
 
 
 @dataclass(kw_only=True)
 class HtmlAttrExpression(BaseExpression):
-    kind: Final[TokenType] = TokenType.EXPR_ATTR
+    """mark node where extract attribute value by key for html element
+
+    should be returns string: if lib parse attrs to List<String> type - convert to string
+    """
+    kind: ClassVar[TokenType] = TokenType.EXPR_ATTR
 
     attr: str
-    accept_type: Final[VariableType] = VariableType.DOCUMENT
-    ret_type: Final[VariableType] = VariableType.STRING
+    accept_type: VariableType = VariableType.DOCUMENT
+    ret_type: VariableType = VariableType.STRING
 
 
 @dataclass(kw_only=True)
 class HtmlAttrAllExpression(BaseExpression):
-    kind: Final[TokenType] = TokenType.EXPR_ATTR_ALL
+    """mark node where extract attributes value by key from all html element
+
+    should be returns string: if lib parse attrs to List<String> type - convert to string
+    """
+
+    kind: ClassVar[TokenType] = TokenType.EXPR_ATTR_ALL
     attr: str
-    accept_type: Final[VariableType] = VariableType.LIST_DOCUMENT
-    ret_type: Final[VariableType] = VariableType.LIST_STRING
+    accept_type: VariableType = VariableType.LIST_DOCUMENT
+    ret_type: VariableType = VariableType.LIST_STRING
 
 
 @dataclass(kw_only=True)
 class HtmlRawExpression(BaseExpression):
-    kind: Final[TokenType] = TokenType.EXPR_RAW
-    accept_type: Final[VariableType] = VariableType.DOCUMENT
-    ret_type: Final[VariableType] = VariableType.STRING
+    """extract raw html from element"""
+    kind: ClassVar[TokenType] = TokenType.EXPR_RAW
+    accept_type: VariableType = VariableType.DOCUMENT
+    ret_type: VariableType = VariableType.STRING
 
 
 @dataclass(kw_only=True)
 class HtmlRawAllExpression(BaseExpression):
-    kind: Final[TokenType] = TokenType.EXPR_RAW_ALL
+    """extract all raw html from elements"""
 
-    accept_type: Final[VariableType] = VariableType.LIST_DOCUMENT
-    ret_type: Final[VariableType] = VariableType.LIST_STRING
+    kind: ClassVar[TokenType] = TokenType.EXPR_RAW_ALL
+
+    accept_type: VariableType = VariableType.LIST_DOCUMENT
+    ret_type: VariableType = VariableType.LIST_STRING
 
 
 @dataclass(kw_only=True)
 class HtmlTextAllExpression(BaseExpression):
-    kind: Final[TokenType] = TokenType.EXPR_TEXT_ALL
-    accept_type: Final[VariableType] = VariableType.LIST_DOCUMENT
-    ret_type: Final[VariableType] = VariableType.LIST_STRING
+    """extract text from html element"""
+    kind: ClassVar[TokenType] = TokenType.EXPR_TEXT_ALL
+    accept_type: VariableType = VariableType.LIST_DOCUMENT
+    ret_type: VariableType = VariableType.LIST_STRING
 
 
 @dataclass(kw_only=True)
 class HtmlTextExpression(BaseExpression):
-    kind: Final[TokenType] = TokenType.EXPR_TEXT
-    accept_type: Final[VariableType] = VariableType.DOCUMENT
-    ret_type: Final[VariableType] = VariableType.STRING
+    """extract text from all html elements"""
+    kind: ClassVar[TokenType] = TokenType.EXPR_TEXT
+    accept_type: VariableType = VariableType.DOCUMENT
+    ret_type: VariableType = VariableType.STRING
 
 
 # ARRAY
 @dataclass(kw_only=True)
 class IndexDocumentExpression(BaseExpression):
-    kind: Final[TokenType] = TokenType.EXPR_LIST_DOCUMENT_INDEX
+    """get element from sequence of elements
+
+    NOTE: if target language not supports negative indexes (like python) - add calculate index:
+
+    pseudocode example:
+
+    len(<VAR_N>) - (value)
+    """
+    kind: ClassVar[TokenType] = TokenType.EXPR_LIST_DOCUMENT_INDEX
 
     value: int
-    accept_type: Final[VariableType] = VariableType.LIST_DOCUMENT
-    ret_type: Final[VariableType] = VariableType.DOCUMENT
+    accept_type: VariableType = VariableType.LIST_DOCUMENT
+    ret_type: VariableType = VariableType.DOCUMENT
 
 
 @dataclass(kw_only=True)
 class IndexStringExpression(BaseExpression):
-    kind: Final[TokenType] = TokenType.EXPR_LIST_STRING_INDEX
+    """get element from sequence of strings
+
+    NOTE: if target language not supports negative indexes (like python) - add calculate index:
+
+    pseudocode example:
+
+    var index_NEXT = len(<VAR_N>) - (value)
+    var val_NEXT = val_PREV[index_NEXT]
+    """
+
+    kind: ClassVar[TokenType] = TokenType.EXPR_LIST_STRING_INDEX
 
     value: int
-    accept_type: Final[VariableType] = VariableType.LIST_STRING
-    ret_type: Final[VariableType] = VariableType.STRING
+    accept_type: VariableType = VariableType.LIST_STRING
+    ret_type: VariableType = VariableType.STRING
 
 
 @dataclass(kw_only=True)
 class JoinExpression(BaseExpression):
-    kind: Final[TokenType] = TokenType.EXPR_LIST_JOIN
+    """join sequence of strings to one string
+
+    pseudocode example:
+
+        ', '.join(["foo", "bar"]) -> "foo, bar"
+
+    """
+    kind: ClassVar[TokenType] = TokenType.EXPR_LIST_JOIN
 
     sep: str
-    accept_type: Final[VariableType] = VariableType.LIST_STRING
-    ret_type: Final[VariableType] = VariableType.STRING
+    accept_type: VariableType = VariableType.LIST_STRING
+    ret_type: VariableType = VariableType.STRING
 
 
 # STRING
 @dataclass(kw_only=True)
 class __TrimNode(BaseExpression):
     value: str
-    accept_type: Final[VariableType] = VariableType.STRING
-    ret_type: Final[VariableType] = VariableType.STRING
+    accept_type: VariableType = VariableType.STRING
+    ret_type: VariableType = VariableType.STRING
 
 
 @dataclass(kw_only=True)
 class TrimExpression(__TrimNode):
-    kind: Final[TokenType] = TokenType.EXPR_STRING_TRIM
+    """trim string by substring in LEFT and RIGHT
+
+    note: if target language not exists buildin operations use regex:
+
+    pseudocode examples:
+        // build-in methods call
+        var VAL_NEXT = VAL_PREV.trim(<value>)
+
+        // by regex trim
+        var RE_LEFT = "^" + escape_str(value)
+        var RE_RIGHT = escape_str(value) + "$"
+        var VAL_NEXT = re.sub(RE_LEFT, "", VAL_PREV).sub(RE_RIGHT, "", VAL_PREV)
+    """
+    kind: ClassVar[TokenType] = TokenType.EXPR_STRING_TRIM
 
 
 @dataclass(kw_only=True)
 class LTrimExpression(__TrimNode):
-    kind: Final[TokenType] = TokenType.EXPR_STRING_LTRIM
+    """trim string by substring in LEFT
+
+    note: if target language not exists buildin operations use regex:
+
+    pseudocode examples:
+
+        // build-in methods call
+        var VAL_NEXT = VAL_PREV.ltrim(<value>)
+
+        // by regex trim
+        var RE_LEFT = "^" + escape_str(value)
+        var VAL_NEXT = re.sub(RE_LEFT, "", VAL_PREV)
+    """
+
+    kind: ClassVar[TokenType] = TokenType.EXPR_STRING_LTRIM
 
 
 @dataclass(kw_only=True)
 class RTrimExpression(__TrimNode):
-    kind: Final[TokenType] = TokenType.EXPR_STRING_RTRIM
+    """trim string by substring in RIGHT
+
+    note: if target language not exists buildin operations use regex:
+
+    pseudocode examples:
+
+        // build-in methods call
+        var VAL_NEXT = VAL_PREV.rtrim(<value>)
+
+        // by regex trim
+        var RE_RIGHT = escape_str(value) + "$"
+        var VAL_NEXT = re.sub(RE_RIGHT, "", VAL_PREV)
+    """
+
+    kind: ClassVar[TokenType] = TokenType.EXPR_STRING_RTRIM
 
 
 @dataclass(kw_only=True)
 class __MapTrimNode(BaseExpression):
     value: str
-    accept_type: Final[VariableType] = VariableType.LIST_STRING
-    ret_type: Final[VariableType] = VariableType.LIST_STRING
+    accept_type: VariableType = VariableType.LIST_STRING
+    ret_type: VariableType = VariableType.LIST_STRING
 
 
 @dataclass(kw_only=True)
 class MapTrimExpression(__MapTrimNode):
-    kind: Final[TokenType] = TokenType.EXPR_LIST_STRING_TRIM
+    """trim sequence of string by substring in LEFT and RIGHT
+
+    note: if target language not exists buildin operations use regex:
+
+    pseudocode examples:
+        // build-in methods call
+        var VAL_NEXT = VAL_PREV.map((i) => i.trim(<value>))
+
+        // by regex trim
+        var RE_LEFT = "^" + escape_str(value)
+        var RE_RIGHT = escape_str(value) + "$"
+        var VAL_NEXT = VAL_PREV.map((i) => re.sub(RE_LEFT, "", i).sub(RE_RIGHT, "", i))
+    """
+    kind: ClassVar[TokenType] = TokenType.EXPR_LIST_STRING_TRIM
 
 
 @dataclass(kw_only=True)
 class MapLTrimExpression(__MapTrimNode):
-    kind: Final[TokenType] = TokenType.EXPR_LIST_STRING_LTRIM
+    """trim sequence of string by substring in LEFT
+
+    note: if target language not exists buildin operations use regex:
+
+    pseudocode examples:
+        // build-in methods call
+        var VAL_NEXT = VAL_PREV.map((i) => i.ltrim(<value>))
+
+        // by regex trim
+        var RE_LEFT = "^" + escape_str(value)
+        var VAL_NEXT = VAL_PREV.map((i) => re.sub(RE_LEFT, "", i))
+    """
+    kind: ClassVar[TokenType] = TokenType.EXPR_LIST_STRING_LTRIM
 
 
 @dataclass(kw_only=True)
 class MapRTrimExpression(__MapTrimNode):
-    kind: Final[TokenType] = TokenType.EXPR_LIST_STRING_RTRIM
+    """trim sequence of string by substring in RIGHT
+
+    note: if target language not exists buildin operations use regex:
+
+    pseudocode examples:
+        // build-in methods call
+        var VAL_NEXT = VAL_PREV.map((i) => i.rtrim(<value>))
+
+        // by regex trim
+        var RE_RIGHT = escape_str(value) + "$"
+        var VAL_NEXT = VAL_PREV.map((i) => re.sub(RE_RIGHT, "", i))
+    """
+    kind: ClassVar[TokenType] = TokenType.EXPR_LIST_STRING_RTRIM
 
 
 @dataclass(kw_only=True)
 class SplitExpression(BaseExpression):
-    kind: Final[TokenType] = TokenType.EXPR_STRING_SPLIT
+    """split string by substring to sequence of string
+
+    pseudocode example:
+
+        var VAL_NEXT = VAL_PREV.split(<value>)
+    """
+    kind: ClassVar[TokenType] = TokenType.EXPR_STRING_SPLIT
     sep: str
-    accept_type: Final[VariableType] = VariableType.STRING
-    ret_type: Final[VariableType] = VariableType.LIST_STRING
+    accept_type: VariableType = VariableType.STRING
+    ret_type: VariableType = VariableType.LIST_STRING
 
 
 @dataclass(kw_only=True)
 class FormatExpression(BaseExpression):
-    kind: Final[TokenType] = TokenType.EXPR_STRING_FORMAT
+    """format string by `fmt` value
+
+    note:
+        in AST placeholder marks as {{}} strings, replace with a chars that the target language support
+
+    pseudocode example:
+
+        var VAL_NEXT = <fmt>.format(VAL_PREV)
+    """
+    kind: ClassVar[TokenType] = TokenType.EXPR_STRING_FORMAT
     fmt: str
-    accept_type: Final[VariableType] = VariableType.STRING
-    ret_type: Final[VariableType] = VariableType.STRING
+    accept_type: VariableType = VariableType.STRING
+    ret_type: VariableType = VariableType.STRING
 
 
 @dataclass(kw_only=True)
 class MapFormatExpression(BaseExpression):
-    kind: Final[TokenType] = TokenType.EXPR_LIST_STRING_FORMAT
+    """format sequence of strings by `fmt` value
+
+    note:
+        in AST placeholder marks as {{}} strings, replace with a chars that the target language support
+
+    pseudocode example:
+
+        var VAL_NEXT = VAL_PREV.map(i => <fmt>.format(i))
+    """
+    kind: ClassVar[TokenType] = TokenType.EXPR_LIST_STRING_FORMAT
     fmt: str
-    accept_type: Final[VariableType] = VariableType.LIST_STRING
-    ret_type: Final[VariableType] = VariableType.LIST_STRING
+    accept_type: VariableType = VariableType.LIST_STRING
+    ret_type: VariableType = VariableType.LIST_STRING
 
 
 @dataclass(kw_only=True)
 class ReplaceExpression(BaseExpression):
-    kind: Final[TokenType] = TokenType.EXPR_STRING_REPLACE
+    """replace string by all occurrences of substring old replaced by new
+
+    pseudocode example:
+
+        var val_NEXT = val_PREV.replace(<old>, <new>)
+    """
+
+    kind: ClassVar[TokenType] = TokenType.EXPR_STRING_REPLACE
     old: str
     new: str
-    accept_type: Final[VariableType] = VariableType.STRING
-    ret_type: Final[VariableType] = VariableType.STRING
+    accept_type: VariableType = VariableType.STRING
+    ret_type: VariableType = VariableType.STRING
 
 
 @dataclass(kw_only=True)
 class MapReplaceExpression(BaseExpression):
-    kind: Final[TokenType] = TokenType.EXPR_LIST_STRING_REPLACE
+    """replace sequence of strings by all occurrences of substring old replaced by new
+
+    pseudocode example:
+
+        var val_NEXT = val_PREV.map(i => i.replace(<old>, <new>))
+    """
+
+    kind: ClassVar[TokenType] = TokenType.EXPR_LIST_STRING_REPLACE
     old: str
     new: str
-    accept_type: Final[VariableType] = VariableType.LIST_STRING
-    ret_type: Final[VariableType] = VariableType.LIST_STRING
+    accept_type: VariableType = VariableType.LIST_STRING
+    ret_type: VariableType = VariableType.LIST_STRING
 
 
 # REGEX
 @dataclass(kw_only=True)
 class RegexExpression(BaseExpression):
-    kind: Final[TokenType] = TokenType.EXPR_REGEX
+    """match <group> first result by regex pattern
+
+    note:
+        don't forget mark group in the pattern
+
+    pseudocode example:
+
+        var val_NEXT = regex.search(<pattern>, val_PREV)[<group>]
+    """
+    kind: ClassVar[TokenType] = TokenType.EXPR_REGEX
 
     pattern: str
     group: int
-    accept_type: Final[VariableType] = VariableType.STRING
-    ret_type: Final[VariableType] = VariableType.STRING
+    accept_type: VariableType = VariableType.STRING
+    ret_type: VariableType = VariableType.STRING
 
 
 @dataclass(kw_only=True)
 class RegexAllExpression(BaseExpression):
-    kind: Final[TokenType] = TokenType.EXPR_REGEX_ALL
+    """match all results by regex pattern
+
+    note:
+        don't forget mark group in the pattern
+        should be contains one group mark
+
+    pseudocode example:
+
+        var val_NEXT = regex.findall(<pattern>, val_PREV)
+    """
+
+    kind: ClassVar[TokenType] = TokenType.EXPR_REGEX_ALL
 
     pattern: str
-    accept_type: Final[VariableType] = VariableType.STRING
-    ret_type: Final[VariableType] = VariableType.LIST_STRING
+    accept_type: VariableType = VariableType.STRING
+    ret_type: VariableType = VariableType.LIST_STRING
 
 
 @dataclass(kw_only=True)
 class RegexSubExpression(BaseExpression):
-    kind: Final[TokenType] = TokenType.EXPR_REGEX_SUB
+    """sub target string to substring by regex pattern
+
+
+    pseudocode example:
+
+        var val_NEXT = regex.sub(<pattern>, <repl>, val_PREV)
+    """
+    kind: ClassVar[TokenType] = TokenType.EXPR_REGEX_SUB
 
     pattern: str
     repl: str
-    accept_type: Final[VariableType] = VariableType.STRING
-    ret_type: Final[VariableType] = VariableType.STRING
+    accept_type: VariableType = VariableType.STRING
+    ret_type: VariableType = VariableType.STRING
 
 
 @dataclass(kw_only=True)
 class MapRegexSubExpression(BaseExpression):
-    kind: Final[TokenType] = TokenType.EXPR_LIST_REGEX_SUB
+    """sub a sequence of strings to substring by regex pattern
+
+
+    pseudocode example:
+
+        var val_NEXT = val_PREV.map(i => regex.sub(<pattern>, <repl>, i))
+    """
+    kind: ClassVar[TokenType] = TokenType.EXPR_LIST_REGEX_SUB
 
     pattern: str
     repl: str
-    accept_type: Final[VariableType] = VariableType.LIST_STRING
-    ret_type: Final[VariableType] = VariableType.LIST_STRING
+    accept_type: VariableType = VariableType.LIST_STRING
+    ret_type: VariableType = VariableType.LIST_STRING
 
 
 # asserts - validators - not modify variables
 @dataclass(kw_only=True)
 class IsEqualExpression(BaseExpression):
-    kind: Final[TokenType] = TokenType.IS_EQUAL
+    """check equal value (by assert stmt). do not modify previous value
+
+    throw error with message, if not passed
+
+    pseudocode example:
+
+        assert val_PREV == <value>, msg
+        // hack: avoid recalc variables
+        var val_NEXT = val_PREV
+    """
+    kind: ClassVar[TokenType] = TokenType.IS_EQUAL
 
     value: str
     msg: str
-    accept_type: Final[VariableType] = VariableType.STRING
-    ret_type: Final[VariableType] = VariableType.STRING
+    accept_type: VariableType = VariableType.STRING
+    ret_type: VariableType = VariableType.STRING
 
 
 @dataclass(kw_only=True)
 class IsNotEqualExpression(BaseExpression):
-    kind: Final[TokenType] = TokenType.IS_NOT_EQUAL
+    """check not equal value (by assert stmt). do not modify previous value
+
+    throw error with message, if not passed
+
+    pseudocode example:
+
+        assert val_PREV != <value>, msg
+        // hack: avoid recalc variable nums
+        var val_NEXT = val_PREV
+    """
+    kind: ClassVar[TokenType] = TokenType.IS_NOT_EQUAL
 
     value: str
     msg: str
-    accept_type: Final[VariableType] = VariableType.STRING
-    ret_type: Final[VariableType] = VariableType.STRING
+    accept_type: VariableType = VariableType.STRING
+    ret_type: VariableType = VariableType.STRING
 
 
 @dataclass(kw_only=True)
 class IsCssExpression(BaseExpression):
-    kind: Final[TokenType] = TokenType.IS_CSS
+    """check valid css query for variable (by assert stmt). do not modify previous value
+
+    passed if first value is founded
+
+    throw error with message, if not passed
+
+    pseudocode example:
+
+        assert val_PREV.css(<query>), msg
+        // hack: avoid recalc variables nums
+        var val_NEXT = val_PREV
+
+    """
+    kind: ClassVar[TokenType] = TokenType.IS_CSS
     query: str
     msg: str
-    accept_type: Final[VariableType] = VariableType.DOCUMENT
-    ret_type: Final[VariableType] = VariableType.DOCUMENT
+    accept_type: VariableType = VariableType.DOCUMENT
+    ret_type: VariableType = VariableType.DOCUMENT
 
 
 @dataclass(kw_only=True)
 class IsXPathExpression(BaseExpression):
-    kind: Final[TokenType] = TokenType.IS_XPATH
+    """check valid xpath query for variable (by assert stmt). do not modify previous value
+
+    passed if first value is founded
+
+    throw error with message, if not passed
+
+    pseudocode example:
+
+        assert val_PREV.xpath(<query>), msg
+        // hack: avoid recalc variable nums
+        var val_NEXT = val_PREV
+
+    """
+
+    kind: ClassVar[TokenType] = TokenType.IS_XPATH
     query: str
     msg: str
-    accept_type: Final[VariableType] = VariableType.DOCUMENT
-    ret_type: Final[VariableType] = VariableType.DOCUMENT
+    accept_type: VariableType = VariableType.DOCUMENT
+    ret_type: VariableType = VariableType.DOCUMENT
 
 
 @dataclass(kw_only=True)
 class IsContainsExpression(BaseExpression):
-    kind: Final[TokenType] = TokenType.IS_CONTAINS
+    """check contains value in sequence of string (by assert stmt). do not modify previous value
+
+    passed if first value is founded
+
+    throw error with message, if not passed
+
+    pseudocode example:
+
+        assert val_PREV.contains(<value>), msg
+        // hack: avoid recalc variables
+        var val_NEXT = val_PREV
+
+    """
+    kind: ClassVar[TokenType] = TokenType.IS_CONTAINS
     item: str
     msg: str
-    accept_type: Final[VariableType] = VariableType.LIST_STRING
-    ret_type: Final[VariableType] = VariableType.LIST_STRING
+    accept_type: VariableType = VariableType.LIST_STRING
+    ret_type: VariableType = VariableType.LIST_STRING
 
 
 @dataclass(kw_only=True)
 class IsRegexMatchExpression(BaseExpression):
-    kind: Final[TokenType] = TokenType.IS_REGEX_MATCH
+    """check valid regex pattern for variable (by assert stmt). do not modify previous value
+
+    passed if first value is founded
+
+    throw error with message, if not passed
+
+    pseudocode example:
+
+        assert re.search(val_PREV, <pattern>), msg
+        // hack: avoid recalc variables
+        var val_NEXT = val_PREV
+    """
+    kind: ClassVar[TokenType] = TokenType.IS_REGEX_MATCH
     pattern: str
     msg: str
-    accept_type: Final[VariableType] = VariableType.STRING
-    ret_type: Final[VariableType] = VariableType.STRING
+    accept_type: VariableType = VariableType.STRING
+    ret_type: VariableType = VariableType.STRING
 
 
 @dataclass(kw_only=True)
 class NestedExpression(BaseExpression):
-    kind: Final[TokenType] = TokenType.EXPR_NESTED
+    """send element to another marked schema
+
+    - schema_cls - configured BaseSchema instance  target
+    - schema - configured BaseSchema instance target name
+    """
+    kind: ClassVar[TokenType] = TokenType.EXPR_NESTED
     schema_cls: Type["BaseSchema"]
-    accept_type: Final[VariableType] = VariableType.DOCUMENT
-    ret_type: Final[VariableType] = VariableType.NESTED
+    accept_type: VariableType = VariableType.DOCUMENT
+    ret_type: VariableType = VariableType.NESTED
 
     @property
-    def schema(self):
+    def schema(self) -> str:
         return self.schema_cls.__name__
 
 
 @dataclass(kw_only=True)
 class ReturnExpression(BaseExpression):
-    kind: Final[TokenType] = TokenType.EXPR_RETURN
-    accept_type: Final[VariableType] = VariableType.ANY
-    ret_type: Final[VariableType] = VariableType.ANY
+    """mark return expression"""
+    kind: ClassVar[TokenType] = TokenType.EXPR_RETURN
+    accept_type: VariableType = VariableType.ANY
+    ret_type: VariableType = VariableType.ANY
 
     def have_assert(self) -> bool:
         if self.parent and self.parent.kind == TokenType.STRUCT_FIELD:
-            return self.parent.have_assert_expr()
+            return self.parent.have_assert_expr()  # type: ignore
         # try to find by recursion
         if not self.prev:
             return False
@@ -488,26 +826,41 @@ class ReturnExpression(BaseExpression):
                 TokenType.IS_REGEX_MATCH,
             ):
                 return True
-            expr = expr.prev
+            expr = expr.prev  # type: ignore
         return False
 
     def get_default_expr(self) -> None | DefaultValueWrapper:
         if not self.parent:
             return None
-        return self.parent.default
+        return self.parent.default  # type: ignore
 
 
 @dataclass(kw_only=True)
 class NoReturnExpression(BaseExpression):
-    kind: Final[TokenType] = TokenType.EXPR_NO_RETURN
-    accept_type: Final[VariableType] = VariableType.ANY
-    ret_type: Final[VariableType] = VariableType.NULL
+    """mark were body does not return anything or null
+
+    in current project, used in `__PRE_VALIDATE__` method
+    """
+
+    kind: ClassVar[TokenType] = TokenType.EXPR_NO_RETURN
+    accept_type: VariableType = VariableType.ANY
+    ret_type: VariableType = VariableType.NULL
 
 
 @dataclass(kw_only=True)
 class CallStructFunctionExpression(BaseExpression):
-    kind: Final[TokenType] = TokenType.STRUCT_CALL_FUNCTION
-    accept_type: Final[VariableType] = VariableType.DOCUMENT
+    """mark call structure method call
+
+    used in `__START_PARSE__` entrypoint
+
+    - fn_ref - call Node link
+    - nested_cls_name_ref - call NestedStruct name (if nested_schema expr)
+    - name - call field name
+    - ret_type return type from called Node
+
+    """
+    kind: ClassVar[TokenType] = TokenType.STRUCT_CALL_FUNCTION
+    accept_type: VariableType = VariableType.DOCUMENT
     fn_ref: Union[
         "StructFieldFunction", "PreValidateFunction", "PartDocFunction", None
     ]
@@ -516,19 +869,23 @@ class CallStructFunctionExpression(BaseExpression):
     ret_type: VariableType
 
     def have_assert_expr(self) -> bool:
+        """return True if target called function have an assert stmt"""
         if not self.fn_ref:
             return False
         return any(e for e in self.fn_ref.body if e.have_assert_expr())
 
     def have_default_expr(self) -> bool:
+        """return True if target called function have a default stmt"""
+
         if not self.fn_ref:
             return False
-        return bool(self.fn_ref.default)
+        return bool(self.fn_ref.default)  # type: ignore
 
     def nested_schema(self) -> Union["StructParser", None]:
+        """return True if reference stmt is nested"""
         if not self.nested_cls_name_ref:
             return None
-        return self.fn_ref.parent
+        return self.fn_ref.parent  # type: ignore
 
 
 # NUMERIC
@@ -536,30 +893,51 @@ class CallStructFunctionExpression(BaseExpression):
 
 @dataclass(kw_only=True)
 class ToInteger(BaseExpression):
-    kind: Final[TokenType] = TokenType.TO_INT
-    accept_type: Final[VariableType] = VariableType.STRING
-    ret_type: Final[VariableType] = VariableType.INT
+    """convert string variable to int (naive)
+
+    pseudocode example:
+        var val_NEXT = val_PREV.to_int()
+    """
+    kind: ClassVar[TokenType] = TokenType.TO_INT
+    accept_type: VariableType = VariableType.STRING
+    ret_type: VariableType = VariableType.INT
 
 
 @dataclass(kw_only=True)
 class ToListInteger(BaseExpression):
-    kind: Final[TokenType] = TokenType.TO_INT_LIST
-    accept_type: Final[VariableType] = VariableType.LIST_STRING
-    ret_type: Final[VariableType] = VariableType.LIST_INT
+    """convert sequence of strings variable to int (naive)
+
+    pseudocode example:
+        var val_NEXT = val_PREV.map(i => i.to_int())
+    """
+
+    kind: ClassVar[TokenType] = TokenType.TO_INT_LIST
+    accept_type: VariableType = VariableType.LIST_STRING
+    ret_type: VariableType = VariableType.LIST_INT
 
 
 @dataclass(kw_only=True)
 class ToFloat(BaseExpression):
-    kind: Final[TokenType] = TokenType.TO_FLOAT
-    accept_type: Final[VariableType] = VariableType.STRING
-    ret_type: Final[VariableType] = VariableType.FLOAT
+    """convert string variable to float (naive)
+
+    pseudocode example:
+        var val_NEXT = val_PREV.to_float()
+    """
+    kind: ClassVar[TokenType] = TokenType.TO_FLOAT
+    accept_type: VariableType = VariableType.STRING
+    ret_type: VariableType = VariableType.FLOAT
 
 
 @dataclass(kw_only=True)
 class ToListFloat(BaseExpression):
-    kind: Final[TokenType] = TokenType.TO_FLOAT_LIST
-    accept_type: Final[VariableType] = VariableType.LIST_STRING
-    ret_type: Final[VariableType] = VariableType.LIST_FLOAT
+    """convert sequence of strings variable to int (naive)
+
+    pseudocode example:
+        var val_NEXT = val_PREV.map(i => i.to_float())
+    """
+    kind: ClassVar[TokenType] = TokenType.TO_FLOAT_LIST
+    accept_type: VariableType = VariableType.LIST_STRING
+    ret_type: VariableType = VariableType.LIST_FLOAT
 
 
 # STRUCT
@@ -568,7 +946,7 @@ class ToListFloat(BaseExpression):
 @dataclass(kw_only=True)
 class __StructNode(BaseAstNode):
     name: str
-    body: list[BaseExpression]
+    body: Sequence[BaseExpression]
 
     @property
     def ret_type(self) -> VariableType:
@@ -576,18 +954,30 @@ class __StructNode(BaseAstNode):
             raise TypeError("Function body empty")
 
         # default expr case
-        if self.body[0].kind == TokenType.EXPR_DEFAULT_START:
-            return self.body[-2].variable.type
-        return self.body[-1].variable.type
+        if self.body[_EXPR_I_START].kind == TokenType.EXPR_DEFAULT_START:
+            # last token type -> TokenType.EXPR_DEFAULT_END
+            return self.body[_EXPR_I_DEFAULT_END].variable.type  # type: ignore
+        return self.body[_EXPR_I_RETURN].variable.type  # type: ignore
 
 
 @dataclass(kw_only=True)
 class StructFieldFunction(__StructNode):
+    """header method in StructParser field
+
+    pseudocode example:
+     // struct parser header...
+     func <field_name>(Document val) {
+    // ... body code
+    """
     name: M_ITEM | M_KEY | M_VALUE | str
-    kind: Final[TokenType] = TokenType.STRUCT_FIELD
+    kind: ClassVar[TokenType] = TokenType.STRUCT_FIELD
     parent: Optional["StructParser"] = None  # LATE INIT
 
     def find_associated_typedef(self) -> TypeDef | None:
+        """try get associated typedef Node
+
+        - for cases, where function should be return parsed NestedSchema or typing
+        """
         if self.ret_type != VariableType.NESTED:
             return None
         elif not self.parent or not self.parent.parent:
@@ -603,6 +993,10 @@ class StructFieldFunction(__StructNode):
         return associated_typedef  # type: ignore
 
     def nested_schema_name(self) -> str | None:
+        """try get associated typedef Node name
+
+        - for cases, where function should be return parsed NestedSchema or typing
+        """
         if self.ret_type != VariableType.NESTED:
             return None
         # type NestedExpression (naive)
@@ -610,6 +1004,7 @@ class StructFieldFunction(__StructNode):
         return self.body[-2].schema  # noqa
 
     def have_assert_expr(self) -> bool:
+        """return True if StructFieldFunction contains assert expr"""
         return any(
             e.kind
             in (
@@ -627,23 +1022,48 @@ class StructFieldFunction(__StructNode):
 
 @dataclass(kw_only=True)
 class PreValidateFunction(__StructNode):
-    kind: Final[TokenType] = TokenType.STRUCT_PRE_VALIDATE
+    """mark `__PRE_VALIDATE__` entrypoint.
+
+    does not modify document and retrun anything. used for optional validate document before parse
+
+    pseudocode example:
+
+        // StructParser code...
+        func _pre_validate(Document val) {
+        // ... body expr
+    """
+    kind: ClassVar[TokenType] = TokenType.STRUCT_PRE_VALIDATE
     name: M_PRE_VALIDATE = "__PRE_VALIDATE__"
     parent: Optional["StructParser"] = None  # LATE INIT
 
 
 @dataclass(kw_only=True)
 class PartDocFunction(__StructNode):
-    kind: Final[TokenType] = TokenType.STRUCT_PART_DOCUMENT
+    """mark `__SPLIT_DOC__` entrypoint.
+
+    used for split document to elements in LIST_ITEM, DICT_ITEM, FLAT_LIST structs before parse
+
+     pseudocode example:
+
+        // StructParser code...
+        func _part_document(Document val) Sequence<Element>{
+        // ... body expr
+    """
+    kind: ClassVar[TokenType] = TokenType.STRUCT_PART_DOCUMENT
     name: M_SPLIT_DOC = "__SPLIT_DOC__"
     parent: Optional["StructParser"] = None  # LATE INIT
 
 
 @dataclass(kw_only=True)
 class StartParseFunction(__StructNode):
+    """ `__START_PARSE__` struct entrypoint
+
+    - body CallStructFunctionExpression node expr
+    - type struct type, for choice generate strategy
+    """
     name: M_START_PARSE = "__START_PARSE__"
-    kind: Final[TokenType] = TokenType.STRUCT_PARSE_START
-    body: list[CallStructFunctionExpression]
+    kind: ClassVar[TokenType] = TokenType.STRUCT_PARSE_START
+    body: Sequence[CallStructFunctionExpression]
     type: StructType
     parent: Optional["StructParser"] = None  # LATE INIT
 
@@ -665,21 +1085,38 @@ class StartParseFunction(__StructNode):
 
 @dataclass(kw_only=True)
 class StructInit(BaseAstNode):
-    kind: Final[TokenType] = TokenType.STRUCT_INIT
+    """helper node for make constructor
+
+    pseudocode example:
+
+    // StructParser code...
+    constructor(<name>) new ...
+    """
+    kind: ClassVar[TokenType] = TokenType.STRUCT_INIT
     parent: Optional["StructParser"] = None  # LATE INIT
     name: str
 
 
 @dataclass(kw_only=True)
 class StructParser(BaseAstNode):
-    kind: Final[TokenType] = TokenType.STRUCT
+    """parent struct node
+
+    - init - Node helper for add constructor (if required)
+    - docstring_class_top - docstring position (top or bottom in StructParser header)
+    - name - schema name
+    - doc - docstring Node
+    - body sequence of StructFieldFunction, StartParseFunction, PreValidateFunction and PartDocFunction Nodes
+    - typedef - link to TypeDef Node (for typing)
+    - parent - ModuleProgram Node
+    """
+    kind: ClassVar[TokenType] = TokenType.STRUCT
     init: StructInit = field(init=False)
     docstring_class_top: bool = False
     type: StructType
 
     name: str
     doc: Docstring
-    body: list[
+    body: Sequence[
         StructFieldFunction
         | StartParseFunction
         | PreValidateFunction
@@ -688,7 +1125,7 @@ class StructParser(BaseAstNode):
     typedef: Optional["TypeDef"] = field(init=False)
     parent: Optional[ModuleProgram] = None  # LATE INIT
 
-    def _build_typedef(self):
+    def _build_typedef(self) -> None:
         ast_typedef = TypeDef(
             name=self.name,
             struct_ref=self,
@@ -700,11 +1137,11 @@ class StructParser(BaseAstNode):
         )
         self.typedef = ast_typedef
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         self.init = StructInit(name=self.name, parent=self)
         self._build_typedef()
 
-        self.body.append(
+        self.body.append(  # type: ignore
             StartParseFunction(
                 parent=self,
                 type=self.type,
@@ -712,8 +1149,8 @@ class StructParser(BaseAstNode):
                     CallStructFunctionExpression(
                         name=fn.name,
                         ret_type=fn.ret_type,
-                        fn_ref=fn,
-                        nested_cls_name_ref=fn.nested_schema_name()
+                        fn_ref=fn,  # type: ignore
+                        nested_cls_name_ref=fn.nested_schema_name()  # type: ignore
                         if fn.ret_type == VariableType.NESTED
                         else None,
                     )
