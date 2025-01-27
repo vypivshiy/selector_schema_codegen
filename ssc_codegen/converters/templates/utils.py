@@ -37,7 +37,7 @@ class TemplateBindings:
             raise KeyError(msg)
         template = self._bindings.get(key)
         if isinstance(template, str):
-            takes_args = len(re.findall(r'\{.*?\}', template))
+            takes_args = len(re.findall(r"\{.*?\}", template))
             if takes_args != len(args):
                 msg = f"{key.name} binding takes {takes_args} arguments but {len(args)} were given"
                 raise TypeError(msg)
@@ -63,13 +63,19 @@ class TemplateTypeBindings:
     def bindings(self) -> dict["StructType", str | Callable[[str], str]]:
         return self._bindings
 
-    def __setitem__(self, key: "StructType", template: str | Callable[[str], str]) -> None:
+    def __setitem__(
+        self, key: "StructType", template: str | Callable[[str], str]
+    ) -> None:
         self._bindings[key] = template
 
-    def bind(self, key: "StructType", template: str | Callable[[str], str]) -> None:
+    def bind(
+        self, key: "StructType", template: str | Callable[[str], str]
+    ) -> None:
         return self.__setitem__(key, template)
 
-    def __getitem__(self, key: Union["StructType", tuple["StructType", ...]]) -> str:
+    def __getitem__(
+        self, key: Union["StructType", tuple["StructType", ...]]
+    ) -> str:
         if isinstance(key, tuple):
             key, args = key[0], key[1:]
         else:
@@ -79,7 +85,7 @@ class TemplateTypeBindings:
             raise KeyError(msg)
         template = self._bindings.get(key)
         if isinstance(template, str):
-            takes_args = len(re.findall(r'\{.*?\}', template))
+            takes_args = len(re.findall(r"\{.*?\}", template))
             if takes_args != len(args):
                 msg = f"{key.name} binding takes {takes_args} arguments but {len(args)} were given"
                 raise TypeError(msg)

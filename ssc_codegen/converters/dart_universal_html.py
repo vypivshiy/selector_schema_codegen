@@ -91,9 +91,7 @@ def tt_typedef(node: TypeDef):
 # dart API
 @converter.pre(TokenType.STRUCT)
 def tt_struct(node: StructParser) -> str:
-    return (dart.BINDINGS[node.kind, node.name]
-            + " "
-            + dart.START_BRACKET)
+    return dart.BINDINGS[node.kind, node.name] + " " + dart.START_BRACKET
 
 
 @converter.post(TokenType.STRUCT)

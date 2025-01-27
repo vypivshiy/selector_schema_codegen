@@ -44,7 +44,9 @@ from ..ast_ssc import (
     IsEqualExpression,
     IsContainsExpression,
     IsRegexMatchExpression,
-    IsNotEqualExpression, DefaultStart, DefaultEnd,
+    IsNotEqualExpression,
+    DefaultStart,
+    DefaultEnd,
 )
 from ..tokens import TokenType, StructType
 
@@ -147,9 +149,7 @@ def tt_start_parse(node: StartParseFunction) -> str:
             body = js.gen_flat_list_body(node)
         case _:
             raise NotImplementedError("Unknown struct type")
-    return (code
-            + body
-            + js.BRACKET_END)
+    return code + body + js.BRACKET_END
 
 
 @converter.pre(TokenType.EXPR_DEFAULT_START)

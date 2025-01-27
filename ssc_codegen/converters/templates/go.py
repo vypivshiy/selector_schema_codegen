@@ -1,4 +1,5 @@
 """code parts for go codegen"""
+
 from typing import TYPE_CHECKING
 
 from ssc_codegen.converters.utils import (

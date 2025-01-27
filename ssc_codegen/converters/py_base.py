@@ -1,4 +1,5 @@
 """base universal python codegen api"""
+
 from functools import partial
 
 from .base import BaseCodeConverter, left_right_var_names
@@ -35,7 +36,11 @@ from ..ast_ssc import (
     IsEqualExpression,
     IsNotEqualExpression,
     IsContainsExpression,
-    IsRegexMatchExpression, ToInteger, ToListInteger, ToFloat, ToListFloat,
+    IsRegexMatchExpression,
+    ToInteger,
+    ToListInteger,
+    ToFloat,
+    ToListFloat,
 )
 from ..tokens import TokenType, VariableType, StructType
 
@@ -57,37 +62,37 @@ class BasePyCodeConverter(BaseCodeConverter):
         self.pre_definitions[TokenType.EXPR_NESTED] = tt_nested
         self.pre_definitions[TokenType.STRUCT_PRE_VALIDATE] = tt_pre_validate
         self.pre_definitions[TokenType.STRUCT_PARSE_START] = tt_start_parse_pre
-        self.post_definitions[
-            TokenType.STRUCT_PARSE_START
-        ] = tt_start_parse_post
+        self.post_definitions[TokenType.STRUCT_PARSE_START] = (
+            tt_start_parse_post
+        )
 
         self.pre_definitions[TokenType.EXPR_DEFAULT_START] = tt_default_start
         self.pre_definitions[TokenType.EXPR_DEFAULT_END] = tt_default_end
 
         self.pre_definitions[TokenType.EXPR_STRING_FORMAT] = tt_string_format
-        self.pre_definitions[
-            TokenType.EXPR_LIST_STRING_FORMAT
-        ] = tt_string_format_all
+        self.pre_definitions[TokenType.EXPR_LIST_STRING_FORMAT] = (
+            tt_string_format_all
+        )
         self.pre_definitions[TokenType.EXPR_STRING_TRIM] = tt_string_trim
-        self.pre_definitions[
-            TokenType.EXPR_LIST_STRING_TRIM
-        ] = tt_string_trim_all
+        self.pre_definitions[TokenType.EXPR_LIST_STRING_TRIM] = (
+            tt_string_trim_all
+        )
         self.pre_definitions[TokenType.EXPR_STRING_TRIM] = tt_string_trim
-        self.pre_definitions[
-            TokenType.EXPR_LIST_STRING_TRIM
-        ] = tt_string_trim_all
+        self.pre_definitions[TokenType.EXPR_LIST_STRING_TRIM] = (
+            tt_string_trim_all
+        )
         self.pre_definitions[TokenType.EXPR_STRING_LTRIM] = tt_string_ltrim
-        self.pre_definitions[
-            TokenType.EXPR_LIST_STRING_LTRIM
-        ] = tt_string_ltrim_all
+        self.pre_definitions[TokenType.EXPR_LIST_STRING_LTRIM] = (
+            tt_string_ltrim_all
+        )
         self.pre_definitions[TokenType.EXPR_STRING_RTRIM] = tt_string_rtrim
-        self.pre_definitions[
-            TokenType.EXPR_LIST_STRING_RTRIM
-        ] = tt_string_rtrim_all
+        self.pre_definitions[TokenType.EXPR_LIST_STRING_RTRIM] = (
+            tt_string_rtrim_all
+        )
         self.pre_definitions[TokenType.EXPR_STRING_REPLACE] = tt_string_replace
-        self.pre_definitions[
-            TokenType.EXPR_LIST_STRING_REPLACE
-        ] = tt_string_replace_all
+        self.pre_definitions[TokenType.EXPR_LIST_STRING_REPLACE] = (
+            tt_string_replace_all
+        )
         self.pre_definitions[TokenType.EXPR_STRING_SPLIT] = tt_string_split
         self.pre_definitions[TokenType.EXPR_REGEX] = tt_regex
         self.pre_definitions[TokenType.EXPR_REGEX_ALL] = tt_regex_all
@@ -106,8 +111,10 @@ class BasePyCodeConverter(BaseCodeConverter):
         self.pre_definitions[TokenType.TO_FLOAT] = tt_to_float
         self.pre_definitions[TokenType.TO_FLOAT_LIST] = tt_to_list_float
 
+
 def tt_imports(node):
     return py.BINDINGS[node.kind]
+
 
 def tt_typedef(node: TypeDef):
     def _fetch_node_type(node_):
@@ -119,14 +126,18 @@ def tt_typedef(node: TypeDef):
     # DICT schema
     match node.struct_ref.type:
         case StructType.DICT:
-            value_ret = [f for f in node.body if f.name == "__VALUE__"][0].ret_type
+            value_ret = [f for f in node.body if f.name == "__VALUE__"][
+                0
+            ].ret_type
             if node.body[-1].ret_type == VariableType.NESTED:
                 type_ = py.TYPE_PREFIX.format(node.body[-1].nested_class)
             else:
                 type_ = py.TYPES.get(value_ret)
             body = py.TYPE_DICT.format(type_)
         case StructType.FLAT_LIST:
-            value_ret = [f for f in node.body if f.name == "__ITEM__"][0].ret_type
+            value_ret = [f for f in node.body if f.name == "__ITEM__"][
+                0
+            ].ret_type
             if node.body[-1].ret_type == VariableType.NESTED:
                 type_ = py.TYPE_PREFIX.format(node.body[-1].nested_class)
             else:
@@ -135,31 +146,30 @@ def tt_typedef(node: TypeDef):
 
         case StructType.ITEM:
             _dict_body = (
-                    "{"
-                    + ", ".join(f"{f.name!r}: {_fetch_node_type(f)}" for f in node.body)
-                    + "}"
+                "{"
+                + ", ".join(
+                    f"{f.name!r}: {_fetch_node_type(f)}" for f in node.body
+                )
+                + "}"
             )
             body = py.TYPE_ITEM.format(repr(t_name), _dict_body)
         case StructType.LIST:
             item_dict_body = (
-                    "{"
-                    + ", ".join(f"{f.name!r}: {_fetch_node_type(f)}" for f in node.body)
-                    + "}"
+                "{"
+                + ", ".join(
+                    f"{f.name!r}: {_fetch_node_type(f)}" for f in node.body
+                )
+                + "}"
             )
-            item_name = f'{t_name}_ITEM'
-            item_body = (item_name
-                         + ' = '
-                         + py.TYPE_ITEM.format(repr(item_name), item_dict_body))
-            body = (t_name
-                    + " = "
-                    + py.TYPE_LIST.format(item_name)
-                    )
-            return (item_body
-                    + '\n'
-                    + body)
-    return (t_name
-            + ' = '
-            + body)
+            item_name = f"{t_name}_ITEM"
+            item_body = (
+                item_name
+                + " = "
+                + py.TYPE_ITEM.format(repr(item_name), item_dict_body)
+            )
+            body = t_name + " = " + py.TYPE_LIST.format(item_name)
+            return item_body + "\n" + body
+    return t_name + " = " + body
 
 
 def tt_struct(node: StructParser) -> str:
@@ -220,9 +230,9 @@ def tt_start_parse_post(node: StartParseFunction):
     if any(f.name == "__PRE_VALIDATE__" for f in node.body):
         name = MAGIC_METHODS.get("__PRE_VALIDATE__")
         code += (
-                py.INDENT_METHOD_BODY
-                + py.E_CALL_METHOD.format(name, "self._doc")
-                + "\n"
+            py.INDENT_METHOD_BODY
+            + py.E_CALL_METHOD.format(name, "self._doc")
+            + "\n"
         )
 
     match node.type:
@@ -241,10 +251,12 @@ def tt_start_parse_post(node: StartParseFunction):
 
 def tt_default_start(node: DefaultStart) -> str:
     prv, nxt = lr_var_names(variable=node.variable)
-    return (py.INDENT_METHOD_BODY
-            + f"{nxt} = {prv}\n"
-            + py.INDENT_METHOD_BODY
-            + py.BINDINGS[node.kind])
+    return (
+        py.INDENT_METHOD_BODY
+        + f"{nxt} = {prv}\n"
+        + py.INDENT_METHOD_BODY
+        + py.BINDINGS[node.kind]
+    )
 
 
 def tt_default_end(node: DefaultEnd) -> str:
@@ -417,12 +429,7 @@ def tt_is_equal(node: IsEqualExpression) -> str:
     code = py.BINDINGS[node.kind, prv, value, msg]
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return indent + code
-    return (indent
-            + code
-            + "\n"
-            + indent
-            + f"{nxt} = {prv}"
-            )
+    return indent + code + "\n" + indent + f"{nxt} = {prv}"
 
 
 def tt_is_not_equal(node: IsNotEqualExpression) -> str:
@@ -434,12 +441,7 @@ def tt_is_not_equal(node: IsNotEqualExpression) -> str:
     code = py.BINDINGS[node.kind, prv, value, msg]
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return indent + code
-    return (indent
-            + code
-            + "\n"
-            + indent
-            + f"{nxt} = {prv}"
-            )
+    return indent + code + "\n" + indent + f"{nxt} = {prv}"
 
 
 def tt_is_contains(node: IsContainsExpression) -> str:
@@ -452,12 +454,7 @@ def tt_is_contains(node: IsContainsExpression) -> str:
     code = py.BINDINGS[node.kind, item, prv, msg]
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return indent + code
-    return (indent
-            + code
-            + "\n"
-            + indent
-            + f"{nxt} = {prv}"
-            )
+    return indent + code + "\n" + indent + f"{nxt} = {prv}"
 
 
 def tt_is_regex(node: IsRegexMatchExpression) -> str:
@@ -470,12 +467,7 @@ def tt_is_regex(node: IsRegexMatchExpression) -> str:
     code = py.BINDINGS[node.kind, pattern, prv, msg]
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return indent + code
-    return (indent
-            + code
-            + "\n"
-            + indent
-            + f"{nxt} = {prv}"
-            )
+    return indent + code + "\n" + indent + f"{nxt} = {prv}"
 
 
 def tt_to_int(node: ToInteger) -> str:

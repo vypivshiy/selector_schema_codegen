@@ -17,7 +17,9 @@ from .ast_ssc import (
     NoReturnExpression,
     CallStructFunctionExpression,
     BaseExpression,
-    TypeDef, DefaultStart, DefaultEnd,
+    TypeDef,
+    DefaultStart,
+    DefaultEnd,
 )
 from .consts import M_SPLIT_DOC, M_VALUE, M_KEY, M_ITEM, SIGNATURE_MAP
 from .document import BaseDocument
@@ -51,9 +53,9 @@ def _extract_schemas(module: ModuleType) -> list[Type[BaseSchema]]:
         obj
         for name, obj in module.__dict__.items()
         if not name.startswith("__")
-           and hasattr(obj, "__mro__")
-           and BaseSchema in obj.__mro__
-           and not _is_template_cls(obj)
+        and hasattr(obj, "__mro__")
+        and BaseSchema in obj.__mro__
+        and not _is_template_cls(obj)
     ]
 
 
@@ -76,8 +78,8 @@ def check_field_expr(field: BaseDocument):
 
 
 def _patch_non_required_attributes(
-        schema: Type[BaseSchema],
-        *fields: M_SPLIT_DOC | M_ITEM | M_KEY | M_VALUE | str,
+    schema: Type[BaseSchema],
+    *fields: M_SPLIT_DOC | M_ITEM | M_KEY | M_VALUE | str,
 ) -> Type[BaseSchema]:
     for f in fields:
         if getattr(schema, f, MISSING_FIELD) == MISSING_FIELD:
@@ -122,7 +124,7 @@ def check_schema(schema: Type[BaseSchema]) -> Type[BaseSchema]:
 
 
 def _fill_stack_variables(
-        stack: list[BaseExpression], *, ret_expr: bool = True
+    stack: list[BaseExpression], *, ret_expr: bool = True
 ) -> list[BaseExpression]:
     tmp_stack = stack.copy()
     ret_type = tmp_stack[-1].ret_type
@@ -145,10 +147,16 @@ def _fill_stack_variables(
                 case VariableType.LIST_FLOAT:
                     ret_type = VariableType.OPTIONAL_LIST_FLOAT
                 # ignore cast
-                case t if t in (VariableType.NULL, VariableType.ANY, VariableType.NESTED):
+                case t if t in (
+                    VariableType.NULL,
+                    VariableType.ANY,
+                    VariableType.NESTED,
+                ):
                     pass
                 case _:
-                    raise TypeError(f"Unknown variable return type: {ret_type.name} {ret_type.name}")
+                    raise TypeError(
+                        f"Unknown variable return type: {ret_type.name} {ret_type.name}"
+                    )
 
     expr_count = len(tmp_stack)
     for i, expr in enumerate(tmp_stack):
@@ -158,13 +166,12 @@ def _fill_stack_variables(
         var = Variable(num=expr_count - 1, count=expr_count, type=ret_type)
         if first_expr.kind == TokenType.EXPR_DEFAULT_START:
             # before TokenType.EXPR_DEFAULT_END push expr
-            tmp_stack.insert(len(tmp_stack) - 1,
-                             ReturnExpression(variable=var, ret_type=ret_type)
-                             )
-        else:
-            tmp_stack.append(
-                ReturnExpression(variable=var, ret_type=ret_type)
+            tmp_stack.insert(
+                len(tmp_stack) - 1,
+                ReturnExpression(variable=var, ret_type=ret_type),
             )
+        else:
+            tmp_stack.append(ReturnExpression(variable=var, ret_type=ret_type))
     else:
         # actual used in __PRE_VALIDATE__, not need check default expr
         tmp_stack.append(
@@ -198,19 +205,18 @@ def build_fields_signature(raw_signature: Any) -> str:
 
 
 def build_ast_struct(
-        schema: Type[BaseSchema],
-        *,
-        docstring_class_top: bool = False,
-        css_to_xpath: bool = False,
-        xpath_to_css: bool = False,
+    schema: Type[BaseSchema],
+    *,
+    docstring_class_top: bool = False,
+    css_to_xpath: bool = False,
+    xpath_to_css: bool = False,
 ) -> StructParser:
     schema = check_schema(schema)
     fields = schema.__get_mro_fields__()
     raw_signature = schema.__class_signature__()
-    doc = ((schema.__doc__ or "")
-           + "\n\n"
-           + build_fields_signature(raw_signature)
-           )
+    doc = (
+        (schema.__doc__ or "") + "\n\n" + build_fields_signature(raw_signature)
+    )
     start_parse_body: list[CallStructFunctionExpression] = []
     struct_parse_functions = []
     for name, field in fields.items():
@@ -221,9 +227,13 @@ def build_ast_struct(
             field = convert_xpath_to_css(field)
         match name:
             case "__PRE_VALIDATE__":
-                extract_pre_validate(field, name, start_parse_body, struct_parse_functions)
+                extract_pre_validate(
+                    field, name, start_parse_body, struct_parse_functions
+                )
             case "__SPLIT_DOC__":
-                extract_split_doc(field, name, start_parse_body, struct_parse_functions)
+                extract_split_doc(
+                    field, name, start_parse_body, struct_parse_functions
+                )
             case _:
                 # insert default instruction API
                 extract_default_expr(field)
@@ -263,11 +273,8 @@ def build_ast_struct(
 def extract_default_expr(field):
     if field.stack[0].kind == TokenType.EXPR_DEFAULT:
         tt_def_val = field.stack.pop(0)
-        field.stack.insert(0,
-                           DefaultStart(value=tt_def_val.value))
-        field.stack.append(
-            DefaultEnd(value=tt_def_val.value)
-        )
+        field.stack.insert(0, DefaultStart(value=tt_def_val.value))
+        field.stack.append(DefaultEnd(value=tt_def_val.value))
 
 
 def extract_split_doc(f, k, start_parse_body, struct_parse_functions):
@@ -304,14 +311,16 @@ def _check_split_doc(f):
 
 
 def build_ast_module(
-        path: str | Path[str],
-        *,
-        docstring_class_top: bool = False,
-        css_to_xpath: bool = False,
-        xpath_to_css: bool = False,
+    path: str | Path[str],
+    *,
+    docstring_class_top: bool = False,
+    css_to_xpath: bool = False,
+    xpath_to_css: bool = False,
 ) -> ModuleProgram:
     if css_to_xpath and xpath_to_css:
-        raise AttributeError("Should be chosen one variant (css_to_xpath OR xpath_to_css)")
+        raise AttributeError(
+            "Should be chosen one variant (css_to_xpath OR xpath_to_css)"
+        )
     if isinstance(path, str):
         path = Path(path)
     module = ModuleType("_")

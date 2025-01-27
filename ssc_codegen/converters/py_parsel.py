@@ -16,13 +16,16 @@ from ..ast_ssc import (
     HtmlXpathExpression,
     HtmlXpathAllExpression,
     IsCssExpression,
-    IsXPathExpression, PreValidateFunction,
+    IsXPathExpression,
+    PreValidateFunction,
 )
 from ..tokens import TokenType, StructType, VariableType
 
 # setup converter
 BINDINGS_POST = TemplateBindings()
-BINDINGS_POST[TokenType.STRUCT_INIT] = "self._doc=Selector(document) if isinstance(document, str) else document"
+BINDINGS_POST[TokenType.STRUCT_INIT] = (
+    "self._doc=Selector(document) if isinstance(document, str) else document"
+)
 BINDINGS_POST[TokenType.IMPORTS] = "from parsel import Selector, SelectorList"
 
 # extend default bindings
@@ -197,12 +200,7 @@ def tt_is_css(node: IsCssExpression):
     code = py.BINDINGS[node.kind, prv, q, msg]
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return indent + code
-    return (indent
-            + code
-            + "\n"
-            + indent
-            + f"{nxt} = {prv}"
-            )
+    return indent + code + "\n" + indent + f"{nxt} = {prv}"
 
 
 @converter.pre(TokenType.IS_XPATH)
@@ -215,9 +213,4 @@ def tt_is_xpath(node: IsXPathExpression):
     code = py.BINDINGS[node.kind, prv, q, msg]
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return indent + code
-    return (indent
-            + code
-            + "\n"
-            + indent
-            + f"{nxt} = {prv}"
-            )
+    return indent + code + "\n" + indent + f"{nxt} = {prv}"

@@ -24,8 +24,8 @@ from ..tokens import TokenType, StructType, VariableType
 
 POST_BINDINGS = TemplateBindings()
 POST_BINDINGS[TokenType.IMPORTS] = (
-        "from scrapy.selector import Selector, SelectorList\n"
-        + "from scrapy.http.response import Response"
+    "from scrapy.selector import Selector, SelectorList\n"
+    + "from scrapy.http.response import Response"
 )
 
 py.BINDINGS[TokenType.EXPR_CSS] = "{} = {}.css({})"
@@ -43,12 +43,12 @@ py.BINDINGS[TokenType.IS_XPATH] = "assert {}.xpath({}), {}"
 
 # https://docs.scrapy.org/en/latest/topics/selectors.html#constructing-selectors
 POST_BINDINGS[TokenType.STRUCT_INIT] = (
-        py.INDENT_METHOD_BODY
-        + "if isinstance(document, Response): self._doc = document.selector  # type: ignore\n"
-        + py.INDENT_METHOD_BODY
-        + "elif isinstance(document, str): self._doc = Selector(document)  # type: ignore\n"
-        + py.INDENT_METHOD_BODY
-        + "else: self._doc = document\n"
+    py.INDENT_METHOD_BODY
+    + "if isinstance(document, Response): self._doc = document.selector  # type: ignore\n"
+    + py.INDENT_METHOD_BODY
+    + "elif isinstance(document, str): self._doc = Selector(document)  # type: ignore\n"
+    + py.INDENT_METHOD_BODY
+    + "else: self._doc = document\n"
 )
 
 converter = BasePyCodeConverter()
@@ -198,11 +198,7 @@ def tt_is_css(node: IsCssExpression) -> str:
     code = py.BINDINGS[node.kind, prv, q, msg]
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return indent + code
-    return (indent
-            + code
-            + "\n"
-            + indent
-            + f"{nxt} = {prv}")
+    return indent + code + "\n" + indent + f"{nxt} = {prv}"
 
 
 @converter.pre(TokenType.IS_XPATH)
@@ -215,8 +211,4 @@ def tt_is_xpath(node: IsXPathExpression) -> str:
     code = py.BINDINGS[node.kind, prv, q, msg]
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return indent + code
-    return (indent
-            + code
-            + "\n"
-            + indent
-            + f"{nxt} = {prv}")
+    return indent + code + "\n" + indent + f"{nxt} = {prv}"

@@ -22,8 +22,12 @@ from ..ast_ssc import (
 from ..tokens import TokenType, StructType, VariableType
 
 POST_BINDINGS = TemplateBindings()
-POST_BINDINGS[TokenType.IMPORTS] = "from selectolax.parser import HTMLParser, Node"
-POST_BINDINGS[TokenType.STRUCT_INIT] = "self._doc=HTMLParser(document) if isinstance(document, str) else document"
+POST_BINDINGS[TokenType.IMPORTS] = (
+    "from selectolax.parser import HTMLParser, Node"
+)
+POST_BINDINGS[TokenType.STRUCT_INIT] = (
+    "self._doc=HTMLParser(document) if isinstance(document, str) else document"
+)
 
 py.BINDINGS[TokenType.EXPR_CSS] = "{} = {}.css_first({})"
 py.BINDINGS[TokenType.EXPR_CSS_ALL] = "{} = {}.css({})"
@@ -64,7 +68,12 @@ def tt_pre_validate(node: PreValidateFunction) -> str:
 @converter.pre(TokenType.STRUCT_PART_DOCUMENT)
 def tt_part_document(node: PartDocFunction) -> str:
     name = py.MAGIC_METHODS_NAME.get(node.name)
-    return py.INDENT_METHOD + py.BINDINGS[node.kind, name, "Union[str, HTMLParser, Node]", "List[Node]"]
+    return (
+        py.INDENT_METHOD
+        + py.BINDINGS[
+            node.kind, name, "Union[str, HTMLParser, Node]", "List[Node]"
+        ]
+    )
 
 
 @converter.pre(TokenType.STRUCT_FIELD)
@@ -160,11 +169,7 @@ def tt_is_css(node: IsCssExpression) -> str:
     code = py.BINDINGS[node.kind, prv, q, msg]
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return indent + code
-    return (indent
-            + code
-            + '\n'
-            + indent
-            + f"{nxt} = {prv}")
+    return indent + code + "\n" + indent + f"{nxt} = {prv}"
 
 
 @converter.pre(TokenType.EXPR_XPATH)

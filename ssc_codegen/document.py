@@ -1,4 +1,5 @@
 """high-level AST builder interface"""
+
 import re
 from typing import Optional, Type
 
@@ -41,7 +42,11 @@ from .ast_ssc import (
     IsNotEqualExpression,
     IsContainsExpression,
     IsRegexMatchExpression,
-    NestedExpression, ToInteger, ToListInteger, ToFloat, ToListFloat,
+    NestedExpression,
+    ToInteger,
+    ToListInteger,
+    ToFloat,
+    ToListFloat,
 )
 from .schema import BaseSchema
 from .selector_utils import validate_css_query, validate_xpath_query

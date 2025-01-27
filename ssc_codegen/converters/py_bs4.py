@@ -22,10 +22,13 @@ from ..ast_ssc import (
 from ..tokens import TokenType, StructType, VariableType
 
 POST_BINDINGS = TemplateBindings()
-POST_BINDINGS[TokenType.STRUCT_INIT] = ("self._doc=BeautifulSoup(document, 'lxml')"
-                                        + " if isinstance(document, str) else document"
-                                        )
-POST_BINDINGS[TokenType.IMPORTS] = "from bs4 import BeautifulSoup, ResultSet, Tag  # noqa (for typing)"
+POST_BINDINGS[TokenType.STRUCT_INIT] = (
+    "self._doc=BeautifulSoup(document, 'lxml')"
+    + " if isinstance(document, str) else document"
+)
+POST_BINDINGS[TokenType.IMPORTS] = (
+    "from bs4 import BeautifulSoup, ResultSet, Tag  # noqa (for typing)"
+)
 
 BS4_INIT = "self._doc=BeautifulSoup(document, 'lxml') if isinstance(document, str) else document"
 BS4_IMPORTS = (
@@ -39,8 +42,12 @@ py.BINDINGS[TokenType.EXPR_TEXT_ALL] = "{} = [e.text for e in {}]"
 
 # bs4 auto convert multiattr values to list
 # most libs return attr value as string, remove this feature
-py.BINDINGS[TokenType.EXPR_ATTR] = "{} = {}[{}] if isinstance({}[{}], str) else ' '.join({}[{}])"
-py.BINDINGS[TokenType.EXPR_ATTR_ALL] = "{} = [e[{}] if isinstance(e[{}], str) else ' '.join(e[{}]) for e in {}]"
+py.BINDINGS[TokenType.EXPR_ATTR] = (
+    "{} = {}[{}] if isinstance({}[{}], str) else ' '.join({}[{}])"
+)
+py.BINDINGS[TokenType.EXPR_ATTR_ALL] = (
+    "{} = [e[{}] if isinstance(e[{}], str) else ' '.join(e[{}]) for e in {}]"
+)
 
 # maybe returns None
 py.BINDINGS[TokenType.EXPR_RAW] = "{} = str({}) if {} else {}"
@@ -54,7 +61,10 @@ converter = BasePyCodeConverter()
 
 @converter.pre(TokenType.STRUCT_INIT)
 def tt_init(node) -> str:
-    return py.INDENT_METHOD + py.BINDINGS[node.kind, "Union[str, BeautifulSoup, Tag]"]
+    return (
+        py.INDENT_METHOD
+        + py.BINDINGS[node.kind, "Union[str, BeautifulSoup, Tag]"]
+    )
 
 
 @converter.post(TokenType.STRUCT_INIT)
@@ -177,11 +187,7 @@ def tt_is_css(node: IsCssExpression):
     code = py.BINDINGS[node.kind, prv, q, msg]
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return indent + code
-    return (indent
-            + code
-            + "\n"
-            + indent
-            + f"{nxt} = {prv}")
+    return indent + code + "\n" + indent + f"{nxt} = {prv}"
 
 
 @converter.pre(TokenType.EXPR_XPATH)

@@ -33,15 +33,15 @@ BINDINGS[TokenType.STRUCT] = "class {} "
 def _cls_init(cls_name: str) -> str:  # noqa
     code = "late final Document selector;"
     code += (
-            cls_name
-            + "(String rawDocument) { selector = html.parseHtmlDocument(rawDocument); }"
+        cls_name
+        + "(String rawDocument) { selector = html.parseHtmlDocument(rawDocument); }"
     )
     code += (
-            cls_name + ".fromDocument(Document document) {selector = document; }"
+        cls_name + ".fromDocument(Document document) {selector = document; }"
     )
     code += (
-            cls_name
-            + ".fromElement(LIElement element) { selector = html.parseHtmlDocument(element.innerHtml as String); }"
+        cls_name
+        + ".fromElement(LIElement element) { selector = html.parseHtmlDocument(element.innerHtml as String); }"
     )
     return code
 
@@ -53,9 +53,9 @@ BINDINGS[TokenType.DOCSTRING] = lambda docstring: "\n".join(
 
 # IN CURRENT LANGUAGE HAVE THIS STABLE PARSER LIB ONLY
 BINDINGS[TokenType.IMPORTS] = (
-        "import 'dart:core';\n"
-        + "import 'package:universal_html/html.dart' show Document, LIElement;\n"
-        + "import 'package:universal_html/parsing.dart' as html;"
+    "import 'dart:core';\n"
+    + "import 'package:universal_html/html.dart' show Document, LIElement;\n"
+    + "import 'package:universal_html/parsing.dart' as html;"
 )
 BINDINGS[TokenType.EXPR_RETURN] = "return {};"
 BINDINGS[TokenType.EXPR_NO_RETURN] = "return null;"
@@ -76,27 +76,47 @@ BINDINGS[TokenType.STRUCT_FIELD] = "_parse{}({})"
 BINDINGS[TokenType.STRUCT_PARSE_START] = "{} {}()"
 
 BINDINGS[TokenType.EXPR_DEFAULT_START] = lambda: "try {"
-BINDINGS[TokenType.EXPR_DEFAULT_END] = lambda value: "} catch(_){\n" + f"return {value};" + "}"
+BINDINGS[TokenType.EXPR_DEFAULT_END] = (
+    lambda value: "} catch(_){\n" + f"return {value};" + "}"
+)
 # string
 BINDINGS[TokenType.EXPR_STRING_FORMAT] = "var {} = {};"
 BINDINGS[TokenType.EXPR_LIST_STRING_FORMAT] = "var {} = {}.map((e) => {});"
-BINDINGS[TokenType.EXPR_STRING_TRIM] = "var {} = {}.replaceFirst(RegExp({}), "").replaceFirst(RegExp({}), "");"
-BINDINGS[TokenType.EXPR_LIST_STRING_TRIM] = (
-        'var {} = {}.map((e) => e.replaceFirst(RegExp({}), ""'
-        + ').replaceFirst(RegExp({}), ""));'
+BINDINGS[TokenType.EXPR_STRING_TRIM] = (
+    "var {} = {}.replaceFirst(RegExp({}), ).replaceFirst(RegExp({}), );"
 )
-BINDINGS[TokenType.EXPR_STRING_LTRIM] = "var {} = {}.replaceFirst(RegExp({}), "");"
-BINDINGS[TokenType.EXPR_LIST_STRING_LTRIM] = "var {} = {}.map((e) => e.replaceFirst(RegExp({}), ""));"
-BINDINGS[TokenType.EXPR_STRING_RTRIM] = "var {} = {}.replaceFirst(RegExp({}), "");"
-BINDINGS[TokenType.EXPR_LIST_STRING_RTRIM] = "var {} = {}.map((e) => e.replaceFirst(RegExp({}), ""));"
+BINDINGS[TokenType.EXPR_LIST_STRING_TRIM] = (
+    'var {} = {}.map((e) => e.replaceFirst(RegExp({}), ""'
+    + ').replaceFirst(RegExp({}), ""));'
+)
+BINDINGS[TokenType.EXPR_STRING_LTRIM] = (
+    "var {} = {}.replaceFirst(RegExp({}), );"
+)
+BINDINGS[TokenType.EXPR_LIST_STRING_LTRIM] = (
+    "var {} = {}.map((e) => e.replaceFirst(RegExp({}), ));"
+)
+BINDINGS[TokenType.EXPR_STRING_RTRIM] = (
+    "var {} = {}.replaceFirst(RegExp({}), );"
+)
+BINDINGS[TokenType.EXPR_LIST_STRING_RTRIM] = (
+    "var {} = {}.map((e) => e.replaceFirst(RegExp({}), ));"
+)
 BINDINGS[TokenType.EXPR_STRING_REPLACE] = "var {} = {}.replaceAll({}, {});"
-BINDINGS[TokenType.EXPR_LIST_STRING_REPLACE] = "var {} = {}.map((e) => e.replaceAll({}, {}));"
+BINDINGS[TokenType.EXPR_LIST_STRING_REPLACE] = (
+    "var {} = {}.map((e) => e.replaceAll({}, {}));"
+)
 BINDINGS[TokenType.EXPR_STRING_SPLIT] = "var {} = {}.split({});"
 # regex
-BINDINGS[TokenType.EXPR_REGEX] = "var {} = RegExp({}).firstMatch({})?.group({})!;"
-BINDINGS[TokenType.EXPR_REGEX_ALL] = "var {} = RegExp({}).allMatches({}).map((e) => e.group(1)!).toList();"
+BINDINGS[TokenType.EXPR_REGEX] = (
+    "var {} = RegExp({}).firstMatch({})?.group({})!;"
+)
+BINDINGS[TokenType.EXPR_REGEX_ALL] = (
+    "var {} = RegExp({}).allMatches({}).map((e) => e.group(1)!).toList();"
+)
 BINDINGS[TokenType.EXPR_REGEX_SUB] = "var {} = {}.replaceAll(RegExp({}), {});"
-BINDINGS[TokenType.EXPR_LIST_REGEX_SUB] = "var {} = {}.map((e) => e.replaceAll(RegExp({}), {})));"
+BINDINGS[TokenType.EXPR_LIST_REGEX_SUB] = (
+    "var {} = {}.map((e) => e.replaceAll(RegExp({}), {})));"
+)
 BINDINGS[TokenType.EXPR_LIST_STRING_INDEX] = "var {} = {}[{}];"
 BINDINGS[TokenType.EXPR_LIST_DOCUMENT_INDEX] = "var {} = {}[{}];"
 BINDINGS[TokenType.EXPR_LIST_JOIN] = "var {} = {}.join({});"
@@ -104,7 +124,9 @@ BINDINGS[TokenType.EXPR_LIST_JOIN] = "var {} = {}.join({});"
 BINDINGS[TokenType.IS_EQUAL] = "assert({} == {}, {});"
 BINDINGS[TokenType.IS_NOT_EQUAL] = "assert({} != {}, {});"
 BINDINGS[TokenType.IS_CONTAINS] = "assert({} != null && {}.contains({}), {});"
-BINDINGS[TokenType.IS_REGEX_MATCH] = "assert({} != null && RegExp({}).firstMatch({}) != null, {});"
+BINDINGS[TokenType.IS_REGEX_MATCH] = (
+    "assert({} != null && RegExp({}).firstMatch({}) != null, {});"
+)
 
 # universal html API
 BINDINGS[TokenType.EXPR_CSS] = "var {} = {}.querySelector({});"
@@ -119,10 +141,15 @@ def _expr_raw(var_num: int, nxt: str, prv: str) -> str:
         return f"var {nxt} = {prv}.querySelector('html').innerHtml;"
     return f"var {nxt} = {prv}.innerHtml;"
 
+
 BINDINGS[TokenType.EXPR_RAW] = _expr_raw
-BINDINGS[TokenType.EXPR_RAW_ALL] = "var {} = {}.map((e) => e.innerHtml).toList();"
+BINDINGS[TokenType.EXPR_RAW_ALL] = (
+    "var {} = {}.map((e) => e.innerHtml).toList();"
+)
 BINDINGS[TokenType.EXPR_ATTR] = "var {} = {}.attributes[{}];"
-BINDINGS[TokenType.EXPR_ATTR_ALL] = "var {} = {}.map((e) => e.attributes[{}]).toList();"
+BINDINGS[TokenType.EXPR_ATTR_ALL] = (
+    "var {} = {}.map((e) => e.attributes[{}]).toList();"
+)
 BINDINGS[TokenType.IS_CSS] = "assert({}.querySelector({}), {});"
 TYPE_PREFIX = "T{}"
 TYPEDEF = "typedef {} = {}; "
@@ -174,7 +201,7 @@ def typedef_item_record(node: "TypeDef") -> str:
             type_ = TYPES.get(f.ret_type)
         record_body[f.name] = type_
     record_code = (
-            "({" + ", ".join(f"{v} {k}" for k, v in record_body.items()) + "})"
+        "({" + ", ".join(f"{v} {k}" for k, v in record_body.items()) + "})"
     )
     return TYPEDEF.format(t_name, record_code)
 
@@ -190,7 +217,7 @@ def typedef_list_record(node: "TypeDef") -> str:
         else:
             type_ = TYPES.get(field.ret_type)
     record_code = (
-            "({" + ", ".join(f"{v} {k}" for k, v in record_body.items()) + "})"
+        "({" + ", ".join(f"{v} {k}" for k, v in record_body.items()) + "})"
     )
     return TYPEDEF.format(t_name, record_code)
 
@@ -205,10 +232,10 @@ def parse_item_code(node: "StartParseFunction") -> str:
         name = to_upper_camel_case(f.name)
         body_fields[f.name] = FN_PARSE.format(name, PARSE_VAR)
     body = (
-            f"{t_name} item = ("
-            + ", ".join(f"{k}: {v}" for k, v in body_fields.items())
-            + ");"
-            + RET.format("item")
+        f"{t_name} item = ("
+        + ", ".join(f"{k}: {v}" for k, v in body_fields.items())
+        + ");"
+        + RET.format("item")
     )
     return body
 
@@ -259,9 +286,9 @@ def parse_flat_list_code(node: "StartParseFunction") -> str:
     part_m = MAGIC_METHODS.get("__SPLIT_DOC__")
     item_m = MAGIC_METHODS.get("__ITEM__")
 
-    return (t_name + " items = [];"
-            + f"for (var e in {part_call}) " + START_BRACKET
-        )
+    return (
+        t_name + " items = [];" + f"for (var e in {part_call}) " + START_BRACKET
+    )
 
     part_call = f"{part_m}({PARSE_VAR})"
     item_call = FN_PARSE.format(item_m, "e")

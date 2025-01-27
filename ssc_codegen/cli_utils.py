@@ -51,8 +51,10 @@ class ConverterLike(Protocol):
 
     def set_debug_prefix(self, comment_prefix: str) -> None:
         pass
+
     def disable_debug(self) -> None:
         pass
+
     def convert_program(
         self, ast_program: "ModuleProgram", comment: str = ""
     ) -> list[str]:
@@ -67,7 +69,9 @@ def import_converter(converter_name: str) -> ConverterLike:
 
 
 # ARG cb
-def cb_check_ssc_files(files: list[Path] | Generator[Path, None, None]) -> list[Path]:
+def cb_check_ssc_files(
+    files: list[Path] | Generator[Path, None, None],
+) -> list[Path]:
     tmp_files = []
     for f in files:
         if f.is_dir():
@@ -77,7 +81,7 @@ def cb_check_ssc_files(files: list[Path] | Generator[Path, None, None]) -> list[
         elif not f.is_file():
             raise BadParameter(f"'{f.name}' is not file")
         # TODO: change extension???
-        elif f.suffix == '.py':
+        elif f.suffix == ".py":
             tmp_files.append(f)
     return tmp_files
 

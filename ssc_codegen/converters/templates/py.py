@@ -1,7 +1,11 @@
 """code parts for python codegen"""
+
 from typing import TYPE_CHECKING
 
-from ssc_codegen.converters.templates.utils import TemplateBindings, TemplateTypeBindings
+from ssc_codegen.converters.templates.utils import (
+    TemplateBindings,
+    TemplateTypeBindings,
+)
 from ssc_codegen.tokens import VariableType, TokenType, StructType
 
 if TYPE_CHECKING:
@@ -37,10 +41,10 @@ BINDINGS = TemplateBindings()
 # build-ins
 BINDINGS[TokenType.DOCSTRING] = '"""{}"""'  # value
 BINDINGS[TokenType.IMPORTS] = (
-        "from __future__ import annotations\n"
-        + "import re\n"
-        + "from typing import List, Dict, TypedDict, Union, Optional\n"
-        + "from contextlib import suppress\n"
+    "from __future__ import annotations\n"
+    + "import re\n"
+    + "from typing import List, Dict, TypedDict, Union, Optional\n"
+    + "from contextlib import suppress\n"
 )
 BINDINGS[TokenType.EXPR_RETURN] = "return {}"  # nxt val
 BINDINGS[TokenType.EXPR_NO_RETURN] = "return"
@@ -56,8 +60,12 @@ BINDINGS[TokenType.EXPR_DEFAULT_START] = "with suppress(Exception):"
 BINDINGS[TokenType.EXPR_DEFAULT_END] = "return {}"  # same as EXPR_RET
 
 # string operations
-BINDINGS[TokenType.EXPR_STRING_FORMAT] = "{} = {}.format({}) if {} else {}"  # nxt = prv, template, prv, prv
-BINDINGS[TokenType.EXPR_LIST_STRING_FORMAT] = "{} = [{}.format(e) for e in {} if e]"
+BINDINGS[TokenType.EXPR_STRING_FORMAT] = (
+    "{} = {}.format({}) if {} else {}"  # nxt = prv, template, prv, prv
+)
+BINDINGS[TokenType.EXPR_LIST_STRING_FORMAT] = (
+    "{} = [{}.format(e) for e in {} if e]"
+)
 BINDINGS[TokenType.EXPR_STRING_TRIM] = "{} = {}.strip({})"
 BINDINGS[TokenType.EXPR_LIST_STRING_TRIM] = "{} = [e.strip({}) for e in {}]"
 BINDINGS[TokenType.EXPR_STRING_LTRIM] = "{} = {}.lstrip({})"
@@ -65,7 +73,9 @@ BINDINGS[TokenType.EXPR_LIST_STRING_LTRIM] = "{} = [e.lstrip({}) for e in {}]"
 BINDINGS[TokenType.EXPR_STRING_RTRIM] = "{} = {}.rstrip({})"
 BINDINGS[TokenType.EXPR_LIST_STRING_RTRIM] = "{} = [e.rstrip({}) for e in {}]"
 BINDINGS[TokenType.EXPR_STRING_REPLACE] = "{} = {}.replace({}, {})"
-BINDINGS[TokenType.EXPR_LIST_STRING_REPLACE] = "{} = [e.replace({}, {}) for e in {}]"
+BINDINGS[TokenType.EXPR_LIST_STRING_REPLACE] = (
+    "{} = [e.replace({}, {}) for e in {}]"
+)
 BINDINGS[TokenType.EXPR_STRING_SPLIT] = "{} = {}.split({})"
 # regex
 BINDINGS[TokenType.EXPR_REGEX] = "{} = re.search({}, {})[{}]"
@@ -97,10 +107,12 @@ TYPE_BINDINGS[StructType.LIST] = "List[{}]"
 
 TOKEN_TEMPLATES = {
     TokenType.DOCSTRING: '"""{}"""',
-    TokenType.IMPORTS: ("from __future__ import annotations\n"
-                        + "import re\n"
-                        + "from typing import List, Dict, TypedDict, Union, Optional\n"
-                        + "from contextlib import suppress\n"),
+    TokenType.IMPORTS: (
+        "from __future__ import annotations\n"
+        + "import re\n"
+        + "from typing import List, Dict, TypedDict, Union, Optional\n"
+        + "from contextlib import suppress\n"
+    ),
     TokenType.EXPR_RETURN: "return {}",
     TokenType.EXPR_NO_RETURN: "return",
 }
@@ -129,15 +141,15 @@ def suggest_indent(node) -> str:
 
 def gen_item_body(node: "StartParseFunction") -> str:
     body = (
-            "{"
-            + ", ".join(
-        [
-            f'"{f.name}": ' + E_CALL_PARSE.format(f.name, "self._doc")
-            for f in node.body
-            if not MAGIC_METHODS_NAME.get(f.name)
-        ]
-    )
-            + "}"
+        "{"
+        + ", ".join(
+            [
+                f'"{f.name}": ' + E_CALL_PARSE.format(f.name, "self._doc")
+                for f in node.body
+                if not MAGIC_METHODS_NAME.get(f.name)
+            ]
+        )
+        + "}"
     )
     return body
 
