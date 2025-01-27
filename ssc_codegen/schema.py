@@ -1,7 +1,7 @@
-from typing import TYPE_CHECKING, TypeAlias, Union, Type, Any
+from typing import TYPE_CHECKING, Any, Type, TypeAlias, Union
 
-from .tokens import StructType, VariableType, TokenType
 from .consts import RESERVED_METHODS
+from .tokens import StructType, TokenType, VariableType
 
 if TYPE_CHECKING:
     from .document import BaseDocument
@@ -13,7 +13,7 @@ class MISSING_FIELD(object):  # noqa
 
 EXCLUDE_KEY = object()
 
-_T_OPT_FIELD: TypeAlias = Union["BaseDocument", MISSING_FIELD]
+_T_OPT_FIELD: TypeAlias = Union["BaseDocument", Type[MISSING_FIELD]]
 
 
 class BaseSchema:
@@ -42,27 +42,33 @@ class BaseSchema:
     def _get_nested_signature(field: "BaseDocument") -> "BaseSchema":
         return [e for e in field.stack if e.kind == TokenType.EXPR_NESTED][
             0
-        ].schema_cls  # noqa
+        ].schema_cls  # type: ignore
 
     @classmethod
-    def __class_signature__(cls):
+    def __class_signature__(cls) -> dict[str, Any] | list[str | Any]:
+        """raw API interface for represent parsed items signature
+
+        used for auto provide docstring API
+        """
         if cls.__SIGNATURE__ != NotImplemented:
             return cls.__SIGNATURE__
-        if cls.__SCHEMA_TYPE__ == StructType.FLAT_LIST:
-            signature = cls._get_flat_list_signature()
-        elif cls.__SCHEMA_TYPE__ == StructType.DICT:
-            signature = cls._get_dict_signature()
-        elif cls.__SCHEMA_TYPE__ == StructType.ITEM:
-            signature = cls._get_item_signature()
-        elif cls.__SCHEMA_TYPE__ == StructType.LIST:
-            signature = cls._get_list_signature()
-        else:
-            # code unreached
-            raise TypeError("Unknown schema type")
+
+        match cls.__SCHEMA_TYPE__:
+            case StructType.FLAT_LIST:
+                signature = cls._get_flat_list_signature()
+            case StructType.DICT:
+                signature = cls._get_dict_signature()
+            case StructType.LIST:
+                signature = cls._get_list_signature()
+            case StructType.ITEM:
+                signature = cls._get_item_signature()
+            case _:
+                # code unreached
+                raise TypeError("Unknown schema type")
         return signature
 
     @classmethod
-    def _get_list_signature(cls):
+    def _get_list_signature(cls):  # type: ignore
         signature = {}
         for k, v in cls.__get_mro_fields__().items():
             if k in cls.__ALLOWED_MAGIC__:
@@ -77,7 +83,7 @@ class BaseSchema:
         return signature
 
     @classmethod
-    def _get_item_signature(cls):
+    def _get_item_signature(cls):  # type: ignore
         signature = {}
         for k, v in cls.__get_mro_fields__().items():
             if k in cls.__ALLOWED_MAGIC__:
@@ -91,12 +97,13 @@ class BaseSchema:
         return signature
 
     @classmethod
-    def _get_dict_signature(cls):
+    def _get_dict_signature(cls):  # type: ignore
         signature = {}
-        field_k, field_v = cls.__KEY__, cls.__VALUE__
+        # _field_k always string
+        _field_k, field_v = cls.__KEY__, cls.__VALUE__
         if field_v.stack_last_ret == VariableType.NESTED:
             nested_class = [
-                e for e in field.stack if e.kind == TokenType.EXPR_NESTED
+                e for e in field_v.stack if e.kind == TokenType.EXPR_NESTED
             ][0].schema_cls  # noqa
             signature["<K>"] = nested_class.__class_signature__()
         else:
@@ -105,7 +112,7 @@ class BaseSchema:
         return signature
 
     @classmethod
-    def _get_flat_list_signature(cls):
+    def _get_flat_list_signature(cls):  # type: ignore
         signature = []
         field = cls.__ITEM__
         if field.stack_last_ret == VariableType.NESTED:
@@ -118,6 +125,10 @@ class BaseSchema:
 
     @classmethod
     def __schema_mro__(cls) -> tuple[Type["BaseSchema"], ...]:
+        """magic method API for helps extract parent classes.
+
+        used in inheritance for avoid duplicate code
+        """
         return tuple(
             (
                 i
@@ -128,30 +139,30 @@ class BaseSchema:
         )
 
     @classmethod
-    def __get_mro_annotations__(cls) -> dict[str, Any]:
+    def __get_mro_annotations__(cls) -> dict[str, Type]:
         """extract all annotations (parent classes included)"""
-        cls__annotations = {}
+        cls__annotations__: dict[str, Type] = {}
         fields = cls.__get_mro_fields__()
         for kls in cls.__schema_mro__():
             if kls.__annotations__:
                 for k, v in kls.__annotations__.items():
                     if (
-                        not cls__annotations.get(k)
+                        not cls__annotations__.get(k)
                         and fields.get(k) != MISSING_FIELD
                     ):
-                        cls__annotations[k] = v
+                        cls__annotations__[k] = v
                     elif (
                         k in cls.__ALLOWED_MAGIC__
                         and fields.get(k) != MISSING_FIELD
-                        and not cls__annotations.get(k)
+                        and not cls__annotations__.get(k)
                     ):
-                        cls__annotations[k] = v
-        return cls__annotations
+                        cls__annotations__[k] = v
+        return cls__annotations__
 
     @classmethod
     def __get_mro_fields__(cls) -> dict[str, "BaseDocument"]:
         """extract all fields (parent classes included)"""
-        cls__dict__ = {}
+        cls__dict__: dict[str, "BaseDocument"] = {}
         for klass in cls.__schema_mro__():
             # copy __dict__ to avoid runtime err:
             # RuntimeError: dictionary changed size during iteration
@@ -173,12 +184,13 @@ class BaseSchema:
                 fields[k] = v
             elif k.startswith("_"):
                 continue
-            # only fields-like accept
+            # only fields-like accept, ignore callable
             elif not callable(v):
                 fields[k] = v
         return fields
 
 
+# build-in structures
 class ItemSchema(BaseSchema):
     __SCHEMA_TYPE__ = StructType.ITEM
 

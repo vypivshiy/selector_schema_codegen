@@ -1,7 +1,6 @@
 import os
 import sys
 import warnings
-
 from ssc_codegen.ast_builder import build_ast_module
 from ssc_codegen.cli_utils import (
     import_converter,
@@ -16,16 +15,16 @@ from ssc_codegen.cli_utils import (
 )
 from ssc_codegen.converters.tools import go_naive_fix_docstring
 
-if sys.version_info <= (3, 10):
+if sys.version_info >= (3, 11):
     from enum import StrEnum
 else:
     from enum import Enum
-
     class StrEnum(str, Enum):
         pass
 
 
 from pathlib import Path
+from os import PathLike
 from typing import Annotated, List, Callable, Optional
 
 from typer import Typer, Argument, Option, BadParameter
@@ -57,9 +56,9 @@ def version() -> None:
 def generate_code(
     *,
     converter: ConverterLike,
-    out: Path[str],
+    out: Path,
     prefix: str,
-    ssc_files: List[Path[str]],
+    ssc_files: List[Path],
     suffix: str,
     comment_str: str,
     fmt_cmd: list[str],
@@ -94,8 +93,8 @@ def generate_code(
             xpath_to_css=xpath_to_css,
         )
         print(f"Convert to code {file_cfg.name}...")
-        code = converter.convert_program(ast_module, comment=comment_str)
-        code = code_cb(code)
+        code_parts = converter.convert_program(ast_module, comment=comment_str)
+        code = code_cb(code_parts)
         for k, v in variables_patches.items():
             code = code.replace(f"${k}$", v)
         out_path = out / out_file
@@ -116,7 +115,7 @@ def gen_py(
         Argument(help="ssc-gen config files", callback=cb_check_ssc_files),
     ],
     out: Annotated[
-        Path[str],
+        Path,
         Option("--out", "-o", help=_HELP_OUTPUT_FOLDER, callback=cb_folder_out),
     ],
     lib: Annotated[
@@ -136,7 +135,7 @@ def gen_py(
     debug: Annotated[
         bool, Option(help=_HELP_DEBUG_COMM_TOKENS, is_flag=True)
     ] = False,
-):
+) -> None:
     converter = import_converter(f"py_{lib.value}")
     if fmt:
         commands = ["ruff format {}", "ruff check {} --fix"]
@@ -165,7 +164,7 @@ def gen_js(
         Argument(help="ssc-gen config files", callback=cb_check_ssc_files),
     ],
     out: Annotated[
-        Path[str],
+        Path,
         Option("--out", "-o", help=_HELP_OUTPUT_FOLDER, callback=cb_folder_out),
     ],
     lib: Annotated[
@@ -185,11 +184,11 @@ def gen_js(
     debug: Annotated[
         bool, Option(help=_HELP_DEBUG_COMM_TOKENS, is_flag=True)
     ] = False,
-):
+) -> None:
     converter = import_converter(f"js_{lib.value}")
     if fmt:
         # TODO: js formatters
-        commands = []
+        commands: list[str] = []
         fmt_cmd = create_fmt_cmd(ssc_files, prefix, suffix, out, commands)
     else:
         fmt_cmd = []
@@ -216,7 +215,7 @@ def gen_dart(
         Argument(help="ssc-gen config files", callback=cb_check_ssc_files),
     ],
     out: Annotated[
-        Path[str],
+        Path,
         Option("--out", "-o", help=_HELP_OUTPUT_FOLDER, callback=cb_folder_out),
     ],
     lib: Annotated[
@@ -236,7 +235,7 @@ def gen_dart(
     debug: Annotated[
         bool, Option(help=_HELP_DEBUG_COMM_TOKENS, is_flag=True)
     ] = False,
-):
+) -> None:
     converter = import_converter(f"dart_{lib.value}")
     if fmt:
         commands = ["dart format {}", "dart fix {}"]
@@ -267,7 +266,7 @@ def gen_go(
         Argument(help="ssc-gen config files", callback=cb_check_ssc_files),
     ],
     out: Annotated[
-        Path[str],
+        Path,
         Option("--out", "-o", help=_HELP_OUTPUT_FOLDER, callback=cb_folder_out),
     ],
     lib: Annotated[
@@ -289,7 +288,7 @@ def gen_go(
     ] = False,
     to_css: Annotated[bool, Option(help=_HELP_TO_CSS, is_flag=True)] = False,
     debug: Annotated[bool, Option(help=_HELP_DEBUG_COMM_TOKENS)] = False,
-):
+) -> None:
     converter = import_converter(f"go_{lib.value}")
     if fmt:
         commands = ["gofmt -w {}"]
