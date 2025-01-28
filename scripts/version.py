@@ -50,7 +50,7 @@ def bump_version(
         with open(file_path, "r") as f:
             pyproject = f.read()
 
-        version = re.search(DEFAULT_RE_TOML_PATTERN, pyproject)[1]
+        version = re.search(DEFAULT_RE_TOML_PATTERN, pyproject)[1]  # type:ignore[index]
         major, minor, patch = map(int, version.split("."))
 
         if part == "major":
