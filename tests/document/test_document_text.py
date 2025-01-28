@@ -2,9 +2,10 @@ import pytest
 
 from ssc_codegen import D, N, R, ItemSchema
 from ssc_codegen.ast_ssc import VariableType
+from ssc_codegen.document import BaseDocument
 
 
-def test_fail_str_format():
+def test_fail_str_format() -> None:
     with pytest.raises(SyntaxError):
         R().fmt("wow")
 
@@ -25,5 +26,5 @@ def test_fail_str_format():
         .repl("&quot;", '"'),
     ],
 )
-def test_string_expr(expr):
+def test_string_expr(expr: BaseDocument) -> None:
     assert expr.stack_last_ret == VariableType.STRING

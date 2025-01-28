@@ -1,6 +1,7 @@
 import pytest
 from ssc_codegen import D, R
 from ssc_codegen.ast_ssc import VariableType
+from ssc_codegen.document import BaseDocument
 
 
 @pytest.mark.parametrize(
@@ -11,7 +12,7 @@ from ssc_codegen.ast_ssc import VariableType
         D().css_all("a").index(0).xpath_all("//a"),
     ],
 )
-def test_list_document(expr):
+def test_list_document(expr: BaseDocument) -> None:
     assert expr.stack_last_ret == VariableType.LIST_DOCUMENT
 
 
@@ -28,5 +29,5 @@ def test_list_document(expr):
         R().re_all(".*"),
     ],
 )
-def test_list_str(expr):
+def test_list_str(expr: BaseDocument) -> None:
     assert expr.stack_last_ret == VariableType.LIST_STRING

@@ -1,7 +1,8 @@
 import pytest
 
-from ssc_codegen import D, N, R, ItemSchema
+from ssc_codegen import D, N, R, ItemSchema, Document
 from ssc_codegen.ast_ssc import VariableType
+from ssc_codegen.document import BaseDocument
 
 
 @pytest.mark.parametrize(
@@ -13,8 +14,8 @@ from ssc_codegen.ast_ssc import VariableType
         D().xpath_all("a"),
     ],
 )
-def test_document_to_list_document(expr):
-    pass
+def test_document_to_list_document(expr: BaseDocument) -> None:
+    assert True
 
 
 @pytest.mark.parametrize(
@@ -28,8 +29,8 @@ def test_document_to_list_document(expr):
         D().xpath_all("//a").text().index(0),
     ],
 )
-def test_doc_to_str(expr):
-    assert expr.last_var_type == VariableType.STRING
+def test_doc_to_str(expr: BaseDocument) -> None:
+    assert expr.stack_last_ret == VariableType.STRING
 
 
 @pytest.mark.parametrize(
@@ -41,5 +42,5 @@ def test_doc_to_str(expr):
         D().xpath_all("//a").attr("href"),
     ],
 )
-def test_do_to_list_str(expr):
+def test_do_to_list_str(expr: BaseDocument) -> None:
     assert expr.stack_last_ret == VariableType.LIST_STRING

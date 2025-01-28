@@ -1,5 +1,6 @@
 import pytest
 from ssc_codegen import D, R
+from ssc_codegen.document import BaseDocument
 
 
 @pytest.mark.parametrize(
@@ -9,8 +10,8 @@ from ssc_codegen import D, R
         D().is_xpath("//a"),
         R().is_equal(""),
         R().split(" ").is_contains(""),
-        R().is_regex(""),
+        R().is_regex("k"),
     ],
 )
-def test_assert_expr(expr):
-    pass
+def test_assert_expr(expr: BaseDocument) -> None:
+    assert True

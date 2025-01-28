@@ -6,7 +6,7 @@ class MockParser(ItemSchema):
     pass
 
 
-def test_raw_invalid_expr():
+def test_raw_invalid_expr() -> None:
     with pytest.raises(SyntaxError):
         R().css("a")
 
@@ -20,7 +20,7 @@ def test_raw_invalid_expr():
         R().css_all("a")
 
 
-def test_nested_invalid_expr():
+def test_nested_invalid_expr() -> None:
     with pytest.raises(SyntaxError):
         N().sub_parser(MockParser).css("a")
 
@@ -28,7 +28,7 @@ def test_nested_invalid_expr():
         N().sub_parser(MockParser).sub_parser(MockParser)
 
 
-def test_invalid_doc_expr():
+def test_invalid_doc_expr() -> None:
     with pytest.raises(SyntaxError):
         D().trim("")
 
@@ -43,3 +43,16 @@ def test_invalid_doc_expr():
 
     with pytest.raises(SyntaxError):
         D().is_equal("")
+
+    with pytest.raises(SyntaxError):
+        D().is_not_equal("")
+
+    with pytest.raises(SyntaxError):
+        D().is_contains("")
+
+    with pytest.raises(SyntaxError):
+        R().is_css("title")
+
+    with pytest.raises(SyntaxError):
+        R().is_xpath("//title")
+
