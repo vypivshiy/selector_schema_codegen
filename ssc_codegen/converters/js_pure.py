@@ -47,6 +47,7 @@ from ..ast_ssc import (
     IsNotEqualExpression,
     DefaultStart,
     DefaultEnd,
+    StructInit,
 )
 from ..tokens import TokenType, StructType
 
@@ -60,12 +61,12 @@ def tt_struct(node: StructParser) -> str:
 
 
 @converter.post(TokenType.STRUCT)
-def tt_struct(_: StructParser) -> str:
+def tt_struct_post(_: StructParser) -> str:
     return js.BRACKET_END
 
 
 @converter.pre(TokenType.STRUCT_INIT)
-def tt_init(node) -> str:
+def tt_init(node: StructInit) -> str:
     return js.BINDINGS[node.kind]
 
 
@@ -98,7 +99,7 @@ def tt_pre_validate(node: PreValidateFunction) -> str:
 
 
 @converter.post(TokenType.STRUCT_PRE_VALIDATE)
-def tt_pre_validate(_: PreValidateFunction) -> str:
+def tt_pre_validate_post(_: PreValidateFunction) -> str:
     return js.BRACKET_END
 
 
@@ -109,7 +110,7 @@ def tt_part_document(node: PartDocFunction) -> str:
 
 
 @converter.post(TokenType.STRUCT_PART_DOCUMENT)
-def tt_part_document(_: PartDocFunction) -> str:
+def tt_part_document_post(_: PartDocFunction) -> str:
     return js.BRACKET_END
 
 
@@ -121,7 +122,7 @@ def tt_function(node: StructFieldFunction) -> str:
 
 
 @converter.post(TokenType.STRUCT_FIELD)
-def tt_function(_: StructFieldFunction) -> str:
+def tt_function_post(_: StructFieldFunction) -> str:
     return js.BRACKET_END
 
 
@@ -132,7 +133,7 @@ def tt_start_parse(node: StartParseFunction) -> str:
 
 
 @converter.post(TokenType.STRUCT_PARSE_START)
-def tt_start_parse(node: StartParseFunction) -> str:
+def tt_start_parse_post(node: StartParseFunction) -> str:
     code = ""
     if any(f.name == "__PRE_VALIDATE__" for f in node.body):
         name = js.MAGIC_METHODS.get("__PRE_VALIDATE__")
