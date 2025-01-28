@@ -11,7 +11,7 @@ from ssc_codegen.document import BaseDocument
         D().css("a").css_all("b"),
         D().xpath("//a").xpath_all("//b"),
         D().css_all("a"),
-        D().xpath_all("a"),
+        D().xpath_all("//a"),
     ],
 )
 def test_document_to_list_document(expr: BaseDocument) -> None:
@@ -42,5 +42,5 @@ def test_doc_to_str(expr: BaseDocument) -> None:
         D().xpath_all("//a").attr("href"),
     ],
 )
-def test_do_to_list_str(expr: BaseDocument) -> None:
+def test_doc_to_list_str(expr: BaseDocument) -> None:
     assert expr.stack_last_ret == VariableType.LIST_STRING
