@@ -1,5 +1,6 @@
 import pytest
 from ssc_codegen import D, N, R, ItemSchema
+from ssc_codegen.document import BaseDocument
 
 
 class MockParserOne(ItemSchema):
@@ -18,15 +19,15 @@ class MockParserMain(ItemSchema):
         N().xpath("//a").sub_parser(MockParserMain),
     ],
 )
-def test_nested(expr):
-    pass
+def test_nested(expr: BaseDocument) -> None:
+    assert True
 
 
-def test_nested_init():
-    class MockParserOne_(ItemSchema):
+def test_nested_init() -> None:
+    class MockParserOne(ItemSchema):
         foo = D().text()
 
-    class MockParserMain_(ItemSchema):
-        bar = N().sub_parser(MockParserOne_)
+    class MockParserMain(ItemSchema):
+        bar = N().sub_parser(MockParserOne)
 
-    MockParserMain_  # noqa
+    MockParserMain  # noqa
