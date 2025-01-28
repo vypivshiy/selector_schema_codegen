@@ -56,8 +56,12 @@ def validate_xpath_query(query: str) -> None:
     try:
         etree.XPath(query.strip('"'))
         # etree.XPath accept CSS-like queries without throw exception, check it!
+        is_css = False
         with suppress(SelectorSyntaxError):
             HTMLTranslator().css_to_xpath(query.strip('"'))
+            is_css = True
+
+        if is_css:
             msg = f"`{query}` looks like CSS query, not XPATH"
             raise SelectorSyntaxError(msg)
     except XPathSyntaxError:
