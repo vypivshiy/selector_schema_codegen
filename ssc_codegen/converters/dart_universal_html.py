@@ -1,7 +1,7 @@
 # TODO: required enchant, not tested
 from functools import partial
 
-from templates import dart
+from .templates import dart
 from .base import BaseCodeConverter, left_right_var_names
 from .utils import (
     to_upper_camel_case as up_camel,
@@ -56,6 +56,9 @@ from ..ast_ssc import (
     IsRegexMatchExpression,
     IsNotEqualExpression,
     StructInit,
+    ToInteger,
+    ToFloat,
+    ToListInteger,
 )
 from ..tokens import TokenType, StructType
 
@@ -82,6 +85,7 @@ def tt_typedef(node: TypeDef):
             code = dart.typedef_item_record(node)
         case StructType.LIST:
             # record
+            # FIXME: typing as List<ITEM>
             code = dart.typedef_list_record(node)
         case _:
             raise TypeError("Unknown struct type")
@@ -116,7 +120,9 @@ def tt_imports(node: ModuleImports) -> str:
 
 @converter.pre(TokenType.EXPR_RETURN)
 def tt_ret(node: ReturnExpression) -> str:
-    _, nxt = lr_var_names(variable=node.variable)
+    prv, nxt = lr_var_names(variable=node.variable)
+    if node.have_default_expr():
+        return dart.BINDINGS[node.kind, prv]
     return dart.BINDINGS[node.kind, nxt]
 
 
@@ -173,7 +179,10 @@ def tt_start_parse(node: StartParseFunction) -> str:
     code = dart.BINDINGS[node.kind, ret_type, name] + " " + dart.START_BRACKET
     if any(f.name == "__PRE_VALIDATE__" for f in node.body):
         name = MAGIC_METHODS.get("__PRE_VALIDATE__")
-        code += dart.BINDINGS[TokenType.STRUCT_PRE_VALIDATE, name]
+        # todo: move to templates consts
+        code+=f"{name}(selector); "
+        # code += dart.BINDINGS[TokenType.STRUCT_PRE_VALIDATE, name]
+
     match node.type:
         case StructType.ITEM:
             body = dart.parse_item_code(node)
@@ -192,7 +201,7 @@ def tt_start_parse(node: StartParseFunction) -> str:
 
 
 @converter.post(TokenType.STRUCT_PARSE_START)
-def tt_start_parse(_: StartParseFunction) -> str:
+def tt_start_parse_(_: StartParseFunction) -> str:
     return dart.END_BRACKET
 
 
@@ -202,7 +211,7 @@ def tt_default(node: DefaultValueWrapper) -> str:
 
 
 @converter.post(TokenType.EXPR_DEFAULT_END)
-def tt_default(node: DefaultValueWrapper) -> str:
+def tt_default_(node: DefaultValueWrapper) -> str:
     # TODO: int, float, lists provide
     val = repr(node.value) if isinstance(node.value, str) else "null"
     return dart.BINDINGS[node.kind, val]
@@ -211,15 +220,13 @@ def tt_default(node: DefaultValueWrapper) -> str:
 @converter.pre(TokenType.EXPR_STRING_FORMAT)
 def tt_string_format(node: FormatExpression) -> str:
     prv, nxt = lr_var_names(variable=node.variable)
-    template = node.fmt.replace("{{}}", f"${prv}")
-    return dart.BINDINGS[node.kind, nxt, repr(template)]
+    return dart.BINDINGS[node.kind, nxt, prv, node.fmt]
 
 
 @converter.pre(TokenType.EXPR_LIST_STRING_FORMAT)
 def tt_string_format_all(node: MapFormatExpression) -> str:
     prv, nxt = lr_var_names(variable=node.variable)
-    template = node.fmt.replace("{{}}", "$e")
-    return dart.BINDINGS[node.kind, nxt, prv, repr(template)]
+    return dart.BINDINGS[node.kind, nxt, prv, node.fmt]
 
 
 @converter.pre(TokenType.EXPR_STRING_TRIM)
@@ -299,7 +306,6 @@ def tt_regex(node: RegexExpression) -> str:
     pattern = repr(node.pattern)
     group = node.group
     return dart.BINDINGS[node.kind, nxt, pattern, prv, group]
-    return dart.E_RE.format(nxt, pattern, prv, group)
 
 
 @converter.pre(TokenType.EXPR_REGEX_ALL)
@@ -314,6 +320,9 @@ def tt_regex_all(node: RegexAllExpression) -> str:
 def tt_regex_sub(node: RegexSubExpression) -> str:
     prv, nxt = lr_var_names(variable=node.variable)
     pattern = repr(node.pattern)
+    # reserved DART symbol
+    if '$' in pattern:
+        pattern = pattern.replace('$', '\$')
     repl = repr(node.repl)
     return dart.BINDINGS[node.kind, nxt, prv, pattern, repl]
 
@@ -387,7 +396,6 @@ def tt_is_regex(node: IsRegexMatchExpression) -> str:
     pattern = repr(node.pattern)
     msg = repr(node.msg)
     code = dart.BINDINGS[node.kind, prv, pattern, prv, msg]
-    code = dart.E_IS_RE.format(prv, pattern, prv, msg)
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return code
     code += dart.E_ASSIGN.format(nxt, prv)
@@ -472,3 +480,28 @@ def tt_xpath_all(_: HtmlXpathAllExpression) -> str:
 @converter.pre(TokenType.IS_XPATH)
 def tt_is_xpath(_: IsXPathExpression):
     raise NotImplementedError("dart universal_html not support xpath")
+
+
+# numeric
+@converter.pre(TokenType.TO_INT)
+def tt_to_int(node: ToInteger) -> str:
+    prv, nxt = lr_var_names(variable=node.variable)
+    return dart.BINDINGS[node.kind, nxt, prv]
+
+
+@converter.pre(TokenType.TO_INT_LIST)
+def tt_to_list_int(node: ToListInteger) -> str:
+    prv, nxt = lr_var_names(variable=node.variable)
+    return dart.BINDINGS[node.kind, nxt, prv]
+
+
+@converter.pre(TokenType.TO_FLOAT)
+def tt_to_float(node: ToFloat) -> str:
+    prv, nxt = lr_var_names(variable=node.variable)
+    return dart.BINDINGS[node.kind, nxt, prv]
+
+
+@converter.pre(TokenType.TO_FLOAT_LIST)
+def tt_to_list_float(node: ToFloat) -> str:
+    prv, nxt = lr_var_names(variable=node.variable)
+    return dart.BINDINGS[node.kind, nxt, prv]
