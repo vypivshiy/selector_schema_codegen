@@ -28,7 +28,6 @@ class TemplateBindings:
         return self.__setitem__(key, template)
 
     def __getitem__(self, keys: T_GETITEM_BIND) -> str:
-
         if isinstance(keys, tuple):
             key, args = keys[0], keys[1:]
         else:

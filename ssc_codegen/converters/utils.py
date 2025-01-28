@@ -9,15 +9,15 @@ from ssc_codegen.ast_ssc import (
 from ssc_codegen.tokens import VariableType, TokenType
 
 
-def to_snake_case(s: str):
+def to_snake_case(s: str) -> str:
     return re.sub(r"(?<!^)(?=[A-Z])", "_", s).lower()
 
 
-def to_upper_camel_case(s: str):
+def to_upper_camel_case(s: str) -> str:
     return "".join(word[0].upper() + word[1:] for word in s.split("_"))
 
 
-def to_lower_camel_case(s: str):
+def to_lower_camel_case(s: str) -> str:
     words = s.replace("_", " ").split()
     return "".join(
         word.capitalize() if i != 0 else word.lower()

@@ -1,7 +1,6 @@
 """high-level AST builder interface"""
 
-import re
-from typing import Optional, Type
+from typing import Type
 
 from typing_extensions import deprecated, Self
 
@@ -48,13 +47,14 @@ from .ast_ssc import (
     ToFloat,
     ToListFloat,
 )
+from .document_utlis import check_re_expression
 from .schema import BaseSchema
 from .selector_utils import validate_css_query, validate_xpath_query
 from .tokens import VariableType
 
 
 class BaseDocument:
-    def __init__(self):
+    def __init__(self) -> None:
         self._stack: list[BaseExpression] = []
 
     @property
@@ -62,11 +62,11 @@ class BaseDocument:
         return self._stack
 
     @property
-    def count(self):
+    def count(self) -> int:
         return len(self._stack)
 
     @property
-    def stack_last_index(self):
+    def stack_last_index(self) -> int:
         return len(self._stack) - 1 if self._stack else 0
 
     @property
@@ -77,15 +77,17 @@ class BaseDocument:
         return self.stack[-1].ret_type
 
     @staticmethod
-    def _raise_wrong_type_error(type_: VariableType, *expected: VariableType):
+    def _raise_wrong_type_error(
+        type_: VariableType, *expected: VariableType
+    ) -> None:
         fmt_types = "(" + ",".join(i.name for i in expected) + ")"
         msg = f"Expected type(s): {fmt_types}, got {type_.name}"
         raise SyntaxError(msg)
 
-    def _add(self, expr: BaseExpression):
+    def _add(self, expr: BaseExpression) -> None:
         self._stack.append(expr)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"Document(count={self.count}, ret_type={self.stack_last_ret.name})"
         )
@@ -213,8 +215,10 @@ class ArrayDocument(BaseDocument):
         return self.index(-1)
 
     def index(self, i: int) -> Self:
-        last_ret = self.stack[-1].ret_type
-        match last_ret:
+        if self.stack == 0:
+            raise SyntaxError("Empty expressions stack")
+
+        match self.stack_last_ret:
             case VariableType.LIST_DOCUMENT:
                 self._add(IndexDocumentExpression(value=i))
             case VariableType.LIST_STRING:
@@ -319,27 +323,27 @@ class StringDocument(BaseDocument):
         return self
 
     def re(self, pattern: str, group: int = 1) -> Self:
-        try:
-            re.compile(pattern)
-        except re.error as e:
-            raise SyntaxError("Wrong regular expression pattern") from e
+        check_re_expression(pattern)
+        if pattern == "":
+            raise SyntaxError("empty regex pattern")
+        if self.stack_last_ret != VariableType.STRING:
+            self._raise_wrong_type_error(
+                self.stack_last_ret, VariableType.STRING
+            )
         self._add(RegexExpression(pattern=pattern, group=group))
         return self
 
     def re_all(self, pattern: str) -> Self:
-        try:
-            re.compile(pattern)
-        except re.error as e:
-            raise SyntaxError("Wrong regular expression pattern") from e
-
+        check_re_expression(pattern)
+        if self.stack_last_ret != VariableType.STRING:
+            self._raise_wrong_type_error(
+                self.stack_last_ret, VariableType.STRING
+            )
         self._add(RegexAllExpression(pattern=pattern))
         return self
 
     def re_sub(self, pattern: str, repl: str = "") -> Self:
-        try:
-            re.compile(pattern)
-        except re.error as e:
-            raise SyntaxError("Wrong regular expression pattern") from e
+        check_re_expression(pattern)
 
         match self.stack_last_ret:
             case VariableType.LIST_STRING:
@@ -357,26 +361,57 @@ class StringDocument(BaseDocument):
 
 class AssertDocument(BaseDocument):
     def is_css(self, query: str, msg: str = "") -> Self:
+        if self.stack_last_ret != VariableType.DOCUMENT:
+            self._raise_wrong_type_error(
+                self.stack_last_ret, VariableType.DOCUMENT
+            )
         self._add(IsCssExpression(query=query, msg=msg))
         return self
 
     def is_xpath(self, query: str, msg: str = "") -> Self:
+        if self.stack_last_ret != VariableType.DOCUMENT:
+            self._raise_wrong_type_error(
+                self.stack_last_ret, VariableType.DOCUMENT
+            )
         self._add(IsXPathExpression(query=query, msg=msg))
         return self
 
     def is_equal(self, value: str, msg: str = "") -> Self:
+        if self.stack_last_ret != VariableType.STRING:
+            self._raise_wrong_type_error(
+                self.stack_last_ret, VariableType.STRING
+            )
         self._add(IsEqualExpression(value=value, msg=msg))
         return self
 
     def is_not_equal(self, value: str, msg: str = "") -> Self:
+        if self.stack_last_ret != VariableType.STRING:
+            # TODO: add INT, FLOAT
+            self._raise_wrong_type_error(
+                self.stack_last_ret, VariableType.STRING
+            )
         self._add(IsNotEqualExpression(value=value, msg=msg))
         return self
 
     def is_contains(self, item: str, msg: str = "") -> Self:
+        if self.stack_last_ret != VariableType.LIST_STRING:
+            # TODO: add LIST_INT, LIST_FLOAT
+            self._raise_wrong_type_error(
+                self.stack_last_ret, VariableType.LIST_STRING
+            )
         self._add(IsContainsExpression(item=item, msg=msg))
         return self
 
     def is_regex(self, pattern: str, msg: str = "") -> Self:
+        if self.stack_last_ret != VariableType.STRING:
+            self._raise_wrong_type_error(
+                self.stack_last_ret, VariableType.STRING
+            )
+        check_re_expression(pattern)
+
+        if pattern == "":
+            raise SyntaxError("empty regex pattern")
+
         self._add(IsRegexMatchExpression(pattern=pattern, msg=msg))
         return self
 
@@ -391,8 +426,7 @@ class NestedDocument(BaseDocument):
 
 class NumericDocument(BaseDocument):
     def to_int(self) -> Self:
-        last_ret = self.stack[-1].ret_type
-        match last_ret:
+        match self.stack_last_ret:
             case VariableType.STRING:
                 self._add(ToInteger())
             case VariableType.LIST_STRING:
@@ -406,8 +440,7 @@ class NumericDocument(BaseDocument):
         return self
 
     def to_float(self) -> Self:
-        last_ret = self.stack[-1].ret_type
-        match last_ret:
+        match self.stack_last_ret:
             case VariableType.STRING:
                 self._add(ToFloat())
             case VariableType.LIST_STRING:

@@ -2,40 +2,42 @@ import json
 import warnings
 from pathlib import Path
 from types import ModuleType
-from typing import Type, Any
+from typing import Any, Type
 
 from .ast_ssc import (
-    ModuleProgram,
-    ModuleImports,
-    Variable,
-    StructParser,
+    BaseAstNode,
+    BaseExpression,
+    CallStructFunctionExpression,
+    DefaultEnd,
+    DefaultStart,
     Docstring,
-    StructFieldFunction,
+    ModuleImports,
+    ModuleProgram,
+    NoReturnExpression,
     PartDocFunction,
     PreValidateFunction,
     ReturnExpression,
-    NoReturnExpression,
-    CallStructFunctionExpression,
-    BaseExpression,
+    StructFieldFunction,
+    StructParser,
     TypeDef,
-    DefaultStart,
-    DefaultEnd,
+    Variable,
 )
-from .consts import M_SPLIT_DOC, M_VALUE, M_KEY, M_ITEM, SIGNATURE_MAP
+from .consts import M_ITEM, M_KEY, M_SPLIT_DOC, M_VALUE, SIGNATURE_MAP
 from .document import BaseDocument
 from .document_utlis import convert_css_to_xpath, convert_xpath_to_css
 from .schema import (
-    BaseSchema,
     MISSING_FIELD,
-    ItemSchema,
+    BaseSchema,
     DictSchema,
-    ListSchema,
     FlatListSchema,
+    ItemSchema,
+    ListSchema,
 )
-from .tokens import VariableType, StructType, TokenType
+from .tokens import StructType, TokenType, VariableType
 
 
 def _is_template_cls(cls: object) -> bool:
+    """return true if class is not BaseSchema instance. used for dynamically import config and generate ast"""
     return any(
         cls == base_cls
         for base_cls in (
@@ -49,6 +51,10 @@ def _is_template_cls(cls: object) -> bool:
 
 
 def _extract_schemas(module: ModuleType) -> list[Type[BaseSchema]]:
+    """extract Schema classes from a dynamically imported module.
+
+    used for dynamically import and generate ast
+    """
     return [
         obj
         for name, obj in module.__dict__.items()
@@ -59,8 +65,11 @@ def _extract_schemas(module: ModuleType) -> list[Type[BaseSchema]]:
     ]
 
 
-def check_field_expr(field: BaseDocument):
-    """validate correct type expression"""
+def check_field_expr(field: BaseDocument) -> None:
+    """validate correct type expressions pass.
+
+    raise TypeError if not passed
+    """
     var_cursor = VariableType.DOCUMENT
     for expr in field.stack:
         if var_cursor == expr.accept_type:
@@ -81,6 +90,7 @@ def _patch_non_required_attributes(
     schema: Type[BaseSchema],
     *fields: M_SPLIT_DOC | M_ITEM | M_KEY | M_VALUE | str,
 ) -> Type[BaseSchema]:
+    """remove non-required fields in schema instance"""
     for f in fields:
         if getattr(schema, f, MISSING_FIELD) == MISSING_FIELD:
             continue
@@ -91,6 +101,7 @@ def _patch_non_required_attributes(
 
 
 def _check_required_attributes(schema: Type[BaseSchema], *fields: str) -> None:
+    """helper function to check required attributes in schema. throw SyntaxError if not passed"""
     for f in fields:
         if getattr(schema, f, MISSING_FIELD) == MISSING_FIELD:
             msg = f"'{schema.__name__}' required '{f}' attribute"
@@ -98,6 +109,10 @@ def _check_required_attributes(schema: Type[BaseSchema], *fields: str) -> None:
 
 
 def check_schema(schema: Type[BaseSchema]) -> Type[BaseSchema]:
+    """validate schema instance minimal required magic fields and check type
+
+    throw SyntaxError if not passed
+    """
     match schema.__SCHEMA_TYPE__:
         case StructType.ITEM:
             schema = _patch_non_required_attributes(
@@ -126,13 +141,15 @@ def check_schema(schema: Type[BaseSchema]) -> Type[BaseSchema]:
 def _fill_stack_variables(
     stack: list[BaseExpression], *, ret_expr: bool = True
 ) -> list[BaseExpression]:
+    """insert variables to field stack of expressions"""
     tmp_stack = stack.copy()
     ret_type = tmp_stack[-1].ret_type
     first_expr = tmp_stack[0]
     if first_expr.kind == TokenType.EXPR_DEFAULT_START:
         # last token - TT.DefaultEnd
         ret_type = tmp_stack[-2].ret_type
-        if first_expr.value == None:
+        # used for convert return type
+        if first_expr.value == None:  # type: ignore[attr-defined]
             match ret_type:
                 case VariableType.STRING:
                     ret_type = VariableType.OPTIONAL_STRING
@@ -184,13 +201,18 @@ def _fill_stack_variables(
     return tmp_stack
 
 
-def replace_enum_values(item):
+# TODO: better typing?
+def replace_enum_values(item: Any) -> dict[str, Any] | list[Any] | str:
     """
     Recursively replaces Enum values with their underlying values.
     Ignores strings and traverses dicts and lists.
     """
     if isinstance(item, VariableType):
-        return SIGNATURE_MAP.get(item)
+        if var_type := SIGNATURE_MAP.get(item):
+            return var_type
+        msg = f"missing Enum variable {item.name}, set ANY"
+        warnings.warn(msg, category=FutureWarning)
+        return "ANY"
     elif isinstance(item, dict):
         return {key: replace_enum_values(value) for key, value in item.items()}
     elif isinstance(item, list):
@@ -200,6 +222,7 @@ def replace_enum_values(item):
 
 
 def build_fields_signature(raw_signature: Any) -> str:
+    """generate fields signature for docstring"""
     raw_signature = replace_enum_values(raw_signature)
     return json.dumps(raw_signature, indent=4)
 
@@ -211,6 +234,7 @@ def build_ast_struct(
     css_to_xpath: bool = False,
     xpath_to_css: bool = False,
 ) -> StructParser:
+    """generate AST from Schema instance"""
     schema = check_schema(schema)
     fields = schema.__get_mro_fields__()
     raw_signature = schema.__class_signature__()
@@ -218,7 +242,7 @@ def build_ast_struct(
         (schema.__doc__ or "") + "\n\n" + build_fields_signature(raw_signature)
     )
     start_parse_body: list[CallStructFunctionExpression] = []
-    struct_parse_functions = []
+    struct_parse_functions: list[BaseAstNode] = []
     for name, field in fields.items():
         check_field_expr(field)
         if css_to_xpath:
@@ -228,11 +252,17 @@ def build_ast_struct(
         match name:
             case "__PRE_VALIDATE__":
                 extract_pre_validate(
-                    field, name, start_parse_body, struct_parse_functions
+                    field,
+                    name,
+                    start_parse_body,
+                    struct_parse_functions,  # type: ignore[arg-type]
                 )
             case "__SPLIT_DOC__":
                 extract_split_doc(
-                    field, name, start_parse_body, struct_parse_functions
+                    field,
+                    name,
+                    start_parse_body,
+                    struct_parse_functions,  # type: ignore[arg-type]
                 )
             case _:
                 # insert default instruction API
@@ -249,7 +279,7 @@ def build_ast_struct(
                             name=name,
                             ret_type=field.stack_last_ret,
                             fn_ref=fn,
-                            nested_cls_name_ref=field.stack[-1].schema,
+                            nested_cls_name_ref=field.stack[-1].schema,  # type: ignore
                         )  # noqa
                     )
                 else:
@@ -264,23 +294,32 @@ def build_ast_struct(
         name=schema.__name__,
         doc=Docstring(value=doc),
         docstring_class_top=docstring_class_top,
-        body=struct_parse_functions,
+        body=struct_parse_functions,  # type: ignore[arg-type]
     )
 
     return ast_struct_parser
 
 
-def extract_default_expr(field):
+def extract_default_expr(field: "BaseDocument") -> None:
+    """convert DefaultValueWrapper node to DefaultStart and DefaultEnd Nodes"""
     if field.stack[0].kind == TokenType.EXPR_DEFAULT:
         tt_def_val = field.stack.pop(0)
-        field.stack.insert(0, DefaultStart(value=tt_def_val.value))
-        field.stack.append(DefaultEnd(value=tt_def_val.value))
+        field.stack.insert(0, DefaultStart(value=tt_def_val.value))  # type: ignore
+        field.stack.append(DefaultEnd(value=tt_def_val.value))  # type: ignore
 
 
-def extract_split_doc(f, k, start_parse_body, struct_parse_functions):
+def extract_split_doc(
+    f: "BaseDocument",
+    k: str,
+    start_parse_body: list["BaseExpression"],
+    struct_parse_functions: list["BaseAstNode"],
+) -> None:
+    """extract __SPLIT_DOC__ field and insert to ast"""
     _check_split_doc(f)
+
     fn = PartDocFunction(
-        name=k,  # noqa
+        # literal type
+        name=k,  # type: ignore[arg-type]
         body=_fill_stack_variables(f.stack),
     )
     start_parse_body.append(
@@ -291,9 +330,16 @@ def extract_split_doc(f, k, start_parse_body, struct_parse_functions):
     struct_parse_functions.append(fn)
 
 
-def extract_pre_validate(f, k, start_parse_body, struct_parse_functions):
+def extract_pre_validate(
+    f: "BaseDocument",
+    k: str,
+    start_parse_body: list["BaseExpression"],
+    struct_parse_functions: list["BaseAstNode"],
+) -> None:
+    """extract __PRE_VALIDATE__ field and insert to ast"""
     fn = PreValidateFunction(
-        name=k,  # noqa
+        # literal
+        name=k,  # type: ignore[arg-type]
         body=_fill_stack_variables(f.stack, ret_expr=False),
     )
     start_parse_body.append(
@@ -304,14 +350,18 @@ def extract_pre_validate(f, k, start_parse_body, struct_parse_functions):
     struct_parse_functions.append(fn)
 
 
-def _check_split_doc(f):
+def _check_split_doc(f: "BaseDocument") -> None:
+    """test __SPLIT_DOC__ body return type
+
+    if ret_type != LIST_DOCUMENT - throw SyntaxError
+    """
     if f.stack_last_ret != VariableType.LIST_DOCUMENT:  # noqa
         msg = f"__SPLIT_DOC__ attribute should be returns LIST_DOCUMENT, not {f.stack_last_ret.name}"  # noqa
         raise SyntaxError(msg)
 
 
 def build_ast_module(
-    path: str | Path[str],
+    path: str | Path,
     *,
     docstring_class_top: bool = False,
     css_to_xpath: bool = False,
@@ -341,10 +391,10 @@ def build_ast_module(
     ast_types = [st.typedef for st in ast_structs if st.typedef]
 
     ast_program = ModuleProgram(
-        body=[module_doc, ast_imports] + ast_types + ast_structs,
+        body=[module_doc, ast_imports] + ast_types + ast_structs,  # type: ignore[operator]
     )
     # links module
     for node in ast_program.body:
         if node.kind in (Docstring.kind, StructParser.kind, TypeDef.kind):
-            node.parent = ast_program
+            node.parent = ast_program  # type: ignore[attr-defined]
     return ast_program

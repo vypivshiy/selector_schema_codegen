@@ -1,7 +1,28 @@
-from typing import Callable
+from typing import Callable, cast
 
-from ..ast_ssc import BaseAstNode, ModuleProgram, Variable
+from mypyc.ir.ops import TypeVar
+
+from ..ast_ssc import (
+    BaseAstNode,
+    Docstring,
+    ModuleImports,
+    ModuleProgram,
+    PartDocFunction,
+    PreValidateFunction,
+    ReturnExpression,
+    StartParseFunction,
+    StructFieldFunction,
+    StructParser,
+    TypeDef,
+    TypeDefField,
+    Variable,
+)
 from ..tokens import TokenType
+
+T_NODE = TypeVar("T_NODE")
+
+CB_AST_BIND = Callable[[BaseAstNode], str]
+CB_AST_DECORATOR = Callable[[CB_AST_BIND], CB_AST_BIND]
 
 
 class BaseCodeConverter:
@@ -10,10 +31,8 @@ class BaseCodeConverter:
     def __init__(
         self, debug_instructions: bool = False, debug_comment_prefix: str = ""
     ):
-        self.pre_definitions: dict[TokenType, Callable[[BaseAstNode], str]] = {}
-        self.post_definitions: dict[
-            TokenType, Callable[[BaseAstNode], str]
-        ] = {}
+        self.pre_definitions: dict[TokenType, CB_AST_BIND] = {}
+        self.post_definitions: dict[TokenType, CB_AST_BIND] = {}
 
         self.debug_instructions = debug_instructions
         self.debug_comment_prefix = debug_comment_prefix
@@ -27,29 +46,23 @@ class BaseCodeConverter:
         """Disable debug instructions."""
         self.debug_instructions = False
 
-    def __call__(
-        self, for_definition: TokenType
-    ) -> Callable[[BaseAstNode], str]:
+    def __call__(self, for_definition: TokenType) -> CB_AST_DECORATOR:
         """Alias for pre decorator."""
         return self.pre(for_definition)
 
-    def pre(self, for_definition: TokenType) -> Callable[[BaseAstNode], str]:
+    def pre(self, for_definition: TokenType) -> CB_AST_DECORATOR:
         """Define a pre-conversion decorator for the given TokenType."""
 
-        def decorator(
-            func: Callable[[BaseAstNode], str],
-        ) -> Callable[[BaseAstNode], str]:
+        def decorator(func: CB_AST_BIND) -> CB_AST_BIND:
             self.pre_definitions[for_definition] = func
             return func
 
         return decorator
 
-    def post(self, for_definition: TokenType) -> Callable[[BaseAstNode], str]:
+    def post(self, for_definition: TokenType) -> CB_AST_DECORATOR:
         """Define a post-conversion decorator for the given TokenType."""
 
-        def decorator(
-            func: Callable[[BaseAstNode], str],
-        ) -> Callable[[BaseAstNode], str]:
+        def decorator(func: CB_AST_BIND) -> CB_AST_BIND:
             self.post_definitions[for_definition] = func
             return func
 
@@ -58,8 +71,10 @@ class BaseCodeConverter:
     def _get_debug_prefix(self, node: BaseAstNode) -> str:
         """Generate debug prefix for the given node."""
         if node.kind == TokenType.EXPR_RETURN:
+            node = cast(ReturnExpression, node)
             return f"{self.debug_comment_prefix}Token: {node.kind.name} ret_type: {node.ret_type.name}"
         elif node.kind == TokenType.STRUCT_PARSE_START:
+            node = cast(StartParseFunction, node)
             return (
                 f"{self.debug_comment_prefix}Token: {node.kind.name} struct_type: {node.type.name}\n"
                 f"{self.debug_comment_prefix}Call instructions count: {len(node.body)}"
@@ -96,47 +111,49 @@ class BaseCodeConverter:
         acc = acc or []
         match ast_entry.kind:
             case TokenType.MODULE:
-                self._convert_module(ast_entry, acc)
+                self._convert_module(ast_entry, acc)  # type: ignore[arg-type]
             case TokenType.DOCSTRING:
-                self._convert_module_docstring(ast_entry, acc)
+                self._convert_module_docstring(ast_entry, acc)  # type: ignore[arg-type]
             case TokenType.IMPORTS:
-                self._convert_imports(ast_entry, acc)
+                self._convert_imports(ast_entry, acc)  # type: ignore[arg-type]
             case TokenType.TYPEDEF:
-                self._convert_typedef(ast_entry, acc)
+                self._convert_typedef(ast_entry, acc)  # type: ignore[arg-type]
             case TokenType.TYPEDEF_FIELD:
-                self._convert_typedef_field(ast_entry, acc)
+                self._convert_typedef_field(ast_entry, acc)  # type: ignore[arg-type]
             case TokenType.STRUCT:
-                self._convert_struct(ast_entry, acc)
+                self._convert_struct(ast_entry, acc)  # type: ignore[arg-type]
             case _ if ast_entry.kind in {
                 TokenType.STRUCT_PART_DOCUMENT,
                 TokenType.STRUCT_PRE_VALIDATE,
                 TokenType.STRUCT_PARSE_START,
                 TokenType.STRUCT_FIELD,
             }:
-                self._convert_struct_method(ast_entry, acc)
+                self._convert_struct_method(ast_entry, acc)  # type: ignore[arg-type]
             case _:
                 self._convert_default(ast_entry, acc)
         return acc
 
-    def _convert_module(self, ast_entry: BaseAstNode, acc: list[str]) -> None:
+    def _convert_module(self, ast_entry: ModuleProgram, acc: list[str]) -> None:
         """Handle module conversion."""
         for node in ast_entry.body:
             self.convert(node, acc)
 
     def _convert_module_docstring(
-        self, ast_entry: BaseAstNode, acc: list[str]
+        self, ast_entry: Docstring, acc: list[str]
     ) -> None:
         """Handle docstring conversion."""
         if ast_entry.parent.kind == TokenType.MODULE:
             acc.append(self._pre_convert_node(ast_entry))
             acc.append(self._post_convert_node(ast_entry))
 
-    def _convert_imports(self, ast_entry: BaseAstNode, acc: list[str]) -> None:
+    def _convert_imports(
+        self, ast_entry: ModuleImports, acc: list[str]
+    ) -> None:
         """Handle imports conversion."""
         acc.append(self._pre_convert_node(ast_entry))
         acc.append(self._post_convert_node(ast_entry))
 
-    def _convert_typedef(self, ast_entry: BaseAstNode, acc: list[str]) -> None:
+    def _convert_typedef(self, ast_entry: TypeDef, acc: list[str]) -> None:
         """Handle typedef conversion."""
         acc.append(self._pre_convert_node(ast_entry))
         for node in ast_entry.body:
@@ -144,17 +161,23 @@ class BaseCodeConverter:
         acc.append(self._post_convert_node(ast_entry))
 
     def _convert_typedef_field(
-        self, ast_entry: BaseAstNode, acc: list[str]
+        self, ast_entry: TypeDefField, acc: list[str]
     ) -> None:
         """Handle typedef field conversion."""
         acc.append(self._pre_convert_node(ast_entry))
         acc.append(self._post_convert_node(ast_entry))
 
-    def _convert_struct(self, ast_entry: BaseAstNode, acc: list[str]) -> None:
+    def _convert_struct(self, ast_entry: StructParser, acc: list[str]) -> None:
         """Handle struct conversion."""
         if getattr(ast_entry, "docstring_class_top", False) and getattr(
             ast_entry, "doc", False
         ):
+            # pre_DOCSTRING + post_DOCSTIRNG
+            # pre_CLASS/STRUCT HEADER
+            # pre_CONSTRUCTOR post_CONSTRUCTOR
+            # BODY
+            # post_CLASS/STRUCT
+
             # doc -> class header -> constructor -> body -> class footer
             acc.append(self._pre_convert_node(ast_entry.doc))
             acc.append(self._post_convert_node(ast_entry.doc))
@@ -168,6 +191,11 @@ class BaseCodeConverter:
             acc.append(self._post_convert_node(ast_entry))
 
         else:
+            # pre_CLASS/STRUCT HEADER
+            # pre_DOCSTRING + post_DOCSTIRNG
+            # pre_CONSTRUCTOR post_CONSTRUCTOR
+            # BODY
+            # post_CLASS/STRUCT
             # class header -> doc -> costructor -> body -> class footer
             acc.append(self._pre_convert_node(ast_entry))
 
@@ -183,7 +211,12 @@ class BaseCodeConverter:
             acc.append(self._post_convert_node(ast_entry))
 
     def _convert_struct_method(
-        self, ast_entry: BaseAstNode, acc: list[str]
+        self,
+        ast_entry: StructFieldFunction
+        | StartParseFunction
+        | PreValidateFunction
+        | PartDocFunction,
+        acc: list[str],
     ) -> None:
         """Handle struct method headers and bodies."""
         acc.append(self._pre_convert_node(ast_entry))

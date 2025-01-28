@@ -9,7 +9,7 @@ from ssc_codegen.converters.templates.utils import (
 from ssc_codegen.tokens import VariableType, TokenType, StructType
 
 if TYPE_CHECKING:
-    from ssc_codegen.ast_ssc import StartParseFunction
+    from ssc_codegen.ast_ssc import StartParseFunction, BaseExpression
 
 TYPES = {
     VariableType.ANY: "Any",
@@ -132,7 +132,7 @@ E_CALL_METHOD = "self.{}({})"
 E_CALL_PARSE = "self._parse_{}({})"
 
 
-def suggest_indent(node) -> str:
+def suggest_indent(node: "BaseExpression") -> str:
     """helper function get current indent"""
     if node.have_default_expr():
         return INDENT_DEFAULT_BODY

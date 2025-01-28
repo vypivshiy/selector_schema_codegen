@@ -24,9 +24,11 @@ _EXPR_I_RETURN = -1
 _EXPR_I_DEFAULT_END = -2
 """default return expression if body wrapped in DEFAULT_START and DEFAULT_END"""
 
+
 @dataclass(kw_only=True)
 class BaseAstNode:
     """base AST container"""
+
     kind: ClassVar[TokenType]
 
 
@@ -46,6 +48,7 @@ class Variable(BaseAstNode):
     - count - count of variables in body expressions
     - type - type of variable
     """
+
     kind: ClassVar[TokenType] = TokenType.VARIABLE
 
     num: int
@@ -68,6 +71,7 @@ class Docstring(BaseAstNode):
     - value - docstring value
     - parent - link to the node to which the docstring belongs
     """
+
     kind: ClassVar[TokenType] = TokenType.DOCSTRING
     value: str
     parent: Optional[Union["StructParser", "ModuleProgram"]] = (
@@ -78,6 +82,7 @@ class Docstring(BaseAstNode):
 @dataclass(kw_only=True)
 class ModuleImports(BaseAstNode):
     """represent imports node. Always constant value, later fix code formatter"""
+
     kind: ClassVar[TokenType] = TokenType.IMPORTS
 
 
@@ -89,6 +94,7 @@ class TypeDefField(BaseAstNode):
     ret_type - field's type
     parent - link to the parent 'TypeDef' node
     """
+
     kind: ClassVar[TokenType] = TokenType.TYPEDEF_FIELD
     name: str
     ret_type: VariableType
@@ -100,11 +106,13 @@ class TypeDefField(BaseAstNode):
         # backport TODO remove:
         if self.ret_type == VariableType.NESTED:
             nested_fn = [
-                fn for fn in self.parent.struct_ref.body if fn.name == self.name
+                fn
+                for fn in self.parent.struct_ref.body
+                if fn.name == self.name  # type: ignore[union-attr]
             ][_EXPR_I_START]  # type: ignore
             nested_class = [
                 e for e in nested_fn.body if e.ret_type == VariableType.NESTED
-            ][_EXPR_I_START].schema # type: ignore
+            ][_EXPR_I_START].schema  # type: ignore
             return nested_class
         return None
 
@@ -139,6 +147,7 @@ class BaseExpression(BaseAstNode):
     - accept_type - expression accept type marks
     - ret_type - return type after expression calls
     """
+
     variable: Variable | None = None
     parent: Optional[
         Union[
@@ -191,7 +200,7 @@ class DefaultValueWrapper(BaseExpression):
 
     accept_type: VariableType = VariableType.ANY
     ret_type: VariableType = VariableType.ANY
-    value: str | None
+    value: str | int | float | None
 
 
 @dataclass(kw_only=True)
@@ -202,6 +211,7 @@ class DefaultStart(BaseExpression):
 
     if block of instructions throws any exception - returns default value
     """
+
     kind: ClassVar[TokenType] = TokenType.EXPR_DEFAULT_START
     accept_type: VariableType = VariableType.ANY
     ret_type: VariableType = VariableType.ANY
@@ -217,6 +227,7 @@ class DefaultEnd(BaseExpression):
     if block of instructions throws any exception - returns default value
 
     """
+
     kind: ClassVar[TokenType] = TokenType.EXPR_DEFAULT_END
     accept_type: VariableType = VariableType.ANY
     ret_type: VariableType = VariableType.ANY
@@ -226,9 +237,8 @@ class DefaultEnd(BaseExpression):
 # DOCUMENT
 @dataclass(kw_only=True)
 class HtmlCssExpression(BaseExpression):
-    """mark node were calls `CSS` query and extract first founded element
+    """mark node were calls `CSS` query and extract first founded element"""
 
-    """
     kind: ClassVar[TokenType] = TokenType.EXPR_CSS
     query: str
     accept_type: VariableType = VariableType.DOCUMENT
@@ -249,6 +259,7 @@ class HtmlCssAllExpression(BaseExpression):
 @dataclass(kw_only=True)
 class HtmlXpathExpression(BaseExpression):
     """mark node where calls `XPATH` query and extract first founded element"""
+
     kind: ClassVar[TokenType] = TokenType.EXPR_XPATH
 
     query: str
@@ -259,6 +270,7 @@ class HtmlXpathExpression(BaseExpression):
 @dataclass(kw_only=True)
 class HtmlXpathAllExpression(BaseExpression):
     """mark node where calls `XPATH` query and extract all founded element"""
+
     kind: ClassVar[TokenType] = TokenType.EXPR_XPATH_ALL
 
     query: str
@@ -272,6 +284,7 @@ class HtmlAttrExpression(BaseExpression):
 
     should be returns string: if lib parse attrs to List<String> type - convert to string
     """
+
     kind: ClassVar[TokenType] = TokenType.EXPR_ATTR
 
     attr: str
@@ -295,6 +308,7 @@ class HtmlAttrAllExpression(BaseExpression):
 @dataclass(kw_only=True)
 class HtmlRawExpression(BaseExpression):
     """extract raw html from element"""
+
     kind: ClassVar[TokenType] = TokenType.EXPR_RAW
     accept_type: VariableType = VariableType.DOCUMENT
     ret_type: VariableType = VariableType.STRING
@@ -313,6 +327,7 @@ class HtmlRawAllExpression(BaseExpression):
 @dataclass(kw_only=True)
 class HtmlTextAllExpression(BaseExpression):
     """extract text from html element"""
+
     kind: ClassVar[TokenType] = TokenType.EXPR_TEXT_ALL
     accept_type: VariableType = VariableType.LIST_DOCUMENT
     ret_type: VariableType = VariableType.LIST_STRING
@@ -321,6 +336,7 @@ class HtmlTextAllExpression(BaseExpression):
 @dataclass(kw_only=True)
 class HtmlTextExpression(BaseExpression):
     """extract text from all html elements"""
+
     kind: ClassVar[TokenType] = TokenType.EXPR_TEXT
     accept_type: VariableType = VariableType.DOCUMENT
     ret_type: VariableType = VariableType.STRING
@@ -337,6 +353,7 @@ class IndexDocumentExpression(BaseExpression):
 
     len(<VAR_N>) - (value)
     """
+
     kind: ClassVar[TokenType] = TokenType.EXPR_LIST_DOCUMENT_INDEX
 
     value: int
@@ -372,6 +389,7 @@ class JoinExpression(BaseExpression):
         ', '.join(["foo", "bar"]) -> "foo, bar"
 
     """
+
     kind: ClassVar[TokenType] = TokenType.EXPR_LIST_JOIN
 
     sep: str
@@ -402,6 +420,7 @@ class TrimExpression(__TrimNode):
         var RE_RIGHT = escape_str(value) + "$"
         var VAL_NEXT = re.sub(RE_LEFT, "", VAL_PREV).sub(RE_RIGHT, "", VAL_PREV)
     """
+
     kind: ClassVar[TokenType] = TokenType.EXPR_STRING_TRIM
 
 
@@ -465,6 +484,7 @@ class MapTrimExpression(__MapTrimNode):
         var RE_RIGHT = escape_str(value) + "$"
         var VAL_NEXT = VAL_PREV.map((i) => re.sub(RE_LEFT, "", i).sub(RE_RIGHT, "", i))
     """
+
     kind: ClassVar[TokenType] = TokenType.EXPR_LIST_STRING_TRIM
 
 
@@ -482,6 +502,7 @@ class MapLTrimExpression(__MapTrimNode):
         var RE_LEFT = "^" + escape_str(value)
         var VAL_NEXT = VAL_PREV.map((i) => re.sub(RE_LEFT, "", i))
     """
+
     kind: ClassVar[TokenType] = TokenType.EXPR_LIST_STRING_LTRIM
 
 
@@ -499,6 +520,7 @@ class MapRTrimExpression(__MapTrimNode):
         var RE_RIGHT = escape_str(value) + "$"
         var VAL_NEXT = VAL_PREV.map((i) => re.sub(RE_RIGHT, "", i))
     """
+
     kind: ClassVar[TokenType] = TokenType.EXPR_LIST_STRING_RTRIM
 
 
@@ -510,6 +532,7 @@ class SplitExpression(BaseExpression):
 
         var VAL_NEXT = VAL_PREV.split(<value>)
     """
+
     kind: ClassVar[TokenType] = TokenType.EXPR_STRING_SPLIT
     sep: str
     accept_type: VariableType = VariableType.STRING
@@ -527,6 +550,7 @@ class FormatExpression(BaseExpression):
 
         var VAL_NEXT = <fmt>.format(VAL_PREV)
     """
+
     kind: ClassVar[TokenType] = TokenType.EXPR_STRING_FORMAT
     fmt: str
     accept_type: VariableType = VariableType.STRING
@@ -544,6 +568,7 @@ class MapFormatExpression(BaseExpression):
 
         var VAL_NEXT = VAL_PREV.map(i => <fmt>.format(i))
     """
+
     kind: ClassVar[TokenType] = TokenType.EXPR_LIST_STRING_FORMAT
     fmt: str
     accept_type: VariableType = VariableType.LIST_STRING
@@ -594,6 +619,7 @@ class RegexExpression(BaseExpression):
 
         var val_NEXT = regex.search(<pattern>, val_PREV)[<group>]
     """
+
     kind: ClassVar[TokenType] = TokenType.EXPR_REGEX
 
     pattern: str
@@ -631,6 +657,7 @@ class RegexSubExpression(BaseExpression):
 
         var val_NEXT = regex.sub(<pattern>, <repl>, val_PREV)
     """
+
     kind: ClassVar[TokenType] = TokenType.EXPR_REGEX_SUB
 
     pattern: str
@@ -648,6 +675,7 @@ class MapRegexSubExpression(BaseExpression):
 
         var val_NEXT = val_PREV.map(i => regex.sub(<pattern>, <repl>, i))
     """
+
     kind: ClassVar[TokenType] = TokenType.EXPR_LIST_REGEX_SUB
 
     pattern: str
@@ -669,6 +697,7 @@ class IsEqualExpression(BaseExpression):
         // hack: avoid recalc variables
         var val_NEXT = val_PREV
     """
+
     kind: ClassVar[TokenType] = TokenType.IS_EQUAL
 
     value: str
@@ -689,6 +718,7 @@ class IsNotEqualExpression(BaseExpression):
         // hack: avoid recalc variable nums
         var val_NEXT = val_PREV
     """
+
     kind: ClassVar[TokenType] = TokenType.IS_NOT_EQUAL
 
     value: str
@@ -712,6 +742,7 @@ class IsCssExpression(BaseExpression):
         var val_NEXT = val_PREV
 
     """
+
     kind: ClassVar[TokenType] = TokenType.IS_CSS
     query: str
     msg: str
@@ -757,6 +788,7 @@ class IsContainsExpression(BaseExpression):
         var val_NEXT = val_PREV
 
     """
+
     kind: ClassVar[TokenType] = TokenType.IS_CONTAINS
     item: str
     msg: str
@@ -778,6 +810,7 @@ class IsRegexMatchExpression(BaseExpression):
         // hack: avoid recalc variables
         var val_NEXT = val_PREV
     """
+
     kind: ClassVar[TokenType] = TokenType.IS_REGEX_MATCH
     pattern: str
     msg: str
@@ -792,6 +825,7 @@ class NestedExpression(BaseExpression):
     - schema_cls - configured BaseSchema instance  target
     - schema - configured BaseSchema instance target name
     """
+
     kind: ClassVar[TokenType] = TokenType.EXPR_NESTED
     schema_cls: Type["BaseSchema"]
     accept_type: VariableType = VariableType.DOCUMENT
@@ -805,6 +839,7 @@ class NestedExpression(BaseExpression):
 @dataclass(kw_only=True)
 class ReturnExpression(BaseExpression):
     """mark return expression"""
+
     kind: ClassVar[TokenType] = TokenType.EXPR_RETURN
     accept_type: VariableType = VariableType.ANY
     ret_type: VariableType = VariableType.ANY
@@ -859,6 +894,7 @@ class CallStructFunctionExpression(BaseExpression):
     - ret_type return type from called Node
 
     """
+
     kind: ClassVar[TokenType] = TokenType.STRUCT_CALL_FUNCTION
     accept_type: VariableType = VariableType.DOCUMENT
     fn_ref: Union[
@@ -898,6 +934,7 @@ class ToInteger(BaseExpression):
     pseudocode example:
         var val_NEXT = val_PREV.to_int()
     """
+
     kind: ClassVar[TokenType] = TokenType.TO_INT
     accept_type: VariableType = VariableType.STRING
     ret_type: VariableType = VariableType.INT
@@ -923,6 +960,7 @@ class ToFloat(BaseExpression):
     pseudocode example:
         var val_NEXT = val_PREV.to_float()
     """
+
     kind: ClassVar[TokenType] = TokenType.TO_FLOAT
     accept_type: VariableType = VariableType.STRING
     ret_type: VariableType = VariableType.FLOAT
@@ -935,6 +973,7 @@ class ToListFloat(BaseExpression):
     pseudocode example:
         var val_NEXT = val_PREV.map(i => i.to_float())
     """
+
     kind: ClassVar[TokenType] = TokenType.TO_FLOAT_LIST
     accept_type: VariableType = VariableType.LIST_STRING
     ret_type: VariableType = VariableType.LIST_FLOAT
@@ -969,6 +1008,7 @@ class StructFieldFunction(__StructNode):
      func <field_name>(Document val) {
     // ... body code
     """
+
     name: M_ITEM | M_KEY | M_VALUE | str
     kind: ClassVar[TokenType] = TokenType.STRUCT_FIELD
     parent: Optional["StructParser"] = None  # LATE INIT
@@ -987,7 +1027,7 @@ class StructFieldFunction(__StructNode):
             fn
             for fn in self.parent.parent.body  # type: ignore
             if getattr(fn, "name", None)
-            and fn.name == self.nested_schema_name()  # noqa
+            and fn.name == self.nested_schema_name()  # type: ignore[attr-defined]
             and fn.kind == TokenType.TYPEDEF
         ][0]
         return associated_typedef  # type: ignore
@@ -1001,7 +1041,7 @@ class StructFieldFunction(__StructNode):
             return None
         # type NestedExpression (naive)
         # last element - ReturnExpr
-        return self.body[-2].schema  # noqa
+        return self.body[-2].schema  # type: ignore[attr-defined]
 
     def have_assert_expr(self) -> bool:
         """return True if StructFieldFunction contains assert expr"""
@@ -1032,6 +1072,7 @@ class PreValidateFunction(__StructNode):
         func _pre_validate(Document val) {
         // ... body expr
     """
+
     kind: ClassVar[TokenType] = TokenType.STRUCT_PRE_VALIDATE
     name: M_PRE_VALIDATE = "__PRE_VALIDATE__"
     parent: Optional["StructParser"] = None  # LATE INIT
@@ -1049,6 +1090,7 @@ class PartDocFunction(__StructNode):
         func _part_document(Document val) Sequence<Element>{
         // ... body expr
     """
+
     kind: ClassVar[TokenType] = TokenType.STRUCT_PART_DOCUMENT
     name: M_SPLIT_DOC = "__SPLIT_DOC__"
     parent: Optional["StructParser"] = None  # LATE INIT
@@ -1056,11 +1098,12 @@ class PartDocFunction(__StructNode):
 
 @dataclass(kw_only=True)
 class StartParseFunction(__StructNode):
-    """ `__START_PARSE__` struct entrypoint
+    """`__START_PARSE__` struct entrypoint
 
     - body CallStructFunctionExpression node expr
     - type struct type, for choice generate strategy
     """
+
     name: M_START_PARSE = "__START_PARSE__"
     kind: ClassVar[TokenType] = TokenType.STRUCT_PARSE_START
     body: Sequence[CallStructFunctionExpression]
@@ -1092,6 +1135,7 @@ class StructInit(BaseAstNode):
     // StructParser code...
     constructor(<name>) new ...
     """
+
     kind: ClassVar[TokenType] = TokenType.STRUCT_INIT
     parent: Optional["StructParser"] = None  # LATE INIT
     name: str
@@ -1109,6 +1153,7 @@ class StructParser(BaseAstNode):
     - typedef - link to TypeDef Node (for typing)
     - parent - ModuleProgram Node
     """
+
     kind: ClassVar[TokenType] = TokenType.STRUCT
     init: StructInit = field(init=False)
     docstring_class_top: bool = False

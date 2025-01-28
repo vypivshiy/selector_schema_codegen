@@ -41,6 +41,8 @@ from ..ast_ssc import (
     ToListInteger,
     ToFloat,
     ToListFloat,
+    ModuleImports,
+    TypeDefField,
 )
 from ..tokens import TokenType, VariableType, StructType
 
@@ -50,7 +52,7 @@ MAGIC_METHODS = py.MAGIC_METHODS_NAME
 
 
 class BasePyCodeConverter(BaseCodeConverter):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         # TODO link converters
         self.pre_definitions[TokenType.IMPORTS] = tt_imports
@@ -112,12 +114,12 @@ class BasePyCodeConverter(BaseCodeConverter):
         self.pre_definitions[TokenType.TO_FLOAT_LIST] = tt_to_list_float
 
 
-def tt_imports(node):
+def tt_imports(node: ModuleImports) -> str:
     return py.BINDINGS[node.kind]
 
 
-def tt_typedef(node: TypeDef):
-    def _fetch_node_type(node_):
+def tt_typedef(node: TypeDef) -> str:
+    def _fetch_node_type(node_: TypeDefField) -> str:
         if node_.ret_type == VariableType.NESTED:
             return py.TYPE_PREFIX.format(node_.nested_class)
         return py.TYPES.get(node_.ret_type)
@@ -225,7 +227,7 @@ def tt_start_parse_pre(node: StartParseFunction) -> str:
     return py.INDENT_METHOD + py.BINDINGS[node.kind, name, t_name]
 
 
-def tt_start_parse_post(node: StartParseFunction):
+def tt_start_parse_post(node: StartParseFunction) -> str:
     code = ""
     if any(f.name == "__PRE_VALIDATE__" for f in node.body):
         name = MAGIC_METHODS.get("__PRE_VALIDATE__")
