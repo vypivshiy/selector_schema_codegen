@@ -1,7 +1,7 @@
 import pprint
 
 import requests  # or any http lib
-from parsers.booksToScrape import CataloguePage
+from booksToScrape import CataloguePage
 
 
 if __name__ == "__main__":
