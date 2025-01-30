@@ -1,12 +1,12 @@
 import re
 
 from ssc_codegen.ast_ssc import (
+    CallStructFunctionExpression,
+    StartParseFunction,
     TypeDef,
-    StructFieldFunction,
     TypeDefField,
-    PartDocFunction,
 )
-from ssc_codegen.tokens import VariableType, TokenType
+from ssc_codegen.tokens import TokenType, VariableType
 
 
 def to_snake_case(s: str) -> str:
@@ -14,15 +14,17 @@ def to_snake_case(s: str) -> str:
 
 
 def to_upper_camel_case(s: str) -> str:
+    if not s:
+        return s
     return "".join(word[0].upper() + word[1:] for word in s.split("_"))
 
 
 def to_lower_camel_case(s: str) -> str:
-    words = s.replace("_", " ").split()
-    return "".join(
-        word.capitalize() if i != 0 else word.lower()
-        for i, word in enumerate(words)
-    )
+    if not s:
+        return s
+
+    up_case = to_upper_camel_case(s)
+    return up_case[0].lower() + up_case[1:]
 
 
 def wrap_double_quotes(s: str, escape_ch: str = "\\") -> str:
@@ -46,25 +48,7 @@ def escape_str(
     return re.sub(pattern, _repl, s)
 
 
-def contains_assert_expr_fn(
-    node: StructFieldFunction | PartDocFunction,
-) -> bool:
-    return any(
-        t.kind
-        in (
-            TokenType.IS_CSS,
-            TokenType.IS_EQUAL,
-            TokenType.IS_NOT_EQUAL,
-            TokenType.IS_CONTAINS,
-            TokenType.IS_XPATH,
-            TokenType.IS_REGEX_MATCH,
-        )
-        for t in node.body
-        if t
-    )
-
-
-def find_nested_associated_typedef_by_t_field(node: TypeDefField) -> TypeDef:
+def find_field_nested_struct(node: TypeDefField) -> TypeDef:
     if node.ret_type != VariableType.NESTED:
         raise TypeError("Return type is not NESTED")
     associated_typedef: TypeDef = [
@@ -75,3 +59,23 @@ def find_nested_associated_typedef_by_t_field(node: TypeDefField) -> TypeDef:
         and fn.kind == TokenType.TYPEDEF
     ][0]
     return associated_typedef
+
+
+def find_tdef_field_node_by_name(
+    node: TypeDef, name: str
+) -> TypeDefField | None:
+    """find node in body by name"""
+    f = [f for f in node.body if f.name == name]
+    if len(f) == 0:
+        return None
+    return f[0]
+
+
+def find_callfn_field_node_by_name(
+    node: StartParseFunction, name: str
+) -> CallStructFunctionExpression | None:
+    """find node in body by name"""
+    f = [f for f in node.body if f.name == name]
+    if len(f) == 0:
+        return None
+    return f[0]
