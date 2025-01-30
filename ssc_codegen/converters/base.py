@@ -9,7 +9,6 @@ from ..ast_ssc import (
     ModuleProgram,
     PartDocFunction,
     PreValidateFunction,
-    ReturnExpression,
     StartParseFunction,
     StructFieldFunction,
     StructParser,
@@ -25,17 +24,51 @@ CB_AST_BIND = Callable[[BaseAstNode], str]
 CB_AST_DECORATOR = Callable[[CB_AST_BIND], CB_AST_BIND]
 
 
+def debug_msg_cb(node: BaseAstNode, comment_prefix: str) -> str:
+    match node.kind:
+        case TokenType.EXPR_RETURN:
+            return f"{comment_prefix}Token: {node.kind.name} ret_type: {node.ret_type.name}"
+        case TokenType.EXPR_DEFAULT_START:
+            return (
+                f"{comment_prefix} Token: {node.kind.name}, value: {node.value}"
+            )
+        case TokenType.STRUCT_PARSE_START:
+            return (
+                f"{comment_prefix}Token: {node.kind.name} struct_type: {node.type.name}\n"
+                f"{comment_prefix}Call instructions count: {len(node.body)}"
+            )
+        case TokenType.STRUCT:
+            return (
+                f"{comment_prefix}Token: {node.kind.name} struct_type: {node.type.name}\n"
+                f"{comment_prefix}FuncsCount: {len(node.body)}"
+            )
+        case TokenType.STRUCT_FIELD:
+            ret_type = node.body[-1].ret_type.name
+            return f"{comment_prefix} Token: {node.kind.name} field: {node.name} ret_type: {ret_type}"
+
+        case TokenType.TYPEDEF:
+            if node.struct_ref:
+                return f"{comment_prefix}Token: {node.kind.name} type: {node.struct_ref.type.name}"
+            return f"{comment_prefix}Token: {node.kind.name}"
+        case _:
+            return f"{comment_prefix}Token: {node.kind.name}"
+
+
 class BaseCodeConverter:
     """Base code class converter that translates AST nodes into code."""
 
     def __init__(
-        self, debug_instructions: bool = False, debug_comment_prefix: str = ""
+        self,
+        debug_instructions: bool = False,
+        debug_comment_prefix: str = "",
+        debug_cb: Callable[[BaseAstNode, str], str] = debug_msg_cb,
     ):
         self.pre_definitions: dict[TokenType, CB_AST_BIND] = {}
         self.post_definitions: dict[TokenType, CB_AST_BIND] = {}
 
         self.debug_instructions = debug_instructions
         self.debug_comment_prefix = debug_comment_prefix
+        self.debug_msg_cb = debug_cb
 
     def set_debug_prefix(self, comment_prefix: str) -> None:
         """Set the debug comment prefix and enable debug instructions."""
@@ -70,16 +103,7 @@ class BaseCodeConverter:
 
     def _get_debug_prefix(self, node: BaseAstNode) -> str:
         """Generate debug prefix for the given node."""
-        if node.kind == TokenType.EXPR_RETURN:
-            node = cast(ReturnExpression, node)
-            return f"{self.debug_comment_prefix}Token: {node.kind.name} ret_type: {node.ret_type.name}"
-        elif node.kind == TokenType.STRUCT_PARSE_START:
-            node = cast(StartParseFunction, node)
-            return (
-                f"{self.debug_comment_prefix}Token: {node.kind.name} struct_type: {node.type.name}\n"
-                f"{self.debug_comment_prefix}Call instructions count: {len(node.body)}"
-            )
-        return f"{self.debug_comment_prefix}Token: {node.kind.name}"
+        return self.debug_msg_cb(node, self.debug_comment_prefix)
 
     def _pre_convert_node(self, node: BaseAstNode) -> str:
         """Convert the AST node using the pre-definition function."""
@@ -231,7 +255,10 @@ class BaseCodeConverter:
 
 
 def left_right_var_names(name: str, variable: Variable) -> tuple[str, str]:
-    """helper generate variable names"""
+    """helper var counter for generate variable names
+
+    returns prev, next variable names
+    """
     if variable.num == 0:
         prev = name
     else:
