@@ -47,9 +47,7 @@ MAGIC_METHODS = {
     "__START_PARSE__": "Parse",
 }
 
-# hardcoded undocumented template package placeholder
-# in cli, set name as directory name
-PACKAGE = "package $PACKAGE$"
+
 
 
 BINDINGS_PRE = TemplateBindings()
@@ -63,9 +61,16 @@ def _docstring(docstring: str) -> str:
 
 BINDINGS_PRE[TokenType.DOCSTRING] = _docstring
 
+# hardcoded undocumented template package placeholder
+# in cli, set name as directory name
+PACKAGE = "package $PACKAGE$"
+
 # TODO: add github.com/antchfx/htmlquery API (xpath)
 # in current stage project support only goquery
-BINDINGS_PRE[TokenType.IMPORTS] = """
+# TODO add goimports cli fix
+BINDINGS_PRE[TokenType.IMPORTS] = f"""
+{PACKAGE}
+
 import (
     "fmt"
     "regexp"
@@ -258,7 +263,7 @@ def _str_re_sub_map(
         + f"for _, {tmp_var} := range {prv} "
         + BRACKET_START
         + f"{nxt} = append({nxt}, string(regexp.MustCompile({pattern}).ReplaceAll([]byte({prv}), []byte({repl}))); "
-        + BRACKET_END
+        + BRACKET_END  + ';'
     )
 
 
@@ -276,13 +281,13 @@ def _assert_eq(
             f"if !({prv} == {value})"
             + BRACKET_START
             + f"panic(fmt.Errorf({msg})); "
-            + BRACKET_END
+            + BRACKET_END  + ';'
         )
     return (
         f"if !({prv} == {value})"
         + BRACKET_START
         + f"panic(fmt.Errorf({msg})); "
-        + BRACKET_END
+        + BRACKET_END  + ';'
     )
 
 
@@ -297,13 +302,13 @@ def _assert_ne(
             f"if {prv} == {value}"
             + BRACKET_START
             + f"panic(fmt.Errorf({msg})); "
-            + BRACKET_END
+            + BRACKET_END  + ';'
         )
     return (
         f"if {prv} == {value}"
         + BRACKET_START
         + f"panic(fmt.Errorf({msg})); "
-        + BRACKET_END
+        + BRACKET_END  + ';'
     )
 
 
@@ -318,13 +323,13 @@ def _assert_in(
             f"if !(slices.Contains({prv}, {item}))"
             + BRACKET_START
             + f"panic(fmt.Errorf({msg})); "
-            + BRACKET_END
+            + BRACKET_END  + ';'
         )
     return (
         f"if !(slices.Contains({prv}, {item}))"
         + BRACKET_START
         + f"panic(fmt.Errorf({msg})); "
-        + BRACKET_END
+        + BRACKET_END  + ';'
     )
 
 
@@ -341,14 +346,14 @@ def _is_regex_match(
             + f"if {err_var} != nil"
             + BRACKET_START
             + f"panic(fmt.Errorf({msg})); "
-            + BRACKET_END
+            + BRACKET_END  + ';'
         )
     return (
         f"_, {err_var} := regexp.Match({pattern}, [] byte({prv})); "
         + f"if {err_var} != nil"
         + BRACKET_START
         + f"panic(fmt.Errorf({msg})); "
-        + BRACKET_END
+        + BRACKET_END  + ';'
     )
 
 
@@ -392,7 +397,7 @@ BINDINGS_PRE[TokenType.EXPR_ATTR] = lambda nxt, prv, attr: (
     + "if !isExists"
     + BRACKET_START
     + f'panic(fmt.Errorf("attr `%s` not exists in `%s`", {attr}, {prv})); '
-    + BRACKET_END
+    + BRACKET_END  + ';'
 )
 
 
@@ -407,7 +412,7 @@ def _attr_map(nxt: str, prv: str, attr: str, arr_type: str) -> str:
         + "if !isExists"
         + BRACKET_START
         + f'panic(fmt.Errorf("attr `%s` not exists in `%s`", {attr}, {tmp_var})); '
-        + BRACKET_END
+        + BRACKET_END  + ';'
         + f"{nxt} = append({nxt}, {raw_var}); "
         + BRACKET_END
     )
@@ -424,13 +429,13 @@ def _is_css(
             f"if {prv}.Find({query}).Length() == 0"
             + BRACKET_START
             + f"panic(fmt.Errorf({msg})); "
-            + BRACKET_END
+            + BRACKET_END  + ';'
         )
     return (
         f"if {prv}.Find({query}).Length() == 0"
         + BRACKET_START
         + f"panic(fmt.Errorf({msg})); "
-        + BRACKET_END
+        + BRACKET_END  + ';'
     )
 
 
@@ -458,7 +463,7 @@ def gen_start_parse_list(node: "StartParseFunction") -> str:
                 + "if err != nil "
                 + BRACKET_START
                 + "return nil, err; "
-                + BRACKET_END
+                + BRACKET_END  + ';'
             )
             if field.ret_type == VariableType.NESTED:
                 st_args.append(var_name)
@@ -478,8 +483,8 @@ def gen_start_parse_list(node: "StartParseFunction") -> str:
         + BRACKET_END
         + ";"
         # close EachIter
-        + "items = append(items, item)"
-        + BRACKET_END
+        + "items = append(items, item); "
+        + BRACKET_END + ';'
     )
     body += "return &items, nil; "
     return body
@@ -501,7 +506,7 @@ def gen_start_parse_item(node: "StartParseFunction") -> str:
                 + "if err != nil "
                 + BRACKET_START
                 + "return nil, err; "
-                + BRACKET_END
+                + BRACKET_END  + ';'
             )
             if field.ret_type == VariableType.NESTED:
                 st_args.append(var_name)
@@ -541,7 +546,7 @@ def gen_start_parse_dict(node: "StartParseFunction") -> str:
             + "if err != nil "
             + BRACKET_START
             + "return nil, err; "
-            + BRACKET_END
+            + BRACKET_END + ';'
         )
         st_args.append("*keyRaw")
     else:
@@ -556,7 +561,7 @@ def gen_start_parse_dict(node: "StartParseFunction") -> str:
             + "if err != nil "
             + BRACKET_START
             + "return nil, err; "
-            + BRACKET_END
+            + BRACKET_END + ';'
         )
         if expr_value.ret_type == VariableType.NESTED:
             st_args.append("valueRaw")
@@ -593,7 +598,7 @@ def gen_start_parse_flat_list(node: "StartParseFunction") -> str:
             + "if err != nil "
             + BRACKET_START
             + "return nil, err; "
-            + BRACKET_END
+            + BRACKET_END + ';'
         )
         if expr_item.ret_type == VariableType.NESTED:
             st_arg = "rawItem"
@@ -621,7 +626,7 @@ def gen_typedef_item(node: "TypeDef") -> str:
             field_type = TYPES.get(f.ret_type, "")
         fields_name = to_upper_camel_case(f.name)
         code += f'{fields_name} {field_type} `json:"{f.name}"`; '
-    code += BRACKET_END
+    code += BRACKET_END + '; '
     return code
 
 

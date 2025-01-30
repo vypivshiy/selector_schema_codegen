@@ -176,7 +176,7 @@ def tt_start_parse_post(node: StartParseFunction) -> str:
             + "if err != nil "
             + go.BRACKET_START
             + "panic(err); "
-            + go.BRACKET_END
+            + go.BRACKET_END + '; '
         )
     match node.type:
         case StructType.ITEM:
