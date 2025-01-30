@@ -367,6 +367,13 @@ def build_ast_module(
     css_to_xpath: bool = False,
     xpath_to_css: bool = False,
 ) -> ModuleProgram:
+    """build ast from python sscgen config file
+
+    WARNING!!!
+        DO NOT PASS MODULES FROM UNKNOWN SOURCE/INPUT FOR SECURITY REASONS.
+
+        THIS FUNCTION COMPILE AND EXEC PYTHON CODE WOUT CHECKS
+    """
     if css_to_xpath and xpath_to_css:
         raise AttributeError(
             "Should be chosen one variant (css_to_xpath OR xpath_to_css)"
