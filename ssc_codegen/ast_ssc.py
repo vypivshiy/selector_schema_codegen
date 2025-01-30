@@ -198,8 +198,8 @@ class DefaultValueWrapper(BaseExpression):
 
     kind: ClassVar[TokenType] = TokenType.EXPR_DEFAULT
 
-    accept_type: VariableType = VariableType.ANY
-    ret_type: VariableType = VariableType.ANY
+    accept_type: VariableType = VariableType.DOCUMENT
+    ret_type: VariableType = VariableType.DOCUMENT
     value: str | int | float | None
 
 
@@ -915,7 +915,7 @@ class CallStructFunctionExpression(BaseExpression):
 
         if not self.fn_ref:
             return False
-        return bool(self.fn_ref.default)  # type: ignore
+        return bool(self.fn_ref.body[0].have_default_expr())  # type: ignore
 
     def nested_schema(self) -> Union["StructParser", None]:
         """return True if reference stmt is nested"""
