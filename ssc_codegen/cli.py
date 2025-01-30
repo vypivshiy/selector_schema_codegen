@@ -208,7 +208,7 @@ def gen_js(
     )
 
 
-@app.command("dart", help="generate dart modules (BROKEN)")
+@app.command("dart", help="generate dart modules (unstable)")
 def gen_dart(
     ssc_files: Annotated[
         List[Path],
@@ -238,7 +238,7 @@ def gen_dart(
 ) -> None:
     converter = import_converter(f"dart_{lib.value}")
     if fmt:
-        commands = ["dart format {}", "dart fix {}"]
+        commands = ["dart format {}"]
         fmt_cmd = create_fmt_cmd(ssc_files, prefix, suffix, out, commands)
     else:
         fmt_cmd = []
@@ -259,7 +259,7 @@ def gen_dart(
     )
 
 
-@app.command("go", help="generate golang modules (BROKEN)")
+@app.command("go", help="generate golang modules (unstable)")
 def gen_go(
     ssc_files: Annotated[
         List[Path],
