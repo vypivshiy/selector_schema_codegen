@@ -3,20 +3,40 @@
 from typing import TYPE_CHECKING
 
 from ssc_codegen.converters.utils import (
+    find_callfn_field_node_by_name,
+    find_field_nested_struct,
+    find_tdef_field_node_by_name,
     to_upper_camel_case,
-    find_nested_associated_typedef_by_t_field,
 )
-from ssc_codegen.tokens import VariableType, StructType
+from ssc_codegen.tokens import StructType, TokenType, VariableType
+
+from .utils import (
+    TemplateBindings,
+)
 
 if TYPE_CHECKING:
-    from ssc_codegen.ast_ssc import StartParseFunction, TypeDef
+    from ssc_codegen.ast_ssc import (
+        StartParseFunction,
+        StructFieldFunction,
+        TypeDef,
+    )
+
 
 TYPES = {
     VariableType.STRING: "string",
     VariableType.LIST_STRING: "[]string",
     VariableType.OPTIONAL_STRING: "*string",
     VariableType.OPTIONAL_LIST_STRING: "*[]string",
+    VariableType.NULL: "nil",
+    VariableType.INT: "int",
+    VariableType.OPTIONAL_INT: "*int",
+    VariableType.LIST_INT: "[]int",
+    VariableType.FLOAT: "float64",
+    VariableType.OPTIONAL_FLOAT: "*float64",
+    VariableType.LIST_FLOAT: "[]float64",
+    VariableType.OPTIONAL_LIST_FLOAT: "*[]float64",
 }
+
 
 MAGIC_METHODS = {
     "__KEY__": "Key",
@@ -27,409 +47,664 @@ MAGIC_METHODS = {
     "__START_PARSE__": "Parse",
 }
 
+# hardcoded undocumented template package placeholder
+# in cli, set name as directory name
 PACKAGE = "package $PACKAGE$"
 
+
+BINDINGS_PRE = TemplateBindings()
+BINDINGS_POST = TemplateBindings()
+
+
+def _docstring(docstring: str) -> str:
+    # todo: provide node for insert func/struct name
+    return "\n".join("// " + line for line in docstring.split("\n"))
+
+
+BINDINGS_PRE[TokenType.DOCSTRING] = _docstring
+
 # TODO: add github.com/antchfx/htmlquery API (xpath)
-IMPORT_HEAD = "import ("
-IMPORT_FOOTER = ")"
-BASE_IMPORTS = """
+# in current stage project support only goquery
+BINDINGS_PRE[TokenType.IMPORTS] = """
+import (
     "fmt"
     "regexp"
     "strings"
     "slices"
+    "strconv"
+    "github.com/PuerkitoBio/goquery"
+)
 """
+
 BRACKET_START = "{"
 BRACKET_END = "}"
 
-DEFAULT_HEAD = "defer func() {if r := recover(); r != nil {"
-
-
-# func (p *Books) parsePrice(value *goquery.Selection) (value3 *string) {
+# try/catch effect realisation via anon defer func
+# if code block throw exception - set default value
+# example:
+# // divide(10, 0) -> 9000
+# // divide(10, 2) -> 5
+# func divide(a, b int) (result int) {
 # 	defer func() {
-# 		if r := recover(); r != nil {
-# 			// Recover from panic and return the default value
-# 			*value3 = "0"
-# 		}
+# 		if r := recover(); r != nil {result = 9000}
 # 	}()
-#
-# 	cb := func(value *goquery.Selection) *string {
-#       ...
-# 		return RET
-# 	}
-# 	return cb(value)
+# 	return a / b
 # }
-def DEFAULT_HEAD(ret_var: str, value: str, ret_type: str) -> str:  # noqa
-    ret_var = ret_var if ret_var == "nil" else "*" + ret_var
+BINDINGS_PRE[TokenType.EXPR_DEFAULT_START] = lambda value: (
+    "defer func() "
+    + BRACKET_START
+    + "if r := recover(); r != nil"
+    + BRACKET_START
+    + f"result = {value}; "
+    + BRACKET_END
+    + BRACKET_END
+    + "();"
+)
+
+
+def _part_doc_func(parent_name: str, is_err: bool = False) -> str:
+    method_name = MAGIC_METHODS.get("__SPLIT_DOC__", "")
+    if is_err:
+        # func (p *{}) {}(value *goquery.Selection) (*goquery.Selection, error) {
+        return (
+            "func (p *"
+            + parent_name
+            + ") "
+            + method_name
+            + "(value *goquery.Selection) (*goquery.Selection, error) "
+            + BRACKET_START
+        )
+    # func (p *{}) {}(value *goquery.Selection) (*goquery.Selection) {
     return (
-        "defer func()"
-        + BRACKET_START
-        + "if r := recover(); r != nil"
-        + BRACKET_START
-        + ret_var
-        + " = "
-        + value
-        + ";"
-        + BRACKET_END
-        + BRACKET_END
-        + "();"
-        + "cb := func() "
-        + ret_type
+        "func (p *"
+        + parent_name
+        + ") "
+        + method_name
+        + "(value *goquery.Selection) (*goquery.Selection)"
         + BRACKET_START
     )
 
 
-DEFAULT_FOOTER = BRACKET_END + ";" + "return cb();"
-RET_DEFAULT = "({} {})"
-"""VAR_NAME (RET) TYPE"""
-
-RET_DEFAULT_ERR = "({} {}, error)"
-"""VAR_NAME (RET) TYPE, ERROR"""
-
-
-def DOCSTRING(docstring: str) -> str:  # noqa
-    return f"\n".join("// " + line for line in docstring.split("\n"))
-
-
-# type {TNAME} struct {
-# Foo `json:foo`
-# BarBaz `json:bar_baz`
-# Zaz struct {
-#
-# } `json: zaz`
-# }
-
-
-STRUCT_VALUE = "document"
-STRUCT_HEAD = "type {} struct"
-STRUCT_BODY = "document *goquery.Document"
-JSON_ANCHOR = '`json:"{}"`'
-TYPE_PREFIX = "T{}"
-TYPE_DICT = "map[string]{}"
-TYPE_LIST = "[]{}"
-TYPE_FLAT_LIST = "[]{}"
-SINGLE_TYPEDEF_ASSIGN = "type {} = {}; "
-TYPE_ITEM_HEAD = "type {} struct"
-TYPE_ITEM_FIELD = "{} {} {}; "
-"""NAME TYPE JSON_ANCHOR"""
-
-PRE_VALIDATE_HEAD = "func (p *{}) {}(value *goquery.Selection) error"
-RET = "return {}; "
-RET_NIL_ERR = "return nil, err;"
-RET_VAL_NIL_ERR = "return {}, nil; "
-NO_RET = "return nil; "
-E_NESTED_NEW_DOC = "doc{} := goquery.NewDocumentFromNode({}.Nodes[0]); "
-
-
-def E_PARSE_NESTED_ST(var_num: int, schema_name: str) -> str:  # noqa
-    return f"st{var_num} := {schema_name}{{ doc{var_num} }}; "
-
-
-E_NESTED_PARSE_CALL = "{} := st{}.Parse(); "
-
-PART_DOC_HEAD = "func (p *{}) {}(value *goquery.Selection) *goquery.Selection"
-PART_DOC_HEAD_ERR = (
-    "func (p *{}) {}(value *goquery.Selection) (*goquery.Selection, error)"
+BINDINGS_PRE[TokenType.STRUCT_PART_DOCUMENT] = _part_doc_func
+BINDINGS_PRE[TokenType.TYPEDEF] = (
+    lambda t_name: f"type {t_name} struct {BRACKET_START}"
 )
-FN_PARSE_HEAD = "func (p *{}) parse{}(value *goquery.Selection) {} "
-FN_PARSE_HEAD_RET_ERR = "(*{}, error)"
-FN_START_PARSE_HEAD = "func (p *{}) {}() {}"
-FN_CALL_PARSE = "p.parse{}({});"
-FN_CALL_DOC_ARG = "p.document.Selection"
+BINDINGS_POST[TokenType.TYPEDEF] = lambda: BRACKET_END
+BINDINGS_PRE[TokenType.TYPEDEF_FIELD] = (
+    lambda name, t_type, json_anchor: f"{name} {t_type} {json_anchor}; "
+)
+"""FIELD_NAME TYPE JSON ANCHOR"""
+BINDINGS_PRE[TokenType.STRUCT_PRE_VALIDATE] = lambda st_ptr: (
+    f"func (p *{st_ptr}) {MAGIC_METHODS.get('__PRE_VALIDATE__', '')}(value *goquery.Selection) error {BRACKET_START}"
+)
 
 
-def E_PARSE_NESTED_ST(var_num: int, schema_name: str) -> str:  # noqa
-    return f"st{var_num} := {schema_name}{{ doc{var_num} }}; "
+def _return_expr(var: str | None = None, is_err: bool = False) -> str:
+    # return value
+    # return value, err
+    # return value, nil
+    if var is None:
+        var = "nil"
+    if is_err:
+        return f"return {var}, nil; "
+    return f"return {var}; "
 
 
-def START_PARSE_CALL_PRE_VALIDATE(node: "StartParseFunction") -> str:  # noqa
-    name = MAGIC_METHODS.get("__PRE_VALIDATE__")
+BINDINGS_PRE[TokenType.EXPR_RETURN] = _return_expr
+BINDINGS_PRE[TokenType.EXPR_NO_RETURN] = "return nil; "
+BINDINGS_PRE[TokenType.EXPR_STRING_FORMAT] = (
+    lambda nxt, fmt, prv: f"{nxt} := fmt.Sprintf({fmt}, {prv}); "
+)
+
+
+def _str_fmt_map(nxt: str, fmt: str, prv: str, arr_type: str) -> str:
+    # https://stackoverflow.com/a/33726830
+    #     <PREV ARRAY VAR> := []<T1>{1,2,3}
+    #
+    #     var <NEW ARRAY VAR> []<T2>
+    #     for _, x := range <PREV ARRAY VAR> {
+    #         <NEW ARRAY VAR> = append(<NEW ARRAY VAR>, <MAP_CODE>)
+    #     }
+    tmp_var = f"tmp{nxt.title()}"
     return (
-        f"err := p.{name}(p.document.Selection); "
-        + "if err != nil "
+        f"{nxt} := make({arr_type}, 0); "
+        + f"for _, {tmp_var} := range {prv} "
         + BRACKET_START
-        + RET_NIL_ERR
-        + BRACKET_END  # T{node.parent.name}
+        + f"{nxt} = append({nxt}, fmt. Sprintf({fmt}, {tmp_var})); "
+        + BRACKET_END
     )
 
 
-E_NXT_ARRAY = "{} := make({}, 0); "  # get from TYPES map
-"""NXT_VAR, TYPE"""
+BINDINGS_PRE[TokenType.EXPR_LIST_STRING_FORMAT] = _str_fmt_map
+BINDINGS_PRE[TokenType.EXPR_STRING_TRIM] = "{} := strings.Trim({}, {}); "
 
-E_FOR_RANGE_HEAD = "for _, {} := range {}"
-"""I_VAR, PRV (ITER)"""
 
-E_FOR_RANGE_MAP_CODE = "{} = append({}, {}); "
-"""NXT, NXT, CODE"""
+def _str_trim_map(nxt: str, chars: str, prv: str, arr_type: str) -> str:
+    tmp_var = f"tmp{nxt.title()}"
+    return (
+        f"{nxt} := make({arr_type}, 0); "
+        + f"for _, {tmp_var} := range {prv} "
+        + BRACKET_START
+        + f"{nxt} = append({nxt}, strings.Trim({tmp_var}, {chars})); "
+        + BRACKET_END
+    )
 
-E_STR_FMT = "{} := fmt.Sprintf({}, {}); "
-E_STR_FMT_ALL = "fmt.Sprintf({}, {})"
-"""TEMPLATE, I_VAR"""
-E_STR_TRIM = "{} := strings.Trim({}, {});"
-E_STR_TRIM_ALL = "strings.Trim({}, {})"
-E_STR_LTRIM = "{} := strings.TrimLeft({}, {}); "
-E_STR_LTRIM_ALL = "strings.TrimLeft({}, {})"
-E_STR_RTRIM = "{} := strings.TrimRight({}, {});"
-E_STR_RTRIM_ALL = "strings.TrimRight({}, {})"
-E_STR_REPL = "{} := strings.Replace({}, {}, {}, -1); "
-"""NXT PRV OLD NEW"""
-E_STR_REPL_ALL = "strings.Replace({}, {}, {}, -1)"
-"""IVAR OLD NEW"""
-E_STR_SPLIT = "{} := strings.Split({}, {}); "
-E_RE = "{} := regexp.MustCompile({}).FindStringSubmatch({})[{}]; "
-E_RE_ALL = "{} := regexp.MustCompile({}).FindStringSubmatch({}); "
-E_RE_SUB = (
-    "{} := string(regexp.MustCompile({}).ReplaceAll([]byte({}), []byte({}))); "
+
+BINDINGS_PRE[TokenType.EXPR_LIST_STRING_TRIM] = _str_trim_map
+BINDINGS_PRE[TokenType.EXPR_STRING_LTRIM] = "{} := strings.TrimLeft({}, {}); "
+
+
+def _str_ltrim_map(nxt: str, chars: str, prv: str, arr_type: str) -> str:
+    tmp_var = f"tmp{nxt.title()}"
+    return (
+        f"{nxt} := make({arr_type}, 0); "
+        + f"for _, {tmp_var} := range {prv} "
+        + BRACKET_START
+        + f"{nxt} = append({nxt}, strings.TrimLeft({tmp_var}, {chars})); "
+        + BRACKET_END
+    )
+
+
+BINDINGS_PRE[TokenType.EXPR_LIST_STRING_LTRIM] = _str_ltrim_map
+BINDINGS_PRE[TokenType.EXPR_STRING_RTRIM] = "{} := strings.TrimRight({}, {}); "
+
+
+def _str_rtrim_map(nxt: str, chars: str, prv: str, arr_type: str) -> str:
+    tmp_var = f"tmp{nxt.title()}"
+    return (
+        f"{nxt} := make({arr_type}, 0); "
+        + f"for _, {tmp_var} := range {prv} "
+        + BRACKET_START
+        + f"{nxt} = append({nxt}, strings.TrimRight({tmp_var}, {chars})); "
+        + BRACKET_END
+    )
+
+
+BINDINGS_PRE[TokenType.EXPR_LIST_STRING_RTRIM] = _str_rtrim_map
+BINDINGS_PRE[TokenType.EXPR_STRING_REPLACE] = (
+    "{} := strings.Replace({}, {}, {}, -1); "
 )
-E_RE_SUB_ALL = (
-    "string(regexp.MustCompile({}).ReplaceAll([]byte({}), []byte({})))"
+
+
+def _str_repl_map(nxt: str, prv: str, old: str, new: str, arr_type: str) -> str:
+    tmp_var = f"tmp{nxt.title()}"
+    return (
+        f"{nxt} := make({arr_type}, 0); "
+        + f"for _, {tmp_var} := range {prv} "
+        + BRACKET_START
+        + f"{nxt} = append({nxt}, strings.Replace({tmp_var}, {old}, {new}, -1); "
+        + BRACKET_END
+    )
+
+
+BINDINGS_PRE[TokenType.EXPR_STRING_SPLIT] = "{} := strings.Split({}, {}); "
+BINDINGS_PRE[TokenType.EXPR_REGEX] = (
+    "{} := regexp.MustCompile({}).FindStringSubmatch({})[{}]; "
 )
-E_INDEX = "{} := {}[{}]; "
-E_JOIN = "{} := strings.Join({}, {}); "
-RET_NIL_FMT_ERR = "return nil, fmt.Errorf({}); "
-RET_FMT_ERR = "return fmt.Errorf({}); "
-E_EQ = "if !({} == {})"
-E_ASSIGN = "{} := {}; "
-E_NE = "if !({} != {})"
-E_IN = "if !(slices.Contains({}, {}))"
-E_IS_RE_ASSIGN = "_, {} := regexp.Match({}, []byte({})); "
-"""ERR_VAR, PATTERN, PRV"""
-E_IS_RE = "if {} != nil"
-"""ERR_VAR"""
+BINDINGS_PRE[TokenType.EXPR_REGEX_ALL] = (
+    "{} := regexp.MustCompile({}).FindStringSubmatch({}); "
+)
+BINDINGS_PRE[TokenType.EXPR_REGEX_SUB] = (
+    "{} := string(regexp.MustCompile({}).ReplaceAll([]byte({}), []byte({})));"
+)
 
 
-def gen_item_body(node: "StartParseFunction") -> str:
-    body = ""
-    st_args = []
+def _str_re_sub_map(
+    nxt: str, pattern: str, prv: str, repl: str, arr_type: str
+) -> str:
+    tmp_var = f"tmp{nxt.title()}"
+    return (
+        f"{nxt} := make({arr_type}, 0); "
+        + f"for _, {tmp_var} := range {prv} "
+        + BRACKET_START
+        + f"{nxt} = append({nxt}, string(regexp.MustCompile({pattern}).ReplaceAll([]byte({prv}), []byte({repl}))); "
+        + BRACKET_END
+    )
+
+
+BINDINGS_PRE[TokenType.EXPR_LIST_REGEX_SUB] = _str_re_sub_map
+BINDINGS_PRE[TokenType.EXPR_LIST_STRING_INDEX] = "{} := {}[{}]; "
+BINDINGS_PRE[TokenType.EXPR_LIST_DOCUMENT_INDEX] = "{} := {}[{}]; "
+BINDINGS_PRE[TokenType.EXPR_LIST_JOIN] = "{} := strings.Join({}, {}); "
+
+
+def _assert_eq(
+    prv: str, value: str, msg: str, is_pre_validate: bool = False
+) -> str:
+    if is_pre_validate:
+        return (
+            f"if !({prv} == {value})"
+            + BRACKET_START
+            + f"panic(fmt.Errorf({msg})); "
+            + BRACKET_END
+        )
+    return (
+        f"if !({prv} == {value})"
+        + BRACKET_START
+        + f"panic(fmt.Errorf({msg})); "
+        + BRACKET_END
+    )
+
+
+BINDINGS_PRE[TokenType.IS_EQUAL] = _assert_eq
+
+
+def _assert_ne(
+    prv: str, value: str, msg: str, is_pre_validate: bool = False
+) -> str:
+    if is_pre_validate:
+        return (
+            f"if {prv} == {value}"
+            + BRACKET_START
+            + f"panic(fmt.Errorf({msg})); "
+            + BRACKET_END
+        )
+    return (
+        f"if {prv} == {value}"
+        + BRACKET_START
+        + f"panic(fmt.Errorf({msg})); "
+        + BRACKET_END
+    )
+
+
+BINDINGS_PRE[TokenType.IS_NOT_EQUAL] = _assert_ne
+
+
+def _assert_in(
+    prv: str, item: str, msg: str, is_pre_validate: bool = False
+) -> str:
+    if is_pre_validate:
+        return (
+            f"if !(slices.Contains({prv}, {item}))"
+            + BRACKET_START
+            + f"panic(fmt.Errorf({msg})); "
+            + BRACKET_END
+        )
+    return (
+        f"if !(slices.Contains({prv}, {item}))"
+        + BRACKET_START
+        + f"panic(fmt.Errorf({msg})); "
+        + BRACKET_END
+    )
+
+
+BINDINGS_PRE[TokenType.IS_CONTAINS] = _assert_in
+
+
+def _is_regex_match(
+    prv: str, pattern: str, msg: str, is_pre_validate: bool = False
+) -> str:
+    err_var = f"err{prv.title()}"
+    if is_pre_validate:
+        return (
+            f"_, {err_var} := regexp.Match({pattern}, [] byte({prv})); "
+            + f"if {err_var} != nil"
+            + BRACKET_START
+            + f"panic(fmt.Errorf({msg})); "
+            + BRACKET_END
+        )
+    return (
+        f"_, {err_var} := regexp.Match({pattern}, [] byte({prv})); "
+        + f"if {err_var} != nil"
+        + BRACKET_START
+        + f"panic(fmt.Errorf({msg})); "
+        + BRACKET_END
+    )
+
+
+BINDINGS_PRE[TokenType.IS_REGEX_MATCH] = _is_regex_match
+BINDINGS_PRE[TokenType.EXPR_CSS] = "{} := {}.Find({}).First(); "
+BINDINGS_PRE[TokenType.EXPR_CSS_ALL] = "{} := {}.Find({}); "
+BINDINGS_PRE[TokenType.EXPR_TEXT] = "{} := {}.Text(); "
+
+
+def _text_map(nxt: str, prv: str, arr_type: str) -> str:
+    tmp_var = f"tmp{nxt.title()}"
+    return (
+        f"{nxt} := make({arr_type}, 0); "
+        + f"for _, {tmp_var} := range {prv} "
+        + BRACKET_START
+        + f"{nxt} = append({nxt}, {tmp_var}.Text()); "
+        + BRACKET_END
+    )
+
+
+BINDINGS_PRE[TokenType.EXPR_TEXT_ALL] = _text_map
+BINDINGS_PRE[TokenType.EXPR_RAW] = "{}, _ := {}.Html(); "
+
+
+def _raw_map(nxt: str, prv: str, arr_type: str) -> str:
+    tmp_var = f"tmp{nxt.title()}"
+    raw_var = f"raw{nxt.title()}"
+    return (
+        f"{nxt} := make({arr_type}, 0); "
+        + f"for _, {tmp_var} := range {prv} "
+        + BRACKET_START
+        + f"{raw_var}, _ := {tmp_var}.Html(); "
+        + f"{nxt} = append({nxt}, {raw_var}); "
+        + BRACKET_END
+    )
+
+
+BINDINGS_PRE[TokenType.EXPR_RAW_ALL] = _raw_map
+BINDINGS_PRE[TokenType.EXPR_ATTR] = lambda nxt, prv, attr: (
+f"{nxt}, isExists := {prv}.Attr({attr}); "
++ "if !isExists" + BRACKET_START
++ f'panic(fmt.Errorf("attr `%s` not exists in `%s`", {attr}, {prv})); '
++ BRACKET_END
+)
+
+
+def _attr_map(nxt: str, prv: str, attr: str, arr_type: str) -> str:
+    tmp_var = f"tmp{nxt.title()}"
+    raw_var = f"attr{nxt.title()}"
+    return (
+        f"{nxt} := make({arr_type}, 0); "
+        + f"for _, {tmp_var} := range {prv} "
+        + BRACKET_START
+        + f"{raw_var}, isExists := {tmp_var}.Attr({attr}); "
+
+        + "if !isExists"
+        + BRACKET_START
+        + f'panic(fmt.Errorf("attr `%s` not exists in `%s`", {attr}, {tmp_var})); '
+        + BRACKET_END
+
+        + f"{nxt} = append({nxt}, {raw_var}); "
+        + BRACKET_END
+    )
+
+
+BINDINGS_PRE[TokenType.EXPR_ATTR_ALL] = _attr_map
+
+
+def _is_css(
+    prv: str, query: str, msg: str, is_pre_validate: bool = False
+) -> str:
+    if is_pre_validate:
+        return (
+            f"if {prv}.Find({query}).Length() == 0"
+            + BRACKET_START
+            + f"panic(fmt.Errorf({msg})); "
+            + BRACKET_END
+        )
+    return (
+        f"if {prv}.Find({query}).Length() == 0"
+        + BRACKET_START
+        + f"panic(fmt.Errorf({msg})); "
+        + BRACKET_END
+    )
+
+
+BINDINGS_PRE[TokenType.IS_CSS] = _is_css
+
+
+def gen_start_parse_list(node: "StartParseFunction") -> str:
+    # later required for make structure
+    st_args: list[str] = []
+    body = (
+        f"items := make(T{node.parent.name}ITEMS, 0); "
+        + "for _, i := range p.splitDoc(p.Document.Selection).EachIter() "
+        + BRACKET_START
+    )
+
     for field in node.body:
         if field.name in MAGIC_METHODS:
             continue
+        method_name = to_upper_camel_case(field.name)
+        var_name = f"{method_name}Raw"
         # golang required manually handle errors
-        method_name = to_upper_camel_case(field.name)
-        var_name = f"{method_name}Raw"
-        # st_args.append(var_name)
-        if field.have_assert_expr():
+        if field.have_assert_expr() or field.ret_type == VariableType.NESTED:
             body += (
-                f"{var_name}, err := "
-                + FN_CALL_PARSE.format(method_name, FN_CALL_DOC_ARG)
+                f"{var_name}, err := p.parse{method_name}(i); "
                 + "if err != nil "
                 + BRACKET_START
-                + RET_NIL_ERR
+                + "return nil, err; "
                 + BRACKET_END
-                + ";"
             )
-            st_args.append("*" + var_name)
+            if field.ret_type == VariableType.NESTED:
+                st_args.append(var_name)
+            else:
+                st_args.append("*" + var_name)
+
+        elif field.have_default_expr():
+            body += f"{var_name}, _ := p.parse{method_name}(i); "
+            st_args.append(var_name)
         else:
-            body += (
-                f"{var_name}"
-                + " := "
-                + FN_CALL_PARSE.format(method_name, FN_CALL_DOC_ARG)
-            )
+            body += f"{var_name} := p.parse{method_name}(i); "
             st_args.append(var_name)
     body += (
-        "item := "
-        + TYPE_PREFIX.format(node.parent.name)
+        f"item := T{node.parent.name}"
         + BRACKET_START
-        + ", ".join(st_args)
+        + ",".join(st_args)
         + BRACKET_END
         + ";"
+        # close EachIter
+        + "items = append(items, item)"
+        + BRACKET_END
     )
-    body += (
-        RET_VAL_NIL_ERR.format("&item")
-        if node.have_assert_expr()
-        else RET.format("item")
-    )
+    body += "return &items, nil; "
     return body
 
 
-def declaration_to_assign(code: str) -> str:
-    """naive func helper in default wrapper cases"""
-    return code.replace(":=", "=&", 1)
-
-
-def gen_list_body(node: "StartParseFunction") -> str:
-    part_m = MAGIC_METHODS.get("__SPLIT_DOC__")
-    st_args = []
-    body = (
-        f"items := make([]T{node.parent.name}, 0); "
-        + f"for _, i := range p.{part_m}({FN_CALL_DOC_ARG}).EachIter() "
-        + BRACKET_START
-    )
+def gen_start_parse_item(node: "StartParseFunction") -> str:
+    body = ""
+    # later required for make structure
+    st_args: list[str] = []
     for field in node.body:
         if field.name in MAGIC_METHODS:
             continue
         method_name = to_upper_camel_case(field.name)
         var_name = f"{method_name}Raw"
-        # st_args.append(var_name)
-
-        if field.have_assert_expr():
+        # golang required manually handle errors
+        if field.have_assert_expr() or field.ret_type == VariableType.NESTED:
             body += (
-                f"{var_name}, err := "
-                + FN_CALL_PARSE.format(method_name, "i")
+                f"{var_name}, err := p.parse{method_name}(p.Document.Selection); "
                 + "if err != nil "
                 + BRACKET_START
-                + RET_NIL_ERR
+                + "return nil, err; "
                 + BRACKET_END
-                + ";"
             )
-            st_args.append("*" + var_name)
+            if field.ret_type == VariableType.NESTED:
+                st_args.append(var_name)
+            else:
+                st_args.append(var_name)
         else:
-            body += var_name + " := " + FN_CALL_PARSE.format(method_name, "i")
+            body += (
+                f"{var_name} := p.parse{method_name}(p.Document.Selection); "
+            )
             st_args.append(var_name)
     body += (
-        "item := "
-        + TYPE_PREFIX.format(node.parent.name)
+        f"item := T{node.parent.name}"
         + BRACKET_START
-        + ", ".join(st_args)
+        + ",".join(st_args)
+        + BRACKET_END
+        + "; "
+    )
+    body += "return &item, nil; "
+    return body
+
+
+def gen_start_parse_dict(node: "StartParseFunction") -> str:
+    st_args: list[str] = []
+    # check in ast build stage
+    expr_key, expr_value = (
+        find_callfn_field_node_by_name(node, "__KEY__"),  # type: ignore
+        find_callfn_field_node_by_name(node, "__VALUE__"),  # type: ignore
+    )
+    body = (
+        f"items := make(T{node.parent.name}); "
+        + "for _, i := range p.splitDoc(p.Document.Selection).EachIter() "
+        + BRACKET_START
+    )
+    if expr_key.have_assert_expr():
+        body += (
+            "keyRaw, err := p.parseKey(i); "
+            + "if err != nil "
+            + BRACKET_START
+            + "return nil, err; "
+            + BRACKET_END
+        )
+        st_args.append("*keyRaw")
+    else:
+        body += "keyRaw := p.parseKey(i); "
+        st_args.append("keyRaw")
+    if expr_value.have_assert_expr() or expr_value.ret_type == VariableType.NESTED:
+        body += (
+            "valueRaw, err := p.parseValue(i); "
+            + "if err != nil "
+            + BRACKET_START
+            + "return nil, err; "
+            + BRACKET_END
+        )
+        if expr_value.ret_type == VariableType.NESTED:
+            st_args.append("valueRaw")
+        else:
+            st_args.append("*valueRaw")
+
+    else:
+        body += "valueRaw := p.parseValue(i); "
+        st_args.append("valueRaw")
+    body += (
+        f"items[{st_args[0]}] = {st_args[1]}; "
         + BRACKET_END
         + ";"
-    )
-    body += "items = append(items, item); " + BRACKET_END + ";"
-    body += (
-        RET_VAL_NIL_ERR.format("items")
-        if node.have_assert_expr()
-        else RET.format("items")
+        + "return &items, nil;"
     )
     return body
 
 
-def gen_dict_body(node: "StartParseFunction") -> str:
-    key_m = MAGIC_METHODS.get("__KEY__")
-    value_m = MAGIC_METHODS.get("__VALUE__")
-    part_m = MAGIC_METHODS.get("__SPLIT_DOC__")
-    fn_key = [fn for fn in node.body if fn.name == "__KEY__"][0]
-    fn_value = [fn for fn in node.body if fn.name == "__VALUE__"][0]
-    var_key = f"{key_m}Raw"
-    var_value = f"{value_m}Raw"
-
+def gen_start_parse_flat_list(node: "StartParseFunction") -> str:
+    # checked in ast build stage
+    expr_item = find_callfn_field_node_by_name(node, "__ITEM__")  # type: ignore
+    st_arg = "rawItem"
     body = (
         f"items := make(T{node.parent.name}, 0); "
-        + f"for _, i := range p.{part_m}(p.document.Selection).EachIter() "
+        + "for _, i := range p.splitDoc(p.Document.Selection).EachIter() "
         + BRACKET_START
     )
-    st_args = []
-    if fn_key.have_assert_expr():
+    if expr_item.have_assert_expr() or expr_item.ret_type == VariableType.NESTED:
         body += (
-            f"{var_key}, err := "
-            + FN_CALL_PARSE.format(key_m, "i")
+            "rawItem, err := p.parseItem(i); "
             + "if err != nil "
             + BRACKET_START
-            + RET_NIL_ERR
+            + "return nil, err; "
             + BRACKET_END
-            + ";"
         )
-        st_args.append("*" + var_key)
-    else:
-        body += f"{var_key} := {FN_CALL_PARSE.format(key_m, 'i')}"
-        st_args.append(var_key)
-
-    if fn_value.have_assert_expr():
-        body += (
-            f"{var_value}, err := "
-            + FN_CALL_PARSE.format(value_m, "i")
-            + "if err != nil "
-            + BRACKET_START
-            + RET_NIL_ERR
-            + BRACKET_END
-            + ";"
-        )
-        st_args.append("*" + var_value)
-    else:
-        body += f"{var_value} := {FN_CALL_PARSE.format(value_m, 'i')}"
-        st_args.append(var_value)
-    # 0 - key, 1 - value
-    body += f"items[{st_args[0]}] = {st_args[1]}; " + BRACKET_END + ";"
-    body += (
-        RET_VAL_NIL_ERR.format("items")
-        if node.have_assert_expr()
-        else RET.format("items")
-    )
-    return body
-
-
-def gen_flat_list_body(node: "StartParseFunction") -> str:
-    item_m = MAGIC_METHODS.get("__ITEM__")
-    part_m = MAGIC_METHODS.get("__SPLIT_DOC__")
-    fn_item = [fn for fn in node.body if fn.name == "__ITEM__"][0]
-
-    body = (
-        f"items := make(T{node.parent.name}, 0); "
-        + f"for _, i := range p.{part_m}({FN_CALL_DOC_ARG}).EachIter()"
-        + BRACKET_START
-    )
-    if fn_item.have_assert_expr():
-        body += (
-            f"rawItem, err := {FN_CALL_PARSE.format(item_m, 'i')}"
-            + "if err != nil"
-            + BRACKET_START
-            + RET_VAL_NIL_ERR
-            + BRACKET_END
-            + ";"
-        )
-        st_arg = "*rawItem"
-    else:
-        body += f"rawItem := {FN_CALL_PARSE.format(item_m, 'i')}"
-        st_arg = "rawItem"
-    # fixme ITEM
-    body += f"items = append(items, {st_arg}); " + BRACKET_END + ";"
-    body += (
-        RET_VAL_NIL_ERR.format("items")
-        if node.have_assert_expr()
-        else RET.format("items")
-    )
-    return body
-
-
-def gen_flat_list_typedef(node: "TypeDef") -> str:
-    # type T_NAME = []T;
-    t_name = TYPE_PREFIX.format(node.name)
-    item_field = [i for i in node.body if i.name == "__ITEM__"][0]
-    if item_field.ret_type == VariableType.NESTED:
-        associated_typedef = find_nested_associated_typedef_by_t_field(
-            item_field
-        )
-        type_ = TYPE_PREFIX.format(associated_typedef.name)
-        if associated_typedef.struct_ref.type == StructType.LIST:
-            type_ = TYPE_LIST.format(type_)
-    else:
-        type_ = TYPES.get(item_field.ret_type)
-    type_ = TYPE_FLAT_LIST.format(type_)
-    return SINGLE_TYPEDEF_ASSIGN.format(t_name, type_)
-
-
-def gen_dict_typedef(node: "TypeDef") -> str:
-    # type T_NAME = map[String]T;
-    t_name = TYPE_PREFIX.format(node.name)
-    value_field = [i for i in node.body if i.name == "__VALUE__"][0]
-    if value_field.ret_type == VariableType.NESTED:
-        associated_typedef = find_nested_associated_typedef_by_t_field(
-            value_field
-        )
-        type_ = TYPE_PREFIX.format(associated_typedef.name)
-        if associated_typedef.struct_ref.type == StructType.LIST:
-            type_ = TYPE_LIST.format(type_)
-    else:
-        type_ = TYPES.get(value_field.ret_type)
-    type_ = TYPE_DICT.format(type_)
-    return SINGLE_TYPEDEF_ASSIGN.format(t_name, type_)
-
-
-def gen_struct_typedef(node: "TypeDef") -> str:
-    # type T_NAME struct { F1 String `json:f1`; ... }
-    t_name = TYPE_PREFIX.format(node.name)
-    typedef = TYPE_ITEM_HEAD.format(t_name) + " " + BRACKET_START
-    for field in node.body:
-        name = to_upper_camel_case(MAGIC_METHODS.get(field.name, field.name))
-        if field.ret_type == VariableType.NESTED:
-            associated_typedef = find_nested_associated_typedef_by_t_field(
-                field
-            )
-            type_ = TYPE_PREFIX.format(associated_typedef.name)
-            if associated_typedef.struct_ref.type == StructType.LIST:
-                type_ = TYPE_LIST.format(type_)
+        if expr_item.ret_type == VariableType.NESTED:
+            st_arg = "rawItem"
         else:
-            type_ = TYPES.get(field.ret_type)
-        typedef += TYPE_ITEM_FIELD.format(
-            name, type_, JSON_ANCHOR.format(field.name)
-        )
-    typedef += " " + BRACKET_END
-    return typedef
+            st_arg = "*rawItem"
+    else:
+        body += "rawItem := p.parseItem(i); "
+    body += f"items = append(items, {st_arg}); " + BRACKET_END + ";"
+    body += "return &items, nil;"
+    return body
+
+
+def gen_typedef_item(node: "TypeDef") -> str:
+    # type T{name} struct { field(camelUPEER) String `json:f1`; ... }
+    code = f"type T{node.name} struct " + BRACKET_START
+    for f in node.body:
+        if f.name in MAGIC_METHODS:
+            continue
+
+        if f.ret_type == VariableType.NESTED:
+            field_type = f"T{f.nested_class}"
+            if find_field_nested_struct(f).struct_ref.type == StructType.LIST:  # type: ignore
+                field_type = f"{field_type}ITEMS"
+        else:
+            field_type = TYPES.get(f.ret_type, "")
+        fields_name = to_upper_camel_case(f.name)
+        code += f'{fields_name} {field_type} `json:"{f.name}"`; '
+    code += BRACKET_END
+    return code
+
+
+def gen_typedef_dict(node: "TypeDef") -> str:
+    # type T{name} = map[{KEY_TYPE}]{VALUE_TYPE};
+    field_key = find_tdef_field_node_by_name(node, "__KEY__")
+    if not field_key:
+        # in AST build step checked
+        raise NotImplementedError  # noqa
+    field_value = find_tdef_field_node_by_name(node, "__VALUE__")
+    if not field_value:
+        # in AST build step checked
+        raise NotImplementedError  # noqa
+
+    if field_value.ret_type == VariableType.NESTED:
+        field_type = f"T{field_value.nested_class}"
+        if (
+            find_field_nested_struct(field_value).struct_ref.type  # type: ignore
+            == StructType.LIST
+        ):
+            field_type = f"{field_type}ITEMS"
+    else:
+        field_type = TYPES.get(field_value.ret_type, "")
+    code = (
+        f"type T{node.name} = "
+        + f"map[{TYPES.get(field_key.ret_type)}]"
+        + f"{field_type}; "
+    )
+    return code
+
+
+def gen_typedef_flat_list(node: "TypeDef") -> str:
+    # type T{name} = []{ITEM_TYPE};
+    field_item = find_tdef_field_node_by_name(node, "__ITEM__")
+    if not field_item:
+        # in AST build step checked
+        raise NotImplementedError  # noqa
+
+    if field_item.ret_type == VariableType.NESTED:
+        field_type = f"T{field_item.nested_class}"
+    else:
+        field_type = TYPES.get(field_item.ret_type, "")
+    code = f"type T{node.name} = []{field_type}; "
+    return code
+
+
+def gen_typedef_list(node: "TypeDef") -> str:
+    # 1. simular generate struct as ST.ITEM
+    # 2. add array type for this struct
+    # type T{name} struct { F1 String `json:f1`; ... }
+    # type T{name}ITEMS = []T{name}
+    code = gen_typedef_item(node)
+    code += f"type T{node.name}ITEMS = []T{node.name}; "
+    return code
+
+
+def gen_struct_field_ret_header(node: "StructFieldFunction") -> str:
+    # "func (p *{}) parse{}(value *goquery.Selection) {} "
+    # 1. is nested (default not included in this construction)
+    if node.ret_type == VariableType.NESTED:
+        ret_type = f"T{node.nested_schema_name()}"
+        typedef = node.find_associated_typedef()
+        if typedef.struct_ref.type == StructType.LIST:  # type: ignore
+            ret_type = f"{ret_type}ITEMS"
+        ret_header = f"({ret_type}, error)"
+    # 2. assert + default
+    elif node.have_assert_expr() and node.body[0].have_default_expr():
+        ret_type = TYPES.get(node.ret_type, "")
+        # first - default expr
+        default_expr_val = node.body[0].value
+        if default_expr_val == None:
+            ret_header = f"(result *{ret_type}, err error)"
+        else:
+            ret_header = f"(result {ret_type}, err error)"
+    # 3. default
+    elif node.body[0].have_default_expr():
+        ret_type = TYPES.get(node.ret_type, "")
+        default_expr_val = node.body[0].value
+        if default_expr_val == None:
+            ret_header = f"(result *{ret_type}, err error)"
+        else:
+            ret_header = f"(result {ret_type}, err error)"
+    # 4. assert
+    elif node.have_assert_expr():
+        ret_type = TYPES.get(node.ret_type, "")
+        ret_header = f"({ret_type}, error)"
+    # 5. normal
+    else:
+        ret_type = TYPES.get(node.ret_type, "")
+        ret_header = f"({ret_type})"
+    return ret_header
