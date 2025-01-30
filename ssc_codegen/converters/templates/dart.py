@@ -320,7 +320,7 @@ def parse_dict_code(node: "StartParseFunction") -> str:
 
     body = t_name + " items = {};"
     body += f"for (var e in {part_call})" + " " + START_BRACKET
-    body += f"items[_parse{key_call}(e)] = items[_parse{value_call}(e)]; "
+    body += f"items[_parse{key_call}] = _parse{value_call}; "
     body += END_BRACKET
     body += BINDINGS[TokenType.EXPR_RETURN, "items"]
     return body
