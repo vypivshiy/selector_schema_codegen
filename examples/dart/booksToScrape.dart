@@ -183,6 +183,16 @@ class Books {
   }
 }
 
+/// books.toscrape.com catalogue page entrypoint parser
+///
+///     USAGE:
+///
+///         1. GET <catalog page> (https://books.toscrape.com/, https://books.toscrape.com/catalogue/page-2.html, ...)
+///         2. add another prepare instruction how to correct cook page (if needed?)
+///
+///     ISSUES:
+///
+///         1. nope! Their love being scraped!
 ///
 ///
 /// {

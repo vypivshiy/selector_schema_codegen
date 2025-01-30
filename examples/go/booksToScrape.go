@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/PuerkitoBio/goquery"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -173,7 +174,17 @@ func (p *Books) Parse() (*TBooksITEMS, error) {
 	return &items, nil
 }
 
-// CataloguePage
+// CataloguePage books.toscrape.com catalogue page entrypoint parser
+//
+//     USAGE:
+//
+//         1. GET <catalog page> (https://books.toscrape.com/, https://books.toscrape.com/catalogue/page-2.html, ...)
+//         2. add another prepare instruction how to correct cook page (if needed?)
+//
+//     ISSUES:
+//
+//         1. nope! Their love being scraped!
+//
 //
 // {
 //     "title": "String",

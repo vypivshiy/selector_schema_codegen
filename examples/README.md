@@ -25,9 +25,15 @@ ssc-gen dart schemas/booksToScrape.py -o dart
 ## go
 
 ```shell
-ssc-gen go schemas/booksToScrape.py -o dart
+ssc-gen go schemas/booksToScrape.py -o go
 ```
 
-## manual API usage
+At the default, package name get from output folder. You can override it:
+
+```shell
+ssc-gen go schemas/booksToScrape.py -o go --package main
+```
+
+## manual python API usage
 
 see `manual_make.py` example
