@@ -1,66 +1,70 @@
 # TODO: required enchant, not tested
 from functools import partial
 
-from .templates import dart
-from .base import BaseCodeConverter, left_right_var_names
-from .utils import (
-    to_upper_camel_case as up_camel,
-    escape_str,
-    wrap_double_quotes as wrap_q,
-)
 from ..ast_ssc import (
-    StructParser,
-    ModuleImports,
-    PreValidateFunction,
-    StructFieldFunction,
-    Docstring,
-    StartParseFunction,
     DefaultValueWrapper,
-    PartDocFunction,
-    HtmlCssExpression,
-    HtmlCssAllExpression,
-    HtmlAttrExpression,
-    HtmlAttrAllExpression,
-    HtmlTextExpression,
-    HtmlTextAllExpression,
-    HtmlRawExpression,
-    HtmlRawAllExpression,
-    HtmlXpathExpression,
-    HtmlXpathAllExpression,
+    Docstring,
     FormatExpression,
-    MapFormatExpression,
-    TrimExpression,
-    MapTrimExpression,
-    LTrimExpression,
-    MapLTrimExpression,
-    RTrimExpression,
-    MapRTrimExpression,
-    ReplaceExpression,
-    MapReplaceExpression,
-    SplitExpression,
-    NestedExpression,
-    RegexExpression,
-    RegexSubExpression,
-    MapRegexSubExpression,
-    RegexAllExpression,
-    ReturnExpression,
-    NoReturnExpression,
-    TypeDef,
+    HtmlAttrAllExpression,
+    HtmlAttrExpression,
+    HtmlCssAllExpression,
+    HtmlCssExpression,
+    HtmlRawAllExpression,
+    HtmlRawExpression,
+    HtmlTextAllExpression,
+    HtmlTextExpression,
+    HtmlXpathAllExpression,
+    HtmlXpathExpression,
     IndexDocumentExpression,
     IndexStringExpression,
-    JoinExpression,
-    IsCssExpression,
-    IsXPathExpression,
-    IsEqualExpression,
     IsContainsExpression,
-    IsRegexMatchExpression,
+    IsCssExpression,
+    IsEqualExpression,
     IsNotEqualExpression,
+    IsRegexMatchExpression,
+    IsXPathExpression,
+    JoinExpression,
+    LTrimExpression,
+    MapFormatExpression,
+    MapLTrimExpression,
+    MapRegexSubExpression,
+    MapReplaceExpression,
+    MapRTrimExpression,
+    MapTrimExpression,
+    ModuleImports,
+    NestedExpression,
+    NoReturnExpression,
+    PartDocFunction,
+    PreValidateFunction,
+    RegexAllExpression,
+    RegexExpression,
+    RegexSubExpression,
+    ReplaceExpression,
+    ReturnExpression,
+    RTrimExpression,
+    SplitExpression,
+    StartParseFunction,
+    StructFieldFunction,
     StructInit,
-    ToInteger,
+    StructParser,
     ToFloat,
+    ToInteger,
     ToListInteger,
+    TrimExpression,
+    TypeDef,
 )
-from ..tokens import TokenType, StructType
+from ..tokens import StructType, TokenType
+from .base import BaseCodeConverter, left_right_var_names
+from .templates import dart
+from .utils import (
+    escape_str,
+)
+from .utils import (
+    to_upper_camel_case as up_camel,
+)
+from .utils import (
+    wrap_double_quotes as wrap_q,
+)
 
 converter = BaseCodeConverter()
 
@@ -85,7 +89,6 @@ def tt_typedef(node: TypeDef):
             code = dart.typedef_item_record(node)
         case StructType.LIST:
             # record
-            # FIXME: typing as List<ITEM>
             code = dart.typedef_list_record(node)
         case _:
             raise TypeError("Unknown struct type")
@@ -180,7 +183,7 @@ def tt_start_parse(node: StartParseFunction) -> str:
     if any(f.name == "__PRE_VALIDATE__" for f in node.body):
         name = MAGIC_METHODS.get("__PRE_VALIDATE__")
         # todo: move to templates consts
-        code+=f"{name}(selector); "
+        code += f"{name}(selector); "
         # code += dart.BINDINGS[TokenType.STRUCT_PRE_VALIDATE, name]
 
     match node.type:
@@ -321,8 +324,8 @@ def tt_regex_sub(node: RegexSubExpression) -> str:
     prv, nxt = lr_var_names(variable=node.variable)
     pattern = repr(node.pattern)
     # reserved DART symbol
-    if '$' in pattern:
-        pattern = pattern.replace('$', '\$')
+    if "$" in pattern:
+        pattern = pattern.replace("$", "\$")
     repl = repr(node.repl)
     return dart.BINDINGS[node.kind, nxt, prv, pattern, repl]
 

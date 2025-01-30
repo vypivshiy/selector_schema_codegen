@@ -1,7 +1,7 @@
 """ast containers for representation module structure"""
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, ClassVar, Optional, Type, Union, Sequence
+from typing import TYPE_CHECKING, ClassVar, Optional, Sequence, Type, Union
 
 from ssc_codegen.consts import (
     M_ITEM,

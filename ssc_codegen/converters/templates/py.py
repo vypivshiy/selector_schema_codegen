@@ -2,14 +2,15 @@
 
 from typing import TYPE_CHECKING
 
-from ssc_codegen.converters.templates.utils import (
+from ssc_codegen.tokens import StructType, TokenType, VariableType
+
+from .utils import (
     TemplateBindings,
     TemplateTypeBindings,
 )
-from ssc_codegen.tokens import VariableType, TokenType, StructType
 
 if TYPE_CHECKING:
-    from ssc_codegen.ast_ssc import StartParseFunction, BaseExpression
+    from ssc_codegen.ast_ssc import BaseExpression, StartParseFunction
 
 TYPES = {
     VariableType.ANY: "Any",

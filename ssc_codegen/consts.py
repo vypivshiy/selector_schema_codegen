@@ -33,5 +33,5 @@ SIGNATURE_MAP = {
     VariableType.OPTIONAL_FLOAT: "Float | null",
     VariableType.OPTIONAL_LIST_FLOAT: "Array<Float> | null",
     VariableType.LIST_FLOAT: "Array<Float>",
-    VariableType.ANY: "Any"
+    VariableType.ANY: "Any",
 }

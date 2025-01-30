@@ -177,7 +177,8 @@ def _expr_xpath_all(nxt: str, prv: str, query: str) -> str:  # noqa
     return (
         f'let {snapshot_var} = {prv}.evaluate("{query}", document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null); '
         + f"let {nxt} = "
-        + "Array.from({ length: " + f"{snapshot_var}.snapshotLength"
+        + "Array.from({ length: "
+        + f"{snapshot_var}.snapshotLength"
         + "}, (_, i) =>"
         + f"{snapshot_var}.snapshotItem(i)"
         + ");"

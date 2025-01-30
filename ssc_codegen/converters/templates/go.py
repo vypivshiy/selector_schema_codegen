@@ -388,10 +388,11 @@ def _raw_map(nxt: str, prv: str, arr_type: str) -> str:
 
 BINDINGS_PRE[TokenType.EXPR_RAW_ALL] = _raw_map
 BINDINGS_PRE[TokenType.EXPR_ATTR] = lambda nxt, prv, attr: (
-f"{nxt}, isExists := {prv}.Attr({attr}); "
-+ "if !isExists" + BRACKET_START
-+ f'panic(fmt.Errorf("attr `%s` not exists in `%s`", {attr}, {prv})); '
-+ BRACKET_END
+    f"{nxt}, isExists := {prv}.Attr({attr}); "
+    + "if !isExists"
+    + BRACKET_START
+    + f'panic(fmt.Errorf("attr `%s` not exists in `%s`", {attr}, {prv})); '
+    + BRACKET_END
 )
 
 
@@ -403,12 +404,10 @@ def _attr_map(nxt: str, prv: str, attr: str, arr_type: str) -> str:
         + f"for _, {tmp_var} := range {prv} "
         + BRACKET_START
         + f"{raw_var}, isExists := {tmp_var}.Attr({attr}); "
-
         + "if !isExists"
         + BRACKET_START
         + f'panic(fmt.Errorf("attr `%s` not exists in `%s`", {attr}, {tmp_var})); '
         + BRACKET_END
-
         + f"{nxt} = append({nxt}, {raw_var}); "
         + BRACKET_END
     )
@@ -548,7 +547,10 @@ def gen_start_parse_dict(node: "StartParseFunction") -> str:
     else:
         body += "keyRaw := p.parseKey(i); "
         st_args.append("keyRaw")
-    if expr_value.have_assert_expr() or expr_value.ret_type == VariableType.NESTED:
+    if (
+        expr_value.have_assert_expr()
+        or expr_value.ret_type == VariableType.NESTED
+    ):
         body += (
             "valueRaw, err := p.parseValue(i); "
             + "if err != nil "
@@ -582,7 +584,10 @@ def gen_start_parse_flat_list(node: "StartParseFunction") -> str:
         + "for _, i := range p.splitDoc(p.Document.Selection).EachIter() "
         + BRACKET_START
     )
-    if expr_item.have_assert_expr() or expr_item.ret_type == VariableType.NESTED:
+    if (
+        expr_item.have_assert_expr()
+        or expr_item.ret_type == VariableType.NESTED
+    ):
         body += (
             "rawItem, err := p.parseItem(i); "
             + "if err != nil "

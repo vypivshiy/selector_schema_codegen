@@ -504,7 +504,6 @@ def tt_to_list_float(node: ToListFloat) -> str:
         + go.BRACKET_START
         + "panic(err); "
         + go.BRACKET_END
-
         + f"{nxt} = append({nxt}, {each_var}); "
         + go.BRACKET_END
     )

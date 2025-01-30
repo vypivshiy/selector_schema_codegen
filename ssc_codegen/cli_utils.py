@@ -2,7 +2,7 @@ import importlib
 import sys
 import warnings
 from pathlib import Path
-from typing import Protocol, TYPE_CHECKING, Generator
+from typing import TYPE_CHECKING, Generator, Protocol
 
 from typer import BadParameter
 

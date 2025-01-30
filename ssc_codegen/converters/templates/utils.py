@@ -1,8 +1,8 @@
 import re
-from typing import TYPE_CHECKING, Callable, Union, TypeAlias
+from typing import TYPE_CHECKING, Callable, TypeAlias, Union
 
 if TYPE_CHECKING:
-    from ssc_codegen.tokens import TokenType, StructType
+    from ssc_codegen.tokens import StructType, TokenType
 
 T_TEMPLATE_BIND: TypeAlias = Union[str, Callable[..., str]]
 T_GETITEM_BIND: TypeAlias = Union["TokenType", tuple["TokenType", ...]]

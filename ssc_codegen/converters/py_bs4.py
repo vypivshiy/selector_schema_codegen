@@ -1,25 +1,25 @@
+from ..ast_ssc import (
+    HtmlAttrAllExpression,
+    HtmlAttrExpression,
+    HtmlCssAllExpression,
+    HtmlCssExpression,
+    HtmlRawAllExpression,
+    HtmlRawExpression,
+    HtmlTextAllExpression,
+    HtmlTextExpression,
+    HtmlXpathAllExpression,
+    HtmlXpathExpression,
+    IsCssExpression,
+    IsXPathExpression,
+    ModuleImports,
+    PartDocFunction,
+    PreValidateFunction,
+    StructFieldFunction,
+)
+from ..tokens import StructType, TokenType, VariableType
 from .py_base import BasePyCodeConverter, lr_var_names
 from .templates import py
 from .templates.utils import TemplateBindings
-from ..ast_ssc import (
-    ModuleImports,
-    StructFieldFunction,
-    PartDocFunction,
-    HtmlCssExpression,
-    HtmlCssAllExpression,
-    HtmlAttrExpression,
-    HtmlAttrAllExpression,
-    HtmlTextExpression,
-    HtmlTextAllExpression,
-    HtmlRawExpression,
-    HtmlRawAllExpression,
-    HtmlXpathExpression,
-    HtmlXpathAllExpression,
-    IsCssExpression,
-    IsXPathExpression,
-    PreValidateFunction,
-)
-from ..tokens import TokenType, StructType, VariableType
 
 POST_BINDINGS = TemplateBindings()
 POST_BINDINGS[TokenType.STRUCT_INIT] = (

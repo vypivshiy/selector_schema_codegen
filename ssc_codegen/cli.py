@@ -1,17 +1,17 @@
 import os
 import sys
-import warnings
+
 from ssc_codegen.ast_builder import build_ast_module
 from ssc_codegen.cli_utils import (
-    import_converter,
-    cb_folder_out,
-    cb_check_ssc_files,
-    PyLIBS,
-    JsLIBS,
+    ConverterLike,
     DartLIBS,
     GoLIBS,
-    ConverterLike,
+    JsLIBS,
+    PyLIBS,
+    cb_check_ssc_files,
+    cb_folder_out,
     create_fmt_cmd,
+    import_converter,
 )
 from ssc_codegen.converters.tools import go_naive_fix_docstring
 
@@ -25,10 +25,9 @@ else:
 
 
 from pathlib import Path
-from os import PathLike
-from typing import Annotated, List, Callable, Optional
+from typing import Annotated, Callable, List, Optional
 
-from typer import Typer, Argument, Option, BadParameter
+from typer import Argument, BadParameter, Option, Typer
 
 app = Typer(no_args_is_help=True)
 
