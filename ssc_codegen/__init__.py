@@ -2,7 +2,7 @@ from .document import HTMLDocument, StringDocument, ArrayDocument, AssertDocumen
     NumericDocument
 from .schema import ItemSchema, DictSchema, ListSchema, FlatListSchema
 
-VERSION = "0.4.3"
+VERSION = "0.5.0"
 
 
 class Document(HTMLDocument, StringDocument, ArrayDocument, AssertDocument, DefaultDocument, NumericDocument):

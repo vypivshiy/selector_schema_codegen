@@ -1,6 +1,6 @@
 [project]
 name = "selector-schema-codegen"
-version = "0.4.3"
+version = "0.5.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -20,13 +20,14 @@ Examples = "https://github.com/vypivshiy/selector_schema_codegen/examples"
 [project.scripts]
 ssc-gen = 'ssc_codegen.cli:main'
 
+[tool.setuptools]
+packages=["ssc_codegen"]
 
 [dependency-groups]
 dev = [
     "mypy>=1.14.1",
+    "pytest>=8.3.4",
     "ruff>=0.9.3",
-    "toml>=0.10.2",
-    "types-toml>=0.10.8.20240310",
 ]
 # python generated code tests
 tests = [
@@ -49,3 +50,10 @@ disallow_untyped_defs = true
 show_error_codes = true
 no_implicit_optional = true
 mypy_path = 'ssc_codegen'
+exclude = [
+    "converters/.*\\.py$",  # to tired typing
+    "examples/.*\\.py$"
+]
+[[tool.mypy.overrides]]
+module="tests.*"
+disallow_untyped_defs = false
