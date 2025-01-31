@@ -16,10 +16,10 @@ class UrlsMap(DictSchema):
     __SPLIT_DOC__ = D().css_all("a")
 
     # declare map key (should be a String)
-    __KEY__ = D().text().trim(" ")
+    __KEY__ = D().attr("href")
 
     # declare value
-    __VALUE__ = D().attr("href")
+    __VALUE__ = D().raw().trim(" ")
 
 
 class Books(ListSchema):

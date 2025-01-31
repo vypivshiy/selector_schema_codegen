@@ -70,16 +70,16 @@ func (p *UrlsMap) splitDoc(value *goquery.Selection) *goquery.Selection {
 	return value1
 }
 func (p *UrlsMap) parseKey(value *goquery.Selection) string {
-	value1 := value.Text()
-	value2 := strings.Trim(" ", value1)
-	return value2
-}
-func (p *UrlsMap) parseValue(value *goquery.Selection) string {
 	value1, isExists := value.Attr("href")
 	if !isExists {
 		panic(fmt.Errorf("attr `%s` not exists in `%s`", "href", value))
 	}
 	return value1
+}
+func (p *UrlsMap) parseValue(value *goquery.Selection) string {
+	value1, _ := value.Html()
+	value2 := strings.Trim(" ", value1)
+	return value2
 }
 func (p *UrlsMap) Parse() (*TUrlsMap, error) {
 	items := make(TUrlsMap)

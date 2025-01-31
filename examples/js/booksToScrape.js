@@ -38,13 +38,13 @@ let value1 = value.querySelectorAll('a');
 return value1;
 }
 _parseKey(value){
-let value1 = value.querySelector("html").textContent;
-let value2 = (function (str, chars){return str.replace(new RegExp(`^[${chars}]+|[${chars}]+$`, 'g'), '');})(value1, ' ');
-return value2;
-}
-_parseValue(value){
 let value1 = value.getAttribute('href');
 return value1;
+}
+_parseValue(value){
+let value1 = value.querySelector("html").innerHTML;
+let value2 = (function (str, chars){return str.replace(new RegExp(`^[${chars}]+|[${chars}]+$`, 'g'), '');})(value1, ' ');
+return value2;
 }
 parse(){
 let item = {};Array.from(this._splitDoc(this._doc)).forEach((e) =>{let k = this._parseKey(e);item[k] = this._parseValue(e);});return item;}

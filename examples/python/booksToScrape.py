@@ -64,13 +64,13 @@ class UrlsMap:
         return value1
 
     def _parse_key(self, value: Selector) -> str:
-        value1 = value.css("::text").get()
-        value2 = value1.strip(" ")
-        return value2
-
-    def _parse_value(self, value: Selector) -> str:
         value1 = value.css("::attr(href)").get()
         return value1
+
+    def _parse_value(self, value: Selector) -> str:
+        value1 = value.get()
+        value2 = value1.strip(" ")
+        return value2
 
     def parse(self) -> T_UrlsMap:
         return {
