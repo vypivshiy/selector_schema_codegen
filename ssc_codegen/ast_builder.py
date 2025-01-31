@@ -245,6 +245,12 @@ def build_ast_struct(
     struct_parse_functions: list[BaseAstNode] = []
     for name, field in fields.items():
         check_field_expr(field)
+
+        # not allowed empty stack exprs
+        if len(field.stack) == 0:
+            msg = f"{schema.__name__}.{name} has not exists expressions"
+            raise SyntaxError(msg)
+
         if css_to_xpath:
             field = convert_css_to_xpath(field)
         elif xpath_to_css:
@@ -302,7 +308,7 @@ def build_ast_struct(
 
 def extract_default_expr(field: "BaseDocument") -> None:
     """convert DefaultValueWrapper node to DefaultStart and DefaultEnd Nodes"""
-    if field.stack[0].kind == TokenType.EXPR_DEFAULT:
+    if field.stack and field.stack[0].kind == TokenType.EXPR_DEFAULT:
         tt_def_val = field.stack.pop(0)
         field.stack.insert(0, DefaultStart(value=tt_def_val.value))  # type: ignore
         field.stack.append(DefaultEnd(value=tt_def_val.value))  # type: ignore
