@@ -25,6 +25,7 @@ packages=["ssc_codegen"]
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.1",
     "mypy>=1.14.1",
     "pytest>=8.3.4",
     "ruff>=0.9.3",
