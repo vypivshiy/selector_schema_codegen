@@ -215,8 +215,12 @@ def tt_default(node: DefaultValueWrapper) -> str:
 
 @converter.post(TokenType.EXPR_DEFAULT_END)
 def tt_default_(node: DefaultValueWrapper) -> str:
-    # TODO: int, float, lists provide
-    val = repr(node.value) if isinstance(node.value, str) else "null"
+    if isinstance(node.value, str):
+        val = repr(node.value)
+    elif isinstance(node.value, (int, float)):
+        val = node.value
+    else:
+        val = "null"
     return dart.BINDINGS[node.kind, val]
 
 
@@ -325,7 +329,7 @@ def tt_regex_sub(node: RegexSubExpression) -> str:
     pattern = repr(node.pattern)
     # reserved DART symbol
     if "$" in pattern:
-        pattern = pattern.replace("$", "\$")
+        pattern = pattern.replace("$", "\\$")
     repl = repr(node.repl)
     return dart.BINDINGS[node.kind, nxt, prv, pattern, repl]
 
@@ -435,7 +439,7 @@ def tt_text_all(node: HtmlTextAllExpression) -> str:
 @converter.pre(TokenType.EXPR_RAW)
 def tt_raw(node: HtmlRawExpression) -> str:
     prv, nxt = lr_var_names(variable=node.variable)
-    return dart.BINDINGS[node.variable.num, nxt, prv]
+    return dart.BINDINGS[node.kind, node.variable.num, nxt, prv]
 
 
 @converter.pre(TokenType.EXPR_RAW_ALL)
