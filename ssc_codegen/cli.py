@@ -13,14 +13,17 @@ from ssc_codegen.cli_utils import (
     create_fmt_cmd,
     import_converter,
 )
-from ssc_codegen.converters.tools import go_naive_fix_docstring
+from ssc_codegen.converters.tools import (
+    go_naive_fix_docstring,
+    go_unimport_naive,
+)
 
 if sys.version_info >= (3, 11):
     from enum import StrEnum
 else:
     from enum import Enum
 
-    class StrEnum(str, Enum):
+    class StrEnum(str, Enum):  # noqa
         pass
 
 
@@ -41,9 +44,7 @@ _HELP_FILE_SUFFIX = "out files suffix (<out>+<suffix>)"
 _HELP_FMT = "format code output"
 _HELP_TO_XPATH = "convert all css queries to xpath"
 _HELP_TO_CSS = "convert all xpath queries to css (works not guaranteed)"
-_HELP_DEBUG_COMM_TOKENS = (
-    "add debug token string in comment every generated instruction"
-)
+_HELP_DEBUG_COMM_TOKENS = "add debug comment for each generated instruction"
 
 
 @app.command(help="Show version and exit")
@@ -303,7 +304,10 @@ def gen_go(
         suffix=suffix,
         comment_str=f"// {COMMENT_STRING}",
         fmt_cmd=fmt_cmd,
-        code_cb=go_naive_fix_docstring,
+        # todo: better API for code callbacks
+        code_cb=lambda lines: go_unimport_naive(
+            go_naive_fix_docstring(lines)
+        ),
         docstring_class_top=True,
         variables_patches={"PACKAGE": package or out.name},
         xpath_to_css=to_css,
