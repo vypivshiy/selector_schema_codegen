@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"github.com/PuerkitoBio/goquery"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 )
@@ -37,21 +36,28 @@ type TCataloguePage struct {
 // ]
 type Urls struct{ Document *goquery.Document }
 
-func (p *Urls) splitDoc(value *goquery.Selection) *goquery.Selection {
+func (p *Urls) splitDoc(value *goquery.Selection) (*goquery.Selection, error) {
 	value1 := value.Find("a")
-	return value1
+	return value1, nil
 }
-func (p *Urls) parseItem(value *goquery.Selection) string {
+func (p *Urls) parseItem(value *goquery.Selection) (string, error) {
 	value1, isExists := value.Attr("href")
 	if !isExists {
-		panic(fmt.Errorf("attr `%s` not exists in `%s`", "href", value))
+		return "", fmt.Errorf("attr `%s` not exists in `%s`", "href", value)
 	}
-	return value1
+	return value1, nil
 }
 func (p *Urls) Parse() (*TUrls, error) {
 	items := make(TUrls, 0)
-	for _, i := range p.splitDoc(p.Document.Selection).EachIter() {
-		rawItem := p.parseItem(i)
+	docParts, err := p.splitDoc(p.Document.Selection)
+	if err != nil {
+		return nil, err
+	}
+	for _, i := range docParts.EachIter() {
+		rawItem, err := p.parseItem(i)
+		if err != nil {
+			return nil, err
+		}
 		items = append(items, rawItem)
 	}
 	return &items, nil
@@ -65,27 +71,40 @@ func (p *Urls) Parse() (*TUrls, error) {
 // }
 type UrlsMap struct{ Document *goquery.Document }
 
-func (p *UrlsMap) splitDoc(value *goquery.Selection) *goquery.Selection {
+func (p *UrlsMap) splitDoc(value *goquery.Selection) (*goquery.Selection, error) {
 	value1 := value.Find("a")
-	return value1
+	return value1, nil
 }
-func (p *UrlsMap) parseKey(value *goquery.Selection) string {
+func (p *UrlsMap) parseKey(value *goquery.Selection) (string, error) {
 	value1, isExists := value.Attr("href")
 	if !isExists {
-		panic(fmt.Errorf("attr `%s` not exists in `%s`", "href", value))
+		return "", fmt.Errorf("attr `%s` not exists in `%s`", "href", value)
 	}
-	return value1
+	return value1, nil
 }
-func (p *UrlsMap) parseValue(value *goquery.Selection) string {
-	value1, _ := value.Html()
+func (p *UrlsMap) parseValue(value *goquery.Selection) (string, error) {
+	value1, err := value.Html()
+	if err != nil {
+		return "", err
+	}
 	value2 := strings.Trim(" ", value1)
-	return value2
+	return value2, nil
 }
 func (p *UrlsMap) Parse() (*TUrlsMap, error) {
 	items := make(TUrlsMap)
-	for _, i := range p.splitDoc(p.Document.Selection).EachIter() {
-		keyRaw := p.parseKey(i)
-		valueRaw := p.parseValue(i)
+	docParts, err := p.splitDoc(p.Document.Selection)
+	if err != nil {
+		return nil, err
+	}
+	for _, i := range docParts.EachIter() {
+		keyRaw, err := p.parseKey(i)
+		if err != nil {
+			return nil, err
+		}
+		valueRaw, err := p.parseValue(i)
+		if err != nil {
+			return nil, err
+		}
 		items[keyRaw] = valueRaw
 	}
 	return &items, nil
@@ -105,43 +124,43 @@ func (p *UrlsMap) Parse() (*TUrlsMap, error) {
 // ]
 type Books struct{ Document *goquery.Document }
 
-func (p *Books) splitDoc(value *goquery.Selection) *goquery.Selection {
+func (p *Books) splitDoc(value *goquery.Selection) (*goquery.Selection, error) {
 	value1 := value.Find(".col-lg-3")
-	return value1
+	return value1, nil
 }
-func (p *Books) parseName(value *goquery.Selection) string {
+func (p *Books) parseName(value *goquery.Selection) (string, error) {
 	value1 := value.Find(".thumbnail").First()
 	value2, isExists := value1.Attr("alt")
 	if !isExists {
-		panic(fmt.Errorf("attr `%s` not exists in `%s`", "alt", value1))
+		return "", fmt.Errorf("attr `%s` not exists in `%s`", "alt", value1)
 	}
-	return value2
+	return value2, nil
 }
-func (p *Books) parseImageUrl(value *goquery.Selection) string {
+func (p *Books) parseImageUrl(value *goquery.Selection) (string, error) {
 	value1 := value.Find(".thumbnail").First()
 	value2, isExists := value1.Attr("src")
 	if !isExists {
-		panic(fmt.Errorf("attr `%s` not exists in `%s`", "src", value1))
+		return "", fmt.Errorf("attr `%s` not exists in `%s`", "src", value1)
 	}
 	value3 := fmt.Sprintf("https://%s", value2)
-	return value3
+	return value3, nil
 }
-func (p *Books) parseUrl(value *goquery.Selection) string {
+func (p *Books) parseUrl(value *goquery.Selection) (string, error) {
 	value1 := value.Find(".image_container > a").First()
 	value2, isExists := value1.Attr("href")
 	if !isExists {
-		panic(fmt.Errorf("attr `%s` not exists in `%s`", "href", value1))
+		return "", fmt.Errorf("attr `%s` not exists in `%s`", "href", value1)
 	}
-	return value2
+	return value2, nil
 }
-func (p *Books) parseRating(value *goquery.Selection) string {
+func (p *Books) parseRating(value *goquery.Selection) (string, error) {
 	value1 := value.Find(".star-rating").First()
 	value2, isExists := value1.Attr("class")
 	if !isExists {
-		panic(fmt.Errorf("attr `%s` not exists in `%s`", "class", value1))
+		return "", fmt.Errorf("attr `%s` not exists in `%s`", "class", value1)
 	}
 	value3 := strings.TrimLeft(value2, "star-rating ")
-	return value3
+	return value3, nil
 }
 func (p *Books) parsePrice(value *goquery.Selection) (result int, err error) {
 	defer func() {
@@ -162,11 +181,27 @@ func (p *Books) parsePrice(value *goquery.Selection) (result int, err error) {
 }
 func (p *Books) Parse() (*TBooksITEMS, error) {
 	items := make(TBooksITEMS, 0)
-	for _, i := range p.splitDoc(p.Document.Selection).EachIter() {
-		NameRaw := p.parseName(i)
-		ImageUrlRaw := p.parseImageUrl(i)
-		UrlRaw := p.parseUrl(i)
-		RatingRaw := p.parseRating(i)
+	docParts, err := p.splitDoc(p.Document.Selection)
+	if err != nil {
+		return nil, err
+	}
+	for _, i := range docParts.EachIter() {
+		NameRaw, err := p.parseName(i)
+		if err != nil {
+			return nil, err
+		}
+		ImageUrlRaw, err := p.parseImageUrl(i)
+		if err != nil {
+			return nil, err
+		}
+		UrlRaw, err := p.parseUrl(i)
+		if err != nil {
+			return nil, err
+		}
+		RatingRaw, err := p.parseRating(i)
+		if err != nil {
+			return nil, err
+		}
 		PriceRaw, _ := p.parsePrice(i)
 		item := TBooks{NameRaw, ImageUrlRaw, UrlRaw, RatingRaw, PriceRaw}
 		items = append(items, item)
@@ -209,14 +244,14 @@ func (p *Books) Parse() (*TBooksITEMS, error) {
 // }
 type CataloguePage struct{ Document *goquery.Document }
 
-func (p *CataloguePage) preValidate(value *goquery.Selection) error {
+func (p *CataloguePage) preValidate(value *goquery.Selection) (error, error) {
 	value1 := value.Find("title").First()
 	value2 := value1.Text()
 	_, errValue2 := regexp.Match(`Books to Scrape`, []byte(value2))
 	if errValue2 != nil {
-		panic(fmt.Errorf(""))
+		return nil, fmt.Errorf("")
 	}
-	return nil
+	return nil, nil
 }
 func (p *CataloguePage) parseTitle(value *goquery.Selection) (result string, err error) {
 	defer func() {
@@ -241,7 +276,7 @@ func (p *CataloguePage) parseUrls(value *goquery.Selection) (TUrls, error) {
 	st0 := Urls{doc0}
 	value1, err := st0.Parse()
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	return *value1, nil
 }
@@ -250,7 +285,7 @@ func (p *CataloguePage) parseUrlsMap(value *goquery.Selection) (TUrlsMap, error)
 	st0 := UrlsMap{doc0}
 	value1, err := st0.Parse()
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	return *value1, nil
 }
@@ -259,14 +294,14 @@ func (p *CataloguePage) parseBooks(value *goquery.Selection) (TBooksITEMS, error
 	st0 := Books{doc0}
 	value1, err := st0.Parse()
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	return *value1, nil
 }
 func (p *CataloguePage) Parse() (*TCataloguePage, error) {
-	err := p.preValidate(p.Document.Selection)
+	_, err := p.preValidate(p.Document.Selection)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	TitleRaw, err := p.parseTitle(p.Document.Selection)
 	if err != nil {

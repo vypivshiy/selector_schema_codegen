@@ -80,15 +80,15 @@ class UrlsMap {
   }
 
   _parseKey(value) {
-    var value1 = value?.text;
-    var value2 =
-        value1.replaceFirst(RegExp("^ "), "").replaceFirst(RegExp(" \$"), "");
-    return value2;
+    var value1 = value?.attributes['href'];
+    return value1;
   }
 
   _parseValue(value) {
-    var value1 = value?.attributes['href'];
-    return value1;
+    var value1 = value.querySelector("html")?.innerHtml;
+    var value2 =
+        value1.replaceFirst(RegExp("^ "), "").replaceFirst(RegExp(" \$"), "");
+    return value2;
   }
 
   TUrlsMap parse() {
@@ -163,7 +163,7 @@ class Books {
       var value5 = int.parse(value4!);
       return value5;
     } catch (_) {
-      return null;
+      return 0;
     }
   }
 
