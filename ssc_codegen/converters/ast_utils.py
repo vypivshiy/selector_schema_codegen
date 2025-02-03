@@ -33,3 +33,13 @@ def find_field_nested_struct(node: TypeDefField) -> TypeDef:
         and fn.kind == TokenType.TYPEDEF
     ][0]
     return associated_typedef
+
+def is_optional_variable(var: VariableType) -> bool:
+    return var in (
+                   VariableType.OPTIONAL_STRING,
+                   VariableType.OPTIONAL_INT,
+                   VariableType.OPTIONAL_FLOAT,
+                   VariableType.OPTIONAL_LIST_FLOAT,
+                   VariableType.OPTIONAL_LIST_INT,
+                   VariableType.OPTIONAL_LIST_STRING
+                   )
