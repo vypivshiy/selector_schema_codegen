@@ -3,11 +3,9 @@
 from typing import TYPE_CHECKING
 
 from ssc_codegen.converters.utils import (
-    find_callfn_field_node_by_name,
-    find_field_nested_struct,
-    find_tdef_field_node_by_name,
     to_upper_camel_case,
 )
+from ..ast_utils import find_tdef_field_node_by_name, find_callfn_field_node_by_name, find_field_nested_struct
 from ssc_codegen.tokens import StructType, TokenType, VariableType
 
 from .utils import (
