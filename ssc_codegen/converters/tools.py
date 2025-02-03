@@ -14,6 +14,7 @@ def go_unimport_naive(go_code: str) -> str:
     import_libs = re.findall(r'"([^"]+)"', imports_code)
     for absolute_lib in import_libs:
         lib = absolute_lib.split("/")[-1] if absolute_lib.find("/") != -1 else absolute_lib
-        if not re.search(lib + '\.', go_code):
-            go_code = go_code.replace(f'"{absolute_lib}"', "")
+        if not re.search(lib + '\\.', go_code):
+            sub_pattern = f'\\s*"{absolute_lib}"'
+            go_code = re.sub(sub_pattern, "", go_code)
     return go_code
