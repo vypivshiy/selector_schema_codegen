@@ -1,5 +1,5 @@
 [project]
-name = "selector-schema-codegen"
+name = "ssc_codegen"
 version = "0.5.0"
 description = "Add your description here"
 readme = "README.md"
@@ -20,7 +20,12 @@ Examples = "https://github.com/vypivshiy/selector_schema_codegen/examples"
 [project.scripts]
 ssc-gen = 'ssc_codegen.cli:main'
 
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [tool.setuptools]
+license-files = []
 packages=["ssc_codegen"]
 
 [dependency-groups]
