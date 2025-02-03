@@ -1,3 +1,5 @@
+from typing_extensions import assert_never
+
 from ..ast_ssc import (
     DefaultStart,
     Docstring,
@@ -61,7 +63,7 @@ converter = BaseCodeConverter()
 
 @converter.pre(TokenType.TYPEDEF)
 def tt_typedef(node: TypeDef) -> str:
-    match node.struct_ref.type:
+    match node.struct_ref.type:  # type: ignore
         case StructType.ITEM:
             code = go.gen_typedef_item(node)
         case StructType.DICT:
@@ -70,8 +72,8 @@ def tt_typedef(node: TypeDef) -> str:
             code = go.gen_typedef_flat_list(node)
         case StructType.LIST:
             code = go.gen_typedef_list(node)
-        case _:
-            raise TypeError("Unknown struct type")
+        case _ as unused_:
+            assert_never(unused_)  # type: ignore
     return code
 
 
@@ -106,24 +108,18 @@ def tt_imports(node: ModuleImports) -> str:
 @converter.pre(TokenType.STRUCT_PART_DOCUMENT)
 def tt_part_doc(node: PartDocFunction) -> str:
     parent_name = node.parent.name
-    # corner cases
-    # 1. have assert expr (+ ret error/nil)
-    # 2. normal mode
-    if node.body[0].have_assert_expr():
-        # func (p *{}) {}(value *goquery.Selection) (*goquery.Selection, error)
-        return go.BINDINGS_PRE[node.kind, parent_name, True]
     return go.BINDINGS_PRE[node.kind, parent_name, False]
 
 
 @converter.post(TokenType.STRUCT_PART_DOCUMENT)
-def tt_part_doc_end(_) -> str:
+def tt_part_doc_end(_: PartDocFunction) -> str:
     return go.BRACKET_END
 
 
 @converter.pre(TokenType.STRUCT_FIELD)
 def tt_function(node: StructFieldFunction) -> str:
     fn_name = to_upper_camel_case(go.MAGIC_METHODS.get(node.name, node.name))
-    parent_name = node.parent.name
+    parent_name = node.parent.name  # type: ignore
     ret_header = go.gen_struct_field_ret_header(node)
     return (
         "func (p *"
@@ -136,7 +132,7 @@ def tt_function(node: StructFieldFunction) -> str:
 
 
 @converter.post(TokenType.STRUCT_FIELD)
-def tt_function_end(_) -> str:
+def tt_function_end(_: StructFieldFunction) -> str:
     return go.BRACKET_END
 
 
@@ -147,7 +143,7 @@ def tt_pre_validate(node: PreValidateFunction) -> str:
 
 
 @converter.post(TokenType.STRUCT_PRE_VALIDATE)
-def tt_pre_validate_end(_) -> str:
+def tt_pre_validate_end(_: PreValidateFunction) -> str:
     return go.BRACKET_END
 
 
@@ -161,10 +157,12 @@ def tt_start_parse(node: StartParseFunction) -> str:
         ret_type = f"*T{node.parent.name}"
     ret_header = f"({ret_type}, error)"
     fn_header = (
-        f"func (p *{node.parent.name}) {name}() {ret_header} "
+        f"func (p *{node.parent.name}) "
+        + f"{name}() "
+        + f"{ret_header} "
         + go.BRACKET_START
     )
-    return fn_header  # todo
+    return fn_header
 
 
 @converter.post(TokenType.STRUCT_PARSE_START)
@@ -172,10 +170,10 @@ def tt_start_parse_post(node: StartParseFunction) -> str:
     code = ""
     if any(e.name == "__PRE_VALIDATE__" for e in node.body):
         code += (
-            "err := p.preValidate(p.Document.Selection); "
+            "_, err := p.preValidate(p.Document.Selection); "
             + "if err != nil "
             + go.BRACKET_START
-            + "panic(err); "
+            + "return nil, err; "
             + go.BRACKET_END + '; '
         )
     match node.type:
@@ -197,34 +195,28 @@ def tt_start_parse_post(node: StartParseFunction) -> str:
 def tt_ret(node: ReturnExpression) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
 
-    # cases
-    # 1. normal
-    # 2. assert (value + err)
-    # 3. default (result, nil)
-    # 4. nested
-    # 5. str cast to int, float...
-
-    if node.have_assert_expr() and node.have_default_expr():
-        return f"result = {prv}; " + "return result, nil;"
-
-    if node.have_default_expr():
-        return f"result = {prv}; " + "return result, nil;"
-
-    elif node.have_assert_expr():
-        if node.ret_type == VariableType.NESTED:
-            return f"return *{nxt}, nil; "
-        return f"return {nxt}, nil; "
-    elif node.ret_type == VariableType.NESTED:
+    if node.ret_type == VariableType.NESTED:
         return f"return *{nxt}, nil; "
-    return f"return {nxt}; "
+
+    elif node.have_default_expr():
+        # OPTIONAL TYPE
+        if node.parent.body[0].value is None: # noqa
+            return f"result = &{prv}; " + "return result, nil;"
+
+        return (
+                f"result = {prv}; "
+                + "return result, nil;"
+        )
+    return f"return {nxt}, nil; "
 
 
-#
 @converter.pre(TokenType.EXPR_NO_RETURN)
 def tt_no_ret(_: NoReturnExpression) -> str:
     # in current stage project used only in __PRE_VALIDATE__
-    # its return nil or throw error
-    return "return nil;"
+    # its return nil or error
+    # HACK:
+    # I was too lazy to describe all the corner cases, so the validation function returns nil and error
+    return "return nil, nil;"
 
 
 @converter.pre(TokenType.EXPR_NESTED)
@@ -237,7 +229,7 @@ def tt_nested(node: NestedExpression) -> str:
         + f"{nxt}, err := st{node.variable.num}.Parse(); "
         + "if err != nil"
         + go.BRACKET_START
-        + "panic(err); "
+        + "return nil, err; "
         + go.BRACKET_END
     )
     return code
@@ -253,7 +245,10 @@ def tt_default(node: DefaultStart) -> str:
     else:
         value = "nil"
     prv, nxt = left_right_var_names("value", node.variable)
-    return go.BINDINGS_PRE[node.kind, value] + f"{nxt} := {prv};"
+    return (go.BINDINGS_PRE[node.kind, value]
+            # hack: avoid recalc variable counter
+            + f"{nxt} := {prv};"
+            )
 
 
 @converter.pre(TokenType.EXPR_STRING_FORMAT)
@@ -396,10 +391,13 @@ def tt_join(node: JoinExpression) -> str:
 @converter.pre(TokenType.IS_EQUAL)
 def tt_is_equal(node: IsEqualExpression) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
-    value = wrap_double_quotes(node.value)
+    value = node.value if isinstance(node.value, (int, float)) else wrap_double_quotes(node.value)
     msg = wrap_double_quotes(node.msg)
     is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
-    code = go.BINDINGS_PRE[node.kind, prv, value, msg, is_validate]
+    is_default = node.have_default_expr()
+    ret_type = node.parent.ret_type
+
+    code = go.BINDINGS_PRE[node.kind, prv, value, msg, is_validate, is_default, ret_type]
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return code
     return code + f"{nxt} := {prv}; "
@@ -408,11 +406,13 @@ def tt_is_equal(node: IsEqualExpression) -> str:
 @converter.pre(TokenType.IS_NOT_EQUAL)
 def tt_is_not_equal(node: IsNotEqualExpression) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
-    value = wrap_double_quotes(node.value)
+    value = node.value if isinstance(node.value, (int, float)) else wrap_double_quotes(node.value)
     msg = wrap_double_quotes(node.msg)
     is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
+    is_default = node.have_default_expr()
+    ret_type = node.parent.ret_type
 
-    code = go.BINDINGS_PRE[node.kind, prv, value, msg, is_validate]
+    code = go.BINDINGS_PRE[node.kind, prv, value, msg, is_validate, is_default, ret_type]
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return code
     return code + f"{nxt} := {prv}; "
@@ -421,11 +421,13 @@ def tt_is_not_equal(node: IsNotEqualExpression) -> str:
 @converter.pre(TokenType.IS_CONTAINS)
 def tt_is_contains(node: IsContainsExpression) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
-    item = wrap_double_quotes(node.item)
+    item = node.item if isinstance(node.item, (int, float)) else wrap_double_quotes(node.item)
     msg = wrap_double_quotes(node.msg)
     is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
+    is_default = node.have_default_expr()
+    ret_type = node.parent.ret_type
 
-    code = go.BINDINGS_PRE[node.kind, prv, item, msg, is_validate]
+    code = go.BINDINGS_PRE[node.kind, prv, item, msg, is_validate, is_default, ret_type]
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return code
     return code + f"{nxt} := {prv}; "
@@ -437,7 +439,10 @@ def tt_is_regex(node: IsRegexMatchExpression) -> str:
     pattern = wrap_backtick(node.pattern)
     msg = wrap_double_quotes(node.msg)
     is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
-    code = go.BINDINGS_PRE[node.kind, prv, pattern, msg, is_validate]
+    is_default = node.have_default_expr()
+    ret_type = node.parent.ret_type
+
+    code = go.BINDINGS_PRE[node.kind, prv, pattern, msg, is_validate, is_default, ret_type]
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return code
     return code + f"{nxt} := {prv}; "
@@ -446,67 +451,37 @@ def tt_is_regex(node: IsRegexMatchExpression) -> str:
 @converter.pre(TokenType.TO_INT)
 def tt_to_int(node: ToInteger) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
-    return (
-        f"{nxt}, err := strconv.Atoi({prv}); "
-        + "if err != nil"
-        + go.BRACKET_START
-        + "panic(err); "
-        + go.BRACKET_END
-    )
+    is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
+    is_default = node.have_default_expr()
+    return go.BINDINGS_PRE[node.kind, nxt, prv, is_validate, is_default, node.parent.ret_type]
 
 
 @converter.pre(TokenType.TO_INT_LIST)
 def tt_to_list_int(node: ToListInteger) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
-    tmp_var = f"tmp{nxt.title()}"
-    each_var = f"i{nxt.title()}"
     arr_type = go.TYPES.get(node.next.variable.type, "")
-    return (
-        f"{nxt} := make({arr_type}, 0); "
-        + f"for _, {tmp_var} := range {prv} "
-        + go.BRACKET_START
-        + f"{each_var}, err := strconv.Atoi({tmp_var}); "
-        + "if err != nil"
-        + go.BRACKET_START
-        + "panic(err); "
-        + go.BRACKET_END
-        + f"{nxt} = append({nxt}, {each_var}); "
-        + go.BRACKET_END
-    )
+    is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
+    is_default = node.have_default_expr()
+    return go.BINDINGS_PRE[node.kind, nxt, prv, arr_type, is_validate, is_default, node.parent.ret_type]
 
 
 @converter.pre(TokenType.TO_FLOAT)
 def tt_to_float(node: ToFloat) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
-    return (
-        f"{nxt}, err := strconv.ParseFloat({prv}, 64); "
-        # todo: return ERR to main?
-        + "if err != nil"
-        + go.BRACKET_START
-        + "panic(err); "
-        + go.BRACKET_END
-    )
+    is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
+    is_default = node.have_default_expr()
+
+    return go.BINDINGS_PRE[node.kind, prv, nxt, is_validate, is_default, node.parent.ret_type]
 
 
 @converter.pre(TokenType.TO_FLOAT_LIST)
 def tt_to_list_float(node: ToListFloat) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
-    tmp_var = f"tmp{nxt.title()}"
-    each_var = f"i{nxt.title()}"
+    is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
+    is_default = node.have_default_expr()
     arr_type = go.TYPES.get(node.next.variable.type, "")
-    return (
-        f"{nxt} := make({arr_type}, 0); "
-        + f"for _, {tmp_var} := range {prv} "
-        + go.BRACKET_START
-        + f"{each_var}, err := strconv.ParseFloat({prv}, 64); "
-        # todo: return ERR to main?
-        + "if err != nil"
-        + go.BRACKET_START
-        + "panic(err); "
-        + go.BRACKET_END
-        + f"{nxt} = append({nxt}, {each_var}); "
-        + go.BRACKET_END
-    )
+
+    return go.BINDINGS_PRE[node.kind, prv, nxt, arr_type, is_validate, is_default, node.parent.ret_type]
 
 
 # # goquery API
@@ -540,28 +515,45 @@ def tt_text_all(node: HtmlTextAllExpression) -> str:
 @converter.pre(TokenType.EXPR_RAW)
 def tt_raw(node: HtmlRawExpression) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
-    return go.BINDINGS_PRE[node.kind, nxt, prv]
+
+    is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
+    is_default = node.have_default_expr()
+    ret_type = node.parent.ret_type
+    return go.BINDINGS_PRE[node.kind, nxt, prv, is_validate, is_default, ret_type]
 
 
 @converter.pre(TokenType.EXPR_RAW_ALL)
 def tt_raw_all(node: HtmlRawAllExpression) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
     arr_type = go.TYPES.get(node.next.ret_type, "")
-    return go.BINDINGS_PRE[node.kind, nxt, prv, arr_type]
+
+    is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
+    is_default = node.have_default_expr()
+    ret_type = node.parent.ret_type
+    return go.BINDINGS_PRE[node.kind, nxt, prv, arr_type, is_validate, is_default, ret_type]
 
 
 @converter.pre(TokenType.EXPR_ATTR)
 def tt_attr(node: HtmlAttrExpression) -> str:
     n = wrap_double_quotes(node.attr)
     prv, nxt = left_right_var_names("value", node.variable)
-    return go.BINDINGS_PRE[node.kind, nxt, prv, n]
+
+    is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
+    is_default = node.have_default_expr()
+    ret_type = node.parent.ret_type
+    return go.BINDINGS_PRE[node.kind, nxt, prv, n, is_validate, is_default, ret_type]
 
 
 @converter.pre(TokenType.EXPR_ATTR_ALL)
 def tt_attr_all(node: HtmlAttrAllExpression) -> str:
     n = wrap_double_quotes(node.attr)
     prv, nxt = left_right_var_names("value", node.variable)
-    return go.BINDINGS_PRE[node.kind, nxt, prv, n]
+
+    arr_type = go.TYPES.get(node.next.ret_type, "")
+    is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
+    is_default = node.have_default_expr()
+    ret_type = node.parent.ret_type
+    return go.BINDINGS_PRE[node.kind, nxt, prv, n, arr_type, is_validate, is_default, ret_type]
 
 
 @converter.pre(TokenType.IS_CSS)
@@ -570,8 +562,9 @@ def tt_is_css(node: IsCssExpression) -> str:
     q = wrap_double_quotes(node.query)
     msg = wrap_double_quotes(node.msg)
     is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
+    is_default = node.have_default_expr()
 
-    code = go.BINDINGS_PRE[node.kind, prv, q, msg, is_validate]
+    code = go.BINDINGS_PRE[node.kind, prv, q, msg, is_validate, is_default, node.parent.ret_type]
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return code
     return code + f"{nxt} := {prv}; "
