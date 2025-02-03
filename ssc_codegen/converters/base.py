@@ -1,6 +1,4 @@
-from typing import Callable, cast
-
-from mypyc.ir.ops import TypeVar
+from typing import Callable, TypeVar
 
 from ..ast_ssc import (
     BaseAstNode,
@@ -15,16 +13,19 @@ from ..ast_ssc import (
     TypeDef,
     TypeDefField,
     Variable,
+    BaseExpression,
 )
 from ..tokens import TokenType
 
-T_NODE = TypeVar("T_NODE")
 
-CB_AST_BIND = Callable[[BaseAstNode], str]
+T_NODE = TypeVar("T_NODE", BaseAstNode, BaseExpression)
+
+
+CB_AST_BIND = Callable[[T_NODE], str]
 CB_AST_DECORATOR = Callable[[CB_AST_BIND], CB_AST_BIND]
 
 
-def debug_msg_cb(node: BaseAstNode, comment_prefix: str) -> str:
+def debug_msg_cb(node: T_NODE, comment_prefix: str) -> str:
     match node.kind:
         case TokenType.EXPR_RETURN:
             return f"{comment_prefix}Token: {node.kind.name} ret_type: {node.ret_type.name}"
