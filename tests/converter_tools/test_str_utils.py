@@ -19,7 +19,7 @@ from ssc_codegen.converters.utils import (
         ("", ""),
     ],
 )
-def test_to_snake_case(input_str, expected_output) -> None:
+def test_to_snake_case(input_str: str, expected_output: str) -> None:
     assert to_snake_case(input_str) == expected_output
 
 
