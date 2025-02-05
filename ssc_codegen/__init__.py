@@ -2,7 +2,7 @@ from .document import HTMLDocument, StringDocument, ArrayDocument, AssertDocumen
     NumericDocument
 from .schema import ItemSchema, DictSchema, ListSchema, FlatListSchema
 
-VERSION = "0.5.1"
+VERSION = "0.5.2"
 
 class __MISSING(object):
     pass
