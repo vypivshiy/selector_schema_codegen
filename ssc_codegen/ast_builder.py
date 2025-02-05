@@ -134,7 +134,8 @@ def check_schema(schema: Type[BaseSchema]) -> Type[BaseSchema]:
             )
             _check_required_attributes(schema, "__SPLIT_DOC__", "__ITEM__")
         case _:
-            raise SyntaxError("Unknown schema type")
+            msg = f"{schema.__name__}: Unknown schema type"
+            raise SyntaxError(msg)
     return schema
 
 
@@ -260,14 +261,14 @@ def build_ast_struct(
                 extract_pre_validate(
                     field,
                     name,
-                    start_parse_body,
+                    start_parse_body,  # type: ignore[arg-type]
                     struct_parse_functions,  # type: ignore[arg-type]
                 )
             case "__SPLIT_DOC__":
                 extract_split_doc(
                     field,
                     name,
-                    start_parse_body,
+                    start_parse_body,  # type: ignore[arg-type]
                     struct_parse_functions,  # type: ignore[arg-type]
                 )
             case _:
@@ -294,7 +295,12 @@ def build_ast_struct(
                             name=name, ret_type=field.stack_last_ret, fn_ref=fn
                         )  # noqa
                     )
-    # fixme: start_parse_body DEAD CODE?
+
+        # after fill variables and types, check corner cases
+        _check_dict_schema_key_type(field, name, schema)
+        _check_split_doc_type(field, name, schema)
+        _check_field_type(field, name, schema)
+
     ast_struct_parser = StructParser(
         type=schema.__SCHEMA_TYPE__,
         name=schema.__name__,
@@ -304,6 +310,27 @@ def build_ast_struct(
     )
 
     return ast_struct_parser
+
+
+def _check_field_type(field: "BaseDocument", name: str, schema: Type[BaseSchema]) -> None:
+    if field.stack_last_ret == VariableType.DOCUMENT:
+        msg = f"{schema.__name__}.{name} cannot return type {VariableType.DOCUMENT.name}"
+        raise TypeError(msg)
+
+
+def _check_split_doc_type(field: "BaseDocument", name: str, schema: Type[BaseSchema]) -> None:
+    if name == "__SPLIT_DOC__" and field.stack_last_ret != VariableType.LIST_DOCUMENT:
+        msg = (
+            f"{schema.__name__}.{name} should be returns {VariableType.LIST_DOCUMENT.name}, "
+            f"not {field.stack_last_ret.name}"
+        )
+        raise TypeError(msg)
+
+
+def _check_dict_schema_key_type(field: "BaseDocument", name: str, schema: Type[BaseSchema]) -> None:
+    if schema.__SCHEMA_TYPE__ == StructType.DICT and name == "__KEY__" and field.stack_last_ret != VariableType.STRING:  # type: ignore
+        msg = f"{schema.__name__}.__KEY__ should be STRING, not {field.stack_last_ret.name}"  # type: ignore
+        raise TypeError(msg)
 
 
 def extract_default_expr(field: "BaseDocument") -> None:
