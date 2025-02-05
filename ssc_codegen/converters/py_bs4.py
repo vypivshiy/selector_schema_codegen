@@ -17,7 +17,7 @@ from ..ast_ssc import (
     PreValidateFunction,
     StructFieldFunction,
 )
-from ..tokens import StructType, TokenType, VariableType
+from ..tokens import TokenType, VariableType
 from .py_base import BasePyCodeConverter, lr_var_names
 from .templates import py
 from .templates.utils import TemplateBindings
@@ -69,7 +69,7 @@ def tt_init(node) -> str:
 
 
 @converter.post(TokenType.STRUCT_INIT)
-def tt_init(node):
+def tt_init_post(node):
     return py.INDENT_METHOD_BODY + POST_BINDINGS[node.kind]
 
 

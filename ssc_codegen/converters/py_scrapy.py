@@ -143,7 +143,7 @@ def tt_text(node: HtmlTextExpression) -> str:
     indent = py.suggest_indent(node)
 
     prv, nxt = lr_var_names(variable=node.variable)
-    return py.BINDINGS[node.kind, nxt, prv]
+    return indent + py.BINDINGS[node.kind, nxt, prv]
 
 
 @converter.pre(TokenType.EXPR_TEXT_ALL)

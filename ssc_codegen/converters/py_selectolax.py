@@ -49,7 +49,7 @@ def tt_init(node) -> str:
 
 
 @converter.post(TokenType.STRUCT_INIT)
-def tt_init(node) -> str:
+def tt_init_post(node) -> str:
     return py.INDENT_METHOD_BODY + POST_BINDINGS[node.kind]
 
 

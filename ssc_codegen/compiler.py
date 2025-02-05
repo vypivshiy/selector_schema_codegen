@@ -18,7 +18,7 @@ class Compiler:
     @classmethod
     def from_file(
         cls, path: PathLike[str] | str, *, converter: BasePyCodeConverter
-    ):
+    ) -> "Compiler":
         if not isinstance(converter, BasePyCodeConverter):
             raise TypeError("Support only python implementation converters")
 

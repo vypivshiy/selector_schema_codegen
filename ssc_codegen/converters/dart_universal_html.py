@@ -102,7 +102,7 @@ def tt_struct(node: StructParser) -> str:
 
 
 @converter.post(TokenType.STRUCT)
-def tt_struct(_: StructParser) -> str:
+def tt_struct_post(_: StructParser) -> str:
     return dart.END_BRACKET
 
 
@@ -147,7 +147,7 @@ def tt_pre_validate(node: PreValidateFunction) -> str:
 
 
 @converter.post(TokenType.STRUCT_PRE_VALIDATE)
-def tt_pre_validate(_: PreValidateFunction) -> str:
+def tt_pre_validate_post(_: PreValidateFunction) -> str:
     return dart.END_BRACKET
 
 
@@ -158,7 +158,7 @@ def tt_part_document(node: PartDocFunction) -> str:
 
 
 @converter.post(TokenType.STRUCT_PART_DOCUMENT)
-def tt_part_document(_: PartDocFunction) -> str:
+def tt_part_document_post(_: PartDocFunction) -> str:
     return dart.END_BRACKET
 
 
@@ -171,7 +171,7 @@ def tt_function(node: StructFieldFunction) -> str:
 
 
 @converter.post(TokenType.STRUCT_FIELD)
-def tt_function(_: StructFieldFunction) -> str:
+def tt_function_post(_: StructFieldFunction) -> str:
     return dart.END_BRACKET
 
 

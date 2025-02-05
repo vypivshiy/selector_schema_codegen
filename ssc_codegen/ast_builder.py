@@ -150,7 +150,7 @@ def _fill_stack_variables(
         # last token - TT.DefaultEnd
         ret_type = tmp_stack[-2].ret_type
         # used for convert return type
-        if first_expr.value == None:  # type: ignore[attr-defined]
+        if first_expr.value is None:  # type: ignore[attr-defined]
             match ret_type:
                 case VariableType.STRING:
                     ret_type = VariableType.OPTIONAL_STRING

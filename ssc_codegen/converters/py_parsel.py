@@ -17,7 +17,7 @@ from ..ast_ssc import (
     StructFieldFunction,
     StructInit,
 )
-from ..tokens import StructType, TokenType, VariableType
+from ..tokens import TokenType, VariableType
 from .py_base import BasePyCodeConverter, lr_var_names
 from .templates import py
 from .templates.utils import TemplateBindings

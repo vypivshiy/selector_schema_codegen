@@ -160,7 +160,7 @@ def tt_default_start(node: DefaultStart) -> str:
 
 @converter.pre(TokenType.EXPR_DEFAULT_END)
 def tt_default_end(node: DefaultEnd) -> str:
-    if node.value == None:
+    if node.value is None:
         val = "null"
     elif isinstance(node.value, str):
         val = repr(node.value)

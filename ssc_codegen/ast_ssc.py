@@ -107,7 +107,7 @@ class TypeDefField(BaseAstNode):
         if self.ret_type == VariableType.NESTED:
             nested_fn = [
                 fn
-                for fn in self.parent.struct_ref.body
+                for fn in self.parent.struct_ref.body  # type: ignore[union-attr]
                 if fn.name == self.name  # type: ignore[union-attr]
             ][_EXPR_I_START]  # type: ignore
             nested_class = [
