@@ -2,6 +2,8 @@
 
 from functools import partial
 
+from typing_extensions import assert_never
+
 from ..ast_ssc import (
     DefaultEnd,
     DefaultStart,
@@ -171,6 +173,8 @@ def tt_typedef(node: TypeDef) -> str:
             )
             body = t_name + " = " + py.TYPE_LIST.format(item_name)
             return item_body + "\n" + body
+        case _ as a_never:
+            assert_never(a_never)
     return t_name + " = " + body
 
 
@@ -248,7 +252,7 @@ def tt_start_parse_post(node: StartParseFunction) -> str:
             body = py.get_flat_list_body(node)
         case _:
             raise NotImplementedError("Unknown struct type")
-    return f"{code}{py.INDENT_METHOD_BODY}return {body}"
+    return code + py.INDENT_METHOD_BODY + "return " + body
 
 
 def tt_default_start(node: DefaultStart) -> str:

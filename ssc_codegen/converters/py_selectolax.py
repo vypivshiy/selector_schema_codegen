@@ -82,8 +82,8 @@ def tt_function(node: StructFieldFunction) -> str:
     if node.ret_type == VariableType.NESTED:
         t_def = node.find_associated_typedef()
         if t_def.struct_ref.type == StructType.LIST:
-            t_name = py.TYPE_PREFIX.format(t_def.struct_ref.name)
-            ret_type = py.TYPE_LIST.format(t_name)
+            t_def = node.find_associated_typedef()
+            ret_type = py.TYPE_PREFIX.format(t_def.struct_ref.name)
         else:
             ret_type = py.TYPE_PREFIX.format(t_def.struct_ref.name)
     else:

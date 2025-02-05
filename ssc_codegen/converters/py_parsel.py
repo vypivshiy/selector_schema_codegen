@@ -15,6 +15,7 @@ from ..ast_ssc import (
     PartDocFunction,
     PreValidateFunction,
     StructFieldFunction,
+    StructInit,
 )
 from ..tokens import StructType, TokenType, VariableType
 from .py_base import BasePyCodeConverter, lr_var_names
@@ -29,18 +30,18 @@ BINDINGS_POST[TokenType.STRUCT_INIT] = (
 BINDINGS_POST[TokenType.IMPORTS] = "from parsel import Selector, SelectorList"
 
 # extend default bindings
-# py.BINDINGS[TokenType.STRUCT_PART_DOCUMENT] = "def {}(self, value: {}) -> {}:"
-
 py.BINDINGS[TokenType.EXPR_CSS] = "{} = {}.css({})"
 py.BINDINGS[TokenType.EXPR_CSS_ALL] = "{} = {}.css({})"
 py.BINDINGS[TokenType.EXPR_XPATH] = "{} = {}.xpath({})"
 py.BINDINGS[TokenType.EXPR_XPATH_ALL] = "{} = {}.xpath({})"
-py.BINDINGS[TokenType.EXPR_TEXT] = '{} = {}.css("::text").get()'
+
+# parsel get() method returns single match instead full text element scope
+py.BINDINGS[TokenType.EXPR_TEXT] = '{} = "".join({}.css("::text").getall())'
 py.BINDINGS[TokenType.EXPR_TEXT_ALL] = '{} = {}.css("::text").getall()'
 py.BINDINGS[TokenType.EXPR_RAW] = "{} = {}.get()"
 py.BINDINGS[TokenType.EXPR_RAW_ALL] = "{} = {}.getall()"
-py.BINDINGS[TokenType.EXPR_ATTR] = "{} = {}.css('::attr({})').get()"
-py.BINDINGS[TokenType.EXPR_ATTR_ALL] = "{} = {}.css('::attr({})').getall()"
+py.BINDINGS[TokenType.EXPR_ATTR] = "{} = {}.attrib[{}]"
+py.BINDINGS[TokenType.EXPR_ATTR_ALL] = "{} = [i.attrib[{}] for i in {}]"
 py.BINDINGS[TokenType.IS_CSS] = "assert {}.css({}), {}"
 py.BINDINGS[TokenType.IS_XPATH] = "assert {}.xpath({}), {}"
 
@@ -48,18 +49,18 @@ converter = BasePyCodeConverter()
 
 
 @converter.pre(TokenType.STRUCT_INIT)
-def tt_init(node) -> str:
+def tt_init(node: StructInit) -> str:
     p_type = "Union[str, SelectorList, Selector]"
     return py.INDENT_METHOD + py.BINDINGS[node.kind, p_type]
 
 
 @converter.post(TokenType.STRUCT_INIT)
-def tt_init_post(node) -> str:
+def tt_init_post(node: StructInit) -> str:
     return py.INDENT_METHOD_BODY + BINDINGS_POST[node.kind]
 
 
 @converter.post(TokenType.IMPORTS)
-def tt_imports(node: ModuleImports) -> str:
+def tt_imports_post(node: ModuleImports) -> str:
     return BINDINGS_POST[node.kind]
 
 
@@ -83,11 +84,7 @@ def tt_function(node: StructFieldFunction) -> str:
     name = py.MAGIC_METHODS_NAME.get(node.name, node.name)
     if node.ret_type == VariableType.NESTED:
         t_def = node.find_associated_typedef()
-        if t_def.struct_ref.type == StructType.LIST:
-            t_name = py.TYPE_PREFIX.format(t_def.struct_ref.name)
-            ret_type = py.TYPE_LIST.format(t_name)
-        else:
-            ret_type = py.TYPE_PREFIX.format(t_def.struct_ref.name)
+        ret_type = py.TYPE_PREFIX.format(t_def.struct_ref.name)
     else:
         ret_type = py.TYPES.get(node.ret_type)
     p_type = "Selector"
@@ -174,7 +171,7 @@ def tt_raw_all(node: HtmlRawAllExpression) -> str:
 def tt_attr(node: HtmlAttrExpression):
     indent = py.suggest_indent(node)
 
-    n = node.attr
+    n = repr(node.attr)
     prv, nxt = lr_var_names(variable=node.variable)
     code = py.BINDINGS[node.kind, nxt, prv, n]
     return indent + code
@@ -184,9 +181,9 @@ def tt_attr(node: HtmlAttrExpression):
 def tt_attr_all(node: HtmlAttrAllExpression):
     indent = py.suggest_indent(node)
 
-    n = node.attr
+    n = repr(node.attr)
     prv, nxt = lr_var_names(variable=node.variable)
-    code = py.BINDINGS(node.kind, nxt, prv, n)
+    code = py.BINDINGS[node.kind, nxt, n, prv]
     return indent + code
 
 

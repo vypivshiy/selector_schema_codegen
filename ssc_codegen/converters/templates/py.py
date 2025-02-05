@@ -103,7 +103,7 @@ BINDINGS[TokenType.TO_FLOAT_LIST] = "{} = [float(i) for i in {}]"
 
 
 TYPE_BINDINGS = TemplateTypeBindings(type_prefix="T_")
-TYPE_BINDINGS[StructType.LIST] = "List[{}]"
+TYPE_BINDINGS[StructType.LIST] = "{}"
 
 
 TOKEN_TEMPLATES = {

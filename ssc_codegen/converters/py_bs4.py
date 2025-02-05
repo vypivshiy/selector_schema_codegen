@@ -15,6 +15,7 @@ from ..ast_ssc import (
     PartDocFunction,
     PreValidateFunction,
     StructFieldFunction,
+    NestedExpression,
 )
 from ..tokens import StructType, TokenType, VariableType
 from .py_base import BasePyCodeConverter, lr_var_names
@@ -97,11 +98,7 @@ def tt_function(node: StructFieldFunction) -> str:
     name = py.MAGIC_METHODS_NAME.get(node.name, node.name)
     if node.ret_type == VariableType.NESTED:
         t_def = node.find_associated_typedef()
-        if t_def.struct_ref.type == StructType.LIST:
-            t_name = py.TYPE_PREFIX.format(t_def.struct_ref.name)
-            type_ = py.TYPE_LIST.format(t_name)
-        else:
-            type_ = py.TYPE_PREFIX.format(t_def.struct_ref.name)
+        type_ = py.TYPE_PREFIX.format(t_def.struct_ref.name)
     else:
         type_ = py.TYPES.get(node.ret_type)
     p_type = "Union[BeautifulSoup, Tag]"
@@ -109,6 +106,18 @@ def tt_function(node: StructFieldFunction) -> str:
 
 
 # BS4 API
+@converter.pre(TokenType.EXPR_NESTED)
+def tt_nested(node: NestedExpression) -> str:
+    # create new BeautifulSoup instance avoid missing parse data
+    # from Tag object in many-nested schemas cases
+    prv, nxt = lr_var_names(variable=node.variable)
+    if node.have_default_expr():
+        indent = py.INDENT_DEFAULT_BODY
+    else:
+        indent = py.INDENT_METHOD_BODY
+    return indent + py.BINDINGS[node.kind, nxt, node.schema, f"str({prv})"]
+
+
 @converter.pre(TokenType.EXPR_CSS)
 def tt_css(node: HtmlCssExpression) -> str:
     indent = py.suggest_indent(node)
