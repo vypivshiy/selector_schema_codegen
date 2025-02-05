@@ -438,15 +438,17 @@ def tt_is_xpath(node: IsXPathExpression) -> str:
     code += js.EXPR_ASSIGN.format(nxt, prv)
     return code
 
+
 @converter.pre(TokenType.TO_INT)
 def tt_to_int(node: ToInteger) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
     return f"let {nxt} = parseInt({prv}, 10); "
 
+
 @converter.pre(TokenType.TO_INT_LIST)
 def tt_to_list_int(node: ToListInteger) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
-    return f'let {nxt} = {prv}.map(i => parseInt(i, 10)); '
+    return f"let {nxt} = {prv}.map(i => parseInt(i, 10)); "
 
 
 @converter.pre(TokenType.TO_FLOAT)
@@ -458,4 +460,4 @@ def tt_to_float(node: ToFloat) -> str:
 @converter.pre(TokenType.TO_FLOAT_LIST)
 def tt_to_list_float(node: ToListFloat) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
-    return f'let {nxt} = {prv}.map(i => parseFloat(i, 64)); '
+    return f"let {nxt} = {prv}.map(i => parseFloat(i, 64)); "

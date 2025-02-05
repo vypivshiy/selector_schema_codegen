@@ -163,7 +163,9 @@ EXPR_ASSIGN = "let {} = {};"
 
 # PURE JS API
 BINDINGS[TokenType.EXPR_CSS] = "let {} = {}.querySelector({});"
-BINDINGS[TokenType.EXPR_CSS_ALL] = "let {} = Array.from({}.querySelectorAll({}));"
+BINDINGS[TokenType.EXPR_CSS_ALL] = (
+    "let {} = Array.from({}.querySelectorAll({}));"
+)
 # document.evaluate(xpath, element, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
 BINDINGS[TokenType.EXPR_XPATH] = (
     "let {} = document.evaluate("
