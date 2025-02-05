@@ -9,4 +9,4 @@ export SOURCE_FILES="ssc_codegen"
 set -x
 
 ${PREFIX}ruff format $SOURCE_FILES
-${PREFIX}ruff check $SOURCE_FILES --select I --fix
+${PREFIX}ruff check $SOURCE_FILES --fix

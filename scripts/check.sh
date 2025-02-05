@@ -10,5 +10,6 @@ set -x
 
 ${PREFIX}ruff format $SOURCE_FILES
 ${PREFIX}ruff check $SOURCE_FILES
+${PREFIX}pytest
 ${PREFIX}mypy $SOURCE_FILES
 
