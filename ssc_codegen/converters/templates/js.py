@@ -163,7 +163,7 @@ EXPR_ASSIGN = "let {} = {};"
 
 # PURE JS API
 BINDINGS[TokenType.EXPR_CSS] = "let {} = {}.querySelector({});"
-BINDINGS[TokenType.EXPR_CSS_ALL] = "let {} = {}.querySelectorAll({});"
+BINDINGS[TokenType.EXPR_CSS_ALL] = "let {} = Array.from({}.querySelectorAll({}));"
 # document.evaluate(xpath, element, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
 BINDINGS[TokenType.EXPR_XPATH] = (
     "let {} = document.evaluate("
@@ -188,11 +188,9 @@ def _expr_xpath_all(nxt: str, prv: str, query: str) -> str:  # noqa
 BINDINGS[TokenType.EXPR_XPATH_ALL] = _expr_xpath_all
 
 
-def _expr_text_doc(var_num: int, nxt: str, prv: str) -> str:
-    # first variable (0) maybe document type, not element
-    if var_num == 0:
-        return f'let {nxt} = {prv}.querySelector("html").textContent;'
-    return f"let {nxt} = {prv}.textContent;"
+# todo: remove _var_num param
+def _expr_text_doc(_var_num: int, nxt: str, prv: str) -> str:
+    return f'let {nxt} = typeof document.textContent === "undefined" ? {prv}.body.textContent : {prv}.textContent; '
 
 
 BINDINGS[TokenType.EXPR_TEXT] = _expr_text_doc
@@ -200,9 +198,7 @@ BINDINGS[TokenType.EXPR_TEXT_ALL] = "let {} = {}.map(e => e.textContent);"
 
 
 def _expr_raw(var_num: int, nxt: str, prv: str) -> str:
-    if var_num == 0:
-        return f'let {nxt} = {prv}.querySelector("html").innerHTML;'
-    return f"let {nxt} = {prv}.innerHTML;"
+    return f'let {nxt} = typeof document.innerHTML === "undefined" ? {prv}.body.innerHTML : {prv}.innerHTML; '
 
 
 BINDINGS[TokenType.EXPR_RAW] = _expr_raw

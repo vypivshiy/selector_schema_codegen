@@ -45,6 +45,10 @@ from ..ast_ssc import (
     StructInit,
     StructParser,
     TrimExpression,
+    ToInteger,
+    ToListInteger,
+    ToFloat,
+    ToListFloat,
 )
 from ..tokens import StructType, TokenType
 from .base import BaseCodeConverter, left_right_var_names
@@ -424,7 +428,7 @@ def tt_is_css(node: IsCssExpression) -> str:
 
 
 @converter.pre(TokenType.IS_XPATH)
-def tt_is_xpath(node: IsXPathExpression):
+def tt_is_xpath(node: IsXPathExpression) -> str:
     #   const result = document.evaluate(xpath, context || document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
     #     const node = result.singleNodeValue;
     prv, nxt = left_right_var_names("value", node.variable)
@@ -433,3 +437,25 @@ def tt_is_xpath(node: IsXPathExpression):
         return code
     code += js.EXPR_ASSIGN.format(nxt, prv)
     return code
+
+@converter.pre(TokenType.TO_INT)
+def tt_to_int(node: ToInteger) -> str:
+    prv, nxt = left_right_var_names("value", node.variable)
+    return f"let {nxt} = parseInt({prv}, 10); "
+
+@converter.pre(TokenType.TO_INT_LIST)
+def tt_to_list_int(node: ToListInteger) -> str:
+    prv, nxt = left_right_var_names("value", node.variable)
+    return f'let {nxt} = {prv}.map(i => parseInt(i, 10)); '
+
+
+@converter.pre(TokenType.TO_FLOAT)
+def tt_to_float(node: ToFloat) -> str:
+    prv, nxt = left_right_var_names("value", node.variable)
+    return f"let {nxt} = parseFloat({prv}, 64); "
+
+
+@converter.pre(TokenType.TO_FLOAT_LIST)
+def tt_to_list_float(node: ToListFloat) -> str:
+    prv, nxt = left_right_var_names("value", node.variable)
+    return f'let {nxt} = {prv}.map(i => parseFloat(i, 64)); '
