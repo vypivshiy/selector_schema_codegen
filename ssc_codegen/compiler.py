@@ -1,6 +1,5 @@
-"""simple compiler and evaulater generated python schemas
+"""simple compiler and evaulater generated python schemas"""
 
-"""
 import sys
 import types
 from os import PathLike
@@ -11,7 +10,7 @@ from ssc_codegen.converters.py_base import BasePyCodeConverter
 
 
 class Compiler:
-    _cache: dict[str, 'Compiler'] = {}
+    _cache: dict[str, "Compiler"] = {}
 
     def __init__(self, module_name: str, module: types.ModuleType) -> None:
         self._module = module
@@ -24,7 +23,9 @@ class Compiler:
             raise TypeError("Support only python implementation converters")
 
         ast = build_ast_module(path)  # type: ignore
-        code_parts = converter.convert_program(ast)  # return real works python code
+        code_parts = converter.convert_program(
+            ast
+        )  # return real works python code
         code = "\n".join(code_parts)
 
         module_name = path if isinstance(path, str) else path.__fspath__()
@@ -53,8 +54,8 @@ class Compiler:
         """Gets the class by name, initializes it with the document, and calls its parse method."""
         sc_cls = self.get_class(schema_name)
         instance = sc_cls(document)  # type: ignore
-        if (not hasattr(instance, "parse")
-                or not callable(getattr(instance, "parse"))
+        if not hasattr(instance, "parse") or not callable(
+            getattr(instance, "parse")
         ):
             raise AttributeError(
                 f"Class '{schema_name}' does not have a callable 'parse' method."

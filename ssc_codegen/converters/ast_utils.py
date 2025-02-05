@@ -1,5 +1,10 @@
-from ssc_codegen.ast_ssc import TypeDef, TypeDefField, StartParseFunction, CallStructFunctionExpression
-from ssc_codegen.tokens import VariableType, TokenType
+from ssc_codegen.ast_ssc import (
+    CallStructFunctionExpression,
+    StartParseFunction,
+    TypeDef,
+    TypeDefField,
+)
+from ssc_codegen.tokens import TokenType, VariableType
 
 
 def find_tdef_field_node_by_name(
@@ -34,12 +39,13 @@ def find_field_nested_struct(node: TypeDefField) -> TypeDef:
     ][0]
     return associated_typedef
 
+
 def is_optional_variable(var: VariableType) -> bool:
     return var in (
-                   VariableType.OPTIONAL_STRING,
-                   VariableType.OPTIONAL_INT,
-                   VariableType.OPTIONAL_FLOAT,
-                   VariableType.OPTIONAL_LIST_FLOAT,
-                   VariableType.OPTIONAL_LIST_INT,
-                   VariableType.OPTIONAL_LIST_STRING
-                   )
+        VariableType.OPTIONAL_STRING,
+        VariableType.OPTIONAL_INT,
+        VariableType.OPTIONAL_FLOAT,
+        VariableType.OPTIONAL_LIST_FLOAT,
+        VariableType.OPTIONAL_LIST_INT,
+        VariableType.OPTIONAL_LIST_STRING,
+    )

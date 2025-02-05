@@ -8,9 +8,10 @@ from ssc_codegen.converters.utils import (
 from ssc_codegen.tokens import StructType, TokenType, VariableType
 
 from ..ast_utils import (
-    find_field_nested_struct,
     find_callfn_field_node_by_name,
-    find_tdef_field_node_by_name, is_optional_variable,
+    find_field_nested_struct,
+    find_tdef_field_node_by_name,
+    is_optional_variable,
 )
 from .utils import (
     TemplateBindings,
@@ -885,7 +886,9 @@ def gen_start_parse_dict(node: "StartParseFunction") -> str:
         find_callfn_field_node_by_name(node, "__VALUE__"),  # type: ignore
     )
     var_key = "&keyRaw" if is_optional_variable(expr_key.ret_type) else "keyRaw"  # type: ignore
-    var_value = "&valueRaw" if is_optional_variable(expr_value.ret_type) else "valueRaw"  # type: ignore
+    var_value = (
+        "&valueRaw" if is_optional_variable(expr_value.ret_type) else "valueRaw"
+    )  # type: ignore
     body = (
         f"items := make(T{node.parent.name}); "
         + "docParts, err := p.splitDoc(p.Document.Selection);"

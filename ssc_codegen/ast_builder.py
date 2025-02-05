@@ -312,14 +312,21 @@ def build_ast_struct(
     return ast_struct_parser
 
 
-def _check_field_type(field: "BaseDocument", name: str, schema: Type[BaseSchema]) -> None:
+def _check_field_type(
+    field: "BaseDocument", name: str, schema: Type[BaseSchema]
+) -> None:
     if field.stack_last_ret == VariableType.DOCUMENT:
         msg = f"{schema.__name__}.{name} cannot return type {VariableType.DOCUMENT.name}"
         raise TypeError(msg)
 
 
-def _check_split_doc_type(field: "BaseDocument", name: str, schema: Type[BaseSchema]) -> None:
-    if name == "__SPLIT_DOC__" and field.stack_last_ret != VariableType.LIST_DOCUMENT:
+def _check_split_doc_type(
+    field: "BaseDocument", name: str, schema: Type[BaseSchema]
+) -> None:
+    if (
+        name == "__SPLIT_DOC__"
+        and field.stack_last_ret != VariableType.LIST_DOCUMENT
+    ):
         msg = (
             f"{schema.__name__}.{name} should be returns {VariableType.LIST_DOCUMENT.name}, "
             f"not {field.stack_last_ret.name}"
@@ -327,8 +334,14 @@ def _check_split_doc_type(field: "BaseDocument", name: str, schema: Type[BaseSch
         raise TypeError(msg)
 
 
-def _check_dict_schema_key_type(field: "BaseDocument", name: str, schema: Type[BaseSchema]) -> None:
-    if schema.__SCHEMA_TYPE__ == StructType.DICT and name == "__KEY__" and field.stack_last_ret != VariableType.STRING:  # type: ignore
+def _check_dict_schema_key_type(
+    field: "BaseDocument", name: str, schema: Type[BaseSchema]
+) -> None:
+    if (
+        schema.__SCHEMA_TYPE__ == StructType.DICT
+        and name == "__KEY__"
+        and field.stack_last_ret != VariableType.STRING
+    ):  # type: ignore
         msg = f"{schema.__name__}.__KEY__ should be STRING, not {field.stack_last_ret.name}"  # type: ignore
         raise TypeError(msg)
 

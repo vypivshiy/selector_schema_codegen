@@ -12,10 +12,10 @@ from ..ast_ssc import (
     IsCssExpression,
     IsXPathExpression,
     ModuleImports,
+    NestedExpression,
     PartDocFunction,
     PreValidateFunction,
     StructFieldFunction,
-    NestedExpression,
 )
 from ..tokens import StructType, TokenType, VariableType
 from .py_base import BasePyCodeConverter, lr_var_names

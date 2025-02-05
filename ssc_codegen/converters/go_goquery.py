@@ -174,7 +174,8 @@ def tt_start_parse_post(node: StartParseFunction) -> str:
             + "if err != nil "
             + go.BRACKET_START
             + "return nil, err; "
-            + go.BRACKET_END + '; '
+            + go.BRACKET_END
+            + "; "
         )
     match node.type:
         case StructType.ITEM:
@@ -200,13 +201,10 @@ def tt_ret(node: ReturnExpression) -> str:
 
     elif node.have_default_expr():
         # OPTIONAL TYPE
-        if node.parent.body[0].value is None: # noqa
+        if node.parent.body[0].value is None:  # noqa
             return f"result = &{prv}; " + "return result, nil;"
 
-        return (
-                f"result = {prv}; "
-                + "return result, nil;"
-        )
+        return f"result = {prv}; " + "return result, nil;"
     return f"return {nxt}, nil; "
 
 
@@ -245,10 +243,11 @@ def tt_default(node: DefaultStart) -> str:
     else:
         value = "nil"
     prv, nxt = left_right_var_names("value", node.variable)
-    return (go.BINDINGS_PRE[node.kind, value]
-            # hack: avoid recalc variable counter
-            + f"{nxt} := {prv};"
-            )
+    return (
+        go.BINDINGS_PRE[node.kind, value]
+        # hack: avoid recalc variable counter
+        + f"{nxt} := {prv};"
+    )
 
 
 @converter.pre(TokenType.EXPR_STRING_FORMAT)
@@ -391,13 +390,19 @@ def tt_join(node: JoinExpression) -> str:
 @converter.pre(TokenType.IS_EQUAL)
 def tt_is_equal(node: IsEqualExpression) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
-    value = node.value if isinstance(node.value, (int, float)) else wrap_double_quotes(node.value)
+    value = (
+        node.value
+        if isinstance(node.value, (int, float))
+        else wrap_double_quotes(node.value)
+    )
     msg = wrap_double_quotes(node.msg)
     is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
     is_default = node.have_default_expr()
     ret_type = node.parent.ret_type
 
-    code = go.BINDINGS_PRE[node.kind, prv, value, msg, is_validate, is_default, ret_type]
+    code = go.BINDINGS_PRE[
+        node.kind, prv, value, msg, is_validate, is_default, ret_type
+    ]
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return code
     return code + f"{nxt} := {prv}; "
@@ -406,13 +411,19 @@ def tt_is_equal(node: IsEqualExpression) -> str:
 @converter.pre(TokenType.IS_NOT_EQUAL)
 def tt_is_not_equal(node: IsNotEqualExpression) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
-    value = node.value if isinstance(node.value, (int, float)) else wrap_double_quotes(node.value)
+    value = (
+        node.value
+        if isinstance(node.value, (int, float))
+        else wrap_double_quotes(node.value)
+    )
     msg = wrap_double_quotes(node.msg)
     is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
     is_default = node.have_default_expr()
     ret_type = node.parent.ret_type
 
-    code = go.BINDINGS_PRE[node.kind, prv, value, msg, is_validate, is_default, ret_type]
+    code = go.BINDINGS_PRE[
+        node.kind, prv, value, msg, is_validate, is_default, ret_type
+    ]
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return code
     return code + f"{nxt} := {prv}; "
@@ -421,13 +432,19 @@ def tt_is_not_equal(node: IsNotEqualExpression) -> str:
 @converter.pre(TokenType.IS_CONTAINS)
 def tt_is_contains(node: IsContainsExpression) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
-    item = node.item if isinstance(node.item, (int, float)) else wrap_double_quotes(node.item)
+    item = (
+        node.item
+        if isinstance(node.item, (int, float))
+        else wrap_double_quotes(node.item)
+    )
     msg = wrap_double_quotes(node.msg)
     is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
     is_default = node.have_default_expr()
     ret_type = node.parent.ret_type
 
-    code = go.BINDINGS_PRE[node.kind, prv, item, msg, is_validate, is_default, ret_type]
+    code = go.BINDINGS_PRE[
+        node.kind, prv, item, msg, is_validate, is_default, ret_type
+    ]
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return code
     return code + f"{nxt} := {prv}; "
@@ -442,7 +459,9 @@ def tt_is_regex(node: IsRegexMatchExpression) -> str:
     is_default = node.have_default_expr()
     ret_type = node.parent.ret_type
 
-    code = go.BINDINGS_PRE[node.kind, prv, pattern, msg, is_validate, is_default, ret_type]
+    code = go.BINDINGS_PRE[
+        node.kind, prv, pattern, msg, is_validate, is_default, ret_type
+    ]
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return code
     return code + f"{nxt} := {prv}; "
@@ -453,7 +472,9 @@ def tt_to_int(node: ToInteger) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
     is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
     is_default = node.have_default_expr()
-    return go.BINDINGS_PRE[node.kind, nxt, prv, is_validate, is_default, node.parent.ret_type]
+    return go.BINDINGS_PRE[
+        node.kind, nxt, prv, is_validate, is_default, node.parent.ret_type
+    ]
 
 
 @converter.pre(TokenType.TO_INT_LIST)
@@ -462,7 +483,15 @@ def tt_to_list_int(node: ToListInteger) -> str:
     arr_type = go.TYPES.get(node.next.variable.type, "")
     is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
     is_default = node.have_default_expr()
-    return go.BINDINGS_PRE[node.kind, nxt, prv, arr_type, is_validate, is_default, node.parent.ret_type]
+    return go.BINDINGS_PRE[
+        node.kind,
+        nxt,
+        prv,
+        arr_type,
+        is_validate,
+        is_default,
+        node.parent.ret_type,
+    ]
 
 
 @converter.pre(TokenType.TO_FLOAT)
@@ -471,7 +500,9 @@ def tt_to_float(node: ToFloat) -> str:
     is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
     is_default = node.have_default_expr()
 
-    return go.BINDINGS_PRE[node.kind, prv, nxt, is_validate, is_default, node.parent.ret_type]
+    return go.BINDINGS_PRE[
+        node.kind, prv, nxt, is_validate, is_default, node.parent.ret_type
+    ]
 
 
 @converter.pre(TokenType.TO_FLOAT_LIST)
@@ -481,7 +512,15 @@ def tt_to_list_float(node: ToListFloat) -> str:
     is_default = node.have_default_expr()
     arr_type = go.TYPES.get(node.next.variable.type, "")
 
-    return go.BINDINGS_PRE[node.kind, prv, nxt, arr_type, is_validate, is_default, node.parent.ret_type]
+    return go.BINDINGS_PRE[
+        node.kind,
+        prv,
+        nxt,
+        arr_type,
+        is_validate,
+        is_default,
+        node.parent.ret_type,
+    ]
 
 
 # # goquery API
@@ -519,7 +558,9 @@ def tt_raw(node: HtmlRawExpression) -> str:
     is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
     is_default = node.have_default_expr()
     ret_type = node.parent.ret_type
-    return go.BINDINGS_PRE[node.kind, nxt, prv, is_validate, is_default, ret_type]
+    return go.BINDINGS_PRE[
+        node.kind, nxt, prv, is_validate, is_default, ret_type
+    ]
 
 
 @converter.pre(TokenType.EXPR_RAW_ALL)
@@ -530,7 +571,9 @@ def tt_raw_all(node: HtmlRawAllExpression) -> str:
     is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
     is_default = node.have_default_expr()
     ret_type = node.parent.ret_type
-    return go.BINDINGS_PRE[node.kind, nxt, prv, arr_type, is_validate, is_default, ret_type]
+    return go.BINDINGS_PRE[
+        node.kind, nxt, prv, arr_type, is_validate, is_default, ret_type
+    ]
 
 
 @converter.pre(TokenType.EXPR_ATTR)
@@ -541,7 +584,9 @@ def tt_attr(node: HtmlAttrExpression) -> str:
     is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
     is_default = node.have_default_expr()
     ret_type = node.parent.ret_type
-    return go.BINDINGS_PRE[node.kind, nxt, prv, n, is_validate, is_default, ret_type]
+    return go.BINDINGS_PRE[
+        node.kind, nxt, prv, n, is_validate, is_default, ret_type
+    ]
 
 
 @converter.pre(TokenType.EXPR_ATTR_ALL)
@@ -553,7 +598,9 @@ def tt_attr_all(node: HtmlAttrAllExpression) -> str:
     is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
     is_default = node.have_default_expr()
     ret_type = node.parent.ret_type
-    return go.BINDINGS_PRE[node.kind, nxt, prv, n, arr_type, is_validate, is_default, ret_type]
+    return go.BINDINGS_PRE[
+        node.kind, nxt, prv, n, arr_type, is_validate, is_default, ret_type
+    ]
 
 
 @converter.pre(TokenType.IS_CSS)
@@ -564,7 +611,9 @@ def tt_is_css(node: IsCssExpression) -> str:
     is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
     is_default = node.have_default_expr()
 
-    code = go.BINDINGS_PRE[node.kind, prv, q, msg, is_validate, is_default, node.parent.ret_type]
+    code = go.BINDINGS_PRE[
+        node.kind, prv, q, msg, is_validate, is_default, node.parent.ret_type
+    ]
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return code
     return code + f"{nxt} := {prv}; "

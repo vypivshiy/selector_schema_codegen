@@ -305,9 +305,7 @@ def gen_go(
         comment_str=f"// {COMMENT_STRING}",
         fmt_cmd=fmt_cmd,
         # todo: better API for code callbacks
-        code_cb=lambda lines: go_unimport_naive(
-            go_naive_fix_docstring(lines)
-        ),
+        code_cb=lambda lines: go_unimport_naive(go_naive_fix_docstring(lines)),
         docstring_class_top=True,
         variables_patches={"PACKAGE": package or out.name},
         xpath_to_css=to_css,

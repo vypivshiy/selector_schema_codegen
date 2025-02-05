@@ -2,6 +2,7 @@ from typing import Callable, TypeVar
 
 from ..ast_ssc import (
     BaseAstNode,
+    BaseExpression,
     Docstring,
     ModuleImports,
     ModuleProgram,
@@ -13,10 +14,8 @@ from ..ast_ssc import (
     TypeDef,
     TypeDefField,
     Variable,
-    BaseExpression,
 )
 from ..tokens import TokenType
-
 
 T_NODE = TypeVar("T_NODE", BaseAstNode, BaseExpression)
 
