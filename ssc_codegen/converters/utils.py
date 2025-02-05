@@ -1,8 +1,15 @@
 import re
 
 
+# def to_snake_case(s: str) -> str:
+#     return re.sub(r"(?<!^)(?=[A-Z])", "_", s).lower()
+
 def to_snake_case(s: str) -> str:
-    return re.sub(r"(?<!^)(?=[A-Z])", "_", s).lower()
+    # camelCase
+    s = re.sub(r"([a-z])([A-Z])", r"\1_\2", s)
+    # PascalCase
+    s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", s)
+    return s.lower()
 
 
 def to_upper_camel_case(s: str) -> str:
