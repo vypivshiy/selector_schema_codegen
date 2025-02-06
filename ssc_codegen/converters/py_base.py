@@ -422,7 +422,7 @@ def tt_join(node: JoinExpression) -> str:
 
     prv, nxt = lr_var_names(variable=node.variable)
     sep = repr(node.sep)
-    code = py.BINDINGS[nxt, sep, prv]
+    code = py.BINDINGS[node.kind, nxt, sep, prv]
     return indent + code
 
 
