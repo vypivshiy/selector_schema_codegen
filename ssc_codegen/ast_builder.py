@@ -79,6 +79,9 @@ def check_field_expr(field: BaseDocument) -> None:
         elif expr.accept_type == VariableType.ANY:
             var_cursor = VariableType.DOCUMENT
             continue
+        # end token operation, ignore
+        elif expr.kind == TokenType.EXPR_DEFAULT_END:
+            continue
         elif var_cursor == VariableType.NESTED:
             raise TypeError("sub_parser not allowed next instructions")
 
@@ -151,30 +154,27 @@ def _fill_stack_variables(
         ret_type = tmp_stack[-2].ret_type
         # used for convert return type
         if first_expr.value is None:  # type: ignore[attr-defined]
-            match ret_type:
-                case VariableType.STRING:
-                    ret_type = VariableType.OPTIONAL_STRING
-                case VariableType.LIST_STRING:
-                    ret_type = VariableType.OPTIONAL_LIST_STRING
-                case VariableType.INT:
-                    ret_type = VariableType.OPTIONAL_INT
-                case VariableType.LIST_INT:
-                    ret_type = VariableType.OPTIONAL_LIST_INT
-                case VariableType.FLOAT:
-                    ret_type = VariableType.OPTIONAL_FLOAT
-                case VariableType.LIST_FLOAT:
-                    ret_type = VariableType.OPTIONAL_LIST_FLOAT
-                # ignore cast
-                case t if t in (
-                    VariableType.NULL,
-                    VariableType.ANY,
-                    VariableType.NESTED,
-                ):
-                    pass
-                case _:
-                    raise TypeError(
-                        f"Unknown variable return type: {ret_type.name} {ret_type.name}"
-                    )
+            ret_type = _cast_ret_type_optional(ret_type)
+            # set DefaultEnd ret_type as DefaultStartToken
+            tmp_stack[-1].ret_type = ret_type
+        elif isinstance(first_expr.value, str):  # type: ignore[attr-defined]
+            tmp_stack[-1].ret_type = VariableType.STRING
+            assert ret_type == VariableType.STRING, (
+                "wrong default type passed (should be a STRING or NULL)"
+            )
+        elif isinstance(first_expr.value, float):  # type: ignore[attr-defined]
+            tmp_stack[-1].ret_type = VariableType.FLOAT
+            assert ret_type == VariableType.FLOAT, (
+                "wrong default type passed (should be a FLOAT or NULL)"
+            )
+        elif isinstance(first_expr.value, int):  # type: ignore[attr-defined]
+            tmp_stack[-1].ret_type = VariableType.INT
+            assert ret_type == VariableType.INT, (
+                "wrong default type passed (should be a INT or NULL)"
+            )
+        else:
+            msg = f"{first_expr.value!r}<{type(first_expr.value).__name__}> default operation not support this type"
+            raise TypeError(msg)
 
     expr_count = len(tmp_stack)
     for i, expr in enumerate(tmp_stack):
@@ -200,6 +200,34 @@ def _fill_stack_variables(
             )
         )
     return tmp_stack
+
+
+def _cast_ret_type_optional(ret_type):
+    match ret_type:
+        case VariableType.STRING:
+            ret_type = VariableType.OPTIONAL_STRING
+        case VariableType.LIST_STRING:
+            ret_type = VariableType.OPTIONAL_LIST_STRING
+        case VariableType.INT:
+            ret_type = VariableType.OPTIONAL_INT
+        case VariableType.LIST_INT:
+            ret_type = VariableType.OPTIONAL_LIST_INT
+        case VariableType.FLOAT:
+            ret_type = VariableType.OPTIONAL_FLOAT
+        case VariableType.LIST_FLOAT:
+            ret_type = VariableType.OPTIONAL_LIST_FLOAT
+        # ignore cast
+        case t if t in (
+            VariableType.NULL,
+            VariableType.ANY,
+            VariableType.NESTED,
+        ):
+            pass
+        case _:
+            raise TypeError(
+                f"Unknown variable return type: {ret_type.name} {ret_type.name}"
+            )
+    return ret_type
 
 
 # TODO: better typing?
@@ -337,11 +365,18 @@ def _check_split_doc_type(
 def _check_dict_schema_key_type(
     field: "BaseDocument", name: str, schema: Type[BaseSchema]
 ) -> None:
+    if schema.__SCHEMA_TYPE__ != StructType.DICT:
+        return
+    # corner case: default value is string, last return value - string
     if (
-        schema.__SCHEMA_TYPE__ == StructType.DICT
-        and name == "__KEY__"
-        and field.stack_last_ret != VariableType.STRING
-    ):  # type: ignore
+        field.stack[0].kind == TokenType.EXPR_DEFAULT_START
+        and isinstance(field.stack[0].value, str)
+        and field.stack[-2].ret_type == VariableType.STRING
+    ):
+        return
+
+    elif name == "__KEY__" and field.stack_last_ret != VariableType.STRING:  # type: ignore
+        # case: default value as string
         msg = f"{schema.__name__}.__KEY__ should be STRING, not {field.stack_last_ret.name}"  # type: ignore
         raise TypeError(msg)
 
