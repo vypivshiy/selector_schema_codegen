@@ -159,3 +159,16 @@ def test_fail_schema_dict_key(schema: Type["BaseSchema"]) -> None:
 def test_fail_document_value_type(schema: Type["BaseSchema"]) -> None:
     with pytest.raises(TypeError):
         build_ast_struct(schema)
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        schema_dict_factory(
+            __SPLIT_DOC__=D().css_all("a"),
+            __KEY__=D().default("ok").attr("a"),
+            __VALUE__=R()),
+    ]
+)
+def test_valid_dict_schema_key(schema: Type["BaseSchema"]) -> None:
+    assert build_ast_struct(schema)
