@@ -21,5 +21,5 @@ from ssc_codegen.schema import BaseSchema
 )
 def test_invalid_default(schema: Type["BaseSchema"]) -> None:
     # TODO: replace exception as TypeError
-    with pytest.raises(AssertionError):
+    with pytest.raises(TypeError):
         build_ast_struct(schema)
