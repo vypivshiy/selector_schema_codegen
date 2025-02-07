@@ -42,7 +42,7 @@ Before reading, make sure you are know about:
 
 ### Quickstart usage
 
-See [examples](examples)
+tutSee [tutorial use cases](examples/tutorial) and [examples](examples)
 
 ### Supported convert programming languages and libraries backends 
 
