@@ -1,7 +1,7 @@
 """ast containers for representation module structure"""
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, ClassVar, Optional, Sequence, Type, Union
+from typing import TYPE_CHECKING, ClassVar, Optional, Type, Union
 
 from ssc_codegen.consts import (
     M_ITEM,
@@ -37,7 +37,7 @@ class ModuleProgram(BaseAstNode):
     """Main module entrypoint"""
 
     kind: ClassVar[TokenType] = TokenType.MODULE
-    body: Sequence[BaseAstNode]
+    body: list[BaseAstNode]
 
 
 @dataclass(kw_only=True)
@@ -985,7 +985,7 @@ class ToListFloat(BaseExpression):
 @dataclass(kw_only=True)
 class __StructNode(BaseAstNode):
     name: str
-    body: Sequence[BaseExpression]
+    body: list[BaseExpression]
 
     @property
     def ret_type(self) -> VariableType:
@@ -1106,7 +1106,7 @@ class StartParseFunction(__StructNode):
 
     name: M_START_PARSE = "__START_PARSE__"
     kind: ClassVar[TokenType] = TokenType.STRUCT_PARSE_START
-    body: Sequence[CallStructFunctionExpression]
+    body: list[CallStructFunctionExpression]
     type: StructType
     parent: Optional["StructParser"] = None  # LATE INIT
 
@@ -1161,7 +1161,7 @@ class StructParser(BaseAstNode):
 
     name: str
     doc: Docstring
-    body: Sequence[
+    body: list[
         StructFieldFunction
         | StartParseFunction
         | PreValidateFunction
