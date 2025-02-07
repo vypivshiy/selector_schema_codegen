@@ -501,37 +501,85 @@ class AssertDocument(BaseDocument):
         self._add(IsXPathExpression(query=query, msg=msg))
         return self
 
-    def is_equal(self, value: str, msg: str = "") -> Self:
-        # todo: int, float support
+    def is_equal(self, value: str | int | float, msg: str = "") -> Self:
         """assert equal by string value. If in generated code check failed - throw exception with passed msg
 
         EXPR DO NOT MODIFY variable
 
         - accept STRING, return STRING
+        - accept INT, return INT
+        - accept FLOAT return FLOAT
         """
-        if self.stack_last_ret != VariableType.STRING:
+        if (
+            isinstance(value, str)
+            and self.stack_last_ret != VariableType.STRING
+        ):
             self._raise_wrong_type_error(
                 self.stack_last_ret, VariableType.STRING
+            )
+        elif isinstance(value, int) and self.stack_last_ret != VariableType.INT:
+            self._raise_wrong_type_error(self.stack_last_ret, VariableType.INT)
+        elif (
+            isinstance(value, float)
+            and self.stack_last_ret != VariableType.FLOAT
+        ):
+            self._raise_wrong_type_error(
+                self.stack_last_ret, VariableType.FLOAT
+            )
+        elif self.stack_last_ret not in (
+            VariableType.STRING,
+            VariableType.INT,
+            VariableType.FLOAT,
+        ):
+            self._raise_wrong_type_error(
+                self.stack_last_ret,
+                VariableType.STRING,
+                VariableType.INT,
+                VariableType.FLOAT,
             )
         self._add(IsEqualExpression(value=value, msg=msg))
         return self
 
-    def is_not_equal(self, value: str, msg: str = "") -> Self:
-        # todo: int, float support
+    def is_not_equal(self, value: str | int | float, msg: str = "") -> Self:
         """assert not equal by string value. If in generated code check failed - throw exception with passed msg
 
         EXPR DO NOT MODIFY variable
 
         - accept STRING, return STRING
+        - accept INT, return INT
+        - accept FLOAT, return FLOAT
         """
-        if self.stack_last_ret != VariableType.STRING:
+        if (
+            isinstance(value, str)
+            and self.stack_last_ret != VariableType.STRING
+        ):
             self._raise_wrong_type_error(
                 self.stack_last_ret, VariableType.STRING
+            )
+        elif isinstance(value, int) and self.stack_last_ret != VariableType.INT:
+            self._raise_wrong_type_error(self.stack_last_ret, VariableType.INT)
+        elif (
+            isinstance(value, float)
+            and self.stack_last_ret != VariableType.FLOAT
+        ):
+            self._raise_wrong_type_error(
+                self.stack_last_ret, VariableType.FLOAT
+            )
+        elif self.stack_last_ret not in (
+            VariableType.STRING,
+            VariableType.INT,
+            VariableType.FLOAT,
+        ):
+            self._raise_wrong_type_error(
+                self.stack_last_ret,
+                VariableType.STRING,
+                VariableType.INT,
+                VariableType.FLOAT,
             )
         self._add(IsNotEqualExpression(value=value, msg=msg))
         return self
 
-    def is_contains(self, item: str, msg: str = "") -> Self:
+    def is_contains(self, item: str | int | float, msg: str = "") -> Self:
         # todo: list_int, list_float support
         """assert value contains in sequence. If in generated code check failed - throw exception with passed msg
 
@@ -539,9 +587,37 @@ class AssertDocument(BaseDocument):
 
         - accept LIST_STRING, return LIST_STRING
         """
-        if self.stack_last_ret != VariableType.LIST_STRING:
+        if (
+            isinstance(item, str)
+            and self.stack_last_ret != VariableType.LIST_STRING
+        ):
             self._raise_wrong_type_error(
                 self.stack_last_ret, VariableType.LIST_STRING
+            )
+        elif (
+            isinstance(item, int)
+            and self.stack_last_ret != VariableType.LIST_INT
+        ):
+            self._raise_wrong_type_error(
+                self.stack_last_ret, VariableType.LIST_INT
+            )
+        elif (
+            isinstance(item, float)
+            and self.stack_last_ret != VariableType.LIST_FLOAT
+        ):
+            self._raise_wrong_type_error(
+                self.stack_last_ret, VariableType.LIST_FLOAT
+            )
+        elif self.stack_last_ret not in (
+            VariableType.LIST_STRING,
+            VariableType.LIST_INT,
+            VariableType.LIST_FLOAT,
+        ):
+            self._raise_wrong_type_error(
+                self.stack_last_ret,
+                VariableType.LIST_STRING,
+                VariableType.LIST_INT,
+                VariableType.LIST_FLOAT,
             )
         self._add(IsContainsExpression(item=item, msg=msg))
         return self

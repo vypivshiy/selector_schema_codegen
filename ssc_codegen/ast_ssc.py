@@ -215,7 +215,7 @@ class DefaultStart(BaseExpression):
     kind: ClassVar[TokenType] = TokenType.EXPR_DEFAULT_START
     accept_type: VariableType = VariableType.ANY
     ret_type: VariableType = VariableType.ANY
-    value: str | None
+    value: str | int | float | None
 
 
 @dataclass(kw_only=True)
@@ -231,7 +231,7 @@ class DefaultEnd(BaseExpression):
     kind: ClassVar[TokenType] = TokenType.EXPR_DEFAULT_END
     accept_type: VariableType = VariableType.ANY
     ret_type: VariableType = VariableType.ANY
-    value: str | None
+    value: str | int | float | None
 
 
 # DOCUMENT
@@ -700,7 +700,7 @@ class IsEqualExpression(BaseExpression):
 
     kind: ClassVar[TokenType] = TokenType.IS_EQUAL
 
-    value: str
+    value: str | int | float
     msg: str
     accept_type: VariableType = VariableType.STRING
     ret_type: VariableType = VariableType.STRING
@@ -721,7 +721,7 @@ class IsNotEqualExpression(BaseExpression):
 
     kind: ClassVar[TokenType] = TokenType.IS_NOT_EQUAL
 
-    value: str
+    value: str | int | float
     msg: str
     accept_type: VariableType = VariableType.STRING
     ret_type: VariableType = VariableType.STRING
@@ -790,7 +790,7 @@ class IsContainsExpression(BaseExpression):
     """
 
     kind: ClassVar[TokenType] = TokenType.IS_CONTAINS
-    item: str
+    item: str | int | float
     msg: str
     accept_type: VariableType = VariableType.LIST_STRING
     ret_type: VariableType = VariableType.LIST_STRING
