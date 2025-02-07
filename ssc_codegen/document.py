@@ -580,7 +580,6 @@ class AssertDocument(BaseDocument):
         return self
 
     def is_contains(self, item: str | int | float, msg: str = "") -> Self:
-        # todo: list_int, list_float support
         """assert value contains in sequence. If in generated code check failed - throw exception with passed msg
 
         EXPR DO NOT MODIFY variable
