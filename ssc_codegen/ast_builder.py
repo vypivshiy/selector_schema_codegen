@@ -58,21 +58,18 @@ def fill_variables_stack_expr(
         elif isinstance(first_expr.value, str):  # type: ignore[attr-defined]
             tmp_stack[-1].ret_type = VariableType.STRING
             if ret_type != VariableType.STRING:
-                raise TypeError(
-                    "wrong default type passed (should be a STRING or NULL)"
-                )
+                msg = f"wrong default type passed (should be a STRING or NULL, got {ret_type.name})"
+                raise TypeError(msg)
         elif isinstance(first_expr.value, float):  # type: ignore[attr-defined]
             tmp_stack[-1].ret_type = VariableType.FLOAT
             if ret_type != VariableType.FLOAT:
-                raise TypeError(
-                    "wrong default type passed (should be a FLOAT or NULL)"
-                )
+                msg = f"wrong default type passed (should be a FLOAT or NULL, got {ret_type.name})"
+                raise TypeError(msg)
         elif isinstance(first_expr.value, int):  # type: ignore[attr-defined]
             tmp_stack[-1].ret_type = VariableType.INT
             if ret_type != VariableType.INT:
-                raise TypeError(
-                    "wrong default type passed (should be a INT or NULL)"
-                )
+                msg = f"wrong default type passed (should be a INT or NULL, got {ret_type.name})"
+                raise TypeError(msg)
         else:
             msg = f"{first_expr.value!r}<{type(first_expr.value).__name__}> default operation not support this type"
             raise TypeError(msg)
