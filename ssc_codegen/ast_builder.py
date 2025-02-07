@@ -4,12 +4,21 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Type
 
+from .ast_build_utils import (
+    check_schema_required_fields,
+    extract_schemas_from_module,
+    assert_ret_type_not_document,
+    assert_split_doc_is_list_document,
+    assert_schema_dict_key_is_string,
+    unwrap_default_expr,
+    assert_split_doc_ret_type_is_list_document,
+    cast_ret_type_to_optional,
+    assert_field_document_variable_types,
+)
 from .ast_ssc import (
     BaseAstNode,
     BaseExpression,
     CallStructFunctionExpression,
-    DefaultEnd,
-    DefaultStart,
     Docstring,
     ModuleImports,
     ModuleProgram,
@@ -22,130 +31,19 @@ from .ast_ssc import (
     TypeDef,
     Variable,
 )
-from .consts import M_ITEM, M_KEY, M_SPLIT_DOC, M_VALUE, SIGNATURE_MAP
+from .consts import SIGNATURE_MAP
 from .document import BaseDocument
 from .document_utlis import convert_css_to_xpath, convert_xpath_to_css
 from .schema import (
-    MISSING_FIELD,
     BaseSchema,
-    DictSchema,
-    FlatListSchema,
-    ItemSchema,
-    ListSchema,
 )
-from .tokens import StructType, TokenType, VariableType
+from .tokens import TokenType, VariableType
 
 
-def _is_template_cls(cls: object) -> bool:
-    """return true if class is not BaseSchema instance. used for dynamically import config and generate ast"""
-    return any(
-        cls == base_cls
-        for base_cls in (
-            FlatListSchema,
-            ItemSchema,
-            DictSchema,
-            ListSchema,
-            BaseSchema,
-        )
-    )
-
-
-def _extract_schemas(module: ModuleType) -> list[Type[BaseSchema]]:
-    """extract Schema classes from a dynamically imported module.
-
-    used for dynamically import and generate ast
-    """
-    return [
-        obj
-        for name, obj in module.__dict__.items()
-        if not name.startswith("__")
-        and hasattr(obj, "__mro__")
-        and BaseSchema in obj.__mro__
-        and not _is_template_cls(obj)
-    ]
-
-
-def check_field_expr(field: BaseDocument) -> None:
-    """validate correct type expressions pass.
-
-    raise TypeError if not passed
-    """
-    var_cursor = VariableType.DOCUMENT
-    for expr in field.stack:
-        if var_cursor == expr.accept_type:
-            var_cursor = expr.ret_type
-            continue
-        # this type always first (naive, used in DEFAULT and RETURN expr)
-        elif expr.accept_type == VariableType.ANY:
-            var_cursor = VariableType.DOCUMENT
-            continue
-        # end token operation, ignore
-        elif expr.kind == TokenType.EXPR_DEFAULT_END:
-            continue
-        elif var_cursor == VariableType.NESTED:
-            raise TypeError("sub_parser not allowed next instructions")
-
-        msg = f"'{expr.kind.name}' expected type '{expr.accept_type.name}', got '{var_cursor.name}'"
-        raise TypeError(msg)
-
-
-def _patch_non_required_attributes(
-    schema: Type[BaseSchema],
-    *fields: M_SPLIT_DOC | M_ITEM | M_KEY | M_VALUE | str,
-) -> Type[BaseSchema]:
-    """remove non-required fields in schema instance"""
-    for f in fields:
-        if getattr(schema, f, MISSING_FIELD) == MISSING_FIELD:
-            continue
-        msg = f"'{schema.__name__}' not required {f} attribute, remove"
-        warnings.warn(msg, category=SyntaxWarning)
-        setattr(schema, f, MISSING_FIELD)
-    return schema
-
-
-def _check_required_attributes(schema: Type[BaseSchema], *fields: str) -> None:
-    """helper function to check required attributes in schema. throw SyntaxError if not passed"""
-    for f in fields:
-        if getattr(schema, f, MISSING_FIELD) == MISSING_FIELD:
-            msg = f"'{schema.__name__}' required '{f}' attribute"
-            raise SyntaxError(msg)
-
-
-def check_schema(schema: Type[BaseSchema]) -> Type[BaseSchema]:
-    """validate schema instance minimal required magic fields and check type
-
-    throw SyntaxError if not passed
-    """
-    match schema.__SCHEMA_TYPE__:
-        case StructType.ITEM:
-            schema = _patch_non_required_attributes(
-                schema, "__SPLIT_DOC__", "__ITEM__", "__KEY__", "__VALUE__"
-            )
-        case StructType.LIST:
-            schema = _patch_non_required_attributes(
-                schema, "__KEY__", "__VALUE__", "__ITEM__"
-            )
-            _check_required_attributes(schema, "__SPLIT_DOC__")
-        case StructType.DICT:
-            schema = _patch_non_required_attributes(schema, "__ITEM__")
-            _check_required_attributes(
-                schema, "__SPLIT_DOC__", "__KEY__", "__VALUE__"
-            )
-        case StructType.FLAT_LIST:
-            schema = _patch_non_required_attributes(
-                schema, "__KEY__", "__VALUE__"
-            )
-            _check_required_attributes(schema, "__SPLIT_DOC__", "__ITEM__")
-        case _:
-            msg = f"{schema.__name__}: Unknown schema type"
-            raise SyntaxError(msg)
-    return schema
-
-
-def _fill_stack_variables(
+def fill_variables_stack_expr(
     stack: list[BaseExpression], *, ret_expr: bool = True
 ) -> list[BaseExpression]:
-    """insert variables to field stack of expressions"""
+    """insert variable nodes to stack of expressions"""
     tmp_stack = stack.copy()
     ret_type = tmp_stack[-1].ret_type
     first_expr = tmp_stack[0]
@@ -154,24 +52,27 @@ def _fill_stack_variables(
         ret_type = tmp_stack[-2].ret_type
         # used for convert return type
         if first_expr.value is None:  # type: ignore[attr-defined]
-            ret_type = _cast_ret_type_optional(ret_type)
+            ret_type = cast_ret_type_to_optional(ret_type)
             # set DefaultEnd ret_type as DefaultStartToken
             tmp_stack[-1].ret_type = ret_type
         elif isinstance(first_expr.value, str):  # type: ignore[attr-defined]
             tmp_stack[-1].ret_type = VariableType.STRING
-            assert ret_type == VariableType.STRING, (
-                "wrong default type passed (should be a STRING or NULL)"
-            )
+            if ret_type != VariableType.STRING:
+                raise TypeError(
+                    "wrong default type passed (should be a STRING or NULL)"
+                )
         elif isinstance(first_expr.value, float):  # type: ignore[attr-defined]
             tmp_stack[-1].ret_type = VariableType.FLOAT
-            assert ret_type == VariableType.FLOAT, (
-                "wrong default type passed (should be a FLOAT or NULL)"
-            )
+            if ret_type != VariableType.FLOAT:
+                raise TypeError(
+                    "wrong default type passed (should be a FLOAT or NULL)"
+                )
         elif isinstance(first_expr.value, int):  # type: ignore[attr-defined]
             tmp_stack[-1].ret_type = VariableType.INT
-            assert ret_type == VariableType.INT, (
-                "wrong default type passed (should be a INT or NULL)"
-            )
+            if ret_type != VariableType.INT:
+                raise TypeError(
+                    "wrong default type passed (should be a INT or NULL)"
+                )
         else:
             msg = f"{first_expr.value!r}<{type(first_expr.value).__name__}> default operation not support this type"
             raise TypeError(msg)
@@ -202,36 +103,9 @@ def _fill_stack_variables(
     return tmp_stack
 
 
-def _cast_ret_type_optional(ret_type):
-    match ret_type:
-        case VariableType.STRING:
-            ret_type = VariableType.OPTIONAL_STRING
-        case VariableType.LIST_STRING:
-            ret_type = VariableType.OPTIONAL_LIST_STRING
-        case VariableType.INT:
-            ret_type = VariableType.OPTIONAL_INT
-        case VariableType.LIST_INT:
-            ret_type = VariableType.OPTIONAL_LIST_INT
-        case VariableType.FLOAT:
-            ret_type = VariableType.OPTIONAL_FLOAT
-        case VariableType.LIST_FLOAT:
-            ret_type = VariableType.OPTIONAL_LIST_FLOAT
-        # ignore cast
-        case t if t in (
-            VariableType.NULL,
-            VariableType.ANY,
-            VariableType.NESTED,
-        ):
-            pass
-        case _:
-            raise TypeError(
-                f"Unknown variable return type: {ret_type.name} {ret_type.name}"
-            )
-    return ret_type
-
-
-# TODO: better typing?
-def replace_enum_values(item: Any) -> dict[str, Any] | list[Any] | str:
+def field_signature_to_string(
+    item: str | dict[str, Any] | list[Any],
+) -> dict[str, Any] | list[Any] | str:
     """
     Recursively replaces Enum values with their underlying values.
     Ignores strings and traverses dicts and lists.
@@ -239,20 +113,24 @@ def replace_enum_values(item: Any) -> dict[str, Any] | list[Any] | str:
     if isinstance(item, VariableType):
         if var_type := SIGNATURE_MAP.get(item):
             return var_type
-        msg = f"missing Enum variable {item.name}, set ANY"
+        msg = f"missing Enum variable {item!r}, set ANY"
         warnings.warn(msg, category=FutureWarning)
         return "ANY"
     elif isinstance(item, dict):
-        return {key: replace_enum_values(value) for key, value in item.items()}
+        return {
+            key: field_signature_to_string(value) for key, value in item.items()
+        }
     elif isinstance(item, list):
-        return [replace_enum_values(element) for element in item]
+        return [field_signature_to_string(element) for element in item]
     else:
         return item
 
 
-def build_fields_signature(raw_signature: Any) -> str:
+def build_fields_signature(
+    raw_signature: str | dict[str, Any] | list[Any],
+) -> str:
     """generate fields signature for docstring"""
-    raw_signature = replace_enum_values(raw_signature)
+    raw_signature = field_signature_to_string(raw_signature)
     return json.dumps(raw_signature, indent=4)
 
 
@@ -264,7 +142,7 @@ def build_ast_struct(
     xpath_to_css: bool = False,
 ) -> StructParser:
     """generate AST from Schema instance"""
-    schema = check_schema(schema)
+    schema = check_schema_required_fields(schema)
     fields = schema.__get_mro_fields__()
     raw_signature = schema.__class_signature__()
     doc = (
@@ -273,7 +151,7 @@ def build_ast_struct(
     start_parse_body: list[CallStructFunctionExpression] = []
     struct_parse_functions: list[BaseAstNode] = []
     for name, field in fields.items():
-        check_field_expr(field)
+        assert_field_document_variable_types(field)
 
         # not allowed empty stack exprs
         if len(field.stack) == 0:
@@ -301,10 +179,10 @@ def build_ast_struct(
                 )
             case _:
                 # insert default instruction API
-                extract_default_expr(field)
+                unwrap_default_expr(field)
                 fn = StructFieldFunction(
                     name=name,
-                    body=_fill_stack_variables(field.stack),
+                    body=fill_variables_stack_expr(field.stack),
                 )
 
                 struct_parse_functions.append(fn)
@@ -325,9 +203,9 @@ def build_ast_struct(
                     )
 
         # after fill variables and types, check corner cases
-        _check_dict_schema_key_type(field, name, schema)
-        _check_split_doc_type(field, name, schema)
-        _check_field_type(field, name, schema)
+        assert_schema_dict_key_is_string(field, name, schema)
+        assert_split_doc_is_list_document(field, name, schema)
+        assert_ret_type_not_document(field, name, schema)
 
     ast_struct_parser = StructParser(
         type=schema.__SCHEMA_TYPE__,
@@ -340,55 +218,6 @@ def build_ast_struct(
     return ast_struct_parser
 
 
-def _check_field_type(
-    field: "BaseDocument", name: str, schema: Type[BaseSchema]
-) -> None:
-    if field.stack_last_ret == VariableType.DOCUMENT:
-        msg = f"{schema.__name__}.{name} cannot return type {VariableType.DOCUMENT.name}"
-        raise TypeError(msg)
-
-
-def _check_split_doc_type(
-    field: "BaseDocument", name: str, schema: Type[BaseSchema]
-) -> None:
-    if (
-        name == "__SPLIT_DOC__"
-        and field.stack_last_ret != VariableType.LIST_DOCUMENT
-    ):
-        msg = (
-            f"{schema.__name__}.{name} should be returns {VariableType.LIST_DOCUMENT.name}, "
-            f"not {field.stack_last_ret.name}"
-        )
-        raise TypeError(msg)
-
-
-def _check_dict_schema_key_type(
-    field: "BaseDocument", name: str, schema: Type[BaseSchema]
-) -> None:
-    if schema.__SCHEMA_TYPE__ != StructType.DICT:
-        return
-    # corner case: default value is string, last return value - string
-    if (
-        field.stack[0].kind == TokenType.EXPR_DEFAULT_START
-        and isinstance(field.stack[0].value, str)
-        and field.stack[-2].ret_type == VariableType.STRING
-    ):
-        return
-
-    elif name == "__KEY__" and field.stack_last_ret != VariableType.STRING:  # type: ignore
-        # case: default value as string
-        msg = f"{schema.__name__}.__KEY__ should be STRING, not {field.stack_last_ret.name}"  # type: ignore
-        raise TypeError(msg)
-
-
-def extract_default_expr(field: "BaseDocument") -> None:
-    """convert DefaultValueWrapper node to DefaultStart and DefaultEnd Nodes"""
-    if field.stack and field.stack[0].kind == TokenType.EXPR_DEFAULT:
-        tt_def_val = field.stack.pop(0)
-        field.stack.insert(0, DefaultStart(value=tt_def_val.value))  # type: ignore
-        field.stack.append(DefaultEnd(value=tt_def_val.value))  # type: ignore
-
-
 def extract_split_doc(
     f: "BaseDocument",
     k: str,
@@ -396,12 +225,12 @@ def extract_split_doc(
     struct_parse_functions: list["BaseAstNode"],
 ) -> None:
     """extract __SPLIT_DOC__ field and insert to ast"""
-    _check_split_doc(f)
+    assert_split_doc_ret_type_is_list_document(f)
 
     fn = PartDocFunction(
         # literal type
         name=k,  # type: ignore[arg-type]
-        body=_fill_stack_variables(f.stack),
+        body=fill_variables_stack_expr(f.stack),
     )
     start_parse_body.append(
         CallStructFunctionExpression(
@@ -421,7 +250,7 @@ def extract_pre_validate(
     fn = PreValidateFunction(
         # literal
         name=k,  # type: ignore[arg-type]
-        body=_fill_stack_variables(f.stack, ret_expr=False),
+        body=fill_variables_stack_expr(f.stack, ret_expr=False),
     )
     start_parse_body.append(
         CallStructFunctionExpression(
@@ -429,16 +258,6 @@ def extract_pre_validate(
         )
     )
     struct_parse_functions.append(fn)
-
-
-def _check_split_doc(f: "BaseDocument") -> None:
-    """test __SPLIT_DOC__ body return type
-
-    if ret_type != LIST_DOCUMENT - throw SyntaxError
-    """
-    if f.stack_last_ret != VariableType.LIST_DOCUMENT:  # noqa
-        msg = f"__SPLIT_DOC__ attribute should be returns LIST_DOCUMENT, not {f.stack_last_ret.name}"  # noqa
-        raise SyntaxError(msg)
 
 
 def build_ast_module(
@@ -453,7 +272,7 @@ def build_ast_module(
     WARNING!!!
         DO NOT PASS MODULES FROM UNKNOWN SOURCE/INPUT FOR SECURITY REASONS.
 
-        THIS FUNCTION COMPILE AND EXEC PYTHON CODE WOUT CHECKS
+        THIS FUNCTION COMPILE AND EXEC PYTHON CODE in runtime WOUT CHECKS
     """
     if css_to_xpath and xpath_to_css:
         raise AttributeError(
@@ -474,7 +293,7 @@ def build_ast_module(
             xpath_to_css=xpath_to_css,
             css_to_xpath=css_to_xpath,
         )
-        for sc in _extract_schemas(module)
+        for sc in extract_schemas_from_module(module)
     ]
     ast_types = [st.typedef for st in ast_structs if st.typedef]
 
