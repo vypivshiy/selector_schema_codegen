@@ -430,7 +430,7 @@ def tt_is_equal(node: IsEqualExpression) -> str:
     indent = py.suggest_indent(node)
 
     prv, nxt = lr_var_names(variable=node.variable)
-    value = repr(node.value)
+    value = repr(node.value) if isinstance(node.value, str) else node.value
     msg = repr(node.msg)
     code = py.BINDINGS[node.kind, prv, value, msg]
     if node.next.kind == TokenType.EXPR_NO_RETURN:
@@ -442,7 +442,7 @@ def tt_is_not_equal(node: IsNotEqualExpression) -> str:
     indent = py.suggest_indent(node)
 
     prv, nxt = lr_var_names(variable=node.variable)
-    value = repr(node.value)
+    value = repr(node.value) if isinstance(node.value, str) else node.value
     msg = repr(node.msg)
     code = py.BINDINGS[node.kind, prv, value, msg]
     if node.next.kind == TokenType.EXPR_NO_RETURN:
@@ -454,7 +454,8 @@ def tt_is_contains(node: IsContainsExpression) -> str:
     indent = py.suggest_indent(node)
 
     prv, nxt = lr_var_names(variable=node.variable)
-    item = repr(node.item)
+
+    item = repr(node.item) if isinstance(node.item, str) else node.item
     msg = repr(node.msg)
 
     code = py.BINDINGS[node.kind, item, prv, msg]

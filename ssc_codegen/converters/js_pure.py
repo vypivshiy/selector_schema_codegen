@@ -310,7 +310,8 @@ def tt_join(node: JoinExpression) -> str:
 @converter.pre(TokenType.IS_EQUAL)
 def tt_is_equal(node: IsEqualExpression) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
-    code = js.BINDINGS[node.kind, prv, repr(node.value), repr(node.msg)]
+    value = repr(node.value) if isinstance(node.value, str) else node.value
+    code = js.BINDINGS[node.kind, prv, value, repr(node.msg)]
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return code
     code += js.EXPR_ASSIGN.format(nxt, prv)
@@ -320,7 +321,8 @@ def tt_is_equal(node: IsEqualExpression) -> str:
 @converter.pre(TokenType.IS_NOT_EQUAL)
 def tt_is_not_equal(node: IsNotEqualExpression) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
-    code = js.BINDINGS[node.kind, prv, repr(node.value), repr(node.msg)]
+    value = repr(node.value) if isinstance(node.value, str) else node.value
+    code = js.BINDINGS[node.kind, prv, value, repr(node.msg)]
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return code
     code += js.EXPR_ASSIGN.format(nxt, prv)
@@ -330,7 +332,8 @@ def tt_is_not_equal(node: IsNotEqualExpression) -> str:
 @converter.pre(TokenType.IS_CONTAINS)
 def tt_is_contains(node: IsContainsExpression) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
-    code = js.BINDINGS[node.kind, repr(node.item), prv, repr(node.msg)]
+    item = repr(node.item) if isinstance(node.item, str) else node.value
+    code = js.BINDINGS[node.kind, item, prv, repr(node.msg)]
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return code
     code += js.EXPR_ASSIGN.format(nxt, prv)

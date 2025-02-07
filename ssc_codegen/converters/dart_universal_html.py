@@ -364,7 +364,7 @@ def tt_join(node: JoinExpression) -> str:
 @converter.pre(TokenType.IS_EQUAL)
 def tt_is_equal(node: IsEqualExpression) -> str:
     prv, nxt = lr_var_names(variable=node.variable)
-    value = repr(node.value)
+    value = repr(node.value) if isinstance(node.value, str) else node.value
     msg = repr(node.msg)
     code = dart.BINDINGS[node.kind, prv, value, msg]
     if node.next.kind == TokenType.EXPR_NO_RETURN:
@@ -376,7 +376,7 @@ def tt_is_equal(node: IsEqualExpression) -> str:
 @converter.pre(TokenType.IS_NOT_EQUAL)
 def tt_is_not_equal(node: IsNotEqualExpression) -> str:
     prv, nxt = lr_var_names(variable=node.variable)
-    value = repr(node.value)
+    value = repr(node.value) if isinstance(node.value, str) else node.value
     msg = repr(node.msg)
     code = dart.BINDINGS[node.kind, prv, value, msg]
     if node.next.kind == TokenType.EXPR_NO_RETURN:
@@ -388,7 +388,7 @@ def tt_is_not_equal(node: IsNotEqualExpression) -> str:
 @converter.pre(TokenType.IS_CONTAINS)
 def tt_is_contains(node: IsContainsExpression) -> str:
     prv, nxt = lr_var_names(variable=node.variable)
-    item = repr(node.item)
+    item = repr(node.item) if isinstance(node.item, str) else node.item
     msg = repr(node.msg)
     code = dart.BINDINGS[node.kind, prv, prv, item, msg]
     if node.next.kind == TokenType.EXPR_NO_RETURN:
