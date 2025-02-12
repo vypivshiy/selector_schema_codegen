@@ -4,6 +4,7 @@ from typing import Type
 
 from typing_extensions import Self
 
+from .json_struct import Json
 from .ast_ssc import (
     BaseExpression,
     DefaultValueWrapper,
@@ -46,6 +47,7 @@ from .ast_ssc import (
     ToListFloat,
     ToListInteger,
     TrimExpression,
+    ToJson,
 )
 from .document_utlis import check_re_expression
 from .schema import BaseSchema
@@ -694,4 +696,18 @@ class NumericDocument(BaseDocument):
                     VariableType.STRING,
                     VariableType.LIST_STRING,
                 )
+        return self
+
+
+class JsonDocument(BaseDocument):
+    def jsonify(self, struct: Type[Json]) -> Self:
+        """marshal json string to object
+
+        - accept STRING, return JSON
+        """
+        if self.stack_last_ret != VariableType.STRING:
+            self._raise_wrong_type_error(
+                self.stack_last_ret, VariableType.STRING
+            )
+        self._add(ToJson(value=struct))
         return self
