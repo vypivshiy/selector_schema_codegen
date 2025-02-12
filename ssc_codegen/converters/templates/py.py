@@ -2,7 +2,11 @@
 
 from typing import TYPE_CHECKING
 
-from ssc_codegen.tokens import StructType, TokenType, VariableType
+from ssc_codegen.tokens import (
+    StructType,
+    TokenType,
+    VariableType,
+)
 
 from .utils import (
     TemplateBindings,
@@ -44,9 +48,16 @@ BINDINGS[TokenType.DOCSTRING] = '"""{}"""'  # value
 BINDINGS[TokenType.IMPORTS] = (
     "from __future__ import annotations\n"
     + "import re\n"
+    + "import json\n"  # TODO: add choice for another backends
     + "from typing import List, Dict, TypedDict, Union, Optional\n"
     + "from contextlib import suppress\n"
+    + "import sys\n"
+    + "if sys.version_info >= (3, 10):\n"
+    + "    from types import NoneType\n"
+    + "else:\n"
+    + "    NoneType = type(None)\n"
 )
+
 BINDINGS[TokenType.EXPR_RETURN] = "return {}"  # nxt val
 BINDINGS[TokenType.EXPR_NO_RETURN] = "return"
 BINDINGS[TokenType.STRUCT] = "class {}:"
