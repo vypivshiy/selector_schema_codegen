@@ -11,7 +11,13 @@ from ssc_codegen.consts import (
     M_START_PARSE,
     M_VALUE,
 )
-from ssc_codegen.tokens import StructType, TokenType, VariableType
+from ssc_codegen.tokens import (
+    StructType,
+    TokenType,
+    VariableType,
+    JsonVariableType,
+)
+from .json_struct import BaseJsonType, JsonObject, Json
 
 if TYPE_CHECKING:
     from .schema import BaseSchema
@@ -130,6 +136,7 @@ class TypeDef(BaseAstNode):
     name: str
     body: list[TypeDefField]
     struct_ref: Optional["StructParser"] = None
+    parent: Optional[ModuleProgram] = None
 
     def __post_init__(self) -> None:
         for f in self.body:
@@ -1214,3 +1221,43 @@ class StructParser(BaseAstNode):
                     expr.prev = fn.body[i - 1]
                 if i + 1 < len(fn.body):
                     expr.next = fn.body[i + 1]
+
+
+# JSON
+@dataclass(kw_only=True)
+class JsonStruct(BaseAstNode):
+    kind: ClassVar[TokenType] = TokenType.JSON_STRUCT
+    name: str
+    body: list["JsonStructField"]
+
+    parent: Optional[ModuleProgram] = None
+
+    def __post_init__(self) -> None:
+        for f in self.body:
+            f.parent = self
+
+
+@dataclass(kw_only=True)
+class JsonStructField(BaseAstNode):
+    kind: ClassVar[TokenType] = TokenType.JSON_FIELD
+    name: str
+    value: BaseJsonType
+
+    parent: Optional[JsonStruct] = None  # LATE INIT
+
+    @property
+    def ret_type(self) -> JsonVariableType | dict[str, JsonVariableType]:
+        return self.value.TYPE
+
+    @property
+    def struct_ref(self) -> str | None:
+        """return JsonObject ref name"""
+        return self.value.name if isinstance(self.value, JsonObject) else None
+
+
+@dataclass(kw_only=True)
+class ToJson(BaseExpression):
+    kind: ClassVar[TokenType] = TokenType.TO_JSON
+    accept_type: VariableType = VariableType.STRING
+    ret_type: VariableType = VariableType.JSON
+    value: Type[Json]

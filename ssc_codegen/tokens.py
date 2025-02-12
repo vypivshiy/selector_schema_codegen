@@ -24,7 +24,33 @@ class VariableType(IntEnum):
     OPTIONAL_LIST_INT = auto()
     OPTIONAL_FLOAT = auto()
     OPTIONAL_LIST_FLOAT = auto()
-    # todo provide consts
+
+    JSON = auto()
+    OPTIONAL_JSON = auto()
+
+
+class JsonVariableType(IntEnum):
+    # https://json-schema.org/understanding-json-schema/reference/type
+    NUMBER = auto()
+    STRING = auto()
+    FLOAT = auto()
+    BOOLEAN = auto()
+
+    OBJECT = auto()
+    ARRAY = auto()
+
+    OPTIONAL_NUMBER = auto()
+    OPTIONAL_STRING = auto()
+    OPTIONAL_FLOAT = auto()
+    OPTIONAL_BOOLEAN = auto()
+
+    NULL = auto()
+
+
+class JsonFieldType(IntEnum):
+    BASIC = auto()  # simple type or optional
+    ARRAY = auto()
+    OBJECT = auto()
 
 
 class StructType(IntEnum):
@@ -123,3 +149,9 @@ class TokenType(IntEnum):
     TO_INT_LIST = auto()
     TO_FLOAT = auto()
     TO_FLOAT_LIST = auto()
+
+    # JSON OP
+    TO_JSON = auto()
+    # STRUCTS
+    JSON_STRUCT = auto()
+    JSON_FIELD = auto()
