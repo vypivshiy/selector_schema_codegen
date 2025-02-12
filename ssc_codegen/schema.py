@@ -1,6 +1,7 @@
 from typing import TYPE_CHECKING, Any, Type, TypeAlias, Union
 
 from .consts import RESERVED_METHODS
+from .json_struct import json_struct_to_signature
 from .tokens import StructType, TokenType, VariableType
 
 if TYPE_CHECKING:
@@ -77,6 +78,8 @@ class BaseSchema:
             if v.stack_last_ret == VariableType.NESTED:
                 nested_class = cls._get_nested_signature(v)
                 signature[k] = nested_class.__class_signature__()
+            elif v.stack_last_ret == VariableType.JSON:
+                signature[k] = json_struct_to_signature(v.stack[-1].value)  # noqa
             else:
                 signature[k] = v.stack_last_ret
         signature = [signature, "..."]
@@ -92,6 +95,8 @@ class BaseSchema:
             if v.stack_last_ret == VariableType.NESTED:
                 nested_class = cls._get_nested_signature(v)
                 signature[k] = nested_class.__class_signature__()
+            elif v.stack_last_ret == VariableType.JSON:
+                signature[k] = json_struct_to_signature(v.stack[-1].value)  # noqa
             else:
                 signature[k] = v.stack_last_ret
         return signature
@@ -106,6 +111,8 @@ class BaseSchema:
                 e for e in field_v.stack if e.kind == TokenType.EXPR_NESTED
             ][0].schema_cls  # noqa
             signature["<K>"] = nested_class.__class_signature__()
+        elif field_v.stack_last_ret == VariableType.JSON:
+            signature["<K>"] = json_struct_to_signature(v.stack[-1].value)  # noqa
         else:
             signature["<K>"] = field_v.stack_last_ret
         signature["<KN>"] = "..."
@@ -118,6 +125,8 @@ class BaseSchema:
         if field.stack_last_ret == VariableType.NESTED:
             nested_class = cls._get_nested_signature(field)
             signature.append(nested_class.__class_signature__())
+        elif field.stack_last_ret == VariableType.JSON:
+            signature[k] = json_struct_to_signature(v.stack[-1].value)  # noqa
         else:
             signature.append(field.stack_last_ret)
         signature.append("...")

@@ -1,5 +1,6 @@
 from .document import HTMLDocument, StringDocument, ArrayDocument, AssertDocument, NestedDocument, DefaultDocument, \
-    NumericDocument
+    NumericDocument, JsonDocument
+from .json_struct import Json
 from .schema import ItemSchema, DictSchema, ListSchema, FlatListSchema
 
 VERSION = "0.5.6"
@@ -9,7 +10,7 @@ class __MISSING(object):
 
 _NO_DEFAULT = __MISSING()
 
-class Document(HTMLDocument, StringDocument, ArrayDocument, AssertDocument, DefaultDocument, NumericDocument):
+class Document(HTMLDocument, StringDocument, ArrayDocument, AssertDocument, DefaultDocument, NumericDocument, JsonDocument):
     pass
 
 
