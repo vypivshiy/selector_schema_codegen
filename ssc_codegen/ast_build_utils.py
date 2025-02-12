@@ -2,7 +2,7 @@ import warnings
 from types import ModuleType
 from typing import Type
 
-from ssc_codegen import FlatListSchema, ItemSchema, DictSchema, ListSchema
+from ssc_codegen import FlatListSchema, ItemSchema, DictSchema, ListSchema, Json
 from ssc_codegen.ast_ssc import DefaultStart, DefaultEnd
 from ssc_codegen.consts import M_SPLIT_DOC, M_ITEM, M_KEY, M_VALUE
 from ssc_codegen.document import BaseDocument
@@ -89,6 +89,17 @@ def extract_schemas_from_module(module: ModuleType) -> list[Type[BaseSchema]]:
         and hasattr(obj, "__mro__")
         and BaseSchema in obj.__mro__
         and not is_template_schema_cls(obj)
+    ]
+
+
+def extract_json_structs_from_module(module: ModuleType) -> list[Type[Json]]:
+    return [
+        obj
+        for name, obj in module.__dict__.items()
+        if not name.startswith("__")
+        and hasattr(obj, "__mro__")
+        and Json in obj.__mro__
+        and obj != Json  # base class drop
     ]
 
 
