@@ -6,6 +6,7 @@ from ssc_codegen.tokens import (
     StructType,
     TokenType,
     VariableType,
+    JsonVariableType,
 )
 
 from .utils import (
@@ -30,6 +31,18 @@ TYPES = {
     VariableType.FLOAT: "float",
     VariableType.LIST_INT: "List[int]",
     VariableType.LIST_FLOAT: "List[float]",
+}
+
+JSON_TYPES = {
+    JsonVariableType.BOOLEAN: "bool",
+    JsonVariableType.STRING: "str",
+    JsonVariableType.NUMBER: "int",
+    JsonVariableType.FLOAT: "float",
+    JsonVariableType.NULL: "NoneType",
+    JsonVariableType.OPTIONAL_STRING: "Optional[str]",
+    JsonVariableType.OPTIONAL_NUMBER: "Optional[int]",
+    JsonVariableType.OPTIONAL_FLOAT: "Optional[float]",
+    JsonVariableType.OPTIONAL_BOOLEAN: "Optional[bool]",
 }
 
 MAGIC_METHODS_NAME = {

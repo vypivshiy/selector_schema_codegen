@@ -4,6 +4,7 @@ from functools import partial
 
 from typing_extensions import assert_never
 
+from .ast_utils import find_json_struct_instance
 from ..ast_ssc import (
     DefaultEnd,
     DefaultStart,
@@ -43,8 +44,11 @@ from ..ast_ssc import (
     TrimExpression,
     TypeDef,
     TypeDefField,
+    ToJson,
+    JsonStruct,
+    JsonStructField,
 )
-from ..tokens import StructType, TokenType, VariableType
+from ..tokens import StructType, TokenType, VariableType, JsonFieldType
 from .base import BaseCodeConverter, left_right_var_names
 from .templates import py
 
@@ -115,6 +119,9 @@ class BasePyCodeConverter(BaseCodeConverter):
         self.pre_definitions[TokenType.TO_FLOAT] = tt_to_float
         self.pre_definitions[TokenType.TO_FLOAT_LIST] = tt_to_list_float
 
+        self.pre_definitions[TokenType.TO_JSON] = tt_to_json
+        self.pre_definitions[TokenType.JSON_STRUCT] = tt_json_struct
+
 
 def tt_imports(node: ModuleImports) -> str:
     return py.BINDINGS[node.kind]
@@ -124,6 +131,14 @@ def tt_typedef(node: TypeDef) -> str:
     def _fetch_node_type(node_: TypeDefField) -> str:
         if node_.ret_type == VariableType.NESTED:
             return py.TYPE_PREFIX.format(node_.nested_class)
+        elif node_.ret_type == VariableType.JSON:
+            # TODO: move to consts
+            json_field = [n for n in node_.parent.struct_ref.body
+                          if n.kind == TokenType.STRUCT_FIELD
+                          and n.name == node_.name][0]
+            instance = find_json_struct_instance(json_field)
+
+            return f"J_{instance.__name__}"
         return py.TYPES.get(node_.ret_type)
 
     t_name = py.TYPE_PREFIX.format(node.name)
@@ -506,4 +521,37 @@ def tt_to_list_float(node: ToListFloat) -> str:
 
     prv, nxt = lr_var_names(variable=node.variable)
     code = py.BINDINGS[node.kind, nxt, prv]
+    return indent + code
+
+
+# json
+def tt_json_struct(node: JsonStruct) -> str:
+    # todo: move consts to templates
+    # prefix: Json<NAME>
+    def json_type(field: JsonStructField):
+        match field.value.kind:
+            case JsonFieldType.BASIC:
+                return py.JSON_TYPES.get(field.ret_type, "Any")
+            case JsonFieldType.ARRAY:
+                # JsonType get
+                return "List[" + py.JSON_TYPES.get(field.ret_type.TYPE, "Any") + "]"
+            case JsonFieldType.OBJECT:
+                return f"J_{field.struct_ref}"
+            case _:
+                assert_never(field.value.kind)
+
+    code = (
+        f'J_{node.name} = TypedDict("J_{node.name}", '
+        + "{"
+        + ", ".join(f'"{f.name}": {json_type(f)}' for f in node.body)
+        + "})"
+    )
+    return code
+
+
+def tt_to_json(node: ToJson) -> str:
+    # TODO: move consts to templates
+    indent = py.suggest_indent(node)
+    prv, nxt = lr_var_names(variable=node.variable)
+    code = f"{nxt} = json.loads({prv})"
     return indent + code

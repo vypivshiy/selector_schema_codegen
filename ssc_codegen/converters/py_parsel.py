@@ -1,3 +1,4 @@
+from .ast_utils import find_json_struct_instance
 from ..ast_ssc import (
     HtmlAttrAllExpression,
     HtmlAttrExpression,
@@ -85,6 +86,9 @@ def tt_function(node: StructFieldFunction) -> str:
     if node.ret_type == VariableType.NESTED:
         t_def = node.find_associated_typedef()
         ret_type = py.TYPE_PREFIX.format(t_def.struct_ref.name)
+    elif node.ret_type == VariableType.JSON:
+        instance = find_json_struct_instance(node)  # noqa
+        ret_type = f"J_{instance.__name__}"
     else:
         ret_type = py.TYPES.get(node.ret_type)
     p_type = "Selector"
