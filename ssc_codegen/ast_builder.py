@@ -4,6 +4,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Type
 
+from . import Json
 from .ast_build_utils import (
     check_schema_required_fields,
     extract_schemas_from_module,
@@ -14,6 +15,7 @@ from .ast_build_utils import (
     assert_split_doc_ret_type_is_list_document,
     cast_ret_type_to_optional,
     assert_field_document_variable_types,
+    extract_json_structs_from_module,
 )
 from .ast_ssc import (
     BaseAstNode,
@@ -30,6 +32,8 @@ from .ast_ssc import (
     StructParser,
     TypeDef,
     Variable,
+    JsonStruct,
+    JsonStructField,
 )
 from .consts import SIGNATURE_MAP
 from .document import BaseDocument
@@ -257,6 +261,16 @@ def extract_pre_validate(
     struct_parse_functions.append(fn)
 
 
+def build_json_struct(json_struct: Type[Json]) -> JsonStruct:
+    return JsonStruct(
+        name=json_struct.__name__,
+        body=[
+            JsonStructField(name=k, value=v)
+            for k, v in json_struct.tokenize().items()
+        ],
+    )
+
+
 def build_ast_module(
     path: str | Path,
     *,
@@ -283,6 +297,10 @@ def build_ast_module(
     module_doc = Docstring(value=module.__dict__.get("__doc__") or "")
 
     ast_imports = ModuleImports()
+    ast_json_structs = [
+        build_json_struct(sc) for sc in extract_json_structs_from_module(module)
+    ]
+
     ast_structs = [
         build_ast_struct(
             sc,
@@ -295,10 +313,21 @@ def build_ast_module(
     ast_types = [st.typedef for st in ast_structs if st.typedef]
 
     ast_program = ModuleProgram(
-        body=[module_doc, ast_imports] + ast_types + ast_structs,  # type: ignore[operator]
+        body=[
+            module_doc,
+            ast_imports,
+        ]  # type: ignore[operator]
+        + ast_json_structs
+        + ast_types
+        + ast_structs,
     )
     # links module
     for node in ast_program.body:
-        if node.kind in (Docstring.kind, StructParser.kind, TypeDef.kind):
+        if node.kind in (
+            Docstring.kind,
+            StructParser.kind,
+            TypeDef.kind,
+            JsonStruct.kind,
+        ):
             node.parent = ast_program  # type: ignore[attr-defined]
     return ast_program

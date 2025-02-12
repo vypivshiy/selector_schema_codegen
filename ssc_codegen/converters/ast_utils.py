@@ -1,8 +1,12 @@
+from typing import Type
+
+from ssc_codegen import Json
 from ssc_codegen.ast_ssc import (
     CallStructFunctionExpression,
     StartParseFunction,
     TypeDef,
     TypeDefField,
+    StructFieldFunction,
 )
 from ssc_codegen.tokens import TokenType, VariableType
 
@@ -49,3 +53,11 @@ def is_optional_variable(var: VariableType) -> bool:
         VariableType.OPTIONAL_LIST_INT,
         VariableType.OPTIONAL_LIST_STRING,
     )
+
+
+def find_json_struct_instance(node: StructFieldFunction) -> Type[Json] | None:
+    # -1 TT_RET, -2 - TO_JSON (not uncluded anything casts (naive)
+    if node.ret_type != VariableType.JSON:
+        return None
+    to_json_node = node.body[-2]
+    return to_json_node.value
