@@ -5,13 +5,19 @@ from typing import TYPE_CHECKING, Any
 from ssc_codegen.converters.utils import (
     to_upper_camel_case,
 )
-from ssc_codegen.tokens import StructType, TokenType, VariableType
+from ssc_codegen.tokens import (
+    StructType,
+    TokenType,
+    VariableType,
+    JsonVariableType,
+)
 
 from ..ast_utils import (
     find_callfn_field_node_by_name,
     find_field_nested_struct,
     find_tdef_field_node_by_name,
     is_optional_variable,
+    find_json_struct_instance,
 )
 from .utils import (
     TemplateBindings,
@@ -38,6 +44,18 @@ TYPES = {
     VariableType.OPTIONAL_FLOAT: "*float64",
     VariableType.LIST_FLOAT: "[]float64",
     VariableType.OPTIONAL_LIST_FLOAT: "*[]float64",
+}
+
+JSON_TYPES = {
+    JsonVariableType.STRING: "string",
+    JsonVariableType.BOOLEAN: "bool",
+    JsonVariableType.NUMBER: "int",
+    JsonVariableType.FLOAT: "float64",
+    JsonVariableType.OPTIONAL_NUMBER: "*int",
+    JsonVariableType.OPTIONAL_FLOAT: "*float64",
+    JsonVariableType.OPTIONAL_BOOLEAN: "*bool",
+    JsonVariableType.OPTIONAL_STRING: "*string",
+    JsonVariableType.NULL: "*string",
 }
 
 # mocks for valid return errors
@@ -94,6 +112,7 @@ import (
     "strings"
     "slices"
     "strconv"
+    "encoding/json"
     "github.com/PuerkitoBio/goquery"
 )
 """
@@ -960,6 +979,9 @@ def gen_typedef_item(node: "TypeDef") -> str:
             field_type = f"T{f.nested_class}"
             if find_field_nested_struct(f).struct_ref.type == StructType.LIST:  # type: ignore
                 field_type = f"{field_type}ITEMS"
+        elif f.ret_type == VariableType.JSON:
+            obj = find_json_struct_instance(f)
+            field_type = f"J{obj.__name__}"
         else:
             field_type = TYPES.get(f.ret_type, "")
         fields_name = to_upper_camel_case(f.name)
@@ -1023,19 +1045,19 @@ def gen_typedef_list(node: "TypeDef") -> str:
 
 def gen_struct_field_ret_header(node: "StructFieldFunction") -> str:
     # "func (p *{}) parse{}(value *goquery.Selection) {} "
-    # 1. is nested (default not included in this construction)
     if node.ret_type == VariableType.NESTED:
         ret_type = f"T{node.nested_schema_name()}"
         typedef = node.find_associated_typedef()
         if typedef.struct_ref.type == StructType.LIST:  # type: ignore
             ret_type = f"{ret_type}ITEMS"
-        ret_header = f"({ret_type}, error)"
-    # 2. default
+        return f"({ret_type}, error)"
+    elif node.ret_type == VariableType.JSON:
+        jsn_obj = find_json_struct_instance(node)
+        ret_type = f"J{jsn_obj.__name__}"
+        return f"({ret_type}, error)"
     elif node.body[0].have_default_expr():
         ret_type = TYPES.get(node.ret_type, "")
-        ret_header = f"(result {ret_type}, err error)"
-    # 3. normal
+        return f"(result {ret_type}, err error)"
     else:
         ret_type = TYPES.get(node.ret_type, "")
-        ret_header = f"({ret_type}, error)"
-    return ret_header
+        return f"({ret_type}, error)"

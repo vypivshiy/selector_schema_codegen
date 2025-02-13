@@ -49,6 +49,7 @@ from ..ast_ssc import (
     ToListInteger,
     ToFloat,
     ToListFloat,
+    ToJson,
 )
 from ..tokens import StructType, TokenType
 from .base import BaseCodeConverter, left_right_var_names
@@ -464,3 +465,9 @@ def tt_to_float(node: ToFloat) -> str:
 def tt_to_list_float(node: ToListFloat) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
     return f"let {nxt} = {prv}.map(i => parseFloat(i, 64)); "
+
+
+@converter.pre(TokenType.TO_JSON)
+def tt_to_json(node: ToJson) -> str:
+    prv, nxt = left_right_var_names("value", node.variable)
+    return f"let {nxt} = JSON.parse({prv}); "

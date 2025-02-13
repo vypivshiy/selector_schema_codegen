@@ -98,11 +98,14 @@ def tt_function(node: StructFieldFunction) -> str:
     name = py.MAGIC_METHODS_NAME.get(node.name, node.name)
     if node.ret_type == VariableType.NESTED:
         t_def = node.find_associated_typedef()
-        type_ = py.TYPE_PREFIX.format(t_def.struct_ref.name)
+        ret_type = py.TYPE_PREFIX.format(t_def.struct_ref.name)
+    elif node.ret_type == VariableType.JSON:
+        instance = find_json_struct_instance(node)  # noqa
+        ret_type = f"J_{instance.__name__}"
     else:
-        type_ = py.TYPES.get(node.ret_type)
+        ret_type = py.TYPES.get(node.ret_type)
     p_type = "Union[BeautifulSoup, Tag]"
-    return py.INDENT_METHOD + py.BINDINGS[node.kind, name, p_type, type_]
+    return py.INDENT_METHOD + py.BINDINGS[node.kind, name, p_type, ret_type]
 
 
 # BS4 API

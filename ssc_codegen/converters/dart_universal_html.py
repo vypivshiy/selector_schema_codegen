@@ -522,10 +522,10 @@ def tt_to_list_float(node: ToFloat) -> str:
 @converter.pre(TokenType.TO_JSON)
 def tt_to_json(_: ToJson) -> str:
     warnings.warn("WIP", category=FutureWarning)
-    return ''
+    return ""
 
 
 @converter.pre(TokenType.JSON_STRUCT)
 def tt_json_struct(_: JsonStruct) -> str:
     warnings.warn("WIP", category=FutureWarning)
-    return ''
+    return ""

@@ -48,8 +48,10 @@ from ..ast_ssc import (
     ToListInteger,
     TrimExpression,
     TypeDef,
+    ToJson,
+    JsonStruct,
 )
-from ..tokens import StructType, TokenType, VariableType
+from ..tokens import StructType, TokenType, VariableType, JsonFieldType
 from .base import BaseCodeConverter, left_right_var_names
 from .templates import go
 from .utils import (
@@ -156,13 +158,12 @@ def tt_start_parse(node: StartParseFunction) -> str:
     else:
         ret_type = f"*T{node.parent.name}"
     ret_header = f"({ret_type}, error)"
-    fn_header = (
+    return (
         f"func (p *{node.parent.name}) "
         + f"{name}() "
         + f"{ret_header} "
         + go.BRACKET_START
     )
-    return fn_header
 
 
 @converter.post(TokenType.STRUCT_PARSE_START)
@@ -202,9 +203,9 @@ def tt_ret(node: ReturnExpression) -> str:
     elif node.have_default_expr():
         # OPTIONAL TYPE
         if node.parent.body[0].value is None:  # noqa
-            return f"result = &{prv}; " + "return result, nil;"
+            return f"result = &{prv}; return result, nil;"
 
-        return f"result = {prv}; " + "return result, nil;"
+        return f"result = {prv}; return result, nil;"
     return f"return {nxt}, nil; "
 
 
@@ -632,3 +633,52 @@ def tt_xpath_all(_):
 @converter.pre(TokenType.IS_XPATH)
 def tt_is_xpath(_):
     raise NotImplementedError("goquery not support xpath")
+
+
+# json
+@converter.pre(TokenType.TO_JSON)
+def tt_to_json(node: ToJson) -> str:
+    prv, nxt = left_right_var_names("value", node.variable)
+    instance = node.value
+    name = f"J{instance.__name__}"
+    return (
+        f"{nxt} := {name}" + "{}; " + f"json.Unmarshal([]byte({prv}), &{nxt});"
+    )
+
+
+@converter.pre(TokenType.JSON_STRUCT)
+def tt_json_struct(node: JsonStruct) -> str:
+    # type J{} struct {
+    # f1.upperCC() <T> `anchor`
+    # ...
+    # }
+    code = f"type J{node.name} struct " + go.BRACKET_START + " "
+    for field in node.body:
+        code += f"{to_upper_camel_case(field.name)} "
+        match field.value.kind:
+            case JsonFieldType.BASIC:
+                code += (
+                    go.JSON_TYPES.get(field.ret_type.TYPE)
+                    + f' `json:"{field.name}"`'
+                    + ";"
+                )
+            case JsonFieldType.ARRAY:
+                if isinstance(field.ret_type.TYPE, dict):
+                    code += (
+                        f"J{field.value.TYPE.name}"
+                        + f' `json:"{field.name}"`'
+                        + ";"
+                    )
+                else:
+                    code += (
+                        f" []{go.JSON_TYPES.get(field.ret_type.TYPE)}"
+                        + f' `json:"{field.name}"`'
+                        + ";"
+                    )
+            case JsonFieldType.OBJECT:
+                code += (
+                    f" J{field.struct_ref}" + f' `json:"{field.name}"`' + ";"
+                )
+            case _:
+                assert_never(field.value.kind)
+    return code + go.BRACKET_END

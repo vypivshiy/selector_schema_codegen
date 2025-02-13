@@ -133,9 +133,11 @@ def tt_typedef(node: TypeDef) -> str:
             return py.TYPE_PREFIX.format(node_.nested_class)
         elif node_.ret_type == VariableType.JSON:
             # TODO: move to consts
-            json_field = [n for n in node_.parent.struct_ref.body
-                          if n.kind == TokenType.STRUCT_FIELD
-                          and n.name == node_.name][0]
+            json_field = [
+                n
+                for n in node_.parent.struct_ref.body
+                if n.kind == TokenType.STRUCT_FIELD and n.name == node_.name
+            ][0]
             instance = find_json_struct_instance(json_field)
 
             return f"J_{instance.__name__}"
@@ -533,8 +535,14 @@ def tt_json_struct(node: JsonStruct) -> str:
             case JsonFieldType.BASIC:
                 return py.JSON_TYPES.get(field.ret_type, "Any")
             case JsonFieldType.ARRAY:
-                # JsonType get
-                return "List[" + py.JSON_TYPES.get(field.ret_type.TYPE, "Any") + "]"
+                # inner list JsonObject
+                if isinstance(field.ret_type.TYPE, dict):
+                    return f"List[J_{field.value.TYPE.name}]"
+                return (
+                    "List["
+                    + py.JSON_TYPES.get(field.ret_type.TYPE, "Any")
+                    + "]"
+                )
             case JsonFieldType.OBJECT:
                 return f"J_{field.struct_ref}"
             case _:
