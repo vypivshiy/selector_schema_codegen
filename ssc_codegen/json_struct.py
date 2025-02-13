@@ -172,29 +172,3 @@ def json_struct_to_signature(json_struct: Json) -> Any:
     for k, field in fields.items():
         tmp_tokens[k] = json_type_to_str_signature(field)
     return tmp_tokens
-
-
-if __name__ == "__main__":
-    import pprint
-
-    class Attributes(Json):
-        foo: str
-        bar: int
-
-    class Demo(Json):
-        name_opt: str | None
-        name: str
-        age: int
-        is_older: bool
-        height: float
-        nullable: None
-        int_items: list[int]
-        float_items: list[float]
-        str_items: list[str]
-        attr_items: list[Attributes]
-        attributes: Attributes
-
-    pprint.pprint(Demo.tokenize(), sort_dicts=False)
-    pprint.pprint(Attributes.tokenize(), sort_dicts=False)
-    o = Demo
-    print(o.__name__)
