@@ -1,4 +1,5 @@
 # TODO: required enchant, not tested
+import warnings
 from functools import partial
 
 from ..ast_ssc import (
@@ -52,6 +53,8 @@ from ..ast_ssc import (
     ToListInteger,
     TrimExpression,
     TypeDef,
+    ToJson,
+    JsonStruct,
 )
 from ..tokens import StructType, TokenType
 from .base import BaseCodeConverter, left_right_var_names
@@ -512,3 +515,17 @@ def tt_to_float(node: ToFloat) -> str:
 def tt_to_list_float(node: ToFloat) -> str:
     prv, nxt = lr_var_names(variable=node.variable)
     return dart.BINDINGS[node.kind, nxt, prv]
+
+
+# TODO
+# stub for tests check pass
+@converter.pre(TokenType.TO_JSON)
+def tt_to_json(_: ToJson) -> str:
+    warnings.warn("WIP", category=FutureWarning)
+    return ''
+
+
+@converter.pre(TokenType.JSON_STRUCT)
+def tt_json_struct(_: JsonStruct) -> str:
+    warnings.warn("WIP", category=FutureWarning)
+    return ''
