@@ -1246,7 +1246,9 @@ class JsonStructField(BaseAstNode):
     parent: Optional[JsonStruct] = None  # LATE INIT
 
     @property
-    def ret_type(self) -> JsonVariableType | dict[str, JsonVariableType]:
+    def ret_type(self) -> BaseJsonType | dict[str, BaseJsonType]:
+        if isinstance(self.value.TYPE, JsonVariableType):
+            return self.value
         return self.value.TYPE
 
     @property
