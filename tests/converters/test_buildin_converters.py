@@ -34,6 +34,7 @@ _TEST_BS4 = new_converter_check(
     include=REQUIRED_TOKENS_CONVERT_IMPL
     | CSS_TOKENS_IMPL
     | TYPING_TOKENS_CONVERT_IMPL,
+    exclude={TokenType.JSON_FIELD},
 )
 
 _TEST_PARSEL = new_converter_check(
@@ -43,6 +44,7 @@ _TEST_PARSEL = new_converter_check(
     | CSS_TOKENS_IMPL
     | XPATH_TOKENS_IMPL
     | TYPING_TOKENS_CONVERT_IMPL,
+    exclude={TokenType.JSON_FIELD},
 )
 
 _TEST_SELECTOLAX = new_converter_check(
@@ -51,6 +53,7 @@ _TEST_SELECTOLAX = new_converter_check(
     include=REQUIRED_TOKENS_CONVERT_IMPL
     | CSS_TOKENS_IMPL
     | TYPING_TOKENS_CONVERT_IMPL,
+    exclude={TokenType.JSON_FIELD},
 )
 _TEST_SCRAPY = new_converter_check(
     "py_scrapy",
@@ -59,6 +62,7 @@ _TEST_SCRAPY = new_converter_check(
     | CSS_TOKENS_IMPL
     | XPATH_TOKENS_IMPL
     | TYPING_TOKENS_CONVERT_IMPL,
+    exclude={TokenType.JSON_FIELD},
 )
 _TEST_DART = new_converter_check(
     "dart_universal_html",
@@ -66,6 +70,7 @@ _TEST_DART = new_converter_check(
     include=REQUIRED_TOKENS_CONVERT_IMPL
     | CSS_TOKENS_IMPL
     | TYPING_TOKENS_CONVERT_IMPL,
+    exclude={TokenType.JSON_FIELD},
 )
 
 _TEST_GO_GOQUERY = new_converter_check(
@@ -77,7 +82,7 @@ _TEST_GO_GOQUERY = new_converter_check(
     # 1. go structs don't need init constructor
     # 2. try/catch (default) operation
     #    realized by defer func() + rescue
-    exclude={TokenType.STRUCT_INIT, TokenType.EXPR_DEFAULT_END},
+    exclude={TokenType.STRUCT_INIT, TokenType.EXPR_DEFAULT_END, TokenType.JSON_FIELD},
 )
 
 _TEST_JS_PURE = new_converter_check(
@@ -85,7 +90,8 @@ _TEST_JS_PURE = new_converter_check(
     converter=js_pure,
     include=REQUIRED_TOKENS_CONVERT_IMPL | CSS_TOKENS_IMPL | XPATH_TOKENS_IMPL,
     # pure js dont need imports
-    exclude={TokenType.IMPORTS},
+    # not need json serialize
+    exclude={TokenType.IMPORTS, TokenType.JSON_FIELD, TokenType.JSON_STRUCT},
 )
 
 
