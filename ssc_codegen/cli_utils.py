@@ -1,4 +1,5 @@
 import importlib
+import re
 import sys
 import warnings
 from pathlib import Path
@@ -19,6 +20,7 @@ if TYPE_CHECKING:
     from ssc_codegen.ast_ssc import BaseAstNode, ModuleProgram
 
 CONVERTER_PATH = "ssc_codegen.converters"
+RE_JSON_KEYS_CHECK = re.compile(r'(?<=")([\d\W][^"]*)(?="\s*:)')
 
 
 class PyLIBS(StrEnum):
@@ -94,6 +96,12 @@ def cb_folder_out(folder: Path) -> Path:
     return folder
 
 
+def cb_file_out(file: Path) -> Path:
+    if not file.is_file():
+        raise BadParameter(f"'{file.name}' is not a file")
+    return file
+
+
 def create_fmt_cmd(
     ssc_files: list[Path],
     prefix: str,
@@ -111,3 +119,14 @@ def create_fmt_cmd(
         for cmd in commands:
             comma.append(cmd.format(str(abc_f.absolute())))
     return comma
+
+
+def raw_json_check_keys(jsn: str) -> None:
+    # TODO: check all bad chars keys
+    if results := RE_JSON_KEYS_CHECK.findall(jsn):
+        for r in results:
+            warnings.warn(f"bad json key: {r}", category=Warning)
+        all_keys = ", ".join(f"`{k}`" for k in results)
+        raise BadParameter(
+            f"bad json keys count: {len(results)}, keys: {all_keys}"
+        )
