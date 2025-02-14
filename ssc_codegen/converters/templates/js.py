@@ -31,10 +31,28 @@ def _make_docstring(value: str) -> str:
 
 BINDINGS = TemplateBindings()
 BINDINGS[TokenType.STRUCT] = "class {}"
+#
+#             this._doc = new DOMParser().parseFromString(doc, 'text/html');
+#         } else if (doc instanceof Document || doc instanceof Element) {
+#             this._doc = doc;
+#         } else {
+#             throw new Error("Invalid input: Expected a Document, Element, or string");
+#         }
 BINDINGS[TokenType.STRUCT_INIT] = lambda: (
     "constructor(doc)"
     + BRACKET_START
-    + "this._doc = typeof document === 'string' ? new DOMParser().parseFromString(doc, 'text/html') : doc;"
+    + "if (typeof doc === 'string') "
+    + BRACKET_START
+    + "this._doc = new DOMParser().parseFromString(doc, 'text/html');"
+    + BRACKET_END
+    + "else if (doc instanceof Document || doc instanceof Element)"
+    + BRACKET_START
+    + "this._doc = doc;"
+    + BRACKET_END
+    + "else"
+    + BRACKET_START
+    + ' throw new Error("Invalid input: Expected a Document, Element, or string");'
+    + BRACKET_END
     + BRACKET_END
 )
 BINDINGS[TokenType.DOCSTRING] = _make_docstring
@@ -143,8 +161,8 @@ BINDINGS[TokenType.EXPR_LIST_STRING_REPLACE] = (
     "let {} = {}.map(e => e.replace({}, {}));"
 )
 BINDINGS[TokenType.EXPR_STRING_SPLIT] = "let {} = {}.split({});"
-BINDINGS[TokenType.EXPR_REGEX] = "let {} = {}.match({})[{}];"
-BINDINGS[TokenType.EXPR_REGEX_ALL] = "let {} = {}.match({});"
+BINDINGS[TokenType.EXPR_REGEX] = "let {} = (new RegExp({})).exec({})[{}];"
+BINDINGS[TokenType.EXPR_REGEX_ALL] = "let {} = (new RegExp({})).exec({});"
 BINDINGS[TokenType.EXPR_REGEX_SUB] = "let {} = {}.replace({}, {});"
 BINDINGS[TokenType.EXPR_LIST_REGEX_SUB] = (
     "let {} = {}.map(e => e.replace({}, {}));"
@@ -192,7 +210,7 @@ BINDINGS[TokenType.EXPR_XPATH_ALL] = _expr_xpath_all
 
 # todo: remove _var_num param
 def _expr_text_doc(_var_num: int, nxt: str, prv: str) -> str:
-    return f'let {nxt} = typeof document.textContent === "undefined" ? {prv}.body.textContent : {prv}.textContent; '
+    return f'let {nxt} = typeof {prv}.textContent === "undefined" ? {prv}.documentElement.textContent : {prv}.textContent; '
 
 
 BINDINGS[TokenType.EXPR_TEXT] = _expr_text_doc
@@ -200,12 +218,12 @@ BINDINGS[TokenType.EXPR_TEXT_ALL] = "let {} = {}.map(e => e.textContent);"
 
 
 def _expr_raw(var_num: int, nxt: str, prv: str) -> str:
-    return f'let {nxt} = typeof document.innerHTML === "undefined" ? {prv}.body.innerHTML : {prv}.innerHTML; '
+    return f'let {nxt} = typeof {prv}.outerHTML === "undefined" ? {prv}.documentElement.outerHTML : {prv}.outerHTML; '
 
 
 BINDINGS[TokenType.EXPR_RAW] = _expr_raw
 
-BINDINGS[TokenType.EXPR_RAW_ALL] = "let {} = {}.map(e => e.innerHTML);"
+BINDINGS[TokenType.EXPR_RAW_ALL] = "let {} = {}.map(e => e.outerHTML);"
 BINDINGS[TokenType.EXPR_ATTR] = "let {} = {}.getAttribute({});"
 BINDINGS[TokenType.EXPR_ATTR_ALL] = "let {} = {}.map(e => e.getAttribute({}));"
 BINDINGS[TokenType.IS_CSS] = "if (!{}.querySelector({})) throw new Error({});"

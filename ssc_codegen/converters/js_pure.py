@@ -262,15 +262,15 @@ def tt_string_split(node: SplitExpression) -> str:
 def tt_regex(node: RegexExpression) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
     pattern = f"/{node.pattern}/g"
-    group = node.group - 1
-    return js.BINDINGS[node.kind, nxt, prv, pattern, group]
+    group = node.group
+    return js.BINDINGS[node.kind, nxt, pattern, prv, group]
 
 
 @converter.pre(TokenType.EXPR_REGEX_ALL)
 def tt_regex_all(node: RegexAllExpression) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
     pattern = f"/{node.pattern}/g"
-    return js.BINDINGS[node.kind, nxt, prv, pattern]
+    return js.BINDINGS[node.kind, nxt, pattern, prv]
 
 
 @converter.pre(TokenType.EXPR_REGEX_SUB)
