@@ -134,7 +134,7 @@ def tt_typedef(node: TypeDef) -> str:
         elif node_.ret_type == VariableType.JSON:
             instance = find_json_struct_instance(node_)
             if instance.__IS_ARRAY__:
-                return f"List[J_{instance.__name__}]" 
+                return f"List[J_{instance.__name__}]"
             return f"J_{instance.__name__}"
         return py.TYPES.get(node_.ret_type)
 

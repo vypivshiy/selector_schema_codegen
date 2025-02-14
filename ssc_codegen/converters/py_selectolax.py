@@ -21,6 +21,7 @@ from .py_base import BasePyCodeConverter, lr_var_names
 from .templates import py
 from .templates.utils import TemplateBindings
 from .ast_utils import find_json_struct_instance
+
 POST_BINDINGS = TemplateBindings()
 POST_BINDINGS[TokenType.IMPORTS] = (
     "from selectolax.parser import HTMLParser, Node"

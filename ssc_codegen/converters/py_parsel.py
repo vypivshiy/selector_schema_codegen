@@ -90,7 +90,7 @@ def tt_function(node: StructFieldFunction) -> str:
         instance = find_json_struct_instance(node)  # noqa
         ret_type = f"J_{instance.__name__}"
         if instance.__IS_ARRAY__:
-            ret_type = f'List[{ret_type}]'
+            ret_type = f"List[{ret_type}]"
     else:
         ret_type = py.TYPES.get(node.ret_type)
     p_type = "Selector"

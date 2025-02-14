@@ -178,5 +178,5 @@ def json_struct_to_signature(json_struct: Json) -> Any:
     for k, field in fields.items():
         tmp_tokens[k] = json_type_to_str_signature(field)
     if json_struct.__IS_ARRAY__:
-        return [tmp_tokens, '...']
+        return [tmp_tokens, "..."]
     return tmp_tokens

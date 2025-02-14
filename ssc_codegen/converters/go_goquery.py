@@ -642,7 +642,11 @@ def tt_to_json(node: ToJson) -> str:
     instance = node.value
     name = f"J{instance.__name__}"
     if instance.__IS_ARRAY__:
-        return f"{nxt} := []{name}" + "{}; " + f"json.Unmarshal([]byte({prv}), &{nxt});"
+        return (
+            f"{nxt} := []{name}"
+            + "{}; "
+            + f"json.Unmarshal([]byte({prv}), &{nxt});"
+        )
     return (
         f"{nxt} := {name}" + "{}; " + f"json.Unmarshal([]byte({prv}), &{nxt});"
     )
