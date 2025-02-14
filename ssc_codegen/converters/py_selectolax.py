@@ -20,7 +20,7 @@ from ..tokens import TokenType, VariableType
 from .py_base import BasePyCodeConverter, lr_var_names
 from .templates import py
 from .templates.utils import TemplateBindings
-
+from .ast_utils import find_json_struct_instance
 POST_BINDINGS = TemplateBindings()
 POST_BINDINGS[TokenType.IMPORTS] = (
     "from selectolax.parser import HTMLParser, Node"
@@ -85,6 +85,8 @@ def tt_function(node: StructFieldFunction) -> str:
     elif node.ret_type == VariableType.JSON:
         instance = find_json_struct_instance(node)  # noqa
         ret_type = f"J_{instance.__name__}"
+        if instance.__IS_ARRAY__:
+            ret_type = f"List[{ret_type}]"
     else:
         ret_type = py.TYPES.get(node.ret_type)
     p_type = "Union[str, HTMLParser, Node]"
