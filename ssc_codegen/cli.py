@@ -19,7 +19,7 @@ from ssc_codegen.cli_utils import (
 )
 from ssc_codegen.converters.json_to_schema import convert_json_to_schema_code
 from ssc_codegen.converters.tools import (
-    go_naive_fix_docstring,
+    remove_empty_lines,
     go_unimport_naive,
 )
 
@@ -256,7 +256,7 @@ def gen_dart(
         suffix=suffix,
         comment_str=f"// {COMMENT_STRING}",
         fmt_cmd=fmt_cmd,
-        code_cb=go_naive_fix_docstring,
+        code_cb=remove_empty_lines,
         docstring_class_top=True,
         xpath_to_css=to_css,
         css_to_xpath=to_xpath,
@@ -310,7 +310,7 @@ def gen_go(
         comment_str=f"// {COMMENT_STRING}",
         fmt_cmd=fmt_cmd,
         # todo: better API for code callbacks
-        code_cb=lambda lines: go_unimport_naive(go_naive_fix_docstring(lines)),
+        code_cb=lambda lines: go_unimport_naive(remove_empty_lines(lines)),
         docstring_class_top=True,
         variables_patches={"PACKAGE": package or out.name},
         xpath_to_css=to_css,
