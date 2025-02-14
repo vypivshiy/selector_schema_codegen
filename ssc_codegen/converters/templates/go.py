@@ -982,6 +982,8 @@ def gen_typedef_item(node: "TypeDef") -> str:
         elif f.ret_type == VariableType.JSON:
             obj = find_json_struct_instance(f)
             field_type = f"J{obj.__name__}"
+            if obj.__IS_ARRAY__:
+                field_type = f"[]{field_type}"
         else:
             field_type = TYPES.get(f.ret_type, "")
         fields_name = to_upper_camel_case(f.name)
@@ -1054,6 +1056,9 @@ def gen_struct_field_ret_header(node: "StructFieldFunction") -> str:
     elif node.ret_type == VariableType.JSON:
         jsn_obj = find_json_struct_instance(node)
         ret_type = f"J{jsn_obj.__name__}"
+        if jsn_obj.__IS_ARRAY__:
+            ret_type = f"[]{ret_type}"
+
         return f"({ret_type}, error)"
     elif node.body[0].have_default_expr():
         ret_type = TYPES.get(node.ret_type, "")

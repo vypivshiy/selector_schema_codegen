@@ -341,7 +341,7 @@ def tt_string_split(node: SplitExpression) -> str:
 def tt_regex(node: RegexExpression) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
     pattern = wrap_backtick(node.pattern)
-    group = node.group - 1  # group starts at 0
+    group = node.group
     return go.BINDINGS_PRE[node.kind, nxt, pattern, prv, group]
 
 
@@ -617,7 +617,7 @@ def tt_is_css(node: IsCssExpression) -> str:
     ]
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return code
-    return code + f"{nxt} := {prv}; "
+    return f"{code}{nxt} := {prv}; "
 
 
 @converter.pre(TokenType.EXPR_XPATH)
@@ -641,6 +641,8 @@ def tt_to_json(node: ToJson) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
     instance = node.value
     name = f"J{instance.__name__}"
+    if instance.__IS_ARRAY__:
+        return f"{nxt} := []{name}" + "{}; " + f"json.Unmarshal([]byte({prv}), &{nxt});"
     return (
         f"{nxt} := {name}" + "{}; " + f"json.Unmarshal([]byte({prv}), &{nxt});"
     )
