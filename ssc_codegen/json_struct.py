@@ -72,16 +72,19 @@ class Json:
     NOTE:
         NOT FOR REST-API CONFIGURATION, its coverage case, where json-like object in html document
 
+    MAGIC methods:
+        - __IS_ARRAY__ - marks if passed raw json as list/array type
+
     support types:
-    - T:
-        - int - number
-        - str - string
-        - bool - boolean
-        - float - float
-        - None - null
-        - T | None - optional type
-    - list[T] - array of items
-    - Json[T] - same class annotate reference. keys should be a string
+        - T:
+            - int - number
+            - str - string
+            - bool - boolean
+            - float - float
+            - None - null
+            - T | None - optional type
+        - list[T] - array of items
+        - Json[T] - same class annotate reference (map/dict). keys should be a string
     """
 
     __TYPE_MAPPING__ = {
@@ -91,6 +94,9 @@ class Json:
         bool: JsonVariableType.BOOLEAN,
         NoneType: JsonVariableType.NULL,
     }
+
+    __IS_ARRAY__: bool = False
+    """marks is array entrypoint"""
 
     @classmethod
     def _annotation_to_token(cls, type_: Any) -> BaseJsonType:
@@ -171,4 +177,6 @@ def json_struct_to_signature(json_struct: Json) -> Any:
     tmp_tokens = fields.copy()
     for k, field in fields.items():
         tmp_tokens[k] = json_type_to_str_signature(field)
+    if json_struct.__IS_ARRAY__:
+        return [tmp_tokens, '...']
     return tmp_tokens

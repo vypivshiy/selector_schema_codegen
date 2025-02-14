@@ -17,17 +17,23 @@ def json_response_to_schema_code(
     array items should have a same type
     class names auto converted to UpperCamelCase
     """
+    is_array_response = False
+
     if result := _BAD_STRING_STARTS.match(name_entrypoint):
         raise TypeError(f"Bad entrypoint name string char: {result[0]}")
     if isinstance(data, str):
         data = json.loads(data)
-    # first entrypoint should be a dict
-    if not isinstance(data, dict):
-        raise TypeError("json response must be a starts as dict")
+    elif isinstance(data, list):
+        # naive apologize, list contains same dict items
+        if not isinstance(data[0], dict) or _sub_schemas_acc:
+            raise TypeError("json response must be a starts as dict")
+        data = data[0]
+        is_array_response = True
 
     sub_schemas_codes = _sub_schemas_acc or []
     name_entrypoint = to_upper_camel_case(name_entrypoint)
     code = f"class {name_entrypoint}(Json):"
+    code += "    __IS_ARRAY__ = True" if is_array_response else ""
 
     for k, v in data.items():
         if v is None:

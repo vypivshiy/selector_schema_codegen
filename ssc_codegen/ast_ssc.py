@@ -1263,3 +1263,11 @@ class ToJson(BaseExpression):
     accept_type: VariableType = VariableType.STRING
     ret_type: VariableType = VariableType.JSON
     value: Type[Json]
+
+    @property
+    def instance_name(self) -> str:
+        return self.value.__name__
+
+    @property
+    def is_array_entrypoint(self) -> bool:
+        return self.value.__IS_ARRAY__
