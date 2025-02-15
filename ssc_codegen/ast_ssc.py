@@ -122,6 +122,17 @@ class TypeDefField(BaseAstNode):
             return nested_class
         return None
 
+    @property
+    def nested_node_ref(self) -> Union["StructParser", None]:
+        """return association StructParser node if ret_type NESTED"""
+        if self.ret_type != VariableType.NESTED:
+            return None
+        return [
+            i
+            for i in self.parent.parent.body  # type: ignore
+            if i.kind == TokenType.STRUCT and i.name == self.nested_class  # noqa
+        ][_EXPR_I_START]
+
 
 @dataclass(kw_only=True)
 class TypeDef(BaseAstNode):
