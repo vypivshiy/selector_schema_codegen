@@ -125,7 +125,9 @@ class BasePyCodeConverter(BaseCodeConverter):
         self.pre_definitions[TokenType.TO_FLOAT_LIST] = tt_to_list_float
 
         self.pre_definitions[TokenType.TO_JSON] = tt_to_json
-        self.pre_definitions[TokenType.JSON_STRUCT] = tt_json_struct
+        self.pre_definitions[TokenType.JSON_STRUCT] = tt_json_struct_pre
+        self.post_definitions[TokenType.JSON_STRUCT] = tt_json_struct_post
+        self.pre_definitions[TokenType.JSON_FIELD] = tt_json_field
 
 
 def tt_imports(node: ModuleImports) -> str:
@@ -527,34 +529,29 @@ def tt_to_list_float(node: ToListFloat) -> str:
 
 
 # json
-def tt_json_struct(node: JsonStruct) -> str:
-    # todo: move consts to templates
-    # prefix: Json<NAME>
-    def json_type(field: JsonStructField):
-        match field.value.kind:
-            case JsonFieldType.BASIC:
-                return py.JSON_TYPES.get(field.ret_type.TYPE, "Any")
-            case JsonFieldType.ARRAY:
-                # inner list JsonObject
-                if isinstance(field.ret_type.TYPE, dict):
-                    return f"List[J_{field.value.TYPE.name}]"
-                return (
-                    "List["
-                    + py.JSON_TYPES.get(field.ret_type.TYPE, "Any")
-                    + "]"
-                )
-            case JsonFieldType.OBJECT:
-                return f"J_{field.struct_ref}"
-            case _:
-                assert_never(field.value.kind)
+def tt_json_struct_pre(node: JsonStruct) -> str:
+    return f'J_{node.name} = TypedDict("J_{node.name}", ' + "{"
 
-    code = (
-        f'J_{node.name} = TypedDict("J_{node.name}", '
-        + "{"
-        + ", ".join(f'"{f.name}": {json_type(f)}' for f in node.body)
-        + "})"
-    )
-    return code
+
+def tt_json_struct_post(_: JsonStruct) -> str:
+    return "})"
+
+
+def tt_json_field(node: JsonStructField) -> str:
+    match node.value.kind:
+        case JsonFieldType.BASIC:
+            return f'"{node.name}": {py.JSON_TYPES.get(node.ret_type.TYPE, "Any")}, '
+        case JsonFieldType.OBJECT:
+            return f'"{node.name}": J_{node.struct_ref}, '
+        case JsonFieldType.ARRAY:
+            if isinstance(node.ret_type.TYPE, dict):
+                type_ = f"List[J_{node.value.TYPE.name}]"
+            else:
+                type_ = f"List[{py.JSON_TYPES.get(node.ret_type.TYPE, 'Any')}]"
+            return f'"{node.name}": {type_}, '
+        case _:
+            assert_never(node.value.kind)  # noqa
+    raise NotImplementedError("inreached code")  # noqa
 
 
 def tt_to_json(node: ToJson) -> str:
