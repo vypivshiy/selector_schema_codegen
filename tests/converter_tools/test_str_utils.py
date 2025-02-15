@@ -1,12 +1,6 @@
 import pytest
-from ssc_codegen.converters.utils import (
-    wrap_backtick,
-    escape_str,
-    wrap_double_quotes,
-    to_lower_camel_case,
-    to_upper_camel_case,
-    to_snake_case,
-)
+from ssc_codegen.str_utils import to_snake_case, to_upper_camel_case, to_lower_camel_case, wrap_double_quotes, \
+    wrap_backtick, escape_str
 
 
 @pytest.mark.parametrize(

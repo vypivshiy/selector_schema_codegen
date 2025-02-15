@@ -1,6 +1,6 @@
 import pytest
 
-from ssc_codegen.converters.tools import go_unimport_naive
+from ssc_codegen.str_utils import go_unimport_naive
 
 # Test case 1: Unused import is removed
 # Test data constants
