@@ -16,7 +16,7 @@ from ssc_codegen.ast_ssc import (
     PreValidateFunction,
     StructFieldFunction,
 )
-from ssc_codegen.tokens import TokenType, VariableType
+from ssc_codegen.tokens import TokenType, VariableType, StructType
 from .py_base import BasePyCodeConverter, lr_var_names
 from .templates import py
 from .templates.template_bindings import TemplateBindings
@@ -82,9 +82,12 @@ def tt_function(node: StructFieldFunction) -> str:
     name = py.MAGIC_METHODS_NAME.get(node.name, node.name)
     if node.ret_type == VariableType.NESTED:
         t_def = node.find_associated_typedef()
-        ret_type = py.TYPE_PREFIX.format(t_def.struct_ref.name)
+        ret_type = f"T_{t_def.struct_ref.name}"
+
+        if t_def.struct_ref.type == StructType.LIST:
+            ret_type = f"List[{ret_type}]"
     elif node.ret_type == VariableType.JSON:
-        instance = find_json_struct_instance(node)  # noqa
+        instance = find_json_struct_instance(node)
         ret_type = f"J_{instance.__name__}"
         if instance.__IS_ARRAY__:
             ret_type = f"List[{ret_type}]"

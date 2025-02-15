@@ -67,7 +67,11 @@ class BasePyCodeConverter(BaseCodeConverter):
         super().__init__()
         # TODO link converters
         self.pre_definitions[TokenType.IMPORTS] = tt_imports
-        self.pre_definitions[TokenType.TYPEDEF] = tt_typedef
+
+        self.pre_definitions[TokenType.TYPEDEF] = tt_typedef_pre
+        self.post_definitions[TokenType.TYPEDEF] = tt_typedef_post
+        self.pre_definitions[TokenType.TYPEDEF_FIELD] = tt_typedef_field
+
         self.pre_definitions[TokenType.STRUCT] = tt_struct
         self.pre_definitions[TokenType.DOCSTRING] = tt_docstring
         self.pre_definitions[TokenType.EXPR_RETURN] = tt_ret
@@ -134,67 +138,67 @@ def tt_imports(node: ModuleImports) -> str:
     return py.BINDINGS[node.kind]
 
 
-def tt_typedef(node: TypeDef) -> str:
-    def _fetch_node_type(node_: TypeDefField) -> str:
-        if node_.ret_type == VariableType.NESTED:
-            return py.TYPE_PREFIX.format(node_.nested_class)
-        elif node_.ret_type == VariableType.JSON:
-            instance = find_json_struct_instance(node_)
-            if instance.__IS_ARRAY__:
-                return f"List[J_{instance.__name__}]"
-            return f"J_{instance.__name__}"
-        return py.TYPES.get(node_.ret_type)
-
-    t_name = py.TYPE_PREFIX.format(node.name)
-    # DICT schema
-    match node.struct_ref.type:
+def tt_typedef_pre(node: TypeDef) -> str:
+    match node.struct_ref.type:  # type: ignore
         case StructType.DICT:
-            value_ret = [f for f in node.body if f.name == "__VALUE__"][
-                0
-            ].ret_type
-            if node.body[-1].ret_type == VariableType.NESTED:
-                type_ = py.TYPE_PREFIX.format(node.body[-1].nested_class)
-            else:
-                type_ = py.TYPES.get(value_ret)
-            body = py.TYPE_DICT.format(type_)
+            return f"T_{node.name} = Dict[str, "
         case StructType.FLAT_LIST:
-            value_ret = [f for f in node.body if f.name == "__ITEM__"][
-                0
-            ].ret_type
-            if node.body[-1].ret_type == VariableType.NESTED:
-                type_ = py.TYPE_PREFIX.format(node.body[-1].nested_class)
-            else:
-                type_ = py.TYPES.get(value_ret)
-            body = py.TYPE_LIST.format(type_)
-
+            return f"T_{node.name} = List["
         case StructType.ITEM:
-            _dict_body = (
-                "{"
-                + ", ".join(
-                    f"{f.name!r}: {_fetch_node_type(f)}" for f in node.body
-                )
-                + "}"
-            )
-            body = py.TYPE_ITEM.format(repr(t_name), _dict_body)
+            return f'T_{node.name} = TypedDict("T_{node.name}", ' + "{"
         case StructType.LIST:
-            item_dict_body = (
-                "{"
-                + ", ".join(
-                    f"{f.name!r}: {_fetch_node_type(f)}" for f in node.body
-                )
-                + "}"
-            )
-            item_name = f"{t_name}_ITEM"
-            item_body = (
-                item_name
-                + " = "
-                + py.TYPE_ITEM.format(repr(item_name), item_dict_body)
-            )
-            body = f"{t_name} = {py.TYPE_LIST.format(item_name)}"
-            return item_body + "\n" + body
-        case _ as a_never:
-            assert_never(a_never)
-    return f"{t_name} = {body}"  # noqa
+            return f'T_{node.name} = TypedDict("T_{node.name}", ' + "{"
+        case _:
+            assert_never(node.struct_ref.type)
+    raise NotImplementedError()  # noqa
+
+
+def tt_typedef_post(node: TypeDef) -> str:
+    match node.struct_ref.type:  # type: ignore
+        case StructType.DICT:
+            return "]"
+        case StructType.FLAT_LIST:
+            return "]"
+        case StructType.ITEM:
+            return "})"
+        case StructType.LIST:
+            return "})"
+        case _:
+            assert_never(node.struct_ref.type)
+    raise NotImplementedError()  # noqa
+
+
+def tt_typedef_field(node: TypeDefField) -> str:
+    # always str
+    if node.name == "__KEY__":
+        return ""
+
+    if node.ret_type == VariableType.NESTED:
+        type_ = f"T_{node.nested_class}"
+        if node.nested_node_ref.type == StructType.LIST:
+            type_ = f"List[{type_}]"
+    elif node.ret_type == VariableType.JSON:
+        instance = find_json_struct_instance(node)
+        if instance.__IS_ARRAY__:
+            type_ = f"List[J_{instance.__name__}]"
+        else:
+            type_ = f"J_{instance.__name__}"
+    else:
+        type_ = py.TYPES.get(node.ret_type, "Any")
+
+    match node.parent.struct_ref.type:
+        case StructType.DICT:
+            return type_
+        case StructType.FLAT_LIST:
+            return type_
+        case StructType.ITEM:
+            return f'"{node.name}": {type_}, '
+        case StructType.LIST:
+            return f'"{node.name}": {type_}, '
+        case _:
+            assert_never(node.parent.struct_ref.type)
+    # unreached code
+    raise NotImplementedError()  # noqa
 
 
 def tt_struct(node: StructParser) -> str:
@@ -241,12 +245,10 @@ def tt_pre_validate(node: PreValidateFunction) -> str:
 
 def tt_start_parse_pre(node: StartParseFunction) -> str:
     name = MAGIC_METHODS.get(node.name)
-    t_name = py.TYPE_BINDINGS.create_name(node.parent.typedef.name)
+    t_name = f"T_{node.parent.typedef.name}"
 
     if node.type == StructType.LIST:
-        t_name = py.TYPE_BINDINGS.create_name(node.parent.typedef.name)
-        t_name = py.TYPE_BINDINGS[node.type, t_name]
-
+        t_name = f"List[{t_name}]"
     return py.INDENT_METHOD + py.BINDINGS[node.kind, name, t_name]
 
 
