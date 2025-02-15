@@ -50,6 +50,7 @@ from ssc_codegen.ast_ssc import (
     TypeDef,
     ToJson,
     JsonStruct,
+    TypeDefField,
 )
 from ssc_codegen.tokens import (
     StructType,
@@ -57,6 +58,7 @@ from ssc_codegen.tokens import (
     VariableType,
     JsonFieldType,
 )
+from .ast_utils import find_json_struct_instance
 from .base import BaseCodeConverter, left_right_var_names
 from .templates import go
 from ssc_codegen.str_utils import (
@@ -69,24 +71,82 @@ converter = BaseCodeConverter()
 
 
 @converter.pre(TokenType.TYPEDEF)
-def tt_typedef(node: TypeDef) -> str:
-    match node.struct_ref.type:  # type: ignore
-        case StructType.ITEM:
-            code = go.gen_typedef_item(node)
+def typedef_pre(node: TypeDef) -> str:
+    match node.struct_ref.type:
+        # codegen join all code part by newline
+        # immediately create DICT, FLAT_LIST types
         case StructType.DICT:
-            code = go.gen_typedef_dict(node)
+            # 0 - key, 1 - value
+            value = node.body[1]
+            type_ = convert_to_go_type(value)
+            # key always string
+            return f"type T{node.name} = map[string]{type_}; "
         case StructType.FLAT_LIST:
-            code = go.gen_typedef_flat_list(node)
+            item = node.body[0]
+            type_ = convert_to_go_type(item)
+            return f"type T{node.name} = []{type_}; "
+        case StructType.ITEM:
+            return f"type T{node.name} struct {go.BRACKET_START}"
         case StructType.LIST:
-            code = go.gen_typedef_list(node)
-        case _ as unused_:
-            assert_never(unused_)  # type: ignore
-    return code
+            return f"type T{node.name} struct {go.BRACKET_START}"
+
+
+@converter.post(TokenType.TYPEDEF)
+def typedef_post(node: TypeDef) -> str:
+    match node.struct_ref.type:
+        case StructType.DICT:
+            return ""
+        case StructType.FLAT_LIST:
+            return ""
+        case StructType.ITEM:
+            return f"{go.BRACKET_END}; "
+        case StructType.LIST:
+            return f"{go.BRACKET_END}; "
+        case _:
+            assert_never(node.struct_ref.type)
+
+
+@converter.pre(TokenType.TYPEDEF_FIELD)
+def typedef_field(node: TypeDefField) -> str:
+    # always string
+    if node.name == "__KEY__":
+        return ""
+
+    match node.parent.struct_ref.type:
+        case StructType.DICT:
+            return ""
+        case StructType.FLAT_LIST:
+            return ""
+        case StructType.ITEM:
+            type_ = convert_to_go_type(node)
+            field_name = to_upper_camel_case(node.name)
+            return f'{field_name} {type_} `json:"{node.name}"`; '
+        case StructType.LIST:
+            type_ = convert_to_go_type(node)
+            field_name = to_upper_camel_case(node.name)
+            return f'{field_name} {type_} `json:"{node.name}"`; '
+        case _:
+            assert_never(node.parent.struct_ref.type)
+
+
+def convert_to_go_type(node) -> str:
+    if node.ret_type == VariableType.NESTED:
+        type_ = f"T{node.nested_class}"
+        if node.nested_node_ref.type == StructType.LIST:
+            type_ = f"[]{type_}"
+    elif node.ret_type == VariableType.JSON:
+        instance = find_json_struct_instance(node)
+        type_ = f"J{instance.__name__}"
+        if instance.__IS_ARRAY__:
+            type_ = f"[]{type_}"
+    else:
+        type_ = go.TYPES.get(node.ret_type)
+    return type_
 
 
 @converter.pre(TokenType.STRUCT)
 def tt_struct(node: StructParser) -> str:
-    # HACK: generate block code immediately, funcs attached by ptr
+    # generate block code immediately, funcs attached by ptr
     return (
         f"type {node.name} struct "
         + go.BRACKET_START
@@ -159,7 +219,7 @@ def tt_start_parse(node: StartParseFunction) -> str:
     # name = go.MAGIC_METHODS.get(node.name)
     name = "Parse"
     if node.type == StructType.LIST:
-        ret_type = f"*T{node.parent.name}ITEMS"
+        ret_type = f"*[]T{node.parent.name}"
     else:
         ret_type = f"*T{node.parent.name}"
     ret_header = f"({ret_type}, error)"

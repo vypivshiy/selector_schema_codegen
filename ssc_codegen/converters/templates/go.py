@@ -10,10 +10,8 @@ from ssc_codegen.tokens import (
     JsonVariableType,
 )
 
-from ..ast_utils import (
+from ssc_codegen.converters.ast_utils import (
     find_callfn_field_node_by_name,
-    find_field_nested_struct,
-    find_tdef_field_node_by_name,
     is_optional_variable,
     find_json_struct_instance,
 )
@@ -25,7 +23,6 @@ if TYPE_CHECKING:
     from ssc_codegen.ast_ssc import (
         StartParseFunction,
         StructFieldFunction,
-        TypeDef,
     )
 
 
@@ -807,7 +804,7 @@ def gen_start_parse_list(node: "StartParseFunction") -> str:
     # later required for make structure
     st_args: list[str] = []
     body = (
-        f"items := make(T{node.parent.name}ITEMS, 0); "
+        f"items := make([]T{node.parent.name}, 0); "
         + "docParts, err := p.splitDoc(p.Document.Selection);"
         + "if err != nil"
         + BRACKET_START
@@ -966,90 +963,13 @@ def gen_start_parse_flat_list(node: "StartParseFunction") -> str:
     return body
 
 
-def gen_typedef_item(node: "TypeDef") -> str:
-    # type T{name} struct { field(camelUPEER) String `json:f1`; ... }
-    code = f"type T{node.name} struct " + BRACKET_START
-    for f in node.body:
-        if f.name in MAGIC_METHODS:
-            continue
-
-        if f.ret_type == VariableType.NESTED:
-            field_type = f"T{f.nested_class}"
-            if find_field_nested_struct(f).struct_ref.type == StructType.LIST:  # type: ignore
-                field_type = f"{field_type}ITEMS"
-        elif f.ret_type == VariableType.JSON:
-            obj = find_json_struct_instance(f)
-            field_type = f"J{obj.__name__}"
-            if obj.__IS_ARRAY__:
-                field_type = f"[]{field_type}"
-        else:
-            field_type = TYPES.get(f.ret_type, "")
-        fields_name = to_upper_camel_case(f.name)
-        code += f'{fields_name} {field_type} `json:"{f.name}"`; '
-    code += BRACKET_END + "; "
-    return code
-
-
-def gen_typedef_dict(node: "TypeDef") -> str:
-    # type T{name} = map[{KEY_TYPE}]{VALUE_TYPE};
-    field_key = find_tdef_field_node_by_name(node, "__KEY__")
-    if not field_key:
-        # in AST build step checked
-        raise NotImplementedError  # noqa
-    field_value = find_tdef_field_node_by_name(node, "__VALUE__")
-    if not field_value:
-        # in AST build step checked
-        raise NotImplementedError  # noqa
-
-    if field_value.ret_type == VariableType.NESTED:
-        field_type = f"T{field_value.nested_class}"
-        if (
-            find_field_nested_struct(field_value).struct_ref.type  # type: ignore
-            == StructType.LIST
-        ):
-            field_type = f"{field_type}ITEMS"
-    else:
-        field_type = TYPES.get(field_value.ret_type, "")
-    code = (
-        f"type T{node.name} = "
-        + f"map[{TYPES.get(field_key.ret_type)}]"
-        + f"{field_type}; "
-    )
-    return code
-
-
-def gen_typedef_flat_list(node: "TypeDef") -> str:
-    # type T{name} = []{ITEM_TYPE};
-    field_item = find_tdef_field_node_by_name(node, "__ITEM__")
-    if not field_item:
-        # in AST build step checked
-        raise NotImplementedError  # noqa
-
-    if field_item.ret_type == VariableType.NESTED:
-        field_type = f"T{field_item.nested_class}"
-    else:
-        field_type = TYPES.get(field_item.ret_type, "")
-    code = f"type T{node.name} = []{field_type}; "
-    return code
-
-
-def gen_typedef_list(node: "TypeDef") -> str:
-    # 1. simular generate struct as ST.ITEM
-    # 2. add array type for this struct
-    # type T{name} struct { F1 String `json:f1`; ... }
-    # type T{name}ITEMS = []T{name}
-    code = gen_typedef_item(node)
-    code += f"type T{node.name}ITEMS = []T{node.name}; "
-    return code
-
-
 def gen_struct_field_ret_header(node: "StructFieldFunction") -> str:
     # "func (p *{}) parse{}(value *goquery.Selection) {} "
     if node.ret_type == VariableType.NESTED:
         ret_type = f"T{node.nested_schema_name()}"
         typedef = node.find_associated_typedef()
         if typedef.struct_ref.type == StructType.LIST:  # type: ignore
-            ret_type = f"{ret_type}ITEMS"
+            ret_type = f"[]{ret_type}"
         return f"({ret_type}, error)"
     elif node.ret_type == VariableType.JSON:
         jsn_obj = find_json_struct_instance(node)
