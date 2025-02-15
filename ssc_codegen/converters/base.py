@@ -14,6 +14,8 @@ from ..ast_ssc import (
     TypeDef,
     TypeDefField,
     Variable,
+    JsonStruct,
+    JsonStructField,
 )
 from ..tokens import TokenType
 
@@ -146,6 +148,10 @@ class BaseCodeConverter:
                 self._convert_typedef_field(ast_entry, acc)  # type: ignore[arg-type]
             case TokenType.STRUCT:
                 self._convert_struct(ast_entry, acc)  # type: ignore[arg-type]
+            case TokenType.JSON_STRUCT:
+                self._convert_json_struct(ast_entry, acc)  # type: ignore[arg-type]
+            case TokenType.JSON_FIELD:
+                self._convert_json_struct_field(ast_entry, acc)  # type: ignore[arg-type]
             case _ if ast_entry.kind in {
                 TokenType.STRUCT_PART_DOCUMENT,
                 TokenType.STRUCT_PRE_VALIDATE,
@@ -188,6 +194,20 @@ class BaseCodeConverter:
         self, ast_entry: TypeDefField, acc: list[str]
     ) -> None:
         """Handle typedef field conversion."""
+        acc.append(self._pre_convert_node(ast_entry))
+        acc.append(self._post_convert_node(ast_entry))
+
+    def _convert_json_struct(
+        self, ast_entry: JsonStruct, acc: list[str]
+    ) -> None:
+        acc.append(self._pre_convert_node(ast_entry))
+        for node in ast_entry.body:
+            self.convert(node, acc)
+        acc.append(self._post_convert_node(ast_entry))
+
+    def _convert_json_struct_field(
+        self, ast_entry: JsonStructField, acc: list[str]
+    ) -> None:
         acc.append(self._pre_convert_node(ast_entry))
         acc.append(self._post_convert_node(ast_entry))
 
