@@ -1,4 +1,4 @@
-from ..ast_ssc import (
+from ssc_codegen.ast_ssc import (
     HtmlAttrAllExpression,
     HtmlAttrExpression,
     HtmlCssAllExpression,
@@ -17,10 +17,10 @@ from ..ast_ssc import (
     PreValidateFunction,
     StructFieldFunction,
 )
-from ..tokens import TokenType, VariableType
+from ssc_codegen.tokens import TokenType, VariableType
 from .py_base import BasePyCodeConverter, lr_var_names
 from .templates import py
-from .templates.utils import TemplateBindings
+from .templates.template_bindings import TemplateBindings
 
 POST_BINDINGS = TemplateBindings()
 POST_BINDINGS[TokenType.STRUCT_INIT] = (

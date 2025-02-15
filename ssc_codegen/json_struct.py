@@ -8,20 +8,9 @@ this solution used for parse json inner HTML documents
 from types import GenericAlias, UnionType, NoneType
 from typing import get_args, Any, Union, TypeAlias
 
-from ssc_codegen.tokens import JsonVariableType, JsonFieldType
+from .consts import JSON_SIGNATURE_MAP
+from .tokens import JsonVariableType, JsonFieldType
 
-__STR_SIGNATURE_MAPPING__ = {
-    JsonVariableType.NULL: "null",
-    JsonVariableType.BOOLEAN: "boolean",
-    JsonVariableType.STRING: "string",
-    JsonVariableType.NUMBER: "number",
-    JsonVariableType.FLOAT: "float",
-    JsonVariableType.OPTIONAL_BOOLEAN: "boolean | null",
-    JsonVariableType.OPTIONAL_FLOAT: "float | null",
-    JsonVariableType.OPTIONAL_NUMBER: "int | null",
-    JsonVariableType.OPTIONAL_STRING: "string | null",
-}
-"""used for autodocumentation structures"""
 
 _TokenValue: TypeAlias = Union[JsonVariableType, "JsonList", "Json"]
 
@@ -118,11 +107,18 @@ class Json:
                 raise TypeError(
                     f"{cls.__name__}: union type requires 2 arguments"
                 )
-            elif args[1] != NoneType:
-                t_get = args[1]
+            elif len(args) > 2:
                 raise TypeError(
-                    f"{cls.__name__}: union type should be a None, got {t_get!r}"
+                    f"{cls.__name__}: too many arguments: required 2"
                 )
+            elif args[1] != NoneType:
+                if args[0] == NoneType:
+                    args = (args[1], args[0])
+                else:
+                    t_get = args[1]
+                    raise TypeError(
+                        f"{cls.__name__}: union type should be a None, got {t_get!r}"
+                    )
             # TODO: Refactoring
             if args[0] is str:
                 return JsonType(JsonVariableType.OPTIONAL_STRING)
@@ -154,17 +150,17 @@ class Json:
 
 def json_type_to_str_signature(json_field: BaseJsonType) -> Any:
     if isinstance(json_field, JsonType):
-        return __STR_SIGNATURE_MAPPING__.get(json_field.TYPE)
+        return JSON_SIGNATURE_MAP.get(json_field.TYPE)
     elif isinstance(json_field, JsonObject):
         return {
-            k: __STR_SIGNATURE_MAPPING__.get(v)
+            k: JSON_SIGNATURE_MAP.get(v)
             if isinstance(v, JsonVariableType)
             else json_type_to_str_signature(v)
             for k, v in json_field.TYPE.items()
         }
     elif isinstance(json_field, JsonList):
         return (
-            __STR_SIGNATURE_MAPPING__.get(json_field.TYPE)
+            JSON_SIGNATURE_MAP.get(json_field.TYPE)
             if isinstance(json_field, JsonVariableType)
             else json_type_to_str_signature(json_field.TYPE)
         )
@@ -177,6 +173,4 @@ def json_struct_to_signature(json_struct: Json) -> Any:
     tmp_tokens = fields.copy()
     for k, field in fields.items():
         tmp_tokens[k] = json_type_to_str_signature(field)
-    if json_struct.__IS_ARRAY__:
-        return [tmp_tokens, "..."]
-    return tmp_tokens
+    return [tmp_tokens, "..."] if json_struct.__IS_ARRAY__ else tmp_tokens

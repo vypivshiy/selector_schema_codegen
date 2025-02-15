@@ -1,6 +1,6 @@
 from typing_extensions import assert_never
 
-from ..ast_ssc import (
+from ssc_codegen.ast_ssc import (
     DefaultStart,
     Docstring,
     FormatExpression,
@@ -51,13 +51,18 @@ from ..ast_ssc import (
     ToJson,
     JsonStruct,
 )
-from ..tokens import StructType, TokenType, VariableType, JsonFieldType
+from ssc_codegen.tokens import (
+    StructType,
+    TokenType,
+    VariableType,
+    JsonFieldType,
+)
 from .base import BaseCodeConverter, left_right_var_names
 from .templates import go
-from .utils import (
+from ssc_codegen.str_utils import (
     to_upper_camel_case,
-    wrap_backtick,
     wrap_double_quotes,
+    wrap_backtick,
 )
 
 converter = BaseCodeConverter()

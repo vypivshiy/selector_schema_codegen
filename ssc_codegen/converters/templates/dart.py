@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING
 
-from ssc_codegen.converters.templates.utils import TemplateBindings
-from ssc_codegen.converters.utils import to_upper_camel_case
+from .template_bindings import TemplateBindings
+from ssc_codegen.str_utils import to_upper_camel_case
 from ssc_codegen.tokens import TokenType, VariableType
 
 if TYPE_CHECKING:

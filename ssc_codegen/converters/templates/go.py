@@ -2,9 +2,7 @@
 
 from typing import TYPE_CHECKING, Any
 
-from ssc_codegen.converters.utils import (
-    to_upper_camel_case,
-)
+from ssc_codegen.str_utils import to_upper_camel_case
 from ssc_codegen.tokens import (
     StructType,
     TokenType,
@@ -19,7 +17,7 @@ from ..ast_utils import (
     is_optional_variable,
     find_json_struct_instance,
 )
-from .utils import (
+from .template_bindings import (
     TemplateBindings,
 )
 

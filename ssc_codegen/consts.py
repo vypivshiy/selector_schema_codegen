@@ -1,6 +1,6 @@
 from typing import Literal, TypeAlias
 
-from ssc_codegen.tokens import VariableType
+from ssc_codegen.tokens import VariableType, JsonVariableType
 
 RESERVED_METHODS = {
     "__PRE_VALIDATE__",
@@ -34,4 +34,16 @@ SIGNATURE_MAP = {
     VariableType.OPTIONAL_LIST_FLOAT: "Array<Float> | null",
     VariableType.LIST_FLOAT: "Array<Float>",
     VariableType.ANY: "Any",
+}
+
+JSON_SIGNATURE_MAP = {
+    JsonVariableType.NULL: "null",
+    JsonVariableType.BOOLEAN: "Bool",
+    JsonVariableType.STRING: "String",
+    JsonVariableType.NUMBER: "Int",
+    JsonVariableType.FLOAT: "Float",
+    JsonVariableType.OPTIONAL_BOOLEAN: "Bool | null",
+    JsonVariableType.OPTIONAL_FLOAT: "Float | null",
+    JsonVariableType.OPTIONAL_NUMBER: "Int | null",
+    JsonVariableType.OPTIONAL_STRING: "String | null",
 }

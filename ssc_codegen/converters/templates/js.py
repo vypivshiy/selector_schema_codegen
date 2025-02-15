@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING
 
-from ssc_codegen.converters.templates.utils import TemplateBindings
-from ssc_codegen.converters.utils import to_upper_camel_case
+from .template_bindings import TemplateBindings
+from ssc_codegen.str_utils import to_upper_camel_case
 from ssc_codegen.tokens import TokenType
 
 if TYPE_CHECKING:
@@ -31,13 +31,6 @@ def _make_docstring(value: str) -> str:
 
 BINDINGS = TemplateBindings()
 BINDINGS[TokenType.STRUCT] = "class {}"
-#
-#             this._doc = new DOMParser().parseFromString(doc, 'text/html');
-#         } else if (doc instanceof Document || doc instanceof Element) {
-#             this._doc = doc;
-#         } else {
-#             throw new Error("Invalid input: Expected a Document, Element, or string");
-#         }
 BINDINGS[TokenType.STRUCT_INIT] = lambda: (
     "constructor(doc)"
     + BRACKET_START

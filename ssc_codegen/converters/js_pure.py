@@ -1,4 +1,4 @@
-from ..ast_ssc import (
+from ssc_codegen.ast_ssc import (
     DefaultEnd,
     DefaultStart,
     Docstring,
@@ -51,10 +51,10 @@ from ..ast_ssc import (
     ToListFloat,
     ToJson,
 )
-from ..tokens import StructType, TokenType
+from ssc_codegen.tokens import StructType, TokenType
 from .base import BaseCodeConverter, left_right_var_names
 from .templates import js
-from .utils import to_upper_camel_case, wrap_backtick
+from ssc_codegen.str_utils import to_upper_camel_case, wrap_backtick
 
 converter = BaseCodeConverter()
 

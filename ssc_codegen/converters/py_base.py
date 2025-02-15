@@ -5,7 +5,7 @@ from functools import partial
 from typing_extensions import assert_never
 
 from .ast_utils import find_json_struct_instance
-from ..ast_ssc import (
+from ssc_codegen.ast_ssc import (
     DefaultEnd,
     DefaultStart,
     Docstring,
@@ -48,7 +48,12 @@ from ..ast_ssc import (
     JsonStruct,
     JsonStructField,
 )
-from ..tokens import StructType, TokenType, VariableType, JsonFieldType
+from ssc_codegen.tokens import (
+    StructType,
+    TokenType,
+    VariableType,
+    JsonFieldType,
+)
 from .base import BaseCodeConverter, left_right_var_names
 from .templates import py
 

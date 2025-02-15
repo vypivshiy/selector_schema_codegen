@@ -1,7 +1,7 @@
 import json
 import re
 
-from .utils import to_upper_camel_case
+from ssc_codegen.str_utils import to_upper_camel_case
 
 _BAD_STRING_STARTS = re.compile(r"^[\d\W]")
 

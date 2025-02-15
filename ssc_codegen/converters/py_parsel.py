@@ -1,5 +1,5 @@
 from .ast_utils import find_json_struct_instance
-from ..ast_ssc import (
+from ssc_codegen.ast_ssc import (
     HtmlAttrAllExpression,
     HtmlAttrExpression,
     HtmlCssAllExpression,
@@ -18,10 +18,10 @@ from ..ast_ssc import (
     StructFieldFunction,
     StructInit,
 )
-from ..tokens import TokenType, VariableType
+from ssc_codegen.tokens import TokenType, VariableType
 from .py_base import BasePyCodeConverter, lr_var_names
 from .templates import py
-from .templates.utils import TemplateBindings
+from .templates.template_bindings import TemplateBindings
 
 # setup converter
 BINDINGS_POST = TemplateBindings()

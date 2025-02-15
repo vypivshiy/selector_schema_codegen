@@ -2,7 +2,7 @@
 import warnings
 from functools import partial
 
-from ..ast_ssc import (
+from ssc_codegen.ast_ssc import (
     DefaultValueWrapper,
     Docstring,
     FormatExpression,
@@ -56,17 +56,13 @@ from ..ast_ssc import (
     ToJson,
     JsonStruct,
 )
-from ..tokens import StructType, TokenType
+from ssc_codegen.tokens import StructType, TokenType
 from .base import BaseCodeConverter, left_right_var_names
 from .templates import dart
-from .utils import (
-    escape_str,
-)
-from .utils import (
+from ssc_codegen.str_utils import (
     to_upper_camel_case as up_camel,
-)
-from .utils import (
     wrap_double_quotes as wrap_q,
+    escape_str,
 )
 
 converter = BaseCodeConverter()
@@ -157,7 +153,7 @@ def tt_pre_validate_post(_: PreValidateFunction) -> str:
 @converter.pre(TokenType.STRUCT_PART_DOCUMENT)
 def tt_part_document(node: PartDocFunction) -> str:
     name = MAGIC_METHODS.get(node.name)
-    return dart.BINDINGS[node.kind, name] + " " + dart.START_BRACKET
+    return f"{dart.BINDINGS[node.kind, name]} {dart.START_BRACKET}"
 
 
 @converter.post(TokenType.STRUCT_PART_DOCUMENT)

@@ -16,8 +16,9 @@ if TYPE_CHECKING:
     from .document import BaseDocument
 
 
-def check_re_expression(pattern: str) -> None:
-    if pattern == "":
+def assert_re_expression(pattern: str) -> None:
+    """throw SyntaxError if pattern empty or cannot be compiled."""
+    if not pattern:
         raise SyntaxError("Empty pattern expression")
     try:
         re.compile(pattern)
@@ -29,7 +30,7 @@ def check_re_expression(pattern: str) -> None:
 def convert_css_to_xpath(
     doc: "BaseDocument", prefix: str = "descendant-or-self::"
 ) -> "BaseDocument":
-    """replace CSS expressions to XPATH"""
+    """replace CSS expressions to XPATH in Document object"""
     old_stack = doc.stack.copy()
     new_stack: list[BaseExpression] = []
 
@@ -59,6 +60,7 @@ def convert_css_to_xpath(
 
 
 def convert_xpath_to_css(doc: "BaseDocument") -> "BaseDocument":
+    """replace xpath expressions to CSS in Document object"""
     old_stack = doc.stack.copy()
     new_stack: list[BaseExpression] = []
     for expr in old_stack:

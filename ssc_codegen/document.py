@@ -49,7 +49,7 @@ from .ast_ssc import (
     TrimExpression,
     ToJson,
 )
-from .document_utlis import check_re_expression
+from .document_utlis import assert_re_expression
 from .schema import BaseSchema
 from .selector_utils import validate_css_query, validate_xpath_query
 from .tokens import VariableType
@@ -429,7 +429,7 @@ class StringDocument(BaseDocument):
         - accept STRING, return STRING
         """
 
-        check_re_expression(pattern)
+        assert_re_expression(pattern)
         if pattern == "":
             raise SyntaxError("empty regex pattern")
         if self.stack_last_ret != VariableType.STRING:
@@ -444,7 +444,7 @@ class StringDocument(BaseDocument):
 
         - accept STRING, return LIST_STRING
         """
-        check_re_expression(pattern)
+        assert_re_expression(pattern)
         if self.stack_last_ret != VariableType.STRING:
             self._raise_wrong_type_error(
                 self.stack_last_ret, VariableType.STRING
@@ -458,7 +458,7 @@ class StringDocument(BaseDocument):
         - accept STRING, return STRING
         - accept LIST_STRING, return LIST_STRING
         """
-        check_re_expression(pattern)
+        assert_re_expression(pattern)
 
         match self.stack_last_ret:
             case VariableType.LIST_STRING:
@@ -634,7 +634,7 @@ class AssertDocument(BaseDocument):
             self._raise_wrong_type_error(
                 self.stack_last_ret, VariableType.STRING
             )
-        check_re_expression(pattern)
+        assert_re_expression(pattern)
 
         if pattern == "":
             raise SyntaxError("empty regex pattern")

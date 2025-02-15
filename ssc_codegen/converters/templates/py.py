@@ -9,7 +9,7 @@ from ssc_codegen.tokens import (
     JsonVariableType,
 )
 
-from .utils import (
+from .template_bindings import (
     TemplateBindings,
     TemplateTypeBindings,
 )

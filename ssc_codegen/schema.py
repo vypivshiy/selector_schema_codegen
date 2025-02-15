@@ -74,16 +74,21 @@ class BaseSchema:
         for k, v in cls.__get_mro_fields__().items():
             if k in cls.__ALLOWED_MAGIC__:
                 continue
+            cls._field_to_signature(k, signature, v)
+        return [signature, "..."]
 
-            if v.stack_last_ret == VariableType.NESTED:
-                nested_class = cls._get_nested_signature(v)
-                signature[k] = nested_class.__class_signature__()
-            elif v.stack_last_ret == VariableType.JSON:
-                signature[k] = json_struct_to_signature(v.stack[-1].value)  # noqa
-            else:
-                signature[k] = v.stack_last_ret
-        signature = [signature, "..."]
-        return signature
+    @classmethod
+    def _field_to_signature(
+        cls, key: str, signature: dict[str, Any], field: "BaseDocument"
+    ) -> None:
+        """convert field to signature item"""
+        if field.stack_last_ret == VariableType.NESTED:
+            nested_class = cls._get_nested_signature(field)
+            signature[key] = nested_class.__class_signature__()
+        elif field.stack_last_ret == VariableType.JSON:
+            signature[key] = json_struct_to_signature(field.stack[-1].value)  # noqa
+        else:
+            signature[key] = field.stack_last_ret
 
     @classmethod
     def _get_item_signature(cls):  # type: ignore
@@ -91,30 +96,15 @@ class BaseSchema:
         for k, v in cls.__get_mro_fields__().items():
             if k in cls.__ALLOWED_MAGIC__:
                 continue
-
-            if v.stack_last_ret == VariableType.NESTED:
-                nested_class = cls._get_nested_signature(v)
-                signature[k] = nested_class.__class_signature__()
-            elif v.stack_last_ret == VariableType.JSON:
-                signature[k] = json_struct_to_signature(v.stack[-1].value)  # noqa
-            else:
-                signature[k] = v.stack_last_ret
+            cls._field_to_signature(k, signature, v)
         return signature
 
     @classmethod
     def _get_dict_signature(cls):  # type: ignore
         signature = {}
         # _field_k always string
-        _field_k, field_v = cls.__KEY__, cls.__VALUE__
-        if field_v.stack_last_ret == VariableType.NESTED:
-            nested_class = [
-                e for e in field_v.stack if e.kind == TokenType.EXPR_NESTED
-            ][0].schema_cls  # noqa
-            signature["<K>"] = nested_class.__class_signature__()
-        elif field_v.stack_last_ret == VariableType.JSON:
-            signature["<K>"] = json_struct_to_signature(v.stack[-1].value)  # noqa
-        else:
-            signature["<K>"] = field_v.stack_last_ret
+        field_v = cls.__VALUE__
+        cls._field_to_signature("<K>", signature, field_v)
         signature["<KN>"] = "..."
         return signature
 
