@@ -20,19 +20,20 @@ type TBooks struct {
 	Rating   string `json:"rating"`
 	Price    int    `json:"price"`
 }
-type TBooksITEMS = []TBooks
 type TCataloguePage struct {
-	Title   string      `json:"title"`
-	Urls    TUrls       `json:"urls"`
-	UrlsMap TUrlsMap    `json:"urls_map"`
-	Books   TBooksITEMS `json:"books"`
+	Title   string   `json:"title"`
+	Urls    TUrls    `json:"urls"`
+	UrlsMap TUrlsMap `json:"urls_map"`
+	Books   []TBooks `json:"books"`
 }
 
 // Urls fetch add patches and urls from <a> tag
 //
 // [
-//     "String",
-//     "..."
+//
+//	"String",
+//	"..."
+//
 // ]
 type Urls struct{ Document *goquery.Document }
 
@@ -65,10 +66,10 @@ func (p *Urls) Parse() (*TUrls, error) {
 
 // UrlsMap
 //
-// {
-//     "<K>": "String",
-//     "<KN>": "..."
-// }
+//	{
+//	    "<K>": "String",
+//	    "<KN>": "..."
+//	}
 type UrlsMap struct{ Document *goquery.Document }
 
 func (p *UrlsMap) splitDoc(value *goquery.Selection) (*goquery.Selection, error) {
@@ -113,14 +114,16 @@ func (p *UrlsMap) Parse() (*TUrlsMap, error) {
 // Books
 //
 // [
-//     {
-//         "name": "String",
-//         "image_url": "String",
-//         "url": "String",
-//         "rating": "String",
-//         "price": "Int"
-//     },
-//     "..."
+//
+//	{
+//	    "name": "String",
+//	    "image_url": "String",
+//	    "url": "String",
+//	    "rating": "String",
+//	    "price": "Int"
+//	},
+//	"..."
+//
 // ]
 type Books struct{ Document *goquery.Document }
 
@@ -171,7 +174,7 @@ func (p *Books) parsePrice(value *goquery.Selection) (result int, err error) {
 	value1 := value
 	value2 := value1.Find(".price_color").First()
 	value3 := value2.Text()
-	value4 := regexp.MustCompile(`(\d+)`).FindStringSubmatch(value3)[0]
+	value4 := regexp.MustCompile(`(\d+)`).FindStringSubmatch(value3)[1]
 	value5, err := strconv.Atoi(value4)
 	if err != nil {
 		panic(err)
@@ -179,8 +182,8 @@ func (p *Books) parsePrice(value *goquery.Selection) (result int, err error) {
 	result = value5
 	return result, nil
 }
-func (p *Books) Parse() (*TBooksITEMS, error) {
-	items := make(TBooksITEMS, 0)
+func (p *Books) Parse() (*[]TBooks, error) {
+	items := make([]TBooks, 0)
 	docParts, err := p.splitDoc(p.Document.Selection)
 	if err != nil {
 		return nil, err
@@ -211,37 +214,36 @@ func (p *Books) Parse() (*TBooksITEMS, error) {
 
 // CataloguePage books.toscrape.com catalogue page entrypoint parser
 //
-//     USAGE:
+// USAGE:
 //
-//         1. GET <catalog page> (https://books.toscrape.com/, https://books.toscrape.com/catalogue/page-2.html, ...)
-//         2. add another prepare instruction how to correct cook page (if needed?)
+//  1. GET <catalog page> (https://books.toscrape.com/, https://books.toscrape.com/catalogue/page-2.html, ...)
+//  2. add another prepare instruction how to correct cook page (if needed?)
 //
-//     ISSUES:
+// ISSUES:
 //
-//         1. nope! Their love being scraped!
+//  1. nope! Their love being scraped!
 //
-//
-// {
-//     "title": "String",
-//     "urls": [
-//         "String",
-//         "..."
-//     ],
-//     "urls_map": {
-//         "<K>": "String",
-//         "<KN>": "..."
-//     },
-//     "books": [
-//         {
-//             "name": "String",
-//             "image_url": "String",
-//             "url": "String",
-//             "rating": "String",
-//             "price": "Any"
-//         },
-//         "..."
-//     ]
-// }
+//	{
+//	    "title": "String",
+//	    "urls": [
+//	        "String",
+//	        "..."
+//	    ],
+//	    "urls_map": {
+//	        "<K>": "String",
+//	        "<KN>": "..."
+//	    },
+//	    "books": [
+//	        {
+//	            "name": "String",
+//	            "image_url": "String",
+//	            "url": "String",
+//	            "rating": "String",
+//	            "price": "Int"
+//	        },
+//	        "..."
+//	    ]
+//	}
 type CataloguePage struct{ Document *goquery.Document }
 
 func (p *CataloguePage) preValidate(value *goquery.Selection) (error, error) {
@@ -289,7 +291,7 @@ func (p *CataloguePage) parseUrlsMap(value *goquery.Selection) (TUrlsMap, error)
 	}
 	return *value1, nil
 }
-func (p *CataloguePage) parseBooks(value *goquery.Selection) (TBooksITEMS, error) {
+func (p *CataloguePage) parseBooks(value *goquery.Selection) ([]TBooks, error) {
 	doc0 := goquery.NewDocumentFromNode(value.Nodes[0])
 	st0 := Books{doc0}
 	value1, err := st0.Parse()

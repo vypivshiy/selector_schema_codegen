@@ -5,19 +5,35 @@ from __future__ import annotations
 import re
 from typing import List, Dict, TypedDict, Union
 from contextlib import suppress
+import sys
+
+if sys.version_info >= (3, 10):
+    from types import NoneType
+else:
+    NoneType = type(None)
 
 from parsel import Selector, SelectorList
 
 T_Urls = List[str]
 T_UrlsMap = Dict[str, str]
-T_Books_ITEM = TypedDict(
-    "T_Books_ITEM",
-    {"name": str, "image_url": str, "url": str, "rating": str, "price": int},
+T_Books = TypedDict(
+    "T_Books",
+    {
+        "name": str,
+        "image_url": str,
+        "url": str,
+        "rating": str,
+        "price": int,
+    },
 )
-T_Books = List[T_Books_ITEM]
 T_CataloguePage = TypedDict(
     "T_CataloguePage",
-    {"title": str, "urls": T_Urls, "urls_map": T_UrlsMap, "books": T_Books},
+    {
+        "title": str,
+        "urls": T_Urls,
+        "urls_map": T_UrlsMap,
+        "books": List[T_Books],
+    },
 )
 
 
@@ -39,7 +55,7 @@ class Urls:
         return value1
 
     def _parse_item(self, value: Selector) -> str:
-        value1 = value.css("::attr(href)").get()
+        value1 = value.attrib["href"]
         return value1
 
     def parse(self) -> T_Urls:
@@ -64,7 +80,7 @@ class UrlsMap:
         return value1
 
     def _parse_key(self, value: Selector) -> str:
-        value1 = value.css("::attr(href)").get()
+        value1 = value.attrib["href"]
         return value1
 
     def _parse_value(self, value: Selector) -> str:
@@ -104,23 +120,23 @@ class Books:
 
     def _parse_name(self, value: Selector) -> str:
         value1 = value.css(".thumbnail")
-        value2 = value1.css("::attr(alt)").get()
+        value2 = value1.attrib["alt"]
         return value2
 
     def _parse_image_url(self, value: Selector) -> str:
         value1 = value.css(".thumbnail")
-        value2 = value1.css("::attr(src)").get()
+        value2 = value1.attrib["src"]
         value3 = "https://{}".format(value2) if value2 else value2
         return value3
 
     def _parse_url(self, value: Selector) -> str:
         value1 = value.css(".image_container > a")
-        value2 = value1.css("::attr(href)").get()
+        value2 = value1.attrib["href"]
         return value2
 
     def _parse_rating(self, value: Selector) -> str:
         value1 = value.css(".star-rating")
-        value2 = value1.css("::attr(class)").get()
+        value2 = value1.attrib["class"]
         value3 = value2.lstrip("star-rating ")
         return value3
 
@@ -128,7 +144,7 @@ class Books:
         value1 = value
         with suppress(Exception):
             value2 = value1.css(".price_color")
-            value3 = value2.css("::text").get()
+            value3 = "".join(value2.css("::text").getall())
             value4 = re.search("(\\d+)", value3)[1]
             value5 = int(value4)
             return value5
@@ -150,14 +166,14 @@ class Books:
 class CataloguePage:
     """books.toscrape.com catalogue page entrypoint parser
 
-        USAGE:
+    USAGE:
 
-            1. GET <catalog page> (https://books.toscrape.com/, https://books.toscrape.com/catalogue/page-2.html, ...)
-            2. add another prepare instruction how to correct cook page (if needed?)
+        1. GET <catalog page> (https://books.toscrape.com/, https://books.toscrape.com/catalogue/page-2.html, ...)
+        2. add another prepare instruction how to correct cook page (if needed?)
 
-        ISSUES:
+    ISSUES:
 
-            1. nope! Their love being scraped!
+        1. nope! Their love being scraped!
 
 
     {
@@ -176,7 +192,7 @@ class CataloguePage:
                 "image_url": "String",
                 "url": "String",
                 "rating": "String",
-                "price": "Any"
+                "price": "Int"
             },
             "..."
         ]
@@ -189,7 +205,7 @@ class CataloguePage:
 
     def _pre_validate(self, value: Union[Selector, SelectorList]) -> None:
         value1 = value.css("title")
-        value2 = value1.css("::text").get()
+        value2 = "".join(value1.css("::text").getall())
         assert re.search("Books to Scrape", value2), ""
         return
 
@@ -199,7 +215,7 @@ class CataloguePage:
             assert value1.css("title"), ""
             value2 = value1
             value3 = value2.css("title")
-            value4 = value3.css("::text").get()
+            value4 = "".join(value3.css("::text").getall())
             value5 = re.sub("^\\s+", "", value4)
             value6 = re.sub("\\s+$", "", value5)
             return value6

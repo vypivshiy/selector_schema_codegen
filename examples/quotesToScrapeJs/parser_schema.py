@@ -15,12 +15,27 @@ else:
 from parsel import Selector, SelectorList
 
 J_Author = TypedDict(
-    "J_Author", {"name": str, "goodreads_links": str, "slug": str}
+    "J_Author",
+    {
+        "name": str,
+        "goodreads_links": str,
+        "slug": str,
+    },
 )
 J_Quote = TypedDict(
-    "J_Quote", {"tags": List[str], "author": J_Author, "text": str}
+    "J_Quote",
+    {
+        "tags": List[str],
+        "author": J_Author,
+        "text": str,
+    },
 )
-T_Main = TypedDict("T_Main", {"data": List[J_Quote]})
+T_Main = TypedDict(
+    "T_Main",
+    {
+        "data": List[J_Quote],
+    },
+)
 
 
 class Main:
@@ -33,13 +48,13 @@ class Main:
     {
         "data": [
             {
-                "tags": "string",
+                "tags": "String",
                 "author": {
-                    "name": "string",
-                    "goodreads_links": "string",
-                    "slug": "string"
+                    "name": "String",
+                    "goodreads_links": "String",
+                    "slug": "String"
                 },
-                "text": "string"
+                "text": "String"
             },
             "..."
         ]
