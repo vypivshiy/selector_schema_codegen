@@ -1,6 +1,6 @@
 [project]
 name = "ssc_codegen"
-version = "0.6.0"
+version = "0.6.1"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -19,7 +19,7 @@ Examples = "https://github.com/vypivshiy/selector_schema_codegen/examples"
 
 
 [project.scripts]
-ssc-gen = 'ssc_codegen.cli:main'
+ssc-gen = 'ssc_codegen.cli.main:main'
 
 [build-system]
 requires = ["hatchling"]
