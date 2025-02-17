@@ -79,3 +79,75 @@ def go_unimport_naive(go_code: str) -> str:
             sub_pattern = f'\\s*"{absolute_lib}"'
             go_code = re.sub(sub_pattern, "", go_code)
     return go_code
+
+
+RE_PY_METHOD_BLOCK = re.compile(
+    r"""
+def\s_(?:parse|split)_\w+\(.*\:\s*  # SPLIT_DOC STRUCT_PARSE HEAD
+(?:\n|.)*?                          # BLOCK OF CODE
+return\s(?P<ret_var>value[\d+]?)    # RET STMT 
+""",
+re.X,
+)
+
+
+def py_optimize_return_naive(py_code: str) -> str:
+    """optimize _parse_[a-zA-Z_0-9] and _split_doc return statements
+
+    insert last expr instruction to return stmt instead create new variable
+
+    example:
+
+    IN:
+
+    class Foo:
+        # ...
+        def _split_doc(self, v):
+            v1 = v.expr1
+            v2 = v1.expr2
+            return v2
+        def _parse_a(self, v):
+            v1 = v.expr1
+            return v1
+        # ...
+
+    OUT:
+
+    class Foo:
+        # ...
+        def _split_doc(self, v):
+            v1 = v.expr1
+            return v1.expr2
+        def _parse_a(self, v):
+            return v.expr1
+        # ...
+
+    """
+    tmp_code = py_code
+    for method_block in RE_PY_METHOD_BLOCK.finditer(tmp_code):
+        ret_var = method_block["ret_var"]
+        # value6\s*=\s*(?P<expr>.*)$
+        re_expr = f"{ret_var}\\s*=\\s*(?P<expr>.*)"
+        expr = re.search(re_expr, method_block[0])["expr"]
+
+        new_method_block = re.sub(f"\\s*{re_expr}", "", method_block[0])
+        new_method_block = re.sub(
+            rf"return {ret_var}", f"return {expr}", new_method_block
+        )
+        tmp_code = tmp_code.replace(method_block[0], new_method_block, 1)
+    return tmp_code
+
+
+RE_STR_FMT = re.compile(r"(?P<template_str>['\"].*['\"])\.format\((?P<var>.*)\)")
+
+
+def py_str_format_to_fstring(py_code: str) -> str:
+    """replace str.format() to fstring"""
+    tmp_code = py_code
+    for expr in RE_STR_FMT.finditer(tmp_code):
+        old_expr = expr[0]
+        var = expr['var']
+        template_str = expr['template_str']
+        new_expr = 'f' + template_str.replace('{}', '{' + var + '}')
+        tmp_code = tmp_code.replace(old_expr, new_expr)
+    return tmp_code

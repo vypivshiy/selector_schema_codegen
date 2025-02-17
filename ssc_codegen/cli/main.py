@@ -11,6 +11,7 @@ from ssc_codegen.cli.cli_utils import (
     import_converter,
     raw_json_check_keys,
 )
+from ssc_codegen.cli.code_callbacks import CB_PY_CODE, CB_DART_CODE, CB_GO_CODE
 from .consts import (
     PyLIBS,
     JsLIBS,
@@ -33,7 +34,6 @@ from .consts import (
     CMD_JSON_GEN,
 )
 from ..converters.json_to_schema import convert_json_to_schema_code
-from ..str_utils import remove_empty_lines, go_unimport_naive
 from .cli_callbacks import cb_check_ssc_files, cb_folder_out
 
 
@@ -152,6 +152,7 @@ def gen_py(
         css_to_xpath=to_xpath,
         debug_instructions=debug,
         debug_comment_prefix="# ",
+        code_cb=CB_PY_CODE,
     )
 
 
@@ -244,7 +245,7 @@ def gen_dart(
         suffix=suffix,
         comment_str=f"// {COMMENT_STRING}",
         fmt_cmd=fmt_cmd,
-        code_cb=remove_empty_lines,
+        code_cb=CB_DART_CODE,
         docstring_class_top=True,
         xpath_to_css=to_css,
         css_to_xpath=to_xpath,
@@ -296,7 +297,7 @@ def gen_go(
         comment_str=f"// {COMMENT_STRING}",
         fmt_cmd=fmt_cmd,
         # todo: better API for code callbacks
-        code_cb=lambda lines: go_unimport_naive(remove_empty_lines(lines)),
+        code_cb=CB_GO_CODE,
         docstring_class_top=True,
         variables_patches={"PACKAGE": package or out.name},
         xpath_to_css=to_css,
