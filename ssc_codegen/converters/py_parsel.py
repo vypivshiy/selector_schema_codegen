@@ -28,7 +28,9 @@ BINDINGS_POST = TemplateBindings()
 BINDINGS_POST[TokenType.STRUCT_INIT] = (
     "self._doc=Selector(document) if isinstance(document, str) else document"
 )
-BINDINGS_POST[TokenType.IMPORTS] = "from parsel import Selector, SelectorList"
+BINDINGS_POST[TokenType.IMPORTS] = (
+    "from parsel import Selector, SelectorList\nfrom parsel.selector import _SelectorType  # noqa"
+)
 
 # extend default bindings
 py.BINDINGS[TokenType.EXPR_CSS] = "{} = {}.css({})"
@@ -51,7 +53,7 @@ converter = BasePyCodeConverter()
 
 @converter.pre(TokenType.STRUCT_INIT)
 def tt_init(node: StructInit) -> str:
-    p_type = "Union[str, SelectorList, Selector]"
+    p_type = "Union[str, _SelectorType]"
     return py.INDENT_METHOD + py.BINDINGS[node.kind, p_type]
 
 
@@ -68,13 +70,13 @@ def tt_imports_post(node: ModuleImports) -> str:
 @converter.pre(TokenType.STRUCT_PRE_VALIDATE)
 def tt_pre_validate(node: PreValidateFunction) -> str:
     name = py.MAGIC_METHODS_NAME.get(node.name)
-    p_type = "Union[Selector, SelectorList]"
+    p_type = "Union[_SelectorType]"
     return py.INDENT_METHOD + py.BINDINGS[node.kind, name, p_type]
 
 
 @converter.pre(TokenType.STRUCT_PART_DOCUMENT)
 def tt_part_document(node: PartDocFunction) -> str:
-    p_type = "Selector"
+    p_type = "_SelectorType"
     ret_type = "SelectorList"
     name = py.MAGIC_METHODS_NAME.get(node.name)
     return py.INDENT_METHOD + py.BINDINGS[node.kind, name, p_type, ret_type]
