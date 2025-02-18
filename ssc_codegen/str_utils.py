@@ -153,7 +153,7 @@ def py_str_format_to_fstring(py_code: str) -> str:
     return tmp_code
 
 
-RE_JS_METHOD_BLOCK = re.compile(r"_(?:parse|split)\w+\(.*\{(?:\n|.)*?return\s(?P<ret_var>\w+);")
+RE_JS_METHOD_BLOCK = re.compile(r"\s_(?:parse|split)\w+\(.*\{(?:\n|.)*?return\s(?P<ret_var>\w+);")
 
 def js_pure_optimize_return(js_code: str) -> str:
     tmp_code = js_code
@@ -163,6 +163,6 @@ def js_pure_optimize_return(js_code: str) -> str:
         match_expr = re.search(f'let {ret_var} = (?P<expr>.*);', method_code_raw)
         expr = match_expr["expr"]  # noqa
         new_method_code = re.sub(f'\\s*let {ret_var} = (?P<expr>.*);', "", method_code_raw)
-        new_method_code = re.sub(f'return {ret_var}', f'return {expr}', new_method_code)
+        new_method_code = new_method_code.replace(f'return {ret_var}', f'return {expr}', 1)
         tmp_code = tmp_code.replace(method_code_raw, new_method_code, 1)
     return tmp_code
