@@ -82,7 +82,9 @@ def tt_docstring(node: Docstring) -> str:
 
 @converter.pre(TokenType.EXPR_RETURN)
 def tt_ret(node: ReturnExpression) -> str:
-    _, nxt = left_right_var_names("value", node.variable)
+    prv, nxt = left_right_var_names("value", node.variable)
+    if node.have_default_expr():
+        return js.BINDINGS[node.kind, prv]
     return js.BINDINGS[node.kind, nxt]
 
 
@@ -160,7 +162,7 @@ def tt_start_parse_post(node: StartParseFunction) -> str:
 
 @converter.pre(TokenType.EXPR_DEFAULT_START)
 def tt_default_start(node: DefaultStart) -> str:
-    return js.BINDINGS[node.kind]
+    return js.BINDINGS[node.kind] + 'let value1 = value;'
 
 
 @converter.pre(TokenType.EXPR_DEFAULT_END)

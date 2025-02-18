@@ -232,7 +232,7 @@ def gen_item_body(node: "StartParseFunction") -> str:
     # kv property
     # return { k1: this._parseK1(), k2: this._parseK2(), ...}
     return (
-        "let item = "
+        "return "
         + BRACKET_START
         + ",".join(
             f"{f.name}: this._parse{to_upper_camel_case(f.name)}(this._doc)"
@@ -241,7 +241,6 @@ def gen_item_body(node: "StartParseFunction") -> str:
         )
         + BRACKET_END
         + ";"
-        + "return item;"
     )
 
 
@@ -256,41 +255,31 @@ def gen_list_body(node: "StartParseFunction") -> str:
         )
         + BRACKET_END
     )
+    # return Array.from(this._splitDoc(this._doc)).map(e => ({
+    #     f1: this.m1(e), ...
+    #   }));
     return (
-        "let items = [];"
-        + "Array.from(this._splitDoc(this._doc))"  # todo: split doc const
-        + ".forEach((e) =>"
-        + BRACKET_START
-        + "items.push("
+        "return "
+        + "Array.from(this._splitDoc(this._doc)).map(e => ("
         + kv_prop
-        + ");"
-        + BRACKET_END
-        + ");"
-        + "return items;"
+        + "));"
     )
 
 
 def gen_dict_body(_: "StartParseFunction") -> str:
     key_m = to_upper_camel_case(MAGIC_METHODS.get("__KEY__"))
     value_m = to_upper_camel_case(MAGIC_METHODS.get("__VALUE__"))
-    # part_m = MAGIC_METHODS.get('__SPLIT_DOC__')
-    return (
-        "let item = {};"
-        + "Array.from(this._splitDoc(this._doc))"  # todo: split doc const
-        + ".forEach((e) =>"
-        + BRACKET_START
-        + f"let k = this._parse{key_m}(e);"
-        + f"item[k] = this._parse{value_m}(e);"
-        + BRACKET_END
-        + ");"
-        + "return item;"
-    )
+    # parse() {
+    #
+    # }
+    return ("return Array.from(this._splitDoc(this._doc)).reduce((item, e)"
+            + f"=> (item[this._parse{key_m}(e)] = this._parse{value_m}(e), item)"
+            + ", {});")
+
 
 
 def gen_flat_list_body(_: "StartParseFunction") -> str:
     item_m = to_upper_camel_case(MAGIC_METHODS.get("__ITEM__"))
-    # part_m = MAGIC_METHODS.get("__SPLIT_DOC__")
     return (
-        f"let items = Array.from(this._splitDoc(this._doc)).map((e) => this._parse{item_m}(e));"
-        + "return items;"
+        f"return Array.from(this._splitDoc(this._doc)).map((e) => this._parse{item_m}(e));"
     )
