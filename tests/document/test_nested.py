@@ -1,5 +1,5 @@
 import pytest
-from ssc_codegen import D, N, R, ItemSchema
+from ssc_codegen import D, N, ItemSchema
 from ssc_codegen.document import BaseDocument
 
 

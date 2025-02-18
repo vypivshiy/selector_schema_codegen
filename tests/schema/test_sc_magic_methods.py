@@ -151,8 +151,7 @@ def test_fail_schema_dict_key(schema: Type["BaseSchema"]) -> None:
             __VALUE__=D().css("a"),
         ),
         schema_flat_list_factory(
-            __SPLIT_DOC__=D().css_all("a"),
-            __ITEM__=D().css("a")
+            __SPLIT_DOC__=D().css_all("a"), __ITEM__=D().css("a")
         ),
     ],
 )
@@ -167,8 +166,9 @@ def test_fail_document_value_type(schema: Type["BaseSchema"]) -> None:
         schema_dict_factory(
             __SPLIT_DOC__=D().css_all("a"),
             __KEY__=D().default("ok").attr("a"),
-            __VALUE__=R()),
-    ]
+            __VALUE__=R(),
+        ),
+    ],
 )
 def test_valid_dict_schema_key(schema: Type["BaseSchema"]) -> None:
     assert build_ast_struct(schema)

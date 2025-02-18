@@ -142,5 +142,5 @@ func main() {
 )
 def test_go_unimport_naive(input_code, expected_output) -> None:
     # this function just remove unused import, later gofmt fix code style
-    output = go_unimport_naive(input_code).replace('\n', '').replace(' ', '')
-    assert output == expected_output.replace('\n', '').replace(' ', '')
+    output = go_unimport_naive(input_code).replace("\n", "").replace(" ", "")
+    assert output == expected_output.replace("\n", "").replace(" ", "")

@@ -113,7 +113,10 @@ def test_convert_xpath_to_css_queries(
         (D().xpath("//a"), [TokenType.EXPR_CSS]),
         (D().xpath_all("//a"), [TokenType.EXPR_CSS_ALL]),
         (D().is_xpath("//a"), [TokenType.IS_CSS]),
-        (D().xpath("//a").is_xpath("//b"), [TokenType.EXPR_CSS, TokenType.IS_CSS]),
+        (
+            D().xpath("//a").is_xpath("//b"),
+            [TokenType.EXPR_CSS, TokenType.IS_CSS],
+        ),
         (
             D().xpath("//a").xpath_all("//b").first().is_xpath("//c"),
             [

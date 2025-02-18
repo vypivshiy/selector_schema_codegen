@@ -1,6 +1,6 @@
 import pytest
 
-from ssc_codegen import D, N, R, ItemSchema
+from ssc_codegen import D, R
 from ssc_codegen.ast_ssc import VariableType
 from ssc_codegen.document import BaseDocument
 

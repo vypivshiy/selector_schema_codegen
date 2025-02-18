@@ -1,6 +1,12 @@
 import pytest
-from ssc_codegen.str_utils import to_snake_case, to_upper_camel_case, to_lower_camel_case, wrap_double_quotes, \
-    wrap_backtick, escape_str
+from ssc_codegen.str_utils import (
+    to_snake_case,
+    to_upper_camel_case,
+    to_lower_camel_case,
+    wrap_double_quotes,
+    wrap_backtick,
+    escape_str,
+)
 
 
 @pytest.mark.parametrize(
@@ -46,10 +52,10 @@ def test_to_lower_camel_case(input_str, expected_output) -> None:
 @pytest.mark.parametrize(
     "input_str, escape_ch, expected_output",
     [
-        ('hello', '\\', '"hello"'),
-        ('hello"world', '\\', '"hello\\"world"'),
-        ('', '\\', '""'),
-        ('hello"world', '*', '"hello*"world"'),
+        ("hello", "\\", '"hello"'),
+        ('hello"world', "\\", '"hello\\"world"'),
+        ("", "\\", '""'),
+        ('hello"world', "*", '"hello*"world"'),
     ],
 )
 def test_wrap_double_quotes(input_str, escape_ch, expected_output) -> None:
@@ -59,10 +65,10 @@ def test_wrap_double_quotes(input_str, escape_ch, expected_output) -> None:
 @pytest.mark.parametrize(
     "input_str, escape_ch, expected_output",
     [
-        ('hello', '\\', '`hello`'),
-        ('hello`world', '\\', '`hello\\`world`'),
-        ('', '\\', '``'),
-        ('hello`world', '*', '`hello*`world`'),
+        ("hello", "\\", "`hello`"),
+        ("hello`world", "\\", "`hello\\`world`"),
+        ("", "\\", "``"),
+        ("hello`world", "*", "`hello*`world`"),
     ],
 )
 def test_wrap_backtick(input_str, escape_ch, expected_output) -> None:
@@ -72,11 +78,11 @@ def test_wrap_backtick(input_str, escape_ch, expected_output) -> None:
 @pytest.mark.parametrize(
     "input_str, pattern, escape_ch, expected_output",
     [
-        ('hello.world', r'\.', '\\', 'hello\\.world'),
-        ('hello^world', r'\^', '\\', 'hello\\^world'),
-        ('hello$world', r'\$', '\\', 'hello\\$world'),
-        ('hello-world', r'\-', '*', 'hello*-world'),
-        ('', r'[\-.^$*+?{}\[\]\\|()]', '\\', ''),
+        ("hello.world", r"\.", "\\", "hello\\.world"),
+        ("hello^world", r"\^", "\\", "hello\\^world"),
+        ("hello$world", r"\$", "\\", "hello\\$world"),
+        ("hello-world", r"\-", "*", "hello*-world"),
+        ("", r"[\-.^$*+?{}\[\]\\|()]", "\\", ""),
     ],
 )
 def test_escape_str(input_str, pattern, escape_ch, expected_output) -> None:

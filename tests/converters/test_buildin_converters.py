@@ -1,4 +1,5 @@
 """helper function helps check converter implementation"""
+
 import pytest
 from helpers_converters import (
     CSS_TOKENS_IMPL,
@@ -82,7 +83,11 @@ _TEST_GO_GOQUERY = new_converter_check(
     # 1. go structs don't need init constructor
     # 2. try/catch (default) operation
     #    realized by defer func() + rescue
-    exclude={TokenType.STRUCT_INIT, TokenType.EXPR_DEFAULT_END, TokenType.JSON_FIELD},
+    exclude={
+        TokenType.STRUCT_INIT,
+        TokenType.EXPR_DEFAULT_END,
+        TokenType.JSON_FIELD,
+    },
 )
 
 _TEST_JS_PURE = new_converter_check(

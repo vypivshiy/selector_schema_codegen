@@ -18,12 +18,23 @@ def schema_factory(parent: Type[BaseSchema], **fields: Document) -> type:
     return type("_PytestFactorySchema", (parent,), fields)
 
 
-def schema_dict_factory(*, __SPLIT_DOC__: Document, __KEY__: Document, __VALUE__:Document) -> type:  # noqa
-    return schema_factory(DictSchema, __SPLIT_DOC__=__SPLIT_DOC__, __KEY__=__KEY__, __VALUE__=__VALUE__)
+def schema_dict_factory(
+    *, __SPLIT_DOC__: Document, __KEY__: Document, __VALUE__: Document
+) -> type:  # noqa
+    return schema_factory(
+        DictSchema,
+        __SPLIT_DOC__=__SPLIT_DOC__,
+        __KEY__=__KEY__,
+        __VALUE__=__VALUE__,
+    )
 
 
-def schema_flat_list_factory(*, __SPLIT_DOC__: Document, __ITEM__: Document) -> type:  # noqa
-    return schema_factory(FlatListSchema, __SPLIT_DOC__=__SPLIT_DOC__, __ITEM__=__ITEM__)
+def schema_flat_list_factory(
+    *, __SPLIT_DOC__: Document, __ITEM__: Document
+) -> type:  # noqa
+    return schema_factory(
+        FlatListSchema, __SPLIT_DOC__=__SPLIT_DOC__, __ITEM__=__ITEM__
+    )
 
 
 def schema_list_factory(*, __SPLIT_DOC__: Document, **fields: Document) -> type:  # noqa

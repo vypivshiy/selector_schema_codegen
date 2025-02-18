@@ -11,7 +11,12 @@ from ssc_codegen.cli.cli_utils import (
     import_converter,
     raw_json_check_keys,
 )
-from ssc_codegen.cli.code_callbacks import CB_PY_CODE, CB_DART_CODE, CB_GO_CODE, CB_JS_CODE
+from ssc_codegen.cli.code_callbacks import (
+    CB_PY_CODE,
+    CB_DART_CODE,
+    CB_GO_CODE,
+    CB_JS_CODE,
+)
 from .consts import (
     PyLIBS,
     JsLIBS,

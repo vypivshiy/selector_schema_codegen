@@ -1,5 +1,3 @@
-from importlib.resources import read_text
-
 from ssc_codegen.converters.base import BaseCodeConverter
 from ssc_codegen.tokens import TokenType
 
@@ -49,10 +47,10 @@ REQUIRED_TOKENS_CONVERT_IMPL = {
 
 
 def new_converter_check(
-        name: str,
-        converter: BaseCodeConverter,
-        include: set[TokenType],
-        exclude: set[TokenType] | None = None) -> tuple[str, BaseCodeConverter, set[TokenType], set[TokenType]]:
+    name: str,
+    converter: BaseCodeConverter,
+    include: set[TokenType],
+    exclude: set[TokenType] | None = None,
+) -> tuple[str, BaseCodeConverter, set[TokenType], set[TokenType]]:
     exclude = exclude or set()
     return name, converter, include, exclude
-    

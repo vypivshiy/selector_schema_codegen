@@ -4,9 +4,7 @@ from ssc_codegen.ast_ssc import VariableType
 from ssc_codegen.document import BaseDocument
 
 
-@pytest.mark.parametrize('pattern', [
-    '(', ''
-])
+@pytest.mark.parametrize("pattern", ["(", ""])
 def test_fail_compile_regex(pattern: str) -> None:
     with pytest.raises(SyntaxError):
         R().re(pattern)
@@ -22,11 +20,7 @@ def test_fail_compile_regex(pattern: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "expr", [
-        R().re_all("0").index(0),
-        R().re("0"),
-        R().re_sub("0", "")
-    ]
+    "expr", [R().re_all("0").index(0), R().re("0"), R().re_sub("0", "")]
 )
 def test_assert_expr(expr: BaseDocument) -> None:
     assert expr.stack_last_ret == VariableType.STRING
