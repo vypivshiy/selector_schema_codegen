@@ -11,7 +11,7 @@ from ssc_codegen.cli.cli_utils import (
     import_converter,
     raw_json_check_keys,
 )
-from ssc_codegen.cli.code_callbacks import CB_PY_CODE, CB_DART_CODE, CB_GO_CODE
+from ssc_codegen.cli.code_callbacks import CB_PY_CODE, CB_DART_CODE, CB_GO_CODE, CB_JS_CODE
 from .consts import (
     PyLIBS,
     JsLIBS,
@@ -202,6 +202,7 @@ def gen_js(
         css_to_xpath=to_xpath,
         debug_instructions=debug,
         debug_comment_prefix="// ",
+        code_cb=CB_JS_CODE,
     )
 
 

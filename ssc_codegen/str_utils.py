@@ -128,7 +128,7 @@ def py_optimize_return_naive(py_code: str) -> str:
         ret_var = method_block["ret_var"]
         # value6\s*=\s*(?P<expr>.*)$
         re_expr = f"{ret_var}\\s*=\\s*(?P<expr>.*)"
-        expr = re.search(re_expr, method_block[0])["expr"]
+        expr = re.search(re_expr, method_block[0])["expr"] # noqa
 
         new_method_block = re.sub(f"\\s*{re_expr}", "", method_block[0])
         new_method_block = re.sub(
@@ -150,4 +150,19 @@ def py_str_format_to_fstring(py_code: str) -> str:
         template_str = expr['template_str']
         new_expr = 'f' + template_str.replace('{}', '{' + var + '}')
         tmp_code = tmp_code.replace(old_expr, new_expr)
+    return tmp_code
+
+
+RE_JS_METHOD_BLOCK = re.compile(r"_(?:parse|split)\w+\(.*\{(?:\n|.)*?return\s(?P<ret_var>\w+);")
+
+def js_pure_optimize_return(js_code: str) -> str:
+    tmp_code = js_code
+    for method_code in RE_JS_METHOD_BLOCK.finditer(tmp_code):
+        ret_var = method_code["ret_var"]
+        method_code_raw = method_code[0]
+        match_expr = re.search(f'let {ret_var} = (?P<expr>.*);', method_code_raw)
+        expr = match_expr["expr"]  # noqa
+        new_method_code = re.sub(f'\\s*let {ret_var} = (?P<expr>.*);', "", method_code_raw)
+        new_method_code = re.sub(f'return {ret_var}', f'return {expr}', new_method_code)
+        tmp_code = tmp_code.replace(method_code_raw, new_method_code, 1)
     return tmp_code
