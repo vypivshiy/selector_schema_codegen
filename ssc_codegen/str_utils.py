@@ -11,6 +11,8 @@ __all__ = [
     "escape_str",
     "remove_empty_lines",
     "go_unimport_naive",
+    "py_str_format_to_fstring",
+    "py_optimize_return_naive",
 ]
 
 
@@ -83,11 +85,11 @@ def go_unimport_naive(go_code: str) -> str:
 
 RE_PY_METHOD_BLOCK = re.compile(
     r"""
-def\s_(?:parse|split)_\w+\(.*\:\s*  # SPLIT_DOC STRUCT_PARSE HEAD
+def\s_(?:parse|split)\w+\(.*\:\s*   # SPLIT_DOC STRUCT_PARSE HEAD
 (?:\n|.)*?                          # BLOCK OF CODE
-return\s(?P<ret_var>value[\d+]?)    # RET STMT 
+return\s(?P<ret_var>\w+)    # RET STMT 
 """,
-re.X,
+    re.X,
 )
 
 
@@ -128,17 +130,20 @@ def py_optimize_return_naive(py_code: str) -> str:
         ret_var = method_block["ret_var"]
         # value6\s*=\s*(?P<expr>.*)$
         re_expr = f"{ret_var}\\s*=\\s*(?P<expr>.*)"
-        expr = re.search(re_expr, method_block[0])["expr"] # noqa
+        if match := re.search(re_expr, method_block[0]):
+            expr = match["expr"]  # noqa
 
-        new_method_block = re.sub(f"\\s*{re_expr}", "", method_block[0])
-        new_method_block = re.sub(
-            rf"return {ret_var}", f"return {expr}", new_method_block
-        )
-        tmp_code = tmp_code.replace(method_block[0], new_method_block, 1)
+            new_method_block = re.sub(f"\\s*{re_expr}", "", method_block[0])
+            new_method_block = re.sub(
+                rf"return {ret_var}", f"return {expr}", new_method_block
+            )
+            tmp_code = tmp_code.replace(method_block[0], new_method_block, 1)
     return tmp_code
 
 
-RE_STR_FMT = re.compile(r"(?P<template_str>['\"].*['\"])\.format\((?P<var>.*)\)")
+RE_STR_FMT = re.compile(
+    r"(?P<template_str>['\"].*['\"])\.format\((?P<var>.*)\)"
+)
 
 
 def py_str_format_to_fstring(py_code: str) -> str:
@@ -146,23 +151,32 @@ def py_str_format_to_fstring(py_code: str) -> str:
     tmp_code = py_code
     for expr in RE_STR_FMT.finditer(tmp_code):
         old_expr = expr[0]
-        var = expr['var']
-        template_str = expr['template_str']
-        new_expr = 'f' + template_str.replace('{}', '{' + var + '}')
+        var = expr["var"]
+        template_str = expr["template_str"]
+        new_expr = "f" + template_str.replace("{}", "{" + var + "}")
         tmp_code = tmp_code.replace(old_expr, new_expr)
     return tmp_code
 
 
-RE_JS_METHOD_BLOCK = re.compile(r"\s_(?:parse|split)\w+\(.*\{(?:\n|.)*?return\s(?P<ret_var>\w+);")
+RE_JS_METHOD_BLOCK = re.compile(
+    r"\s_(?:parse|split)\w+\(.*\{(?:\n|.)*?return\s(?P<ret_var>\w+);"
+)
+
 
 def js_pure_optimize_return(js_code: str) -> str:
     tmp_code = js_code
     for method_code in RE_JS_METHOD_BLOCK.finditer(tmp_code):
         ret_var = method_code["ret_var"]
         method_code_raw = method_code[0]
-        match_expr = re.search(f'let {ret_var} = (?P<expr>.*);', method_code_raw)
-        expr = match_expr["expr"]  # noqa
-        new_method_code = re.sub(f'\\s*let {ret_var} = (?P<expr>.*);', "", method_code_raw)
-        new_method_code = new_method_code.replace(f'return {ret_var}', f'return {expr}', 1)
-        tmp_code = tmp_code.replace(method_code_raw, new_method_code, 1)
+        if match_expr := re.search(
+            f"let {ret_var} = (?P<expr>.*);", method_code_raw
+        ):
+            expr = match_expr["expr"]  # noqa
+            new_method_code = re.sub(
+                f"\\s*let {ret_var} = (?P<expr>.*);", "", method_code_raw
+            )
+            new_method_code = new_method_code.replace(
+                f"return {ret_var}", f"return {expr}", 1
+            )
+            tmp_code = tmp_code.replace(method_code_raw, new_method_code, 1)
     return tmp_code
