@@ -162,7 +162,7 @@ def tt_start_parse_post(node: StartParseFunction) -> str:
 
 @converter.pre(TokenType.EXPR_DEFAULT_START)
 def tt_default_start(node: DefaultStart) -> str:
-    return js.BINDINGS[node.kind] + 'let value1 = value;'
+    return js.BINDINGS[node.kind] + "let value1 = value;"
 
 
 @converter.pre(TokenType.EXPR_DEFAULT_END)

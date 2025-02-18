@@ -272,14 +272,13 @@ def gen_dict_body(_: "StartParseFunction") -> str:
     # parse() {
     #
     # }
-    return ("return Array.from(this._splitDoc(this._doc)).reduce((item, e)"
-            + f"=> (item[this._parse{key_m}(e)] = this._parse{value_m}(e), item)"
-            + ", {});")
-
+    return (
+        "return Array.from(this._splitDoc(this._doc)).reduce((item, e)"
+        + f"=> (item[this._parse{key_m}(e)] = this._parse{value_m}(e), item)"
+        + ", {});"
+    )
 
 
 def gen_flat_list_body(_: "StartParseFunction") -> str:
     item_m = to_upper_camel_case(MAGIC_METHODS.get("__ITEM__"))
-    return (
-        f"return Array.from(this._splitDoc(this._doc)).map((e) => this._parse{item_m}(e));"
-    )
+    return f"return Array.from(this._splitDoc(this._doc)).map((e) => this._parse{item_m}(e));"
