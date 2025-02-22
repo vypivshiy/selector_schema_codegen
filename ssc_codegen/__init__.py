@@ -3,7 +3,7 @@ from .document import HTMLDocument, StringDocument, ArrayDocument, AssertDocumen
 from .json_struct import Json
 from .schema import ItemSchema, DictSchema, ListSchema, FlatListSchema
 
-VERSION = "0.7.1"
+VERSION = "0.7.2"
 
 class __MISSING(object):
     pass
