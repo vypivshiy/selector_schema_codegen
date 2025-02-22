@@ -25,13 +25,14 @@ import pytest
             "FOO\nbar",
         ),
         (
-            BaseCodeCallback(lambda c: c.replace("foo", "FOO"),
-                             lambda c: c.replace("bar", "raB"),
-                             lambda c: c.replace("FOO", "FoF"),
-                             ),
-                             ["foo", "bar"],
-                             "FoF\nraB"
-        )
+            BaseCodeCallback(
+                lambda c: c.replace("foo", "FOO"),
+                lambda c: c.replace("bar", "raB"),
+                lambda c: c.replace("FOO", "FoF"),
+            ),
+            ["foo", "bar"],
+            "FoF\nraB",
+        ),
     ],
 )
 def test_code_callback(
