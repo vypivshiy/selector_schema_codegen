@@ -62,7 +62,8 @@ BINDINGS[TokenType.DOCSTRING] = _docstring
 BINDINGS[TokenType.IMPORTS] = (
     "import 'dart:core';\n"
     + "import 'package:universal_html/html.dart' show Document, LIElement;\n"
-    + "import 'package:universal_html/parsing.dart' as html;"
+    + "import 'package:universal_html/parsing.dart' as html;\n"
+    + "import 'dart:convert';"
 )
 BINDINGS[TokenType.EXPR_RETURN] = "return {};"
 BINDINGS[TokenType.EXPR_NO_RETURN] = "return null;"
