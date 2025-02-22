@@ -33,7 +33,7 @@ def json_response_to_schema_code(
     sub_schemas_codes = _sub_schemas_acc or []
     name_entrypoint = to_upper_camel_case(name_entrypoint)
     code = f"class {name_entrypoint}(Json):"
-    code += "    __IS_ARRAY__ = True" if is_array_response else ""
+    code += "\n    __IS_ARRAY__ = True" if is_array_response else ""
 
     for k, v in data.items():
         if v is None:
