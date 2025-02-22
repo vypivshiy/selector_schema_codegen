@@ -43,12 +43,15 @@ class Compiler:
         if self._module is None:
             raise RuntimeError("Module not compiled and executed yet.")
 
-        if not hasattr(self._module, class_name):
+        if not self.class_exists(class_name):
             raise AttributeError(
                 f"Class '{class_name}' not found in compiled module."
             )
 
         return getattr(self._module, class_name)
+
+    def class_exists(self, class_name: str) -> bool:
+        return hasattr(self._module, class_name)
 
     def run_parse(self, schema_name: str, document: str) -> Any:
         """Gets the class by name, initializes it with the document, and calls its parse method."""
