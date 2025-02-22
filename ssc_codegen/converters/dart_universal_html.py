@@ -513,15 +513,16 @@ def tt_to_list_float(node: ToFloat) -> str:
     return dart.BINDINGS[node.kind, nxt, prv]
 
 
-# TODO
-# stub for tests check pass
 @converter.pre(TokenType.TO_JSON)
-def tt_to_json(_: ToJson) -> str:
-    warnings.warn("WIP", category=FutureWarning)
-    return ""
+def tt_to_json(node: ToJson) -> str:
+    prv, nxt = lr_var_names(variable=node.variable)
+    return f"var {nxt} = jsonDecode({prv}); "
 
 
 @converter.pre(TokenType.JSON_STRUCT)
-def tt_json_struct(_: JsonStruct) -> str:
-    warnings.warn("WIP", category=FutureWarning)
+def tt_json_struct(node: JsonStruct) -> str:
+    warnings.warn(
+        "Serialization current not available, generate dynamic struct",
+        category=FutureWarning,
+    )
     return ""
