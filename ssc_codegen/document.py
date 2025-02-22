@@ -269,9 +269,9 @@ class ArrayDocument(BaseDocument):
 
         match self.stack_last_ret:
             case VariableType.LIST_DOCUMENT:
-                self._add(IndexDocumentExpression(value=i))
+                self._add(IndexDocumentExpression(value=i, ret_type=VariableType.DOCUMENT))
             case VariableType.LIST_STRING:
-                self._add(IndexStringExpression(value=i))
+                self._add(IndexStringExpression(value=i, ret_type=VariableType.STRING))
             case VariableType.LIST_INT:
                 self._add(
                     IndexStringExpression(value=i, ret_type=VariableType.INT)
