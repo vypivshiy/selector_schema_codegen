@@ -6,9 +6,12 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "cssselect>=1.2.0",
+    "httpx>=0.28.1",
+    "ichrome>=4.0.4",
     "lxml>=5.3.0",
+    "parsel>=1.10.0",
     "typer>=0.15.1",
-    "typing_extensions;python_version<'3.11'"
+    "typing_extensions;python_version<'3.11'",
 ]
 
 [project.urls]
@@ -31,6 +34,7 @@ packages=["ssc_codegen"]
 
 [dependency-groups]
 dev = [
+    "coverage>=7.6.12",
     "httpx>=0.28.1",
     "mypy>=1.14.1",
     "pytest>=8.3.4",
@@ -40,7 +44,6 @@ dev = [
 tests = [
     "bs4>=0.0.2",
     "parsel>=1.10.0",
-    "pytest>=8.3.4",
     "selectolax>=0.3.27",
 ]
 
