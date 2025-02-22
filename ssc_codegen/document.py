@@ -179,10 +179,14 @@ class HTMLDocument(BaseDocument):
         return self
 
     def attr(self, name: str) -> Self:
-        """Css query. returns all founded elements
+        """Extract attribute value by name
 
         - accept DOCUMENT, return STRING
         - accept LIST_DOCUMENT, return LIST_STRING
+
+        Note:
+            in generated code, not check exists required name attribute and throw exception in runtime
+
         """
         match self.stack_last_ret:
             case VariableType.DOCUMENT:
@@ -314,7 +318,7 @@ class ArrayDocument(BaseDocument):
 
 class StringDocument(BaseDocument):
     def trim(self, substr: str = " ") -> Self:
-        """trim LEFT and RIGHT by substr
+        """trim LEFT and RIGHT chars string by substr
 
         - accept STRING, return STRING
         - accept LIST_STRING, return LIST_STRING
@@ -428,10 +432,8 @@ class StringDocument(BaseDocument):
 
         - accept STRING, return STRING
         """
-
         assert_re_expression(pattern)
-        if pattern == "":
-            raise SyntaxError("empty regex pattern")
+
         if self.stack_last_ret != VariableType.STRING:
             self._raise_wrong_type_error(
                 self.stack_last_ret, VariableType.STRING
@@ -444,7 +446,7 @@ class StringDocument(BaseDocument):
 
         - accept STRING, return LIST_STRING
         """
-        assert_re_expression(pattern)
+        assert_re_expression(pattern, max_groups=1)
         if self.stack_last_ret != VariableType.STRING:
             self._raise_wrong_type_error(
                 self.stack_last_ret, VariableType.STRING
@@ -458,7 +460,7 @@ class StringDocument(BaseDocument):
         - accept STRING, return STRING
         - accept LIST_STRING, return LIST_STRING
         """
-        assert_re_expression(pattern)
+        assert_re_expression(pattern, allow_empty_groups=True)
 
         match self.stack_last_ret:
             case VariableType.LIST_STRING:
@@ -471,6 +473,18 @@ class StringDocument(BaseDocument):
                     VariableType.STRING,
                     VariableType.LIST_STRING,
                 )
+        return self
+
+    def re_trim(self, pattern: str = r"/s*") -> Self:
+        """shortcut of re_sub('^' + pattern).re_sub(pattern + '$')
+
+        as default, trim LEFT and RIGHT whitespace chars by regular expression.
+
+        - accept STRING, return STRING
+        - accept LIST_STRING, return LIST_STRING
+        """
+        self.re_sub(f"^{pattern}")
+        self.re_sub(f"{pattern}$")
         return self
 
 
@@ -504,7 +518,7 @@ class AssertDocument(BaseDocument):
         return self
 
     def is_equal(self, value: str | int | float, msg: str = "") -> Self:
-        """assert equal by string value. If in generated code check failed - throw exception with passed msg
+        """assert equal by string, int or float value. If in generated code check failed - throw exception with passed msg
 
         EXPR DO NOT MODIFY variable
 
@@ -634,10 +648,7 @@ class AssertDocument(BaseDocument):
             self._raise_wrong_type_error(
                 self.stack_last_ret, VariableType.STRING
             )
-        assert_re_expression(pattern)
-
-        if pattern == "":
-            raise SyntaxError("empty regex pattern")
+        assert_re_expression(pattern, allow_empty_groups=True)
 
         self._add(IsRegexMatchExpression(pattern=pattern, msg=msg))
         return self
@@ -663,8 +674,8 @@ class NumericDocument(BaseDocument):
     def to_int(self) -> Self:
         """convert string or sequence of string to integer.
 
-        - accept STRING, return INT
-        - accept LIST_STRING, return LIST_INT
+        - accept STRING, return FLOAT
+        - accept LIST_STRING, return LIST_FLOAT
         """
         match self.stack_last_ret:
             case VariableType.STRING:

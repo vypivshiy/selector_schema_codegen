@@ -1,7 +1,7 @@
 import re
 from typing import TYPE_CHECKING
 
-from .ast_ssc import (
+from ssc_codegen.ast_ssc import (
     BaseExpression,
     HtmlCssAllExpression,
     HtmlCssExpression,
@@ -10,19 +10,26 @@ from .ast_ssc import (
     IsCssExpression,
     IsXPathExpression,
 )
-from .selector_utils import css_to_xpath, xpath_to_css
+from ssc_codegen.selector_utils import css_to_xpath, xpath_to_css
 
 if TYPE_CHECKING:
     from .document import BaseDocument
 
 
-def assert_re_expression(pattern: str) -> None:
+def assert_re_expression(
+    pattern: str, allow_empty_groups: bool = False, max_groups: int = -1
+) -> None:
     """throw SyntaxError if pattern empty or cannot be compiled."""
     if not pattern:
         raise SyntaxError("Empty pattern expression")
     try:
-        re.compile(pattern)
-        # todo: pattern group check
+        re_pattern = re.compile(pattern)
+        if not allow_empty_groups and re_pattern.groups == 0:
+            msg = f"`{re_pattern.pattern}` pattern groups is empty"
+            raise SyntaxError(msg)
+        elif max_groups != -1 and re_pattern.groups > max_groups:
+            msg = f"`{re_pattern.pattern}` too many groups in pattern, expected {max_groups}"
+            raise SyntaxError(msg)
     except re.error as e:
         raise SyntaxError("Wrong regex pattern") from e
 
