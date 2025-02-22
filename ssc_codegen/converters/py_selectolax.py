@@ -24,7 +24,7 @@ from .ast_utils import find_json_struct_instance
 
 POST_BINDINGS = TemplateBindings()
 POST_BINDINGS[TokenType.IMPORTS] = (
-    "from selectolax.parser import HTMLParser, Node"
+    "from selectolax.lexbor import LexborHTMLParser as HTMLParser, Node"
 )
 POST_BINDINGS[TokenType.STRUCT_INIT] = (
     "self._doc=HTMLParser(document) if isinstance(document, str) else document"
