@@ -18,14 +18,14 @@ class Nested(HTMLDocument, NestedDocument, ArrayDocument, AssertDocument):
     pass
 
 
-def D(default_value: None | str | int | float | __MISSING =_NO_DEFAULT) -> Document:  # noqa
+def D(default: None | str | int | float | __MISSING =_NO_DEFAULT) -> Document:  # noqa
     """Shortcut as a Document() object
 
-    :param default_value: .default() operator shortcut
+    :param default: .default() operator shortcut
     """
-    if default_value==_NO_DEFAULT:
+    if default==_NO_DEFAULT:
         return Document()
-    return Document().default(value=default_value)  # type: ignore
+    return Document().default(value=default)  # type: ignore
 
 
 def N() -> Nested:  # noqa
@@ -33,12 +33,12 @@ def N() -> Nested:  # noqa
     return Nested()
 
 
-def R(default_value: None | str | int | float | __MISSING =_NO_DEFAULT) -> Document: # noqa
+def R(default: None | str | int | float | __MISSING =_NO_DEFAULT) -> Document: # noqa
     """Shortcut as a Document().raw() object.
     For regex and format string operations
 
-    :param default_value: .default() operator shortcut
+    :param default: .default() operator shortcut
     """
-    if default_value==_NO_DEFAULT:
+    if default==_NO_DEFAULT:
         return Document().raw()
-    return Document().default(default_value).raw()  # type: ignore
+    return Document().default(default).raw()  # type: ignore
