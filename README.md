@@ -190,7 +190,7 @@ Print output:
 alert(JSON.stringify((new HelloWorld(document).parse())))
 ```
 
-![example](assets/example.png)
+![example](docs/assets/example.png)
 
 
 You can use any html source:
