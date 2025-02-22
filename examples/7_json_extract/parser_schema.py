@@ -9,13 +9,30 @@ if sys.version_info >= (3, 10):
 else:
     NoneType = type(None)
 
-from parsel import Selector, SelectorList
+from parsel import Selector
+from parsel.selector import _SelectorType  # noqa
 
 J_Attributes = TypedDict(
-    "J_Attributes", {"spam": float, "eggs": str, "default": NoneType}
+    "J_Attributes",
+    {
+        "spam": float,
+        "eggs": str,
+        "default": NoneType,
+    },
 )
-J_Content = TypedDict("J_Content", {"a": List[str], "attributes": J_Attributes})
-T_Main = TypedDict("T_Main", {"jsn": J_Content})
+J_Content = TypedDict(
+    "J_Content",
+    {
+        "a": List[str],
+        "attributes": J_Attributes,
+    },
+)
+T_Main = TypedDict(
+    "T_Main",
+    {
+        "jsn": J_Content,
+    },
+)
 
 
 class Main:
@@ -23,16 +40,16 @@ class Main:
 
     {
         "jsn": {
-            "a": "string",
+            "a": "String",
             "attributes": {
-                "spam": "float",
-                "eggs": "string",
+                "spam": "Float",
+                "eggs": "String",
                 "default": "null"
             }
         }
     }"""
 
-    def __init__(self, document: Union[str, SelectorList, Selector]) -> None:
+    def __init__(self, document: Union[str, _SelectorType]) -> None:
         self._doc = (
             Selector(document) if isinstance(document, str) else document
         )
@@ -40,8 +57,7 @@ class Main:
     def _parse_jsn(self, value: Selector) -> J_Content:
         value1 = value.css("script")
         value2 = "".join(value1.css("::text").getall())
-        value3 = json.loads(value2)
-        return value3
+        return json.loads(value2)
 
     def parse(self) -> T_Main:
         return {"jsn": self._parse_jsn(self._doc)}

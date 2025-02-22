@@ -2,8 +2,15 @@
 from __future__ import annotations
 import re
 from typing import List, TypedDict, Union
+import sys
 
-from parsel import Selector, SelectorList
+if sys.version_info >= (3, 10):
+    from types import NoneType
+else:
+    NoneType = type(None)
+
+from parsel import Selector
+from parsel.selector import _SelectorType  # noqa
 
 T_Main = TypedDict(
     "T_Main",
@@ -22,6 +29,10 @@ T_Main = TypedDict(
 class Main:
     """Hello, it my first docstring for useless synthetic html!
 
+    USAGE:
+        - pass index.html document from 1_basic folder
+
+
 
     {
         "item_sc": "String",
@@ -33,51 +44,44 @@ class Main:
         "var_list_ints": "Array<Int>"
     }"""
 
-    def __init__(self, document: Union[str, SelectorList, Selector]) -> None:
+    def __init__(self, document: Union[str, _SelectorType]) -> None:
         self._doc = (
             Selector(document) if isinstance(document, str) else document
         )
 
     def _parse_item_sc(self, value: Selector) -> str:
         value1 = value.css(".item-sc > p")
-        value2 = "".join(value1.css("::text").getall())
-        return value2
+        return "".join(value1.css("::text").getall())
 
     def _parse_a_href(self, value: Selector) -> str:
         value1 = value.css(".item-sc > a")
         value2 = value1.attrib["href"]
-        value3 = "https://{}".format(value2) if value2 else value2
-        return value3
+        return f"https://{value2}" if value2 else value2
 
     def _parse_a_text(self, value: Selector) -> str:
         value1 = value.css(".item-sc > a")
         value2 = "".join(value1.css("::text").getall())
-        value3 = value2.strip(" ")
-        return value3
+        return value2.strip(" ")
 
     def _parse_var_int(self, value: Selector) -> int:
         value1 = value.css(".item-sc > #int-item")
         value2 = "".join(value1.css("::text").getall())
-        value3 = int(value2)
-        return value3
+        return int(value2)
 
     def _parse_var_float(self, value: Selector) -> float:
         value1 = value.css(".item-sc > #float-item")
         value2 = "".join(value1.css("::text").getall())
-        value3 = float(value2)
-        return value3
+        return float(value2)
 
     def _parse_var_list(self, value: Selector) -> List[str]:
         value1 = value.css(".item-sc > .list-items > li")
-        value2 = value1.css("::text").getall()
-        return value2
+        return value1.css("::text").getall()
 
     def _parse_var_list_ints(self, value: Selector) -> List[int]:
         value1 = value.css(".item-sc > .list-items > li")
         value2 = value1.css("::text").getall()
         value3 = [re.sub("\\D+", "", e) for e in value2]
-        value4 = [int(i) for i in value3]
-        return value4
+        return [int(i) for i in value3]
 
     def parse(self) -> T_Main:
         return {

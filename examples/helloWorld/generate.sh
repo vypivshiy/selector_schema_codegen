@@ -1,0 +1,1 @@
+ssc-gen py schema.py -i parsel --prefix parser_ -o .

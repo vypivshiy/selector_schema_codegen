@@ -13,6 +13,7 @@ else:
     NoneType = type(None)
 
 from parsel import Selector, SelectorList
+from parsel.selector import _SelectorType  # noqa
 
 T_Urls = List[str]
 T_UrlsMap = Dict[str, str]
@@ -45,18 +46,16 @@ class Urls:
         "..."
     ]"""
 
-    def __init__(self, document: Union[str, SelectorList, Selector]) -> None:
+    def __init__(self, document: Union[str, _SelectorType]) -> None:
         self._doc = (
             Selector(document) if isinstance(document, str) else document
         )
 
-    def _split_doc(self, value: Selector) -> SelectorList:
-        value1 = value.css("a")
-        return value1
+    def _split_doc(self, value: _SelectorType) -> SelectorList:
+        return value.css("a")
 
     def _parse_item(self, value: Selector) -> str:
-        value1 = value.attrib["href"]
-        return value1
+        return value.attrib["href"]
 
     def parse(self) -> T_Urls:
         return [self._parse_item(e) for e in self._split_doc(self._doc)]
@@ -70,23 +69,20 @@ class UrlsMap:
         "<KN>": "..."
     }"""
 
-    def __init__(self, document: Union[str, SelectorList, Selector]) -> None:
+    def __init__(self, document: Union[str, _SelectorType]) -> None:
         self._doc = (
             Selector(document) if isinstance(document, str) else document
         )
 
-    def _split_doc(self, value: Selector) -> SelectorList:
-        value1 = value.css("a")
-        return value1
+    def _split_doc(self, value: _SelectorType) -> SelectorList:
+        return value.css("a")
 
     def _parse_key(self, value: Selector) -> str:
-        value1 = value.attrib["href"]
-        return value1
+        return value.attrib["href"]
 
     def _parse_value(self, value: Selector) -> str:
         value1 = value.get()
-        value2 = value1.strip(" ")
-        return value2
+        return value1.strip(" ")
 
     def parse(self) -> T_UrlsMap:
         return {
@@ -109,36 +105,31 @@ class Books:
         "..."
     ]"""
 
-    def __init__(self, document: Union[str, SelectorList, Selector]) -> None:
+    def __init__(self, document: Union[str, _SelectorType]) -> None:
         self._doc = (
             Selector(document) if isinstance(document, str) else document
         )
 
-    def _split_doc(self, value: Selector) -> SelectorList:
-        value1 = value.css(".col-lg-3")
-        return value1
+    def _split_doc(self, value: _SelectorType) -> SelectorList:
+        return value.css(".col-lg-3")
 
     def _parse_name(self, value: Selector) -> str:
         value1 = value.css(".thumbnail")
-        value2 = value1.attrib["alt"]
-        return value2
+        return value1.attrib["alt"]
 
     def _parse_image_url(self, value: Selector) -> str:
         value1 = value.css(".thumbnail")
         value2 = value1.attrib["src"]
-        value3 = "https://{}".format(value2) if value2 else value2
-        return value3
+        return f"https://{value2}" if value2 else value2
 
     def _parse_url(self, value: Selector) -> str:
         value1 = value.css(".image_container > a")
-        value2 = value1.attrib["href"]
-        return value2
+        return value1.attrib["href"]
 
     def _parse_rating(self, value: Selector) -> str:
         value1 = value.css(".star-rating")
         value2 = value1.attrib["class"]
-        value3 = value2.lstrip("star-rating ")
-        return value3
+        return value2.lstrip("star-rating ")
 
     def _parse_price(self, value: Selector) -> int:
         value1 = value
@@ -146,8 +137,7 @@ class Books:
             value2 = value1.css(".price_color")
             value3 = "".join(value2.css("::text").getall())
             value4 = re.search("(\\d+)", value3)[1]
-            value5 = int(value4)
-            return value5
+            return int(value4)
         return 0
 
     def parse(self) -> List[T_Books]:
@@ -198,12 +188,12 @@ class CataloguePage:
         ]
     }"""
 
-    def __init__(self, document: Union[str, SelectorList, Selector]) -> None:
+    def __init__(self, document: Union[str, _SelectorType]) -> None:
         self._doc = (
             Selector(document) if isinstance(document, str) else document
         )
 
-    def _pre_validate(self, value: Union[Selector, SelectorList]) -> None:
+    def _pre_validate(self, value: Union[_SelectorType]) -> None:
         value1 = value.css("title")
         value2 = "".join(value1.css("::text").getall())
         assert re.search("Books to Scrape", value2), ""
@@ -217,21 +207,17 @@ class CataloguePage:
             value3 = value2.css("title")
             value4 = "".join(value3.css("::text").getall())
             value5 = re.sub("^\\s+", "", value4)
-            value6 = re.sub("\\s+$", "", value5)
-            return value6
+            return re.sub("\s+$", "", value5)
         return "test"
 
     def _parse_urls(self, value: Selector) -> T_Urls:
-        value1 = Urls(value).parse()
-        return value1
+        return Urls(value).parse()
 
     def _parse_urls_map(self, value: Selector) -> T_UrlsMap:
-        value1 = UrlsMap(value).parse()
-        return value1
+        return UrlsMap(value).parse()
 
     def _parse_books(self, value: Selector) -> List[T_Books]:
-        value1 = Books(value).parse()
-        return value1
+        return Books(value).parse()
 
     def parse(self) -> T_CataloguePage:
         self._pre_validate(self._doc)

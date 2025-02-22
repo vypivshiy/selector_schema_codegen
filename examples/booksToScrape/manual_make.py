@@ -3,8 +3,8 @@
 from ssc_codegen.ast_builder import build_ast_module
 
 # build-in converter
-from ssc_codegen.converters.go_goquery import converter
-
+from ssc_codegen.converters.js_pure import converter
+from ssc_codegen.cli.code_callbacks import CB_JS_CODE
 if __name__ == "__main__":
     # base ast builder
 
@@ -29,5 +29,8 @@ if __name__ == "__main__":
     # converter.disable_debug()
     # generate code (formatting exclude)
     code = converter.convert_program(ast)
+    code = CB_JS_CODE(code)
+    print(code)
     # assembly code parts (without formatting)
-    print("\n".join(code))
+
+    # print('\n'.join(code))

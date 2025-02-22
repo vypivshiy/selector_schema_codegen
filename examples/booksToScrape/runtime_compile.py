@@ -11,6 +11,6 @@ if __name__ == '__main__':
     resp = httpx.get("https://books.toscrape.com/")
 
     pprint.pprint(
-        compiler.run_parse("CataloguePage", resp.text),
+        compiler.run_parse("CataloguePagef", resp.text),
         compact=True,
     )

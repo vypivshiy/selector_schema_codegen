@@ -2,8 +2,15 @@
 from __future__ import annotations
 from typing import TypedDict, Union, Optional
 from contextlib import suppress
+import sys
 
-from parsel import Selector, SelectorList
+if sys.version_info >= (3, 10):
+    from types import NoneType
+else:
+    NoneType = type(None)
+
+from parsel import Selector
+from parsel.selector import _SelectorType  # noqa
 
 T_Main = TypedDict(
     "T_Main",
@@ -18,7 +25,11 @@ T_Main = TypedDict(
 
 
 class Main:
-    """
+    """default value set example, if field code parse throw exception
+
+    USAGE:
+        - pass index.html document from 3_default_values folder
+
 
     {
         "title_ok": "String",
@@ -28,15 +39,14 @@ class Main:
         "title_float_default": "Float"
     }"""
 
-    def __init__(self, document: Union[str, SelectorList, Selector]) -> None:
+    def __init__(self, document: Union[str, _SelectorType]) -> None:
         self._doc = (
             Selector(document) if isinstance(document, str) else document
         )
 
     def _parse_title_ok(self, value: Selector) -> str:
         value1 = value.css("title")
-        value2 = "".join(value1.css("::text").getall())
-        return value2
+        return "".join(value1.css("::text").getall())
 
     def _parse_title_null(self, value: Selector) -> Optional[str]:
         value1 = value
@@ -44,8 +54,7 @@ class Main:
             value2 = value1.css("title")
             assert value2.css("a"), ""
             value3 = value2
-            value4 = "".join(value3.css("::text").getall())
-            return value4
+            return "".join(value3.css("::text").getall())
         return None
 
     def _parse_title_str_default(self, value: Selector) -> str:
@@ -54,8 +63,7 @@ class Main:
             value2 = value1.css("title")
             assert value2.css("a"), ""
             value3 = value2
-            value4 = "".join(value3.css("::text").getall())
-            return value4
+            return "".join(value3.css("::text").getall())
         return "unknown"
 
     def _parse_title_int_default(self, value: Selector) -> int:
@@ -63,8 +71,7 @@ class Main:
         with suppress(Exception):
             value2 = value1.css("title")
             value3 = "".join(value2.css("::text").getall())
-            value4 = int(value3)
-            return value4
+            return int(value3)
         return 1
 
     def _parse_title_float_default(self, value: Selector) -> float:
@@ -72,8 +79,7 @@ class Main:
         with suppress(Exception):
             value2 = value1.css("title")
             value3 = "".join(value2.css("::text").getall())
-            value4 = float(value3)
-            return value4
+            return float(value3)
         return 3.14
 
     def parse(self) -> T_Main:

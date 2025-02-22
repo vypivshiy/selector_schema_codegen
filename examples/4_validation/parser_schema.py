@@ -3,20 +3,33 @@ from __future__ import annotations
 import re
 from typing import TypedDict, Union
 from contextlib import suppress
+import sys
 
-from parsel import Selector, SelectorList
+if sys.version_info >= (3, 10):
+    from types import NoneType
+else:
+    NoneType = type(None)
 
-T_Main = TypedDict("T_Main", {"title": str, "title_rescue_assert": str})
+from parsel import Selector
+from parsel.selector import _SelectorType  # noqa
+
+T_Main = TypedDict(
+    "T_Main",
+    {
+        "title": str,
+        "title_rescue_assert": str,
+    },
+)
 
 
 class Main:
     """Example validate document input and fields
 
-        USAGE:
-            - pass index.html document from 4_validation folder
+    USAGE:
+        - pass index.html document from 4_validation folder
 
-        ISSUES:
-            - if title not equal Demo page - throw error
+    ISSUES:
+        - if title not equal Demo page - throw error
 
 
     {
@@ -24,12 +37,12 @@ class Main:
         "title_rescue_assert": "String"
     }"""
 
-    def __init__(self, document: Union[str, SelectorList, Selector]) -> None:
+    def __init__(self, document: Union[str, _SelectorType]) -> None:
         self._doc = (
             Selector(document) if isinstance(document, str) else document
         )
 
-    def _pre_validate(self, value: Union[Selector, SelectorList]) -> None:
+    def _pre_validate(self, value: Union[_SelectorType]) -> None:
         assert value.css("title"), ""
         value1 = value
         value2 = value1.css("title")
@@ -48,8 +61,7 @@ class Main:
         value1 = value.css("title")
         value2 = "".join(value1.css("::text").getall())
         assert value2 == "Demo page", ""
-        value3 = value2
-        return value3
+        return value2
 
     def _parse_title_rescue_assert(self, value: Selector) -> str:
         value1 = value
@@ -57,8 +69,7 @@ class Main:
             value2 = value1.css("title")
             value3 = "".join(value2.css("::text").getall())
             assert value3 == "IM not demo page!", ""
-            value4 = value3
-            return value4
+            return value3
         return "I SAY ITS DEMO PAGE"
 
     def parse(self) -> T_Main:

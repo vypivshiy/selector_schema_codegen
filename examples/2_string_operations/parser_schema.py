@@ -2,8 +2,15 @@
 from __future__ import annotations
 import re
 from typing import List, TypedDict, Union
+import sys
 
-from parsel import Selector, SelectorList
+if sys.version_info >= (3, 10):
+    from types import NoneType
+else:
+    NoneType = type(None)
+
+from parsel import Selector
+from parsel.selector import _SelectorType  # noqa
 
 T_Main = TypedDict(
     "T_Main",
@@ -28,7 +35,11 @@ T_Main = TypedDict(
 
 
 class Main:
-    """
+    """string operations example
+
+    USAGE:
+        - pass index.html document from 2_string_operations folder
+
 
     {
         "title_orig": "String",
@@ -48,101 +59,86 @@ class Main:
         "items_str_digits": "Array<String>"
     }"""
 
-    def __init__(self, document: Union[str, SelectorList, Selector]) -> None:
+    def __init__(self, document: Union[str, _SelectorType]) -> None:
         self._doc = (
             Selector(document) if isinstance(document, str) else document
         )
 
     def _parse_title_orig(self, value: Selector) -> str:
         value1 = value.css("title")
-        value2 = "".join(value1.css("::text").getall())
-        return value2
+        return "".join(value1.css("::text").getall())
 
     def _parse_title_fmt(self, value: Selector) -> str:
         value1 = value.css("title")
         value2 = "".join(value1.css("::text").getall())
-        value3 = "TITLE - {} - END.".format(value2) if value2 else value2
-        return value3
+        return f"TITLE - {value2} - END." if value2 else value2
 
     def _parse_title_trim(self, value: Selector) -> str:
         value1 = value.css("title")
         value2 = "".join(value1.css("::text").getall())
-        value3 = value2.strip(" ")
-        return value3
+        return value2.strip(" ")
 
     def _parse_title_trim2(self, value: Selector) -> str:
         value1 = value.css("title")
         value2 = "".join(value1.css("::text").getall())
         value3 = value2.strip(" ")
-        value4 = value3.strip("vvv")
-        return value4
+        return value3.strip("vvv")
 
     def _parse_title_rtrim(self, value: Selector) -> str:
         value1 = value.css("title")
         value2 = "".join(value1.css("::text").getall())
-        value3 = value2.rstrip("vvv   ")
-        return value3
+        return value2.rstrip("vvv   ")
 
     def _parse_title_ltrim(self, value: Selector) -> str:
         value1 = value.css("title")
         value2 = "".join(value1.css("::text").getall())
-        value3 = value2.lstrip("   vvv")
-        return value3
+        return value2.lstrip("   vvv")
 
     def _parse_title_repl(self, value: Selector) -> str:
         value1 = value.css("title")
         value2 = "".join(value1.css("::text").getall())
         value3 = value2.replace("vvv   ", "===")
-        value4 = value3.replace("   vvv", "===")
-        return value4
+        return value3.replace("   vvv", "===")
 
     def _parse_title_split(self, value: Selector) -> List[str]:
         value1 = value.css("title")
         value2 = "".join(value1.css("::text").getall())
-        value3 = value2.split(" ")
-        return value3
+        return value2.split(" ")
 
     def _parse_title_split_fmt(self, value: Selector) -> List[str]:
         value1 = value.css("title")
         value2 = "".join(value1.css("::text").getall())
         value3 = value2.split(" ")
-        value4 = ["({})".format(e) for e in value3 if e]
-        return value4
+        return [f"({e})" for e in value3 if e]
 
     def _parse_title_re(self, value: Selector) -> str:
         value1 = value.css("title")
         value2 = "".join(value1.css("::text").getall())
-        value3 = re.search("vvv(.*?)vvv", value2)[1]
-        return value3
+        return re.search("vvv(.*?)vvv", value2)[1]
 
     def _parse_title_re_sub(self, value: Selector) -> str:
         value1 = value.css("title")
         value2 = "".join(value1.css("::text").getall())
-        value3 = re.sub("vvv(.*?)vvv", "My Title", value2)
-        return value3
+        return re.sub("vvv(.*?)vvv", "My Title", value2)
 
     def _parse_items_orig(self, value: Selector) -> List[str]:
         value1 = value.css(".items > li")
-        value2 = value1.css("::text").getall()
-        return value2
+        return value1.css("::text").getall()
 
     def _parse_items_str_operations(self, value: Selector) -> List[str]:
         value1 = value.css(".items > li")
         value2 = value1.css("::text").getall()
-        value3 = [e.replace("__", "") for e in value2]
-        return value3
+        return [e.replace("__", "") for e in value2]
 
     def _parse_items_str_join(self, value: Selector) -> str:
         value1 = value.css(".items > li")
         value2 = value1.css("::text").getall()
-        value3 = ", ".join(value2)
-        return value3
+        return ", ".join(value2)
 
     def _parse_items_str_digits(self, value: Selector) -> List[str]:
         value1 = value.css(".items > li")
         value2 = value1.css("::text").getall()
-        value3 = [re.sub("\\D+", "", e) for e in value2]
-        return value3
+        return [re.sub("\D+", "", e) for e in value2]
 
     def parse(self) -> T_Main:
         return {
