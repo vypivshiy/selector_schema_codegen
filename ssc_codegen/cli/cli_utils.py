@@ -2,7 +2,9 @@ import importlib
 import re
 import warnings
 from pathlib import Path
+from types import ModuleType
 from typing import TYPE_CHECKING, Protocol
+import difflib
 
 from typer import BadParameter
 
@@ -77,3 +79,14 @@ def raw_json_check_keys(jsn: str) -> None:
         raise BadParameter(
             f"bad json keys count: {len(results)}, keys: {all_keys}"
         )
+
+
+def suggest_class_name(module: ModuleType, target_class_name: str) -> str:
+    """try to suggest correct class name"""
+    class_names = [
+        name for name in dir(module) if isinstance(getattr(module, name), type)
+    ]
+
+    return difflib.get_close_matches(
+        target_class_name, class_names, n=3, cutoff=0.6
+    )[0]

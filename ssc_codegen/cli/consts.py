@@ -1,4 +1,4 @@
-from enum import StrEnum
+from ssc_codegen._compat import StrEnum
 
 CONVERTERS_PATH = "ssc_codegen.converters"
 
@@ -40,8 +40,12 @@ HELP_JSON_TO_SCHEMA = "convert json response to ssc-gen schema"
 CMD_VERSION = "Show version and exit"
 CMD_PY = "generate python modules"
 CMD_JS = "generate javascript modules"
-CMD_DART = "generate dart modules (json not implemented)"
+CMD_DART = "generate dart modules"
 CMD_GO = "generate golang modules"
 CMD_JSON_GEN = """generate schema code from json.
-entrypoint should be: stats as dict(map) or array[map] object, not contains reserved words and key starts as _[a-z][A-Z] char
+entrypoint should be: map or array object and key starts as _[a-zA-Z] char
 """
+
+DEFAULT_UA = (
+    "Mozilla/5.0 (X11; Linux x86_64; rv:135.0) Gecko/20100101 Firefox/135.0"
+)

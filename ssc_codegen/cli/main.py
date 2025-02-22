@@ -1,7 +1,9 @@
 import json
 import os
+import pprint
 import sys
-
+import warnings
+from ichrome.exceptions import ChromeRuntimeError
 import typer
 
 from ssc_codegen.ast_builder import build_ast_module
@@ -10,12 +12,20 @@ from ssc_codegen.cli.cli_utils import (
     create_fmt_cmd,
     import_converter,
     raw_json_check_keys,
+    suggest_class_name,
 )
 from ssc_codegen.cli.code_callbacks import (
     CB_PY_CODE,
     CB_DART_CODE,
     CB_GO_CODE,
     CB_JS_CODE,
+)
+from ssc_codegen.cli.runtime_parse_runners import (
+    assert_cls_target,
+    parse_from_html_file,
+    print_json_output,
+    parse_from_http_request,
+    parse_from_chrome,
 )
 from .consts import (
     PyLIBS,
@@ -37,6 +47,7 @@ from .consts import (
     CMD_DART,
     CMD_GO,
     CMD_JSON_GEN,
+    DEFAULT_UA,
 )
 from ..converters.json_to_schema import convert_json_to_schema_code
 from .cli_callbacks import cb_check_ssc_files, cb_folder_out
@@ -341,7 +352,7 @@ def json_to_schema(
 
     raw_json_check_keys(jsn_text)
     jsn = json.loads(jsn_text)
-    if not isinstance(jsn, dict):
+    if not isinstance(jsn, dict) and not isinstance(jsn[0], dict):
         msg = f"Expected dict but got {type(jsn).__name__}"
         raise typer.BadParameter(msg)
 
@@ -351,6 +362,210 @@ def json_to_schema(
         + "from ssc_codegen import Json\n"
         + code
     )
+
+
+@app.command(
+    "parse-from-file", help="runtime convert schema to python and parse html"
+)
+def parse_from_file(
+    source: Annotated[Path, Argument(help="html file input")],
+    cls_target: Annotated[
+        str, Option("-t", "--target", help="class parser entrypoint")
+    ],
+    out: Annotated[
+        Optional[Path],
+        Option(
+            "--out",
+            "-o",
+            help="output filename. if not passed - print parsed result",
+        ),
+    ] = None,
+) -> None:
+    from ssc_codegen.compiler import Compiler
+    from ssc_codegen.converters.py_parsel import converter
+
+    cls_target, schema_config = _validate_parser_target(cls_target)
+
+    compiler = Compiler.from_file(schema_config, converter=converter)
+    if not assert_cls_target(compiler, cls_target):
+        suggest = suggest_class_name(compiler._module, cls_target)  # noqa
+        msg = f"{schema_config.name} not contains {cls_target} class. Did you mean `{suggest}`?"
+        raise typer.BadParameter(msg)
+    if not source.exists():
+        raise typer.BadParameter(f"`{source}` does not exist")
+    elif source.is_dir():
+        raise typer.BadParameter(
+            f"`{source}` should be a html file, not directory"
+        )
+    result = parse_from_html_file(source, compiler, cls_target)
+    if out:
+        if isinstance(result, str):
+            result = json.loads(result)
+        json.dump(result, out, indent=2)
+    else:
+        print_json_output(result)
+
+
+@app.command(
+    "parse-from-url",
+    help="runtime convert schema to python and parse from http response",
+)
+def parse_from_url(
+    url: Annotated[str, Argument(help="http(s) url")],
+    cls_target: Annotated[
+        str,
+        Option(
+            "-t",
+            "--target",
+            help="ssc-gen config file and class parser entrypoint. file and class name sep by `:` char ",
+        ),
+    ],
+    out: Annotated[
+        Optional[Path],
+        Option(
+            "--out",
+            "-o",
+            help="output filename. if not passed - print parsed result",
+        ),
+    ] = None,
+    # TODO: cookie files arg and other useful http options
+    user_agent: Annotated[
+        str, Option("-ua", "--user-agent", help="user agent for web request")
+    ] = DEFAULT_UA,
+    follow_redirects: Annotated[
+        bool, Option("-fr", "--follow-redirects", help="follow redirects")
+    ] = True,
+) -> None:
+    from ssc_codegen.compiler import Compiler
+    from ssc_codegen.converters.py_parsel import converter
+
+    cls_target, schema_config = _validate_parser_target(cls_target)
+
+    compiler = Compiler.from_file(schema_config, converter=converter)
+    if not assert_cls_target(compiler, cls_target):
+        suggest = suggest_class_name(compiler._module, cls_target)  # noqa
+        msg = f"{schema_config.name} not contains {cls_target} class. Did you mean `{suggest}`?"
+        raise typer.BadParameter(msg)
+    if not url.startswith("http"):
+        raise typer.BadParameter(f"`{url}` not a http url")
+    result = parse_from_http_request(
+        url,
+        compiler,
+        cls_target,
+        headers={"user-agent": user_agent},
+        follow_redirects=follow_redirects,
+    )
+    if out:
+        if isinstance(result, str):
+            result = json.loads(result)
+        json.dump(result, out, indent=2)
+    else:
+        print_json_output(result)
+
+
+@app.command(
+    "parse-from-chrome",
+    help="runtime convert schema to js and parse from chrome browser",
+)
+def parse_from_chrome_(
+    url: Annotated[str, Argument(help="http(s) url")],
+    cls_target: Annotated[
+        str, Option("-t", "--target", help="class parser entrypoint")
+    ],
+    out: Annotated[
+        Optional[Path],
+        Option(
+            "--out",
+            "-o",
+            help="output filename. if not passed - print parsed result",
+        ),
+    ] = None,
+    timeout: Annotated[
+        int, Option("-ti", "--timeout", help="load page timeout in seconds")
+    ] = 10,
+    host: Annotated[str, Option("--host", help="cdp host")] = "localhost",
+    port: Annotated[int, Option("--port", help="cdp port")] = 9992,
+    headless: Annotated[
+        bool, Option("-hl", "--headless", help="headless mode")
+    ] = False,
+    chrome_path: Annotated[
+        Optional[str],
+        Option("-sc", "--system-chrome", help="chrome binary path"),
+    ] = None,
+    chrome_options: Annotated[
+        str,
+        Option(
+            "-co",
+            "--options",
+            help="extra chrome options (one line, sep by comma `,`",
+        ),
+    ] = "",
+) -> None:
+    from ssc_codegen.converters.js_pure import converter as js_converter
+    import asyncio
+    from ssc_codegen.compiler import Compiler
+    from ssc_codegen.converters.py_parsel import converter
+
+    cls_target, schema_config = _validate_parser_target(cls_target)
+
+    compiler = Compiler.from_file(schema_config, converter=converter)
+    if not assert_cls_target(compiler, cls_target):
+        suggest = suggest_class_name(compiler._module, cls_target)  # noqa
+        msg = f"{schema_config.name} not contains {cls_target} class. Did you mean `{suggest}`?"
+        raise typer.BadParameter(msg)
+    if not assert_cls_target(compiler, cls_target):
+        suggest = suggest_class_name(compiler._module, cls_target)  # noqa
+        msg = f"{schema_config.name} not contains {cls_target} class. Did you mean `{suggest}`?"
+        raise typer.BadParameter(msg)
+    if not url.startswith("http"):
+        raise typer.BadParameter(f"`{url}` not a http url")
+
+    ast = build_ast_module(schema_config, docstring_class_top=True)  # type: ignore
+    code_parts = js_converter.convert_program(ast)
+    code = CB_JS_CODE(code_parts)
+    code += f"; JSON.stringify((new {cls_target}(document).parse()))"
+
+    chrome_opt = chrome_options.split(",") if chrome_options else []
+    try:
+        result = asyncio.run(
+            parse_from_chrome(
+                url=url,
+                js_code=code,
+                page_load_timeout=timeout,
+                chrome_path=chrome_path,
+                host=host,
+                port=port,
+                headless=headless,
+                chrome_options=chrome_opt,
+            )
+        )
+    except ChromeRuntimeError as e:
+        msg = f"{e} try manually provide chrome executable path"
+        warnings.warn(msg, category=Warning)
+        exit(1)
+    try:
+        if isinstance(result, str):
+            result = json.loads(result)
+        result = json.dumps(result, indent=2)
+        if out:
+            out.write_text(result)
+        else:
+            print(result)
+    except Exception as e:
+        print("parse json error", e)
+        pprint.pprint(result, sort_dicts=False)
+
+
+def _validate_parser_target(cls_target: str) -> tuple[str, Path]:
+    try:
+        schema_config, cls_target = cls_target.split(":", 1)
+        schema_config = Path(schema_config)  # type: ignore
+
+    except ValueError as e:
+        raise typer.BadParameter(
+            "-t --target option missing parser class name after `:` char"
+        ) from e
+    return cls_target, schema_config  # type: ignore
 
 
 def main() -> None:
