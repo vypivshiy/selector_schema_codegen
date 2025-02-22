@@ -52,11 +52,31 @@ def check_schema_required_fields(schema: Type[BaseSchema]) -> Type[BaseSchema]:
             _check_required_attributes(
                 schema, "__SPLIT_DOC__", "__KEY__", "__VALUE__"
             )
+            # delete non required fields
+            not_required_fields: list[str] = []
+            for k, v in schema.__get_mro_fields__().items():
+                if k not in {"__SPLIT_DOC__", "__KEY__", "__VALUE__"}:
+                    msg = f"{schema.__name__}.{k} not required, remove"
+                    warnings.warn(msg, category=SyntaxWarning)
+                    not_required_fields.append(k)
+            schema = _remove_non_required_attributes(
+                schema, *not_required_fields
+            )
         case StructType.FLAT_LIST:
             schema = _remove_non_required_attributes(
                 schema, "__KEY__", "__VALUE__"
             )
             _check_required_attributes(schema, "__SPLIT_DOC__", "__ITEM__")
+
+            not_required_fields: list[str] = []  # type: ignore
+            for k, v in schema.__get_mro_fields__().items():
+                if k not in {"__SPLIT_DOC__", "__ITEM__"}:
+                    msg = f"{schema.__name__}.{k} not required, remove"
+                    warnings.warn(msg, category=SyntaxWarning)
+                    not_required_fields.append(k)
+            schema = _remove_non_required_attributes(
+                schema, *not_required_fields
+            )
         case _:
             msg = f"{schema.__name__}: Unknown schema type"
             raise SyntaxError(msg)
