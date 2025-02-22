@@ -1,7 +1,7 @@
 [project]
 name = "ssc_codegen"
-version = "0.7.0"
-description = "Add your description here"
+version = "0.7.1"
+description = "Python-dsl code converter to html parser for web scraping "
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -12,6 +12,24 @@ dependencies = [
     "parsel>=1.10.0",
     "typer>=0.15.1",
     "typing_extensions;python_version<'3.11'",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Software Development :: Code Generators",
+    "Topic :: Text Processing :: Markup :: HTML",
+    "Topic :: Utilities",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Go",
+    "Programming Language :: Dart",
+    "Programming Language :: JavaScript",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+
 ]
 
 [project.urls]
@@ -28,9 +46,10 @@ ssc-gen = 'ssc_codegen.cli.main:main'
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.setuptools]
-license-files = []
-packages=["ssc_codegen"]
+[tool.hatch.build.targets.sdist]
+include = [
+  "ssc_codegen/*",
+]
 
 [dependency-groups]
 dev = [
