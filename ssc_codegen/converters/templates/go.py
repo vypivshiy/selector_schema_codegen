@@ -39,6 +39,7 @@ TYPES = {
     VariableType.OPTIONAL_FLOAT: "*float64",
     VariableType.LIST_FLOAT: "[]float64",
     VariableType.OPTIONAL_LIST_FLOAT: "*[]float64",
+    VariableType.BOOL: "bool",
 }
 
 JSON_TYPES = {

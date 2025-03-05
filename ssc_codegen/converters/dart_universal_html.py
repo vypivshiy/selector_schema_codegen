@@ -1,6 +1,7 @@
 # TODO: required enchant, not tested
 import warnings
 from functools import partial
+from typing_extensions import assert_never
 
 from ssc_codegen.ast_ssc import (
     DefaultValueWrapper,
@@ -55,8 +56,10 @@ from ssc_codegen.ast_ssc import (
     TypeDef,
     ToJson,
     JsonStruct,
+    ToBool,
+    ArrayLengthExpression,
 )
-from ssc_codegen.tokens import StructType, TokenType
+from ssc_codegen.tokens import StructType, TokenType, VariableType
 from .base import BaseCodeConverter, left_right_var_names
 from .templates import dart
 from ssc_codegen.str_utils import (
@@ -520,9 +523,41 @@ def tt_to_json(node: ToJson) -> str:
 
 
 @converter.pre(TokenType.JSON_STRUCT)
-def tt_json_struct(node: JsonStruct) -> str:
+def tt_json_struct(_: JsonStruct) -> str:
     warnings.warn(
         "Serialization current not available, generate dynamic struct",
         category=FutureWarning,
     )
     return ""
+
+
+@converter.pre(TokenType.TO_BOOL)
+def to_bool(node: ToBool) -> str:
+    prv, nxt = lr_var_names(variable=node.variable)
+    match node.ret_type:
+        case VariableType.LIST_DOCUMENT:
+            code = f"var {nxt} = ({prv} != null) && !{prv}.isEmpty; "
+        case VariableType.LIST_INT:
+            code = f"var {nxt} = ({prv} != null) && !{prv}.isEmpty; "
+        case VariableType.LIST_FLOAT:
+            code = f"var {nxt} = ({prv} != null) && !{prv}.isEmpty; "
+        case VariableType.LIST_STRING:
+            code = f"var {nxt} = ({prv} != null) && !{prv}.isEmpty; "
+        case VariableType.STRING:
+            code = f"var {nxt} = ({prv} != null) && !{prv}.isEmpty; "
+
+        case VariableType.INT:
+            code = f"var {nxt} = {prv} != null; "
+        case VariableType.FLOAT:
+            code = f"var {nxt} = {prv} != null; "
+        case VariableType.DOCUMENT:
+            code = f"var {nxt} = {prv} != null; "
+        case _:
+            assert_never(node.ret_type)
+    return code
+
+
+@converter.pre(TokenType.EXPR_LIST_LEN)
+def to_len(node: ArrayLengthExpression) -> str:
+    prv, nxt = lr_var_names(variable=node.variable)
+    return f"var {nxt} = {prv}.length; "

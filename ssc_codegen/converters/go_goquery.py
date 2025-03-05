@@ -51,6 +51,8 @@ from ssc_codegen.ast_ssc import (
     ToJson,
     JsonStruct,
     TypeDefField,
+    ArrayLengthExpression,
+    ToBool,
 )
 from ssc_codegen.tokens import (
     StructType,
@@ -304,6 +306,8 @@ def tt_default(node: DefaultStart) -> str:
     # defer func() wrapper, set default value if code throw error
     if isinstance(node.value, str):
         value = wrap_double_quotes(node.value)
+    elif isinstance(node.value, bool):
+        value = "true" if node.value else "false"
     elif isinstance(node.value, (int, float)):
         value = node.value
     else:
@@ -753,3 +757,47 @@ def tt_json_struct(node: JsonStruct) -> str:
             case _:
                 assert_never(field.value.kind)
     return code + go.BRACKET_END
+
+
+@converter.pre(TokenType.EXPR_LIST_LEN)
+def tt_to_len(node: ArrayLengthExpression) -> str:
+    prv, nxt = left_right_var_names("value", node.variable)
+    match node.ret_type:
+        # https://pkg.go.dev/gopkg.in/goquery.v1#Selection.Length
+        case VariableType.LIST_DOCUMENT:
+            code = f"{nxt} := {prv}.Length();"
+        # build-in array used
+        case _:
+            code = f"{nxt} := len({prv});"
+    return code
+
+
+@converter.pre(TokenType.TO_BOOL)
+def tt_to_bool(node: ToBool) -> str:
+    prv, nxt = left_right_var_names("value", node.variable)
+    match node.ret_type:
+        # https://pkg.go.dev/gopkg.in/goquery.v1#Selection.Length
+        case VariableType.DOCUMENT:
+            code = f"{nxt} := {prv} != nil && {prv}.Length() > 0; "
+        case VariableType.LIST_DOCUMENT:
+            code = f"{nxt} := {prv} != nil && {prv}.Length() > 0; "
+
+        case VariableType.STRING:
+            code = f'{nxt} := {prv} != nil && {prv} != ""; '
+
+        # `0` is true
+        case VariableType.INT:
+            code = f"{nxt} := {prv} != nil; "
+        case VariableType.FLOAT:
+            code = f"{nxt} := {prv} != nil; "
+
+        # build-in array
+        case VariableType.LIST_STRING:
+            code = f"{nxt} := {prv} != nil && len({prv}) > 0; "
+        case VariableType.LIST_INT:
+            code = f"{nxt} := {prv} != nil && len({prv}) > 0; "
+        case VariableType.LIST_FLOAT:
+            code = f"{nxt} := {prv} != nil && len({prv}) > 0; "
+        case _:
+            assert_never(node.prev.ret_type)
+    return code

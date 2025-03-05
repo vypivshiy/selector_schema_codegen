@@ -20,6 +20,7 @@ TYPES = {
     VariableType.OPTIONAL_FLOAT: "double?",
     VariableType.LIST_FLOAT: "List<double>",
     VariableType.OPTIONAL_LIST_FLOAT: "List<double>?",
+    VariableType.BOOL: "bool",
 }
 
 

@@ -47,6 +47,8 @@ from ssc_codegen.ast_ssc import (
     ToJson,
     JsonStruct,
     JsonStructField,
+    ArrayLengthExpression,
+    ToBool,
 )
 from ssc_codegen.tokens import (
     StructType,
@@ -132,6 +134,9 @@ class BasePyCodeConverter(BaseCodeConverter):
         self.pre_definitions[TokenType.JSON_STRUCT] = tt_json_struct_pre
         self.post_definitions[TokenType.JSON_STRUCT] = tt_json_struct_post
         self.pre_definitions[TokenType.JSON_FIELD] = tt_json_field
+
+        self.pre_definitions[TokenType.EXPR_LIST_LEN] = tt_to_len
+        self.pre_definitions[TokenType.TO_BOOL] = tt_to_bool
 
 
 def tt_imports(node: ModuleImports) -> str:
@@ -287,7 +292,7 @@ def tt_default_start(node: DefaultStart) -> str:
 
 
 def tt_default_end(node: DefaultEnd) -> str:
-    # prv, nxt = lr_var_names(variable=node.variable)
+    # bool, int, float, None represent as same
     val = repr(node.value) if isinstance(node.value, str) else node.value
     return py.INDENT_METHOD_BODY + py.BINDINGS[node.kind, val]
 
@@ -561,4 +566,18 @@ def tt_to_json(node: ToJson) -> str:
     indent = py.suggest_indent(node)
     prv, nxt = lr_var_names(variable=node.variable)
     code = f"{nxt} = json.loads({prv})"
+    return indent + code
+
+
+def tt_to_len(node: ArrayLengthExpression) -> str:
+    indent = py.suggest_indent(node)
+    prv, nxt = lr_var_names(variable=node.variable)
+    code = f"{nxt} = len({prv})"
+    return indent + code
+
+
+def tt_to_bool(node: ToBool) -> str:
+    indent = py.suggest_indent(node)
+    prv, nxt = lr_var_names(variable=node.variable)
+    code = f"{nxt} = bool({prv} or {prv} == 0)"
     return indent + code

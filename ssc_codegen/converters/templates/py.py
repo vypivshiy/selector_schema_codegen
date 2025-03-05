@@ -31,6 +31,7 @@ TYPES = {
     VariableType.FLOAT: "float",
     VariableType.LIST_INT: "List[int]",
     VariableType.LIST_FLOAT: "List[float]",
+    VariableType.BOOL: "bool",
 }
 
 JSON_TYPES = {

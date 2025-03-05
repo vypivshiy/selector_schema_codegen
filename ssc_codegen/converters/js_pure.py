@@ -50,6 +50,8 @@ from ssc_codegen.ast_ssc import (
     ToFloat,
     ToListFloat,
     ToJson,
+    ToBool,
+    ArrayLengthExpression,
 )
 from ssc_codegen.tokens import StructType, TokenType
 from .base import BaseCodeConverter, left_right_var_names
@@ -473,3 +475,15 @@ def tt_to_list_float(node: ToListFloat) -> str:
 def tt_to_json(node: ToJson) -> str:
     prv, nxt = left_right_var_names("value", node.variable)
     return f"let {nxt} = JSON.parse({prv}); "
+
+
+@converter.pre(TokenType.TO_BOOL)
+def tt_to_bool(node: ToBool) -> str:
+    prv, nxt = left_right_var_names("value", node.variable)
+    return f"let {nxt} = {prv} || {prv} === 0 ? true : false;"
+
+
+@converter.pre(TokenType.EXPR_LIST_LEN)
+def tt_to_len(node: ArrayLengthExpression) -> str:
+    prv, nxt = left_right_var_names("value", node.variable)
+    return f"let {nxt} = {prv}.length; "
