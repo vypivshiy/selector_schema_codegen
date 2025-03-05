@@ -200,9 +200,12 @@ You can use any html source:
 - get from browser (playwright, selenium, chrome-cdp)
 - paste code to developer console (js)
 - or call curl in shell and parse stdin
+- use in third-party tools in stdin pipeline: 
+(from [ProjectDiscovery](https://github.com/projectdiscovery), for example)
 
 
 ## See also
 - [Brief](docs/brief.md) about css selectors and regular expressions.
 - [Tutorial](docs/tutorial.md) how to use ssc-gen
 - [Reference](docs/reference.md) about high-level API
+- [AST reference](docs/ast_reference.md) about generation code from AST
