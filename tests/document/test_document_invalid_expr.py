@@ -40,6 +40,10 @@ class MockParser(ItemSchema):
         lambda: R().to_int().is_equal("a"),
         lambda: R().to_float().is_equal(1),
         lambda: R().to_float().is_equal("a"),
+        lambda: R().to_len(),
+        lambda: D().to_len(),
+        lambda: D().css("a").to_len(),
+        lambda: D().xpath("//a").to_len(),
     ],
 )
 def test_invalid_expr(document: Callable[[], Document]) -> None:

@@ -19,6 +19,10 @@ from ssc_codegen.document import BaseDocument
         R().is_regex("k"),
         R().split(" ").to_int().is_contains(1),
         R().split(" ").to_float().is_contains(0.1),
+        R().split(" ").to_len().is_equal(1),
+        R().split(" ").to_len().is_equal(0),
+        R().split(" ").to_len().is_not_equal(0),
+        R().split(" ").to_len().is_not_equal(1),
     ],
 )
 def test_assert_expr(expr: BaseDocument) -> None:
