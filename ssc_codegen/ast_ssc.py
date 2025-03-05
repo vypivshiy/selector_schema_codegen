@@ -69,6 +69,9 @@ class Variable(BaseAstNode):
         """
         return self.num + 1
 
+    def __repr__(self) -> str:
+        return f"{self.kind.name!r}({self.num!r} of {self.count!r}) {self.type!r}"
+
 
 @dataclass(kw_only=True)
 class Docstring(BaseAstNode):
@@ -80,15 +83,12 @@ class Docstring(BaseAstNode):
 
     kind: ClassVar[TokenType] = TokenType.DOCSTRING
     value: str
-    parent: Optional[Union["StructParser", "ModuleProgram"]] = (
-        None  # LATE INIT in builder
-    )
+    parent: Optional[Union["StructParser", "ModuleProgram"]] = field(default=None, repr=False)
 
 
 @dataclass(kw_only=True)
 class ModuleImports(BaseAstNode):
     """represent imports node. Always constant value, later fix code formatter"""
-
     kind: ClassVar[TokenType] = TokenType.IMPORTS
 
 
@@ -104,7 +104,7 @@ class TypeDefField(BaseAstNode):
     kind: ClassVar[TokenType] = TokenType.TYPEDEF_FIELD
     name: str
     ret_type: VariableType
-    parent: Optional["TypeDef"] = None
+    parent: Optional["TypeDef"] = field(default=None, repr=False)
 
     @property
     def nested_class(self) -> str | None:
@@ -146,8 +146,8 @@ class TypeDef(BaseAstNode):
     kind: ClassVar[TokenType] = TokenType.TYPEDEF
     name: str
     body: list[TypeDefField]
-    struct_ref: Optional["StructParser"] = None
-    parent: Optional[ModuleProgram] = None
+    struct_ref: Optional["StructParser"] = field(default=None, repr=False)
+    parent: Optional[ModuleProgram] = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         for f in self.body:
@@ -174,9 +174,9 @@ class BaseExpression(BaseAstNode):
             "PreValidateFunction",
             "PartDocFunction",
         ]
-    ] = None  # LATE INIT
-    prev: Optional["BaseExpression"] = None  # LATE INIT
-    next: Optional["BaseExpression"] = None  # LATE INIT
+    ] = field(init=False, repr=False)  # LATE INIT
+    prev: Optional["BaseExpression"] = field(default=None, repr=False)  # LATE INIT
+    next: Optional["BaseExpression"] = field(default=None, repr=False)  # LATE INIT
 
     accept_type: VariableType
     ret_type: VariableType
@@ -482,9 +482,9 @@ class RTrimExpression(__TrimNode):
 
 @dataclass(kw_only=True)
 class __MapTrimNode(BaseExpression):
-    value: str
     accept_type: VariableType = VariableType.LIST_STRING
     ret_type: VariableType = VariableType.LIST_STRING
+    value: str
 
 
 @dataclass(kw_only=True)
@@ -552,9 +552,9 @@ class SplitExpression(BaseExpression):
     """
 
     kind: ClassVar[TokenType] = TokenType.EXPR_STRING_SPLIT
-    sep: str
     accept_type: VariableType = VariableType.STRING
     ret_type: VariableType = VariableType.LIST_STRING
+    sep: str
 
 
 @dataclass(kw_only=True)
@@ -570,9 +570,9 @@ class FormatExpression(BaseExpression):
     """
 
     kind: ClassVar[TokenType] = TokenType.EXPR_STRING_FORMAT
-    fmt: str
     accept_type: VariableType = VariableType.STRING
     ret_type: VariableType = VariableType.STRING
+    fmt: str
 
 
 @dataclass(kw_only=True)
@@ -588,9 +588,9 @@ class MapFormatExpression(BaseExpression):
     """
 
     kind: ClassVar[TokenType] = TokenType.EXPR_LIST_STRING_FORMAT
-    fmt: str
     accept_type: VariableType = VariableType.LIST_STRING
     ret_type: VariableType = VariableType.LIST_STRING
+    fmt: str
 
 
 @dataclass(kw_only=True)
@@ -603,10 +603,10 @@ class ReplaceExpression(BaseExpression):
     """
 
     kind: ClassVar[TokenType] = TokenType.EXPR_STRING_REPLACE
-    old: str
-    new: str
     accept_type: VariableType = VariableType.STRING
     ret_type: VariableType = VariableType.STRING
+    old: str
+    new: str
 
 
 @dataclass(kw_only=True)
@@ -619,10 +619,10 @@ class MapReplaceExpression(BaseExpression):
     """
 
     kind: ClassVar[TokenType] = TokenType.EXPR_LIST_STRING_REPLACE
-    old: str
-    new: str
     accept_type: VariableType = VariableType.LIST_STRING
     ret_type: VariableType = VariableType.LIST_STRING
+    old: str
+    new: str
 
 
 # REGEX
@@ -639,11 +639,10 @@ class RegexExpression(BaseExpression):
     """
 
     kind: ClassVar[TokenType] = TokenType.EXPR_REGEX
-
-    pattern: str
-    group: int
     accept_type: VariableType = VariableType.STRING
     ret_type: VariableType = VariableType.STRING
+    pattern: str
+    group: int
 
 
 @dataclass(kw_only=True)
@@ -660,10 +659,9 @@ class RegexAllExpression(BaseExpression):
     """
 
     kind: ClassVar[TokenType] = TokenType.EXPR_REGEX_ALL
-
-    pattern: str
     accept_type: VariableType = VariableType.STRING
     ret_type: VariableType = VariableType.LIST_STRING
+    pattern: str
 
 
 @dataclass(kw_only=True)
@@ -677,11 +675,10 @@ class RegexSubExpression(BaseExpression):
     """
 
     kind: ClassVar[TokenType] = TokenType.EXPR_REGEX_SUB
-
-    pattern: str
-    repl: str
     accept_type: VariableType = VariableType.STRING
     ret_type: VariableType = VariableType.STRING
+    pattern: str
+    repl: str
 
 
 @dataclass(kw_only=True)
@@ -695,11 +692,10 @@ class MapRegexSubExpression(BaseExpression):
     """
 
     kind: ClassVar[TokenType] = TokenType.EXPR_LIST_REGEX_SUB
-
-    pattern: str
-    repl: str
     accept_type: VariableType = VariableType.LIST_STRING
     ret_type: VariableType = VariableType.LIST_STRING
+    pattern: str
+    repl: str
 
 
 # asserts - validators - not modify variables
@@ -717,11 +713,10 @@ class IsEqualExpression(BaseExpression):
     """
 
     kind: ClassVar[TokenType] = TokenType.IS_EQUAL
-
-    value: str | int | float
-    msg: str
     accept_type: VariableType = VariableType.STRING
     ret_type: VariableType = VariableType.STRING
+    value: str | int | float
+    msg: str
 
 
 @dataclass(kw_only=True)
@@ -738,11 +733,10 @@ class IsNotEqualExpression(BaseExpression):
     """
 
     kind: ClassVar[TokenType] = TokenType.IS_NOT_EQUAL
-
-    value: str | int | float
-    msg: str
     accept_type: VariableType = VariableType.STRING
     ret_type: VariableType = VariableType.STRING
+    value: str | int | float
+    msg: str
 
 
 @dataclass(kw_only=True)
@@ -762,10 +756,10 @@ class IsCssExpression(BaseExpression):
     """
 
     kind: ClassVar[TokenType] = TokenType.IS_CSS
-    query: str
-    msg: str
     accept_type: VariableType = VariableType.DOCUMENT
     ret_type: VariableType = VariableType.DOCUMENT
+    query: str
+    msg: str
 
 
 @dataclass(kw_only=True)
@@ -785,10 +779,10 @@ class IsXPathExpression(BaseExpression):
     """
 
     kind: ClassVar[TokenType] = TokenType.IS_XPATH
-    query: str
-    msg: str
     accept_type: VariableType = VariableType.DOCUMENT
     ret_type: VariableType = VariableType.DOCUMENT
+    query: str
+    msg: str
 
 
 @dataclass(kw_only=True)
@@ -808,10 +802,10 @@ class IsContainsExpression(BaseExpression):
     """
 
     kind: ClassVar[TokenType] = TokenType.IS_CONTAINS
-    item: str | int | float
-    msg: str
     accept_type: VariableType = VariableType.LIST_STRING
     ret_type: VariableType = VariableType.LIST_STRING
+    item: str | int | float
+    msg: str
 
 
 @dataclass(kw_only=True)
@@ -830,10 +824,10 @@ class IsRegexMatchExpression(BaseExpression):
     """
 
     kind: ClassVar[TokenType] = TokenType.IS_REGEX_MATCH
-    pattern: str
-    msg: str
     accept_type: VariableType = VariableType.STRING
     ret_type: VariableType = VariableType.STRING
+    pattern: str
+    msg: str
 
 
 @dataclass(kw_only=True)
@@ -917,7 +911,7 @@ class CallStructFunctionExpression(BaseExpression):
     accept_type: VariableType = VariableType.DOCUMENT
     fn_ref: Union[
         "StructFieldFunction", "PreValidateFunction", "PartDocFunction", None
-    ]
+    ] = field(default=None, repr=False)
     nested_cls_name_ref: str | None = None
     name: str
     ret_type: VariableType
@@ -1029,7 +1023,7 @@ class StructFieldFunction(__StructNode):
 
     name: M_ITEM | M_KEY | M_VALUE | str
     kind: ClassVar[TokenType] = TokenType.STRUCT_FIELD
-    parent: Optional["StructParser"] = None  # LATE INIT
+    parent: Optional["StructParser"] = field(default=None, repr=False)  # LATE INIT
 
     def find_associated_typedef(self) -> TypeDef | None:
         """try get associated typedef Node
@@ -1093,7 +1087,7 @@ class PreValidateFunction(__StructNode):
 
     kind: ClassVar[TokenType] = TokenType.STRUCT_PRE_VALIDATE
     name: M_PRE_VALIDATE = "__PRE_VALIDATE__"
-    parent: Optional["StructParser"] = None  # LATE INIT
+    parent: Optional["StructParser"] = field(default=None, init=False, repr=False) # LATE INIT
 
 
 @dataclass(kw_only=True)
@@ -1126,7 +1120,7 @@ class StartParseFunction(__StructNode):
     kind: ClassVar[TokenType] = TokenType.STRUCT_PARSE_START
     body: list[CallStructFunctionExpression]
     type: StructType
-    parent: Optional["StructParser"] = None  # LATE INIT
+    parent: Optional["StructParser"] = field(default=None, repr=False)  # LATE INIT
 
     def have_assert_expr(self) -> bool:
         for expr in self.body:
@@ -1155,7 +1149,7 @@ class StructInit(BaseAstNode):
     """
 
     kind: ClassVar[TokenType] = TokenType.STRUCT_INIT
-    parent: Optional["StructParser"] = None  # LATE INIT
+    parent: Optional["StructParser"] = field(default=None, repr=False) # LATE INIT
     name: str
 
 
@@ -1185,8 +1179,8 @@ class StructParser(BaseAstNode):
         | PreValidateFunction
         | PartDocFunction
     ]
-    typedef: Optional["TypeDef"] = field(init=False)
-    parent: Optional[ModuleProgram] = None  # LATE INIT
+    typedef: Optional["TypeDef"] = field(default=None, repr=False)
+    parent: Optional[ModuleProgram] = field(default=None, repr=False) # LATE INIT
 
     def _build_typedef(self) -> None:
         ast_typedef = TypeDef(
@@ -1241,7 +1235,7 @@ class JsonStruct(BaseAstNode):
     name: str
     body: list["JsonStructField"]
 
-    parent: Optional[ModuleProgram] = None
+    parent: Optional[ModuleProgram] = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         for f in self.body:
@@ -1254,7 +1248,7 @@ class JsonStructField(BaseAstNode):
     name: str
     value: BaseJsonType
 
-    parent: Optional[JsonStruct] = None  # LATE INIT
+    parent: Optional[JsonStruct] = field(default=None, repr=False)  # LATE INIT
 
     @property
     def ret_type(self) -> BaseJsonType | dict[str, BaseJsonType]:
