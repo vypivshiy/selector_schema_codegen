@@ -1,16 +1,25 @@
 from .document import HTMLDocument, StringDocument, ArrayDocument, AssertDocument, NestedDocument, DefaultDocument, \
-    NumericDocument, JsonDocument
+    NumericDocument, JsonDocument, BooleanDocument
 from .json_struct import Json
 from .schema import ItemSchema, DictSchema, ListSchema, FlatListSchema
 
-VERSION = "0.7.2"
+VERSION = "0.7.3"
 
 class __MISSING(object):
     pass
 
 _NO_DEFAULT = __MISSING()
 
-class Document(HTMLDocument, StringDocument, ArrayDocument, AssertDocument, DefaultDocument, NumericDocument, JsonDocument):
+class Document(
+    HTMLDocument,
+    StringDocument,
+    ArrayDocument,
+    AssertDocument,
+    DefaultDocument,
+    NumericDocument,
+    JsonDocument,
+    BooleanDocument
+):
     pass
 
 
