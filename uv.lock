@@ -977,10 +977,9 @@ wheels = [
 
 [[package]]
 name = "ssc-codegen"
-version = "0.6.2"
+version = "0.7.2"
 source = { editable = "." }
 dependencies = [
-    { name = "coverage" },
     { name = "cssselect" },
     { name = "httpx" },
     { name = "ichrome" },
@@ -1006,7 +1005,6 @@ tests = [
 
 [package.metadata]
 requires-dist = [
-    { name = "coverage", specifier = ">=7.6.12" },
     { name = "cssselect", specifier = ">=1.2.0" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "ichrome", specifier = ">=4.0.4" },
