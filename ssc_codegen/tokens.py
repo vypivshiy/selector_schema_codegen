@@ -28,6 +28,8 @@ class VariableType(IntEnum):
     JSON = auto()
     OPTIONAL_JSON = auto()
 
+    BOOL = auto()
+
 
 class JsonVariableType(IntEnum):
     # https://json-schema.org/understanding-json-schema/reference/type
@@ -135,6 +137,7 @@ class TokenType(IntEnum):
     EXPR_LIST_STRING_INDEX = auto()
     EXPR_LIST_DOCUMENT_INDEX = auto()
     EXPR_LIST_JOIN = auto()
+    EXPR_LIST_LEN = auto()
 
     # ASSERT
     IS_EQUAL = auto()
@@ -155,3 +158,6 @@ class TokenType(IntEnum):
     # STRUCTS
     JSON_STRUCT = auto()
     JSON_FIELD = auto()
+
+    # bool
+    TO_BOOL = auto()

@@ -70,7 +70,9 @@ class Variable(BaseAstNode):
         return self.num + 1
 
     def __repr__(self) -> str:
-        return f"{self.kind.name!r}({self.num!r} of {self.count!r}) {self.type!r}"
+        return (
+            f"{self.kind.name!r}({self.num!r} of {self.count!r}) {self.type!r}"
+        )
 
 
 @dataclass(kw_only=True)
@@ -83,12 +85,15 @@ class Docstring(BaseAstNode):
 
     kind: ClassVar[TokenType] = TokenType.DOCSTRING
     value: str
-    parent: Optional[Union["StructParser", "ModuleProgram"]] = field(default=None, repr=False)
+    parent: Optional[Union["StructParser", "ModuleProgram"]] = field(
+        default=None, repr=False
+    )
 
 
 @dataclass(kw_only=True)
 class ModuleImports(BaseAstNode):
     """represent imports node. Always constant value, later fix code formatter"""
+
     kind: ClassVar[TokenType] = TokenType.IMPORTS
 
 
@@ -175,8 +180,12 @@ class BaseExpression(BaseAstNode):
             "PartDocFunction",
         ]
     ] = field(init=False, repr=False)  # LATE INIT
-    prev: Optional["BaseExpression"] = field(default=None, repr=False)  # LATE INIT
-    next: Optional["BaseExpression"] = field(default=None, repr=False)  # LATE INIT
+    prev: Optional["BaseExpression"] = field(
+        default=None, repr=False
+    )  # LATE INIT
+    next: Optional["BaseExpression"] = field(
+        default=None, repr=False
+    )  # LATE INIT
 
     accept_type: VariableType
     ret_type: VariableType
@@ -218,7 +227,7 @@ class DefaultValueWrapper(BaseExpression):
 
     accept_type: VariableType = VariableType.DOCUMENT
     ret_type: VariableType = VariableType.DOCUMENT
-    value: str | int | float | None
+    value: str | int | float | bool | None
 
 
 @dataclass(kw_only=True)
@@ -233,7 +242,7 @@ class DefaultStart(BaseExpression):
     kind: ClassVar[TokenType] = TokenType.EXPR_DEFAULT_START
     accept_type: VariableType = VariableType.ANY
     ret_type: VariableType = VariableType.ANY
-    value: str | int | float | None
+    value: str | int | float | bool | None
 
 
 @dataclass(kw_only=True)
@@ -249,7 +258,7 @@ class DefaultEnd(BaseExpression):
     kind: ClassVar[TokenType] = TokenType.EXPR_DEFAULT_END
     accept_type: VariableType = VariableType.ANY
     ret_type: VariableType = VariableType.ANY
-    value: str | int | float | None
+    value: str | int | float | bool | None
 
 
 # DOCUMENT
@@ -413,6 +422,18 @@ class JoinExpression(BaseExpression):
     sep: str
     accept_type: VariableType = VariableType.LIST_STRING
     ret_type: VariableType = VariableType.STRING
+
+
+@dataclass(kw_only=True)
+class ArrayLengthExpression(BaseExpression):
+    kind: ClassVar[TokenType] = TokenType.EXPR_LIST_LEN
+    accept_type: VariableType = (
+        VariableType.LIST_STRING
+        | VariableType.LIST_DOCUMENT
+        | VariableType.LIST_INT
+        | VariableType.LIST_FLOAT
+    )
+    ret_type: VariableType = VariableType.INT
 
 
 # STRING
@@ -1023,7 +1044,9 @@ class StructFieldFunction(__StructNode):
 
     name: M_ITEM | M_KEY | M_VALUE | str
     kind: ClassVar[TokenType] = TokenType.STRUCT_FIELD
-    parent: Optional["StructParser"] = field(default=None, repr=False)  # LATE INIT
+    parent: Optional["StructParser"] = field(
+        default=None, repr=False
+    )  # LATE INIT
 
     def find_associated_typedef(self) -> TypeDef | None:
         """try get associated typedef Node
@@ -1087,7 +1110,9 @@ class PreValidateFunction(__StructNode):
 
     kind: ClassVar[TokenType] = TokenType.STRUCT_PRE_VALIDATE
     name: M_PRE_VALIDATE = "__PRE_VALIDATE__"
-    parent: Optional["StructParser"] = field(default=None, init=False, repr=False) # LATE INIT
+    parent: Optional["StructParser"] = field(
+        default=None, init=False, repr=False
+    )  # LATE INIT
 
 
 @dataclass(kw_only=True)
@@ -1120,7 +1145,9 @@ class StartParseFunction(__StructNode):
     kind: ClassVar[TokenType] = TokenType.STRUCT_PARSE_START
     body: list[CallStructFunctionExpression]
     type: StructType
-    parent: Optional["StructParser"] = field(default=None, repr=False)  # LATE INIT
+    parent: Optional["StructParser"] = field(
+        default=None, repr=False
+    )  # LATE INIT
 
     def have_assert_expr(self) -> bool:
         for expr in self.body:
@@ -1149,7 +1176,9 @@ class StructInit(BaseAstNode):
     """
 
     kind: ClassVar[TokenType] = TokenType.STRUCT_INIT
-    parent: Optional["StructParser"] = field(default=None, repr=False) # LATE INIT
+    parent: Optional["StructParser"] = field(
+        default=None, repr=False
+    )  # LATE INIT
     name: str
 
 
@@ -1180,7 +1209,9 @@ class StructParser(BaseAstNode):
         | PartDocFunction
     ]
     typedef: Optional["TypeDef"] = field(default=None, repr=False)
-    parent: Optional[ModuleProgram] = field(default=None, repr=False) # LATE INIT
+    parent: Optional[ModuleProgram] = field(
+        default=None, repr=False
+    )  # LATE INIT
 
     def _build_typedef(self) -> None:
         ast_typedef = TypeDef(
@@ -1264,6 +1295,8 @@ class JsonStructField(BaseAstNode):
 
 @dataclass(kw_only=True)
 class ToJson(BaseExpression):
+    """jsonify string to structure"""
+
     kind: ClassVar[TokenType] = TokenType.TO_JSON
     accept_type: VariableType = VariableType.STRING
     ret_type: VariableType = VariableType.JSON
@@ -1276,3 +1309,19 @@ class ToJson(BaseExpression):
     @property
     def is_array_entrypoint(self) -> bool:
         return self.value.__IS_ARRAY__
+
+
+# BOOLEAN
+@dataclass(kw_only=True)
+class ToBool(BaseExpression):
+    """convert variable to boolean
+
+    boolean convert rules
+
+    None, nil, empty array, empty string - False
+    other - True
+    """
+
+    kind: ClassVar[TokenType] = TokenType.TO_BOOL
+    accept_type: VariableType = VariableType.ANY
+    ret_type: VariableType = VariableType.BOOL

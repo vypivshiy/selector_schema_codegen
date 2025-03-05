@@ -207,6 +207,7 @@ def build_ast_struct(
         assert_schema_dict_key_is_string(field, name, schema)
         assert_split_doc_is_list_document(field, name, schema)
         assert_ret_type_not_document(field, name, schema)
+        # TODO: compare default placeholder value type and last expr ret_type
 
     ast_struct_parser = StructParser(
         type=schema.__SCHEMA_TYPE__,

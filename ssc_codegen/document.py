@@ -48,6 +48,8 @@ from .ast_ssc import (
     ToListInteger,
     TrimExpression,
     ToJson,
+    ToBool,
+    ArrayLengthExpression,
 )
 from .document_utlis import assert_re_expression
 from .schema import BaseSchema
@@ -269,9 +271,15 @@ class ArrayDocument(BaseDocument):
 
         match self.stack_last_ret:
             case VariableType.LIST_DOCUMENT:
-                self._add(IndexDocumentExpression(value=i, ret_type=VariableType.DOCUMENT))
+                self._add(
+                    IndexDocumentExpression(
+                        value=i, ret_type=VariableType.DOCUMENT
+                    )
+                )
             case VariableType.LIST_STRING:
-                self._add(IndexStringExpression(value=i, ret_type=VariableType.STRING))
+                self._add(
+                    IndexStringExpression(value=i, ret_type=VariableType.STRING)
+                )
             case VariableType.LIST_INT:
                 self._add(
                     IndexStringExpression(value=i, ret_type=VariableType.INT)
@@ -313,6 +321,32 @@ class ArrayDocument(BaseDocument):
                     self.stack_last_ret,
                     VariableType.LIST_STRING,
                 )
+        return self
+
+    def to_len(self) -> Self:
+        """Get length of items in array object
+
+        - accept LIST_STRING | LIST_DOCUMENT | LIST_INT | LIST_FLOAT, return INT
+
+        """
+        match self.stack_last_ret:
+            case VariableType.LIST_STRING:
+                pass
+            case VariableType.LIST_DOCUMENT:
+                pass
+            case VariableType.LIST_INT:
+                pass
+            case VariableType.LIST_FLOAT:
+                pass
+            case _:
+                self._raise_wrong_type_error(
+                    self.stack_last_ret,
+                    VariableType.LIST_STRING,
+                    VariableType.LIST_DOCUMENT,
+                    VariableType.LIST_INT,
+                    VariableType.LIST_FLOAT,
+                )
+        self._add(ArrayLengthExpression())
         return self
 
 
@@ -707,6 +741,23 @@ class NumericDocument(BaseDocument):
                     VariableType.STRING,
                     VariableType.LIST_STRING,
                 )
+        return self
+
+
+class BooleanDocument(BaseDocument):
+    def to_bool(self) -> Self:
+        """convert current value to bool. Accept any type
+
+        value returns false if:
+
+        - None
+        - empty sequence
+        - empty string
+
+        other - true
+
+        """
+        self._add(ToBool())
         return self
 
 
