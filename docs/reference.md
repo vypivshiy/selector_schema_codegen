@@ -30,6 +30,7 @@ Allowed methods:
 - [text](#text)
 - [raw](#raw)
 - [sub_parser](#sub_parser)
+- [to_bool](#to_bool)
 
 ### ListDocument
 
@@ -47,6 +48,8 @@ Allowed methods
 - [index](#index)
 - [first](#first)
 - [last](#last)
+- [to_len](#to_len)
+- [to_bool](#to_bool)
 
 ### String
 
@@ -63,6 +66,7 @@ Allowed methods
 - [to_int](#to_int)
 - [to_float](#to_float)
 - [jsonify](#jsonify)
+- [to_bool](#to_bool)
 
 ### ListString
 
@@ -76,6 +80,8 @@ Allowed methods
 - [re_trim](#re_trim)
 - [to_int](#to_int)
 - [to_float](#to_float)
+- [to_len](#to_len)
+- [to_bool](#to_bool)
 
 ### Nested
 
@@ -566,7 +572,6 @@ D().is_xpath('//title').xpath('//title').text()
 D().default('titled tag. rly?').is_xpath('//titled').xpath('//titled').text()
 ```
 
-
 ### is_equal
 
 Assertion that variable equal by string, int or float else throw exception. 
@@ -587,7 +592,6 @@ R().re('(\d+)').to_float().is_equal(3.14)
 # rescue exception
 D().default('Not equal').css('title').text().is_equal('O!')
 ```
-
 
 ### is_not_equal
 
@@ -695,6 +699,43 @@ R().re_all(r'(\d+\.\d+)').to_float()
 D().css('p').text().re_sub('[^0-9.]').to_float()
 D().css_all('p').text().re_sub('[^0-9.]').to_float()
 
+```
+
+### to_len
+
+Get length of items in array object
+        
+- accept LIST_STRING | LIST_DOCUMENT | LIST_INT | LIST_FLOAT, return INT
+
+```python
+from ssc_codegen import D, R
+
+D().css_all('a').to_len()
+R().re('\d+').to_len()
+R().re('\d+').to_int().to_len()
+R().re('\d+').to_float().to_len()
+```        
+
+### to_bool
+
+Convert current value to bool. Accept any type
+
+Value returns false if:
+
+- None
+- empty sequence
+- empty string
+
+other - true
+
+```python
+from ssc_codegen import D, R
+
+D().css('title').to_bool()
+D().css('.some_unique_class').to_bool()
+D().css_all('.some_unique_class').to_bool()
+# resque value if regex does not match
+R().default(False).re("foobarbaz unique regex").to_bool()
 ```
 
 ### sub_parser
