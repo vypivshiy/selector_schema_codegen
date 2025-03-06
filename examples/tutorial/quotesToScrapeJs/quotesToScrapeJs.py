@@ -1,5 +1,16 @@
 from ssc_codegen import Json, R, ItemSchema
+import re
 
+# most difficult step:
+# write correct regular expression for extract a valid json structure
+
+# allow pass patterns in verbose mode
+# codegen automatically convert to normal pattern
+JSON_PATTERN = re.compile(r"""
+var\s+\w+\s*=\s*     # var data =
+(\[[\s\S]*?\])       # json content
+;                    # END
+""", re.X)
 
 class Author(Json):
     name: str
@@ -18,6 +29,4 @@ class Quote(Json):
 
 
 class Main(ItemSchema):
-    # most difficult step:
-    # write correct regular expression for extract a valid json structure
-    data = R().re(r'var\s+\w+\s*=\s*(\[[\s\S]*?\]);').jsonify(Quote)
+    data = R().re(JSON_PATTERN).jsonify(Quote)
