@@ -1,6 +1,6 @@
 """high-level AST builder interface"""
 
-from typing import Type
+from typing import Type, Pattern
 
 from typing_extensions import Self
 
@@ -51,7 +51,7 @@ from .ast_ssc import (
     ToBool,
     ArrayLengthExpression,
 )
-from .document_utlis import assert_re_expression
+from .document_utlis import assert_re_expression, unverbosify_regex
 from .schema import BaseSchema
 from .selector_utils import validate_css_query, validate_xpath_query
 from .tokens import VariableType
@@ -458,7 +458,7 @@ class StringDocument(BaseDocument):
                 )
         return self
 
-    def re(self, pattern: str, group: int = 1) -> Self:
+    def re(self, pattern: str | Pattern, group: int = 1) -> Self:
         """extract first regex result.
 
         NOTE:
@@ -466,6 +466,7 @@ class StringDocument(BaseDocument):
 
         - accept STRING, return STRING
         """
+        pattern = unverbosify_regex(pattern)
         assert_re_expression(pattern)
 
         if self.stack_last_ret != VariableType.STRING:
@@ -475,11 +476,12 @@ class StringDocument(BaseDocument):
         self._add(RegexExpression(pattern=pattern, group=group))
         return self
 
-    def re_all(self, pattern: str) -> Self:
+    def re_all(self, pattern: str | Pattern) -> Self:
         """extract all regex results.
 
         - accept STRING, return LIST_STRING
         """
+        pattern = unverbosify_regex(pattern)
         assert_re_expression(pattern, max_groups=1)
         if self.stack_last_ret != VariableType.STRING:
             self._raise_wrong_type_error(
@@ -488,12 +490,13 @@ class StringDocument(BaseDocument):
         self._add(RegexAllExpression(pattern=pattern))
         return self
 
-    def re_sub(self, pattern: str, repl: str = "") -> Self:
+    def re_sub(self, pattern: str | Pattern, repl: str = "") -> Self:
         """Replace substring by `pattern` to `repl`.
 
         - accept STRING, return STRING
         - accept LIST_STRING, return LIST_STRING
         """
+        pattern = unverbosify_regex(pattern)
         assert_re_expression(pattern, allow_empty_groups=True)
 
         match self.stack_last_ret:

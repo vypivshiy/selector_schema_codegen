@@ -1,5 +1,5 @@
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Pattern
 
 from ssc_codegen.ast_ssc import (
     BaseExpression,
@@ -14,6 +14,40 @@ from ssc_codegen.selector_utils import css_to_xpath, xpath_to_css
 
 if TYPE_CHECKING:
     from .document import BaseDocument
+
+
+# https://stackoverflow.com/a/14919203
+CM1_RX = r"(?m)(?<!\\)((\\{2})*)#.*$"
+CM2_RX = r"(\\)?((\\{2})*)(#)"
+WS_RX = r"(\\)?((\\{2})*)(\s)\s*"
+
+
+def unverbosify_regex(pattern: str | Pattern) -> str:
+    if isinstance(pattern, str):
+        return pattern
+
+    def strip_escapes(match):  # type: ignore
+        ## if even slashes: delete space and retain slashes
+        if match.group(1) is None:
+            return match.group(2)
+        ## if number of slashes is odd: delete slash and keep space (or 'comment')
+        elif match.group(1) == "\\":
+            return match.group(2) + match.group(4)
+        ## error
+        else:
+            raise Exception
+
+    if pattern.flags & re.X:
+        not_verbose_regex = re.sub(
+            WS_RX,
+            strip_escapes,
+            re.sub(
+                CM2_RX, strip_escapes, re.sub(CM1_RX, "\\1", pattern.pattern)
+            ),
+        )
+
+        return not_verbose_regex
+    return pattern.pattern
 
 
 def assert_re_expression(
