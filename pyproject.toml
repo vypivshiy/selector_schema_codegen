@@ -1,6 +1,6 @@
 [project]
 name = "ssc_codegen"
-version = "0.7.4"
+version = "0.7.5"
 description = "Python-dsl code converter to html parser for web scraping "
 readme = "README.md"
 requires-python = ">=3.10"
@@ -26,7 +26,6 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
-
 ]
 
 [project.urls]
