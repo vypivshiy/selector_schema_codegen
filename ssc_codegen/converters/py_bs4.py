@@ -54,7 +54,7 @@ py.BINDINGS[TokenType.EXPR_ATTR_ALL] = (
 # maybe returns None
 py.BINDINGS[TokenType.EXPR_RAW] = "{} = str({}) if {} else {}"
 # maybe returns None
-py.BINDINGS[TokenType.EXPR_RAW_ALL] = "{} = [e for e in {} if e]"
+py.BINDINGS[TokenType.EXPR_RAW_ALL] = "{} = [str(e) for e in {} if e]"
 
 py.BINDINGS[TokenType.IS_CSS] = "assert {}.select_one({}), {}"
 
