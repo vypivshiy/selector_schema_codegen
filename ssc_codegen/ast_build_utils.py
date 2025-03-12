@@ -216,10 +216,10 @@ def cast_ret_type_to_optional(ret_type: VariableType) -> VariableType:
     return ret_type
 
 
-def assert_field_document_variable_types(field: BaseDocument) -> None:
+def scan_field_stack_expr(field: BaseDocument) -> None:
     """validate correct type expressions pass.
 
-    raise TypeError if not passed
+    raise TypeError if not scan passed
     """
     var_cursor = VariableType.DOCUMENT
     for expr in field.stack:
@@ -246,8 +246,13 @@ def assert_field_document_variable_types(field: BaseDocument) -> None:
         # end token operation, ignore
         elif expr.kind == TokenType.EXPR_DEFAULT_END:
             continue
+        # end operations
         elif var_cursor == VariableType.NESTED:
-            raise TypeError("sub_parser not allowed next instructions")
+            raise TypeError(".sub_parser() not allowed next instructions")
+        elif var_cursor == VariableType.JSON:
+            raise TypeError(".jsonify() not allowed next instructions")
+        elif var_cursor == VariableType.OPTIONAL_JSON:
+            raise TypeError(".jsonify() not allowed next instructions")
 
         # not covered cases
         msg = f"'{expr.kind.name}' expected type '{expr.accept_type.name}', got '{var_cursor.name}'"

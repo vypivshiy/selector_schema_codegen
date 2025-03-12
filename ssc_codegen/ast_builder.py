@@ -14,7 +14,7 @@ from .ast_build_utils import (
     unwrap_default_expr,
     assert_split_doc_ret_type_is_list_document,
     cast_ret_type_to_optional,
-    assert_field_document_variable_types,
+    scan_field_stack_expr,
     extract_json_structs_from_module,
 )
 from .ast_ssc import (
@@ -60,15 +60,17 @@ def fill_variables_stack_expr(
             # set DefaultEnd ret_type as DefaultStartToken
             tmp_stack[-1].ret_type = ret_type
         elif isinstance(first_expr.value, str):  # type: ignore[attr-defined]
-            tmp_stack[-1].ret_type = VariableType.STRING
-            if ret_type != VariableType.STRING:
-                msg = f"wrong default type passed (should be a STRING or NULL, got {ret_type.name})"
-                raise TypeError(msg)
-        elif isinstance(first_expr.value, float):  # type: ignore[attr-defined]
             tmp_stack[-1].ret_type = VariableType.FLOAT
             if ret_type != VariableType.FLOAT:
                 msg = f"wrong default type passed (should be a FLOAT or NULL, got {ret_type.name})"
                 raise TypeError(msg)
+
+        elif isinstance(first_expr.value, bool):  # type: ignore[attr-defined]
+            tmp_stack[-1].ret_type = VariableType.BOOL
+            if ret_type != VariableType.BOOL:
+                msg = f"wrong default type passed (should be a BOOL or NULL, got {ret_type.name})"
+                raise TypeError(msg)
+
         elif isinstance(first_expr.value, int):  # type: ignore[attr-defined]
             tmp_stack[-1].ret_type = VariableType.INT
             if ret_type != VariableType.INT:
@@ -152,11 +154,11 @@ def build_ast_struct(
     start_parse_body: list[CallStructFunctionExpression] = []
     struct_parse_functions: list[BaseAstNode] = []
     for name, field in fields.items():
-        assert_field_document_variable_types(field)
+        scan_field_stack_expr(field)
 
         # not allowed empty stack exprs
         if len(field.stack) == 0:
-            msg = f"{schema.__name__}.{name} has not exists expressions"
+            msg = f"{schema.__name__}.{name} has empty expressions"
             raise SyntaxError(msg)
 
         if css_to_xpath:
