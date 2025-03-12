@@ -103,9 +103,25 @@ BINDINGS[TokenType.EXPR_LIST_STRING_REPLACE] = (
     "{} = [e.replace({}, {}) for e in {}]"
 )
 BINDINGS[TokenType.EXPR_STRING_SPLIT] = "{} = {}.split({})"
+
+
 # regex
-BINDINGS[TokenType.EXPR_REGEX] = "{} = re.search({}, {})[{}]"
-BINDINGS[TokenType.EXPR_REGEX_ALL] = "{} = re.findall({}, {})"
+def expr_re(
+    nxt: str, pattern: str, prv: str, group: int, ignore_case: bool
+) -> str:
+    if ignore_case:
+        return f"{nxt} = re.search({pattern}, '{prv}', re.IGNORECASE)[{group}]"
+    return f"{nxt} = re.search({pattern}, '{prv}')[{group}]"
+
+
+def expr_re_all(nxt: str, pattern: str, prv: str, ignore_case: bool) -> str:
+    if ignore_case:
+        return f"{nxt} = re.findall({pattern}, '{prv}', re.IGNORECASE)"
+    return f"{nxt} = re.findall({pattern}, '{prv}')"
+
+
+BINDINGS[TokenType.EXPR_REGEX] = expr_re
+BINDINGS[TokenType.EXPR_REGEX_ALL] = expr_re_all
 BINDINGS[TokenType.EXPR_REGEX_SUB] = "{} = re.sub({}, {}, {})"
 BINDINGS[TokenType.EXPR_LIST_REGEX_SUB] = "{} = [re.sub({}, {}, e) for e in {}]"
 
@@ -118,7 +134,15 @@ BINDINGS[TokenType.EXPR_LIST_JOIN] = "{} = {}.join({})"
 BINDINGS[TokenType.IS_EQUAL] = "assert {} == {}, {}"
 BINDINGS[TokenType.IS_NOT_EQUAL] = "assert {} != {}, {}"
 BINDINGS[TokenType.IS_CONTAINS] = "assert {} in {}, {}"
-BINDINGS[TokenType.IS_REGEX_MATCH] = "assert re.search({}, {}), {}"
+
+
+def is_regex(pattern: str, prv: str, msg: str, ignore_case: bool) -> str:
+    if ignore_case:
+        return f"assert re.search({pattern}, {prv}, re.IGNORECASE), {msg}"
+    return f"assert re.search({pattern}, {prv}), {msg}"
+
+
+BINDINGS[TokenType.IS_REGEX_MATCH] = is_regex
 
 # int, float converters
 BINDINGS[TokenType.TO_INT] = "{} = int({})"

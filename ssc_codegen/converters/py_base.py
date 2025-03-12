@@ -401,7 +401,7 @@ def tt_regex(node: RegexExpression) -> str:
     prv, nxt = lr_var_names(variable=node.variable)
     pattern = repr(node.pattern)
     group = node.group
-    code = py.BINDINGS[node.kind, nxt, pattern, prv, group]
+    code = py.BINDINGS[node.kind, nxt, pattern, prv, group, node.ignore_case]
     return indent + code
 
 
@@ -410,7 +410,7 @@ def tt_regex_all(node: RegexAllExpression) -> str:
 
     prv, nxt = lr_var_names(variable=node.variable)
     pattern = repr(node.pattern)
-    code = py.BINDINGS[node.kind, nxt, pattern, prv]
+    code = py.BINDINGS[node.kind, nxt, pattern, prv, node.ignore_case]
     return indent + code
 
 
@@ -497,7 +497,7 @@ def tt_is_regex(node: IsRegexMatchExpression) -> str:
     pattern = repr(node.pattern)
     msg = repr(node.msg)
 
-    code = py.BINDINGS[node.kind, pattern, prv, msg]
+    code = py.BINDINGS[node.kind, pattern, prv, msg, node.ignore_case]
     if node.next.kind == TokenType.EXPR_NO_RETURN:
         return indent + code
     return indent + code + "\n" + indent + f"{nxt} = {prv}"
