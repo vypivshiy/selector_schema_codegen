@@ -427,12 +427,7 @@ class JoinExpression(BaseExpression):
 @dataclass(kw_only=True)
 class ArrayLengthExpression(BaseExpression):
     kind: ClassVar[TokenType] = TokenType.EXPR_LIST_LEN
-    accept_type: VariableType = (
-        VariableType.LIST_STRING
-        | VariableType.LIST_DOCUMENT
-        | VariableType.LIST_INT
-        | VariableType.LIST_FLOAT
-    )
+    accept_type: VariableType = VariableType.LIST_ANY
     ret_type: VariableType = VariableType.INT
 
 

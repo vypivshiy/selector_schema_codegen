@@ -126,6 +126,10 @@ def extract_json_structs_from_module(module: ModuleType) -> list[Type[Json]]:
 def assert_ret_type_not_document(
     field: "BaseDocument", name: str, schema: Type[BaseSchema]
 ) -> None:
+    # always ret nil, skip
+    if name == "__PRE_VALIDATE__":
+        return
+
     if field.stack_last_ret == VariableType.DOCUMENT:
         msg = f"{schema.__name__}.{name} cannot return type {VariableType.DOCUMENT.name}"
         raise TypeError(msg)
@@ -222,6 +226,19 @@ def assert_field_document_variable_types(field: BaseDocument) -> None:
         if var_cursor == expr.accept_type:
             var_cursor = expr.ret_type
             continue
+        # currently used in to_len() operation
+        elif expr.accept_type == VariableType.LIST_ANY:
+            if var_cursor in (
+                VariableType.LIST_STRING,
+                VariableType.LIST_DOCUMENT,
+                VariableType.LIST_FLOAT,
+                VariableType.LIST_INT,
+            ):
+                var_cursor = expr.ret_type
+                continue
+            msg = f".to_len() expected LIST_ANY type, got '{var_cursor.name}'"
+            raise TypeError(msg)
+
         # this type always first (naive, used in DEFAULT and RETURN expr)
         elif expr.accept_type == VariableType.ANY:
             var_cursor = VariableType.DOCUMENT
@@ -232,5 +249,6 @@ def assert_field_document_variable_types(field: BaseDocument) -> None:
         elif var_cursor == VariableType.NESTED:
             raise TypeError("sub_parser not allowed next instructions")
 
+        # not covered cases
         msg = f"'{expr.kind.name}' expected type '{expr.accept_type.name}', got '{var_cursor.name}'"
         raise TypeError(msg)

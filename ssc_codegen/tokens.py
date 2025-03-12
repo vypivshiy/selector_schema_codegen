@@ -14,6 +14,10 @@ class VariableType(IntEnum):
     # mark accept any variable type
     # used in return and default expr
     ANY = auto()
+
+    # currently used for to_len() operation
+    LIST_ANY = auto()
+
     # nested functions
     NESTED = auto()
     INT = auto()
