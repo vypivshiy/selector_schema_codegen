@@ -110,14 +110,14 @@ def expr_re(
     nxt: str, pattern: str, prv: str, group: int, ignore_case: bool
 ) -> str:
     if ignore_case:
-        return f"{nxt} = re.search({pattern}, '{prv}', re.IGNORECASE)[{group}]"
-    return f"{nxt} = re.search({pattern}, '{prv}')[{group}]"
+        return f"{nxt} = re.search({pattern}, {prv}, re.IGNORECASE)[{group}]"
+    return f"{nxt} = re.search({pattern}, {prv})[{group}]"
 
 
 def expr_re_all(nxt: str, pattern: str, prv: str, ignore_case: bool) -> str:
     if ignore_case:
-        return f"{nxt} = re.findall({pattern}, '{prv}', re.IGNORECASE)"
-    return f"{nxt} = re.findall({pattern}, '{prv}')"
+        return f"{nxt} = re.findall({pattern}, {prv}, re.IGNORECASE)"
+    return f"{nxt} = re.findall({pattern}, {prv})"
 
 
 BINDINGS[TokenType.EXPR_REGEX] = expr_re
