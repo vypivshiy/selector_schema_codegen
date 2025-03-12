@@ -664,6 +664,7 @@ class RegexExpression(BaseExpression):
     ret_type: VariableType = VariableType.STRING
     pattern: str
     group: int
+    ignore_case: bool = False
 
 
 @dataclass(kw_only=True)
@@ -683,6 +684,7 @@ class RegexAllExpression(BaseExpression):
     accept_type: VariableType = VariableType.STRING
     ret_type: VariableType = VariableType.LIST_STRING
     pattern: str
+    ignore_case: bool = False
 
 
 @dataclass(kw_only=True)
@@ -700,6 +702,7 @@ class RegexSubExpression(BaseExpression):
     ret_type: VariableType = VariableType.STRING
     pattern: str
     repl: str
+    ignore_case: bool = False
 
 
 @dataclass(kw_only=True)
@@ -849,6 +852,7 @@ class IsRegexMatchExpression(BaseExpression):
     ret_type: VariableType = VariableType.STRING
     pattern: str
     msg: str
+    ignore_case: bool = False
 
 
 @dataclass(kw_only=True)

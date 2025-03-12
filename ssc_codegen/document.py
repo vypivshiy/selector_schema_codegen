@@ -51,7 +51,11 @@ from .ast_ssc import (
     ToBool,
     ArrayLengthExpression,
 )
-from .document_utlis import assert_re_expression, unverbosify_regex
+from .document_utlis import (
+    assert_re_expression,
+    unverbosify_regex,
+    is_ignore_case_regex,
+)
 from .schema import BaseSchema
 from .selector_utils import validate_css_query, validate_xpath_query
 from .tokens import VariableType
@@ -458,7 +462,9 @@ class StringDocument(BaseDocument):
                 )
         return self
 
-    def re(self, pattern: str | Pattern, group: int = 1) -> Self:
+    def re(
+        self, pattern: str | Pattern, group: int = 1, ignore_case: bool = False
+    ) -> Self:
         """extract first regex result.
 
         NOTE:
@@ -466,6 +472,10 @@ class StringDocument(BaseDocument):
 
         - accept STRING, return STRING
         """
+        # TODO: implement, js, go, dart ignorecase flag
+        if not isinstance(pattern, str):
+            ignore_case = is_ignore_case_regex(pattern)
+
         pattern = unverbosify_regex(pattern)
         assert_re_expression(pattern)
 
@@ -473,21 +483,28 @@ class StringDocument(BaseDocument):
             self._raise_wrong_type_error(
                 self.stack_last_ret, VariableType.STRING
             )
-        self._add(RegexExpression(pattern=pattern, group=group))
+        self._add(
+            RegexExpression(
+                pattern=pattern, group=group, ignore_case=ignore_case
+            )
+        )
         return self
 
-    def re_all(self, pattern: str | Pattern) -> Self:
+    def re_all(self, pattern: str | Pattern, ignore_case: bool = False) -> Self:
         """extract all regex results.
 
         - accept STRING, return LIST_STRING
         """
+        if not isinstance(pattern, str):
+            ignore_case = is_ignore_case_regex(pattern)
+
         pattern = unverbosify_regex(pattern)
         assert_re_expression(pattern, max_groups=1)
         if self.stack_last_ret != VariableType.STRING:
             self._raise_wrong_type_error(
                 self.stack_last_ret, VariableType.STRING
             )
-        self._add(RegexAllExpression(pattern=pattern))
+        self._add(RegexAllExpression(pattern=pattern, ignore_case=ignore_case))
         return self
 
     def re_sub(self, pattern: str | Pattern, repl: str = "") -> Self:
@@ -674,20 +691,29 @@ class AssertDocument(BaseDocument):
         self._add(IsContainsExpression(item=item, msg=msg))
         return self
 
-    def is_regex(self, pattern: str, msg: str = "") -> Self:
+    def is_regex(
+        self, pattern: str | Pattern, msg: str = "", ignore_case: bool = False
+    ) -> Self:
         """assert value matched by regex. If in generated code check failed - throw exception with passed msg
 
         EXPR DO NOT MODIFY variable
 
         - accept STRING, return STRING
         """
+        if not isinstance(pattern, str):
+            ignore_case = is_ignore_case_regex(pattern)
+        pattern = unverbosify_regex(pattern)
         if self.stack_last_ret != VariableType.STRING:
             self._raise_wrong_type_error(
                 self.stack_last_ret, VariableType.STRING
             )
         assert_re_expression(pattern, allow_empty_groups=True)
 
-        self._add(IsRegexMatchExpression(pattern=pattern, msg=msg))
+        self._add(
+            IsRegexMatchExpression(
+                pattern=pattern, msg=msg, ignore_case=ignore_case
+            )
+        )
         return self
 
 

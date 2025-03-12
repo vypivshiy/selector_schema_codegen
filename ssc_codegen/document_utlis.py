@@ -22,6 +22,12 @@ CM2_RX = r"(\\)?((\\{2})*)(#)"
 WS_RX = r"(\\)?((\\{2})*)(\s)\s*"
 
 
+def is_ignore_case_regex(pattern: str | Pattern) -> bool:
+    if isinstance(pattern, str):
+        return False
+    return bool(pattern.flags & re.IGNORECASE)
+
+
 def unverbosify_regex(pattern: str | Pattern) -> str:
     if isinstance(pattern, str):
         return pattern
