@@ -1,72 +1,37 @@
 """high-level AST builder interface"""
 
+import logging
 from typing import Type, Pattern
 
+from cssselect import SelectorSyntaxError
 from typing_extensions import Self
 
-from .json_struct import Json
-from .ast_ssc import (
-    BaseExpression,
-    DefaultValueWrapper,
-    FormatExpression,
-    HtmlAttrAllExpression,
-    HtmlAttrExpression,
-    HtmlCssAllExpression,
-    HtmlCssExpression,
-    HtmlRawAllExpression,
-    HtmlRawExpression,
-    HtmlTextAllExpression,
-    HtmlTextExpression,
-    HtmlXpathAllExpression,
-    HtmlXpathExpression,
-    IndexDocumentExpression,
-    IndexStringExpression,
-    IsContainsExpression,
-    IsCssExpression,
-    IsEqualExpression,
-    IsNotEqualExpression,
-    IsRegexMatchExpression,
-    IsXPathExpression,
-    JoinExpression,
-    LTrimExpression,
-    MapFormatExpression,
-    MapLTrimExpression,
-    MapRegexSubExpression,
-    MapReplaceExpression,
-    MapRTrimExpression,
-    MapTrimExpression,
-    NestedExpression,
-    RegexAllExpression,
-    RegexExpression,
-    RegexSubExpression,
-    ReplaceExpression,
-    RTrimExpression,
-    SplitExpression,
-    ToFloat,
-    ToInteger,
-    ToListFloat,
-    ToListInteger,
-    TrimExpression,
-    ToJson,
-    ToBool,
-    ArrayLengthExpression,
-)
-from .document_utlis import (
+from ssc_codegen.ast_ import BaseAstNode, ExprDefaultValueWrapper, ExprCss, ExprCssAll, ExprXpathAll, ExprGetHtmlAttr, \
+    ExprGetHtmlText, ExprGetHtmlAttrAll, ExprGetHtmlTextAll, ExprGetHtmlRaw, ExprGetHtmlRawAll, ExprIndex, \
+    ExprListStringJoin, ExprToListLength, ExprStringTrim, ExprListStringTrim, ExprStringLeftTrim, \
+    ExprListStringLeftTrim, ExprListStringRightTrim, ExprStringRightTrim, ExprStringSplit, ExprListStringFormat, \
+    ExprStringFormat, ExprListStringReplace, ExprStringReplace, ExprStringRegex, ExprStringRegexAll, \
+    ExprListStringRegexSub, ExprStringRegexSub, ExprIsCss, ExprIsXpath, ExprIsEqual, ExprIsNotEqual, ExprIsContains, \
+    ExprIsRegex, ExprNested, ExprToInt, ExprToListInt, ExprToFloat, ExprToListFloat, ExprToBool, ExprJsonify, ExprXpath
+from ssc_codegen.document_utlis import (
     assert_re_expression,
     unverbosify_regex,
     is_ignore_case_regex,
 )
-from .schema import BaseSchema
-from .selector_utils import validate_css_query, validate_xpath_query
-from .tokens import VariableType
+from ssc_codegen.json_struct import Json
+from ssc_codegen.schema import BaseSchema
+from ssc_codegen.selector_utils import validate_css_query, validate_xpath_query
+from ssc_codegen.tokens import VariableType
+
+LOGGER = logging.getLogger("ssc_gen")
 
 
 class BaseDocument:
     def __init__(self) -> None:
-        self._stack: list[BaseExpression] = []
+        self._stack: list[BaseAstNode] = []
 
     @property
-    def stack(self) -> list[BaseExpression]:
+    def stack(self) -> list[BaseAstNode]:
         """return current stack of expressions"""
         return self._stack
 
@@ -82,7 +47,7 @@ class BaseDocument:
 
     @property
     def stack_last_ret(self) -> VariableType:
-        """return last expression type"""
+        """return last expression ret type"""
         if len(self._stack) == 0:
             # always Document or Element type
             return VariableType.DOCUMENT
@@ -90,13 +55,13 @@ class BaseDocument:
 
     @staticmethod
     def _raise_wrong_type_error(
-        type_: VariableType, *expected: VariableType
+            type_: VariableType, *expected: VariableType
     ) -> None:
         fmt_types = "(" + ",".join(i.name for i in expected) + ")"
         msg = f"Expected type(s): {fmt_types}, got {type_.name}"
         raise SyntaxError(msg)
 
-    def _add(self, expr: BaseExpression) -> None:
+    def _add(self, expr: BaseAstNode) -> None:
         self._stack.append(expr)
 
     def __repr__(self) -> str:
@@ -113,8 +78,11 @@ class DefaultDocument(BaseDocument):
         - accept: DOCUMENT, return DOCUMENT
         """
         if self.count != 0:
-            raise SyntaxError("default expression should be a first")
-        self._add(DefaultValueWrapper(value=value))
+            LOGGER.warning("default(%s) expression should be a first pos, not %s",
+                           value,
+                           # human-readable style
+                           self.stack_last_index + 1)
+        self._add(ExprDefaultValueWrapper(kwargs={"value": value}))
         return self
 
 
@@ -124,67 +92,71 @@ class HTMLDocument(BaseDocument):
 
         - accept: DOCUMENT, return DOCUMENT
         """
-        validate_css_query(query)
-        match self.stack_last_ret:
-            case VariableType.DOCUMENT:
-                self._add(HtmlCssExpression(query=query))
-            case VariableType.ANY:
-                self._add(HtmlCssExpression(query=query))
-            case _:
-                self._raise_wrong_type_error(
-                    self.stack_last_ret, VariableType.DOCUMENT
-                )
+        query = ' '.join(query.splitlines())
+        try:
+            validate_css_query(query)
+        except SelectorSyntaxError:
+            LOGGER.warning("`%s` is not valid css query", query)
+        # TODO: Remove ANY
+        if self.stack_last_ret not in (VariableType.DOCUMENT, VariableType.ANY):
+            LOGGER.warning("Expected type %s, got %s", VariableType.DOCUMENT.name, self.stack_last_ret.name)
+
+        self._add(ExprCss(kwargs={"query": query}))
         return self
 
     def xpath(self, query: str) -> Self:
         """Xpath query. returns first founded element
         - accept: DOCUMENT, return DOCUMENT
         """
-        validate_xpath_query(query)
-        match self.stack_last_ret:
-            case VariableType.DOCUMENT:
-                self._add(HtmlXpathExpression(query=query))
-            case VariableType.ANY:
-                self._add(HtmlXpathExpression(query=query))
-            case _:
-                self._raise_wrong_type_error(
-                    self.stack_last_ret, VariableType.DOCUMENT
-                )
+        query = ' '.join(query.splitlines())
+        try:
+            validate_xpath_query(query)
+        except SelectorSyntaxError:
+            LOGGER.warning("`%s` is not valid xpath query", query, exc_info=e)
+
+        if self.stack_last_ret not in (VariableType.DOCUMENT, VariableType.ANY):
+            LOGGER.warning("Expected type(s) %s, got %s", VariableType.DOCUMENT.name, self.stack_last_ret.name)
+        self._add(ExprXpath(kwargs={"query": query}))
         return self
+        # match self.stack_last_ret:
+        #     case VariableType.DOCUMENT:
+        #         self._add(HtmlXpathExpression(query=query))
+        #     case VariableType.ANY:
+        #         self._add(HtmlXpathExpression(query=query))
+        #     case _:
+        #         self._raise_wrong_type_error(
+        #             self.stack_last_ret, VariableType.DOCUMENT
+        #         )
 
     def css_all(self, query: str) -> Self:
         """Css query. returns all founded elements
         - accept: DOCUMENT, return: LIST_DOCUMENT
         """
-        validate_css_query(query)
-        match self.stack_last_ret:
-            case VariableType.DOCUMENT:
-                self._add(HtmlCssAllExpression(query=query))
-            case VariableType.ANY:
-                self._add(HtmlCssAllExpression(query=query))
-            case _:
-                self._raise_wrong_type_error(
-                    self.stack_last_ret, VariableType.DOCUMENT
-                )
+        query = ' '.join(query.splitlines())
+        try:
+            validate_css_query(query)
+        except SelectorSyntaxError:
+            LOGGER.warning("`%s` is not valid css query", query)
+        if self.stack_last_ret not in (VariableType.DOCUMENT, VariableType.ANY):
+            LOGGER.warning("Expected type(s) %s, got %s", VariableType.DOCUMENT.name, self.stack_last_ret.name)
+        self._add(ExprCssAll(kwargs={"query": query}))
         return self
 
     def xpath_all(self, query: str) -> Self:
         """Xpath query. returns all founded elements
         - accept: DOCUMENT, return: LIST_DOCUMENT
         """
-        validate_xpath_query(query)
-        match self.stack_last_ret:
-            case VariableType.DOCUMENT:
-                self._add(HtmlXpathAllExpression(query=query))
-            case VariableType.ANY:
-                self._add(HtmlXpathAllExpression(query=query))
-            case _:
-                self._raise_wrong_type_error(
-                    self.stack_last_ret, VariableType.DOCUMENT
-                )
+        query = ' '.join(query.splitlines())
+        try:
+            validate_xpath_query(query)
+        except SelectorSyntaxError as e:
+            LOGGER.warning("`%s` is not valid xpath query", query, exc_info=e)
+        if self.stack_last_ret not in (VariableType.DOCUMENT, VariableType.ANY):
+            LOGGER.warning("Expected type(s) %s, got %s", VariableType.DOCUMENT.name, self.stack_last_ret.name)
+        self._add(ExprXpathAll(kwargs={"query": query}))
         return self
 
-    def attr(self, name: str) -> Self:
+    def attr(self, key: str) -> Self:
         """Extract attribute value by name
 
         - accept DOCUMENT, return STRING
@@ -195,18 +167,14 @@ class HTMLDocument(BaseDocument):
 
         """
         match self.stack_last_ret:
-            case VariableType.DOCUMENT:
-                self._add(HtmlAttrExpression(attr=name))
-            case VariableType.ANY:
-                self._add(HtmlAttrExpression(attr=name))
             case VariableType.LIST_DOCUMENT:
-                self._add(HtmlAttrAllExpression(attr=name))
+                self._add(ExprGetHtmlAttrAll(kwargs={"key": key}))
+            case VariableType.DOCUMENT:
+                self._add(ExprGetHtmlAttr(kwargs={"key": key}))
             case _:
-                self._raise_wrong_type_error(
-                    self.stack_last_ret,
-                    VariableType.DOCUMENT,
-                    VariableType.LIST_DOCUMENT,
-                )
+                LOGGER.warning("attr(%s): Expected type(s) %s got %s", key,
+                               (VariableType.DOCUMENT.name, VariableType.LIST_DOCUMENT.name), self.stack_last_ret)
+                self._add(ExprGetHtmlAttr(kwargs={"key": key}))
         return self
 
     def text(self) -> Self:
@@ -216,19 +184,14 @@ class HTMLDocument(BaseDocument):
         - accept LIST_DOCUMENT, return LIST_STRING
         """
         match self.stack_last_ret:
-            case VariableType.DOCUMENT:
-                self._add(HtmlTextExpression())
-            case VariableType.ANY:
-                self._add(HtmlTextExpression())
-
             case VariableType.LIST_DOCUMENT:
-                self._add(HtmlTextAllExpression())
+                self._add(ExprGetHtmlTextAll())
+            case VariableType.DOCUMENT:
+                self._add(ExprGetHtmlText())
             case _:
-                self._raise_wrong_type_error(
-                    self.stack_last_ret,
-                    VariableType.DOCUMENT,
-                    VariableType.LIST_DOCUMENT,
-                )
+                LOGGER.warning("text(): Expected type(s) %s got %s",
+                               (VariableType.DOCUMENT.name, VariableType.LIST_DOCUMENT.name), self.stack_last_ret)
+                self._add(ExprGetHtmlText())
         return self
 
     def raw(self) -> Self:
@@ -238,18 +201,14 @@ class HTMLDocument(BaseDocument):
         - accept LIST_DOCUMENT, return LIST_STRING
         """
         match self.stack_last_ret:
-            case VariableType.DOCUMENT:
-                self._add(HtmlRawExpression())
-            case VariableType.ANY:
-                self._add(HtmlRawExpression())
             case VariableType.LIST_DOCUMENT:
-                self._add(HtmlRawAllExpression())
+                self._add(ExprGetHtmlRawAll())
+            case VariableType.DOCUMENT:
+                self._add(ExprGetHtmlRaw())
             case _:
-                self._raise_wrong_type_error(
-                    self.stack_last_ret,
-                    VariableType.DOCUMENT,
-                    VariableType.LIST_DOCUMENT,
-                )
+                LOGGER.warning("raw(): Expected type(s) %s got %s",
+                               (VariableType.DOCUMENT.name, VariableType.LIST_DOCUMENT.name), self.stack_last_ret)
+                self._add(ExprGetHtmlRaw())
         return self
 
 
@@ -270,45 +229,74 @@ class ArrayDocument(BaseDocument):
         - accept LIST_INT, return INT
         - accept LIST_FLOAT, return FLOAT
         """
-        if self.stack == 0:
-            raise SyntaxError("Empty expressions stack")
-
         match self.stack_last_ret:
+            case VariableType.LIST_ANY:
+                self._add(
+                    ExprIndex(kwargs={"index": i},
+                              accept_type=VariableType.LIST_ANY,
+                              ret_type=VariableType.ANY)
+                )
             case VariableType.LIST_DOCUMENT:
                 self._add(
-                    IndexDocumentExpression(
-                        value=i, ret_type=VariableType.DOCUMENT
-                    )
+                    ExprIndex(kwargs={"index": i},
+                              accept_type=VariableType.LIST_DOCUMENT,
+                              ret_type=VariableType.DOCUMENT
+                              )
                 )
             case VariableType.LIST_STRING:
                 self._add(
-                    IndexStringExpression(value=i, ret_type=VariableType.STRING)
+                    ExprIndex(kwargs={"index": i},
+                              accept_type=VariableType.LIST_STRING,
+                              ret_type=VariableType.STRING
+                              )
                 )
             case VariableType.LIST_INT:
                 self._add(
-                    IndexStringExpression(value=i, ret_type=VariableType.INT)
+                    ExprIndex(kwargs={"index": i},
+                              accept_type=VariableType.LIST_INT,
+                              ret_type=VariableType.INT
+                              )
                 )
             case VariableType.LIST_FLOAT:
                 self._add(
-                    IndexStringExpression(value=i, ret_type=VariableType.FLOAT)
+                    ExprIndex(kwargs={"index": i},
+                              accept_type=VariableType.LIST_FLOAT,
+                              ret_type=VariableType.FLOAT
+                              )
                 )
             case VariableType.OPTIONAL_LIST_STRING:
                 self._add(
-                    IndexStringExpression(value=i, ret_type=VariableType.STRING)
+                    ExprIndex(kwargs={"index": i},
+                              accept_type=VariableType.LIST_STRING,
+                              ret_type=VariableType.STRING
+                              )
                 )
             case VariableType.OPTIONAL_LIST_INT:
                 self._add(
-                    IndexStringExpression(value=i, ret_type=VariableType.INT)
+                    ExprIndex(kwargs={"index": i},
+                              accept_type=VariableType.LIST_INT,
+                              ret_type=VariableType.INT
+                              )
                 )
             case VariableType.OPTIONAL_LIST_FLOAT:
                 self._add(
-                    IndexStringExpression(value=i, ret_type=VariableType.FLOAT)
+                    ExprIndex(kwargs={"index": i},
+                              accept_type=VariableType.LIST_FLOAT,
+                              ret_type=VariableType.FLOAT
+                              )
                 )
             case _:
-                self._raise_wrong_type_error(
-                    self.stack_last_ret,
-                    VariableType.LIST_STRING,
-                    VariableType.LIST_DOCUMENT,
+                LOGGER.warning("index(%s): Expected type(s) %s got %s", i,
+                               (VariableType.LIST_DOCUMENT.name,
+                                VariableType.LIST_STRING.name,
+                                VariableType.LIST_INT.name,
+                                VariableType.LIST_FLOAT.name,
+                                VariableType.LIST_ANY.name),
+                               self.stack_last_ret)
+                self._add(
+                    ExprIndex(
+                        kwargs={"index": i},
+                    )
                 )
         return self
 
@@ -319,11 +307,15 @@ class ArrayDocument(BaseDocument):
         """
         match self.stack_last_ret:
             case VariableType.LIST_STRING:
-                self._add(JoinExpression(sep=s))
+                self._add(
+                    ExprListStringJoin(kwargs={"sep": s})
+                )
             case _:
-                self._raise_wrong_type_error(
-                    self.stack_last_ret,
-                    VariableType.LIST_STRING,
+                # side effect
+                LOGGER.warning("join(%s): Expected type(s) %s got %s", s,
+                               VariableType.LIST_STRING.name, self.stack_last_ret)
+                self._add(
+                    ExprListStringJoin(kwargs={"sep": s})
                 )
         return self
 
@@ -333,24 +325,18 @@ class ArrayDocument(BaseDocument):
         - accept LIST_STRING | LIST_DOCUMENT | LIST_INT | LIST_FLOAT, return INT
 
         """
-        match self.stack_last_ret:
-            case VariableType.LIST_STRING:
-                pass
-            case VariableType.LIST_DOCUMENT:
-                pass
-            case VariableType.LIST_INT:
-                pass
-            case VariableType.LIST_FLOAT:
-                pass
-            case _:
-                self._raise_wrong_type_error(
-                    self.stack_last_ret,
-                    VariableType.LIST_STRING,
-                    VariableType.LIST_DOCUMENT,
-                    VariableType.LIST_INT,
-                    VariableType.LIST_FLOAT,
-                )
-        self._add(ArrayLengthExpression())
+        if self.stack_last_ret not in (
+                VariableType.LIST_STRING,
+                VariableType.LIST_DOCUMENT,
+                VariableType.LIST_INT,
+                VariableType.LIST_FLOAT,
+        ):
+            LOGGER.warning("to_len(): Expected type(s) %s got %s",
+                           (VariableType.LIST_DOCUMENT.name,
+                            VariableType.LIST_STRING.name,
+                            VariableType.LIST_INT,
+                            VariableType.LIST_FLOAT), self.stack_last_ret)
+        self._add(ExprToListLength(accept_type=self.stack_last_ret))
         return self
 
 
@@ -363,15 +349,15 @@ class StringDocument(BaseDocument):
         """
         match self.stack_last_ret:
             case VariableType.LIST_STRING:
-                self._add(MapTrimExpression(value=substr))
+                self._add(ExprListStringTrim(kwargs={"substr": substr}))
             case VariableType.STRING:
-                self._add(TrimExpression(value=substr))
+                self._add(ExprStringTrim(kwargs={"substr": substr}))
             case _:
-                self._raise_wrong_type_error(
-                    self.stack_last_ret,
-                    VariableType.STRING,
-                    VariableType.LIST_STRING,
-                )
+                LOGGER.warning("trim(%s): Expected type(s) %s got %s",
+                               repr(substr),
+                               (VariableType.LIST_STRING.name, VariableType.STRING.name),
+                               self.stack_last_ret)
+                self._add(ExprStringTrim(kwargs={"substr": substr}))
         return self
 
     def ltrim(self, substr: str = " ") -> Self:
@@ -382,15 +368,15 @@ class StringDocument(BaseDocument):
         """
         match self.stack_last_ret:
             case VariableType.LIST_STRING:
-                self._add(MapLTrimExpression(value=substr))
+                self._add(ExprListStringLeftTrim(kwargs={"substr": substr}))
             case VariableType.STRING:
-                self._add(LTrimExpression(value=substr))
+                self._add(ExprStringLeftTrim(kwargs={"substr": substr}))
             case _:
-                self._raise_wrong_type_error(
-                    self.stack_last_ret,
-                    VariableType.STRING,
-                    VariableType.LIST_STRING,
-                )
+                LOGGER.warning("ltrim(%s): Expected type(s) %s got %s",
+                               repr(substr),
+                               (VariableType.LIST_STRING.name, VariableType.STRING.name),
+                               self.stack_last_ret)
+                self._add(ExprStringLeftTrim(kwargs={"substr": substr}))
         return self
 
     def rtrim(self, substr: str = " ") -> Self:
@@ -401,15 +387,15 @@ class StringDocument(BaseDocument):
         """
         match self.stack_last_ret:
             case VariableType.LIST_STRING:
-                self._add(MapRTrimExpression(value=substr))
+                self._add(ExprListStringRightTrim(kwargs={"substr": substr}))
             case VariableType.STRING:
-                self._add(RTrimExpression(value=substr))
+                self._add(ExprStringRightTrim(kwargs={"substr": substr}))
             case _:
-                self._raise_wrong_type_error(
-                    self.stack_last_ret,
-                    VariableType.STRING,
-                    VariableType.LIST_STRING,
-                )
+                LOGGER.warning("rtrim(%s): Expected type(s) %s got %s",
+                               repr(substr),
+                               (VariableType.LIST_STRING.name, VariableType.STRING.name),
+                               self.stack_last_ret)
+                self._add(ExprStringRightTrim(kwargs={"substr": substr}))
         return self
 
     def split(self, sep: str) -> Self:
@@ -417,7 +403,13 @@ class StringDocument(BaseDocument):
 
         - accept STRING, return LIST_STRING
         """
-        self._add(SplitExpression(sep=sep))
+        if self.stack_last_ret != VariableType.STRING:
+            LOGGER.warning("split(%s): Expected type(s) %s got %s",
+                           repr(sep),
+                           VariableType.STRING.name,
+                           self.stack_last_ret)
+            ...
+        self._add(ExprStringSplit(kwargs={"sep": sep}))
         return self
 
     def fmt(self, fmt_string: str) -> Self:
@@ -428,19 +420,20 @@ class StringDocument(BaseDocument):
         - accept LIST_STRING, return LIST_STRING
         """
         if "{{}}" not in fmt_string:
-            raise SyntaxError("Missing `{{}}` mark in template argument")
+            LOGGER.warning("fmt() missing placeholder char {{}}, set to end string")
+            fmt_string += "{{}}"
 
         match self.stack_last_ret:
             case VariableType.LIST_STRING:
-                self._add(MapFormatExpression(fmt=fmt_string))
+                self._add(ExprListStringFormat(kwargs={"fmt": fmt_string}))
             case VariableType.STRING:
-                self._add(FormatExpression(fmt=fmt_string))
+                self._add(ExprStringFormat(kwargs={"fmt": fmt_string}))
             case _:
-                self._raise_wrong_type_error(
-                    self.stack_last_ret,
-                    VariableType.STRING,
-                    VariableType.LIST_STRING,
-                )
+                LOGGER.warning("fmt(%s): Expected type(s) %s got %s",
+                               repr(fmt_string),
+                               (VariableType.LIST_STRING.name, VariableType.STRING.name),
+                               self.stack_last_ret)
+                self._add(ExprStringFormat(kwargs={"fmt": fmt_string}))
         return self
 
     def repl(self, old: str, new: str) -> Self:
@@ -451,19 +444,19 @@ class StringDocument(BaseDocument):
         """
         match self.stack_last_ret:
             case VariableType.LIST_STRING:
-                self._add(MapReplaceExpression(old=old, new=new))
+                self._add(ExprListStringReplace(kwargs={"old": old, "new": new}))
             case VariableType.STRING:
-                self._add(ReplaceExpression(old=old, new=new))
+                self._add(ExprStringReplace(kwargs={"old": old, "new": new}))
             case _:
-                self._raise_wrong_type_error(
-                    self.stack_last_ret,
-                    VariableType.STRING,
-                    VariableType.LIST_STRING,
-                )
+                LOGGER.warning("repl(%s, %s): Expected type(s) %s got %s",
+                               repr(old), repr(new),
+                               (VariableType.LIST_STRING.name, VariableType.STRING.name),
+                               self.stack_last_ret)
+                self._add(ExprStringReplace(kwargs={"old": old, "new": new}))
         return self
 
     def re(
-        self, pattern: str | Pattern, group: int = 1, ignore_case: bool = False
+            self, pattern: str | Pattern, group: int = 1, ignore_case: bool = False
     ) -> Self:
         """extract first regex result.
 
@@ -480,13 +473,13 @@ class StringDocument(BaseDocument):
         assert_re_expression(pattern)
 
         if self.stack_last_ret != VariableType.STRING:
-            self._raise_wrong_type_error(
-                self.stack_last_ret, VariableType.STRING
-            )
+            LOGGER.warning("re(%s): Expected type(s) %s got %s",
+                           repr(pattern),
+                           VariableType.STRING.name,
+                           self.stack_last_ret)
         self._add(
-            RegexExpression(
-                pattern=pattern, group=group, ignore_case=ignore_case
-            )
+            ExprStringRegex(kwargs={"pattern": pattern, "group": group, "ignore_case": ignore_case}
+                            )
         )
         return self
 
@@ -500,11 +493,13 @@ class StringDocument(BaseDocument):
 
         pattern = unverbosify_regex(pattern)
         assert_re_expression(pattern, max_groups=1)
+
         if self.stack_last_ret != VariableType.STRING:
-            self._raise_wrong_type_error(
-                self.stack_last_ret, VariableType.STRING
-            )
-        self._add(RegexAllExpression(pattern=pattern, ignore_case=ignore_case))
+            LOGGER.warning("re_all(%s): Expected type(s) %s got %s",
+                           repr(pattern),
+                           VariableType.STRING.name,
+                           self.stack_last_ret)
+        self._add(ExprStringRegexAll(kwargs={"pattern": pattern, "ignore_case": ignore_case}))
         return self
 
     def re_sub(self, pattern: str | Pattern, repl: str = "") -> Self:
@@ -518,15 +513,15 @@ class StringDocument(BaseDocument):
 
         match self.stack_last_ret:
             case VariableType.LIST_STRING:
-                self._add(MapRegexSubExpression(pattern=pattern, repl=repl))
+                self._add(ExprListStringRegexSub(kwargs={"pattern": pattern, "repl": repl}))
             case VariableType.STRING:
-                self._add(RegexSubExpression(pattern=pattern, repl=repl))
+                self._add(ExprStringRegexSub(kwargs={"pattern": pattern, "repl": repl}))
             case _:
-                self._raise_wrong_type_error(
-                    self.stack_last_ret,
-                    VariableType.STRING,
-                    VariableType.LIST_STRING,
-                )
+                LOGGER.warning("re_sub(%s): Expected type(s) %s got %s",
+                               repr(pattern),
+                               (VariableType.STRING.name, VariableType.LIST_STRING.name),
+                               self.stack_last_ret)
+                self._add(ExprStringRegexSub(kwargs={"pattern": pattern, "repl": repl}))
         return self
 
     def re_trim(self, pattern: str = r"/s*") -> Self:
@@ -550,11 +545,17 @@ class AssertDocument(BaseDocument):
 
         - accept DOCUMENT, return DOCUMENT
         """
+        query = ' '.join(query.splitlines())
+        try:
+            validate_css_query(query)
+        except SelectorSyntaxError:
+            LOGGER.warning("is_css `%s` is not valid css query", query)
         if self.stack_last_ret != VariableType.DOCUMENT:
-            self._raise_wrong_type_error(
-                self.stack_last_ret, VariableType.DOCUMENT
-            )
-        self._add(IsCssExpression(query=query, msg=msg))
+            LOGGER.warning("is_css(%s): Expected type(s) %s got %s",
+                           repr(query),
+                           VariableType.DOCUMENT.name,
+                           self.stack_last_ret)
+        self._add(ExprIsCss(kwargs={"query": query, "msg": msg}))
         return self
 
     def is_xpath(self, query: str, msg: str = "") -> Self:
@@ -564,11 +565,17 @@ class AssertDocument(BaseDocument):
 
         - accept DOCUMENT, return DOCUMENT
         """
+        query = ' '.join(query.splitlines())
+        try:
+            validate_xpath_query(query)
+        except SelectorSyntaxError:
+            LOGGER.warning("is_xpath `%s` is not valid xpath query", query)
         if self.stack_last_ret != VariableType.DOCUMENT:
-            self._raise_wrong_type_error(
-                self.stack_last_ret, VariableType.DOCUMENT
-            )
-        self._add(IsXPathExpression(query=query, msg=msg))
+            LOGGER.warning("is_xpath(%s): Expected type(s) %s got %s",
+                           repr(query),
+                           VariableType.DOCUMENT.name,
+                           self.stack_last_ret)
+        self._add(ExprIsXpath(kwargs={'query': query, 'msg': msg}))
         return self
 
     def is_equal(self, value: str | int | float, msg: str = "") -> Self:
@@ -580,34 +587,34 @@ class AssertDocument(BaseDocument):
         - accept INT, return INT
         - accept FLOAT return FLOAT
         """
+
         if (
-            isinstance(value, str)
-            and self.stack_last_ret != VariableType.STRING
+                isinstance(value, str)
+                and self.stack_last_ret != VariableType.STRING
         ):
-            self._raise_wrong_type_error(
-                self.stack_last_ret, VariableType.STRING
-            )
+            expected_type = VariableType.STRING
         elif isinstance(value, int) and self.stack_last_ret != VariableType.INT:
-            self._raise_wrong_type_error(self.stack_last_ret, VariableType.INT)
+            ...
+            expected_type = VariableType.INT
         elif (
-            isinstance(value, float)
-            and self.stack_last_ret != VariableType.FLOAT
+                isinstance(value, float)
+                and self.stack_last_ret != VariableType.FLOAT
         ):
-            self._raise_wrong_type_error(
-                self.stack_last_ret, VariableType.FLOAT
-            )
-        elif self.stack_last_ret not in (
-            VariableType.STRING,
-            VariableType.INT,
-            VariableType.FLOAT,
+            expected_type = VariableType.FLOAT
+        elif (
+                isinstance(value, bool)
+                and self.stack_last_ret != VariableType.BOOL
         ):
-            self._raise_wrong_type_error(
-                self.stack_last_ret,
-                VariableType.STRING,
-                VariableType.INT,
-                VariableType.FLOAT,
-            )
-        self._add(IsEqualExpression(value=value, msg=msg))
+            expected_type = VariableType.BOOL
+        else:
+            expected_type = VariableType.ANY
+            LOGGER.warning("is_equal(%s): Not support variable type `%s`", repr(value), type(value).__name__)
+
+        if self.stack_last_ret != expected_type:
+            LOGGER.warning("is_equal(%s): Expected type(s) %s got %s", repr(value), expected_type, self.stack_last_ret)
+        self._add(ExprIsEqual(kwargs={'item': value, 'msg': msg},
+                              accept_type=self.stack_last_ret,
+                              ret_type=self.stack_last_ret))
         return self
 
     def is_not_equal(self, value: str | int | float, msg: str = "") -> Self:
@@ -619,34 +626,36 @@ class AssertDocument(BaseDocument):
         - accept INT, return INT
         - accept FLOAT, return FLOAT
         """
+        # warn segment
         if (
-            isinstance(value, str)
-            and self.stack_last_ret != VariableType.STRING
+                isinstance(value, str)
+                and self.stack_last_ret != VariableType.STRING
         ):
-            self._raise_wrong_type_error(
-                self.stack_last_ret, VariableType.STRING
-            )
+            expected_type = VariableType.STRING
         elif isinstance(value, int) and self.stack_last_ret != VariableType.INT:
-            self._raise_wrong_type_error(self.stack_last_ret, VariableType.INT)
+            ...
+            expected_type = VariableType.INT
         elif (
-            isinstance(value, float)
-            and self.stack_last_ret != VariableType.FLOAT
+                isinstance(value, float)
+                and self.stack_last_ret != VariableType.FLOAT
         ):
-            self._raise_wrong_type_error(
-                self.stack_last_ret, VariableType.FLOAT
-            )
-        elif self.stack_last_ret not in (
-            VariableType.STRING,
-            VariableType.INT,
-            VariableType.FLOAT,
+            expected_type = VariableType.FLOAT
+        elif (
+                isinstance(value, bool)
+                and self.stack_last_ret != VariableType.BOOL
         ):
-            self._raise_wrong_type_error(
-                self.stack_last_ret,
-                VariableType.STRING,
-                VariableType.INT,
-                VariableType.FLOAT,
-            )
-        self._add(IsNotEqualExpression(value=value, msg=msg))
+            expected_type = VariableType.BOOL
+        else:
+            expected_type = VariableType.ANY
+            LOGGER.warning("is_not_equal(%s): Not support variable type `%s`", repr(value), type(value).__name__)
+
+        if self.stack_last_ret != expected_type:
+            LOGGER.warning("is_not_equal(%s): Expected type(s) %s got %s", repr(value), expected_type,
+                           self.stack_last_ret)
+        self._add(ExprIsNotEqual(
+            kwargs={'item': value, 'msg': msg},
+            accept_type=self.stack_last_ret,
+            ret_type=self.stack_last_ret))
         return self
 
     def is_contains(self, item: str | int | float, msg: str = "") -> Self:
@@ -656,43 +665,36 @@ class AssertDocument(BaseDocument):
 
         - accept LIST_STRING, return LIST_STRING
         """
+        # warn
         if (
-            isinstance(item, str)
-            and self.stack_last_ret != VariableType.LIST_STRING
+                isinstance(item, str)
+                and self.stack_last_ret != VariableType.LIST_STRING
         ):
-            self._raise_wrong_type_error(
-                self.stack_last_ret, VariableType.LIST_STRING
-            )
+            expected_type = VariableType.LIST_STRING
         elif (
-            isinstance(item, int)
-            and self.stack_last_ret != VariableType.LIST_INT
+                isinstance(item, int)
+                and self.stack_last_ret != VariableType.LIST_INT
         ):
-            self._raise_wrong_type_error(
-                self.stack_last_ret, VariableType.LIST_INT
-            )
+            expected_type = VariableType.LIST_INT
         elif (
-            isinstance(item, float)
-            and self.stack_last_ret != VariableType.LIST_FLOAT
+                isinstance(item, float)
+                and self.stack_last_ret != VariableType.LIST_FLOAT
         ):
-            self._raise_wrong_type_error(
-                self.stack_last_ret, VariableType.LIST_FLOAT
-            )
-        elif self.stack_last_ret not in (
-            VariableType.LIST_STRING,
-            VariableType.LIST_INT,
-            VariableType.LIST_FLOAT,
-        ):
-            self._raise_wrong_type_error(
-                self.stack_last_ret,
-                VariableType.LIST_STRING,
-                VariableType.LIST_INT,
-                VariableType.LIST_FLOAT,
-            )
-        self._add(IsContainsExpression(item=item, msg=msg))
+            expected_type = VariableType.LIST_FLOAT
+        else:
+            expected_type = VariableType.LIST_ANY
+            LOGGER.warning("is_contains(%s): Not support variable type `%s`", repr(item), type(item).__name__)
+
+        if expected_type != self.stack_last_ret:
+            LOGGER.warning("is_contains(%s): Expected type(s) %s got %s", repr(item), expected_type,
+                           self.stack_last_ret)
+        self._add(ExprIsContains(kwargs={'item': item, 'msg': msg},
+                                 accept_type=self.stack_last_ret,
+                                 ret_type=self.stack_last_ret))
         return self
 
     def is_regex(
-        self, pattern: str | Pattern, msg: str = "", ignore_case: bool = False
+            self, pattern: str | Pattern, msg: str = "", ignore_case: bool = False
     ) -> Self:
         """assert value matched by regex. If in generated code check failed - throw exception with passed msg
 
@@ -703,15 +705,15 @@ class AssertDocument(BaseDocument):
         if not isinstance(pattern, str):
             ignore_case = is_ignore_case_regex(pattern)
         pattern = unverbosify_regex(pattern)
-        if self.stack_last_ret != VariableType.STRING:
-            self._raise_wrong_type_error(
-                self.stack_last_ret, VariableType.STRING
-            )
         assert_re_expression(pattern, allow_empty_groups=True)
 
+        if self.stack_last_ret != VariableType.STRING:
+            LOGGER.warning("is_regex(%s): Expected type(s) %s got %s", repr(pattern),
+                           VariableType.STRING.name, self.stack_last_ret)
+
         self._add(
-            IsRegexMatchExpression(
-                pattern=pattern, msg=msg, ignore_case=ignore_case
+            ExprIsRegex(
+                kwargs={'pattern': pattern, 'ignore_case': ignore_case, 'msg': msg}
             )
         )
         return self
@@ -724,12 +726,11 @@ class NestedDocument(BaseDocument):
         - accept DOCUMENT, return NESTED
         """
         if self.stack_last_ret == VariableType.NESTED:
-            raise SyntaxError("Nested already used")
-        if self.stack_last_ret != VariableType.DOCUMENT:
-            self._raise_wrong_type_error(
-                self.stack_last_ret, VariableType.DOCUMENT
-            )
-        self._add(NestedExpression(schema_cls=schema))
+            LOGGER.warning("sub_parser(%s) not allowed expressions", schema.__name__)
+        elif self.stack_last_ret != VariableType.DOCUMENT:
+            LOGGER.warning("sub_parser(%s) required %s type",
+                           schema.__name__, VariableType.DOCUMENT.name)
+        self._add(ExprNested(kwargs={'schema_cls': schema}))
         return self
 
 
@@ -742,15 +743,14 @@ class NumericDocument(BaseDocument):
         """
         match self.stack_last_ret:
             case VariableType.STRING:
-                self._add(ToInteger())
+                self._add(ExprToInt())
             case VariableType.LIST_STRING:
-                self._add(ToListInteger())
+                self._add(ExprToListInt())
             case _:
-                self._raise_wrong_type_error(
-                    self.stack_last_ret,
-                    VariableType.STRING,
-                    VariableType.LIST_STRING,
-                )
+                LOGGER.warning("to_int(): Expected type(s) %s got %s",
+                               (VariableType.STRING.name, VariableType.LIST_STRING.name),
+                               self.stack_last_ret)
+                self._add(ExprToInt())
         return self
 
     def to_float(self) -> Self:
@@ -761,15 +761,14 @@ class NumericDocument(BaseDocument):
         """
         match self.stack_last_ret:
             case VariableType.STRING:
-                self._add(ToFloat())
+                self._add(ExprToFloat())
             case VariableType.LIST_STRING:
-                self._add(ToListFloat())
+                self._add(ExprToListFloat())
             case _:
-                self._raise_wrong_type_error(
-                    self.stack_last_ret,
-                    VariableType.STRING,
-                    VariableType.LIST_STRING,
-                )
+                LOGGER.warning("to_float(): Expected type(s) %s got %s",
+                               (VariableType.STRING.name, VariableType.LIST_STRING.name),
+                               self.stack_last_ret)
+                self._add(ExprToFloat())
         return self
 
 
@@ -786,7 +785,8 @@ class BooleanDocument(BaseDocument):
         other - true
 
         """
-        self._add(ToBool())
+        # not required checks
+        self._add(ExprToBool())
         return self
 
 
@@ -797,8 +797,14 @@ class JsonDocument(BaseDocument):
         - accept STRING, return JSON
         """
         if self.stack_last_ret != VariableType.STRING:
-            self._raise_wrong_type_error(
-                self.stack_last_ret, VariableType.STRING
-            )
-        self._add(ToJson(value=struct))
+            LOGGER.warning("jsonify(%s): Expected type(s) %s got %s",
+                           struct.__name__,
+                           VariableType.STRING.name,
+                           self.stack_last_ret)
+        elif self.stack_last_ret == VariableType.JSON:
+            LOGGER.warning("jsonify(%s): not allowed expressions",
+                           struct.__name__,
+                           VariableType.STRING.name,
+                           self.stack_last_ret)
+        self._add(ExprJsonify(kwargs={"json_struct": struct}))
         return self
