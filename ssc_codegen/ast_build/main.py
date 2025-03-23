@@ -6,7 +6,7 @@ from ssc_codegen.ast_ import (
     StructParser,
     StructInitMethod,
     BaseAstNode,
-    PreValidateMethod,
+    StructPreValidateMethod,
     ModuleProgram,
     ExprCallStructMethod,
     StructPartDocMethod,
@@ -22,7 +22,7 @@ from ssc_codegen.ast_ import (
     TypeDefField,
     ExprReturn,
     ExprNoReturn,
-    ExprNested,
+    ExprNested, ExprJsonify,
 )
 from ssc_codegen.ast_build.utils import (
     generate_docstring_signature,
@@ -37,7 +37,7 @@ from ssc_codegen.document_utlis import (
 )
 from ssc_codegen.schema import BaseSchema
 from ssc_codegen.static_checker import run_analyze_schema
-from ssc_codegen.tokens import TokenType, VariableType
+from ssc_codegen.tokens import TokenType, VariableType, StructType
 
 
 def build_ast_module_parser(
@@ -100,7 +100,11 @@ def build_ast_typedef(
     ast_typedefs: list[BaseAstNode] = []
     for sc in ast_schemas:
         ast_t_def = TypeDef(
-            parent=ast_module, kwargs={"name": sc.kwargs["name"]}
+            parent=ast_module,
+            kwargs={
+                "name": sc.kwargs["name"],
+                "struct_type": sc.struct_type
+            }
         )
         for sc_field in sc.body:
             if sc_field.kind != TokenType.STRUCT_FIELD:
@@ -112,14 +116,30 @@ def build_ast_typedef(
                 ][0]
                 node = cast(ExprNested, node)
                 cls_name = node.kwargs["schema_name"]
+                cls_nested_type = node.kwargs["schema_type"]
+
+            elif sc_field.body[-1].ret_type == VariableType.JSON:
+                node2 = [
+                    i for i in sc_field.body if i.kind == TokenType.TO_JSON
+                ][0]
+                node2 = cast(ExprJsonify, node2)
+                cls_name = node2.kwargs["json_struct_name"]
+                # hack: for provide more consistent Typedef field gen api
+                if node2.kwargs['is_array']:
+                    cls_nested_type = StructType.LIST
+                else:
+                    cls_nested_type = StructType.ITEM
             else:
                 cls_name = None
+                cls_nested_type = None
+
             ast_t_def_field = TypeDefField(
                 parent=ast_t_def,
                 kwargs={
                     "name": sc_field.kwargs["name"],
                     "type": sc_field.body[-1].ret_type,
                     "cls_nested": cls_name,
+                    "cls_nested_type": cls_nested_type
                 },
             )
             ast_t_def.body.append(ast_t_def_field)
@@ -136,7 +156,7 @@ def build_ast_json(
             kwargs={"name": jsn_st.__name__, "is_array": jsn_st.__IS_ARRAY__},
             parent=ast_module,
         )
-        for name, field_type in jsn_st.extract_fields().items():
+        for name, field_type in jsn_st.get_fields().items():
             ast_jsn.body.append(
                 JsonStructField(
                     kwargs={"name": name, "type": field_type}, parent=ast_jsn
@@ -157,8 +177,7 @@ def build_ast_struct_parser(
     if errors_count > 0:
         # todo: exc
         raise SyntaxError
-
-    docstring = schema.__doc__ or "" + "\n\n" + generate_docstring_signature(
+    docstring = (schema.__doc__ or "") + "\n\n" + generate_docstring_signature(
         schema
     )
     st = StructParser(
@@ -170,7 +189,7 @@ def build_ast_struct_parser(
         parent=module_ref,
     )
     # build body
-    body: list[BaseAstNode] = [StructInitMethod()]
+    body: list[BaseAstNode] = [StructInitMethod(parent=st)]
     # names counter for CallStruct expr (Start parse entrypoint)
     body_parse_method_expr: list[BaseAstNode] = []
     fields = schema.__get_mro_fields__().copy()
@@ -183,13 +202,16 @@ def build_ast_struct_parser(
         body_parse_method_expr,
         fields,
         st,
-        schema_name,
         css_to_xpath,
         xpath_to_css,
     )
 
     # last node - run entrypoint
-    body.append(StartParseMethod(body=body_parse_method_expr, parent=st))
+    start_parse_method = StartParseMethod(parent=st)
+    for i in body_parse_method_expr:
+        i.parent = start_parse_method
+    start_parse_method.body = body_parse_method_expr
+    body.append(start_parse_method)
     st.body = body
     return st
 
@@ -199,7 +221,6 @@ def _fetch_field_nodes(
     body_parse_method_expr: list[BaseAstNode],
     fields: dict[str, BaseDocument],
     st_ref: StructParser,
-    schema_name: str,
     css_to_xpath: bool = False,
     xpath_to_css: bool = False,
 ) -> None:
@@ -211,16 +232,19 @@ def _fetch_field_nodes(
             document = convert_xpath_to_css(document)
 
         ret_type = document.stack_last_ret
-        _unwrap_default_node(document, ret_type)
-        document.stack.append(
-            ExprReturn(accept_type=ret_type, ret_type=ret_type)
-        )
         method = StructFieldMethod(
-            body=document.stack,
             kwargs={"name": field_name},
             parent=st_ref,
             ret_type=ret_type,
         )
+        document.stack.append(
+            ExprReturn(accept_type=ret_type, ret_type=ret_type)
+        )
+        _unwrap_default_node(document, ret_type)
+        for i in document.stack:
+            i.parent = method
+        method.body = document.stack
+
         body.append(method)
         if ret_type == VariableType.NESTED:
             node = [
@@ -232,7 +256,7 @@ def _fetch_field_nodes(
             cls_name = None
         body_parse_method_expr.append(
             ExprCallStructMethod(
-                parent=method,
+                # parent=method,
                 kwargs={
                     "name": field_name,
                     "type": ret_type,
@@ -265,12 +289,15 @@ def _try_fetch_split_doc_node(
     if fields.get("__SPLIT_DOC__"):
         split_doc = fields.pop("__SPLIT_DOC__")
         # always sequence of elements
+        method = StructPartDocMethod(parent=st_ref)
         split_doc.stack.append(ExprReturn(ret_type=VariableType.LIST_DOCUMENT))
-        method = StructPartDocMethod(body=split_doc.stack, parent=st_ref)
+        for i in split_doc.stack:
+            i.parent = method
+        method.body = split_doc.stack
         body.append(method)
+
         call_methods_expr.append(
             ExprCallStructMethod(
-                parent=method,
                 kwargs={
                     "type": VariableType.LIST_DOCUMENT,
                     "name": "__SPLIT_DOC__",
@@ -287,12 +314,14 @@ def _try_fetch_pre_validate_node(
 ) -> None:
     if fields.get("__PRE_VALIDATE__"):
         validate_field = fields.pop("__PRE_VALIDATE__")
+        method = StructPreValidateMethod(body=validate_field.stack, parent=st_ref)
         validate_field.stack.append(ExprNoReturn())
-        method = PreValidateMethod(body=validate_field.stack, parent=st_ref)
+        for i in validate_field.stack:
+            i.parent = method
+
         body.append(method)
         call_methods_expr.append(
             ExprCallStructMethod(
-                parent=method,
                 kwargs={"type": VariableType.NULL, "name": "__PRE_VALIDATE__"},
             )
         )
