@@ -45,18 +45,18 @@ class JsonVariableType(IntEnum):
     OBJECT = auto()
     ARRAY = auto()
 
+    ARRAY_OBJECTS = auto()
+    ARRAY_NUMBER = auto()
+    ARRAY_STRING = auto()
+    ARRAY_FLOAT = auto()
+    ARRAY_BOOLEAN = auto()
+
     OPTIONAL_NUMBER = auto()
     OPTIONAL_STRING = auto()
     OPTIONAL_FLOAT = auto()
     OPTIONAL_BOOLEAN = auto()
 
     NULL = auto()
-
-
-class JsonFieldType(IntEnum):
-    BASIC = auto()  # simple type or optional
-    ARRAY = auto()
-    OBJECT = auto()
 
 
 class StructType(IntEnum):
@@ -138,6 +138,7 @@ class TokenType(IntEnum):
     EXPR_LIST_STRING_REPLACE = auto()
 
     # ARRAY
+    EXPR_LIST_ANY_INDEX = auto()
     EXPR_LIST_STRING_INDEX = auto()
     EXPR_LIST_DOCUMENT_INDEX = auto()
     EXPR_LIST_JOIN = auto()
@@ -165,3 +166,12 @@ class TokenType(IntEnum):
 
     # bool
     TO_BOOL = auto()
+
+    @classmethod
+    def default_tokens(cls) -> tuple['TokenType', ...]:
+        return TokenType.EXPR_DEFAULT, TokenType.EXPR_DEFAULT_START, TokenType.EXPR_DEFAULT_END
+
+    @classmethod
+    def assert_tokens(cls) -> tuple['TokenType', ...]:
+        return (TokenType.IS_CSS, TokenType.IS_XPATH, TokenType.IS_EQUAL, TokenType.IS_NOT_EQUAL, TokenType.IS_CONTAINS,
+                TokenType.IS_REGEX_MATCH)
