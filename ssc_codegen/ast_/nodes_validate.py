@@ -21,7 +21,7 @@ class ExprIsEqual(BaseAstNode[KW_ASSERT_EQ_OR_NE, ARGS_ASSERT_EQ]):
 
 @dataclass(kw_only=True)
 class ExprIsNotEqual(BaseAstNode[KW_ASSERT_EQ_OR_NE, ARGS_ASSERT_EQ]):
-    kind: ClassVar[TokenType] = TokenType.IS_EQUAL
+    kind: ClassVar[TokenType] = TokenType.IS_NOT_EQUAL
     accept_type: VariableType = VariableType.ANY
     ret_type: VariableType = VariableType.ANY
 
