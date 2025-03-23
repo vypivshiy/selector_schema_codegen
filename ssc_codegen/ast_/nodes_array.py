@@ -18,6 +18,7 @@ class ExprIndex(BaseAstNode[KW_EXPR_INDEX, ARGS_EXPR_INDEX]):
 KW_EXPR_JOIN = TypedDict("KW_EXPR_JOIN", {"sep": str})
 ARGS_EXPR_JOIN = tuple[str]
 
+
 @dataclass(kw_only=True)
 class ExprListStringJoin(BaseAstNode[KW_EXPR_JOIN, ARGS_EXPR_JOIN]):
     kind: ClassVar[TokenType] = TokenType.EXPR_LIST_JOIN

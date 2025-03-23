@@ -93,7 +93,9 @@ class ExprListStringReplace(BaseAstNode[KW_STR_REPL, tuple[str, str]]):
     ret_type: VariableType = VariableType.LIST_STRING
 
 
-KW_STR_RE = TypedDict("KW_STR_RE", {"pattern": str, "group": int, "ignore_case": bool})
+KW_STR_RE = TypedDict(
+    "KW_STR_RE", {"pattern": str, "group": int, "ignore_case": bool}
+)
 
 
 @dataclass(kw_only=True)
@@ -103,7 +105,10 @@ class ExprStringRegex(BaseAstNode[KW_STR_RE, tuple[str, int, bool]]):
     ret_type: VariableType = VariableType.STRING
 
 
-KW_STR_RE_ALL = TypedDict("KW_STR_RE_ALL", {"pattern": str, "ignore_case": bool})
+KW_STR_RE_ALL = TypedDict(
+    "KW_STR_RE_ALL", {"pattern": str, "ignore_case": bool}
+)
+
 
 @dataclass(kw_only=True)
 class ExprStringRegexAll(BaseAstNode[KW_STR_RE_ALL, tuple[str, bool]]):

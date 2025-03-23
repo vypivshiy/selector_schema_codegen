@@ -45,8 +45,8 @@ class ExprToBool(BaseAstNode[T_EMPTY_KWARGS, tuple]):
 
 
 _T_SCHEMA: TypeAlias = Type["BaseSchema"]
-KW_EXPR_NESTED = TypedDict("KW_EXPR_NESTED", {"schema_cls": _T_SCHEMA})
-EXPR_NESTED_ARGS = tuple[_T_SCHEMA]
+KW_EXPR_NESTED = TypedDict("KW_EXPR_NESTED", {"schema_name": str})
+EXPR_NESTED_ARGS = tuple[str]
 
 
 @dataclass(kw_only=True)
@@ -56,7 +56,7 @@ class ExprNested(BaseAstNode[KW_EXPR_NESTED, EXPR_NESTED_ARGS]):
     ret_type: VariableType = VariableType.NESTED
 
 
-_T_JSON: TypeAlias = Type["Json"]
+_T_JSON: TypeAlias = Type["Json"]  # todo: provide json struct name only
 KW_EXPR_JSONIFY = TypedDict("KW_EXPR_JSONIFY", {"json_struct": _T_JSON})
 ARGS_EXPR_JSONIFY = tuple[_T_JSON]
 

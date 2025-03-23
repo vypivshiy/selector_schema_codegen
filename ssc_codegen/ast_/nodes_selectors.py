@@ -16,9 +16,7 @@ class ExprCss(BaseAstNode[KW_EXPR_SELECTOR_LIKE, ARGS_EXPR_SELECTOR_LIKE]):
 
 
 @dataclass(kw_only=True)
-class ExprCssAll(
-    BaseAstNode[KW_EXPR_SELECTOR_LIKE, ARGS_EXPR_SELECTOR_LIKE]
-):
+class ExprCssAll(BaseAstNode[KW_EXPR_SELECTOR_LIKE, ARGS_EXPR_SELECTOR_LIKE]):
     kind: ClassVar[TokenType] = TokenType.EXPR_CSS
     accept_type: VariableType = VariableType.DOCUMENT
     ret_type: VariableType = VariableType.LIST_DOCUMENT
@@ -32,9 +30,7 @@ class ExprXpath(BaseAstNode[KW_EXPR_SELECTOR_LIKE, ARGS_EXPR_SELECTOR_LIKE]):
 
 
 @dataclass(kw_only=True)
-class ExprXpathAll(
-    BaseAstNode[KW_EXPR_SELECTOR_LIKE, ARGS_EXPR_SELECTOR_LIKE]
-):
+class ExprXpathAll(BaseAstNode[KW_EXPR_SELECTOR_LIKE, ARGS_EXPR_SELECTOR_LIKE]):
     kind: ClassVar[TokenType] = TokenType.EXPR_CSS
     accept_type: VariableType = VariableType.DOCUMENT
     ret_type: VariableType = VariableType.LIST_DOCUMENT

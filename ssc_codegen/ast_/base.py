@@ -8,6 +8,7 @@ from typing import (
     TypedDict,
     Optional,
     Sequence,
+    MutableSequence,
 )
 
 from ssc_codegen.tokens import TokenType, VariableType
@@ -17,18 +18,6 @@ T_MAPPING_FIELD = TypeVar("T_MAPPING_FIELD", bound=Mapping[str, Any])
 T_EMPTY_KWARGS = TypedDict("T_EMPTY_KWARGS", {})
 
 
-class GlobalRelationsTable:
-    """special class for store nodes relations with StructParser, CallStructMethod or StructMethod:
-
-    - ExprNested
-    - ExprJsonify
-    - TypeDef/TypeDefField
-
-    """
-
-    # TODO
-
-
 @dataclass(kw_only=True)
 class BaseAstNode(Generic[T_MAPPING_FIELD, T_ARGUMENTS]):
     """base AST container"""
@@ -36,12 +25,9 @@ class BaseAstNode(Generic[T_MAPPING_FIELD, T_ARGUMENTS]):
     kind: ClassVar[TokenType]
     kwargs: T_MAPPING_FIELD = field(default_factory=dict)  # type: ignore[assignment]
 
-    body: Sequence["BaseAstNode[Any, Any]"] = field(default_factory=list)
+    body: MutableSequence["BaseAstNode[Any, Any]"] = field(default_factory=list)
     parent: Optional["BaseAstNode[Any, Any]"] = field(default=None, repr=False)
 
-    # used for move in expression nodes
-    next: Optional["BaseAstNode[Any, Any]"] = field(default=None, repr=False)
-    prev: Optional["BaseAstNode[Any, Any]"] = field(default=None, repr=False)
     # used for type check expressions
     accept_type: VariableType | Sequence[VariableType] = VariableType.ANY
     ret_type: VariableType = VariableType.ANY
@@ -79,3 +65,23 @@ class BaseAstNode(Generic[T_MAPPING_FIELD, T_ARGUMENTS]):
             if self.kwargs.get(name):
                 return self.kwargs[name]
             raise e
+
+
+@dataclass(kw_only=True)
+class _DisableReprBody(BaseAstNode):
+    """special class for disable repr unnecessary node fields"""
+
+    body: MutableSequence[BaseAstNode] = field(default_factory=list, repr=False)
+
+
+@dataclass(kw_only=True)
+class _DisableReprAcceptAndRetType(BaseAstNode):
+    accept_type: VariableType = field(default=VariableType.ANY, repr=False)
+    ret_type: VariableType = field(default=VariableType.ANY, repr=False)
+
+
+@dataclass(kw_only=True)
+class _DisableRepr(_DisableReprBody, _DisableReprAcceptAndRetType):
+    body: MutableSequence[BaseAstNode] = field(default_factory=list, repr=False)
+    accept_type: VariableType = field(default=VariableType.ANY, repr=False)
+    ret_type: VariableType = field(default=VariableType.ANY, repr=False)
