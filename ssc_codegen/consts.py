@@ -47,4 +47,9 @@ JSON_SIGNATURE_MAP = {
     JsonVariableType.OPTIONAL_FLOAT: "Float | null",
     JsonVariableType.OPTIONAL_NUMBER: "Int | null",
     JsonVariableType.OPTIONAL_STRING: "String | null",
+    JsonVariableType.ARRAY_FLOAT: "Array<Float>",
+    JsonVariableType.ARRAY_STRING: "Array<String>",
+    JsonVariableType.ARRAY_NUMBER: "Array<Int>",
+    JsonVariableType.ARRAY_BOOLEAN: "Array<Bool>",
+    JsonVariableType.ARRAY: "Array<>"
 }
