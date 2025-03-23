@@ -135,9 +135,9 @@ def json_type_to_str_signature(json_field: JsonType | str) -> Any:
     if isinstance(json_field, str):
         return json_field
     elif json_field.type == JsonVariableType.ARRAY_OBJECTS:
-        return json.dumps([{k: json_type_to_str_signature(v) for k, v in json_field.fields.items()}, '...'])
+        return [{k: json_type_to_str_signature(v) for k, v in json_field.fields.items()}, '...']
     elif json_field.type == JsonVariableType.OBJECT:
-        return json.dumps({k: json_type_to_str_signature(v) for k, v in json_field.fields.items()})
+        return {k: json_type_to_str_signature(v) for k, v in json_field.fields.items()}
     elif JSON_SIGNATURE_MAP.get(json_field.type):
         return JSON_SIGNATURE_MAP.get(json_field.type)
     raise NotImplementedError("Unreachable code")
@@ -150,8 +150,3 @@ def json_struct_to_signature(json_struct: Type[Json]) -> Any:
     for k, field in fields.items():
         tmp_tokens[k] = json_type_to_str_signature(field)
     return [tmp_tokens, "..."] if json_struct.__IS_ARRAY__ else tmp_tokens
-
-if __name__ == '__main__':
-    class C(Json):
-        foo: list
-    print(json_struct_to_signature(C))
