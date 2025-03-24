@@ -20,7 +20,7 @@ def assert_cls_target(compiler: Compiler, cls_target: str) -> bool:
 
 
 def parse_from_http_request(
-    url: str, compiler: Compiler, cls_target: str, **http_options
+    url: str, compiler: Compiler, cls_target: str, **http_options: Any
 ) -> Any:
     response = httpx.get(url, **http_options)
     if not response.is_success:
