@@ -5,7 +5,7 @@ import types
 from os import PathLike
 from typing import Any
 
-from ssc_codegen.ast_builder import build_ast_module
+from ssc_codegen.ast_build import build_ast_module_parser
 from ssc_codegen.converters.py_base import BasePyCodeConverter
 
 
@@ -22,7 +22,7 @@ class Compiler:
         if not isinstance(converter, BasePyCodeConverter):
             raise TypeError("Support only python implementation converters")
 
-        ast = build_ast_module(path)  # type: ignore
+        ast = build_ast_module_parser(path)  # type: ignore
         code_parts = converter.convert_program(
             ast
         )  # return real works python code
