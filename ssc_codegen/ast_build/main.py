@@ -22,7 +22,8 @@ from ssc_codegen.ast_ import (
     TypeDefField,
     ExprReturn,
     ExprNoReturn,
-    ExprNested, ExprJsonify,
+    ExprNested,
+    ExprJsonify,
 )
 from ssc_codegen.ast_build.utils import (
     generate_docstring_signature,
@@ -101,10 +102,7 @@ def build_ast_typedef(
     for sc in ast_schemas:
         ast_t_def = TypeDef(
             parent=ast_module,
-            kwargs={
-                "name": sc.kwargs["name"],
-                "struct_type": sc.struct_type
-            }
+            kwargs={"name": sc.kwargs["name"], "struct_type": sc.struct_type},
         )
         for sc_field in sc.body:
             if sc_field.kind != TokenType.STRUCT_FIELD:
@@ -125,7 +123,7 @@ def build_ast_typedef(
                 node2 = cast(ExprJsonify, node2)
                 cls_name = node2.kwargs["json_struct_name"]
                 # hack: for provide more consistent Typedef field gen api
-                if node2.kwargs['is_array']:
+                if node2.kwargs["is_array"]:
                     cls_nested_type = StructType.LIST
                 else:
                     cls_nested_type = StructType.ITEM
@@ -139,7 +137,7 @@ def build_ast_typedef(
                     "name": sc_field.kwargs["name"],
                     "type": sc_field.body[-1].ret_type,
                     "cls_nested": cls_name,
-                    "cls_nested_type": cls_nested_type
+                    "cls_nested_type": cls_nested_type,
                 },
             )
             ast_t_def.body.append(ast_t_def_field)
@@ -177,8 +175,8 @@ def build_ast_struct_parser(
     if errors_count > 0:
         # todo: exc
         raise SyntaxError
-    docstring = (schema.__doc__ or "") + "\n\n" + generate_docstring_signature(
-        schema
+    docstring = (
+        (schema.__doc__ or "") + "\n\n" + generate_docstring_signature(schema)
     )
     st = StructParser(
         kwargs={
@@ -196,7 +194,6 @@ def build_ast_struct_parser(
 
     _try_fetch_pre_validate_node(body, body_parse_method_expr, fields, st)
     _try_fetch_split_doc_node(body, body_parse_method_expr, fields, st)
-    schema_name = schema.__name__
     _fetch_field_nodes(
         body,
         body_parse_method_expr,
@@ -314,7 +311,9 @@ def _try_fetch_pre_validate_node(
 ) -> None:
     if fields.get("__PRE_VALIDATE__"):
         validate_field = fields.pop("__PRE_VALIDATE__")
-        method = StructPreValidateMethod(body=validate_field.stack, parent=st_ref)
+        method = StructPreValidateMethod(
+            body=validate_field.stack, parent=st_ref
+        )
         validate_field.stack.append(ExprNoReturn())
         for i in validate_field.stack:
             i.parent = method
