@@ -7,7 +7,6 @@ from typing import (
     Any,
     TypedDict,
     Optional,
-    Sequence,
     MutableSequence,
 )
 
@@ -29,7 +28,7 @@ class BaseAstNode(Generic[T_MAPPING_FIELD, T_ARGUMENTS]):
     parent: Optional["BaseAstNode"] = field(default=None, repr=False)
 
     # used for type check expressions
-    accept_type: VariableType | Sequence[VariableType] = VariableType.ANY
+    accept_type: VariableType = VariableType.ANY
     ret_type: VariableType = VariableType.ANY
 
     def unpack_args(self) -> T_ARGUMENTS:
