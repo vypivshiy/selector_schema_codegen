@@ -6,7 +6,7 @@ import warnings
 from ichrome.exceptions import ChromeRuntimeError
 import typer
 
-from ssc_codegen.ast_builder import build_ast_module
+from ssc_codegen.ast_build import build_ast_module_parser
 from ssc_codegen.cli.cli_utils import (
     ConverterLike,
     create_fmt_cmd,
@@ -27,10 +27,9 @@ from ssc_codegen.cli.runtime_parse_runners import (
     parse_from_http_request,
     parse_from_chrome,
 )
-from .consts import (
+from ssc_codegen.cli.consts import (
     PyLIBS,
     JsLIBS,
-    DartLIBS,
     GoLIBS,
     COMMENT_STRING,
     HELP_OUTPUT_FOLDER,
@@ -44,13 +43,12 @@ from .consts import (
     CMD_VERSION,
     CMD_PY,
     CMD_JS,
-    CMD_DART,
     CMD_GO,
     CMD_JSON_GEN,
     DEFAULT_UA,
 )
-from ..converters.json_to_schema import convert_json_to_schema_code
-from .cli_callbacks import cb_check_ssc_files, cb_folder_out
+from ssc_codegen.json_to_scc import convert_json_to_schema_code
+from ssc_codegen.cli.cli_callbacks import cb_check_ssc_files, cb_folder_out
 
 
 from pathlib import Path
@@ -102,7 +100,7 @@ def generate_code(
         name = file_cfg.name.split(".")[0]
         out_file = f"{prefix}{name}{suffix}"
         print(f"Make AST {file_cfg.name}...")
-        ast_module = build_ast_module(
+        ast_module = build_ast_module_parser(
             file_cfg,
             docstring_class_top=docstring_class_top,
             css_to_xpath=css_to_xpath,
@@ -222,53 +220,6 @@ def gen_js(
     )
 
 
-@app.command("dart", help=CMD_DART)
-def gen_dart(
-    ssc_files: Annotated[
-        List[Path],
-        Argument(help="ssc-gen config files", callback=cb_check_ssc_files),
-    ],
-    out: Annotated[
-        Path,
-        Option("--out", "-o", help=HELP_OUTPUT_FOLDER, callback=cb_folder_out),
-    ],
-    lib: Annotated[
-        DartLIBS, Option("--lib", "-i", help=HELP_CORE_LIB)
-    ] = DartLIBS.UNIVERSAL_HTML,
-    prefix: Annotated[
-        str, Option("--prefix", "-p", help=HELP_FILE_PREFIX)
-    ] = "",
-    suffix: Annotated[
-        str, Option("--suffix", "-s", help=HELP_FILE_SUFFIX)
-    ] = ".dart",
-    fmt: Annotated[bool, Option(help=HELP_FMT, is_flag=True)] = True,
-    to_xpath: Annotated[bool, Option(help=HELP_TO_XPATH, is_flag=True)] = False,
-    to_css: Annotated[bool, Option(help=HELP_TO_CSS, is_flag=True)] = False,
-    debug: Annotated[
-        bool, Option(help=HELP_DEBUG_COMM_TOKENS, is_flag=True)
-    ] = False,
-) -> None:
-    converter = import_converter(f"dart_{lib.value}")
-    if fmt:
-        commands = ["dart format {}"]
-        fmt_cmd = create_fmt_cmd(ssc_files, prefix, suffix, out, commands)
-    else:
-        fmt_cmd = []
-    generate_code(
-        converter=converter,
-        out=out,
-        prefix=prefix,
-        ssc_files=ssc_files,
-        suffix=suffix,
-        comment_str=f"// {COMMENT_STRING}",
-        fmt_cmd=fmt_cmd,
-        code_cb=CB_DART_CODE,
-        docstring_class_top=True,
-        xpath_to_css=to_css,
-        css_to_xpath=to_xpath,
-        debug_instructions=debug,
-        debug_comment_prefix="// ",
-    )
 
 
 @app.command("go", help=CMD_GO)
@@ -382,11 +333,11 @@ def parse_from_file(
     ] = None,
 ) -> None:
     from ssc_codegen.compiler import Compiler
-    from ssc_codegen.converters.py_parsel import converter
+    from ssc_codegen.converters.py_parsel import CONVERTER
 
     cls_target, schema_config = _validate_parser_target(cls_target)
 
-    compiler = Compiler.from_file(schema_config, converter=converter)
+    compiler = Compiler.from_file(schema_config, converter=CONVERTER)
     if not assert_cls_target(compiler, cls_target):
         suggest = suggest_class_name(compiler._module, cls_target)  # noqa
         msg = f"{schema_config.name} not contains {cls_target} class. Did you mean `{suggest}`?"
@@ -401,7 +352,8 @@ def parse_from_file(
     if out:
         if isinstance(result, str):
             result = json.loads(result)
-        json.dump(result, out, indent=2)
+        with open(out, "w") as f:
+            json.dump(result, f, indent=2)
     else:
         print_json_output(result)
 
@@ -437,11 +389,11 @@ def parse_from_url(
     ] = True,
 ) -> None:
     from ssc_codegen.compiler import Compiler
-    from ssc_codegen.converters.py_parsel import converter
+    from ssc_codegen.converters.py_parsel import CONVERTER
 
     cls_target, schema_config = _validate_parser_target(cls_target)
 
-    compiler = Compiler.from_file(schema_config, converter=converter)
+    compiler = Compiler.from_file(schema_config, converter=CONVERTER)
     if not assert_cls_target(compiler, cls_target):
         suggest = suggest_class_name(compiler._module, cls_target)  # noqa
         msg = f"{schema_config.name} not contains {cls_target} class. Did you mean `{suggest}`?"
@@ -458,7 +410,8 @@ def parse_from_url(
     if out:
         if isinstance(result, str):
             result = json.loads(result)
-        json.dump(result, out, indent=2)
+        with open(out, "w") as f:
+            json.dump(result, f, indent=2)
     else:
         print_json_output(result)
 
@@ -501,14 +454,14 @@ def parse_from_chrome_(
         ),
     ] = "",
 ) -> None:
-    from ssc_codegen.converters.js_pure import converter as js_converter
+    from ssc_codegen.converters.js_pure import CONVERTER as JS_CONVERTER
     import asyncio
     from ssc_codegen.compiler import Compiler
-    from ssc_codegen.converters.py_parsel import converter
+    from ssc_codegen.converters.py_parsel import CONVERTER
 
     cls_target, schema_config = _validate_parser_target(cls_target)
 
-    compiler = Compiler.from_file(schema_config, converter=converter)
+    compiler = Compiler.from_file(schema_config, converter=CONVERTER)
     if not assert_cls_target(compiler, cls_target):
         suggest = suggest_class_name(compiler._module, cls_target)  # noqa
         msg = f"{schema_config.name} not contains {cls_target} class. Did you mean `{suggest}`?"
@@ -520,8 +473,8 @@ def parse_from_chrome_(
     if not url.startswith("http"):
         raise typer.BadParameter(f"`{url}` not a http url")
 
-    ast = build_ast_module(schema_config, docstring_class_top=True)  # type: ignore
-    code_parts = js_converter.convert_program(ast)
+    ast = build_ast_module_parser(schema_config, docstring_class_top=True)  # type: ignore
+    code_parts = JS_CONVERTER.convert_program(ast)
     code = CB_JS_CODE(code_parts)
     code += f"; JSON.stringify((new {cls_target}(document).parse()))"
 

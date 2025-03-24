@@ -9,15 +9,10 @@ class PyLIBS(StrEnum):
     BS4 = "bs4"
     PARSEL = "parsel"
     SELECTOLAX = "selectolax"
-    SCRAPY = "scrapy"
 
 
 class JsLIBS(StrEnum):
     PURE = "pure"
-
-
-class DartLIBS(StrEnum):
-    UNIVERSAL_HTML = "universal_html"
 
 
 class GoLIBS(StrEnum):
@@ -40,7 +35,6 @@ HELP_JSON_TO_SCHEMA = "convert json response to ssc-gen schema"
 CMD_VERSION = "Show version and exit"
 CMD_PY = "generate python modules"
 CMD_JS = "generate javascript modules"
-CMD_DART = "generate dart modules"
 CMD_GO = "generate golang modules"
 CMD_JSON_GEN = """generate schema code from json.
 entrypoint should be: map or array object and key starts as _[a-zA-Z] char
