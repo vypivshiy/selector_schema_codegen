@@ -1,6 +1,6 @@
-from typing import TYPE_CHECKING, Any, Type, TypeAlias, Union, cast
+from typing import TYPE_CHECKING, Any, Type, TypeAlias, Union
 
-from .consts import RESERVED_METHODS
+from .consts import RESERVED_METHODS, SIGNATURE_MAP
 from .json_struct import json_struct_to_signature
 from .tokens import StructType, TokenType, VariableType
 
@@ -40,13 +40,8 @@ class BaseSchema:
 
     __ALLOWED_MAGIC__ = RESERVED_METHODS
 
-    __NESTED_SCHEMAS__: dict[str, Type['BaseSchema']] = {}
-    __JSON_SCHEMAS__: dict[str, Type['Json']] = {}
-
-    @classmethod
-    def _get_nested_signature(cls, field: "BaseDocument") -> Type["BaseSchema"]:
-        name = [e for e in field.stack if e.kind == TokenType.EXPR_NESTED][0].kwargs['schema_name']
-        return cls.__NESTED_SCHEMAS__[name]
+    __NESTED_SCHEMAS__: dict[str, Type["BaseSchema"]] = {}
+    __JSON_SCHEMAS__: dict[str, Type["Json"]] = {}
 
     @classmethod
     def __class_signature__(cls) -> dict[str, Any] | list[str | Any]:
@@ -86,11 +81,17 @@ class BaseSchema:
     ) -> None:
         """convert field to signature item"""
         if field.stack_last_ret == VariableType.NESTED:
-            nested_class = cls._get_nested_signature(field)
-            signature[key] = nested_class.__class_signature__()
+            name = [e for e in field.stack if e.kind == TokenType.EXPR_NESTED][
+                0
+            ].kwargs["schema_name"]
+            signature[key] = cls.__NESTED_SCHEMAS__[name].__class_signature__()
         elif field.stack_last_ret == VariableType.JSON:
-            json_cls = cls.__JSON_SCHEMAS__[field.stack[-1].kwargs['json_struct_name']]
+            json_cls = cls.__JSON_SCHEMAS__[
+                field.stack[-1].kwargs["json_struct_name"]
+            ]
             signature[key] = json_struct_to_signature(json_cls)
+        else:
+            signature[key] = SIGNATURE_MAP[field.stack_last_ret]
 
     @classmethod
     def _get_item_signature(cls):  # type: ignore
