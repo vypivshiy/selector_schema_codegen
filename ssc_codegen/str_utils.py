@@ -47,7 +47,7 @@ def wrap_double_quotes(s: str, escape_ch: str = "\\") -> str:
 
 def wrap_backtick(s: str, escape_ch: str = "\\") -> str:
     if not s:
-        return '``'
+        return "``"
     return "`" + s.replace("`", f"{escape_ch}`") + "`"
 
 

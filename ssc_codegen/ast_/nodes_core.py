@@ -12,34 +12,24 @@ from ssc_codegen.tokens import (
     TokenType,
     StructType,
     VariableType,
-    JsonVariableType,
 )
 
 KW_DOCSTRING = TypedDict("KW_DOCSTRING", {"value": str})
 
 
 @dataclass(kw_only=True)
-class Docstring(
-    _DisableRepr,
-    BaseAstNode[KW_DOCSTRING, tuple[str]]
-):
+class Docstring(_DisableRepr, BaseAstNode[KW_DOCSTRING, tuple[str]]):
     kind: ClassVar[TokenType] = TokenType.DOCSTRING
     kwargs: KW_DOCSTRING
 
 
 @dataclass(kw_only=True)
-class ModuleImports(
-    _DisableRepr,
-    BaseAstNode[T_EMPTY_KWARGS, tuple]
-):
+class ModuleImports(_DisableRepr, BaseAstNode[T_EMPTY_KWARGS, tuple]):
     kind: ClassVar[TokenType] = TokenType.IMPORTS
 
 
 @dataclass(kw_only=True)
-class StructInitMethod(
-    _DisableRepr,
-    BaseAstNode[T_EMPTY_KWARGS, tuple]
-):
+class StructInitMethod(_DisableRepr, BaseAstNode[T_EMPTY_KWARGS, tuple]):
     """mark as class constructor entry if target language not need it - skip"""
 
     kind: ClassVar[TokenType] = TokenType.STRUCT_INIT
@@ -50,8 +40,7 @@ class StructInitMethod(
 
 @dataclass(kw_only=True)
 class StructPreValidateMethod(
-    _DisableReprAcceptAndRetType,
-    BaseAstNode[T_EMPTY_KWARGS, tuple]
+    _DisableReprAcceptAndRetType, BaseAstNode[T_EMPTY_KWARGS, tuple]
 ):
     """mark optional input validation method.
 
@@ -68,8 +57,7 @@ ARGS_ST_METHOD = tuple[str]
 
 @dataclass(kw_only=True)
 class StructFieldMethod(
-    _DisableReprAcceptAndRetType,
-    BaseAstNode[KW_ST_METHOD, ARGS_ST_METHOD]
+    _DisableReprAcceptAndRetType, BaseAstNode[KW_ST_METHOD, ARGS_ST_METHOD]
 ):
     """mark as method for parse singe field"""
 
@@ -80,8 +68,7 @@ class StructFieldMethod(
 
 @dataclass(kw_only=True)
 class StructPartDocMethod(
-    _DisableReprAcceptAndRetType,
-    BaseAstNode[T_EMPTY_KWARGS, tuple]
+    _DisableReprAcceptAndRetType, BaseAstNode[T_EMPTY_KWARGS, tuple]
 ):
     """mark as method for split html document to elements"""
 
@@ -92,8 +79,7 @@ class StructPartDocMethod(
 
 @dataclass(kw_only=True)
 class StartParseMethod(
-    _DisableReprAcceptAndRetType,
-    BaseAstNode[T_EMPTY_KWARGS, tuple]
+    _DisableReprAcceptAndRetType, BaseAstNode[T_EMPTY_KWARGS, tuple]
 ):
     """mark as method for run parser"""
 
@@ -111,8 +97,7 @@ ARGS_EXPR_CALL_METHOD = tuple[str, VariableType, str | None]
 
 @dataclass(kw_only=True)
 class ExprCallStructMethod(
-    _DisableRepr,
-    BaseAstNode[KW_EXPR_CALL_METHOD, ARGS_ST_METHOD]
+    _DisableRepr, BaseAstNode[KW_EXPR_CALL_METHOD, ARGS_ST_METHOD]
 ):
     """mark as call field method"""
 
@@ -129,9 +114,7 @@ ARGS_STRUCT_PARSER = tuple[str, StructType, str]
 
 
 @dataclass(kw_only=True)
-class StructParser(
-    BaseAstNode[KW_STRUCT_PARSER, ARGS_STRUCT_PARSER]
-):
+class StructParser(BaseAstNode[KW_STRUCT_PARSER, ARGS_STRUCT_PARSER]):
     kind: ClassVar[TokenType] = TokenType.STRUCT
 
     @property
@@ -145,7 +128,12 @@ class StructParser(
 
 KW_TYPEDEF_FIELD = TypedDict(
     "KW_TYPEDEF_FIELD",
-    {"name": str, "type": VariableType, "cls_nested": str | None, "cls_nested_type": StructType | None},
+    {
+        "name": str,
+        "type": VariableType,
+        "cls_nested": str | None,
+        "cls_nested_type": StructType | None,
+    },
 )
 ARGS_TYPEDEF_FIELD = tuple[str, VariableType, str | None, StructType | None]
 T_TYPEDEF = TypeVar("T_TYPEDEF", bound="TypeDef")
@@ -153,8 +141,7 @@ T_TYPEDEF = TypeVar("T_TYPEDEF", bound="TypeDef")
 
 @dataclass(kw_only=True)
 class TypeDefField(
-    _DisableRepr,
-    BaseAstNode[KW_TYPEDEF_FIELD, ARGS_TYPEDEF_FIELD]
+    _DisableRepr, BaseAstNode[KW_TYPEDEF_FIELD, ARGS_TYPEDEF_FIELD]
 ):
     kind: ClassVar[TokenType] = TokenType.TYPEDEF_FIELD
 
@@ -165,8 +152,7 @@ ARGS_TYPEDEF = tuple[str, StructType]
 
 @dataclass(kw_only=True)
 class TypeDef(
-    _DisableReprAcceptAndRetType,
-    BaseAstNode[KW_TYPEDEF, ARGS_TYPEDEF]
+    _DisableReprAcceptAndRetType, BaseAstNode[KW_TYPEDEF, ARGS_TYPEDEF]
 ):
     kind: ClassVar[TokenType] = TokenType.TYPEDEF
 
@@ -195,28 +181,27 @@ ARGS_JSON_ST = tuple[str, bool]
 
 @dataclass(kw_only=True)
 class JsonStruct(
-    _DisableReprAcceptAndRetType,
-    BaseAstNode[KW_JSON_ST, ARGS_JSON_ST]
+    _DisableReprAcceptAndRetType, BaseAstNode[KW_JSON_ST, ARGS_JSON_ST]
 ):
     kind: ClassVar[TokenType] = TokenType.JSON_STRUCT
 
 
 @dataclass(kw_only=True)
 class ModuleProgram(
-    _DisableReprAcceptAndRetType,
-    BaseAstNode[T_EMPTY_KWARGS, tuple]
+    _DisableReprAcceptAndRetType, BaseAstNode[T_EMPTY_KWARGS, tuple]
 ):
     kind: ClassVar[TokenType] = TokenType.MODULE
 
 
-KW_AST_DEFAULT = TypedDict("KW_AST_DEFAULT", {"value": str | int | float | bool | None})
+KW_AST_DEFAULT = TypedDict(
+    "KW_AST_DEFAULT", {"value": str | int | float | bool | None}
+)
 ARGS_AST_DEFAULT = tuple[str | int | float | bool | None]
 
 
 @dataclass(kw_only=True)
 class ExprDefaultValueWrapper(
-    _DisableReprBody,
-    BaseAstNode[KW_AST_DEFAULT, ARGS_AST_DEFAULT]
+    _DisableReprBody, BaseAstNode[KW_AST_DEFAULT, ARGS_AST_DEFAULT]
 ):
     # later insert ExprDefaultValueStart to the first pos
     # and insert ExprDefaultValueEnd to the last pos
@@ -227,31 +212,23 @@ class ExprDefaultValueWrapper(
 
 @dataclass(kw_only=True)
 class ExprDefaultValueStart(
-    _DisableReprBody,
-    BaseAstNode[KW_AST_DEFAULT, ARGS_AST_DEFAULT]
+    _DisableReprBody, BaseAstNode[KW_AST_DEFAULT, ARGS_AST_DEFAULT]
 ):
     kind: ClassVar[TokenType] = TokenType.EXPR_DEFAULT_START
 
 
 @dataclass(kw_only=True)
 class ExprDefaultValueEnd(
-    _DisableReprBody,
-    BaseAstNode[KW_AST_DEFAULT, ARGS_AST_DEFAULT]
+    _DisableReprBody, BaseAstNode[KW_AST_DEFAULT, ARGS_AST_DEFAULT]
 ):
     kind: ClassVar[TokenType] = TokenType.EXPR_DEFAULT_END
 
 
 @dataclass(kw_only=True)
-class ExprReturn(
-    _DisableReprBody,
-    BaseAstNode[T_EMPTY_KWARGS, tuple]
-):
+class ExprReturn(_DisableReprBody, BaseAstNode[T_EMPTY_KWARGS, tuple]):
     kind: ClassVar[TokenType] = TokenType.EXPR_RETURN
 
 
 @dataclass(kw_only=True)
-class ExprNoReturn(
-    _DisableReprBody,
-    BaseAstNode[T_EMPTY_KWARGS, tuple]
-):
+class ExprNoReturn(_DisableReprBody, BaseAstNode[T_EMPTY_KWARGS, tuple]):
     kind: ClassVar[TokenType] = TokenType.EXPR_NO_RETURN

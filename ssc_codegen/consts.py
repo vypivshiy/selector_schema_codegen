@@ -51,5 +51,5 @@ JSON_SIGNATURE_MAP = {
     JsonVariableType.ARRAY_STRING: "Array<String>",
     JsonVariableType.ARRAY_NUMBER: "Array<Int>",
     JsonVariableType.ARRAY_BOOLEAN: "Array<Bool>",
-    JsonVariableType.ARRAY: "Array<>"
+    JsonVariableType.ARRAY: "Array<>",
 }

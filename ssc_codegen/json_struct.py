@@ -4,7 +4,7 @@
 NOTE: generate schemas for rest-api use tools like OpenAPI specs generators from requests and response.
 this solution used for parse json inner HTML documents
 """
-import json
+
 from dataclasses import dataclass, field
 from types import GenericAlias, UnionType, NoneType
 from typing import get_args, Any, Union, TypeAlias, Type
@@ -12,14 +12,14 @@ from typing import get_args, Any, Union, TypeAlias, Type
 from ssc_codegen.consts import JSON_SIGNATURE_MAP
 from ssc_codegen.tokens import JsonVariableType
 
-_TokenValue: TypeAlias = Union['JsonType']
+_TokenValue: TypeAlias = Union["JsonType"]
 
 
 @dataclass()
 class JsonType:
     type: JsonVariableType
     name: str = ""  # stub for link nested Json / Array<Json> types
-    fields: dict[str, 'JsonType'] = field(default_factory=dict)
+    fields: dict[str, "JsonType"] = field(default_factory=dict)
 
 
 class Json:
@@ -77,7 +77,8 @@ class Json:
                 return JsonType(
                     JsonVariableType.ARRAY_OBJECTS,
                     name=args[0].__name__,
-                    fields=args[0].get_fields())
+                    fields=args[0].get_fields(),
+                )
             if not cls.__ARRAY_TYPE_MAPPING__.get(args[0]):
                 msg = f"list not support type {args[0].__name__}"
                 raise TypeError(msg)
@@ -116,12 +117,12 @@ class Json:
                     raise TypeError(msg)
 
         elif issubclass(type_, Json):
-            return JsonType(JsonVariableType.OBJECT,
-                            name=type_.__name__,
-                            fields=type_.get_fields())
-        raise TypeError(
-            f"{cls.__name__}: invalid type {type_} (not supported)"
-        )
+            return JsonType(
+                JsonVariableType.OBJECT,
+                name=type_.__name__,
+                fields=type_.get_fields(),
+            )
+        raise TypeError(f"{cls.__name__}: invalid type {type_} (not supported)")
 
     @classmethod
     def get_fields(cls) -> dict[str, JsonType]:
@@ -135,9 +136,18 @@ def json_type_to_str_signature(json_field: JsonType | str) -> Any:
     if isinstance(json_field, str):
         return json_field
     elif json_field.type == JsonVariableType.ARRAY_OBJECTS:
-        return [{k: json_type_to_str_signature(v) for k, v in json_field.fields.items()}, '...']
+        return [
+            {
+                k: json_type_to_str_signature(v)
+                for k, v in json_field.fields.items()
+            },
+            "...",
+        ]
     elif json_field.type == JsonVariableType.OBJECT:
-        return {k: json_type_to_str_signature(v) for k, v in json_field.fields.items()}
+        return {
+            k: json_type_to_str_signature(v)
+            for k, v in json_field.fields.items()
+        }
     elif JSON_SIGNATURE_MAP.get(json_field.type):
         return JSON_SIGNATURE_MAP.get(json_field.type)
     raise NotImplementedError("Unreachable code")
@@ -147,6 +157,6 @@ def json_struct_to_signature(json_struct: Type[Json]) -> Any:
     """function helper for generate docstring signature in schema"""
     fields = json_struct.get_fields()
     tmp_tokens = fields.copy()
-    for k, field in fields.items():
-        tmp_tokens[k] = json_type_to_str_signature(field)
+    for k, doc_field in fields.items():
+        tmp_tokens[k] = json_type_to_str_signature(doc_field)
     return [tmp_tokens, "..."] if json_struct.__IS_ARRAY__ else tmp_tokens

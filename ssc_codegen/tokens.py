@@ -168,10 +168,20 @@ class TokenType(IntEnum):
     TO_BOOL = auto()
 
     @classmethod
-    def default_tokens(cls) -> tuple['TokenType', ...]:
-        return TokenType.EXPR_DEFAULT, TokenType.EXPR_DEFAULT_START, TokenType.EXPR_DEFAULT_END
+    def default_tokens(cls) -> tuple["TokenType", ...]:
+        return (
+            TokenType.EXPR_DEFAULT,
+            TokenType.EXPR_DEFAULT_START,
+            TokenType.EXPR_DEFAULT_END,
+        )
 
     @classmethod
-    def assert_tokens(cls) -> tuple['TokenType', ...]:
-        return (TokenType.IS_CSS, TokenType.IS_XPATH, TokenType.IS_EQUAL, TokenType.IS_NOT_EQUAL, TokenType.IS_CONTAINS,
-                TokenType.IS_REGEX_MATCH)
+    def assert_tokens(cls) -> tuple["TokenType", ...]:
+        return (
+            TokenType.IS_CSS,
+            TokenType.IS_XPATH,
+            TokenType.IS_EQUAL,
+            TokenType.IS_NOT_EQUAL,
+            TokenType.IS_CONTAINS,
+            TokenType.IS_REGEX_MATCH,
+        )

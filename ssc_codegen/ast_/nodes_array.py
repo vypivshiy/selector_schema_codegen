@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import TypedDict, ClassVar, TYPE_CHECKING, TypeVar, Union
+from typing import TypedDict, ClassVar
 
 from ssc_codegen.ast_.base import BaseAstNode, T_EMPTY_KWARGS
 from ssc_codegen.tokens import TokenType, VariableType
@@ -9,9 +9,7 @@ ARGS_EXPR_INDEX = tuple[int]
 
 
 @dataclass(kw_only=True)
-class ExprIndex(
-    BaseAstNode[KW_EXPR_INDEX, ARGS_EXPR_INDEX]
-):
+class ExprIndex(BaseAstNode[KW_EXPR_INDEX, ARGS_EXPR_INDEX]):
     kind: ClassVar[TokenType] = TokenType.EXPR_LIST_ANY_INDEX
     accept_type: VariableType = VariableType.LIST_ANY
     ret_type: VariableType = VariableType.ANY

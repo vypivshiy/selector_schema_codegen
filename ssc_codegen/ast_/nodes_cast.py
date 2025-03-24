@@ -6,7 +6,6 @@ from ssc_codegen.ast_.base import BaseAstNode, T_EMPTY_KWARGS
 
 if TYPE_CHECKING:
     from ssc_codegen.schema import BaseSchema
-    from ssc_codegen.json_struct import Json
 
 
 @dataclass(kw_only=True)
@@ -45,7 +44,9 @@ class ExprToBool(BaseAstNode[T_EMPTY_KWARGS, tuple]):
 
 
 _T_SCHEMA: TypeAlias = Type["BaseSchema"]
-KW_EXPR_NESTED = TypedDict("KW_EXPR_NESTED", {"schema_name": str, "schema_type": StructType})
+KW_EXPR_NESTED = TypedDict(
+    "KW_EXPR_NESTED", {"schema_name": str, "schema_type": StructType}
+)
 EXPR_NESTED_ARGS = tuple[str, StructType]
 
 
@@ -56,7 +57,9 @@ class ExprNested(BaseAstNode[KW_EXPR_NESTED, EXPR_NESTED_ARGS]):
     ret_type: VariableType = VariableType.NESTED
 
 
-KW_EXPR_JSONIFY = TypedDict("KW_EXPR_JSONIFY", {"json_struct_name": str, "is_array": bool})
+KW_EXPR_JSONIFY = TypedDict(
+    "KW_EXPR_JSONIFY", {"json_struct_name": str, "is_array": bool}
+)
 ARGS_EXPR_JSONIFY = tuple[str, bool]
 
 

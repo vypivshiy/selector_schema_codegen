@@ -60,6 +60,7 @@ from ssc_codegen.json_struct import Json
 from ssc_codegen.schema import BaseSchema
 from ssc_codegen.selector_utils import validate_css_query, validate_xpath_query
 from ssc_codegen.tokens import VariableType
+
 LOGGER = logging.getLogger("ssc_gen")
 
 
@@ -920,7 +921,14 @@ class NestedDocument(BaseDocument):
             )
         # HACK: store to class instance for generate docstring signature
         schema.__NESTED_SCHEMAS__[schema.__name__] = schema
-        self._add(ExprNested(kwargs={"schema_name": schema.__name__, "schema_type": schema.__SCHEMA_TYPE__}))
+        self._add(
+            ExprNested(
+                kwargs={
+                    "schema_name": schema.__name__,
+                    "schema_type": schema.__SCHEMA_TYPE__,
+                }
+            )
+        )
         return self
 
 
@@ -1004,7 +1012,14 @@ class JsonDocument(BaseDocument):
                 VariableType.STRING.name,
                 self.stack_last_ret.name,
             )
-        self._add(ExprJsonify(kwargs={"json_struct_name": struct.__name__, "is_array": struct.__IS_ARRAY__}))
+        self._add(
+            ExprJsonify(
+                kwargs={
+                    "json_struct_name": struct.__name__,
+                    "is_array": struct.__IS_ARRAY__,
+                }
+            )
+        )
         # HACK: store to class instance for generate docstring signature
         BaseSchema.__JSON_SCHEMAS__[struct.__name__] = struct  # type: ignore
         return self

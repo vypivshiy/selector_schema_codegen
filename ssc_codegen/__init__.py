@@ -2,8 +2,13 @@ from .document import HTMLDocument, StringDocument, ArrayDocument, AssertDocumen
     NumericDocument, JsonDocument, BooleanDocument
 from .json_struct import Json
 from .schema import ItemSchema, DictSchema, ListSchema, FlatListSchema
+from .logs import setup_logger
+
+setup_logger()
+
 
 VERSION = "0.7.7"
+
 
 class __MISSING(object):
     pass

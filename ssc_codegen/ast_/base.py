@@ -25,8 +25,8 @@ class BaseAstNode(Generic[T_MAPPING_FIELD, T_ARGUMENTS]):
     kind: ClassVar[TokenType]
     kwargs: T_MAPPING_FIELD = field(default_factory=dict)  # type: ignore[assignment]
 
-    body: MutableSequence['BaseAstNode'] = field(default_factory=list)
-    parent: Optional['BaseAstNode'] = field(default=None, repr=False)
+    body: MutableSequence["BaseAstNode"] = field(default_factory=list)
+    parent: Optional["BaseAstNode"] = field(default=None, repr=False)
 
     # used for type check expressions
     accept_type: VariableType | Sequence[VariableType] = VariableType.ANY
