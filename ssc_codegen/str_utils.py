@@ -40,10 +40,14 @@ def to_lower_camel_case(s: str) -> str:
 
 def wrap_double_quotes(s: str, escape_ch: str = "\\") -> str:
     """used if string marks only in this chars"""
+    if not s:
+        return '""'
     return '"' + s.replace('"', f'{escape_ch}"') + '"'
 
 
 def wrap_backtick(s: str, escape_ch: str = "\\") -> str:
+    if not s:
+        return '``'
     return "`" + s.replace("`", f"{escape_ch}`") + "`"
 
 
