@@ -1,14 +1,14 @@
 import re
 from typing import TYPE_CHECKING, Pattern
 
-from ssc_codegen.ast_ssc import (
-    BaseExpression,
-    HtmlCssAllExpression,
-    HtmlCssExpression,
-    HtmlXpathAllExpression,
-    HtmlXpathExpression,
-    IsCssExpression,
-    IsXPathExpression,
+from ssc_codegen.ast_ import (
+    BaseAstNode,
+    ExprIsCss,
+    ExprCss,
+    ExprIsXpath,
+    ExprXpathAll,
+    ExprXpath,
+    ExprCssAll,
 )
 from ssc_codegen.selector_utils import css_to_xpath, xpath_to_css
 
@@ -79,28 +79,37 @@ def convert_css_to_xpath(
 ) -> "BaseDocument":
     """replace CSS expressions to XPATH in Document object"""
     old_stack = doc.stack.copy()
-    new_stack: list[BaseExpression] = []
+    new_stack: list[BaseAstNode] = []
 
     for expr in old_stack:
         match expr.kind:
-            case HtmlCssExpression.kind:
-                new_expr = HtmlXpathExpression(  # type: ignore[assignment]
-                    variable=expr.variable,
-                    query=css_to_xpath(expr.query, prefix=prefix),  # type: ignore[attr-defined]
+            case ExprCss.kind:
+                new_expr = ExprXpath(  # type: ignore[assignment]
+                    kwargs={
+                        "query": css_to_xpath(
+                            expr.kwargs["query"], prefix=prefix
+                        )
+                    }
                 )
-            case HtmlCssAllExpression.kind:
-                new_expr = HtmlXpathAllExpression(  # type: ignore[assignment]
-                    variable=expr.variable,
-                    query=css_to_xpath(expr.query, prefix=prefix),  # type: ignore[attr-defined]
+            case ExprCssAll.kind:
+                new_expr = ExprXpathAll(  # type: ignore[assignment]
+                    kwargs={
+                        "query": css_to_xpath(
+                            expr.kwargs["query"], prefix=prefix
+                        )
+                    }
                 )
-            case IsCssExpression.kind:
-                new_expr = IsXPathExpression(  # type: ignore[assignment]
-                    variable=expr.variable,
-                    query=css_to_xpath(expr.query, prefix=prefix),  # type: ignore[attr-defined]
-                    msg=expr.msg,  # type: ignore[attr-defined]
+            case ExprIsCss.kind:
+                new_expr = ExprIsXpath(  # type: ignore[assignment]
+                    kwargs={
+                        "query": css_to_xpath(
+                            expr.kwargs["query"], prefix=prefix
+                        ),
+                        "msg": expr.kwargs["msg"],
+                    }
                 )
             case _:
-                new_expr = expr  # type:ignore[assignment]
+                new_expr = expr  # type: ignore[assignment]
         new_stack.append(new_expr)
     doc._stack = new_stack
     return doc
@@ -109,24 +118,23 @@ def convert_css_to_xpath(
 def convert_xpath_to_css(doc: "BaseDocument") -> "BaseDocument":
     """replace xpath expressions to CSS in Document object"""
     old_stack = doc.stack.copy()
-    new_stack: list[BaseExpression] = []
+    new_stack: list[BaseAstNode] = []
     for expr in old_stack:
         match expr.kind:
-            case HtmlXpathExpression.kind:
-                new_expr = HtmlCssExpression(  # type: ignore[assignment]
-                    variable=expr.variable,
-                    query=xpath_to_css(expr.query),  # type: ignore[attr-defined]
+            case ExprXpath.kind:
+                new_expr = ExprCss(
+                    kwargs={"query": xpath_to_css(expr.kwargs["query"])}
                 )
-            case HtmlXpathAllExpression.kind:
-                new_expr = HtmlCssAllExpression(  # type: ignore[assignment]
-                    variable=expr.variable,
-                    query=xpath_to_css(expr.query),  # type: ignore[attr-defined]
+            case ExprXpathAll.kind:
+                new_expr = ExprCssAll(  # type: ignore[assignment]
+                    kwargs={"query": xpath_to_css(expr.kwargs["query"])}
                 )
-            case IsXPathExpression.kind:
-                new_expr = IsCssExpression(  # type: ignore[assignment]
-                    variable=expr.variable,
-                    query=xpath_to_css(expr.query),  # type: ignore[attr-defined]
-                    msg=expr.msg,  # type: ignore[attr-defined]
+            case ExprIsXpath.kind:
+                new_expr = ExprIsCss(  # type: ignore[assignment]
+                    kwargs={
+                        "query": xpath_to_css(expr.kwargs["query"]),
+                        "msg": expr.kwargs["msg"],
+                    }
                 )
             case _:
                 new_expr = expr  # type: ignore[assignment]
