@@ -1,583 +1,740 @@
-"""base universal python codegen api"""
+"""Universal python expr codegen
 
-from functools import partial
+Codegen notations:
+
+- used legacy typing for support python 3.8 or higher
+- generated types have `T_{schema_name}` names
+- generated json types have `J_{json_schema_name}` names
+- vars have prefix `v{index}`, start argument names as `v`
+
+SPECIAL METHODS NOTATIONS:
+
+- field_name : _parse_{field_name} (add prefix `_parse_` for every struct method parse)
+- __KEY__ -> `key`, `_parse_key`
+- __VALUE__: `value`, `_parse_value`
+- "__ITEM__": `item`, `_parse_item`
+- "__PRE_VALIDATE__": "_pre_validate",
+- "__SPLIT_DOC__": "_split_doc",
+- "__START_PARSE__": "parse",
+
+
+TIP:
+
+- for add new imports (parser backend), use post define TokenType.IMPORTS
+
+REQUIRED IMPLEMENT expr:
+- css, css_all, xpath, xpath_all,
+- attr, attr_all,
+- text, text_all,
+- raw, raw_all,
+- is_css, is_xpath
+- optional: override init, parse_methods annotations
+"""
+
+from typing import cast
 
 from typing_extensions import assert_never
 
-from .ast_utils import find_json_struct_instance
-from ssc_codegen.ast_ssc import (
-    DefaultEnd,
-    DefaultStart,
+from ssc_codegen.ast_ import (
     Docstring,
-    FormatExpression,
-    IndexDocumentExpression,
-    IndexStringExpression,
-    IsContainsExpression,
-    IsEqualExpression,
-    IsNotEqualExpression,
-    IsRegexMatchExpression,
-    JoinExpression,
-    LTrimExpression,
-    MapFormatExpression,
-    MapLTrimExpression,
-    MapRegexSubExpression,
-    MapReplaceExpression,
-    MapRTrimExpression,
-    MapTrimExpression,
     ModuleImports,
-    NestedExpression,
-    NoReturnExpression,
-    PreValidateFunction,
-    RegexAllExpression,
-    RegexExpression,
-    RegexSubExpression,
-    ReplaceExpression,
-    ReturnExpression,
-    RTrimExpression,
-    SplitExpression,
-    StartParseFunction,
-    StructParser,
-    ToFloat,
-    ToInteger,
-    ToListFloat,
-    ToListInteger,
-    TrimExpression,
     TypeDef,
     TypeDefField,
-    ToJson,
     JsonStruct,
     JsonStructField,
-    ArrayLengthExpression,
-    ToBool,
+    StructParser,
+    ExprReturn,
+    ExprNoReturn,
+    ExprNested,
+    StructPreValidateMethod,
+    StructFieldMethod,
+    StartParseMethod,
+    StructInitMethod,
+    ExprDefaultValueStart,
+    ExprDefaultValueEnd,
+    ExprStringFormat,
+    ExprListStringFormat,
+    ExprStringTrim,
+    ExprStringLeftTrim,
+    ExprStringRightTrim,
+    ExprListStringTrim,
+    ExprListStringLeftTrim,
+    ExprListStringRightTrim,
+    ExprStringSplit,
+    ExprStringReplace,
+    ExprListStringReplace,
+    ExprStringRegex,
+    ExprStringRegexAll,
+    ExprStringRegexSub,
+    ExprListStringRegexSub,
+    ExprIndex,
+    ExprListStringJoin,
+    ExprIsEqual,
+    ExprIsNotEqual,
+    ExprIsContains,
+    ExprIsRegex,
+    ExprToInt,
+    ExprToListInt,
+    ExprToFloat,
+    ExprToListFloat,
+    ExprToListLength,
+    ExprToBool,
+    ExprJsonify,
 )
-from ssc_codegen.tokens import (
-    StructType,
-    TokenType,
-    VariableType,
-    JsonFieldType,
+from ssc_codegen.converters.base import (
+    BaseCodeConverter,
+    CB_FMT_DEBUG_COMMENT,
+    debug_comment_cb,
 )
-from .base import BaseCodeConverter, left_right_var_names
-from .templates import py
+from ssc_codegen.converters.helpers import (
+    have_default_expr,
+    have_pre_validate_call,
+    prev_next_var,
+    is_last_var_no_ret,
+)
+from ssc_codegen.tokens import StructType, VariableType, JsonVariableType
 
-lr_var_names = partial(left_right_var_names, name="value")
+INDENT_CH = " "
+INDENT_METHOD = INDENT_CH * 4
+INDENT_METHOD_BODY = INDENT_CH * (4 * 2)
+INDENT_DEFAULT_BODY = INDENT_CH * (4 * 3)
+TYPE_PREFIX = "T_{}"
+TYPE_DICT = "Dict[str, {}]"
+TYPE_LIST = "List[{}]"
+TYPE_ITEM = "TypedDict({}, {})"
 
-MAGIC_METHODS = py.MAGIC_METHODS_NAME
+TYPES = {
+    VariableType.ANY: "Any",
+    VariableType.STRING: "str",
+    VariableType.LIST_STRING: "List[str]",
+    VariableType.OPTIONAL_STRING: "Optional[str]",
+    VariableType.OPTIONAL_LIST_STRING: "Optional[List[str]]",
+    VariableType.OPTIONAL_INT: "Optional[int]",
+    VariableType.OPTIONAL_LIST_INT: "Optional[List[int]]",
+    VariableType.OPTIONAL_FLOAT: "Optional[float]",
+    VariableType.OPTIONAL_LIST_FLOAT: "Optional[List[float]]",
+    VariableType.INT: "int",
+    VariableType.FLOAT: "float",
+    VariableType.LIST_INT: "List[int]",
+    VariableType.LIST_FLOAT: "List[float]",
+    VariableType.BOOL: "bool",
+}
+
+JSON_TYPES = {
+    JsonVariableType.BOOLEAN: "bool",
+    JsonVariableType.STRING: "str",
+    JsonVariableType.NUMBER: "int",
+    JsonVariableType.FLOAT: "float",
+    JsonVariableType.NULL: "NoneType",
+    JsonVariableType.OPTIONAL_STRING: "Optional[str]",
+    JsonVariableType.OPTIONAL_NUMBER: "Optional[int]",
+    JsonVariableType.OPTIONAL_FLOAT: "Optional[float]",
+    JsonVariableType.OPTIONAL_BOOLEAN: "Optional[bool]",
+    JsonVariableType.ARRAY: "List",
+    JsonVariableType.ARRAY_FLOAT: "List[float]",
+    JsonVariableType.ARRAY_NUMBER: "List[int]",
+    JsonVariableType.ARRAY_STRING: "List[str]",
+    JsonVariableType.ARRAY_BOOLEAN: "List[bool]",
+}
+
+MAGIC_METHODS = {
+    "__ITEM__": "item",
+    "__KEY__": "key",
+    "__VALUE__": "value",
+}
+
+# used old style typing for support old python versions (3.8)
+IMPORTS_MIN = """
+from __future__ import annotations
+import re
+import json
+from typing import List, Dict, TypedDict, Union, Optional\n
+from contextlib import suppress
+NoneType = type(None)
+"""
 
 
 class BasePyCodeConverter(BaseCodeConverter):
-    def __init__(self) -> None:
-        super().__init__()
-        # TODO link converters
-        self.pre_definitions[TokenType.IMPORTS] = tt_imports
-
-        self.pre_definitions[TokenType.TYPEDEF] = tt_typedef_pre
-        self.post_definitions[TokenType.TYPEDEF] = tt_typedef_post
-        self.pre_definitions[TokenType.TYPEDEF_FIELD] = tt_typedef_field
-
-        self.pre_definitions[TokenType.STRUCT] = tt_struct
-        self.pre_definitions[TokenType.DOCSTRING] = tt_docstring
-        self.pre_definitions[TokenType.EXPR_RETURN] = tt_ret
-        self.pre_definitions[TokenType.EXPR_NO_RETURN] = tt_no_ret
-        self.pre_definitions[TokenType.EXPR_NESTED] = tt_nested
-        self.pre_definitions[TokenType.STRUCT_PRE_VALIDATE] = tt_pre_validate
-        self.pre_definitions[TokenType.STRUCT_PARSE_START] = tt_start_parse_pre
-        self.post_definitions[TokenType.STRUCT_PARSE_START] = (
-            tt_start_parse_post
+    def __init__(
+        self,
+        debug_instructions: bool = False,
+        debug_comment_prefix: str = "",
+        comment_prefix_sep: str = "\n",
+        debug_cb: CB_FMT_DEBUG_COMMENT = debug_comment_cb,
+    ) -> None:
+        super().__init__(
+            debug_instructions,
+            debug_comment_prefix,
+            comment_prefix_sep,
+            debug_cb,
         )
+        self.pre_definitions = {
+            Docstring.kind: pre_docstring,
+            ModuleImports.kind: pre_imports,
+            TypeDef.kind: pre_typedef,
+            TypeDefField.kind: pre_typedef_field,
+            JsonStruct.kind: pre_json_struct,
+            JsonStructField.kind: pre_json_field,
+            StructParser.kind: pre_struct_parser,
+            ExprReturn.kind: pre_ret,
+            ExprNoReturn.kind: pre_no_ret,
+            ExprNested.kind: pre_nested,
+            StructPreValidateMethod.kind: pre_pre_validate,
+            StructFieldMethod.kind: pre_parse_field,
+            StartParseMethod.kind: pre_start_parse,
+            StructInitMethod.kind: pre_struct_init,
+            ExprDefaultValueStart.kind: pre_default_start,
+            ExprDefaultValueEnd.kind: pre_default_end,
+            ExprStringFormat.kind: pre_str_fmt,
+            ExprListStringFormat.kind: pre_list_str_fmt,
+            ExprStringTrim.kind: pre_str_trim,
+            ExprStringLeftTrim.kind: pre_str_left_trim,
+            ExprStringRightTrim.kind: pre_str_right_trim,
+            ExprListStringTrim.kind: pre_list_str_trim,
+            ExprListStringLeftTrim.kind: pre_list_str_left_trim,
+            ExprListStringRightTrim.kind: pre_list_str_right_trim,
+            ExprStringSplit.kind: pre_str_split,
+            ExprStringReplace.kind: pre_str_replace,
+            ExprListStringReplace.kind: pre_list_str_replace,
+            ExprStringRegex.kind: pre_str_regex,
+            ExprStringRegexAll.kind: pre_str_regex_all,
+            ExprStringRegexSub.kind: pre_str_regex_sub,
+            ExprListStringRegexSub.kind: pre_list_str_regex_sub,
+            ExprIndex.kind: pre_index,
+            ExprListStringJoin.kind: pre_list_str_join,
+            ExprIsEqual.kind: pre_is_equal,
+            ExprIsNotEqual.kind: pre_is_not_equal,
+            ExprIsContains.kind: pre_is_contains,
+            ExprIsRegex.kind: pre_is_regex,
+            ExprToInt.kind: pre_to_int,
+            ExprToListInt.kind: pre_to_list_int,
+            ExprToFloat.kind: pre_to_float,
+            ExprToListFloat.kind: pre_to_list_float,
+            ExprToListLength.kind: pre_to_len,
+            ExprToBool.kind: pre_to_bool,
+            ExprJsonify.kind: pre_jsonify,
+        }
 
-        self.pre_definitions[TokenType.EXPR_DEFAULT_START] = tt_default_start
-        self.pre_definitions[TokenType.EXPR_DEFAULT_END] = tt_default_end
-
-        self.pre_definitions[TokenType.EXPR_STRING_FORMAT] = tt_string_format
-        self.pre_definitions[TokenType.EXPR_LIST_STRING_FORMAT] = (
-            tt_string_format_all
-        )
-        self.pre_definitions[TokenType.EXPR_STRING_TRIM] = tt_string_trim
-        self.pre_definitions[TokenType.EXPR_LIST_STRING_TRIM] = (
-            tt_string_trim_all
-        )
-        self.pre_definitions[TokenType.EXPR_STRING_TRIM] = tt_string_trim
-        self.pre_definitions[TokenType.EXPR_LIST_STRING_TRIM] = (
-            tt_string_trim_all
-        )
-        self.pre_definitions[TokenType.EXPR_STRING_LTRIM] = tt_string_ltrim
-        self.pre_definitions[TokenType.EXPR_LIST_STRING_LTRIM] = (
-            tt_string_ltrim_all
-        )
-        self.pre_definitions[TokenType.EXPR_STRING_RTRIM] = tt_string_rtrim
-        self.pre_definitions[TokenType.EXPR_LIST_STRING_RTRIM] = (
-            tt_string_rtrim_all
-        )
-        self.pre_definitions[TokenType.EXPR_STRING_REPLACE] = tt_string_replace
-        self.pre_definitions[TokenType.EXPR_LIST_STRING_REPLACE] = (
-            tt_string_replace_all
-        )
-        self.pre_definitions[TokenType.EXPR_STRING_SPLIT] = tt_string_split
-        self.pre_definitions[TokenType.EXPR_REGEX] = tt_regex
-        self.pre_definitions[TokenType.EXPR_REGEX_ALL] = tt_regex_all
-        self.pre_definitions[TokenType.EXPR_REGEX_SUB] = tt_regex_sub
-        self.pre_definitions[TokenType.EXPR_LIST_REGEX_SUB] = tt_regex_sub_all
-        self.pre_definitions[TokenType.EXPR_LIST_STRING_INDEX] = tt_index
-        self.pre_definitions[TokenType.EXPR_LIST_DOCUMENT_INDEX] = tt_index
-        self.pre_definitions[TokenType.EXPR_LIST_JOIN] = tt_join
-        self.pre_definitions[TokenType.IS_EQUAL] = tt_is_equal
-        self.pre_definitions[TokenType.IS_NOT_EQUAL] = tt_is_not_equal
-        self.pre_definitions[TokenType.IS_CONTAINS] = tt_is_contains
-        self.pre_definitions[TokenType.IS_REGEX_MATCH] = tt_is_regex
-
-        self.pre_definitions[TokenType.TO_INT] = tt_to_int
-        self.pre_definitions[TokenType.TO_INT_LIST] = tt_to_list_int
-        self.pre_definitions[TokenType.TO_FLOAT] = tt_to_float
-        self.pre_definitions[TokenType.TO_FLOAT_LIST] = tt_to_list_float
-
-        self.pre_definitions[TokenType.TO_JSON] = tt_to_json
-        self.pre_definitions[TokenType.JSON_STRUCT] = tt_json_struct_pre
-        self.post_definitions[TokenType.JSON_STRUCT] = tt_json_struct_post
-        self.pre_definitions[TokenType.JSON_FIELD] = tt_json_field
-
-        self.pre_definitions[TokenType.EXPR_LIST_LEN] = tt_to_len
-        self.pre_definitions[TokenType.TO_BOOL] = tt_to_bool
-
-
-def tt_imports(node: ModuleImports) -> str:
-    return py.BINDINGS[node.kind]
+        self.post_definitions = {
+            TypeDef.kind: post_typedef,
+            JsonStruct.kind: post_json_struct,
+            StartParseMethod.kind: post_start_parse,
+        }
 
 
-def tt_typedef_pre(node: TypeDef) -> str:
-    match node.struct_ref.type:  # type: ignore
-        case StructType.DICT:
-            return f"T_{node.name} = Dict[str, "
-        case StructType.FLAT_LIST:
-            return f"T_{node.name} = List["
-        case StructType.ITEM:
-            return f'T_{node.name} = TypedDict("T_{node.name}", ' + "{"
-        case StructType.LIST:
-            return f'T_{node.name} = TypedDict("T_{node.name}", ' + "{"
-        case _:
-            assert_never(node.struct_ref.type)
-    raise NotImplementedError()  # noqa
-
-
-def tt_typedef_post(node: TypeDef) -> str:
-    match node.struct_ref.type:  # type: ignore
-        case StructType.DICT:
-            return "]"
-        case StructType.FLAT_LIST:
-            return "]"
-        case StructType.ITEM:
-            return "})"
-        case StructType.LIST:
-            return "})"
-        case _:
-            assert_never(node.struct_ref.type)
-    raise NotImplementedError()  # noqa
-
-
-def tt_typedef_field(node: TypeDefField) -> str:
-    # always str
-    if node.name == "__KEY__":
-        return ""
-
-    if node.ret_type == VariableType.NESTED:
-        type_ = f"T_{node.nested_class}"
-        if node.nested_node_ref.type == StructType.LIST:
+def get_typedef_field_by_name(node: TypeDef, field_name: str) -> str:
+    value = [i for i in node.body if i.kwargs["name"] == field_name][0]
+    value = cast(TypeDefField, value)
+    if value.kwargs["type"] == VariableType.NESTED:
+        type_ = f"T_{value.kwargs['cls_nested']}"
+        if value.kwargs["cls_nested_type"] == StructType.LIST:
             type_ = f"List[{type_}]"
-    elif node.ret_type == VariableType.JSON:
-        instance = find_json_struct_instance(node)
-        if instance.__IS_ARRAY__:
-            type_ = f"List[J_{instance.__name__}]"
-        else:
-            type_ = f"J_{instance.__name__}"
+    elif value.kwargs["type"] == VariableType.JSON:
+        type_ = f"J_{value.kwargs['cls_nested']}"
+        if value.kwargs["cls_nested_type"] == StructType.LIST:
+            type_ = f"List[{type_}]"
     else:
-        type_ = py.TYPES.get(node.ret_type, "Any")
+        type_ = TYPES[value.kwargs["type"]]
+    return type_
 
-    match node.parent.struct_ref.type:
-        case StructType.DICT:
-            return type_
-        case StructType.FLAT_LIST:
-            return type_
-        case StructType.ITEM:
-            return f'"{node.name}": {type_}, '
-        case StructType.LIST:
-            return f'"{node.name}": {type_}, '
+
+def get_field_method_ret_type(node: StructFieldMethod) -> str:
+    last_expr = node.body[-1]
+    match last_expr.ret_type:
+        case VariableType.NESTED:
+            last_expr = node.body[-2]
+            last_expr = cast(ExprNested, last_expr)
+            schema_name, schema_type = last_expr.unpack_args()
+            type_ = f"T_{schema_name}"
+            if schema_type == StructType.LIST:
+                type_ = f"List[{type_}]"
+        case VariableType.JSON:
+            last_expr = node.body[-2]
+            last_expr = cast(ExprJsonify, last_expr)
+            json_struct_name, is_array = last_expr.unpack_args()
+            type_ = f"J_{json_struct_name}"
+            if is_array:
+                type_ = f"List[{type_}]"
         case _:
-            assert_never(node.parent.struct_ref.type)
-    # unreached code
+            type_ = TYPES[last_expr.ret_type]
+    return type_
+
+
+def pre_docstring(node: Docstring) -> str:
+    value, *_ = node.unpack_args()
+    if value:
+        return '"""' + value + '""""'
+    return ""
+
+
+def pre_imports(_node: ModuleImports) -> str:
+    return IMPORTS_MIN
+
+
+def pre_typedef(node: TypeDef) -> str:
+    name, struct_type = node.unpack_args()
+    match struct_type:
+        case StructType.DICT:
+            type_ = get_typedef_field_by_name(node, "__VALUE__")
+            return f"T_{name} = Dict[str, {type_}]"
+        case StructType.FLAT_LIST:
+            type_ = get_typedef_field_by_name(node, "__ITEM__")
+            return f"T_{name} = List[{type_}]"
+        case StructType.ITEM | StructType.LIST:
+            return f'T_{name} = TypedDict("T_{name}", ' + "{"
+        case _:
+            assert_never(struct_type)
     raise NotImplementedError()  # noqa
 
 
-def tt_struct(node: StructParser) -> str:
-    return py.BINDINGS[node.kind, node.name]
-
-
-def tt_docstring(node: Docstring) -> str:
-    if not node.value:
-        return ""
-    # in codegen docstrings used in first line and inner classes
-    indent = "" if node.parent.kind == TokenType.MODULE else py.INDENT_METHOD
-    return indent + py.BINDINGS[node.kind, node.value]
-
-
-def tt_ret(node: ReturnExpression) -> str:
-    if node.have_default_expr():
-        indent = py.INDENT_DEFAULT_BODY
-        _, nxt = lr_var_names(variable=node.prev.variable)
-    else:
-        indent = py.INDENT_METHOD_BODY
-        _, nxt = lr_var_names(variable=node.variable)
-    return indent + py.BINDINGS[node.kind, nxt]
-
-
-def tt_no_ret(node: NoReturnExpression) -> str:
-    # used in __pre_validate__ case, ignore default wrap
-    indent = py.suggest_indent(node)
-    return indent + py.BINDINGS[node.kind]
-
-
-def tt_nested(node: NestedExpression) -> str:
-    prv, nxt = lr_var_names(variable=node.variable)
-    if node.have_default_expr():
-        indent = py.INDENT_DEFAULT_BODY
-    else:
-        indent = py.INDENT_METHOD_BODY
-    return indent + py.BINDINGS[node.kind, nxt, node.schema, prv]
-
-
-def tt_pre_validate(node: PreValidateFunction) -> str:
-    name = MAGIC_METHODS.get(node.name)
-    return py.INDENT_METHOD + py.BINDINGS[node.kind, name]
-
-
-def tt_start_parse_pre(node: StartParseFunction) -> str:
-    name = MAGIC_METHODS.get(node.name)
-    t_name = f"T_{node.parent.typedef.name}"
-
-    if node.type == StructType.LIST:
-        t_name = f"List[{t_name}]"
-    return py.INDENT_METHOD + py.BINDINGS[node.kind, name, t_name]
-
-
-def tt_start_parse_post(node: StartParseFunction) -> str:
-    code = ""
-    if any(f.name == "__PRE_VALIDATE__" for f in node.body):
-        name = MAGIC_METHODS.get("__PRE_VALIDATE__")
-        code += (
-            py.INDENT_METHOD_BODY
-            + py.E_CALL_METHOD.format(name, "self._doc")
-            + "\n"
-        )
-
-    match node.type:
-        case StructType.ITEM:
-            body = py.gen_item_body(node)
-        case StructType.LIST:
-            body = py.gen_list_body(node)
+def post_typedef(node: TypeDef) -> str:
+    _, struct_type = node.unpack_args()
+    match struct_type:
         case StructType.DICT:
-            body = py.gen_dict_body(node)
+            return ""
         case StructType.FLAT_LIST:
-            body = py.get_flat_list_body(node)
+            return ""
+        # close TypedDict type
+        case StructType.ITEM | StructType.LIST:
+            return "})"
         case _:
-            raise NotImplementedError("Unknown struct type")
-    return code + py.INDENT_METHOD_BODY + "return " + body
-
-
-def tt_default_start(node: DefaultStart) -> str:
-    prv, nxt = lr_var_names(variable=node.variable)
-    return (
-        py.INDENT_METHOD_BODY
-        + f"{nxt} = {prv}\n"
-        + py.INDENT_METHOD_BODY
-        + py.BINDINGS[node.kind]
-    )
-
-
-def tt_default_end(node: DefaultEnd) -> str:
-    # bool, int, float, None represent as same
-    val = repr(node.value) if isinstance(node.value, str) else node.value
-    return py.INDENT_METHOD_BODY + py.BINDINGS[node.kind, val]
-
-
-def tt_string_format(node: FormatExpression) -> str:
-    indent = py.suggest_indent(node)
-
-    prv, nxt = lr_var_names(variable=node.variable)
-    template = node.fmt.replace("{{}}", "{}")
-    return indent + py.BINDINGS[node.kind, nxt, repr(template), prv, prv, prv]
-
-
-def tt_string_format_all(node: MapFormatExpression) -> str:
-    indent = py.suggest_indent(node)
-
-    prv, nxt = lr_var_names(variable=node.variable)
-    template = node.fmt.replace("{{}}", "{}")
-    code = py.BINDINGS[node.kind, nxt, repr(template), prv]
-    return indent + code
-
-
-def tt_string_trim(node: TrimExpression) -> str:
-    indent = py.suggest_indent(node)
-
-    prv, nxt = lr_var_names(variable=node.variable)
-    chars = repr(node.value)
-    code = py.BINDINGS[node.kind, nxt, prv, chars]
-    return indent + code
-
-
-def tt_string_trim_all(node: MapTrimExpression) -> str:
-    indent = py.suggest_indent(node)
-
-    prv, nxt = lr_var_names(variable=node.variable)
-    chars = repr(node.value)
-    code = py.BINDINGS[node.kind, nxt, chars, prv]
-    return indent + code
-
-
-def tt_string_ltrim(node: LTrimExpression) -> str:
-    indent = py.suggest_indent(node)
-
-    prv, nxt = lr_var_names(variable=node.variable)
-    chars = repr(node.value)
-    code = py.BINDINGS[node.kind, nxt, prv, chars]
-    return indent + code
-
-
-def tt_string_ltrim_all(node: MapLTrimExpression) -> str:
-    indent = py.suggest_indent(node)
-
-    prv, nxt = lr_var_names(variable=node.variable)
-    chars = repr(node.value)
-    code = py.BINDINGS[node.kind, nxt, chars, prv]
-    return indent + code
-
-
-def tt_string_rtrim(node: RTrimExpression) -> str:
-    indent = py.suggest_indent(node)
-
-    prv, nxt = lr_var_names(variable=node.variable)
-    chars = repr(node.value)
-    code = py.BINDINGS[node.kind, nxt, prv, chars]
-    return indent + code
-
-
-def tt_string_rtrim_all(node: MapRTrimExpression) -> str:
-    indent = py.suggest_indent(node)
-
-    prv, nxt = lr_var_names(variable=node.variable)
-    chars = repr(node.value)
-    code = py.BINDINGS[node.kind, nxt, prv, chars]
-    return indent + code
-
-
-def tt_string_replace(node: ReplaceExpression) -> str:
-    indent = py.suggest_indent(node)
-
-    prv, nxt = lr_var_names(variable=node.variable)
-    old, new = repr(node.old), repr(node.new)
-    code = py.BINDINGS[node.kind, nxt, prv, old, new]
-    return indent + code
-
-
-def tt_string_replace_all(node: MapReplaceExpression) -> str:
-    indent = py.suggest_indent(node)
-
-    prv, nxt = lr_var_names(variable=node.variable)
-    old, new = repr(node.old), repr(node.new)
-    code = py.BINDINGS[node.kind, nxt, old, new, prv]
-    return indent + code
-
-
-def tt_string_split(node: SplitExpression) -> str:
-    indent = py.suggest_indent(node)
-
-    prv, nxt = lr_var_names(variable=node.variable)
-    sep = repr(node.sep)
-    code = py.BINDINGS[node.kind, nxt, prv, sep]
-    return indent + code
-
-
-def tt_regex(node: RegexExpression) -> str:
-    indent = py.suggest_indent(node)
-
-    prv, nxt = lr_var_names(variable=node.variable)
-    pattern = repr(node.pattern)
-    group = node.group
-    code = py.BINDINGS[node.kind, nxt, pattern, prv, group, node.ignore_case]
-    return indent + code
-
-
-def tt_regex_all(node: RegexAllExpression) -> str:
-    indent = py.suggest_indent(node)
-
-    prv, nxt = lr_var_names(variable=node.variable)
-    pattern = repr(node.pattern)
-    code = py.BINDINGS[node.kind, nxt, pattern, prv, node.ignore_case]
-    return indent + code
-
-
-def tt_regex_sub(node: RegexSubExpression) -> str:
-    indent = py.suggest_indent(node)
-
-    prv, nxt = lr_var_names(variable=node.variable)
-    pattern = repr(node.pattern)
-    repl = repr(node.repl)
-    code = py.BINDINGS[node.kind, nxt, pattern, repl, prv]
-    return indent + code
-
-
-def tt_regex_sub_all(node: MapRegexSubExpression) -> str:
-    indent = py.suggest_indent(node)
-
-    prv, nxt = lr_var_names(variable=node.variable)
-    pattern = repr(node.pattern)
-    repl = repr(node.repl)
-    code = py.BINDINGS[node.kind, nxt, pattern, repl, prv]
-    return indent + code
-
-
-def tt_index(node: IndexStringExpression | IndexDocumentExpression) -> str:
-    indent = py.suggest_indent(node)
-
-    prv, nxt = lr_var_names(variable=node.variable)
-    i = node.value
-    code = py.BINDINGS[node.kind, nxt, prv, i]
-    return indent + code
-
-
-def tt_join(node: JoinExpression) -> str:
-    indent = py.suggest_indent(node)
-
-    prv, nxt = lr_var_names(variable=node.variable)
-    sep = repr(node.sep)
-    code = py.BINDINGS[node.kind, nxt, sep, prv]
-    return indent + code
-
-
-def tt_is_equal(node: IsEqualExpression) -> str:
-    indent = py.suggest_indent(node)
-
-    prv, nxt = lr_var_names(variable=node.variable)
-    value = repr(node.value) if isinstance(node.value, str) else node.value
-    msg = repr(node.msg)
-    code = py.BINDINGS[node.kind, prv, value, msg]
-    if node.next.kind == TokenType.EXPR_NO_RETURN:
-        return indent + code
-    return indent + code + "\n" + indent + f"{nxt} = {prv}"
-
-
-def tt_is_not_equal(node: IsNotEqualExpression) -> str:
-    indent = py.suggest_indent(node)
-
-    prv, nxt = lr_var_names(variable=node.variable)
-    value = repr(node.value) if isinstance(node.value, str) else node.value
-    msg = repr(node.msg)
-    code = py.BINDINGS[node.kind, prv, value, msg]
-    if node.next.kind == TokenType.EXPR_NO_RETURN:
-        return indent + code
-    return indent + code + "\n" + indent + f"{nxt} = {prv}"
-
-
-def tt_is_contains(node: IsContainsExpression) -> str:
-    indent = py.suggest_indent(node)
-
-    prv, nxt = lr_var_names(variable=node.variable)
-
-    item = repr(node.item) if isinstance(node.item, str) else node.item
-    msg = repr(node.msg)
-
-    code = py.BINDINGS[node.kind, item, prv, msg]
-    if node.next.kind == TokenType.EXPR_NO_RETURN:
-        return indent + code
-    return indent + code + "\n" + indent + f"{nxt} = {prv}"
-
-
-def tt_is_regex(node: IsRegexMatchExpression) -> str:
-    indent = py.suggest_indent(node)
-
-    prv, nxt = lr_var_names(variable=node.variable)
-    pattern = repr(node.pattern)
-    msg = repr(node.msg)
-
-    code = py.BINDINGS[node.kind, pattern, prv, msg, node.ignore_case]
-    if node.next.kind == TokenType.EXPR_NO_RETURN:
-        return indent + code
-    return indent + code + "\n" + indent + f"{nxt} = {prv}"
-
-
-def tt_to_int(node: ToInteger) -> str:
-    indent = py.suggest_indent(node)
-
-    prv, nxt = lr_var_names(variable=node.variable)
-    code = py.BINDINGS[node.kind, nxt, prv]
-    return indent + code
-
-
-def tt_to_list_int(node: ToListInteger) -> str:
-    indent = py.suggest_indent(node)
-
-    prv, nxt = lr_var_names(variable=node.variable)
-    code = py.BINDINGS[node.kind, nxt, prv]
-    return indent + code
-
-
-def tt_to_float(node: ToFloat) -> str:
-    indent = py.suggest_indent(node)
-
-    prv, nxt = lr_var_names(variable=node.variable)
-    code = py.BINDINGS[node.kind, nxt, prv]
-    return indent + code
-
-
-def tt_to_list_float(node: ToListFloat) -> str:
-    indent = py.suggest_indent(node)
-
-    prv, nxt = lr_var_names(variable=node.variable)
-    code = py.BINDINGS[node.kind, nxt, prv]
-    return indent + code
-
-
-# json
-def tt_json_struct_pre(node: JsonStruct) -> str:
-    return f'J_{node.name} = TypedDict("J_{node.name}", ' + "{"
-
-
-def tt_json_struct_post(_: JsonStruct) -> str:
+            assert_never(struct_type)
+    raise NotImplementedError()  # noqa
+
+
+def pre_typedef_field(node: TypeDefField) -> str:
+    name, var_type, cls_nested, cls_nested_type = node.unpack_args()
+    node.parent = cast(TypeDef, node.parent)
+    # skip generated types
+    if node.parent.struct_type in (StructType.DICT, StructType.FLAT_LIST):
+        return ""
+    # always string
+    elif name == "__KEY__":
+        return ""
+    elif var_type == VariableType.NESTED:
+        type_ = f"T_{cls_nested}"
+        if cls_nested_type == StructType.LIST:
+            type_ = f"List[{type_}]"
+    elif var_type == VariableType.JSON:
+        type_ = f"J_{cls_nested}"
+        if cls_nested_type == StructType.LIST:
+            type_ = f"List[{type_}]"
+    else:
+        type_ = TYPES[var_type]
+    return f"{name!r}: {type_},"
+
+
+def pre_json_struct(node: JsonStruct) -> str:
+    name = node.kwargs["name"]
+    return f'J_{name} = TypedDict("J_{name}", ' + "{"
+
+
+def post_json_struct(_node: JsonStruct) -> str:
     return "})"
 
 
-def tt_json_field(node: JsonStructField) -> str:
-    match node.value.kind:
-        case JsonFieldType.BASIC:
-            return f'"{node.name}": {py.JSON_TYPES.get(node.ret_type.TYPE, "Any")}, '
-        case JsonFieldType.OBJECT:
-            return f'"{node.name}": J_{node.struct_ref}, '
-        case JsonFieldType.ARRAY:
-            if isinstance(node.ret_type.TYPE, dict):
-                type_ = f"List[J_{node.value.TYPE.name}]"
-            else:
-                type_ = f"List[{py.JSON_TYPES.get(node.ret_type.TYPE, 'Any')}]"
-            return f'"{node.name}": {type_}, '
+def pre_json_field(node: JsonStructField) -> str:
+    name, json_type = node.unpack_args()
+    if json_type.type == JsonVariableType.OBJECT:
+        type_ = f"J_{json_type.name}"
+    elif json_type.type == JsonVariableType.ARRAY_OBJECTS:
+        type_ = f"List[J_{json_type.name}]"
+    else:
+        type_ = JSON_TYPES[json_type.type]
+    return f'"{node.name}": {type_}, '
+
+
+def pre_struct_parser(node: StructParser) -> str:
+    name, _struct_type, docstring = node.unpack_args()
+    return f"class {name}:\n" + INDENT_METHOD + '"""' + docstring + '"""'
+
+
+def pre_ret(node: ExprReturn) -> str:
+    expr = f"return v{node.index_prev}"
+    if have_default_expr(node):
+        return INDENT_DEFAULT_BODY + expr
+    return INDENT_METHOD_BODY + expr
+
+
+def pre_no_ret(_node: ExprNoReturn) -> str:
+    # used in __pre_validate__ case, ignore default wrap
+    return INDENT_METHOD_BODY + "return"
+
+
+def pre_nested(node: ExprNested) -> str:
+    # not allowed default expr in nested
+    prv, nxt = prev_next_var(node)
+    schema_name, schema_type = node.unpack_args()
+
+    return INDENT_METHOD_BODY + f"{nxt} = {schema_name}({prv}).parse()"
+
+
+def pre_pre_validate(_node: StructPreValidateMethod) -> str:
+    # __SPLIT_DOC__ = "_pre_validate()...)
+    return INDENT_METHOD + "def _pre_validate(self, v):"
+
+
+def pre_parse_field(node: StructFieldMethod) -> str:
+    name = node.kwargs["name"]
+    name = MAGIC_METHODS.get(name, name)
+    type_ = get_field_method_ret_type(node)
+    return INDENT_METHOD + f"def _parse_{name}(self, v) -> {type_}:"
+
+
+def pre_start_parse(node: StartParseMethod) -> str:
+    node.parent = cast(StructParser, node.parent)
+    name = node.parent.kwargs["name"]
+    st_type = node.parent.kwargs["struct_type"]
+    type_ = f"T_{name}"
+    if st_type == StructType.LIST:
+        type_ = f"List[{type_}]"
+    return INDENT_METHOD + f"def parse(self) -> {type_}:"
+
+
+def pre_struct_init(_node: StructInitMethod) -> str:
+    return (
+        INDENT_METHOD
+        + "def __init__(self, document):"
+        + INDENT_METHOD_BODY
+        + "self._document = document"
+    )
+
+
+def post_start_parse(node: StartParseMethod) -> str:
+    node.parent = cast(StructParser, node.parent)
+    code = ""
+    if have_pre_validate_call(node):
+        code += INDENT_METHOD_BODY + "self._pre_validate(self._document)\n"
+    match node.parent.struct_type:
+        case StructType.ITEM:
+            # return {...}
+            code += INDENT_METHOD_BODY + "return {"
+            for expr in node.body:
+                name = expr.kwargs["name"]
+                if name.startswith("__"):
+                    continue
+                code += f"{name!r}: self._parse_{name}(self._document),"
+            code += "}"
+        case StructType.LIST:
+            # return [{...} for el in self._split_doc(self.document)]
+            code += INDENT_METHOD_BODY + "return [{"
+            for expr in node.body:
+                name = expr.kwargs["name"]
+                if name.startswith("__"):
+                    continue
+                code += f"{name!r}: self._parse_{name}(el),"
+            code += "} for el in self._split_doc(self._document)]"
+        case StructType.DICT:
+            # return {key: value, ...}
+            code += (
+                INDENT_METHOD_BODY
+                + "return {self._parse_key(el): self._parse_value(el)"
+                + " for el in self._split_doc(self._document)}"
+            )
+        case StructType.FLAT_LIST:
+            # return [item, ...]
+            code += (
+                INDENT_METHOD_BODY
+                + "return [self._parse_item(el) for el in self._split_doc(self._document)]"
+            )
         case _:
-            assert_never(node.value.kind)  # noqa
-    raise NotImplementedError("inreached code")  # noqa
+            assert_never(node.parent.struct_type)  # type: ignore
+    return code
 
 
-def tt_to_json(node: ToJson) -> str:
-    # TODO: move consts to templates
-    indent = py.suggest_indent(node)
-    prv, nxt = lr_var_names(variable=node.variable)
-    code = f"{nxt} = json.loads({prv})"
-    return indent + code
+# EXPRESSIONS
 
 
-def tt_to_len(node: ArrayLengthExpression) -> str:
-    indent = py.suggest_indent(node)
-    prv, nxt = lr_var_names(variable=node.variable)
-    code = f"{nxt} = len({prv})"
-    return indent + code
+def pre_default_start(node: ExprDefaultValueStart) -> str:
+    # HACK, for avoid recalc indexes use assign var trick
+    prv, nxt = prev_next_var(node)
+    return (
+        INDENT_METHOD_BODY
+        + f"{nxt} = {prv}"
+        + "\n"
+        + INDENT_METHOD_BODY
+        + "with suppress(Exception):"
+    )
 
 
-def tt_to_bool(node: ToBool) -> str:
-    indent = py.suggest_indent(node)
-    prv, nxt = lr_var_names(variable=node.variable)
-    code = f"{nxt} = bool({prv} or {prv} == 0)"
-    return indent + code
+def pre_default_end(node: ExprDefaultValueEnd) -> str:
+    value = node.kwargs["value"]
+    if isinstance(value, str):
+        value = repr(value)
+    return INDENT_METHOD_BODY + f"return {value}"
+
+
+def pre_str_fmt(node: ExprStringFormat) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    fmt = "f" + repr(node.kwargs["fmt"].replace("{{}}", "{" + prv + "}"))
+    return indent + f"{nxt} = {fmt}"
+
+
+def pre_list_str_fmt(node: ExprListStringFormat) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    fmt = "f" + repr(node.kwargs["fmt"].replace("{{}}", "{i}"))
+    return indent + f"{nxt} = [{fmt} for i in {prv}]"
+
+
+def pre_str_trim(node: ExprStringTrim) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    substr = node.kwargs["substr"]
+    return indent + f"{nxt} = {prv}.strip({substr!r})"
+
+
+def pre_list_str_trim(node: ExprListStringTrim) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    substr = node.kwargs["substr"]
+    return indent + f"{nxt} = [i.strip({substr!r}) for i in {prv}]"
+
+
+def pre_str_left_trim(node: ExprStringLeftTrim) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    substr = node.kwargs["substr"]
+    return indent + f"{nxt} = {prv}.lstrip({substr!r})"
+
+
+def pre_list_str_left_trim(node: ExprListStringLeftTrim) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    substr = node.kwargs["substr"]
+    return indent + f"{nxt} = [i.lstrip({substr!r}) for i in {prv}]"
+
+
+def pre_str_right_trim(node: ExprStringRightTrim) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    substr = node.kwargs["substr"]
+    return indent + f"{nxt} = {prv}.rstrip({substr!r})"
+
+
+def pre_list_str_right_trim(node: ExprListStringRightTrim) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    substr = node.kwargs["substr"]
+    return indent + f"{nxt} = [i.rstrip({substr!r}) for i in {prv}]"
+
+
+def pre_str_split(node: ExprStringSplit) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    sep = node.kwargs["sep"]
+    return indent + f"{nxt} = {prv}.split({sep!r})"
+
+
+def pre_str_replace(node: ExprStringReplace) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    old, new = node.unpack_args()
+    return indent + f"{nxt} = {prv}.replace({old!r}, {new!r})"
+
+
+def pre_list_str_replace(node: ExprListStringReplace) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    old, new = node.unpack_args()
+    return indent + f"{nxt} = [i.replace({old!r}, {new!r}) for i in {prv}]"
+
+
+def pre_str_regex(node: ExprStringRegex) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    pattern, group, ignore_case = node.unpack_args()
+    pattern = repr(pattern)
+    if ignore_case:
+        return (
+            indent
+            + f"{nxt} = re.search({pattern}, {prv}, re.IGNORECASE)[{group}]"
+        )
+    return indent + f"{nxt} = re.search({pattern}, {prv})[{group}]"
+
+
+def pre_str_regex_all(node: ExprStringRegexAll) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    pattern, ignore_case = node.unpack_args()
+    if ignore_case:
+        return indent + f"{nxt} = re.findall({pattern!r}, {prv}, re.IGNORECASE)"
+    return indent + f"{nxt} = re.findall({pattern!r}, {prv})"
+
+
+def pre_str_regex_sub(node: ExprStringRegexSub) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    pattern, repl = node.unpack_args()
+    return indent + f"{nxt} = re.sub({pattern!r}, {repl!r}, {prv})"
+
+
+def pre_list_str_regex_sub(node: ExprListStringRegexSub) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    pattern, repl = node.unpack_args()
+    return indent + f"{nxt} = [re.sub({pattern!r}, {repl!r}, i) for i in {prv}]"
+
+
+def pre_index(node: ExprIndex) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    index, *_ = node.unpack_args()
+    return indent + f"{nxt} = {prv}[{index}]"
+
+
+def pre_list_str_join(node: ExprListStringJoin) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    sep = node.kwargs["sep"]
+    return indent + f"{nxt} = {sep!r}.join({prv})"
+
+
+def pre_is_equal(node: ExprIsEqual) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    item, msg = node.unpack_args()
+    if isinstance(item, str):
+        item = repr(item)
+    expr = indent + f"assert {prv} != {item}, {msg!r}"
+    if is_last_var_no_ret(node):
+        return expr
+    # HACK: avoid recalc variables
+    return expr + "\n" + indent + f"{nxt} = {prv}"
+
+
+def pre_is_not_equal(node: ExprIsNotEqual) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    item, msg = node.unpack_args()
+    if isinstance(item, str):
+        item = repr(item)
+    expr = indent + f"assert {prv} == {item}, {msg!r}"
+    if is_last_var_no_ret(node):
+        return expr
+    # HACK: avoid recalc variables
+    return expr + "\n" + indent + f"{nxt} = {prv}"
+
+
+def pre_is_contains(node: ExprIsContains) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    item, msg = node.unpack_args()
+    if isinstance(item, str):
+        item = repr(item)
+    expr = indent + f"assert {item} not in {prv}, {msg!r}"
+    if is_last_var_no_ret(node):
+        return expr
+    # HACK: avoid recalc variables
+    return expr + "\n" + indent + f"{nxt} = {prv}"
+
+
+def pre_is_regex(node: ExprIsRegex) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    pattern, ignore_case, msg = node.unpack_args()
+    expr = indent + f"assert re.search({pattern!r}, {prv}), {msg!r}"
+    if is_last_var_no_ret(node):
+        return expr
+    # HACK: avoid recalc variables
+    return expr + "\n" + indent + f"{nxt} = {prv}"
+
+
+def pre_to_int(node: ExprToInt) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    return indent + f"{nxt} = int({prv})"
+
+
+def pre_to_list_int(node: ExprToListInt) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    return indent + f"{nxt} = [int(i) for i in {prv}]"
+
+
+def pre_to_float(node: ExprToFloat) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    return indent + f"{nxt} = float({prv})"
+
+
+def pre_to_list_float(node: ExprToListFloat) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    return indent + f"{nxt} = [float(i) for i in {prv}]"
+
+
+def pre_to_len(node: ExprToListLength) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    return indent + f"{nxt} = len({prv})"
+
+
+def pre_to_bool(node: ExprToBool) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    return indent + f"{nxt} = bool({prv} or {prv} == 0)"
+
+
+def pre_jsonify(node: ExprJsonify) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    _name, _is_array = node.unpack_args()
+    return indent + f"{nxt} = json.loads({prv})"

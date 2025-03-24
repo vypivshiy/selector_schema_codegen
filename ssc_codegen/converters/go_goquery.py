@@ -1,780 +1,916 @@
+"""golang goquery implementation
+
+Codegen notations:
+
+- types, json implemented by type struct expr (json anchors include)
+- typedef T{struct_name}
+- json struct J{struct_name}
+- vars have prefix `v{index}`, start argument names as `v`
+- public methods auto convert to camelCase
+- private methods auto convert to PascalCase
+
+
+
+try/catch effect realisation via anon defer func.
+
+if code block throw exception - set default value.
+
+Example:
+
+```go
+
+func divide(a, b int) (result int) {
+        defer func() {
+                if r := recover(); r != nil {result = 9000}
+        }()
+        return a / b
+}
+
+divide(10, 0)  // 9000
+
+divide(10, 2) // 5
+
+```
+
+map array types
+
+# https://stackoverflow.com/a/33726830
+<PREV ARRAY VAR> := []<T1>{1,2,3}
+
+var <NEW ARRAY VAR> []<T2>
+
+for _, x := range <PREV ARRAY VAR> {
+
+    <NEW ARRAY VAR> = append(<NEW ARRAY VAR>, <MAP_CODE>)
+
+}
+
+SPECIAL METHODS NOTATIONS:
+
+- field_name : Parse{Field_name} (add prefix `Parse` for every struct method parse)
+- __KEY__ -> `key`, `parseKey`
+- __VALUE__: `value`, `parseValue`
+- __ITEM__: `item`, `parseItem`
+- __PRE_VALIDATE__: `preValidate`,
+- __SPLIT_DOC__: `splitDoc`,
+- __START_PARSE__: `Parse`,
+"""
+
+from typing import cast
+
 from typing_extensions import assert_never
 
-from ssc_codegen.ast_ssc import (
-    DefaultStart,
+from ssc_codegen.ast_ import (
     Docstring,
-    FormatExpression,
-    HtmlAttrAllExpression,
-    HtmlAttrExpression,
-    HtmlCssAllExpression,
-    HtmlCssExpression,
-    HtmlRawAllExpression,
-    HtmlRawExpression,
-    HtmlTextAllExpression,
-    HtmlTextExpression,
-    IndexDocumentExpression,
-    IndexStringExpression,
-    IsContainsExpression,
-    IsCssExpression,
-    IsEqualExpression,
-    IsNotEqualExpression,
-    IsRegexMatchExpression,
-    JoinExpression,
-    LTrimExpression,
-    MapFormatExpression,
-    MapLTrimExpression,
-    MapRegexSubExpression,
-    MapReplaceExpression,
-    MapRTrimExpression,
-    MapTrimExpression,
-    ModuleImports,
-    NestedExpression,
-    NoReturnExpression,
-    PartDocFunction,
-    PreValidateFunction,
-    RegexAllExpression,
-    RegexExpression,
-    RegexSubExpression,
-    ReplaceExpression,
-    ReturnExpression,
-    RTrimExpression,
-    SplitExpression,
-    StartParseFunction,
-    StructFieldFunction,
     StructParser,
-    ToFloat,
-    ToInteger,
-    ToListFloat,
-    ToListInteger,
-    TrimExpression,
+    ExprReturn,
+    ExprNoReturn,
+    ExprNested,
+    StructPreValidateMethod,
+    StructFieldMethod,
+    StartParseMethod,
+    StructPartDocMethod,
+    ExprStringFormat,
+    ExprListStringFormat,
+    ExprStringTrim,
+    ExprListStringTrim,
+    ExprStringLeftTrim,
+    ExprListStringLeftTrim,
+    ExprStringRightTrim,
+    ExprListStringRightTrim,
+    ExprStringSplit,
+    ExprStringReplace,
+    ExprListStringReplace,
+    ExprStringRegex,
+    ExprStringRegexAll,
+    ExprStringRegexSub,
+    ExprListStringRegexSub,
+    ExprIndex,
+    ExprListStringJoin,
+    ExprIsEqual,
+    ExprIsNotEqual,
+    ExprIsContains,
+    ExprIsRegex,
+    ExprIsCss,
+    ExprToInt,
+    ExprToListInt,
+    ExprToFloat,
+    ExprToListFloat,
+    ExprToListLength,
+    ExprToBool,
+    ExprJsonify,
+    ExprCss,
+    ExprCssAll,
+    ExprXpath,
+    ExprXpathAll,
+    ExprGetHtmlAttr,
+    ExprGetHtmlAttrAll,
+    ExprGetHtmlText,
+    ExprGetHtmlTextAll,
+    ExprGetHtmlRaw,
+    ExprGetHtmlRawAll,
     TypeDef,
-    ToJson,
-    JsonStruct,
     TypeDefField,
-    ArrayLengthExpression,
-    ToBool,
+    ModuleImports,
+    ExprDefaultValueStart,
+    ExprCallStructMethod,
 )
-from ssc_codegen.tokens import (
-    StructType,
-    TokenType,
-    VariableType,
-    JsonFieldType,
+from ssc_codegen.converters.base import BaseCodeConverter
+from ssc_codegen.converters.helpers import (
+    prev_next_var,
+    is_last_var_no_ret,
+    have_default_expr,
+    is_pre_validate_parent,
+    get_last_ret_type,
+    have_pre_validate_call,
+    get_struct_field_method_by_name,
 )
-from .ast_utils import find_json_struct_instance
-from .base import BaseCodeConverter, left_right_var_names
-from .templates import go
+from ssc_codegen.converters.templates.go_goquery import (
+    J2_PRE_NESTED,
+    CODE_PRE_VALIDATE_CALL,
+    J2_START_PARSE_ITEM_BODY,
+    J2_START_PARSE_LIST_BODY,
+    J2_START_PARSE_DICT_BODY,
+    J2_START_PARSE_FLAT_LIST_BODY,
+    J2_PRE_DEFAULT_START,
+    J2_PRE_LIST_STR_FMT,
+    J2_PRE_LIST_STR_TRIM,
+    J2_PRE_LIST_STR_LEFT_TRIM,
+    J2_PRE_LIST_STR_RIGHT_TRIM,
+    J2_PRE_LIST_STR_REPLACE,
+    J2_PRE_LIST_STR_REGEX_SUB,
+    J2_PRE_IS_EQUAL,
+    J2_PRE_IS_NOT_EQUAL,
+    J2_PRE_IS_CONTAINS,
+    J2_PRE_IS_REGEX,
+    J2_PRE_IS_CSS,
+    J2_PRE_TO_INT,
+    J2_PRE_TO_LIST_INT,
+    J2_PRE_TO_FLOAT,
+    J2_PRE_TO_LIST_FLOAT,
+    J2_PRE_HTML_ATTR,
+    J2_PRE_HTML_ATTR_ALL,
+    J2_PRE_HTML_RAW,
+    J2_PRE_HTML_RAW_ALL,
+)
 from ssc_codegen.str_utils import (
+    wrap_backtick,
     to_upper_camel_case,
     wrap_double_quotes,
-    wrap_backtick,
 )
+from ssc_codegen.tokens import JsonVariableType, VariableType, StructType
 
-converter = BaseCodeConverter()
+MAGIC_METHODS = {
+    "__ITEM__": "Item",
+    "__KEY__": "Key",
+    "__VALUE__": "Value",
+}
+
+TYPES = {
+    VariableType.STRING: "string",
+    VariableType.LIST_STRING: "[]string",
+    VariableType.OPTIONAL_STRING: "*string",
+    VariableType.OPTIONAL_LIST_STRING: "*[]string",
+    VariableType.NULL: "nil",
+    VariableType.INT: "int",
+    VariableType.OPTIONAL_INT: "*int",
+    VariableType.LIST_INT: "[]int",
+    VariableType.FLOAT: "float64",
+    VariableType.OPTIONAL_FLOAT: "*float64",
+    VariableType.LIST_FLOAT: "[]float64",
+    VariableType.OPTIONAL_LIST_FLOAT: "*[]float64",
+    VariableType.BOOL: "bool",
+}
+
+JSON_TYPES = {
+    JsonVariableType.STRING: "string",
+    JsonVariableType.BOOLEAN: "bool",
+    JsonVariableType.NUMBER: "int",
+    JsonVariableType.FLOAT: "float64",
+    JsonVariableType.OPTIONAL_NUMBER: "*int",
+    JsonVariableType.OPTIONAL_FLOAT: "*float64",
+    JsonVariableType.OPTIONAL_BOOLEAN: "*bool",
+    JsonVariableType.OPTIONAL_STRING: "*string",
+    JsonVariableType.NULL: "*string",
+    JsonVariableType.ARRAY_STRING: "[]string",
+    JsonVariableType.ARRAY_FLOAT: "[]float64",
+    JsonVariableType.ARRAY_BOOLEAN: "[]bool",
+    JsonVariableType.ARRAY_NUMBER: "[]int",
+}
+
+# mocks for valid return errors
+RETURN_ERR_TYPES = {
+    VariableType.STRING: '""',
+    VariableType.INT: "-1",
+    VariableType.FLOAT: "-1.0",
+    VariableType.LIST_STRING: "nil",
+    VariableType.OPTIONAL_STRING: "nil",
+    VariableType.OPTIONAL_LIST_STRING: "nil",
+    VariableType.NULL: "nil",
+    VariableType.OPTIONAL_INT: "nil",
+    VariableType.LIST_INT: "nil",
+    VariableType.OPTIONAL_FLOAT: "nil",
+    VariableType.LIST_FLOAT: "nil",
+    VariableType.OPTIONAL_LIST_FLOAT: "nil",
+    VariableType.BOOL: "false",
+}
+
+# Constants are deliberately used to avoid missing a character in the visitor
+BRACKET_START = "{"
+BRACKET_END = "}"
+END = "; "
+DOCSTR = "// "
+CONVERTER = BaseCodeConverter(debug_comment_prefix="// ")
 
 
-@converter.pre(TokenType.TYPEDEF)
-def typedef_pre(node: TypeDef) -> str:
-    match node.struct_ref.type:
-        # codegen join all code part by newline
-        # immediately create DICT, FLAT_LIST types
-        case StructType.DICT:
-            # 0 - key, 1 - value
-            value = node.body[1]
-            type_ = convert_to_go_type(value)
-            # key always string
-            return f"type T{node.name} = map[string]{type_}; "
-        case StructType.FLAT_LIST:
-            item = node.body[0]
-            type_ = convert_to_go_type(item)
-            return f"type T{node.name} = []{type_}; "
-        case StructType.ITEM:
-            return f"type T{node.name} struct {go.BRACKET_START}"
-        case StructType.LIST:
-            return f"type T{node.name} struct {go.BRACKET_START}"
+def py_var_to_go_var(item: None | str | int | float) -> str | int | float:
+    if item is None:
+        item = "nil"
+    elif isinstance(item, str):
+        item = wrap_double_quotes(item)
+    elif isinstance(item, bool):
+        item = "true" if item else "false"
+    return item
 
 
-@converter.post(TokenType.TYPEDEF)
-def typedef_post(node: TypeDef) -> str:
-    match node.struct_ref.type:
-        case StructType.DICT:
-            return ""
-        case StructType.FLAT_LIST:
-            return ""
-        case StructType.ITEM:
-            return f"{go.BRACKET_END}; "
-        case StructType.LIST:
-            return f"{go.BRACKET_END}; "
-        case _:
-            assert_never(node.struct_ref.type)
+def make_go_docstring(docstring: str, class_name: str = "") -> str:
+    doc = "\n".join("// " + line for line in docstring.split("\n"))
+    if class_name:
+        doc = doc.replace("// ", f"// {class_name} ", 1)
+    return doc
 
 
-@converter.pre(TokenType.TYPEDEF_FIELD)
-def typedef_field(node: TypeDefField) -> str:
-    # always string
-    if node.name == "__KEY__":
-        return ""
-
-    match node.parent.struct_ref.type:
-        case StructType.DICT:
-            return ""
-        case StructType.FLAT_LIST:
-            return ""
-        case StructType.ITEM:
-            type_ = convert_to_go_type(node)
-            field_name = to_upper_camel_case(node.name)
-            return f'{field_name} {type_} `json:"{node.name}"`; '
-        case StructType.LIST:
-            type_ = convert_to_go_type(node)
-            field_name = to_upper_camel_case(node.name)
-            return f'{field_name} {type_} `json:"{node.name}"`; '
-        case _:
-            assert_never(node.parent.struct_ref.type)
+@CONVERTER(Docstring.kind)
+def pre_docstring(node: Docstring) -> str:
+    value = node.kwargs["value"]
+    docstr = make_go_docstring(value)
+    return docstr
 
 
-def convert_to_go_type(node) -> str:
-    if node.ret_type == VariableType.NESTED:
-        type_ = f"T{node.nested_class}"
-        if node.nested_node_ref.type == StructType.LIST:
+@CONVERTER(ModuleImports.kind)
+def pre_module_imports(_node: ModuleImports) -> str:
+    # todo: doc templates variables
+    return """
+package $PACKAGE$
+
+import (
+    "fmt"
+    "regexp"
+    "strings"
+    "slices"
+    "strconv"
+    "encoding/json"
+    "github.com/PuerkitoBio/goquery"
+)
+"""
+
+
+def get_typedef_field_by_name(node: TypeDef, field_name: str) -> str:
+    value = [i for i in node.body if i.kwargs["name"] == field_name][0]
+    value = cast(TypeDefField, value)
+    if value.kwargs["type"] == VariableType.NESTED:
+        type_ = f"T{value.kwargs['cls_nested']}"
+        if value.kwargs["cls_nested_type"] == StructType.LIST:
             type_ = f"[]{type_}"
-    elif node.ret_type == VariableType.JSON:
-        instance = find_json_struct_instance(node)
-        type_ = f"J{instance.__name__}"
-        if instance.__IS_ARRAY__:
+    elif value.kwargs["type"] == VariableType.JSON:
+        type_ = f"J{value.kwargs['cls_nested']}"
+        if value.kwargs["cls_nested_type"] == StructType.LIST:
             type_ = f"[]{type_}"
     else:
-        type_ = go.TYPES.get(node.ret_type)
+        type_ = TYPES[value.kwargs["type"]]
     return type_
 
 
-@converter.pre(TokenType.STRUCT)
-def tt_struct(node: StructParser) -> str:
-    # generate block code immediately, funcs attached by ptr
-    return (
-        f"type {node.name} struct "
-        + go.BRACKET_START
-        + "Document *goquery.Document; "
-        + go.BRACKET_END
-    )
-
-
-@converter.pre(TokenType.DOCSTRING)
-def tt_docstring(node: Docstring) -> str:
-    if node.value:
-        if node.parent and node.parent.kind == StructParser.kind:
-            return go.BINDINGS_PRE[
-                node.kind, f"{node.parent.name} {node.value}"
-            ]
-        return go.BINDINGS_PRE[node.kind, f"{node.value}"]
-    return ""
-
-
-@converter.pre(TokenType.IMPORTS)
-def tt_imports(node: ModuleImports) -> str:
-    # dependency variable $PACKAGE$
-    return go.BINDINGS_PRE[node.kind]
-
-
-@converter.pre(TokenType.STRUCT_PART_DOCUMENT)
-def tt_part_doc(node: PartDocFunction) -> str:
-    parent_name = node.parent.name
-    return go.BINDINGS_PRE[node.kind, parent_name, False]
-
-
-@converter.post(TokenType.STRUCT_PART_DOCUMENT)
-def tt_part_doc_end(_: PartDocFunction) -> str:
-    return go.BRACKET_END
-
-
-@converter.pre(TokenType.STRUCT_FIELD)
-def tt_function(node: StructFieldFunction) -> str:
-    fn_name = to_upper_camel_case(go.MAGIC_METHODS.get(node.name, node.name))
-    parent_name = node.parent.name  # type: ignore
-    ret_header = go.gen_struct_field_ret_header(node)
-    return (
-        "func (p *"
-        + parent_name
-        + ") "
-        + f"parse{fn_name}(value *goquery.Selection) "
-        + ret_header
-        + go.BRACKET_START
-    )
-
-
-@converter.post(TokenType.STRUCT_FIELD)
-def tt_function_end(_: StructFieldFunction) -> str:
-    return go.BRACKET_END
-
-
-@converter.pre(TokenType.STRUCT_PRE_VALIDATE)
-def tt_pre_validate(node: PreValidateFunction) -> str:
-    # "func (p *{}) {}(value *goquery.Selection) error {"
-    return go.BINDINGS_PRE[node.kind, node.parent.name]
-
-
-@converter.post(TokenType.STRUCT_PRE_VALIDATE)
-def tt_pre_validate_end(_: PreValidateFunction) -> str:
-    return go.BRACKET_END
-
-
-@converter.pre(TokenType.STRUCT_PARSE_START)
-def tt_start_parse(node: StartParseFunction) -> str:
-    # name = go.MAGIC_METHODS.get(node.name)
-    name = "Parse"
-    if node.type == StructType.LIST:
-        ret_type = f"*[]T{node.parent.name}"
-    else:
-        ret_type = f"*T{node.parent.name}"
-    ret_header = f"({ret_type}, error)"
-    return (
-        f"func (p *{node.parent.name}) "
-        + f"{name}() "
-        + f"{ret_header} "
-        + go.BRACKET_START
-    )
-
-
-@converter.post(TokenType.STRUCT_PARSE_START)
-def tt_start_parse_post(node: StartParseFunction) -> str:
-    code = ""
-    if any(e.name == "__PRE_VALIDATE__" for e in node.body):
-        code += (
-            "_, err := p.preValidate(p.Document.Selection); "
-            + "if err != nil "
-            + go.BRACKET_START
-            + "return nil, err; "
-            + go.BRACKET_END
-            + "; "
-        )
-    match node.type:
-        case StructType.ITEM:
-            body = go.gen_start_parse_item(node)
+@CONVERTER(TypeDef.kind)
+def pre_typedef(node: TypeDef) -> str:
+    name, st_type = node.unpack_args()
+    match st_type:
         case StructType.DICT:
-            body = go.gen_start_parse_dict(node)
+            type_ = get_typedef_field_by_name(node, "__VALUE__")
+            return f"type T{name} = map[string]{type_}" + END
         case StructType.FLAT_LIST:
-            body = go.gen_start_parse_flat_list(node)
-        case StructType.LIST:
-            body = go.gen_start_parse_list(node)
+            type_ = get_typedef_field_by_name(node, "__ITEM__")
+            return f"type T{name} = []{type_}" + END
+        case StructType.ITEM | StructType.LIST:
+            return f"type T{node.name} struct {BRACKET_START}"
         case _:
-            msg = f"Unknown StructType type {node.type.name}"
-            raise TypeError(msg)
-    return code + body + go.BRACKET_END
+            assert_never(st_type)
+    raise NotImplementedError("unreachable")  # noqa
 
 
-@converter.pre(TokenType.EXPR_RETURN)
-def tt_ret(node: ReturnExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
+@CONVERTER.post(TypeDef.kind)
+def post_typedef(node: TypeDef) -> str:
+    name, st_type = node.unpack_args()
+    match st_type:
+        case StructType.DICT | StructType.FLAT_LIST:
+            return ""
+        case StructType.ITEM | StructType.LIST:
+            return BRACKET_END + END
+        case _:
+            assert_never(st_type)
+    raise NotImplementedError("unreachable")  # noqa
+
+
+@CONVERTER(TypeDefField.kind)
+def pre_typedef_field(node: TypeDefField) -> str:
+    name, var_type, cls_nested, cls_nested_type = node.unpack_args()
+    node.parent = cast(TypeDef, node.parent)
+    if node.parent.struct_type in (StructType.DICT, StructType.FLAT_LIST):
+        return ""
+
+    elif name == "__KEY__":
+        return ""
+
+    elif var_type == VariableType.NESTED:
+        type_ = f"T{cls_nested}"
+        if cls_nested_type == StructType.LIST:
+            type_ = f"[]{type_}"
+    elif var_type == VariableType.JSON:
+        type_ = f"J{cls_nested}"
+        if cls_nested_type == StructType.LIST:
+            type_ = f"[]{type_}"
+    else:
+        type_ = TYPES[var_type]
+    field_name = to_upper_camel_case(name)
+    return f'{field_name} {type_} `json:"{name}"`' + END
+
+
+@CONVERTER(StructParser.kind)
+def pre_struct_parser(node: StructParser) -> str:
+    name = node.kwargs["name"]
+    docstr = make_go_docstring(node.kwargs["docstring"], name)
+    # generate block code immediately, funcs attached by ptr
+    return f"""{docstr}
+type {name} struct {BRACKET_START}
+Document *goquery.Document;
+{BRACKET_END}
+"""
+
+
+@CONVERTER(ExprReturn.kind)
+def pre_return(node: ExprReturn) -> str:
+    prv, _ = prev_next_var(node)
 
     if node.ret_type == VariableType.NESTED:
-        return f"return *{nxt}, nil; "
+        return f"return *{prv}, nil; "
 
-    elif node.have_default_expr():
+    elif have_default_expr(node):
         # OPTIONAL TYPE
-        if node.parent.body[0].value is None:  # noqa
+        node.parent = cast(StructParser, node.parent)
+        if node.parent.body[0].kwargs["value"] is None:
             return f"result = &{prv}; return result, nil;"
 
         return f"result = {prv}; return result, nil;"
-    return f"return {nxt}, nil; "
+    return f"return {prv}, nil;"
 
 
-@converter.pre(TokenType.EXPR_NO_RETURN)
-def tt_no_ret(_: NoReturnExpression) -> str:
-    # in current stage project used only in __PRE_VALIDATE__
-    # its return nil or error
-    # HACK:
-    # I was too lazy to describe all the corner cases, so the validation function returns nil and error
+@CONVERTER(ExprNoReturn.kind)
+def pre_no_return(_node: ExprReturn) -> str:
+    # HACK: for simplify functions header gen, return two variables
     return "return nil, nil;"
 
 
-@converter.pre(TokenType.EXPR_NESTED)
-def tt_nested(node: NestedExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    # HACK: make selection type as document
-    code = (
-        f"doc{node.variable.num} := goquery.NewDocumentFromNode({prv}.Nodes[0]); "
-        + f"st{node.variable.num} := {node.schema}{{ doc{node.variable.num} }}; "
-        + f"{nxt}, err := st{node.variable.num}.Parse(); "
-        + "if err != nil"
-        + go.BRACKET_START
-        + "return nil, err; "
-        + go.BRACKET_END
+@CONVERTER(ExprNested.kind)
+def pre_nested(node: ExprNested) -> str:
+    prv, nxt = prev_next_var(node)
+    sc_name, sc_type = node.unpack_args()
+    # make selection type as document
+    tmp_doc, tmp_st = f"doc{nxt}", f"st{nxt}"
+    return J2_PRE_NESTED.render(
+        tmp_doc=tmp_doc, tmp_st=tmp_st, prv=prv, nxt=nxt, sc_name=sc_name
     )
-    return code
 
 
-@converter.pre(TokenType.EXPR_DEFAULT_START)
-def tt_default(node: DefaultStart) -> str:
-    # defer func() wrapper, set default value if code throw error
-    if isinstance(node.value, str):
-        value = wrap_double_quotes(node.value)
-    elif isinstance(node.value, bool):
-        value = "true" if node.value else "false"
-    elif isinstance(node.value, (int, float)):
-        value = node.value
+@CONVERTER(StructPreValidateMethod.kind)
+def pre_pre_validate(node: StructPreValidateMethod) -> str:
+    node.parent = cast(StructParser, node.parent)
+    name = node.parent.kwargs["name"]
+    return f"func (p *{name}) preValidate(v *goquery.Selection) (error, error) {BRACKET_START}"
+
+
+@CONVERTER.post(StructPreValidateMethod.kind)
+def post_pre_validate(_node: StructPreValidateMethod) -> str:
+    return BRACKET_END
+
+
+@CONVERTER(StructPartDocMethod.kind)
+def pre_part_doc(node: StructPartDocMethod) -> str:
+    node.parent = cast(StructParser, node.parent)
+    name = node.parent.kwargs["name"]
+    return f"func (p *{name}) splitDoc(v *goquery.Selection) (*goquery.Selection, error) {BRACKET_START}"
+
+
+@CONVERTER.post(StructPartDocMethod.kind)
+def post_part_doc(_node: StructPartDocMethod) -> str:
+    return BRACKET_END
+
+
+@CONVERTER(StructFieldMethod.kind)
+def pre_parse_field(node: StructFieldMethod) -> str:
+    # ret header cases
+    # 1. Nested -> T{st_name}, error
+    # 2. Nested (array) -> []T{st_name}, error
+    # 3. Json -> J{st_name}, error
+    # 4. Json (array) -> []J{st_name}, error
+    # 5. default expr -> result {ret_type}, error
+    # 6. normal -> {ret_type}, error
+    node.parent = cast(StructParser, node.parent)
+    st_name = node.parent.kwargs["name"]
+    name = MAGIC_METHODS.get(node.kwargs["name"], node.kwargs["name"])
+    fn_name = "parse" + to_upper_camel_case(name)
+    if node.body[-1].ret_type == VariableType.NESTED:
+        nested_expr = node.body[-2]
+        nested_expr = cast(ExprNested, nested_expr)
+        sc_name, sc_type = nested_expr.unpack_args()
+        ret_type = f"T{sc_name}"
+        if sc_type == StructType.LIST:
+            ret_type = f"[]{ret_type}"
+    elif node.body[-1].ret_type == VariableType.JSON:
+        json_expr = node.body[-2]
+        json_expr = cast(ExprJsonify, json_expr)
+        st_name, is_array = json_expr.unpack_args()
+        ret_type = f"J{st_name}"
+        if is_array:
+            ret_type = f"[]{ret_type}"
+    elif have_default_expr(node.body[0]):
+        ret_type = TYPES[node.body[-1].ret_type]
+        ret_type = f"result {ret_type}"
     else:
-        value = "nil"
-    prv, nxt = left_right_var_names("value", node.variable)
-    return (
-        go.BINDINGS_PRE[node.kind, value]
-        # hack: avoid recalc variable counter
-        + f"{nxt} := {prv};"
-    )
-
-
-@converter.pre(TokenType.EXPR_STRING_FORMAT)
-def tt_string_format(node: FormatExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    template = wrap_double_quotes(node.fmt.replace("{{}}", "%s"))
-    return go.BINDINGS_PRE[TokenType.EXPR_STRING_FORMAT, nxt, template, prv]
-
-
-#
-@converter.pre(TokenType.EXPR_LIST_STRING_FORMAT)
-def tt_string_format_all(node: MapFormatExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    template = wrap_double_quotes(node.fmt.replace("{{}}", "%s"))
-    arr_type = go.TYPES.get(node.next.ret_type, "")
-    return go.BINDINGS_PRE[node.kind, nxt, template, prv, arr_type]
-
-
-@converter.pre(TokenType.EXPR_STRING_TRIM)
-def tt_string_trim(node: TrimExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    chars = wrap_double_quotes(node.value)
-    return go.BINDINGS_PRE[node.kind, nxt, chars, prv]
-
-
-@converter.pre(TokenType.EXPR_LIST_STRING_TRIM)
-def tt_string_trim_all(node: MapTrimExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    chars = wrap_double_quotes(node.value)
-    arr_type = go.TYPES.get(node.next.ret_type, "")
-
-    return go.BINDINGS_PRE[node.kind, nxt, chars, arr_type]
-
-
-@converter.pre(TokenType.EXPR_STRING_LTRIM)
-def tt_string_ltrim(node: LTrimExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    chars = wrap_double_quotes(node.value)
-    return go.BINDINGS_PRE[node.kind, nxt, prv, chars]
-
-
-@converter.pre(TokenType.EXPR_LIST_STRING_LTRIM)
-def tt_string_ltrim_all(node: MapLTrimExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    chars = wrap_double_quotes(node.value)
-    arr_type = go.TYPES.get(node.next.variable.type)
-    return go.BINDINGS_PRE[node.kind, nxt, chars, prv, arr_type]
-
-
-@converter.pre(TokenType.EXPR_STRING_RTRIM)
-def tt_string_rtrim(node: RTrimExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    chars = wrap_double_quotes(node.value)
-    return go.BINDINGS_PRE[node.kind, nxt, prv, chars]
-
-
-@converter.pre(TokenType.EXPR_LIST_STRING_RTRIM)
-def tt_string_rtrim_all(node: MapRTrimExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    chars = wrap_double_quotes(node.value)
-    arr_type = go.TYPES.get(node.next.variable.type)
-
-    return go.BINDINGS_PRE[node.kind, nxt, chars, prv, arr_type]
-
-
-@converter.pre(TokenType.EXPR_STRING_REPLACE)
-def tt_string_replace(node: ReplaceExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    old, new = wrap_double_quotes(node.old), wrap_double_quotes(node.new)
-
-    return go.BINDINGS_PRE[node.kind, nxt, prv, old, new]
-
-
-@converter.pre(TokenType.EXPR_LIST_STRING_REPLACE)
-def tt_string_replace_all(node: MapReplaceExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    old, new = wrap_double_quotes(node.old), wrap_double_quotes(node.new)
-    arr_type = go.TYPES.get(node.next.variable.type, "")
-    return go.BINDINGS_PRE[node.kind, nxt, prv, old, new, arr_type]
-
-
-@converter.pre(TokenType.EXPR_STRING_SPLIT)
-def tt_string_split(node: SplitExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    sep = wrap_double_quotes(node.sep)
-    return go.BINDINGS_PRE[node.kind, nxt, prv, sep]
-
-
-@converter.pre(TokenType.EXPR_REGEX)
-def tt_regex(node: RegexExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    pattern = wrap_backtick(node.pattern)
-    group = node.group
-    return go.BINDINGS_PRE[node.kind, nxt, pattern, prv, group]
-
-
-@converter.pre(TokenType.EXPR_REGEX_ALL)
-def tt_regex_all(node: RegexAllExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    pattern = wrap_backtick(node.pattern)
-    return go.BINDINGS_PRE[node.kind, nxt, pattern, prv]
-
-
-@converter.pre(TokenType.EXPR_REGEX_SUB)
-def tt_regex_sub(node: RegexSubExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    pattern = wrap_backtick(node.pattern)
-    repl = wrap_double_quotes(node.repl)
-    return go.BINDINGS_PRE[node.kind, nxt, pattern, prv, repl]
-
-
-@converter.pre(TokenType.EXPR_LIST_REGEX_SUB)
-def tt_regex_sub_all(node: MapRegexSubExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    pattern = wrap_backtick(node.pattern)
-    repl = wrap_double_quotes(node.repl)
-    arr_type = go.TYPES.get(node.next.variable.type, "")
-    return go.BINDINGS_PRE[node.kind, nxt, pattern, prv, repl, arr_type]
-
-
-@converter.pre(TokenType.EXPR_LIST_STRING_INDEX)
-def tt_string_index(node: IndexStringExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    return go.BINDINGS_PRE[node.kind, nxt, prv, node.value]
-
-
-@converter.pre(TokenType.EXPR_LIST_DOCUMENT_INDEX)
-def tt_doc_index(node: IndexDocumentExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    return go.BINDINGS_PRE[node.kind, nxt, prv, node.value]
-
-
-@converter.pre(TokenType.EXPR_LIST_JOIN)
-def tt_join(node: JoinExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    sep = wrap_double_quotes(node.sep)
-    return go.BINDINGS_PRE[node.kind, nxt, prv, sep]
-
-
-@converter.pre(TokenType.IS_EQUAL)
-def tt_is_equal(node: IsEqualExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    value = (
-        node.value
-        if isinstance(node.value, (int, float))
-        else wrap_double_quotes(node.value)
-    )
-    msg = wrap_double_quotes(node.msg)
-    is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
-    is_default = node.have_default_expr()
-    ret_type = node.parent.ret_type
-
-    code = go.BINDINGS_PRE[
-        node.kind, prv, value, msg, is_validate, is_default, ret_type
-    ]
-    if node.next.kind == TokenType.EXPR_NO_RETURN:
-        return code
-    return code + f"{nxt} := {prv}; "
-
-
-@converter.pre(TokenType.IS_NOT_EQUAL)
-def tt_is_not_equal(node: IsNotEqualExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    value = (
-        node.value
-        if isinstance(node.value, (int, float))
-        else wrap_double_quotes(node.value)
-    )
-    msg = wrap_double_quotes(node.msg)
-    is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
-    is_default = node.have_default_expr()
-    ret_type = node.parent.ret_type
-
-    code = go.BINDINGS_PRE[
-        node.kind, prv, value, msg, is_validate, is_default, ret_type
-    ]
-    if node.next.kind == TokenType.EXPR_NO_RETURN:
-        return code
-    return code + f"{nxt} := {prv}; "
-
-
-@converter.pre(TokenType.IS_CONTAINS)
-def tt_is_contains(node: IsContainsExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    item = (
-        node.item
-        if isinstance(node.item, (int, float))
-        else wrap_double_quotes(node.item)
-    )
-    msg = wrap_double_quotes(node.msg)
-    is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
-    is_default = node.have_default_expr()
-    ret_type = node.parent.ret_type
-
-    code = go.BINDINGS_PRE[
-        node.kind, prv, item, msg, is_validate, is_default, ret_type
-    ]
-    if node.next.kind == TokenType.EXPR_NO_RETURN:
-        return code
-    return code + f"{nxt} := {prv}; "
-
-
-@converter.pre(TokenType.IS_REGEX_MATCH)
-def tt_is_regex(node: IsRegexMatchExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    pattern = wrap_backtick(node.pattern)
-    msg = wrap_double_quotes(node.msg)
-    is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
-    is_default = node.have_default_expr()
-    ret_type = node.parent.ret_type
-
-    code = go.BINDINGS_PRE[
-        node.kind, prv, pattern, msg, is_validate, is_default, ret_type
-    ]
-    if node.next.kind == TokenType.EXPR_NO_RETURN:
-        return code
-    return code + f"{nxt} := {prv}; "
-
-
-@converter.pre(TokenType.TO_INT)
-def tt_to_int(node: ToInteger) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
-    is_default = node.have_default_expr()
-    return go.BINDINGS_PRE[
-        node.kind, nxt, prv, is_validate, is_default, node.parent.ret_type
-    ]
-
-
-@converter.pre(TokenType.TO_INT_LIST)
-def tt_to_list_int(node: ToListInteger) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    arr_type = go.TYPES.get(node.next.variable.type, "")
-    is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
-    is_default = node.have_default_expr()
-    return go.BINDINGS_PRE[
-        node.kind,
-        nxt,
-        prv,
-        arr_type,
-        is_validate,
-        is_default,
-        node.parent.ret_type,
-    ]
-
-
-@converter.pre(TokenType.TO_FLOAT)
-def tt_to_float(node: ToFloat) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
-    is_default = node.have_default_expr()
-
-    return go.BINDINGS_PRE[
-        node.kind, prv, nxt, is_validate, is_default, node.parent.ret_type
-    ]
-
-
-@converter.pre(TokenType.TO_FLOAT_LIST)
-def tt_to_list_float(node: ToListFloat) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
-    is_default = node.have_default_expr()
-    arr_type = go.TYPES.get(node.next.variable.type, "")
-
-    return go.BINDINGS_PRE[
-        node.kind,
-        prv,
-        nxt,
-        arr_type,
-        is_validate,
-        is_default,
-        node.parent.ret_type,
-    ]
-
-
-# # goquery API
-@converter.pre(TokenType.EXPR_CSS)
-def tt_css(node: HtmlCssExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    q = wrap_double_quotes(node.query)
-    return go.BINDINGS_PRE[node.kind, nxt, prv, q]
-
-
-@converter.pre(TokenType.EXPR_CSS_ALL)
-def tt_css_all(node: HtmlCssAllExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    q = wrap_double_quotes(node.query)
-    return go.BINDINGS_PRE[node.kind, nxt, prv, q]
-
-
-@converter.pre(TokenType.EXPR_TEXT)
-def tt_text(node: HtmlTextExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    return go.BINDINGS_PRE[node.kind, nxt, prv]
-
-
-@converter.pre(TokenType.EXPR_TEXT_ALL)
-def tt_text_all(node: HtmlTextAllExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    arr_type = go.TYPES.get(node.next.ret_type, "")
-    return go.BINDINGS_PRE[node.kind, nxt, prv, arr_type]
-
-
-@converter.pre(TokenType.EXPR_RAW)
-def tt_raw(node: HtmlRawExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-
-    is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
-    is_default = node.have_default_expr()
-    ret_type = node.parent.ret_type
-    return go.BINDINGS_PRE[
-        node.kind, nxt, prv, is_validate, is_default, ret_type
-    ]
-
-
-@converter.pre(TokenType.EXPR_RAW_ALL)
-def tt_raw_all(node: HtmlRawAllExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    arr_type = go.TYPES.get(node.next.ret_type, "")
-
-    is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
-    is_default = node.have_default_expr()
-    ret_type = node.parent.ret_type
-    return go.BINDINGS_PRE[
-        node.kind, nxt, prv, arr_type, is_validate, is_default, ret_type
-    ]
-
-
-@converter.pre(TokenType.EXPR_ATTR)
-def tt_attr(node: HtmlAttrExpression) -> str:
-    n = wrap_double_quotes(node.attr)
-    prv, nxt = left_right_var_names("value", node.variable)
-
-    is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
-    is_default = node.have_default_expr()
-    ret_type = node.parent.ret_type
-    return go.BINDINGS_PRE[
-        node.kind, nxt, prv, n, is_validate, is_default, ret_type
-    ]
-
-
-@converter.pre(TokenType.EXPR_ATTR_ALL)
-def tt_attr_all(node: HtmlAttrAllExpression) -> str:
-    n = wrap_double_quotes(node.attr)
-    prv, nxt = left_right_var_names("value", node.variable)
-
-    arr_type = go.TYPES.get(node.next.ret_type, "")
-    is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
-    is_default = node.have_default_expr()
-    ret_type = node.parent.ret_type
-    return go.BINDINGS_PRE[
-        node.kind, nxt, prv, n, arr_type, is_validate, is_default, ret_type
-    ]
-
-
-@converter.pre(TokenType.IS_CSS)
-def tt_is_css(node: IsCssExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    q = wrap_double_quotes(node.query)
-    msg = wrap_double_quotes(node.msg)
-    is_validate = node.parent.kind == TokenType.STRUCT_PRE_VALIDATE
-    is_default = node.have_default_expr()
-
-    code = go.BINDINGS_PRE[
-        node.kind, prv, q, msg, is_validate, is_default, node.parent.ret_type
-    ]
-    if node.next.kind == TokenType.EXPR_NO_RETURN:
-        return code
-    return f"{code}{nxt} := {prv}; "
-
-
-@converter.pre(TokenType.EXPR_XPATH)
-def tt_xpath(_):
-    raise NotImplementedError("goquery not support xpath")
-
-
-@converter.pre(TokenType.EXPR_XPATH_ALL)
-def tt_xpath_all(_):
-    raise NotImplementedError("goquery not support xpath")
-
-
-@converter.pre(TokenType.IS_XPATH)
-def tt_is_xpath(_):
-    raise NotImplementedError("goquery not support xpath")
-
-
-# json
-@converter.pre(TokenType.TO_JSON)
-def tt_to_json(node: ToJson) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    instance = node.value
-    name = f"J{instance.__name__}"
-    if instance.__IS_ARRAY__:
-        return (
-            f"{nxt} := []{name}"
-            + "{}; "
-            + f"json.Unmarshal([]byte({prv}), &{nxt});"
-        )
-    return (
-        f"{nxt} := {name}" + "{}; " + f"json.Unmarshal([]byte({prv}), &{nxt});"
-    )
-
-
-@converter.pre(TokenType.JSON_STRUCT)
-def tt_json_struct(node: JsonStruct) -> str:
-    # type J{} struct {
-    # f1.upperCC() <T> `anchor`
-    # ...
-    # }
-    code = f"type J{node.name} struct " + go.BRACKET_START + " "
-    for field in node.body:
-        code += f"{to_upper_camel_case(field.name)} "
-        match field.value.kind:
-            case JsonFieldType.BASIC:
-                code += (
-                    go.JSON_TYPES.get(field.ret_type.TYPE)
-                    + f' `json:"{field.name}"`'
-                    + ";"
-                )
-            case JsonFieldType.ARRAY:
-                if isinstance(field.ret_type.TYPE, dict):
-                    code += (
-                        f"J{field.value.TYPE.name}"
-                        + f' `json:"{field.name}"`'
-                        + ";"
-                    )
-                else:
-                    code += (
-                        f" []{go.JSON_TYPES.get(field.ret_type.TYPE)}"
-                        + f' `json:"{field.name}"`'
-                        + ";"
-                    )
-            case JsonFieldType.OBJECT:
-                code += (
-                    f" J{field.struct_ref}" + f' `json:"{field.name}"`' + ";"
-                )
-            case _:
-                assert_never(field.value.kind)
-    return code + go.BRACKET_END
-
-
-@converter.pre(TokenType.EXPR_LIST_LEN)
-def tt_to_len(node: ArrayLengthExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    match node.ret_type:
-        # https://pkg.go.dev/gopkg.in/goquery.v1#Selection.Length
-        case VariableType.LIST_DOCUMENT:
-            code = f"{nxt} := {prv}.Length();"
-        # build-in array used
-        case _:
-            code = f"{nxt} := len({prv});"
+        ret_type = TYPES[node.body[-1].ret_type]
+
+    if have_default_expr(node.body[0]):
+        ret_header = f"({ret_type}, err error)"
+    else:
+        ret_header = f"({ret_type}, error)"
+
+    return f"func (p *{st_name}) {fn_name}(v *goquery.Selection) {ret_header} {BRACKET_START}"
+
+
+@CONVERTER.post(StructFieldMethod.kind)
+def post_parse_field(_node: StructFieldMethod) -> str:
+    return BRACKET_END
+
+
+@CONVERTER(StartParseMethod.kind)
+def pre_start_parse_method(node: StartParseMethod) -> str:
+    parent = node.parent
+    parent = cast(StructParser, parent)
+    name, st_type, _ = parent.unpack_args()
+    ret_type = f"T{name}"
+    if st_type == StructType.LIST:
+        ret_type = f"[]{ret_type}"
+    return f"func (p *{name}) Parse() (*{ret_type}, error) {BRACKET_START}"
+
+
+@CONVERTER.post(StartParseMethod.kind)
+def post_start_parse_method(node: StartParseMethod) -> str:
+    parent = node.parent
+    parent = cast(StructParser, parent)
+    name, st_type, _ = parent.unpack_args()
+    code = ""
+    if have_pre_validate_call(node):
+        code += CODE_PRE_VALIDATE_CALL
+    match st_type:
+        case StructType.ITEM:
+            # acc variables name for pass to struct
+            st_args, methods = [], []
+            for field in node.body:
+                field = cast(ExprCallStructMethod, field)
+                if field.kwargs["name"] in MAGIC_METHODS or field.kwargs[
+                    "name"
+                ].startswith("__"):
+                    continue
+                method_name = to_upper_camel_case(field.kwargs["name"])
+                var_name = method_name.lower()
+                st_args.append(var_name)
+                methods.append((var_name, method_name))
+            code = J2_START_PARSE_ITEM_BODY.render(
+                name=name, methods=methods, st_args=st_args
+            )
+        case StructType.LIST:
+            # acc variables name for pass to struct
+            st_args, methods = [], []
+            for field in node.body:
+                field = cast(ExprCallStructMethod, field)
+                if field.kwargs["name"] in MAGIC_METHODS or field.kwargs[
+                    "name"
+                ].startswith("__"):
+                    continue
+                method_name = to_upper_camel_case(field.name)
+                var_name = method_name.lower()
+                st_args.append(var_name)
+                methods.append((var_name, method_name))
+            code = J2_START_PARSE_LIST_BODY.render(
+                name=name, methods=methods, st_args=st_args
+            )
+        case StructType.DICT:
+            value_field = get_struct_field_method_by_name(parent, "__VALUE__")
+            default_is_nil = False
+            if have_default_expr(value_field):
+                expr_default = value_field.body[0]
+                expr_default = cast(ExprDefaultValueStart, expr_default)
+                default_is_nil = expr_default.kwargs["value"] is None
+            var_value = "&value" if default_is_nil else "value"
+            code = J2_START_PARSE_DICT_BODY.render(
+                name=name, var_value=var_value
+            )
+        case StructType.FLAT_LIST:
+            item_field = get_struct_field_method_by_name(parent, "__ITEM__")
+            default_is_nil = False
+            if have_default_expr(item_field):
+                expr_default = item_field.body[0]
+                expr_default = cast(ExprDefaultValueStart, expr_default)
+                default_is_nil = expr_default.kwargs["value"] is None
+            var = "&item" if default_is_nil else "item"
+            code = J2_START_PARSE_FLAT_LIST_BODY.render(name=name, var=var)
     return code
 
 
-@converter.pre(TokenType.TO_BOOL)
-def tt_to_bool(node: ToBool) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
+@CONVERTER(ExprDefaultValueStart.kind)
+def pre_default_start(node: ExprDefaultValueStart) -> str:
+    prv, nxt = prev_next_var(node)
+    value = node.kwargs["value"]
+    value = py_var_to_go_var(value)
+    return J2_PRE_DEFAULT_START.render(prv=prv, nxt=nxt, value=value)
+
+
+@CONVERTER(ExprStringFormat.kind)
+def pre_str_fmt(node: ExprStringFormat) -> str:
+    prv, nxt = prev_next_var(node)
+    fmt = node.kwargs["fmt"]
+    template = wrap_double_quotes(fmt.replace("{{}}", "%s"))
+    return f"{nxt} := fmt.Sprintf({template}, {prv})" + END
+
+
+@CONVERTER(ExprListStringFormat.kind)
+def pre_list_str_fmt(node: ExprListStringFormat) -> str:
+    prv, nxt = prev_next_var(node)
+    fmt = node.kwargs["fmt"]
+    template = wrap_double_quotes(fmt.replace("{{}}", "%s"))
+    tmp_var = f"tmp{nxt}"
+    arr_type = TYPES.get(node.body[node.index_next].ret_type)
+
+    return J2_PRE_LIST_STR_FMT.render(
+        nxt=nxt, arr_type=arr_type, tmp_var=tmp_var, prv=prv, template=template
+    )
+
+
+@CONVERTER(ExprStringTrim.kind)
+def pre_str_trim(node: ExprStringTrim) -> str:
+    prv, nxt = prev_next_var(node)
+    substr = wrap_double_quotes(node.kwargs["substr"])
+    return f"{nxt} := strings.Trim({prv}, {substr})" + END
+
+
+@CONVERTER(ExprListStringTrim.kind)
+def pre_list_str_trim(node: ExprListStringTrim) -> str:
+    prv, nxt = prev_next_var(node)
+    substr = wrap_double_quotes(node.kwargs["substr"])
+    tmp_var = f"tmp{nxt}"
+    arr_type = TYPES.get(node.body[node.index_next].ret_type)
+    return J2_PRE_LIST_STR_TRIM.render(
+        nxt=nxt, arr_type=arr_type, tmp_var=tmp_var, prv=prv, substr=substr
+    )
+
+
+@CONVERTER(ExprStringLeftTrim.kind)
+def pre_str_left_trim(node: ExprStringLeftTrim) -> str:
+    prv, nxt = prev_next_var(node)
+    substr = wrap_double_quotes(node.kwargs["substr"])
+    return f"{nxt} := strings.TrimLeft({prv}, {substr})" + END
+
+
+@CONVERTER(ExprListStringLeftTrim.kind)
+def pre_list_str_left_trim(node: ExprListStringLeftTrim) -> str:
+    prv, nxt = prev_next_var(node)
+    substr = wrap_double_quotes(node.kwargs["substr"])
+    tmp_var = f"tmp{nxt}"
+    arr_type = TYPES.get(node.body[node.index_next].ret_type)
+    return J2_PRE_LIST_STR_LEFT_TRIM.render(
+        nxt=nxt, arr_type=arr_type, tmp_var=tmp_var, prv=prv, substr=substr
+    )
+
+
+@CONVERTER(ExprStringRightTrim.kind)
+def pre_str_right_trim(node: ExprStringRightTrim) -> str:
+    prv, nxt = prev_next_var(node)
+    substr = wrap_double_quotes(node.kwargs["substr"])
+    return f"{nxt} := strings.TrimRight({prv}, {substr})" + END
+
+
+@CONVERTER(ExprListStringRightTrim.kind)
+def pre_list_str_right_trim(node: ExprListStringRightTrim) -> str:
+    prv, nxt = prev_next_var(node)
+    substr = wrap_double_quotes(node.kwargs["substr"])
+    tmp_var = f"tmp{nxt}"
+    arr_type = TYPES.get(node.body[node.index_next].ret_type)
+
+    return J2_PRE_LIST_STR_RIGHT_TRIM.render(
+        nxt=nxt, arr_type=arr_type, tmp_var=tmp_var, prv=prv, substr=substr
+    )
+
+
+@CONVERTER(ExprStringSplit.kind)
+def pre_str_split(node: ExprStringSplit) -> str:
+    prv, nxt = prev_next_var(node)
+    sep = wrap_double_quotes(node.kwargs["sep"])
+    return f"{nxt} := strings.Split({prv}, {sep})" + END
+
+
+@CONVERTER(ExprStringReplace.kind)
+def pre_str_replace(node: ExprStringReplace) -> str:
+    prv, nxt = prev_next_var(node)
+    old, new = node.unpack_args()
+    old = wrap_double_quotes(old)
+    new = wrap_double_quotes(new)
+
+    return f"{nxt} := strings.Replace({prv}, {old}, {new}, -1)" + END
+
+
+@CONVERTER(ExprListStringReplace.kind)
+def pre_list_str_replace(node: ExprListStringReplace) -> str:
+    prv, nxt = prev_next_var(node)
+    old, new = node.unpack_args()
+
+    old = wrap_double_quotes(old)
+    new = wrap_double_quotes(new)
+    arr_type = TYPES.get(node.body[node.index_next].ret_type)
+    tmp_var = f"tmp{nxt}"
+
+    return J2_PRE_LIST_STR_REPLACE.render(
+        nxt=nxt, arr_type=arr_type, tmp_var=tmp_var, prv=prv, old=old, new=new
+    )
+
+
+@CONVERTER(ExprStringRegex.kind)
+def pre_str_regex(node: ExprStringRegex) -> str:
+    prv, nxt = prev_next_var(node)
+    pattern, group, ignore_case = node.unpack_args()
+    if ignore_case:
+        pattern = wrap_backtick("(?i)" + node.pattern)
+    else:
+        pattern = wrap_backtick(pattern)
+    return (
+        f"{nxt} := regexp.MustCompile({pattern}).FindStringSubmatch({prv})[{group}]"
+        + END
+    )
+
+
+@CONVERTER(ExprStringRegexAll.kind)
+def pre_str_regex_all(node: ExprStringRegexAll) -> str:
+    prv, nxt = prev_next_var(node)
+    pattern, ignore_case = node.unpack_args()
+    if ignore_case:
+        pattern = wrap_backtick("(?i)" + node.pattern)
+    else:
+        pattern = wrap_backtick(pattern)
+    return (
+        f"{nxt} := regexp.MustCompile({pattern}).FindStringSubmatch({prv})"
+        + END
+    )
+
+
+@CONVERTER(ExprStringRegexSub.kind)
+def pre_str_regex_sub(node: ExprStringRegexSub) -> str:
+    prv, nxt = prev_next_var(node)
+    pattern, repl = node.unpack_args()
+    pattern = wrap_backtick(pattern)
+    repl = wrap_double_quotes(repl)
+    return (
+        f"{nxt} := string(regexp.MustCompile({pattern}).ReplaceAll([]byte({prv}), []byte({repl})))"
+        + END
+    )
+
+
+@CONVERTER(ExprListStringRegexSub.kind)
+def pre_list_str_regex_sub(node: ExprListStringRegexSub) -> str:
+    prv, nxt = prev_next_var(node)
+    pattern, repl = node.unpack_args()
+
+    pattern = wrap_backtick(pattern)
+    repl = wrap_double_quotes(repl)
+    arr_type = TYPES.get(node.body[node.index_next].ret_type)
+    tmp_var = f"tmp{nxt}"
+    return J2_PRE_LIST_STR_REGEX_SUB.render(
+        nxt=nxt,
+        arr_type=arr_type,
+        tmp_var=tmp_var,
+        prv=prv,
+        pattern=pattern,
+        repl=repl,
+    )
+
+
+@CONVERTER(ExprIndex.kind)
+def pre_index(node: ExprIndex) -> str:
+    prv, nxt = prev_next_var(node)
+    index, *_ = node.unpack_args()
+    return f"{nxt} := {prv}[{index}];"
+
+
+@CONVERTER(ExprListStringJoin.kind)
+def pre_list_str_join(node: ExprListStringJoin) -> str:
+    prv, nxt = prev_next_var(node)
+    sep = node.kwargs["sep"]
+    sep = wrap_double_quotes(sep)
+    return f"{nxt} := strings.Join({prv}, {sep})" + END
+
+
+@CONVERTER(ExprIsEqual.kind)
+def pre_is_equal(node: ExprIsEqual) -> str:
+    prv, nxt = prev_next_var(node)
+    item, msg = node.unpack_args()
+
+    msg = wrap_double_quotes(msg)
+    item = py_var_to_go_var(item)
+
+    context = {
+        "prv": prv,
+        "nxt": nxt,
+        "item": item,
+        "msg": msg,
+        "have_default_expr": have_default_expr(node),
+        "is_pre_validate_parent": is_pre_validate_parent(node),
+        "is_last_var_no_ret": is_last_var_no_ret(node),
+        "return_type": RETURN_ERR_TYPES.get(get_last_ret_type(node), "nil"),
+    }
+
+    return J2_PRE_IS_EQUAL.render(**context)
+
+
+@CONVERTER(ExprIsNotEqual.kind)
+def pre_is_not_equal(node: ExprIsNotEqual) -> str:
+    prv, nxt = prev_next_var(node)
+    item, msg = node.unpack_args()
+
+    msg = wrap_double_quotes(msg) if msg else '""'
+    item = py_var_to_go_var(item)
+
+    context = {
+        "prv": prv,
+        "nxt": nxt,
+        "item": item,
+        "msg": msg,
+        "have_default_expr": have_default_expr(node),
+        "is_pre_validate_parent": is_pre_validate_parent(node),
+        "is_last_var_no_ret": is_last_var_no_ret(node),
+        "return_type": RETURN_ERR_TYPES.get(get_last_ret_type(node), "nil"),
+    }
+
+    return J2_PRE_IS_NOT_EQUAL.render(**context)
+
+
+@CONVERTER(ExprIsContains.kind)
+def pre_is_contains(node: ExprIsContains) -> str:
+    prv, nxt = prev_next_var(node)
+    item, msg = node.unpack_args()
+
+    msg = wrap_double_quotes(msg) if msg else '""'
+    item = py_var_to_go_var(item)
+
+    context = {
+        "prv": prv,
+        "nxt": nxt,
+        "item": item,
+        "msg": msg,
+        "have_default_expr": have_default_expr(node),
+        "is_pre_validate_parent": is_pre_validate_parent(node),
+        "is_last_var_no_ret": is_last_var_no_ret(node),
+        "return_type": RETURN_ERR_TYPES.get(get_last_ret_type(node), "nil"),
+    }
+
+    return J2_PRE_IS_CONTAINS.render(**context)
+
+
+@CONVERTER(ExprIsRegex.kind)
+def pre_is_regex(node: ExprIsRegex) -> str:
+    prv, nxt = prev_next_var(node)
+    pattern, ignore_case, msg = node.unpack_args()
+
+    # Handle ignore_case in function before template rendering
+    if ignore_case:
+        pattern = f"(?i){pattern}"
+    pattern = wrap_backtick(pattern)
+    msg = wrap_double_quotes(msg)
+    err_var = f"err{nxt}"
+
+    context = {
+        "prv": prv,
+        "nxt": nxt,
+        "pattern": pattern,  # Already processed with ignore_case and backticks
+        "msg": msg,
+        "err_var": err_var,
+        "have_default_expr": have_default_expr(node),
+        "is_pre_validate_parent": is_pre_validate_parent(node),
+        "is_last_var_no_ret": is_last_var_no_ret(node),
+        "return_type": RETURN_ERR_TYPES.get(get_last_ret_type(node), "nil"),
+    }
+
+    return J2_PRE_IS_REGEX.render(**context)
+
+
+@CONVERTER(ExprIsCss.kind)
+def pre_is_css(node: ExprIsCss) -> str:
+    prv, nxt = prev_next_var(node)
+    query, msg = node.unpack_args()
+
+    query = wrap_double_quotes(query)
+    msg = wrap_double_quotes(msg)
+    context = {
+        "prv": prv,
+        "nxt": nxt,
+        "query": query,
+        "msg": msg,
+        "have_default_expr": have_default_expr(node),
+        "is_pre_validate_parent": is_pre_validate_parent(node),
+        "is_last_var_no_ret": is_last_var_no_ret(node),
+        "return_type": RETURN_ERR_TYPES.get(get_last_ret_type(node), "nil"),
+    }
+
+    return J2_PRE_IS_CSS.render(**context)
+
+
+@CONVERTER(ExprToInt.kind)
+def pre_to_int(node: ExprToInt) -> str:
+    prv, nxt = prev_next_var(node)
+
+    context = {
+        "prv": prv,
+        "nxt": nxt,
+        "have_default_expr": have_default_expr(node),
+        "is_pre_validate_parent": is_pre_validate_parent(node),
+        "return_type": RETURN_ERR_TYPES.get(get_last_ret_type(node), "nil"),
+    }
+
+    return J2_PRE_TO_INT.render(**context)
+
+
+@CONVERTER(ExprToListInt.kind)
+def pre_to_list_int(node: ExprToListInt) -> str:
+    prv, nxt = prev_next_var(node)
+    tmp_var = f"tmp{nxt}"
+    each_var = f"i{nxt}"
+    arr_type = TYPES.get(node.body[node.index_next].ret_type)
+
+    context = {
+        "prv": prv,
+        "nxt": nxt,
+        "tmp_var": tmp_var,
+        "each_var": each_var,
+        "arr_type": arr_type,
+        "have_default_expr": have_default_expr(node),
+        "is_pre_validate_parent": is_pre_validate_parent(node),
+        "return_type": RETURN_ERR_TYPES.get(get_last_ret_type(node), "nil"),
+    }
+
+    return J2_PRE_TO_LIST_INT.render(**context)
+
+
+@CONVERTER(ExprToFloat.kind)
+def pre_to_float(node: ExprToFloat) -> str:
+    prv, nxt = prev_next_var(node)
+
+    context = {
+        "prv": prv,
+        "nxt": nxt,
+        "have_default_expr": have_default_expr(node),
+        "is_pre_validate_parent": is_pre_validate_parent(node),
+        "return_type": RETURN_ERR_TYPES.get(get_last_ret_type(node), "nil"),
+    }
+
+    return J2_PRE_TO_FLOAT.render(**context)
+
+
+@CONVERTER(ExprToListFloat.kind)
+def pre_to_list_float(node: ExprToListFloat) -> str:
+    prv, nxt = prev_next_var(node)
+    tmp_var = f"tmp{nxt}"
+    each_var = f"i{nxt}"
+    arr_type = TYPES.get(node.body[node.index_next].ret_type)
+
+    context = {
+        "prv": prv,
+        "nxt": nxt,
+        "tmp_var": tmp_var,
+        "each_var": each_var,
+        "arr_type": arr_type,
+        "have_default_expr": have_default_expr(node),
+        "is_pre_validate_parent": is_pre_validate_parent(node),
+        "return_type": RETURN_ERR_TYPES.get(get_last_ret_type(node), "nil"),
+    }
+
+    return J2_PRE_TO_LIST_FLOAT.render(**context)
+
+
+@CONVERTER(ExprToListLength.kind)
+def pre_to_len(node: ExprToListLength) -> str:
+    prv, nxt = prev_next_var(node)
+    return f"let {nxt} = len({prv})" + END
+
+
+@CONVERTER(ExprToBool.kind)
+def pre_to_bool(node: ExprToBool) -> str:
+    prv, nxt = prev_next_var(node)
     match node.ret_type:
         # https://pkg.go.dev/gopkg.in/goquery.v1#Selection.Length
         case VariableType.DOCUMENT:
@@ -800,4 +936,142 @@ def tt_to_bool(node: ToBool) -> str:
             code = f"{nxt} := {prv} != nil && len({prv}) > 0; "
         case _:
             assert_never(node.prev.ret_type)
-    return code
+    return code  # noqa
+
+
+@CONVERTER(ExprJsonify.kind)
+def pre_jsonify(node: ExprJsonify) -> str:
+    prv, nxt = prev_next_var(node)
+    name, is_array = node.unpack_args()
+    name = f"J{name}"
+    if is_array:
+        return (
+            f"{nxt} := []{name}"
+            + "{}; "
+            + f"json.Unmarshal([]byte({prv}), &{nxt});"
+        )
+    return (
+        f"{nxt} := {name}" + "{}; " + f"json.Unmarshal([]byte({prv}), &{nxt});"
+    )
+
+
+@CONVERTER(ExprCss.kind)
+def pre_css(node: ExprCss) -> str:
+    prv, nxt = prev_next_var(node)
+    query = wrap_double_quotes(node.kwargs["query"])
+    return f"{nxt} := {prv}.Find({query}).First(); "
+
+
+@CONVERTER(ExprCssAll.kind)
+def pre_css_all(node: ExprCssAll) -> str:
+    prv, nxt = prev_next_var(node)
+    query = wrap_double_quotes(node.kwargs["query"])
+    return f"{nxt} := {prv}.Find({query}); "
+
+
+@CONVERTER(ExprXpath.kind)
+def pre_xpath(_: ExprXpath) -> str:
+    raise NotImplementedError("goquery not support xpath")
+
+
+@CONVERTER(ExprXpathAll.kind)
+def pre_xpath_all(_: ExprXpathAll) -> str:
+    raise NotImplementedError("goquery not support xpath")
+
+
+@CONVERTER(ExprGetHtmlAttr.kind)
+def pre_html_attr(node: ExprGetHtmlAttr) -> str:
+    prv, nxt = prev_next_var(node)
+    key = wrap_double_quotes(node.kwargs["key"])
+
+    context = {
+        "prv": prv,
+        "nxt": nxt,
+        "key": key,
+        "have_default_expr": have_default_expr(node),
+        "is_pre_validate_parent": is_pre_validate_parent(node),
+        "return_type": RETURN_ERR_TYPES.get(get_last_ret_type(node), "nil"),
+    }
+
+    return J2_PRE_HTML_ATTR.render(**context)
+
+
+@CONVERTER(ExprGetHtmlAttrAll.kind)
+def pre_html_attr_all(node: ExprGetHtmlAttrAll) -> str:
+    prv, nxt = prev_next_var(node)
+    key = wrap_double_quotes(node.kwargs["key"])
+    tmp_var = f"tmp{nxt.title()}"
+    raw_var = f"attr{nxt.title()}"
+    arr_type = TYPES.get(node.body[node.index_next].ret_type)
+
+    context = {
+        "prv": prv,
+        "nxt": nxt,
+        "key": key,
+        "tmp_var": tmp_var,
+        "raw_var": raw_var,
+        "arr_type": arr_type,
+        "have_default_expr": have_default_expr(node),
+        "is_pre_validate_parent": is_pre_validate_parent(node),
+        "return_type": RETURN_ERR_TYPES.get(get_last_ret_type(node), "nil"),
+    }
+
+    return J2_PRE_HTML_ATTR_ALL.render(**context)
+
+
+@CONVERTER(ExprGetHtmlText.kind)
+def pre_html_text(node: ExprGetHtmlText) -> str:
+    prv, nxt = prev_next_var(node)
+    return f"{nxt} := {prv}.Text(); "
+
+
+@CONVERTER(ExprGetHtmlTextAll.kind)
+def pre_html_text_all(node: ExprGetHtmlTextAll) -> str:
+    prv, nxt = prev_next_var(node)
+    tmp_var = f"tmp{nxt.title()}"
+    arr_type = TYPES.get(node.body[node.index_next].ret_type)
+    return (
+        f"{nxt} := make({arr_type}, 0)"
+        + END
+        + f"for _, {tmp_var} := range {prv} "
+        + BRACKET_START
+        + f"{nxt} = append({nxt}, {tmp_var}.Text())"
+        + END
+        + BRACKET_END
+    )
+
+
+@CONVERTER(ExprGetHtmlRaw.kind)
+def pre_html_raw(node: ExprGetHtmlRaw) -> str:
+    prv, nxt = prev_next_var(node)
+
+    context = {
+        "prv": prv,
+        "nxt": nxt,
+        "have_default_expr": have_default_expr(node),
+        "is_pre_validate_parent": is_pre_validate_parent(node),
+        "return_type": RETURN_ERR_TYPES.get(get_last_ret_type(node), "nil"),
+    }
+
+    return J2_PRE_HTML_RAW.render(**context)
+
+
+@CONVERTER(ExprGetHtmlRawAll.kind)
+def pre_html_raw_all(node: ExprGetHtmlRawAll) -> str:
+    prv, nxt = prev_next_var(node)
+    tmp_var = f"tmp{nxt.title()}"
+    raw_var = f"raw{nxt.title()}"
+    arr_type = TYPES.get(node.body[node.index_next].ret_type)
+
+    context = {
+        "prv": prv,
+        "nxt": nxt,
+        "tmp_var": tmp_var,
+        "raw_var": raw_var,
+        "arr_type": arr_type,
+        "have_default_expr": have_default_expr(node),
+        "is_pre_validate_parent": is_pre_validate_parent(node),
+        "return_type": RETURN_ERR_TYPES.get(get_last_ret_type(node), "nil"),
+    }
+
+    return J2_PRE_HTML_RAW_ALL.render(**context)

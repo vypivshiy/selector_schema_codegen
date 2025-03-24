@@ -1,224 +1,200 @@
-from .ast_utils import find_json_struct_instance
-from ssc_codegen.ast_ssc import (
-    HtmlAttrAllExpression,
-    HtmlAttrExpression,
-    HtmlCssAllExpression,
-    HtmlCssExpression,
-    HtmlRawAllExpression,
-    HtmlRawExpression,
-    HtmlTextAllExpression,
-    HtmlTextExpression,
-    HtmlXpathAllExpression,
-    HtmlXpathExpression,
-    IsCssExpression,
-    IsXPathExpression,
+from ssc_codegen.ast_ import (
+    ExprCss,
+    ExprCssAll,
     ModuleImports,
-    PartDocFunction,
-    PreValidateFunction,
-    StructFieldFunction,
-    StructInit,
+    ExprXpathAll,
+    ExprXpath,
+    ExprIsXpath,
+    ExprGetHtmlAttr,
+    ExprGetHtmlAttrAll,
+    ExprGetHtmlText,
+    ExprGetHtmlTextAll,
+    ExprGetHtmlRaw,
+    ExprGetHtmlRawAll,
+    ExprIsCss,
+    StructInitMethod,
+    StructFieldMethod,
+    StructPreValidateMethod,
+    StructPartDocMethod,
 )
-from ssc_codegen.tokens import TokenType, VariableType, StructType
-from .py_base import BasePyCodeConverter, lr_var_names
-from .templates import py
-from .templates.template_bindings import TemplateBindings
-
-# setup converter
-BINDINGS_POST = TemplateBindings()
-BINDINGS_POST[TokenType.STRUCT_INIT] = (
-    "self._doc=Selector(document) if isinstance(document, str) else document"
+from ssc_codegen.converters.helpers import (
+    prev_next_var,
+    have_default_expr,
+    is_last_var_no_ret,
 )
-BINDINGS_POST[TokenType.IMPORTS] = (
-    "from parsel import Selector, SelectorList\nfrom parsel.selector import _SelectorType  # noqa"
+from ssc_codegen.converters.py_base import (
+    BasePyCodeConverter,
+    INDENT_DEFAULT_BODY,
+    INDENT_METHOD_BODY,
+    INDENT_METHOD,
+    MAGIC_METHODS,
+    get_field_method_ret_type,
 )
 
-# extend default bindings
-py.BINDINGS[TokenType.EXPR_CSS] = "{} = {}.css({})"
-py.BINDINGS[TokenType.EXPR_CSS_ALL] = "{} = {}.css({})"
-py.BINDINGS[TokenType.EXPR_XPATH] = "{} = {}.xpath({})"
-py.BINDINGS[TokenType.EXPR_XPATH_ALL] = "{} = {}.xpath({})"
-
-# parsel get() method returns single match instead full text element scope
-py.BINDINGS[TokenType.EXPR_TEXT] = '{} = "".join({}.css("::text").getall())'
-py.BINDINGS[TokenType.EXPR_TEXT_ALL] = '{} = {}.css("::text").getall()'
-py.BINDINGS[TokenType.EXPR_RAW] = "{} = {}.get()"
-py.BINDINGS[TokenType.EXPR_RAW_ALL] = "{} = {}.getall()"
-py.BINDINGS[TokenType.EXPR_ATTR] = "{} = {}.attrib[{}]"
-py.BINDINGS[TokenType.EXPR_ATTR_ALL] = "{} = [i.attrib[{}] for i in {}]"
-py.BINDINGS[TokenType.IS_CSS] = "assert {}.css({}), {}"
-py.BINDINGS[TokenType.IS_XPATH] = "assert {}.xpath({}), {}"
-
-converter = BasePyCodeConverter()
+CONVERTER = BasePyCodeConverter()
 
 
-@converter.pre(TokenType.STRUCT_INIT)
-def tt_init(node: StructInit) -> str:
-    p_type = "Union[str, _SelectorType]"
-    return py.INDENT_METHOD + py.BINDINGS[node.kind, p_type]
+@CONVERTER(StructInitMethod.kind)
+def pre_init(_node: StructInitMethod) -> str:
+    return (
+        INDENT_METHOD
+        + "def __init__(self, document: Union[str, _SelectorType]) -> None:\n"
+        + INDENT_METHOD_BODY
+        + "self._document = Selector(document) if isinstance(document, str) else document"
+    )
 
 
-@converter.post(TokenType.STRUCT_INIT)
-def tt_init_post(node: StructInit) -> str:
-    return py.INDENT_METHOD_BODY + BINDINGS_POST[node.kind]
+@CONVERTER(StructPreValidateMethod.kind)
+def pre_struct_pre_validate(_node: StructPreValidateMethod) -> str:
+    return (
+        INDENT_METHOD
+        + "def _pre_validate(self, v: Union[Selector, _SelectorType]) -> None:"
+    )
 
 
-@converter.post(TokenType.IMPORTS)
-def tt_imports_post(node: ModuleImports) -> str:
-    return BINDINGS_POST[node.kind]
+@CONVERTER(StructPartDocMethod.kind)
+def pre_struct_part_doc_method(_node: StructPartDocMethod) -> str:
+    return (
+        INDENT_METHOD
+        + "def _split_doc(self, v: Union[Selector, _SelectorType]) -> SelectorList:"
+    )
 
 
-@converter.pre(TokenType.STRUCT_PRE_VALIDATE)
-def tt_pre_validate(node: PreValidateFunction) -> str:
-    name = py.MAGIC_METHODS_NAME.get(node.name)
-    p_type = "Union[_SelectorType]"
-    return py.INDENT_METHOD + py.BINDINGS[node.kind, name, p_type]
+@CONVERTER(StructFieldMethod.kind)
+def pre_struct_field_method(node: StructFieldMethod) -> str:
+    name = node.kwargs["name"]
+    type_ = get_field_method_ret_type(node)
+    name = MAGIC_METHODS.get(name, name)
+    return (
+        INDENT_METHOD
+        + f"def _parse_{name}(self, v: Union[Selector, _SelectorType]) -> {type_}:"
+    )
 
 
-@converter.pre(TokenType.STRUCT_PART_DOCUMENT)
-def tt_part_document(node: PartDocFunction) -> str:
-    p_type = "_SelectorType"
-    ret_type = "SelectorList"
-    name = py.MAGIC_METHODS_NAME.get(node.name)
-    return py.INDENT_METHOD + py.BINDINGS[node.kind, name, p_type, ret_type]
+@CONVERTER.post(ModuleImports.kind)
+def post_imports(_: ModuleImports) -> str:
+    return """from parsel import Selector, SelectorList
+from parsel.selector import _SelectorType  # noqa
+"""
 
 
-@converter.pre(TokenType.STRUCT_FIELD)
-def tt_function(node: StructFieldFunction) -> str:
-    name = py.MAGIC_METHODS_NAME.get(node.name, node.name)
-    if node.ret_type == VariableType.NESTED:
-        t_def = node.find_associated_typedef()
-        ret_type = f"T_{t_def.struct_ref.name}"
-
-        if t_def.struct_ref.type == StructType.LIST:
-            ret_type = f"List[{ret_type}]"
-    elif node.ret_type == VariableType.JSON:
-        instance = find_json_struct_instance(node)  # noqa
-        ret_type = f"J_{instance.__name__}"
-        if instance.__IS_ARRAY__:
-            ret_type = f"List[{ret_type}]"
-    else:
-        ret_type = py.TYPES.get(node.ret_type)
-    p_type = "Selector"
-    return py.INDENT_METHOD + py.BINDINGS[node.kind, name, p_type, ret_type]
+@CONVERTER(ExprCss.kind)
+def pre_css(node: ExprCss) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    query = node.kwargs["query"]
+    return indent + f"{nxt} = {prv}.css({query!r})"
 
 
-# PARSEL API
-@converter.pre(TokenType.EXPR_CSS)
-def tt_css(node: HtmlCssExpression) -> str:
-    indent = py.suggest_indent(node)
-
-    q = repr(node.query)
-    prv, nxt = lr_var_names(variable=node.variable)
-    code = py.BINDINGS[node.kind, nxt, prv, q]
-    return indent + code
-
-
-@converter.pre(TokenType.EXPR_CSS_ALL)
-def tt_css_all(node: HtmlCssAllExpression) -> str:
-    indent = py.suggest_indent(node)
-
-    q = repr(node.query)
-    prv, nxt = lr_var_names(variable=node.variable)
-    code = py.BINDINGS[node.kind, nxt, prv, q]
-    return indent + code
+@CONVERTER(ExprCssAll.kind)
+def pre_css_all(node: ExprCssAll) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    query = node.kwargs["query"]
+    return indent + f"{nxt} = {prv}.css({query!r})"
 
 
-@converter.pre(TokenType.EXPR_XPATH)
-def tt_xpath(node: HtmlXpathExpression) -> str:
-    indent = py.suggest_indent(node)
-
-    q = repr(node.query)
-    prv, nxt = lr_var_names(variable=node.variable)
-    code = py.BINDINGS[node.kind, nxt, prv, q]
-    return indent + code
-
-
-@converter.pre(TokenType.EXPR_XPATH_ALL)
-def tt_xpath_all(node: HtmlXpathAllExpression) -> str:
-    indent = py.suggest_indent(node)
-    q = repr(node.query)
-    prv, nxt = lr_var_names(variable=node.variable)
-    code = py.BINDINGS[node.kind, nxt, prv, q]
-    return indent + code
+@CONVERTER(ExprXpath.kind)
+def pre_xpath(node: ExprXpath) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    query = node.kwargs["query"]
+    return indent + f"{nxt} = {prv}.xpath({query!r})"
 
 
-@converter.pre(TokenType.EXPR_TEXT)
-def tt_text(node: HtmlTextExpression) -> str:
-    indent = py.suggest_indent(node)
-
-    prv, nxt = lr_var_names(variable=node.variable)
-    code = py.BINDINGS[node.kind, nxt, prv]
-    return indent + code
-
-
-@converter.pre(TokenType.EXPR_TEXT_ALL)
-def tt_text_all(node: HtmlTextAllExpression) -> str:
-    indent = py.suggest_indent(node)
-
-    prv, nxt = lr_var_names(variable=node.variable)
-    code = py.BINDINGS[node.kind, nxt, prv]
-    return indent + code
+@CONVERTER(ExprXpathAll.kind)
+def pre_xpath_all(node: ExprXpathAll) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    query = node.kwargs["query"]
+    return indent + f"{nxt} = {prv}.xpath({query!r})"
 
 
-@converter.pre(TokenType.EXPR_RAW)
-def tt_raw(node: HtmlRawExpression) -> str:
-    indent = py.suggest_indent(node)
-
-    prv, nxt = lr_var_names(variable=node.variable)
-    code = py.BINDINGS[node.kind, nxt, prv]
-    return indent + code
-
-
-@converter.pre(TokenType.EXPR_RAW_ALL)
-def tt_raw_all(node: HtmlRawAllExpression) -> str:
-    indent = py.suggest_indent(node)
-
-    prv, nxt = lr_var_names(variable=node.variable)
-    code = py.BINDINGS[node.kind, nxt, prv]
-    return indent + code
+@CONVERTER(ExprGetHtmlAttr.kind)
+def pre_html_attr(node: ExprGetHtmlAttr) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    key = node.kwargs["key"]
+    return indent + f"{nxt} = {prv}.attrib[{key!r}]"
 
 
-@converter.pre(TokenType.EXPR_ATTR)
-def tt_attr(node: HtmlAttrExpression):
-    indent = py.suggest_indent(node)
-
-    n = repr(node.attr)
-    prv, nxt = lr_var_names(variable=node.variable)
-    code = py.BINDINGS[node.kind, nxt, prv, n]
-    return indent + code
-
-
-@converter.pre(TokenType.EXPR_ATTR_ALL)
-def tt_attr_all(node: HtmlAttrAllExpression):
-    indent = py.suggest_indent(node)
-
-    n = repr(node.attr)
-    prv, nxt = lr_var_names(variable=node.variable)
-    code = py.BINDINGS[node.kind, nxt, n, prv]
-    return indent + code
+@CONVERTER(ExprGetHtmlAttrAll.kind)
+def pre_html_attr_all(node: ExprGetHtmlAttrAll) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    key = node.kwargs["key"]
+    return indent + f"{nxt} = [e.attrib[{key!r}] for e in {prv}]"
 
 
-@converter.pre(TokenType.IS_CSS)
-def tt_is_css(node: IsCssExpression):
-    indent = py.suggest_indent(node)
-
-    prv, nxt = lr_var_names(variable=node.variable)
-    q = repr(node.query)
-    msg = repr(node.msg)
-    code = py.BINDINGS[node.kind, prv, q, msg]
-    if node.next.kind == TokenType.EXPR_NO_RETURN:
-        return indent + code
-    return indent + code + "\n" + indent + f"{nxt} = {prv}"
+@CONVERTER(ExprGetHtmlText.kind)
+def pre_html_text(node: ExprGetHtmlText) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    return indent + f'{nxt} = "".join({prv}.css("::text").getall())'
 
 
-@converter.pre(TokenType.IS_XPATH)
-def tt_is_xpath(node: IsXPathExpression):
-    indent = py.suggest_indent(node)
+@CONVERTER(ExprGetHtmlTextAll.kind)
+def pre_html_text_all(node: ExprGetHtmlTextAll) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    return indent + f'{nxt} = {prv}.css("::text").getall()'
 
-    prv, nxt = lr_var_names(variable=node.variable)
-    q = repr(node.query)
-    msg = repr(node.msg)
-    code = py.BINDINGS[node.kind, prv, q, msg]
-    if node.next.kind == TokenType.EXPR_NO_RETURN:
-        return indent + code
-    return indent + code + "\n" + indent + f"{nxt} = {prv}"
+
+@CONVERTER(ExprGetHtmlRaw.kind)
+def pre_html_raw(node: ExprGetHtmlRaw) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    return indent + f"{nxt} = {prv}.get()"
+
+
+@CONVERTER(ExprGetHtmlRawAll.kind)
+def pre_html_raw_all(node: ExprGetHtmlRawAll) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    return indent + f"{nxt} = {prv}.getall()"
+
+
+@CONVERTER(ExprIsCss.kind)
+def pre_is_css(node: ExprIsCss) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    query, msg = node.unpack_args()
+    expr = indent + f"assert {prv}.css({query!r}), {msg!r}"
+    if is_last_var_no_ret(node):
+        return expr
+    return expr + "\n" + indent + f"{nxt} = {prv}"
+
+
+@CONVERTER(ExprIsXpath.kind)
+def pre_is_xpath(node: ExprIsXpath) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    query, msg = node.unpack_args()
+    expr = indent + f"assert {prv}.xpath({query!r}), {msg!r}"
+    if is_last_var_no_ret(node):
+        return expr
+    return expr + "\n" + indent + f"{nxt} = {prv}"

@@ -1,489 +1,552 @@
-from ssc_codegen.ast_ssc import (
-    DefaultEnd,
-    DefaultStart,
+"""pure ES6 js standard implementation. Works in modern browsers and developer console
+
+Codegen notations:
+
+- exclude typing and struct serializations
+- vars have prefix `v{index}`, start argument names as `v`
+- methods auto convert to camelCase
+- code formatter exclude
+
+SPECIAL METHODS NOTATIONS:
+
+- field_name : _parse_{field_name} (add prefix `_parse_` for every struct method parse)
+- __KEY__ -> `key`, `_parseKey`
+- __VALUE__: `value`, `_parseValue`
+- __ITEM__: `item`, `_parseItem`
+- __PRE_VALIDATE__: `_preValidate`,
+- __SPLIT_DOC__: `_splitDoc`,
+- __START_PARSE__: `parse`,
+"""
+
+from typing import cast
+
+from typing_extensions import assert_never
+
+from ssc_codegen.ast_ import (
     Docstring,
-    FormatExpression,
-    HtmlAttrAllExpression,
-    HtmlAttrExpression,
-    HtmlCssAllExpression,
-    HtmlCssExpression,
-    HtmlRawAllExpression,
-    HtmlRawExpression,
-    HtmlTextAllExpression,
-    HtmlTextExpression,
-    HtmlXpathAllExpression,
-    HtmlXpathExpression,
-    IndexDocumentExpression,
-    IndexStringExpression,
-    IsContainsExpression,
-    IsCssExpression,
-    IsEqualExpression,
-    IsNotEqualExpression,
-    IsRegexMatchExpression,
-    IsXPathExpression,
-    JoinExpression,
-    LTrimExpression,
-    MapFormatExpression,
-    MapLTrimExpression,
-    MapRegexSubExpression,
-    MapReplaceExpression,
-    MapRTrimExpression,
-    MapTrimExpression,
-    NestedExpression,
-    NoReturnExpression,
-    PartDocFunction,
-    PreValidateFunction,
-    RegexAllExpression,
-    RegexExpression,
-    RegexSubExpression,
-    ReplaceExpression,
-    ReturnExpression,
-    RTrimExpression,
-    SplitExpression,
-    StartParseFunction,
-    StructFieldFunction,
-    StructInit,
     StructParser,
-    TrimExpression,
-    ToInteger,
-    ToListInteger,
-    ToFloat,
-    ToListFloat,
-    ToJson,
-    ToBool,
-    ArrayLengthExpression,
+    ExprReturn,
+    ExprNoReturn,
+    ExprNested,
+    StructPreValidateMethod,
+    StructFieldMethod,
+    StartParseMethod,
+    StructInitMethod,
+    ExprDefaultValueStart,
+    ExprDefaultValueEnd,
+    ExprStringFormat,
+    ExprListStringFormat,
+    ExprStringTrim,
+    ExprListStringTrim,
+    ExprStringLeftTrim,
+    ExprListStringLeftTrim,
+    ExprStringRightTrim,
+    ExprListStringRightTrim,
+    ExprStringSplit,
+    ExprStringReplace,
+    ExprListStringReplace,
+    ExprStringRegex,
+    ExprStringRegexAll,
+    ExprStringRegexSub,
+    ExprListStringRegexSub,
+    ExprIndex,
+    ExprListStringJoin,
+    ExprIsEqual,
+    ExprIsNotEqual,
+    ExprIsContains,
+    ExprIsRegex,
+    ExprToInt,
+    ExprToListInt,
+    ExprToFloat,
+    ExprToListFloat,
+    ExprToListLength,
+    ExprToBool,
+    ExprJsonify,
+    ExprCss,
+    ExprCssAll,
+    ExprXpath,
+    ExprXpathAll,
+    ExprGetHtmlAttr,
+    ExprGetHtmlAttrAll,
+    ExprGetHtmlText,
+    ExprGetHtmlTextAll,
+    ExprGetHtmlRaw,
+    ExprGetHtmlRawAll,
 )
-from ssc_codegen.tokens import StructType, TokenType
-from .base import BaseCodeConverter, left_right_var_names
-from .templates import js
-from ssc_codegen.str_utils import to_upper_camel_case, wrap_backtick
+from ssc_codegen.converters.base import BaseCodeConverter
+from ssc_codegen.converters.helpers import (
+    prev_next_var,
+    is_last_var_no_ret,
+    have_pre_validate_call,
+)
+from ssc_codegen.converters.templates.js_pure import (
+    J2_STRUCT_INIT,
+    J2_START_PARSE_DICT,
+    J2_START_PARSE_FLAT_LIST,
+    J2_START_PARSE_ITEM,
+    J2_START_PARSE_LIST_PARSE,
+    J2_PRE_LIST_STR_TRIM,
+    J2_PRE_STR_LEFT_TRIM,
+    J2_PRE_LIST_STR_LEFT_TRIM,
+    J2_PRE_STR_RIGHT_TRIM,
+    J2_PRE_LIST_STR_RIGHT_TRIM,
+    J2_PRE_XPATH,
+    J2_PRE_XPATH_ALL,
+    J2_PRE_STR_TRIM,
+)
+from ssc_codegen.str_utils import (
+    wrap_backtick,
+    to_upper_camel_case,
+)
+from ssc_codegen.tokens import StructType
 
-converter = BaseCodeConverter()
+MAGIC_METHODS = {
+    "__ITEM__": "Item",
+    "__KEY__": "Key",
+    "__VALUE__": "Value",
+}
+# Constants are deliberately used to avoid missing a character in the visitor
+BRACKET_START = "{"
+BRACKET_END = "}"
 
-
-# pure js API
-@converter.pre(TokenType.STRUCT)
-def tt_struct(node: StructParser) -> str:
-    return js.BINDINGS[node.kind, node.name] + js.BRACKET_START
-
-
-@converter.post(TokenType.STRUCT)
-def tt_struct_post(_: StructParser) -> str:
-    return js.BRACKET_END
-
-
-@converter.pre(TokenType.STRUCT_INIT)
-def tt_init(node: StructInit) -> str:
-    return js.BINDINGS[node.kind]
-
-
-@converter.pre(TokenType.DOCSTRING)
-def tt_docstring(node: Docstring) -> str:
-    return js.BINDINGS[node.kind, node.value]
-
-
-@converter.pre(TokenType.EXPR_RETURN)
-def tt_ret(node: ReturnExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    if node.have_default_expr():
-        return js.BINDINGS[node.kind, prv]
-    return js.BINDINGS[node.kind, nxt]
-
-
-@converter.pre(TokenType.EXPR_NO_RETURN)
-def tt_no_ret(node: NoReturnExpression) -> str:
-    return js.BINDINGS[node.kind]
-
-
-@converter.pre(TokenType.EXPR_NESTED)
-def tt_nested(node: NestedExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    return js.BINDINGS[node.kind, nxt, node.schema, prv]
+DOCSTR_START = "/**"
+DOCSTR_END = "*/"
+DOCSTR_SEP = "* "
+CONVERTER = BaseCodeConverter(debug_comment_prefix="// ")
 
 
-@converter.pre(TokenType.STRUCT_PRE_VALIDATE)
-def tt_pre_validate(node: PreValidateFunction) -> str:
-    name = js.MAGIC_METHODS.get(node.name)
-    return js.BINDINGS[node.kind, name] + js.BRACKET_START
+def make_js_docstring(value: str) -> str:
+    if not value:
+        return ""
+    docstr_start = DOCSTR_START
+    docstr_parts = "\n".join(DOCSTR_SEP + line for line in value.split("\n"))
+    docstr_end = DOCSTR_END
+    return docstr_start + docstr_parts + docstr_end
 
 
-@converter.post(TokenType.STRUCT_PRE_VALIDATE)
-def tt_pre_validate_post(_: PreValidateFunction) -> str:
-    return js.BRACKET_END
+@CONVERTER(Docstring.kind)
+def pre_docstring(node: Docstring) -> str:
+    value = node.kwargs["value"]
+    docstr = make_js_docstring(value)
+    return docstr
 
 
-@converter.pre(TokenType.STRUCT_PART_DOCUMENT)
-def tt_part_document(node: PartDocFunction) -> str:
-    name = js.MAGIC_METHODS.get(node.name)
-    return js.BINDINGS[node.kind, name] + js.BRACKET_START
+@CONVERTER(StructParser.kind)
+def pre_struct_parser(node: StructParser) -> str:
+    name = node.kwargs["name"]
+    docstr = make_js_docstring(node.kwargs["docstring"])
+    return docstr + "\n" + f"class {name}" + BRACKET_START
 
 
-@converter.post(TokenType.STRUCT_PART_DOCUMENT)
-def tt_part_document_post(_: PartDocFunction) -> str:
-    return js.BRACKET_END
+@CONVERTER(StructParser.kind)
+def post_struct_parser(_node: StructParser) -> str:
+    return BRACKET_END
 
 
-@converter.pre(TokenType.STRUCT_FIELD)
-def tt_function(node: StructFieldFunction) -> str:
-    name = js.MAGIC_METHODS.get(node.name, node.name)
-    name = to_upper_camel_case(name)
-    return js.BINDINGS[node.kind, name] + js.BRACKET_START
+@CONVERTER(ExprReturn.kind)
+def pre_return(node: ExprReturn) -> str:
+    return f"return v{node.index_prev};"
 
 
-@converter.post(TokenType.STRUCT_FIELD)
-def tt_function_post(_: StructFieldFunction) -> str:
-    return js.BRACKET_END
+@CONVERTER(ExprNoReturn.kind)
+def pre_no_return(_node: ExprReturn) -> str:
+    return "return;"
 
 
-@converter.pre(TokenType.STRUCT_PARSE_START)
-def tt_start_parse(node: StartParseFunction) -> str:
-    name = js.MAGIC_METHODS.get(node.name)
-    return js.BINDINGS[node.kind, name] + js.BRACKET_START
+@CONVERTER(ExprNested.kind)
+def pre_nested(node: ExprNested) -> str:
+    prv, nxt = prev_next_var(node)
+    schema_name, schema_type = node.unpack_args()
+    return f"let {nxt} = (new {schema_name}({prv})).parse();"
 
 
-@converter.post(TokenType.STRUCT_PARSE_START)
-def tt_start_parse_post(node: StartParseFunction) -> str:
+@CONVERTER(StructPreValidateMethod.kind)
+def pre_pre_validate(_node: StructPreValidateMethod) -> str:
+    return "_preValidate(v)" + BRACKET_START
+
+
+@CONVERTER.post(StructPreValidateMethod.kind)
+def post_pre_validate(_node: StructPreValidateMethod) -> str:
+    return BRACKET_END
+
+
+@CONVERTER(StructFieldMethod.kind)
+def pre_parse_field(node: StructFieldMethod) -> str:
+    name = node.kwargs["name"]
+    name = MAGIC_METHODS.get(name, name)
+    fn_name = "_parse" + to_upper_camel_case(name)
+    return f"{fn_name}(v)" + BRACKET_START
+
+
+@CONVERTER.post(StructFieldMethod.kind)
+def post_parse_field(_node: StructFieldMethod) -> str:
+    return BRACKET_END
+
+
+@CONVERTER(StartParseMethod.kind)
+def pre_start_parse_method(_node: StartParseMethod) -> str:
+    return "parse()" + BRACKET_START
+
+
+@CONVERTER.post(StartParseMethod.kind)
+def post_start_parse_method(_node: StartParseMethod) -> str:
+    return BRACKET_END
+
+
+@CONVERTER(StructInitMethod.kind)
+def pre_struct_init(_node: StructInitMethod) -> str:
+    return J2_STRUCT_INIT
+
+
+@CONVERTER(StartParseMethod.kind)
+def pre_start_parse(node: StartParseMethod) -> str:
+    node.parent = cast(StructParser, node.parent)
     code = ""
-    if any(f.name == "__PRE_VALIDATE__" for f in node.body):
-        name = js.MAGIC_METHODS.get("__PRE_VALIDATE__")
-        # TODO: token for call
-        code += f"this.{name}(this._doc);"
-    match node.type:
+    if have_pre_validate_call(node):
+        code += "this._preValidate(this._doc);"
+
+    exprs = [
+        {
+            "name": expr.kwargs["name"],
+            "upper_name": to_upper_camel_case(expr.kwargs["name"]),
+        }
+        for expr in node.body
+        if not expr.kwargs["name"].startswith("__")
+    ]
+
+    match node.parent.struct_type:
         case StructType.ITEM:
-            body = js.gen_item_body(node)
+            code += J2_START_PARSE_ITEM.render(exprs=exprs)
         case StructType.LIST:
-            body = js.gen_list_body(node)
+            code += J2_START_PARSE_LIST_PARSE.render(exprs=exprs)
         case StructType.DICT:
-            body = js.gen_dict_body(node)
+            code += J2_START_PARSE_DICT
         case StructType.FLAT_LIST:
-            body = js.gen_flat_list_body(node)
+            code += J2_START_PARSE_FLAT_LIST
         case _:
-            raise NotImplementedError("Unknown struct type")
-    return code + body + js.BRACKET_END
+            assert_never(node.parent.struct_type)  # type: ignore
+    return code
 
 
-@converter.pre(TokenType.EXPR_DEFAULT_START)
-def tt_default_start(node: DefaultStart) -> str:
-    return js.BINDINGS[node.kind] + "let value1 = value;"
+@CONVERTER(ExprDefaultValueStart.kind)
+def pre_default_start(node: ExprDefaultValueStart) -> str:
+    prv, nxt = prev_next_var(node)
+    return f"{nxt} = {prv};" + "try " + BRACKET_START
 
 
-@converter.pre(TokenType.EXPR_DEFAULT_END)
-def tt_default_end(node: DefaultEnd) -> str:
-    if node.value is None:
-        val = "null"
-    elif isinstance(node.value, str):
-        val = repr(node.value)
-    else:
-        val = node.value
-    # TODO: default list types
-    return js.BINDINGS[node.kind, val]
+@CONVERTER(ExprDefaultValueEnd.kind)
+def pre_default_end(node: ExprDefaultValueEnd) -> str:
+    value = node.kwargs["value"]
+    if value is None:
+        value = "null"
+    elif isinstance(value, str):
+        value = repr(value)
+    elif isinstance(value, bool):
+        value = "true" if value else "false"
+    return f"}}catch(Error) {{ return {value}; }}"
 
 
-@converter.pre(TokenType.EXPR_STRING_FORMAT)
-def tt_string_format(node: FormatExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    template = node.fmt.replace("{{}}", "${" + prv + "}")
-    template = wrap_backtick(template)
-    return js.BINDINGS[node.kind, nxt, template]
+@CONVERTER(ExprStringFormat.kind)
+def pre_str_fmt(node: ExprStringFormat) -> str:
+    prv, nxt = prev_next_var(node)
+    template = wrap_backtick(node.fmt.replace("{{}}", "${" + prv + "}"))
+    return f"let {nxt} = {template};"
 
 
-@converter.pre(TokenType.EXPR_LIST_STRING_FORMAT)
-def tt_string_format_all(node: MapFormatExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    template = node.fmt.replace("{{}}", "${e}")
-    template = wrap_backtick(template)
-    return js.BINDINGS[node.kind, nxt, prv, template]
+@CONVERTER(ExprStringFormat.kind)
+def pre_list_str_fmt(node: ExprListStringFormat) -> str:
+    prv, nxt = prev_next_var(node)
+    template = wrap_backtick(node.fmt.replace("{{}}", "${e}"))
+    return f"let {nxt} = {prv}.map(e => {template});"
 
 
-@converter.pre(TokenType.EXPR_STRING_TRIM)
-def tt_string_trim(node: TrimExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    chars = node.value
-    return js.BINDINGS[node.kind, nxt, prv, chars]
+@CONVERTER(ExprStringTrim.kind)
+def pre_str_trim(node: ExprStringTrim) -> str:
+    prv, nxt = prev_next_var(node)
+    substr = node.kwargs["substr"]
+    return J2_PRE_STR_TRIM.render(nxt=nxt, prv=prv, substr=repr(substr))
 
 
-@converter.pre(TokenType.EXPR_LIST_STRING_TRIM)
-def tt_string_trim_all(node: MapTrimExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    chars = node.value
-    return js.BINDINGS[node.kind, nxt, prv, chars]
+@CONVERTER(ExprListStringTrim.kind)
+def pre_list_str_trim(node: ExprListStringTrim) -> str:
+    prv, nxt = prev_next_var(node)
+    substr = node.kwargs["substr"]
+    return J2_PRE_LIST_STR_TRIM.render(prv=prv, nxt=nxt, substr=repr(substr))
 
 
-@converter.pre(TokenType.EXPR_STRING_LTRIM)
-def tt_string_ltrim(node: LTrimExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    chars = node.value
-    return js.BINDINGS[node.kind, nxt, prv, chars]
+@CONVERTER(ExprStringLeftTrim.kind)
+def pre_str_left_trim(node: ExprStringLeftTrim) -> str:
+    prv, nxt = prev_next_var(node)
+    substr = node.kwargs["substr"]
+    return J2_PRE_STR_LEFT_TRIM.render(prv=prv, nxt=nxt, substr=repr(substr))
 
 
-@converter.pre(TokenType.EXPR_LIST_STRING_LTRIM)
-def tt_string_ltrim_all(node: MapLTrimExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    chars = node.value
-    return js.BINDINGS[node.kind, nxt, prv, chars]
+@CONVERTER(ExprListStringLeftTrim.kind)
+def pre_list_str_left_trim(node: ExprListStringLeftTrim) -> str:
+    prv, nxt = prev_next_var(node)
+    substr = node.kwargs["substr"]
+    return J2_PRE_LIST_STR_LEFT_TRIM.render(
+        prv=prv, nxt=nxt, substr=repr(substr)
+    )
 
 
-@converter.pre(TokenType.EXPR_STRING_RTRIM)
-def tt_string_rtrim(node: RTrimExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    chars = node.value
-    return js.BINDINGS[node.kind, nxt, prv, chars]
+@CONVERTER(ExprStringRightTrim.kind)
+def pre_str_right_trim(node: ExprStringRightTrim) -> str:
+    prv, nxt = prev_next_var(node)
+    substr = node.kwargs["substr"]
+    return J2_PRE_STR_RIGHT_TRIM.render(prv=prv, nxt=nxt, substr=repr(substr))
 
 
-@converter.pre(TokenType.EXPR_LIST_STRING_RTRIM)
-def tt_string_rtrim_all(node: MapRTrimExpression) -> str:
-    # const rtrim = function (str, chars) {
-    #     return str.replace(new RegExp(`[${chars}]+$`, 'g'), '');
-    # };
-    #
-    prv, nxt = left_right_var_names("value", node.variable)
-    chars = node.value
-    return js.BINDINGS[node.kind, nxt, prv, chars]
+@CONVERTER(ExprListStringRightTrim.kind)
+def pre_list_str_right_trim(node: ExprListStringRightTrim) -> str:
+    prv, nxt = prev_next_var(node)
+    substr = node.kwargs["substr"]
+    return J2_PRE_LIST_STR_RIGHT_TRIM.render(
+        prv=prv, nxt=nxt, substr=repr(substr)
+    )
 
 
-@converter.pre(TokenType.EXPR_STRING_REPLACE)
-def tt_string_replace(node: ReplaceExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    old, new = repr(node.old), repr(node.new)
-    return js.BINDINGS[node.kind, nxt, prv, old, new]
+@CONVERTER(ExprStringSplit.kind)
+def pre_str_split(node: ExprStringSplit) -> str:
+    prv, nxt = prev_next_var(node)
+    sep = node.kwargs["sep"]
+    return f"let {nxt} = {prv}.split({sep!r});"
 
 
-@converter.pre(TokenType.EXPR_LIST_STRING_REPLACE)
-def tt_string_replace_all(node: MapReplaceExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    old, new = repr(node.old), repr(node.new)
-    return js.BINDINGS[node.kind, nxt, prv, old, new]
+@CONVERTER(ExprStringReplace.kind)
+def pre_str_replace(node: ExprStringReplace) -> str:
+    prv, nxt = prev_next_var(node)
+    old, new = node.unpack_args()
+    return f"let {nxt} = {prv}.replace({old!r}, {new!r});"
 
 
-@converter.pre(TokenType.EXPR_STRING_SPLIT)
-def tt_string_split(node: SplitExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    sep = repr(node.sep)
-    return js.BINDINGS[node.kind, nxt, prv, sep]
+@CONVERTER(ExprListStringReplace.kind)
+def pre_list_str_replace(node: ExprListStringReplace) -> str:
+    prv, nxt = prev_next_var(node)
+    old, new = node.unpack_args()
+    return f"let {nxt} = {prv}.map(e => e.replace({old!r}, {new!r}));"
 
 
-@converter.pre(TokenType.EXPR_REGEX)
-def tt_regex(node: RegexExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
+@CONVERTER(ExprStringRegex.kind)
+def pre_str_regex(node: ExprStringRegex) -> str:
+    prv, nxt = prev_next_var(node)
+    pattern, group, ignore_case = node.unpack_args()
     pattern = f"/{node.pattern}/g"
-    group = node.group
-    return js.BINDINGS[node.kind, nxt, pattern, prv, group]
+    if ignore_case:
+        return f'let {nxt} = (new RegExp({pattern}, "i")).exec({prv})[{group}];'
+    return f"let {nxt} = (new RegExp({pattern})).exec({prv})[{group}];"
 
 
-@converter.pre(TokenType.EXPR_REGEX_ALL)
-def tt_regex_all(node: RegexAllExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
+@CONVERTER(ExprStringRegexAll.kind)
+def pre_str_regex_all(node: ExprStringRegexAll) -> str:
+    prv, nxt = prev_next_var(node)
+    pattern, ignore_case = node.unpack_args()
     pattern = f"/{node.pattern}/g"
-    return js.BINDINGS[node.kind, nxt, pattern, prv]
+    if ignore_case:
+        return f'let {nxt} = (new RegExp({pattern}, "i")).exec({prv});'
+    return f"let {nxt} = (new RegExp({pattern})).exec({prv});"
 
 
-@converter.pre(TokenType.EXPR_REGEX_SUB)
-def tt_regex_sub(node: RegexSubExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
+@CONVERTER(ExprStringRegexSub.kind)
+def pre_str_regex_sub(node: ExprStringRegexSub) -> str:
+    prv, nxt = prev_next_var(node)
+    pattern, repl = node.unpack_args()
     pattern = f"/{node.pattern}/g"
-    repl = repr(node.repl)
-    return js.BINDINGS[node.kind, nxt, prv, pattern, repl]
+
+    return f"let {nxt} = {prv}.replace({pattern}, {repl!r});"
 
 
-@converter.pre(TokenType.EXPR_LIST_REGEX_SUB)
-def tt_regex_sub_all(node: MapRegexSubExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
+@CONVERTER(ExprListStringRegexSub.kind)
+def pre_list_str_regex_sub(node: ExprListStringRegexSub) -> str:
+    prv, nxt = prev_next_var(node)
+    pattern, repl = node.unpack_args()
     pattern = f"/{node.pattern}/g"
-    repl = repr(node.repl)
-    return js.BINDINGS[node.kind, nxt, prv, pattern, repl]
+    return f"let {nxt} = {prv}.map(e => e.replace({pattern}, {repl!r}));"
 
 
-@converter.pre(TokenType.EXPR_LIST_STRING_INDEX)
-def tt_string_index(node: IndexStringExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    return js.BINDINGS[node.kind, nxt, prv, node.value]
+@CONVERTER(ExprIndex.kind)
+def pre_index(node: ExprIndex) -> str:
+    prv, nxt = prev_next_var(node)
+    index, *_ = node.unpack_args()
+    return f"let {nxt} = {prv}[{index}];"
 
 
-@converter.pre(TokenType.EXPR_LIST_DOCUMENT_INDEX)
-def tt_doc_index(node: IndexDocumentExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    return js.BINDINGS[node.kind, nxt, prv, node.value]
+@CONVERTER(ExprListStringJoin.kind)
+def pre_list_str_join(node: ExprListStringJoin) -> str:
+    prv, nxt = prev_next_var(node)
+    sep = node.kwargs["sep"]
+    return f"let {nxt} = {prv}.join({sep!r});"
 
 
-@converter.pre(TokenType.EXPR_LIST_JOIN)
-def tt_join(node: JoinExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    sep = repr(node.sep)
-    return js.BINDINGS[node.kind, nxt, prv, sep]
+@CONVERTER(ExprIsEqual.kind)
+def pre_is_equal(node: ExprIsEqual) -> str:
+    prv, nxt = prev_next_var(node)
+    item, msg = node.unpack_args()
+    if isinstance(item, str):
+        item = repr(item)
+    elif isinstance(item, bool):
+        item = "true" if item else "false"
+    expr = f"if ({item} != {prv}) throw new Error({msg!r});"
+    if is_last_var_no_ret(node):
+        return expr
+    return expr + f"let {nxt} = {prv};"
 
 
-@converter.pre(TokenType.IS_EQUAL)
-def tt_is_equal(node: IsEqualExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    value = repr(node.value) if isinstance(node.value, str) else node.value
-    code = js.BINDINGS[node.kind, prv, value, repr(node.msg)]
-    if node.next.kind == TokenType.EXPR_NO_RETURN:
-        return code
-    code += js.EXPR_ASSIGN.format(nxt, prv)
-    return code
+@CONVERTER(ExprIsNotEqual.kind)
+def pre_is_not_equal(node: ExprIsNotEqual) -> str:
+    prv, nxt = prev_next_var(node)
+    item, msg = node.unpack_args()
+    if isinstance(item, str):
+        item = repr(item)
+    elif isinstance(item, bool):
+        item = "true" if item else "false"
+    expr = f"if ({item} == {prv}) throw new Error({msg!r});"
+    if is_last_var_no_ret(node):
+        return expr
+    # HACK: avoid recalc variables
+    return expr + f"let {nxt} = {prv};"
 
 
-@converter.pre(TokenType.IS_NOT_EQUAL)
-def tt_is_not_equal(node: IsNotEqualExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    value = repr(node.value) if isinstance(node.value, str) else node.value
-    code = js.BINDINGS[node.kind, prv, value, repr(node.msg)]
-    if node.next.kind == TokenType.EXPR_NO_RETURN:
-        return code
-    code += js.EXPR_ASSIGN.format(nxt, prv)
-    return code
+@CONVERTER(ExprIsContains.kind)
+def pre_is_contains(node: ExprIsContains) -> str:
+    prv, nxt = prev_next_var(node)
+    item, msg = node.unpack_args()
+    if isinstance(item, str):
+        item = repr(item)
+    elif isinstance(item, bool):
+        item = "true" if item else "false"
+    expr = f"if (!({item} in {prv})) throw new Error({msg!r});"
+    if is_last_var_no_ret(node):
+        return expr
+    # HACK: avoid recalc variables
+    return expr + f"let {nxt} = {prv};"
 
 
-@converter.pre(TokenType.IS_CONTAINS)
-def tt_is_contains(node: IsContainsExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    item = repr(node.item) if isinstance(node.item, str) else node.value
-    code = js.BINDINGS[node.kind, item, prv, repr(node.msg)]
-    if node.next.kind == TokenType.EXPR_NO_RETURN:
-        return code
-    code += js.EXPR_ASSIGN.format(nxt, prv)
-    return code
+@CONVERTER(ExprIsRegex.kind)
+def pre_is_regex(node: ExprIsRegex) -> str:
+    prv, nxt = prev_next_var(node)
+    pattern, ignore_case, msg = node.unpack_args()
+    pattern = f"/{node.pattern}/g"
+    expr = f"if ({prv}.match({pattern}) === null) throw new Error({msg!r});"
+    if is_last_var_no_ret(node):
+        return expr
+    # HACK: avoid recalc variables
+    return expr + f"let {nxt} = {prv};"
 
 
-@converter.pre(TokenType.IS_REGEX_MATCH)
-def tt_is_regex(node: IsRegexMatchExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    pattern = f"/{node.pattern}/"
-    code = js.BINDINGS[node.kind, prv, pattern, repr(node.msg)]
-    if node.next.kind == TokenType.EXPR_NO_RETURN:
-        return code
-    code += js.EXPR_ASSIGN.format(nxt, prv)
-    return code
+@CONVERTER(ExprToInt.kind)
+def pre_to_int(node: ExprToInt) -> str:
+    prv, nxt = prev_next_var(node)
+    return f"let {nxt} = parseInt({prv}, 10);"
 
 
-# js pure API
-@converter.pre(TokenType.EXPR_CSS)
-def tt_css(node: HtmlCssExpression) -> str:
-    q = repr(node.query)
-    prv, nxt = left_right_var_names("value", node.variable)
-    return js.BINDINGS[node.kind, nxt, prv, q]
+@CONVERTER(ExprToListInt.kind)
+def pre_to_list_int(node: ExprToListInt) -> str:
+    prv, nxt = prev_next_var(node)
+    return f"let {nxt} = {prv}.map(i => parseInt(i, 10));"
 
 
-@converter.pre(TokenType.EXPR_CSS_ALL)
-def tt_css_all(node: HtmlCssAllExpression) -> str:
-    q = repr(node.query)
-    prv, nxt = left_right_var_names("value", node.variable)
-    return js.BINDINGS[node.kind, nxt, prv, q]
+@CONVERTER(ExprToFloat.kind)
+def pre_to_float(node: ExprToFloat) -> str:
+    prv, nxt = prev_next_var(node)
+    return f"let {nxt} = parseFloat({prv}, 64);"
 
 
-@converter.pre(TokenType.EXPR_XPATH)
-def tt_xpath(node: HtmlXpathExpression) -> str:
-    q = repr(node.query)
-    prv, nxt = left_right_var_names("value", node.variable)
-    return js.BINDINGS[node.kind, nxt, q, prv]
+@CONVERTER(ExprToListFloat.kind)
+def pre_to_list_float(node: ExprToListFloat) -> str:
+    prv, nxt = prev_next_var(node)
+    return f"let {nxt} = {prv}.map(i => parseFloat(i, 64));"
 
 
-@converter.pre(TokenType.EXPR_XPATH_ALL)
-def tt_xpath_all(node: HtmlXpathAllExpression) -> str:
-    q = node.query
-    prv, nxt = left_right_var_names("value", node.variable)
-    return js.BINDINGS[node.kind, nxt, prv, q]
+@CONVERTER(ExprToListLength.kind)
+def pre_to_len(node: ExprToListLength) -> str:
+    prv, nxt = prev_next_var(node)
+    return f"let {nxt} = {prv}.length;"
 
 
-@converter.pre(TokenType.EXPR_TEXT)
-def tt_text(node: HtmlTextExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    # document object (naive)
-    return js.BINDINGS[node.kind, node.variable.num, nxt, prv]
-
-
-@converter.pre(TokenType.EXPR_TEXT_ALL)
-def tt_text_all(node: HtmlTextAllExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    return js.BINDINGS[node.kind, nxt, prv]
-
-
-@converter.pre(TokenType.EXPR_RAW)
-def tt_raw(node: HtmlRawExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    # document object (naive)
-    return js.BINDINGS[node.kind, node.variable.num, nxt, prv]
-
-
-@converter.pre(TokenType.EXPR_RAW_ALL)
-def tt_raw_all(node: HtmlRawAllExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    return js.BINDINGS[node.kind, nxt, prv]
-
-
-@converter.pre(TokenType.EXPR_ATTR)
-def tt_attr(node: HtmlAttrExpression) -> str:
-    attr = repr(node.attr)
-    prv, nxt = left_right_var_names("value", node.variable)
-    return js.BINDINGS[node.kind, nxt, prv, attr]
-
-
-@converter.pre(TokenType.EXPR_ATTR_ALL)
-def tt_attr_all(node: HtmlAttrAllExpression) -> str:
-    attr = repr(node.attr)
-    prv, nxt = left_right_var_names("value", node.variable)
-    return js.BINDINGS[node.kind, nxt, prv, attr]
-
-
-@converter.pre(TokenType.IS_CSS)
-def tt_is_css(node: IsCssExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    code = js.BINDINGS[node.kind, prv, repr(node.query), repr(node.msg)]
-    if node.next.kind == TokenType.EXPR_NO_RETURN:
-        return code
-    code += js.EXPR_ASSIGN.format(nxt, prv)
-    return code
-
-
-@converter.pre(TokenType.IS_XPATH)
-def tt_is_xpath(node: IsXPathExpression) -> str:
-    #   const result = document.evaluate(xpath, context || document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
-    #     const node = result.singleNodeValue;
-    prv, nxt = left_right_var_names("value", node.variable)
-    code = js.BINDINGS[node.kind, repr(node.query), prv, repr(node.msg)]
-    if node.next.kind == TokenType.EXPR_NO_RETURN:
-        return code
-    code += js.EXPR_ASSIGN.format(nxt, prv)
-    return code
-
-
-@converter.pre(TokenType.TO_INT)
-def tt_to_int(node: ToInteger) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    return f"let {nxt} = parseInt({prv}, 10); "
-
-
-@converter.pre(TokenType.TO_INT_LIST)
-def tt_to_list_int(node: ToListInteger) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    return f"let {nxt} = {prv}.map(i => parseInt(i, 10)); "
-
-
-@converter.pre(TokenType.TO_FLOAT)
-def tt_to_float(node: ToFloat) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    return f"let {nxt} = parseFloat({prv}, 64); "
-
-
-@converter.pre(TokenType.TO_FLOAT_LIST)
-def tt_to_list_float(node: ToListFloat) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    return f"let {nxt} = {prv}.map(i => parseFloat(i, 64)); "
-
-
-@converter.pre(TokenType.TO_JSON)
-def tt_to_json(node: ToJson) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    return f"let {nxt} = JSON.parse({prv}); "
-
-
-@converter.pre(TokenType.TO_BOOL)
-def tt_to_bool(node: ToBool) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
+@CONVERTER(ExprToBool.kind)
+def pre_to_bool(node: ExprToBool) -> str:
+    prv, nxt = prev_next_var(node)
     return f"let {nxt} = {prv} || {prv} === 0 ? true : false;"
 
 
-@converter.pre(TokenType.EXPR_LIST_LEN)
-def tt_to_len(node: ArrayLengthExpression) -> str:
-    prv, nxt = left_right_var_names("value", node.variable)
-    return f"let {nxt} = {prv}.length; "
+@CONVERTER(ExprJsonify.kind)
+def pre_jsonify(node: ExprJsonify) -> str:
+    prv, nxt = prev_next_var(node)
+    return f"let {nxt} = JSON.parse({prv});"
+
+
+@CONVERTER(ExprCss.kind)
+def pre_css(node: ExprCss) -> str:
+    prv, nxt = prev_next_var(node)
+    query = node.kwargs["query"]
+    return f"let {nxt} = {prv}.querySelector({query!r});"
+
+
+@CONVERTER(ExprCssAll.kind)
+def pre_css_all(node: ExprCssAll) -> str:
+    prv, nxt = prev_next_var(node)
+    query = node.kwargs["query"]
+    return f"let {nxt} = Array.from({prv}.querySelectorAll({query!r}));"
+
+
+@CONVERTER(ExprXpath.kind)
+def pre_xpath(node: ExprXpath) -> str:
+    prv, nxt = prev_next_var(node)
+    query = node.kwargs["query"]
+    return J2_PRE_XPATH.render(prv=prv, nxt=nxt, query=query)
+
+
+@CONVERTER(ExprXpathAll.kind)
+def pre_xpath_all(node: ExprXpathAll) -> str:
+    prv, nxt = prev_next_var(node)
+    query = node.kwargs["query"]
+    snapshot_var = f"s{nxt}"
+    return J2_PRE_XPATH_ALL.render(
+        prv=prv, nxt=nxt, query=query, snapshot_var=snapshot_var
+    )
+
+
+@CONVERTER(ExprGetHtmlAttr.kind)
+def pre_html_attr(node: ExprGetHtmlAttr) -> str:
+    prv, nxt = prev_next_var(node)
+    key = node.kwargs["key"]
+    return f"let {nxt} = {prv}.getAttribute({key!r});"
+
+
+@CONVERTER(ExprGetHtmlAttrAll.kind)
+def pre_html_attr_all(node: ExprGetHtmlAttrAll) -> str:
+    prv, nxt = prev_next_var(node)
+    key = node.kwargs["key"]
+    return f"let {nxt} = {prv}.map(e => e.getAttribute({key!r}));"
+
+
+@CONVERTER(ExprGetHtmlText.kind)
+def pre_html_text(node: ExprGetHtmlText) -> str:
+    prv, nxt = prev_next_var(node)
+    return (
+        f"let {nxt} = typeof {prv}.textContent ==="
+        + f'"undefined" ? {prv}.documentElement.textContent : {prv}.textContent;'
+    )
+
+
+@CONVERTER(ExprGetHtmlTextAll.kind)
+def pre_html_text_all(node: ExprGetHtmlTextAll) -> str:
+    prv, nxt = prev_next_var(node)
+    # naive apologize, its element objects, not document
+    return f"let {nxt} = {prv}.map(e => e.textContent);"
+
+
+@CONVERTER(ExprGetHtmlRaw.kind)
+def pre_html_raw(node: ExprGetHtmlRaw) -> str:
+    prv, nxt = prev_next_var(node)
+    return (
+        f'let {nxt} = typeof {prv}.outerHTML === "undefined" '
+        f"? {prv}.documentElement.outerHTML : {prv}.outerHTML;"
+    )
+
+
+@CONVERTER(ExprGetHtmlRawAll.kind)
+def pre_html_raw_all(node: ExprGetHtmlRawAll) -> str:
+    prv, nxt = prev_next_var(node)
+    return f"let {nxt} = {prv}.map(e => e.outerHTML);"
