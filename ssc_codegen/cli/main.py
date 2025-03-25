@@ -16,7 +16,6 @@ from ssc_codegen.cli.cli_utils import (
 )
 from ssc_codegen.cli.code_callbacks import (
     CB_PY_CODE,
-    CB_DART_CODE,
     CB_GO_CODE,
     CB_JS_CODE,
 )
@@ -218,8 +217,6 @@ def gen_js(
         debug_comment_prefix="// ",
         code_cb=CB_JS_CODE,
     )
-
-
 
 
 @app.command("go", help=CMD_GO)
