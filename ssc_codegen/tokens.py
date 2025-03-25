@@ -139,8 +139,6 @@ class TokenType(IntEnum):
 
     # ARRAY
     EXPR_LIST_ANY_INDEX = auto()
-    EXPR_LIST_STRING_INDEX = auto()
-    EXPR_LIST_DOCUMENT_INDEX = auto()
     EXPR_LIST_JOIN = auto()
     EXPR_LIST_LEN = auto()
 
@@ -183,5 +181,15 @@ class TokenType(IntEnum):
             TokenType.IS_EQUAL,
             TokenType.IS_NOT_EQUAL,
             TokenType.IS_CONTAINS,
+            TokenType.IS_REGEX_MATCH,
+        )
+
+    @classmethod
+    def regex_tokens(cls) -> tuple["TokenType", ...]:
+        return (
+            TokenType.EXPR_REGEX,
+            TokenType.EXPR_REGEX_ALL,
+            TokenType.EXPR_REGEX_SUB,
+            TokenType.EXPR_LIST_REGEX_SUB,
             TokenType.IS_REGEX_MATCH,
         )
