@@ -1,8 +1,8 @@
 from dataclasses import dataclass
-from typing import TypedDict, ClassVar
+from typing import TypedDict, ClassVar, Sequence
 
-from ssc_codegen.tokens import TokenType, VariableType
 from ssc_codegen.ast_.base import BaseAstNode
+from ssc_codegen.tokens import TokenType, VariableType
 
 T_EQ_OR_NE_ARG = str | int | float | bool
 
@@ -18,12 +18,25 @@ class ExprIsEqual(BaseAstNode[KW_ASSERT_EQ_OR_NE, ARGS_ASSERT_EQ]):
     accept_type: VariableType = VariableType.ANY
     ret_type: VariableType = VariableType.ANY
 
+    exclude_types: Sequence[VariableType] = (
+        VariableType.DOCUMENT,
+        VariableType.LIST_DOCUMENT,
+        VariableType.JSON,
+        VariableType.NESTED,
+    )
+
 
 @dataclass(kw_only=True)
 class ExprIsNotEqual(BaseAstNode[KW_ASSERT_EQ_OR_NE, ARGS_ASSERT_EQ]):
     kind: ClassVar[TokenType] = TokenType.IS_NOT_EQUAL
     accept_type: VariableType = VariableType.ANY
     ret_type: VariableType = VariableType.ANY
+    exclude_types: Sequence[VariableType] = (
+        VariableType.DOCUMENT,
+        VariableType.LIST_DOCUMENT,
+        VariableType.JSON,
+        VariableType.NESTED,
+    )
 
 
 T_IS_IN_ARG = str | int | float
@@ -36,6 +49,7 @@ class ExprIsContains(BaseAstNode[KW_ASSERT_IN, ARGS_ASSERT_IN]):
     kind: ClassVar[TokenType] = TokenType.IS_CONTAINS
     accept_type: VariableType = VariableType.LIST_ANY
     ret_type: VariableType = VariableType.ANY
+    exclude_types: Sequence[VariableType] = (VariableType.LIST_DOCUMENT,)
 
 
 KW_IS_REGEX = TypedDict(

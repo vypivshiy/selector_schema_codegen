@@ -8,6 +8,7 @@ from typing import (
     TypedDict,
     Optional,
     MutableSequence,
+    Sequence,
 )
 
 from ssc_codegen.tokens import TokenType, VariableType
@@ -30,6 +31,7 @@ class BaseAstNode(Generic[T_MAPPING_FIELD, T_ARGUMENTS]):
     # used for type check expressions
     accept_type: VariableType = VariableType.ANY
     ret_type: VariableType = VariableType.ANY
+    exclude_types: Sequence[VariableType] = field(default_factory=tuple)
 
     def unpack_args(self) -> T_ARGUMENTS:
         """extract all values from kwargs field wout keys"""
