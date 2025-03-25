@@ -114,6 +114,8 @@ from ssc_codegen.ast_ import (
     ModuleImports,
     ExprDefaultValueStart,
     ExprCallStructMethod,
+    JsonStruct,
+    JsonStructField,
 )
 from ssc_codegen.converters.base import BaseCodeConverter
 from ssc_codegen.converters.helpers import (
@@ -279,6 +281,30 @@ def get_typedef_field_by_name(node: TypeDef, field_name: str) -> str:
     else:
         type_ = TYPES[value.kwargs["type"]]
     return type_
+
+
+@CONVERTER(JsonStruct.kind)
+def pre_json_struct(node: JsonStruct) -> str:
+    name, _is_array = node.unpack_args()
+    return f"type J{name} struct " + BRACKET_START
+
+
+@CONVERTER(JsonStruct.kind)
+def post_json_struct(_: JsonStruct) -> str:
+    return BRACKET_END
+
+
+@CONVERTER(JsonStructField.kind)
+def pre_json_struct_field(node: JsonStructField) -> str:
+    name, field_type = node.unpack_args()
+    if field_type.name:
+        type_ = f"J{field_type.name}"
+        if field_type.type == JsonVariableType.ARRAY_OBJECTS:
+            type_ = f"[]{type_}"
+    else:
+        type_ = JSON_TYPES[field_type.type]
+    field_name = to_upper_camel_case(name)
+    return f'{field_name} {type_} `json:"{name}"`' + END
 
 
 @CONVERTER(TypeDef.kind)
