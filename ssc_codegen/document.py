@@ -52,7 +52,7 @@ from ssc_codegen.ast_ import (
     ExprXpath,
 )
 from ssc_codegen.document_utlis import (
-    assert_re_expression,
+    analyze_re_expression,
     unverbosify_regex,
     is_ignore_case_regex,
 )
@@ -414,12 +414,15 @@ class ArrayDocument(BaseDocument):
         - accept LIST_STRING | LIST_DOCUMENT | LIST_INT | LIST_FLOAT, return INT
 
         """
-        if self.stack_last_ret not in (
+        if self.stack_last_ret in (
             VariableType.LIST_STRING,
             VariableType.LIST_DOCUMENT,
             VariableType.LIST_INT,
             VariableType.LIST_FLOAT,
         ):
+            expected_type = self.stack_last_ret
+        else:
+            expected_type = VariableType.LIST_ANY
             LOGGER.warning(
                 "to_len(): Expected type(s) %s got %s",
                 (
@@ -430,7 +433,7 @@ class ArrayDocument(BaseDocument):
                 ),
                 self.stack_last_ret.name,
             )
-        self._add(ExprToListLength(accept_type=self.stack_last_ret))
+        self._add(ExprToListLength(accept_type=expected_type))
         return self
 
 
@@ -523,7 +526,8 @@ class StringDocument(BaseDocument):
         """
         if "{{}}" not in fmt_string:
             LOGGER.warning(
-                "fmt() missing placeholder char {{}}, set to end string"
+                "fmt(%s) missing placeholder char `{{}}`, set to end string",
+                repr(fmt_string),
             )
             fmt_string += "{{}}"
 
@@ -581,8 +585,9 @@ class StringDocument(BaseDocument):
             ignore_case = is_ignore_case_regex(pattern)
 
         pattern = unverbosify_regex(pattern)
-        assert_re_expression(pattern)
-
+        result = analyze_re_expression(pattern, max_groups=1)
+        if not result:
+            LOGGER.warning(result.msg)
         if self.stack_last_ret != VariableType.STRING:
             LOGGER.warning(
                 "re(%s): Expected type(s) %s got %s",
@@ -610,7 +615,9 @@ class StringDocument(BaseDocument):
             ignore_case = is_ignore_case_regex(pattern)
 
         pattern = unverbosify_regex(pattern)
-        assert_re_expression(pattern, max_groups=1)
+        result = analyze_re_expression(pattern, max_groups=1)
+        if not result:
+            LOGGER.warning(result.msg)
 
         if self.stack_last_ret != VariableType.STRING:
             LOGGER.warning(
@@ -633,7 +640,9 @@ class StringDocument(BaseDocument):
         - accept LIST_STRING, return LIST_STRING
         """
         pattern = unverbosify_regex(pattern)
-        assert_re_expression(pattern, allow_empty_groups=True)
+        result = analyze_re_expression(pattern, allow_empty_groups=True)
+        if not result:
+            LOGGER.warning(result.msg)
 
         match self.stack_last_ret:
             case VariableType.LIST_STRING:
@@ -735,18 +744,18 @@ class AssertDocument(BaseDocument):
             and self.stack_last_ret != VariableType.STRING
         ):
             expected_type = VariableType.STRING
-        elif isinstance(value, int) and self.stack_last_ret != VariableType.INT:
-            ...
-            expected_type = VariableType.INT
+        elif (
+            isinstance(value, bool) and self.stack_last_ret != VariableType.BOOL
+        ):
+            expected_type = VariableType.BOOL
         elif (
             isinstance(value, float)
             and self.stack_last_ret != VariableType.FLOAT
         ):
             expected_type = VariableType.FLOAT
-        elif (
-            isinstance(value, bool) and self.stack_last_ret != VariableType.BOOL
-        ):
-            expected_type = VariableType.BOOL
+
+        elif isinstance(value, int) and self.stack_last_ret != VariableType.INT:
+            expected_type = VariableType.INT
         else:
             expected_type = VariableType.ANY
             LOGGER.warning(
@@ -765,8 +774,8 @@ class AssertDocument(BaseDocument):
         self._add(
             ExprIsEqual(
                 kwargs={"item": value, "msg": msg},
-                accept_type=self.stack_last_ret,
-                ret_type=self.stack_last_ret,
+                accept_type=expected_type,
+                ret_type=expected_type,
             )
         )
         return self
@@ -786,18 +795,20 @@ class AssertDocument(BaseDocument):
             and self.stack_last_ret != VariableType.STRING
         ):
             expected_type = VariableType.STRING
-        elif isinstance(value, int) and self.stack_last_ret != VariableType.INT:
-            ...
-            expected_type = VariableType.INT
+        elif (
+            isinstance(value, bool) and self.stack_last_ret != VariableType.BOOL
+        ):
+            expected_type = VariableType.BOOL
+
         elif (
             isinstance(value, float)
             and self.stack_last_ret != VariableType.FLOAT
         ):
             expected_type = VariableType.FLOAT
-        elif (
-            isinstance(value, bool) and self.stack_last_ret != VariableType.BOOL
-        ):
-            expected_type = VariableType.BOOL
+
+        elif isinstance(value, int) and self.stack_last_ret != VariableType.INT:
+            expected_type = VariableType.INT
+
         else:
             expected_type = VariableType.ANY
             LOGGER.warning(
@@ -816,8 +827,8 @@ class AssertDocument(BaseDocument):
         self._add(
             ExprIsNotEqual(
                 kwargs={"item": value, "msg": msg},
-                accept_type=self.stack_last_ret,
-                ret_type=self.stack_last_ret,
+                accept_type=expected_type,
+                ret_type=expected_type,
             )
         )
         return self
@@ -863,8 +874,8 @@ class AssertDocument(BaseDocument):
         self._add(
             ExprIsContains(
                 kwargs={"item": item, "msg": msg},
-                accept_type=self.stack_last_ret,
-                ret_type=self.stack_last_ret,
+                accept_type=expected_type,
+                ret_type=expected_type,
             )
         )
         return self
@@ -881,7 +892,7 @@ class AssertDocument(BaseDocument):
         if not isinstance(pattern, str):
             ignore_case = is_ignore_case_regex(pattern)
         pattern = unverbosify_regex(pattern)
-        assert_re_expression(pattern, allow_empty_groups=True)
+        analyze_re_expression(pattern, allow_empty_groups=True)
 
         if self.stack_last_ret != VariableType.STRING:
             LOGGER.warning(
