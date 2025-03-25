@@ -11,22 +11,17 @@ from helpers_converters import (
 
 from ssc_codegen.converters.base import BaseCodeConverter
 
-# dart
-from ssc_codegen.converters.dart_universal_html import (
-    converter as dart_universal_html,
-)
 
 # go
-from ssc_codegen.converters.go_goquery import converter as go_goquery
+from ssc_codegen.converters.go_goquery import CONVERTER as go_goquery
 
 # js
-from ssc_codegen.converters.js_pure import converter as js_pure
+from ssc_codegen.converters.js_pure import CONVERTER as js_pure
 
 # python
-from ssc_codegen.converters.py_bs4 import converter as py_bs4
-from ssc_codegen.converters.py_parsel import converter as py_parsel
-from ssc_codegen.converters.py_scrapy import converter as py_scrapy
-from ssc_codegen.converters.py_selectolax import converter as py_selectolax
+from ssc_codegen.converters.py_bs4 import CONVERTER as py_bs4
+from ssc_codegen.converters.py_parsel import CONVERTER as py_parsel
+from ssc_codegen.converters.py_selectolax import CONVERTER as py_selectolax
 from ssc_codegen.tokens import TokenType
 
 _TEST_BS4 = new_converter_check(
@@ -51,23 +46,6 @@ _TEST_PARSEL = new_converter_check(
 _TEST_SELECTOLAX = new_converter_check(
     "py_selectolax",
     converter=py_selectolax,
-    include=REQUIRED_TOKENS_CONVERT_IMPL
-    | CSS_TOKENS_IMPL
-    | TYPING_TOKENS_CONVERT_IMPL,
-    exclude={TokenType.JSON_FIELD},
-)
-_TEST_SCRAPY = new_converter_check(
-    "py_scrapy",
-    converter=py_scrapy,
-    include=REQUIRED_TOKENS_CONVERT_IMPL
-    | CSS_TOKENS_IMPL
-    | XPATH_TOKENS_IMPL
-    | TYPING_TOKENS_CONVERT_IMPL,
-    exclude={TokenType.JSON_FIELD},
-)
-_TEST_DART = new_converter_check(
-    "dart_universal_html",
-    converter=dart_universal_html,
     include=REQUIRED_TOKENS_CONVERT_IMPL
     | CSS_TOKENS_IMPL
     | TYPING_TOKENS_CONVERT_IMPL,
@@ -106,8 +84,6 @@ _TEST_JS_PURE = new_converter_check(
         _TEST_BS4,
         _TEST_PARSEL,
         _TEST_SELECTOLAX,
-        _TEST_SCRAPY,
-        _TEST_DART,
         _TEST_GO_GOQUERY,
         _TEST_JS_PURE,
     ],

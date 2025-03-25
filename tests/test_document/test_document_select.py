@@ -1,12 +1,12 @@
 import pytest
 
 from ssc_codegen import D, R
-from ssc_codegen.ast_ssc import VariableType
+from ssc_codegen.tokens import VariableType
 from ssc_codegen.document import BaseDocument
 
 
 @pytest.mark.parametrize(
-    "expr",
+    "_",
     [
         D().css("a").css_all("b"),
         D().xpath("//a").xpath_all("//b"),
@@ -14,7 +14,7 @@ from ssc_codegen.document import BaseDocument
         D().xpath_all("//a"),
     ],
 )
-def test_document_to_list_document(expr: BaseDocument) -> None:
+def test_document_to_list_document(_: BaseDocument) -> None:
     assert True
 
 

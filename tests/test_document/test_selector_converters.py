@@ -76,7 +76,7 @@ def test_convert_css_to_xpath_queries(
             [
                 TokenType.EXPR_XPATH,
                 TokenType.EXPR_XPATH_ALL,
-                TokenType.EXPR_LIST_DOCUMENT_INDEX,
+                TokenType.EXPR_LIST_ANY_INDEX,
                 TokenType.IS_XPATH,
             ],
         ),
@@ -122,7 +122,7 @@ def test_convert_xpath_to_css_queries(
             [
                 TokenType.EXPR_CSS,
                 TokenType.EXPR_CSS_ALL,
-                TokenType.EXPR_LIST_DOCUMENT_INDEX,
+                TokenType.EXPR_LIST_ANY_INDEX,
                 TokenType.IS_CSS,
             ],
         ),

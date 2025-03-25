@@ -8,26 +8,27 @@ class MockParserOne(ItemSchema):
 
 
 class MockParserMain(ItemSchema):
-    bar: MockParserOne = N().sub_parser(MockParserOne)
+    bar = N().sub_parser(MockParserOne)
 
 
 @pytest.mark.parametrize(
-    "expr",
+    "_",
     [
         N().sub_parser(MockParserOne),
         N().css("a").sub_parser(MockParserMain),
         N().xpath("//a").sub_parser(MockParserMain),
     ],
 )
-def test_nested(expr: BaseDocument) -> None:
+def test_nested(_: BaseDocument) -> None:
     assert True
 
 
 def test_nested_init() -> None:
-    class MockParserOne(ItemSchema):
+    class MockParserOne2(ItemSchema):
         foo = D().text()
 
-    class MockParserMain(ItemSchema):
+    class MockParserMain2(MockParserOne2):
         bar = N().sub_parser(MockParserOne)
 
-    MockParserMain  # noqa
+    fields = MockParserMain2.__get_mro_fields__()
+    assert fields.get("foo")

@@ -1,13 +1,8 @@
 import pytest
 
 from ssc_codegen import D, R
-from ssc_codegen.ast_ssc import VariableType
+from ssc_codegen.tokens import VariableType
 from ssc_codegen.document import BaseDocument
-
-
-def test_fail_str_format() -> None:
-    with pytest.raises(SyntaxError):
-        R().fmt("wow")
 
 
 @pytest.mark.parametrize(

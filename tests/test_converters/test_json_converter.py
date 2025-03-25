@@ -1,6 +1,6 @@
 import pytest
 
-from ssc_codegen.converters import convert_json_to_schema_code
+from ssc_codegen.json_to_scc import convert_json_to_schema_code
 
 
 @pytest.mark.parametrize(

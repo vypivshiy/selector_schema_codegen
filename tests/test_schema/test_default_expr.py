@@ -4,8 +4,9 @@ import pytest
 from helpers import schema_item_factory
 
 from ssc_codegen import D
-from ssc_codegen.ast_builder import build_ast_struct
+from ssc_codegen.ast_build.main import build_ast_struct_parser
 from ssc_codegen.schema import BaseSchema
+from ssc_codegen.ast_ import ModuleProgram
 
 
 @pytest.mark.parametrize(
@@ -20,6 +21,5 @@ from ssc_codegen.schema import BaseSchema
     ],
 )
 def test_invalid_default(schema: Type["BaseSchema"]) -> None:
-    # TODO: replace exception as TypeError
-    with pytest.raises(TypeError):
-        build_ast_struct(schema)
+    with pytest.raises(SyntaxError):
+        build_ast_struct_parser(schema, ModuleProgram())
