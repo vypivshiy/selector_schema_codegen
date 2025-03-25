@@ -4,7 +4,8 @@ from typing import Type, Sequence
 from ssc_codegen.schema import BaseSchema
 from ssc_codegen.static_checker.callbacks import analyze_schema_item_field, analyze_schema_key_field, \
     analyze_schema_value_field, analyze_field_default_value, analyze_field_type_static, analyze_field_html_queries, \
-    analyze_schema_split_doc_field, analyze_field_split_doc_ret_type, CB_SCHEMA, CB_DOCUMENT
+    analyze_schema_split_doc_field, analyze_field_split_doc_ret_type, CB_SCHEMA, CB_DOCUMENT, analyze_regex_expr, \
+    analyze_field_key_ret_type, analyze_other_field_type
 
 LOGGER = logging.getLogger("ssc_gen")
 
@@ -19,7 +20,10 @@ _DEFAULT_CB_DOCUMENTS = (
     analyze_field_type_static,
     analyze_field_default_value,
     analyze_field_html_queries,
-    analyze_field_split_doc_ret_type
+    analyze_field_split_doc_ret_type,
+    analyze_field_key_ret_type,
+    analyze_other_field_type,
+    analyze_regex_expr,
 )
 
 
