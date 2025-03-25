@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Type, cast
+from typing_extensions import assert_never
 
 from ssc_codegen import Json
 from ssc_codegen.ast_ import (
@@ -29,8 +30,8 @@ from ssc_codegen.ast_build.utils import (
     generate_docstring_signature,
     extract_json_structs_from_module,
     exec_module_code,
+    extract_schemas_from_module,
 )
-from ssc_codegen.ast_build_utils import extract_schemas_from_module
 from ssc_codegen.document import BaseDocument
 from ssc_codegen.document_utlis import (
     convert_css_to_xpath,
@@ -174,7 +175,8 @@ def build_ast_struct_parser(
     errors_count = run_analyze_schema(schema)
     if errors_count > 0:
         # todo: exc
-        raise SyntaxError
+        msg = f"{schema.__name__} founded errors: {errors_count}"
+        raise SyntaxError(msg)
     docstring = (
         (schema.__doc__ or "") + "\n\n" + generate_docstring_signature(schema)
     )
@@ -266,12 +268,26 @@ def _fetch_field_nodes(
 def _unwrap_default_node(
     document: BaseDocument, ret_type: VariableType
 ) -> None:
+    ret_type = document.stack_last_ret
+
     if document.stack[0].kind == TokenType.EXPR_DEFAULT:
         default_expr = document.stack.pop(0)
         value = default_expr.kwargs["value"]
+        if value is None:
+            match ret_type:
+                case VariableType.STRING:
+                    default_type = VariableType.OPTIONAL_STRING
+                case VariableType.INT:
+                    default_type = VariableType.OPTIONAL_INT
+                case VariableType.FLOAT:
+                    default_type = VariableType.OPTIONAL_FLOAT
+                case _:
+                    assert_never(ret_type)
+        else:
+            default_type = ret_type
         expr_default_start = ExprDefaultValueStart(kwargs={"value": value})
         expr_default_end = ExprDefaultValueEnd(
-            kwargs={"value": value}, ret_type=ret_type
+            kwargs={"value": value}, ret_type=default_type
         )
         document.stack.insert(0, expr_default_start)
         document.stack.append(expr_default_end)
