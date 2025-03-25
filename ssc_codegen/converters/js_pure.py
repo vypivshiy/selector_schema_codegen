@@ -72,6 +72,9 @@ from ssc_codegen.ast_ import (
     ExprGetHtmlTextAll,
     ExprGetHtmlRaw,
     ExprGetHtmlRawAll,
+    StructPartDocMethod,
+    ExprIsCss,
+    ExprIsXpath,
 )
 from ssc_codegen.converters.base import BaseCodeConverter
 from ssc_codegen.converters.helpers import (
@@ -93,6 +96,7 @@ from ssc_codegen.converters.templates.js_pure import (
     J2_PRE_XPATH,
     J2_PRE_XPATH_ALL,
     J2_PRE_STR_TRIM,
+    J2_IS_XPATH,
 )
 from ssc_codegen.str_utils import (
     wrap_backtick,
@@ -129,6 +133,11 @@ def pre_docstring(node: Docstring) -> str:
     value = node.kwargs["value"]
     docstr = make_js_docstring(value)
     return docstr
+
+
+@CONVERTER(StructPartDocMethod.kind)
+def pre_part_doc(_node: StructPartDocMethod) -> str:
+    return "_splitDoc(v) " + BRACKET_START
 
 
 @CONVERTER(StructParser.kind)
@@ -253,7 +262,7 @@ def pre_str_fmt(node: ExprStringFormat) -> str:
     return f"let {nxt} = {template};"
 
 
-@CONVERTER(ExprStringFormat.kind)
+@CONVERTER(ExprListStringFormat.kind)
 def pre_list_str_fmt(node: ExprListStringFormat) -> str:
     prv, nxt = prev_next_var(node)
     template = wrap_backtick(node.fmt.replace("{{}}", "${e}"))
@@ -431,6 +440,30 @@ def pre_is_regex(node: ExprIsRegex) -> str:
     if is_last_var_no_ret(node):
         return expr
     # HACK: avoid recalc variables
+    return expr + f"let {nxt} = {prv};"
+
+
+@CONVERTER(ExprIsCss.kind)
+def pre_is_css(node: ExprIsCss) -> str:
+    prv, nxt = prev_next_var(node)
+    query, msg = node.unpack_args()
+    expr = f"if ({prv}.querySelector({query!r}) === null) throw new Error({msg!r});"
+    if is_last_var_no_ret(node):
+        return expr
+    # HACK: avoid recalc variables
+    return expr + f"let {nxt} = {prv};"
+
+
+@CONVERTER(ExprIsXpath.kind)
+def pre_is_xpath(node: ExprIsXpath) -> str:
+    prv, nxt = prev_next_var(node)
+    query, msg = node.unpack_args()
+    msg = repr(msg)
+    expr = J2_IS_XPATH.render(prv=prv, nxt=nxt, msg=msg)
+    if is_last_var_no_ret(node):
+        return expr
+    # HACK: avoid recalc variables
+    # TODO: move to j2 template
     return expr + f"let {nxt} = {prv};"
 
 

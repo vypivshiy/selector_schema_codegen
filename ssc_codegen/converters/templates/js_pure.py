@@ -95,3 +95,8 @@ let {{ nxt }} = Array.from({ length: {{ snapshot_var }}.snapshotLength }, (_, i)
     {{ snapshot_var }}.snapshotItem(i)
 );
 """)
+
+
+J2_IS_XPATH = Template("""
+if (document.evaluate("{{ query }}", {{ prv }}, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue === null) throw new Error({{ msg }});
+""")
