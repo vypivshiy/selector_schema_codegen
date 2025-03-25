@@ -1,6 +1,6 @@
 import re
 from typing import TYPE_CHECKING, Pattern
-
+import logging
 from ssc_codegen.ast_ import (
     BaseAstNode,
     ExprIsCss,
@@ -11,6 +11,9 @@ from ssc_codegen.ast_ import (
     ExprCssAll,
 )
 from ssc_codegen.selector_utils import css_to_xpath, xpath_to_css
+from ssc_codegen.static_checker.base import AnalyzeResult
+
+LOGGER = logging.getLogger("ssc_gen")
 
 if TYPE_CHECKING:
     from .document import BaseDocument
@@ -56,22 +59,25 @@ def unverbosify_regex(pattern: str | Pattern) -> str:
     return pattern.pattern
 
 
-def assert_re_expression(
+def analyze_re_expression(
     pattern: str, allow_empty_groups: bool = False, max_groups: int = -1
-) -> None:
+) -> AnalyzeResult:
     """throw SyntaxError if pattern empty or cannot be compiled."""
+    # TODO: move to static_checkers
     if not pattern:
-        raise SyntaxError("Empty pattern expression")
+        return AnalyzeResult.error("Empty pattern expression")
     try:
         re_pattern = re.compile(pattern)
         if not allow_empty_groups and re_pattern.groups == 0:
             msg = f"`{re_pattern.pattern}` pattern groups is empty"
-            raise SyntaxError(msg)
+            return AnalyzeResult.error(msg)
         elif max_groups != -1 and re_pattern.groups > max_groups:
             msg = f"`{re_pattern.pattern}` too many groups in pattern, expected {max_groups}"
-            raise SyntaxError(msg)
+            return AnalyzeResult.error(msg)
     except re.error as e:
-        raise SyntaxError("Wrong regex pattern") from e
+        msg = f"`{pattern}` wrong regex pattern syntax: {e!r}"
+        return AnalyzeResult.error(msg)
+    return AnalyzeResult.ok()
 
 
 def convert_css_to_xpath(
