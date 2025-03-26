@@ -75,6 +75,12 @@ from ssc_codegen.ast_ import (
     StructPartDocMethod,
     ExprIsCss,
     ExprIsXpath,
+    ExprStringRmPrefix,
+    ExprListStringRmPrefix,
+    ExprStringRmSuffix,
+    ExprListStringRmSuffix,
+    ExprStringRmPrefixAndSuffix,
+    ExprListStringRmPrefixAndSuffix,
 )
 from ssc_codegen.converters.base import BaseCodeConverter
 from ssc_codegen.converters.helpers import (
@@ -583,3 +589,53 @@ def pre_html_raw(node: ExprGetHtmlRaw) -> str:
 def pre_html_raw_all(node: ExprGetHtmlRawAll) -> str:
     prv, nxt = prev_next_var(node)
     return f"let {nxt} = {prv}.map(e => e.outerHTML);"
+
+
+@CONVERTER(ExprStringRmPrefix.kind)
+def pre_str_rm_prefix(node: ExprStringRmPrefix) -> str:
+    prv, nxt = prev_next_var(node)
+    substr = repr(node.kwargs["substr"])
+    return f"let {nxt} = {prv}.startsWith({substr}) ? {prv}.slice({substr}.length) : {prv};"
+
+
+@CONVERTER(ExprListStringRmPrefix.kind)
+def pre_list_str_rm_prefix(node: ExprListStringRmPrefix) -> str:
+    prv, nxt = prev_next_var(node)
+    substr = repr(node.kwargs["substr"])
+    return f"let {nxt} = {prv}.map((e) => e.startsWith({substr}) ? e.slice({substr}.length) : e);"
+
+
+@CONVERTER(ExprStringRmSuffix.kind)
+def pre_str_rm_suffix(node: ExprStringRmSuffix) -> str:
+    prv, nxt = prev_next_var(node)
+    substr = repr(node.kwargs["substr"])
+    return f"let {nxt} = {prv}.endsWith({substr}) ? {prv}.slice(0, -{substr}.length) : {prv};"
+
+
+@CONVERTER(ExprListStringRmSuffix.kind)
+def pre_list_str_rm_suffix(node: ExprListStringRmSuffix) -> str:
+    prv, nxt = prev_next_var(node)
+    substr = repr(node.kwargs["substr"])
+    return f"let {nxt} = {prv}.map((e) => e.endsWith({substr}) ? e.slice(0, -{substr}.length) : e);"
+
+
+@CONVERTER(ExprStringRmPrefixAndSuffix.kind)
+def pre_str_rm_prefix_and_suffix(node: ExprStringRmPrefixAndSuffix) -> str:
+    prv, nxt = prev_next_var(node)
+    substr = repr(node.kwargs["substr"])
+    return (
+        f"let {nxt} = {prv}.startsWith({substr}) ? {prv}.slice({substr}.length) : {prv}; "
+        + f"{nxt} = {nxt}.endsWith({substr}) ? {prv}.slice(0, -{substr}.length) : {prv};"
+    )
+
+
+@CONVERTER(ExprListStringRmPrefixAndSuffix.kind)
+def pre_list_str_rm_prefix_and_suffix(
+    node: ExprListStringRmPrefixAndSuffix,
+) -> str:
+    prv, nxt = prev_next_var(node)
+    substr = repr(node.kwargs["substr"])
+    return (
+        f"let {nxt} = {prv}.map((e) => e.startsWith({substr}) ? e.slice({substr}.length) : e);"
+        + f"{nxt} = {nxt}.map((e) => e.endsWith({substr}) ? e.slice(0, -{substr}.length) : e);"
+    )

@@ -80,6 +80,11 @@ from ssc_codegen.ast_ import (
     ExprToListLength,
     ExprToBool,
     ExprJsonify,
+    ExprStringRmPrefix,
+    ExprStringRmSuffix,
+    ExprListStringRmSuffix,
+    ExprStringRmPrefixAndSuffix,
+    ExprListStringRmPrefixAndSuffix,
 )
 from ssc_codegen.converters.base import (
     BaseCodeConverter,
@@ -172,6 +177,8 @@ class BasePyCodeConverter(BaseCodeConverter):
             comment_prefix_sep,
             debug_cb,
         )
+        from ssc_codegen.ast_ import ExprListStringRmPrefix
+
         self.pre_definitions = {
             Docstring.kind: pre_docstring,
             ModuleImports.kind: pre_imports,
@@ -204,6 +211,12 @@ class BasePyCodeConverter(BaseCodeConverter):
             ExprStringRegexAll.kind: pre_str_regex_all,
             ExprStringRegexSub.kind: pre_str_regex_sub,
             ExprListStringRegexSub.kind: pre_list_str_regex_sub,
+            ExprStringRmPrefix.kind: pre_str_rm_prefix,
+            ExprListStringRmPrefix.kind: pre_list_str_rm_prefix,
+            ExprStringRmSuffix.kind: pre_str_rm_suffix,
+            ExprListStringRmSuffix.kind: pre_list_str_rm_suffix,
+            ExprStringRmPrefixAndSuffix.kind: pre_str_rm_prefix_and_suffix,
+            ExprListStringRmPrefixAndSuffix.kind: pre_list_str_rm_prefix_and_suffix,
             ExprIndex.kind: pre_index,
             ExprListStringJoin.kind: pre_list_str_join,
             ExprIsEqual.kind: pre_is_equal,
@@ -484,6 +497,89 @@ def pre_list_str_fmt(node: ExprListStringFormat) -> str:
     prv, nxt = prev_next_var(node)
     fmt = "f" + repr(node.kwargs["fmt"].replace("{{}}", "{i}"))
     return indent + f"{nxt} = [{fmt} for i in {prv}]"
+
+
+def pre_str_rm_prefix(node: ExprStringRmPrefix) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    substr = node.kwargs["substr"]
+    return (
+        indent
+        + f"{nxt} = {prv}[len({substr!r}):] if {prv}.startswith({substr!r}) else {prv}"
+    )
+
+
+def pre_list_str_rm_prefix(node: ExprStringRmPrefix) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    substr = node.kwargs["substr"]
+    return (
+        indent
+        + f"{nxt} = "
+        + f"[i[len({substr!r}):] if i.startswith({substr!r}) else i "
+        + f"for i in {prv}]"
+    )
+
+
+# NOTE: rm prefixes and rm suffixes use hacks with slices instead str.removeprefix() and str.removesuffix()
+# for py3.8 compatibility
+def pre_str_rm_suffix(node: ExprStringRmSuffix) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    substr = node.kwargs["substr"]
+    return (
+        indent
+        + f"{nxt} = {prv}[:-(len({substr!r}))] if {prv}.endswith({substr!r}) else {prv}"
+    )
+
+
+def pre_list_str_rm_suffix(node: ExprListStringRmSuffix) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    substr = node.kwargs["substr"]
+    return (
+        indent
+        + f"{nxt} = "
+        + f"[i[:-(len({substr!r}))] if i.endswith({substr!r}) else i "
+        + f"for i in {prv}]"
+    )
+
+
+def pre_str_rm_prefix_and_suffix(node: ExprStringRmPrefixAndSuffix) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    substr = node.kwargs["substr"]
+    return (
+        indent
+        + f"{nxt} = ({prv}[len({substr!r}):] if {prv}.startswith({substr!r}) else {prv})"
+        + f"[:-(len({substr!r}))] if {prv}.endswith({substr!r}) else {prv}"
+    )
+
+
+def pre_list_str_rm_prefix_and_suffix(
+    node: ExprListStringRmPrefixAndSuffix,
+) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    substr = node.kwargs["substr"]
+    return (
+        indent
+        + f"{nxt} = [(i[len({substr!r}):] if i.startswith({substr!r}) else i)"
+        + f"[:-(len({substr!r}))] if i.endswith({substr!r}) else i for i in {prv}"
+        + "]"
+    )
 
 
 def pre_str_trim(node: ExprStringTrim) -> str:

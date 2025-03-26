@@ -50,6 +50,11 @@ from ssc_codegen.ast_ import (
     ExprToBool,
     ExprJsonify,
     ExprXpath,
+    ExprStringRmPrefix,
+    ExprStringRmSuffix,
+    ExprListStringRmSuffix,
+    ExprStringRmPrefixAndSuffix,
+    ExprListStringRmPrefixAndSuffix,
 )
 from ssc_codegen.document_utlis import (
     analyze_re_expression,
@@ -438,6 +443,75 @@ class ArrayDocument(BaseDocument):
 
 
 class StringDocument(BaseDocument):
+    def rm_prefix(self, substr: str) -> Self:
+        """remove prefix from string by substr
+
+        - accept STRING, return STRING
+        - accept LIST_STRING, return LIST_STRING
+        """
+        match self.stack_last_ret:
+            case VariableType.LIST_STRING:
+                self._add(ExprListStringTrim(kwargs={"substr": substr}))
+            case VariableType.STRING:
+                self._add(ExprStringRmPrefix(kwargs={"substr": substr}))
+            case _:
+                LOGGER.warning(
+                    "rm_prefix(%s): Expected type(s) %s got %s",
+                    repr(substr),
+                    (VariableType.LIST_STRING.name, VariableType.STRING.name),
+                    self.stack_last_ret.name,
+                )
+                self._add(ExprStringRmPrefix(kwargs={"substr": substr}))
+        return self
+
+    def rm_suffix(self, substr: str) -> Self:
+        """remove suffix from string by substr
+
+        - accept STRING, return STRING
+        - accept LIST_STRING, return LIST_STRING
+        """
+        match self.stack_last_ret:
+            case VariableType.LIST_STRING:
+                self._add(ExprListStringRmSuffix(kwargs={"substr": substr}))
+            case VariableType.STRING:
+                self._add(ExprStringRmSuffix(kwargs={"substr": substr}))
+            case _:
+                LOGGER.warning(
+                    "rm_suffix(%s): Expected type(s) %s got %s",
+                    repr(substr),
+                    (VariableType.LIST_STRING.name, VariableType.STRING.name),
+                    self.stack_last_ret.name,
+                )
+                self._add(ExprStringRmSuffix(kwargs={"substr": substr}))
+        return self
+
+    def rm_prefix_suffix(self, substr: str) -> Self:
+        """remove prefix and suffix from string by substr
+
+        - accept STRING, return STRING
+        - accept LIST_STRING, return LIST_STRING
+        """
+        match self.stack_last_ret:
+            case VariableType.LIST_STRING:
+                self._add(
+                    ExprListStringRmPrefixAndSuffix(kwargs={"substr": substr})
+                )
+            case VariableType.STRING:
+                self._add(
+                    ExprStringRmPrefixAndSuffix(kwargs={"substr": substr})
+                )
+            case _:
+                LOGGER.warning(
+                    "rm_prefix_suffix(%s): Expected type(s) %s got %s",
+                    repr(substr),
+                    (VariableType.LIST_STRING.name, VariableType.STRING.name),
+                    self.stack_last_ret.name,
+                )
+                self._add(
+                    ExprStringRmPrefixAndSuffix(kwargs={"substr": substr})
+                )
+        return self
+
     def trim(self, substr: str = " ") -> Self:
         """trim LEFT and RIGHT chars string by substr
 

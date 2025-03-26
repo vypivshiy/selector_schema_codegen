@@ -1,8 +1,8 @@
 from dataclasses import dataclass
 from typing import TypedDict, ClassVar
 
-from ssc_codegen.tokens import TokenType, VariableType
 from ssc_codegen.ast_.base import BaseAstNode
+from ssc_codegen.tokens import TokenType, VariableType
 
 KW_STR_TRIM = TypedDict("KW_STR_TRIM", {"substr": str})
 
@@ -130,5 +130,65 @@ class ExprStringRegexSub(BaseAstNode[KW_STR_RE_SUB, tuple[str, str]]):
 @dataclass(kw_only=True)
 class ExprListStringRegexSub(BaseAstNode[KW_STR_RE_SUB, tuple[str, str]]):
     kind: ClassVar[TokenType] = TokenType.EXPR_LIST_REGEX_SUB
+    accept_type: VariableType = VariableType.LIST_STRING
+    ret_type: VariableType = VariableType.LIST_STRING
+
+
+KW_STR_RM_PREFIX_OR_SUFFIX = TypedDict(
+    "KW_STR_RM_PREFIX_OR_SUFFIX", {"substr": str}
+)
+ARGS_STR_RM_PREFIX_OR_SUFFIX = tuple[str]
+
+
+@dataclass(kw_only=True)
+class ExprStringRmPrefix(
+    BaseAstNode[KW_STR_RM_PREFIX_OR_SUFFIX, ARGS_STR_RM_PREFIX_OR_SUFFIX]
+):
+    kind: ClassVar[TokenType] = TokenType.EXPR_STRING_RM_PREFIX
+    accept_type: VariableType = VariableType.STRING
+    ret_type: VariableType = VariableType.STRING
+
+
+@dataclass(kw_only=True)
+class ExprStringRmSuffix(
+    BaseAstNode[KW_STR_RM_PREFIX_OR_SUFFIX, ARGS_STR_RM_PREFIX_OR_SUFFIX]
+):
+    kind: ClassVar[TokenType] = TokenType.EXPR_STRING_RM_SUFFIX
+    accept_type: VariableType = VariableType.STRING
+    ret_type: VariableType = VariableType.STRING
+
+
+@dataclass(kw_only=True)
+class ExprStringRmPrefixAndSuffix(
+    BaseAstNode[KW_STR_RM_PREFIX_OR_SUFFIX, ARGS_STR_RM_PREFIX_OR_SUFFIX]
+):
+    kind: ClassVar[TokenType] = TokenType.EXPR_STRING_RM_PREFIX_AND_SUFFIX
+    accept_type: VariableType = VariableType.STRING
+    ret_type: VariableType = VariableType.STRING
+
+
+@dataclass(kw_only=True)
+class ExprListStringRmPrefix(
+    BaseAstNode[KW_STR_RM_PREFIX_OR_SUFFIX, ARGS_STR_RM_PREFIX_OR_SUFFIX]
+):
+    kind: ClassVar[TokenType] = TokenType.EXPR_LIST_STRING_RM_PREFIX
+    accept_type: VariableType = VariableType.LIST_STRING
+    ret_type: VariableType = VariableType.LIST_STRING
+
+
+@dataclass(kw_only=True)
+class ExprListStringRmSuffix(
+    BaseAstNode[KW_STR_RM_PREFIX_OR_SUFFIX, ARGS_STR_RM_PREFIX_OR_SUFFIX]
+):
+    kind: ClassVar[TokenType] = TokenType.EXPR_LIST_STRING_RM_SUFFIX
+    accept_type: VariableType = VariableType.LIST_STRING
+    ret_type: VariableType = VariableType.LIST_STRING
+
+
+@dataclass(kw_only=True)
+class ExprListStringRmPrefixAndSuffix(
+    BaseAstNode[KW_STR_RM_PREFIX_OR_SUFFIX, ARGS_STR_RM_PREFIX_OR_SUFFIX]
+):
+    kind: ClassVar[TokenType] = TokenType.EXPR_LIST_STRING_RM_PREFIX_AND_SUFFIX
     accept_type: VariableType = VariableType.LIST_STRING
     ret_type: VariableType = VariableType.LIST_STRING

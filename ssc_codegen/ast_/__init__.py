@@ -25,5 +25,8 @@ from .nodes_selectors import ExprCss, ExprCssAll, ExprXpathAll, ExprXpath, ExprG
 
 from .nodes_string import ExprStringTrim, ExprStringRegex, ExprStringSplit, ExprStringReplace, ExprStringLeftTrim, \
     ExprStringFormat, ExprListStringTrim, ExprStringRegexAll, ExprStringRegexSub, ExprStringRightTrim, \
-    ExprListStringFormat, ExprListStringReplace, ExprListStringRightTrim, ExprListStringLeftTrim, ExprListStringRegexSub
+    ExprListStringFormat, ExprListStringReplace, ExprListStringRightTrim, ExprListStringLeftTrim, \
+    ExprListStringRegexSub, \
+    ExprStringRmPrefix, ExprStringRmSuffix, ExprStringRmPrefixAndSuffix, ExprListStringRmPrefixAndSuffix, \
+    ExprListStringRmPrefix, ExprListStringRmSuffix
 from .nodes_validate import ExprIsCss, ExprIsEqual, ExprIsRegex, ExprIsXpath, ExprIsNotEqual, ExprIsContains

@@ -350,3 +350,66 @@ for _, {{ tmp_var }} := range {{ prv }} {
     {{ nxt }} = append({{ nxt }}, {{ raw_var }});
 }
 """)
+
+
+J2_PRE_STR_RM_PREFIX = Template("""
+if strings.HasPrefix({{ prv }}, {{ substr }}) {
+    {{ nxt }} := {{ prv }}[len({{ substr }}):];
+} else {
+    {{ nxt }} := {{ prv }};
+}
+""")
+
+J2_PRE_LIST_STR_RM_PREFIX = Template("""
+{{ nxt }} := make([]string, 0); 
+for _, {{ tmp_var }} := range {{ prv }} {
+    if strings.HasPrefix({{ tmp_var }}, {{ substr }}) {
+        {{ tmp_var }} = {{ tmp_var }}[len({{ substr }}):];
+} 
+    {{ nxt }} := append({{ nxt }}, {{ tmp_var }});
+}
+""")
+
+
+J2_PRE_STR_RM_SUFFIX = Template("""
+if strings.HasSuffix({{ prv }}, {{ substr }}) {
+    {{ nxt }} := {{ prv }}[:len({{ prv }})-len({{ substr }})];
+} else {
+    {{ nxt }} := {{ prv }};
+}
+""")
+
+J2_PRE_LIST_STR_RM_SUFFIX = Template("""
+{{ nxt }} := make([]string, 0); 
+for _, {{ tmp_var }} := range {{ prv }} {
+    if strings.HasSuffix({{ tmp_var }}, {{ substr }}) {
+        {{ tmp_var }} = {{ tmp_var }}[:len({{ tmp_var }})-len({{ substr }})];
+} 
+    {{nxt}} := append({{ nxt }}, {{ tmp_var }});
+}
+""")
+
+J2_PRE_STR_RM_PREFIX_AND_SUFFIX = Template("""
+{{ tmp_var }} := {{ prv }};
+if strings.HasSuffix({{ tmp_var }}, {{ substr }}) {
+    {{ tmp_var }} = {{ tmp_var }}[:len({{ tmp_var }})-len({{ substr }})];
+    } 
+if strings.HasPrefix({{ tmp_var }}, {{ substr }}) {
+    {{ tmp_var }} = {{ tmp_var }}[len({{ substr }}):];
+    } 
+{{ nxt }} := {{ tmp_var }};
+}
+""")
+
+J2_PRE_LIST_STR_RM_PREFIX_AND_SUFFIX = Template("""
+{{ nxt }} := make([]string, 0); 
+for _, {{ tmp_var }} := range {{ prv }} {
+    if strings.HasSuffix({{ tmp_var }}, {{ substr }}) {
+        {{ tmp_var }} = {{ tmp_var }}[:len({{ tmp_var }})-len({{ substr }})];
+    } 
+    if strings.HasPrefix({{ tmp_var }}, {{ substr }}) {
+        {{ tmp_var }} = {{ tmp_var }}[len({{ substr }}):];
+    } 
+    {{nxt}} := append({{ nxt }}, {{ tmp_var} });
+}
+""")

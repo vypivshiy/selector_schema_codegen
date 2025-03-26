@@ -116,6 +116,12 @@ from ssc_codegen.ast_ import (
     ExprCallStructMethod,
     JsonStruct,
     JsonStructField,
+    ExprStringRmPrefix,
+    ExprListStringRmPrefix,
+    ExprStringRmSuffix,
+    ExprListStringRmSuffix,
+    ExprStringRmPrefixAndSuffix,
+    ExprListStringRmPrefixAndSuffix,
 )
 from ssc_codegen.converters.base import BaseCodeConverter
 from ssc_codegen.converters.helpers import (
@@ -154,6 +160,12 @@ from ssc_codegen.converters.templates.go_goquery import (
     J2_PRE_HTML_ATTR_ALL,
     J2_PRE_HTML_RAW,
     J2_PRE_HTML_RAW_ALL,
+    J2_PRE_STR_RM_PREFIX,
+    J2_PRE_LIST_STR_RM_PREFIX,
+    J2_PRE_STR_RM_SUFFIX,
+    J2_PRE_LIST_STR_RM_SUFFIX,
+    J2_PRE_STR_RM_PREFIX_AND_SUFFIX,
+    J2_PRE_LIST_STR_RM_PREFIX_AND_SUFFIX,
 )
 from ssc_codegen.str_utils import (
     wrap_backtick,
@@ -1101,3 +1113,59 @@ def pre_html_raw_all(node: ExprGetHtmlRawAll) -> str:
     }
 
     return J2_PRE_HTML_RAW_ALL.render(**context)
+
+
+@CONVERTER(ExprStringRmPrefix.kind)
+def pre_str_rm_prefix(node: ExprStringRmPrefix) -> str:
+    prv, nxt = prev_next_var(node)
+    substr = wrap_double_quotes(node.kwargs["substr"])
+    return J2_PRE_STR_RM_PREFIX.render(prv=prv, nxt=nxt, substr=substr)
+
+
+@CONVERTER(ExprListStringRmPrefix.kind)
+def pre_list_str_rm_prefix(node: ExprListStringRmPrefix) -> str:
+    prv, nxt = prev_next_var(node)
+    substr = wrap_double_quotes(node.kwargs["substr"])
+    tmp_var = f"i{nxt}"
+    return J2_PRE_LIST_STR_RM_PREFIX.render(
+        prv=prv, nxt=nxt, substr=substr, tmp_var=tmp_var
+    )
+
+
+@CONVERTER(ExprStringRmSuffix.kind)
+def pre_str_rm_suffix(node: ExprStringRmSuffix) -> str:
+    prv, nxt = prev_next_var(node)
+    substr = wrap_double_quotes(node.kwargs["substr"])
+    return J2_PRE_STR_RM_SUFFIX.render(prv=prv, nxt=nxt, substr=substr)
+
+
+@CONVERTER(ExprListStringRmSuffix.kind)
+def pre_list_str_rm_suffix(node: ExprListStringRmSuffix) -> str:
+    prv, nxt = prev_next_var(node)
+    substr = wrap_double_quotes(node.kwargs["substr"])
+    tmp_var = f"i{nxt}"
+    return J2_PRE_LIST_STR_RM_SUFFIX.render(
+        prv=prv, nxt=nxt, substr=substr, tmp_var=tmp_var
+    )
+
+
+@CONVERTER(ExprStringRmPrefixAndSuffix.kind)
+def pre_str_rm_prefix_and_suffix(node: ExprStringRmPrefixAndSuffix) -> str:
+    prv, nxt = prev_next_var(node)
+    substr = wrap_double_quotes(node.kwargs["substr"])
+    tmp_var = f"i{nxt}"
+    return J2_PRE_STR_RM_PREFIX_AND_SUFFIX.render(
+        prv=prv, nxt=nxt, substr=substr, tmp_var=tmp_var
+    )
+
+
+@CONVERTER(ExprListStringRmPrefixAndSuffix.kind)
+def pre_list_str_rm_prefix_and_suffix(
+    node: ExprListStringRmPrefixAndSuffix,
+) -> str:
+    prv, nxt = prev_next_var(node)
+    substr = wrap_double_quotes(node.kwargs["substr"])
+    tmp_var = f"i{nxt}"
+    return J2_PRE_LIST_STR_RM_PREFIX_AND_SUFFIX.render(
+        prv=prv, nxt=nxt, substr=substr, tmp_var=tmp_var
+    )
