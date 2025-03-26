@@ -9,7 +9,7 @@ if err != nil {
 {% endfor %}
 
 item := T{{ name }} {
-{{ st_args|join(', ') }}
+{{ st_args|join(', ') }},
 };
 return &item, nil;
 }
@@ -38,7 +38,7 @@ for _, i := range docParts.EachIter() {
 {% endfor %}
 
     item := T{{ name }} {
-        {{ st_args|join(', ') }}
+        {{ st_args|join(', ') }},
     };
     items = append(items, item);
 }
@@ -353,29 +353,27 @@ for _, {{ tmp_var }} := range {{ prv }} {
 
 
 J2_PRE_STR_RM_PREFIX = Template("""
+{{ nxt }} := {{ prv }}
 if strings.HasPrefix({{ prv }}, {{ substr }}) {
-    {{ nxt }} := {{ prv }}[len({{ substr }}):];
-} else {
-    {{ nxt }} := {{ prv }};
+    {{ nxt }} = {{ prv }}[len({{ substr }}):];
 }
 """)
 
 J2_PRE_LIST_STR_RM_PREFIX = Template("""
-{{ nxt }} := make([]string, 0); 
+{{ nxt }} := make([]string, 0);
 for _, {{ tmp_var }} := range {{ prv }} {
     if strings.HasPrefix({{ tmp_var }}, {{ substr }}) {
         {{ tmp_var }} = {{ tmp_var }}[len({{ substr }}):];
 } 
-    {{ nxt }} := append({{ nxt }}, {{ tmp_var }});
+    {{ nxt }} = append({{ nxt }}, {{ tmp_var }});
 }
 """)
 
 
 J2_PRE_STR_RM_SUFFIX = Template("""
+{{ nxt }} := {{ prv }};
 if strings.HasSuffix({{ prv }}, {{ substr }}) {
-    {{ nxt }} := {{ prv }}[:len({{ prv }})-len({{ substr }})];
-} else {
-    {{ nxt }} := {{ prv }};
+    {{ nxt }} = {{ prv }}[:len({{ prv }})-len({{ substr }})];
 }
 """)
 
@@ -385,20 +383,18 @@ for _, {{ tmp_var }} := range {{ prv }} {
     if strings.HasSuffix({{ tmp_var }}, {{ substr }}) {
         {{ tmp_var }} = {{ tmp_var }}[:len({{ tmp_var }})-len({{ substr }})];
 } 
-    {{nxt}} := append({{ nxt }}, {{ tmp_var }});
+    {{nxt}} = append({{ nxt }}, {{ tmp_var }});
 }
 """)
 
 J2_PRE_STR_RM_PREFIX_AND_SUFFIX = Template("""
-{{ tmp_var }} := {{ prv }};
-if strings.HasSuffix({{ tmp_var }}, {{ substr }}) {
-    {{ tmp_var }} = {{ tmp_var }}[:len({{ tmp_var }})-len({{ substr }})];
-    } 
-if strings.HasPrefix({{ tmp_var }}, {{ substr }}) {
-    {{ tmp_var }} = {{ tmp_var }}[len({{ substr }}):];
-    } 
-{{ nxt }} := {{ tmp_var }};
-}
+{{ nxt }} := {{ prv }};
+if strings.HasPrefix({{ nxt }}, {{ substr }}) {
+    {{ nxt }} = {{ nxt }}[len({{ substr }}):];
+} 
+if strings.HasSuffix({{ nxt }}, {{ substr }}) {
+    {{ nxt }} = {{ nxt }}[:len({{ nxt }})-len({{ substr }})];
+} 
 """)
 
 J2_PRE_LIST_STR_RM_PREFIX_AND_SUFFIX = Template("""
@@ -410,6 +406,6 @@ for _, {{ tmp_var }} := range {{ prv }} {
     if strings.HasPrefix({{ tmp_var }}, {{ substr }}) {
         {{ tmp_var }} = {{ tmp_var }}[len({{ substr }}):];
     } 
-    {{nxt}} := append({{ nxt }}, {{ tmp_var} });
+    {{nxt}} = append({{ nxt }}, {{ tmp_var }});
 }
 """)

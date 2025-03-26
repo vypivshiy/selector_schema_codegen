@@ -171,6 +171,7 @@ from ssc_codegen.str_utils import (
     wrap_backtick,
     to_upper_camel_case,
     wrap_double_quotes,
+    to_lower_camel_case,
 )
 from ssc_codegen.tokens import JsonVariableType, VariableType, StructType
 
@@ -227,6 +228,8 @@ RETURN_ERR_TYPES = {
     VariableType.LIST_FLOAT: "nil",
     VariableType.OPTIONAL_LIST_FLOAT: "nil",
     VariableType.BOOL: "false",
+    VariableType.NESTED: "nil",
+    VariableType.JSON: "nil",
 }
 
 # Constants are deliberately used to avoid missing a character in the visitor
@@ -423,6 +426,7 @@ def pre_nested(node: ExprNested) -> str:
 def pre_pre_validate(node: StructPreValidateMethod) -> str:
     node.parent = cast(StructParser, node.parent)
     name = node.parent.kwargs["name"]
+    # first ret type always nil, stub for avoid calculate return args
     return f"func (p *{name}) preValidate(v *goquery.Selection) (error, error) {BRACKET_START}"
 
 
@@ -519,7 +523,7 @@ def post_start_parse_method(node: StartParseMethod) -> str:
                 ].startswith("__"):
                     continue
                 method_name = to_upper_camel_case(field.kwargs["name"])
-                var_name = method_name.lower()
+                var_name = to_lower_camel_case(method_name)
                 st_args.append(var_name)
                 methods.append((var_name, method_name))
             code = J2_START_PARSE_ITEM_BODY.render(
@@ -535,7 +539,7 @@ def post_start_parse_method(node: StartParseMethod) -> str:
                 ].startswith("__"):
                     continue
                 method_name = to_upper_camel_case(field.name)
-                var_name = method_name.lower()
+                var_name = to_lower_camel_case(method_name)
                 st_args.append(var_name)
                 methods.append((var_name, method_name))
             code = J2_START_PARSE_LIST_BODY.render(
@@ -684,13 +688,44 @@ def pre_list_str_replace(node: ExprListStringReplace) -> str:
 def pre_str_regex(node: ExprStringRegex) -> str:
     prv, nxt = prev_next_var(node)
     pattern, group, ignore_case = node.unpack_args()
+    tmp_var = f"tmp{nxt}"
+    err_type = RETURN_ERR_TYPES[get_last_ret_type(node)]
+    is_default = have_default_expr(node)
+    is_pre_validate = is_pre_validate_parent(node)
+
     if ignore_case:
-        pattern = wrap_backtick("(?i)" + node.pattern)
+        go_pattern = wrap_backtick("(?i)" + node.pattern)
     else:
-        pattern = wrap_backtick(pattern)
+        go_pattern = wrap_backtick(pattern)
+
+    if is_default:
+        return (
+            f"{tmp_var} := regexp.MustCompile({go_pattern}).FindStringSubmatch({prv});"
+            + f"if len({tmp_var}) == 0 "
+            + BRACKET_START
+            + f'panic(fmt.Errorf("{pattern!r} not match result"));'
+            + BRACKET_END
+            + END
+            + f"{nxt} := {tmp_var}[{group}];"
+        )
+    elif is_pre_validate:
+        return (
+            f"{tmp_var} := regexp.MustCompile({go_pattern}).FindStringSubmatch({prv});"
+            + f"if len({tmp_var}) == 0 "
+            + BRACKET_START
+            + f'return nil, fmt.Errorf("{pattern!r} not match result");'
+            + BRACKET_END
+            + END
+            + f"{nxt} := {tmp_var}[{group}];"
+        )
     return (
-        f"{nxt} := regexp.MustCompile({pattern}).FindStringSubmatch({prv})[{group}]"
+        f"{tmp_var} := regexp.MustCompile({go_pattern}).FindStringSubmatch({prv});"
+        + f"if len({tmp_var}) == 0 "
+        + BRACKET_START
+        + f'return {err_type}, fmt.Errorf("{pattern!r} not match result");'
+        + BRACKET_END
         + END
+        + f"{nxt} := {tmp_var}[{group}];"
     )
 
 
@@ -698,14 +733,12 @@ def pre_str_regex(node: ExprStringRegex) -> str:
 def pre_str_regex_all(node: ExprStringRegexAll) -> str:
     prv, nxt = prev_next_var(node)
     pattern, ignore_case = node.unpack_args()
+
     if ignore_case:
         pattern = wrap_backtick("(?i)" + node.pattern)
     else:
         pattern = wrap_backtick(pattern)
-    return (
-        f"{nxt} := regexp.MustCompile({pattern}).FindStringSubmatch({prv})"
-        + END
-    )
+    return f"{nxt} := regexp.MustCompile({pattern}).FindStringSubmatch({prv});"
 
 
 @CONVERTER(ExprStringRegexSub.kind)
