@@ -7,7 +7,7 @@ import pprint
 
 
 if __name__ == '__main__':
-    compiler = Compiler.from_file("schemas/booksToScrape.py", converter=CONVERTER)
+    compiler = Compiler.from_file("booksToScrape.py", converter=CONVERTER)
     resp = httpx.get("https://books.toscrape.com/")
 
     pprint.pprint(

@@ -1,6 +1,6 @@
 """example usage API interface"""
 
-from ssc_codegen.ast_builder import build_ast_module
+from ssc_codegen.ast_build import build_ast_module_parser
 
 # build-in converter
 from ssc_codegen.converters.js_pure import converter
@@ -11,8 +11,8 @@ if __name__ == "__main__":
     # runtime import module and parse
     # WARNING: DO NOT PASS UNKNOWN MODULES FOR SECURITY REASONS
     # IT COMPILE AND EXEC PYTHON CODE FROM FILE IN RUNTIME
-    ast = build_ast_module(
-        "schemas/booksToScrape.py",
+    ast = build_ast_module_parser(
+        "booksToScrape.py",
         # set true, if target language required hover top on class/function docstring
         # (dart, js, go...)
         docstring_class_top=True,
