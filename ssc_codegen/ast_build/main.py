@@ -268,11 +268,10 @@ def _fetch_field_nodes(
 def _unwrap_default_node(
     document: BaseDocument, ret_type: VariableType
 ) -> None:
-    ret_type = document.stack_last_ret
-
     if document.stack[0].kind == TokenType.EXPR_DEFAULT:
         default_expr = document.stack.pop(0)
         value = default_expr.kwargs["value"]
+        default_type = ret_type
         if value is None:
             match ret_type:
                 case VariableType.STRING:
@@ -282,9 +281,7 @@ def _unwrap_default_node(
                 case VariableType.FLOAT:
                     default_type = VariableType.OPTIONAL_FLOAT
                 case _:
-                    assert_never(ret_type)
-        else:
-            default_type = ret_type
+                    assert_never(ret_type)  # type: ignore
         expr_default_start = ExprDefaultValueStart(kwargs={"value": value})
         expr_default_end = ExprDefaultValueEnd(
             kwargs={"value": value}, ret_type=default_type
