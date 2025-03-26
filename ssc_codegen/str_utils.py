@@ -16,6 +16,7 @@ __all__ = [
     "py_str_format_to_fstring",
     "py_optimize_return_naive",
     "js_pure_optimize_return",
+    "py_remove_unused_none_type_import",
 ]
 
 
@@ -176,6 +177,17 @@ def py_str_format_to_fstring(py_code: str) -> str:
 RE_JS_METHOD_BLOCK = re.compile(
     r"\s_(?:parse|split)\w+\(.*\{(?:\n|.)*?return\s(?P<ret_var>\w+);"
 )
+
+
+RE_PY_REMOVE_NONE_TYPE_IMPORT = re.compile(
+    r"if sys\.version_info >= \(3, 10\):[^)]*\(None\)", flags=re.MULTILINE
+)
+
+
+def py_remove_unused_none_type_import(py_code: str) -> str:
+    if len(re.findall(r"\bNoneType\b", py_code)) == 2:
+        return RE_PY_REMOVE_NONE_TYPE_IMPORT.sub("", py_code)
+    return py_code
 
 
 def js_pure_optimize_return(js_code: str) -> str:

@@ -4,8 +4,8 @@ from typing import Callable
 from ssc_codegen.str_utils import (
     go_unimport_naive,
     py_optimize_return_naive,
-    py_str_format_to_fstring,
     js_pure_optimize_return,
+    py_remove_unused_none_type_import,
 )
 
 
@@ -31,7 +31,7 @@ class BaseCodeCallback:
 
 
 CB_PY_CODE = BaseCodeCallback(
-    py_optimize_return_naive, py_str_format_to_fstring
+    py_optimize_return_naive, py_remove_unused_none_type_import
 )
 CB_GO_CODE = BaseCodeCallback(go_unimport_naive, remove_empty_lines=True)
 CB_DART_CODE = BaseCodeCallback(remove_empty_lines=True)
