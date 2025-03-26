@@ -1,7 +1,10 @@
-from typing import Callable, Type, TYPE_CHECKING, cast
+from typing import Callable, Type, TYPE_CHECKING
+
+from cssselect import SelectorSyntaxError
 from typing_extensions import assert_never
 
-from ssc_codegen.ast_ import ExprDefaultValueEnd, ExprDefaultValueStart
+from ssc_codegen.ast_ import ExprDefaultValueWrapper
+from ssc_codegen.selector_utils import validate_css_query, validate_xpath_query
 from ssc_codegen.static_checker.base import (
     AnalyzeResult,
     FMT_MAPPING_METHODS,
@@ -10,8 +13,6 @@ from ssc_codegen.static_checker.base import (
     SELECT_XPATH_EXPR,
 )
 from ssc_codegen.tokens import StructType, VariableType, TokenType
-from cssselect import SelectorSyntaxError
-from ssc_codegen.selector_utils import validate_css_query, validate_xpath_query
 
 if TYPE_CHECKING:
     from ssc_codegen.schema import BaseSchema
@@ -27,8 +28,41 @@ def prettify_expr_stack(d: "BaseDocument", end: int) -> str:
         method = FMT_MAPPING_METHODS.get(e.kind)
         kw = e.kwargs
         s += f".{method}(" + ",".join(f"{k}={v!r}" for k, v in kw.items()) + ")"
-    s += "# "
     return s
+
+
+def analyze_dict_schema_fields(sc: Type["BaseSchema"]) -> AnalyzeResult:
+    if sc.__SCHEMA_TYPE__ != StructType.DICT:
+        return AnalyzeResult.ok()
+    # not allowed fields
+    fields = sc.__get_mro_fields__()
+    skip_fields = {"__SPLIT_DOC__", "__PRE_VALIDATE__", "__KEY__", "__VALUE__"}
+    non_required_fields = [
+        name for name in fields.keys() if name not in skip_fields
+    ]
+    if non_required_fields:
+        fields = f"`{', '.join(non_required_fields)}`"
+        return AnalyzeResult.error(
+            f"{sc.__name__} (DICT) unnecessary fields (remove required): {fields}"
+        )
+    return AnalyzeResult.ok()
+
+
+def analyze_flat_list_schema_fields(sc: Type["BaseSchema"]) -> AnalyzeResult:
+    if sc.__SCHEMA_TYPE__ != StructType.FLAT_LIST:
+        return AnalyzeResult.ok()
+    # not allowed fields
+    fields = sc.__get_mro_fields__()
+    skip_fields = {"__SPLIT_DOC__", "__PRE_VALIDATE__", "__ITEM__"}
+    non_required_fields = [
+        name for name in fields.keys() if name not in skip_fields
+    ]
+    if non_required_fields:
+        fields = f"`{', '.join(non_required_fields)}`"
+        return AnalyzeResult.error(
+            f"{sc.__name__} (FLAT_LIST) unnecessary fields (remove required): {fields}"
+        )
+    return AnalyzeResult.ok()
 
 
 # schema check segment
@@ -147,32 +181,15 @@ def analyze_field_default_value(
 
     default_value, *_ = document.stack[0].unpack_args()
     ret_type = document.stack_last_ret
+    # ExprDefaultValueWrapper node,
+    # in ast-build stage will be unwrapped to ExprDefaultValueStart and ExprDefaultValueEnd nodes
     if default_value is None:
-        default_end = document.stack[-2]
-        default_end = cast(ExprDefaultValueEnd, default_end)
-        match (ret_type, default_end.ret_type):
-            case (VariableType.STRING, VariableType.OPTIONAL_STRING):
-                return AnalyzeResult.ok()
-            case (VariableType.INT, VariableType.OPTIONAL_INT):
-                return AnalyzeResult.ok()
-            case (VariableType.FLOAT, VariableType.OPTIONAL_FLOAT):
-                return AnalyzeResult.ok()
-            case _:
-                expr_stack = prettify_expr_stack(
-                    document, document.stack_last_index
-                )
-                if ret_type == VariableType.STRING:
-                    msg = f"`{VariableType.OPTIONAL_STRING.name}` expect ret type `{VariableType.STRING.name}`"
-                elif ret_type == VariableType.INT:
-                    msg = f"`{VariableType.OPTIONAL_INT.name}` expect ret type `{VariableType.INT.name}`"
-                elif ret_type == VariableType.FLOAT:
-                    msg = f"`{VariableType.OPTIONAL_FLOAT.name}` expect ret type `{VariableType.FLOAT.name}`"
-                else:
-                    msg = f"`{default_end.ret_type}` not expect ret type `{ret_type.name}`"
-
-                return AnalyzeResult.error(
-                    f"{sc.__name__}.{name} = D().{expr_stack} # {msg}"
-                )
+        if ret_type in (VariableType.DOCUMENT, VariableType.LIST_DOCUMENT, VariableType.BOOL):
+            return AnalyzeResult.error(
+                f"Default value cannot return type(s) ({VariableType.DOCUMENT.name}, "
+                f"{VariableType.LIST_DOCUMENT.name}, {VariableType.BOOL.name})"
+            )
+        return AnalyzeResult.ok()
 
     if isinstance(default_value, str):
         default_ast_type = VariableType.STRING
@@ -213,7 +230,7 @@ def analyze_field_html_queries(
             except SelectorSyntaxError:
                 expr_stack = prettify_expr_stack(document, i)
                 return AnalyzeResult.error(
-                    f"{sc.__name__}.{name} = D().{expr_stack} # invalid CSS query `{query!r}`"
+                    f"{sc.__name__}.{name} = {expr_stack} # invalid CSS query `{query!r}`"
                 )
         elif expr.kind in SELECT_XPATH_EXPR:
             try:
@@ -221,7 +238,7 @@ def analyze_field_html_queries(
             except SelectorSyntaxError:
                 expr_stack = prettify_expr_stack(document, i)
                 return AnalyzeResult.error(
-                    f"{sc.__name__}.{name} = D().{expr_stack} # invalid XPATH query `{query!r}`"
+                    f"{sc.__name__}.{name} = {expr_stack} # invalid XPATH query `{query!r}`"
                 )
     return AnalyzeResult.ok()
 
@@ -234,7 +251,7 @@ def analyze_field_split_doc_ret_type(
     if document.stack_last_ret != VariableType.LIST_DOCUMENT:
         expr_stack = prettify_expr_stack(document, document.stack_last_index)
         return AnalyzeResult.error(
-            f"{sc.__name__}.{name} = D().{expr_stack}  # Expected type `{VariableType.LIST_DOCUMENT.name}`, "
+            f"{sc.__name__}.{name} = {expr_stack}  # Expected type `{VariableType.LIST_DOCUMENT.name}`, "
             f"got `{document.stack_last_ret.name}`"
         )
     return AnalyzeResult.ok()
@@ -245,19 +262,22 @@ def analyze_field_key_ret_type(
 ) -> AnalyzeResult:
     if name != "__KEY__":
         return AnalyzeResult.ok()
-    if document.stack and document.stack[0].kind == ExprDefaultValueStart.kind:
+    if (
+        document.stack
+        and document.stack[0].kind == ExprDefaultValueWrapper.kind
+    ):
         value = document.stack[0].kwargs["value"]
         if not isinstance(value, str):
             expr_stack = prettify_expr_stack(
                 document, document.stack_last_index
             )
             return AnalyzeResult.error(
-                f"{sc.__name__}.{name} = D().{expr_stack}  # default value should be a string, not `value<{type(value).__name__}>`"
+                f"{sc.__name__}.{name} = {expr_stack}  # default value should be a string, not `value<{type(value).__name__}>`"
             )
     if document.stack_last_ret != VariableType.STRING:
         expr_stack = prettify_expr_stack(document, document.stack_last_index)
         return AnalyzeResult.error(
-            f"{sc.__name__}.{name} = D().{expr_stack}  # Expected type `{VariableType.STRING.name}`, "
+            f"{sc.__name__}.{name} = {expr_stack}  # Expected type `{VariableType.STRING.name}`, "
             f"got `{document.stack_last_ret.name}`"
         )
     return AnalyzeResult.ok()
@@ -275,7 +295,8 @@ def analyze_other_field_type(
     ):
         expr_stack = prettify_expr_stack(document, document.stack_last_index)
         return AnalyzeResult.error(
-            f"{sc.__name__}.{name} = D().{expr_stack}  # Not allowed type(s) `{VariableType.LIST_DOCUMENT.name}, {VariableType.DOCUMENT.name}`"
+            f"{sc.__name__}.{name} = {expr_stack}  # Not allowed type(s) "
+            f"`{VariableType.LIST_DOCUMENT.name}, {VariableType.DOCUMENT.name} {VariableType.BOOL.name}`"
         )
     return AnalyzeResult.ok()
 
@@ -299,7 +320,7 @@ def analyze_regex_expr(
                         document, document.stack_last_index
                     )
                     return AnalyzeResult.error(
-                        f"{sc.__name__}.{name} = D().{expr_stack}  # {result.msg}"
+                        f"{sc.__name__}.{name} = {expr_stack}  # {result.msg}"
                     )
             case (
                 TokenType.EXPR_REGEX_SUB
@@ -314,8 +335,25 @@ def analyze_regex_expr(
                         document, document.stack_last_index
                     )
                     return AnalyzeResult.error(
-                        f"{sc.__name__}.{name} = D().{expr_stack}  # {result.msg}"
+                        f"{sc.__name__}.{name} = {expr_stack}  # {result.msg}"
                     )
             case _:
                 assert_never(re_expr.kind)  # type: ignore
     return AnalyzeResult.ok()
+
+
+def analyze_jsonify_expr(
+    sc: Type["BaseSchema"], name: str, document: "BaseDocument"
+) -> AnalyzeResult:
+    have_json_expr = any(i.kind == TokenType.TO_JSON for i in document.stack)
+    if not have_json_expr:
+        return AnalyzeResult.ok()
+    have_default_expr = any(
+        expr.kind == TokenType.EXPR_DEFAULT for expr in document.stack
+    )
+    if not have_default_expr:
+        return AnalyzeResult.ok()
+    expr_stack = prettify_expr_stack(document, document.stack_last_index)
+    return AnalyzeResult.error(
+        f"{sc.__name__}.{name} = {expr_stack} # jsonify not allowed default expr"
+    )
