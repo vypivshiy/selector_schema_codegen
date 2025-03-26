@@ -280,7 +280,7 @@ def get_field_method_ret_type(node: StructFieldMethod) -> str:
 def pre_docstring(node: Docstring) -> str:
     value, *_ = node.unpack_args()
     if value:
-        return '"""' + value + '""""'
+        return '"""' + value + '"""'
     return ""
 
 
