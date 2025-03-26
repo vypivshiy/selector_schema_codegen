@@ -16,13 +16,13 @@ J2_START_PARSE_FLAT_LIST = "return Array.from(this._splitDoc(this._doc)).map((e)
 
 J2_START_PARSE_ITEM = Template("""return {
     {% for expr in exprs %}
-    {{ expr.name }}: this._parse{{ expr.upper_name }}(this._doc),
+{{ expr.name }}: this._parse{{ expr.upper_name }}(this._doc),
     {% endfor %}
 };""")
 
 J2_START_PARSE_LIST_PARSE = Template("""Array.from(this._splitDoc(this._doc)).map((e) => ({
     {% for expr in exprs %}
-    '{{ expr.name }}': self._parse{{ expr.upper_name }}(e),
+{{ expr.name }}: self._parse{{ expr.upper_name }}(e),
     {% endfor %}
 }));""")
 

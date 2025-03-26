@@ -147,7 +147,7 @@ def pre_struct_parser(node: StructParser) -> str:
     return docstr + "\n" + f"class {name}" + BRACKET_START
 
 
-@CONVERTER(StructParser.kind)
+@CONVERTER.post(StructParser.kind)
 def post_struct_parser(_node: StructParser) -> str:
     return BRACKET_END
 
@@ -210,7 +210,7 @@ def pre_struct_init(_node: StructInitMethod) -> str:
 @CONVERTER(StartParseMethod.kind)
 def pre_start_parse(node: StartParseMethod) -> str:
     node.parent = cast(StructParser, node.parent)
-    code = ""
+    code = "parse() " + BRACKET_START
     if have_pre_validate_call(node):
         code += "this._preValidate(this._doc);"
 
