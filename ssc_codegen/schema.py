@@ -86,9 +86,8 @@ class BaseSchema:
             ].kwargs["schema_name"]
             signature[key] = cls.__NESTED_SCHEMAS__[name].__class_signature__()
         elif field.stack_last_ret == VariableType.JSON:
-            json_cls = cls.__JSON_SCHEMAS__[
-                field.stack[-1].kwargs["json_struct_name"]
-            ]
+            name = [e for e in field.stack if e.kind == TokenType.TO_JSON][0].kwargs["json_struct_name"]
+            json_cls = cls.__JSON_SCHEMAS__[name]
             signature[key] = json_struct_to_signature(json_cls)
         else:
             signature[key] = SIGNATURE_MAP[field.stack_last_ret]
