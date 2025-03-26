@@ -38,7 +38,7 @@ CONVERTER = BasePyCodeConverter()
 def pre_init(_node: StructInitMethod) -> str:
     return (
         INDENT_METHOD
-        + "def __init__(self, document: Union[str, Selector]) -> None:\n"
+        + "def __init__(self, document: Union[str, Selector, SelectorList]) -> None:\n"
         + INDENT_METHOD_BODY
         + "self._document = Selector(document) if isinstance(document, str) else document"
     )
