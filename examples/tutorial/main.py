@@ -11,7 +11,8 @@ def main() -> None:
         for book in catalogue["books"]:
             print(book["name"])
             book_resp = httpx.get(book["url"]).text
-            pprint.pprint(ProductDescription(book_resp).parse(), sort_dicts=True)
+            result = ProductDescription(book_resp).parse()
+            pprint.pprint(result, sort_dicts=True)
         resp = httpx.get(catalogue['next_page']).text
         catalogue = MainCatalogue(resp).parse()
 

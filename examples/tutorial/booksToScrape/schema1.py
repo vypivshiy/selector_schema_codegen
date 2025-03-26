@@ -1,5 +1,6 @@
 from ssc_codegen import ItemSchema, D
 
+
 class MainCatalogue(ItemSchema):
     # in start pagination not exists this tag, set None
     prev_page = D().default(None).css('.previous a').attr('href')

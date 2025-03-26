@@ -82,10 +82,10 @@ class MainCatalogue(ItemSchema):
     # 1. set default if teg will be not founded
     # 2. get tag by css query
     # 3. get [href] attribute
-    # 4. ltrim remove left substring
+    # 4. rm_prefix remove left substring for remove subchars use ltrim
     # 5. fmt - format previous string by passed template
-    prev_page = D().default(None).css('.previous a').attr('href').ltrim('catalogue/').fmt(FMT_URL)
-    next_page = D().default(None).css('.next a').attr('href').ltrim('catalogue/').fmt(FMT_URL)
+    prev_page = D().default(None).css('.previous a').attr('href').rm_prefix('catalogue/').fmt(FMT_URL)
+    next_page = D().default(None).css('.next a').attr('href').rm_prefix('catalogue/').fmt(FMT_URL)
     # 1. get tag by .current class
     # 2. extract text and get current page number by regex
     # 3. insert result to template
@@ -166,9 +166,9 @@ class Book(ListSchema):
     __SPLIT_DOC__ = D().css_all(".col-lg-3")
 
     name = D().css(".thumbnail").attr("alt")
-    image_url = D().css(".thumbnail").attr("src").ltrim('..').fmt(FMT_THUMBNAIL_BOOK)
+    image_url = D().css(".thumbnail").attr("src").rm_prefix('..').fmt(FMT_THUMBNAIL_BOOK)
     url = D().css(".image_container > a").attr("href").fmt(FMT_URL)
-    rating = D().css(".star-rating").attr("class").ltrim("star-rating ")
+    rating = D().css(".star-rating").attr("class").rm_prefix("star-rating ")
     # convert price to integer
     price = D().default(0).css(".price_color").text().re(r"(\d+)").to_int()
 
@@ -186,8 +186,8 @@ class MainCatalogue(ItemSchema):
     """
     books = N().sub_parser(Book)
 
-    prev_page = D().default(None).css('.previous a').attr('href').ltrim('catalogue/').fmt(FMT_URL)
-    next_page = D().default(None).css('.next a').attr('href').ltrim('catalogue/').fmt(FMT_URL)
+    prev_page = D().default(None).css('.previous a').attr('href').rm_prefix('catalogue/').fmt(FMT_URL)
+    next_page = D().default(None).css('.next a').attr('href').rm_prefix('catalogue/').fmt(FMT_URL)
     curr_page = D().css('.current').text().re(r'Page\s(\d+)').fmt(FMT_URL_CURRENT)
 ```
 
@@ -504,5 +504,5 @@ Full json mark types support:
 - keys should matched by `[_a-zA-Z][_a-zA-Z0-9]*` and do not allowed target language keywords and other chars
 - cannot modify keys, values in jsonify step
 - json structure must be consistent. 
-  - not allowed describe an array with random data types 
+  - not allowed to describe an array with random data types 
   - not allowed dictionaries with random keys
