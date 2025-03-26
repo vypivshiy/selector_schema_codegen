@@ -29,6 +29,10 @@ def debug_comment_cb(node: BaseAstNode, comment_prefix: str) -> str:
             return f"{comment_prefix}Token: {node.kind.name} ret_type: {node.ret_type.name}"
         case TokenType.EXPR_NO_RETURN:
             return f"{comment_prefix}Token: {node.kind.name}"
+        case TokenType.STRUCT_PARSE_START:
+            parent = node.parent
+            parent = cast(StructParser, parent)
+            return f"{comment_prefix}Token: {node.kind.name}, type: {parent.struct_type.name}"
         case _:
             return f"{comment_prefix}Token: {node.kind.name}, kwargs: {node.kwargs}"
 
