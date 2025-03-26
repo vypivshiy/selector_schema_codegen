@@ -1,3 +1,5 @@
+"""post-processing functions for fix code output and utils operations with strings"""
+
 import re
 
 RE_GO_IMPORTS_BLOCK = re.compile(r"import\s*\(\s*([\s\S]*?)\s*\)")
@@ -13,10 +15,12 @@ __all__ = [
     "go_unimport_naive",
     "py_str_format_to_fstring",
     "py_optimize_return_naive",
+    "js_pure_optimize_return",
 ]
 
 
 def to_snake_case(s: str) -> str:
+    """convert string to snake_case"""
     # camelCase
     s = re.sub(r"([a-z])([A-Z])", r"\1_\2", s)
     # PascalCase
@@ -25,12 +29,14 @@ def to_snake_case(s: str) -> str:
 
 
 def to_upper_camel_case(s: str) -> str:
+    """convert string to UpperCamelCase (PascalCase)"""
     return (
         "".join(word[0].upper() + word[1:] for word in s.split("_")) if s else s
     )
 
 
 def to_lower_camel_case(s: str) -> str:
+    """convert string to lowerCamelCase"""
     if not s:
         return s
 
@@ -39,13 +45,14 @@ def to_lower_camel_case(s: str) -> str:
 
 
 def wrap_double_quotes(s: str, escape_ch: str = "\\") -> str:
-    """used if string marks only in this chars"""
+    """wrap string to `"` chars"""
     if not s:
         return '""'
     return '"' + s.replace('"', f'{escape_ch}"') + '"'
 
 
 def wrap_backtick(s: str, escape_ch: str = "\\") -> str:
+    """wrap string to '`' chars"""
     if not s:
         return "``"
     return "`" + s.replace("`", f"{escape_ch}`") + "`"
@@ -63,8 +70,12 @@ def escape_str(
     return re.sub(pattern, _repl, s)
 
 
+def escape_regex_pattern(pattern: str) -> str:
+    return re.escape(pattern)
+
+
 def remove_empty_lines(code: list[str], sep: str = "\n") -> str:
-    """remove empty lines from sequence of strings"""
+    """remove empty lines from sequence of strings and concatenate"""
     return sep.join([i for i in code if i])
 
 
