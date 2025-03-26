@@ -2,9 +2,9 @@ import json
 import os
 import pprint
 import sys
-import warnings
 from ichrome.exceptions import ChromeRuntimeError
 import typer
+import logging
 
 from ssc_codegen.ast_build import build_ast_module_parser
 from ssc_codegen.cli.cli_utils import (
@@ -56,6 +56,7 @@ from typing import Annotated, Callable, List, Optional
 from typer import Argument, BadParameter, Option, Typer
 
 app = Typer(no_args_is_help=True)
+LOGGER = logging.getLogger("ssc_gen")
 
 
 @app.command(help=CMD_VERSION)
@@ -87,38 +88,38 @@ def generate_code(
     if css_to_xpath and xpath_to_css:
         raise BadParameter("Should be passed to-xpath or to-css flag")
     if css_to_xpath:
-        print("Convert ALL CSS queries to XPATH")
+        LOGGER.info("Convert ALL CSS queries to XPATH")
     elif xpath_to_css:
-        print("Convert ALL XPATH queries to CSS")
+        LOGGER.info("Convert ALL XPATH queries to CSS")
 
-    print("Generating code start")
+    LOGGER.info("Generating code start")
     if debug_instructions:
-        print("TOGGLE debug generated tokens")
+        LOGGER.info("TOGGLE debug generated tokens")
         converter.set_debug_prefix(debug_comment_prefix)
     for file_cfg in ssc_files:
         name = file_cfg.name.split(".")[0]
         out_file = f"{prefix}{name}{suffix}"
-        print(f"Make AST {file_cfg.name}...")
+        LOGGER.info("Make AST %s...", file_cfg.name)
         ast_module = build_ast_module_parser(
             file_cfg,
             docstring_class_top=docstring_class_top,
             css_to_xpath=css_to_xpath,
             xpath_to_css=xpath_to_css,
         )
-        print(f"Convert to code {file_cfg.name}...")
+        LOGGER.info("Convert to code %s...", file_cfg.name)
         code_parts = converter.convert_program(ast_module, comment=comment_str)
         code = code_cb(code_parts)
         for k, v in variables_patches.items():
             code = code.replace(f"${k}$", v)
         out_path = out / out_file
-        print(f"save {str(out_path)}")
+        LOGGER.info("save generated code to %s", str(out_path))
         with open(out_path, "w") as f:
             f.write(code)
     if fmt_cmd:
-        print("format code")
+        LOGGER.info("run formatters code")
         for cmd in fmt_cmd:
             os.system(cmd)
-    print("done")
+    LOGGER.info("done")
 
 
 @app.command("py", help=CMD_PY)
@@ -491,7 +492,9 @@ def parse_from_chrome_(
         )
     except ChromeRuntimeError as e:
         msg = f"{e} try manually provide chrome executable path"
-        warnings.warn(msg, category=Warning)
+        logging.error(
+            "Not founded chromium executable. Try manually provide chrome executable path by `-sc` option"
+        )
         exit(1)
     try:
         if isinstance(result, str):
@@ -502,7 +505,7 @@ def parse_from_chrome_(
         else:
             print(result)
     except Exception as e:
-        print("parse json error", e)
+        logging.error("parse json error", exc_info=e)
         pprint.pprint(result, sort_dicts=False)
 
 
