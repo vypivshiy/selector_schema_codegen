@@ -184,7 +184,11 @@ def analyze_field_default_value(
     # ExprDefaultValueWrapper node,
     # in ast-build stage will be unwrapped to ExprDefaultValueStart and ExprDefaultValueEnd nodes
     if default_value is None:
-        if ret_type in (VariableType.DOCUMENT, VariableType.LIST_DOCUMENT, VariableType.BOOL):
+        if ret_type in (
+            VariableType.DOCUMENT,
+            VariableType.LIST_DOCUMENT,
+            VariableType.BOOL,
+        ):
             return AnalyzeResult.error(
                 f"Default value cannot return type(s) ({VariableType.DOCUMENT.name}, "
                 f"{VariableType.LIST_DOCUMENT.name}, {VariableType.BOOL.name})"
