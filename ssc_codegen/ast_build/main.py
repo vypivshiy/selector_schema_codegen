@@ -236,9 +236,18 @@ def _fetch_field_nodes(
             parent=st_ref,
             ret_type=ret_type,
         )
-        document.stack.append(
-            ExprReturn(accept_type=ret_type, ret_type=ret_type)
-        )
+        # TODO: add ast tests
+        # in inheritance schemas, child classes use same fields are used as in the parent class
+        # avoid duplicate ExprReturn node
+        # second case used in ExprDefaultValueWrapper cases
+        if (
+            document.stack[-1].kind != ExprReturn.kind
+            and document.stack[-1].kind != TokenType.EXPR_DEFAULT_END
+        ):
+            document.stack.append(
+                ExprReturn(accept_type=ret_type, ret_type=ret_type)
+            )
+
         _unwrap_default_node(document, ret_type)
         for i in document.stack:
             i.parent = method
@@ -255,7 +264,6 @@ def _fetch_field_nodes(
             cls_name = None
         body_parse_method_expr.append(
             ExprCallStructMethod(
-                # parent=method,
                 kwargs={
                     "name": field_name,
                     "type": ret_type,
@@ -298,9 +306,18 @@ def _try_fetch_split_doc_node(
 ) -> None:
     if fields.get("__SPLIT_DOC__"):
         split_doc = fields.pop("__SPLIT_DOC__")
-        # always sequence of elements
         method = StructPartDocMethod(parent=st_ref)
-        split_doc.stack.append(ExprReturn(ret_type=VariableType.LIST_DOCUMENT))
+
+        # in inheritance schemas, child classes use same fields are used as in the parent class
+        # second case used in ExprDefaultValueWrapper cases
+        if (
+            split_doc.stack[-1].kind != ExprReturn.kind
+            and split_doc.stack[-1].kind != TokenType.EXPR_DEFAULT_END
+        ):
+            # always returns sequence of elements
+            split_doc.stack.append(
+                ExprReturn(ret_type=VariableType.LIST_DOCUMENT)
+            )
         for i in split_doc.stack:
             i.parent = method
         method.body = split_doc.stack
