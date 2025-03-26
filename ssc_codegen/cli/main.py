@@ -1,12 +1,17 @@
 import json
+import logging
 import os
 import pprint
 import sys
-from ichrome.exceptions import ChromeRuntimeError
+from pathlib import Path
+from typing import Annotated, Callable, List, Optional
+
 import typer
-import logging
+from ichrome.exceptions import ChromeRuntimeError
+from typer import Argument, BadParameter, Option, Typer
 
 from ssc_codegen.ast_build import build_ast_module_parser
+from ssc_codegen.cli.cli_callbacks import cb_check_ssc_files, cb_folder_out
 from ssc_codegen.cli.cli_utils import (
     ConverterLike,
     create_fmt_cmd,
@@ -18,13 +23,6 @@ from ssc_codegen.cli.code_callbacks import (
     CB_PY_CODE,
     CB_GO_CODE,
     CB_JS_CODE,
-)
-from ssc_codegen.cli.runtime_parse_runners import (
-    assert_cls_target,
-    parse_from_html_file,
-    print_json_output,
-    parse_from_http_request,
-    parse_from_chrome,
 )
 from ssc_codegen.cli.consts import (
     PyLIBS,
@@ -46,16 +44,22 @@ from ssc_codegen.cli.consts import (
     CMD_JSON_GEN,
     DEFAULT_UA,
 )
+from ssc_codegen.cli.runtime_parse_runners import (
+    assert_cls_target,
+    parse_from_html_file,
+    print_json_output,
+    parse_from_http_request,
+    parse_from_chrome,
+)
 from ssc_codegen.json_to_scc import convert_json_to_schema_code
-from ssc_codegen.cli.cli_callbacks import cb_check_ssc_files, cb_folder_out
 
+app = Typer(
+    no_args_is_help=True,
+    pretty_exceptions_enable=False,
+    pretty_exceptions_short=False,
+    pretty_exceptions_show_locals=False,
+)
 
-from pathlib import Path
-from typing import Annotated, Callable, List, Optional
-
-from typer import Argument, BadParameter, Option, Typer
-
-app = Typer(no_args_is_help=True)
 LOGGER = logging.getLogger("ssc_gen")
 
 
