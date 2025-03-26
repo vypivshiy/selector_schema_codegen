@@ -156,10 +156,11 @@ import sys
 import json
 from typing import List, Dict, TypedDict, Union, Optional
 from contextlib import suppress
-if sys.version_info < (3, 10):
-    NoneType = type(None)
-else:
+
+if sys.version_info >= (3, 10):
     from types import NoneType
+else:
+    NoneType = type(None)
 """
 
 
