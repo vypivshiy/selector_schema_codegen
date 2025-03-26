@@ -13,6 +13,9 @@ from ssc_codegen.document import BaseDocument
         R().ltrim(""),
         R().rtrim(""),
         R().repl("", ""),
+        R().rm_prefix('a'),
+        R().rm_suffix('a'),
+        R().rm_prefix_suffix('a'),
         R().fmt("{{}}"),
         D()
         .css("#video")
