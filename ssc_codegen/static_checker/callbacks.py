@@ -41,7 +41,7 @@ def analyze_dict_schema_fields(sc: Type["BaseSchema"]) -> AnalyzeResult:
         name for name in fields.keys() if name not in skip_fields
     ]
     if non_required_fields:
-        fields = f"`{', '.join(non_required_fields)}`"
+        fields = f"`{', '.join(non_required_fields)}`"  # type: ignore[assignment]
         return AnalyzeResult.error(
             f"{sc.__name__} (DICT) unnecessary fields (remove required): {fields}"
         )
@@ -58,7 +58,7 @@ def analyze_flat_list_schema_fields(sc: Type["BaseSchema"]) -> AnalyzeResult:
         name for name in fields.keys() if name not in skip_fields
     ]
     if non_required_fields:
-        fields = f"`{', '.join(non_required_fields)}`"
+        fields = f"`{', '.join(non_required_fields)}`"  # type: ignore[assignment]
         return AnalyzeResult.error(
             f"{sc.__name__} (FLAT_LIST) unnecessary fields (remove required): {fields}"
         )
