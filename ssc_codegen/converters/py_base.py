@@ -150,7 +150,6 @@ MAGIC_METHODS = {
 
 # used old style typing for support old python versions (3.8)
 IMPORTS_MIN = """
-from __future__ import annotations
 import re
 import sys
 import json
@@ -368,7 +367,8 @@ def pre_struct_parser(node: StructParser) -> str:
 
 
 def pre_ret(node: ExprReturn) -> str:
-    expr = f"return v{node.index_prev}"
+    prv, _ = prev_next_var(node)
+    expr = f"return {prv}"
     if have_default_expr(node):
         return INDENT_DEFAULT_BODY + expr
     return INDENT_METHOD_BODY + expr
@@ -670,13 +670,12 @@ def pre_str_regex(node: ExprStringRegex) -> str:
     )
     prv, nxt = prev_next_var(node)
     pattern, group, ignore_case = node.unpack_args()
-    pattern = repr(pattern)
     if ignore_case:
         return (
             indent
-            + f"{nxt} = re.search({pattern}, {prv}, re.IGNORECASE)[{group}]"
+            + f"{nxt} = re.search(r{pattern!r}, {prv}, re.IGNORECASE)[{group}]"
         )
-    return indent + f"{nxt} = re.search({pattern}, {prv})[{group}]"
+    return indent + f"{nxt} = re.search(r{pattern!r}, {prv})[{group}]"
 
 
 def pre_str_regex_all(node: ExprStringRegexAll) -> str:
@@ -686,8 +685,10 @@ def pre_str_regex_all(node: ExprStringRegexAll) -> str:
     prv, nxt = prev_next_var(node)
     pattern, ignore_case = node.unpack_args()
     if ignore_case:
-        return indent + f"{nxt} = re.findall({pattern!r}, {prv}, re.IGNORECASE)"
-    return indent + f"{nxt} = re.findall({pattern!r}, {prv})"
+        return (
+            indent + f"{nxt} = re.findall(r{pattern!r}, {prv}, re.IGNORECASE)"
+        )
+    return indent + f"{nxt} = re.findall(r{pattern!r}, {prv})"
 
 
 def pre_str_regex_sub(node: ExprStringRegexSub) -> str:
@@ -696,7 +697,7 @@ def pre_str_regex_sub(node: ExprStringRegexSub) -> str:
     )
     prv, nxt = prev_next_var(node)
     pattern, repl = node.unpack_args()
-    return indent + f"{nxt} = re.sub({pattern!r}, {repl!r}, {prv})"
+    return indent + f"{nxt} = re.sub(r{pattern!r}, {repl!r}, {prv})"
 
 
 def pre_list_str_regex_sub(node: ExprListStringRegexSub) -> str:
@@ -705,7 +706,9 @@ def pre_list_str_regex_sub(node: ExprListStringRegexSub) -> str:
     )
     prv, nxt = prev_next_var(node)
     pattern, repl = node.unpack_args()
-    return indent + f"{nxt} = [re.sub({pattern!r}, {repl!r}, i) for i in {prv}]"
+    return (
+        indent + f"{nxt} = [re.sub(r{pattern!r}, {repl!r}, i) for i in {prv}]"
+    )
 
 
 def pre_index(node: ExprIndex) -> str:
@@ -777,7 +780,7 @@ def pre_is_regex(node: ExprIsRegex) -> str:
     )
     prv, nxt = prev_next_var(node)
     pattern, ignore_case, msg = node.unpack_args()
-    expr = indent + f"assert re.search({pattern!r}, {prv}), {msg!r}"
+    expr = indent + f"assert re.search(r{pattern!r}, {prv}), {msg!r}"
     if is_last_var_no_ret(node):
         return expr
     # HACK: avoid recalc variables
