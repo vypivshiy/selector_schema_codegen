@@ -81,7 +81,6 @@ def generate_code(
     css_to_xpath: bool = False,
     xpath_to_css: bool = False,
     debug_instructions: bool = False,
-    debug_comment_prefix: str = "",
 ) -> None:
     """universal generate code entrypoint"""
     variables_patches = variables_patches or {}
@@ -95,7 +94,7 @@ def generate_code(
     LOGGER.info("Generating code start")
     if debug_instructions:
         LOGGER.info("TOGGLE debug generated tokens")
-        converter.set_debug_prefix(debug_comment_prefix)
+        converter.debug_instructions = True
     for file_cfg in ssc_files:
         name = file_cfg.name.split(".")[0]
         out_file = f"{prefix}{name}{suffix}"
@@ -165,7 +164,6 @@ def gen_py(
         xpath_to_css=to_css,
         css_to_xpath=to_xpath,
         debug_instructions=debug,
-        debug_comment_prefix="# ",
         code_cb=CB_PY_CODE,
     )
 
@@ -215,7 +213,6 @@ def gen_js(
         xpath_to_css=to_css,
         css_to_xpath=to_xpath,
         debug_instructions=debug,
-        debug_comment_prefix="// ",
         code_cb=CB_JS_CODE,
     )
 
@@ -269,7 +266,6 @@ def gen_go(
         xpath_to_css=to_css,
         css_to_xpath=to_xpath,
         debug_instructions=debug,
-        debug_comment_prefix="// ",
     )
 
 
