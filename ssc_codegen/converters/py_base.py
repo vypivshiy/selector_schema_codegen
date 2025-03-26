@@ -147,10 +147,14 @@ MAGIC_METHODS = {
 IMPORTS_MIN = """
 from __future__ import annotations
 import re
+import sys
 import json
-from typing import List, Dict, TypedDict, Union, Optional\n
+from typing import List, Dict, TypedDict, Union, Optional
 from contextlib import suppress
-NoneType = type(None)
+if sys.version_info < (3, 10):
+    NoneType = type(None)
+else:
+    from types import NoneType
 """
 
 
@@ -158,7 +162,7 @@ class BasePyCodeConverter(BaseCodeConverter):
     def __init__(
         self,
         debug_instructions: bool = False,
-        debug_comment_prefix: str = "",
+        debug_comment_prefix: str = "# ",
         comment_prefix_sep: str = "\n",
         debug_cb: CB_FMT_DEBUG_COMMENT = debug_comment_cb,
     ) -> None:
