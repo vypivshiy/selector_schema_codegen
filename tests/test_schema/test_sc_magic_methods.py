@@ -1,7 +1,7 @@
 from typing import Type
 
 import pytest
-from helpers import (
+from .helpers import (
     schema_dict_factory,
     schema_factory,
     schema_flat_list_factory,
@@ -81,41 +81,41 @@ def test_fail_field_empty_expr(schema: Type["BaseSchema"]) -> None:
 @pytest.mark.parametrize(
     "schema",
     [
-        # schema_dict_factory(
-        #     __SPLIT_DOC__=D().css_all("p"),
-        #     __KEY__=D().css("p").text().to_int(),
-        #     __VALUE__=R(),
-        # ),
-        # schema_dict_factory(
-        #     __SPLIT_DOC__=D().css_all("p"),
-        #     __KEY__=D().css("p").text().to_float(),
-        #     __VALUE__=R(),
-        # ),
-        # schema_dict_factory(
-        #     __SPLIT_DOC__=D().css_all("p"),
-        #     __KEY__=D().css("p").css("a"),
-        #     __VALUE__=R(),
-        # ),
-        # schema_dict_factory(
-        #     __SPLIT_DOC__=D().css_all("p"),
-        #     __KEY__=D().css_all("p"),
-        #     __VALUE__=R(),
-        # ),
-        # schema_dict_factory(
-        #     __SPLIT_DOC__=D().css_all("p"),
-        #     __KEY__=D().css_all("p").first(),
-        #     __VALUE__=R(),
-        # ),
-        # schema_dict_factory(
-        #     __SPLIT_DOC__=D().css_all("p"),
-        #     __KEY__=D().css_all("p").raw(),
-        #     __VALUE__=R(),
-        # ),
-        # schema_dict_factory(
-        #     __SPLIT_DOC__=D().css_all("p"),
-        #     __KEY__=D().css_all("p").text(),
-        #     __VALUE__=R(),
-        # ),
+        schema_dict_factory(
+            __SPLIT_DOC__=D().css_all("p"),
+            __KEY__=D().css("p").text().to_int(),
+            __VALUE__=R(),
+        ),
+        schema_dict_factory(
+            __SPLIT_DOC__=D().css_all("p"),
+            __KEY__=D().css("p").text().to_float(),
+            __VALUE__=R(),
+        ),
+        schema_dict_factory(
+            __SPLIT_DOC__=D().css_all("p"),
+            __KEY__=D().css("p").css("a"),
+            __VALUE__=R(),
+        ),
+        schema_dict_factory(
+            __SPLIT_DOC__=D().css_all("p"),
+            __KEY__=D().css_all("p"),
+            __VALUE__=R(),
+        ),
+        schema_dict_factory(
+            __SPLIT_DOC__=D().css_all("p"),
+            __KEY__=D().css_all("p").first(),
+            __VALUE__=R(),
+        ),
+        schema_dict_factory(
+            __SPLIT_DOC__=D().css_all("p"),
+            __KEY__=D().css_all("p").raw(),
+            __VALUE__=R(),
+        ),
+        schema_dict_factory(
+            __SPLIT_DOC__=D().css_all("p"),
+            __KEY__=D().css_all("p").text(),
+            __VALUE__=R(),
+        ),
         schema_dict_factory(
             __SPLIT_DOC__=D().css_all("p"),
             __KEY__=D().default(None).raw(),
@@ -126,16 +126,16 @@ def test_fail_field_empty_expr(schema: Type["BaseSchema"]) -> None:
             __KEY__=D().default(None).css("a").text(),
             __VALUE__=R(),
         ),
-        # schema_dict_factory(
-        #     __SPLIT_DOC__=D().css_all("p"),
-        #     __KEY__=D().default(1).css("a").text().to_int(),
-        #     __VALUE__=R(),
-        # ),
-        # schema_dict_factory(
-        #     __SPLIT_DOC__=D().css_all("p"),
-        #     __KEY__=D().default(0.1).css("a").text().to_float(),
-        #     __VALUE__=R(),
-        # ),
+        schema_dict_factory(
+            __SPLIT_DOC__=D().css_all("p"),
+            __KEY__=D().default(1).css("a").text().to_int(),
+            __VALUE__=R(),
+        ),
+        schema_dict_factory(
+            __SPLIT_DOC__=D().css_all("p"),
+            __KEY__=D().default(0.1).css("a").text().to_float(),
+            __VALUE__=R(),
+        ),
     ],
 )
 def test_fail_schema_dict_key(schema: Type["BaseSchema"]) -> None:

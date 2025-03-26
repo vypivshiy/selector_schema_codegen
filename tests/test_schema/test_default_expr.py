@@ -1,7 +1,7 @@
 from typing import Type
 
 import pytest
-from helpers import schema_item_factory
+from .helpers import schema_item_factory
 
 from ssc_codegen import D
 from ssc_codegen.ast_build.main import build_ast_struct_parser
