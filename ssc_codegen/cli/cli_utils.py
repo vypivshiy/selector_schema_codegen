@@ -8,28 +8,21 @@ import difflib
 
 from typer import BadParameter
 
-from .consts import CONVERTERS_PATH
+from ssc_codegen.cli.consts import CONVERTERS_PATH
 
 if TYPE_CHECKING:
-    from ssc_codegen.ast_ssc import BaseAstNode, ModuleProgram
+    from ssc_codegen.ast_ import BaseAstNode, ModuleProgram
 
 
 RE_JSON_KEYS_CHECK = re.compile(r'(?<=")([\d\W][^"]*)(?="\s*:)')
 
 
 class ConverterLike(Protocol):
-    debug_instructions: bool = False
-    debug_comment_prefix: str = ""
+    debug_instructions: bool
 
     def convert(
         self, ast_entry: "BaseAstNode", acc: list[str] | None = None
     ) -> list[str]:
-        pass
-
-    def set_debug_prefix(self, comment_prefix: str) -> None:
-        pass
-
-    def disable_debug(self) -> None:
         pass
 
     def convert_program(
@@ -42,7 +35,7 @@ def import_converter(converter_name: str) -> ConverterLike:
     """import converter module in runtime"""
     full_import = f"{CONVERTERS_PATH}.{converter_name}"
     module = importlib.import_module(full_import)
-    converter_obj: ConverterLike = module.converter
+    converter_obj: ConverterLike = module.CONVERTER
     return converter_obj
 
 
@@ -56,7 +49,6 @@ def create_fmt_cmd(
     """insert generated schemas paths to shell command template"""
     comma: list[str] = []
     if not commands:
-        warnings.warn("Missing cmd fmt templates", category=Warning)
         return comma
     for f in ssc_files:
         name = f.name.split(".")[0]
