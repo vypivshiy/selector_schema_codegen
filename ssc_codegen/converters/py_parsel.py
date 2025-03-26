@@ -38,7 +38,7 @@ CONVERTER = BasePyCodeConverter()
 def pre_init(_node: StructInitMethod) -> str:
     return (
         INDENT_METHOD
-        + "def __init__(self, document: Union[str, _SelectorType]) -> None:\n"
+        + "def __init__(self, document: Union[str, Selector]) -> None:\n"
         + INDENT_METHOD_BODY
         + "self._document = Selector(document) if isinstance(document, str) else document"
     )
@@ -48,7 +48,7 @@ def pre_init(_node: StructInitMethod) -> str:
 def pre_struct_pre_validate(_node: StructPreValidateMethod) -> str:
     return (
         INDENT_METHOD
-        + "def _pre_validate(self, v: Union[Selector, _SelectorType]) -> None:"
+        + "def _pre_validate(self, v: Union[Selector, SelectorList]) -> None:"
     )
 
 
@@ -56,7 +56,7 @@ def pre_struct_pre_validate(_node: StructPreValidateMethod) -> str:
 def pre_struct_part_doc_method(_node: StructPartDocMethod) -> str:
     return (
         INDENT_METHOD
-        + "def _split_doc(self, v: Union[Selector, _SelectorType]) -> SelectorList:"
+        + "def _split_doc(self, v: Union[Selector, SelectorList]) -> SelectorList:"
     )
 
 
@@ -67,15 +67,13 @@ def pre_struct_field_method(node: StructFieldMethod) -> str:
     name = MAGIC_METHODS.get(name, name)
     return (
         INDENT_METHOD
-        + f"def _parse_{name}(self, v: Union[Selector, _SelectorType]) -> {type_}:"
+        + f"def _parse_{name}(self, v: Union[Selector, SelectorList]) -> {type_}:"
     )
 
 
 @CONVERTER.post(ModuleImports.kind)
 def post_imports(_: ModuleImports) -> str:
-    return """from parsel import Selector, SelectorList
-from parsel.selector import _SelectorType  # noqa
-"""
+    return """from parsel import Selector, SelectorList"""
 
 
 @CONVERTER(ExprCss.kind)
