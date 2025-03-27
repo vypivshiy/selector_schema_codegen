@@ -1,5 +1,6 @@
 import json
 import logging
+import sys
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Type
@@ -87,10 +88,16 @@ def extract_json_structs_from_module(module: ModuleType) -> list[Type[Json]]:
     ]
 
 
-def exec_module_code(path: str | Path) -> ModuleType:
+def exec_module_code(path: str | Path, add_sys_path: bool = True) -> ModuleType:
+    # apologize, input - real python file
     if isinstance(path, str):
         path = Path(path)
     module = ModuleType("_")
-    code = Path(path.resolve()).read_text()
+    abs_path = path.resolve()
+    # required for correct imports (eg: constants)
+    if add_sys_path and str(abs_path.parent) not in sys.path:
+        sys.path.append(str(abs_path.parent))
+
+    code = Path(abs_path).read_text()
     exec(code, module.__dict__)
     return module

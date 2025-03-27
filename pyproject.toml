@@ -1,6 +1,6 @@
 [project]
 name = "ssc_codegen"
-version = "0.8.3"
+version = "0.8.4"
 description = "Python-dsl code converter to html parser for web scraping "
 readme = "README.md"
 requires-python = ">=3.10"
@@ -84,3 +84,26 @@ exclude = [
 [[tool.mypy.overrides]]
 module="tests.*"
 disallow_untyped_defs = false
+
+
+[tool.coverage.report]
+exclude_also = [
+    'def __repr__',
+    'if self.debug:',
+    'if settings.DEBUG',
+    'raise AssertionError',
+    'raise NotImplementedError',
+    'if 0:',
+    'if __name__ == .__main__.:',
+    'if TYPE_CHECKING:',
+    'class .*\bProtocol\):',
+    '@(abc\.)?abstractmethod',
+]
+
+[tool.coverage.run]
+source = ["ssc_codegen"]
+omit = [
+    "*/.venv/*",
+    "*/scripts/*",
+    "*/tests/*"
+]
