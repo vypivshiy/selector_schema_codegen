@@ -144,11 +144,23 @@ def py_optimize_return_naive(py_code: str) -> str:
     tmp_code = py_code
     for method_block in RE_PY_METHOD_BLOCK.finditer(tmp_code):
         ret_var = method_block["ret_var"]
-        # value6\s*=\s*(?P<expr>.*)$
+        # v6\s*=\s*(?P<expr>.*)$
         re_expr = f"{ret_var}\\s*=\\s*(?P<expr>.*)"
         if match := re.search(re_expr, method_block[0]):
             expr = match["expr"]  # noqa
 
+            # optimization function convert double backslash to single (\\ -> \) in regex patterns
+            # add `r` prefix for avoid SyntaxWarning then compile generated code to cpython bytecode
+            def add_r_prefix(m: re.Match) -> str:
+                func, string = m.groups()
+                if not string.startswith(('r"', "r'")):
+                    return f"{func}r{string}"
+                return match.group(0)
+
+            # in patterns codegen used single quotas literals
+            expr = re.sub(
+                r'(\bre\.\w+\()\s*(".*?"|\'.*?\')', add_r_prefix, expr
+            )
             new_method_block = re.sub(f"\\s*{re_expr}", "", method_block[0])
             new_method_block = re.sub(
                 rf"return {ret_var}", f"return {expr}", new_method_block
