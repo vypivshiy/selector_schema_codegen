@@ -654,7 +654,6 @@ class StringDocument(BaseDocument):
 
         - accept STRING, return STRING
         """
-        # TODO: implement, js, go, dart ignorecase flag
         if not isinstance(pattern, str):
             ignore_case = is_ignore_case_regex(pattern)
 
