@@ -5,6 +5,12 @@ from cssselect import HTMLTranslator, SelectorSyntaxError
 from lxml import etree
 from lxml.etree import XPathSyntaxError
 
+# cssselect not support CSS4 standard syntax
+# used for particularly provide CSS 4 API
+# https://facelessuser.github.io/soupsieve/selectors/
+from soupsieve import compile as css_compile
+from soupsieve.util import SelectorSyntaxError as SoupSieveSelectorSyntaxError
+
 
 def css_to_xpath(query: str, prefix: str = "descendant-or-self::") -> str:
     """convert css to XPATH selector"""
@@ -24,6 +30,10 @@ def xpath_to_css(query: str) -> str:
     EG FAIL:
         //p[contains(@class, "star-rating")]
 
+
+    NOTE:
+        cssselect not fully support CSS4 standard
+
     """
     # https://stackoverflow.com/a/18421383
     css = re.sub(
@@ -41,8 +51,8 @@ def xpath_to_css(query: str) -> str:
 
 def validate_css_query(query: str) -> None:
     try:
-        HTMLTranslator().css_to_xpath(query.strip('"'))
-    except SelectorSyntaxError:
+        css_compile(query.strip('"'))
+    except SoupSieveSelectorSyntaxError:
         # maybe is XPATH?
         with suppress(XPathSyntaxError):
             etree.XPath(query)  # type: ignore
@@ -57,10 +67,9 @@ def validate_xpath_query(query: str) -> None:
         etree.XPath(query.strip('"'))
         # etree.XPath accept CSS-like queries without throw exception, check it!
         is_css = False
-        with suppress(SelectorSyntaxError):
-            HTMLTranslator().css_to_xpath(query.strip('"'))
+        with suppress(SoupSieveSelectorSyntaxError):
+            css_compile(query.strip('"'))
             is_css = True
-
         if is_css:
             msg = f"`{query}` looks like CSS query, not XPATH"
             raise SelectorSyntaxError(msg)

@@ -1052,7 +1052,7 @@ wheels = [
 
 [[package]]
 name = "ssc-codegen"
-version = "0.8.0"
+version = "0.8.4"
 source = { editable = "." }
 dependencies = [
     { name = "colorama", marker = "sys_platform == 'win32'" },
@@ -1062,6 +1062,7 @@ dependencies = [
     { name = "jinja2" },
     { name = "lxml" },
     { name = "parsel" },
+    { name = "soupsieve" },
     { name = "typer" },
     { name = "typing-extensions", marker = "python_full_version < '3.11'" },
 ]
@@ -1089,6 +1090,7 @@ requires-dist = [
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "lxml", specifier = ">=5.3.0" },
     { name = "parsel", specifier = ">=1.10.0" },
+    { name = "soupsieve", specifier = ">=2.6" },
     { name = "typer", specifier = ">=0.15.1" },
     { name = "typing-extensions", marker = "python_full_version < '3.11'" },
 ]

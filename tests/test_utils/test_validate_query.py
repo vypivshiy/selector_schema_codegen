@@ -26,6 +26,10 @@ def test_fail_validate_xpath_query(q: str) -> None:
         "head > title",
         # note: several backend css parser may be not fully support css2 specs
         "body > div:nth-child(1)",
+        # BS4 particularly support CSS4 standard
+        # https://facelessuser.github.io/soupsieve/selectors/
+        ":is(a, b, c[foobar])",
+        ":not(a, b, c[foobar])",
     ],
 )
 def test_validate_css_query(q: str) -> None:
