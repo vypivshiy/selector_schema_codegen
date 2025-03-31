@@ -95,8 +95,12 @@ def exec_module_code(path: str | Path, add_sys_path: bool = True) -> ModuleType:
     module = ModuleType("_")
     abs_path = path.resolve()
     # required for correct imports (eg: constants)
+    # TODO: calculate configs dirs depth
     if add_sys_path and str(abs_path.parent) not in sys.path:
         sys.path.append(str(abs_path.parent))
+
+    if add_sys_path and str(abs_path.parent.parent) not in sys.path:
+        sys.path.append(str(abs_path.parent.parent))
 
     code = Path(abs_path).read_text()
     exec(code, module.__dict__)
