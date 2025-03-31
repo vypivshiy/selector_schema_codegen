@@ -100,6 +100,13 @@ def generate_code(
         LOGGER.info("TOGGLE debug generated tokens")
         converter.debug_instructions = True
     for file_cfg in ssc_files:
+        # check ssc-gen files
+        if (
+            file_cfg.suffix != ".py"
+            and "ssc_codegen" not in file_cfg.read_text()
+        ):
+            LOGGER.info("Skip %s (not ssc-gen config)", file_cfg.name)
+            continue
         name = file_cfg.name.split(".")[0]
         out_file = f"{prefix}{name}{suffix}"
         LOGGER.info("Make AST %s...", file_cfg.name)
