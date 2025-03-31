@@ -146,6 +146,11 @@ def pre_part_doc(_node: StructPartDocMethod) -> str:
     return "_splitDoc(v) " + BRACKET_START
 
 
+@CONVERTER.post(StructPartDocMethod.kind)
+def post_part_doc(_node: StructPartDocMethod) -> str:
+    return BRACKET_END
+
+
 @CONVERTER(StructParser.kind)
 def pre_struct_parser(node: StructParser) -> str:
     name = node.kwargs["name"]
