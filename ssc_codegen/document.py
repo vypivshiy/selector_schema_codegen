@@ -4,7 +4,7 @@ import logging
 from typing import Type, Pattern
 
 from cssselect import SelectorSyntaxError
-from typing_extensions import Self
+from typing_extensions import Self, assert_never
 
 from ssc_codegen.ast_ import (
     BaseAstNode,
@@ -63,6 +63,11 @@ from ssc_codegen.document_utlis import (
     unverbosify_regex,
     is_ignore_case_regex,
 )
+from ssc_codegen.pseudo_selectors import (
+    parse_pseudo_xpath_query,
+    parse_pseudo_css_query,
+    PseudoAction,
+)
 from ssc_codegen.json_struct import Json
 from ssc_codegen.schema import BaseSchema
 from ssc_codegen.selector_utils import validate_css_query, validate_xpath_query
@@ -72,6 +77,8 @@ LOGGER = logging.getLogger("ssc_gen")
 
 
 class BaseDocument:
+    LOGGER = LOGGER
+
     def __init__(self) -> None:
         self._stack: list[BaseAstNode] = []
 
@@ -97,14 +104,6 @@ class BaseDocument:
             # always Document or Element type
             return VariableType.DOCUMENT
         return self.stack[-1].ret_type
-
-    @staticmethod
-    def _raise_wrong_type_error(
-        type_: VariableType, *expected: VariableType
-    ) -> None:
-        fmt_types = "(" + ",".join(i.name for i in expected) + ")"
-        msg = f"Expected type(s): {fmt_types}, got {type_.name}"
-        raise SyntaxError(msg)
 
     def _add(self, expr: BaseAstNode) -> None:
         self._stack.append(expr)
@@ -140,6 +139,7 @@ class HTMLDocument(BaseDocument):
         - accept: DOCUMENT, return DOCUMENT
         """
         query = " ".join(query.splitlines())
+        query, action = parse_pseudo_css_query(query)
         try:
             validate_css_query(query)
         except SelectorSyntaxError:
@@ -153,13 +153,29 @@ class HTMLDocument(BaseDocument):
             )
 
         self._add(ExprCss(kwargs={"query": query}))
+        self._pseudo_query_action_to_expr(action)
         return self
+
+    def _pseudo_query_action_to_expr(
+        self, action: tuple[PseudoAction | None, str | None]
+    ) -> None:
+        if action[0]:
+            match action[0]:
+                case "text":
+                    self.text()
+                case "raw":
+                    self.raw()
+                case "attr":
+                    self.attr(action[1])  # type: ignore
+                case _:
+                    assert_never(action[0])
 
     def xpath(self, query: str) -> Self:
         """Xpath query. returns first founded element
         - accept: DOCUMENT, return DOCUMENT
         """
         query = " ".join(query.splitlines())
+        query, action = parse_pseudo_xpath_query(query)
         try:
             validate_xpath_query(query)
         except SelectorSyntaxError:
@@ -172,22 +188,15 @@ class HTMLDocument(BaseDocument):
                 self.stack_last_ret.name,
             )
         self._add(ExprXpath(kwargs={"query": query}))
+        self._pseudo_query_action_to_expr(action)
         return self
-        # match self.stack_last_ret:
-        #     case VariableType.DOCUMENT:
-        #         self._add(HtmlXpathExpression(query=query))
-        #     case VariableType.ANY:
-        #         self._add(HtmlXpathExpression(query=query))
-        #     case _:
-        #         self._raise_wrong_type_error(
-        #             self.stack_last_ret, VariableType.DOCUMENT
-        #         )
 
     def css_all(self, query: str) -> Self:
         """Css query. returns all founded elements
         - accept: DOCUMENT, return: LIST_DOCUMENT
         """
         query = " ".join(query.splitlines())
+        query, action = parse_pseudo_css_query(query)
         try:
             validate_css_query(query)
         except SelectorSyntaxError:
@@ -199,6 +208,7 @@ class HTMLDocument(BaseDocument):
                 self.stack_last_ret.name,
             )
         self._add(ExprCssAll(kwargs={"query": query}))
+        self._pseudo_query_action_to_expr(action)
         return self
 
     def xpath_all(self, query: str) -> Self:
@@ -206,6 +216,7 @@ class HTMLDocument(BaseDocument):
         - accept: DOCUMENT, return: LIST_DOCUMENT
         """
         query = " ".join(query.splitlines())
+        query, action = parse_pseudo_xpath_query(query)
         try:
             validate_xpath_query(query)
         except SelectorSyntaxError as e:
@@ -217,6 +228,7 @@ class HTMLDocument(BaseDocument):
                 self.stack_last_ret.name,
             )
         self._add(ExprXpathAll(kwargs={"query": query}))
+        self._pseudo_query_action_to_expr(action)
         return self
 
     def attr(self, key: str) -> Self:
@@ -768,6 +780,13 @@ class AssertDocument(BaseDocument):
         - accept DOCUMENT, return DOCUMENT
         """
         query = " ".join(query.splitlines())
+        new_query, action = parse_pseudo_css_query(query)
+        if action[0]:
+            LOGGER.warning(
+                "is_css(%s) not support pseudo parse classes, skip", repr(query)
+            )
+            query = new_query
+
         try:
             validate_css_query(query)
         except SelectorSyntaxError:
@@ -790,6 +809,13 @@ class AssertDocument(BaseDocument):
         - accept DOCUMENT, return DOCUMENT
         """
         query = " ".join(query.splitlines())
+        new_query, action = parse_pseudo_xpath_query(query)
+        if action[0]:
+            LOGGER.warning(
+                "is_xpath(%s) not support pseudo parse classes, skip",
+                repr(query),
+            )
+            query = new_query
         try:
             validate_xpath_query(query)
         except SelectorSyntaxError:

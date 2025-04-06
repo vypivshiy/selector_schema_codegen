@@ -1,6 +1,8 @@
+import logging
 import re
 from typing import TYPE_CHECKING, Pattern
-import logging
+from typing_extensions import assert_never
+
 from ssc_codegen.ast_ import (
     BaseAstNode,
     ExprIsCss,
@@ -10,6 +12,12 @@ from ssc_codegen.ast_ import (
     ExprXpath,
     ExprCssAll,
 )
+from ssc_codegen.pseudo_selectors import (
+    parse_pseudo_xpath_query,
+    pseudo_action_to_pseudo_xpath,
+    parse_pseudo_css_query,
+    pseudo_action_to_pseudo_css,
+)
 from ssc_codegen.selector_utils import css_to_xpath, xpath_to_css
 from ssc_codegen.static_checker.base import AnalyzeResult
 
@@ -17,7 +25,6 @@ LOGGER = logging.getLogger("ssc_gen")
 
 if TYPE_CHECKING:
     from .document import BaseDocument
-
 
 # https://stackoverflow.com/a/14919203
 CM1_RX = r"(?m)(?<!\\)((\\{2})*)#.*$"
@@ -88,35 +95,34 @@ def convert_css_to_xpath(
     new_stack: list[BaseAstNode] = []
 
     for expr in old_stack:
+        if expr.kind not in (ExprCss.kind, ExprCssAll.kind, ExprIsCss.kind):
+            new_stack.append(expr)
+            continue
+        query = expr.kwargs["query"]
+        query, pseudo_action = parse_pseudo_css_query(query)
+        new_query = css_to_xpath(query, prefix=prefix)
+        if pseudo_action[0]:
+            new_query += pseudo_action_to_pseudo_css(*pseudo_action)
         match expr.kind:
             case ExprCss.kind:
-                new_expr = ExprXpath(  # type: ignore[assignment]
-                    kwargs={
-                        "query": css_to_xpath(
-                            expr.kwargs["query"], prefix=prefix
-                        )
-                    }
-                )
+                new_stack.append(ExprXpath(kwargs={"query": new_query}))
             case ExprCssAll.kind:
-                new_expr = ExprXpathAll(  # type: ignore[assignment]
-                    kwargs={
-                        "query": css_to_xpath(
-                            expr.kwargs["query"], prefix=prefix
-                        )
-                    }
+                new_stack.append(
+                    ExprXpathAll(  # type: ignore[assignment]
+                        kwargs={"query": new_query}
+                    )
                 )
             case ExprIsCss.kind:
-                new_expr = ExprIsXpath(  # type: ignore[assignment]
-                    kwargs={
-                        "query": css_to_xpath(
-                            expr.kwargs["query"], prefix=prefix
-                        ),
-                        "msg": expr.kwargs["msg"],
-                    }
+                new_stack.append(
+                    ExprIsXpath(  # type: ignore[assignment]
+                        kwargs={
+                            "query": new_query,
+                            "msg": expr.kwargs["msg"],
+                        }
+                    )
                 )
             case _:
-                new_expr = expr  # type: ignore[assignment]
-        new_stack.append(new_expr)
+                assert_never(expr.kind)
     doc._stack = new_stack
     return doc
 
@@ -126,24 +132,33 @@ def convert_xpath_to_css(doc: "BaseDocument") -> "BaseDocument":
     old_stack = doc.stack.copy()
     new_stack: list[BaseAstNode] = []
     for expr in old_stack:
+        if expr.kind not in (
+            ExprXpath.kind,
+            ExprXpathAll.kind,
+            ExprIsXpath.kind,
+        ):
+            new_stack.append(expr)
+            continue
+        query = expr.kwargs["query"]
+        query, pseudo_action = parse_pseudo_xpath_query(query)
+        new_query = xpath_to_css(query)
+        if pseudo_action[0]:
+            new_query += pseudo_action_to_pseudo_xpath(*pseudo_action)
         match expr.kind:
             case ExprXpath.kind:
-                new_expr = ExprCss(
-                    kwargs={"query": xpath_to_css(expr.kwargs["query"])}
-                )
+                new_stack.append(ExprCss(kwargs={"query": new_query}))
             case ExprXpathAll.kind:
-                new_expr = ExprCssAll(  # type: ignore[assignment]
-                    kwargs={"query": xpath_to_css(expr.kwargs["query"])}
-                )
+                new_stack.append(ExprCssAll(kwargs={"query": new_query}))
             case ExprIsXpath.kind:
-                new_expr = ExprIsCss(  # type: ignore[assignment]
-                    kwargs={
-                        "query": xpath_to_css(expr.kwargs["query"]),
-                        "msg": expr.kwargs["msg"],
-                    }
+                new_stack.append(
+                    ExprIsCss(
+                        kwargs={
+                            "query": new_query,
+                            "msg": expr.kwargs["msg"],
+                        }
+                    )
                 )
             case _:
-                new_expr = expr  # type: ignore[assignment]
-        new_stack.append(new_expr)
+                assert_never(expr.kind)
     doc._stack = new_stack
     return doc

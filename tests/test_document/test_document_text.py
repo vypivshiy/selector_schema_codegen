@@ -28,19 +28,18 @@ def test_string_expr(expr: BaseDocument) -> None:
     assert expr.stack_last_ret == VariableType.STRING
 
 
-
 @pytest.mark.parametrize(
     "expr",
     [
-        R().split(' ').trim(""),
-        R().split(' ').ltrim(""),
-        R().split(' ').rtrim(""),
-        R().split(' ').rm_prefix("a"),
-        R().split(' ').rm_suffix("a"),
-        R().split(' ').rm_prefix_suffix("a"),
-        R().split(' ').fmt("{{}}"),
-        R().split(' ').repl("o", 'n'),
-    ]
+        R().split(" ").trim(""),
+        R().split(" ").ltrim(""),
+        R().split(" ").rtrim(""),
+        R().split(" ").rm_prefix("a"),
+        R().split(" ").rm_suffix("a"),
+        R().split(" ").rm_prefix_suffix("a"),
+        R().split(" ").fmt("{{}}"),
+        R().split(" ").repl("o", "n"),
+    ],
 )
 def test_list_string_expr(expr: BaseDocument) -> None:
     assert expr.stack_last_ret == VariableType.LIST_STRING
