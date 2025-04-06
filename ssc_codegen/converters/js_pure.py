@@ -353,9 +353,10 @@ def pre_list_str_replace(node: ExprListStringReplace) -> str:
 def pre_str_regex(node: ExprStringRegex) -> str:
     prv, nxt = prev_next_var(node)
     pattern, group, ignore_case = node.unpack_args()
-    pattern = f"/{node.pattern}/g"
+    pattern = pattern.replace("/", "\\/")
+    pattern = f"/{pattern}/g"
     if ignore_case:
-        return f'let {nxt} = (new RegExp({pattern}, "i")).exec({prv})[{group}];'
+        pattern += "i"
     return f"let {nxt} = (new RegExp({pattern})).exec({prv})[{group}];"
 
 
@@ -363,9 +364,10 @@ def pre_str_regex(node: ExprStringRegex) -> str:
 def pre_str_regex_all(node: ExprStringRegexAll) -> str:
     prv, nxt = prev_next_var(node)
     pattern, ignore_case = node.unpack_args()
-    pattern = f"/{node.pattern}/g"
+    pattern = pattern.replace("/", "\\/")
+    pattern = f"/{pattern}/g"
     if ignore_case:
-        return f'let {nxt} = (new RegExp({pattern}, "i")).exec({prv});'
+        pattern += "i"
     return f"let {nxt} = (new RegExp({pattern})).exec({prv});"
 
 
@@ -373,7 +375,8 @@ def pre_str_regex_all(node: ExprStringRegexAll) -> str:
 def pre_str_regex_sub(node: ExprStringRegexSub) -> str:
     prv, nxt = prev_next_var(node)
     pattern, repl = node.unpack_args()
-    pattern = f"/{node.pattern}/g"
+    pattern = pattern.replace("/", "\\/")
+    pattern = f"/{pattern}/g"
 
     return f"let {nxt} = {prv}.replace({pattern}, {repl!r});"
 
@@ -382,7 +385,8 @@ def pre_str_regex_sub(node: ExprStringRegexSub) -> str:
 def pre_list_str_regex_sub(node: ExprListStringRegexSub) -> str:
     prv, nxt = prev_next_var(node)
     pattern, repl = node.unpack_args()
-    pattern = f"/{node.pattern}/g"
+    pattern = pattern.replace("/", "\\/")
+    pattern = f"/{pattern}/g"
     return f"let {nxt} = {prv}.map(e => e.replace({pattern}, {repl!r}));"
 
 
@@ -448,7 +452,8 @@ def pre_is_contains(node: ExprIsContains) -> str:
 def pre_is_regex(node: ExprStringIsRegex) -> str:
     prv, nxt = prev_next_var(node)
     pattern, ignore_case, msg = node.unpack_args()
-    pattern = f"/{node.pattern}/g"
+    pattern = pattern.replace("/", "\\/")
+    pattern = f"/{pattern}/g"
     if ignore_case:
         pattern += "i"
 
@@ -464,7 +469,8 @@ def pre_list_str_any_is_regex(node: ExprListStringAnyRegex) -> str:
     # a.some(i => (new RegExp("foo")).test(i))
     prv, nxt = prev_next_var(node)
     pattern, ignore_case, msg = node.unpack_args()
-    pattern = f"/{node.pattern}/g"
+    pattern = pattern.replace("/", "\\/")
+    pattern = f"/{pattern}/g"
     if ignore_case:
         pattern += "i"
 
@@ -480,7 +486,8 @@ def pre_list_str_all_is_regex(node: ExprListStringAllRegex) -> str:
     prv, nxt = prev_next_var(node)
     # a.every(i => (new RegExp("foo")).test)
     pattern, ignore_case, msg = node.unpack_args()
-    pattern = f"/{node.pattern}/g"
+    pattern = pattern.replace("/", "\\/")
+    pattern = f"/{pattern}/g"
     if ignore_case:
         pattern += "i"
 
