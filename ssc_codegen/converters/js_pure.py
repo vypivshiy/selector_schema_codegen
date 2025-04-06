@@ -54,7 +54,7 @@ from ssc_codegen.ast_ import (
     ExprIsEqual,
     ExprIsNotEqual,
     ExprIsContains,
-    ExprIsRegex,
+    ExprStringIsRegex,
     ExprToInt,
     ExprToListInt,
     ExprToFloat,
@@ -81,6 +81,8 @@ from ssc_codegen.ast_ import (
     ExprListStringRmSuffix,
     ExprStringRmPrefixAndSuffix,
     ExprListStringRmPrefixAndSuffix,
+    ExprListStringAnyRegex,
+    ExprListStringAllRegex,
 )
 from ssc_codegen.converters.base import BaseCodeConverter
 from ssc_codegen.converters.helpers import (
@@ -442,12 +444,47 @@ def pre_is_contains(node: ExprIsContains) -> str:
     return expr + f"let {nxt} = {prv};"
 
 
-@CONVERTER(ExprIsRegex.kind)
-def pre_is_regex(node: ExprIsRegex) -> str:
+@CONVERTER(ExprStringIsRegex.kind)
+def pre_is_regex(node: ExprStringIsRegex) -> str:
     prv, nxt = prev_next_var(node)
     pattern, ignore_case, msg = node.unpack_args()
     pattern = f"/{node.pattern}/g"
+    if ignore_case:
+        pattern += "i"
+
     expr = f"if ({prv}.match({pattern}) === null) throw new Error({msg!r});"
+    if is_last_var_no_ret(node):
+        return expr
+    # HACK: avoid recalc variables
+    return expr + f"let {nxt} = {prv};"
+
+
+@CONVERTER(ExprListStringAnyRegex.kind)
+def pre_list_str_any_is_regex(node: ExprListStringAnyRegex) -> str:
+    # a.some(i => (new RegExp("foo")).test(i))
+    prv, nxt = prev_next_var(node)
+    pattern, ignore_case, msg = node.unpack_args()
+    pattern = f"/{node.pattern}/g"
+    if ignore_case:
+        pattern += "i"
+
+    expr = f"if (!{prv}.some(i => (new RegExp({pattern})).test(i))) throw new Error({msg!r});"
+    if is_last_var_no_ret(node):
+        return expr
+    # HACK: avoid recalc variables
+    return expr + f"let {nxt} = {prv};"
+
+
+@CONVERTER(ExprListStringAllRegex.kind)
+def pre_list_str_all_is_regex(node: ExprListStringAllRegex) -> str:
+    prv, nxt = prev_next_var(node)
+    # a.every(i => (new RegExp("foo")).test)
+    pattern, ignore_case, msg = node.unpack_args()
+    pattern = f"/{node.pattern}/g"
+    if ignore_case:
+        pattern += "i"
+
+    expr = f"if (!{prv}.every(i => (new RegExp({pattern})).test(i))) throw new Error({msg!r});"
     if is_last_var_no_ret(node):
         return expr
     # HACK: avoid recalc variables

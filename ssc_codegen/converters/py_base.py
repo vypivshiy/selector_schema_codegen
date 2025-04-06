@@ -72,7 +72,7 @@ from ssc_codegen.ast_ import (
     ExprIsEqual,
     ExprIsNotEqual,
     ExprIsContains,
-    ExprIsRegex,
+    ExprStringIsRegex,
     ExprToInt,
     ExprToListInt,
     ExprToFloat,
@@ -85,6 +85,8 @@ from ssc_codegen.ast_ import (
     ExprListStringRmSuffix,
     ExprStringRmPrefixAndSuffix,
     ExprListStringRmPrefixAndSuffix,
+    ExprListStringAnyRegex,
+    ExprListStringAllRegex,
 )
 from ssc_codegen.converters.base import (
     BaseCodeConverter,
@@ -222,7 +224,9 @@ class BasePyCodeConverter(BaseCodeConverter):
             ExprIsEqual.kind: pre_is_equal,
             ExprIsNotEqual.kind: pre_is_not_equal,
             ExprIsContains.kind: pre_is_contains,
-            ExprIsRegex.kind: pre_is_regex,
+            ExprStringIsRegex.kind: pre_is_regex,
+            ExprListStringAllRegex.kind: pre_list_str_all_is_regex,
+            ExprListStringAnyRegex.kind: pre_list_str_any_is_regex,
             ExprToInt.kind: pre_to_int,
             ExprToListInt.kind: pre_to_list_int,
             ExprToFloat.kind: pre_to_float,
@@ -770,13 +774,45 @@ def pre_is_contains(node: ExprIsContains) -> str:
     return expr + "\n" + indent + f"{nxt} = {prv}"
 
 
-def pre_is_regex(node: ExprIsRegex) -> str:
+def pre_is_regex(node: ExprStringIsRegex) -> str:
     indent = (
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
     pattern, ignore_case, msg = node.unpack_args()
     expr = indent + f"assert re.search({pattern!r}, {prv}), {msg!r}"
+    if is_last_var_no_ret(node):
+        return expr
+    # HACK: avoid recalc variables
+    return expr + "\n" + indent + f"{nxt} = {prv}"
+
+
+def pre_list_str_any_is_regex(node: ExprListStringAnyRegex) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    pattern, ignore_case, msg = node.unpack_args()
+    expr = (
+        indent
+        + f"assert any(re.search({pattern!r}, i) for i in {prv}), {msg!r}"
+    )
+    if is_last_var_no_ret(node):
+        return expr
+    # HACK: avoid recalc variables
+    return expr + "\n" + indent + f"{nxt} = {prv}"
+
+
+def pre_list_str_all_is_regex(node: ExprListStringAllRegex) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    pattern, ignore_case, msg = node.unpack_args()
+    expr = (
+        indent
+        + f"assert all(re.search({pattern!r}, i) for i in {prv}), {msg!r}"
+    )
     if is_last_var_no_ret(node):
         return expr
     # HACK: avoid recalc variables

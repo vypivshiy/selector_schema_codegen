@@ -409,3 +409,42 @@ for _, {{ tmp_var }} := range {{ prv }} {
     {{nxt}} = append({{ nxt }}, {{ tmp_var }});
 }
 """)
+
+
+J2_PRE_LIST_STR_ANY_IS_RE = Template("""
+re{{ nxt }} :=  regexp.MustCompile({{ pattern }});
+for _, {{ tmp_var }} := range {{ prv }} {
+    if re{{ nxt }}.MatchString({{ tmp_var }}) {
+        break;
+    }
+    {% if have_default_expr %}
+    panic(fmt.Errorf({{ msg }}));
+    {% elif is_pre_validate_parent %}
+    return nil, fmt.Errorf({{ msg }});
+    {% else %}
+    return {{ return_type }}, fmt.Errorf({{ msg }});
+    {% endif %}
+}
+{% if not is_last_var_no_ret %}
+{{ nxt }} := {{ prv }};
+{% endif %}
+""")
+
+
+J2_PRE_LIST_STR_ALL_IS_RE = Template("""
+re{{ nxt }} :=  regexp.MustCompile({{ pattern }});
+for _, {{ tmp_var }} := range {{ prv }} {
+    if !re{{ nxt }}.MatchString({{ tmp_var }}) {
+        {% if have_default_expr %}
+        panic(fmt.Errorf({{ msg }}));
+        {% elif is_pre_validate_parent %}
+        return nil, fmt.Errorf({{ msg }});
+        {% else %}
+        return {{ return_type }}, fmt.Errorf({{ msg }});
+        {% endif %}
+    }
+}
+{% if not is_last_var_no_ret %}
+{{ nxt }} := {{ prv }};
+{% endif %}
+""")

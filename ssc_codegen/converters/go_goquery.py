@@ -90,7 +90,7 @@ from ssc_codegen.ast_ import (
     ExprIsEqual,
     ExprIsNotEqual,
     ExprIsContains,
-    ExprIsRegex,
+    ExprStringIsRegex,
     ExprIsCss,
     ExprToInt,
     ExprToListInt,
@@ -122,6 +122,8 @@ from ssc_codegen.ast_ import (
     ExprListStringRmSuffix,
     ExprStringRmPrefixAndSuffix,
     ExprListStringRmPrefixAndSuffix,
+    ExprListStringAnyRegex,
+    ExprListStringAllRegex,
 )
 from ssc_codegen.converters.base import BaseCodeConverter
 from ssc_codegen.converters.helpers import (
@@ -166,6 +168,8 @@ from ssc_codegen.converters.templates.go_goquery import (
     J2_PRE_LIST_STR_RM_SUFFIX,
     J2_PRE_STR_RM_PREFIX_AND_SUFFIX,
     J2_PRE_LIST_STR_RM_PREFIX_AND_SUFFIX,
+    J2_PRE_LIST_STR_ANY_IS_RE,
+    J2_PRE_LIST_STR_ALL_IS_RE,
 )
 from ssc_codegen.str_utils import (
     wrap_backtick,
@@ -853,8 +857,8 @@ def pre_is_contains(node: ExprIsContains) -> str:
     return J2_PRE_IS_CONTAINS.render(**context)
 
 
-@CONVERTER(ExprIsRegex.kind)
-def pre_is_regex(node: ExprIsRegex) -> str:
+@CONVERTER(ExprStringIsRegex.kind)
+def pre_is_regex(node: ExprStringIsRegex) -> str:
     prv, nxt = prev_next_var(node)
     pattern, ignore_case, msg = node.unpack_args()
 
@@ -878,6 +882,48 @@ def pre_is_regex(node: ExprIsRegex) -> str:
     }
 
     return J2_PRE_IS_REGEX.render(**context)
+
+
+@CONVERTER(ExprListStringAnyRegex.kind)
+def pre_list_str_any_is_regex(node: ExprListStringAnyRegex) -> str:
+    prv, nxt = prev_next_var(node)
+    pattern, ignore_case, msg = node.unpack_args()
+    if ignore_case:
+        pattern = f"(?i){pattern}"
+    pattern = wrap_backtick(pattern)
+    msg = wrap_double_quotes(msg)
+    context = {
+        "prv": prv,
+        "nxt": nxt,
+        "pattern": pattern,  # Already processed with ignore_case and backticks
+        "msg": msg,
+        "have_default_expr": have_default_expr(node),
+        "is_pre_validate_parent": is_pre_validate_parent(node),
+        "is_last_var_no_ret": is_last_var_no_ret(node),
+        "return_type": RETURN_ERR_TYPES.get(get_last_ret_type(node), "nil"),
+    }
+    return J2_PRE_LIST_STR_ANY_IS_RE.render(**context)
+
+
+@CONVERTER(ExprListStringAllRegex.kind)
+def pre_list_str_all_is_regex(node: ExprListStringAllRegex) -> str:
+    prv, nxt = prev_next_var(node)
+    pattern, ignore_case, msg = node.unpack_args()
+    if ignore_case:
+        pattern = f"(?i){pattern}"
+    pattern = wrap_backtick(pattern)
+    msg = wrap_double_quotes(msg)
+    context = {
+        "prv": prv,
+        "nxt": nxt,
+        "pattern": pattern,  # Already processed with ignore_case and backticks
+        "msg": msg,
+        "have_default_expr": have_default_expr(node),
+        "is_pre_validate_parent": is_pre_validate_parent(node),
+        "is_last_var_no_ret": is_last_var_no_ret(node),
+        "return_type": RETURN_ERR_TYPES.get(get_last_ret_type(node), "nil"),
+    }
+    return J2_PRE_LIST_STR_ALL_IS_RE.render(**context)
 
 
 @CONVERTER(ExprIsCss.kind)
