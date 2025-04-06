@@ -253,7 +253,7 @@ def pre_start_parse(node: StartParseMethod) -> str:
 @CONVERTER(ExprDefaultValueStart.kind)
 def pre_default_start(node: ExprDefaultValueStart) -> str:
     prv, nxt = prev_next_var(node)
-    return f"{nxt} = {prv};" + "try " + BRACKET_START
+    return f"let {nxt} = {prv};" + "try " + BRACKET_START
 
 
 @CONVERTER(ExprDefaultValueEnd.kind)
