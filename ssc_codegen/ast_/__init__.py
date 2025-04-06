@@ -29,4 +29,5 @@ from .nodes_string import ExprStringTrim, ExprStringRegex, ExprStringSplit, Expr
     ExprListStringRegexSub, \
     ExprStringRmPrefix, ExprStringRmSuffix, ExprStringRmPrefixAndSuffix, ExprListStringRmPrefixAndSuffix, \
     ExprListStringRmPrefix, ExprListStringRmSuffix
-from .nodes_validate import ExprIsCss, ExprIsEqual, ExprIsRegex, ExprIsXpath, ExprIsNotEqual, ExprIsContains
+from .nodes_validate import ExprIsCss, ExprIsEqual, ExprStringIsRegex, ExprIsXpath, ExprIsNotEqual, ExprIsContains, \
+    ExprListStringAnyRegex, ExprListStringAllRegex

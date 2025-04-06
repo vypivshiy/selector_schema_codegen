@@ -329,7 +329,7 @@ def analyze_regex_expr(
             case (
                 TokenType.EXPR_REGEX_SUB
                 | TokenType.EXPR_LIST_REGEX_SUB
-                | TokenType.IS_REGEX_MATCH
+                | TokenType.IS_STRING_REGEX_MATCH
             ):
                 result = analyze_re_expression(
                     re_expr.kwargs["pattern"], allow_empty_groups=True

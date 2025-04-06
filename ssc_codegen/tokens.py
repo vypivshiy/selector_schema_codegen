@@ -153,7 +153,9 @@ class TokenType(IntEnum):
     IS_CONTAINS = auto()
     IS_CSS = auto()
     IS_XPATH = auto()
-    IS_REGEX_MATCH = auto()
+    IS_STRING_REGEX_MATCH = auto()
+    ANY_LIST_STRING_REGEX_MATCH = auto()
+    ALL_LIST_STRING_REGEX_MATCH = auto()
 
     # NUMERIC
     TO_INT = auto()
@@ -186,7 +188,7 @@ class TokenType(IntEnum):
             TokenType.IS_EQUAL,
             TokenType.IS_NOT_EQUAL,
             TokenType.IS_CONTAINS,
-            TokenType.IS_REGEX_MATCH,
+            TokenType.IS_STRING_REGEX_MATCH,
         )
 
     @classmethod
@@ -196,5 +198,5 @@ class TokenType(IntEnum):
             TokenType.EXPR_REGEX_ALL,
             TokenType.EXPR_REGEX_SUB,
             TokenType.EXPR_LIST_REGEX_SUB,
-            TokenType.IS_REGEX_MATCH,
+            TokenType.IS_STRING_REGEX_MATCH,
         )

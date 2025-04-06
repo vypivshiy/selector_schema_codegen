@@ -41,7 +41,7 @@ from ssc_codegen.ast_ import (
     ExprIsEqual,
     ExprIsNotEqual,
     ExprIsContains,
-    ExprIsRegex,
+    ExprStringIsRegex,
     ExprNested,
     ExprToInt,
     ExprToListInt,
@@ -55,6 +55,8 @@ from ssc_codegen.ast_ import (
     ExprListStringRmSuffix,
     ExprStringRmPrefixAndSuffix,
     ExprListStringRmPrefixAndSuffix,
+    ExprListStringAllRegex,
+    ExprListStringAnyRegex,
 )
 from ssc_codegen.document_utlis import (
     analyze_re_expression,
@@ -953,6 +955,78 @@ class AssertDocument(BaseDocument):
         )
         return self
 
+    def any_is_re(
+        self, pattern: str | Pattern, msg: str = "", ignore_case: bool = False
+    ) -> Self:
+        """assert any value matched in array of strings by regex.
+        If in generated code check failed - throw exception with passed msg
+
+        EXPR DO NOT MODIFY variable
+
+        - accept LIST_STRING, return LIST_STRING
+        """
+        if not isinstance(pattern, str):
+            ignore_case = is_ignore_case_regex(pattern)
+        pattern = unverbosify_regex(pattern)
+        analyze_re_expression(pattern, allow_empty_groups=True)
+        if self.stack_last_ret != VariableType.LIST_STRING:
+            LOGGER.warning(
+                "any_is_re(%s): Expected type(s) %s got %s",
+                repr(pattern),
+                VariableType.LIST_STRING.name,
+                self.stack_last_ret.name,
+            )
+
+        self._add(
+            ExprListStringAnyRegex(
+                kwargs={
+                    "pattern": pattern,
+                    "ignore_case": ignore_case,
+                    "msg": msg,
+                }
+            )
+        )
+        return self
+
+    def all_is_re(
+        self, pattern: str | Pattern, msg: str = "", ignore_case: bool = False
+    ) -> Self:
+        """assert all value matched in array of strings by regex.
+        If in generated code check failed - throw exception with passed msg
+
+        EXPR DO NOT MODIFY variable
+
+        - accept LIST_STRING, return LIST_STRING
+        """
+        if not isinstance(pattern, str):
+            ignore_case = is_ignore_case_regex(pattern)
+        pattern = unverbosify_regex(pattern)
+        analyze_re_expression(pattern, allow_empty_groups=True)
+        if self.stack_last_ret != VariableType.LIST_STRING:
+            LOGGER.warning(
+                "all_is_re(%s): Expected type(s) %s got %s",
+                repr(pattern),
+                VariableType.LIST_STRING.name,
+                self.stack_last_ret.name,
+            )
+
+        self._add(
+            ExprListStringAllRegex(
+                kwargs={
+                    "pattern": pattern,
+                    "ignore_case": ignore_case,
+                    "msg": msg,
+                }
+            )
+        )
+        return self
+
+    def is_re(
+        self, pattern: str | Pattern, msg: str = "", ignore_case: bool = False
+    ) -> Self:
+        """shortcut of is_regex() method"""
+        return self.is_regex(pattern, msg, ignore_case)
+
     def is_regex(
         self, pattern: str | Pattern, msg: str = "", ignore_case: bool = False
     ) -> Self:
@@ -976,7 +1050,7 @@ class AssertDocument(BaseDocument):
             )
 
         self._add(
-            ExprIsRegex(
+            ExprStringIsRegex(
                 kwargs={
                     "pattern": pattern,
                     "ignore_case": ignore_case,

@@ -59,10 +59,24 @@ ARGS_IS_REGEX = tuple[str, bool, str]
 
 
 @dataclass(kw_only=True)
-class ExprIsRegex(BaseAstNode[KW_IS_REGEX, ARGS_IS_REGEX]):
-    kind: ClassVar[TokenType] = TokenType.IS_REGEX_MATCH
+class ExprStringIsRegex(BaseAstNode[KW_IS_REGEX, ARGS_IS_REGEX]):
+    kind: ClassVar[TokenType] = TokenType.IS_STRING_REGEX_MATCH
     accept_type: VariableType = VariableType.STRING
     ret_type: VariableType = VariableType.STRING
+
+
+@dataclass(kw_only=True)
+class ExprListStringAnyRegex(BaseAstNode[KW_IS_REGEX, ARGS_IS_REGEX]):
+    kind: ClassVar[TokenType] = TokenType.ANY_LIST_STRING_REGEX_MATCH
+    accept_type: VariableType = VariableType.LIST_STRING
+    ret_type: VariableType = VariableType.LIST_STRING
+
+
+@dataclass(kw_only=True)
+class ExprListStringAllRegex(BaseAstNode[KW_IS_REGEX, ARGS_IS_REGEX]):
+    kind: ClassVar[TokenType] = TokenType.ALL_LIST_STRING_REGEX_MATCH
+    accept_type: VariableType = VariableType.LIST_STRING
+    ret_type: VariableType = VariableType.LIST_STRING
 
 
 KW_IS_SELECT = TypedDict("KW_IS_SELECT", {"query": str, "msg": str})
