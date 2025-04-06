@@ -66,6 +66,9 @@ class MockJson(Json):
         R().re_sub("("),
         R().is_regex(""),
         R().is_regex("("),
+        R().any_is_re('.*'),
+        R().all_is_re('.*'),
+
         D().css("a").default(None),
         D().default(None).css("a"),
         D().default(None).css_all("a"),
