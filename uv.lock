@@ -1052,7 +1052,7 @@ wheels = [
 
 [[package]]
 name = "ssc-codegen"
-version = "0.8.4"
+version = "0.8.6"
 source = { editable = "." }
 dependencies = [
     { name = "colorama", marker = "sys_platform == 'win32'" },
