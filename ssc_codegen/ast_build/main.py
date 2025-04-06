@@ -288,6 +288,13 @@ def _unwrap_default_node(
                     default_type = VariableType.OPTIONAL_INT
                 case VariableType.FLOAT:
                     default_type = VariableType.OPTIONAL_FLOAT
+                case VariableType.LIST_STRING:
+                    default_type = VariableType.OPTIONAL_LIST_STRING
+                case VariableType.LIST_INT:
+                    default_type = VariableType.OPTIONAL_LIST_INT
+                case VariableType.LIST_FLOAT:
+                    default_type = VariableType.OPTIONAL_LIST_FLOAT
+                # TODO: warning for BOOL type
                 case _:
                     assert_never(ret_type)  # type: ignore
         expr_default_start = ExprDefaultValueStart(kwargs={"value": value})
