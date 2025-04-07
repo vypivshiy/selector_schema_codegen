@@ -31,6 +31,8 @@ CM1_RX = r"(?m)(?<!\\)((\\{2})*)#.*$"
 CM2_RX = r"(\\)?((\\{2})*)(#)"
 WS_RX = r"(\\)?((\\{2})*)(\s)\s*"
 
+RE_CAPTURED_GROUPS = re.compile(r"(?<!\()\((?!\?:)[^)]+\)")
+
 
 def is_ignore_case_regex(pattern: str | Pattern) -> bool:
     if isinstance(pattern, str):
@@ -76,10 +78,14 @@ def analyze_re_expression(
     try:
         re_pattern = re.compile(pattern)
         if not allow_empty_groups and re_pattern.groups == 0:
-            msg = f"`{re_pattern.pattern}` pattern groups is empty"
+            msg = f"`{re_pattern.pattern}` pattern groups is empty."
+            msg += "\nTIP: maybe you remember wrap pattern to brackets `()`?"
             return AnalyzeResult.error(msg)
         elif max_groups != -1 and re_pattern.groups > max_groups:
-            msg = f"`{re_pattern.pattern}` too many groups in pattern, expected {max_groups}"
+            captured_groups = RE_CAPTURED_GROUPS.findall(re_pattern.pattern)
+            msg = f"`{re_pattern.pattern}` too many groups in pattern, expected groups count: {max_groups}."
+            msg += f"\nTIP: fix regular expression for extract {max_groups}:"
+            msg += f"\nGroups founded: {captured_groups}"
             return AnalyzeResult.error(msg)
     except re.error as e:
         msg = f"`{pattern}` wrong regex pattern syntax: {e!r}"
