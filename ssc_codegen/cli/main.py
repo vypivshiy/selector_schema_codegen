@@ -80,7 +80,6 @@ def generate_code(
     comment_str: str,
     fmt_cmd: list[str],
     code_cb: Callable[[list[str]], str] = lambda c: "\n".join(c),
-    docstring_class_top: bool = False,
     variables_patches: dict[str, str] | None = None,
     css_to_xpath: bool = False,
     xpath_to_css: bool = False,
@@ -112,7 +111,6 @@ def generate_code(
         LOGGER.info("Make AST %s...", file_cfg.name)
         ast_module = build_ast_module_parser(
             file_cfg,
-            docstring_class_top=docstring_class_top,
             css_to_xpath=css_to_xpath,
             xpath_to_css=xpath_to_css,
         )
@@ -220,7 +218,6 @@ def gen_js(
         suffix=suffix,
         comment_str=f"// {COMMENT_STRING}",
         fmt_cmd=fmt_cmd,
-        docstring_class_top=True,
         xpath_to_css=to_css,
         css_to_xpath=to_xpath,
         debug_instructions=debug,
@@ -272,7 +269,6 @@ def gen_go(
         fmt_cmd=fmt_cmd,
         # todo: better API for code callbacks
         code_cb=CB_GO_CODE,
-        docstring_class_top=True,
         variables_patches={"PACKAGE": package or out.name},
         xpath_to_css=to_css,
         css_to_xpath=to_xpath,
@@ -478,7 +474,7 @@ def parse_from_chrome_(
     if not url.startswith("http"):
         raise typer.BadParameter(f"`{url}` not a http url")
 
-    ast = build_ast_module_parser(schema_config, docstring_class_top=True)  # type: ignore
+    ast = build_ast_module_parser(schema_config)  # type: ignore
     code_parts = JS_CONVERTER.convert_program(ast)
     code = CB_JS_CODE(code_parts)
     code += f"; JSON.stringify((new {cls_target}(document).parse()))"
