@@ -19,7 +19,7 @@ Current support converters
 |---------------|-------------------------------|---------------|-------------|------------------------------------------|----------------|
 | Python (3.8+) | bs4                           | N             | Y           | TypedDict*, list, dict                   | ruff           |
 | ...           | parsel                        | Y             | Y           | ...                                      | -              |
-| ...           | selectolax (modest)           | N             | Y           | ...                                      | -              |
+| ...           | selectolax (lexbor)           | N             | Y           | ...                                      | -              |
 | js (ES6)      | pure (firefox/chrome/nodejs)  | Y             | Y           | Array, Map**                             | -              |
 | go (1.10+)    | goquery                       | N             | Y           | struct(json anchors include), array, map | gofmt          |
 
