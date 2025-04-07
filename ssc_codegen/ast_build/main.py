@@ -77,15 +77,32 @@ def build_ast_module_parser(
     json_structs = extract_json_structs_from_module(py_module)
     # TODO: API for build single json
     ast_jsons = build_ast_json(ast_module, *json_structs)
-    ast_schemas = [
-        build_ast_struct_parser(
-            sc,
-            ast_module,
-            css_to_xpath=css_to_xpath,
-            xpath_to_css=xpath_to_css,
-        )
-        for sc in schemas
-    ]
+    # TODO: implement analyze-only AST function
+    try:
+        ast_schemas = [
+            build_ast_struct_parser(
+                sc,
+                ast_module,
+                css_to_xpath=css_to_xpath,
+                xpath_to_css=xpath_to_css,
+            )
+            for sc in schemas
+        ]
+    except SyntaxError:
+        # get all schemas exceptions and throw to logs:
+        errors = []
+        for sc in schemas:
+            try:
+                build_ast_struct_parser(
+                    sc,
+                    ast_module,
+                    css_to_xpath=css_to_xpath,
+                    xpath_to_css=xpath_to_css,
+                )
+            except SyntaxError as e:
+                errors.append(e)
+        raise SyntaxError(f"{path}: Founded errors: {len(errors)}")
+
     # TODO: API for build single typedef
     ast_typedefs = build_ast_typedef(ast_module, *ast_schemas)
     module_body.extend(ast_jsons)
@@ -173,7 +190,6 @@ def build_ast_struct_parser(
 ) -> StructParser:
     errors_count = run_analyze_schema(schema)
     if errors_count > 0:
-        # todo: exc
         msg = f"{schema.__name__} founded errors: {errors_count}"
         raise SyntaxError(msg)
     docstring = (
@@ -237,8 +253,7 @@ def _fetch_field_nodes(
         )
         # TODO: add ast tests
         # in inheritance schemas, child classes use same fields are used as in the parent class
-        # avoid duplicate ExprReturn node
-        # second case used in ExprDefaultValueWrapper cases
+        # avoid duplicate ExprReturn or ExprDefaultValueWrapper node
         if (
             document.stack[-1].kind != ExprReturn.kind
             and document.stack[-1].kind != TokenType.EXPR_DEFAULT_END
@@ -335,7 +350,7 @@ def _try_fetch_split_doc_node(
         method = StructPartDocMethod(parent=st_ref)
 
         # in inheritance schemas, child classes use same fields are used as in the parent class
-        # second case used in ExprDefaultValueWrapper cases
+        # avoid duplicate ExprReturn or ExprDefaultValueWrapper node
         if (
             split_doc.stack[-1].kind != ExprReturn.kind
             and split_doc.stack[-1].kind != TokenType.EXPR_DEFAULT_END
