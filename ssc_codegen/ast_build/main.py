@@ -1,6 +1,6 @@
+import warnings
 from pathlib import Path
 from typing import Type, cast
-from typing_extensions import assert_never
 
 from ssc_codegen import Json
 from ssc_codegen.ast_ import (
@@ -45,7 +45,6 @@ from ssc_codegen.tokens import TokenType, VariableType, StructType
 def build_ast_module_parser(
     path: str | Path,
     *,
-    docstring_class_top: bool = False,
     css_to_xpath: bool = False,
     xpath_to_css: bool = False,
 ) -> ModuleProgram:
@@ -296,7 +295,27 @@ def _unwrap_default_node(
                     default_type = VariableType.OPTIONAL_LIST_FLOAT
                 # TODO: warning for BOOL type
                 case _:
-                    assert_never(ret_type)  # type: ignore
+                    warnings.warn(
+                        f"'None' default value not allowed return type '{ret_type.name}'. ",
+                        category=SyntaxWarning,
+                    )
+                    default_type = VariableType.ANY
+        elif isinstance(value, list):
+            # todo: check if empty list passed
+            match ret_type:
+                case VariableType.LIST_STRING:
+                    default_type = VariableType.LIST_STRING
+                case VariableType.LIST_INT:
+                    default_type = VariableType.LIST_INT
+                case VariableType.LIST_FLOAT:
+                    default_type = VariableType.LIST_FLOAT
+                case _:
+                    warnings.warn(
+                        f"`empty list` default value not allowed return type `{ret_type.name}`. "
+                        f"Expected types `{(VariableType.LIST_STRING.name, VariableType.LIST_INT, VariableType.LIST_FLOAT)}`",
+                        category=SyntaxWarning,
+                    )
+                    default_type = VariableType.ANY
         expr_default_start = ExprDefaultValueStart(kwargs={"value": value})
         expr_default_end = ExprDefaultValueEnd(
             kwargs={"value": value}, ret_type=default_type

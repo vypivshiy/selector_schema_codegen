@@ -7,10 +7,11 @@ from ssc_codegen.schema import ItemSchema, DictSchema, ListSchema, FlatListSchem
 
 setup_logger()
 
-VERSION = "0.8.12"
+VERSION = "0.8.13"
 
 
 class __MISSING(object):
+    """special marker for mark is not passed default value"""
     pass
 
 
@@ -34,7 +35,7 @@ class Nested(HTMLDocument, NestedDocument, ArrayDocument, AssertDocument):
     pass
 
 
-def D(default: None | str | int | float | __MISSING = _NO_DEFAULT) -> Document:  # noqa
+def D(default: None | str | int | float | list | __MISSING = _NO_DEFAULT) -> Document:  # noqa
     """Shortcut as a Document() object
 
     :param default: .default() operator shortcut
@@ -49,7 +50,7 @@ def N() -> Nested:  # noqa
     return Nested()
 
 
-def R(default: None | str | int | float | __MISSING = _NO_DEFAULT) -> Document:  # noqa
+def R(default: None | str | int | float | list | __MISSING = _NO_DEFAULT) -> Document:  # noqa
     """Shortcut as a Document().raw() object.
     For regex and format string operations
 

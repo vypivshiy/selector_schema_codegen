@@ -115,7 +115,7 @@ class BaseDocument:
 
 
 class DefaultDocument(BaseDocument):
-    def default(self, value: str | int | float | None) -> Self:
+    def default(self, value: str | int | float | list | None) -> Self:
         """Set default value. Accept string, int, float or None.
         Should be a first else raise SyntaxError
 

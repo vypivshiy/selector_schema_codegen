@@ -194,9 +194,9 @@ class ModuleProgram(
 
 
 KW_AST_DEFAULT = TypedDict(
-    "KW_AST_DEFAULT", {"value": str | int | float | bool | None}
+    "KW_AST_DEFAULT", {"value": str | int | float | bool | list | None}
 )
-ARGS_AST_DEFAULT = tuple[str | int | float | bool | None]
+ARGS_AST_DEFAULT = tuple[str | int | float | bool | list | None]
 
 
 @dataclass(kw_only=True)

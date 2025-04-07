@@ -1,3 +1,4 @@
+import warnings
 from typing import Callable, Type, TYPE_CHECKING
 
 from cssselect import SelectorSyntaxError
@@ -171,7 +172,7 @@ def analyze_field_default_value(
 
     elif (index := default_expr_pos[0][0]) and index != 0:
         return AnalyzeResult.error(
-            f"{sc.__name__}.{name}  # default expr should be a first, not {index}"
+            f"{sc.__name__}.{name}  # default expr should be a first, not {index} position"
         )
 
     elif name in ("__PRE_VALIDATE__", "__SPLIT_DOC__"):
@@ -203,12 +204,30 @@ def analyze_field_default_value(
         default_ast_type = VariableType.INT
     elif isinstance(default_value, float):
         default_ast_type = VariableType.FLOAT
+    elif isinstance(default_value, list):
+        if len(default_value) != 0:
+            warnings.warn(
+                f"{sc.__name__}.{name} # not supported pass values to list",
+                category=SyntaxWarning,
+            )
+        default_ast_type = ret_type
     else:
         return AnalyzeResult.error(
             f"{sc.__name__}.{name} # Unsupported default value: `{default_value!r}`<{type(default_value).__name__}>"
         )
 
-    if default_ast_type != ret_type:
+    if isinstance(default_value, list) and default_ast_type not in (
+        VariableType.LIST_STRING,
+        VariableType.LIST_INT,
+        VariableType.LIST_FLOAT,
+    ):
+        return AnalyzeResult.error(
+            f"{sc.__name__}.{name} # default({default_value!r}) wrong last list return type expr"
+            f" (expected type(s) "
+            f"`{(VariableType.LIST_STRING.name, VariableType.LIST_FLOAT.name, VariableType.LIST_INT.name)}` "
+            f"got `{ret_type.name}`)"
+        )
+    elif default_ast_type != ret_type:
         return AnalyzeResult.error(
             f"{sc.__name__}.{name} # default({default_value!r}) wrong last return type expr"
             f" (expected type `{default_ast_type.name}` got `{ret_type.name}`)"
