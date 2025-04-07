@@ -244,13 +244,20 @@ DOCSTR = "// "
 CONVERTER = BaseCodeConverter(debug_comment_prefix="// ")
 
 
-def py_var_to_go_var(item: None | str | int | float) -> str | int | float:
+def py_var_to_go_var(
+    item: None | str | int | float | list, ret_type: VariableType
+) -> str | int | float:
     if item is None:
         item = "nil"
     elif isinstance(item, str):
         item = wrap_double_quotes(item)
     elif isinstance(item, bool):
         item = "true" if item else "false"
+    elif isinstance(item, list):
+        # in AST static check step check if return type is
+        # LIST_STRING, LIST_INT, LIST_FLOAT
+        type_ = TYPES[ret_type]
+        item = f"make({type_}, 0)"
     return item
 
 
@@ -576,7 +583,8 @@ def post_start_parse_method(node: StartParseMethod) -> str:
 def pre_default_start(node: ExprDefaultValueStart) -> str:
     prv, nxt = prev_next_var(node)
     value = node.kwargs["value"]
-    value = py_var_to_go_var(value)
+    ret_type = get_last_ret_type(node)
+    value = py_var_to_go_var(value, ret_type)
     return J2_PRE_DEFAULT_START.render(prv=prv, nxt=nxt, value=value)
 
 
@@ -797,7 +805,8 @@ def pre_is_equal(node: ExprIsEqual) -> str:
     item, msg = node.unpack_args()
 
     msg = wrap_double_quotes(msg)
-    item = py_var_to_go_var(item)
+    ret_type = get_last_ret_type(node)
+    item = py_var_to_go_var(item, ret_type)
 
     context = {
         "prv": prv,
@@ -819,7 +828,8 @@ def pre_is_not_equal(node: ExprIsNotEqual) -> str:
     item, msg = node.unpack_args()
 
     msg = wrap_double_quotes(msg) if msg else '""'
-    item = py_var_to_go_var(item)
+    ret_type = get_last_ret_type(node)
+    item = py_var_to_go_var(item, ret_type)
 
     context = {
         "prv": prv,
@@ -841,7 +851,8 @@ def pre_is_contains(node: ExprIsContains) -> str:
     item, msg = node.unpack_args()
 
     msg = wrap_double_quotes(msg) if msg else '""'
-    item = py_var_to_go_var(item)
+    ret_type = get_last_ret_type(node)
+    item = py_var_to_go_var(item, ret_type)
 
     context = {
         "prv": prv,

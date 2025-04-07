@@ -265,6 +265,8 @@ def pre_default_end(node: ExprDefaultValueEnd) -> str:
         value = repr(value)
     elif isinstance(value, bool):
         value = "true" if value else "false"
+    elif isinstance(value, list):
+        value = "[]"
     return f"}}catch(Error) {{ return {value}; }}"
 
 

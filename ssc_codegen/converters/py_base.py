@@ -483,6 +483,8 @@ def pre_default_end(node: ExprDefaultValueEnd) -> str:
     value = node.kwargs["value"]
     if isinstance(value, str):
         value = repr(value)
+    elif isinstance(value, list):
+        value = "[]"
     return INDENT_METHOD_BODY + f"return {value}"
 
 
