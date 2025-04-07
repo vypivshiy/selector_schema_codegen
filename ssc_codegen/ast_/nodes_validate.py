@@ -97,6 +97,24 @@ class ExprIsXpath(BaseAstNode[KW_IS_SELECT, ARGS_IS_SELECT]):
     ret_type: VariableType = VariableType.DOCUMENT
 
 
+KW_HAS_ATTR = TypedDict("KW_HAS_ATTR", {"key": str, "msg": str})
+ARGS_HAS_ATTR = tuple[str, str]
+
+
+@dataclass(kw_only=True)
+class ExprHasAttr(BaseAstNode[KW_HAS_ATTR, ARGS_HAS_ATTR]):
+    kind: ClassVar[TokenType] = TokenType.HAS_ATTR
+    accept_type: VariableType = VariableType.DOCUMENT
+    ret_type: VariableType = VariableType.DOCUMENT
+
+
+@dataclass(kw_only=True)
+class ExprListHasAttr(BaseAstNode[KW_HAS_ATTR, ARGS_HAS_ATTR]):
+    kind: ClassVar[TokenType] = TokenType.HAS_LIST_ATTR
+    accept_type: VariableType = VariableType.DOCUMENT
+    ret_type: VariableType = VariableType.DOCUMENT
+
+
 # TODO:
 # ExprIsBiggerThan
 # ExprIsBiggerOrEq

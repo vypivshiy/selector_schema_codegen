@@ -83,6 +83,8 @@ from ssc_codegen.ast_ import (
     ExprListStringRmPrefixAndSuffix,
     ExprListStringAnyRegex,
     ExprListStringAllRegex,
+    ExprListHasAttr,
+    ExprHasAttr,
 )
 from ssc_codegen.converters.base import BaseCodeConverter
 from ssc_codegen.converters.helpers import (
@@ -690,3 +692,23 @@ def pre_list_str_rm_prefix_and_suffix(
         f"let {nxt} = {prv}.map((e) => e.startsWith({substr}) ? e.slice({substr}.length) : e);"
         + f"{nxt} = {nxt}.map((e) => e.endsWith({substr}) ? e.slice(0, -{substr}.length) : e);"
     )
+
+
+@CONVERTER(ExprHasAttr.kind)
+def pre_has_attr(node: ExprHasAttr) -> str:
+    prv, nxt = prev_next_var(node)
+    key, msg = node.unpack_args()
+    expr = f"if (!{prv}?.hasAttribute({key!r}) throw new Error({msg!r});"
+    if is_last_var_no_ret(node):
+        return expr
+    return expr + f"let {nxt} = {prv};"
+
+
+@CONVERTER(ExprListHasAttr.kind)
+def pre_list_has_attr(node: ExprListHasAttr) -> str:
+    prv, nxt = prev_next_var(node)
+    key, msg = node.unpack_args()
+    expr = f"if (!{prv}.every(e => e?.hasAttribute({key!r}))) throw new Error({msg!r});"
+    if is_last_var_no_ret(node):
+        return expr
+    return expr + f"let {nxt} = {prv};"

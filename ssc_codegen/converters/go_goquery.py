@@ -1259,3 +1259,6 @@ def pre_list_str_rm_prefix_and_suffix(
     return J2_PRE_LIST_STR_RM_PREFIX_AND_SUFFIX.render(
         prv=prv, nxt=nxt, substr=substr, tmp_var=tmp_var
     )
+
+
+# TODO impl ExprHasAttr, ExprListHasAttr

@@ -16,6 +16,8 @@ from ssc_codegen.ast_ import (
     StructFieldMethod,
     StructPreValidateMethod,
     StructPartDocMethod,
+    ExprListHasAttr,
+    ExprHasAttr,
 )
 from ssc_codegen.converters.helpers import (
     prev_next_var,
@@ -193,6 +195,35 @@ def pre_is_xpath(node: ExprIsXpath) -> str:
     prv, nxt = prev_next_var(node)
     query, msg = node.unpack_args()
     expr = indent + f"assert {prv}.xpath({query!r}), {msg!r}"
+    if is_last_var_no_ret(node):
+        return expr
+    return expr + "\n" + indent + f"{nxt} = {prv}"
+
+
+@CONVERTER(ExprHasAttr.kind)
+def pre_has_attr(node: ExprHasAttr) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    key, msg = node.unpack_args()
+    expr = indent + f"assert {prv}.attrib.get({key!r}, None), {msg!r}"
+    if is_last_var_no_ret(node):
+        return expr
+    return expr + "\n" + indent + f"{nxt} = {prv}"
+
+
+@CONVERTER(ExprListHasAttr.kind)
+def pre_list_has_attr(node: ExprListHasAttr) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    key, msg = node.unpack_args()
+    expr = (
+        indent
+        + f"assert all(i.attrib.get({key!r}, None) for i in {prv}), {msg!r}"
+    )
     if is_last_var_no_ret(node):
         return expr
     return expr + "\n" + indent + f"{nxt} = {prv}"

@@ -57,6 +57,8 @@ from ssc_codegen.ast_ import (
     ExprListStringRmPrefixAndSuffix,
     ExprListStringAllRegex,
     ExprListStringAnyRegex,
+    ExprHasAttr,
+    ExprListHasAttr,
 )
 from ssc_codegen.document_utlis import (
     analyze_re_expression,
@@ -1084,6 +1086,33 @@ class AssertDocument(BaseDocument):
                 }
             )
         )
+        return self
+
+    def has_attr(self, key: str, msg: str = "") -> Self:
+        """assert document has attribute key. If in generated code check failed - throw exception with passed msg
+
+        EXPR DO NOT MODIFY variable
+
+        - accept DOCUMENT, return DOCUMENT
+        - accept LIST_DOCUMENT, return LIST_DOCUMENT
+        """
+        if self.stack_last_ret == VariableType.DOCUMENT:
+            self._add(ExprHasAttr(kwargs={"key": key, "msg": msg}))
+        elif self.stack_last_ret == VariableType.LIST_DOCUMENT:
+            self._add(ExprListHasAttr(kwargs={"key": key, "msg": msg}))
+        else:
+            LOGGER.warning(
+                "has_attr(%s): Expected type(s) %s got %s",
+                repr(key),
+                (VariableType.DOCUMENT.name, VariableType.LIST_DOCUMENT.name),
+                self.stack_last_ret.name,
+            )
+            self._add(
+                ExprHasAttr(
+                    kwargs={"key": key, "msg": msg},
+                    ret_type=self.stack_last_ret,
+                )
+            )
         return self
 
 

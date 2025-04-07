@@ -156,6 +156,8 @@ class TokenType(IntEnum):
     IS_STRING_REGEX_MATCH = auto()
     ANY_LIST_STRING_REGEX_MATCH = auto()
     ALL_LIST_STRING_REGEX_MATCH = auto()
+    HAS_ATTR = auto()
+    HAS_LIST_ATTR = auto()
 
     # NUMERIC
     TO_INT = auto()

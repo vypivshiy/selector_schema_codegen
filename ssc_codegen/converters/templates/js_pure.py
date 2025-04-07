@@ -100,3 +100,12 @@ let {{ nxt }} = Array.from({ length: {{ snapshot_var }}.snapshotLength }, (_, i)
 J2_IS_XPATH = Template("""
 if (document.evaluate("{{ query }}", {{ prv }}, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue === null) throw new Error({{ msg }});
 """)
+# TODO: use in covverter
+JS_HAS_ATTR = Template("""
+if (!{{prv}}?.hasAttribute({{key}}) throw new Error({{ msg }});
+""")
+
+
+JS_HAS_ATTR_ALL = Template("""
+if (!{{prv}}.every(e => e?.hasAttribute({{key}}));}) throw new Error({{ msg }});
+""")
