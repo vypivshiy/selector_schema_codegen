@@ -9,14 +9,17 @@ import pytest
 @pytest.mark.parametrize(
     "doc",
     [
-        # D().default('').raw(),
-        # D().default(1).raw().to_int(),
-        # D().default(.1).raw().to_float(),
-        # D().default(0).raw().to_int(),
-        # D().default(.0).raw().to_float(),
-        # D().default(True).raw().to_bool(),
-        # D().default(False).raw().to_bool(),
-        D().default(None).raw()
+        D().default("").raw(),
+        D().default(1).raw().to_int(),
+        D().default(0.1).raw().to_float(),
+        D().default(0).raw().to_int(),
+        D().default(0.0).raw().to_float(),
+        D().default(True).raw().to_bool(),
+        D().default(False).raw().to_bool(),
+        D().default(None).raw(),
+        D().default([]).raw().split(" "),
+        D().default([]).raw().split(" ").to_int(),
+        D().default([]).raw().split(" ").to_float(),
     ],
 )
 def test_default_document(doc: BaseDocument) -> None:
