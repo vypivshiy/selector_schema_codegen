@@ -129,6 +129,17 @@ DOCSTR_SEP = "* "
 CONVERTER = BaseCodeConverter(debug_comment_prefix="// ")
 
 
+# TODO: move to string_utils
+def to_js_regexp(pattern: str, ignore_case: bool = False) -> str:
+    """helper function for convert string pattern to js"""
+    pattern = pattern.replace("<\\/", "</")
+    pattern = pattern.replace("/", "\\/")
+    pattern = f"/{pattern}/g"
+    if ignore_case:
+        pattern += "i"
+    return pattern
+
+
 def make_js_docstring(value: str) -> str:
     if not value:
         return ""
@@ -357,10 +368,7 @@ def pre_list_str_replace(node: ExprListStringReplace) -> str:
 def pre_str_regex(node: ExprStringRegex) -> str:
     prv, nxt = prev_next_var(node)
     pattern, group, ignore_case = node.unpack_args()
-    pattern = pattern.replace("/", "\\/")
-    pattern = f"/{pattern}/g"
-    if ignore_case:
-        pattern += "i"
+    pattern = to_js_regexp(pattern, ignore_case)
     return f"let {nxt} = (new RegExp({pattern})).exec({prv})[{group}];"
 
 
@@ -368,10 +376,8 @@ def pre_str_regex(node: ExprStringRegex) -> str:
 def pre_str_regex_all(node: ExprStringRegexAll) -> str:
     prv, nxt = prev_next_var(node)
     pattern, ignore_case = node.unpack_args()
-    pattern = pattern.replace("/", "\\/")
-    pattern = f"/{pattern}/g"
-    if ignore_case:
-        pattern += "i"
+    pattern = to_js_regexp(pattern, ignore_case)
+
     return f"let {nxt} = (new RegExp({pattern})).exec({prv});"
 
 
@@ -379,8 +385,7 @@ def pre_str_regex_all(node: ExprStringRegexAll) -> str:
 def pre_str_regex_sub(node: ExprStringRegexSub) -> str:
     prv, nxt = prev_next_var(node)
     pattern, repl = node.unpack_args()
-    pattern = pattern.replace("/", "\\/")
-    pattern = f"/{pattern}/g"
+    pattern = to_js_regexp(pattern)
 
     return f"let {nxt} = {prv}.replace({pattern}, {repl!r});"
 
@@ -389,8 +394,8 @@ def pre_str_regex_sub(node: ExprStringRegexSub) -> str:
 def pre_list_str_regex_sub(node: ExprListStringRegexSub) -> str:
     prv, nxt = prev_next_var(node)
     pattern, repl = node.unpack_args()
-    pattern = pattern.replace("/", "\\/")
-    pattern = f"/{pattern}/g"
+    pattern = to_js_regexp(pattern)
+
     return f"let {nxt} = {prv}.map(e => e.replace({pattern}, {repl!r}));"
 
 
@@ -456,10 +461,7 @@ def pre_is_contains(node: ExprIsContains) -> str:
 def pre_is_regex(node: ExprStringIsRegex) -> str:
     prv, nxt = prev_next_var(node)
     pattern, ignore_case, msg = node.unpack_args()
-    pattern = pattern.replace("/", "\\/")
-    pattern = f"/{pattern}/g"
-    if ignore_case:
-        pattern += "i"
+    pattern = to_js_regexp(pattern, ignore_case)
 
     expr = f"if ({prv}.match({pattern}) === null) throw new Error({msg!r});"
     if is_last_var_no_ret(node):
