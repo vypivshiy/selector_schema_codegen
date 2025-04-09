@@ -103,7 +103,7 @@ RE_PY_METHOD_BLOCK = re.compile(
     r"""
 def\s_(?:parse|split)\w+\(.*\:\s*   # SPLIT_DOC STRUCT_PARSE HEAD
 (?:\n|.)*?                          # BLOCK OF CODE
-return\s(?P<ret_var>\w+)    # RET STMT 
+return\s(?P<ret_var>\w+)            # RET STMT 
 """,
     re.X,
 )
@@ -148,6 +148,9 @@ def py_optimize_return_naive(py_code: str) -> str:
         re_expr = f"{ret_var}\\s*=\\s*(?P<expr>.*)"
         if match := re.search(re_expr, method_block[0]):
             expr = match["expr"]  # noqa
+            # NAIVE apologize, its .filter(...) expr, skip optimization
+            if expr.strip().endswith(" if"):
+                continue
 
             # optimization function convert double backslash to single (\\ -> \) in regex patterns
             # add `r` prefix for avoid SyntaxWarning then compile generated code to cpython bytecode
