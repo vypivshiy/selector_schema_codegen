@@ -47,3 +47,12 @@ def get_struct_field_method_by_name(
     ][0]
     result = cast(StructFieldMethod, result)
     return result
+
+
+def is_prev_node_atomic_cond(node: BaseAstNode) -> bool:
+    """return true if node is atomic condition (exclude body), NOT FIRST"""
+    return node.index != 0 and not node.parent.body[node.index_prev].body
+
+
+def is_first_node_cond(node: BaseAstNode) -> bool:
+    return node.index == 0 and node.parent.kind == TokenType.EXPR_FILTER

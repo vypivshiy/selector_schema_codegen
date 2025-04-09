@@ -87,6 +87,15 @@ from ssc_codegen.ast_ import (
     ExprListStringRmPrefixAndSuffix,
     ExprListStringAnyRegex,
     ExprListStringAllRegex,
+    FilterOr,
+    FilterAnd,
+    FilterNot,
+    ExprFilter,
+    FilterStrIn,
+    FilterStrStarts,
+    FilterStrEnds,
+    FilterStrRe,
+    FilterEqual,
 )
 from ssc_codegen.converters.base import (
     BaseCodeConverter,
@@ -98,6 +107,8 @@ from ssc_codegen.converters.helpers import (
     have_pre_validate_call,
     prev_next_var,
     is_last_var_no_ret,
+    is_prev_node_atomic_cond,
+    is_first_node_cond,
 )
 from ssc_codegen.tokens import StructType, VariableType, JsonVariableType
 
@@ -181,6 +192,8 @@ class BasePyCodeConverter(BaseCodeConverter):
         )
         from ssc_codegen.ast_ import ExprListStringRmPrefix
 
+        from ssc_codegen.ast_ import FilterNotEqual
+
         self.pre_definitions = {
             Docstring.kind: pre_docstring,
             ModuleImports.kind: pre_imports,
@@ -234,12 +247,27 @@ class BasePyCodeConverter(BaseCodeConverter):
             ExprToListLength.kind: pre_to_len,
             ExprToBool.kind: pre_to_bool,
             ExprJsonify.kind: pre_jsonify,
+            # FILTER,
+            ExprFilter.kind: pre_expr_filter,
+            FilterAnd.kind: pre_filter_and,
+            FilterOr.kind: pre_filter_or,
+            FilterNot.kind: pre_filter_not,
+            FilterStrStarts.kind: pre_filter_starts_with,
+            FilterStrEnds.kind: pre_filter_ends_with,
+            FilterStrIn.kind: pre_filter_in,
+            FilterStrRe.kind: pre_filter_re,
+            FilterEqual.kind: pre_filter_eq,
+            FilterNotEqual.kind: pre_filter_ne,
         }
 
         self.post_definitions = {
             TypeDef.kind: post_typedef,
             JsonStruct.kind: post_json_struct,
             StartParseMethod.kind: post_start_parse,
+            ExprFilter.kind: post_expr_filter,
+            FilterAnd.kind: post_filter_and,
+            FilterOr.kind: post_filter_or,
+            FilterNot.kind: post_filter_not,
         }
 
 
@@ -876,3 +904,95 @@ def pre_jsonify(node: ExprJsonify) -> str:
     prv, nxt = prev_next_var(node)
     _name, _is_array = node.unpack_args()
     return indent + f"{nxt} = json.loads({prv})"
+
+
+# FILTERS
+
+
+def pre_expr_filter(node: ExprFilter) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    return indent + f"{nxt} = [i for i in {prv} if "
+
+
+def post_expr_filter(_node: ExprFilter) -> str:
+    return "]"
+
+
+def pre_filter_or(_node: FilterOr) -> str:
+    return " or ("
+
+
+def post_filter_or(_node: FilterOr) -> str:
+    return ")"
+
+
+def pre_filter_and(_node: FilterAnd) -> str:
+    return " and ("
+
+
+def post_filter_and(_node: FilterAnd) -> str:
+    return ")"
+
+
+def pre_filter_not(_node: FilterNot) -> str:
+    return "not ("
+
+
+def post_filter_not(_node: FilterNot) -> str:
+    return ")"
+
+
+def pre_filter_in(node: FilterStrIn) -> str:
+    substr, *_ = node.unpack_args()
+    expr = f"{substr!r} in i"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return f" and {expr}"
+    return expr
+
+
+def pre_filter_starts_with(node: FilterStrStarts) -> str:
+    start_, *_ = node.unpack_args()
+    expr = f"i.startswith({start_})"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return f" and {expr}"
+    return expr
+
+
+def pre_filter_ends_with(node: FilterStrEnds) -> str:
+    suffix_, *_ = node.unpack_args()
+    expr = f"i.endswith({suffix_})"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return f" and {expr}"
+    return expr
+
+
+def pre_filter_re(node: FilterStrRe) -> str:
+    pattern, ignore_case, *_ = node.unpack_args()
+    if ignore_case:
+        expr = f"re.search({pattern!r}, i, re.IGNORECASE)"
+    else:
+        expr = f"re.search({pattern!r}, i)"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return f" and {expr}"
+    return expr
+
+
+def pre_filter_eq(node: FilterEqual) -> str:
+    value, *_ = node.unpack_args()
+    # currently support only str
+    expr = f"i == {value!r}"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return f" and {expr}"
+    return expr
+
+
+def pre_filter_ne(node: FilterEqual) -> str:
+    value, *_ = node.unpack_args()
+    # currently support only str
+    expr = f"i != {value!r}"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return f" and {expr}"
+    return expr
