@@ -1,6 +1,6 @@
 import warnings
 from pathlib import Path
-from typing import Type, cast
+from typing import Type, cast, MutableSequence
 
 from ssc_codegen import Json
 from ssc_codegen.ast_ import (
@@ -230,6 +230,15 @@ def build_ast_struct_parser(
     return st
 
 
+def set_parent_for_expr_filter(
+    parent: BaseAstNode, parent_body: MutableSequence[BaseAstNode]
+) -> None:
+    for j in parent_body:
+        j.parent = parent
+        if j.body:
+            set_parent_for_expr_filter(j, j.body)
+
+
 def _fetch_field_nodes(
     body: list[BaseAstNode],
     body_parse_method_expr: list[BaseAstNode],
@@ -263,8 +272,12 @@ def _fetch_field_nodes(
             )
 
         _unwrap_default_node(document, ret_type)
+
         for i in document.stack:
             i.parent = method
+            if i.kind == TokenType.EXPR_FILTER:
+                set_parent_for_expr_filter(i, i.body)
+
         method.body = document.stack
 
         body.append(method)
@@ -361,6 +374,9 @@ def _try_fetch_split_doc_node(
             )
         for i in split_doc.stack:
             i.parent = method
+            if i.kind == TokenType.EXPR_FILTER:
+                set_parent_for_expr_filter(i, i.body)
+
         method.body = split_doc.stack
         body.append(method)
 
@@ -388,6 +404,8 @@ def _try_fetch_pre_validate_node(
         validate_field.stack.append(ExprNoReturn())
         for i in validate_field.stack:
             i.parent = method
+            if i.kind == TokenType.EXPR_FILTER:
+                set_parent_for_expr_filter(i, i.body)
 
         body.append(method)
         call_methods_expr.append(
