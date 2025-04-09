@@ -85,12 +85,24 @@ from ssc_codegen.ast_ import (
     ExprListStringAllRegex,
     ExprListHasAttr,
     ExprHasAttr,
+    FilterEqual,
+    FilterNotEqual,
+    FilterStrRe,
+    FilterStrEnds,
+    FilterStrStarts,
+    FilterStrIn,
+    FilterNot,
+    FilterAnd,
+    FilterOr,
+    ExprFilter,
 )
 from ssc_codegen.converters.base import BaseCodeConverter
 from ssc_codegen.converters.helpers import (
     prev_next_var,
     is_last_var_no_ret,
     have_pre_validate_call,
+    is_first_node_cond,
+    is_prev_node_atomic_cond,
 )
 from ssc_codegen.converters.templates.js_pure import (
     J2_STRUCT_INIT,
@@ -130,11 +142,15 @@ CONVERTER = BaseCodeConverter(debug_comment_prefix="// ")
 
 
 # TODO: move to string_utils
-def to_js_regexp(pattern: str, ignore_case: bool = False) -> str:
+def to_js_regexp(
+    pattern: str, ignore_case: bool = False, is_global: bool = True
+) -> str:
     """helper function for convert string pattern to js"""
     pattern = pattern.replace("<\\/", "</")
     pattern = pattern.replace("/", "\\/")
-    pattern = f"/{pattern}/g"
+    pattern = f"/{pattern}/"
+    if is_global:
+        pattern += "g"
     if ignore_case:
         pattern += "i"
     return pattern
@@ -368,8 +384,8 @@ def pre_list_str_replace(node: ExprListStringReplace) -> str:
 def pre_str_regex(node: ExprStringRegex) -> str:
     prv, nxt = prev_next_var(node)
     pattern, group, ignore_case = node.unpack_args()
-    pattern = to_js_regexp(pattern, ignore_case)
-    return f"let {nxt} = (new RegExp({pattern})).exec({prv})[{group}];"
+    pattern = to_js_regexp(pattern, ignore_case, is_global=False)
+    return f"let {nxt} = {prv}.match({pattern})[{group}];"
 
 
 @CONVERTER(ExprStringRegexAll.kind)
@@ -377,8 +393,7 @@ def pre_str_regex_all(node: ExprStringRegexAll) -> str:
     prv, nxt = prev_next_var(node)
     pattern, ignore_case = node.unpack_args()
     pattern = to_js_regexp(pattern, ignore_case)
-
-    return f"let {nxt} = (new RegExp({pattern})).exec({prv});"
+    return f"let {nxt} = Array.from({prv}.match({pattern}));"
 
 
 @CONVERTER(ExprStringRegexSub.kind)
@@ -714,3 +729,106 @@ def pre_list_has_attr(node: ExprListHasAttr) -> str:
     if is_last_var_no_ret(node):
         return expr
     return expr + f"let {nxt} = {prv};"
+
+
+@CONVERTER(ExprFilter.kind)
+def pre_expr_filter(node: ExprFilter) -> str:
+    prv, nxt = prev_next_var(node)
+    return f"let {nxt} = {prv}.filter(i => "
+
+
+@CONVERTER.post(ExprFilter.kind)
+def post_expr_filter(_node: ExprFilter) -> str:
+    return ");"
+
+
+@CONVERTER(FilterOr.kind)
+def pre_filter_or(_node: FilterOr) -> str:
+    return " || ("
+
+
+@CONVERTER.post(FilterOr.kind)
+def post_filter_or(_node: FilterOr) -> str:
+    return ")"
+
+
+@CONVERTER(FilterAnd.kind)
+def pre_filter_and(_node: FilterAnd) -> str:
+    return " && ("
+
+
+@CONVERTER.post(FilterAnd.kind)
+def post_filter_and(_node: FilterAnd) -> str:
+    return ")"
+
+
+@CONVERTER(FilterNot.kind)
+def pre_filter_not(_node: FilterNot) -> str:  # type: ignore
+    return "!("
+
+
+@CONVERTER.post(FilterNot.kind)
+def post_filter_not(_node: FilterNot) -> str:
+    return ")"
+
+
+@CONVERTER(FilterStrIn.kind)
+def pre_filter_in(node: FilterStrIn) -> str:
+    substr, *_ = node.unpack_args()
+    expr = f"i.includes({substr!r})"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return f" && {expr}"
+    return expr
+
+
+@CONVERTER(FilterStrStarts.kind)
+def pre_filter_starts_with(node: FilterStrStarts) -> str:
+    start_, *_ = node.unpack_args()
+    if len(start_) == 1:
+        expr = f"i.startsWith({start_[0]!r})"
+    else:
+        expr = "(" + " || ".join(f"i.startsWith({s!r})" for s in start_) + ")"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return f" && {expr}"
+    return expr
+
+
+@CONVERTER(FilterStrEnds.kind)
+def pre_filter_ends_with(node: FilterStrEnds) -> str:
+    suffix_, *_ = node.unpack_args()
+    if len(suffix_) == 1:
+        expr = f"i.endsWith({suffix_[0]!r})"
+    else:
+        expr = "(" + " || ".join(f"i.endsWith({s!r})" for s in suffix_) + ")"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return f" && {expr}"
+    return expr
+
+
+@CONVERTER(FilterStrRe.kind)
+def pre_filter_re(node: FilterStrRe) -> str:
+    pattern, ignore_case, *_ = node.unpack_args()
+    pattern = to_js_regexp(pattern, ignore_case, is_global=False)
+
+    expr = f"(new RegExp({pattern})).test(i)"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return f" && {expr}"
+    return expr
+
+
+@CONVERTER(FilterEqual.kind)
+def pre_filter_eq(node: FilterEqual) -> str:
+    value, *_ = node.unpack_args()
+    expr = f"i === {value!r}"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return f" && {expr}"
+    return expr
+
+
+@CONVERTER(FilterNotEqual.kind)
+def pre_filter_ne(node: FilterNotEqual) -> str:
+    value, *_ = node.unpack_args()
+    expr = f"i !== {value!r}"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return f" && {expr}"
+    return expr
