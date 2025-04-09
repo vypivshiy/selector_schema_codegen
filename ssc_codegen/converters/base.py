@@ -14,6 +14,9 @@ from ssc_codegen.ast_ import (
     StructInitMethod,
     StructPartDocMethod,
     StructPreValidateMethod,
+    FilterOr,
+    FilterAnd,
+    FilterNot,
 )
 from ssc_codegen.tokens import TokenType
 
@@ -168,12 +171,22 @@ class BaseCodeConverter:
             case TokenType.JSON_FIELD:
                 ast_entry = cast(JsonStructField, ast_entry)
                 self._convert_json_struct_field(ast_entry, acc)
-            case _ if ast_entry.kind in {
-                TokenType.STRUCT_PART_DOCUMENT,
-                TokenType.STRUCT_PRE_VALIDATE,
-                TokenType.STRUCT_PARSE_START,
-                TokenType.STRUCT_FIELD,
-            }:
+
+            case (
+                TokenType.EXPR_FILTER
+                | TokenType.FILTER_OR
+                | TokenType.FILTER_AND
+                | TokenType.FILTER_NOT
+            ):
+                ast_entry = cast(FilterOr | FilterAnd | FilterNot, ast_entry)
+                self._convert_logic_filter(ast_entry, acc)
+
+            case (
+                TokenType.STRUCT_PART_DOCUMENT
+                | TokenType.STRUCT_PRE_VALIDATE
+                | TokenType.STRUCT_PARSE_START
+                | TokenType.STRUCT_FIELD
+            ):
                 ast_entry = cast(
                     StructFieldMethod
                     | StructInitMethod
@@ -185,6 +198,18 @@ class BaseCodeConverter:
             case _:
                 self._convert_default(ast_entry, acc)
         return acc
+
+    def _convert_logic_filter(
+        self, ast_entry: FilterOr | FilterAnd | FilterNot, acc: list[str]
+    ) -> None:
+        # AND(body=[F1, F2]) ->
+        # AND ( (OPEN)
+        #       F1 and F2
+        # ) (CLOSE)
+        acc.append(self._pre_convert_node(ast_entry))
+        for node in ast_entry.body:
+            self.convert(node, acc)
+        acc.append(self._post_convert_node(ast_entry))
 
     def _convert_module(self, ast_entry: ModuleProgram, acc: list[str]) -> None:
         """Handle module conversion."""
