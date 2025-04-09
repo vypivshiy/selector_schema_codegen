@@ -20,9 +20,10 @@ from .nodes_core import (ExprReturn,
                          TypeDef,
                          TypeDefField,
                          ExprCallStructMethod)
+from .nodes_filter import Filter, FilterOr, FilterAnd, FilterNot, FilterNotEqual, FilterEqual, FilterStrIn, \
+    FilterStrStarts, FilterStrEnds, FilterStrRe, ExprFilter
 from .nodes_selectors import ExprCss, ExprCssAll, ExprXpathAll, ExprXpath, ExprGetHtmlText, ExprGetHtmlRaw, \
     ExprGetHtmlAttr, ExprGetHtmlAttrAll, ExprGetHtmlRawAll, ExprGetHtmlTextAll
-
 from .nodes_string import ExprStringTrim, ExprStringRegex, ExprStringSplit, ExprStringReplace, ExprStringLeftTrim, \
     ExprStringFormat, ExprListStringTrim, ExprStringRegexAll, ExprStringRegexSub, ExprStringRightTrim, \
     ExprListStringFormat, ExprListStringReplace, ExprListStringRightTrim, ExprListStringLeftTrim, \

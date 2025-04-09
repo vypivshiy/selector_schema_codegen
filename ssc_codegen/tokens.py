@@ -174,6 +174,21 @@ class TokenType(IntEnum):
     # bool
     TO_BOOL = auto()
 
+    # FILTER
+    EXPR_FILTER = auto()
+
+    FILTER = auto()  # TODO: REMOVE?
+    FILTER_OR = auto()
+    FILTER_AND = auto()
+    FILTER_NOT = auto()
+    # FILTER EXPR
+    FILTER_STR_IN = auto()
+    FILTER_STR_STARTS = auto()
+    FILTER_STR_ENDS = auto()
+    FILTER_STR_RE = auto()
+    FILTER_EQ = auto()
+    FILTER_NE = auto()
+
     @classmethod
     def default_tokens(cls) -> tuple["TokenType", ...]:
         return (
