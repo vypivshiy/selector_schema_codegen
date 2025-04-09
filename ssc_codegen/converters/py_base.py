@@ -96,6 +96,7 @@ from ssc_codegen.ast_ import (
     FilterStrEnds,
     FilterStrRe,
     FilterEqual,
+    FilterNotEqual,
 )
 from ssc_codegen.converters.base import (
     BaseCodeConverter,
@@ -989,7 +990,7 @@ def pre_filter_eq(node: FilterEqual) -> str:
     return expr
 
 
-def pre_filter_ne(node: FilterEqual) -> str:
+def pre_filter_ne(node: FilterNotEqual) -> str:
     value, *_ = node.unpack_args()
     # currently support only str
     expr = f"i != {value!r}"
