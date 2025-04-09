@@ -59,6 +59,16 @@ from ssc_codegen.ast_ import (
     ExprListStringAnyRegex,
     ExprHasAttr,
     ExprListHasAttr,
+    ExprFilter,
+    FilterEqual,
+    FilterNotEqual,
+    FilterStrStarts,
+    FilterStrEnds,
+    FilterStrIn,
+    FilterStrRe,
+    FilterAnd,
+    FilterOr,
+    FilterNot,
 )
 from ssc_codegen.document_utlis import (
     analyze_re_expression,
@@ -455,6 +465,20 @@ class ArrayDocument(BaseDocument):
                 self.stack_last_ret.name,
             )
         self._add(ExprToListLength(accept_type=expected_type))
+        return self
+
+    def filter(self, expr: "DocumentFilter") -> Self:
+        """filter array of resuts by expr
+
+        - accept LIST_STRING, return LIST_STRING
+        """
+        if self.stack_last_ret != VariableType.LIST_STRING:
+            LOGGER.warning(
+                "to_len(): Expected type(s) %s got %s",
+                (VariableType.LIST_STRING.name,),
+                self.stack_last_ret.name,
+            )
+        self._add(ExprFilter(body=expr.stack))
         return self
 
 
@@ -1236,3 +1260,78 @@ class JsonDocument(BaseDocument):
         # HACK: store to class instance for generate docstring signature
         BaseSchema.__JSON_SCHEMAS__[struct.__name__] = struct  # type: ignore
         return self
+
+
+class DocumentFilter(BaseDocument):
+    def eq(self, value: str) -> Self:
+        self._add(FilterEqual(kwargs={"value": value}))
+        return self
+
+    def ne(self, value: str) -> Self:
+        self._add(FilterNotEqual(kwargs={"value": value}))
+        return self
+
+    def starts(self, *values: str) -> Self:
+        self._add(FilterStrStarts(kwargs={"substr": values}))
+        return self
+
+    def ends(self, *values: str) -> Self:
+        self._add(FilterStrEnds(kwargs={"substr": values}))
+        return self
+
+    def contains(self, value: str) -> Self:
+        self._add(FilterStrIn(kwargs={"substr": value}))
+        return self
+
+    def re(
+        self, pattern: str | Pattern[str], ignore_case: bool = False
+    ) -> Self:
+        if not isinstance(pattern, str):
+            ignore_case = is_ignore_case_regex(pattern)
+
+        pattern = unverbosify_regex(pattern)
+        result = analyze_re_expression(pattern, allow_empty_groups=True)
+        if not result:
+            LOGGER.warning(result.msg)
+        self._add(
+            FilterStrRe(kwargs={"pattern": pattern, "ignore_case": ignore_case})
+        )
+        return self
+
+    def and_(self, filter_expr: "DocumentFilter") -> Self:
+        if self.stack[0].kind in (FilterAnd.kind, FilterOr.kind):
+            LOGGER.warning(
+                "logic AND: first node is `%s`", self.stack[0].kind.name
+            )
+        tmp_stack = filter_expr.stack.copy()
+        self._add(FilterAnd(body=tmp_stack))
+        return self
+
+    def or_(self, filter_expr: "DocumentFilter") -> Self:
+        if self.stack[0].kind in (FilterAnd.kind, FilterOr.kind):
+            LOGGER.warning(
+                "logic OR: first node is `%s`", self.stack[0].kind.name
+            )
+        tmp_stack = filter_expr.stack.copy()
+        self._add(FilterOr(body=tmp_stack))
+        return self
+
+    def not_(self, filter_expr: "DocumentFilter") -> Self:
+        tmp_stack = filter_expr.stack.copy()
+        self._add(FilterNot(body=tmp_stack))
+        return self
+
+    def __or__(self, other: "DocumentFilter") -> "DocumentFilter":
+        return self.or_(other)
+
+    def __and__(self, other: "DocumentFilter") -> "DocumentFilter":
+        return self.and_(other)
+
+    def __invert__(self) -> "DocumentFilter":
+        return DocumentFilter().not_(self)
+
+    def __eq__(self, other: str) -> Self:
+        return self.eq(other)
+
+    def __ne__(self, other: str) -> Self:
+        return self.ne(other)

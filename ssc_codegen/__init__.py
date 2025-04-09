@@ -1,6 +1,6 @@
 from ssc_codegen.document import HTMLDocument, StringDocument, ArrayDocument, AssertDocument, NestedDocument, \
     DefaultDocument, \
-    NumericDocument, JsonDocument, BooleanDocument
+    NumericDocument, JsonDocument, BooleanDocument, DocumentFilter
 from ssc_codegen.json_struct import Json
 from ssc_codegen.logs import setup_logger
 from ssc_codegen.schema import ItemSchema, DictSchema, ListSchema, FlatListSchema
@@ -59,3 +59,8 @@ def R(default: None | str | int | float | list | __MISSING = _NO_DEFAULT) -> Doc
     if default == _NO_DEFAULT:
         return Document().raw()
     return Document().default(default).raw()  # type: ignore
+
+
+def F() -> DocumentFilter:
+    """Shortcut as a DocumentFilter() object"""
+    return DocumentFilter()
