@@ -7,11 +7,6 @@ from ssc_codegen.tokens import TokenType, VariableType
 
 # TODO: static analyzer for filter operations
 # TODO: implement operators for DOCUMENT, INT, FLOAT
-@dataclass(kw_only=True)
-class Filter(BaseAstNode):
-    kind: ClassVar[TokenType] = TokenType.FILTER
-    accept_type: VariableType = VariableType.STRING
-    ret_type: VariableType = VariableType.STRING
 
 
 @dataclass(kw_only=True)
@@ -38,8 +33,8 @@ class FilterNot(BaseAstNode[T_EMPTY_KWARGS, tuple]):
     # TODO: typing body accept Filter-like nodes
 
 
-KW_STR_IN = TypedDict("KW_STR_IN", {"substr": str})
-ARGS_STR_IN = tuple[str]
+KW_STR_IN = TypedDict("KW_STR_IN", {"substr": tuple[str, ...]})
+ARGS_STR_IN = tuple[tuple[str, ...]]
 
 KW_STR_STARTS_OR_ENDS = TypedDict(
     "KW_STR_STARTS_OR_ENDS", {"substr": tuple[str, ...]}
@@ -84,8 +79,8 @@ class FilterStrRe(BaseAstNode[KW_STR_RE, ARGS_STR_RE]):
 
 
 # TODO: provide API for int, float, etc
-KW_STR_EQ_OR_NE = TypedDict("KW_STR_EQ_OR_NE", {"value": str})
-ARGS_STR_EQ_OR_NE = tuple[str]
+KW_STR_EQ_OR_NE = TypedDict("KW_STR_EQ_OR_NE", {"values": tuple[str, ...]})
+ARGS_STR_EQ_OR_NE = tuple[tuple[str, ...]]
 
 
 @dataclass(kw_only=True)
@@ -97,7 +92,7 @@ class FilterEqual(BaseAstNode[KW_STR_EQ_OR_NE, ARGS_STR_EQ_OR_NE]):
 
 @dataclass(kw_only=True)
 class FilterNotEqual(BaseAstNode[KW_STR_EQ_OR_NE, ARGS_STR_EQ_OR_NE]):
-    kind: ClassVar[TokenType] = TokenType.FILTER_EQ
+    kind: ClassVar[TokenType] = TokenType.FILTER_NE
     accept_type: VariableType = VariableType.STRING
     ret_type: VariableType = VariableType.STRING
 

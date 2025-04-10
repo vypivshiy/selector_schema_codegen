@@ -177,7 +177,6 @@ class TokenType(IntEnum):
     # FILTER
     EXPR_FILTER = auto()
 
-    FILTER = auto()  # TODO: REMOVE?
     FILTER_OR = auto()
     FILTER_AND = auto()
     FILTER_NOT = auto()
