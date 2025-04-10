@@ -1404,7 +1404,6 @@ class DocumentFilter(BaseDocument):
 
     def __or__(self, other: "DocumentFilter") -> "DocumentFilter":
         """syntax suger F().or_(...)"""
-
         return self.or_(other)
 
     def __and__(self, other: "DocumentFilter") -> "DocumentFilter":
@@ -1431,7 +1430,7 @@ class DocumentFilter(BaseDocument):
 
         if isinstance(other, str):
             other = (other,)
-        return self.eq(*other)
+        return self.ne(*other)
 
     def __lt__(self, other: int) -> Self:
         return self.len_lt(other)
