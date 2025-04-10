@@ -1,7 +1,7 @@
 """high-level AST builder interface"""
 
 import logging
-from typing import Type, Pattern
+from typing import Type, Pattern, Sequence
 
 from cssselect import SelectorSyntaxError
 from typing_extensions import Self, assert_never
@@ -1263,29 +1263,80 @@ class JsonDocument(BaseDocument):
 
 
 class DocumentFilter(BaseDocument):
-    def eq(self, value: str) -> Self:
-        self._add(FilterEqual(kwargs={"value": value}))
+    def eq(self, *values: str) -> Self:
+        """check if value equal
+
+        multiple values converts to logical AND
+
+        pseudocode example:
+
+            F().eq("foo") -> value == "foo"
+
+            F().eq("bar", "foo") -> (value == "bar" && value == "foo")
+        """
+        self._add(FilterEqual(kwargs={"values": values}))
         return self
 
-    def ne(self, value: str) -> Self:
-        self._add(FilterNotEqual(kwargs={"value": value}))
+    def ne(self, *values: str) -> Self:
+        """check if value not equal
+
+        multiple values converts to logical AND
+
+        pseudocode example:
+
+            F().eq("foo") -> value == "foo"
+
+            F().eq("bar", "foo") -> (value != "bar" && value != "foo")
+        """
+        self._add(FilterNotEqual(kwargs={"values": values}))
         return self
 
     def starts(self, *values: str) -> Self:
+        """check if value starts by substring
+
+        multiple values converts to logical OR
+
+        pseudocode example:
+
+            F().eq("foo") -> value == "foo"
+
+            F().eq("foo", "bar") -> (value.starts_with("bar") || value.starts_with("foo"))
+        """
         self._add(FilterStrStarts(kwargs={"substr": values}))
         return self
 
     def ends(self, *values: str) -> Self:
+        """check if value starts by substring
+
+        multiple values converts to logical OR
+
+        pseudocode example:
+
+            F().eq("foo") -> value == "foo"
+
+            F().eq("foo", "bar") -> (value.ends_with("bar") || value.ends_with("foo"))
+        """
         self._add(FilterStrEnds(kwargs={"substr": values}))
         return self
 
-    def contains(self, value: str) -> Self:
-        self._add(FilterStrIn(kwargs={"substr": value}))
+    def contains(self, *values: str) -> Self:
+        """check if value contains by substring
+
+        multiple values converts to logical OR
+
+        pseudocode example:
+
+            F().eq("foo") -> value == "foo"
+
+            F().eq("foo", "bar") -> (value.include("bar") || value.include("foo"))
+        """
+        self._add(FilterStrIn(kwargs={"substr": values}))
         return self
 
     def re(
         self, pattern: str | Pattern[str], ignore_case: bool = False
     ) -> Self:
+        """check if pattern matched result in value"""
         if not isinstance(pattern, str):
             ignore_case = is_ignore_case_regex(pattern)
 
@@ -1322,16 +1373,26 @@ class DocumentFilter(BaseDocument):
         return self
 
     def __or__(self, other: "DocumentFilter") -> "DocumentFilter":
+        """syntax suger F().or_(...)"""
+
         return self.or_(other)
 
     def __and__(self, other: "DocumentFilter") -> "DocumentFilter":
+        """syntax sugar F().and_(...)"""
         return self.and_(other)
 
     def __invert__(self) -> "DocumentFilter":
+        """syntax sugar F().not_(...)"""
         return DocumentFilter().not_(self)
 
-    def __eq__(self, other: str) -> Self:
-        return self.eq(other)
+    def __eq__(self, other: str | Sequence[str]) -> Self:
+        """syntax sugar F().eq(...)"""
+        if isinstance(other, str):
+            other = (other,)
+        return self.eq(*other)
 
-    def __ne__(self, other: str) -> Self:
-        return self.ne(other)
+    def __ne__(self, other: str | Sequence[str]) -> Self:
+        """syntax sugar F().ne(...)"""
+        if isinstance(other, str):
+            other = (other,)
+        return self.eq(*other)
