@@ -1052,9 +1052,10 @@ wheels = [
 
 [[package]]
 name = "ssc-codegen"
-version = "0.8.14"
+version = "0.8.17"
 source = { editable = "." }
 dependencies = [
+    { name = "bs4" },
     { name = "colorama", marker = "sys_platform == 'win32'" },
     { name = "cssselect" },
     { name = "httpx" },
@@ -1083,6 +1084,7 @@ tests = [
 
 [package.metadata]
 requires-dist = [
+    { name = "bs4", specifier = ">=0.0.2" },
     { name = "colorama", marker = "sys_platform == 'win32'", specifier = ">=0.4.6" },
     { name = "cssselect", specifier = ">=1.2.0" },
     { name = "httpx", specifier = ">=0.28.1" },
