@@ -947,8 +947,12 @@ def post_filter_not(_node: FilterNot) -> str:
 
 
 def pre_filter_in(node: FilterStrIn) -> str:
-    substr, *_ = node.unpack_args()
-    expr = f"{substr!r} in i"
+    values, *_ = node.unpack_args()
+
+    if len(values) == 1:
+        expr = f"{values[0]!r} in i"
+    else:
+        expr = f"any(s in i for s in {values})"
     if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
         return f" and {expr}"
     return expr
@@ -956,6 +960,7 @@ def pre_filter_in(node: FilterStrIn) -> str:
 
 def pre_filter_starts_with(node: FilterStrStarts) -> str:
     start_, *_ = node.unpack_args()
+    # build-in python startswith accept tuple[str, ...]
     expr = f"i.startswith({start_})"
     if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
         return f" and {expr}"
@@ -964,6 +969,7 @@ def pre_filter_starts_with(node: FilterStrStarts) -> str:
 
 def pre_filter_ends_with(node: FilterStrEnds) -> str:
     suffix_, *_ = node.unpack_args()
+    # build-in python endswith accept tuple[str, ...]
     expr = f"i.endswith({suffix_})"
     if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
         return f" and {expr}"
@@ -982,18 +988,24 @@ def pre_filter_re(node: FilterStrRe) -> str:
 
 
 def pre_filter_eq(node: FilterEqual) -> str:
-    value, *_ = node.unpack_args()
+    values, *_ = node.unpack_args()
     # currently support only str
-    expr = f"i == {value!r}"
+    if len(values) == 1:
+        expr = f"i == {values[0]!r}"
+    else:
+        expr = f"all(s == i for s in {values})"
     if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
         return f" and {expr}"
     return expr
 
 
 def pre_filter_ne(node: FilterNotEqual) -> str:
-    value, *_ = node.unpack_args()
+    values, *_ = node.unpack_args()
     # currently support only str
-    expr = f"i != {value!r}"
+    if len(values) == 1:
+        expr = f"i != {values[0]!r}"
+    else:
+        expr = f"all(s != i for s in {values})"
     if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
         return f" and {expr}"
     return expr

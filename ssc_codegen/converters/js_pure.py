@@ -774,8 +774,14 @@ def post_filter_not(_node: FilterNot) -> str:
 
 @CONVERTER(FilterStrIn.kind)
 def pre_filter_in(node: FilterStrIn) -> str:
-    substr, *_ = node.unpack_args()
-    expr = f"i.includes({substr!r})"
+    values, *_ = node.unpack_args()
+    if len(values) == 1:
+        expr = f"i.includes({values[0]!r})"
+    else:
+        # to js array
+        val_arr = str(values)
+        val_arr = "[" + val_arr[1:-1] + "]"
+        expr = f"{val_arr}.some(e => i.includes(e))"
     if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
         return f" && {expr}"
     return expr
@@ -783,11 +789,14 @@ def pre_filter_in(node: FilterStrIn) -> str:
 
 @CONVERTER(FilterStrStarts.kind)
 def pre_filter_starts_with(node: FilterStrStarts) -> str:
-    start_, *_ = node.unpack_args()
-    if len(start_) == 1:
-        expr = f"i.startsWith({start_[0]!r})"
+    values, *_ = node.unpack_args()
+    if len(values) == 1:
+        expr = f"i.startsWith({values[0]!r})"
     else:
-        expr = "(" + " || ".join(f"i.startsWith({s!r})" for s in start_) + ")"
+        # to js array
+        val_arr = str(values)
+        val_arr = "[" + val_arr[1:-1] + "]"
+        expr = f"{val_arr}.some(e => i.startsWith(e))"
     if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
         return f" && {expr}"
     return expr
@@ -795,11 +804,14 @@ def pre_filter_starts_with(node: FilterStrStarts) -> str:
 
 @CONVERTER(FilterStrEnds.kind)
 def pre_filter_ends_with(node: FilterStrEnds) -> str:
-    suffix_, *_ = node.unpack_args()
-    if len(suffix_) == 1:
-        expr = f"i.endsWith({suffix_[0]!r})"
+    values, *_ = node.unpack_args()
+    if len(values) == 1:
+        expr = f"i.endsWith({values[0]!r})"
     else:
-        expr = "(" + " || ".join(f"i.endsWith({s!r})" for s in suffix_) + ")"
+        # to js array
+        val_arr = str(values)
+        val_arr = "[" + val_arr[1:-1] + "]"
+        expr = f"{val_arr}.some(e => i.endsWith(e))"
     if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
         return f" && {expr}"
     return expr
@@ -818,8 +830,13 @@ def pre_filter_re(node: FilterStrRe) -> str:
 
 @CONVERTER(FilterEqual.kind)
 def pre_filter_eq(node: FilterEqual) -> str:
-    value, *_ = node.unpack_args()
-    expr = f"i === {value!r}"
+    values, *_ = node.unpack_args()
+    if len(values) == 1:
+        expr = f"i === {values[0]!r}"
+    else:
+        val_arr = str(values)
+        val_arr = "[" + val_arr[1:-1] + "]"
+        expr = f"{val_arr}.every(e => i === e)"
     if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
         return f" && {expr}"
     return expr
@@ -827,8 +844,13 @@ def pre_filter_eq(node: FilterEqual) -> str:
 
 @CONVERTER(FilterNotEqual.kind)
 def pre_filter_ne(node: FilterNotEqual) -> str:
-    value, *_ = node.unpack_args()
-    expr = f"i !== {value!r}"
+    values, *_ = node.unpack_args()
+    if len(values) == 1:
+        expr = f"i !== {values[0]!r}"
+    else:
+        val_arr = str(values)
+        val_arr = "[" + val_arr[1:-1] + "]"
+        expr = f"{val_arr}.every(e => i !== e)"
     if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
         return f" && {expr}"
     return expr
