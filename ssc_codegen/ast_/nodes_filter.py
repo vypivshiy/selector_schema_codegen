@@ -78,6 +78,52 @@ class FilterStrRe(BaseAstNode[KW_STR_RE, ARGS_STR_RE]):
     ret_type: VariableType = VariableType.STRING
 
 
+KW_STR_LEN = TypedDict("KW_STR_LEN", {"length": int})
+ARGS_STR_LEN = tuple[int]
+
+
+@dataclass(kw_only=True)
+class FilterStrLenEq(BaseAstNode[KW_STR_LEN, ARGS_STR_LEN]):
+    kind: ClassVar[TokenType] = TokenType.FILTER_STR_LEN_EQ
+    accept_type: VariableType = VariableType.STRING
+    ret_type: VariableType = VariableType.STRING
+
+
+@dataclass(kw_only=True)
+class FilterStrLenNe(BaseAstNode[KW_STR_LEN, ARGS_STR_LEN]):
+    kind: ClassVar[TokenType] = TokenType.FILTER_STR_LEN_NE
+    accept_type: VariableType = VariableType.STRING
+    ret_type: VariableType = VariableType.STRING
+
+
+@dataclass(kw_only=True)
+class FilterStrLenLt(BaseAstNode[KW_STR_LEN, ARGS_STR_LEN]):
+    kind: ClassVar[TokenType] = TokenType.FILTER_STR_LEN_LT
+    accept_type: VariableType = VariableType.STRING
+    ret_type: VariableType = VariableType.STRING
+
+
+@dataclass(kw_only=True)
+class FilterStrLenLe(BaseAstNode[KW_STR_LEN, ARGS_STR_LEN]):
+    kind: ClassVar[TokenType] = TokenType.FILTER_STR_LEN_LE
+    accept_type: VariableType = VariableType.STRING
+    ret_type: VariableType = VariableType.STRING
+
+
+@dataclass(kw_only=True)
+class FilterStrLenGt(BaseAstNode[KW_STR_LEN, ARGS_STR_LEN]):
+    kind: ClassVar[TokenType] = TokenType.FILTER_STR_LEN_GT
+    accept_type: VariableType = VariableType.STRING
+    ret_type: VariableType = VariableType.STRING
+
+
+@dataclass(kw_only=True)
+class FilterStrLenGe(BaseAstNode[KW_STR_LEN, ARGS_STR_LEN]):
+    kind: ClassVar[TokenType] = TokenType.FILTER_STR_LEN_GE
+    accept_type: VariableType = VariableType.STRING
+    ret_type: VariableType = VariableType.STRING
+
+
 # TODO: provide API for int, float, etc
 KW_STR_EQ_OR_NE = TypedDict("KW_STR_EQ_OR_NE", {"values": tuple[str, ...]})
 ARGS_STR_EQ_OR_NE = tuple[tuple[str, ...]]

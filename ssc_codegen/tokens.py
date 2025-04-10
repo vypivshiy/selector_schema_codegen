@@ -180,11 +180,19 @@ class TokenType(IntEnum):
     FILTER_OR = auto()
     FILTER_AND = auto()
     FILTER_NOT = auto()
-    # FILTER EXPR
+    # FILTER EXPR (STR)
     FILTER_STR_IN = auto()
     FILTER_STR_STARTS = auto()
     FILTER_STR_ENDS = auto()
     FILTER_STR_RE = auto()
+
+    FILTER_STR_LEN_EQ = auto()
+    FILTER_STR_LEN_NE = auto()
+    FILTER_STR_LEN_LT = auto()
+    FILTER_STR_LEN_LE = auto()
+    FILTER_STR_LEN_GT = auto()
+    FILTER_STR_LEN_GE = auto()
+
     FILTER_EQ = auto()
     FILTER_NE = auto()
 

@@ -21,7 +21,9 @@ from .nodes_core import (ExprReturn,
                          TypeDefField,
                          ExprCallStructMethod)
 from .nodes_filter import FilterOr, FilterAnd, FilterNot, FilterNotEqual, FilterEqual, FilterStrIn, \
-    FilterStrStarts, FilterStrEnds, FilterStrRe, ExprFilter
+    FilterStrStarts, FilterStrEnds, FilterStrRe, ExprFilter, FilterStrLenEq, FilterStrLenNe, FilterStrLenLt, \
+    FilterStrLenLe, FilterStrLenGt, FilterStrLenGe
+
 from .nodes_selectors import ExprCss, ExprCssAll, ExprXpathAll, ExprXpath, ExprGetHtmlText, ExprGetHtmlRaw, \
     ExprGetHtmlAttr, ExprGetHtmlAttrAll, ExprGetHtmlRawAll, ExprGetHtmlTextAll
 from .nodes_string import ExprStringTrim, ExprStringRegex, ExprStringSplit, ExprStringReplace, ExprStringLeftTrim, \
