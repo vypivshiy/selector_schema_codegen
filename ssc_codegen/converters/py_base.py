@@ -97,6 +97,12 @@ from ssc_codegen.ast_ import (
     FilterStrRe,
     FilterEqual,
     FilterNotEqual,
+    FilterStrLenEq,
+    FilterStrLenNe,
+    FilterStrLenLt,
+    FilterStrLenLe,
+    FilterStrLenGt,
+    FilterStrLenGe,
 )
 from ssc_codegen.converters.base import (
     BaseCodeConverter,
@@ -259,6 +265,12 @@ class BasePyCodeConverter(BaseCodeConverter):
             FilterStrRe.kind: pre_filter_re,
             FilterEqual.kind: pre_filter_eq,
             FilterNotEqual.kind: pre_filter_ne,
+            FilterStrLenEq.kind: pre_filter_str_len_eq,
+            FilterStrLenNe.kind: pre_filter_str_len_ne,
+            FilterStrLenLt.kind: pre_filter_str_len_lt,
+            FilterStrLenLe.kind: pre_filter_str_len_le,
+            FilterStrLenGe.kind: pre_filter_str_len_ge,
+            FilterStrLenGt.kind: pre_filter_str_len_gt,
         }
 
         self.post_definitions = {
@@ -1006,6 +1018,54 @@ def pre_filter_ne(node: FilterNotEqual) -> str:
         expr = f"i != {values[0]!r}"
     else:
         expr = f"all(s != i for s in {values})"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return f" and {expr}"
+    return expr
+
+
+def pre_filter_str_len_eq(node: FilterStrLenEq) -> str:
+    length, *_ = node.unpack_args()
+    expr = f"len(i) == {length}"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return f" and {expr}"
+    return expr
+
+
+def pre_filter_str_len_ne(node: FilterStrLenNe) -> str:
+    length, *_ = node.unpack_args()
+    expr = f"len(i) != {length}"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return f" and {expr}"
+    return expr
+
+
+def pre_filter_str_len_lt(node: FilterStrLenLt) -> str:
+    length, *_ = node.unpack_args()
+    expr = f"len(i) < {length}"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return f" and {expr}"
+    return expr
+
+
+def pre_filter_str_len_le(node: FilterStrLenLe) -> str:
+    length, *_ = node.unpack_args()
+    expr = f"len(i) <= {length}"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return f" and {expr}"
+    return expr
+
+
+def pre_filter_str_len_gt(node: FilterStrLenGt) -> str:
+    length, *_ = node.unpack_args()
+    expr = f"len(i) > {length}"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return f" and {expr}"
+    return expr
+
+
+def pre_filter_str_len_ge(node: FilterStrLenGe) -> str:
+    length, *_ = node.unpack_args()
+    expr = f"len(i) >= {length}"
     if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
         return f" and {expr}"
     return expr

@@ -69,18 +69,24 @@ from ssc_codegen.ast_ import (
     FilterAnd,
     FilterOr,
     FilterNot,
+    FilterStrLenEq,
+    FilterStrLenNe,
+    FilterStrLenLt,
+    FilterStrLenLe,
+    FilterStrLenGt,
+    FilterStrLenGe,
 )
 from ssc_codegen.document_utlis import (
     analyze_re_expression,
     unverbosify_regex,
     is_ignore_case_regex,
 )
+from ssc_codegen.json_struct import Json
 from ssc_codegen.pseudo_selectors import (
     parse_pseudo_xpath_query,
     parse_pseudo_css_query,
     PseudoAction,
 )
-from ssc_codegen.json_struct import Json
 from ssc_codegen.schema import BaseSchema
 from ssc_codegen.selector_utils import validate_css_query, validate_xpath_query
 from ssc_codegen.tokens import VariableType
@@ -1367,6 +1373,30 @@ class DocumentFilter(BaseDocument):
         self._add(FilterOr(body=tmp_stack))
         return self
 
+    def len_eq(self, value: int) -> Self:
+        self._add(FilterStrLenEq(kwargs={"length": value}))
+        return self
+
+    def len_ne(self, value: int) -> Self:
+        self._add(FilterStrLenNe(kwargs={"length": value}))
+        return self
+
+    def len_lt(self, value: int) -> Self:
+        self._add(FilterStrLenLt(kwargs={"length": value}))
+        return self
+
+    def len_le(self, value: int) -> Self:
+        self._add(FilterStrLenLe(kwargs={"length": value}))
+        return self
+
+    def len_gt(self, value: int) -> Self:
+        self._add(FilterStrLenGt(kwargs={"length": value}))
+        return self
+
+    def len_ge(self, value: int) -> Self:
+        self._add(FilterStrLenGe(kwargs={"length": value}))
+        return self
+
     def not_(self, filter_expr: "DocumentFilter") -> Self:
         tmp_stack = filter_expr.stack.copy()
         self._add(FilterNot(body=tmp_stack))
@@ -1385,14 +1415,32 @@ class DocumentFilter(BaseDocument):
         """syntax sugar F().not_(...)"""
         return DocumentFilter().not_(self)
 
-    def __eq__(self, other: str | Sequence[str]) -> Self:
+    def __eq__(self, other: int | str | Sequence[str]) -> Self:
         """syntax sugar F().eq(...)"""
+        if isinstance(other, int):
+            return self.len_eq(other)
+
         if isinstance(other, str):
             other = (other,)
         return self.eq(*other)
 
-    def __ne__(self, other: str | Sequence[str]) -> Self:
+    def __ne__(self, other: int | str | Sequence[str]) -> Self:
         """syntax sugar F().ne(...)"""
+        if isinstance(other, int):
+            return self.len_ne(other)
+
         if isinstance(other, str):
             other = (other,)
         return self.eq(*other)
+
+    def __lt__(self, other: int) -> Self:
+        return self.len_lt(other)
+
+    def __le__(self, other: int) -> Self:
+        return self.len_le(other)
+
+    def __gt__(self, other: int) -> Self:
+        return self.len_gt(other)
+
+    def __ge__(self, other: int) -> Self:
+        return self.len_ge(other)
