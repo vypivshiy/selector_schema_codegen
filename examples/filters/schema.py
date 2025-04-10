@@ -19,3 +19,6 @@ class FilterSchema(ItemSchema):
         | (F() != ('', '#', "/"))
         & ~F().starts("#")
     )
+
+    urls_by_len = D().css_all("a[href]::attr(href)").filter(
+        F() >= 12)
