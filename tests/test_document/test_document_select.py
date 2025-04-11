@@ -37,9 +37,17 @@ def test_doc_to_str(expr: BaseDocument) -> None:
     "expr",
     [
         D().css_all("a").text(),
+        D().css_all("a").raw(),
         D().xpath_all("//a").text(),
+        D().xpath_all("//a").raw(),
         D().css_all("a").attr("href"),
         D().xpath_all("//a").attr("href"),
+        D().css_all("a::text"),
+        D().css_all("a::raw"),
+        D().xpath_all("//a/text()"),
+        D().xpath_all("//a/raw()"),
+        D().css_all("a::attr(href)"),
+        D().xpath_all("//a/@href"),
     ],
 )
 def test_doc_to_list_str(expr: BaseDocument) -> None:
