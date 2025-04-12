@@ -146,6 +146,7 @@ class TokenType(IntEnum):
     EXPR_LIST_ANY_INDEX = auto()
     EXPR_LIST_JOIN = auto()
     EXPR_LIST_LEN = auto()
+    EXPR_LIST_UNIQUE = auto()
 
     # ASSERT
     IS_EQUAL = auto()

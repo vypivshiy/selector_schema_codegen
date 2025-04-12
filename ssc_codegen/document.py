@@ -75,6 +75,7 @@ from ssc_codegen.ast_ import (
     FilterStrLenLe,
     FilterStrLenGt,
     FilterStrLenGe,
+    ExprListUnique,
 )
 from ssc_codegen.document_utlis import (
     analyze_re_expression,
@@ -485,6 +486,14 @@ class ArrayDocument(BaseDocument):
                 self.stack_last_ret.name,
             )
         self._add(ExprFilter(body=expr.stack))
+        return self
+
+    def unique(self) -> Self:
+        """Remove duplicates from array-like object
+
+        - accept LIST_STRING, return LIST_STRING
+        """
+        self._add(ExprListUnique())
         return self
 
 

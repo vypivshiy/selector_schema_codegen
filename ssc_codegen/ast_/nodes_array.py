@@ -31,3 +31,11 @@ class ExprToListLength(BaseAstNode[T_EMPTY_KWARGS, tuple]):
     kind: ClassVar[TokenType] = TokenType.EXPR_LIST_LEN
     accept_type: VariableType = VariableType.LIST_ANY
     ret_type: VariableType = VariableType.INT
+
+
+@dataclass(kw_only=True)
+class ExprListUnique(BaseAstNode[T_EMPTY_KWARGS, tuple]):
+    # TODO: support LIST_INT, LIST_FLOAT
+    kind: ClassVar[TokenType] = TokenType.EXPR_LIST_UNIQUE
+    accept_type: VariableType = VariableType.LIST_STRING
+    ret_type: VariableType = VariableType.LIST_STRING
