@@ -103,6 +103,7 @@ from ssc_codegen.ast_ import (
     FilterStrLenLe,
     FilterStrLenGt,
     FilterStrLenGe,
+    ExprListUnique,
 )
 from ssc_codegen.converters.base import (
     BaseCodeConverter,
@@ -271,6 +272,7 @@ class BasePyCodeConverter(BaseCodeConverter):
             FilterStrLenLe.kind: pre_filter_str_len_le,
             FilterStrLenGe.kind: pre_filter_str_len_ge,
             FilterStrLenGt.kind: pre_filter_str_len_gt,
+            ExprListUnique.kind: pre_list_unique,
         }
 
         self.post_definitions = {
@@ -1069,3 +1071,12 @@ def pre_filter_str_len_ge(node: FilterStrLenGe) -> str:
     if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
         return f" and {expr}"
     return expr
+
+
+def pre_list_unique(node: ExprListUnique) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    # use `dict.fromkeys()` instead `set()` for guarantees insertion order (py 3.7+) reason
+    return f"{indent}{nxt} = list(dict.fromkeys({prv}))"

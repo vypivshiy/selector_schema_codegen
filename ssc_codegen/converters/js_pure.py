@@ -101,6 +101,7 @@ from ssc_codegen.ast_ import (
     FilterStrLenLe,
     FilterStrLenGt,
     FilterStrLenGe,
+    ExprListUnique,
 )
 from ssc_codegen.converters.base import BaseCodeConverter
 from ssc_codegen.converters.helpers import (
@@ -914,3 +915,11 @@ def pre_filter_str_len_ge(node: FilterStrLenGe) -> str:
     if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
         return f" && {expr}"
     return expr
+
+
+@CONVERTER(ExprListUnique.kind)
+def pre_list_unique(node: ExprListUnique) -> str:
+    prv, nxt = prev_next_var(node)
+    # save order guaranteed
+    # https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set#description
+    return f"let {nxt} = [...new Set({prv})]; "
