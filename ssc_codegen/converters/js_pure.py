@@ -930,13 +930,17 @@ def pre_list_unique(node: ExprListUnique) -> str:
 @CONVERTER(ExprStringMapReplace.kind)
 def pre_str_map_repl(node: ExprStringMapReplace) -> str:
     old_arr, new_arr = node.unpack_args()
+    old_arr = list(old_arr)  # type: ignore
+    new_arr = list(new_arr)  # type: ignore
     prv, nxt = prev_next_var(node)
-    # py list<str> literal syntax equal js Array<string> literak
+    # py list<str> literal syntax equal js Array<string> literal
     return f"let {nxt} = {old_arr}.reduce((s, v, i) => s.replaceAll(v, {new_arr}[i] ?? ''), {prv});"
 
 
 @CONVERTER(ExprListStringMapReplace.kind)
 def pre_list_str_map_repl(node: ExprListStringMapReplace) -> str:
     old_arr, new_arr = node.unpack_args()
+    old_arr = list(old_arr)  # type: ignore
+    new_arr = list(new_arr)  # type: ignore
     prv, nxt = prev_next_var(node)
     return f"let {nxt} = {prv}.map(s => {old_arr}.reduce((s, v, i) => s.replaceAll(v, {new_arr}[i] ?? ''), s));"
