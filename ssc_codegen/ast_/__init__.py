@@ -31,6 +31,6 @@ from .nodes_string import ExprStringTrim, ExprStringRegex, ExprStringSplit, Expr
     ExprListStringFormat, ExprListStringReplace, ExprListStringRightTrim, ExprListStringLeftTrim, \
     ExprListStringRegexSub, \
     ExprStringRmPrefix, ExprStringRmSuffix, ExprStringRmPrefixAndSuffix, ExprListStringRmPrefixAndSuffix, \
-    ExprListStringRmPrefix, ExprListStringRmSuffix
+    ExprListStringRmPrefix, ExprListStringRmSuffix, ExprStringMapReplace, ExprListStringMapReplace
 from .nodes_validate import ExprIsCss, ExprIsEqual, ExprStringIsRegex, ExprIsXpath, ExprIsNotEqual, ExprIsContains, \
     ExprListStringAnyRegex, ExprListStringAllRegex, ExprHasAttr, ExprListHasAttr

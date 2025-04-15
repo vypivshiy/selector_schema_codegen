@@ -93,6 +93,26 @@ class ExprListStringReplace(BaseAstNode[KW_STR_REPL, tuple[str, str]]):
     ret_type: VariableType = VariableType.LIST_STRING
 
 
+KW_STR_MAP_REPL = TypedDict(
+    "KW_STR_MAP_REPL", {"old": tuple[str, ...], "new": tuple[str, ...]}
+)
+ARGS_STR_MAP_REPL = tuple[tuple[str, ...], tuple[str, ...]]
+
+
+@dataclass(kw_only=True)
+class ExprStringMapReplace(BaseAstNode[KW_STR_MAP_REPL, ARGS_STR_MAP_REPL]):
+    kind: ClassVar[TokenType] = TokenType.EXPR_STRING_MAP_REPLACE
+    accept_type: VariableType = VariableType.STRING
+    ret_type: VariableType = VariableType.STRING
+
+
+@dataclass(kw_only=True)
+class ExprListStringMapReplace(BaseAstNode[KW_STR_MAP_REPL, ARGS_STR_MAP_REPL]):
+    kind: ClassVar[TokenType] = TokenType.EXPR_LIST_STRING_MAP_REPLACE
+    accept_type: VariableType = VariableType.LIST_STRING
+    ret_type: VariableType = VariableType.LIST_STRING
+
+
 KW_STR_RE = TypedDict(
     "KW_STR_RE", {"pattern": str, "group": int, "ignore_case": bool}
 )

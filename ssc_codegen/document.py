@@ -76,6 +76,8 @@ from ssc_codegen.ast_ import (
     FilterStrLenGt,
     FilterStrLenGe,
     ExprListUnique,
+    ExprListStringMapReplace,
+    ExprStringMapReplace,
 )
 from ssc_codegen.document_utlis import (
     analyze_re_expression,
@@ -498,6 +500,37 @@ class ArrayDocument(BaseDocument):
 
 
 class StringDocument(BaseDocument):
+    def repl_map(self, replace_table: dict[str, str]) -> Self:
+        old_args = tuple(replace_table.keys())
+        new_args = tuple(replace_table.values())
+
+        match self.stack_last_ret:
+            case VariableType.LIST_STRING:
+                self._add(
+                    ExprListStringMapReplace(
+                        kwargs={"old": old_args, "new": new_args}
+                    )
+                )
+            case VariableType.STRING:
+                self._add(
+                    ExprStringMapReplace(
+                        kwargs={"old": old_args, "new": new_args}
+                    )
+                )
+            case _:
+                LOGGER.warning(
+                    "repl_map(%s): Expected type(s) %s got %s",
+                    replace_table,
+                    (VariableType.LIST_STRING.name, VariableType.STRING.name),
+                    self.stack_last_ret.name,
+                )
+                self._add(
+                    ExprStringMapReplace(
+                        kwargs={"old": old_args, "new": new_args}
+                    )
+                )
+        return self
+
     def rm_prefix(self, substr: str) -> Self:
         """remove prefix from string by substr
 

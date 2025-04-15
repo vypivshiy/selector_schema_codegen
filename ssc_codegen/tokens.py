@@ -131,6 +131,7 @@ class TokenType(IntEnum):
     EXPR_STRING_RM_PREFIX = auto()
     EXPR_STRING_RM_SUFFIX = auto()
     EXPR_STRING_RM_PREFIX_AND_SUFFIX = auto()
+    EXPR_STRING_MAP_REPLACE = auto()
 
     # LIST_STRING
     EXPR_LIST_REGEX_SUB = auto()
@@ -142,6 +143,8 @@ class TokenType(IntEnum):
     EXPR_LIST_STRING_RM_PREFIX = auto()
     EXPR_LIST_STRING_RM_SUFFIX = auto()
     EXPR_LIST_STRING_RM_PREFIX_AND_SUFFIX = auto()
+    EXPR_LIST_STRING_MAP_REPLACE = auto()
+
     # ARRAY
     EXPR_LIST_ANY_INDEX = auto()
     EXPR_LIST_JOIN = auto()
