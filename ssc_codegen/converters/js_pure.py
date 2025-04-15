@@ -102,6 +102,8 @@ from ssc_codegen.ast_ import (
     FilterStrLenGt,
     FilterStrLenGe,
     ExprListUnique,
+    ExprStringMapReplace,
+    ExprListStringMapReplace,
 )
 from ssc_codegen.converters.base import BaseCodeConverter
 from ssc_codegen.converters.helpers import (
@@ -377,14 +379,14 @@ def pre_str_split(node: ExprStringSplit) -> str:
 def pre_str_replace(node: ExprStringReplace) -> str:
     prv, nxt = prev_next_var(node)
     old, new = node.unpack_args()
-    return f"let {nxt} = {prv}.replace({old!r}, {new!r});"
+    return f"let {nxt} = {prv}.replaceAll({old!r}, {new!r});"
 
 
 @CONVERTER(ExprListStringReplace.kind)
 def pre_list_str_replace(node: ExprListStringReplace) -> str:
     prv, nxt = prev_next_var(node)
     old, new = node.unpack_args()
-    return f"let {nxt} = {prv}.map(e => e.replace({old!r}, {new!r}));"
+    return f"let {nxt} = {prv}.map(e => e.replaceAll({old!r}, {new!r}));"
 
 
 @CONVERTER(ExprStringRegex.kind)
@@ -923,3 +925,18 @@ def pre_list_unique(node: ExprListUnique) -> str:
     # save order guaranteed
     # https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set#description
     return f"let {nxt} = [...new Set({prv})]; "
+
+
+@CONVERTER(ExprStringMapReplace.kind)
+def pre_str_map_repl(node: ExprStringMapReplace) -> str:
+    old_arr, new_arr = node.unpack_args()
+    prv, nxt = prev_next_var(node)
+    # py list<str> literal syntax equal js Array<string> literak
+    return f"let {nxt} = {old_arr}.reduce((s, v, i) => s.replaceAll(v, {new_arr}[i] ?? ''), {prv});"
+
+
+@CONVERTER(ExprListStringMapReplace.kind)
+def pre_list_str_map_repl(node: ExprListStringMapReplace) -> str:
+    old_arr, new_arr = node.unpack_args()
+    prv, nxt = prev_next_var(node)
+    return f"let {nxt} = {prv}.map(s => {old_arr}.reduce((s, v, i) => s.replaceAll(v, {new_arr}[i] ?? ''), s));"

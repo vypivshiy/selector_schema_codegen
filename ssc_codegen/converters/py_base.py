@@ -104,6 +104,8 @@ from ssc_codegen.ast_ import (
     FilterStrLenGt,
     FilterStrLenGe,
     ExprListUnique,
+    ExprStringMapReplace,
+    ExprListStringMapReplace,
 )
 from ssc_codegen.converters.base import (
     BaseCodeConverter,
@@ -176,6 +178,7 @@ import sys
 import json
 from typing import List, Dict, TypedDict, Union, Optional
 from contextlib import suppress
+from functools import reduce
 
 if sys.version_info >= (3, 10):
     from types import NoneType
@@ -273,6 +276,8 @@ class BasePyCodeConverter(BaseCodeConverter):
             FilterStrLenGe.kind: pre_filter_str_len_ge,
             FilterStrLenGt.kind: pre_filter_str_len_gt,
             ExprListUnique.kind: pre_list_unique,
+            ExprStringMapReplace.kind: pre_str_map_replace,
+            ExprListStringMapReplace.kind: pre_list_str_map_replace,
         }
 
         self.post_definitions = {
@@ -1080,3 +1085,27 @@ def pre_list_unique(node: ExprListUnique) -> str:
     prv, nxt = prev_next_var(node)
     # use `dict.fromkeys()` instead `set()` for guarantees insertion order (py 3.7+) reason
     return f"{indent}{nxt} = list(dict.fromkeys({prv}))"
+
+
+def pre_str_map_replace(node: ExprStringMapReplace) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    old_arr, new_arr = node.unpack_args()
+    replacements = dict(zip(old_arr, new_arr))
+
+    prv, nxt = prev_next_var(node)
+    expr = f"reduce(lambda acc, kv: acc.replace(kv[0], kv[1]), {replacements}.items(), {prv})"
+    return f"{indent}{nxt} = {expr}"
+
+
+def pre_list_str_map_replace(node: ExprListStringMapReplace) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    old_arr, new_arr = node.unpack_args()
+    replacements = dict(zip(old_arr, new_arr))
+
+    prv, nxt = prev_next_var(node)
+    expr = f"[reduce(lambda acc, kv: acc.replace(kv[0], kv[1]), {replacements}.items(), i) for i in {prv}]"
+    return f"{indent}{nxt} = {expr}"
