@@ -22,19 +22,29 @@ class BaseSchema:
     __SCHEMA_TYPE__: StructType = NotImplemented
 
     __SIGNATURE__: dict | list = NotImplemented
-    """manually write signature attribute"""
+    """manually write signature for docstring"""
 
     __PRE_VALIDATE__: _T_OPT_FIELD = MISSING_FIELD
+    """Optional method for pre validation input document
+    
+    if checks not passed - throw error
+    """
 
     # DICT, LIST, FLAT_LIST HOOK
     __SPLIT_DOC__: _T_OPT_FIELD = MISSING_FIELD
+    """ListSchema, DictSchema, FlatListSchema method for write split document to parts of elements
+    """
 
     # FLAT LIST HOOK
     __ITEM__: _T_OPT_FIELD = MISSING_FIELD
+    """FlatListSchema item method for parse items for array"""
 
     # DICT HOOKS
     __KEY__: _T_OPT_FIELD = MISSING_FIELD
+    """DictSchema method for parse key """
+
     __VALUE__: _T_OPT_FIELD = MISSING_FIELD
+    """DictSchema method for parse value"""
 
     __EXCLUDE_SIGNATURE__: _T_OPT_FIELD = MISSING_FIELD
 
