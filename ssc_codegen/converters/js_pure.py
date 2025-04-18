@@ -128,6 +128,7 @@ from ssc_codegen.converters.templates.js_pure import (
     J2_PRE_XPATH_ALL,
     J2_PRE_STR_TRIM,
     J2_IS_XPATH,
+    J2_START_PARSE_ACC_LIST,
 )
 from ssc_codegen.str_utils import (
     wrap_backtick,
@@ -283,6 +284,8 @@ def pre_start_parse(node: StartParseMethod) -> str:
             code += J2_START_PARSE_DICT
         case StructType.FLAT_LIST:
             code += J2_START_PARSE_FLAT_LIST
+        case StructType.ACC_LIST:
+            code += J2_START_PARSE_ACC_LIST.render(exprs=exprs)
         case _:
             assert_never(node.parent.struct_type)  # type: ignore
     return code

@@ -351,6 +351,9 @@ def pre_typedef(node: TypeDef) -> str:
             return f"T_{name} = List[{type_}]"
         case StructType.ITEM | StructType.LIST:
             return f'T_{name} = TypedDict("T_{name}", ' + "{"
+        case StructType.ACC_LIST:
+            # current impl support only str type
+            return f"T_{name} = List[str]"
         case _:
             assert_never(struct_type)
     raise NotImplementedError()  # noqa
@@ -359,9 +362,7 @@ def pre_typedef(node: TypeDef) -> str:
 def post_typedef(node: TypeDef) -> str:
     _, struct_type = node.unpack_args()
     match struct_type:
-        case StructType.DICT:
-            return ""
-        case StructType.FLAT_LIST:
+        case StructType.DICT | StructType.FLAT_LIST | StructType.ACC_LIST:
             return ""
         # close TypedDict type
         case StructType.ITEM | StructType.LIST:
@@ -375,7 +376,11 @@ def pre_typedef_field(node: TypeDefField) -> str:
     name, var_type, cls_nested, cls_nested_type = node.unpack_args()
     node.parent = cast(TypeDef, node.parent)
     # skip generated types
-    if node.parent.struct_type in (StructType.DICT, StructType.FLAT_LIST):
+    if node.parent.struct_type in (
+        StructType.DICT,
+        StructType.FLAT_LIST,
+        StructType.ACC_LIST,
+    ):
         return ""
     # always string
     elif name == "__KEY__":
@@ -485,6 +490,17 @@ def post_start_parse(node: StartParseMethod) -> str:
                     continue
                 code += f"{name!r}: self._parse_{name}(self._document),"
             code += "}"
+        case StructType.ACC_LIST:
+            code += INDENT_METHOD_BODY + "return "
+            methods = []
+            for expr in node.body:
+                name = expr.kwargs["name"]
+                if name.startswith("__"):
+                    continue
+                # acc list of str (all list are flatten)
+                methods.append(f"self._parse_{name}(self._document)")
+            code += " + ".join(methods)
+
         case StructType.LIST:
             # return [{...} for el in self._split_doc(self.document)]
             code += INDENT_METHOD_BODY + "return [{"
