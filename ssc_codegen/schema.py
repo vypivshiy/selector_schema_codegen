@@ -120,8 +120,11 @@ class BaseSchema:
         signature = []
         field = cls.__ITEM__
         if field.stack_last_ret == VariableType.NESTED:
-            nested_class = cls._get_nested_signature(field)
-            signature.append(nested_class.__class_signature__())
+            name = [e for e in field.stack if e.kind == TokenType.EXPR_NESTED][
+                0
+            ].kwargs["schema_name"]
+            nested_class = cls.__NESTED_SCHEMAS__[name].__class_signature__()
+            signature.append(nested_class)
         elif field.stack_last_ret == VariableType.JSON:
             signature[k] = json_struct_to_signature(v.stack[-1].value)  # noqa
         else:
