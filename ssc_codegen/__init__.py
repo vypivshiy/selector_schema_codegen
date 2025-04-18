@@ -3,7 +3,7 @@ from ssc_codegen.document import HTMLDocument, StringDocument, ArrayDocument, As
     NumericDocument, JsonDocument, BooleanDocument, DocumentFilter
 from ssc_codegen.json_struct import Json
 from ssc_codegen.logs import setup_logger
-from ssc_codegen.schema import ItemSchema, DictSchema, ListSchema, FlatListSchema
+from ssc_codegen.schema import ItemSchema, DictSchema, ListSchema, FlatListSchema, AccListSchema
 
 setup_logger()
 

@@ -61,6 +61,9 @@ class BaseSchema:
                 signature = cls._get_list_signature()
             case StructType.ITEM:
                 signature = cls._get_item_signature()
+
+            case StructType.ACC_LIST:
+                signature = [VariableType.STRING, "..."]
             case _:
                 # code unreached
                 raise TypeError("Unknown schema type")
@@ -208,3 +211,7 @@ class DictSchema(BaseSchema):
 
 class FlatListSchema(BaseSchema):
     __SCHEMA_TYPE__ = StructType.FLAT_LIST
+
+
+class AccListSchema(BaseSchema):
+    __SCHEMA_TYPE__ = StructType.ACC_LIST

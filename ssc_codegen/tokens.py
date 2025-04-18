@@ -66,6 +66,7 @@ class StructType(IntEnum):
     DICT = auto()
     LIST = auto()
     FLAT_LIST = auto()
+    ACC_LIST = auto()
 
 
 class TokenType(IntEnum):

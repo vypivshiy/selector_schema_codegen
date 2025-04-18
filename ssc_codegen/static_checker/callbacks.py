@@ -66,6 +66,26 @@ def analyze_flat_list_schema_fields(sc: Type["BaseSchema"]) -> AnalyzeResult:
     return AnalyzeResult.ok()
 
 
+def analyze_schema_acc_list(sc: Type["BaseSchema"]) -> AnalyzeResult:
+    # current impl support only LIST_STRING expr
+    if sc.__SCHEMA_TYPE__ != StructType.ACC_LIST:
+        return AnalyzeResult.ok()
+    skip_fields = {"__SPLIT_DOC__", "__PRE_VALIDATE__"}
+    err_fields = {
+        name: field
+        for name, field in sc.__get_mro_fields__().items()
+        if name not in skip_fields
+        and field.stack_last_ret != VariableType.LIST_STRING
+    }
+    if err_fields:
+        msg = ""
+        for name, field in err_fields.items():
+            msg += f"{sc.__name__}.{name} expected type(s) {VariableType.LIST_STRING.name}, got {field.stack_last_ret}"
+            msg += "\n"
+        return AnalyzeResult.error(msg)
+    return AnalyzeResult.ok()
+
+
 # schema check segment
 def analyze_schema_split_doc_field(sc: Type["BaseSchema"]) -> AnalyzeResult:
     if sc.__SCHEMA_TYPE__ in (

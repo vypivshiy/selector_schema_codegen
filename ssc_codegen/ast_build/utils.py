@@ -13,6 +13,7 @@ from ssc_codegen.schema import (
     DictSchema,
     ItemSchema,
     FlatListSchema,
+    AccListSchema,
 )
 from ssc_codegen.tokens import VariableType
 
@@ -59,6 +60,7 @@ def is_template_schema_cls(cls: object) -> bool:
         DictSchema,
         ListSchema,
         BaseSchema,
+        AccListSchema,
     )
 
 
