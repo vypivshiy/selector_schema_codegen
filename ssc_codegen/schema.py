@@ -226,5 +226,5 @@ class FlatListSchema(BaseSchema):
     __SCHEMA_TYPE__ = StructType.FLAT_LIST
 
 
-class AccListSchema(BaseSchema):
+class AccUniqueListSchema(BaseSchema):
     __SCHEMA_TYPE__ = StructType.ACC_LIST

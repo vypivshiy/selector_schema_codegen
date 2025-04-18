@@ -491,7 +491,7 @@ def post_start_parse(node: StartParseMethod) -> str:
                 code += f"{name!r}: self._parse_{name}(self._document),"
             code += "}"
         case StructType.ACC_LIST:
-            code += INDENT_METHOD_BODY + "return "
+            code += INDENT_METHOD_BODY + "return list(dict.fromkeys("
             methods = []
             for expr in node.body:
                 name = expr.kwargs["name"]
@@ -500,6 +500,7 @@ def post_start_parse(node: StartParseMethod) -> str:
                 # acc list of str (all list are flatten)
                 methods.append(f"self._parse_{name}(self._document)")
             code += " + ".join(methods)
+            code += "))"
 
         case StructType.LIST:
             # return [{...} for el in self._split_doc(self.document)]

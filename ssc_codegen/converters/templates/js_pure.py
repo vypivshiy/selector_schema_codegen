@@ -15,14 +15,13 @@ J2_START_PARSE_DICT = "return Array.from(this._splitDoc(this._doc)).reduce((item
 J2_START_PARSE_FLAT_LIST = "return Array.from(this._splitDoc(this._doc)).map((e) => this._parseItem(e));"
 J2_START_PARSE_ACC_LIST = Template(
     """
-return [
+return [...new Set([
 {% for expr in exprs %}
 this._parse{{ expr.upper_name }}(this._doc),
 {% endfor %}
-].flat();
+].flat())];
 """
 )
-
 J2_START_PARSE_ITEM = Template("""return {
     {% for expr in exprs %}
 {{ expr.name }}: this._parse{{ expr.upper_name }}(this._doc),
