@@ -47,6 +47,7 @@ def build_ast_module_parser(
     *,
     css_to_xpath: bool = False,
     xpath_to_css: bool = False,
+    gen_docstring: bool = True,
 ) -> ModuleProgram:
     """build ast from python sscgen config file
 
@@ -66,12 +67,18 @@ def build_ast_module_parser(
             "Should be chosen one variant (css_to_xpath OR xpath_to_css)"
         )
     py_module = exec_module_code(path)
-    docstr = py_module.__dict__.get("__doc__") or ""  # type: str
     ast_module = ModuleProgram()
-    module_body: list[BaseAstNode] = [
-        Docstring(kwargs={"value": docstr}, parent=ast_module),
-        ModuleImports(parent=ast_module),
-    ]
+
+    if gen_docstring:
+        docstr = py_module.__dict__.get("__doc__") or ""  # type: str
+        module_body: list[BaseAstNode] = [
+            Docstring(kwargs={"value": docstr}, parent=ast_module),
+            ModuleImports(parent=ast_module),
+        ]
+    else:
+        module_body: list[BaseAstNode] = [
+            ModuleImports(parent=ast_module),
+        ]
 
     schemas = extract_schemas_from_module(py_module)
     json_structs = extract_json_structs_from_module(py_module)
@@ -85,6 +92,7 @@ def build_ast_module_parser(
                 ast_module,
                 css_to_xpath=css_to_xpath,
                 xpath_to_css=xpath_to_css,
+                gen_docstring=gen_docstring,
             )
             for sc in schemas
         ]
@@ -98,6 +106,7 @@ def build_ast_module_parser(
                     ast_module,
                     css_to_xpath=css_to_xpath,
                     xpath_to_css=xpath_to_css,
+                    gen_docstring=gen_docstring,
                 )
             except SyntaxError as e:
                 errors.append(e)
@@ -187,6 +196,7 @@ def build_ast_struct_parser(
     *,
     css_to_xpath: bool = False,
     xpath_to_css: bool = False,
+    gen_docstring: bool = True,
 ) -> StructParser:
     errors_count = run_analyze_schema(schema)
     if errors_count > 0:
@@ -195,11 +205,12 @@ def build_ast_struct_parser(
     docstring = (
         (schema.__doc__ or "") + "\n\n" + generate_docstring_signature(schema)
     )
+
     st = StructParser(
         kwargs={
             "name": schema.__name__,
             "struct_type": schema.__SCHEMA_TYPE__,
-            "docstring": docstring,
+            "docstring": docstring if gen_docstring else "",
         },
         parent=module_ref,
     )

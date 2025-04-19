@@ -32,6 +32,7 @@ HELP_TO_CSS = "convert all xpath queries to css (works not guaranteed)"
 HELP_DEBUG_COMM_TOKENS = "add debug comment for each generated instruction"
 HELP_JSON_TO_SCHEMA = "convert json response to ssc-gen schema"
 # cmd group description
+HELP_DOCSTRING = "disable docstring and fields signature generate"
 CMD_VERSION = "Show version and exit"
 CMD_PY = "generate python modules"
 CMD_JS = "generate javascript modules"

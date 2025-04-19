@@ -43,6 +43,7 @@ from ssc_codegen.cli.consts import (
     CMD_GO,
     CMD_JSON_GEN,
     DEFAULT_UA,
+    HELP_DOCSTRING,
 )
 from ssc_codegen.cli.runtime_parse_runners import (
     assert_cls_target,
@@ -84,6 +85,7 @@ def generate_code(
     css_to_xpath: bool = False,
     xpath_to_css: bool = False,
     debug_instructions: bool = False,
+    gen_docstring: bool = True,
 ) -> None:
     """universal generate code entrypoint"""
     variables_patches = variables_patches or {}
@@ -113,6 +115,7 @@ def generate_code(
             file_cfg,
             css_to_xpath=css_to_xpath,
             xpath_to_css=xpath_to_css,
+            gen_docstring=gen_docstring,
         )
         LOGGER.info("Convert to code %s...", file_cfg.name)
         code_parts = converter.convert_program(ast_module, comment=comment_str)
@@ -155,6 +158,9 @@ def gen_py(
     debug: Annotated[
         bool, Option(help=HELP_DEBUG_COMM_TOKENS, is_flag=True)
     ] = False,
+    docstring: Annotated[
+        bool, Option(help=HELP_DOCSTRING, is_flag=True)
+    ] = True,
 ) -> None:
     converter = import_converter(f"py_{lib.value}")
     if fmt:
@@ -174,6 +180,7 @@ def gen_py(
         css_to_xpath=to_xpath,
         debug_instructions=debug,
         code_cb=CB_PY_CODE,
+        gen_docstring=docstring,
     )
 
 
@@ -202,6 +209,9 @@ def gen_js(
     debug: Annotated[
         bool, Option(help=HELP_DEBUG_COMM_TOKENS, is_flag=True)
     ] = False,
+    docstring: Annotated[
+        bool, Option(help=HELP_DOCSTRING, is_flag=True)
+    ] = True,
 ) -> None:
     converter = import_converter(f"js_{lib.value}")
     if fmt:
@@ -222,6 +232,7 @@ def gen_js(
         css_to_xpath=to_xpath,
         debug_instructions=debug,
         code_cb=CB_JS_CODE,
+        gen_docstring=docstring,
     )
 
 
@@ -252,6 +263,9 @@ def gen_go(
     to_xpath: Annotated[bool, Option(help=HELP_TO_XPATH, is_flag=True)] = False,
     to_css: Annotated[bool, Option(help=HELP_TO_CSS, is_flag=True)] = False,
     debug: Annotated[bool, Option(help=HELP_DEBUG_COMM_TOKENS)] = False,
+    docstring: Annotated[
+        bool, Option(help=HELP_DOCSTRING, is_flag=True)
+    ] = True,
 ) -> None:
     converter = import_converter(f"go_{lib.value}")
     if fmt:
@@ -273,6 +287,7 @@ def gen_go(
         xpath_to_css=to_css,
         css_to_xpath=to_xpath,
         debug_instructions=debug,
+        gen_docstring=docstring,
     )
 
 
