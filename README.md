@@ -7,42 +7,46 @@ ssc-gen - based-python DSL language for writing html parsers in dataclass style 
 Project solving next problems:
 
 - decrease boilerplate code
-- create types (or type annotations if possible) and documentation 
+- generation DDD-like modules independent of the project
+- generate types or type annotations if possible and documentation 
 - simplify code support
-- portability to other languages
+- portability to other languages and HTML parser backends
 
 ## Support converters
 
 Current support converters
 
-| Language      | Library (html parser backend) | XPath Support | CSS Support | Generated types                          | Code formatter |
-|---------------|-------------------------------|---------------|-------------|------------------------------------------|----------------|
-| Python (3.8+) | bs4                           | N             | Y           | TypedDict*, list, dict                   | ruff           |
-| ...           | parsel                        | Y             | Y           | ...                                      | -              |
-| ...           | selectolax (lexbor)           | N             | Y           | ...                                      | -              |
-| js (ES6)      | pure (firefox/chrome/nodejs)  | Y             | Y           | Array, Map**                             | -              |
-| go (1.10+)    | goquery                       | N             | Y           | struct(json anchors include), array, map | gofmt          |
+| Language      | HTML parser backend          | XPath | CSS3 | CSS4 | Generated types, structs          | formatter dependency |
+|---------------|------------------------------|-------|------|------|-----------------------------------|----------------------|
+| Python (3.8+) | bs4                          | N     | Y    | Y    | TypedDict*, list, dict            | ruff                 |
+| ...           | parsel                       | Y     | Y    | N    | ...                               | ...                  |
+| ...           | selectolax (lexbor)          | N     | Y    | N    | ...                               | ...                  |
+| js (ES6)      | pure (firefox/chrome/nodejs) | Y     | Y    | Y    | Array, Map**                      | prettier             |
+| go (1.10+)    | goquery                      | N     | Y    | N    | struct(+json anchors), array, map | gofmt                |
 
+- **CSS3** means support next selectors:
+  - basic: (`tag`, `.class`, `#id`, `tag1,tag2`)
+  - combined: (`div p`, `ul > li`, `h2 +p`, `title ~head`)
+  - attribute: (`a[href]`, `input[type='text']`, `a[href*='...']`, ...)
+  - basic pseudo classes: (`:nth-child(n)`, `:first-child`, `:last-child`)
+- **CSS4** means support next selectors:
+  - `:has()`, `:nth-of-type()`, `:where()`, `:is()` etc
 - *this annotation type was deliberately chosen as a compromise reasons. 
 Python has many ways of serialization: `namedtuple, dataclass, attrs, pydantic, msgspec, etc`
   - TypedDict is like a build-in dict, but with IDE and linter hint support, and you can easily implement an adapter for the required structure.
-- **js exclude build-in serialization methods
+- **js exclude build-in serialization methods, used standard Array and Map structures 
+- **formatter** - optional dependency for prettify and fix codestyle
 
 ### Limitations
 
 For maximum portability of the configuration to the target language:
 
 - Use CSS selectors: they are guaranteed to be converted to XPATH
-- Unlike javascript, most html parse libs implement [CSS3 selectors standard](https://www.w3.org/TR/selectors-3/).
-check in target lib complex selectors before implement:
-  - basic selectors: (`tag`, `.class`, `#id`, `tag1,tag2`)
-  - combined: (`div p`, `ul > li`, `h2 +p`, `title ~head`\[1])
-  - attribute: (`a[href]`, `input[type='text']`)\[2]
-  - pseudo classes: (`:nth-child(n)`, `:first-child`, `:last-child`)\[3]
-  - **often, not support more complex, dynamic styles**: (`:has()`, `:nth-of-type()`, `:where()`, `:is()`)
+- Unlike javascript, most html parse libs implement [CSS3 selectors standard](https://www.w3.org/TR/selectors-3/). 
+Check the html parser lib documentation before implement CSS selectors
 
 1. Several libs not support `+` operations (eg: [selectolax(modest)](https://github.com/rushter/selectolax), [dart.universal_html](https://pub.dev/packages/universal_html))
-2. Often, web scraping libs not supports attribute operations like `*=`, `~=`, `|=`, `^=` and `$=`
+2. HTML parser libs maybe not supports attribute operations like `*=`, `~=`, `|=`, `^=` and `$=`
 3. Several libs not support pseudo classes (eg: standard [dart.html](https://dart.dev/libraries/dart-html) lib miss this feature). 
 This project will not implement converters with such a cons
 
@@ -86,7 +90,7 @@ class HelloWorld(ItemSchema):
 ### try it in cli
 
 >[!note]
-> this tools developed for testing purposes, not for web-scraping
+> this tools developed for testing purposes, not for web-scraping tasks
 
 ### from file
 
@@ -133,7 +137,7 @@ ssc-gen parse-from-chrome https://example.com -t schema.py:HelloWorld -sc /usr/b
 
 Convert to code for use in projects:
 
->![note]
+>[!note]
 > for example, used js: it can be fast test in developer console
 
 
@@ -141,7 +145,7 @@ Convert to code for use in projects:
 ssc-gen js schema.py -o .
 ```
 
-Code output looks like this (code formatted by IDE):
+Code output looks like this:
 
 ```javascript
 // autogenerated by ssc-gen DO NOT_EDIT
@@ -182,7 +186,7 @@ class HelloWorld {
 }
 ```
 
-### copy code output and past to developer console:
+### Copy code output and past to developer console:
 
 Print output:
 
@@ -195,17 +199,14 @@ alert(JSON.stringify((new HelloWorld(document).parse())))
 
 You can use any html source:
 
-- read from html file
-- get from http request
-- get from browser (playwright, selenium, chrome-cdp)
-- paste code to developer console (js)
-- or call curl in shell and parse stdin
-- use in third-party tools in stdin pipeline: 
-(from [ProjectDiscovery](https://github.com/projectdiscovery), for example)
-
+- parse from html files
+- parse from http responses
+- parse from browsers: playwright, selenium, chrome-cdp, etc.
+- call curl in shell and parse STDIN
+- use in STDIN pipelines with third-party tools like [projectdiscovery/httpx](https://github.com/projectdiscovery/httpx)
 
 ## See also
 - [Brief](docs/brief.md) about css selectors and regular expressions.
-- [Tutorial](docs/tutorial.md) how to use ssc-gen
-- [Reference](docs/reference.md) about high-level API
+- [Tutorial](docs/tutorial.md) basic usage ssc-gen
+- [Reference](docs/reference.md) about lib API
 - [AST reference](docs/ast_reference.md) about generation code from AST
