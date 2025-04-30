@@ -491,7 +491,7 @@ def post_start_parse(node: StartParseMethod) -> str:
                 code += f"{name!r}: self._parse_{name}(self._document),"
             code += "}"
         case StructType.ACC_LIST:
-            code += INDENT_METHOD_BODY + "return list(dict.fromkeys("
+            code += INDENT_METHOD_BODY + "return list(set("
             methods = []
             for expr in node.body:
                 name = expr.kwargs["name"]
@@ -1100,8 +1100,7 @@ def pre_list_unique(node: ExprListUnique) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    # use `dict.fromkeys()` instead `set()` for guarantees insertion order (py 3.7+) reason
-    return f"{indent}{nxt} = list(dict.fromkeys({prv}))"
+    return f"{indent}{nxt} = list(set({prv}))"
 
 
 def pre_str_map_replace(node: ExprStringMapReplace) -> str:
