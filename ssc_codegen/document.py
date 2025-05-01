@@ -187,7 +187,7 @@ class HTMLDocument(BaseDocument):
                 case "raw":
                     self.raw()
                 case "attr":
-                    self.attr(action[1])  # type: ignore
+                    self.attr(*action[1])  # type: ignore
                 case _:
                     assert_never(action[0])
 
@@ -252,7 +252,7 @@ class HTMLDocument(BaseDocument):
         self._pseudo_query_action_to_expr(action)
         return self
 
-    def attr(self, key: str) -> Self:
+    def attr(self, *key: str) -> Self:
         """Extract attribute value by name
 
         - accept DOCUMENT, return STRING
@@ -266,7 +266,15 @@ class HTMLDocument(BaseDocument):
             case VariableType.LIST_DOCUMENT:
                 self._add(ExprGetHtmlAttrAll(kwargs={"key": key}))
             case VariableType.DOCUMENT:
-                self._add(ExprGetHtmlAttr(kwargs={"key": key}))
+                if len(key) == 1:
+                    self._add(ExprGetHtmlAttr(kwargs={"key": key}))
+                else:
+                    self._add(
+                        ExprGetHtmlAttr(
+                            kwargs={"key": key},
+                            ret_type=VariableType.LIST_STRING,
+                        )
+                    )
             case _:
                 LOGGER.warning(
                     "attr(%s): Expected type(s) %s got %s",

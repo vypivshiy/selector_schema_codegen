@@ -36,8 +36,8 @@ class ExprXpathAll(BaseAstNode[KW_EXPR_SELECTOR_LIKE, ARGS_EXPR_SELECTOR_LIKE]):
     ret_type: VariableType = VariableType.LIST_DOCUMENT
 
 
-KW_EXPR_ATTR = TypedDict("KW_EXPR_ATTR", {"key": str})
-ARGS_EXPR_ATTR = tuple[str]
+KW_EXPR_ATTR = TypedDict("KW_EXPR_ATTR", {"key": tuple[str, ...]})
+ARGS_EXPR_ATTR = tuple[tuple[str, ...]]
 
 
 @dataclass(kw_only=True)

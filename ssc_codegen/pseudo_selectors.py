@@ -6,7 +6,7 @@ PseudoAction = Literal["text", "raw", "attr"]
 
 def parse_pseudo_css_query(
     query: str,
-) -> tuple[str, tuple[PseudoAction | None, str | None]]:
+) -> tuple[str, tuple[PseudoAction | None, str | tuple[str, ...] | None]]:
     """parse css selector and extract pseudo class action"""
     query = query.strip()
 
@@ -17,14 +17,17 @@ def parse_pseudo_css_query(
         return query[: -len("::raw")], ("raw", None)
 
     if match := re.search(r"::attr\(([^)]+)\)$", query):
-        return query[: match.start()], ("attr", match.group(1))
+        return query[: match.start()], (
+            "attr",
+            tuple([i.strip() for i in match.group(1).split(",")]),
+        )
 
     return query, (None, None)
 
 
 def parse_pseudo_xpath_query(
     query: str,
-) -> tuple[str, tuple[PseudoAction | None, str | None]]:
+) -> tuple[str, tuple[PseudoAction | None, str | tuple[str, ...] | None]]:
     """parse xpath selector and extract pseudo class action"""
     query = query.strip()
 
@@ -35,7 +38,10 @@ def parse_pseudo_xpath_query(
         return query[: -len("/raw()")], ("raw", None)
 
     if match := re.search(r"/@([\w:-]+)$", query):
-        return query[: match.start()], ("attr", match.group(1))
+        return query[: match.start()], (
+            "attr",
+            tuple([i.strip() for i in match.group(1).split(",")]),
+        )
 
     return query, (None, None)
 
