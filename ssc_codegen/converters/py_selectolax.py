@@ -81,7 +81,7 @@ def post_imports(_: ModuleImports) -> str:
     # The Modest backend is still available for compatibility reasons and the underlying C library
     # that selectolax uses is not maintained anymore.
     # https://github.com/rushter/selectolax?tab=readme-ov-file#available-backends
-    return "from selectolax.lexbor import LexborHTMLParser as HTMLParser, Node"
+    return "from selectolax.lexbor import LexborHTMLParser as HTMLParser, LexborNode as Node"
 
 
 @CONVERTER(ExprCss.kind)
