@@ -104,11 +104,14 @@ def pre_html_attr(node: ExprGetHtmlAttr) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    key = node.kwargs["key"]
-    # as default, bs4 return list of attrs, set string for API consistence
+    keys = node.kwargs["key"]
+    # bs4 maybe return list of attrs, set string for API consistence
+    if len(keys) == 1:
+        key = keys[0]
+        return indent + f"{nxt} = ' '.join({prv}.get_attribute_list({key!r}))"
     return (
         indent
-        + f"{nxt} = {prv}[{key!r}] if isinstance({prv}[{key!r}], str) else ' '.join({prv}[{key!r}])"
+        + f"{nxt} = [' '.join({prv}.get_attribute_list(k)) for k in {keys} if {prv}.get(k)]"
     )
 
 
@@ -118,11 +121,18 @@ def pre_html_attr_all(node: ExprGetHtmlAttrAll) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    key = node.kwargs["key"]
-    # as default, bs4 return list of attrs, set string for API consistence
+    keys = node.kwargs["key"]
+    # as default, bs4 maybe return list of attrs, set string for API consistence
+    if len(keys) == 1:
+        key = keys[0]
+        return (
+            indent
+            + f"{nxt} = [' '.join(e.get_attribute_list({key!r})) for e in {prv} if e.get({key!r})]"
+        )
+    # [tag.get(attr) for tag in tags for attr in ('src', 'href') if tag.has_attr(attr)]
     return (
         indent
-        + f"{nxt} = [e[{key!r}] if isinstance(e[{key!r}], str) else ' '.join(e[{key!r}]) for e in {prv}]"
+        + f"{nxt} = [' '.join(e.get_attribute_list(k)) for e in {prv} for k in {keys} if e.get(k)]"
     )
 
 

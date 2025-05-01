@@ -110,8 +110,14 @@ def pre_html_attr(node: ExprGetHtmlAttr) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    key = node.kwargs["key"]
-    return indent + f"{nxt} = {prv}.attributes[{key!r}]"
+    keys = node.kwargs["key"]
+    if len(keys) == 1:
+        key = keys[0]
+        return indent + f"{nxt} = {prv}.attributes[{key!r}]"
+    return (
+        indent
+        + f"{nxt} = [{prv}.attributes[k] for k in {keys} if {prv}.attributes.get(k)]"
+    )
 
 
 @CONVERTER(ExprGetHtmlAttrAll.kind)
@@ -120,8 +126,14 @@ def pre_html_attr_all(node: ExprGetHtmlAttrAll) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    key = node.kwargs["key"]
-    return indent + f"{nxt} = [e.attributes[{key!r}] for e in {prv}]"
+    keys = node.kwargs["key"]
+    if len(keys) == 1:
+        key = keys[0]
+        return indent + f"{nxt} = [e.attributes[{key!r}] for e in {prv}]"
+    return (
+        indent
+        + f"{nxt} = [e.attributes[k] for e in {prv} for k in {keys} if e.attributes.get(k)]"
+    )
 
 
 @CONVERTER(ExprGetHtmlText.kind)

@@ -175,6 +175,12 @@ def make_js_docstring(value: str) -> str:
     return docstr_start + docstr_parts + docstr_end
 
 
+def py_sequence_to_js_array(values: tuple[str, ...] | list[str]) -> str:
+    """note: value should be wrapper to"""
+    val_arr = str(values)
+    return "[" + val_arr[1:-1] + "]"
+
+
 @CONVERTER(Docstring.kind)
 def pre_docstring(node: Docstring) -> str:
     value = node.kwargs["value"]
@@ -631,15 +637,23 @@ def pre_xpath_all(node: ExprXpathAll) -> str:
 @CONVERTER(ExprGetHtmlAttr.kind)
 def pre_html_attr(node: ExprGetHtmlAttr) -> str:
     prv, nxt = prev_next_var(node)
-    key = node.kwargs["key"]
-    return f"let {nxt} = {prv}.getAttribute({key!r});"
+    keys = node.kwargs["key"]
+    if len(keys) == 1:
+        key = keys[0]
+        return f"let {nxt} = {prv}.getAttribute({key!r});"
+    js_keys = py_sequence_to_js_array(keys)
+    return f"let {nxt} = {js_keys}.map(k => {prv}?.getAttribute(k)).filter(Boolean); "
 
 
 @CONVERTER(ExprGetHtmlAttrAll.kind)
 def pre_html_attr_all(node: ExprGetHtmlAttrAll) -> str:
     prv, nxt = prev_next_var(node)
-    key = node.kwargs["key"]
-    return f"let {nxt} = {prv}.map(e => e.getAttribute({key!r}));"
+    keys = node.kwargs["key"]
+    if len(keys) == 1:
+        key = keys[0]
+        return f"let {nxt} = {prv}.map(e => e.getAttribute({key!r})); "
+    js_keys = py_sequence_to_js_array(keys)
+    return f"let {nxt} = Array.from({prv}).flatMap(e => {js_keys}.map(k => e.getAttribute(k)).filter(Boolean)); "
 
 
 @CONVERTER(ExprGetHtmlText.kind)
