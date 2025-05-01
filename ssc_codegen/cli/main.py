@@ -216,8 +216,8 @@ def gen_js(
     converter = import_converter(f"js_{lib.value}")
     if fmt:
         commands: list[str] = [
-            'prettier --write --tab-width 4 --single-quote --trailing-comma all --semi {}',
-            ]
+            "prettier --write --tab-width 4 --single-quote --trailing-comma all --semi {}",
+        ]
         fmt_cmd = create_fmt_cmd(ssc_files, prefix, suffix, out, commands)
     else:
         fmt_cmd = []
