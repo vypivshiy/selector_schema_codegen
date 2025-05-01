@@ -11,6 +11,9 @@ Project solving next problems:
 - generate types or type annotations if possible and documentation 
 - simplify code support
 - portability to other languages and HTML parser backends
+- designed for SSR (server-side-render) pages parsers. 
+For REST-API, GRAPHQL endpoints use tools like [mitmproxy2swagger](https://github.com/alufers/mitmproxy2swagger)
+
 
 ## Support converters
 
@@ -22,7 +25,7 @@ Current support converters
 | ...           | parsel                       | Y     | Y    | N    | ...                               | ...                  |
 | ...           | selectolax (lexbor)          | N     | Y    | N    | ...                               | ...                  |
 | js (ES6)      | pure (firefox/chrome/nodejs) | Y     | Y    | Y    | Array, Map**                      | prettier             |
-| go (1.10+)    | goquery                      | N     | Y    | N    | struct(+json anchors), array, map | gofmt                |
+| go (1.10+)    | goquery (WIP)                | N     | Y    | N    | struct(+json anchors), array, map | gofmt                |
 
 - **CSS3** means support next selectors:
   - basic: (`tag`, `.class`, `#id`, `tag1,tag2`)
