@@ -79,6 +79,10 @@ from ssc_codegen.ast_ import (
     ExprListStringMapReplace,
     ExprStringMapReplace,
 )
+from ssc_codegen.ast_.nodes_string import (
+    ExprListStringUnescape,
+    ExprStringUnescape,
+)
 from ssc_codegen.document_utlis import (
     analyze_re_expression,
     unverbosify_regex,
@@ -850,6 +854,26 @@ class StringDocument(BaseDocument):
         """
         self.re_sub(f"^{pattern}")
         self.re_sub(f"{pattern}$")
+        return self
+
+    def unescape(self) -> Self:
+        """unescape string output
+
+        - accept STRING, return STRING
+        - accept LIST_STRING, return LIST_STRING
+        """
+        match self.stack_last_ret:
+            case VariableType.STRING:
+                self._add(ExprStringUnescape())
+            case VariableType.LIST_STRING:
+                self._add(ExprListStringUnescape())
+            case _:
+                LOGGER.warning(
+                    "unescape(): Expected type(s) %s got %s",
+                    (VariableType.STRING.name, VariableType.LIST_STRING.name),
+                    self.stack_last_ret.name,
+                )
+                self._add(ExprStringUnescape())
         return self
 
 

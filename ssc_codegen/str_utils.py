@@ -151,6 +151,9 @@ def py_optimize_return_naive(py_code: str) -> str:
             # NAIVE apologize, its .filter(...) expr, skip optimization
             if expr.strip().endswith(" if"):
                 continue
+            # unescape expr, skip
+            if "_html_unescape" in expr.strip():
+                continue
 
             # optimization function convert double backslash to single (\\ -> \) in regex patterns
             # add `r` prefix for avoid SyntaxWarning then compile generated code to cpython bytecode

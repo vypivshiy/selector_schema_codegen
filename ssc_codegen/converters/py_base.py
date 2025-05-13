@@ -107,6 +107,10 @@ from ssc_codegen.ast_ import (
     ExprStringMapReplace,
     ExprListStringMapReplace,
 )
+from ssc_codegen.ast_.nodes_string import (
+    ExprListStringUnescape,
+    ExprStringUnescape,
+)
 from ssc_codegen.converters.base import (
     BaseCodeConverter,
     CB_FMT_DEBUG_COMMENT,
@@ -176,6 +180,7 @@ IMPORTS_MIN = """
 import re
 import sys
 import json
+from html import unescape as _html_unescape
 from typing import List, Dict, TypedDict, Union, Optional
 from contextlib import suppress
 from functools import reduce
@@ -278,6 +283,8 @@ class BasePyCodeConverter(BaseCodeConverter):
             ExprListUnique.kind: pre_list_unique,
             ExprStringMapReplace.kind: pre_str_map_replace,
             ExprListStringMapReplace.kind: pre_list_str_map_replace,
+            ExprStringUnescape.kind: pre_str_unescape,
+            ExprListStringUnescape.kind: pre_list_str_unescape,
         }
 
         self.post_definitions = {
@@ -1125,3 +1132,47 @@ def pre_list_str_map_replace(node: ExprListStringMapReplace) -> str:
     prv, nxt = prev_next_var(node)
     expr = f"[reduce(lambda acc, kv: acc.replace(kv[0], kv[1]), {replacements}.items(), i) for i in {prv}]"
     return f"{indent}{nxt} = {expr}"
+
+
+def pre_str_unescape(node: ExprStringUnescape) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    return (
+        f"{indent}{nxt} = _html_unescape({prv})\n"
+        # hex unescape
+        + f"{indent}{nxt} = re.sub(r'&#x([0-9a-fA-F]+);', lambda m: chr(int(m.group(1), 16)), {nxt})\n"
+        + f"{indent}{nxt} = re.sub(r'\\\\u([0-9a-fA-F]{{4}})', lambda m: chr(int(m.group(1), 16)), {nxt})\n"
+        + f"{indent}{nxt} = re.sub(r'\\\\x([0-9a-fA-F]{{2}})', lambda m: chr(int(m.group(1), 16)), {nxt})\n"
+        # chars
+        + f"{indent}{nxt} = {nxt}"
+        + r".replace('\\b', '\b')"
+        + r".replace('\\f', '\f')"
+        + r".replace('\\n', '\n')"
+        + r".replace('\\r', '\r')"
+        + r".replace('\\t', '\t')"
+    )
+
+
+def pre_list_str_unescape(node: ExprListStringUnescape) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    return (
+        f"{indent}{nxt} = [_html_unescape(i) for i in {prv}]\n"
+        # hex unescape
+        + f"{indent}{nxt} = [re.sub(r'&#x([0-9a-fA-F]+);', lambda m: chr(int(m.group(1), 16)), i) for i in {nxt}]\n"
+        + f"{indent}{nxt} = [re.sub(r'\\\\u([0-9a-fA-F]{{4}})', lambda m: chr(int(m.group(1), 16)), i) for i in {nxt}]\n"
+        + f"{indent}{nxt} = [re.sub(r'\\\\x([0-9a-fA-F]{{2}})', lambda m: chr(int(m.group(1), 16)), i) for i in {nxt}]\n"
+        + f"{indent}{nxt} = "
+        # chars
+        + f"{indent}{nxt} = [i"
+        + r".replace('\\b', '\b')"
+        + r".replace('\\f', '\f')"
+        + r".replace('\\n', '\n')"
+        + r".replace('\\r', '\r')"
+        + r".replace('\\t', '\t')"
+        + f" for i in {nxt}]"
+    )

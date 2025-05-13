@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import TypedDict, ClassVar
 
-from ssc_codegen.ast_.base import BaseAstNode
+from ssc_codegen.ast_.base import BaseAstNode, T_EMPTY_KWARGS
 from ssc_codegen.tokens import TokenType, VariableType
 
 KW_STR_TRIM = TypedDict("KW_STR_TRIM", {"substr": str})
@@ -210,5 +210,19 @@ class ExprListStringRmPrefixAndSuffix(
     BaseAstNode[KW_STR_RM_PREFIX_OR_SUFFIX, ARGS_STR_RM_PREFIX_OR_SUFFIX]
 ):
     kind: ClassVar[TokenType] = TokenType.EXPR_LIST_STRING_RM_PREFIX_AND_SUFFIX
+    accept_type: VariableType = VariableType.LIST_STRING
+    ret_type: VariableType = VariableType.LIST_STRING
+
+
+@dataclass(kw_only=True)
+class ExprStringUnescape(BaseAstNode[T_EMPTY_KWARGS, tuple]):
+    kind: ClassVar[TokenType] = TokenType.EXPR_STRING_UNESCAPE
+    accept_type: VariableType = VariableType.STRING
+    ret_type: VariableType = VariableType.STRING
+
+
+@dataclass(kw_only=True)
+class ExprListStringUnescape(BaseAstNode[T_EMPTY_KWARGS, tuple]):
+    kind: ClassVar[TokenType] = TokenType.EXPR_LIST_STRING_UNESCAPE
     accept_type: VariableType = VariableType.LIST_STRING
     ret_type: VariableType = VariableType.LIST_STRING

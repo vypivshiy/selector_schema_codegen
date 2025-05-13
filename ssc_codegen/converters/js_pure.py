@@ -105,6 +105,11 @@ from ssc_codegen.ast_ import (
     ExprStringMapReplace,
     ExprListStringMapReplace,
 )
+from ssc_codegen.ast_.nodes_core import ModuleImports
+from ssc_codegen.ast_.nodes_string import (
+    ExprListStringUnescape,
+    ExprStringUnescape,
+)
 from ssc_codegen.converters.base import BaseCodeConverter
 from ssc_codegen.converters.helpers import (
     prev_next_var,
@@ -179,6 +184,12 @@ def py_sequence_to_js_array(values: tuple[str, ...] | list[str]) -> str:
     """note: value should be wrapper to"""
     val_arr = str(values)
     return "[" + val_arr[1:-1] + "]"
+
+
+@CONVERTER(ModuleImports.kind)
+def pre_imports(_node: ModuleImports) -> str:
+    # HACK: used imports node for provide helpers scripts
+    pass
 
 
 @CONVERTER(Docstring.kind)
@@ -961,3 +972,43 @@ def pre_list_str_map_repl(node: ExprListStringMapReplace) -> str:
     new_arr = list(new_arr)  # type: ignore
     prv, nxt = prev_next_var(node)
     return f"let {nxt} = {prv}.map(s => {old_arr}.reduce((s, v, i) => s.replaceAll(v, {new_arr}[i] ?? ''), s));"
+
+
+@CONVERTER(ExprStringUnescape.kind)
+def pre_str_unescape(node: ExprStringUnescape) -> str:
+    prv, nxt = prev_next_var(node)
+    return (
+        f"let {nxt} = {prv}"
+        + ".replace(/&amp;/g, '&')"
+        + ".replace(/&lt;/g, '<')"
+        + ".replace(/&gt;/g, '>')"
+        + ".replace(/&quot;/g, '\"')"
+        + '.replace(/&#039;/g, "\'")'
+        + ".replace(/&#x2F;/g, '/')"
+        + ".replace(/&nbsp;/g, ' ')"
+        + ".replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))"
+        + r".replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))"
+        + r".replace(/\\x([0-9a-fA-F]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))"
+        + r".replace(/\\([bfnrt])/g, (_, ch) => ({b:'\\b',f:'\\f',n:'\\n',r:'\\r',t:'\\t'})[ch])"
+        + ";"
+    )
+
+
+@CONVERTER(ExprListStringUnescape.kind)
+def pre_list_str_unescape(node: ExprListStringUnescape) -> str:
+    prv, nxt = prev_next_var(node)
+    return (
+        f"let {nxt} = {prv}.map(s => s"
+        + ".replace(/&amp;/g, '&')"
+        + ".replace(/&lt;/g, '<')"
+        + ".replace(/&gt;/g, '>')"
+        + ".replace(/&quot;/g, '\"')"
+        + '.replace(/&#039;/g, "\'")'
+        + ".replace(/&#x2F;/g, '/')"
+        + ".replace(/&nbsp;/g, ' ')"
+        + ".replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))"
+        + r".replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))"
+        + r".replace(/\\x([0-9a-fA-F]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))"
+        + r".replace(/\\([bfnrt])/g, (_, ch) => ({b:'\b',f:'\f',n:'\n',r:'\r',t:'\\t'})[ch])"
+        + ");"
+    )
