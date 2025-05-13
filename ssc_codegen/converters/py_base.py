@@ -1168,7 +1168,7 @@ def pre_list_str_unescape(node: ExprListStringUnescape) -> str:
         + f"{indent}{nxt} = [re.sub(r'\\\\x([0-9a-fA-F]{{2}})', lambda m: chr(int(m.group(1), 16)), i) for i in {nxt}]\n"
         + f"{indent}{nxt} = "
         # chars
-        + f"{indent}{nxt} = [i"
+        + "[i"
         + r".replace('\\b', '\b')"
         + r".replace('\\f', '\f')"
         + r".replace('\\n', '\n')"
