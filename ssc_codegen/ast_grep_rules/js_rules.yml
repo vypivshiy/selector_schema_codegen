@@ -7,7 +7,7 @@ rule:
       selector: lexical_declaration
   pattern: return $VAR
 fix: |-
-  return $$$EXPR:
+  return $$$EXPR
 ---
 id: remove-last-decl
 language: js
