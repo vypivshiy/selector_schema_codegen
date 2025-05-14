@@ -1,6 +1,7 @@
 """post-processing functions for fix code output and utils operations with strings"""
 
 import re
+from ssc_codegen._compat import deprecated
 
 RE_GO_IMPORTS_BLOCK = re.compile(r"import\s*\(\s*([\s\S]*?)\s*\)")
 
@@ -108,7 +109,7 @@ return\s(?P<ret_var>\w+)            # RET STMT
     re.X,
 )
 
-
+@deprecated("use ast-grep rule")
 def py_optimize_return_naive(py_code: str) -> str:
     """optimize _parse_[a-zA-Z_0-9] and _split_doc return statements
 
@@ -208,6 +209,7 @@ def py_remove_unused_none_type_import(py_code: str) -> str:
     return py_code
 
 
+@deprecated("use ast-grep rule")
 def js_pure_optimize_return(js_code: str) -> str:
     tmp_code = js_code
     for method_code in RE_JS_METHOD_BLOCK.finditer(tmp_code):

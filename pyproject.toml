@@ -17,7 +17,9 @@ dependencies = [
     "typer>=0.15.1",
     "typing_extensions;python_version<'3.11'",
     # https://github.com/fastapi/typer/discussions/1215
-    "click<8.2.0"
+    # https://github.com/fastapi/typer/pull/1145
+    "click<8.2.0",
+    "ast-grep-cli>=0.38.1",
 ]
 
 classifiers = [

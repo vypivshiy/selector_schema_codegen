@@ -126,6 +126,21 @@ wheels = [
 ]
 
 [[package]]
+name = "ast-grep-cli"
+version = "0.38.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/84/90/15b90054c0fa5837b75f231b0a3a5af00379b4b299f4bc5d66b3b4d6d711/ast_grep_cli-0.38.1.tar.gz", hash = "sha256:daef78260c35349a8da95f3091d37c407c2e30f2fc161e296481923bc72a489a", size = 191726 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/15/a9/ba75fec5675e9994d432817b5d5dbc8a3aff6819f63e15502297ee1487e9/ast_grep_cli-0.38.1-py3-none-macosx_10_12_x86_64.macosx_11_0_arm64.macosx_10_12_universal2.whl", hash = "sha256:9023f591dce6c9af68066212bb0cd0f64bdcddbac9080bbeba7a3adc8cc6a1c0", size = 13249715 },
+    { url = "https://files.pythonhosted.org/packages/1f/6c/a3308cd90a00819d131e860d723bb39f614192eb380c06c57cfe4bbacfdc/ast_grep_cli-0.38.1-py3-none-macosx_10_12_x86_64.whl", hash = "sha256:71aa564426302f799bdc27a293582f284f427b00ea3020eb8e8c9827ec0adf5c", size = 6635266 },
+    { url = "https://files.pythonhosted.org/packages/db/56/b9e9bac53e75da3909528b6b683a2e329cedc2c8b51caea89631bb8b2db8/ast_grep_cli-0.38.1-py3-none-manylinux_2_28_aarch64.whl", hash = "sha256:9c1509cdfb0618bd243a26e1326c6ecb48b0c0a2ad9fc27beaa003d46cb67b55", size = 6457038 },
+    { url = "https://files.pythonhosted.org/packages/64/8f/b02e2513ea3a92affb5140d1f5b226a020c914831797af2e230b1ef93c52/ast_grep_cli-0.38.1-py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:cca2eb20eaa36e176b877abf643a34c3165f3753b58ae8dcb879d9dd29fbb98d", size = 6780374 },
+    { url = "https://files.pythonhosted.org/packages/dc/00/87c5a4da8834b64f660f13bfbb276e008a9e4e0da2f3936758988604724a/ast_grep_cli-0.38.1-py3-none-win32.whl", hash = "sha256:84a1eccdb2593de3ed04de27080e818223d72650e32c9c56f90fefd679056331", size = 6331288 },
+    { url = "https://files.pythonhosted.org/packages/3f/a8/48006d0c45cb84de888319f7012056c293a570233343c532dde5fe26273a/ast_grep_cli-0.38.1-py3-none-win_amd64.whl", hash = "sha256:68d33580e661ac25a05f0d2517fc18a509889208559ab2c460b2c86c7f0ea229", size = 6647284 },
+    { url = "https://files.pythonhosted.org/packages/18/4c/01a080b6c5d85dfa1f5f8d329d83f3c9d48d4bdb8a4a7dc4dd580ba0c62f/ast_grep_cli-0.38.1-py3-none-win_arm64.whl", hash = "sha256:99584c048dd8e4b6dc5b75a0c703a19a0ea1a2285db81e77ad1d834acf918f67", size = 6374370 },
+]
+
+[[package]]
 name = "async-timeout"
 version = "5.0.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1053,10 +1068,12 @@ wheels = [
 
 [[package]]
 name = "ssc-codegen"
-version = "0.8.23"
+version = "0.9.5"
 source = { editable = "." }
 dependencies = [
+    { name = "ast-grep-cli" },
     { name = "bs4" },
+    { name = "click" },
     { name = "colorama", marker = "sys_platform == 'win32'" },
     { name = "cssselect" },
     { name = "httpx" },
@@ -1085,7 +1102,9 @@ tests = [
 
 [package.metadata]
 requires-dist = [
+    { name = "ast-grep-cli", specifier = ">=0.38.1" },
     { name = "bs4", specifier = ">=0.0.2" },
+    { name = "click", specifier = "<8.2.0" },
     { name = "colorama", marker = "sys_platform == 'win32'", specifier = ">=0.4.6" },
     { name = "cssselect", specifier = ">=1.2.0" },
     { name = "httpx", specifier = ">=0.28.1" },

@@ -1,0 +1,20 @@
+id: replace-last-decl
+language: python
+rule:
+  follows:
+    pattern:
+      context: $VAR = $$$EXPR
+      selector: expression_statement
+  pattern: return $VAR
+fix: |-
+  return $$$EXPR
+---
+id: remove-last-decl
+language: python
+rule:
+  pattern:
+    context: $VAR = $$$EXPR
+    selector: expression_statement
+  precedes:
+    pattern: "return $VAR"
+fix: ''

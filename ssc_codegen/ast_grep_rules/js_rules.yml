@@ -1,0 +1,20 @@
+id: replace-last-decl
+language: js
+rule:
+  follows:
+    pattern:
+      context: let $VAR = $$$EXPR
+      selector: lexical_declaration
+  pattern: return $VAR
+fix: |-
+  return $$$EXPR:
+---
+id: remove-last-decl
+language: js
+rule:
+  pattern:
+      context: let $VAR = $$$EXPR
+      selector: lexical_declaration
+  precedes:
+    pattern: "return $VAR"
+fix: ''

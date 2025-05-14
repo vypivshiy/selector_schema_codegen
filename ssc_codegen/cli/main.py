@@ -11,6 +11,7 @@ from ichrome.exceptions import ChromeRuntimeError
 from typer import Argument, BadParameter, Option, Typer
 
 from ssc_codegen.ast_build import build_ast_module_parser
+from ssc_codegen.cli.ast_grep import JS_RULES, PY_RULES
 from ssc_codegen.cli.cli_callbacks import cb_check_ssc_files, cb_folder_out
 from ssc_codegen.cli.cli_utils import (
     ConverterLike,
@@ -164,10 +165,15 @@ def gen_py(
 ) -> None:
     converter = import_converter(f"py_{lib.value}")
     if fmt:
-        commands = ["ruff format {}", "ruff check {} --fix"]
+        commands = [
+            "ruff format {}",
+            "ruff check {} --fix",
+            f"ast-grep scan --rule {PY_RULES} -U " + "{}",
+        ]
         fmt_cmd = create_fmt_cmd(ssc_files, prefix, suffix, out, commands)
     else:
         fmt_cmd = []
+
     generate_code(
         converter=converter,
         out=out,
@@ -216,6 +222,7 @@ def gen_js(
     converter = import_converter(f"js_{lib.value}")
     if fmt:
         commands: list[str] = [
+            f"ast-grep scan --rule {JS_RULES} -U " + "{}",
             "prettier --write --tab-width 4 --single-quote --trailing-comma all --semi {}",
         ]
         fmt_cmd = create_fmt_cmd(ssc_files, prefix, suffix, out, commands)
