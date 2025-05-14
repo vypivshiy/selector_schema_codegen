@@ -109,6 +109,7 @@ return\s(?P<ret_var>\w+)            # RET STMT
     re.X,
 )
 
+
 @deprecated("use ast-grep rule")
 def py_optimize_return_naive(py_code: str) -> str:
     """optimize _parse_[a-zA-Z_0-9] and _split_doc return statements

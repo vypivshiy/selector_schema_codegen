@@ -12,7 +12,6 @@ else:
         pass
 
 
-
 def deprecated(reason=""):
     def decorator(func):
         @functools.wraps(func)
