@@ -106,6 +106,7 @@ from ssc_codegen.ast_ import (
     ExprListStringMapReplace,
 )
 from ssc_codegen.ast_.nodes_core import ModuleImports
+from ssc_codegen.ast_.nodes_selectors import ExprMapAttrs, ExprMapAttrsAll
 from ssc_codegen.ast_.nodes_string import (
     ExprListStringUnescape,
     ExprStringUnescape,
@@ -1012,3 +1013,15 @@ def pre_list_str_unescape(node: ExprListStringUnescape) -> str:
         + r".replace(/\\([bfnrt])/g, (_, ch) => ({b:'\b',f:'\f',n:'\n',r:'\r',t:'\\t'})[ch])"
         + ");"
     )
+
+
+@CONVERTER(ExprMapAttrs.kind)
+def pre_map_attrs(node: ExprMapAttrs) -> str:
+    prv, nxt = prev_next_var(node)
+    return f"let {nxt} = Array.from({prv}.attributes).map(a => a.value); "
+
+
+@CONVERTER(ExprMapAttrsAll.kind)
+def pre_map_attrs_all(node: ExprMapAttrsAll) -> str:
+    prv, nxt = prev_next_var(node)
+    return f"let {nxt} = [].concat(...{prv}.map(e => Array.from(e.attributes).map(a => a.value))); "

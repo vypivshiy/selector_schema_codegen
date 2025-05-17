@@ -79,6 +79,7 @@ from ssc_codegen.ast_ import (
     ExprListStringMapReplace,
     ExprStringMapReplace,
 )
+from ssc_codegen.ast_.nodes_selectors import ExprMapAttrs, ExprMapAttrsAll
 from ssc_codegen.ast_.nodes_string import (
     ExprListStringUnescape,
     ExprStringUnescape,
@@ -336,6 +337,28 @@ class HTMLDocument(BaseDocument):
                     self.stack_last_ret.name,
                 )
                 self._add(ExprGetHtmlRaw())
+        return self
+
+    def attrs_map(self) -> Self:
+        """extract all attributes from current tag or list of tags
+        - accept DOCUMENT, return LIST_STRING
+        - accept LIST_DOCUMENT, return LIST_STRING
+        """
+        match self.stack_last_ret:
+            case VariableType.DOCUMENT:
+                self._add(ExprMapAttrs())
+            case VariableType.LIST_DOCUMENT:
+                self._add(ExprMapAttrsAll())
+            case _:
+                LOGGER.warning(
+                    "attrs_list(): Expected type(s) %s got %s",
+                    (
+                        VariableType.DOCUMENT.name,
+                        VariableType.LIST_DOCUMENT.name,
+                    ),
+                    self.stack_last_ret.name,
+                )
+                self._add(ExprMapAttrs())
         return self
 
 

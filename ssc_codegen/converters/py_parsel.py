@@ -19,6 +19,7 @@ from ssc_codegen.ast_ import (
     ExprListHasAttr,
     ExprHasAttr,
 )
+from ssc_codegen.ast_.nodes_selectors import ExprMapAttrs, ExprMapAttrsAll
 from ssc_codegen.converters.helpers import (
     prev_next_var,
     have_default_expr,
@@ -239,3 +240,21 @@ def pre_list_has_attr(node: ExprListHasAttr) -> str:
     if is_last_var_no_ret(node):
         return expr
     return expr + "\n" + indent + f"{nxt} = {prv}"
+
+
+@CONVERTER(ExprMapAttrs.kind)
+def pre_map_attrs(node: ExprMapAttrs) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    return indent + f"{nxt} = list({prv}.attrib.values())"
+
+
+@CONVERTER(ExprMapAttrsAll.kind)
+def pre_map_attrs_all(node: ExprMapAttrsAll) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    return indent + f"{nxt} = [i for e in {prv} for i in e.attrib.values()]"

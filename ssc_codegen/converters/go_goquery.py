@@ -1267,3 +1267,4 @@ def pre_list_str_rm_prefix_and_suffix(
 # TODO: impl ExprStringMapReplace, ExprListStringMapReplace
 # TODO: impl ExprAttr, ExprListAttr for multiple extract keys
 # TODO impl unescape
+# TODO: impl ExprHasAttr, ExprHasAttrAll

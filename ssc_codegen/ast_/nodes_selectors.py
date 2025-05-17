@@ -80,3 +80,17 @@ class ExprGetHtmlRawAll(BaseAstNode[T_EMPTY_KWARGS, tuple]):
     kind: ClassVar[TokenType] = TokenType.EXPR_RAW_ALL
     accept_type: VariableType = VariableType.LIST_DOCUMENT
     ret_type: VariableType = VariableType.LIST_STRING
+
+
+@dataclass(kw_only=True)
+class ExprMapAttrs(BaseAstNode[T_EMPTY_KWARGS, tuple]):
+    kind: ClassVar[TokenType] = TokenType.EXPR_MAP_ATTRS
+    accept_type: VariableType = VariableType.DOCUMENT
+    ret_type: VariableType = VariableType.LIST_STRING
+
+
+@dataclass(kw_only=True)
+class ExprMapAttrsAll(BaseAstNode[T_EMPTY_KWARGS, tuple]):
+    kind: ClassVar[TokenType] = TokenType.EXPR_MAP_ATTRS_ALL
+    accept_type: VariableType = VariableType.LIST_DOCUMENT
+    ret_type: VariableType = VariableType.LIST_STRING

@@ -111,6 +111,7 @@ class TokenType(IntEnum):
     EXPR_ATTR = auto()
     EXPR_TEXT = auto()
     EXPR_RAW = auto()
+    EXPR_MAP_ATTRS = auto()
 
     # LIST_DOCUMENT
     EXPR_CSS_ALL = auto()
@@ -118,6 +119,7 @@ class TokenType(IntEnum):
     EXPR_ATTR_ALL = auto()
     EXPR_TEXT_ALL = auto()
     EXPR_RAW_ALL = auto()
+    EXPR_MAP_ATTRS_ALL = auto()
 
     # STRING
     EXPR_REGEX = auto()
