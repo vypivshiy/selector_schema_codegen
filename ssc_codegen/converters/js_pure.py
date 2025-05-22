@@ -162,8 +162,9 @@ def to_js_regexp(
     pattern: str, ignore_case: bool = False, is_global: bool = True
 ) -> str:
     """helper function for convert string pattern to js"""
-    pattern = pattern.replace("<\\/", "</")
-    pattern = pattern.replace("/", "\\/")
+    # fix backslashes translate
+    pattern = pattern.replace("/", r"\/").replace(r"\\/", r"\/")
+
     pattern = f"/{pattern}/"
     if is_global:
         pattern += "g"
@@ -185,12 +186,6 @@ def py_sequence_to_js_array(values: tuple[str, ...] | list[str]) -> str:
     """note: value should be wrapper to"""
     val_arr = str(values)
     return "[" + val_arr[1:-1] + "]"
-
-
-@CONVERTER(ModuleImports.kind)
-def pre_imports(_node: ModuleImports) -> str:
-    # HACK: used imports node for provide helpers scripts
-    pass
 
 
 @CONVERTER(Docstring.kind)
