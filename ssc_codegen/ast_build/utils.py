@@ -90,20 +90,59 @@ def extract_json_structs_from_module(module: ModuleType) -> list[Type[Json]]:
     ]
 
 
+def _add_sys_path(abs_path: Path) -> None:
+    # required for correct imports (eg: constants)
+    # TODO: calculate configs dirs depth
+    pathes = str(abs_path.parent), str(abs_path.parent.parent)
+    for p in pathes:
+        if p not in sys.path:
+            sys.path.append(p)
+
+
+def _is_not_dunder_obj(name: str) -> bool:
+    return not name.startswith("__") and not name.endswith("___")
+
+
+def _is_ssc_cls(name: str, cls: type) -> bool:
+    return (
+        _is_not_dunder_obj(name)
+        and hasattr(cls, "__mro__")
+        and BaseSchema in cls.__mro__
+        and not is_template_schema_cls(cls)
+    )
+
+
 def exec_module_code(path: str | Path, add_sys_path: bool = True) -> ModuleType:
     # apologize, input - real python file
     if isinstance(path, str):
         path = Path(path)
-    module = ModuleType("_")
     abs_path = path.resolve()
-    # required for correct imports (eg: constants)
-    # TODO: calculate configs dirs depth
-    if add_sys_path and str(abs_path.parent) not in sys.path:
-        sys.path.append(str(abs_path.parent))
+    module = ModuleType("_")
 
-    if add_sys_path and str(abs_path.parent.parent) not in sys.path:
-        sys.path.append(str(abs_path.parent.parent))
+    if add_sys_path:
+        _add_sys_path(abs_path)
 
     code = Path(abs_path).read_text()
     exec(code, module.__dict__)
+
+    tmp_module = module.__dict__.copy()
+    main_entypoint_schemas = {}
+    for k, v in tmp_module.items():
+        # move first schemas to end for correct order import and code generate
+        if _is_ssc_cls(k, v):
+            main_entypoint_schemas[k] = v
+            module.__dict__.pop(k)
+        # scan and import sub_schemas
+        # NOTE: context will be overrided by BaseSchema-like names
+        elif _is_not_dunder_obj(k) and isinstance(v, ModuleType):
+            for sc in extract_schemas_from_module(v):
+                if module.__dict__.get(sc.__name__):
+                    LOGGER.warning(
+                        "Schema `%s` already defined. `%s.%s` override it",
+                        sc.__name__,
+                        f"{v.__name__}.{sc.__name__}",
+                    )
+                module.__dict__[sc.__name__] = sc
+
+    module.__dict__.update(main_entypoint_schemas)
     return module
