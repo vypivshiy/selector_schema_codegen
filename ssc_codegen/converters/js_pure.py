@@ -105,7 +105,6 @@ from ssc_codegen.ast_ import (
     ExprStringMapReplace,
     ExprListStringMapReplace,
 )
-from ssc_codegen.ast_.nodes_core import ModuleImports
 from ssc_codegen.ast_.nodes_selectors import ExprMapAttrs, ExprMapAttrsAll
 from ssc_codegen.ast_.nodes_string import (
     ExprListStringUnescape,
