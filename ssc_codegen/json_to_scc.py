@@ -158,8 +158,8 @@ def convert_json_to_schema_code(
 
 
 if __name__ == "__main__":
-    # jsn = '{"a": ["b", "c"], "attributes": {"spam": 1.0, "eggs": "foobar", "default": null}}'
-    jsn = """
+    jsn = '{"a": ["b", "c"], "attributes": {"spam": 1.0, "eggs": "foobar", "default": null}}'
+    jsn2 = """
     {"props": {
         "pageProps": {
             "findPageMeta": {
@@ -174,28 +174,6 @@ if __name__ == "__main__":
 """
     out = convert_json_to_schema_code(jsn, "Content")
     print(out)
-# expected
-"""
-class Props(Json):
-    pageProps: PageProps
+    out = convert_json_to_schema_code(jsn2, "Content")
+    print(out)
 
-class PageProps(Json):
-    findPageMeta: FindPageMeta
-
-class FindPageMeta(Json):
-    searchTerm: str
-    includeAdult: bool
-    isExactMatch: bool
-    searchType: str
-
-class Content(Json):
-    props: Props
-"""
-# actual
-"""
-class Props(Json):
-    pageProps: PageProps
-
-class Content(Json):
-    props: Props
-"""
