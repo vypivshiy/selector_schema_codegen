@@ -131,3 +131,13 @@ dmypy.json
 
 # project
 test_schemas/
+.idea/.gitignore
+.idea/.name
+.idea/misc.xml
+.idea/modules.xml
+.idea/selector_schema_codegen.iml
+.idea/vcs.xml
+.idea/yh_parser.iml
+.idea/inspectionProfiles/profiles_settings.xml
+.idea/inspectionProfiles/Project_Default.xml
+.idea/libraries/Dart_SDK.xml

@@ -114,41 +114,49 @@ class ExprListStringMapReplace(BaseAstNode[KW_STR_MAP_REPL, ARGS_STR_MAP_REPL]):
 
 
 KW_STR_RE = TypedDict(
-    "KW_STR_RE", {"pattern": str, "group": int, "ignore_case": bool}
+    "KW_STR_RE",
+    {"pattern": str, "group": int, "ignore_case": bool, "dotall": bool},
 )
 
 
 @dataclass(kw_only=True)
-class ExprStringRegex(BaseAstNode[KW_STR_RE, tuple[str, int, bool]]):
+class ExprStringRegex(BaseAstNode[KW_STR_RE, tuple[str, int, bool, bool]]):
     kind: ClassVar[TokenType] = TokenType.EXPR_REGEX
     accept_type: VariableType = VariableType.STRING
     ret_type: VariableType = VariableType.STRING
 
 
 KW_STR_RE_ALL = TypedDict(
-    "KW_STR_RE_ALL", {"pattern": str, "ignore_case": bool}
+    "KW_STR_RE_ALL", {"pattern": str, "ignore_case": bool, "dotall": bool}
 )
 
 
 @dataclass(kw_only=True)
-class ExprStringRegexAll(BaseAstNode[KW_STR_RE_ALL, tuple[str, bool]]):
+class ExprStringRegexAll(BaseAstNode[KW_STR_RE_ALL, tuple[str, bool, bool]]):
     kind: ClassVar[TokenType] = TokenType.EXPR_REGEX_ALL
     accept_type: VariableType = VariableType.STRING
     ret_type: VariableType = VariableType.LIST_STRING
 
 
-KW_STR_RE_SUB = TypedDict("KW_STR_RE_SUB", {"pattern": str, "repl": str})
+KW_STR_RE_SUB = TypedDict(
+    "KW_STR_RE_SUB",
+    {"pattern": str, "repl": str, "ignore_case": bool, "dotall": bool},
+)
 
 
 @dataclass(kw_only=True)
-class ExprStringRegexSub(BaseAstNode[KW_STR_RE_SUB, tuple[str, str]]):
+class ExprStringRegexSub(
+    BaseAstNode[KW_STR_RE_SUB, tuple[str, str, bool, bool]]
+):
     kind: ClassVar[TokenType] = TokenType.EXPR_REGEX_SUB
     accept_type: VariableType = VariableType.STRING
     ret_type: VariableType = VariableType.STRING
 
 
 @dataclass(kw_only=True)
-class ExprListStringRegexSub(BaseAstNode[KW_STR_RE_SUB, tuple[str, str]]):
+class ExprListStringRegexSub(
+    BaseAstNode[KW_STR_RE_SUB, tuple[str, str, bool, bool]]
+):
     kind: ClassVar[TokenType] = TokenType.EXPR_LIST_REGEX_SUB
     accept_type: VariableType = VariableType.LIST_STRING
     ret_type: VariableType = VariableType.LIST_STRING

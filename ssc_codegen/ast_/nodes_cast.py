@@ -58,9 +58,9 @@ class ExprNested(BaseAstNode[KW_EXPR_NESTED, EXPR_NESTED_ARGS]):
 
 
 KW_EXPR_JSONIFY = TypedDict(
-    "KW_EXPR_JSONIFY", {"json_struct_name": str, "is_array": bool}
+    "KW_EXPR_JSONIFY", {"json_struct_name": str, "is_array": bool, "query": str}
 )
-ARGS_EXPR_JSONIFY = tuple[str, bool]
+ARGS_EXPR_JSONIFY = tuple[str, bool, str]
 
 
 @dataclass(kw_only=True)
