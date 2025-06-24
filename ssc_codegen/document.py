@@ -86,6 +86,7 @@ from ssc_codegen.ast_.nodes_string import (
 )
 from ssc_codegen.document_utlis import (
     analyze_re_expression,
+    is_dotall_case_regex,
     unverbosify_regex,
     is_ignore_case_regex,
 )
@@ -535,37 +536,6 @@ class ArrayDocument(BaseDocument):
 
 
 class StringDocument(BaseDocument):
-    def repl_map(self, replace_table: dict[str, str]) -> Self:
-        old_args = tuple(replace_table.keys())
-        new_args = tuple(replace_table.values())
-
-        match self.stack_last_ret:
-            case VariableType.LIST_STRING:
-                self._add(
-                    ExprListStringMapReplace(
-                        kwargs={"old": old_args, "new": new_args}
-                    )
-                )
-            case VariableType.STRING:
-                self._add(
-                    ExprStringMapReplace(
-                        kwargs={"old": old_args, "new": new_args}
-                    )
-                )
-            case _:
-                LOGGER.warning(
-                    "repl_map(%s): Expected type(s) %s got %s",
-                    replace_table,
-                    (VariableType.LIST_STRING.name, VariableType.STRING.name),
-                    self.stack_last_ret.name,
-                )
-                self._add(
-                    ExprStringMapReplace(
-                        kwargs={"old": old_args, "new": new_args}
-                    )
-                )
-        return self
-
     def rm_prefix(self, substr: str) -> Self:
         """remove prefix from string by substr
 
@@ -767,8 +737,43 @@ class StringDocument(BaseDocument):
                 self._add(ExprStringReplace(kwargs={"old": old, "new": new}))
         return self
 
+    def repl_map(self, replace_table: dict[str, str]) -> Self:
+        old_args = tuple(replace_table.keys())
+        new_args = tuple(replace_table.values())
+
+        match self.stack_last_ret:
+            case VariableType.LIST_STRING:
+                self._add(
+                    ExprListStringMapReplace(
+                        kwargs={"old": old_args, "new": new_args}
+                    )
+                )
+            case VariableType.STRING:
+                self._add(
+                    ExprStringMapReplace(
+                        kwargs={"old": old_args, "new": new_args}
+                    )
+                )
+            case _:
+                LOGGER.warning(
+                    "repl_map(%s): Expected type(s) %s got %s",
+                    replace_table,
+                    (VariableType.LIST_STRING.name, VariableType.STRING.name),
+                    self.stack_last_ret.name,
+                )
+                self._add(
+                    ExprStringMapReplace(
+                        kwargs={"old": old_args, "new": new_args}
+                    )
+                )
+        return self
+
     def re(
-        self, pattern: str | Pattern, group: int = 1, ignore_case: bool = False
+        self,
+        pattern: str | Pattern,
+        group: int = 1,
+        ignore_case: bool = False,
+        dotall: bool = False,
     ) -> Self:
         """extract first regex result.
 
@@ -779,6 +784,7 @@ class StringDocument(BaseDocument):
         """
         if not isinstance(pattern, str):
             ignore_case = is_ignore_case_regex(pattern)
+            dotall = is_dotall_case_regex(pattern)
 
         pattern = unverbosify_regex(pattern)
         result = analyze_re_expression(pattern, max_groups=1)
@@ -797,18 +803,25 @@ class StringDocument(BaseDocument):
                     "pattern": pattern,
                     "group": group,
                     "ignore_case": ignore_case,
+                    "dotall": dotall,
                 }
             )
         )
         return self
 
-    def re_all(self, pattern: str | Pattern, ignore_case: bool = False) -> Self:
+    def re_all(
+        self,
+        pattern: str | Pattern,
+        ignore_case: bool = False,
+        dotall: bool = False,
+    ) -> Self:
         """extract all regex results.
 
         - accept STRING, return LIST_STRING
         """
         if not isinstance(pattern, str):
             ignore_case = is_ignore_case_regex(pattern)
+            dotall = is_dotall_case_regex(pattern)
 
         pattern = unverbosify_regex(pattern)
         result = analyze_re_expression(pattern, max_groups=1)
@@ -824,17 +837,30 @@ class StringDocument(BaseDocument):
             )
         self._add(
             ExprStringRegexAll(
-                kwargs={"pattern": pattern, "ignore_case": ignore_case}
+                kwargs={
+                    "pattern": pattern,
+                    "ignore_case": ignore_case,
+                    "dotall": dotall,
+                }
             )
         )
         return self
 
-    def re_sub(self, pattern: str | Pattern, repl: str = "") -> Self:
+    def re_sub(
+        self,
+        pattern: str | Pattern,
+        repl: str = "",
+        ignore_case: bool = False,
+        dotall: bool = False,
+    ) -> Self:
         """Replace substring by `pattern` to `repl`.
 
         - accept STRING, return STRING
         - accept LIST_STRING, return LIST_STRING
         """
+        if not isinstance(pattern, str):
+            ignore_case = is_ignore_case_regex(pattern)
+            dotall = is_dotall_case_regex(pattern)
         pattern = unverbosify_regex(pattern)
         result = analyze_re_expression(pattern, allow_empty_groups=True)
         if not result:
@@ -844,13 +870,23 @@ class StringDocument(BaseDocument):
             case VariableType.LIST_STRING:
                 self._add(
                     ExprListStringRegexSub(
-                        kwargs={"pattern": pattern, "repl": repl}
+                        kwargs={
+                            "pattern": pattern,
+                            "repl": repl,
+                            "ignore_case": ignore_case,
+                            "dotall": dotall,
+                        }
                     )
                 )
             case VariableType.STRING:
                 self._add(
                     ExprStringRegexSub(
-                        kwargs={"pattern": pattern, "repl": repl}
+                        kwargs={
+                            "pattern": pattern,
+                            "repl": repl,
+                            "ignore_case": ignore_case,
+                            "dotall": dotall,
+                        }
                     )
                 )
             case _:
@@ -1276,8 +1312,8 @@ class NumericDocument(BaseDocument):
     def to_int(self) -> Self:
         """convert string or sequence of string to integer.
 
-        - accept STRING, return FLOAT
-        - accept LIST_STRING, return LIST_FLOAT
+        - accept STRING, return INTEGER
+        - accept LIST_STRING, return LIST_INTEGER
         """
         match self.stack_last_ret:
             case VariableType.STRING:
@@ -1333,7 +1369,7 @@ class BooleanDocument(BaseDocument):
 
 
 class JsonDocument(BaseDocument):
-    def jsonify(self, struct: Type[Json]) -> Self:
+    def jsonify(self, struct: Type[Json], start_query: str = "") -> Self:
         """marshal json string to object
 
         - accept STRING, return JSON
@@ -1357,6 +1393,7 @@ class JsonDocument(BaseDocument):
                 kwargs={
                     "json_struct_name": struct.__name__,
                     "is_array": struct.__IS_ARRAY__,
+                    "query": start_query,
                 }
             )
         )
@@ -1375,8 +1412,10 @@ class DocumentFilter(BaseDocument):
 
             F().eq("foo") -> value == "foo"
 
-            F().eq("bar", "foo") -> (value == "bar" && value == "foo")
+            F().eq("bar", "foo") -> (value == "bar" | value == "foo")
         """
+
+        # FIXME: replace series str to OR operator
         self._add(FilterEqual(kwargs={"values": values}))
         return self
 
@@ -1389,8 +1428,10 @@ class DocumentFilter(BaseDocument):
 
             F().eq("foo") -> value == "foo"
 
-            F().eq("bar", "foo") -> (value != "bar" && value != "foo")
+            F().eq("bar", "foo") -> (value != "bar" | value != "foo")
         """
+
+        # FIXME: replace series str to OR operator
         self._add(FilterNotEqual(kwargs={"values": values}))
         return self
 
@@ -1501,42 +1542,60 @@ class DocumentFilter(BaseDocument):
 
     def __or__(self, other: "DocumentFilter") -> "DocumentFilter":
         """syntax suger F().or_(...)"""
-        return self.or_(other)
+        new_filter = DocumentFilter()
+        new_filter.stack.extend(self.stack)
+        return new_filter.or_(other)
 
     def __and__(self, other: "DocumentFilter") -> "DocumentFilter":
         """syntax sugar F().and_(...)"""
-        return self.and_(other)
+        new_filter = DocumentFilter()
+        new_filter.stack.extend(self.stack)
+        return new_filter.and_(other)
 
     def __invert__(self) -> "DocumentFilter":
         """syntax sugar F().not_(...)"""
-        return DocumentFilter().not_(self)
+        new_filter = DocumentFilter()
+        new_filter.stack.extend(self.stack)
+        return DocumentFilter().not_(new_filter)
 
     def __eq__(self, other: int | str | Sequence[str]) -> Self:
         """syntax sugar F().eq(...)"""
+        new_filter = DocumentFilter()
+        new_filter.stack.extend(self.stack)
         if isinstance(other, int):
-            return self.len_eq(other)
+            return new_filter.len_eq(other)
 
         if isinstance(other, str):
             other = (other,)
-        return self.eq(*other)
+        return new_filter.eq(*other)
 
     def __ne__(self, other: int | str | Sequence[str]) -> Self:
         """syntax sugar F().ne(...)"""
+        new_filter = DocumentFilter()
+        new_filter.stack.extend(self.stack)
         if isinstance(other, int):
-            return self.len_ne(other)
+            return new_filter.len_ne(other)
 
         if isinstance(other, str):
             other = (other,)
-        return self.ne(*other)
+        return new_filter.ne(*other)
 
     def __lt__(self, other: int) -> Self:
-        return self.len_lt(other)
+        new_filter = DocumentFilter()
+        new_filter.stack.extend(self.stack)
+        return new_filter.len_lt(other)
 
     def __le__(self, other: int) -> Self:
-        return self.len_le(other)
+        new_filter = DocumentFilter()
+        new_filter.stack.extend(self.stack)
+        return new_filter.len_le(other)
 
     def __gt__(self, other: int) -> Self:
-        return self.len_gt(other)
+        new_filter = DocumentFilter()
+        new_filter.stack.extend(self.stack)
+        return new_filter.len_gt(other)
 
     def __ge__(self, other: int) -> Self:
-        return self.len_ge(other)
+        new_filter = DocumentFilter()
+        new_filter.stack.extend(self.stack)
+        return new_filter.len_ge(other)

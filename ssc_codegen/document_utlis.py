@@ -40,6 +40,12 @@ def is_ignore_case_regex(pattern: str | Pattern) -> bool:
     return bool(pattern.flags & re.IGNORECASE)
 
 
+def is_dotall_case_regex(pattern: str | Pattern) -> bool:
+    if isinstance(pattern, str):
+        return False
+    return bool(pattern.flags & re.DOTALL)
+
+
 def unverbosify_regex(pattern: str | Pattern) -> str:
     if isinstance(pattern, str):
         return pattern
