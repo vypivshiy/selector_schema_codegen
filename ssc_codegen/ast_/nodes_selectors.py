@@ -94,3 +94,25 @@ class ExprMapAttrsAll(BaseAstNode[T_EMPTY_KWARGS, tuple]):
     kind: ClassVar[TokenType] = TokenType.EXPR_MAP_ATTRS_ALL
     accept_type: VariableType = VariableType.LIST_DOCUMENT
     ret_type: VariableType = VariableType.LIST_STRING
+
+
+KW_EXPR_SELECTOR_REMOVE = TypedDict("KW_EXPR_SELECTOR_REMOVE", {"query": str})
+ARGS_EXPR_SELECTOR_REMOVE = tuple[str]
+
+
+@dataclass(kw_only=True)
+class ExprCssElementRemove(
+    BaseAstNode[KW_EXPR_SELECTOR_REMOVE, ARGS_EXPR_SELECTOR_REMOVE]
+):
+    kind: ClassVar[TokenType] = TokenType.EXPR_CSS_REMOVE
+    accept_type: VariableType = VariableType.DOCUMENT
+    ret_type: VariableType = VariableType.DOCUMENT
+
+
+@dataclass(kw_only=True)
+class ExprXpathElementRemove(
+    BaseAstNode[KW_EXPR_SELECTOR_REMOVE, ARGS_EXPR_SELECTOR_REMOVE]
+):
+    kind: ClassVar[TokenType] = TokenType.EXPR_XPATH_REMOVE
+    accept_type: VariableType = VariableType.DOCUMENT
+    ret_type: VariableType = VariableType.DOCUMENT

@@ -25,7 +25,7 @@ from .nodes_filter import FilterOr, FilterAnd, FilterNot, FilterNotEqual, Filter
     FilterStrLenLe, FilterStrLenGt, FilterStrLenGe
 
 from .nodes_selectors import ExprCss, ExprCssAll, ExprXpathAll, ExprXpath, ExprGetHtmlText, ExprGetHtmlRaw, \
-    ExprGetHtmlAttr, ExprGetHtmlAttrAll, ExprGetHtmlRawAll, ExprGetHtmlTextAll, ExprMapAttrs, ExprMapAttrsAll
+    ExprGetHtmlAttr, ExprGetHtmlAttrAll, ExprGetHtmlRawAll, ExprGetHtmlTextAll, ExprMapAttrs, ExprMapAttrsAll, ExprCssElementRemove, ExprXpathElementRemove
 from .nodes_string import ExprStringTrim, ExprStringRegex, ExprStringSplit, ExprStringReplace, ExprStringLeftTrim, \
     ExprStringFormat, ExprListStringTrim, ExprStringRegexAll, ExprStringRegexSub, ExprStringRightTrim, \
     ExprListStringFormat, ExprListStringReplace, ExprListStringRightTrim, ExprListStringLeftTrim, \

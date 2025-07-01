@@ -111,8 +111,8 @@ class ExprHasAttr(BaseAstNode[KW_HAS_ATTR, ARGS_HAS_ATTR]):
 @dataclass(kw_only=True)
 class ExprListHasAttr(BaseAstNode[KW_HAS_ATTR, ARGS_HAS_ATTR]):
     kind: ClassVar[TokenType] = TokenType.HAS_LIST_ATTR
-    accept_type: VariableType = VariableType.DOCUMENT
-    ret_type: VariableType = VariableType.DOCUMENT
+    accept_type: VariableType = VariableType.LIST_DOCUMENT
+    ret_type: VariableType = VariableType.LIST_DOCUMENT
 
 
 # TODO:

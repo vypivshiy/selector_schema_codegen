@@ -79,7 +79,12 @@ from ssc_codegen.ast_ import (
     ExprListStringMapReplace,
     ExprStringMapReplace,
 )
-from ssc_codegen.ast_.nodes_selectors import ExprMapAttrs, ExprMapAttrsAll
+from ssc_codegen.ast_.nodes_selectors import (
+    ExprCssElementRemove,
+    ExprMapAttrs,
+    ExprMapAttrsAll,
+    ExprXpathElementRemove,
+)
 from ssc_codegen.ast_.nodes_string import (
     ExprListStringUnescape,
     ExprStringUnescape,
@@ -360,6 +365,48 @@ class HTMLDocument(BaseDocument):
                     self.stack_last_ret.name,
                 )
                 self._add(ExprMapAttrs())
+        return self
+
+    def css_remove(self, query: str):
+        """remove elements with childs by css query
+
+        WARNING: have side effect, this method permanently remove elements from virtual DOM
+
+        Added for regex search optimization and drop unnecessary elements like <svg>, <script> etc
+
+        - accept DOCUMENT, return DOCUMENT
+        """
+        match self.stack_last_ret:
+            case VariableType.DOCUMENT:
+                self._add(ExprCssElementRemove(kwargs={"query": query}))
+            case _:
+                LOGGER.warning(
+                    "css_remove(): Expected type(s) %s got %s",
+                    (VariableType.DOCUMENT.name,),
+                    self.stack_last_ret.name,
+                )
+                self._add(ExprCssElementRemove())
+        return self
+
+    def xpath_remove(self, query: str):
+        """remove elements with childs by xpath query
+
+        WARNING: have side effect, this method permanently remove elements from virtual DOM.
+
+        Added for regex search optimization and drop unnecessary elements like <svg>, <script> etc
+
+        - accept DOCUMENT, return DOCUMENT
+        """
+        match self.stack_last_ret:
+            case VariableType.DOCUMENT:
+                self._add(ExprXpathElementRemove(kwargs={"query": query}))
+            case _:
+                LOGGER.warning(
+                    "xpath_remove(): Expected type(s) %s got %s",
+                    (VariableType.DOCUMENT.name,),
+                    self.stack_last_ret.name,
+                )
+                self._add(ExprCssElementRemove())
         return self
 
 
