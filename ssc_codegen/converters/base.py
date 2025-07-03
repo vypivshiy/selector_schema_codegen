@@ -97,12 +97,22 @@ class BaseCodeConverter:
     def debug_instructions(self, value: bool) -> None:
         self._debug_instructions = value
 
-    def pre(self, for_definition: TokenType) -> CB_AST_DECORATOR:
-        """Define a pre-conversion decorator for the given TokenType."""
+    def pre(
+        self,
+        for_definition: TokenType,
+        post_callback: Callable[[BaseAstNode], str] | None = None,
+    ) -> CB_AST_DECORATOR:
+        """Define a pre-conversion decorator for the given TokenType.
+
+        optional allow set post callback for simple string casts like close brackets etc
+        """
 
         def decorator(func: CB_AST_BIND) -> CB_AST_BIND:
             self.pre_definitions[for_definition] = func
             return func
+
+        if post_callback:
+            self.post_definitions[for_definition] = post_callback
 
         return decorator
 
@@ -115,9 +125,13 @@ class BaseCodeConverter:
 
         return decorator
 
-    def __call__(self, for_definition: TokenType) -> CB_AST_DECORATOR:
+    def __call__(
+        self,
+        for_definition: TokenType,
+        post_callback: Callable[[BaseAstNode], str] | None = None,
+    ) -> CB_AST_DECORATOR:
         """Alias for pre decorator."""
-        return self.pre(for_definition)
+        return self.pre(for_definition, post_callback=post_callback)
 
     def _pre_convert_node(self, node: BaseAstNode) -> str:
         """Convert the AST node using the pre-definition function."""
