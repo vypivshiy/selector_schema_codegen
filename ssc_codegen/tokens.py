@@ -68,6 +68,11 @@ class StructType(IntEnum):
     FLAT_LIST = auto()
     ACC_LIST = auto()
 
+    # current DSL fronted impl auto convert
+    # StructType.ITEM to StructType.CONFIG_LITERALS (Singleton structure)
+    # if StructType.ITEM not contains parse fields documents
+    CONFIG_CLASSVARS = auto()
+
 
 class TokenType(IntEnum):
     # UTILS
@@ -75,21 +80,39 @@ class TokenType(IntEnum):
     IMPORTS = auto()
     VARIABLE = auto()
     MODULE = auto()
+    CLASSVAR = auto()
+    """used for configuration purposes
+
+    this variable should be not change in the multithread parse mode 
+    due to the risk of race-condition or other side effects.
+    """
 
     # STRUCTS
     STRUCT = auto()
-    STRUCT_INIT = auto()  # used for OOP, or init base class/struct attributes
-    STRUCT_FIELD = auto()  # PARSE FUNCTION KEY
-    STRUCT_PRE_VALIDATE = auto()  # VALIDATE DOC INPUT BEFORE PARSE
-    STRUCT_PART_DOCUMENT = auto()  # SPLIT DOCUMENT TO PARTS
-    STRUCT_PARSE_START = auto()  # START PARSE ENTRYPOINT
+    STRUCT_INIT = auto()
+    """used for OOP, or init base class/struct attributes if the target language supports the OOP paradigm"""
+    STRUCT_FIELD = auto()
+    """parse function key. Stores the parser logic for each field"""
+    STRUCT_PRE_VALIDATE = auto()
+    """Validate document input before run parser"""
+
+    STRUCT_PART_DOCUMENT = auto()
+    """Split document to parts for several structures"""
+    STRUCT_PARSE_START = auto()
+    """start parse enrtypoint"""
+
     STRUCT_CALL_FUNCTION = auto()  # CALL STRUCT_FIELD EXPR
+    """contains inner `STRUCT_PARSE_START` node. Means that it calls a function/method for parsing"""
+    STRUCT_CALL_CLASSVAR = auto()
+    """contains inner `STRUCT_PARSE_START` node. Means that it push CLASSVAR value"""
 
     # TYPES
+    # If target language is not static-typed or not supports type-hints - will be ignored and not generated
     TYPEDEF = auto()
     TYPEDEF_FIELD = auto()
 
-    # FIRST
+    # Should be a first in parse expressions
+    # later will be converted to EXPR_DEFAULT_START and EXPR_DEFAULT_END
     EXPR_DEFAULT = auto()
 
     # auto marks by EXPR_DEFAULT
@@ -101,8 +124,7 @@ class TokenType(IntEnum):
 
     # RETURN EXPR (AUTO SET)
     EXPR_RETURN = auto()
-    # RETURN EXPR (AUTO SET)
-    # USED IN __PRE_VALIDATE__ ATTR
+    # USED IN __PRE_VALIDATE__ ATTR (AUTO SET)
     EXPR_NO_RETURN = auto()
 
     # DOCUMENT
@@ -112,6 +134,10 @@ class TokenType(IntEnum):
     EXPR_TEXT = auto()
     EXPR_RAW = auto()
     EXPR_MAP_ATTRS = auto()
+
+    # DOCUMENT (side effect)
+    EXPR_CSS_REMOVE = auto()
+    EXPR_XPATH_REMOVE = auto()
 
     # LIST_DOCUMENT
     EXPR_CSS_ALL = auto()
@@ -205,31 +231,21 @@ class TokenType(IntEnum):
     FILTER_EQ = auto()
     FILTER_NE = auto()
 
-    @classmethod
-    def default_tokens(cls) -> tuple["TokenType", ...]:
-        return (
-            TokenType.EXPR_DEFAULT,
-            TokenType.EXPR_DEFAULT_START,
-            TokenType.EXPR_DEFAULT_END,
-        )
 
-    @classmethod
-    def assert_tokens(cls) -> tuple["TokenType", ...]:
-        return (
-            TokenType.IS_CSS,
-            TokenType.IS_XPATH,
-            TokenType.IS_EQUAL,
-            TokenType.IS_NOT_EQUAL,
-            TokenType.IS_CONTAINS,
-            TokenType.IS_STRING_REGEX_MATCH,
-        )
+# collections of tokens (for static chekcks, etc)
 
-    @classmethod
-    def regex_tokens(cls) -> tuple["TokenType", ...]:
-        return (
-            TokenType.EXPR_REGEX,
-            TokenType.EXPR_REGEX_ALL,
-            TokenType.EXPR_REGEX_SUB,
-            TokenType.EXPR_LIST_REGEX_SUB,
-            TokenType.IS_STRING_REGEX_MATCH,
-        )
+TOKENS_REGEX = (
+    TokenType.EXPR_REGEX,
+    TokenType.EXPR_REGEX_ALL,
+    TokenType.EXPR_REGEX_SUB,
+    TokenType.EXPR_LIST_REGEX_SUB,
+    TokenType.IS_STRING_REGEX_MATCH,
+    TokenType.ALL_LIST_STRING_REGEX_MATCH,
+    TokenType.ANY_LIST_STRING_REGEX_MATCH,
+)
+
+TOKENS_DEFAULT = (
+    TokenType.EXPR_DEFAULT,
+    TokenType.EXPR_DEFAULT_START,
+    TokenType.EXPR_DEFAULT_END,
+)
