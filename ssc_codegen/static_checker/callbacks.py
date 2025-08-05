@@ -13,7 +13,7 @@ from ssc_codegen.static_checker.base import (
     SELECT_CSS_EXPR,
     SELECT_XPATH_EXPR,
 )
-from ssc_codegen.tokens import StructType, VariableType, TokenType
+from ssc_codegen.tokens import TOKENS_REGEX, StructType, VariableType, TokenType
 
 if TYPE_CHECKING:
     from ssc_codegen.schema import BaseSchema
@@ -329,13 +329,19 @@ def analyze_field_key_ret_type(
 def analyze_other_field_type(
     sc: Type["BaseSchema"], name: str, document: "BaseDocument"
 ) -> AnalyzeResult:
-    # skip
+    # skip literals, magic methods
+    if getattr(
+        document, "__IS_LITERAL_DOC__", False
+    ):  # magic constant LiteralDocument() (L())
+        return AnalyzeResult.ok()
     if name in ("__KEY__", "__SPLIT_DOC__", "__PRE_VALIDATE__"):
         return AnalyzeResult.ok()
+
     if document.stack_last_ret in (
         VariableType.LIST_DOCUMENT,
         VariableType.DOCUMENT,
     ):
+        print(name, document)
         expr_stack = prettify_expr_stack(document, document.stack_last_index)
         return AnalyzeResult.error(
             f"{sc.__name__}.{name} = {expr_stack}  # Not allowed type(s) "
@@ -347,7 +353,7 @@ def analyze_other_field_type(
 def analyze_regex_expr(
     sc: Type["BaseSchema"], name: str, document: "BaseDocument"
 ) -> AnalyzeResult:
-    re_exprs = [i for i in document.stack if i.kind in TokenType.regex_tokens()]
+    re_exprs = [i for i in document.stack if i.kind in TOKENS_REGEX]
     if not re_exprs:
         return AnalyzeResult.ok()
     from ssc_codegen.document_utlis import analyze_re_expression
@@ -369,6 +375,8 @@ def analyze_regex_expr(
                 TokenType.EXPR_REGEX_SUB
                 | TokenType.EXPR_LIST_REGEX_SUB
                 | TokenType.IS_STRING_REGEX_MATCH
+                | TokenType.ALL_LIST_STRING_REGEX_MATCH
+                | TokenType.ANY_LIST_STRING_REGEX_MATCH
             ):
                 result = analyze_re_expression(
                     re_expr.kwargs["pattern"], allow_empty_groups=True
