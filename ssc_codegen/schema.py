@@ -1,11 +1,11 @@
 from typing import TYPE_CHECKING, Any, Type, TypeAlias, Union
 
-from .consts import RESERVED_METHODS, SIGNATURE_MAP
+
 from .json_struct import json_struct_to_signature
 from .tokens import StructType, TokenType, VariableType
 
 if TYPE_CHECKING:
-    from .document import BaseDocument
+    from .document import BaseDocument, ClassVarDocument
     from .json_struct import Json
 
 
@@ -14,15 +14,42 @@ class MISSING_FIELD(object):  # noqa
 
 
 EXCLUDE_KEY = object()
-
 _T_OPT_FIELD: TypeAlias = Union["BaseDocument", Type[MISSING_FIELD]]
+
+
+RESERVED_METHODS = {
+    "__PRE_VALIDATE__",
+    "__SPLIT_DOC__",
+    "__KEY__",
+    "__VALUE__",
+    "__ITEM__",
+    "__START_PARSE__",
+}
+
+SIGNATURE_MAP = {
+    VariableType.STRING: "String",
+    VariableType.LIST_STRING: "Array<String>",
+    VariableType.OPTIONAL_STRING: "String | null",
+    VariableType.OPTIONAL_LIST_STRING: "Array<String> | null",
+    VariableType.NULL: "null",
+    VariableType.INT: "Int",
+    VariableType.OPTIONAL_INT: "Int | null",
+    VariableType.LIST_INT: "Array<Int>",
+    VariableType.OPTIONAL_LIST_INT: "Array<Int> | null",
+    VariableType.FLOAT: "Float",
+    VariableType.OPTIONAL_FLOAT: "Float | null",
+    VariableType.OPTIONAL_LIST_FLOAT: "Array<Float> | null",
+    VariableType.LIST_FLOAT: "Array<Float>",
+    VariableType.ANY: "Any",
+    VariableType.BOOL: "Bool",
+}
 
 
 class BaseSchema:
     __SCHEMA_TYPE__: StructType = NotImplemented
 
-    __SIGNATURE__: dict | list = NotImplemented
-    """manually write signature for docstring"""
+    __SIGNATURE__: dict | list | None = NotImplemented
+    """manually write signature for final docstring"""
 
     __PRE_VALIDATE__: _T_OPT_FIELD = MISSING_FIELD
     """Optional method for pre validation input document
@@ -104,6 +131,14 @@ class BaseSchema:
             ].kwargs["json_struct_name"]
             json_cls = cls.__JSON_SCHEMAS__[name]
             signature[key] = json_struct_to_signature(json_cls)
+        elif getattr(field, "__IS_LITERAL_DOC__", False):
+            # if classvar returns from parse entrypoint (pre inited struct_name and field_name)
+            if getattr(field, "struct_name", False) and getattr(
+                field, "field_name", False
+            ):
+                signature[key] = SIGNATURE_MAP[field.stack_last_ret]
+            # else ignore classvar signature
+            return
         else:
             signature[key] = SIGNATURE_MAP[field.stack_last_ret]
 
@@ -136,7 +171,9 @@ class BaseSchema:
             nested_class = cls.__NESTED_SCHEMAS__[name].__class_signature__()
             signature.append(nested_class)
         elif field.stack_last_ret == VariableType.JSON:
-            signature[k] = json_struct_to_signature(v.stack[-1].value)  # noqa
+            signature["__item__"] = json_struct_to_signature(
+                field.stack[-1].value
+            )
         else:
             signature.append(field.stack_last_ret)
         signature.append("...")
@@ -179,7 +216,7 @@ class BaseSchema:
         return cls__annotations__
 
     @classmethod
-    def __get_mro_fields__(cls) -> dict[str, "BaseDocument"]:
+    def _get_ssc_deep_documents(cls) -> dict[str, Union["BaseDocument", str]]:
         """extract all fields (parent classes included)"""
         cls__dict__: dict[str, "BaseDocument"] = {}
         for klass in cls.__schema_mro__():
@@ -197,21 +234,64 @@ class BaseSchema:
                 elif cls__dict__.get(k):
                     continue
                 cls__dict__[k] = v
+        return cls__dict__
+
+    @classmethod
+    def __get_mro_fields__(cls) -> dict[str, Union["BaseDocument", str]]:
+        """extract all fields (parent classes included)"""
+        cls__dict__ = cls._get_ssc_deep_documents()
         fields = {}
         for k, v in cls__dict__.items():
+            # handle magic fields `__SPLIT_DOC__`, `__PRE_VALIDATE__` etc
             if k in cls.__ALLOWED_MAGIC__ and v != MISSING_FIELD:
                 fields[k] = v
+            # ignore other hidden fields
             elif k.startswith("_"):
                 continue
-            # only fields-like accept, ignore callable
-            elif not callable(v):
+            # 1. only fields-like accept, ignore callables
+            # 2. ignore literals
+            elif not callable(v) and not getattr(
+                v, "__IS_LITERAL_DOC__", False
+            ):
                 fields[k] = v
         return fields
+
+    @classmethod
+    def __get_mro_literals__(cls) -> dict[str, "ClassVarDocument"]:
+        cls__dict = cls._get_ssc_deep_documents()
+        fields = {}
+        for k, v in cls__dict.items():
+            if k.startswith("_"):
+                continue
+            if isinstance(v, str):
+                continue
+            if (
+                v
+                and not callable(v)
+                and getattr(v, "__IS_LITERAL_DOC__", False)
+            ):
+                fields[k] = v
+        return fields
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        # HACK: for set LiteralDocument values in inheirended subclasses
+        class_name = cls.__name__
+        for attr_name, attr_value in cls.__dict__.items():
+            if getattr(attr_value, "__IS_LITERAL_DOC__", False):
+                attr_value.struct_name = class_name
+                attr_value.field_name = attr_name
+                setattr(cls, attr_name, attr_value)
 
 
 # build-in structures
 class ItemSchema(BaseSchema):
     __SCHEMA_TYPE__ = StructType.ITEM
+
+
+class ConfigLiteralsSchema(BaseSchema):
+    # ItemSchema auto converted to it, if parse fields not defined
+    __SCHEMA_TYPE__ = StructType.CONFIG_CLASSVARS
 
 
 class ListSchema(BaseSchema):
