@@ -1,7 +1,8 @@
 """high-level AST builder interface"""
 
 import logging
-from typing import Type, Pattern, Sequence
+from typing import Any, Type, Pattern, Sequence
+from re import Pattern as RePattern
 
 from cssselect import SelectorSyntaxError
 from typing_extensions import Self, assert_never
@@ -79,6 +80,7 @@ from ssc_codegen.ast_ import (
     ExprListStringMapReplace,
     ExprStringMapReplace,
 )
+from ssc_codegen.ast_.nodes_core import ExprClassVar
 from ssc_codegen.ast_.nodes_selectors import (
     ExprCssElementRemove,
     ExprMapAttrs,
@@ -86,10 +88,12 @@ from ssc_codegen.ast_.nodes_selectors import (
     ExprXpathElementRemove,
 )
 from ssc_codegen.ast_.nodes_string import (
+    ExprListStringRmPrefix,
     ExprListStringUnescape,
     ExprStringUnescape,
 )
 from ssc_codegen.document_utlis import (
+    add_inline_regex_flags,
     analyze_re_expression,
     is_dotall_case_regex,
     unverbosify_regex,
@@ -103,7 +107,7 @@ from ssc_codegen.pseudo_selectors import (
 )
 from ssc_codegen.schema import BaseSchema
 from ssc_codegen.selector_utils import validate_css_query, validate_xpath_query
-from ssc_codegen.tokens import VariableType
+from ssc_codegen.tokens import TokenType, VariableType
 
 LOGGER = logging.getLogger("ssc_gen")
 
@@ -111,7 +115,7 @@ LOGGER = logging.getLogger("ssc_gen")
 class BaseDocument:
     LOGGER = LOGGER
 
-    def __init__(self) -> None:
+    def __init__(self, *_args, **_kwargs) -> None:
         self._stack: list[BaseAstNode] = []
 
     @property
@@ -140,6 +144,27 @@ class BaseDocument:
     def _add(self, expr: BaseAstNode) -> None:
         self._stack.append(expr)
 
+    @staticmethod
+    def _new_literal_hook(name: str, value: Any) -> dict[str, ExprClassVar]:
+        if isinstance(value, ExprClassVar) and value.kind == TokenType.CLASSVAR:
+            return {name: value}
+        # corner case self-used expr eg:
+        # class A(ItemSchema):
+        #     LIT_1 = L("SPLT")
+        #     items = D().css("p::text").split(LIT_1)
+        elif getattr(value, "__IS_LITERAL_DOC__", False):
+            return value.expr()
+        return {}
+
+    def _resolve_literal_hook(
+        self, name: str, value: ExprClassVar | Any
+    ) -> tuple[Any, dict[str, ExprClassVar]]:
+        """shortcut unpack variable if passed ExprLiteral"""
+        literal_hook = self._new_literal_hook(name, value)
+        if literal_hook:
+            return literal_hook.value, {name: literal_hook}
+        return value, {}
+
     def __repr__(self) -> str:
         return (
             f"Document(count={self.count}, ret_type={self.stack_last_ret.name})"
@@ -147,44 +172,65 @@ class BaseDocument:
 
 
 class DefaultDocument(BaseDocument):
-    def default(self, value: str | int | float | list | None) -> Self:
-        """Set default value. Accept string, int, float or None.
+    def default(
+        self, value: str | int | float | list | None | list | ExprClassVar
+    ) -> Self:
+        """Set default value. Accept string, int, float, None or empty list
         Should be a first else raise SyntaxError
 
         - accept: DOCUMENT, return DOCUMENT
         """
-        if self.count != 0:
+        value, literal_hooks = self._resolve_literal_hook("value", value)
+
+        if isinstance(value, list) and len(value) != 0:
             LOGGER.warning(
-                "default(%s) expression should be a first pos, not %s",
+                "default(%s) expression value allowed only empty list",
                 value,
                 # human-readable style
                 self.stack_last_index + 1,
             )
-        self._add(ExprDefaultValueWrapper(kwargs={"value": value}))
+
+        if self.count != 0:
+            LOGGER.warning(
+                "default(%s) expression should be a first pos, not %s",
+                value,
+                self.stack_last_index + 1,
+            )
+        self._add(
+            ExprDefaultValueWrapper(
+                kwargs={"value": value}, classvar_hooks=literal_hooks
+            )
+        )
         return self
 
 
 class HTMLDocument(BaseDocument):
-    def css(self, query: str) -> Self:
+    def css(self, query: str | ExprClassVar) -> Self:
         """Css query. returns first founded element
 
         - accept: DOCUMENT, return DOCUMENT
         """
+        query, literal_hooks = self._resolve_literal_hook("query", query)
+
         query = " ".join(query.splitlines())
         query, action = parse_pseudo_css_query(query)
         try:
             validate_css_query(query)
         except SelectorSyntaxError:
             LOGGER.warning("`%s` is not valid css query", query)
-        # TODO: Remove ANY
+
+        # type ANY used in start or default expr
         if self.stack_last_ret not in (VariableType.DOCUMENT, VariableType.ANY):
             LOGGER.warning(
                 "Expected type %s, got %s",
                 VariableType.DOCUMENT.name,
                 self.stack_last_ret.name,
             )
-
-        self._add(ExprCss(kwargs={"query": query}))
+        if literal_hooks.get("query"):
+            literal_hooks["query"].value = query
+        self._add(
+            ExprCss(kwargs={"query": query}, classvar_hooks=literal_hooks)
+        )
         self._pseudo_query_action_to_expr(action)
         return self
 
@@ -202,10 +248,12 @@ class HTMLDocument(BaseDocument):
                 case _:
                     assert_never(action[0])
 
-    def xpath(self, query: str) -> Self:
+    def xpath(self, query: str | ExprClassVar) -> Self:
         """Xpath query. returns first founded element
         - accept: DOCUMENT, return DOCUMENT
         """
+        query, literal_hooks = self._resolve_literal_hook("query", query)
+
         query = " ".join(query.splitlines())
         query, action = parse_pseudo_xpath_query(query)
         try:
@@ -219,14 +267,19 @@ class HTMLDocument(BaseDocument):
                 VariableType.DOCUMENT.name,
                 self.stack_last_ret.name,
             )
-        self._add(ExprXpath(kwargs={"query": query}))
+        if literal_hooks.get("query"):
+            literal_hooks["query"].value = query
+        self._add(
+            ExprXpath(kwargs={"query": query}, classvar_hooks=literal_hooks)
+        )
         self._pseudo_query_action_to_expr(action)
         return self
 
-    def css_all(self, query: str) -> Self:
+    def css_all(self, query: str | ExprClassVar) -> Self:
         """Css query. returns all founded elements
         - accept: DOCUMENT, return: LIST_DOCUMENT
         """
+        query, literal_hooks = self._resolve_literal_hook("query", query)
         query = " ".join(query.splitlines())
         query, action = parse_pseudo_css_query(query)
         try:
@@ -239,14 +292,21 @@ class HTMLDocument(BaseDocument):
                 VariableType.DOCUMENT.name,
                 self.stack_last_ret.name,
             )
-        self._add(ExprCssAll(kwargs={"query": query}))
+
+        if literal_hooks.get("query"):
+            literal_hooks["query"].value = query
+        self._add(
+            ExprCssAll(kwargs={"query": query}, classvar_hooks=literal_hooks)
+        )
         self._pseudo_query_action_to_expr(action)
         return self
 
-    def xpath_all(self, query: str) -> Self:
+    def xpath_all(self, query: str | ExprClassVar) -> Self:
         """Xpath query. returns all founded elements
         - accept: DOCUMENT, return: LIST_DOCUMENT
         """
+        query, literal_hooks = self._resolve_literal_hook("query", query)
+
         query = " ".join(query.splitlines())
         query, action = parse_pseudo_xpath_query(query)
         try:
@@ -259,11 +319,16 @@ class HTMLDocument(BaseDocument):
                 VariableType.DOCUMENT.name,
                 self.stack_last_ret.name,
             )
-        self._add(ExprXpathAll(kwargs={"query": query}))
+
+        if literal_hooks.get("query"):
+            literal_hooks["query"].value = query
+        self._add(
+            ExprXpathAll(kwargs={"query": query}, classvar_hooks=literal_hooks)
+        )
         self._pseudo_query_action_to_expr(action)
         return self
 
-    def attr(self, *key: str) -> Self:
+    def attr(self, *keys: str) -> Self:
         """Extract attribute value by name
 
         - accept DOCUMENT, return STRING
@@ -275,28 +340,28 @@ class HTMLDocument(BaseDocument):
         """
         match self.stack_last_ret:
             case VariableType.LIST_DOCUMENT:
-                self._add(ExprGetHtmlAttrAll(kwargs={"key": key}))
+                self._add(ExprGetHtmlAttrAll(kwargs={"key": keys}))
             case VariableType.DOCUMENT:
-                if len(key) == 1:
-                    self._add(ExprGetHtmlAttr(kwargs={"key": key}))
+                if len(keys) == 1:
+                    self._add(ExprGetHtmlAttr(kwargs={"key": keys}))
                 else:
                     self._add(
                         ExprGetHtmlAttr(
-                            kwargs={"key": key},
+                            kwargs={"key": keys},
                             ret_type=VariableType.LIST_STRING,
                         )
                     )
             case _:
                 LOGGER.warning(
                     "attr(%s): Expected type(s) %s got %s",
-                    repr(key),
+                    repr(keys),
                     (
                         VariableType.DOCUMENT.name,
                         VariableType.LIST_DOCUMENT.name,
                     ),
                     self.stack_last_ret.name,
                 )
-                self._add(ExprGetHtmlAttr(kwargs={"key": key}))
+                self._add(ExprGetHtmlAttr(kwargs={"key": keys}))
         return self
 
     def text(self) -> Self:
@@ -367,7 +432,7 @@ class HTMLDocument(BaseDocument):
                 self._add(ExprMapAttrs())
         return self
 
-    def css_remove(self, query: str):
+    def css_remove(self, query: str | ExprClassVar):
         """remove elements with childs by css query
 
         WARNING: have side effect, this method permanently remove elements from virtual DOM
@@ -376,9 +441,23 @@ class HTMLDocument(BaseDocument):
 
         - accept DOCUMENT, return DOCUMENT
         """
+        query, literal_hooks = self._resolve_literal_hook("query", query)
+        query = " ".join(query.splitlines())
+        query, action = parse_pseudo_css_query(query)
+        if action:
+            LOGGER.warning(
+                "css_remove(%s) not allowed pseudoclasses, ignore", repr(query)
+            )
+        if literal_hooks.get("query"):
+            literal_hooks["query"].value = query
+
         match self.stack_last_ret:
             case VariableType.DOCUMENT:
-                self._add(ExprCssElementRemove(kwargs={"query": query}))
+                self._add(
+                    ExprCssElementRemove(
+                        kwargs={"query": query}, classvar_hooks=literal_hooks
+                    )
+                )
             case _:
                 LOGGER.warning(
                     "css_remove(): Expected type(s) %s got %s",
@@ -397,9 +476,24 @@ class HTMLDocument(BaseDocument):
 
         - accept DOCUMENT, return DOCUMENT
         """
+        query, literal_hooks = self._resolve_literal_hook("query", query)
+
+        query, action = parse_pseudo_xpath_query(query)
+
+        if action:
+            LOGGER.warning(
+                "xpath_remove(%s) not allowed pseudoselectors, ignore",
+                repr(query),
+            )
+        if literal_hooks.get("query"):
+            literal_hooks["query"].value = query
         match self.stack_last_ret:
             case VariableType.DOCUMENT:
-                self._add(ExprXpathElementRemove(kwargs={"query": query}))
+                self._add(
+                    ExprXpathElementRemove(
+                        kwargs={"query": query}, classvar_hooks=literal_hooks
+                    )
+                )
             case _:
                 LOGGER.warning(
                     "xpath_remove(): Expected type(s) %s got %s",
@@ -419,7 +513,7 @@ class ArrayDocument(BaseDocument):
         """alias index(-1). NOTE: several languages does not support get last index"""
         return self.index(-1)
 
-    def index(self, i: int) -> Self:
+    def index(self, i: int | ExprClassVar) -> Self:
         """Extract item from sequence
 
         - accept LIST_DOCUMENT, return DOCUMENT
@@ -427,6 +521,7 @@ class ArrayDocument(BaseDocument):
         - accept LIST_INT, return INT
         - accept LIST_FLOAT, return FLOAT
         """
+        i, literal_hooks = self._resolve_literal_hook("index", i)
         match self.stack_last_ret:
             case VariableType.LIST_ANY:
                 self._add(
@@ -434,6 +529,7 @@ class ArrayDocument(BaseDocument):
                         kwargs={"index": i},
                         accept_type=VariableType.LIST_ANY,
                         ret_type=VariableType.ANY,
+                        classvar_hooks=literal_hooks,
                     )
                 )
             case VariableType.LIST_DOCUMENT:
@@ -442,6 +538,7 @@ class ArrayDocument(BaseDocument):
                         kwargs={"index": i},
                         accept_type=VariableType.LIST_DOCUMENT,
                         ret_type=VariableType.DOCUMENT,
+                        classvar_hooks=literal_hooks,
                     )
                 )
             case VariableType.LIST_STRING:
@@ -450,6 +547,7 @@ class ArrayDocument(BaseDocument):
                         kwargs={"index": i},
                         accept_type=VariableType.LIST_STRING,
                         ret_type=VariableType.STRING,
+                        classvar_hooks=literal_hooks,
                     )
                 )
             case VariableType.LIST_INT:
@@ -458,6 +556,7 @@ class ArrayDocument(BaseDocument):
                         kwargs={"index": i},
                         accept_type=VariableType.LIST_INT,
                         ret_type=VariableType.INT,
+                        classvar_hooks=literal_hooks,
                     )
                 )
             case VariableType.LIST_FLOAT:
@@ -466,6 +565,7 @@ class ArrayDocument(BaseDocument):
                         kwargs={"index": i},
                         accept_type=VariableType.LIST_FLOAT,
                         ret_type=VariableType.FLOAT,
+                        classvar_hooks=literal_hooks,
                     )
                 )
             case VariableType.OPTIONAL_LIST_STRING:
@@ -474,6 +574,7 @@ class ArrayDocument(BaseDocument):
                         kwargs={"index": i},
                         accept_type=VariableType.LIST_STRING,
                         ret_type=VariableType.STRING,
+                        classvar_hooks=literal_hooks,
                     )
                 )
             case VariableType.OPTIONAL_LIST_INT:
@@ -482,6 +583,7 @@ class ArrayDocument(BaseDocument):
                         kwargs={"index": i},
                         accept_type=VariableType.LIST_INT,
                         ret_type=VariableType.INT,
+                        classvar_hooks=literal_hooks,
                     )
                 )
             case VariableType.OPTIONAL_LIST_FLOAT:
@@ -490,6 +592,7 @@ class ArrayDocument(BaseDocument):
                         kwargs={"index": i},
                         accept_type=VariableType.LIST_FLOAT,
                         ret_type=VariableType.FLOAT,
+                        classvar_hooks=literal_hooks,
                     )
                 )
             case _:
@@ -512,23 +615,31 @@ class ArrayDocument(BaseDocument):
                 )
         return self
 
-    def join(self, s: str) -> Self:
+    def join(self, sep: str | ExprClassVar) -> Self:
         """concatenate sequence of string to one by char
 
         - accept LIST_STRING, return STRING
         """
+        sep, literal_hooks = self._resolve_literal_hook("sep", sep)
         match self.stack_last_ret:
             case VariableType.LIST_STRING:
-                self._add(ExprListStringJoin(kwargs={"sep": s}))
+                self._add(
+                    ExprListStringJoin(
+                        kwargs={"sep": sep}, classvar_hooks=literal_hooks
+                    )
+                )
             case _:
-                # side effect
                 LOGGER.warning(
                     "join(%s): Expected type(s) %s got %s",
-                    s,
+                    sep,
                     VariableType.LIST_STRING.name,
                     self.stack_last_ret.name,
                 )
-                self._add(ExprListStringJoin(kwargs={"sep": s}))
+                self._add(
+                    ExprListStringJoin(
+                        kwargs={"sep": sep}, classvar_hooks=literal_hooks
+                    )
+                )
         return self
 
     def to_len(self) -> Self:
@@ -573,27 +684,37 @@ class ArrayDocument(BaseDocument):
         self._add(ExprFilter(body=expr.stack))
         return self
 
-    def unique(self) -> Self:
+    def unique(self, *, keep_order: bool = False) -> Self:
         """Remove duplicates from array-like object
 
         - accept LIST_STRING, return LIST_STRING
         """
-        self._add(ExprListUnique())
+        self._add(ExprListUnique(kwargs={"keep_order": keep_order}))
         return self
 
 
 class StringDocument(BaseDocument):
-    def rm_prefix(self, substr: str) -> Self:
+    def rm_prefix(self, substr: str | ExprClassVar) -> Self:
         """remove prefix from string by substr
 
         - accept STRING, return STRING
         - accept LIST_STRING, return LIST_STRING
         """
+        substr, literal_hooks = self._resolve_literal_hook("substr", substr)
+
         match self.stack_last_ret:
             case VariableType.LIST_STRING:
-                self._add(ExprListStringTrim(kwargs={"substr": substr}))
+                self._add(
+                    ExprListStringRmPrefix(
+                        kwargs={"substr": substr}, classvar_hooks=literal_hooks
+                    )
+                )
             case VariableType.STRING:
-                self._add(ExprStringRmPrefix(kwargs={"substr": substr}))
+                self._add(
+                    ExprStringRmPrefix(
+                        kwargs={"substr": substr}, classvar_hooks=literal_hooks
+                    )
+                )
             case _:
                 LOGGER.warning(
                     "rm_prefix(%s): Expected type(s) %s got %s",
@@ -604,17 +725,27 @@ class StringDocument(BaseDocument):
                 self._add(ExprStringRmPrefix(kwargs={"substr": substr}))
         return self
 
-    def rm_suffix(self, substr: str) -> Self:
+    def rm_suffix(self, substr: str | ExprClassVar) -> Self:
         """remove suffix from string by substr
 
         - accept STRING, return STRING
         - accept LIST_STRING, return LIST_STRING
         """
+        substr, literal_hooks = self._resolve_literal_hook("substr", substr)
+
         match self.stack_last_ret:
             case VariableType.LIST_STRING:
-                self._add(ExprListStringRmSuffix(kwargs={"substr": substr}))
+                self._add(
+                    ExprListStringRmSuffix(
+                        kwargs={"substr": substr}, classvar_hooks=literal_hooks
+                    )
+                )
             case VariableType.STRING:
-                self._add(ExprStringRmSuffix(kwargs={"substr": substr}))
+                self._add(
+                    ExprStringRmSuffix(
+                        kwargs={"substr": substr}, classvar_hooks=literal_hooks
+                    )
+                )
             case _:
                 LOGGER.warning(
                     "rm_suffix(%s): Expected type(s) %s got %s",
@@ -625,20 +756,26 @@ class StringDocument(BaseDocument):
                 self._add(ExprStringRmSuffix(kwargs={"substr": substr}))
         return self
 
-    def rm_prefix_suffix(self, substr: str) -> Self:
+    def rm_prefix_suffix(self, substr: str | ExprClassVar) -> Self:
         """remove prefix and suffix from string by substr
 
         - accept STRING, return STRING
         - accept LIST_STRING, return LIST_STRING
         """
+        substr, literal_hooks = self._resolve_literal_hook("substr", substr)
+
         match self.stack_last_ret:
             case VariableType.LIST_STRING:
                 self._add(
-                    ExprListStringRmPrefixAndSuffix(kwargs={"substr": substr})
+                    ExprListStringRmPrefixAndSuffix(
+                        kwargs={"substr": substr}, classvar_hooks=literal_hooks
+                    )
                 )
             case VariableType.STRING:
                 self._add(
-                    ExprStringRmPrefixAndSuffix(kwargs={"substr": substr})
+                    ExprStringRmPrefixAndSuffix(
+                        kwargs={"substr": substr}, classvar_hooks=literal_hooks
+                    )
                 )
             case _:
                 LOGGER.warning(
@@ -652,17 +789,27 @@ class StringDocument(BaseDocument):
                 )
         return self
 
-    def trim(self, substr: str = " ") -> Self:
+    def trim(self, substr: str | ExprClassVar = " ") -> Self:
         """trim LEFT and RIGHT chars string by substr
 
         - accept STRING, return STRING
         - accept LIST_STRING, return LIST_STRING
         """
+        substr, literal_hooks = self._resolve_literal_hook("substr", substr)
+
         match self.stack_last_ret:
             case VariableType.LIST_STRING:
-                self._add(ExprListStringTrim(kwargs={"substr": substr}))
+                self._add(
+                    ExprListStringTrim(
+                        kwargs={"substr": substr}, classvar_hooks=literal_hooks
+                    )
+                )
             case VariableType.STRING:
-                self._add(ExprStringTrim(kwargs={"substr": substr}))
+                self._add(
+                    ExprStringTrim(
+                        kwargs={"substr": substr}, classvar_hooks=literal_hooks
+                    )
+                )
             case _:
                 LOGGER.warning(
                     "trim(%s): Expected type(s) %s got %s",
@@ -673,17 +820,27 @@ class StringDocument(BaseDocument):
                 self._add(ExprStringTrim(kwargs={"substr": substr}))
         return self
 
-    def ltrim(self, substr: str = " ") -> Self:
+    def ltrim(self, substr: str | ExprClassVar = " ") -> Self:
         """trim LEFT by substr
 
         - accept STRING, return STRING
         - accept LIST_STRING, return LIST_STRING
         """
+        substr, literal_hooks = self._resolve_literal_hook("substr", substr)
+
         match self.stack_last_ret:
             case VariableType.LIST_STRING:
-                self._add(ExprListStringLeftTrim(kwargs={"substr": substr}))
+                self._add(
+                    ExprListStringLeftTrim(
+                        kwargs={"substr": substr}, classvar_hooks=literal_hooks
+                    )
+                )
             case VariableType.STRING:
-                self._add(ExprStringLeftTrim(kwargs={"substr": substr}))
+                self._add(
+                    ExprStringLeftTrim(
+                        kwargs={"substr": substr}, classvar_hooks=literal_hooks
+                    )
+                )
             case _:
                 LOGGER.warning(
                     "ltrim(%s): Expected type(s) %s got %s",
@@ -694,17 +851,27 @@ class StringDocument(BaseDocument):
                 self._add(ExprStringLeftTrim(kwargs={"substr": substr}))
         return self
 
-    def rtrim(self, substr: str = " ") -> Self:
+    def rtrim(self, substr: str | ExprClassVar = " ") -> Self:
         """trim RIGHT by substr
 
         - accept STRING, return STRING
         - accept LIST_STRING, return LIST_STRING
         """
+        substr, literal_hooks = self._resolve_literal_hook("substr", substr)
+
         match self.stack_last_ret:
             case VariableType.LIST_STRING:
-                self._add(ExprListStringRightTrim(kwargs={"substr": substr}))
+                self._add(
+                    ExprListStringRightTrim(
+                        kwargs={"substr": substr}, classvar_hooks=literal_hooks
+                    )
+                )
             case VariableType.STRING:
-                self._add(ExprStringRightTrim(kwargs={"substr": substr}))
+                self._add(
+                    ExprStringRightTrim(
+                        kwargs={"substr": substr}, classvar_hooks=literal_hooks
+                    )
+                )
             case _:
                 LOGGER.warning(
                     "rtrim(%s): Expected type(s) %s got %s",
@@ -715,11 +882,13 @@ class StringDocument(BaseDocument):
                 self._add(ExprStringRightTrim(kwargs={"substr": substr}))
         return self
 
-    def split(self, sep: str) -> Self:
+    def split(self, sep: str | ExprClassVar) -> Self:
         """split string by sep
 
         - accept STRING, return LIST_STRING
         """
+        sep, literal_hooks = self._resolve_literal_hook("sep", sep)
+
         if self.stack_last_ret != VariableType.STRING:
             LOGGER.warning(
                 "split(%s): Expected type(s) %s got %s",
@@ -728,16 +897,21 @@ class StringDocument(BaseDocument):
                 self.stack_last_ret.name,
             )
             ...
-        self._add(ExprStringSplit(kwargs={"sep": sep}))
+        self._add(
+            ExprStringSplit(kwargs={"sep": sep}, classvar_hooks=literal_hooks)
+        )
         return self
 
-    def fmt(self, fmt_string: str) -> Self:
+    def fmt(self, fmt_string: str | ExprClassVar) -> Self:
         """Format string by template.
         Template placeholder should be included `{{}}` marker
 
         - accept STRING, return STRING
         - accept LIST_STRING, return LIST_STRING
         """
+        fmt_string, literal_hooks = self._resolve_literal_hook(
+            "fmt", fmt_string
+        )
         if "{{}}" not in fmt_string:
             LOGGER.warning(
                 "fmt(%s) missing placeholder char `{{}}`, set to end string",
@@ -747,9 +921,17 @@ class StringDocument(BaseDocument):
 
         match self.stack_last_ret:
             case VariableType.LIST_STRING:
-                self._add(ExprListStringFormat(kwargs={"fmt": fmt_string}))
+                self._add(
+                    ExprListStringFormat(
+                        kwargs={"fmt": fmt_string}, classvar_hooks=literal_hooks
+                    )
+                )
             case VariableType.STRING:
-                self._add(ExprStringFormat(kwargs={"fmt": fmt_string}))
+                self._add(
+                    ExprStringFormat(
+                        kwargs={"fmt": fmt_string}, classvar_hooks=literal_hooks
+                    )
+                )
             case _:
                 LOGGER.warning(
                     "fmt(%s): Expected type(s) %s got %s",
@@ -757,22 +939,38 @@ class StringDocument(BaseDocument):
                     (VariableType.LIST_STRING.name, VariableType.STRING.name),
                     self.stack_last_ret.name,
                 )
-                self._add(ExprStringFormat(kwargs={"fmt": fmt_string}))
+                self._add(
+                    ExprStringFormat(
+                        kwargs={"fmt": fmt_string}, classvar_hooks=literal_hooks
+                    )
+                )
         return self
 
-    def repl(self, old: str, new: str) -> Self:
+    def repl(self, old: str | ExprClassVar, new: str | ExprClassVar) -> Self:
         """Replace all `old` substring with `new` in current string.
 
         - accept STRING, return STRING
         - accept LIST_STRING, return LIST_STRING
         """
+        old, literal_hooks1 = self._resolve_literal_hook("old", old)
+        new, literal_hooks2 = self._resolve_literal_hook("new", new)
+        literal_hooks = literal_hooks1 | literal_hooks2
+
         match self.stack_last_ret:
             case VariableType.LIST_STRING:
                 self._add(
-                    ExprListStringReplace(kwargs={"old": old, "new": new})
+                    ExprListStringReplace(
+                        kwargs={"old": old, "new": new},
+                        classvar_hooks=literal_hooks,
+                    )
                 )
             case VariableType.STRING:
-                self._add(ExprStringReplace(kwargs={"old": old, "new": new}))
+                self._add(
+                    ExprStringReplace(
+                        kwargs={"old": old, "new": new},
+                        classvar_hooks=literal_hooks,
+                    )
+                )
             case _:
                 LOGGER.warning(
                     "repl(%s, %s): Expected type(s) %s got %s",
@@ -817,7 +1015,7 @@ class StringDocument(BaseDocument):
 
     def re(
         self,
-        pattern: str | Pattern,
+        pattern: str | Pattern | ExprClassVar,
         group: int = 1,
         ignore_case: bool = False,
         dotall: bool = False,
@@ -829,6 +1027,9 @@ class StringDocument(BaseDocument):
 
         - accept STRING, return STRING
         """
+
+        pattern, literal_hooks = self._resolve_literal_hook("pattern", pattern)
+
         if not isinstance(pattern, str):
             ignore_case = is_ignore_case_regex(pattern)
             dotall = is_dotall_case_regex(pattern)
@@ -844,6 +1045,12 @@ class StringDocument(BaseDocument):
                 VariableType.STRING.name,
                 self.stack_last_ret.name,
             )
+        # use inline flags for simplify handling literal variabls
+        if literal_hooks.get("pattern"):
+            literal_hooks["pattern"].value = add_inline_regex_flags(
+                pattern, ignore_case, dotall
+            )
+
         self._add(
             ExprStringRegex(
                 kwargs={
@@ -851,14 +1058,15 @@ class StringDocument(BaseDocument):
                     "group": group,
                     "ignore_case": ignore_case,
                     "dotall": dotall,
-                }
+                },
+                classvar_hooks=literal_hooks,
             )
         )
         return self
 
     def re_all(
         self,
-        pattern: str | Pattern,
+        pattern: str | Pattern | ExprClassVar,
         ignore_case: bool = False,
         dotall: bool = False,
     ) -> Self:
@@ -866,6 +1074,9 @@ class StringDocument(BaseDocument):
 
         - accept STRING, return LIST_STRING
         """
+
+        pattern, literal_hooks = self._resolve_literal_hook("pattern", pattern)
+
         if not isinstance(pattern, str):
             ignore_case = is_ignore_case_regex(pattern)
             dotall = is_dotall_case_regex(pattern)
@@ -882,21 +1093,28 @@ class StringDocument(BaseDocument):
                 VariableType.STRING.name,
                 self.stack_last_ret.name,
             )
+
+        # use inline flags for simplify handling literal variabls
+        if literal_hooks.get("pattern"):
+            literal_hooks["pattern"].value = add_inline_regex_flags(
+                pattern, ignore_case, dotall
+            )
         self._add(
             ExprStringRegexAll(
                 kwargs={
                     "pattern": pattern,
                     "ignore_case": ignore_case,
                     "dotall": dotall,
-                }
+                },
+                classvar_hooks=literal_hooks,
             )
         )
         return self
 
     def re_sub(
         self,
-        pattern: str | Pattern,
-        repl: str = "",
+        pattern: str | Pattern | ExprClassVar,
+        repl: str | ExprClassVar = "",
         ignore_case: bool = False,
         dotall: bool = False,
     ) -> Self:
@@ -905,6 +1123,10 @@ class StringDocument(BaseDocument):
         - accept STRING, return STRING
         - accept LIST_STRING, return LIST_STRING
         """
+        pattern, literal_hooks1 = self._resolve_literal_hook("pattern", pattern)
+        repl, literal_hooks2 = self._resolve_literal_hook("repl", repl)
+        literal_hooks = literal_hooks1 | literal_hooks2
+
         if not isinstance(pattern, str):
             ignore_case = is_ignore_case_regex(pattern)
             dotall = is_dotall_case_regex(pattern)
@@ -912,6 +1134,12 @@ class StringDocument(BaseDocument):
         result = analyze_re_expression(pattern, allow_empty_groups=True)
         if not result:
             LOGGER.warning(result.msg)
+
+        # use inline flags for simplify handling literal variabls
+        if literal_hooks.get("pattern"):
+            literal_hooks["pattern"].value = add_inline_regex_flags(
+                pattern, ignore_case, dotall
+            )
 
         match self.stack_last_ret:
             case VariableType.LIST_STRING:
@@ -922,7 +1150,8 @@ class StringDocument(BaseDocument):
                             "repl": repl,
                             "ignore_case": ignore_case,
                             "dotall": dotall,
-                        }
+                        },
+                        classvar_hooks=literal_hooks,
                     )
                 )
             case VariableType.STRING:
@@ -933,7 +1162,8 @@ class StringDocument(BaseDocument):
                             "repl": repl,
                             "ignore_case": ignore_case,
                             "dotall": dotall,
-                        }
+                        },
+                        classvar_hooks=literal_hooks,
                     )
                 )
             case _:
@@ -958,6 +1188,12 @@ class StringDocument(BaseDocument):
         - accept STRING, return STRING
         - accept LIST_STRING, return LIST_STRING
         """
+        if isinstance(pattern, ExprClassVar):
+            LOGGER.warning(
+                "re_trim() not allowed ExprLiteral. Use direct re_sub() instead"
+            )
+            pattern = pattern.value
+
         self.re_sub(f"^{pattern}")
         self.re_sub(f"{pattern}$")
         return self
@@ -984,13 +1220,19 @@ class StringDocument(BaseDocument):
 
 
 class AssertDocument(BaseDocument):
-    def is_css(self, query: str, msg: str = "") -> Self:
+    def is_css(
+        self, query: str | ExprClassVar, msg: str | ExprClassVar = ""
+    ) -> Self:
         """assert css query found element. If in generated code check failed - throw exception
 
         EXPR DO NOT MODIFY variable
 
         - accept DOCUMENT, return DOCUMENT
         """
+        query, literal_hooks1 = self._resolve_literal_hook("query", query)
+        msg, literal_hooks2 = self._resolve_literal_hook("msg", msg)
+        literal_hooks = literal_hooks1 | literal_hooks2
+
         query = " ".join(query.splitlines())
         new_query, action = parse_pseudo_css_query(query)
         if action[0]:
@@ -998,7 +1240,6 @@ class AssertDocument(BaseDocument):
                 "is_css(%s) not support pseudo parse classes, skip", repr(query)
             )
             query = new_query
-
         try:
             validate_css_query(query)
         except SelectorSyntaxError:
@@ -1010,16 +1251,29 @@ class AssertDocument(BaseDocument):
                 VariableType.DOCUMENT.name,
                 self.stack_last_ret.name,
             )
-        self._add(ExprIsCss(kwargs={"query": query, "msg": msg}))
+        if literal_hooks.get("query"):
+            literal_hooks["query"].value = query
+        self._add(
+            ExprIsCss(
+                kwargs={"query": query, "msg": msg},
+                classvar_hooks=literal_hooks,
+            )
+        )
         return self
 
-    def is_xpath(self, query: str, msg: str = "") -> Self:
+    def is_xpath(
+        self, query: str | ExprClassVar, msg: str | ExprClassVar = ""
+    ) -> Self:
         """assert xpath query found element. If in generated code check failed - throw exception with passed msg
 
         EXPR DO NOT MODIFY variable
 
         - accept DOCUMENT, return DOCUMENT
         """
+        query, literal_hooks1 = self._resolve_literal_hook("query", query)
+        msg, literal_hooks2 = self._resolve_literal_hook("msg", msg)
+        literal_hooks = literal_hooks1 | literal_hooks2
+
         query = " ".join(query.splitlines())
         new_query, action = parse_pseudo_xpath_query(query)
         if action[0]:
@@ -1039,10 +1293,22 @@ class AssertDocument(BaseDocument):
                 VariableType.DOCUMENT.name,
                 self.stack_last_ret.name,
             )
-        self._add(ExprIsXpath(kwargs={"query": query, "msg": msg}))
+
+        if literal_hooks.get("query"):
+            literal_hooks["query"].value = query
+        self._add(
+            ExprIsXpath(
+                kwargs={"query": query, "msg": msg},
+                classvar_hooks=literal_hooks,
+            )
+        )
         return self
 
-    def is_equal(self, value: str | int | float, msg: str = "") -> Self:
+    def is_equal(
+        self,
+        value: str | int | float | ExprClassVar,
+        msg: str | ExprClassVar = "",
+    ) -> Self:
         """assert equal by string, int or float value. If in generated code check failed - throw exception with passed msg
 
         EXPR DO NOT MODIFY variable
@@ -1051,6 +1317,10 @@ class AssertDocument(BaseDocument):
         - accept INT, return INT
         - accept FLOAT return FLOAT
         """
+        value, literal_hooks1 = self._resolve_literal_hook("item", value)
+        msg, literal_hooks2 = self._resolve_literal_hook("msg", msg)
+
+        literal_hooks = literal_hooks1 | literal_hooks2
 
         if (
             isinstance(value, str)
@@ -1089,11 +1359,16 @@ class AssertDocument(BaseDocument):
                 kwargs={"item": value, "msg": msg},
                 accept_type=expected_type,
                 ret_type=expected_type,
+                classvar_hooks=literal_hooks,
             )
         )
         return self
 
-    def is_not_equal(self, value: str | int | float, msg: str = "") -> Self:
+    def is_not_equal(
+        self,
+        value: str | int | float | ExprClassVar,
+        msg: str | ExprClassVar = "",
+    ) -> Self:
         """assert not equal by string value. If in generated code check failed - throw exception with passed msg
 
         EXPR DO NOT MODIFY variable
@@ -1102,7 +1377,10 @@ class AssertDocument(BaseDocument):
         - accept INT, return INT
         - accept FLOAT, return FLOAT
         """
-        # warn segment
+        value, literal_hooks1 = self._resolve_literal_hook("item", value)
+        msg, literal_hooks2 = self._resolve_literal_hook("msg", msg)
+        literal_hooks = literal_hooks1 | literal_hooks2
+
         if (
             isinstance(value, str)
             and self.stack_last_ret != VariableType.STRING
@@ -1142,18 +1420,26 @@ class AssertDocument(BaseDocument):
                 kwargs={"item": value, "msg": msg},
                 accept_type=expected_type,
                 ret_type=expected_type,
+                classvar_hooks=literal_hooks,
             )
         )
         return self
 
-    def is_contains(self, item: str | int | float, msg: str = "") -> Self:
+    def is_contains(
+        self,
+        item: str | int | float | ExprClassVar,
+        msg: str | ExprClassVar = "",
+    ) -> Self:
         """assert value contains in sequence. If in generated code check failed - throw exception with passed msg
 
         EXPR DO NOT MODIFY variable
 
         - accept LIST_STRING, return LIST_STRING
         """
-        # warn
+        item, literal_hooks1 = self._resolve_literal_hook("item", item)
+        msg, literal_hooks2 = self._resolve_literal_hook("msg", msg)
+        literal_hooks = literal_hooks1 | literal_hooks2
+
         if (
             isinstance(item, str)
             and self.stack_last_ret != VariableType.LIST_STRING
@@ -1189,12 +1475,16 @@ class AssertDocument(BaseDocument):
                 kwargs={"item": item, "msg": msg},
                 accept_type=expected_type,
                 ret_type=expected_type,
+                classvar_hooks=literal_hooks,
             )
         )
         return self
 
     def any_is_re(
-        self, pattern: str | Pattern, msg: str = "", ignore_case: bool = False
+        self,
+        pattern: str | Pattern | ExprClassVar,
+        msg: str | ExprClassVar = "",
+        ignore_case: bool = False,
     ) -> Self:
         """assert any value matched in array of strings by regex.
         If in generated code check failed - throw exception with passed msg
@@ -1203,6 +1493,10 @@ class AssertDocument(BaseDocument):
 
         - accept LIST_STRING, return LIST_STRING
         """
+        pattern, literal_hooks1 = self._resolve_literal_hook("pattern", pattern)
+        msg, literal_hooks2 = self._resolve_literal_hook("msg", msg)
+        literal_hooks = literal_hooks1 | literal_hooks2
+
         if not isinstance(pattern, str):
             ignore_case = is_ignore_case_regex(pattern)
         pattern = unverbosify_regex(pattern)
@@ -1215,19 +1509,28 @@ class AssertDocument(BaseDocument):
                 self.stack_last_ret.name,
             )
 
+        # use inline flags for simplify handling literal variabls
+        if literal_hooks.get("pattern"):
+            literal_hooks["pattern"].value = add_inline_regex_flags(
+                pattern, ignore_case
+            )
         self._add(
             ExprListStringAnyRegex(
                 kwargs={
                     "pattern": pattern,
                     "ignore_case": ignore_case,
                     "msg": msg,
-                }
+                },
+                classvar_hooks=literal_hooks,
             )
         )
         return self
 
     def all_is_re(
-        self, pattern: str | Pattern, msg: str = "", ignore_case: bool = False
+        self,
+        pattern: str | Pattern | ExprClassVar,
+        msg: str | ExprClassVar = "",
+        ignore_case: bool = False,
     ) -> Self:
         """assert all value matched in array of strings by regex.
         If in generated code check failed - throw exception with passed msg
@@ -1236,6 +1539,10 @@ class AssertDocument(BaseDocument):
 
         - accept LIST_STRING, return LIST_STRING
         """
+        pattern, literal_hooks1 = self._resolve_literal_hook("pattern", pattern)
+        msg, literal_hooks2 = self._resolve_literal_hook("msg", msg)
+        literal_hooks = literal_hooks1 | literal_hooks2
+
         if not isinstance(pattern, str):
             ignore_case = is_ignore_case_regex(pattern)
         pattern = unverbosify_regex(pattern)
@@ -1248,25 +1555,36 @@ class AssertDocument(BaseDocument):
                 self.stack_last_ret.name,
             )
 
+        if literal_hooks.get("pattern"):
+            literal_hooks["pattern"].value = add_inline_regex_flags(
+                pattern, ignore_case
+            )
         self._add(
             ExprListStringAllRegex(
                 kwargs={
                     "pattern": pattern,
                     "ignore_case": ignore_case,
                     "msg": msg,
-                }
+                },
+                classvar_hooks=literal_hooks,
             )
         )
         return self
 
     def is_re(
-        self, pattern: str | Pattern, msg: str = "", ignore_case: bool = False
+        self,
+        pattern: str | Pattern | ExprClassVar,
+        msg: str | ExprClassVar = "",
+        ignore_case: bool = False,
     ) -> Self:
         """shortcut of is_regex() method"""
         return self.is_regex(pattern, msg, ignore_case)
 
     def is_regex(
-        self, pattern: str | Pattern, msg: str = "", ignore_case: bool = False
+        self,
+        pattern: str | Pattern | ExprClassVar,
+        msg: str | ExprClassVar = "",
+        ignore_case: bool = False,
     ) -> Self:
         """assert value matched by regex. If in generated code check failed - throw exception with passed msg
 
@@ -1274,6 +1592,10 @@ class AssertDocument(BaseDocument):
 
         - accept STRING, return STRING
         """
+        pattern, literal_hooks1 = self._resolve_literal_hook("pattern", pattern)
+        msg, literal_hooks2 = self._resolve_literal_hook("msg", pattern)
+        literal_hooks = literal_hooks1 | literal_hooks2
+
         if not isinstance(pattern, str):
             ignore_case = is_ignore_case_regex(pattern)
         pattern = unverbosify_regex(pattern)
@@ -1287,18 +1609,25 @@ class AssertDocument(BaseDocument):
                 self.stack_last_ret.name,
             )
 
+        if literal_hooks.get("pattern"):
+            literal_hooks["pattern"].value = add_inline_regex_flags(
+                pattern, ignore_case
+            )
         self._add(
             ExprStringIsRegex(
                 kwargs={
                     "pattern": pattern,
                     "ignore_case": ignore_case,
                     "msg": msg,
-                }
+                },
+                classvar_hooks=literal_hooks,
             )
         )
         return self
 
-    def has_attr(self, key: str, msg: str = "") -> Self:
+    def has_attr(
+        self, key: str | ExprClassVar, msg: str | ExprClassVar = ""
+    ) -> Self:
         """assert document has attribute key. If in generated code check failed - throw exception with passed msg
 
         EXPR DO NOT MODIFY variable
@@ -1306,10 +1635,24 @@ class AssertDocument(BaseDocument):
         - accept DOCUMENT, return DOCUMENT
         - accept LIST_DOCUMENT, return LIST_DOCUMENT
         """
+        key, literal_hooks1 = self._resolve_literal_hook("key", key)
+        msg, literal_hooks2 = self._resolve_literal_hook("msg", key)
+        literal_hooks = literal_hooks1 | literal_hooks2
+
         if self.stack_last_ret == VariableType.DOCUMENT:
-            self._add(ExprHasAttr(kwargs={"key": key, "msg": msg}))
+            self._add(
+                ExprHasAttr(
+                    kwargs={"key": key, "msg": msg},
+                    classvar_hooks=literal_hooks,
+                )
+            )
         elif self.stack_last_ret == VariableType.LIST_DOCUMENT:
-            self._add(ExprListHasAttr(kwargs={"key": key, "msg": msg}))
+            self._add(
+                ExprListHasAttr(
+                    kwargs={"key": key, "msg": msg},
+                    classvar_hooks=literal_hooks,
+                )
+            )
         else:
             LOGGER.warning(
                 "has_attr(%s): Expected type(s) %s got %s",
@@ -1342,7 +1685,7 @@ class NestedDocument(BaseDocument):
                 schema.__name__,
                 VariableType.DOCUMENT.name,
             )
-        # HACK: store to class instance for generate docstring signature
+        # HACK: store to class instance for a correct generate docstring signature
         schema.__NESTED_SCHEMAS__[schema.__name__] = schema
         self._add(
             ExprNested(
@@ -1453,7 +1796,7 @@ class DocumentFilter(BaseDocument):
     def eq(self, *values: str) -> Self:
         """check if value equal
 
-        multiple values converts to logical AND
+        multiple values converts to logical OR (simular as SQL `value IN ("bar", "foo")`)
 
         pseudocode example:
 
@@ -1469,13 +1812,13 @@ class DocumentFilter(BaseDocument):
     def ne(self, *values: str) -> Self:
         """check if value not equal
 
-        multiple values converts to logical AND
+        multiple values converts to logical AND (simular as SQL `value NOT IN ("bar", "foo")`)
 
         pseudocode example:
 
             F().eq("foo") -> value == "foo"
 
-            F().eq("bar", "foo") -> (value != "bar" | value != "foo")
+            F().eq("bar", "foo") -> (value != "bar" & value != "foo")
         """
 
         # FIXME: replace series str to OR operator
@@ -1525,9 +1868,13 @@ class DocumentFilter(BaseDocument):
         return self
 
     def re(
-        self, pattern: str | Pattern[str], ignore_case: bool = False
+        self,
+        pattern: str | Pattern[str] | ExprClassVar,
+        ignore_case: bool = False,
     ) -> Self:
         """check if pattern matched result in value"""
+        pattern, literal_hooks = self._resolve_literal_hook("pattern", pattern)
+
         if not isinstance(pattern, str):
             ignore_case = is_ignore_case_regex(pattern)
 
@@ -1535,8 +1882,14 @@ class DocumentFilter(BaseDocument):
         result = analyze_re_expression(pattern, allow_empty_groups=True)
         if not result:
             LOGGER.warning(result.msg)
+
+        if literal_hooks.get("pattern"):
+            literal_hooks["pattern"].value = pattern
         self._add(
-            FilterStrRe(kwargs={"pattern": pattern, "ignore_case": ignore_case})
+            FilterStrRe(
+                kwargs={"pattern": pattern, "ignore_case": ignore_case},
+                classvar_hooks=literal_hooks,
+            )
         )
         return self
 
@@ -1646,3 +1999,75 @@ class DocumentFilter(BaseDocument):
         new_filter = DocumentFilter()
         new_filter.stack.extend(self.stack)
         return new_filter.len_ge(other)
+
+
+class ClassVarDocument(BaseDocument):
+    __IS_LITERAL_DOC__ = True
+    """special document type for define classvar-literal variables
+
+    it can be helps create a config-like structures, fields
+    """
+
+    def __init__(
+        self,
+        val: str | int | float | RePattern[str] | list[str] | None,
+        self_cls: str | None = None,
+        parse_returns: bool = False,
+    ):
+        super().__init__()
+
+        if not (
+            val is None or isinstance(val, (str, int, float, RePattern, list))
+        ):
+            raise TypeError(
+                "Literals expected (None, int, str, float, re.Pattern, list[str]) types"
+            )
+
+        if val is None:
+            type_ = VariableType.NULL
+        # regex pattern input required check in re, re_all, re_sub exprs
+        #  1. shold be converts later in coverter
+        #  2. flags converts to inline: (?i) (?s), (?si) etc
+        elif isinstance(val, (str, RePattern)):
+            type_ = VariableType.STRING
+        elif isinstance(val, bool):
+            type_ = VariableType.BOOL
+        elif isinstance(val, float):
+            type_ = VariableType.FLOAT
+        elif isinstance(val, int):
+            type_ = VariableType.INT
+        # list string only supports this DSL impl
+        # elemets will be converts later
+        elif isinstance(val, list):
+            type_ = VariableType.LIST_STRING
+
+        self._value = val
+        self._type = type_
+        self._parse_returns = parse_returns
+        # if self-init classvar need manually pass path
+        self.use_self_cls = bool(self_cls)
+        if self.use_self_cls:
+            cls, name = self_cls.split(".")
+            self.struct_name = cls
+            self.field_name = name
+        # late init by __init_subclass__ in BaseSchema class
+        else:
+            self.struct_name: str | None = None
+            self.field_name: str | None = None
+
+    def expr(self) -> ExprClassVar:
+        return ExprClassVar(
+            kwargs={
+                "value": self._value,
+                "struct_name": self.struct_name,
+                "field_name": self.field_name,
+                "parse_returns": self._parse_returns,
+            },
+            accept_type=self._type,
+            ret_type=self._type,
+        )
+
+    def __repr__(self) -> str:
+        if self.struct_name and self.field_name:
+            return f"ClassVar({self.struct_name}.{self.field_name} = {self._value!r}, returns = {self._parse_returns})"
+        return f"ClassVar({self._value!r}, returns = {self._parse_returns})"

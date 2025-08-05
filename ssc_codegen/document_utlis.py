@@ -12,6 +12,10 @@ from ssc_codegen.ast_ import (
     ExprXpath,
     ExprCssAll,
 )
+from ssc_codegen.ast_.nodes_selectors import (
+    ExprCssElementRemove,
+    ExprXpathElementRemove,
+)
 from ssc_codegen.pseudo_selectors import (
     parse_pseudo_xpath_query,
     pseudo_action_to_pseudo_xpath,
@@ -44,6 +48,19 @@ def is_dotall_case_regex(pattern: str | Pattern) -> bool:
     if isinstance(pattern, str):
         return False
     return bool(pattern.flags & re.DOTALL)
+
+
+def add_inline_regex_flags(
+    pattern: str, ignore_case: bool = False, dotall: bool = False
+) -> str:
+    flags = ""
+    if ignore_case:
+        flags += "i"
+    if dotall:
+        flags += "s"
+    if flags:
+        flags = f"(?{flags})"
+    return flags + pattern
 
 
 def unverbosify_regex(pattern: str | Pattern) -> str:
@@ -133,6 +150,10 @@ def convert_css_to_xpath(
                         }
                     )
                 )
+            case ExprCssElementRemove.kind:
+                new_stack.append(
+                    ExprXpathElementRemove(kwargs={"query": new_query})
+                )
             case _:
                 assert_never(expr.kind)
     doc._stack = new_stack
@@ -169,6 +190,10 @@ def convert_xpath_to_css(doc: "BaseDocument") -> "BaseDocument":
                             "msg": expr.kwargs["msg"],
                         }
                     )
+                )
+            case ExprXpathElementRemove.kind:
+                new_stack.append(
+                    ExprCssElementRemove(kwargs={"query": new_query})
                 )
             case _:
                 assert_never(expr.kind)
