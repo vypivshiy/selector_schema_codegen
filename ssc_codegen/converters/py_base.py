@@ -107,6 +107,7 @@ from ssc_codegen.ast_ import (
     ExprStringMapReplace,
     ExprListStringMapReplace,
 )
+from ssc_codegen.ast_.nodes_core import ExprClassVar
 from ssc_codegen.ast_.nodes_string import (
     ExprListStringUnescape,
     ExprStringUnescape,
@@ -119,12 +120,25 @@ from ssc_codegen.converters.base import (
 from ssc_codegen.converters.helpers import (
     have_default_expr,
     have_pre_validate_call,
+    jsonify_query_parse,
     prev_next_var,
     is_last_var_no_ret,
     is_prev_node_atomic_cond,
     is_first_node_cond,
+    py_get_classvar_hook_or_value,
+    py_regex_flags,
 )
-from ssc_codegen.tokens import StructType, VariableType, JsonVariableType
+from ssc_codegen.json_struct import JsonType
+from ssc_codegen.tokens import (
+    StructType,
+    TokenType,
+    VariableType,
+    JsonVariableType,
+)
+from ssc_codegen.converters.templates.py_base import (
+    HELPER_FUNCTIONS,
+    IMPORTS_MIN,
+)
 
 INDENT_CH = " "
 INDENT_METHOD = INDENT_CH * 4
@@ -169,27 +183,19 @@ JSON_TYPES = {
     JsonVariableType.ARRAY_BOOLEAN: "List[bool]",
 }
 
+LITERAL_TYPES = {
+    list: "ClassVar[list]",
+    int: "ClassVar[int]",
+    bool: "ClassVar[bool]",
+    float: "ClassVar[float]",
+    str: "ClassVar[str]",
+}
+
 MAGIC_METHODS = {
     "__ITEM__": "item",
     "__KEY__": "key",
     "__VALUE__": "value",
 }
-
-# used old style typing for support old python versions (3.8)
-IMPORTS_MIN = """
-import re
-import sys
-import json
-from html import unescape as _html_unescape
-from typing import List, Dict, TypedDict, Union, Optional
-from contextlib import suppress
-from functools import reduce
-
-if sys.version_info >= (3, 10):
-    from types import NoneType
-else:
-    NoneType = type(None)
-"""
 
 
 class BasePyCodeConverter(BaseCodeConverter):
@@ -218,6 +224,7 @@ class BasePyCodeConverter(BaseCodeConverter):
             JsonStruct.kind: pre_json_struct,
             JsonStructField.kind: pre_json_field,
             StructParser.kind: pre_struct_parser,
+            ExprClassVar.kind: pre_expr_classvar,
             ExprReturn.kind: pre_ret,
             ExprNoReturn.kind: pre_no_ret,
             ExprNested.kind: pre_nested,
@@ -288,6 +295,7 @@ class BasePyCodeConverter(BaseCodeConverter):
         }
 
         self.post_definitions = {
+            ModuleImports.kind: post_imports,
             TypeDef.kind: post_typedef,
             JsonStruct.kind: post_json_struct,
             StartParseMethod.kind: post_start_parse,
@@ -327,7 +335,7 @@ def get_field_method_ret_type(node: StructFieldMethod) -> str:
         case VariableType.JSON:
             last_expr = node.body[-2]
             last_expr = cast(ExprJsonify, last_expr)
-            json_struct_name, is_array = last_expr.unpack_args()
+            json_struct_name, is_array, *_ = last_expr.unpack_args()
             type_ = f"J_{json_struct_name}"
             if is_array:
                 type_ = f"List[{type_}]"
@@ -345,6 +353,10 @@ def pre_docstring(node: Docstring) -> str:
 
 def pre_imports(_node: ModuleImports) -> str:
     return IMPORTS_MIN
+
+
+def post_imports(_: ModuleImports) -> str:
+    return HELPER_FUNCTIONS
 
 
 def pre_typedef(node: TypeDef) -> str:
@@ -416,18 +428,32 @@ def post_json_struct(_node: JsonStruct) -> str:
 
 def pre_json_field(node: JsonStructField) -> str:
     name, json_type = node.unpack_args()
+    json_type: JsonType
     if json_type.type == JsonVariableType.OBJECT:
         type_ = f"J_{json_type.name}"
     elif json_type.type == JsonVariableType.ARRAY_OBJECTS:
         type_ = f"List[J_{json_type.name}]"
     else:
         type_ = JSON_TYPES[json_type.type]
-    return f'"{node.name}": {type_}, '
+
+    return f'"{json_type.get_mapped_field()}": {type_}, '
 
 
 def pre_struct_parser(node: StructParser) -> str:
     name, _struct_type, docstring = node.unpack_args()
     return f"class {name}:\n" + INDENT_METHOD + '"""' + docstring + '"""'
+
+
+def pre_expr_classvar(node: ExprClassVar) -> str:
+    value, _st_name, field_name, *_ = node.unpack_args()
+    if isinstance(value, str):
+        # ExprStringFormat template
+        if "{{}}" in value:
+            value = value.replace("{{}}", "{}")
+        value = repr(value)
+    # classvar type add
+    type_ = LITERAL_TYPES.get(type(value))
+    return f"{INDENT_METHOD}{field_name}: {type_} = {value}"
 
 
 def pre_ret(node: ExprReturn) -> str:
@@ -446,7 +472,7 @@ def pre_no_ret(_node: ExprNoReturn) -> str:
 def pre_nested(node: ExprNested) -> str:
     # not allowed default expr in nested
     prv, nxt = prev_next_var(node)
-    schema_name, schema_type = node.unpack_args()
+    schema_name, _schema_type = node.unpack_args()
 
     return INDENT_METHOD_BODY + f"{nxt} = {schema_name}({prv}).parse()"
 
@@ -485,6 +511,9 @@ def pre_struct_init(_node: StructInitMethod) -> str:
 def post_start_parse(node: StartParseMethod) -> str:
     node.parent = cast(StructParser, node.parent)
     code = ""
+
+    if node.parent.struct_type == StructType.CONFIG_CLASSVARS:
+        return ""
     if have_pre_validate_call(node):
         code += INDENT_METHOD_BODY + "self._pre_validate(self._document)\n"
     match node.parent.struct_type:
@@ -492,10 +521,15 @@ def post_start_parse(node: StartParseMethod) -> str:
             # return {...}
             code += INDENT_METHOD_BODY + "return {"
             for expr in node.body:
-                name = expr.kwargs["name"]
-                if name.startswith("__"):
-                    continue
-                code += f"{name!r}: self._parse_{name}(self._document),"
+                if expr.kind == TokenType.STRUCT_CALL_FUNCTION:
+                    name = expr.kwargs["name"]
+                    if name.startswith("__"):
+                        continue
+                    code += f"{name!r}: self._parse_{name}(self._document),"
+                elif expr.kind == TokenType.STRUCT_CALL_CLASSVAR:
+                    # {"struct_name": str, "field_name": str, "type": VariableType},
+                    st_name, f_name, _ = expr.unpack_args()
+                    code += f"{f_name!r}: {st_name}.{f_name},"
             code += "}"
         case StructType.ACC_LIST:
             code += INDENT_METHOD_BODY + "return list(set("
@@ -508,15 +542,19 @@ def post_start_parse(node: StartParseMethod) -> str:
                 methods.append(f"self._parse_{name}(self._document)")
             code += " + ".join(methods)
             code += "))"
-
         case StructType.LIST:
             # return [{...} for el in self._split_doc(self.document)]
             code += INDENT_METHOD_BODY + "return [{"
             for expr in node.body:
-                name = expr.kwargs["name"]
-                if name.startswith("__"):
-                    continue
-                code += f"{name!r}: self._parse_{name}(el),"
+                if expr.kind == TokenType.STRUCT_CALL_FUNCTION:
+                    name = expr.kwargs["name"]
+                    if name.startswith("__"):
+                        continue
+                    code += f"{name!r}: self._parse_{name}(el),"
+                elif expr.kind == TokenType.STRUCT_CALL_CLASSVAR:
+                    # {"struct_name": str, "field_name": str, "type": VariableType},
+                    st_name, f_name, _ = expr.unpack_args()
+                    code += f"{f_name!r}: {st_name}.{f_name},"
             code += "} for el in self._split_doc(self._document)]"
         case StructType.DICT:
             # return {key: value, ...}
@@ -552,11 +590,7 @@ def pre_default_start(node: ExprDefaultValueStart) -> str:
 
 
 def pre_default_end(node: ExprDefaultValueEnd) -> str:
-    value = node.kwargs["value"]
-    if isinstance(value, str):
-        value = repr(value)
-    elif isinstance(value, list):
-        value = "[]"
+    value = py_get_classvar_hook_or_value(node, "value")
     return INDENT_METHOD_BODY + f"return {value}"
 
 
@@ -565,7 +599,14 @@ def pre_str_fmt(node: ExprStringFormat) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    fmt = "f" + repr(node.kwargs["fmt"].replace("{{}}", "{" + prv + "}"))
+    fmt = py_get_classvar_hook_or_value(
+        node,
+        "fmt",
+        # literal value already patched `{{}}` to `{}`
+        cb_literal_cast=lambda e: ".".join(e.literal_ref_name)
+        + f".format({prv})",
+        cb_value_cast=lambda i: "f" + repr(i.replace("{{}}", "{" + prv + "}")),
+    )
     return indent + f"{nxt} = {fmt}"
 
 
@@ -574,20 +615,26 @@ def pre_list_str_fmt(node: ExprListStringFormat) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    fmt = "f" + repr(node.kwargs["fmt"].replace("{{}}", "{i}"))
+    fmt = py_get_classvar_hook_or_value(
+        node,
+        "fmt",
+        cb_literal_cast=lambda e: ".".join(e.literal_ref_name) + ".format(i)",
+        cb_value_cast=lambda i: "f" + repr(i.replace("{{}}", "{i}")),
+    )
+
     return indent + f"{nxt} = [{fmt} for i in {prv}]"
 
 
+# NOTE: rm prefixes and rm suffixes use hacks with slices instead str.removeprefix() and str.removesuffix()
+# for py3.8 compatibility
 def pre_str_rm_prefix(node: ExprStringRmPrefix) -> str:
     indent = (
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    substr = node.kwargs["substr"]
-    return (
-        indent
-        + f"{nxt} = {prv}[len({substr!r}):] if {prv}.startswith({substr!r}) else {prv}"
-    )
+    substr = py_get_classvar_hook_or_value(node, "substr")
+
+    return indent + f"{nxt} = ssc_rm_prefix({prv}, {substr})"
 
 
 def pre_list_str_rm_prefix(node: ExprStringRmPrefix) -> str:
@@ -595,27 +642,20 @@ def pre_list_str_rm_prefix(node: ExprStringRmPrefix) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    substr = node.kwargs["substr"]
-    return (
-        indent
-        + f"{nxt} = "
-        + f"[i[len({substr!r}):] if i.startswith({substr!r}) else i "
-        + f"for i in {prv}]"
-    )
+    substr = py_get_classvar_hook_or_value(node, "substr")
+
+    # def ssc_rm_prefix(v: str, p: str) -> str:
+    return f"{indent}{nxt} = [ssc_rm_prefix(i, {substr}) for i in {prv}]"
 
 
-# NOTE: rm prefixes and rm suffixes use hacks with slices instead str.removeprefix() and str.removesuffix()
-# for py3.8 compatibility
 def pre_str_rm_suffix(node: ExprStringRmSuffix) -> str:
     indent = (
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    substr = node.kwargs["substr"]
-    return (
-        indent
-        + f"{nxt} = {prv}[:-(len({substr!r}))] if {prv}.endswith({substr!r}) else {prv}"
-    )
+    substr = py_get_classvar_hook_or_value(node, "substr")
+
+    return f"{indent}{nxt} = ssc_rm_suffix({prv}, {substr})"
 
 
 def pre_list_str_rm_suffix(node: ExprListStringRmSuffix) -> str:
@@ -623,13 +663,10 @@ def pre_list_str_rm_suffix(node: ExprListStringRmSuffix) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    substr = node.kwargs["substr"]
-    return (
-        indent
-        + f"{nxt} = "
-        + f"[i[:-(len({substr!r}))] if i.endswith({substr!r}) else i "
-        + f"for i in {prv}]"
-    )
+    substr = py_get_classvar_hook_or_value(node, "substr")
+
+    # def ssc_rm_suffix(v: str, s: str) -> str:
+    return f"{indent}{nxt} = [ssc_rm_suffix(i, {substr}) for i in {prv}]"
 
 
 def pre_str_rm_prefix_and_suffix(node: ExprStringRmPrefixAndSuffix) -> str:
@@ -637,11 +674,11 @@ def pre_str_rm_prefix_and_suffix(node: ExprStringRmPrefixAndSuffix) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    substr = node.kwargs["substr"]
+    substr = py_get_classvar_hook_or_value(node, "substr")
+
+    # def ssc_rm_prefix_and_suffix(v: str, p: str, s: str)
     return (
-        indent
-        + f"{nxt} = ({prv}[len({substr!r}):] if {prv}.startswith({substr!r}) else {prv})"
-        + f"[:-(len({substr!r}))] if {prv}.endswith({substr!r}) else {prv}"
+        f"{indent}{nxt} = ssc_rm_prefix_and_suffix({prv}, {substr}, {substr})"
     )
 
 
@@ -652,13 +689,10 @@ def pre_list_str_rm_prefix_and_suffix(
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    substr = node.kwargs["substr"]
-    return (
-        indent
-        + f"{nxt} = [(i[len({substr!r}):] if i.startswith({substr!r}) else i)"
-        + f"[:-(len({substr!r}))] if i.endswith({substr!r}) else i for i in {prv}"
-        + "]"
-    )
+    substr = py_get_classvar_hook_or_value(node, "substr")
+
+    # def ssc_rm_prefix_and_suffix(v: str, p: str, s: str)
+    return f"{indent}{nxt} = [ssc_rm_prefix_and_suffix(i, {substr}, {substr}) for i in {prv}]"
 
 
 def pre_str_trim(node: ExprStringTrim) -> str:
@@ -666,8 +700,9 @@ def pre_str_trim(node: ExprStringTrim) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    substr = node.kwargs["substr"]
-    return indent + f"{nxt} = {prv}.strip({substr!r})"
+    substr = py_get_classvar_hook_or_value(node, "substr")
+
+    return indent + f"{nxt} = {prv}.strip({substr})"
 
 
 def pre_list_str_trim(node: ExprListStringTrim) -> str:
@@ -675,8 +710,9 @@ def pre_list_str_trim(node: ExprListStringTrim) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    substr = node.kwargs["substr"]
-    return indent + f"{nxt} = [i.strip({substr!r}) for i in {prv}]"
+    substr = py_get_classvar_hook_or_value(node, "substr")
+
+    return indent + f"{nxt} = [i.strip({substr}) for i in {prv}]"
 
 
 def pre_str_left_trim(node: ExprStringLeftTrim) -> str:
@@ -684,8 +720,9 @@ def pre_str_left_trim(node: ExprStringLeftTrim) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    substr = node.kwargs["substr"]
-    return indent + f"{nxt} = {prv}.lstrip({substr!r})"
+    substr = py_get_classvar_hook_or_value(node, "substr")
+
+    return indent + f"{nxt} = {prv}.lstrip({substr})"
 
 
 def pre_list_str_left_trim(node: ExprListStringLeftTrim) -> str:
@@ -693,8 +730,9 @@ def pre_list_str_left_trim(node: ExprListStringLeftTrim) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    substr = node.kwargs["substr"]
-    return indent + f"{nxt} = [i.lstrip({substr!r}) for i in {prv}]"
+    substr = py_get_classvar_hook_or_value(node, "substr")
+
+    return indent + f"{nxt} = [i.lstrip({substr}) for i in {prv}]"
 
 
 def pre_str_right_trim(node: ExprStringRightTrim) -> str:
@@ -702,8 +740,9 @@ def pre_str_right_trim(node: ExprStringRightTrim) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    substr = node.kwargs["substr"]
-    return indent + f"{nxt} = {prv}.rstrip({substr!r})"
+    substr = py_get_classvar_hook_or_value(node, "substr")
+
+    return indent + f"{nxt} = {prv}.rstrip({substr})"
 
 
 def pre_list_str_right_trim(node: ExprListStringRightTrim) -> str:
@@ -711,8 +750,9 @@ def pre_list_str_right_trim(node: ExprListStringRightTrim) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    substr = node.kwargs["substr"]
-    return indent + f"{nxt} = [i.rstrip({substr!r}) for i in {prv}]"
+    substr = py_get_classvar_hook_or_value(node, "substr")
+
+    return indent + f"{nxt} = [i.rstrip({substr}) for i in {prv}]"
 
 
 def pre_str_split(node: ExprStringSplit) -> str:
@@ -720,8 +760,9 @@ def pre_str_split(node: ExprStringSplit) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    sep = node.kwargs["sep"]
-    return indent + f"{nxt} = {prv}.split({sep!r})"
+    sep = py_get_classvar_hook_or_value(node, "sep")
+
+    return indent + f"{nxt} = {prv}.split({sep})"
 
 
 def pre_str_replace(node: ExprStringReplace) -> str:
@@ -729,8 +770,10 @@ def pre_str_replace(node: ExprStringReplace) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    old, new = node.unpack_args()
-    return indent + f"{nxt} = {prv}.replace({old!r}, {new!r})"
+    old = py_get_classvar_hook_or_value(node, "old")
+    new = py_get_classvar_hook_or_value(node, "new")
+
+    return indent + f"{nxt} = {prv}.replace({old}, {new})"
 
 
 def pre_list_str_replace(node: ExprListStringReplace) -> str:
@@ -738,20 +781,28 @@ def pre_list_str_replace(node: ExprListStringReplace) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    old, new = node.unpack_args()
-    return indent + f"{nxt} = [i.replace({old!r}, {new!r}) for i in {prv}]"
+    old = py_get_classvar_hook_or_value(node, "old")
+    new = py_get_classvar_hook_or_value(node, "new")
+
+    return indent + f"{nxt} = [i.replace({old}, {new}) for i in {prv}]"
 
 
 def pre_str_regex(node: ExprStringRegex) -> str:
+    # FIXME issues:
+    # regex throw error in parsel exprs
+    # https://github.com/libanime/libanime_schema/blob/main/player/kodik.py#L216
     indent = (
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    pattern, group, ignore_case = node.unpack_args()
-    if ignore_case:
+    pattern, group, ignore_case, dotall = node.unpack_args()
+    if node.classvar_hooks:
+        pattern = py_get_classvar_hook_or_value(node, "pattern")
+        return indent + f"re.search({pattern}, {prv})[{group}]"
+    flags = py_regex_flags(ignore_case, dotall)
+    if flags:
         return (
-            indent
-            + f"{nxt} = re.search({pattern!r}, {prv}, re.IGNORECASE)[{group}]"
+            indent + f"{nxt} = re.search({pattern!r}, {prv}, {flags})[{group}]"
         )
     return indent + f"{nxt} = re.search({pattern!r}, {prv})[{group}]"
 
@@ -761,9 +812,13 @@ def pre_str_regex_all(node: ExprStringRegexAll) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    pattern, ignore_case = node.unpack_args()
-    if ignore_case:
-        return indent + f"{nxt} = re.findall({pattern!r}, {prv}, re.IGNORECASE)"
+    pattern, ignore_case, dotall = node.unpack_args()
+    if node.classvar_hooks:
+        pattern = py_get_classvar_hook_or_value(node, "pattern")
+        return indent + f"re.findall({pattern}, {prv})"
+    flags = py_regex_flags(ignore_case, dotall)
+    if flags:
+        return indent + f"{nxt} = re.findall({pattern!r}, {prv}, {flags})"
     return indent + f"{nxt} = re.findall({pattern!r}, {prv})"
 
 
@@ -772,8 +827,22 @@ def pre_str_regex_sub(node: ExprStringRegexSub) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    pattern, repl = node.unpack_args()
-    return indent + f"{nxt} = re.sub({pattern!r}, {repl!r}, {prv})"
+    pattern, repl, ignore_case, dotall = node.unpack_args()
+    if node.classvar_hooks.get("pattern"):
+        pattern = py_get_classvar_hook_or_value(node, "pattern")
+        if node.classvar_hooks.get("repl"):
+            repl = py_get_classvar_hook_or_value(node, "repl")
+        else:
+            repl = repr(repl)
+        return indent + f"{nxt}" + f"re.sub({pattern}, {repl}, {prv})"
+    else:
+        flags = py_regex_flags(ignore_case, dotall)
+        if flags:
+            return (
+                indent
+                + f"{nxt} = re.sub({pattern!r}, {repl!r}, {prv}, {flags})"
+            )
+        return indent + f"{nxt} = re.sub({pattern!r}, {repl!r}, {prv})"
 
 
 def pre_list_str_regex_sub(node: ExprListStringRegexSub) -> str:
@@ -781,7 +850,22 @@ def pre_list_str_regex_sub(node: ExprListStringRegexSub) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    pattern, repl = node.unpack_args()
+    pattern, repl, ignore_case, dotall = node.unpack_args()
+    if node.classvar_hooks.get("pattern"):
+        pattern = py_get_classvar_hook_or_value(node, "pattern")
+        if node.classvar_hooks.get("repl"):
+            repl = py_get_classvar_hook_or_value(node, "repl")
+        else:
+            repl = repr(repl)
+        return (
+            indent + f"{nxt} = [re.sub({pattern}), {repl}, i) for i in {prv}]"
+        )
+    flags = py_regex_flags(ignore_case, dotall)
+    if flags:
+        return (
+            indent
+            + f"{nxt} = [re.sub({pattern!r}, {repl!r}, i, {flags}) for i in {prv}]"
+        )
     return indent + f"{nxt} = [re.sub({pattern!r}, {repl!r}, i) for i in {prv}]"
 
 
@@ -791,6 +875,7 @@ def pre_index(node: ExprIndex) -> str:
     )
     prv, nxt = prev_next_var(node)
     index, *_ = node.unpack_args()
+    index = py_get_classvar_hook_or_value(node, "index")
     return indent + f"{nxt} = {prv}[{index}]"
 
 
@@ -799,8 +884,8 @@ def pre_list_str_join(node: ExprListStringJoin) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    sep = node.kwargs["sep"]
-    return indent + f"{nxt} = {sep!r}.join({prv})"
+    sep = py_get_classvar_hook_or_value(node, "sep")
+    return indent + f"{nxt} = {sep}.join({prv})"
 
 
 def pre_is_equal(node: ExprIsEqual) -> str:
@@ -809,12 +894,12 @@ def pre_is_equal(node: ExprIsEqual) -> str:
     )
     prv, nxt = prev_next_var(node)
     item, msg = node.unpack_args()
-    if isinstance(item, str):
-        item = repr(item)
-    expr = indent + f"assert {prv} != {item}, {msg!r}"
+    item = py_get_classvar_hook_or_value(node, "item")
+    msg = py_get_classvar_hook_or_value(node, "msg")
+
+    expr = indent + f"assert {prv} != {item}, {msg}"
     if is_last_var_no_ret(node):
         return expr
-    # HACK: avoid recalc variables
     return expr + "\n" + indent + f"{nxt} = {prv}"
 
 
@@ -824,12 +909,12 @@ def pre_is_not_equal(node: ExprIsNotEqual) -> str:
     )
     prv, nxt = prev_next_var(node)
     item, msg = node.unpack_args()
-    if isinstance(item, str):
-        item = repr(item)
-    expr = indent + f"assert {prv} == {item}, {msg!r}"
+    item = py_get_classvar_hook_or_value(node, "item")
+    msg = py_get_classvar_hook_or_value(node, "msg")
+
+    expr = indent + f"assert {prv} == {item}, {msg}"
     if is_last_var_no_ret(node):
         return expr
-    # HACK: avoid recalc variables
     return expr + "\n" + indent + f"{nxt} = {prv}"
 
 
@@ -839,12 +924,13 @@ def pre_is_contains(node: ExprIsContains) -> str:
     )
     prv, nxt = prev_next_var(node)
     item, msg = node.unpack_args()
-    if isinstance(item, str):
-        item = repr(item)
+
+    item = py_get_classvar_hook_or_value(node, "item")
+    msg = py_get_classvar_hook_or_value(node, "msg")
+
     expr = indent + f"assert {item} not in {prv}, {msg!r}"
     if is_last_var_no_ret(node):
         return expr
-    # HACK: avoid recalc variables
     return expr + "\n" + indent + f"{nxt} = {prv}"
 
 
@@ -854,10 +940,22 @@ def pre_is_regex(node: ExprStringIsRegex) -> str:
     )
     prv, nxt = prev_next_var(node)
     pattern, ignore_case, msg = node.unpack_args()
-    expr = indent + f"assert re.search({pattern!r}, {prv}), {msg!r}"
+
+    msg = py_get_classvar_hook_or_value(node, "msg")
+
+    if node.classvar_hooks.get("pattern"):
+        pattern = py_get_classvar_hook_or_value(node, "pattern")
+        expr = f"re.search({pattern}, {prv})"
+    else:
+        flags = py_regex_flags(ignore_case)
+        if flags:
+            expr = f"re.search({pattern}, {prv}, re.I)"
+        else:
+            expr = f"re.search({pattern}, {prv})"
+
+    expr = indent + f"assert {expr}, {msg}"
     if is_last_var_no_ret(node):
         return expr
-    # HACK: avoid recalc variables
     return expr + "\n" + indent + f"{nxt} = {prv}"
 
 
@@ -867,13 +965,20 @@ def pre_list_str_any_is_regex(node: ExprListStringAnyRegex) -> str:
     )
     prv, nxt = prev_next_var(node)
     pattern, ignore_case, msg = node.unpack_args()
-    expr = (
-        indent
-        + f"assert any(re.search({pattern!r}, i) for i in {prv}), {msg!r}"
-    )
+
+    if node.classvar_hooks.get("pattern"):
+        pattern = py_get_classvar_hook_or_value(node, "pattern")
+        expr = f"re.search({pattern}, i)"
+    else:
+        flags = py_regex_flags(ignore_case)
+        if flags:
+            expr = f"re.search({pattern!r}, i, re.I)"
+        else:
+            expr = f"re.search({pattern!r}, i)"
+
+    expr = indent + f"assert any({expr} for i in {prv}), {msg!r}"
     if is_last_var_no_ret(node):
         return expr
-    # HACK: avoid recalc variables
     return expr + "\n" + indent + f"{nxt} = {prv}"
 
 
@@ -883,13 +988,20 @@ def pre_list_str_all_is_regex(node: ExprListStringAllRegex) -> str:
     )
     prv, nxt = prev_next_var(node)
     pattern, ignore_case, msg = node.unpack_args()
-    expr = (
-        indent
-        + f"assert all(re.search({pattern!r}, i) for i in {prv}), {msg!r}"
-    )
+
+    if node.classvar_hooks.get("pattern"):
+        pattern = py_get_classvar_hook_or_value(node, "pattern")
+        expr = f"re.search({pattern}, i)"
+    else:
+        flags = py_regex_flags(ignore_case)
+        if flags:
+            expr = f"re.search({pattern!r}, i, re.I)"
+        else:
+            expr = f"re.search({pattern!r}, i)"
+
+    expr = indent + f"assert all({expr} for i in {prv}), {msg!r}"
     if is_last_var_no_ret(node):
         return expr
-    # HACK: avoid recalc variables
     return expr + "\n" + indent + f"{nxt} = {prv}"
 
 
@@ -946,8 +1058,9 @@ def pre_jsonify(node: ExprJsonify) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    _name, _is_array = node.unpack_args()
-    return indent + f"{nxt} = json.loads({prv})"
+    _name, _is_array, query = node.unpack_args()
+    expr = "".join(f"[{i}]" for i in jsonify_query_parse(query))
+    return indent + f"{nxt} = json.loads({prv}){expr}"
 
 
 # FILTERS
@@ -1036,7 +1149,7 @@ def pre_filter_eq(node: FilterEqual) -> str:
     if len(values) == 1:
         expr = f"i == {values[0]!r}"
     else:
-        expr = f"all(s == i for s in {values})"
+        expr = f"any(s == i for s in {values})"
     if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
         return f" and {expr}"
     return expr
@@ -1106,7 +1219,11 @@ def pre_list_unique(node: ExprListUnique) -> str:
     indent = (
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
+    keep_order, *_ = node.unpack_args()
     prv, nxt = prev_next_var(node)
+    if keep_order:
+        # py 3.7+ dicts order elements guaranteed
+        return f"{indent}{nxt} = list(dict.fromkeys({prv}))"
     return f"{indent}{nxt} = list(set({prv}))"
 
 
@@ -1118,8 +1235,8 @@ def pre_str_map_replace(node: ExprStringMapReplace) -> str:
     replacements = dict(zip(old_arr, new_arr))
 
     prv, nxt = prev_next_var(node)
-    expr = f"reduce(lambda acc, kv: acc.replace(kv[0], kv[1]), {replacements}.items(), {prv})"
-    return f"{indent}{nxt} = {expr}"
+    # ssc_map_replace(s: str, replacements: Dict[str, str]) -> str
+    return f"{indent}{nxt} = ssc_map_replace({prv}, {replacements})"
 
 
 def pre_list_str_map_replace(node: ExprListStringMapReplace) -> str:
@@ -1130,8 +1247,10 @@ def pre_list_str_map_replace(node: ExprListStringMapReplace) -> str:
     replacements = dict(zip(old_arr, new_arr))
 
     prv, nxt = prev_next_var(node)
-    expr = f"[reduce(lambda acc, kv: acc.replace(kv[0], kv[1]), {replacements}.items(), i) for i in {prv}]"
-    return f"{indent}{nxt} = {expr}"
+    # ssc_map_replace(s: str, replacements: Dict[str, str]) -> str
+    return (
+        f"{indent}{nxt} = [ssc_map_replace(i, {replacements}) for i in {prv}]"
+    )
 
 
 def pre_str_unescape(node: ExprStringUnescape) -> str:
@@ -1139,20 +1258,8 @@ def pre_str_unescape(node: ExprStringUnescape) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    return (
-        f"{indent}{nxt} = _html_unescape({prv})\n"
-        # hex unescape
-        + f"{indent}{nxt} = re.sub(r'&#x([0-9a-fA-F]+);', lambda m: chr(int(m.group(1), 16)), {nxt})\n"
-        + f"{indent}{nxt} = re.sub(r'\\\\u([0-9a-fA-F]{{4}})', lambda m: chr(int(m.group(1), 16)), {nxt})\n"
-        + f"{indent}{nxt} = re.sub(r'\\\\x([0-9a-fA-F]{{2}})', lambda m: chr(int(m.group(1), 16)), {nxt})\n"
-        # chars
-        + f"{indent}{nxt} = {nxt}"
-        + r".replace('\\b', '\b')"
-        + r".replace('\\f', '\f')"
-        + r".replace('\\n', '\n')"
-        + r".replace('\\r', '\r')"
-        + r".replace('\\t', '\t')"
-    )
+    # ssc_unescape(s: str) -> str
+    return f"{indent}{nxt} = ssc_unescape({prv})"
 
 
 def pre_list_str_unescape(node: ExprListStringUnescape) -> str:
@@ -1160,19 +1267,5 @@ def pre_list_str_unescape(node: ExprListStringUnescape) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    return (
-        f"{indent}{nxt} = [_html_unescape(i) for i in {prv}]\n"
-        # hex unescape
-        + f"{indent}{nxt} = [re.sub(r'&#x([0-9a-fA-F]+);', lambda m: chr(int(m.group(1), 16)), i) for i in {nxt}]\n"
-        + f"{indent}{nxt} = [re.sub(r'\\\\u([0-9a-fA-F]{{4}})', lambda m: chr(int(m.group(1), 16)), i) for i in {nxt}]\n"
-        + f"{indent}{nxt} = [re.sub(r'\\\\x([0-9a-fA-F]{{2}})', lambda m: chr(int(m.group(1), 16)), i) for i in {nxt}]\n"
-        + f"{indent}{nxt} = "
-        # chars
-        + "[i"
-        + r".replace('\\b', '\b')"
-        + r".replace('\\f', '\f')"
-        + r".replace('\\n', '\n')"
-        + r".replace('\\r', '\r')"
-        + r".replace('\\t', '\t')"
-        + f" for i in {nxt}]"
-    )
+    # ssc_unescape(s: str) -> str
+    return f"{indent}{nxt} = [ssc_unescape(i) for i in {prv}]"
