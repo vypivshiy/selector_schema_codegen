@@ -104,14 +104,24 @@ from ssc_codegen.ast_ import (
     ExprListUnique,
     ExprStringMapReplace,
     ExprListStringMapReplace,
+    ExprClassVar,
 )
-from ssc_codegen.ast_.nodes_selectors import ExprMapAttrs, ExprMapAttrsAll
+from ssc_codegen.ast_.nodes_core import ModuleImports
+from ssc_codegen.ast_.nodes_selectors import (
+    ExprCssElementRemove,
+    ExprMapAttrs,
+    ExprMapAttrsAll,
+    ExprXpathElementRemove,
+)
 from ssc_codegen.ast_.nodes_string import (
     ExprListStringUnescape,
     ExprStringUnescape,
 )
 from ssc_codegen.converters.base import BaseCodeConverter
 from ssc_codegen.converters.helpers import (
+    get_classvar_hook_or_value,
+    js_get_classvar_hook_or_value,
+    jsonify_query_parse,
     prev_next_var,
     is_last_var_no_ret,
     have_pre_validate_call,
@@ -119,6 +129,7 @@ from ssc_codegen.converters.helpers import (
     is_prev_node_atomic_cond,
 )
 from ssc_codegen.converters.templates.js_pure import (
+    HELPER_FUNCTIONS,
     J2_STRUCT_INIT,
     J2_START_PARSE_DICT,
     J2_START_PARSE_FLAT_LIST,
@@ -139,7 +150,7 @@ from ssc_codegen.str_utils import (
     wrap_backtick,
     to_upper_camel_case,
 )
-from ssc_codegen.tokens import StructType
+from ssc_codegen.tokens import StructType, TokenType
 
 MAGIC_METHODS = {
     "__ITEM__": "Item",
@@ -158,7 +169,10 @@ CONVERTER = BaseCodeConverter(debug_comment_prefix="// ")
 
 # TODO: move to string_utils
 def to_js_regexp(
-    pattern: str, ignore_case: bool = False, is_global: bool = True
+    pattern: str,
+    ignore_case: bool = False,
+    is_global: bool = True,
+    dotall: bool = False,
 ) -> str:
     """helper function for convert string pattern to js"""
     # fix backslashes translate
@@ -169,6 +183,9 @@ def to_js_regexp(
         pattern += "g"
     if ignore_case:
         pattern += "i"
+    # NOTE: ES9 (ES2018) supports only
+    if dotall:
+        pattern += "s"
     return pattern
 
 
@@ -187,6 +204,11 @@ def py_sequence_to_js_array(values: tuple[str, ...] | list[str]) -> str:
     return "[" + val_arr[1:-1] + "]"
 
 
+@CONVERTER(ModuleImports.kind)
+def pre_imports(_: ModuleImports) -> str:
+    return HELPER_FUNCTIONS
+
+
 @CONVERTER(Docstring.kind)
 def pre_docstring(node: Docstring) -> str:
     value = node.kwargs["value"]
@@ -194,26 +216,16 @@ def pre_docstring(node: Docstring) -> str:
     return docstr
 
 
-@CONVERTER(StructPartDocMethod.kind)
+@CONVERTER(StructPartDocMethod.kind, post_callback=lambda _: BRACKET_END)
 def pre_part_doc(_node: StructPartDocMethod) -> str:
     return "_splitDoc(v) " + BRACKET_START
 
 
-@CONVERTER.post(StructPartDocMethod.kind)
-def post_part_doc(_node: StructPartDocMethod) -> str:
-    return BRACKET_END
-
-
-@CONVERTER(StructParser.kind)
+@CONVERTER(StructParser.kind, post_callback=lambda _: BRACKET_END)
 def pre_struct_parser(node: StructParser) -> str:
     name = node.kwargs["name"]
     docstr = make_js_docstring(node.kwargs["docstring"])
     return docstr + "\n" + f"class {name}" + BRACKET_START
-
-
-@CONVERTER.post(StructParser.kind)
-def post_struct_parser(_node: StructParser) -> str:
-    return BRACKET_END
 
 
 @CONVERTER(ExprReturn.kind)
@@ -238,12 +250,24 @@ def pre_pre_validate(_node: StructPreValidateMethod) -> str:
     return "_preValidate(v)" + BRACKET_START
 
 
-@CONVERTER.post(StructPreValidateMethod.kind)
-def post_pre_validate(_node: StructPreValidateMethod) -> str:
-    return BRACKET_END
+@CONVERTER(ExprClassVar.kind)
+def pre_classvar(node: ExprClassVar) -> str:
+    value, _class_name, field_name, *_ = node.unpack_args()
+
+    # fmt string generate a single line func
+    if "{{}}" in value:
+        value = wrap_backtick(value.replace("{{}}", "${e}"))
+        return f"static {field_name} = (e) => {value}; "
+
+    if isinstance(value, str):
+        value = repr(value)
+    elif isinstance(value, bool):
+        value = "true" if value else "false"
+
+    return f"static {field_name} = (e) => {value}; "
 
 
-@CONVERTER(StructFieldMethod.kind)
+@CONVERTER(StructFieldMethod.kind, post_callback=lambda _: BRACKET_END)
 def pre_parse_field(node: StructFieldMethod) -> str:
     name = node.kwargs["name"]
     name = MAGIC_METHODS.get(name, name)
@@ -251,41 +275,46 @@ def pre_parse_field(node: StructFieldMethod) -> str:
     return f"{fn_name}(v)" + BRACKET_START
 
 
-@CONVERTER.post(StructFieldMethod.kind)
-def post_parse_field(_node: StructFieldMethod) -> str:
-    return BRACKET_END
-
-
-@CONVERTER(StartParseMethod.kind)
-def pre_start_parse_method(_node: StartParseMethod) -> str:
-    return "parse()" + BRACKET_START
-
-
-@CONVERTER.post(StartParseMethod.kind)
-def post_start_parse_method(_node: StartParseMethod) -> str:
-    return BRACKET_END
-
-
 @CONVERTER(StructInitMethod.kind)
 def pre_struct_init(_node: StructInitMethod) -> str:
     return J2_STRUCT_INIT
 
 
-@CONVERTER(StartParseMethod.kind)
+@CONVERTER(StartParseMethod.kind, post_callback=lambda _: BRACKET_END)
 def pre_start_parse(node: StartParseMethod) -> str:
     node.parent = cast(StructParser, node.parent)
     code = "parse() " + BRACKET_START
+
+    if node.parent.struct_type == StructType.CONFIG_CLASSVARS:
+        return ""
+
     if have_pre_validate_call(node):
         code += "this._preValidate(this._doc);"
-
+    # literals ret fetch
     exprs = [
         {
-            "name": expr.kwargs["name"],
-            "upper_name": to_upper_camel_case(expr.kwargs["name"]),
+            "name": expr.kwargs["field_name"],
+            "upper_name": expr.kwargs["struct_name"]
+            + "."
+            + expr.kwargs["field_name"],
+            "is_classvar": True,
         }
         for expr in node.body
-        if not expr.kwargs["name"].startswith("__")
+        if expr.kind == TokenType.STRUCT_CALL_CLASSVAR
     ]
+    # methods call
+    exprs.extend(
+        [
+            {
+                "name": expr.kwargs["name"],
+                "upper_name": to_upper_camel_case(expr.kwargs["name"]),
+                "is_classvar": False,
+            }
+            for expr in node.body
+            if expr.kind == TokenType.STRUCT_CALL_FUNCTION
+            and not expr.kwargs["name"].startswith("__")
+        ]
+    )
 
     match node.parent.struct_type:
         case StructType.ITEM:
@@ -311,129 +340,157 @@ def pre_default_start(node: ExprDefaultValueStart) -> str:
 
 @CONVERTER(ExprDefaultValueEnd.kind)
 def pre_default_end(node: ExprDefaultValueEnd) -> str:
-    value = node.kwargs["value"]
-    if value is None:
-        value = "null"
-    elif isinstance(value, str):
-        value = repr(value)
-    elif isinstance(value, bool):
-        value = "true" if value else "false"
-    elif isinstance(value, list):
-        value = "[]"
+    value = js_get_classvar_hook_or_value(node, "value")
+
     return f"}}catch(Error) {{ return {value}; }}"
 
 
 @CONVERTER(ExprStringFormat.kind)
 def pre_str_fmt(node: ExprStringFormat) -> str:
     prv, nxt = prev_next_var(node)
-    template = wrap_backtick(node.fmt.replace("{{}}", "${" + prv + "}"))
-    return f"let {nxt} = {template};"
+    fmt = js_get_classvar_hook_or_value(
+        node,
+        "fmt",
+        # called classvar signature:
+        # static {CLS_NAME}.{VALUE} = (fmt) => `template ${fmt}`;
+        cb_literal_cast=lambda e: ".".join(e.literal_ref_name) + f"({prv})",
+        cb_value_cast=lambda i: wrap_backtick(
+            i.replace("{{}}", "${" + prv + "}")
+        ),
+    )
+    return f"let {nxt} = {fmt};"
 
 
 @CONVERTER(ExprListStringFormat.kind)
 def pre_list_str_fmt(node: ExprListStringFormat) -> str:
     prv, nxt = prev_next_var(node)
-    template = wrap_backtick(node.fmt.replace("{{}}", "${e}"))
-    return f"let {nxt} = {prv}.map(e => {template});"
+    fmt = js_get_classvar_hook_or_value(
+        node,
+        "fmt",
+        # called classvar signature:
+        # static {CLS_NAME}.{VALUE} = (fmt) => `template ${fmt}`;
+        cb_literal_cast=lambda e: ".".join(e.literal_ref_name) + "(e)",
+        # string input, replace to placeholder
+        cb_value_cast=lambda i: wrap_backtick(i.replace("{{}}", "${e}")),
+    )
+    return f"let {nxt} = {prv}.map(e => {fmt});"
 
 
 @CONVERTER(ExprStringTrim.kind)
 def pre_str_trim(node: ExprStringTrim) -> str:
     prv, nxt = prev_next_var(node)
-    substr = node.kwargs["substr"]
-    return J2_PRE_STR_TRIM.render(nxt=nxt, prv=prv, substr=repr(substr))
+    substr = js_get_classvar_hook_or_value(node, "substr")
+    return J2_PRE_STR_TRIM.render(nxt=nxt, prv=prv, substr=substr)
 
 
 @CONVERTER(ExprListStringTrim.kind)
 def pre_list_str_trim(node: ExprListStringTrim) -> str:
     prv, nxt = prev_next_var(node)
-    substr = node.kwargs["substr"]
-    return J2_PRE_LIST_STR_TRIM.render(prv=prv, nxt=nxt, substr=repr(substr))
+    substr = js_get_classvar_hook_or_value(node, "substr")
+    return J2_PRE_LIST_STR_TRIM.render(prv=prv, nxt=nxt, substr=substr)
 
 
 @CONVERTER(ExprStringLeftTrim.kind)
 def pre_str_left_trim(node: ExprStringLeftTrim) -> str:
     prv, nxt = prev_next_var(node)
-    substr = node.kwargs["substr"]
-    return J2_PRE_STR_LEFT_TRIM.render(prv=prv, nxt=nxt, substr=repr(substr))
+    substr = js_get_classvar_hook_or_value(node, "substr")
+    return J2_PRE_STR_LEFT_TRIM.render(prv=prv, nxt=nxt, substr=substr)
 
 
 @CONVERTER(ExprListStringLeftTrim.kind)
 def pre_list_str_left_trim(node: ExprListStringLeftTrim) -> str:
     prv, nxt = prev_next_var(node)
-    substr = node.kwargs["substr"]
-    return J2_PRE_LIST_STR_LEFT_TRIM.render(
-        prv=prv, nxt=nxt, substr=repr(substr)
-    )
+    substr = js_get_classvar_hook_or_value(node, "substr")
+    return J2_PRE_LIST_STR_LEFT_TRIM.render(prv=prv, nxt=nxt, substr=substr)
 
 
 @CONVERTER(ExprStringRightTrim.kind)
 def pre_str_right_trim(node: ExprStringRightTrim) -> str:
     prv, nxt = prev_next_var(node)
-    substr = node.kwargs["substr"]
-    return J2_PRE_STR_RIGHT_TRIM.render(prv=prv, nxt=nxt, substr=repr(substr))
+    substr = js_get_classvar_hook_or_value(node, "substr")
+    return J2_PRE_STR_RIGHT_TRIM.render(prv=prv, nxt=nxt, substr=substr)
 
 
 @CONVERTER(ExprListStringRightTrim.kind)
 def pre_list_str_right_trim(node: ExprListStringRightTrim) -> str:
     prv, nxt = prev_next_var(node)
-    substr = node.kwargs["substr"]
-    return J2_PRE_LIST_STR_RIGHT_TRIM.render(
-        prv=prv, nxt=nxt, substr=repr(substr)
-    )
+    substr = js_get_classvar_hook_or_value(node, "substr")
+    return J2_PRE_LIST_STR_RIGHT_TRIM.render(prv=prv, nxt=nxt, substr=substr)
 
 
 @CONVERTER(ExprStringSplit.kind)
 def pre_str_split(node: ExprStringSplit) -> str:
     prv, nxt = prev_next_var(node)
-    sep = node.kwargs["sep"]
-    return f"let {nxt} = {prv}.split({sep!r});"
+    sep = js_get_classvar_hook_or_value(node, "sep")
+    return f"let {nxt} = {prv}.split({sep});"
 
 
 @CONVERTER(ExprStringReplace.kind)
 def pre_str_replace(node: ExprStringReplace) -> str:
     prv, nxt = prev_next_var(node)
-    old, new = node.unpack_args()
-    return f"let {nxt} = {prv}.replaceAll({old!r}, {new!r});"
+    old = js_get_classvar_hook_or_value(node, "old")
+    new = js_get_classvar_hook_or_value(node, "new")
+
+    return f"let {nxt} = {prv}.replaceAll({old}, {new});"
 
 
 @CONVERTER(ExprListStringReplace.kind)
 def pre_list_str_replace(node: ExprListStringReplace) -> str:
     prv, nxt = prev_next_var(node)
-    old, new = node.unpack_args()
-    return f"let {nxt} = {prv}.map(e => e.replaceAll({old!r}, {new!r}));"
+    old = js_get_classvar_hook_or_value(node, "old")
+    new = js_get_classvar_hook_or_value(node, "new")
+    return f"let {nxt} = {prv}.map(e => e.replaceAll({old}, {new}));"
 
 
 @CONVERTER(ExprStringRegex.kind)
 def pre_str_regex(node: ExprStringRegex) -> str:
     prv, nxt = prev_next_var(node)
-    pattern, group, ignore_case = node.unpack_args()
-    pattern = to_js_regexp(pattern, ignore_case, is_global=False)
+    pattern, group, ignore_case, dotall = node.unpack_args()
+    if node.classvar_hooks.get("pattern"):
+        pattern = js_get_classvar_hook_or_value(node, "pattern")
+    else:
+        pattern = to_js_regexp(
+            pattern, ignore_case, is_global=False, dotall=dotall
+        )
+
     return f"let {nxt} = {prv}.match({pattern})[{group}];"
 
 
 @CONVERTER(ExprStringRegexAll.kind)
 def pre_str_regex_all(node: ExprStringRegexAll) -> str:
     prv, nxt = prev_next_var(node)
-    pattern, ignore_case = node.unpack_args()
-    pattern = to_js_regexp(pattern, ignore_case)
+    pattern, ignore_case, dotall = node.unpack_args()
+    if node.classvar_hooks.get("pattern"):
+        pattern = js_get_classvar_hook_or_value(node, "pattern")
+    else:
+        pattern = to_js_regexp(pattern, ignore_case, dotall=dotall)
     return f"let {nxt} = Array.from({prv}.match({pattern}));"
 
 
 @CONVERTER(ExprStringRegexSub.kind)
 def pre_str_regex_sub(node: ExprStringRegexSub) -> str:
     prv, nxt = prev_next_var(node)
-    pattern, repl = node.unpack_args()
-    pattern = to_js_regexp(pattern)
+    pattern, repl, ignore_case, dotall = node.unpack_args()
 
-    return f"let {nxt} = {prv}.replace({pattern}, {repl!r});"
+    repl = js_get_classvar_hook_or_value(node, "repl")
+    if node.classvar_hooks.get("pattern"):
+        pattern = js_get_classvar_hook_or_value(node, "pattern")
+    else:
+        pattern = to_js_regexp(pattern, ignore_case=ignore_case, dotall=dotall)
+
+    return f"let {nxt} = {prv}.replace({pattern}, {repl});"
 
 
 @CONVERTER(ExprListStringRegexSub.kind)
 def pre_list_str_regex_sub(node: ExprListStringRegexSub) -> str:
     prv, nxt = prev_next_var(node)
-    pattern, repl = node.unpack_args()
-    pattern = to_js_regexp(pattern)
+    pattern, repl, ignore_case, dotall = node.unpack_args()
+
+    repl = js_get_classvar_hook_or_value(node, "repl")
+    if node.classvar_hooks.get("pattern"):
+        pattern = js_get_classvar_hook_or_value(node, "pattern")
+    else:
+        pattern = to_js_regexp(pattern, ignore_case=ignore_case, dotall=dotall)
 
     return f"let {nxt} = {prv}.map(e => e.replace({pattern}, {repl!r}));"
 
@@ -441,26 +498,25 @@ def pre_list_str_regex_sub(node: ExprListStringRegexSub) -> str:
 @CONVERTER(ExprIndex.kind)
 def pre_index(node: ExprIndex) -> str:
     prv, nxt = prev_next_var(node)
-    index, *_ = node.unpack_args()
+    index = get_classvar_hook_or_value(node, "index")
     return f"let {nxt} = {prv}[{index}];"
 
 
 @CONVERTER(ExprListStringJoin.kind)
 def pre_list_str_join(node: ExprListStringJoin) -> str:
     prv, nxt = prev_next_var(node)
-    sep = node.kwargs["sep"]
-    return f"let {nxt} = {prv}.join({sep!r});"
+    sep = get_classvar_hook_or_value(node, "sep")
+    return f"let {nxt} = {prv}.join({sep});"
 
 
 @CONVERTER(ExprIsEqual.kind)
 def pre_is_equal(node: ExprIsEqual) -> str:
     prv, nxt = prev_next_var(node)
-    item, msg = node.unpack_args()
-    if isinstance(item, str):
-        item = repr(item)
-    elif isinstance(item, bool):
-        item = "true" if item else "false"
-    expr = f"if ({item} != {prv}) throw new Error({msg!r});"
+
+    item = get_classvar_hook_or_value(node, "item")
+    msg = get_classvar_hook_or_value(node, "msg")
+
+    expr = f"if ({item} != {prv}) throw new Error({msg});"
     if is_last_var_no_ret(node):
         return expr
     return expr + f"let {nxt} = {prv};"
@@ -469,30 +525,25 @@ def pre_is_equal(node: ExprIsEqual) -> str:
 @CONVERTER(ExprIsNotEqual.kind)
 def pre_is_not_equal(node: ExprIsNotEqual) -> str:
     prv, nxt = prev_next_var(node)
-    item, msg = node.unpack_args()
-    if isinstance(item, str):
-        item = repr(item)
-    elif isinstance(item, bool):
-        item = "true" if item else "false"
-    expr = f"if ({item} == {prv}) throw new Error({msg!r});"
+
+    item = get_classvar_hook_or_value(node, "item")
+    msg = get_classvar_hook_or_value(node, "msg")
+
+    expr = f"if ({item} == {prv}) throw new Error({msg});"
     if is_last_var_no_ret(node):
         return expr
-    # HACK: avoid recalc variables
     return expr + f"let {nxt} = {prv};"
 
 
 @CONVERTER(ExprIsContains.kind)
 def pre_is_contains(node: ExprIsContains) -> str:
     prv, nxt = prev_next_var(node)
-    item, msg = node.unpack_args()
-    if isinstance(item, str):
-        item = repr(item)
-    elif isinstance(item, bool):
-        item = "true" if item else "false"
-    expr = f"if (!({item} in {prv})) throw new Error({msg!r});"
+    item = get_classvar_hook_or_value(node, "item")
+    msg = get_classvar_hook_or_value(node, "msg")
+
+    expr = f"if (!({item} in {prv})) throw new Error({msg});"
     if is_last_var_no_ret(node):
         return expr
-    # HACK: avoid recalc variables
     return expr + f"let {nxt} = {prv};"
 
 
@@ -500,12 +551,16 @@ def pre_is_contains(node: ExprIsContains) -> str:
 def pre_is_regex(node: ExprStringIsRegex) -> str:
     prv, nxt = prev_next_var(node)
     pattern, ignore_case, msg = node.unpack_args()
-    pattern = to_js_regexp(pattern, ignore_case)
+    msg = get_classvar_hook_or_value(node, "msg")
 
-    expr = f"if ({prv}.match({pattern}) === null) throw new Error({msg!r});"
+    if node.classvar_hooks.get("pattern"):
+        pattern = get_classvar_hook_or_value(node, "pattern")
+    else:
+        pattern = to_js_regexp(pattern, ignore_case)
+
+    expr = f"if ({prv}.match({pattern}) === null) throw new Error({msg});"
     if is_last_var_no_ret(node):
         return expr
-    # HACK: avoid recalc variables
     return expr + f"let {nxt} = {prv};"
 
 
@@ -514,15 +569,15 @@ def pre_list_str_any_is_regex(node: ExprListStringAnyRegex) -> str:
     # a.some(i => (new RegExp("foo")).test(i))
     prv, nxt = prev_next_var(node)
     pattern, ignore_case, msg = node.unpack_args()
-    pattern = pattern.replace("/", "\\/")
-    pattern = f"/{pattern}/g"
-    if ignore_case:
-        pattern += "i"
+    msg = get_classvar_hook_or_value(node, "msg")
+    if node.classvar_hooks.get("pattern"):
+        pattern = get_classvar_hook_or_value(node, "pattern")
+    else:
+        pattern = to_js_regexp(pattern, ignore_case)
 
-    expr = f"if (!{prv}.some(i => (new RegExp({pattern})).test(i))) throw new Error({msg!r});"
+    expr = f"if (!{prv}.some(i => (new RegExp({pattern})).test(i))) throw new Error({msg});"
     if is_last_var_no_ret(node):
         return expr
-    # HACK: avoid recalc variables
     return expr + f"let {nxt} = {prv};"
 
 
@@ -531,23 +586,26 @@ def pre_list_str_all_is_regex(node: ExprListStringAllRegex) -> str:
     prv, nxt = prev_next_var(node)
     # a.every(i => (new RegExp("foo")).test)
     pattern, ignore_case, msg = node.unpack_args()
-    pattern = pattern.replace("/", "\\/")
-    pattern = f"/{pattern}/g"
-    if ignore_case:
-        pattern += "i"
 
-    expr = f"if (!{prv}.every(i => (new RegExp({pattern})).test(i))) throw new Error({msg!r});"
+    msg = get_classvar_hook_or_value(node, "msg")
+    if node.classvar_hooks.get("pattern"):
+        pattern = get_classvar_hook_or_value(node, "pattern")
+    else:
+        pattern = to_js_regexp(pattern, ignore_case)
+
+    expr = f"if (!{prv}.every(i => (new RegExp({pattern})).test(i))) throw new Error({msg});"
     if is_last_var_no_ret(node):
         return expr
-    # HACK: avoid recalc variables
     return expr + f"let {nxt} = {prv};"
 
 
 @CONVERTER(ExprIsCss.kind)
 def pre_is_css(node: ExprIsCss) -> str:
     prv, nxt = prev_next_var(node)
-    query, msg = node.unpack_args()
-    expr = f"if ({prv}.querySelector({query!r}) === null) throw new Error({msg!r});"
+    query = get_classvar_hook_or_value(node, "query")
+    msg = get_classvar_hook_or_value(node, "msg")
+
+    expr = f"if ({prv}.querySelector({query}) === null) throw new Error({msg});"
     if is_last_var_no_ret(node):
         return expr
     # HACK: avoid recalc variables
@@ -557,13 +615,12 @@ def pre_is_css(node: ExprIsCss) -> str:
 @CONVERTER(ExprIsXpath.kind)
 def pre_is_xpath(node: ExprIsXpath) -> str:
     prv, nxt = prev_next_var(node)
-    query, msg = node.unpack_args()
-    msg = repr(msg)
-    expr = J2_IS_XPATH.render(prv=prv, nxt=nxt, msg=msg)
+    query = get_classvar_hook_or_value(node, "query")
+    msg = get_classvar_hook_or_value(node, "msg")
+
+    expr = J2_IS_XPATH.render(prv=prv, nxt=nxt, msg=msg, query=query)
     if is_last_var_no_ret(node):
         return expr
-    # HACK: avoid recalc variables
-    # TODO: move to j2 template
     return expr + f"let {nxt} = {prv};"
 
 
@@ -606,34 +663,37 @@ def pre_to_bool(node: ExprToBool) -> str:
 @CONVERTER(ExprJsonify.kind)
 def pre_jsonify(node: ExprJsonify) -> str:
     prv, nxt = prev_next_var(node)
-    return f"let {nxt} = JSON.parse({prv});"
+    _, _, query = node.unpack_args()
+    expr = "".join(f"[{i}]" for i in jsonify_query_parse(query))
+
+    return f"let {nxt} = JSON.parse({prv}){expr};"
 
 
 @CONVERTER(ExprCss.kind)
 def pre_css(node: ExprCss) -> str:
     prv, nxt = prev_next_var(node)
-    query = node.kwargs["query"]
-    return f"let {nxt} = {prv}.querySelector({query!r});"
+    query = get_classvar_hook_or_value(node, "query")
+    return f"let {nxt} = {prv}.querySelector({query});"
 
 
 @CONVERTER(ExprCssAll.kind)
 def pre_css_all(node: ExprCssAll) -> str:
     prv, nxt = prev_next_var(node)
-    query = node.kwargs["query"]
-    return f"let {nxt} = Array.from({prv}.querySelectorAll({query!r}));"
+    query = get_classvar_hook_or_value(node, "query")
+    return f"let {nxt} = Array.from({prv}.querySelectorAll({query}));"
 
 
 @CONVERTER(ExprXpath.kind)
 def pre_xpath(node: ExprXpath) -> str:
     prv, nxt = prev_next_var(node)
-    query = node.kwargs["query"]
+    query = get_classvar_hook_or_value(node, "query")
     return J2_PRE_XPATH.render(prv=prv, nxt=nxt, query=query)
 
 
 @CONVERTER(ExprXpathAll.kind)
 def pre_xpath_all(node: ExprXpathAll) -> str:
     prv, nxt = prev_next_var(node)
-    query = node.kwargs["query"]
+    query = get_classvar_hook_or_value(node, "query")
     snapshot_var = f"s{nxt}"
     return J2_PRE_XPATH_ALL.render(
         prv=prv, nxt=nxt, query=query, snapshot_var=snapshot_var
@@ -696,39 +756,41 @@ def pre_html_raw_all(node: ExprGetHtmlRawAll) -> str:
 @CONVERTER(ExprStringRmPrefix.kind)
 def pre_str_rm_prefix(node: ExprStringRmPrefix) -> str:
     prv, nxt = prev_next_var(node)
-    substr = repr(node.kwargs["substr"])
-    return f"let {nxt} = {prv}.startsWith({substr}) ? {prv}.slice({substr}.length) : {prv};"
+    substr = get_classvar_hook_or_value(node, "substr")
+    #  sscRmPrefix = (v, p)
+    return f"let {nxt} = sscRmPrefix({prv}, {substr});"
 
 
 @CONVERTER(ExprListStringRmPrefix.kind)
 def pre_list_str_rm_prefix(node: ExprListStringRmPrefix) -> str:
     prv, nxt = prev_next_var(node)
-    substr = repr(node.kwargs["substr"])
-    return f"let {nxt} = {prv}.map((e) => e.startsWith({substr}) ? e.slice({substr}.length) : e);"
+    substr = get_classvar_hook_or_value(node, "substr")
+    #  sscRmPrefix = (v, p)
+    return f"let {nxt} = {prv}.map((e) => sscRmPrefix(e, {substr}));"
 
 
 @CONVERTER(ExprStringRmSuffix.kind)
 def pre_str_rm_suffix(node: ExprStringRmSuffix) -> str:
     prv, nxt = prev_next_var(node)
-    substr = repr(node.kwargs["substr"])
-    return f"let {nxt} = {prv}.endsWith({substr}) ? {prv}.slice(0, -{substr}.length) : {prv};"
+    substr = get_classvar_hook_or_value(node, "substr")
+    # sscRmSuffix = (v, s)
+    return f"let {nxt} = sscRmSuffix({prv}, {substr});"
 
 
 @CONVERTER(ExprListStringRmSuffix.kind)
 def pre_list_str_rm_suffix(node: ExprListStringRmSuffix) -> str:
     prv, nxt = prev_next_var(node)
-    substr = repr(node.kwargs["substr"])
-    return f"let {nxt} = {prv}.map((e) => e.endsWith({substr}) ? e.slice(0, -{substr}.length) : e);"
+    substr = get_classvar_hook_or_value(node, "substr")
+    # sscRmSuffix = (v, s)
+    return f"let {nxt} = {prv}.map((e) => sscRmSuffix(e, {substr}));"
 
 
 @CONVERTER(ExprStringRmPrefixAndSuffix.kind)
 def pre_str_rm_prefix_and_suffix(node: ExprStringRmPrefixAndSuffix) -> str:
     prv, nxt = prev_next_var(node)
-    substr = repr(node.kwargs["substr"])
-    return (
-        f"let {nxt} = {prv}.startsWith({substr}) ? {prv}.slice({substr}.length) : {prv}; "
-        + f"{nxt} = {nxt}.endsWith({substr}) ? {prv}.slice(0, -{substr}.length) : {prv};"
-    )
+    substr = get_classvar_hook_or_value(node, "substr")
+    # sscRmPrefixSuffix = (v, p, s)
+    return f"let {nxt} = sscRmPrefixSuffix({prv}, {substr}, {substr});"
 
 
 @CONVERTER(ExprListStringRmPrefixAndSuffix.kind)
@@ -736,18 +798,18 @@ def pre_list_str_rm_prefix_and_suffix(
     node: ExprListStringRmPrefixAndSuffix,
 ) -> str:
     prv, nxt = prev_next_var(node)
-    substr = repr(node.kwargs["substr"])
-    return (
-        f"let {nxt} = {prv}.map((e) => e.startsWith({substr}) ? e.slice({substr}.length) : e);"
-        + f"{nxt} = {nxt}.map((e) => e.endsWith({substr}) ? e.slice(0, -{substr}.length) : e);"
-    )
+    substr = get_classvar_hook_or_value(node, "substr")
+    # sscRmPrefixSuffix = (v, p, s)
+    return f"let {nxt} = {prv}.map((e) => sscRmPrefixSuffix(e,{substr}, {substr}));"
 
 
 @CONVERTER(ExprHasAttr.kind)
 def pre_has_attr(node: ExprHasAttr) -> str:
     prv, nxt = prev_next_var(node)
-    key, msg = node.unpack_args()
-    expr = f"if (!{prv}?.hasAttribute({key!r})) throw new Error({msg!r});"
+    key = get_classvar_hook_or_value(node, "key")
+    msg = get_classvar_hook_or_value(node, "msg")
+
+    expr = f"if (!{prv}?.hasAttribute({key})) throw new Error({msg});"
     if is_last_var_no_ret(node):
         return expr
     return expr + f"let {nxt} = {prv};"
@@ -756,52 +818,34 @@ def pre_has_attr(node: ExprHasAttr) -> str:
 @CONVERTER(ExprListHasAttr.kind)
 def pre_list_has_attr(node: ExprListHasAttr) -> str:
     prv, nxt = prev_next_var(node)
-    key, msg = node.unpack_args()
-    expr = f"if (!{prv}.every(e => e?.hasAttribute({key!r}))) throw new Error({msg!r});"
+    key = get_classvar_hook_or_value(node, "key")
+    msg = get_classvar_hook_or_value(node, "msg")
+
+    expr = f"if (!{prv}.every(e => e?.hasAttribute({key}))) throw new Error({msg});"
     if is_last_var_no_ret(node):
         return expr
     return expr + f"let {nxt} = {prv};"
 
 
-@CONVERTER(ExprFilter.kind)
+@CONVERTER(ExprFilter.kind, post_callback=lambda _: ");")
 def pre_expr_filter(node: ExprFilter) -> str:
     prv, nxt = prev_next_var(node)
     return f"let {nxt} = {prv}.filter(i => "
 
 
-@CONVERTER.post(ExprFilter.kind)
-def post_expr_filter(_node: ExprFilter) -> str:
-    return ");"
-
-
-@CONVERTER(FilterOr.kind)
+@CONVERTER(FilterOr.kind, post_callback=lambda _: ")")
 def pre_filter_or(_node: FilterOr) -> str:
     return " || ("
 
 
-@CONVERTER.post(FilterOr.kind)
-def post_filter_or(_node: FilterOr) -> str:
-    return ")"
-
-
-@CONVERTER(FilterAnd.kind)
+@CONVERTER(FilterAnd.kind, post_callback=lambda _: ")")
 def pre_filter_and(_node: FilterAnd) -> str:
     return " && ("
 
 
-@CONVERTER.post(FilterAnd.kind)
-def post_filter_and(_node: FilterAnd) -> str:
-    return ")"
-
-
-@CONVERTER(FilterNot.kind)
+@CONVERTER(FilterNot.kind, post_callback=lambda _: ")")
 def pre_filter_not(_node: FilterNot) -> str:  # type: ignore
     return "!("
-
-
-@CONVERTER.post(FilterNot.kind)
-def post_filter_not(_node: FilterNot) -> str:
-    return ")"
 
 
 @CONVERTER(FilterStrIn.kind)
@@ -868,7 +912,7 @@ def pre_filter_eq(node: FilterEqual) -> str:
     else:
         val_arr = str(values)
         val_arr = "[" + val_arr[1:-1] + "]"
-        expr = f"{val_arr}.every(e => i === e)"
+        expr = f"{val_arr}.some(e => i === e)"
     if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
         return f" && {expr}"
     return expr
@@ -945,7 +989,7 @@ def pre_filter_str_len_ge(node: FilterStrLenGe) -> str:
 @CONVERTER(ExprListUnique.kind)
 def pre_list_unique(node: ExprListUnique) -> str:
     prv, nxt = prev_next_var(node)
-    # save order guaranteed
+    # elements order guaranteed, ignore node's argument `keep_oreder`
     # https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set#description
     return f"let {nxt} = [...new Set({prv})]; "
 
@@ -953,16 +997,17 @@ def pre_list_unique(node: ExprListUnique) -> str:
 @CONVERTER(ExprStringMapReplace.kind)
 def pre_str_map_repl(node: ExprStringMapReplace) -> str:
     old_arr, new_arr = node.unpack_args()
+    # py list<str> literal syntax equal js Array<string> literal
     old_arr = list(old_arr)  # type: ignore
     new_arr = list(new_arr)  # type: ignore
     prv, nxt = prev_next_var(node)
-    # py list<str> literal syntax equal js Array<string> literal
     return f"let {nxt} = {old_arr}.reduce((s, v, i) => s.replaceAll(v, {new_arr}[i] ?? ''), {prv});"
 
 
 @CONVERTER(ExprListStringMapReplace.kind)
 def pre_list_str_map_repl(node: ExprListStringMapReplace) -> str:
     old_arr, new_arr = node.unpack_args()
+    # py list<str> literal syntax equal js Array<string> literal
     old_arr = list(old_arr)  # type: ignore
     new_arr = list(new_arr)  # type: ignore
     prv, nxt = prev_next_var(node)
@@ -972,41 +1017,15 @@ def pre_list_str_map_repl(node: ExprListStringMapReplace) -> str:
 @CONVERTER(ExprStringUnescape.kind)
 def pre_str_unescape(node: ExprStringUnescape) -> str:
     prv, nxt = prev_next_var(node)
-    return (
-        f"let {nxt} = {prv}"
-        + ".replace(/&amp;/g, '&')"
-        + ".replace(/&lt;/g, '<')"
-        + ".replace(/&gt;/g, '>')"
-        + ".replace(/&quot;/g, '\"')"
-        + '.replace(/&#039;/g, "\'")'
-        + ".replace(/&#x2F;/g, '/')"
-        + ".replace(/&nbsp;/g, ' ')"
-        + ".replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))"
-        + r".replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))"
-        + r".replace(/\\x([0-9a-fA-F]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))"
-        + r".replace(/\\([bfnrt])/g, (_, ch) => ({b:'\\b',f:'\\f',n:'\\n',r:'\\r',t:'\\t'})[ch])"
-        + ";"
-    )
+    # function sscUnescape(v)
+    return f"let {nxt} = sscUnescape{prv});"
 
 
 @CONVERTER(ExprListStringUnescape.kind)
 def pre_list_str_unescape(node: ExprListStringUnescape) -> str:
     prv, nxt = prev_next_var(node)
-    return (
-        f"let {nxt} = {prv}.map(s => s"
-        + ".replace(/&amp;/g, '&')"
-        + ".replace(/&lt;/g, '<')"
-        + ".replace(/&gt;/g, '>')"
-        + ".replace(/&quot;/g, '\"')"
-        + '.replace(/&#039;/g, "\'")'
-        + ".replace(/&#x2F;/g, '/')"
-        + ".replace(/&nbsp;/g, ' ')"
-        + ".replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))"
-        + r".replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))"
-        + r".replace(/\\x([0-9a-fA-F]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))"
-        + r".replace(/\\([bfnrt])/g, (_, ch) => ({b:'\b',f:'\f',n:'\n',r:'\r',t:'\\t'})[ch])"
-        + ");"
-    )
+    # function sscUnescape(v)
+    return f"let {nxt} = {prv}.map(s => sscUnescape(s));"
 
 
 @CONVERTER(ExprMapAttrs.kind)
@@ -1019,3 +1038,20 @@ def pre_map_attrs(node: ExprMapAttrs) -> str:
 def pre_map_attrs_all(node: ExprMapAttrsAll) -> str:
     prv, nxt = prev_next_var(node)
     return f"let {nxt} = [].concat(...{prv}.map(e => Array.from(e.attributes).map(a => a.value))); "
+
+
+@CONVERTER(ExprCssElementRemove.kind)
+def pre_css_remove(node: ExprCssElementRemove) -> str:
+    prv, nxt = prev_next_var(node)
+    query = get_classvar_hook_or_value(node, "query")
+    return f"document.querySelectorAll({query}).forEach(el => el.remove()); let {nxt} = {prv};"
+
+
+@CONVERTER(ExprXpathElementRemove.kind)
+def pre_xpath_remove(node: ExprXpathElementRemove) -> str:
+    prv, nxt = prev_next_var(node)
+    query = get_classvar_hook_or_value(node, "query")
+    return (
+        f"for (let {prv}r = document.evaluate({query}, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null), {prv}i = {prv}r.snapshotLength; {prv}i--; ) {prv}r.snapshotItem({prv}i).remove(); "
+        + f"let {nxt} = {prv}; "
+    )
