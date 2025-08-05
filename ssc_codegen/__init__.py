@@ -1,4 +1,4 @@
-from ssc_codegen.document import HTMLDocument, StringDocument, ArrayDocument, AssertDocument, NestedDocument, \
+from ssc_codegen.document import HTMLDocument, ClassVarDocument, StringDocument, ArrayDocument, AssertDocument, NestedDocument, \
     DefaultDocument, \
     NumericDocument, JsonDocument, BooleanDocument, DocumentFilter
 from ssc_codegen.json_struct import Json
@@ -64,3 +64,29 @@ def R(default: None | str | int | float | list | __MISSING = _NO_DEFAULT) -> Doc
 def F() -> DocumentFilter:
     """Shortcut as a DocumentFilter() object"""
     return DocumentFilter()
+
+
+def CV(value, self_cls_path: str | None = None, *, returns: bool = False) -> ClassVarDocument:
+    """Shortcut as ClassVarDocument(value, self_cls, parse_returns) object
+
+    pass `self_cls_path` argument if need use this var inner schema context:
+
+    self_cls_path use case example:
+
+```
+class B(ItemSchema):
+    # dont need pass class and attr names
+    C = CV("test {{}}")
+
+class A(ItemShema):
+    # current impl cannot be extract class and field names
+    # need pass it manually
+    C1 = CV("title", "A.C1")
+
+    title = D().css(C1).text().fmt(C)
+
+```
+
+    """
+    
+    return ClassVarDocument(value, self_cls_path, parse_returns=returns)
