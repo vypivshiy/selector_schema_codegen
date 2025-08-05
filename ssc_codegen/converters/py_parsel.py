@@ -19,11 +19,17 @@ from ssc_codegen.ast_ import (
     ExprListHasAttr,
     ExprHasAttr,
 )
-from ssc_codegen.ast_.nodes_selectors import ExprMapAttrs, ExprMapAttrsAll
+from ssc_codegen.ast_.nodes_selectors import (
+    ExprCssElementRemove,
+    ExprMapAttrs,
+    ExprMapAttrsAll,
+    ExprXpathElementRemove,
+)
 from ssc_codegen.converters.helpers import (
     prev_next_var,
     have_default_expr,
     is_last_var_no_ret,
+    py_get_classvar_hook_or_value,
 )
 from ssc_codegen.converters.py_base import (
     BasePyCodeConverter,
@@ -33,6 +39,7 @@ from ssc_codegen.converters.py_base import (
     MAGIC_METHODS,
     get_field_method_ret_type,
 )
+from ssc_codegen.converters.templates.py_base import IMPORTS_MIN
 
 CONVERTER = BasePyCodeConverter()
 
@@ -74,9 +81,9 @@ def pre_struct_field_method(node: StructFieldMethod) -> str:
     )
 
 
-@CONVERTER.post(ModuleImports.kind)
-def post_imports(_: ModuleImports) -> str:
-    return """from parsel import Selector, SelectorList"""
+@CONVERTER(ModuleImports.kind)
+def pre_imports(_: ModuleImports) -> str:
+    return IMPORTS_MIN + "from parsel import Selector, SelectorList"
 
 
 @CONVERTER(ExprCss.kind)
@@ -85,8 +92,8 @@ def pre_css(node: ExprCss) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    query = node.kwargs["query"]
-    return indent + f"{nxt} = {prv}.css({query!r})"
+    query = py_get_classvar_hook_or_value(node, "query")
+    return indent + f"{nxt} = {prv}.css({query})"
 
 
 @CONVERTER(ExprCssAll.kind)
@@ -95,8 +102,8 @@ def pre_css_all(node: ExprCssAll) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    query = node.kwargs["query"]
-    return indent + f"{nxt} = {prv}.css({query!r})"
+    query = py_get_classvar_hook_or_value(node, "query")
+    return indent + f"{nxt} = {prv}.css({query})"
 
 
 @CONVERTER(ExprXpath.kind)
@@ -105,8 +112,8 @@ def pre_xpath(node: ExprXpath) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    query = node.kwargs["query"]
-    return indent + f"{nxt} = {prv}.xpath({query!r})"
+    query = py_get_classvar_hook_or_value(node, "query")
+    return indent + f"{nxt} = {prv}.xpath({query})"
 
 
 @CONVERTER(ExprXpathAll.kind)
@@ -115,8 +122,8 @@ def pre_xpath_all(node: ExprXpathAll) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    query = node.kwargs["query"]
-    return indent + f"{nxt} = {prv}.xpath({query!r})"
+    query = py_get_classvar_hook_or_value(node, "query")
+    return indent + f"{nxt} = {prv}.xpath({query})"
 
 
 @CONVERTER(ExprGetHtmlAttr.kind)
@@ -193,8 +200,10 @@ def pre_is_css(node: ExprIsCss) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    query, msg = node.unpack_args()
-    expr = indent + f"assert {prv}.css({query!r}), {msg!r}"
+    query = py_get_classvar_hook_or_value(node, "query")
+    msg = py_get_classvar_hook_or_value(node, "msg")
+
+    expr = indent + f"assert {prv}.css({query}), {msg}"
     if is_last_var_no_ret(node):
         return expr
     return expr + "\n" + indent + f"{nxt} = {prv}"
@@ -206,8 +215,10 @@ def pre_is_xpath(node: ExprIsXpath) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    query, msg = node.unpack_args()
-    expr = indent + f"assert {prv}.xpath({query!r}), {msg!r}"
+    query = py_get_classvar_hook_or_value(node, "query")
+    msg = py_get_classvar_hook_or_value(node, "msg")
+
+    expr = indent + f"assert {prv}.xpath({query}), {msg}"
     if is_last_var_no_ret(node):
         return expr
     return expr + "\n" + indent + f"{nxt} = {prv}"
@@ -219,7 +230,9 @@ def pre_has_attr(node: ExprHasAttr) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    key, msg = node.unpack_args()
+    key = py_get_classvar_hook_or_value(node, "key")
+    msg = py_get_classvar_hook_or_value(node, "msg")
+
     expr = indent + f"assert {prv}.attrib.get({key!r}, None), {msg!r}"
     if is_last_var_no_ret(node):
         return expr
@@ -232,7 +245,9 @@ def pre_list_has_attr(node: ExprListHasAttr) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    key, msg = node.unpack_args()
+    key = py_get_classvar_hook_or_value(node, "key")
+    msg = py_get_classvar_hook_or_value(node, "msg")
+
     expr = (
         indent
         + f"assert all(i.attrib.get({key!r}, None) for i in {prv}), {msg!r}"
@@ -258,3 +273,35 @@ def pre_map_attrs_all(node: ExprMapAttrsAll) -> str:
     )
     prv, nxt = prev_next_var(node)
     return indent + f"{nxt} = [i for e in {prv} for i in e.attrib.values()]"
+
+
+@CONVERTER(ExprCssElementRemove.kind)
+def pre_css_remove(node: ExprCssElementRemove) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    query = py_get_classvar_hook_or_value(node, "query")
+
+    return (
+        indent
+        + f"[i.root.getparent().remove(i.root) for i in {prv}.css({query})]\n"
+        + indent
+        + f"{nxt} = {prv}"
+    )
+
+
+@CONVERTER(ExprXpathElementRemove.kind)
+def pre_xpath_remove(node: ExprXpathElementRemove) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    query = py_get_classvar_hook_or_value(node, "query")
+
+    return (
+        indent
+        + f"[i.root.getparent().remove(i.root) for i in {prv}.xpath({query})]\n"
+        + indent
+        + f"{nxt} = {prv}"
+    )

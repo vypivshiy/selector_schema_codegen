@@ -19,11 +19,17 @@ from ssc_codegen.ast_ import (
     ExprHasAttr,
     ExprListHasAttr,
 )
-from ssc_codegen.ast_.nodes_selectors import ExprMapAttrs, ExprMapAttrsAll
+from ssc_codegen.ast_.nodes_selectors import (
+    ExprCssElementRemove,
+    ExprMapAttrs,
+    ExprMapAttrsAll,
+    ExprXpathElementRemove,
+)
 from ssc_codegen.converters.helpers import (
     prev_next_var,
     have_default_expr,
     is_last_var_no_ret,
+    py_get_classvar_hook_or_value,
 )
 from ssc_codegen.converters.py_base import (
     BasePyCodeConverter,
@@ -32,6 +38,9 @@ from ssc_codegen.converters.py_base import (
     INDENT_METHOD,
     MAGIC_METHODS,
     get_field_method_ret_type,
+)
+from ssc_codegen.converters.templates.py_base import (
+    IMPORTS_MIN,
 )
 
 CONVERTER = BasePyCodeConverter()
@@ -74,9 +83,12 @@ def pre_struct_field_method(node: StructFieldMethod) -> str:
     )
 
 
-@CONVERTER.post(ModuleImports.kind)
-def post_imports(_: ModuleImports) -> str:
-    return "from bs4 import BeautifulSoup, ResultSet, Tag  # noqa (for typing)"
+@CONVERTER.pre(ModuleImports.kind)
+def pre_imports(_: ModuleImports) -> str:
+    return (
+        IMPORTS_MIN
+        + "from bs4 import BeautifulSoup, ResultSet, Tag  # noqa (for typing)"
+    )
 
 
 @CONVERTER(ExprCss.kind)
@@ -85,8 +97,9 @@ def pre_css(node: ExprCss) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    query = node.kwargs["query"]
-    return indent + f"{nxt} = {prv}.select_one({query!r})"
+    query = py_get_classvar_hook_or_value(node, "query")
+
+    return indent + f"{nxt} = {prv}.select_one({query})"
 
 
 @CONVERTER(ExprCssAll.kind)
@@ -95,8 +108,9 @@ def pre_css_all(node: ExprCssAll) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    query = node.kwargs["query"]
-    return indent + f"{nxt} = {prv}.select({query!r})"
+    query = py_get_classvar_hook_or_value(node, "query")
+
+    return indent + f"{nxt} = {prv}.select({query})"
 
 
 @CONVERTER(ExprGetHtmlAttr.kind)
@@ -179,8 +193,10 @@ def pre_is_css(node: ExprIsCss) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    query, msg = node.unpack_args()
-    expr = indent + f"assert {prv}.select_one({query!r}), {msg!r}"
+    query = py_get_classvar_hook_or_value(node, "query")
+    msg = py_get_classvar_hook_or_value(node, "msg")
+
+    expr = indent + f"assert {prv}.select_one({query}), {msg}"
     if is_last_var_no_ret(node):
         return expr
     return expr + "\n" + indent + f"{nxt} = {prv}"
@@ -192,8 +208,10 @@ def pre_has_attr(node: ExprHasAttr) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    key, msg = node.unpack_args()
-    expr = indent + f"assert {prv}.get({key!r}, None), {msg!r}"
+    key = py_get_classvar_hook_or_value(node, "key")
+    msg = py_get_classvar_hook_or_value(node, "msg")
+
+    expr = indent + f"assert {prv}.get({key!r}, None), {msg}"
     if is_last_var_no_ret(node):
         return expr
     return expr + "\n" + indent + f"{nxt} = {prv}"
@@ -205,8 +223,9 @@ def pre_list_has_attr(node: ExprListHasAttr) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    key, msg = node.unpack_args()
-    expr = indent + f"assert all(i.get({key!r}, None) for i in {prv}), {msg!r}"
+    key = py_get_classvar_hook_or_value(node, "key")
+    msg = py_get_classvar_hook_or_value(node, "msg")
+    expr = indent + f"assert all(i.get({key}, None) for i in {prv}), {msg}"
     if is_last_var_no_ret(node):
         return expr
     return expr + "\n" + indent + f"{nxt} = {prv}"
@@ -236,6 +255,21 @@ def pre_map_attrs_all(node: ExprMapAttrsAll) -> str:
     )
 
 
+@CONVERTER(ExprCssElementRemove.kind)
+def pre_css_remove(node: ExprCssElementRemove) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    query = py_get_classvar_hook_or_value(node, "query")
+    return (
+        indent
+        + f"[i.decompose() for i in {prv}.select({query})]\n"
+        + indent
+        + f"{nxt} = {prv}"
+    )
+
+
 # NOT SUPPORT
 @CONVERTER(ExprXpath.kind)
 def pre_xpath(_: ExprXpath) -> str:
@@ -249,4 +283,9 @@ def pre_xpath_all(_: ExprXpathAll) -> str:
 
 @CONVERTER(ExprIsXpath.kind)
 def pre_is_xpath(_: ExprIsXpath) -> str:
+    raise NotImplementedError("bs4 not support xpath")
+
+
+@CONVERTER(ExprXpathElementRemove.kind)
+def pre_xpath_remove(_: ExprXpathElementRemove) -> str:
     raise NotImplementedError("bs4 not support xpath")
