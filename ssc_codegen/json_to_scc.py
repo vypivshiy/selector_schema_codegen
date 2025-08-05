@@ -138,19 +138,20 @@ def convert_json_to_schema_code(
     """convert json-like string or python dict to schema code"""
     LOGGER.debug("Start convert json")
     jsn = json.loads(data) if isinstance(data, str) else data
-    parts = json_start_path.split(".")
-    for i, part in enumerate(parts):
-        part = int(part) if part.isdigit() else part
-        try:
-            jsn = jsn[part]
-        except IndexError as e:
-            last_part = ".".join(parts[:i])
-            LOGGER.error("`%s`, json index not exists", last_part)
-            raise e
-        except KeyError as e:
-            last_part = ".".join(parts[:i])
-            LOGGER.error("`%s`, json key not exists", last_part)
-            raise e
+    if json_start_path:
+        parts = json_start_path.split(".")
+        for i, part in enumerate(parts):
+            part = int(part) if part.isdigit() else part
+            try:
+                jsn = jsn[part]
+            except IndexError as e:
+                last_part = ".".join(parts[:i])
+                LOGGER.error("`%s`, json index not exists", last_part)
+                raise e
+            except KeyError as e:
+                last_part = ".".join(parts[:i])
+                LOGGER.error("`%s`, json key not exists", last_part)
+                raise e
 
     data = json.dumps(jsn)
     code, sub_codes = json_response_to_schema_code(data, start_name_entrypoint)
@@ -176,4 +177,3 @@ if __name__ == "__main__":
     print(out)
     out = convert_json_to_schema_code(jsn2, "Content")
     print(out)
-
