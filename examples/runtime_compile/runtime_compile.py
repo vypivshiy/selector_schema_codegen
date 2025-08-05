@@ -1,4 +1,10 @@
-# EXPERIMENTAL FEATURE: compile ssc_gen config in runtime and run
+"""EXPERIMENTAL FEATURE: compile ssc_gen config in runtime and run
+
+WARNING:
+
+    Do not use this feature in real projects, this module used for testing purposes
+"""
+# 
 
 from ssc_codegen.compiler import Compiler
 from ssc_codegen.converters.py_parsel import CONVERTER

@@ -1,22 +1,20 @@
 # Tutorial
 
-## booksToScrape
+## books.toscrape
 
 Write web scraper for fictional bookstore https://books.toscrape.com/
 
-### ItemSchema class. Extract pagination urls
-
-#### Prepare
+### pagination links
 
 Go to the second page (https://books.toscrape.com/catalogue/page-2.html) and scroll to the end.
 
-![](assets/t_bookstoscrape_1.png)
+![](../docs/assets/t_bookstoscrape_1.png)
 
 ```html
 <li class="previous"><a href="page-1.html">previous</a></li>
 ```
 
-![](assets/t_bookstoscrape_2.png)
+![](../docs/assets/t_bookstoscrape_2.png)
 
 ```html
 <li class="next"><a href="page-3.html">next</a></li>
@@ -33,11 +31,25 @@ This example extracts the pagination fields:
 # examples/tutorial/booksToScrape/schema1.py
 from ssc_codegen import ItemSchema, D
 
+# this main project idea documentate everything!
 class MainCatalogue(ItemSchema):
-    # in start pagination not exists this tag, set None
+    """Extract pagination urls
+
+    Usage Examples:
+
+        - GET https://books.toscrape.com/
+        - GET https://books.toscrape.com/catalogue/page-2.html
+        - GET https://books.toscrape.com/catalogue/page-50.html
+
+    Issues:
+
+        - on the first page, prev_page = None
+        - on the last page, next_page = None
+    """
     prev_page = D().default(None).css('.previous a').attr('href')
-    # in end pagination not exists this tag, set None
-    next_page = D().default(None).css('.next a').attr('href')
+    # shortcut: D(None) == D().default(None)
+    # pseudo selector ::attr(href) equal call .attr(href) mehtod
+    next_page = D(None).css('.next a::attr(href)')
 ```
 
 The action steps for every field extraction are described by a chain of expression calls:
@@ -45,57 +57,64 @@ The action steps for every field extraction are described by a chain of expressi
 - `default` - special expression: if the code block for field throw an error, set the default value.
 In this case, there may be missing elements at the start (..page-1.html) and end of pagination (..page-50.html)
 - `css` - CSS selector
-- `attr` - extract value from element by attribute 
-
+- `attr` - extract value from element by attribute key
 
 Run code via shell:
 
 >[!note]
-> in real projects, recommended download a real html page for local testing code
+> in real projects, recommended download a real html page for local development stage
 
 
 ```shell
 # from file
-ssc-gen parse-from-url "https://books.toscrape.com/catalogue/page-2.html" -t schema1.py:MainCatalogue
+ssc-gen parse-from-url "https://books.toscrape.com/catalogue/page-2.html" -t schema.py:MainCatalogue
 #{
 #  "prev_page": "page-1.html",
 #  "next_page": "page-3.html"
 #}
-ssc-gen parse-from-url "https://books.toscrape.com" -t schema1.py:MainCatalogue
+ssc-gen parse-from-url "https://books.toscrape.com" -t schema.py:MainCatalogue
 #{
 #  "prev_page": null,
 #  "next_page": "catalogue/page-2.html"
 #}
+ssc-gen parse-from-url "https://books.toscrape.com/catalogue/page-50.html" -t schema.py:MainCatalogue
+#{
+#  "prev_page": catalogue/page-49.html,
+#  "next_page": null
+#}
 ```
 
-Cool, its work! Add current page field and format pagination paths to full url
+Cool, its work! Add current page field and format pagination paths to full url and override fields to compact syntax
 
 ```python
-# examples/tutorial/booksToScrape/schema2.py
 from ssc_codegen import ItemSchema, D
 
 FMT_URL = "https://books.toscrape.com/catalogue/{{}}"
 FMT_URL_CURRENT = "https://books.toscrape.com/catalogue/page-{{}}.html"
 
 class MainCatalogue(ItemSchema):
-    # steps:
-    # 1. set default if teg will be not founded
-    # 2. get tag by css query
-    # 3. get [href] attribute
-    # 4. rm_prefix remove left substring for remove subchars use ltrim
-    # 5. fmt - format previous string by passed template
-    prev_page = D().default(None).css('.previous a').attr('href').rm_prefix('catalogue/').fmt(FMT_URL)
-    next_page = D().default(None).css('.next a').attr('href').rm_prefix('catalogue/').fmt(FMT_URL)
-    # 1. get tag by .current class
-    # 2. extract text and get current page number by regex
-    # 3. insert result to template
+    """Extract pagination urls
+
+    Usage Examples:
+
+        - GET https://books.toscrape.com/
+        - GET https://books.toscrape.com/catalogue/page-2.html
+        - GET https://books.toscrape.com/catalogue/page-50.html
+
+    Issues:
+
+        - on the first page, prev_page = None
+        - on the last page, next_page = None
+    """
+    prev_page = D(None).css('.previous a::attr(href)').rm_prefix('catalogue/').fmt(FMT_URL)
+    next_page = D(None).css('.next a::attr(href)').rm_prefix('catalogue/').fmt(FMT_URL)
     curr_page = D().css('.current').text().re(r'Page\s(\d+)').fmt(FMT_URL_CURRENT)
 ```
 
 Test again:
 
 ```shell
-ssc-gen parse-from-url "https://books.toscrape.com/catalogue/page-2.html" -t schema2.py:MainCatalogue
+ssc-gen parse-from-url "https://books.toscrape.com/catalogue/page-2.html" -t schema.py:MainCatalogue
 #{
 #  "prev_page": "https://books.toscrape.com/catalogue/page-1.html",
 #  "next_page": "https://books.toscrape.com/catalogue/page-3.html",
@@ -103,7 +122,7 @@ ssc-gen parse-from-url "https://books.toscrape.com/catalogue/page-2.html" -t sch
 #}
 ```
 
-### ListSchema class. Nested schemas. Extract product cards
+#### Extract product cards
 
 The usual situation: convert duplicate elements into a separate and understandable data structure.
 In the fictitious bookstore example, product cards are presented.
@@ -151,38 +170,112 @@ Potentially useful information for extraction:
 - price 
   - `<p class="price_color">£33.63</p>`
 
-
-Extend schema fields by this information:
+Add parse book cards logic:
 
 ```python
-# examples/tutorial/booksToScrape/schema3.py
 from ssc_codegen import ItemSchema, D, ListSchema, N
+import re
 
 FMT_URL = "https://books.toscrape.com/catalogue/{{}}"
+FMT_BASE = "https://books.toscrape.com/{{}}"
 FMT_URL_CURRENT = "https://books.toscrape.com/catalogue/page-{{}}.html"
-FMT_THUMBNAIL_BOOK = "https://books.toscrape.com{{}}"
+
+# recommended define regexp by re.compile() for extra check syntax
+RE_BOOK_PRICE = re.compile(r"(\d+(?:.\d+)?)")
+
 
 class Book(ListSchema):
-    __SPLIT_DOC__ = D().css_all(".col-lg-3")
+    """Exctract a book cards
 
-    name = D().css(".thumbnail").attr("alt")
-    image_url = D().css(".thumbnail").attr("src").rm_prefix('..').fmt(FMT_THUMBNAIL_BOOK)
-    url = D().css(".image_container > a").attr("href").fmt(FMT_URL)
-    rating = D().css(".star-rating").attr("class").rm_prefix("star-rating ")
-    # convert price to integer
-    price = D().default(0).css(".price_color").text().re(r"(\d+)").to_int()
+    Usage:
+
+        - GET https://books.toscrape.com/
+        - GET https://books.toscrape.com/catalogue/page-2.html
+        - GET https://books.toscrape.com/catalogue/page-50.html
+    """
+
+    # should be returns collection of elements
+    __SPLIT_DOC__ = D().css_all(".col-lg-3")
+    # Optional pre validate method
+    __PRE_VALIDATE__ = D().is_css(".col-lg-3 .thumbnail")
+
+    name = D().css(".thumbnail::attr(alt)")
+    # fix urls:
+    # if response from books.toscrape.com - cards contains /catalogue prefix
+    # if response from books.toscrape.com/catalogue - cards exclude this prefix
+    image_url = (
+        D().css(".thumbnail::attr(src)").rm_prefix("..").ltrim('/').fmt(FMT_BASE)
+    )
+    url = D().css(".image_container > a::attr(href)").ltrim('/').rm_prefix("catalogue/").fmt(FMT_URL)
+    rating = (
+        D(0)
+        .css(".star-rating::attr(class)")
+        .rm_prefix("star-rating ")
+        # translate literal rating to integer
+        .repl_map(
+            {"One": "1", "Two": "2", "Three": "3", "Four": "4", "Five": "5"}
+        )
+        .to_int()
+    )
+    # NEW pseudo selector ::text - same as call `.text()` method
+    price = (
+        D()
+        # define float explicitly
+        .default(0.0)
+        .css(".price_color::text")
+        .re(RE_BOOK_PRICE)
+        .to_float()
+    )
+
+class MainCatalogue(ItemSchema):
+    """Extract pagination urls and book cards
+
+    Usage Examples:
+
+        - GET https://books.toscrape.com/
+        - GET https://books.toscrape.com/catalogue/page-2.html
+        - GET https://books.toscrape.com/catalogue/page-50.html
+
+    Issues:
+        - on the first page, prev_page = None
+        - on the last page, next_page = None
+    """
+
+    books = N().sub_parser(Book)
+
+    prev_page = (
+        D()
+        .default(None)
+        .css(".previous a")
+        .attr("href")
+        .rm_prefix("catalogue/")
+        .fmt(FMT_URL)
+    )
+    next_page = (
+        D()
+        .default(None)
+        .css(".next a")
+        .attr("href")
+        .rm_prefix("catalogue/")
+        .fmt(FMT_URL)
+    )
+    curr_page = (
+        D().css(".current").text().re(r"Page\s(\d+)").fmt(FMT_URL_CURRENT)
+    )
 
 
 class MainCatalogue(ItemSchema):
-    # docstring is optional feature:
-    # converter translate to output code
-    # this will later help explain how to use this code
-    """parse main catalogue page
+    """Extract pagination urls and book cards
 
-    Response input examples:
-        - https://books.toscrape.com/
-        - https://books.toscrape.com/catalogue/page-2.html
+    Usage Examples:
 
+        - GET https://books.toscrape.com/
+        - GET https://books.toscrape.com/catalogue/page-2.html
+        - GET https://books.toscrape.com/catalogue/page-50.html
+
+    Issues:
+        - on the first page, prev_page = None
+        - on the last page, next_page = None
     """
     books = N().sub_parser(Book)
 
@@ -193,37 +286,31 @@ class MainCatalogue(ItemSchema):
 
 - `__SPLIT_DOC__` - special magic method: define how need part document or element input before parse.
 should be ends as `css_all` or `xpath_all`. In current case - part document to list of product cards.
+- `__PRE_VALIDATE__` опциональный, ситуативный метод. It validates the submitted document. If the checks are passed, it will raise an error. It does not change the document.
+- `to_int()`, `to_float()` - final casts string to primitive types
 - `N()` - special alias for define nested structures. Useful for separating code and fields into logical structures.
-- docstring feature will be demonstrated in [convert-to-code](#convert-to-code) section.
+- Validation methods start with the prefix `is_` - they do not modify the data, they only check the value. If the check fails, it will raise an error.
+    - If there was a call to `default()` at the beginning - it will catch the error and set the default value
 
+Example:
 
-how to work ListSchema in scheme view:
-
-```mermaid
-graph TD;
-    A[ListSchema] -->|send document or element| B["__SPLIT_DOC\_\_"];
-    B --> C[collection for elements];
-    C --> D{"foreach (end?)"};
-    D -- No --> E["parse fields to Map(Dict) structure"];
-    E --> F[Add to List];
-    F --> C;
-    D -- Yes --> G[End];
-    G --> F["return parsed collection"]
+```python
+# set default value "unknown" if <title> tag does not exists
+D("unknown").is_css("title").css("title::text")
 ```
 
-Test updated code:
+Test code:
 
 ```shell
-ssc-gen parse-from-url "https://books.toscrape.com/catalogue/page-2.html" -t schema3.py:MainCatalogue
-# ...
-#    {
-#      "name": "You can't bury them all: Poems",
-#      "image_url": "https://books.toscrape.com/media/cache/e9/20/e9203b733126c4a0832a1c7885dc27cf.jpg",
-#      "url": "https://books.toscrape.com/catalogue/you-cant-bury-them-all-poems_961/index.html",
-#      "rating": "Two",
-#      "price": 33
-#    }
-#  ],
+ssc-gen parse-from-url "https://books.toscrape.com/catalogue/page-2.html" -t schema.py:MainCatalogue
+# "books":[
+#  {
+#    "name": "In Her Wake",
+#    "image_url": "https://books.toscrape.com/media/cache/5d/72/5d72709c6a7a9584a4d1cf07648bfce1.jpg",
+#    "url": "https://books.toscrape.com/catalogue/in-her-wake_980/index.html",
+#    "rating": "One",
+#    "price": 12
+#  }, ...],
 #  "prev_page": "https://books.toscrape.com/catalogue/page-1.html",
 #  "next_page": "https://books.toscrape.com/catalogue/page-3.html",
 #  "curr_page": "https://books.toscrape.com/catalogue/page-2.html"
@@ -233,7 +320,7 @@ ssc-gen parse-from-url "https://books.toscrape.com/catalogue/page-2.html" -t sch
 Also, you can pass `Book` class to `-t` option: its accept full document:
 
 ```shell
-ssc-gen parse-from-url "https://books.toscrape.com/catalogue/page-2.html" -t schema3.py:Book
+ssc-gen parse-from-url "https://books.toscrape.com/catalogue/page-2.html" -t schema.py:Book
 # [
 #  {
 #    "name": "In Her Wake",
@@ -246,15 +333,16 @@ ssc-gen parse-from-url "https://books.toscrape.com/catalogue/page-2.html" -t sch
 #  ]
 ```
 
+#### parse product page
 
-### DictSchema class. Parse product page
-
-Another data structure - DictSchema.
+Demonstration of the situational structure DictSchema:
 
 It can be useful in the following situations:
 
 - Parsing html tags of tables `<table> <tr> <tr> <th> <td>`
 - When there is an unknown, unique key in the html (e.g., in attributes)
+
+Product information document:
 
 ```html
 <table class="table table-striped">
@@ -287,7 +375,6 @@ It can be useful in the following situations:
 Write parser:
 
 ```python
-# examples/tutorial/booksToScrape/schema4.py
 from ssc_codegen import DictSchema, D
 
 
@@ -295,10 +382,11 @@ from ssc_codegen import DictSchema, D
 class ProductDescription(DictSchema):
     """parse product description from product page
 
-    Response input examples:
-        - https://books.toscrape.com/catalogue/in-her-wake_980/index.html
-        - from catalogue page
+    USAGE:
+        - GET https://books.toscrape.com/catalogue/in-her-wake_980/index.html
+        - from catalogue page by key []books['url']
     """
+
     __SPLIT_DOC__ = D().css_all("table tr")
     __SIGNATURE__ = {
         "UPC": "String",
@@ -316,8 +404,6 @@ class ProductDescription(DictSchema):
     # im_not_be_compiled = D().css("title").text()
 ```
 
-- `__SPLIT_DOC__` - same as [ListSchema](#listschema-class-nested-schemas-extract-product-cards): 
-split document or element to parts
 - `__SIGNATURE__` - optional magic method: override fields information in docstring class
   - accept types: `str, int, float, None, list, dict`
   - in DictSchema, FlatListSchema signature is generated less informatively 
@@ -367,30 +453,33 @@ Types for parsed structures generated too:
 Full project code example:
 
 ```python
-# examples/tutorial/main.py
 import httpx
-from schema3 import MainCatalogue
-from schema4 import ProductDescription
+from catalogue import MainCatalogue
+from product import ProductDescription
 import pprint
+
 
 def main() -> None:
     resp = httpx.get("https://books.toscrape.com/").text
     catalogue = MainCatalogue(resp).parse()
     # break if next_page == None
-    while catalogue['next_page']:
+    while catalogue["next_page"]:
         for book in catalogue["books"]:
             print(book["name"])
+            print("rating:", book["rating"])
+            print("price:", book["price"])
             book_resp = httpx.get(book["url"]).text
             pprint.pprint(ProductDescription(book_resp).parse())
-        resp = httpx.get(catalogue['next_page']).text
+        resp = httpx.get(catalogue["next_page"]).text
         catalogue = MainCatalogue(resp).parse()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
+
 ```
 
-## quotesToScrapeJs. Parse JSON
+### quotes.toscrape/js
 
 Some sites with [server-side render](https://en.wikipedia.org/wiki/Server-side_scripting) can store json data
 in html documents.
@@ -417,25 +506,38 @@ echo '{"a": ["b", "c"]}' | ssc-gen json-gen -o tmp.py
 Config example:
 
 ```python
-# examples/tutorial/quotesToScrapeJs/quotesToScrapeJs.py
+"""Example how to parse json-like data from plain HTML
+
+"""
 from ssc_codegen import Json, R, ItemSchema
 import re
 
 # most difficult step:
 # write correct regular expression for extract a valid json structure
 
-# allow pass patterns in verbose mode
-# codegen automatically convert to normal pattern
-JSON_PATTERN = re.compile(r"""
-var\s+\w+\s*=\s*     # var data =
-(\[[\s\S]*?\])       # json content
-;                    # END
-""", re.X)
+# allow write patterns in verbose mode for simplify documentation
+# codegen automatically convert it to normal pattern
+JSON_PATTERN = re.compile(
+    r"""
+    var\s+data\s*=\s*     # START ANCHOR var data =
+    (
+        \[                # START ARRAY
+        .*                # JSON DATA
+        \]                # END ARRAY
+    )
+    ;\s+for              # END ANCHOR
+""",
+    # verbose + re.DOTALL mode
+    # NOTE: javascript ES6 standart does not support this flag
+    re.X | re.S,
+)  
+
 
 class Author(Json):
     name: str
     goodreads_links: str
     slug: str
+
 
 class Quote(Json):
     # mark as array entrypoint
@@ -447,7 +549,6 @@ class Quote(Json):
     text: str
 
 
-
 class Main(ItemSchema):
     data = R().re(JSON_PATTERN).jsonify(Quote)
 
@@ -456,7 +557,7 @@ class Main(ItemSchema):
 Test it!
 
 ```shell
-ssc-gen parse-from-url "https://quotes.toscrape.com/js/" -t quotesToScrapeJs.py:Main
+ssc-gen parse-from-url "https://quotes.toscrape.com/js/" -t schema.py:Main
 #{
 #  "data": [
 #    {
@@ -477,7 +578,7 @@ ssc-gen parse-from-url "https://quotes.toscrape.com/js/" -t quotesToScrapeJs.py:
 ```
 
 - `R()` alias of `D().raw()`
-- `.jsonify()` - json marshall operation
+- `.jsonify()` - final json marshall operation
 - `Json` - special struct for serialize json input
 - `__IS_ARRAY__` - Json marks that the input point is an array with dictionaries
 
@@ -501,8 +602,9 @@ Full json mark types support:
 ### Json limitations
 
 - keys always should be a string
-- keys should matched by `[_a-zA-Z][_a-zA-Z0-9]*` and do not allowed target language keywords and other chars
-- cannot modify keys, values in jsonify step
+- keys should matched by `[_a-zA-Z][_a-zA-Z0-9]*` and do not allowed target language keywords and other chars. path this by regular expressions!
+    - also, keys does not check names as reserved language keywords
+- cannot modify keys, values after `jsonify()` step
 - json structure must be consistent. 
   - not allowed to describe an array with random data types 
   - not allowed dictionaries with random keys
