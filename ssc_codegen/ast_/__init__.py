@@ -19,7 +19,9 @@ from .nodes_core import (ExprReturn,
                          JsonStructField,
                          TypeDef,
                          TypeDefField,
-                         ExprCallStructMethod)
+                         ExprCallStructMethod, 
+                         ExprClassVar,
+                         ExprCallStructClassVar)
 from .nodes_filter import FilterOr, FilterAnd, FilterNot, FilterNotEqual, FilterEqual, FilterStrIn, \
     FilterStrStarts, FilterStrEnds, FilterStrRe, ExprFilter, FilterStrLenEq, FilterStrLenNe, FilterStrLenLt, \
     FilterStrLenLe, FilterStrLenGt, FilterStrLenGe

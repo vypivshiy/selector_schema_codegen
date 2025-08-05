@@ -33,8 +33,12 @@ class ExprToListLength(BaseAstNode[T_EMPTY_KWARGS, tuple]):
     ret_type: VariableType = VariableType.INT
 
 
+KW_UNIQUE = TypedDict("KW_UNIQUE", {"keep_order": bool})
+ARGS_UNIQUE = tuple[bool]
+
+
 @dataclass(kw_only=True)
-class ExprListUnique(BaseAstNode[T_EMPTY_KWARGS, tuple]):
+class ExprListUnique(BaseAstNode[KW_UNIQUE, ARGS_UNIQUE]):
     # TODO: support LIST_INT, LIST_FLOAT
     kind: ClassVar[TokenType] = TokenType.EXPR_LIST_UNIQUE
     accept_type: VariableType = VariableType.LIST_STRING

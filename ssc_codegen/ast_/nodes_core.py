@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import TypedDict, ClassVar, TypeVar
+from typing import Sequence, TypedDict, ClassVar, TypeVar
 
 from ssc_codegen.ast_.base import T_EMPTY_KWARGS, BaseAstNode
 from ssc_codegen.ast_.base import (
@@ -104,6 +104,22 @@ class ExprCallStructMethod(
     kind: ClassVar[TokenType] = TokenType.STRUCT_CALL_FUNCTION
     accept_type: VariableType = VariableType.DOCUMENT
     ret_type: VariableType = VariableType.ANY
+
+
+KW_EXPR_CALL_CLASSVAR = TypedDict(
+    "KW_EXPR_CALL_LITERAL",
+    {"struct_name": str, "field_name": str, "type": VariableType},
+)
+ARGS_EXPR_CALL_CLASSVAR = tuple[str, str, VariableType]
+
+
+@dataclass(kw_only=True)
+class ExprCallStructClassVar(
+    _DisableRepr, BaseAstNode[KW_EXPR_CALL_CLASSVAR, ARGS_EXPR_CALL_CLASSVAR]
+):
+    kind: ClassVar[TokenType] = TokenType.STRUCT_CALL_CLASSVAR
+    accept_type = VariableType.ANY
+    ret_type = VariableType.ANY
 
 
 KW_STRUCT_PARSER = TypedDict(
@@ -232,3 +248,46 @@ class ExprReturn(_DisableReprBody, BaseAstNode[T_EMPTY_KWARGS, tuple]):
 @dataclass(kw_only=True)
 class ExprNoReturn(_DisableReprBody, BaseAstNode[T_EMPTY_KWARGS, tuple]):
     kind: ClassVar[TokenType] = TokenType.EXPR_NO_RETURN
+
+
+# regex pattern auto converts to string
+T_CLASSVAR = int | str | bool | float | None
+KW_CLASSVAR = TypedDict(
+    "KW_LITERAL",
+    {
+        "value": T_CLASSVAR,
+        "struct_name": str,
+        "field_name": str,
+        "parse_returns": bool,
+    },
+)
+ARGS_CLASSVAR = tuple[T_CLASSVAR, str, str]
+
+
+@dataclass(kw_only=True)
+class ExprClassVar(_DisableReprBody, BaseAstNode[KW_CLASSVAR, ARGS_CLASSVAR]):
+    kind: ClassVar[TokenType] = TokenType.CLASSVAR
+    exclude_types: Sequence[VariableType] = field(
+        default=(
+            VariableType.DOCUMENT,
+            VariableType.LIST_DOCUMENT,
+            VariableType.JSON,
+            VariableType.NESTED,
+            VariableType.LIST_ANY,
+            VariableType.LIST_INT,
+            VariableType.LIST_STRING,
+        ),
+        repr=False,
+    )
+
+    @property
+    def value(self) -> T_CLASSVAR:
+        return self.kwargs["value"]
+
+    @value.setter
+    def value(self, val) -> None:
+        self.kwargs["value"] = val
+
+    @property
+    def literal_ref_name(self) -> tuple[str, str]:
+        return self.kwargs["struct_name"], self.kwargs["field_name"]
