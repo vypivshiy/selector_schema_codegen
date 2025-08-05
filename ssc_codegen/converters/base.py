@@ -29,15 +29,21 @@ CB_AST_DECORATOR = Callable[[CB_AST_BIND], CB_AST_BIND]
 def debug_comment_cb(node: BaseAstNode, comment_prefix: str) -> str:
     match node.kind:
         case TokenType.EXPR_RETURN:
-            return f"{comment_prefix}Token: {node.kind.name} ret_type: {node.ret_type.name}"
+            token = f"{comment_prefix}Token: {node.kind.name} ret_type: {node.ret_type.name}"
         case TokenType.EXPR_NO_RETURN:
-            return f"{comment_prefix}Token: {node.kind.name}"
+            token = f"{comment_prefix}Token: {node.kind.name}"
         case TokenType.STRUCT_PARSE_START:
             parent = node.parent
             parent = cast(StructParser, parent)
             return f"{comment_prefix}Token: {node.kind.name}, type: {parent.struct_type.name}"
         case _:
-            return f"{comment_prefix}Token: {node.kind.name}, kwargs: {node.kwargs}"
+            token = f"{comment_prefix}Token: {node.kind.name}, kwargs: {node.kwargs}"
+    if node.classvar_hooks:
+        fmt_hooks = ", ".join(
+            f"{v.kind.name} {v.kwargs}" for v in node.classvar_hooks.values()
+        )
+        return f"{token}\n{comment_prefix}{fmt_hooks}"
+    return token
 
 
 class BaseCodeConverter:
@@ -100,7 +106,7 @@ class BaseCodeConverter:
     def pre(
         self,
         for_definition: TokenType,
-        post_callback: Callable[[BaseAstNode], str] | None = None,
+        post_callback: Callable[[BaseAstNode], str] | str | None = None,
     ) -> CB_AST_DECORATOR:
         """Define a pre-conversion decorator for the given TokenType.
 
