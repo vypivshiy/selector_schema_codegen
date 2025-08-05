@@ -6,8 +6,8 @@ from types import ModuleType
 from typing import Any, Type
 
 from ssc_codegen import Json
-from ssc_codegen.consts import SIGNATURE_MAP
 from ssc_codegen.schema import (
+    SIGNATURE_MAP,
     BaseSchema,
     ListSchema,
     DictSchema,
@@ -146,3 +146,10 @@ def exec_module_code(path: str | Path, add_sys_path: bool = True) -> ModuleType:
 
     module.__dict__.update(main_entypoint_schemas)
     return module
+
+
+def is_literals_only_schema(schema: Type[BaseSchema]) -> bool:
+    return (
+        len(schema.__get_mro_fields__()) == 0
+        and len(schema.__get_mro_literals__()) > 0
+    )

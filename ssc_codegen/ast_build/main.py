@@ -26,11 +26,13 @@ from ssc_codegen.ast_ import (
     ExprNested,
     ExprJsonify,
 )
+from ssc_codegen.ast_.nodes_core import ExprCallStructClassVar, ExprClassVar
 from ssc_codegen.ast_build.utils import (
     generate_docstring_signature,
     extract_json_structs_from_module,
     exec_module_code,
     extract_schemas_from_module,
+    is_literals_only_schema,
 )
 from ssc_codegen.document import BaseDocument
 from ssc_codegen.document_utlis import (
@@ -126,46 +128,75 @@ def build_ast_typedef(
 ) -> list[BaseAstNode]:
     ast_typedefs: list[BaseAstNode] = []
     for sc in ast_schemas:
+        # dont need create typedef for literals-only schemas
+        if sc.struct_type == StructType.CONFIG_CLASSVARS:
+            continue
         ast_t_def = TypeDef(
             parent=ast_module,
             kwargs={"name": sc.kwargs["name"], "struct_type": sc.struct_type},
         )
         for sc_field in sc.body:
-            if sc_field.kind != TokenType.STRUCT_FIELD:
+            if sc_field.kind not in (
+                TokenType.STRUCT_FIELD,
+                TokenType.CLASSVAR,
+            ):
                 continue
-            sc_field = cast(StructFieldMethod, sc_field)
-            if sc_field.body[-1].ret_type == VariableType.NESTED:
-                node = [
-                    i for i in sc_field.body if i.kind == TokenType.EXPR_NESTED
-                ][0]
-                node = cast(ExprNested, node)
-                cls_name = node.kwargs["schema_name"]
-                cls_nested_type = node.kwargs["schema_type"]
+            # create field, if CLASSVAR should be returns
+            elif (
+                sc_field.kind == TokenType.CLASSVAR
+                and sc_field.kwargs["parse_returns"]
+            ):
+                sc_field = cast(ExprClassVar, sc_field)
+                _, _struct_name, field_name, _ = sc_field.unpack_args()
+                ast_t_def_field = TypeDefField(
+                    parent=ast_t_def,
+                    kwargs={
+                        "name": field_name,
+                        "type": sc_field.ret_type,
+                        "cls_nested": None,  # self-used field, ignore
+                        "cls_nested_type": None,
+                    },
+                )
+            # else, ignore static classvar
+            elif sc_field.kind == TokenType.CLASSVAR:
+                continue
 
-            elif sc_field.body[-1].ret_type == VariableType.JSON:
-                node2 = [
-                    i for i in sc_field.body if i.kind == TokenType.TO_JSON
-                ][0]
-                node2 = cast(ExprJsonify, node2)
-                cls_name = node2.kwargs["json_struct_name"]
-                # hack: for provide more consistent Typedef field gen api
-                if node2.kwargs["is_array"]:
-                    cls_nested_type = StructType.LIST
-                else:
-                    cls_nested_type = StructType.ITEM
             else:
-                cls_name = None
-                cls_nested_type = None
+                sc_field = cast(StructFieldMethod, sc_field)
+                if sc_field.body[-1].ret_type == VariableType.NESTED:
+                    node = [
+                        i
+                        for i in sc_field.body
+                        if i.kind == TokenType.EXPR_NESTED
+                    ][0]
+                    node = cast(ExprNested, node)
+                    cls_name = node.kwargs["schema_name"]
+                    cls_nested_type = node.kwargs["schema_type"]
 
-            ast_t_def_field = TypeDefField(
-                parent=ast_t_def,
-                kwargs={
-                    "name": sc_field.kwargs["name"],
-                    "type": sc_field.body[-1].ret_type,
-                    "cls_nested": cls_name,
-                    "cls_nested_type": cls_nested_type,
-                },
-            )
+                elif sc_field.body[-1].ret_type == VariableType.JSON:
+                    node2 = [
+                        i for i in sc_field.body if i.kind == TokenType.TO_JSON
+                    ][0]
+                    node2 = cast(ExprJsonify, node2)
+                    cls_name = node2.kwargs["json_struct_name"]
+                    # hack: for provide more consistent Typedef field gen api
+                    if node2.kwargs["is_array"]:
+                        cls_nested_type = StructType.LIST
+                    else:
+                        cls_nested_type = StructType.ITEM
+                else:
+                    cls_name = None
+                    cls_nested_type = None
+
+                ast_t_def_field = TypeDefField(
+                    parent=ast_t_def,
+                    kwargs={
+                        "name": sc_field.kwargs["name"],
+                        "type": sc_field.body[-1].ret_type,
+                        "cls_nested": cls_name,
+                        "cls_nested_type": cls_nested_type,
+                    },
+                )
             ast_t_def.body.append(ast_t_def_field)
         ast_typedefs.append(ast_t_def)
     return ast_typedefs
@@ -202,6 +233,26 @@ def build_ast_struct_parser(
     if errors_count > 0:
         msg = f"{schema.__name__} founded errors: {errors_count}"
         raise SyntaxError(msg)
+
+    if is_literals_only_schema(schema):
+        if schema.__SCHEMA_TYPE__ != StructType.ITEM:
+            raise SyntaxError("Literals-only init allowed only ItemSchema")
+        literals = schema.__get_mro_literals__().copy()
+        # schema.__SCHEMA_TYPE__ == StructType.CONFIG_LITERALS
+        st = StructParser(
+            kwargs={
+                "name": schema.__name__,
+                "struct_type": StructType.CONFIG_CLASSVARS,
+                "docstring": schema.__doc__ or "" if gen_docstring else "",
+            },
+            parent=module_ref,
+        )
+        body: list[BaseAstNode] = [e.expr() for e in literals.values()]
+        for i in body:
+            i.parent = st
+        st.body = body
+        return st
+
     docstring = (
         (schema.__doc__ or "") + "\n\n" + generate_docstring_signature(schema)
     )
@@ -215,11 +266,17 @@ def build_ast_struct_parser(
         parent=module_ref,
     )
     # build body
-    body: list[BaseAstNode] = [StructInitMethod(parent=st)]
+    fields = schema.__get_mro_fields__().copy()
+    literals = schema.__get_mro_literals__().copy()
+
+    # literals first push
+    body: list[BaseAstNode] = [e.expr() for e in literals.values()]
+    for i in body:
+        i.parent = st
+
+    body.append(StructInitMethod(parent=st))
     # names counter for CallStruct expr (Start parse entrypoint)
     body_parse_method_expr: list[BaseAstNode] = []
-    fields = schema.__get_mro_fields__().copy()
-
     _try_fetch_pre_validate_node(body, body_parse_method_expr, fields, st)
     _try_fetch_split_doc_node(body, body_parse_method_expr, fields, st)
     _fetch_field_nodes(
@@ -233,6 +290,22 @@ def build_ast_struct_parser(
 
     # last node - run entrypoint
     start_parse_method = StartParseMethod(parent=st)
+    # classvars add
+    for i in literals.values():
+        i = i.expr()
+        if i.kwargs["parse_returns"]:
+            _, struct_name, field_name, *_ = i.unpack_args()
+            body_parse_method_expr.append(
+                ExprCallStructClassVar(
+                    kwargs={
+                        "struct_name": struct_name,
+                        "field_name": field_name,
+                        "type": i.ret_type,
+                    },
+                    parent=start_parse_method,
+                )
+            )
+
     for i in body_parse_method_expr:
         i.parent = start_parse_method
     start_parse_method.body = body_parse_method_expr
