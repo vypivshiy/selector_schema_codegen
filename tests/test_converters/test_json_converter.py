@@ -21,3 +21,21 @@ from ssc_codegen.json_to_scc import convert_json_to_schema_code
 def test_json_converter(raw_json: str, expected: list[str]) -> None:
     code = convert_json_to_schema_code(raw_json)
     assert all(i in code for i in expected)
+
+
+@pytest.mark.parametrize(
+    "raw_json,path,expected",
+    [
+        ('{"spam": {"egg": {"a":1,"b":null}}}', "spam", ["class Egg(Json):"]),
+        (
+            '{"spam": [{"egg": {"a":1,"b":null}}, null]}',
+            "spam.0",
+            ["class Egg(Json):"],
+        ),
+    ],
+)
+def test_json_converter_path(
+    raw_json: str, path: str, expected: list[str]
+) -> None:
+    code = convert_json_to_schema_code(raw_json, json_start_path=path)
+    assert all(i in code for i in expected)

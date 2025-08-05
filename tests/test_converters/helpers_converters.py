@@ -26,12 +26,14 @@ CSS_TOKENS_IMPL = {
     TokenType.EXPR_CSS,
     TokenType.EXPR_CSS_ALL,
     TokenType.IS_CSS,
+    TokenType.EXPR_CSS_REMOVE,
 }
 # impl, if target language and backend supports xpath selections
 XPATH_TOKENS_IMPL = {
     TokenType.EXPR_XPATH,
     TokenType.EXPR_XPATH_ALL,
     TokenType.IS_XPATH,
+    TokenType.EXPR_XPATH_REMOVE,
 }
 
 
