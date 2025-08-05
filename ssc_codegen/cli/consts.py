@@ -9,6 +9,7 @@ class PyLIBS(StrEnum):
     BS4 = "bs4"
     PARSEL = "parsel"
     SELECTOLAX = "selectolax"
+    LXML = "lxml"
 
 
 class JsLIBS(StrEnum):
