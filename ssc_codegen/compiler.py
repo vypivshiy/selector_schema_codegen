@@ -3,10 +3,61 @@
 import sys
 import types
 from os import PathLike
-from typing import Any
+from typing import Any, Type
 
+from ssc_codegen.ast_.nodes_core import ModuleImports, ModuleProgram
 from ssc_codegen.ast_build import build_ast_module_parser
+from ssc_codegen.ast_build.main import build_ast_struct_parser
 from ssc_codegen.converters.py_base import BasePyCodeConverter
+from ssc_codegen.schema import BaseSchema
+
+
+def compile(
+    *schemas: Type[BaseSchema], converter: BasePyCodeConverter
+) -> types.ModuleType:
+    """ssc-gen gen compiler to a real cpython code in runtime
+
+    this function implemented for test schemas in runtime and not recommended used in production.
+
+    after recompiling the modules, the code of the previous schemes is overwritten.
+
+    returns:
+        types.ModuleType object. Compile code in runtime, push compiled classes to sys.modules["_ssc_single_eval"]
+
+
+    Usage example:
+
+        ```python
+        import requests
+        from ssc_codegen import ItemSchema, CV
+
+        class Demo(ItemSchema):
+            CVAR = CV("Some classvar")
+            title = D().css("title::text")
+            urls = D().css_all("a[href]::attr(href)")
+
+        module = compile(Demo())
+        print(module.Demo.CVAR)  # "Some classvar"
+        # pass html document
+        document = requests.get("https://example.com")
+        print(module.Demo(document.text).parse())
+        ```
+    """
+
+    module = ModuleProgram()
+    module.body.append(ModuleImports())
+
+    structs = []
+    for s in schemas:
+        struct = build_ast_struct_parser(s, module, gen_docstring=False)
+        structs.append(struct)
+    module.body.extend(structs)
+
+    code_parts = converter.convert_program(module)
+    module = types.ModuleType("_ssc_single_eval")
+    code = "\n".join(code_parts)
+    exec(code, module.__dict__)
+    sys.modules["_ssc_single_eval"] = module
 
 
 class Compiler:
@@ -37,6 +88,10 @@ class Compiler:
         instance = cls(module_name, module)  # type: ignore
         cls._cache[module_name] = instance
         return instance
+
+    @property
+    def cache(self):
+        return self._cache
 
     def get_class(self, class_name: str) -> Any:
         """Retrieves a class from the compiled module by name."""
