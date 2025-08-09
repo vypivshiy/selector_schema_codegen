@@ -259,6 +259,7 @@ KW_CLASSVAR = TypedDict(
         "struct_name": str,
         "field_name": str,
         "parse_returns": bool,
+        "is_regex": bool,
     },
 )
 ARGS_CLASSVAR = tuple[T_CLASSVAR, str, str]

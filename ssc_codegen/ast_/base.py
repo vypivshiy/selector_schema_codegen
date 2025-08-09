@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from typing import (
+    Callable,
     ClassVar,
     Mapping,
     TypeVar,
@@ -73,6 +74,39 @@ class BaseAstNode(Generic[T_MAPPING_FIELD, T_ARGUMENTS]):
             if self.kwargs.get(name):
                 return self.kwargs[name]
             raise e
+
+    def find_node(
+        self, func: Callable[["BaseAstNode"], bool]
+    ) -> Optional["BaseAstNode"]:
+        """find nodes in body by func filter
+
+        return None if node not founded or node.body is empty
+        """
+        if len(self.body) == 0:
+            return None
+
+        for n in self.body:
+            if func(n):
+                return n
+        return None
+
+    def find_node_all(
+        self, func: Callable[["BaseAstNode"], bool]
+    ) -> "BaseAstNode":
+        """find nodes in body by func filter"""
+        if len(self.body) == 0:
+            return []
+        return [i for i in self.body if i.kind == func(i)]
+
+    def find_node_by_token(
+        self, token_type: TokenType
+    ) -> Optional["BaseAstNode"]:
+        """find node by TokenType"""
+        return self.find_node(lambda n: n.kind == token_type)
+
+    def find_nodes_by_token(self, token_type: TokenType) -> list["BaseAstNode"]:
+        """find nodes by TokenType"""
+        return self.find_nodes_by_token(lambda n: n.kind == token_type)
 
 
 @dataclass(kw_only=True)
