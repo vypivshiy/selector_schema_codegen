@@ -7,6 +7,7 @@ from ssc_codegen.ast_ import (
     StructParser,
 )
 from ssc_codegen.ast_.nodes_core import ExprClassVar
+from ssc_codegen.str_utils import wrap_double_quotes
 from ssc_codegen.tokens import TOKENS_DEFAULT, TokenType, VariableType
 
 
@@ -155,6 +156,44 @@ def js_get_classvar_hook_or_value(
 ):
     """javascript create a ref for classvar if exists or return literal value"""
     return get_classvar_hook_or_value(
+        node, key, cb_literal_cast=cb_literal_cast, cb_value_cast=cb_value_cast
+    )
+
+
+def _go_default_cast_t(i) -> str:
+    """default python literals convert to valid golang literals"""
+    # None -> nil
+    # str -> string
+    # bool -> true/false
+    # list[str] -> []string
+    # save literals
+    # list[int] -> []int
+    # list[float] -> []float64
+    # int -> int
+    # float -> float64
+    if i is None:
+        return "nil"
+    elif isinstance(i, str):
+        return wrap_double_quotes(i)
+    elif isinstance(i, list):
+        if all(isinstance(j, str) for j in i):
+            return "[" + ", ".join([wrap_double_quotes(j) for j in i])
+        # dont need cast literals
+        elif all(isinstance(j, (int, float)) for j in i):
+            return str(i)
+    elif isinstance(i, bool):
+        return "true" if i else "false"
+    # dont need cast int, float literals
+    return str(i)
+
+
+def go_get_classvar_hook_or_value(
+    node: BaseAstNode,
+    key: str,
+    cb_literal_cast: Callable[[ExprClassVar], str] = _go_default_cast_t,
+    cb_value_cast: Callable[[Any], str] | None = _js_default_cast_t,
+):
+    return go_get_classvar_hook_or_value(
         node, key, cb_literal_cast=cb_literal_cast, cb_value_cast=cb_value_cast
     )
 
