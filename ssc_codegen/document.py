@@ -2013,8 +2013,10 @@ class ClassVarDocument(BaseDocument):
         val: str | int | float | RePattern[str] | list[str] | None,
         self_cls: str | None = None,
         parse_returns: bool = False,
+        is_regex: bool = False,
     ):
         super().__init__()
+        self._is_regex = False
 
         if not (
             val is None or isinstance(val, (str, int, float, RePattern, list))
@@ -2030,6 +2032,7 @@ class ClassVarDocument(BaseDocument):
         #  2. flags converts to inline: (?i) (?s), (?si) etc
         elif isinstance(val, (str, RePattern)):
             type_ = VariableType.STRING
+            self._is_regex = True
         elif isinstance(val, bool):
             type_ = VariableType.BOOL
         elif isinstance(val, float):
@@ -2040,6 +2043,9 @@ class ClassVarDocument(BaseDocument):
         # elemets will be converts later
         elif isinstance(val, list):
             type_ = VariableType.LIST_STRING
+
+        if isinstance(val, RePattern):
+            self._is_regex = self._is_regex or is_regex
 
         self._value = val
         self._type = type_
@@ -2055,6 +2061,14 @@ class ClassVarDocument(BaseDocument):
             self.struct_name: str | None = None
             self.field_name: str | None = None
 
+    @property
+    def is_regex(self):
+        return self._is_regex
+
+    @is_regex.setter
+    def is_regex(self, val: bool):
+        self._is_regex = val
+
     def expr(self) -> ExprClassVar:
         return ExprClassVar(
             kwargs={
@@ -2062,6 +2076,7 @@ class ClassVarDocument(BaseDocument):
                 "struct_name": self.struct_name,
                 "field_name": self.field_name,
                 "parse_returns": self._parse_returns,
+                "is_regex": self._is_regex,
             },
             accept_type=self._type,
             ret_type=self._type,
