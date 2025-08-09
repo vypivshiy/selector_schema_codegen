@@ -65,7 +65,8 @@ _TEST_GO_GOQUERY = new_converter_check(
         TokenType.STRUCT_INIT,
         TokenType.EXPR_DEFAULT_END,
         TokenType.JSON_FIELD,
-        TokenType.STRUCT_CALL_CLASSVAR
+        TokenType.STRUCT_CALL_CLASSVAR,
+        TokenType.CLASSVAR,  # conveter in call StructParser token
     },
 )
 
@@ -75,7 +76,12 @@ _TEST_JS_PURE = new_converter_check(
     include=REQUIRED_TOKENS_CONVERT_IMPL | CSS_TOKENS_IMPL | XPATH_TOKENS_IMPL,
     # pure js dont need imports
     # not need json serialize
-    exclude={TokenType.IMPORTS, TokenType.JSON_FIELD, TokenType.JSON_STRUCT, TokenType.STRUCT_CALL_CLASSVAR},
+    exclude={
+        TokenType.IMPORTS,
+        TokenType.JSON_FIELD,
+        TokenType.JSON_STRUCT,
+        TokenType.STRUCT_CALL_CLASSVAR,
+    },
 )
 
 
