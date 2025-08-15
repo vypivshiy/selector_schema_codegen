@@ -87,6 +87,19 @@ class TokenType(IntEnum):
     due to the risk of race-condition or other side effects.
     """
 
+    # utils nodes
+    CODE_START = auto()
+    """insert to ast after DOCSTRING and IMPORTS tokens
+    
+    maybe used for inject custom code after generate docstring and imports strings
+    """
+
+    CODE_END = auto()
+    """insert to end an ast tree.
+
+    maybe usef for inject custom code or logic
+    """
+
     # STRUCTS
     STRUCT = auto()
     STRUCT_INIT = auto()

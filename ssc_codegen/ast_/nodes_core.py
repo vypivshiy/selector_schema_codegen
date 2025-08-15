@@ -292,3 +292,13 @@ class ExprClassVar(_DisableReprBody, BaseAstNode[KW_CLASSVAR, ARGS_CLASSVAR]):
     @property
     def literal_ref_name(self) -> tuple[str, str]:
         return self.kwargs["struct_name"], self.kwargs["field_name"]
+
+
+@dataclass(kw_only=True)
+class CodeStart(_DisableRepr, BaseAstNode):
+    kind: ClassVar[TokenType] = TokenType.CODE_START
+
+
+@dataclass(kw_only=True)
+class CodeEnd(_DisableRepr, BaseAstNode):
+    kind: ClassVar[TokenType] = TokenType.CODE_END

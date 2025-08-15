@@ -21,7 +21,9 @@ from .nodes_core import (ExprReturn,
                          TypeDefField,
                          ExprCallStructMethod, 
                          ExprClassVar,
-                         ExprCallStructClassVar)
+                         ExprCallStructClassVar,
+                         CodeStart,
+                         CodeEnd)
 from .nodes_filter import FilterOr, FilterAnd, FilterNot, FilterNotEqual, FilterEqual, FilterStrIn, \
     FilterStrStarts, FilterStrEnds, FilterStrRe, ExprFilter, FilterStrLenEq, FilterStrLenNe, FilterStrLenLt, \
     FilterStrLenLe, FilterStrLenGt, FilterStrLenGe

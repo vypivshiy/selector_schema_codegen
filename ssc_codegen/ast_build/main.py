@@ -26,7 +26,12 @@ from ssc_codegen.ast_ import (
     ExprNested,
     ExprJsonify,
 )
-from ssc_codegen.ast_.nodes_core import ExprCallStructClassVar, ExprClassVar
+from ssc_codegen.ast_.nodes_core import (
+    CodeEnd,
+    CodeStart,
+    ExprCallStructClassVar,
+    ExprClassVar,
+)
 from ssc_codegen.ast_build.utils import (
     generate_docstring_signature,
     extract_json_structs_from_module,
@@ -81,6 +86,8 @@ def build_ast_module_parser(
         module_body: list[BaseAstNode] = [
             ModuleImports(parent=ast_module),
         ]
+    # add start code token
+    module_body.append(CodeStart(parent=ast_module))
 
     schemas = extract_schemas_from_module(py_module)
     json_structs = extract_json_structs_from_module(py_module)
@@ -119,6 +126,9 @@ def build_ast_module_parser(
     module_body.extend(ast_jsons)
     module_body.extend(ast_typedefs)
     module_body.extend(ast_schemas)
+
+    # end code token hook
+    module_body.append(CodeEnd(parent=ast_module))
     ast_module.body.extend(module_body)
     return ast_module
 
