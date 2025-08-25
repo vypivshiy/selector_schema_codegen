@@ -7,7 +7,7 @@ from ssc_codegen.ast_ import (
     StructParser,
 )
 from ssc_codegen.ast_.nodes_core import ExprClassVar
-from ssc_codegen.str_utils import wrap_double_quotes
+from ssc_codegen.str_utils import to_upper_camel_case, wrap_double_quotes
 from ssc_codegen.tokens import TOKENS_DEFAULT, TokenType, VariableType
 
 
@@ -187,13 +187,53 @@ def _go_default_cast_t(i) -> str:
     return str(i)
 
 
+def _go_literal_expr_attr_call(node: ExprClassVar, sep: str = ".") -> str:
+    """convert to literal classvar call"""
+    if node.kind != TokenType.CLASSVAR:
+        raise TypeError("not found literal hook")
+    cls_name, field_name = node.literal_ref_name
+    # go classvars assign by Cfg{ClsName}.{FieldName}
+    return sep.join(["Cfg" + cls_name, to_upper_camel_case(field_name)])
+
+
 def go_get_classvar_hook_or_value(
     node: BaseAstNode,
     key: str,
-    cb_literal_cast: Callable[[ExprClassVar], str] = _go_default_cast_t,
-    cb_value_cast: Callable[[Any], str] | None = _js_default_cast_t,
+    cb_literal_cast: Callable[[ExprClassVar], str] = _go_literal_expr_attr_call,
+    cb_value_cast: Callable[[Any], str] | None = _go_default_cast_t,
 ):
     return go_get_classvar_hook_or_value(
+        node, key, cb_literal_cast=cb_literal_cast, cb_value_cast=cb_value_cast
+    )
+
+
+def _lua_default_cast_t(value: Any) -> str:
+    if value is None:
+        return "nil"
+
+    if isinstance(value, str):
+        if "{{}}" in value:
+            # fmt, fmt_all exprs
+            value = value.replace("{{}}", "%s", 1)
+        value = wrap_double_quotes(value)
+    elif isinstance(value, bool):
+        value = "true" if value else "false"
+    elif isinstance(value, list):
+        if all(isinstance(v, str) for v in value):
+            value = [wrap_double_quotes(i) for i in value]
+        else:
+            value = [str(i) for i in value]
+        value = "{" + ", ".join(value) + "}"
+    return value
+
+
+def lua_get_classvar_hook_or_value(
+    node: BaseAstNode,
+    key: str,
+    cb_literal_cast: Callable[[ExprClassVar], str] = literal_expr_attr_call,
+    cb_value_cast: Callable[[Any], str] | None = _lua_default_cast_t,
+) -> str:
+    return get_classvar_hook_or_value(
         node, key, cb_literal_cast=cb_literal_cast, cb_value_cast=cb_value_cast
     )
 
