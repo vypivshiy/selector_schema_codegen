@@ -74,9 +74,12 @@ import sre_parse
 import sre_constants as srec
 from dataclasses import dataclass, field
 from typing import Literal
+import logging
 
 __all__ = ["py_regex_to_lua_pattern"]
 
+
+LOGGER = logging.getLogger("ssc-gen")
 
 @dataclass
 class Piece:
@@ -199,7 +202,7 @@ def repeat_atom(atom: Piece, minrep: int, maxrep: int) -> Piece:
         t = a.text
         return (
             len(t) == 1
-            or (t.startswith("%") and len(t) == 2)
+            or (t.startswith("%") and len(t) == 2)  # classes %d, %w, %s
             or (t.startswith("[") and t.endswith("]"))
         )
 
@@ -220,11 +223,8 @@ def repeat_atom(atom: Piece, minrep: int, maxrep: int) -> Piece:
         all_alts = [atom.text] + atom.alternatives
 
         if maxrep == UNLIM:
-            # For unlimited repetition with alternatives, use helper
-            return piece(
-                f"PatternHelpers.repeat_at_least(s, {repr(atom.text)}, {minrep})",
-                False,
-            )
+            # For unlimited repetition with alternatives, not supported
+            raise NotImplementedError("{n,} quantifier with alternatives not supported")
         elif minrep == maxrep:
             # Fixed repetition
             combined_alts = []
@@ -232,9 +232,7 @@ def repeat_atom(atom: Piece, minrep: int, maxrep: int) -> Piece:
                 combined_alts.append(alt * minrep)
             main_text = atom.text * minrep
             return piece(
-                main_text,
-                False,
-                combined_alts[1:] if len(combined_alts) > 1 else [],
+                main_text, False, combined_alts[1:] if len(combined_alts) > 1 else []
             )
         else:
             # Variable repetition with alternatives
@@ -242,38 +240,15 @@ def repeat_atom(atom: Piece, minrep: int, maxrep: int) -> Piece:
             for k in range(minrep, maxrep + 1):
                 for alt in all_alts:
                     combined_alts.append(alt * k)
-            main_text = atom.text * minrep + (atom.text + "?") * (
-                maxrep - minrep
-            )
+            main_text = atom.text * minrep + (atom.text + "?") * (maxrep - minrep)
             return piece(main_text, False, combined_alts)
 
     if maxrep == UNLIM:
-        if minrep == 0:
-            return (
-                piece(atom.text + "*")
-                if trivial(atom)
-                else piece(
-                    f"PatternHelpers.repeat_at_least(s, {repr(atom.text)}, 0)",
-                    False,
-                )
-            )
-        if minrep == 1:
-            return (
-                piece(atom.text + "+")
-                if trivial(atom)
-                else piece(
-                    f"PatternHelpers.repeat_at_least(s, {repr(atom.text)}, 1)",
-                    False,
-                )
-            )
-        return (
-            piece(atom.text * minrep + atom.text + "+")
-            if trivial(atom)
-            else piece(
-                f"PatternHelpers.repeat_at_least(s, {repr(atom.text)}, {minrep})",
-                False,
-            )
-        )
+        if trivial(atom):
+            return piece(atom.text + "+")
+        else:
+            # Not supported for non-trivial atoms
+            raise NotImplementedError("{n,} quantifier not supported")
     if minrep == maxrep:
         return piece(atom.text * minrep)
     if trivial(atom):
@@ -410,9 +385,7 @@ def translate(pattern: str, ignore_case: bool = False) -> Piece:
                 atom = walk(p)
                 out += repeat_atom(atom, minr, maxr)
             elif op == srec.MIN_REPEAT:
-                print(
-                    "WARNING: lua pattern matching not support non-greedy modifier suffix `?`. Replaced to eager `*`"
-                )
+                LOGGER.warning("lua pattern matching not support non-greedy modifier suffix `?`. Replaced to eager `*`")
                 minr, maxr, p = av
                 atom = walk(p)
                 out += repeat_atom(atom, minr, maxr)
@@ -467,6 +440,9 @@ def py_regex_to_lua_pattern(
     -- PM.search(s, pat, ...)  # re()
     -- PM.findall(s, pat, ...)  # re_all()
     -- PM.sub(s, repl, pat, ...)  # re_sub()
+    -- PM.re_any(s, pat, ...)  # any pattern matched
+    -- PM.re_all(s, pat, ...)  # all patterns matched
+    -- F.pm(e, pat, ...)  # regex filter equalent
 
     """
     result = translate(pattern, ignore_case=ignore_case)
@@ -502,6 +478,9 @@ def py_regex_to_lua_pattern(
 if __name__ == "__main__":
     tests = [
         r"Page\s(\d+)",  # Page%s(%d+)
+        r"\d{2}",  # %d%d
+        r"\d{2,4}",  # %d%d%d?%d?
+        r"\d{,4}",  # %d?%d?%d?%d?
         r"\bhello world\b",  # %f[%w]hello world%f[^%w]
         r"\b(hello\s+world)\b",  # %f[%w]hello%s+world%f[^%w]
         r"\b(hello\s+w[^auo]orld)\b",  # %f[%w]hello%s+w[^auo]orld%f[^%w]
@@ -518,6 +497,7 @@ if __name__ == "__main__":
         r"(https?://(?:www\.|wap\.)?[a-z]+\.[a-z]+)",  # multiple alternatives with optional group
     ]
     for pat in tests:
+        print(pat)
         p = translate(pat)
         p.order()
         if p.alternatives:
