@@ -209,7 +209,8 @@ def go_get_classvar_hook_or_value(
 
 def _lua_default_cast_t(value: Any) -> str:
     if value is None:
-        return "nil"
+        # required for correct translate to json
+        return "json.null"
 
     if isinstance(value, str):
         if "{{}}" in value:
