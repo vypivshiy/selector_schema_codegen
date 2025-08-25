@@ -26,6 +26,9 @@ from ssc_codegen.cli.code_callbacks import (
     CB_JS_CODE,
 )
 from ssc_codegen.cli.consts import (
+    CMD_LUA,
+    HELP_LUA_PCRE_FLAG,
+    LuaLIBS,
     PyLIBS,
     JsLIBS,
     GoLIBS,
@@ -97,6 +100,9 @@ def generate_code(
     elif xpath_to_css:
         LOGGER.info("Convert ALL XPATH queries to CSS")
 
+    for k, v in variables_patches.items():
+        setattr(converter, k, v)
+
     LOGGER.info("Generating code start")
     if debug_instructions:
         LOGGER.info("TOGGLE debug generated tokens")
@@ -121,8 +127,8 @@ def generate_code(
         LOGGER.info("Convert to code %s...", file_cfg.name)
         code_parts = converter.convert_program(ast_module, comment=comment_str)
         code = code_cb(code_parts)
-        for k, v in variables_patches.items():
-            code = code.replace(f"${k}$", v)
+        # for k, v in variables_patches.items():
+        #     code = code.replace(f"${k}$", v)
         out_path = out / out_file
         LOGGER.info("save generated code to %s", str(out_path))
         with open(out_path, "w") as f:
@@ -292,6 +298,59 @@ def gen_go(
         # todo: better API for code callbacks
         code_cb=CB_GO_CODE,
         variables_patches={"PACKAGE": package or out.name},
+        xpath_to_css=to_css,
+        css_to_xpath=to_xpath,
+        debug_instructions=debug,
+        gen_docstring=docstring,
+    )
+
+
+@app.command("lua", help=CMD_LUA)
+def gen_lua(
+    ssc_files: Annotated[
+        List[Path],
+        Argument(help="ssc-gen config files", callback=cb_check_ssc_files),
+    ],
+    out: Annotated[
+        Path,
+        Option("--out", "-o", help=HELP_OUTPUT_FOLDER, callback=cb_folder_out),
+    ],
+    lib: Annotated[
+        LuaLIBS, Option("--lib", "-i", help=HELP_CORE_LIB)
+    ] = LuaLIBS.LUA_HTMLPARSER,
+    prefix: Annotated[
+        str, Option("--prefix", "-p", help=HELP_FILE_PREFIX)
+    ] = "",
+    suffix: Annotated[
+        str, Option("--suffix", "-s", help=HELP_FILE_SUFFIX)
+    ] = ".lua",
+    use_pcre: Annotated[
+        bool, Option(help=HELP_LUA_PCRE_FLAG, is_flag=True)
+    ] = False,
+    fmt: Annotated[bool, Option(help=HELP_FMT, is_flag=True)] = True,
+    to_xpath: Annotated[bool, Option(help=HELP_TO_XPATH, is_flag=True)] = False,
+    to_css: Annotated[bool, Option(help=HELP_TO_CSS, is_flag=True)] = False,
+    debug: Annotated[bool, Option(help=HELP_DEBUG_COMM_TOKENS)] = False,
+    docstring: Annotated[
+        bool, Option(help=HELP_DOCSTRING, is_flag=True)
+    ] = True,
+) -> None:
+    converter = import_converter(f"lua_{lib.value}")
+    if fmt:
+        # TODO UNTESTED
+        commands = ["lua-format {}"]
+        fmt_cmd = create_fmt_cmd(ssc_files, prefix, suffix, out, commands)
+    else:
+        fmt_cmd = []
+    generate_code(
+        converter=converter,
+        out=out,
+        prefix=prefix,
+        ssc_files=ssc_files,
+        suffix=suffix,
+        comment_str=f"-- {COMMENT_STRING}",
+        fmt_cmd=fmt_cmd,
+        variables_patches={"USE_PCRE": use_pcre},
         xpath_to_css=to_css,
         css_to_xpath=to_xpath,
         debug_instructions=debug,
