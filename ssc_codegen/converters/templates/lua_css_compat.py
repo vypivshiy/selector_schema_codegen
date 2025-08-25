@@ -80,7 +80,7 @@ def css_query_to_lua_htmlparser_code(
     # skip translate query syntax
     if not patch_positions:
         serialized = "".join(t.serialize() for t in tokens)
-        return [f"local {nxt_var} = {prv_var}:select({serialized!r})"]
+        return [f"local {nxt_var} = {prv_var}:select({serialized})"]
 
     # Complex case - apply patches
     code_lines = [f"local {nxt_var}"]
