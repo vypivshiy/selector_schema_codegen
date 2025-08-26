@@ -157,13 +157,15 @@ def build_ast_typedef(
                 and sc_field.kwargs["parse_returns"]
             ):
                 sc_field = cast(ExprClassVar, sc_field)
-                _, _struct_name, field_name, _ = sc_field.unpack_args()
+                _value, _struct_name, field_name, _parse_returns, _is_regex = (
+                    sc_field.unpack_args()
+                )
                 ast_t_def_field = TypeDefField(
                     parent=ast_t_def,
                     kwargs={
                         "name": field_name,
                         "type": sc_field.ret_type,
-                        "cls_nested": None,  # self-used field, ignore
+                        "cls_nested": None,  # always self-used field, ignore
                         "cls_nested_type": None,
                     },
                 )
@@ -400,6 +402,7 @@ def _unwrap_default_node(
     if document.stack[0].kind == TokenType.EXPR_DEFAULT:
         default_expr = document.stack.pop(0)
         value = default_expr.kwargs["value"]
+        classvar_hooks = default_expr.classvar_hooks
         default_type = ret_type
         if value is None:
             match ret_type:
@@ -438,9 +441,13 @@ def _unwrap_default_node(
                         category=SyntaxWarning,
                     )
                     default_type = VariableType.ANY
-        expr_default_start = ExprDefaultValueStart(kwargs={"value": value})
+        expr_default_start = ExprDefaultValueStart(
+            kwargs={"value": value}, classvar_hooks=classvar_hooks
+        )
         expr_default_end = ExprDefaultValueEnd(
-            kwargs={"value": value}, ret_type=default_type
+            kwargs={"value": value},
+            ret_type=default_type,
+            classvar_hooks=classvar_hooks,
         )
         document.stack.insert(0, expr_default_start)
         document.stack.append(expr_default_end)
