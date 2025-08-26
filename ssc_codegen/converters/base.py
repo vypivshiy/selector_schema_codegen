@@ -1,4 +1,4 @@
-from typing import Callable, cast, Any, TypeVar
+from typing import Callable, ClassVar, cast, Any, TypeVar
 
 from ssc_codegen.ast_ import (
     BaseAstNode,
@@ -58,6 +58,18 @@ class BaseCodeConverter:
     - @post - second trigger visitor entrypoint (for close brackets or other logic, for example)
 
     """
+
+    TEST_EXCLUDE_NODES: ClassVar[list[TokenType]] = [
+        # build-ins, not used in converters
+        TokenType.VARIABLE,
+        TokenType.EXPR_DEFAULT,
+        TokenType.MODULE,
+        TokenType.CODE_START,
+        TokenType.CODE_END,
+        TokenType.STRUCT_CALL_FUNCTION,
+        TokenType.STRUCT_CALL_CLASSVAR,
+    ]
+    """dev classvar marks exclude nodes in tests"""
 
     def __init__(
         self,
