@@ -20,6 +20,7 @@ dependencies = [
     # https://github.com/fastapi/typer/pull/1145
     "click<8.2.0",
     "ast-grep-cli>=0.38.1",
+    "tinycss2>=1.4.0",
 ]
 
 classifiers = [
