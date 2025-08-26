@@ -39,7 +39,10 @@ def test_converter_impl(
 ) -> None:
     def _any_token_impl(token: TokenType) -> bool:
         """return True if convert token configured"""
-        return token in converter.pre_definitions or token in converter.post_definitions 
+        return (
+            token in converter.pre_definitions
+            or token in converter.post_definitions
+        )
 
     not_implemented: list[TokenType] = []
     for token in TokenType:
@@ -48,6 +51,8 @@ def test_converter_impl(
         if not _any_token_impl(token):
             not_implemented.append(token)
     if not_implemented:
-        msg = ", ".join(f'`{t.name}`' for t in not_implemented) + "not implemented exprs"
+        msg = (
+            ", ".join(f"`{t.name}`" for t in not_implemented)
+            + "not implemented exprs"
+        )
         assert not not_implemented, msg
-
