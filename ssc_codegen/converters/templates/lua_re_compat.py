@@ -81,6 +81,7 @@ __all__ = ["py_regex_to_lua_pattern"]
 
 LOGGER = logging.getLogger("ssc-gen")
 
+
 @dataclass
 class Piece:
     text: str
@@ -224,7 +225,9 @@ def repeat_atom(atom: Piece, minrep: int, maxrep: int) -> Piece:
 
         if maxrep == UNLIM:
             # For unlimited repetition with alternatives, not supported
-            raise NotImplementedError("{n,} quantifier with alternatives not supported")
+            raise NotImplementedError(
+                "{n,} quantifier with alternatives not supported"
+            )
         elif minrep == maxrep:
             # Fixed repetition
             combined_alts = []
@@ -232,7 +235,9 @@ def repeat_atom(atom: Piece, minrep: int, maxrep: int) -> Piece:
                 combined_alts.append(alt * minrep)
             main_text = atom.text * minrep
             return piece(
-                main_text, False, combined_alts[1:] if len(combined_alts) > 1 else []
+                main_text,
+                False,
+                combined_alts[1:] if len(combined_alts) > 1 else [],
             )
         else:
             # Variable repetition with alternatives
@@ -240,7 +245,9 @@ def repeat_atom(atom: Piece, minrep: int, maxrep: int) -> Piece:
             for k in range(minrep, maxrep + 1):
                 for alt in all_alts:
                     combined_alts.append(alt * k)
-            main_text = atom.text * minrep + (atom.text + "?") * (maxrep - minrep)
+            main_text = atom.text * minrep + (atom.text + "?") * (
+                maxrep - minrep
+            )
             return piece(main_text, False, combined_alts)
 
     if maxrep == UNLIM:
@@ -385,7 +392,9 @@ def translate(pattern: str, ignore_case: bool = False) -> Piece:
                 atom = walk(p)
                 out += repeat_atom(atom, minr, maxr)
             elif op == srec.MIN_REPEAT:
-                LOGGER.warning("lua pattern matching not support non-greedy modifier suffix `?`. Replaced to eager `*`")
+                LOGGER.warning(
+                    "lua pattern matching not support non-greedy modifier suffix `?`. Replaced to eager `*`"
+                )
                 minr, maxr, p = av
                 atom = walk(p)
                 out += repeat_atom(atom, minr, maxr)

@@ -199,6 +199,7 @@ MAGIC_METHODS = {
 
 
 class BasePyCodeConverter(BaseCodeConverter):
+
     def __init__(
         self,
         debug_instructions: bool = False,

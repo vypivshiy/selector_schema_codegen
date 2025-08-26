@@ -45,7 +45,7 @@ SPECIAL METHODS NOTATIONS:
 see also templates.go_goquery for overview helper functions implementation
 """
 
-from typing import cast
+from typing import ClassVar, cast
 
 from typing_extensions import assert_never
 
@@ -145,7 +145,11 @@ from ssc_codegen.ast_.nodes_string import (
     ExprStringMapReplace,
     ExprStringUnescape,
 )
-from ssc_codegen.ast_.nodes_validate import ExprHasAttr, ExprListHasAttr
+from ssc_codegen.ast_.nodes_validate import (
+    ExprHasAttr,
+    ExprIsXpath,
+    ExprListHasAttr,
+)
 from ssc_codegen.converters.base import BaseCodeConverter
 from ssc_codegen.converters.helpers import (
     go_get_classvar_hook_or_value,
@@ -174,7 +178,12 @@ from ssc_codegen.str_utils import (
     to_upper_camel_case,
     wrap_double_quotes,
 )
-from ssc_codegen.tokens import JsonVariableType, VariableType, StructType
+from ssc_codegen.tokens import (
+    JsonVariableType,
+    TokenType,
+    VariableType,
+    StructType,
+)
 
 MAGIC_METHODS = {
     "__ITEM__": "Item",
@@ -242,7 +251,9 @@ DOCSTR = "// "
 
 class GoConverter(BaseCodeConverter):
     # HACK: in golang, it is allowed to use functions in only one namespace without redefinition.
-    HELPER_FUNCS_IMPORTED = False
+    PACKAGE: ClassVar[str] = "main"
+
+    HELPER_FUNCS_IMPORTED: ClassVar[bool] = False
     """a special flag indicating that helper functions have been added. 
     golang does not support overloading, overwriting functions.
     
@@ -251,6 +262,13 @@ class GoConverter(BaseCodeConverter):
 
 
 CONVERTER = GoConverter(debug_comment_prefix="// ")
+CONVERTER.TEST_EXCLUDE_NODES.extend(
+    [
+        TokenType.STRUCT_INIT,  # defined inside a struct
+        TokenType.EXPR_DEFAULT_END,  # emulated by defer func() + rescue
+        TokenType.CLASSVAR,  # emulated by type ST struct{ f1: T1, f2: T2, ...}; var ST {f1=V1, f2=V2, ...};
+    ]
+)
 
 
 def py_var_to_go_var(
@@ -315,7 +333,8 @@ def pre_module_imports(_node: ModuleImports) -> str:
         HELPER_FUNCTIONS if not CONVERTER.HELPER_FUNCS_IMPORTED else ""
     )
     code = (
-        IMPORTS
+        # magic constant
+        IMPORTS.replace("$PACKAGE$", CONVERTER.PACKAGE)
         # HACK: push helper functions to ModuleImports token:
         #       its generated second after module docstring
         + helper_functions
@@ -873,6 +892,11 @@ def pre_is_css(node: ExprIsCss) -> str:
     return go_assert_func_add_error_check(
         node, call_func=f"sscAssertCss({prv}, {query}, {msg})"
     )
+
+
+@CONVERTER(ExprIsXpath.kind)
+def pre_is_xpath(_: ExprIsXpath) -> str:
+    raise NotImplementedError("goquery not support xpath")
 
 
 @CONVERTER(ExprHasAttr.kind)

@@ -689,7 +689,11 @@ end
 
 
 HELPER_FUNCTIONS = (
-    _HELPER_BUILDINS + _HELPER_REGEX + _HELPER_FILTER + _HELPER_SELECTORS + '-- Main code'
+    _HELPER_BUILDINS
+    + _HELPER_REGEX
+    + _HELPER_FILTER
+    + _HELPER_SELECTORS
+    + "-- Main code"
 )
 
 

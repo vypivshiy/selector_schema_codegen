@@ -140,7 +140,7 @@ from ssc_codegen.converters.templates.lua_re_compat import (
     py_regex_to_lua_pattern,
 )
 from ssc_codegen.str_utils import wrap_double_quotes
-from ssc_codegen.tokens import StructType
+from ssc_codegen.tokens import JsonVariableType, StructType, VariableType
 
 
 class LuaConverter(BaseCodeConverter):
@@ -171,15 +171,47 @@ PCRE regex detected via class variable. Conversion to Lua pattern is not support
 - If you are using Lua pattern syntax inside a class variable, this warning can be ignored
 - see also https://www.lua.org/manual/5.4/manual.html#6.4.1
 """
+
 WARNING_DOTALL_FLAG = "lua pattern syntax not support re.X | re.DOTALL flag"
 WARNING_CSS_QUERY_MSG = "lua htmlparser not full support CSS3 query selectors syntax. Recommended css query pass as argument"
 
 
+TYPES = {
+    VariableType.STRING: "string",
+    VariableType.LIST_STRING: "string[]",
+    VariableType.OPTIONAL_STRING: "string|nil",
+    VariableType.OPTIONAL_LIST_STRING: "string[]|nil",
+    VariableType.NULL: "nil",
+    VariableType.INT: "integer",
+    VariableType.OPTIONAL_INT: "integer|nil",
+    VariableType.LIST_INT: "integer[]",
+    VariableType.FLOAT: "number",
+    VariableType.OPTIONAL_FLOAT: "number|nil",
+    VariableType.LIST_FLOAT: "number[]",
+    VariableType.OPTIONAL_LIST_FLOAT: "number[]|nil",
+    VariableType.BOOL: "boolean",
+}
+
+JSON_TYPES = {
+    JsonVariableType.STRING: "string",
+    JsonVariableType.BOOLEAN: "bool",
+    JsonVariableType.NUMBER: "integer",
+    JsonVariableType.FLOAT: "number[]",
+    JsonVariableType.OPTIONAL_NUMBER: "integer|nil",
+    JsonVariableType.OPTIONAL_FLOAT: "number|nil",
+    JsonVariableType.OPTIONAL_BOOLEAN: "boolean|nil",
+    JsonVariableType.OPTIONAL_STRING: "string|nil",
+    JsonVariableType.NULL: "nil",
+    JsonVariableType.ARRAY_STRING: "string[]",
+    JsonVariableType.ARRAY_FLOAT: "number[]",
+    JsonVariableType.ARRAY_BOOLEAN: "boolean[]",
+    JsonVariableType.ARRAY_NUMBER: "integer[]",
+}
+
+
 def make_lua_docstring(docstr: str) -> str:
-    # TODO: impl EmmyLua annotation syntax
     if not docstr:
         return ""
-    # TODO: impl function for annotate class
     return "\n".join([f"-- {i}" for i in docstr.split("\n")])
 
 
@@ -227,33 +259,88 @@ def pre_docstring(node: Docstring) -> str:
     return make_lua_docstring(node.kwargs["value"])
 
 
-# TODO emmylua types
-@CONVERTER(TypeDef.kind)
+def get_typedef_field_by_name(node: TypeDef, field_name: str) -> str:
+    value = [i for i in node.body if i.kwargs["name"] == field_name][0]
+    value = cast(TypeDefField, value)
+    if value.kwargs["type"] == VariableType.NESTED:
+        type_ = f"T_{value.kwargs['cls_nested']}"
+        if value.kwargs["cls_nested_type"] == StructType.LIST:
+            type_ = f"{type_}[]"
+    elif value.kwargs["type"] == VariableType.JSON:
+        type_ = f"J_{value.kwargs['cls_nested']}"
+        if value.kwargs["cls_nested_type"] == StructType.LIST:
+            type_ = f"{type_}[]"
+    else:
+        type_ = TYPES[value.kwargs["type"]]
+    return type_
+
+
+@CONVERTER(TypeDef.kind, post_callback=lambda _: "\n")
 def pre_typedef(node: TypeDef) -> str:
-    pass
+    name, st_type = node.unpack_args()
+    if st_type == StructType.ACC_LIST:
+        return f"---@alias T_{name} string[]"
+    # TODO: maybe return wrong type
+    elif st_type == StructType.FLAT_LIST:
+        type_ = get_typedef_field_by_name(node, "__ITEM__")
+        return f"---@alias T_{name} {type_}[]"
+    elif st_type == StructType.DICT:
+        type_ = get_typedef_field_by_name(node, "__VALUE__")
+        return f"---@alias T_{name} table<string, {type_}>"
+    return f"---@class T_{name}"
 
 
 @CONVERTER(TypeDefField.kind)
-def pre_typedef_field(node: TypeDef) -> str:
-    pass
+def pre_typedef_field(node: TypeDefField) -> str:
+    # @alias types, skip
+    if node.parent.kwargs["struct_type"] in {
+        StructType.ACC_LIST,
+        StructType.FLAT_LIST,
+        StructType.DICT,
+    }:
+        return ""
+
+    name, var_type, cls_nested, cls_nested_type = node.unpack_args()
+
+    if cls_nested:
+        if cls_nested_type in {
+            StructType.ACC_LIST,
+            StructType.LIST,
+            StructType.FLAT_LIST,
+        }:
+            type_ = f"T_{cls_nested}[]"
+        else:
+            type_ = f"T_{cls_nested}"
+    elif var_type == VariableType.JSON:
+        if cls_nested_type == StructType.LIST:
+            type_ = f"J_{cls_nested}[]"
+        else:
+            type_ = f"J_{cls_nested}"
+    else:
+        type_ = TYPES.get(var_type)
+    return f"---@field {name} {type_}"
 
 
-@CONVERTER(JsonStruct.kind)
+@CONVERTER(JsonStruct.kind, post_callback=lambda _: "\n")
 def pre_json_struct(node: JsonStruct) -> str:
-    pass
+    name, _is_array = node.unpack_args()
+    return f"---@class J_{name}"
 
 
 @CONVERTER(JsonStructField.kind)
 def pre_json_struct_field(node: JsonStructField) -> str:
-    pass
+    name, var_type = node.unpack_args()
+    type_ = JSON_TYPES.get(var_type)
+    return f"---@field {name} {type_}"
 
 
 @CONVERTER(StructParser.kind)
 def pre_struct_parser(node: StructParser) -> str:
     name = node.kwargs["name"]
     # TODO DOSTR SIGNATURE
-    # docstr = make_lua_docstring(node.kwargs["docstring"])
-    # local {cls_name} = {}
+    if node.kwargs["docstring"]:
+        docstr = make_lua_docstring(node.kwargs["docstring"])
+        return f"{docstr}\nlocal {name} = " + "{}; "
     return f"local {name} = " + "{}; "
 
 
@@ -321,7 +408,15 @@ def pre_start_parse(node: StartParseMethod) -> str:
         return ""
 
     parent_name = node.parent.kwargs["name"]
-    return f"function {parent_name}:parse() "
+    ret_t = f"T_{parent_name}"
+    if node.parent.struct_type in {
+        StructType.ACC_LIST,
+        StructType.FLAT_LIST,
+        StructType.LIST,
+    }:
+        ret_t += "[]"
+    # insert annotation
+    return f"---@return {ret_t}\nfunction {parent_name}:parse() "
 
 
 @CONVERTER.post(StartParseMethod.kind)
@@ -850,9 +945,7 @@ def pre_css_all(node: ExprCssAll) -> str:
         code = f"local {nxt} = {prv}:select({query})"
     else:
         # TODO: compare: array or sinlge object?
-        code = (
-            "\n".join(css_query_to_lua_htmlparser_code(query, prv, nxt))
-        )
+        code = "\n".join(css_query_to_lua_htmlparser_code(query, prv, nxt))
     # returns table of ElementNode object
     return code
 
@@ -1282,6 +1375,8 @@ def pre_xpath_remove(node: ExprXpathElementRemove) -> str:
 @CONVERTER(CodeEnd.kind)
 def pre_code_end(node: CodeEnd) -> str:
     # https://www.lua.org/pil/15.2.html
-    classes: list[StructParser] = [n for n in node.parent.body if n.kind == StructParser.kind]
-    names = [n.kwargs['name'] + '=' + n.kwargs['name'] for n in classes]
-    return "return {" + ', '.join(names)  + "}" 
+    classes: list[StructParser] = [
+        n for n in node.parent.body if n.kind == StructParser.kind
+    ]
+    names = [n.kwargs["name"] + "=" + n.kwargs["name"] for n in classes]
+    return "return {" + ", ".join(names) + "}"

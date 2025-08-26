@@ -119,7 +119,6 @@ from ssc_codegen.ast_.nodes_string import (
 )
 from ssc_codegen.converters.base import BaseCodeConverter
 from ssc_codegen.converters.helpers import (
-    get_classvar_hook_or_value,
     js_get_classvar_hook_or_value,
     jsonify_query_parse,
     prev_next_var,
@@ -165,6 +164,15 @@ DOCSTR_START = "/**"
 DOCSTR_END = "*/"
 DOCSTR_SEP = "* "
 CONVERTER = BaseCodeConverter(debug_comment_prefix="// ")
+# javascript not support typing/annotations
+CONVERTER.TEST_EXCLUDE_NODES.extend(
+    [
+        TokenType.TYPEDEF,
+        TokenType.TYPEDEF_FIELD,
+        TokenType.JSON_STRUCT,
+        TokenType.JSON_FIELD,
+    ]
+)
 
 
 # TODO: move to string_utils
@@ -498,14 +506,15 @@ def pre_list_str_regex_sub(node: ExprListStringRegexSub) -> str:
 @CONVERTER(ExprIndex.kind)
 def pre_index(node: ExprIndex) -> str:
     prv, nxt = prev_next_var(node)
-    index = get_classvar_hook_or_value(node, "index")
+
+    index = js_get_classvar_hook_or_value(node, "index")
     return f"let {nxt} = {prv}[{index}];"
 
 
 @CONVERTER(ExprListStringJoin.kind)
 def pre_list_str_join(node: ExprListStringJoin) -> str:
     prv, nxt = prev_next_var(node)
-    sep = get_classvar_hook_or_value(node, "sep")
+    sep = js_get_classvar_hook_or_value(node, "sep")
     return f"let {nxt} = {prv}.join({sep});"
 
 
@@ -513,8 +522,8 @@ def pre_list_str_join(node: ExprListStringJoin) -> str:
 def pre_is_equal(node: ExprIsEqual) -> str:
     prv, nxt = prev_next_var(node)
 
-    item = get_classvar_hook_or_value(node, "item")
-    msg = get_classvar_hook_or_value(node, "msg")
+    item = js_get_classvar_hook_or_value(node, "item")
+    msg = js_get_classvar_hook_or_value(node, "msg")
 
     expr = f"if ({item} != {prv}) throw new Error({msg});"
     if is_last_var_no_ret(node):
@@ -526,8 +535,8 @@ def pre_is_equal(node: ExprIsEqual) -> str:
 def pre_is_not_equal(node: ExprIsNotEqual) -> str:
     prv, nxt = prev_next_var(node)
 
-    item = get_classvar_hook_or_value(node, "item")
-    msg = get_classvar_hook_or_value(node, "msg")
+    item = js_get_classvar_hook_or_value(node, "item")
+    msg = js_get_classvar_hook_or_value(node, "msg")
 
     expr = f"if ({item} == {prv}) throw new Error({msg});"
     if is_last_var_no_ret(node):
@@ -538,8 +547,8 @@ def pre_is_not_equal(node: ExprIsNotEqual) -> str:
 @CONVERTER(ExprIsContains.kind)
 def pre_is_contains(node: ExprIsContains) -> str:
     prv, nxt = prev_next_var(node)
-    item = get_classvar_hook_or_value(node, "item")
-    msg = get_classvar_hook_or_value(node, "msg")
+    item = js_get_classvar_hook_or_value(node, "item")
+    msg = js_get_classvar_hook_or_value(node, "msg")
 
     expr = f"if (!({item} in {prv})) throw new Error({msg});"
     if is_last_var_no_ret(node):
@@ -551,10 +560,10 @@ def pre_is_contains(node: ExprIsContains) -> str:
 def pre_is_regex(node: ExprStringIsRegex) -> str:
     prv, nxt = prev_next_var(node)
     pattern, ignore_case, msg = node.unpack_args()
-    msg = get_classvar_hook_or_value(node, "msg")
+    msg = js_get_classvar_hook_or_value(node, "msg")
 
     if node.classvar_hooks.get("pattern"):
-        pattern = get_classvar_hook_or_value(node, "pattern")
+        pattern = js_get_classvar_hook_or_value(node, "pattern")
     else:
         pattern = to_js_regexp(pattern, ignore_case)
 
@@ -569,9 +578,9 @@ def pre_list_str_any_is_regex(node: ExprListStringAnyRegex) -> str:
     # a.some(i => (new RegExp("foo")).test(i))
     prv, nxt = prev_next_var(node)
     pattern, ignore_case, msg = node.unpack_args()
-    msg = get_classvar_hook_or_value(node, "msg")
+    msg = js_get_classvar_hook_or_value(node, "msg")
     if node.classvar_hooks.get("pattern"):
-        pattern = get_classvar_hook_or_value(node, "pattern")
+        pattern = js_get_classvar_hook_or_value(node, "pattern")
     else:
         pattern = to_js_regexp(pattern, ignore_case)
 
@@ -587,9 +596,9 @@ def pre_list_str_all_is_regex(node: ExprListStringAllRegex) -> str:
     # a.every(i => (new RegExp("foo")).test)
     pattern, ignore_case, msg = node.unpack_args()
 
-    msg = get_classvar_hook_or_value(node, "msg")
+    msg = js_get_classvar_hook_or_value(node, "msg")
     if node.classvar_hooks.get("pattern"):
-        pattern = get_classvar_hook_or_value(node, "pattern")
+        pattern = js_get_classvar_hook_or_value(node, "pattern")
     else:
         pattern = to_js_regexp(pattern, ignore_case)
 
@@ -602,8 +611,8 @@ def pre_list_str_all_is_regex(node: ExprListStringAllRegex) -> str:
 @CONVERTER(ExprIsCss.kind)
 def pre_is_css(node: ExprIsCss) -> str:
     prv, nxt = prev_next_var(node)
-    query = get_classvar_hook_or_value(node, "query")
-    msg = get_classvar_hook_or_value(node, "msg")
+    query = js_get_classvar_hook_or_value(node, "query")
+    msg = js_get_classvar_hook_or_value(node, "msg")
 
     expr = f"if ({prv}.querySelector({query}) === null) throw new Error({msg});"
     if is_last_var_no_ret(node):
@@ -615,8 +624,8 @@ def pre_is_css(node: ExprIsCss) -> str:
 @CONVERTER(ExprIsXpath.kind)
 def pre_is_xpath(node: ExprIsXpath) -> str:
     prv, nxt = prev_next_var(node)
-    query = get_classvar_hook_or_value(node, "query")
-    msg = get_classvar_hook_or_value(node, "msg")
+    query = js_get_classvar_hook_or_value(node, "query")
+    msg = js_get_classvar_hook_or_value(node, "msg")
 
     expr = J2_IS_XPATH.render(prv=prv, nxt=nxt, msg=msg, query=query)
     if is_last_var_no_ret(node):
@@ -672,28 +681,28 @@ def pre_jsonify(node: ExprJsonify) -> str:
 @CONVERTER(ExprCss.kind)
 def pre_css(node: ExprCss) -> str:
     prv, nxt = prev_next_var(node)
-    query = get_classvar_hook_or_value(node, "query")
+    query = js_get_classvar_hook_or_value(node, "query")
     return f"let {nxt} = {prv}.querySelector({query});"
 
 
 @CONVERTER(ExprCssAll.kind)
 def pre_css_all(node: ExprCssAll) -> str:
     prv, nxt = prev_next_var(node)
-    query = get_classvar_hook_or_value(node, "query")
+    query = js_get_classvar_hook_or_value(node, "query")
     return f"let {nxt} = Array.from({prv}.querySelectorAll({query}));"
 
 
 @CONVERTER(ExprXpath.kind)
 def pre_xpath(node: ExprXpath) -> str:
     prv, nxt = prev_next_var(node)
-    query = get_classvar_hook_or_value(node, "query")
+    query = js_get_classvar_hook_or_value(node, "query")
     return J2_PRE_XPATH.render(prv=prv, nxt=nxt, query=query)
 
 
 @CONVERTER(ExprXpathAll.kind)
 def pre_xpath_all(node: ExprXpathAll) -> str:
     prv, nxt = prev_next_var(node)
-    query = get_classvar_hook_or_value(node, "query")
+    query = js_get_classvar_hook_or_value(node, "query")
     snapshot_var = f"s{nxt}"
     return J2_PRE_XPATH_ALL.render(
         prv=prv, nxt=nxt, query=query, snapshot_var=snapshot_var
@@ -756,7 +765,7 @@ def pre_html_raw_all(node: ExprGetHtmlRawAll) -> str:
 @CONVERTER(ExprStringRmPrefix.kind)
 def pre_str_rm_prefix(node: ExprStringRmPrefix) -> str:
     prv, nxt = prev_next_var(node)
-    substr = get_classvar_hook_or_value(node, "substr")
+    substr = js_get_classvar_hook_or_value(node, "substr")
     #  sscRmPrefix = (v, p)
     return f"let {nxt} = sscRmPrefix({prv}, {substr});"
 
@@ -764,7 +773,7 @@ def pre_str_rm_prefix(node: ExprStringRmPrefix) -> str:
 @CONVERTER(ExprListStringRmPrefix.kind)
 def pre_list_str_rm_prefix(node: ExprListStringRmPrefix) -> str:
     prv, nxt = prev_next_var(node)
-    substr = get_classvar_hook_or_value(node, "substr")
+    substr = js_get_classvar_hook_or_value(node, "substr")
     #  sscRmPrefix = (v, p)
     return f"let {nxt} = {prv}.map((e) => sscRmPrefix(e, {substr}));"
 
@@ -772,7 +781,7 @@ def pre_list_str_rm_prefix(node: ExprListStringRmPrefix) -> str:
 @CONVERTER(ExprStringRmSuffix.kind)
 def pre_str_rm_suffix(node: ExprStringRmSuffix) -> str:
     prv, nxt = prev_next_var(node)
-    substr = get_classvar_hook_or_value(node, "substr")
+    substr = js_get_classvar_hook_or_value(node, "substr")
     # sscRmSuffix = (v, s)
     return f"let {nxt} = sscRmSuffix({prv}, {substr});"
 
@@ -780,7 +789,7 @@ def pre_str_rm_suffix(node: ExprStringRmSuffix) -> str:
 @CONVERTER(ExprListStringRmSuffix.kind)
 def pre_list_str_rm_suffix(node: ExprListStringRmSuffix) -> str:
     prv, nxt = prev_next_var(node)
-    substr = get_classvar_hook_or_value(node, "substr")
+    substr = js_get_classvar_hook_or_value(node, "substr")
     # sscRmSuffix = (v, s)
     return f"let {nxt} = {prv}.map((e) => sscRmSuffix(e, {substr}));"
 
@@ -788,7 +797,7 @@ def pre_list_str_rm_suffix(node: ExprListStringRmSuffix) -> str:
 @CONVERTER(ExprStringRmPrefixAndSuffix.kind)
 def pre_str_rm_prefix_and_suffix(node: ExprStringRmPrefixAndSuffix) -> str:
     prv, nxt = prev_next_var(node)
-    substr = get_classvar_hook_or_value(node, "substr")
+    substr = js_get_classvar_hook_or_value(node, "substr")
     # sscRmPrefixSuffix = (v, p, s)
     return f"let {nxt} = sscRmPrefixSuffix({prv}, {substr}, {substr});"
 
@@ -798,7 +807,7 @@ def pre_list_str_rm_prefix_and_suffix(
     node: ExprListStringRmPrefixAndSuffix,
 ) -> str:
     prv, nxt = prev_next_var(node)
-    substr = get_classvar_hook_or_value(node, "substr")
+    substr = js_get_classvar_hook_or_value(node, "substr")
     # sscRmPrefixSuffix = (v, p, s)
     return f"let {nxt} = {prv}.map((e) => sscRmPrefixSuffix(e,{substr}, {substr}));"
 
@@ -806,8 +815,8 @@ def pre_list_str_rm_prefix_and_suffix(
 @CONVERTER(ExprHasAttr.kind)
 def pre_has_attr(node: ExprHasAttr) -> str:
     prv, nxt = prev_next_var(node)
-    key = get_classvar_hook_or_value(node, "key")
-    msg = get_classvar_hook_or_value(node, "msg")
+    key = js_get_classvar_hook_or_value(node, "key")
+    msg = js_get_classvar_hook_or_value(node, "msg")
 
     expr = f"if (!{prv}?.hasAttribute({key})) throw new Error({msg});"
     if is_last_var_no_ret(node):
@@ -818,8 +827,8 @@ def pre_has_attr(node: ExprHasAttr) -> str:
 @CONVERTER(ExprListHasAttr.kind)
 def pre_list_has_attr(node: ExprListHasAttr) -> str:
     prv, nxt = prev_next_var(node)
-    key = get_classvar_hook_or_value(node, "key")
-    msg = get_classvar_hook_or_value(node, "msg")
+    key = js_get_classvar_hook_or_value(node, "key")
+    msg = js_get_classvar_hook_or_value(node, "msg")
 
     expr = f"if (!{prv}.every(e => e?.hasAttribute({key}))) throw new Error({msg});"
     if is_last_var_no_ret(node):
@@ -1043,14 +1052,14 @@ def pre_map_attrs_all(node: ExprMapAttrsAll) -> str:
 @CONVERTER(ExprCssElementRemove.kind)
 def pre_css_remove(node: ExprCssElementRemove) -> str:
     prv, nxt = prev_next_var(node)
-    query = get_classvar_hook_or_value(node, "query")
+    query = js_get_classvar_hook_or_value(node, "query")
     return f"document.querySelectorAll({query}).forEach(el => el.remove()); let {nxt} = {prv};"
 
 
 @CONVERTER(ExprXpathElementRemove.kind)
 def pre_xpath_remove(node: ExprXpathElementRemove) -> str:
     prv, nxt = prev_next_var(node)
-    query = get_classvar_hook_or_value(node, "query")
+    query = js_get_classvar_hook_or_value(node, "query")
     return (
         f"for (let {prv}r = document.evaluate({query}, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null), {prv}i = {prv}r.snapshotLength; {prv}i--; ) {prv}r.snapshotItem({prv}i).remove(); "
         + f"let {nxt} = {prv}; "
