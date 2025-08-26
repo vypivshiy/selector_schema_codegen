@@ -4,7 +4,7 @@ import os
 import pprint
 import sys
 from pathlib import Path
-from typing import Annotated, Callable, List, Optional
+from typing import Annotated, Any, Callable, List, Optional
 
 import typer
 from ichrome.exceptions import ChromeRuntimeError
@@ -85,7 +85,7 @@ def generate_code(
     comment_str: str,
     fmt_cmd: list[str],
     code_cb: Callable[[list[str]], str] = lambda c: "\n".join(c),
-    variables_patches: dict[str, str] | None = None,
+    variables_patches: dict[str, Any] | None = None,
     css_to_xpath: bool = False,
     xpath_to_css: bool = False,
     debug_instructions: bool = False,
