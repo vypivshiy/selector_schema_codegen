@@ -1,13 +1,6 @@
 """helper function helps check converter implementation"""
 
 import pytest
-from .helpers_converters import (
-    CSS_TOKENS_IMPL,
-    REQUIRED_TOKENS_CONVERT_IMPL,
-    TYPING_TOKENS_CONVERT_IMPL,
-    XPATH_TOKENS_IMPL,
-    new_converter_check,
-)
 
 from ssc_codegen.converters.base import BaseCodeConverter
 
