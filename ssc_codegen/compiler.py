@@ -7,7 +7,10 @@ from typing import Any, Type
 
 from ssc_codegen.ast_.nodes_core import ModuleImports, ModuleProgram
 from ssc_codegen.ast_build import build_ast_module_parser
-from ssc_codegen.ast_build.main import build_ast_struct_parser
+from ssc_codegen.ast_build.main import (
+    build_ast_struct_parser,
+    build_ast_typedef,
+)
 from ssc_codegen.converters.py_base import BasePyCodeConverter
 from ssc_codegen.schema import BaseSchema
 
@@ -48,9 +51,14 @@ def compile(
     module.body.append(ModuleImports())
 
     structs = []
+
+    # TODO: add json structs support
     for s in schemas:
         struct = build_ast_struct_parser(s, module, gen_docstring=False)
         structs.append(struct)
+
+    t_defs = build_ast_typedef(module, *structs)
+    module.body.extend(t_defs)
     module.body.extend(structs)
 
     code_parts = converter.convert_program(module)
@@ -58,6 +66,7 @@ def compile(
     code = "\n".join(code_parts)
     exec(code, module.__dict__)
     sys.modules["_ssc_single_eval"] = module
+    return module
 
 
 class Compiler:
