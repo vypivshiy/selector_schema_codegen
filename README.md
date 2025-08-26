@@ -6,8 +6,8 @@ ssc-gen - a python-based DSL to describe parsers for html documents, which is tr
 
 ### For a better experience using this library, you should know:
 
-- HTML CSS selectors (CSS3 standard minimum), Xpath
-- regular expressions
+- HTML CSS selectors (CSS3 standard min), Xpath
+- regular expressions (PCRE)
 
 ### Project solving next problems:
 
@@ -15,35 +15,45 @@ ssc-gen - a python-based DSL to describe parsers for html documents, which is tr
 - decrease boilerplate code
 - generates independent modules from the project that can be reused.
 - generates docstring documentation and the signature of the parser output.
-- generates a typedef, type annotation, if the target programming language supports it.
-- support for annotation and parsing of JSON-like strings from a document
-- AST API for codegen for developing a converter for parsing
+- for a better IDE experience, generates a typedefs, type annotations (if the target programming language supports it).
+- support annotation and parsing of JSON-like strings from a document
+- AST API codegen for developing a converter for parsing
 
 ## Support converters
 
 Current support converters
 
-| Language      | HTML parser backend                    | XPath | CSS3 | CSS4 | Generated types, structs          | formatter dependency |
-| ------------- | -------------------------------------- | ----- | ---- | ---- | --------------------------------- | -------------------- |
-| Python (3.8+) | bs4                                    | N     | Y    | Y    | TypedDict`*`, list, dict          | ruff                 |
-| ...           | parsel                                 | Y     | Y    | N    | ...                               | ...                  |
-| ...           | selectolax (lexbor)                    | N     | Y    | N    | ...                               | ...                  |
-| js (ES6)      | pure (firefox/chrome extension/nodejs) | Y     | Y    | Y    | Array, Map`**`                    | prettier             |
-| go (1.10+)    | goquery (`***`)                        | N     | Y    | N    | struct(+json anchors), array, map | gofmt                |
+| Language                                 | HTML parser lib + dependencies         | XPath | CSS3 | CSS4 | Generated annotations, types, structs | formatter dependency |
+| ---------------------------------------- | -------------------------------------- | ----- | ---- | ---- | ------------------------------------- | -------------------- |
+| Python (3.8+)                            | bs4, lxml                              | N     | Y    | Y    | TypedDict`1`, list, dict              | ruff                 |
+| ...                                      | parsel                                 | Y     | Y    | N    | ...                                   | ...                  |
+| ...                                      | selectolax (lexbor)                    | N     | Y    | N    | ...                                   | ...                  |
+| ...                                      | lxml                                   | Y     | Y    | N    | ...                                   | ...                  |
+| js (ES6)`2`                              | pure (firefox/chrome extension/nodejs) | Y     | Y    | Y    | Array, Map`3`                         | prettier             |
+| go (1.10+) **(UNSTABLE)**                | goquery, gjson (`4`)                   | N     | Y    | N    | struct(+json anchors), array, map     | gofmt                |
+| lua (5.2+), luajit(2+) **(UNSTABLE)**`5` | lua-htmlparser, lrexlib(opt), dkjson   | N     | Y    | N    | EmmyLua                               | LuaFormatter         |
 
 - **CSS3** means support next selectors:
   - basic: (`tag`, `.class`, `#id`, `tag1,tag2`)
   - combined: (`div p`, `ul > li`, `h2 +p`, `title ~head`)
   - attribute: (`a[href]`, `input[type='text']`, `a[href*='...']`, ...)
-  - basic pseudo classes: (`:nth-child(n)`, `:first-child`, `:last-child`)
+  - CSS3 pseudo classes: (`:nth-child(n)`, `:first-child`, `:last-child`)
 - **CSS4** means support next selectors:
-  - `:has()`, `:nth-of-type()`, `:where()`, `:is()` etc
-- `*`this annotation type was deliberately chosen as a compromise reasons:
+  - `:nth-of-type()`, `:where()`, `:is()`, `:not()` etc
+- `1`this annotation type was deliberately chosen as a compromise reasons:
   Python has many ways of serialization: `namedtuple, dataclass, attrs, pydantic, msgspec, etc`
   - TypedDict is like a build-in dict, but with IDE and linter hint support, and you can easily implement an adapter for the required structure.
-- `**`js exclude build-in serialization methods, used standard Array and Map types. Focus on the singanutur documentation!
-- `***`golang has not been tested much, there may be issues
+- `2`ES8 standart required if needed use PCRE `re.S | re.DOTALL` flag
+- `3`js exclude build-in serialization methods, used standard Array and Map types. Focus on the singanutur documentation!
+- `4`golang has not been tested much, there may be issues
 - **formatter dependency** - optional dependency for prettify and fix codestyle
+
+- `5`lua
+  - Experimental Research PoC, performance and stability are not guaranteed
+  - Priority on generation to pure lua without C-libs dependencies. using [mva/htmlparser](https://luarocks.org/modules/mva/htmlparser) and [dhkolf/dkjson](https://luarocks.org/modules/dhkolf/dkjson)
+  - Translates unsupported CSS3 selectors into the equivalent in the form of function calls:
+    - for example, `div +p` is equivalent to `CssExt.combine_plus(root:select("div"), "p")`
+  - Translates PCRE regex to [string pattern matching](https://www.lua.org/manual/5.4/manual.html#6.4.1) (with restrictions) for more information in [lua_re_compat.py ](ssc_codegen/converters/templates/lua_re_compat.py)
 
 ### Limitations
 
@@ -51,9 +61,10 @@ For maximum portability of the configuration to the target language:
 
 - If possible, use CSS selectors: they are guaranteed to be converted to XPATH
 - Unlike javascript, most html parse libs implement [CSS3 selectors standard](https://www.w3.org/TR/selectors-3/). They may not fully implement the functionality!
-  Check the html parser lib documentation aboud CSS selectors before implement code. For example:
-    1. Several libs not support `+` operations (eg: [selectolax(modest)](https://github.com/rushter/selectolax), [dart.universal_html](https://pub.dev/packages/universal_html))
-2. HTML parser libs maybe not supports attribute operations like `*=`, `~=`, `|=`, `^=` and `$=`
+  Check the html parser lib documentation aboud CSS selectors before implement code. Examples:
+  1. Several libs not support `+` operations (eg: [selectolax(modest)](https://github.com/rushter/selectolax), [dart.universal_html](https://pub.dev/packages/universal_html))
+  2. For research purpose, lua_htmlparser include converter for unsupported CSS3 query syntax
+2. HTML parser libs maybe not supports attribute selectors: `*=`, `~=`, `|=`, `^=`, `$=`
 3. Several libs not support pseudo classes (eg: standard [dart.html](https://dart.dev/libraries/dart-html) lib miss this feature).
 
 ## Getting started
