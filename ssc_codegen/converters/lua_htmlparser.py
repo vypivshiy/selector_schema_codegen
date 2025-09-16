@@ -110,6 +110,7 @@ from ssc_codegen.ast_ import (
     ExprStringUnescape,
     ModuleImports,
 )
+from ssc_codegen.ast_.nodes_cast import ExprJsonifyDynamic
 from ssc_codegen.ast_.nodes_core import (
     CodeEnd,
     ExprCallStructClassVar,
@@ -1380,3 +1381,16 @@ def pre_code_end(node: CodeEnd) -> str:
     ]
     names = [n.kwargs["name"] + "=" + n.kwargs["name"] for n in classes]
     return "return {" + ", ".join(names) + "}"
+
+
+@CONVERTER(ExprJsonifyDynamic.kind)
+def pre_jsonify_dynamic(node: ExprJsonifyDynamic) -> str:
+    prv, nxt = prev_next_var(node)
+    query = node.unpack_args()
+    # lua index starts by 1, fix query
+    expr = "".join(
+        f"[{int(i) + 1}]" if i.isdigit() else f"[{i}]"
+        for i in jsonify_query_parse(query)
+    )
+
+    return f"local {nxt} = json.decode({prv}){expr}; "

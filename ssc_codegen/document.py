@@ -80,6 +80,7 @@ from ssc_codegen.ast_ import (
     ExprListStringMapReplace,
     ExprStringMapReplace,
 )
+from ssc_codegen.ast_.nodes_cast import ExprJsonifyDynamic
 from ssc_codegen.ast_.nodes_core import ExprClassVar
 from ssc_codegen.ast_.nodes_selectors import (
     ExprCssElementRemove,
@@ -1759,6 +1760,26 @@ class BooleanDocument(BaseDocument):
 
 
 class JsonDocument(BaseDocument):
+    def jsonify_dynamic(self, start_query: str = "") -> Self:
+        """marshal json to dynamic object wout annotated type/struct
+        
+        - accept STRING, return ANY
+        """
+        if self.stack_last_ret != VariableType.STRING:
+            LOGGER.warning(
+                "jsonify_dynamic(): Expected type(s) %s got %s",
+                VariableType.STRING.name,
+                self.stack_last_ret.name,
+            )
+        self._add(
+            ExprJsonifyDynamic(
+                kwargs={
+                    "query": start_query,
+                }
+            )
+        )
+        return self
+
     def jsonify(self, struct: Type[Json], start_query: str = "") -> Self:
         """marshal json string to object
 

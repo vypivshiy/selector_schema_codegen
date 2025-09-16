@@ -68,3 +68,16 @@ class ExprJsonify(BaseAstNode[KW_EXPR_JSONIFY, ARGS_EXPR_JSONIFY]):
     kind: ClassVar[TokenType] = TokenType.TO_JSON
     accept_type: VariableType = VariableType.STRING
     ret_type: VariableType = VariableType.JSON
+
+
+KW_EXPR_JSONIFY_DYNAMIC = TypedDict("KW_EXPR_JSONIFY_DYNAMIC", {"query": str})
+ARGS_EXPR_JSONIFY_DYNAMIC = tuple[str]
+
+
+@dataclass(kw_only=True)
+class ExprJsonifyDynamic(
+    BaseAstNode[KW_EXPR_JSONIFY_DYNAMIC, ARGS_EXPR_JSONIFY_DYNAMIC]
+):
+    kind: ClassVar[TokenType] = TokenType.TO_JSON_DYNAMIC
+    accept_type: VariableType = VariableType.STRING
+    ret_type: VariableType = VariableType.ANY  # STUBBED

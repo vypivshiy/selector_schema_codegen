@@ -107,6 +107,7 @@ from ssc_codegen.ast_ import (
     ExprStringMapReplace,
     ExprListStringMapReplace,
 )
+from ssc_codegen.ast_.nodes_cast import ExprJsonifyDynamic
 from ssc_codegen.ast_.nodes_core import ExprClassVar
 from ssc_codegen.ast_.nodes_string import (
     ExprListStringUnescape,
@@ -270,6 +271,7 @@ class BasePyCodeConverter(BaseCodeConverter):
             ExprToListLength.kind: pre_to_len,
             ExprToBool.kind: pre_to_bool,
             ExprJsonify.kind: pre_jsonify,
+            ExprJsonifyDynamic.kind: pre_to_json_dynamic,
             # FILTER,
             ExprFilter.kind: pre_expr_filter,
             FilterAnd.kind: pre_filter_and,
@@ -1269,3 +1271,15 @@ def pre_list_str_unescape(node: ExprListStringUnescape) -> str:
     prv, nxt = prev_next_var(node)
     # ssc_unescape(s: str) -> str
     return f"{indent}{nxt} = [ssc_unescape(i) for i in {prv}]"
+
+
+def pre_to_json_dynamic(node: ExprJsonifyDynamic) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    query = node.unpack_args()
+
+    expr = "".join(f"[{i}]" for i in jsonify_query_parse(query))
+
+    return f"{indent}{nxt} = json.loads({prv}){expr}"

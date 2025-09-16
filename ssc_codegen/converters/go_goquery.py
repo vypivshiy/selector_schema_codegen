@@ -267,6 +267,7 @@ CONVERTER.TEST_EXCLUDE_NODES.extend(
         TokenType.STRUCT_INIT,  # defined inside a struct
         TokenType.EXPR_DEFAULT_END,  # emulated by defer func() + rescue
         TokenType.CLASSVAR,  # emulated by type ST struct{ f1: T1, f2: T2, ...}; var ST {f1=V1, f2=V2, ...};
+        TokenType.TO_JSON_DYNAMIC,  # golang exclude dynamic json structures (DDD aka dict driven development)
     ]
 )
 

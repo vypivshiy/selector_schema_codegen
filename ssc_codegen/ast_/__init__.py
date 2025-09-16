@@ -1,6 +1,6 @@
 from .base import BaseAstNode
 from .nodes_array import ExprIndex, ExprToListLength, ExprListStringJoin, ExprListUnique
-from .nodes_cast import ExprNested, ExprJsonify, ExprToInt, ExprToFloat, ExprToListInt, ExprToListFloat, ExprToBool
+from .nodes_cast import ExprNested, ExprJsonify, ExprToInt, ExprToFloat, ExprToListInt, ExprToListFloat, ExprToBool, ExprJsonifyDynamic
 from .nodes_core import (ExprReturn,
                          ExprNoReturn,
                          ExprDefaultValueEnd,

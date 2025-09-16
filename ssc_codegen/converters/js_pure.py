@@ -106,6 +106,7 @@ from ssc_codegen.ast_ import (
     ExprListStringMapReplace,
     ExprClassVar,
 )
+from ssc_codegen.ast_.nodes_cast import ExprJsonifyDynamic
 from ssc_codegen.ast_.nodes_core import ModuleImports
 from ssc_codegen.ast_.nodes_selectors import (
     ExprCssElementRemove,
@@ -1064,3 +1065,13 @@ def pre_xpath_remove(node: ExprXpathElementRemove) -> str:
         f"for (let {prv}r = document.evaluate({query}, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null), {prv}i = {prv}r.snapshotLength; {prv}i--; ) {prv}r.snapshotItem({prv}i).remove(); "
         + f"let {nxt} = {prv}; "
     )
+
+
+@CONVERTER(ExprJsonifyDynamic.kind)
+def pre_jsonify_dynamic(node: ExprJsonifyDynamic) -> str:
+    prv, nxt = prev_next_var(node)
+    query = node.unpack_args()
+
+    expr = "".join(f"[{i}]" for i in jsonify_query_parse(query))
+
+    return f"let {nxt} = JSON.parse({prv}){expr};"

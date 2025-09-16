@@ -215,6 +215,7 @@ class TokenType(IntEnum):
 
     # JSON OP
     TO_JSON = auto()
+    TO_JSON_DYNAMIC = auto()
     # STRUCTS
     JSON_STRUCT = auto()
     JSON_FIELD = auto()
