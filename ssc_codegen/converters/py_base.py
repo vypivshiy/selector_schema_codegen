@@ -951,9 +951,9 @@ def pre_is_regex(node: ExprStringIsRegex) -> str:
     else:
         flags = py_regex_flags(ignore_case)
         if flags:
-            expr = f"re.search({pattern}, {prv}, re.I)"
+            expr = f"re.search({pattern!r}, {prv}, re.I)"
         else:
-            expr = f"re.search({pattern}, {prv})"
+            expr = f"re.search({pattern!r}, {prv})"
 
     expr = indent + f"assert {expr}, {msg}"
     if is_last_var_no_ret(node):
