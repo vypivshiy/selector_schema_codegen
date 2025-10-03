@@ -28,10 +28,12 @@ class Document(
     JsonDocument,
     BooleanDocument
 ):
+    """Special Common Document or Element marker manipulations"""
     pass
 
 
 class Nested(HTMLDocument, NestedDocument, ArrayDocument, AssertDocument):
+    """Special Common Document or Element marker for provide Nested structure parsers"""
     pass
 
 
