@@ -1,11 +1,12 @@
 """high-level AST builder interface"""
 
+from functools import wraps
 import logging
-from typing import Any, Type, Pattern, Sequence
+from typing import Any, Callable, Type, Pattern, Sequence, TypeVar
 from re import Pattern as RePattern
 
 from cssselect import SelectorSyntaxError
-from typing_extensions import Self, assert_never
+from typing_extensions import ParamSpec, Self, assert_never
 
 from ssc_codegen.ast_ import (
     BaseAstNode,
@@ -112,6 +113,40 @@ from ssc_codegen.tokens import TokenType, VariableType
 
 LOGGER = logging.getLogger("ssc_gen")
 
+T = TypeVar("T", bound="BaseDocument")
+P = ParamSpec("P")
+R = TypeVar("R")
+
+
+# helper decorators
+def validate_types(
+    *expected_types: VariableType,
+) -> Callable[[Callable[P, R]], Callable[P, R]]:
+    """decorator for validation types in nodes
+
+    pass expected types for checks
+    """
+
+    def decorator(doc_method: Callable[P, R]) -> Callable[P, R]:
+        @wraps(doc_method)
+        def wrapper(self: BaseDocument, *args: P.args, **kwargs: P.kwargs) -> R:
+            current_type = self.stack_last_ret
+            if (
+                current_type not in expected_types
+                and current_type != VariableType.ANY
+            ):
+                LOGGER.warning(
+                    "%s(): Expected type(s) %s, got %s",
+                    doc_method.__name__,
+                    [t.name for t in expected_types],
+                    current_type.name,
+                )
+            return doc_method(self, *args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
 
 class BaseDocument:
     LOGGER = LOGGER
@@ -206,6 +241,7 @@ class DefaultDocument(BaseDocument):
 
 
 class HTMLDocument(BaseDocument):
+    @validate_types(VariableType.DOCUMENT, VariableType.ANY)
     def css(self, query: str | ExprClassVar) -> Self:
         """Css query. returns first founded element
 
@@ -220,13 +256,6 @@ class HTMLDocument(BaseDocument):
         except SelectorSyntaxError:
             LOGGER.warning("`%s` is not valid css query", query)
 
-        # type ANY used in start or default expr
-        if self.stack_last_ret not in (VariableType.DOCUMENT, VariableType.ANY):
-            LOGGER.warning(
-                "Expected type %s, got %s",
-                VariableType.DOCUMENT.name,
-                self.stack_last_ret.name,
-            )
         if literal_hooks.get("query"):
             literal_hooks["query"].value = query
         self._add(
@@ -249,6 +278,7 @@ class HTMLDocument(BaseDocument):
                 case _:
                     assert_never(action[0])
 
+    @validate_types(VariableType.DOCUMENT, VariableType.ANY)
     def xpath(self, query: str | ExprClassVar) -> Self:
         """Xpath query. returns first founded element
         - accept: DOCUMENT, return DOCUMENT
@@ -261,13 +291,6 @@ class HTMLDocument(BaseDocument):
             validate_xpath_query(query)
         except SelectorSyntaxError:
             LOGGER.warning("`%s` is not valid xpath query", query)
-
-        if self.stack_last_ret not in (VariableType.DOCUMENT, VariableType.ANY):
-            LOGGER.warning(
-                "Expected type(s) %s, got %s",
-                VariableType.DOCUMENT.name,
-                self.stack_last_ret.name,
-            )
         if literal_hooks.get("query"):
             literal_hooks["query"].value = query
         self._add(
@@ -276,6 +299,7 @@ class HTMLDocument(BaseDocument):
         self._pseudo_query_action_to_expr(action)
         return self
 
+    @validate_types(VariableType.DOCUMENT, VariableType.ANY)
     def css_all(self, query: str | ExprClassVar) -> Self:
         """Css query. returns all founded elements
         - accept: DOCUMENT, return: LIST_DOCUMENT
@@ -287,13 +311,6 @@ class HTMLDocument(BaseDocument):
             validate_css_query(query)
         except SelectorSyntaxError:
             LOGGER.warning("`%s` is not valid css query", query)
-        if self.stack_last_ret not in (VariableType.DOCUMENT, VariableType.ANY):
-            LOGGER.warning(
-                "Expected type(s) %s, got %s",
-                VariableType.DOCUMENT.name,
-                self.stack_last_ret.name,
-            )
-
         if literal_hooks.get("query"):
             literal_hooks["query"].value = query
         self._add(
@@ -302,6 +319,7 @@ class HTMLDocument(BaseDocument):
         self._pseudo_query_action_to_expr(action)
         return self
 
+    @validate_types(VariableType.DOCUMENT, VariableType.ANY)
     def xpath_all(self, query: str | ExprClassVar) -> Self:
         """Xpath query. returns all founded elements
         - accept: DOCUMENT, return: LIST_DOCUMENT
@@ -314,12 +332,6 @@ class HTMLDocument(BaseDocument):
             validate_xpath_query(query)
         except SelectorSyntaxError as e:
             LOGGER.warning("`%s` is not valid xpath query", query, exc_info=e)
-        if self.stack_last_ret not in (VariableType.DOCUMENT, VariableType.ANY):
-            LOGGER.warning(
-                "Expected type(s) %s, got %s",
-                VariableType.DOCUMENT.name,
-                self.stack_last_ret.name,
-            )
 
         if literal_hooks.get("query"):
             literal_hooks["query"].value = query
@@ -329,11 +341,23 @@ class HTMLDocument(BaseDocument):
         self._pseudo_query_action_to_expr(action)
         return self
 
+    @validate_types(VariableType.DOCUMENT, VariableType.LIST_DOCUMENT)
     def attr(self, *keys: str) -> Self:
         """Extract attribute value by name
 
         - accept DOCUMENT, return STRING
         - accept LIST_DOCUMENT, return LIST_STRING
+
+
+        CSS has pseudo selector `::attr(*keys)` alias:
+
+        D().css("a::attr(href)") == D().css("a").attr("href")
+        D().css_all("a::attr(href)") == D().css_all("a").attr("href")
+
+        XPATH has pseudo selector `/@key` alias:
+
+        D().xpath("//a/@href") == D().xpath("//a").attr("href")
+        D().xpath_all("//a/@href") == D().xpath_all("//a").attr("href")
 
         Note:
             in generated code, not check exists required name attribute and throw exception in runtime
@@ -352,24 +376,27 @@ class HTMLDocument(BaseDocument):
                             ret_type=VariableType.LIST_STRING,
                         )
                     )
+            # next - stub node. Later static checker catch it and throw exception
             case _:
-                LOGGER.warning(
-                    "attr(%s): Expected type(s) %s got %s",
-                    repr(keys),
-                    (
-                        VariableType.DOCUMENT.name,
-                        VariableType.LIST_DOCUMENT.name,
-                    ),
-                    self.stack_last_ret.name,
-                )
                 self._add(ExprGetHtmlAttr(kwargs={"key": keys}))
         return self
 
+    @validate_types(VariableType.DOCUMENT, VariableType.LIST_DOCUMENT)
     def text(self) -> Self:
         """extract text from current document/element.
 
         - accept DOCUMENT, return STRING
         - accept LIST_DOCUMENT, return LIST_STRING
+
+        CSS has pseudo selector `::text` alias:
+
+        D().css("p::text") == D().css("p").text()
+        D().css_all("p::text") == D().css_all("p").text()
+
+        XPATH has pseudo selector `/text()` alias:
+
+        D().xpath("//p/text()") == D().xpath("//p").text()
+        D().xpath_all("//p/text()") == D().xpath_all("//p").text()
         """
         match self.stack_last_ret:
             case VariableType.LIST_DOCUMENT:
@@ -377,22 +404,25 @@ class HTMLDocument(BaseDocument):
             case VariableType.DOCUMENT:
                 self._add(ExprGetHtmlText())
             case _:
-                LOGGER.warning(
-                    "text(): Expected type(s) %s got %s",
-                    (
-                        VariableType.DOCUMENT.name,
-                        VariableType.LIST_DOCUMENT.name,
-                    ),
-                    self.stack_last_ret.name,
-                )
                 self._add(ExprGetHtmlText())
         return self
 
+    @validate_types(VariableType.DOCUMENT, VariableType.LIST_DOCUMENT)
     def raw(self) -> Self:
         """extract raw html from current document/element.
 
         - accept DOCUMENT, return STRING
         - accept LIST_DOCUMENT, return LIST_STRING
+
+         CSS has pseudo selector `::raw` alias:
+
+        D().css("p::raw") == D().css("p").raw()
+        D().css_all("p::raw") == D().css_all("p").raw()
+
+        XPATH has pseudo selector `/raw()` alias:
+
+        D().xpath("//p/raw()") == D().xpath("//p").raw()
+        D().xpath_all("//p/raw()") == D().xpath_all("//p").raw()
         """
         match self.stack_last_ret:
             case VariableType.LIST_DOCUMENT:
@@ -400,17 +430,10 @@ class HTMLDocument(BaseDocument):
             case VariableType.DOCUMENT:
                 self._add(ExprGetHtmlRaw())
             case _:
-                LOGGER.warning(
-                    "raw(): Expected type(s) %s got %s",
-                    (
-                        VariableType.DOCUMENT.name,
-                        VariableType.LIST_DOCUMENT.name,
-                    ),
-                    self.stack_last_ret.name,
-                )
                 self._add(ExprGetHtmlRaw())
         return self
 
+    @validate_types(VariableType.DOCUMENT, VariableType.LIST_DOCUMENT)
     def attrs_map(self) -> Self:
         """extract all attributes from current tag or list of tags
         - accept DOCUMENT, return LIST_STRING
@@ -422,17 +445,10 @@ class HTMLDocument(BaseDocument):
             case VariableType.LIST_DOCUMENT:
                 self._add(ExprMapAttrsAll())
             case _:
-                LOGGER.warning(
-                    "attrs_list(): Expected type(s) %s got %s",
-                    (
-                        VariableType.DOCUMENT.name,
-                        VariableType.LIST_DOCUMENT.name,
-                    ),
-                    self.stack_last_ret.name,
-                )
                 self._add(ExprMapAttrs())
         return self
 
+    @validate_types(VariableType.DOCUMENT)
     def css_remove(self, query: str | ExprClassVar):
         """remove elements with childs by css query
 
@@ -460,15 +476,11 @@ class HTMLDocument(BaseDocument):
                     )
                 )
             case _:
-                LOGGER.warning(
-                    "css_remove(): Expected type(s) %s got %s",
-                    (VariableType.DOCUMENT.name,),
-                    self.stack_last_ret.name,
-                )
                 self._add(ExprCssElementRemove())
         return self
 
-    def xpath_remove(self, query: str):
+    @validate_types(VariableType.DOCUMENT)
+    def xpath_remove(self, query: str) -> Self:
         """remove elements with childs by xpath query
 
         WARNING: have side effect, this method permanently remove elements from virtual DOM.
@@ -496,11 +508,6 @@ class HTMLDocument(BaseDocument):
                     )
                 )
             case _:
-                LOGGER.warning(
-                    "xpath_remove(): Expected type(s) %s got %s",
-                    (VariableType.DOCUMENT.name,),
-                    self.stack_last_ret.name,
-                )
                 self._add(ExprCssElementRemove())
         return self
 
@@ -514,6 +521,16 @@ class ArrayDocument(BaseDocument):
         """alias index(-1). NOTE: several languages does not support get last index"""
         return self.index(-1)
 
+    @validate_types(
+        VariableType.LIST_STRING,
+        VariableType.LIST_DOCUMENT,
+        VariableType.LIST_INT,
+        VariableType.LIST_FLOAT,
+        VariableType.OPTIONAL_LIST_STRING,
+        VariableType.OPTIONAL_LIST_INT,
+        VariableType.OPTIONAL_LIST_FLOAT,
+        VariableType.LIST_ANY,
+    )
     def index(self, i: int | ExprClassVar) -> Self:
         """Extract item from sequence
 
@@ -521,6 +538,17 @@ class ArrayDocument(BaseDocument):
         - accept LIST_STRING, return STRING
         - accept LIST_INT, return INT
         - accept LIST_FLOAT, return FLOAT
+
+        NOTE:
+            - if target backend supports next selectors - recommended use Structural pseudo-classes:
+                - :nth-child(n)
+                - :nth-last-child(n)
+                - :nth-of-type(n)
+                - :nth-last-of-type(n)
+                - :first-child
+                - :last-child
+            - first elements starts by 0. if target language index starts by 1 - ssc-gen auto convert it
+            - If i < 0, it takes the index from the end of the array. If the target language doesn't support this feature, ssc-gen automatically converts it
         """
         i, literal_hooks = self._resolve_literal_hook("index", i)
         match self.stack_last_ret:
@@ -597,18 +625,6 @@ class ArrayDocument(BaseDocument):
                     )
                 )
             case _:
-                LOGGER.warning(
-                    "index(%s): Expected type(s) %s got %s",
-                    i,
-                    (
-                        VariableType.LIST_DOCUMENT.name,
-                        VariableType.LIST_STRING.name,
-                        VariableType.LIST_INT.name,
-                        VariableType.LIST_FLOAT.name,
-                        VariableType.LIST_ANY.name,
-                    ),
-                    self.stack_last_ret,
-                )
                 self._add(
                     ExprIndex(
                         kwargs={"index": i},
@@ -616,6 +632,7 @@ class ArrayDocument(BaseDocument):
                 )
         return self
 
+    @validate_types(VariableType.LIST_STRING)
     def join(self, sep: str | ExprClassVar) -> Self:
         """concatenate sequence of string to one by char
 
@@ -643,10 +660,21 @@ class ArrayDocument(BaseDocument):
                 )
         return self
 
+    @validate_types(
+        VariableType.LIST_STRING,
+        VariableType.LIST_DOCUMENT,
+        VariableType.LIST_INT,
+        VariableType.LIST_FLOAT,
+        VariableType.OPTIONAL_LIST_STRING,
+        VariableType.OPTIONAL_LIST_INT,
+        VariableType.OPTIONAL_LIST_FLOAT,
+        VariableType.LIST_ANY,
+    )
     def to_len(self) -> Self:
         """Get length of items in array object
 
-        - accept LIST_STRING | LIST_DOCUMENT | LIST_INT | LIST_FLOAT, return INT
+        - accept LIST_STRING | LIST_DOCUMENT | LIST_INT | LIST_FLOAT,
+        - return INT
 
         """
         if self.stack_last_ret in (
@@ -658,35 +686,23 @@ class ArrayDocument(BaseDocument):
             expected_type = self.stack_last_ret
         else:
             expected_type = VariableType.LIST_ANY
-            LOGGER.warning(
-                "to_len(): Expected type(s) %s got %s",
-                (
-                    VariableType.LIST_DOCUMENT.name,
-                    VariableType.LIST_STRING.name,
-                    VariableType.LIST_INT,
-                    VariableType.LIST_FLOAT,
-                ),
-                self.stack_last_ret.name,
-            )
         self._add(ExprToListLength(accept_type=expected_type))
         return self
 
+    @validate_types(VariableType.LIST_STRING)
     def filter(self, expr: "DocumentFilter") -> Self:
-        """filter array of resuts by expr
+        """filter array of strings by F() expr
 
         - accept LIST_STRING, return LIST_STRING
         """
-        if self.stack_last_ret != VariableType.LIST_STRING:
-            LOGGER.warning(
-                "to_len(): Expected type(s) %s got %s",
-                (VariableType.LIST_STRING.name,),
-                self.stack_last_ret.name,
-            )
         self._add(ExprFilter(body=expr.stack))
         return self
 
+    @validate_types(VariableType.LIST_STRING)
     def unique(self, *, keep_order: bool = False) -> Self:
         """Remove duplicates from array-like object
+
+        - keep_order - guarantee the order of elements
 
         - accept LIST_STRING, return LIST_STRING
         """
@@ -695,6 +711,7 @@ class ArrayDocument(BaseDocument):
 
 
 class StringDocument(BaseDocument):
+    @validate_types(VariableType.STRING, VariableType.LIST_STRING)
     def rm_prefix(self, substr: str | ExprClassVar) -> Self:
         """remove prefix from string by substr
 
@@ -717,15 +734,10 @@ class StringDocument(BaseDocument):
                     )
                 )
             case _:
-                LOGGER.warning(
-                    "rm_prefix(%s): Expected type(s) %s got %s",
-                    repr(substr),
-                    (VariableType.LIST_STRING.name, VariableType.STRING.name),
-                    self.stack_last_ret.name,
-                )
                 self._add(ExprStringRmPrefix(kwargs={"substr": substr}))
         return self
 
+    @validate_types(VariableType.STRING, VariableType.LIST_STRING)
     def rm_suffix(self, substr: str | ExprClassVar) -> Self:
         """remove suffix from string by substr
 
@@ -757,6 +769,7 @@ class StringDocument(BaseDocument):
                 self._add(ExprStringRmSuffix(kwargs={"substr": substr}))
         return self
 
+    @validate_types(VariableType.STRING, VariableType.LIST_STRING)
     def rm_prefix_suffix(self, substr: str | ExprClassVar) -> Self:
         """remove prefix and suffix from string by substr
 
@@ -779,17 +792,12 @@ class StringDocument(BaseDocument):
                     )
                 )
             case _:
-                LOGGER.warning(
-                    "rm_prefix_suffix(%s): Expected type(s) %s got %s",
-                    repr(substr),
-                    (VariableType.LIST_STRING.name, VariableType.STRING.name),
-                    self.stack_last_ret.name,
-                )
                 self._add(
                     ExprStringRmPrefixAndSuffix(kwargs={"substr": substr})
                 )
         return self
 
+    @validate_types(VariableType.STRING, VariableType.LIST_STRING)
     def trim(self, substr: str | ExprClassVar = " ") -> Self:
         """trim LEFT and RIGHT chars string by substr
 
@@ -812,15 +820,10 @@ class StringDocument(BaseDocument):
                     )
                 )
             case _:
-                LOGGER.warning(
-                    "trim(%s): Expected type(s) %s got %s",
-                    repr(substr),
-                    (VariableType.LIST_STRING.name, VariableType.STRING.name),
-                    self.stack_last_ret.name,
-                )
                 self._add(ExprStringTrim(kwargs={"substr": substr}))
         return self
 
+    @validate_types(VariableType.STRING, VariableType.LIST_STRING)
     def ltrim(self, substr: str | ExprClassVar = " ") -> Self:
         """trim LEFT by substr
 
@@ -843,15 +846,10 @@ class StringDocument(BaseDocument):
                     )
                 )
             case _:
-                LOGGER.warning(
-                    "ltrim(%s): Expected type(s) %s got %s",
-                    repr(substr),
-                    (VariableType.LIST_STRING.name, VariableType.STRING.name),
-                    self.stack_last_ret.name,
-                )
                 self._add(ExprStringLeftTrim(kwargs={"substr": substr}))
         return self
 
+    @validate_types(VariableType.STRING, VariableType.LIST_STRING)
     def rtrim(self, substr: str | ExprClassVar = " ") -> Self:
         """trim RIGHT by substr
 
@@ -874,38 +872,25 @@ class StringDocument(BaseDocument):
                     )
                 )
             case _:
-                LOGGER.warning(
-                    "rtrim(%s): Expected type(s) %s got %s",
-                    repr(substr),
-                    (VariableType.LIST_STRING.name, VariableType.STRING.name),
-                    self.stack_last_ret.name,
-                )
                 self._add(ExprStringRightTrim(kwargs={"substr": substr}))
         return self
 
+    @validate_types(VariableType.STRING)
     def split(self, sep: str | ExprClassVar) -> Self:
         """split string by sep
 
         - accept STRING, return LIST_STRING
         """
         sep, literal_hooks = self._resolve_literal_hook("sep", sep)
-
-        if self.stack_last_ret != VariableType.STRING:
-            LOGGER.warning(
-                "split(%s): Expected type(s) %s got %s",
-                repr(sep),
-                VariableType.STRING.name,
-                self.stack_last_ret.name,
-            )
-            ...
         self._add(
             ExprStringSplit(kwargs={"sep": sep}, classvar_hooks=literal_hooks)
         )
         return self
 
+    @validate_types(VariableType.STRING, VariableType.LIST_STRING)
     def fmt(self, fmt_string: str | ExprClassVar) -> Self:
         """Format string by template.
-        Template placeholder should be included `{{}}` marker
+        Template placeholder should be include `{{}}` marker
 
         - accept STRING, return STRING
         - accept LIST_STRING, return LIST_STRING
@@ -934,12 +919,6 @@ class StringDocument(BaseDocument):
                     )
                 )
             case _:
-                LOGGER.warning(
-                    "fmt(%s): Expected type(s) %s got %s",
-                    repr(fmt_string),
-                    (VariableType.LIST_STRING.name, VariableType.STRING.name),
-                    self.stack_last_ret.name,
-                )
                 self._add(
                     ExprStringFormat(
                         kwargs={"fmt": fmt_string}, classvar_hooks=literal_hooks
@@ -947,6 +926,7 @@ class StringDocument(BaseDocument):
                 )
         return self
 
+    @validate_types(VariableType.STRING, VariableType.LIST_STRING)
     def repl(self, old: str | ExprClassVar, new: str | ExprClassVar) -> Self:
         """Replace all `old` substring with `new` in current string.
 
@@ -973,17 +953,16 @@ class StringDocument(BaseDocument):
                     )
                 )
             case _:
-                LOGGER.warning(
-                    "repl(%s, %s): Expected type(s) %s got %s",
-                    repr(old),
-                    repr(new),
-                    (VariableType.LIST_STRING.name, VariableType.STRING.name),
-                    self.stack_last_ret.name,
-                )
                 self._add(ExprStringReplace(kwargs={"old": old, "new": new}))
         return self
 
+    @validate_types(VariableType.STRING, VariableType.LIST_STRING)
     def repl_map(self, replace_table: dict[str, str]) -> Self:
+        """Replace all `old` substring with `new` in current string by dict table.
+
+        - accept STRING, return STRING
+        - accept LIST_STRING, return LIST_STRING
+        """
         old_args = tuple(replace_table.keys())
         new_args = tuple(replace_table.values())
 
@@ -1001,12 +980,6 @@ class StringDocument(BaseDocument):
                     )
                 )
             case _:
-                LOGGER.warning(
-                    "repl_map(%s): Expected type(s) %s got %s",
-                    replace_table,
-                    (VariableType.LIST_STRING.name, VariableType.STRING.name),
-                    self.stack_last_ret.name,
-                )
                 self._add(
                     ExprStringMapReplace(
                         kwargs={"old": old_args, "new": new_args}
@@ -1014,6 +987,7 @@ class StringDocument(BaseDocument):
                 )
         return self
 
+    @validate_types(VariableType.STRING)
     def re(
         self,
         pattern: str | Pattern | ExprClassVar,
@@ -1023,10 +997,12 @@ class StringDocument(BaseDocument):
     ) -> Self:
         """extract first regex result.
 
-        NOTE:
-            if result not founded - generated code output throw exception (group not founded)
-
         - accept STRING, return STRING
+
+        NOTE:
+            - if result not founded - generated code output throw exception (group not founded)
+            - support capture one group only
+            - allow use re.S, re.I flags
         """
 
         pattern, literal_hooks = self._resolve_literal_hook("pattern", pattern)
@@ -1039,13 +1015,6 @@ class StringDocument(BaseDocument):
         result = analyze_re_expression(pattern, max_groups=1)
         if not result:
             LOGGER.warning(result.msg)
-        if self.stack_last_ret != VariableType.STRING:
-            LOGGER.warning(
-                "re(%s): Expected type(s) %s got %s",
-                repr(pattern),
-                VariableType.STRING.name,
-                self.stack_last_ret.name,
-            )
         # use inline flags for simplify handling literal variabls
         if literal_hooks.get("pattern"):
             literal_hooks["pattern"].value = add_inline_regex_flags(
@@ -1065,15 +1034,20 @@ class StringDocument(BaseDocument):
         )
         return self
 
+    @validate_types(VariableType.STRING)
     def re_all(
         self,
         pattern: str | Pattern | ExprClassVar,
         ignore_case: bool = False,
         dotall: bool = False,
     ) -> Self:
-        """extract all regex results.
+        """extract all regex results from captured group.
 
         - accept STRING, return LIST_STRING
+
+        NOTE:
+            - support capture one group only
+            - allow use re.S, re.I flags
         """
 
         pattern, literal_hooks = self._resolve_literal_hook("pattern", pattern)
@@ -1086,14 +1060,6 @@ class StringDocument(BaseDocument):
         result = analyze_re_expression(pattern, max_groups=1)
         if not result:
             LOGGER.warning(result.msg)
-
-        if self.stack_last_ret != VariableType.STRING:
-            LOGGER.warning(
-                "re_all(%s): Expected type(s) %s got %s",
-                repr(pattern),
-                VariableType.STRING.name,
-                self.stack_last_ret.name,
-            )
 
         # use inline flags for simplify handling literal variabls
         if literal_hooks.get("pattern"):
@@ -1112,6 +1078,7 @@ class StringDocument(BaseDocument):
         )
         return self
 
+    @validate_types(VariableType.STRING, VariableType.LIST_STRING)
     def re_sub(
         self,
         pattern: str | Pattern | ExprClassVar,
@@ -1123,6 +1090,10 @@ class StringDocument(BaseDocument):
 
         - accept STRING, return STRING
         - accept LIST_STRING, return LIST_STRING
+
+        NOTE:
+            - support capture 0 or 1 group only
+            - allow use re.S, re.I flags
         """
         pattern, literal_hooks1 = self._resolve_literal_hook("pattern", pattern)
         repl, literal_hooks2 = self._resolve_literal_hook("repl", repl)
@@ -1168,12 +1139,6 @@ class StringDocument(BaseDocument):
                     )
                 )
             case _:
-                LOGGER.warning(
-                    "re_sub(%s): Expected type(s) %s got %s",
-                    repr(pattern),
-                    (VariableType.STRING.name, VariableType.LIST_STRING.name),
-                    self.stack_last_ret.name,
-                )
                 self._add(
                     ExprStringRegexSub(
                         kwargs={"pattern": pattern, "repl": repl}
@@ -1199,6 +1164,7 @@ class StringDocument(BaseDocument):
         self.re_sub(f"{pattern}$")
         return self
 
+    @validate_types(VariableType.STRING, VariableType.LIST_STRING)
     def unescape(self) -> Self:
         """unescape string output
 
@@ -1211,16 +1177,12 @@ class StringDocument(BaseDocument):
             case VariableType.LIST_STRING:
                 self._add(ExprListStringUnescape())
             case _:
-                LOGGER.warning(
-                    "unescape(): Expected type(s) %s got %s",
-                    (VariableType.STRING.name, VariableType.LIST_STRING.name),
-                    self.stack_last_ret.name,
-                )
                 self._add(ExprStringUnescape())
         return self
 
 
 class AssertDocument(BaseDocument):
+    @validate_types(VariableType.DOCUMENT)
     def is_css(
         self, query: str | ExprClassVar, msg: str | ExprClassVar = ""
     ) -> Self:
@@ -1245,13 +1207,7 @@ class AssertDocument(BaseDocument):
             validate_css_query(query)
         except SelectorSyntaxError:
             LOGGER.warning("is_css `%s` is not valid css query", query)
-        if self.stack_last_ret != VariableType.DOCUMENT:
-            LOGGER.warning(
-                "is_css(%s): Expected type(s) %s got %s",
-                repr(query),
-                VariableType.DOCUMENT.name,
-                self.stack_last_ret.name,
-            )
+
         if literal_hooks.get("query"):
             literal_hooks["query"].value = query
         self._add(
@@ -1262,6 +1218,7 @@ class AssertDocument(BaseDocument):
         )
         return self
 
+    @validate_types(VariableType.DOCUMENT)
     def is_xpath(
         self, query: str | ExprClassVar, msg: str | ExprClassVar = ""
     ) -> Self:
@@ -1287,13 +1244,6 @@ class AssertDocument(BaseDocument):
             validate_xpath_query(query)
         except SelectorSyntaxError:
             LOGGER.warning("is_xpath `%s` is not valid xpath query", query)
-        if self.stack_last_ret != VariableType.DOCUMENT:
-            LOGGER.warning(
-                "is_xpath(%s): Expected type(s) %s got %s",
-                repr(query),
-                VariableType.DOCUMENT.name,
-                self.stack_last_ret.name,
-            )
 
         if literal_hooks.get("query"):
             literal_hooks["query"].value = query
@@ -1305,6 +1255,12 @@ class AssertDocument(BaseDocument):
         )
         return self
 
+    @validate_types(
+        VariableType.STRING,
+        VariableType.INT,
+        VariableType.FLOAT,
+        VariableType.BOOL,
+    )
     def is_equal(
         self,
         value: str | int | float | ExprClassVar,
@@ -1342,19 +1298,6 @@ class AssertDocument(BaseDocument):
             expected_type = VariableType.INT
         else:
             expected_type = VariableType.ANY
-            LOGGER.warning(
-                "is_equal(%s): Not support variable type `%s`",
-                repr(value),
-                type(value).__name__,
-            )
-
-        if self.stack_last_ret != expected_type:
-            LOGGER.warning(
-                "is_equal(%s): Expected type(s) %s got %s",
-                repr(value),
-                expected_type,
-                self.stack_last_ret.name,
-            )
         self._add(
             ExprIsEqual(
                 kwargs={"item": value, "msg": msg},
@@ -1365,6 +1308,12 @@ class AssertDocument(BaseDocument):
         )
         return self
 
+    @validate_types(
+        VariableType.STRING,
+        VariableType.INT,
+        VariableType.FLOAT,
+        VariableType.BOOL,
+    )
     def is_not_equal(
         self,
         value: str | int | float | ExprClassVar,
@@ -1403,19 +1352,7 @@ class AssertDocument(BaseDocument):
 
         else:
             expected_type = VariableType.ANY
-            LOGGER.warning(
-                "is_not_equal(%s): Not support variable type `%s`",
-                repr(value),
-                type(value).__name__,
-            )
 
-        if self.stack_last_ret != expected_type:
-            LOGGER.warning(
-                "is_not_equal(%s): Expected type(s) %s got %s",
-                repr(value),
-                expected_type,
-                self.stack_last_ret.name,
-            )
         self._add(
             ExprIsNotEqual(
                 kwargs={"item": value, "msg": msg},
@@ -1426,6 +1363,9 @@ class AssertDocument(BaseDocument):
         )
         return self
 
+    @validate_types(
+        VariableType.LIST_STRING, VariableType.LIST_INT, VariableType.LIST_FLOAT
+    )
     def is_contains(
         self,
         item: str | int | float | ExprClassVar,
@@ -1436,6 +1376,8 @@ class AssertDocument(BaseDocument):
         EXPR DO NOT MODIFY variable
 
         - accept LIST_STRING, return LIST_STRING
+        - accept LIST_INT, return LIST_INT
+        - accept LIST_FLOAT, return LIST_FLOAT
         """
         item, literal_hooks1 = self._resolve_literal_hook("item", item)
         msg, literal_hooks2 = self._resolve_literal_hook("msg", msg)
@@ -1458,19 +1400,7 @@ class AssertDocument(BaseDocument):
             expected_type = VariableType.LIST_FLOAT
         else:
             expected_type = VariableType.LIST_ANY
-            LOGGER.warning(
-                "is_contains(%s): Not support variable type `%s`",
-                repr(item),
-                type(item).__name__,
-            )
 
-        if expected_type != self.stack_last_ret:
-            LOGGER.warning(
-                "is_contains(%s): Expected type(s) %s got %s",
-                repr(item),
-                expected_type,
-                self.stack_last_ret.name,
-            )
         self._add(
             ExprIsContains(
                 kwargs={"item": item, "msg": msg},
@@ -1481,6 +1411,7 @@ class AssertDocument(BaseDocument):
         )
         return self
 
+    @validate_types(VariableType.LIST_STRING)
     def any_is_re(
         self,
         pattern: str | Pattern | ExprClassVar,
@@ -1502,13 +1433,6 @@ class AssertDocument(BaseDocument):
             ignore_case = is_ignore_case_regex(pattern)
         pattern = unverbosify_regex(pattern)
         analyze_re_expression(pattern, allow_empty_groups=True)
-        if self.stack_last_ret != VariableType.LIST_STRING:
-            LOGGER.warning(
-                "any_is_re(%s): Expected type(s) %s got %s",
-                repr(pattern),
-                VariableType.LIST_STRING.name,
-                self.stack_last_ret.name,
-            )
 
         # use inline flags for simplify handling literal variabls
         if literal_hooks.get("pattern"):
@@ -1527,6 +1451,7 @@ class AssertDocument(BaseDocument):
         )
         return self
 
+    @validate_types(VariableType.LIST_STRING)
     def all_is_re(
         self,
         pattern: str | Pattern | ExprClassVar,
@@ -1548,13 +1473,6 @@ class AssertDocument(BaseDocument):
             ignore_case = is_ignore_case_regex(pattern)
         pattern = unverbosify_regex(pattern)
         analyze_re_expression(pattern, allow_empty_groups=True)
-        if self.stack_last_ret != VariableType.LIST_STRING:
-            LOGGER.warning(
-                "all_is_re(%s): Expected type(s) %s got %s",
-                repr(pattern),
-                VariableType.LIST_STRING.name,
-                self.stack_last_ret.name,
-            )
 
         if literal_hooks.get("pattern"):
             literal_hooks["pattern"].value = add_inline_regex_flags(
@@ -1581,6 +1499,7 @@ class AssertDocument(BaseDocument):
         """shortcut of is_regex() method"""
         return self.is_regex(pattern, msg, ignore_case)
 
+    @validate_types(VariableType.STRING)
     def is_regex(
         self,
         pattern: str | Pattern | ExprClassVar,
@@ -1594,21 +1513,13 @@ class AssertDocument(BaseDocument):
         - accept STRING, return STRING
         """
         pattern, literal_hooks1 = self._resolve_literal_hook("pattern", pattern)
-        msg, literal_hooks2 = self._resolve_literal_hook("msg", pattern)
+        msg, literal_hooks2 = self._resolve_literal_hook("msg", msg)
         literal_hooks = literal_hooks1 | literal_hooks2
 
         if not isinstance(pattern, str):
             ignore_case = is_ignore_case_regex(pattern)
         pattern = unverbosify_regex(pattern)
         analyze_re_expression(pattern, allow_empty_groups=True)
-
-        if self.stack_last_ret != VariableType.STRING:
-            LOGGER.warning(
-                "is_regex(%s): Expected type(s) %s got %s",
-                repr(pattern),
-                VariableType.STRING.name,
-                self.stack_last_ret.name,
-            )
 
         if literal_hooks.get("pattern"):
             literal_hooks["pattern"].value = add_inline_regex_flags(
@@ -1626,6 +1537,7 @@ class AssertDocument(BaseDocument):
         )
         return self
 
+    @validate_types(VariableType.DOCUMENT, VariableType.LIST_DOCUMENT)
     def has_attr(
         self, key: str | ExprClassVar, msg: str | ExprClassVar = ""
     ) -> Self:
@@ -1637,7 +1549,7 @@ class AssertDocument(BaseDocument):
         - accept LIST_DOCUMENT, return LIST_DOCUMENT
         """
         key, literal_hooks1 = self._resolve_literal_hook("key", key)
-        msg, literal_hooks2 = self._resolve_literal_hook("msg", key)
+        msg, literal_hooks2 = self._resolve_literal_hook("msg", msg)
         literal_hooks = literal_hooks1 | literal_hooks2
 
         if self.stack_last_ret == VariableType.DOCUMENT:
@@ -1655,12 +1567,6 @@ class AssertDocument(BaseDocument):
                 )
             )
         else:
-            LOGGER.warning(
-                "has_attr(%s): Expected type(s) %s got %s",
-                repr(key),
-                (VariableType.DOCUMENT.name, VariableType.LIST_DOCUMENT.name),
-                self.stack_last_ret.name,
-            )
             self._add(
                 ExprHasAttr(
                     kwargs={"key": key, "msg": msg},
@@ -1671,21 +1577,12 @@ class AssertDocument(BaseDocument):
 
 
 class NestedDocument(BaseDocument):
+    @validate_types(VariableType.DOCUMENT)
     def sub_parser(self, schema: Type["BaseSchema"]) -> Self:
         """mark parse by `schema` config.
 
         - accept DOCUMENT, return NESTED
         """
-        if self.stack_last_ret == VariableType.NESTED:
-            LOGGER.warning(
-                "sub_parser(%s) not allowed expressions", schema.__name__
-            )
-        elif self.stack_last_ret != VariableType.DOCUMENT:
-            LOGGER.warning(
-                "sub_parser(%s) required %s type",
-                schema.__name__,
-                VariableType.DOCUMENT.name,
-            )
         # HACK: store to class instance for a correct generate docstring signature
         schema.__NESTED_SCHEMAS__[schema.__name__] = schema
         self._add(
@@ -1700,6 +1597,7 @@ class NestedDocument(BaseDocument):
 
 
 class NumericDocument(BaseDocument):
+    @validate_types(VariableType.STRING, VariableType.LIST_STRING)
     def to_int(self) -> Self:
         """convert string or sequence of string to integer.
 
@@ -1712,14 +1610,10 @@ class NumericDocument(BaseDocument):
             case VariableType.LIST_STRING:
                 self._add(ExprToListInt())
             case _:
-                LOGGER.warning(
-                    "to_int(): Expected type(s) %s got %s",
-                    (VariableType.STRING.name, VariableType.LIST_STRING.name),
-                    self.stack_last_ret.name,
-                )
                 self._add(ExprToInt())
         return self
 
+    @validate_types(VariableType.STRING, VariableType.LIST_STRING)
     def to_float(self) -> Self:
         """convert string or sequence of string to float64 or double.
 
@@ -1732,11 +1626,6 @@ class NumericDocument(BaseDocument):
             case VariableType.LIST_STRING:
                 self._add(ExprToListFloat())
             case _:
-                LOGGER.warning(
-                    "to_float(): Expected type(s) %s got %s",
-                    (VariableType.STRING.name, VariableType.LIST_STRING.name),
-                    self.stack_last_ret.name,
-                )
                 self._add(ExprToFloat())
         return self
 
@@ -1745,7 +1634,7 @@ class BooleanDocument(BaseDocument):
     def to_bool(self) -> Self:
         """convert current value to bool. Accept any type
 
-        value returns false if:
+        value returns false if previous value:
 
         - None
         - empty sequence
@@ -1760,17 +1649,20 @@ class BooleanDocument(BaseDocument):
 
 
 class JsonDocument(BaseDocument):
+    @validate_types(VariableType.STRING, VariableType.LIST_STRING)
     def jsonify_dynamic(self, start_query: str = "") -> Self:
         """marshal json to dynamic object wout annotated type/struct
-        
+
         - accept STRING, return ANY
+        - accept LIST_STRING, return ANY
+
+        json query syntax examples:
+
+            start_query="key" - extract json data from ["key"]
+            start_query="key.value" - extract json data from ["key"]["value"]
+            start_query="0.key" - extract json data from [0]["key"]
+            start_query="key.value.1" - extract json data from ["key"]["value"][1]
         """
-        if self.stack_last_ret != VariableType.STRING:
-            LOGGER.warning(
-                "jsonify_dynamic(): Expected type(s) %s got %s",
-                VariableType.STRING.name,
-                self.stack_last_ret.name,
-            )
         self._add(
             ExprJsonifyDynamic(
                 kwargs={
@@ -1780,25 +1672,20 @@ class JsonDocument(BaseDocument):
         )
         return self
 
+    @validate_types(VariableType.STRING)
     def jsonify(self, struct: Type[Json], start_query: str = "") -> Self:
-        """marshal json string to object
+        """marshal json string to object.
+
+        if start_query passed - extract data by path before serialize
 
         - accept STRING, return JSON
+        json query syntax examples (slighty):
+
+            start_query="key" - extract json data from ["key"]
+            start_query="key.value" - extract json data from ["key"]["value"]
+            start_query="0.key" - extract json data from [0]["key"]
+            start_query="key.value.1" - extract json data from ["key"]["value"][1]
         """
-        if self.stack_last_ret != VariableType.STRING:
-            LOGGER.warning(
-                "jsonify(%s): Expected type(s) %s got %s",
-                struct.__name__,
-                VariableType.STRING.name,
-                self.stack_last_ret.name,
-            )
-        elif self.stack_last_ret == VariableType.JSON:
-            LOGGER.warning(
-                "jsonify(%s): not allowed expressions",
-                struct.__name__,
-                VariableType.STRING.name,
-                self.stack_last_ret.name,
-            )
         self._add(
             ExprJsonify(
                 kwargs={
@@ -1814,6 +1701,8 @@ class JsonDocument(BaseDocument):
 
 
 class DocumentFilter(BaseDocument):
+    """Special filter marker collections for .filter() argument"""
+
     def eq(self, *values: str) -> Self:
         """check if value equal
 
