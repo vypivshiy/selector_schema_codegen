@@ -210,7 +210,9 @@ You can use any html source:
 
 ## See also
 
+
 - [Brief](docs/briefing.md) about css selectors and regular expressions.
+- [LLM]("llm.md") experimental prompt for generate code
 - [Quickstart](docs/quickstart.md) about css selectors and regular expressions.
 - [Tutorial](docs/tutorial.md) basic usage ssc-gen
 - [AST reference](docs/ast_reference.md) about generation code from AST
