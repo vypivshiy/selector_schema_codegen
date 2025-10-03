@@ -141,7 +141,7 @@ def _js_default_cast_t(i) -> str:
             return "[" + ",".join(repr(j) for j in i) + "]"
         return "[]"
     elif isinstance(i, str):
-        return repr(str)
+        return repr(i)
     elif isinstance(i, bool):
         return "true" if i else "false"
     # int, float types
