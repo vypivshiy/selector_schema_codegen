@@ -17,7 +17,6 @@
 | **Asynchronous Events & Timing**    | Fully supported                                   | Not supported                                    |
 | **Realism (User Behavior Emulation)** | Fully mimics real user behavior                   | Often identified as a non-human client           |
 
-
 ## Rest-api, graphql
 
 Ssc-gen DSL not support works with json outputs from rest-api or graphql. For documentation APIs use tools like [mitmproxy2swagger](https://github.com/alufers/mitmproxy2swagger)
