@@ -341,7 +341,6 @@ def analyze_other_field_type(
         VariableType.LIST_DOCUMENT,
         VariableType.DOCUMENT,
     ):
-        print(name, document)
         expr_stack = prettify_expr_stack(document, document.stack_last_index)
         return AnalyzeResult.error(
             f"{sc.__name__}.{name} = {expr_stack}  # Not allowed type(s) "
