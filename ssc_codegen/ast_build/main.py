@@ -1,52 +1,19 @@
-import warnings
 from pathlib import Path
-from typing import Type, cast, MutableSequence
+from typing import Type
 
-from ssc_codegen import Json
-from ssc_codegen.ast_ import (
-    StructParser,
-    StructInitMethod,
-    BaseAstNode,
-    StructPreValidateMethod,
-    ModuleProgram,
-    ExprCallStructMethod,
-    StructPartDocMethod,
-    StructFieldMethod,
-    StartParseMethod,
-    ExprDefaultValueStart,
-    ExprDefaultValueEnd,
-    Docstring,
-    ModuleImports,
-    JsonStruct,
-    JsonStructField,
-    TypeDef,
-    TypeDefField,
-    ExprReturn,
-    ExprNoReturn,
-    ExprNested,
-    ExprJsonify,
-)
-from ssc_codegen.ast_.nodes_core import (
-    CodeEnd,
-    CodeStart,
-    ExprCallStructClassVar,
-    ExprClassVar,
-)
+from ssc_codegen.ast_ import ModuleProgram
+
+from ssc_codegen.ast_build.builder import AstBuilder
 from ssc_codegen.ast_build.utils import (
-    generate_docstring_signature,
-    extract_json_structs_from_module,
     exec_module_code,
     extract_schemas_from_module,
-    is_literals_only_schema,
 )
-from ssc_codegen.document import BaseDocument
-from ssc_codegen.document_utlis import (
-    convert_css_to_xpath,
-    convert_xpath_to_css,
-)
+
 from ssc_codegen.schema import BaseSchema
 from ssc_codegen.static_checker import run_analyze_schema
-from ssc_codegen.tokens import TokenType, VariableType, StructType
+import logging
+
+LOGGER = logging.getLogger("ssc-gen")
 
 
 def build_ast_module_parser(
@@ -63,454 +30,62 @@ def build_ast_module_parser(
 
         THIS FUNCTION COMPILE AND EXEC PYTHON CODE in runtime WOUT CHECKS
     """
-    # ast structure
-    # docstring
-    # imports
-    # json types/structs
-    # schema types/structs
-    # schema parsers
     if css_to_xpath and xpath_to_css:
         raise AttributeError(
             "Should be chosen one variant (css_to_xpath OR xpath_to_css)"
         )
     py_module = exec_module_code(path)
-    ast_module = ModuleProgram()
-
-    if gen_docstring:
-        docstr = py_module.__dict__.get("__doc__") or ""  # type: str
-        module_body: list[BaseAstNode] = [
-            Docstring(kwargs={"value": docstr}, parent=ast_module),
-            ModuleImports(parent=ast_module),
-        ]
-    else:
-        module_body: list[BaseAstNode] = [
-            ModuleImports(parent=ast_module),
-        ]
-    # add start code token
-    module_body.append(CodeStart(parent=ast_module))
-
+    # check code configs before build AST
     schemas = extract_schemas_from_module(py_module)
-    json_structs = extract_json_structs_from_module(py_module)
-    # TODO: API for build single json
-    ast_jsons = build_ast_json(ast_module, *json_structs)
-    # TODO: implement analyze-only AST function
-    try:
-        ast_schemas = [
-            build_ast_struct_parser(
-                sc,
-                ast_module,
-                css_to_xpath=css_to_xpath,
-                xpath_to_css=xpath_to_css,
-                gen_docstring=gen_docstring,
-            )
-            for sc in schemas
-        ]
-    except SyntaxError:
-        # get all schemas exceptions and throw to logs:
-        errors = []
-        for sc in schemas:
-            try:
-                build_ast_struct_parser(
-                    sc,
-                    ast_module,
-                    css_to_xpath=css_to_xpath,
-                    xpath_to_css=xpath_to_css,
-                    gen_docstring=gen_docstring,
-                )
-            except SyntaxError as e:
-                errors.append(e)
-        raise SyntaxError(f"{path}: Founded errors: {len(errors)}")
+    count_errors = 0
+    for schema in schemas:
+        errors = run_analyze_schema(schema)
+        if errors > 0:
+            msg = f"{schema.__name__} founded errors: {errors}"
+            LOGGER.error(msg)
+            count_errors += errors
 
-    # TODO: API for build single typedef
-    ast_typedefs = build_ast_typedef(ast_module, *ast_schemas)
-    module_body.extend(ast_jsons)
-    module_body.extend(ast_typedefs)
-    module_body.extend(ast_schemas)
+    if count_errors > 0:
+        msg = f"{path} errors count: {count_errors}"
+        LOGGER.error(msg)
+        raise SyntaxError("")
 
-    # end code token hook
-    module_body.append(CodeEnd(parent=ast_module))
-    ast_module.body.extend(module_body)
+    ast_module = AstBuilder.build_from_moduletype(
+        py_module,
+        css_to_xpath=css_to_xpath,
+        xpath_to_css=xpath_to_css,
+        gen_docstr=gen_docstring,
+    )
     return ast_module
+    # static check
 
 
-def build_ast_typedef(
-    ast_module: ModuleProgram | None, *ast_schemas: StructParser
-) -> list[BaseAstNode]:
-    ast_typedefs: list[BaseAstNode] = []
-    for sc in ast_schemas:
-        # dont need create typedef for literals-only schemas
-        if sc.struct_type == StructType.CONFIG_CLASSVARS:
-            continue
-        ast_t_def = TypeDef(
-            parent=ast_module,
-            kwargs={"name": sc.kwargs["name"], "struct_type": sc.struct_type},
-        )
-        for sc_field in sc.body:
-            if sc_field.kind not in (
-                TokenType.STRUCT_FIELD,
-                TokenType.CLASSVAR,
-            ):
-                continue
-            # create field, if CLASSVAR should be returns
-            elif (
-                sc_field.kind == TokenType.CLASSVAR
-                and sc_field.kwargs["parse_returns"]
-            ):
-                sc_field = cast(ExprClassVar, sc_field)
-                _value, _struct_name, field_name, _parse_returns, _is_regex = (
-                    sc_field.unpack_args()
-                )
-                ast_t_def_field = TypeDefField(
-                    parent=ast_t_def,
-                    kwargs={
-                        "name": field_name,
-                        "type": sc_field.ret_type,
-                        "cls_nested": None,  # always self-used field, ignore
-                        "cls_nested_type": None,
-                    },
-                )
-            # else, ignore static classvar
-            elif sc_field.kind == TokenType.CLASSVAR:
-                continue
-
-            else:
-                sc_field = cast(StructFieldMethod, sc_field)
-                if sc_field.body[-1].ret_type == VariableType.NESTED:
-                    node = [
-                        i
-                        for i in sc_field.body
-                        if i.kind == TokenType.EXPR_NESTED
-                    ][0]
-                    node = cast(ExprNested, node)
-                    cls_name = node.kwargs["schema_name"]
-                    cls_nested_type = node.kwargs["schema_type"]
-
-                elif sc_field.body[-1].ret_type == VariableType.JSON:
-                    node2 = [
-                        i for i in sc_field.body if i.kind == TokenType.TO_JSON
-                    ][0]
-                    node2 = cast(ExprJsonify, node2)
-                    cls_name = node2.kwargs["json_struct_name"]
-                    # hack: for provide more consistent Typedef field gen api
-                    if node2.kwargs["is_array"]:
-                        cls_nested_type = StructType.LIST
-                    else:
-                        cls_nested_type = StructType.ITEM
-                else:
-                    cls_name = None
-                    cls_nested_type = None
-
-                ast_t_def_field = TypeDefField(
-                    parent=ast_t_def,
-                    kwargs={
-                        "name": sc_field.kwargs["name"],
-                        "type": sc_field.body[-1].ret_type,
-                        "cls_nested": cls_name,
-                        "cls_nested_type": cls_nested_type,
-                    },
-                )
-            ast_t_def.body.append(ast_t_def_field)
-        ast_typedefs.append(ast_t_def)
-    return ast_typedefs
-
-
-def build_ast_json(
-    ast_module: ModuleProgram | None, *json_structs: Type[Json]
-) -> list[BaseAstNode]:
-    ast_jsons: list[BaseAstNode] = []
-    for jsn_st in json_structs:
-        ast_jsn = JsonStruct(
-            kwargs={"name": jsn_st.__name__, "is_array": jsn_st.__IS_ARRAY__},
-            parent=ast_module,
-        )
-        for name, field_type in jsn_st.get_fields().items():
-            ast_jsn.body.append(
-                JsonStructField(
-                    kwargs={"name": name, "type": field_type}, parent=ast_jsn
-                )
-            )
-        ast_jsons.append(ast_jsn)
-    return ast_jsons
-
-
-def build_ast_struct_parser(
-    schema: Type[BaseSchema],
-    module_ref: ModuleProgram,
-    *,
+def build_ast_schemas(
+    *schemas: Type[BaseSchema],
     css_to_xpath: bool = False,
     xpath_to_css: bool = False,
-    gen_docstring: bool = True,
-) -> StructParser:
-    errors_count = run_analyze_schema(schema)
-    if errors_count > 0:
-        msg = f"{schema.__name__} founded errors: {errors_count}"
-        raise SyntaxError(msg)
-
-    if is_literals_only_schema(schema):
-        if schema.__SCHEMA_TYPE__ != StructType.ITEM:
-            raise SyntaxError("Literals-only init allowed only ItemSchema")
-        literals = schema.__get_mro_literals__().copy()
-        # schema.__SCHEMA_TYPE__ == StructType.CONFIG_LITERALS
-        st = StructParser(
-            kwargs={
-                "name": schema.__name__,
-                "struct_type": StructType.CONFIG_CLASSVARS,
-                "docstring": schema.__doc__ or "" if gen_docstring else "",
-            },
-            parent=module_ref,
+    gen_docstring: bool = False,
+) -> ModuleProgram:
+    if css_to_xpath and xpath_to_css:
+        raise AttributeError(
+            "Should be chosen one variant (css_to_xpath OR xpath_to_css)"
         )
-        body: list[BaseAstNode] = [e.expr() for e in literals.values()]
-        for i in body:
-            i.parent = st
-        st.body = body
-        return st
+    count_errors = 0
+    for schema in schemas:
+        errors = run_analyze_schema(schema)
+        if errors > 0:
+            msg = f"{schema.__name__} founded errors: {errors}"
+            LOGGER.error(msg)
+            count_errors += errors
 
-    docstring = (
-        (schema.__doc__ or "") + "\n\n" + generate_docstring_signature(schema)
+    if count_errors > 0:
+        msg = f"scehmas errors count: {count_errors}"
+        LOGGER.error(msg)
+        raise SyntaxError
+    ast_module = AstBuilder.build_from_ssc_schemas(
+        *schemas,
+        css_to_xpath=css_to_xpath,
+        xpath_to_css=xpath_to_css,
+        gen_docstr=gen_docstring,
     )
-
-    st = StructParser(
-        kwargs={
-            "name": schema.__name__,
-            "struct_type": schema.__SCHEMA_TYPE__,
-            "docstring": docstring if gen_docstring else "",
-        },
-        parent=module_ref,
-    )
-    # build body
-    fields = schema.__get_mro_fields__().copy()
-    literals = schema.__get_mro_literals__().copy()
-
-    # literals first push
-    body: list[BaseAstNode] = [e.expr() for e in literals.values()]
-    for i in body:
-        i.parent = st
-
-    body.append(StructInitMethod(parent=st))
-    # names counter for CallStruct expr (Start parse entrypoint)
-    body_parse_method_expr: list[BaseAstNode] = []
-    _try_fetch_pre_validate_node(body, body_parse_method_expr, fields, st)
-    _try_fetch_split_doc_node(body, body_parse_method_expr, fields, st)
-    _fetch_field_nodes(
-        body,
-        body_parse_method_expr,
-        fields,
-        st,
-        css_to_xpath,
-        xpath_to_css,
-    )
-
-    # last node - run entrypoint
-    start_parse_method = StartParseMethod(parent=st)
-    # classvars add
-    for i in literals.values():
-        i = i.expr()
-        if i.kwargs["parse_returns"]:
-            _, struct_name, field_name, *_ = i.unpack_args()
-            body_parse_method_expr.append(
-                ExprCallStructClassVar(
-                    kwargs={
-                        "struct_name": struct_name,
-                        "field_name": field_name,
-                        "type": i.ret_type,
-                    },
-                    parent=start_parse_method,
-                )
-            )
-
-    for i in body_parse_method_expr:
-        i.parent = start_parse_method
-    start_parse_method.body = body_parse_method_expr
-    body.append(start_parse_method)
-    st.body = body
-    return st
-
-
-def set_parent_for_expr_filter(
-    parent: BaseAstNode, parent_body: MutableSequence[BaseAstNode]
-) -> None:
-    for j in parent_body:
-        j.parent = parent
-        if j.body:
-            set_parent_for_expr_filter(j, j.body)
-
-
-def _fetch_field_nodes(
-    body: list[BaseAstNode],
-    body_parse_method_expr: list[BaseAstNode],
-    fields: dict[str, BaseDocument],
-    st_ref: StructParser,
-    css_to_xpath: bool = False,
-    xpath_to_css: bool = False,
-) -> None:
-    for field_name, document in fields.items():
-        # check passed flags in CLI
-        if css_to_xpath:
-            document = convert_css_to_xpath(document)
-        elif xpath_to_css:
-            document = convert_xpath_to_css(document)
-
-        ret_type = document.stack_last_ret
-        method = StructFieldMethod(
-            kwargs={"name": field_name},
-            parent=st_ref,
-            ret_type=ret_type,
-        )
-        # TODO: add ast tests
-        # in inheritance schemas, child classes use same fields are used as in the parent class
-        # avoid duplicate ExprReturn or ExprDefaultValueWrapper node
-        if (
-            document.stack[-1].kind != ExprReturn.kind
-            and document.stack[-1].kind != TokenType.EXPR_DEFAULT_END
-        ):
-            document.stack.append(
-                ExprReturn(accept_type=ret_type, ret_type=ret_type)
-            )
-
-        _unwrap_default_node(document, ret_type)
-
-        for i in document.stack:
-            i.parent = method
-            if i.kind == TokenType.EXPR_FILTER:
-                set_parent_for_expr_filter(i, i.body)
-
-        method.body = document.stack
-
-        body.append(method)
-        if ret_type == VariableType.NESTED:
-            node = [
-                i for i in document.stack if i.kind == TokenType.EXPR_NESTED
-            ][0]
-            node = cast(ExprNested, node)
-            cls_name = node.kwargs["schema_name"]
-        else:
-            cls_name = None
-        body_parse_method_expr.append(
-            ExprCallStructMethod(
-                kwargs={
-                    "name": field_name,
-                    "type": ret_type,
-                    "cls_nested": cls_name,
-                },
-            )
-        )
-
-
-def _unwrap_default_node(
-    document: BaseDocument, ret_type: VariableType
-) -> None:
-    if document.stack[0].kind == TokenType.EXPR_DEFAULT:
-        default_expr = document.stack.pop(0)
-        value = default_expr.kwargs["value"]
-        classvar_hooks = default_expr.classvar_hooks
-        default_type = ret_type
-        if value is None:
-            match ret_type:
-                case VariableType.STRING:
-                    default_type = VariableType.OPTIONAL_STRING
-                case VariableType.INT:
-                    default_type = VariableType.OPTIONAL_INT
-                case VariableType.FLOAT:
-                    default_type = VariableType.OPTIONAL_FLOAT
-                case VariableType.LIST_STRING:
-                    default_type = VariableType.OPTIONAL_LIST_STRING
-                case VariableType.LIST_INT:
-                    default_type = VariableType.OPTIONAL_LIST_INT
-                case VariableType.LIST_FLOAT:
-                    default_type = VariableType.OPTIONAL_LIST_FLOAT
-                # TODO: warning for BOOL type
-                case _:
-                    warnings.warn(
-                        f"'None' default value not allowed return type '{ret_type.name}'. ",
-                        category=SyntaxWarning,
-                    )
-                    default_type = VariableType.ANY
-        elif isinstance(value, list):
-            # todo: check if empty list passed
-            match ret_type:
-                case VariableType.LIST_STRING:
-                    default_type = VariableType.LIST_STRING
-                case VariableType.LIST_INT:
-                    default_type = VariableType.LIST_INT
-                case VariableType.LIST_FLOAT:
-                    default_type = VariableType.LIST_FLOAT
-                case _:
-                    warnings.warn(
-                        f"`empty list` default value not allowed return type `{ret_type.name}`. "
-                        f"Expected types `{(VariableType.LIST_STRING.name, VariableType.LIST_INT, VariableType.LIST_FLOAT)}`",
-                        category=SyntaxWarning,
-                    )
-                    default_type = VariableType.ANY
-        expr_default_start = ExprDefaultValueStart(
-            kwargs={"value": value}, classvar_hooks=classvar_hooks
-        )
-        expr_default_end = ExprDefaultValueEnd(
-            kwargs={"value": value},
-            ret_type=default_type,
-            classvar_hooks=classvar_hooks,
-        )
-        document.stack.insert(0, expr_default_start)
-        document.stack.append(expr_default_end)
-
-
-def _try_fetch_split_doc_node(
-    body: list[BaseAstNode],
-    call_methods_expr: list[BaseAstNode],
-    fields: dict[str, BaseDocument],
-    st_ref: StructParser,
-) -> None:
-    if fields.get("__SPLIT_DOC__"):
-        split_doc = fields.pop("__SPLIT_DOC__")
-        method = StructPartDocMethod(parent=st_ref)
-
-        # in inheritance schemas, child classes use same fields are used as in the parent class
-        # avoid duplicate ExprReturn or ExprDefaultValueWrapper node
-        if (
-            split_doc.stack[-1].kind != ExprReturn.kind
-            and split_doc.stack[-1].kind != TokenType.EXPR_DEFAULT_END
-        ):
-            # always returns sequence of elements
-            split_doc.stack.append(
-                ExprReturn(ret_type=VariableType.LIST_DOCUMENT)
-            )
-        for i in split_doc.stack:
-            i.parent = method
-            if i.kind == TokenType.EXPR_FILTER:
-                set_parent_for_expr_filter(i, i.body)
-
-        method.body = split_doc.stack
-        body.append(method)
-
-        call_methods_expr.append(
-            ExprCallStructMethod(
-                kwargs={
-                    "type": VariableType.LIST_DOCUMENT,
-                    "name": "__SPLIT_DOC__",
-                },
-            )
-        )
-
-
-def _try_fetch_pre_validate_node(
-    body: list[BaseAstNode],
-    call_methods_expr: list[BaseAstNode],
-    fields: dict[str, BaseDocument],
-    st_ref: StructParser,
-) -> None:
-    if fields.get("__PRE_VALIDATE__"):
-        validate_field = fields.pop("__PRE_VALIDATE__")
-        method = StructPreValidateMethod(
-            body=validate_field.stack, parent=st_ref
-        )
-        validate_field.stack.append(ExprNoReturn())
-        for i in validate_field.stack:
-            i.parent = method
-            if i.kind == TokenType.EXPR_FILTER:
-                set_parent_for_expr_filter(i, i.body)
-
-        body.append(method)
-        call_methods_expr.append(
-            ExprCallStructMethod(
-                kwargs={"type": VariableType.NULL, "name": "__PRE_VALIDATE__"},
-            )
-        )
+    return ast_module

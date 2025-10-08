@@ -25,11 +25,21 @@ CB_DOCUMENT = Callable[[Type["BaseSchema"], str, "BaseDocument"], AnalyzeResult]
 
 def prettify_expr_stack(d: "BaseDocument", end: int) -> str:
     s = "D()"
+
+    if len(d.stack) != 0:
+        node = d.stack[end]
+        kw = node.kwargs
+        m = FMT_MAPPING_METHODS.get(node.kind)
+        target_problem = (
+            f"[{m}(" + ",".join(f"{k}={v!r}" for k, v in kw.items()) + ")]"
+        )
+    else:
+        target_problem = ""
     for e in d.stack[:end]:
         method = FMT_MAPPING_METHODS.get(e.kind)
         kw = e.kwargs
         s += f".{method}(" + ",".join(f"{k}={v!r}" for k, v in kw.items()) + ")"
-    return s
+    return s + " " + target_problem
 
 
 def analyze_dict_schema_fields(sc: Type["BaseSchema"]) -> AnalyzeResult:
@@ -174,8 +184,49 @@ def analyze_field_type_static(
             continue
 
         method_trace = prettify_expr_stack(document, i)
-        msg = f"{sc.__name__}.{name} = {method_trace} Expected type {expr.accept_type.name}, got {cursor.name}"
-        return AnalyzeResult.error(msg)
+        # detais HOWTO quick fix
+
+        # TODO: refactoring
+        # check call expr after default()
+        #      0 Doc Doc 1 Str Str
+        # D().default(None).trim()   [ERR, ret_type shoud be a string]
+        #      0 Doc Doc 1 Doc Str
+        # D().default(None).text()  [ok, types passed]
+        if (
+            document.stack[i - 1].kind == ExprDefaultValueWrapper.kind
+            and cursor
+            in (
+                VariableType.DOCUMENT,
+                VariableType.LIST_DOCUMENT,
+            )
+            and expr.accept_type
+            in (VariableType.STRING, VariableType.LIST_STRING)
+        ):
+            msg = f"{sc.__name__}.{name} = {method_trace} Expected type {expr.accept_type.name}, got {cursor.name}"
+            tip = (
+                "After `default()` expr required call selectors (`css()`, `css_all()`, `xpath()`, `xpath_all()`), "
+                "and extract value by `raw()`, `text()` or `attr()` methods or by pseudoselectors equalents"
+            )
+
+        # second common problem is forgetting to extract string(s) from element(s)
+        elif cursor in (
+            VariableType.DOCUMENT,
+            VariableType.LIST_DOCUMENT,
+        ) and expr.accept_type in (
+            VariableType.STRING,
+            VariableType.LIST_STRING,
+        ):
+            msg = f"{sc.__name__}.{name} = {method_trace} Expected type {expr.accept_type.name}, got {cursor.name}"
+            tip = (
+                "After call selectors (`css()`, `css_all()`, `xpath()`, `xpath_all()`), "
+                "extract value by `raw()`, `text()` or `attr()` methods or by pseudoselectors equalents"
+            )
+
+        else:
+            msg = f"{sc.__name__}.{name} = {method_trace} Expected type {expr.accept_type.name}, got {cursor.name}"
+            tip = ""
+
+        return AnalyzeResult.error(msg, tip)
     return AnalyzeResult.ok()
 
 
