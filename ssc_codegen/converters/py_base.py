@@ -33,8 +33,6 @@ REQUIRED IMPLEMENT expr:
 
 from typing import cast
 
-from typing_extensions import assert_never
-
 from ssc_codegen.ast_ import (
     Docstring,
     ModuleImports,
@@ -106,13 +104,13 @@ from ssc_codegen.ast_ import (
     ExprListUnique,
     ExprStringMapReplace,
     ExprListStringMapReplace,
-)
-from ssc_codegen.ast_.nodes_cast import ExprJsonifyDynamic
-from ssc_codegen.ast_.nodes_core import ExprClassVar
-from ssc_codegen.ast_.nodes_string import (
+    ExprListStringRmPrefix,
     ExprListStringUnescape,
     ExprStringUnescape,
+    ExprClassVar,
+    ExprJsonifyDynamic,
 )
+
 from ssc_codegen.converters.base import (
     BaseCodeConverter,
     CB_FMT_DEBUG_COMMENT,
@@ -213,14 +211,10 @@ class BasePyCodeConverter(BaseCodeConverter):
             comment_prefix_sep,
             debug_cb,
         )
-        from ssc_codegen.ast_ import ExprListStringRmPrefix
-
-        from ssc_codegen.ast_ import FilterNotEqual
 
         self.pre_definitions = {
             Docstring.kind: pre_docstring,
             ModuleImports.kind: pre_imports,
-            TypeDef.kind: pre_typedef,
             TypeDefField.kind: pre_typedef_field,
             JsonStruct.kind: pre_json_struct,
             JsonStructField.kind: pre_json_field,
@@ -294,17 +288,38 @@ class BasePyCodeConverter(BaseCodeConverter):
             ExprListStringMapReplace.kind: pre_list_str_map_replace,
             ExprStringUnescape.kind: pre_str_unescape,
             ExprListStringUnescape.kind: pre_list_str_unescape,
+            # shortcut structures:
+            (TypeDef.kind, StructType.ITEM): pre_typedef_item,
+            (TypeDef.kind, StructType.LIST): pre_typedef_list,
+            (TypeDef.kind, StructType.DICT): pre_typedef_dict,
+            (TypeDef.kind, StructType.FLAT_LIST): pre_typedef_flat_list,
+            (TypeDef.kind, StructType.ACC_LIST): pre_typedef_acc_list,
         }
 
         self.post_definitions = {
             ModuleImports.kind: post_imports,
-            TypeDef.kind: post_typedef,
             JsonStruct.kind: post_json_struct,
-            StartParseMethod.kind: post_start_parse,
             ExprFilter.kind: post_expr_filter,
             FilterAnd.kind: post_filter_and,
             FilterOr.kind: post_filter_or,
             FilterNot.kind: post_filter_not,
+            # shortcuts parsers
+            (StartParseMethod.kind, StructType.ITEM): post_start_parse_item,
+            (StartParseMethod.kind, StructType.LIST): post_start_parse_list,
+            (StartParseMethod.kind, StructType.DICT): post_start_parse_dict,
+            (
+                StartParseMethod.kind,
+                StructType.FLAT_LIST,
+            ): post_start_parse_flat_list,
+            (
+                StartParseMethod.kind,
+                StructType.ACC_LIST,
+            ): post_start_parse_acc_list,
+            (TypeDef.kind, StructType.ITEM): post_typedef_item,
+            (TypeDef.kind, StructType.LIST): post_typedef_list,
+            (TypeDef.kind, StructType.DICT): post_typedef_dict,
+            (TypeDef.kind, StructType.FLAT_LIST): post_typedef_flat_list,
+            (TypeDef.kind, StructType.ACC_LIST): post_typedef_acc_list,
         }
 
 
@@ -361,36 +376,52 @@ def post_imports(_: ModuleImports) -> str:
     return HELPER_FUNCTIONS
 
 
-def pre_typedef(node: TypeDef) -> str:
-    name, struct_type = node.unpack_args()
-    match struct_type:
-        case StructType.DICT:
-            type_ = get_typedef_field_by_name(node, "__VALUE__")
-            return f"T_{name} = Dict[str, {type_}]"
-        case StructType.FLAT_LIST:
-            type_ = get_typedef_field_by_name(node, "__ITEM__")
-            return f"T_{name} = List[{type_}]"
-        case StructType.ITEM | StructType.LIST:
-            return f'T_{name} = TypedDict("T_{name}", ' + "{"
-        case StructType.ACC_LIST:
-            # current impl support only str type
-            return f"T_{name} = List[str]"
-        case _:
-            assert_never(struct_type)
-    raise NotImplementedError()  # noqa
+# TYPEDEF
+def pre_typedef_item(node: TypeDef) -> str:
+    name, _ = node.unpack_args()
+    return f'T_{name} = TypedDict("T_{name}", ' + "{"
 
 
-def post_typedef(node: TypeDef) -> str:
-    _, struct_type = node.unpack_args()
-    match struct_type:
-        case StructType.DICT | StructType.FLAT_LIST | StructType.ACC_LIST:
-            return ""
-        # close TypedDict type
-        case StructType.ITEM | StructType.LIST:
-            return "})"
-        case _:
-            assert_never(struct_type)
-    raise NotImplementedError()  # noqa
+def post_typedef_item(_: TypeDef) -> str:
+    return "})"
+
+
+def pre_typedef_list(node: TypeDef) -> str:
+    name, _ = node.unpack_args()
+    return f'T_{name} = TypedDict("T_{name}", ' + "{"
+
+
+def post_typedef_list(_: TypeDef) -> str:
+    return "})"
+
+
+def pre_typedef_dict(node: TypeDef) -> str:
+    name, _ = node.unpack_args()
+    type_ = get_typedef_field_by_name(node, "__VALUE__")
+    return f"T_{name} = Dict[str, {type_}]"
+
+
+def post_typedef_dict(_: TypeDef) -> str:
+    return ""
+
+
+def pre_typedef_flat_list(node: TypeDef) -> str:
+    name, _ = node.unpack_args()
+    type_ = get_typedef_field_by_name(node, "__VALUE__")
+    return f"T_{name} = List[{type_}]"
+
+
+def post_typedef_flat_list(_: TypeDef) -> str:
+    return ""
+
+
+def pre_typedef_acc_list(node: TypeDef) -> str:
+    name, _ = node.unpack_args()
+    return f"T_{name} = List[str]"
+
+
+def post_typedef_acc_list(_: TypeDef) -> str:
+    return ""
 
 
 def pre_typedef_field(node: TypeDefField) -> str:
@@ -417,6 +448,9 @@ def pre_typedef_field(node: TypeDefField) -> str:
     else:
         type_ = TYPES[var_type]
     return f"{name!r}: {type_},"
+
+
+# END TYPEDEF
 
 
 def pre_json_struct(node: JsonStruct) -> str:
@@ -510,75 +544,88 @@ def pre_struct_init(_node: StructInitMethod) -> str:
     )
 
 
-def post_start_parse(node: StartParseMethod) -> str:
-    node.parent = cast(StructParser, node.parent)
+# START_PARSE
+def post_start_parse_item(node: StartParseMethod) -> str:
     code = ""
-
-    if node.parent.struct_type == StructType.CONFIG_CLASSVARS:
-        return ""
     if have_pre_validate_call(node):
         code += INDENT_METHOD_BODY + "self._pre_validate(self._document)\n"
-    match node.parent.struct_type:
-        case StructType.ITEM:
-            # return {...}
-            code += INDENT_METHOD_BODY + "return {"
-            for expr in node.body:
-                if expr.kind == TokenType.STRUCT_CALL_FUNCTION:
-                    name = expr.kwargs["name"]
-                    if name.startswith("__"):
-                        continue
-                    code += f"{name!r}: self._parse_{name}(self._document),"
-                elif expr.kind == TokenType.STRUCT_CALL_CLASSVAR:
-                    # {"struct_name": str, "field_name": str, "type": VariableType},
-                    st_name, f_name, _ = expr.unpack_args()
-                    code += f"{f_name!r}: {st_name}.{f_name},"
-            code += "}"
-        case StructType.ACC_LIST:
-            code += INDENT_METHOD_BODY + "return list(set("
-            methods = []
-            for expr in node.body:
-                name = expr.kwargs["name"]
-                if name.startswith("__"):
-                    continue
-                # acc list of str (all list are flatten)
-                methods.append(f"self._parse_{name}(self._document)")
-            code += " + ".join(methods)
-            code += "))"
-        case StructType.LIST:
-            # return [{...} for el in self._split_doc(self.document)]
-            code += INDENT_METHOD_BODY + "return [{"
-            for expr in node.body:
-                if expr.kind == TokenType.STRUCT_CALL_FUNCTION:
-                    name = expr.kwargs["name"]
-                    if name.startswith("__"):
-                        continue
-                    code += f"{name!r}: self._parse_{name}(el),"
-                elif expr.kind == TokenType.STRUCT_CALL_CLASSVAR:
-                    # {"struct_name": str, "field_name": str, "type": VariableType},
-                    st_name, f_name, _ = expr.unpack_args()
-                    code += f"{f_name!r}: {st_name}.{f_name},"
-            code += "} for el in self._split_doc(self._document)]"
-        case StructType.DICT:
-            # return {key: value, ...}
-            code += (
-                INDENT_METHOD_BODY
-                + "return {self._parse_key(el): self._parse_value(el)"
-                + " for el in self._split_doc(self._document)}"
-            )
-        case StructType.FLAT_LIST:
-            # return [item, ...]
-            code += (
-                INDENT_METHOD_BODY
-                + "return [self._parse_item(el) for el in self._split_doc(self._document)]"
-            )
-        case _:
-            assert_never(node.parent.struct_type)  # type: ignore
+    code += INDENT_METHOD_BODY + "return {"
+    for expr in node.body:
+        if expr.kind == TokenType.STRUCT_CALL_FUNCTION:
+            name = expr.kwargs["name"]
+            if name.startswith("__"):
+                continue
+            code += f"{name!r}: self._parse_{name}(self._document),"
+        elif expr.kind == TokenType.STRUCT_CALL_CLASSVAR:
+            # {"struct_name": str, "field_name": str, "type": VariableType},
+            st_name, f_name, _ = expr.unpack_args()
+            code += f"{f_name!r}: {st_name}.{f_name},"
+    code += "}"
+    return code
+
+
+def post_start_parse_list(node: StartParseMethod) -> str:
+    code = ""
+    if have_pre_validate_call(node):
+        code += INDENT_METHOD_BODY + "self._pre_validate(self._document)\n"
+    # return [{...} for el in self._split_doc(self.document)]
+    code += INDENT_METHOD_BODY + "return [{"
+    for expr in node.body:
+        if expr.kind == TokenType.STRUCT_CALL_FUNCTION:
+            name = expr.kwargs["name"]
+            if name.startswith("__"):
+                continue
+            code += f"{name!r}: self._parse_{name}(el),"
+        elif expr.kind == TokenType.STRUCT_CALL_CLASSVAR:
+            # {"struct_name": str, "field_name": str, "type": VariableType},
+            st_name, f_name, _ = expr.unpack_args()
+            code += f"{f_name!r}: {st_name}.{f_name},"
+    code += "} for el in self._split_doc(self._document)]"
+    return code
+
+
+def post_start_parse_acc_list(node: StartParseMethod) -> str:
+    code = ""
+    if have_pre_validate_call(node):
+        code += INDENT_METHOD_BODY + "self._pre_validate(self._document)\n"
+    code += INDENT_METHOD_BODY + "return list(set("
+    methods = []
+    for expr in node.body:
+        name = expr.kwargs["name"]
+        if name.startswith("__"):
+            continue
+        # acc list of str (all list are flatten)
+        methods.append(f"self._parse_{name}(self._document)")
+    code += " + ".join(methods)
+    code += "))"
+    return code
+
+
+def post_start_parse_dict(node: StartParseMethod) -> str:
+    code = ""
+    if have_pre_validate_call(node):
+        code += INDENT_METHOD_BODY + "self._pre_validate(self._document)\n"
+    code += (
+        INDENT_METHOD_BODY
+        + "return {self._parse_key(el): self._parse_value(el)"
+        + " for el in self._split_doc(self._document)}"
+    )
+    return code
+
+
+def post_start_parse_flat_list(node: StartParseMethod) -> str:
+    code = ""
+    if have_pre_validate_call(node):
+        code += INDENT_METHOD_BODY + "self._pre_validate(self._document)\n"
+    # return [item, ...]
+    code += (
+        INDENT_METHOD_BODY
+        + "return [self._parse_item(el) for el in self._split_doc(self._document)]"
+    )
     return code
 
 
 # EXPRESSIONS
-
-
 def pre_default_start(node: ExprDefaultValueStart) -> str:
     # HACK, for avoid recalc indexes use assign var trick
     prv, nxt = prev_next_var(node)

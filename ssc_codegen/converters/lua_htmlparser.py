@@ -1,9 +1,12 @@
 """htmlparser lua 5.2+ or luajit 2.0+ impl
 
+Convert to pure lua, if you dont use pcre-regex dependency
+
 dependencies:
 
 - html parser, css selectors https://github.com/msva/lua-htmlparser
 - pcre-regex (OPTIONAL) https://github.com/rrthomas/lrexlib dependency (standard lua not support regex flags)
+    - or try convert PCRE regex to equalent string pattern matching code
 - json parser https://luarocks.org/modules/dhkolf/dkjson
 - optional formatter dependency https://github.com/Koihik/LuaFormatter
 
@@ -16,7 +19,6 @@ for annotations, typehints used EmmyLua annotations syntax:
 
 import logging
 from typing import Any, cast
-from typing_extensions import assert_never
 
 
 from ssc_codegen.ast_ import (
@@ -276,18 +278,35 @@ def get_typedef_field_by_name(node: TypeDef, field_name: str) -> str:
     return type_
 
 
-@CONVERTER(TypeDef.kind, post_callback=lambda _: "\n")
-def pre_typedef(node: TypeDef) -> str:
-    name, st_type = node.unpack_args()
-    if st_type == StructType.ACC_LIST:
-        return f"---@alias T_{name} string[]"
-    # TODO: maybe return wrong type
-    elif st_type == StructType.FLAT_LIST:
-        type_ = get_typedef_field_by_name(node, "__ITEM__")
-        return f"---@alias T_{name} {type_}[]"
-    elif st_type == StructType.DICT:
-        type_ = get_typedef_field_by_name(node, "__VALUE__")
-        return f"---@alias T_{name} table<string, {type_}>"
+@CONVERTER(TypeDef.kind, StructType.ACC_LIST, post_callback=lambda _: "\n")
+def pre_typedef_acc_list(node: TypeDef) -> str:
+    name, _st_type = node.unpack_args()
+    return f"---@alias T_{name} string[]"
+
+
+@CONVERTER(TypeDef.kind, StructType.FLAT_LIST, post_callback=lambda _: "\n")
+def pre_typedef_flat_list(node: TypeDef) -> str:
+    name, _st_type = node.unpack_args()
+    type_ = get_typedef_field_by_name(node, "__ITEM__")
+    return f"---@alias T_{name} {type_}[]"
+
+
+@CONVERTER(TypeDef.kind, StructType.DICT, post_callback=lambda _: "\n")
+def pre_typedef_flat_dict(node: TypeDef) -> str:
+    name, _st_type = node.unpack_args()
+    type_ = get_typedef_field_by_name(node, "__VALUE__")
+    return f"---@alias T_{name} table<string, {type_}>"
+
+
+@CONVERTER(TypeDef.kind, StructType.ITEM, post_callback=lambda _: "\n")
+def pre_typedef_flat_item(node: TypeDef) -> str:
+    name, _st_type = node.unpack_args()
+    return f"---@class T_{name}"
+
+
+@CONVERTER(TypeDef.kind, StructType.LIST, post_callback=lambda _: "\n")
+def pre_typedef_list(node: TypeDef) -> str:
+    name, _st_type = node.unpack_args()
     return f"---@class T_{name}"
 
 
@@ -420,65 +439,91 @@ def pre_start_parse(node: StartParseMethod) -> str:
     return f"---@return {ret_t}\nfunction {parent_name}:parse() "
 
 
-@CONVERTER.post(StartParseMethod.kind)
-def post_start_parse(node: StartParseMethod) -> str:
+@CONVERTER.post(StartParseMethod.kind, StructType.ITEM)
+def post_start_parse_item(node: StartParseMethod) -> str:
     code = ""
-
-    # skip create parse() method for literals-only struct
-    if node.parent.struct_type == StructType.CONFIG_CLASSVARS:
-        return ""
-
     if have_pre_validate_call(node):
         # throw error in runtime if check is failed
         code += "self:_pre_validate(self._document); "
-    # literals ret fetch
-    match node.parent.struct_type:
-        case StructType.ITEM:
-            code += "local result = {}; "
-            for expr in node.body:
-                if expr.kind == ExprCallStructMethod.kind:
-                    name = expr.kwargs["name"]
-                    if name.startswith("__"):
-                        continue
-                    code += f"result[{name!r}] = self:_parse_{name}(self._document); "
-                elif expr.kind == ExprCallStructClassVar.kind:
-                    st_name, f_name, _ = expr.unpack_args()
-                    code += f"result[{f_name}] = {st_name}.{f_name}; "
-        case StructType.LIST:
-            code += "local result = {}; "
-            code += "for _, el in ipairs(self:_split_doc(self._document)) do "
-            code += "table.insert(result, {"
-            for expr in node.body:
-                if expr.kind == ExprCallStructMethod.kind:
-                    name = expr.kwargs["name"]
-                    if name.startswith("__"):
-                        continue
-                    code += f"{name} = self:_parse_{name}(el), "
-                elif expr.kind == ExprCallStructClassVar.kind:
-                    st_name, f_name, _ = expr.unpack_args()
-                    code += f"{f_name} = {st_name}.{f_name}, "
-            code += " }) end "
-        case StructType.DICT:
-            code += "local result = {}; "
-            code += "for _, el in ipairs(self:_split_doc(self._document)) do "
-            code += "result[self:_parse_key(el)] = self:_parse_value(el) end "
-        case StructType.FLAT_LIST:
-            code += "local result = {}; "
-            code += "for _, el in ipairs(self:_split_doc(self._document)) do "
-            code += "table.insert(result, self:_parse_item(el)) end "
-        case StructType.ACC_LIST:
-            code += "local result = {}; "
-            for expr in node.body:
-                if expr.kind == ExprCallStructMethod.kind:
-                    name = expr.kwargs["name"]
-                    if name.startswith("__"):
-                        continue
-                    code += f"for _, e in ipairs(self:_parse_{name}(self._document)) do table.insert(result, e) end"
+    code += "local result = {}; "
+    for expr in node.body:
+        if expr.kind == ExprCallStructMethod.kind:
+            name = expr.kwargs["name"]
+            if name.startswith("__"):
+                continue
+            code += f"result[{name!r}] = self:_parse_{name}(self._document); "
+        elif expr.kind == ExprCallStructClassVar.kind:
+            st_name, f_name, _ = expr.unpack_args()
+            code += f"result[{f_name}] = {st_name}.{f_name}; "
+    code += "return result; end "
+    return code
+
+
+@CONVERTER.post(StartParseMethod.kind, StructType.LIST)
+def post_start_parse_list(node: StartParseMethod) -> str:
+    code = ""
+    if have_pre_validate_call(node):
+        code += "self:_pre_validate(self._document); "
+    code += "local result = {}; "
+    code += "for _, el in ipairs(self:_split_doc(self._document)) do "
+    code += "table.insert(result, {"
+    for expr in node.body:
+        if expr.kind == ExprCallStructMethod.kind:
+            name = expr.kwargs["name"]
+            if name.startswith("__"):
+                continue
+            code += f"{name} = self:_parse_{name}(el), "
+        elif expr.kind == ExprCallStructClassVar.kind:
+            st_name, f_name, _ = expr.unpack_args()
+            code += f"{f_name} = {st_name}.{f_name}, "
+    code += " }) end "
+    code += "return result; end "
+    return code
+
+
+@CONVERTER.post(StartParseMethod.kind, StructType.DICT)
+def post_start_parse_dict(node: StartParseMethod) -> str:
+    code = ""
+    if have_pre_validate_call(node):
+        # throw error in runtime if check is failed
+        code += "self:_pre_validate(self._document); "
+    code += "local result = {}; "
+    code += "for _, el in ipairs(self:_split_doc(self._document)) do "
+    code += "result[self:_parse_key(el)] = self:_parse_value(el) end "
+    code += "return result; end "
+    return code
+
+
+@CONVERTER.post(StartParseMethod.kind, StructType.FLAT_LIST)
+def post_start_parse_flat_list(node: StartParseMethod) -> str:
+    code = ""
+    if have_pre_validate_call(node):
+        # throw error in runtime if check is failed
+        code += "self:_pre_validate(self._document); "
+    code += "local result = {}; "
+    code += "for _, el in ipairs(self:_split_doc(self._document)) do "
+    code += "table.insert(result, self:_parse_item(el)) end "
+    code += "return result; end "
+    return code
+
+
+@CONVERTER.post(StartParseMethod.kind, StructType.ACC_LIST)
+def post_start_parse_acc_list(node: StartParseMethod) -> str:
+    code = ""
+    if have_pre_validate_call(node):
+        # throw error in runtime if check is failed
+        code += "self:_pre_validate(self._document); "
+    code += "local result = {}; "
+    for expr in node.body:
+        if expr.kind == ExprCallStructMethod.kind:
+            name = expr.kwargs["name"]
+            if name.startswith("__"):
+                continue
+            code += f"for _, e in ipairs(self:_parse_{name}(self._document)) do table.insert(result, e) end"
             # local function Buildins.unique(arr)
             code += "result = Buildins.unique(result); "
-        case _:
-            assert_never(node.parent.struct_type)  # type: ignore
-    return code + "return result; end "  # close parse method
+    code += "return result; end "
+    return code
 
 
 @CONVERTER(ExprDefaultValueStart.kind)

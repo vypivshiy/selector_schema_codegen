@@ -2,14 +2,15 @@
 
 Codegen notations:
 
-- exclude typing and struct serializations
-- vars have prefix `v{index}`, start argument names as `v`
-- methods auto convert to camelCase
-- code formatter exclude
+- ES8 required if you need to use re.S (re.DOTALL) regex flag, other works in ES6 
+- annotations are generated in JSDoc format
+    - https://jsdoc.app/
+- method names (fields) auto convert to UpperCamelCase
 
 SPECIAL METHODS NOTATIONS:
 
-- field_name : _parse_{field_name} (add prefix `_parse_` for every struct method parse)
+- field_name : _parse_{field_name} (add prefix `_parse` for every struct method parse)
+    - `field_name` convert to UpperCamelCase
 - __KEY__ -> `key`, `_parseKey`
 - __VALUE__: `value`, `_parseValue`
 - __ITEM__: `item`, `_parseItem`
@@ -19,8 +20,6 @@ SPECIAL METHODS NOTATIONS:
 """
 
 from typing import cast
-
-from typing_extensions import assert_never
 
 from ssc_codegen.ast_ import (
     Docstring,
@@ -107,7 +106,13 @@ from ssc_codegen.ast_ import (
     ExprClassVar,
 )
 from ssc_codegen.ast_.nodes_cast import ExprJsonifyDynamic
-from ssc_codegen.ast_.nodes_core import ModuleImports
+from ssc_codegen.ast_.nodes_core import (
+    JsonStruct,
+    JsonStructField,
+    ModuleImports,
+    TypeDef,
+    TypeDefField,
+)
 from ssc_codegen.ast_.nodes_selectors import (
     ExprCssElementRemove,
     ExprMapAttrs,
@@ -120,6 +125,7 @@ from ssc_codegen.ast_.nodes_string import (
 )
 from ssc_codegen.converters.base import BaseCodeConverter
 from ssc_codegen.converters.helpers import (
+    get_typedef_field_by_name,
     js_get_classvar_hook_or_value,
     jsonify_query_parse,
     prev_next_var,
@@ -131,10 +137,6 @@ from ssc_codegen.converters.helpers import (
 from ssc_codegen.converters.templates.js_pure import (
     HELPER_FUNCTIONS,
     J2_STRUCT_INIT,
-    J2_START_PARSE_DICT,
-    J2_START_PARSE_FLAT_LIST,
-    J2_START_PARSE_ITEM,
-    J2_START_PARSE_LIST_PARSE,
     J2_PRE_LIST_STR_TRIM,
     J2_PRE_STR_LEFT_TRIM,
     J2_PRE_LIST_STR_LEFT_TRIM,
@@ -144,13 +146,17 @@ from ssc_codegen.converters.templates.js_pure import (
     J2_PRE_XPATH_ALL,
     J2_PRE_STR_TRIM,
     J2_IS_XPATH,
-    J2_START_PARSE_ACC_LIST,
 )
 from ssc_codegen.str_utils import (
     wrap_backtick,
     to_upper_camel_case,
 )
-from ssc_codegen.tokens import StructType, TokenType
+from ssc_codegen.tokens import (
+    JsonVariableType,
+    StructType,
+    TokenType,
+    VariableType,
+)
 
 MAGIC_METHODS = {
     "__ITEM__": "Item",
@@ -264,11 +270,11 @@ def pre_classvar(node: ExprClassVar) -> str:
     value, _class_name, field_name, *_ = node.unpack_args()
 
     # fmt string generate a single line func
-    if "{{}}" in value:
-        value = wrap_backtick(value.replace("{{}}", "${e}"))
-        return f"static {field_name} = (e) => {value}; "
 
     if isinstance(value, str):
+        if "{{}}" in value:
+            value = wrap_backtick(value.replace("{{}}", "${e}"))
+            return f"static {field_name} = (e) => {value}; "
         value = repr(value)
     elif isinstance(value, bool):
         value = "true" if value else "false"
@@ -289,55 +295,227 @@ def pre_struct_init(_node: StructInitMethod) -> str:
     return J2_STRUCT_INIT
 
 
-@CONVERTER(StartParseMethod.kind, post_callback=lambda _: BRACKET_END)
-def pre_start_parse(node: StartParseMethod) -> str:
-    node.parent = cast(StructParser, node.parent)
-    code = "parse() " + BRACKET_START
+JSDOC_TYPES = {
+    VariableType.ANY: "?",
+    VariableType.STRING: "string",
+    VariableType.LIST_STRING: "Array<string>",
+    VariableType.OPTIONAL_STRING: "string | null",
+    VariableType.OPTIONAL_LIST_STRING: "Array<string> | null",
+    VariableType.OPTIONAL_INT: "number | null",
+    VariableType.OPTIONAL_LIST_INT: "Array<number> | null",
+    VariableType.OPTIONAL_FLOAT: "Array<number> | null",
+    VariableType.OPTIONAL_LIST_FLOAT: "Array<number> | null",
+    VariableType.INT: "number",
+    VariableType.FLOAT: "number",
+    VariableType.LIST_INT: "Array<number>",
+    VariableType.LIST_FLOAT: "Array<number>",
+    VariableType.BOOL: "boolean",
+}
 
-    if node.parent.struct_type == StructType.CONFIG_CLASSVARS:
+JSDOC_JSON_TYPES = {
+    JsonVariableType.BOOLEAN: "boolean",
+    JsonVariableType.STRING: "string",
+    JsonVariableType.NUMBER: "number",
+    JsonVariableType.FLOAT: "number",
+    JsonVariableType.NULL: "null",
+    JsonVariableType.OPTIONAL_STRING: "string | null",
+    JsonVariableType.OPTIONAL_NUMBER: "number | null",
+    JsonVariableType.OPTIONAL_FLOAT: "number | null",
+    JsonVariableType.OPTIONAL_BOOLEAN: "boolean | null",
+    JsonVariableType.ARRAY: "Array",
+    JsonVariableType.ARRAY_FLOAT: "Array<number>",
+    JsonVariableType.ARRAY_NUMBER: "Array<number>",
+    JsonVariableType.ARRAY_STRING: "Array<string>",
+    JsonVariableType.ARRAY_BOOLEAN: "Array<boolean>",
+}
+
+
+# TYPEDEF
+@CONVERTER(TypeDef.kind, StructType.ITEM, post_callback=lambda _: "*/\n")
+def pre_typedef_item(node: TypeDef) -> str:
+    name, _ = node.unpack_args()
+    code = "/**\n"
+    code += "* @typedef {Object} " + f"T_{name}"
+    return code
+
+
+@CONVERTER(TypeDef.kind, StructType.LIST, post_callback=lambda _: "*/\n")
+def pre_typedef_list(node: TypeDef) -> str:
+    name, _ = node.unpack_args()
+    code = "/**\n"
+    code += "* @typedef {Object} " + f"T_{name}"
+    return code
+
+
+@CONVERTER(TypeDef.kind, StructType.DICT, post_callback=lambda _: "*/\n")
+def pre_typedef_dict(node: TypeDef) -> str:
+    name, _ = node.unpack_args()
+    code = "/**\n"
+    value = get_typedef_field_by_name(node, "__VALUE__")
+    _, var_type, *_ = value.unpack_args()
+    type_ = JSDOC_TYPES[var_type]
+    code += "* @typedef {Map<string, " + type_ + ">} " + f"T_{name}"
+    return code
+
+
+@CONVERTER(TypeDef.kind, StructType.FLAT_LIST, post_callback=lambda _: "*/\n")
+def pre_typedef_flat_list(node: TypeDef) -> str:
+    name, _ = node.unpack_args()
+    code = "/**\n"
+    value = get_typedef_field_by_name(node, "__ITEM__")
+    _, var_type, *_ = value.unpack_args()
+    type_ = JSDOC_TYPES[var_type]
+    code += "* @typedef {Array<" + type_ + ">} " + f"T_{name}"
+    return code
+
+
+@CONVERTER(TypeDef.kind, StructType.ACC_LIST, post_callback=lambda _: "*/\n")
+def pre_typedef_acc_list(node: TypeDef) -> str:
+    name, _ = node.unpack_args()
+    code = "/**\n"
+    code += "* @typedef {Array<string>} " + f"T_{name}"
+    return code
+
+
+@CONVERTER(TypeDefField.kind)
+def pre_typedef_field(node: TypeDefField) -> str:
+    name, var_type, cls_nested, cls_nested_type = node.unpack_args()
+    node.parent = cast(TypeDef, node.parent)
+    # skip format
+    if node.parent.struct_type in (
+        StructType.DICT,
+        StructType.FLAT_LIST,
+        StructType.ACC_LIST,
+    ):
+        return ""
+    # always str
+    if name == "__KEY__":
         return ""
 
-    if have_pre_validate_call(node):
-        code += "this._preValidate(this._doc);"
-    # literals ret fetch
-    exprs = [
-        {
-            "name": expr.kwargs["field_name"],
-            "upper_name": expr.kwargs["struct_name"]
-            + "."
-            + expr.kwargs["field_name"],
-            "is_classvar": True,
-        }
-        for expr in node.body
-        if expr.kind == TokenType.STRUCT_CALL_CLASSVAR
-    ]
-    # methods call
-    exprs.extend(
-        [
-            {
-                "name": expr.kwargs["name"],
-                "upper_name": to_upper_camel_case(expr.kwargs["name"]),
-                "is_classvar": False,
-            }
-            for expr in node.body
-            if expr.kind == TokenType.STRUCT_CALL_FUNCTION
-            and not expr.kwargs["name"].startswith("__")
-        ]
-    )
+    elif var_type == VariableType.NESTED:
+        type_ = f"T_{cls_nested}"
+        if cls_nested_type == StructType.LIST:
+            type_ = f"Array<{type_}>"
+    elif var_type == VariableType.JSON:
+        type_ = f"J_{cls_nested}"
+        if cls_nested_type == StructType.LIST:
+            type_ = f"Array<{type_}>"
+    else:
+        type_ = JSDOC_TYPES[var_type]
+    return "* @property {" + type_ + "} " + name
 
-    match node.parent.struct_type:
-        case StructType.ITEM:
-            code += J2_START_PARSE_ITEM.render(exprs=exprs)
-        case StructType.LIST:
-            code += J2_START_PARSE_LIST_PARSE.render(exprs=exprs)
-        case StructType.DICT:
-            code += J2_START_PARSE_DICT
-        case StructType.FLAT_LIST:
-            code += J2_START_PARSE_FLAT_LIST
-        case StructType.ACC_LIST:
-            code += J2_START_PARSE_ACC_LIST.render(exprs=exprs)
-        case _:
-            assert_never(node.parent.struct_type)  # type: ignore
+
+@CONVERTER(JsonStruct.kind, post_callback=lambda _: "\n\n")
+def pre_json_struct(node: JsonStruct) -> str:
+    name, _is_array = node.unpack_args()
+    return "//*\n" + "* @typedef {Object} " + f"J_{name}"
+
+
+@CONVERTER(JsonStructField.kind)
+def pre_json_struct_field(node: JsonStructField) -> str:
+    name, var_type = node.unpack_args()
+    type_ = JSDOC_JSON_TYPES.get(var_type)
+    return "* @property {" + type_ + "} " + name
+
+
+# START PARSE
+@CONVERTER(
+    StartParseMethod.kind, StructType.ITEM, post_callback=lambda _: BRACKET_END
+)
+def pre_start_parse_item(node: StartParseMethod) -> str:
+    node.parent = cast(StructParser, node.parent)
+    st_name = node.parent.kwargs["name"]
+    st_type = node.parent.kwargs["struct_type"]
+    ret_type = (
+        "Array<" + f"T_{st_name}" + ">"
+        if st_type == StructType.LIST
+        else f"T_{st_name}"
+    )
+    code = "/**\n" + "* " + "@returns " + "{" + ret_type + "}\n" + "*/\n"
+    code += "parse() " + BRACKET_START
+
+    if have_pre_validate_call(node):
+        code += "this._preValidate(this._doc); "
+    code += "return {"
+    for expr in node.body:
+        if expr.kind == TokenType.STRUCT_CALL_CLASSVAR:
+            st_name, f_name, _ = expr.unpack_args()
+            code += f"{f_name!r}: {st_name}.{f_name},"
+        elif expr.kind == TokenType.STRUCT_CALL_FUNCTION and not expr.kwargs[
+            "name"
+        ].startswith("__"):
+            name = expr.kwargs["name"]
+            method_suffix = to_upper_camel_case(expr.kwargs["name"])
+            code += f"{name}: this._parse{method_suffix}(this._doc), "
+    code += "};"
+    return code
+
+
+@CONVERTER(
+    StartParseMethod.kind, StructType.LIST, post_callback=lambda _: BRACKET_END
+)
+def pre_start_parse_list(node: StartParseMethod) -> str:
+    code = "parse() " + BRACKET_START
+
+    if have_pre_validate_call(node):
+        code += "this._preValidate(this._doc); "
+    code += "return Array.from(this._splitDoc(this._doc)).map((e) => ({"
+    for expr in node.body:
+        if expr.kind == TokenType.STRUCT_CALL_CLASSVAR:
+            st_name, f_name, _ = expr.unpack_args()
+            code += f"{f_name!r}: {st_name}.{f_name},"
+        elif expr.kind == TokenType.STRUCT_CALL_FUNCTION and not expr.kwargs[
+            "name"
+        ].startswith("__"):
+            name = expr.kwargs["name"]
+            method_suffix = to_upper_camel_case(expr.kwargs["name"])
+            code += f"{name}: this._parse{method_suffix}(this._doc), "
+    code += "})); "
+    return code
+
+
+@CONVERTER(
+    StartParseMethod.kind, StructType.DICT, post_callback=lambda _: BRACKET_END
+)
+def pre_start_parse_dict(node: StartParseMethod) -> str:
+    code = "parse() " + BRACKET_START
+
+    if have_pre_validate_call(node):
+        code += "this._preValidate(this._doc); "
+    code += "return Array.from(this._splitDoc(this._doc)).reduce((item, e) => "
+    "(item[this._parseKey(e)] = this._parseValue(e), item), {});"
+    return code
+
+
+@CONVERTER(
+    StartParseMethod.kind,
+    StructType.FLAT_LIST,
+    post_callback=lambda _: BRACKET_END,
+)
+def pre_start_parse_flat_list(node: StartParseMethod) -> str:
+    code = "parse() " + BRACKET_START
+
+    if have_pre_validate_call(node):
+        code += "this._preValidate(this._doc); "
+    code += "return Array.from(this._splitDoc(this._doc)).map((e) => this._parseItem(e));"
+    return code
+
+
+@CONVERTER(
+    StartParseMethod.kind,
+    StructType.ACC_LIST,
+    post_callback=lambda _: BRACKET_END,
+)
+def pre_start_parse_acc_List(node: StartParseMethod) -> str:
+    code = "parse() " + BRACKET_START
+
+    if have_pre_validate_call(node):
+        code += "this._preValidate(this._doc); "
+    code += "return [...new Set(["
+    for expr in node.body:
+        method_suffix = to_upper_camel_case(expr.kwargs["name"])
+        code += f"this._parse{method_suffix}(this._doc),"
+    code += "].flat())]; "
     return code
 
 

@@ -50,37 +50,6 @@ throw new Error("Invalid input: Expected a Document, Element, or string");}
 }
 """
 
-J2_START_PARSE_DICT = "return Array.from(this._splitDoc(this._doc)).reduce((item, e) => (item[this._parseKey(e)] = this._parseValue(e), item), {});"
-J2_START_PARSE_FLAT_LIST = "return Array.from(this._splitDoc(this._doc)).map((e) => this._parseItem(e));"
-J2_START_PARSE_ACC_LIST = Template(
-    """
-return [...new Set([
-{% for expr in exprs %}
-this._parse{{ expr.upper_name }}(this._doc),
-{% endfor %}
-].flat())];
-"""
-)
-J2_START_PARSE_ITEM = Template("""return {
-{% for expr in exprs %}
-    {%- if expr.is_classvar -%}
-        {{ expr.name }}: {{ expr.upper_name }},
-    {%- else -%}
-        {{ expr.name }}: this._parse{{ expr.upper_name }}(this._doc),
-    {%- endif -%}
-{% endfor %}
-};""")
-
-J2_START_PARSE_LIST_PARSE = Template("""return Array.from(this._splitDoc(this._doc)).map((e) => ({
-{% for expr in exprs %}
-    {%- if expr.is_classvar -%}
-        {{ expr.name }}: {{ expr.upper_name }},
-    {%- else -%}
-        {{ expr.name }}: this._parse{{ expr.upper_name }}(e),
-    {%- endif -%}
-{% endfor %}
-}));""")
-
 J2_PRE_STR_TRIM = Template(
     """
     let {{ nxt }} = (function (str, chars) {

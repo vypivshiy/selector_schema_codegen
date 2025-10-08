@@ -6,9 +6,15 @@ from ssc_codegen.ast_ import (
     StartParseMethod,
     StructParser,
 )
-from ssc_codegen.ast_.nodes_core import ExprClassVar
+from ssc_codegen.ast_.nodes_core import ExprClassVar, TypeDef, TypeDefField
 from ssc_codegen.str_utils import to_upper_camel_case, wrap_double_quotes
 from ssc_codegen.tokens import TOKENS_DEFAULT, TokenType, VariableType
+
+
+def get_typedef_field_by_name(node: TypeDef, field_name: str) -> TypeDefField:
+    value = [i for i in node.body if i.kwargs["name"] == field_name][0]
+    value = cast(TypeDefField, value)
+    return value
 
 
 def have_default_expr(node: BaseAstNode) -> bool:
