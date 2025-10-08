@@ -14,11 +14,12 @@ from ssc_codegen.ast_ import (
     StructInitMethod,
     StructPartDocMethod,
     StructPreValidateMethod,
+    StartParseMethod,
     FilterOr,
     FilterAnd,
     FilterNot,
 )
-from ssc_codegen.tokens import TokenType
+from ssc_codegen.tokens import StructType, TokenType
 
 T_NODE = TypeVar("T_NODE", bound=BaseAstNode[Any, Any])
 CB_FMT_DEBUG_COMMENT = Callable[[BaseAstNode[Any, Any], str], str]
@@ -88,8 +89,12 @@ class BaseCodeConverter:
         self._debug_comment_prefix = debug_comment_prefix
         self._debug_cb = debug_cb
         self._comment_prefix_sep = comment_prefix_sep
-        self.pre_definitions: dict[TokenType | int, CB_AST_BIND] = {}
-        self.post_definitions: dict[TokenType | int, CB_AST_BIND] = {}
+        self.pre_definitions: dict[
+            TokenType | int | tuple[TokenType, StructType], CB_AST_BIND
+        ] = {}
+        self.post_definitions: dict[
+            TokenType | int | tuple[TokenType, StructType], CB_AST_BIND
+        ] = {}
 
     @property
     def comment_prefix_sep(self) -> str:
@@ -118,27 +123,63 @@ class BaseCodeConverter:
     def pre(
         self,
         for_definition: TokenType,
+        for_struct_definition: StructType | None = None,
+        *,
         post_callback: Callable[[BaseAstNode], str] | str | None = None,
     ) -> CB_AST_DECORATOR:
         """Define a pre-conversion decorator for the given TokenType.
 
         optional allow set post callback for simple string casts like close brackets etc
+
+        StartParseMethod has shortcut (StartParseMethod.kind, StructType.<TYPE>) for simplify callback generators
         """
+        if for_struct_definition and for_definition not in (
+            StartParseMethod.kind,
+            TypeDef.kind,
+        ):
+            raise TypeError(
+                "Add struct definition allowed only for `StartParseMethod` nodes"
+            )
 
         def decorator(func: CB_AST_BIND) -> CB_AST_BIND:
-            self.pre_definitions[for_definition] = func
+            if for_struct_definition:
+                self.pre_definitions[
+                    (for_definition, for_struct_definition)
+                ] = func
+            else:
+                self.pre_definitions[for_definition] = func
             return func
 
         if post_callback:
+            if for_struct_definition:
+                self.post_definitions[
+                    (for_definition, for_struct_definition)
+                ] = post_callback
             self.post_definitions[for_definition] = post_callback
 
         return decorator
 
-    def post(self, for_definition: TokenType) -> CB_AST_DECORATOR:
+    def post(
+        self,
+        for_definition: TokenType,
+        for_struct_definition: StructType | None = None,
+    ) -> CB_AST_DECORATOR:
         """Define a post-conversion decorator for the given TokenType."""
+        if for_struct_definition and for_definition not in (
+            StartParseMethod.kind,
+            TypeDef.kind,
+        ):
+            raise TypeError(
+                "Add struct definition allowed only for `StartParseMethod` or `TypeDef` nodes"
+            )
 
         def decorator(func: CB_AST_BIND) -> CB_AST_BIND:
-            self.post_definitions[for_definition] = func
+            if for_struct_definition:
+                self.post_definitions[
+                    (for_definition, for_struct_definition)
+                ] = func
+            else:
+                self.post_definitions[for_definition] = func
             return func
 
         return decorator
@@ -146,21 +187,51 @@ class BaseCodeConverter:
     def __call__(
         self,
         for_definition: TokenType,
+        for_struct_definition: StructType | None = None,
+        *,
         post_callback: Callable[[BaseAstNode], str] | None = None,
     ) -> CB_AST_DECORATOR:
         """Alias for pre decorator."""
-        return self.pre(for_definition, post_callback=post_callback)
+        return self.pre(
+            for_definition, for_struct_definition, post_callback=post_callback
+        )
 
-    def _pre_convert_node(self, node: BaseAstNode) -> str:
+    def _pre_convert_node(
+        self, node: BaseAstNode, st_type: StructType | None = None
+    ) -> str:
         """Convert the AST node using the pre-definition function."""
+        # syntax sugar: split generate start_parse methods by part callbacks
+        if (
+            node.kind in (StartParseMethod.kind, TypeDef.kind)
+            and st_type
+            and (pre_func := self.pre_definitions.get((node.kind, st_type)))
+        ):
+            if self.debug_instructions:
+                return f"{self._debug_cb(node, self.comment_prefix)}{self.comment_prefix_sep}{pre_func(node)}"
+            return pre_func(node)
+
+        # old realisation use
         if pre_func := self.pre_definitions.get(node.kind):
             if self.debug_instructions:
                 return f"{self._debug_cb(node, self.comment_prefix)}{self.comment_prefix_sep}{pre_func(node)}"
             return pre_func(node)
         return ""
 
-    def _post_convert_node(self, node: BaseAstNode) -> str:
+    def _post_convert_node(
+        self, node: BaseAstNode, st_type: StructType | None = None
+    ) -> str:
         """Convert the AST node using the post-definition function."""
+        # syntax sugar: split generate start_parse methods by part callbacks
+        if (
+            node.kind in (StartParseMethod.kind, TypeDef.kind)
+            and st_type
+            and StartParseMethod.kind
+            and (post_func := self.post_definitions.get((node.kind, st_type)))
+        ):
+            if self.debug_instructions:
+                return f"{self._debug_cb(node, self.comment_prefix)}{self.comment_prefix_sep}{post_func(node)}"
+            return post_func(node)
+
         if post_func := self.post_definitions.get(node.kind):
             return post_func(node)
         return ""
@@ -212,18 +283,19 @@ class BaseCodeConverter:
             ):
                 ast_entry = cast(FilterOr | FilterAnd | FilterNot, ast_entry)
                 self._convert_logic_filter(ast_entry, acc)
-
             case (
                 TokenType.STRUCT_PART_DOCUMENT
                 | TokenType.STRUCT_PRE_VALIDATE
                 | TokenType.STRUCT_PARSE_START
                 | TokenType.STRUCT_FIELD
+                | TokenType.STRUCT_INIT
             ):
                 ast_entry = cast(
                     StructFieldMethod
-                    | StructInitMethod
+                    | StartParseMethod
                     | StructPartDocMethod
-                    | StructPreValidateMethod,
+                    | StructPreValidateMethod
+                    | StructInitMethod,
                     ast_entry,
                 )
                 self._convert_struct_method(ast_entry, acc)
@@ -262,11 +334,13 @@ class BaseCodeConverter:
 
     def _convert_typedef(self, ast_entry: TypeDef, acc: list[str]) -> None:
         """Handle typedef conversion."""
-        acc.append(self._pre_convert_node(ast_entry))
-        # TYPEDEF_FIELD call
-        for node in ast_entry.body:
-            self.convert(node, acc)
-        acc.append(self._post_convert_node(ast_entry))
+        _, st_type = ast_entry.unpack_args()
+        self._convert_node_with_struct_type(ast_entry, acc)
+        # acc.append(self._pre_convert_node(ast_entry))
+        # # TYPEDEF_FIELD call
+        # for node in ast_entry.body:
+        #     self.convert(node, acc)
+        # acc.append(self._post_convert_node(ast_entry))
 
     def _convert_typedef_field(
         self, ast_entry: TypeDefField, acc: list[str]
@@ -302,19 +376,40 @@ class BaseCodeConverter:
             self.convert(node, acc)
         acc.append(self._post_convert_node(ast_entry))
 
+    def _convert_node_with_struct_type(
+        self, ast_entry: StartParseMethod | TypeDef, acc: list[str]
+    ) -> None:
+        if isinstance(ast_entry, StartParseMethod):
+            st_node = ast_entry.parent
+            st_node = cast(StructParser | TypeDef, ast_entry.parent)
+            st_type = st_node.kwargs["struct_type"]
+        else:
+            # TYPEDEF
+            _, st_type = ast_entry.unpack_args()
+        # 0.11 new shortcut API (with backport support)
+        acc.append(self._pre_convert_node(ast_entry, st_type))
+        for node in ast_entry.body:
+            self.convert(node, acc)
+        acc.append(self._post_convert_node(ast_entry, st_type))
+
     def _convert_struct_method(
         self,
         ast_entry: StructFieldMethod
         | StructInitMethod
         | StructPartDocMethod
-        | StructPreValidateMethod,
+        | StructPreValidateMethod
+        | StartParseMethod,
         acc: list[str],
     ) -> None:
         """Handle struct method headers and bodies."""
-        acc.append(self._pre_convert_node(ast_entry))
-        for node in ast_entry.body:
-            self.convert(node, acc)
-        acc.append(self._post_convert_node(ast_entry))
+        if ast_entry.kind == StartParseMethod.kind:
+            ast_entry = cast(StartParseMethod, ast_entry)
+            self._convert_node_with_struct_type(ast_entry, acc)
+        else:
+            acc.append(self._pre_convert_node(ast_entry))
+            for node in ast_entry.body:
+                self.convert(node, acc)
+            acc.append(self._post_convert_node(ast_entry))
 
     def _convert_default(self, ast_entry: BaseAstNode, acc: list[str]) -> None:
         """Handle default node conversion."""
