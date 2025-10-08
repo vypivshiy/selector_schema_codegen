@@ -273,7 +273,7 @@ def pre_classvar(node: ExprClassVar) -> str:
     elif isinstance(value, bool):
         value = "true" if value else "false"
 
-    return f"static {field_name} = (e) => {value}; "
+    return f"static {field_name} = {value}; "
 
 
 @CONVERTER(StructFieldMethod.kind, post_callback=lambda _: BRACKET_END)
@@ -1070,7 +1070,7 @@ def pre_xpath_remove(node: ExprXpathElementRemove) -> str:
 @CONVERTER(ExprJsonifyDynamic.kind)
 def pre_jsonify_dynamic(node: ExprJsonifyDynamic) -> str:
     prv, nxt = prev_next_var(node)
-    query = node.unpack_args()
+    query, *_ = node.unpack_args()
 
     expr = "".join(f"[{i}]" for i in jsonify_query_parse(query))
 
