@@ -45,10 +45,16 @@ class BaseAstNode(Generic[T_MAPPING_FIELD, T_ARGUMENTS]):
         """extract all values from kwargs field wout keys"""
         return tuple(self.kwargs.values())  # type: ignore
 
-    # todo: cached property?
     @property
     def index(self) -> int:
         if self.parent:
+            # self.parent.body.index(self) add side effect if expr has same operations:
+            #      0      1      1       1
+            # D().raw().trim().trim().trim()
+            # use compare by id
+            for i, child in enumerate(self.parent.body):
+                if id(child) == id(self):
+                    return i
             return self.parent.body.index(self)
         return -1
 
