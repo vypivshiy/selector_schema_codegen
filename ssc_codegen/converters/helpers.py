@@ -56,12 +56,16 @@ def get_struct_field_method_by_name(
 
 def is_prev_node_atomic_cond(node: BaseAstNode) -> bool:
     """return true if node is atomic condition (exclude body), NOT FIRST"""
-    return node.index != 0 and not node.parent.body[node.index_prev].body
+    return (
+        node and node.index != 0 and not node.parent.body[node.index_prev].body
+    )
 
 
 def is_first_node_cond(node: BaseAstNode) -> bool:
     """return true if node at the first and its EXPR_FILTER token"""
-    return node.index == 0 and node.parent.kind == TokenType.EXPR_FILTER
+    return (
+        node and node.index == 0 and node.parent.kind == TokenType.EXPR_FILTER
+    )
 
 
 def jsonify_query_parse(query: str) -> list[str]:
@@ -89,9 +93,7 @@ def get_classvar_hook_or_value(
     node: BaseAstNode,
     key: str,
     *,
-    cb_literal_cast: Callable[
-        [ExprClassVar, str], str
-    ] = literal_expr_attr_call,
+    cb_literal_cast: Callable[[ExprClassVar], str] = literal_expr_attr_call,
     cb_value_cast: Callable[[Any], str] | None = None,
 ) -> str:
     """generate call classvar literal or if not exists - returns variable"""
@@ -153,14 +155,14 @@ def js_get_classvar_hook_or_value(
     key: str,
     cb_literal_cast: Callable[[ExprClassVar], str] = literal_expr_attr_call,
     cb_value_cast: Callable[[Any], str] | None = _js_default_cast_t,
-):
+) -> Any:
     """javascript create a ref for classvar if exists or return literal value"""
     return get_classvar_hook_or_value(
         node, key, cb_literal_cast=cb_literal_cast, cb_value_cast=cb_value_cast
     )
 
 
-def _go_default_cast_t(i) -> str:
+def _go_default_cast_t(i: Any) -> str:
     """default python literals convert to valid golang literals"""
     # None -> nil
     # str -> string
@@ -201,7 +203,7 @@ def go_get_classvar_hook_or_value(
     key: str,
     cb_literal_cast: Callable[[ExprClassVar], str] = _go_literal_expr_attr_call,
     cb_value_cast: Callable[[Any], str] | None = _go_default_cast_t,
-):
+) -> Any:
     return go_get_classvar_hook_or_value(
         node, key, cb_literal_cast=cb_literal_cast, cb_value_cast=cb_value_cast
     )

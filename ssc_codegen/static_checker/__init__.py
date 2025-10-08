@@ -51,6 +51,8 @@ def run_analyze_schema(
             result = cb_document(schema, name, document)
             if not result:
                 LOGGER.error(result.msg)
+                if result.tip:
+                    LOGGER.info(f'FIX:\n{result.tip}\n')
                 errors.append(result)
 
     LOGGER.info("%s: Founded issues: %s",schema.__name__, len(errors))

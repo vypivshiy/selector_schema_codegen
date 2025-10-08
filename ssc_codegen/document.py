@@ -1962,21 +1962,21 @@ class ClassVarDocument(BaseDocument):
         self._parse_returns = parse_returns
         # if self-init classvar need manually pass path
         self.use_self_cls = bool(self_cls)
-        if self.use_self_cls:
+        if self.use_self_cls and isinstance(self_cls, str):
             cls, name = self_cls.split(".")
-            self.struct_name = cls
-            self.field_name = name
+            self.struct_name = cls  # type: ignore
+            self.field_name = name  # type: ignore
         # late init by __init_subclass__ in BaseSchema class
         else:
-            self.struct_name: str | None = None
-            self.field_name: str | None = None
+            self.struct_name: str | None = None  # type: ignore
+            self.field_name: str | None = None  # type: ignore
 
     @property
-    def is_regex(self):
+    def is_regex(self) -> bool:
         return self._is_regex
 
     @is_regex.setter
-    def is_regex(self, val: bool):
+    def is_regex(self, val: bool) -> None:
         self._is_regex = val
 
     def expr(self) -> ExprClassVar:

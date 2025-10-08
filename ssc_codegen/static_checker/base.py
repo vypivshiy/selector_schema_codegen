@@ -71,12 +71,14 @@ FMT_MAPPING_METHODS = {
     TokenType.TO_FLOAT_LIST: "to_float",
     TokenType.TO_JSON: "jsonify",
     TokenType.TO_BOOL: "to_bool",
+    TokenType.EXPR_FILTER: "filter",
 }
 
 
 class AnalyzeResult(NamedTuple):
     value: bool
     msg: str
+    tip: str = ""
 
     def __bool__(self) -> bool:
         return self.value
@@ -86,5 +88,5 @@ class AnalyzeResult(NamedTuple):
         return cls(True, "")
 
     @classmethod
-    def error(cls, msg: str) -> Self:
-        return cls(False, msg)
+    def error(cls, msg: str, tip: str = "") -> Self:
+        return cls(False, msg, tip=tip)

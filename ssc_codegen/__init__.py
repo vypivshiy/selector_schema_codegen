@@ -68,7 +68,7 @@ def F() -> DocumentFilter:
     return DocumentFilter()
 
 
-def CV(value, self_cls_path: str | None = None, *, returns: bool = False) -> ClassVarDocument:
+def CV(value: int | str | float | bool | None | list, self_cls_path: str | None = None, *, returns: bool = False) -> ClassVarDocument:
     """Shortcut as ClassVarDocument(value, self_cls, parse_returns) object
 
     pass `self_cls_path` argument if need use this var inner schema context:
@@ -90,5 +90,4 @@ class A(ItemShema):
 ```
 
     """
-    
     return ClassVarDocument(value, self_cls_path, parse_returns=returns)

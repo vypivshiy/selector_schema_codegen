@@ -237,7 +237,7 @@ class BaseSchema:
         return cls__dict__
 
     @classmethod
-    def __get_mro_fields__(cls) -> dict[str, Union["BaseDocument", str]]:
+    def __get_mro_fields__(cls) -> dict[str, "BaseDocument"]:
         """extract all fields (parent classes included)"""
         cls__dict__ = cls._get_ssc_deep_documents()
         fields = {}
