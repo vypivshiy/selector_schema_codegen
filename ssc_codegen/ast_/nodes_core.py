@@ -107,7 +107,7 @@ class ExprCallStructMethod(
 
 
 KW_EXPR_CALL_CLASSVAR = TypedDict(
-    "KW_EXPR_CALL_LITERAL",
+    "KW_EXPR_CALL_CLASSVAR",
     {"struct_name": str, "field_name": str, "type": VariableType},
 )
 ARGS_EXPR_CALL_CLASSVAR = tuple[str, str, VariableType]
@@ -253,7 +253,7 @@ class ExprNoReturn(_DisableReprBody, BaseAstNode[T_EMPTY_KWARGS, tuple]):
 # regex pattern auto converts to string
 T_CLASSVAR = int | str | bool | float | None
 KW_CLASSVAR = TypedDict(
-    "KW_LITERAL",
+    "KW_CLASSVAR",
     {
         "value": T_CLASSVAR,
         "struct_name": str,
@@ -262,7 +262,7 @@ KW_CLASSVAR = TypedDict(
         "is_regex": bool,
     },
 )
-ARGS_CLASSVAR = tuple[T_CLASSVAR, str, str]
+ARGS_CLASSVAR = tuple[T_CLASSVAR, str, str, bool, bool]
 
 
 @dataclass(kw_only=True)
@@ -286,7 +286,7 @@ class ExprClassVar(_DisableReprBody, BaseAstNode[KW_CLASSVAR, ARGS_CLASSVAR]):
         return self.kwargs["value"]
 
     @value.setter
-    def value(self, val) -> None:
+    def value(self, val: T_CLASSVAR) -> None:
         self.kwargs["value"] = val
 
     @property

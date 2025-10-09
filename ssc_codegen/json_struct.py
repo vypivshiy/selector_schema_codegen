@@ -53,11 +53,11 @@ class JsonType:
 class JsonField:
     """Descriptor for custom JSON field configuration"""
 
-    json_key: str = None
+    json_key: str | None = None
     description: str = ""
     required: bool = True
 
-    def __set_name__(self, owner, name):
+    def __set_name__(self, _owner: Any, name: str) -> None:
         self.field_name = name
         if self.json_key is None:
             self.json_key = name

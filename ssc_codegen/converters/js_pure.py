@@ -415,7 +415,7 @@ def pre_json_struct(node: JsonStruct) -> str:
 def pre_json_struct_field(node: JsonStructField) -> str:
     name, var_type = node.unpack_args()
     type_ = JSDOC_JSON_TYPES.get(var_type)
-    return "* @property {" + type_ + "} " + name
+    return "* @property {" + type_ + "} " + name  # type: ignore
 
 
 # START PARSE

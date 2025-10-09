@@ -1,6 +1,7 @@
 import json
 import re
 import logging
+from typing import Any
 
 from ssc_codegen.str_utils import to_upper_camel_case
 
@@ -10,7 +11,7 @@ LOGGER = logging.getLogger("ssc_gen")
 
 
 def _process_json_field(
-    key: str, value, parent_name: str, accumulated_schemas: list[str]
+    key: str, value: Any, parent_name: str, accumulated_schemas: list[str]
 ) -> str:
     """Process a single JSON field and return the field definition line."""
     if value is None:
@@ -141,7 +142,7 @@ def convert_json_to_schema_code(
     if json_start_path:
         parts = json_start_path.split(".")
         for i, part in enumerate(parts):
-            part = int(part) if part.isdigit() else part
+            part = int(part) if part.isdigit() else part  # type: ignore[assignment]
             try:
                 jsn = jsn[part]
             except IndexError as e:

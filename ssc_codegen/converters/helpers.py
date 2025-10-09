@@ -1,5 +1,4 @@
 from typing import Any, Callable, cast
-
 from ssc_codegen.ast_ import (
     BaseAstNode,
     StructFieldMethod,
@@ -62,16 +61,12 @@ def get_struct_field_method_by_name(
 
 def is_prev_node_atomic_cond(node: BaseAstNode) -> bool:
     """return true if node is atomic condition (exclude body), NOT FIRST"""
-    return (
-        node and node.index != 0 and not node.parent.body[node.index_prev].body
-    )
+    return node.index != 0 and not node.parent.body[node.index_prev].body  # type: ignore[union-attr]
 
 
 def is_first_node_cond(node: BaseAstNode) -> bool:
     """return true if node at the first and its EXPR_FILTER token"""
-    return (
-        node and node.index == 0 and node.parent.kind == TokenType.EXPR_FILTER
-    )
+    return node.index == 0 and node.parent.kind == TokenType.EXPR_FILTER  # type: ignore[union-attr]
 
 
 def jsonify_query_parse(query: str) -> list[str]:
@@ -92,6 +87,11 @@ def literal_expr_attr_call(node: ExprClassVar, sep: str = ".") -> str:
     """convert to literal classvar call"""
     if node.kind != TokenType.CLASSVAR:
         raise TypeError("not found literal hook")
+    # opps missing reference name
+    if all(not i for i in node.literal_ref_name):
+        raise TypeError(
+            "classvar exclude struct_name and field_name refecrences"
+        )
     return sep.join(node.literal_ref_name)
 
 
@@ -114,7 +114,7 @@ def get_classvar_hook_or_value(
     )
 
 
-def _py_default_cast_t(i) -> str:
+def _py_default_cast_t(i: Any) -> str:
     """convert variable to valid python literal"""
     if isinstance(i, list):
         if all(isinstance(j, str) for j in i):
@@ -129,18 +129,16 @@ def py_get_classvar_hook_or_value(
     node: BaseAstNode,
     key: str,
     *,
-    cb_literal_cast: Callable[
-        [ExprClassVar, str], str
-    ] = literal_expr_attr_call,
+    cb_literal_cast: Callable[[ExprClassVar], str] = literal_expr_attr_call,
     cb_value_cast: Callable[[Any], str] | None = _py_default_cast_t,
-):
+) -> str:
     """python create a ref for classvar if exists or return literal value"""
     return get_classvar_hook_or_value(
         node, key, cb_literal_cast=cb_literal_cast, cb_value_cast=cb_value_cast
     )
 
 
-def _js_default_cast_t(i) -> str:
+def _js_default_cast_t(i: Any) -> str:
     if i is None:
         return "null"
     # simular literal as python list

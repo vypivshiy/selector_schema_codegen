@@ -197,7 +197,7 @@ class BaseDocument:
     ) -> tuple[Any, dict[str, ExprClassVar]]:
         """shortcut unpack variable if passed ExprLiteral"""
         literal_hook = self._new_literal_hook(name, value)
-        if literal_hook:
+        if literal_hook and not isinstance(literal_hook, dict):
             return literal_hook.value, {name: literal_hook}
         return value, {}
 
@@ -1116,7 +1116,7 @@ class StringDocument(BaseDocument):
         if not isinstance(pattern, str):
             ignore_case = is_ignore_case_regex(pattern)
             dotall = is_dotall_case_regex(pattern)
-        pattern = unverbosify_regex(pattern)
+        pattern = unverbosify_regex(pattern)  # type: ignore
         result = analyze_re_expression(pattern, allow_empty_groups=True)
         if not result:
             LOGGER.warning(result.msg)
@@ -1155,7 +1155,12 @@ class StringDocument(BaseDocument):
             case _:
                 self._add(
                     ExprStringRegexSub(
-                        kwargs={"pattern": pattern, "repl": repl}
+                        kwargs={
+                            "pattern": pattern,
+                            "repl": repl,
+                            "dotall": dotall,
+                            "ignore_case": ignore_case,
+                        }
                     )
                 )
         return self
@@ -1799,9 +1804,9 @@ class DocumentFilter(BaseDocument):
         pattern, literal_hooks = self._resolve_literal_hook("pattern", pattern)
 
         if not isinstance(pattern, str):
-            ignore_case = is_ignore_case_regex(pattern)
+            ignore_case = is_ignore_case_regex(pattern)  # type: ignore
 
-        pattern = unverbosify_regex(pattern)
+        pattern = unverbosify_regex(pattern)  # type: ignore
         result = analyze_re_expression(pattern, allow_empty_groups=True)
         if not result:
             LOGGER.warning(result.msg)
@@ -1881,7 +1886,8 @@ class DocumentFilter(BaseDocument):
         new_filter.stack.extend(self.stack)
         return DocumentFilter().not_(new_filter)
 
-    def __eq__(self, other: int | str | Sequence[str]) -> Self:
+    # ignoring Liskov substitution principle for the sake of filter DSL expressiveness
+    def __eq__(self, other: int | str | Sequence[str]) -> "DocumentFilter":  # type: ignore[override]
         """syntax sugar F().eq(...)"""
         new_filter = DocumentFilter()
         new_filter.stack.extend(self.stack)
@@ -1892,7 +1898,7 @@ class DocumentFilter(BaseDocument):
             other = (other,)
         return new_filter.eq(*other)
 
-    def __ne__(self, other: int | str | Sequence[str]) -> Self:
+    def __ne__(self, other: int | str | Sequence[str]) -> "DocumentFilter":  # type: ignore[override]
         """syntax sugar F().ne(...)"""
         new_filter = DocumentFilter()
         new_filter.stack.extend(self.stack)
@@ -1903,22 +1909,22 @@ class DocumentFilter(BaseDocument):
             other = (other,)
         return new_filter.ne(*other)
 
-    def __lt__(self, other: int) -> Self:
+    def __lt__(self, other: int) -> "DocumentFilter":
         new_filter = DocumentFilter()
         new_filter.stack.extend(self.stack)
         return new_filter.len_lt(other)
 
-    def __le__(self, other: int) -> Self:
+    def __le__(self, other: int) -> "DocumentFilter":
         new_filter = DocumentFilter()
         new_filter.stack.extend(self.stack)
         return new_filter.len_le(other)
 
-    def __gt__(self, other: int) -> Self:
+    def __gt__(self, other: int) -> "DocumentFilter":
         new_filter = DocumentFilter()
         new_filter.stack.extend(self.stack)
         return new_filter.len_gt(other)
 
-    def __ge__(self, other: int) -> Self:
+    def __ge__(self, other: int) -> "DocumentFilter":
         new_filter = DocumentFilter()
         new_filter.stack.extend(self.stack)
         return new_filter.len_ge(other)
@@ -1983,6 +1989,10 @@ class ClassVarDocument(BaseDocument):
         else:
             self.struct_name: str | None = None  # type: ignore
             self.field_name: str | None = None  # type: ignore
+
+    @property
+    def stack_last_ret(self) -> VariableType:
+        return self.expr().ret_type
 
     @property
     def is_regex(self) -> bool:

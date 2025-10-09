@@ -154,8 +154,8 @@ class BaseCodeConverter:
             if for_struct_definition:
                 self.post_definitions[
                     (for_definition, for_struct_definition)
-                ] = post_callback
-            self.post_definitions[for_definition] = post_callback
+                ] = post_callback  # type: ignore[assignment]
+            self.post_definitions[for_definition] = post_callback  # type: ignore[assignment]
 
         return decorator
 

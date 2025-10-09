@@ -464,7 +464,7 @@ def post_json_struct(_node: JsonStruct) -> str:
 
 def pre_json_field(node: JsonStructField) -> str:
     name, json_type = node.unpack_args()
-    json_type: JsonType
+    json_type = cast(JsonType, json_type)
     if json_type.type == JsonVariableType.OBJECT:
         type_ = f"J_{json_type.name}"
     elif json_type.type == JsonVariableType.ARRAY_OBJECTS:
@@ -924,7 +924,7 @@ def pre_index(node: ExprIndex) -> str:
     )
     prv, nxt = prev_next_var(node)
     index, *_ = node.unpack_args()
-    index = py_get_classvar_hook_or_value(node, "index")
+    index = py_get_classvar_hook_or_value(node, "index")  # type: ignore
     return indent + f"{nxt} = {prv}[{index}]"
 
 
@@ -1325,7 +1325,7 @@ def pre_to_json_dynamic(node: ExprJsonifyDynamic) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    query = node.unpack_args()
+    query, *_ = node.unpack_args()
 
     expr = "".join(f"[{i}]" for i in jsonify_query_parse(query))
 

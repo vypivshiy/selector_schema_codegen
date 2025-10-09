@@ -98,10 +98,10 @@ class BaseAstNode(Generic[T_MAPPING_FIELD, T_ARGUMENTS]):
 
     def find_node_all(
         self, func: Callable[["BaseAstNode"], bool]
-    ) -> "BaseAstNode":
+    ) -> list["BaseAstNode"]:
         """find nodes in body by func filter"""
         if len(self.body) == 0:
-            return []
+            return []  # type: ignore
         return [i for i in self.body if i.kind == func(i)]
 
     def find_node_by_token(
@@ -112,7 +112,7 @@ class BaseAstNode(Generic[T_MAPPING_FIELD, T_ARGUMENTS]):
 
     def find_nodes_by_token(self, token_type: TokenType) -> list["BaseAstNode"]:
         """find nodes by TokenType"""
-        return self.find_nodes_by_token(lambda n: n.kind == token_type)
+        return self.find_nodes_by_token(lambda n: n.kind == token_type)  # type: ignore[arg-type]
 
 
 @dataclass(kw_only=True)
