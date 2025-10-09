@@ -251,6 +251,10 @@ class HTMLDocument(BaseDocument):
 
         query = " ".join(query.splitlines())
         query, action = parse_pseudo_css_query(query)
+        # used only pseudo selector, skip add css expr
+        if not query:
+            self._pseudo_query_action_to_expr(action)
+            return self
         try:
             validate_css_query(query)
         except SelectorSyntaxError:
@@ -287,6 +291,10 @@ class HTMLDocument(BaseDocument):
 
         query = " ".join(query.splitlines())
         query, action = parse_pseudo_xpath_query(query)
+        if not query:
+            self._pseudo_query_action_to_expr(action)
+            return self
+
         try:
             validate_xpath_query(query)
         except SelectorSyntaxError:
@@ -307,6 +315,9 @@ class HTMLDocument(BaseDocument):
         query, literal_hooks = self._resolve_literal_hook("query", query)
         query = " ".join(query.splitlines())
         query, action = parse_pseudo_css_query(query)
+        if not query:
+            self._pseudo_query_action_to_expr(action)
+            return self
         try:
             validate_css_query(query)
         except SelectorSyntaxError:
@@ -328,6 +339,9 @@ class HTMLDocument(BaseDocument):
 
         query = " ".join(query.splitlines())
         query, action = parse_pseudo_xpath_query(query)
+        if not query:
+            self._pseudo_query_action_to_expr(action)
+            return self
         try:
             validate_xpath_query(query)
         except SelectorSyntaxError as e:
@@ -1146,8 +1160,8 @@ class StringDocument(BaseDocument):
                 )
         return self
 
-    def re_trim(self, pattern: str = r"/s*") -> Self:
-        """shortcut of re_sub('^' + pattern).re_sub(pattern + '$')
+    def re_trim(self, pattern: str = r"(?:^\s+)|(?:\s+$)") -> Self:
+        """shortcut of re_sub(r'(?:^\s+)|(?:\s+$)')
 
         as default, trim LEFT and RIGHT whitespace chars by regular expression.
 
@@ -1160,8 +1174,7 @@ class StringDocument(BaseDocument):
             )
             pattern = pattern.value
 
-        self.re_sub(f"^{pattern}")
-        self.re_sub(f"{pattern}$")
+        self.re_sub(pattern)
         return self
 
     @validate_types(VariableType.STRING, VariableType.LIST_STRING)
