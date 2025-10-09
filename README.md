@@ -212,6 +212,7 @@ You can use any html source:
 
 
 - [Brief](docs/briefing.md) about css selectors and regular expressions
+- [Explain](docs/explain.md) short document on how to understand DSL syntax
 - [LLM](llm.md) experimental prompt for generate code
 - [Explain](docs/explain.md) short note how to explain and read sscgen schema configs
 - [Quickstart](docs/quickstart.md) about css selectors and regular expressions.
