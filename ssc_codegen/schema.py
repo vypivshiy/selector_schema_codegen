@@ -15,7 +15,7 @@ class MISSING_FIELD(object):  # noqa
     pass
 
 
-LOGGER = logging.getLogger("ssc-gen")
+LOGGER = logging.getLogger("ssc_gen")
 _T_OPT_FIELD: TypeAlias = Union["BaseDocument", Type[MISSING_FIELD]]
 
 
@@ -118,6 +118,43 @@ class SchemaMeta(type):
 
         cls.__SSC_MRO_CLASSVARS__ = mro_classvars
 
+    @staticmethod
+    def __resolve_self_classvars(cls: Type["BaseSchema"]) -> None:
+        """primitive self used classvars in schemas
+
+        ```
+        class B(ItemSchema):
+            C2 = CV("title")
+
+        class A(ItemSchema):
+            C = CV("title")
+            # cpython compiles function and method calls first,
+            # and this classvar does not have time
+            # to determine which schema it belongs to.
+            title = D().css(C).text()
+
+            # ok, it compiled normally
+            title2 = D().css(B.C2).text()
+        ```
+
+        """
+        if cls.__SSC_MRO_CLASSVARS__:
+            tmp_cvars = cls.__SSC_MRO_CLASSVARS__.copy()
+            for name, field in cls.__SSC_MRO_FIELDS__.items():
+                for expr in field.stack:
+                    for value in expr.classvar_hooks.values():
+                        if all(not i for i in value.literal_ref_name):
+                            for cvar_name, cvar in tmp_cvars.items():
+                                if cvar._value == value.kwargs["value"]:
+                                    value.kwargs["struct_name"] = cls.__name__
+                                    value.kwargs["field_name"] = cvar_name
+                                    LOGGER.warning(
+                                        f"{cls.__name__}.{name}: fix classvar reference as {cls.__name__}.{cvar_name}\n"
+                                        + "Сheck this field in configuration to avoid side effects"
+                                    )
+                                    tmp_cvars.pop(cvar_name)
+                                    break
+
     def __new__(mcs, name, bases, namespace, **kwargs):  # type: ignore
         cls = super().__new__(mcs, name, bases, namespace)
         cls = cast(Type["BaseSchema"], cls)
@@ -131,6 +168,7 @@ class SchemaMeta(type):
         mcs.__fill_schema_mro(cls)
         mcs.__fill_mro_fields(cls)
         mcs.__fill_literals(cls, name)
+        mcs.__resolve_self_classvars(cls)
 
         return cls
 
