@@ -1,10 +1,10 @@
 import warnings
-from typing import Callable, Type, TYPE_CHECKING
+from typing import Callable, Type, TYPE_CHECKING, cast
 
 from cssselect import SelectorSyntaxError
 from typing_extensions import assert_never
 
-from ssc_codegen.ast_ import ExprDefaultValueWrapper
+from ssc_codegen.ast_ import ExprDefaultValueWrapper, ExprClassVar
 from ssc_codegen.selector_utils import validate_css_query, validate_xpath_query
 from ssc_codegen.static_checker.base import (
     AnalyzeResult,
@@ -132,6 +132,30 @@ def analyze_schema_item_field(sc: Type["BaseSchema"]) -> AnalyzeResult:
         fields = sc.__get_mro_fields__()
         if not fields.get("__ITEM__"):
             return AnalyzeResult.error(f"{sc.__name__} missing __ITEM__ field")
+    return AnalyzeResult.ok()
+
+
+def analyze_self_classvar_variables_schema(
+    sc: Type["BaseSchema"],
+) -> AnalyzeResult:
+    if not sc.__get_mro_literals__():
+        return AnalyzeResult.ok()
+    fields = sc.__get_mro_fields__()
+    for name, field in fields.items():
+        for i, expr in enumerate(field.stack):
+            for value in expr.classvar_hooks.values():
+                value = cast(ExprClassVar, value)
+                if all(not i for i in value.literal_ref_name):
+                    trace = prettify_expr_stack(field, i)
+                    msg = f"{sc.__name__}.{name} = {trace}  # classvar missing struct_name and struct_field"
+                    tip = (
+                        "Provide manually reference classvar's name in format `<st_name>.<st_field>`\n"
+                        + "Example:\n\n"
+                        + "class Struct(ItemSchema):\n"
+                        + '    CVAR = CV("title", "Struct.CVAR")  #  <---\n'
+                        + "    title = D().css(CVAR).text()"
+                    )
+                    return AnalyzeResult.error(msg, tip=tip)
     return AnalyzeResult.ok()
 
 

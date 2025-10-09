@@ -2,7 +2,7 @@ import logging
 from typing import Type, Sequence
 
 from ssc_codegen.schema import BaseSchema
-from ssc_codegen.static_checker.callbacks import analyze_schema_item_field, analyze_schema_key_field, \
+from ssc_codegen.static_checker.callbacks import analyze_schema_item_field, analyze_schema_key_field, analyze_self_classvar_variables_schema, \
     analyze_schema_value_field, analyze_field_default_value, analyze_field_type_static, analyze_field_html_queries, \
     analyze_schema_split_doc_field, analyze_field_split_doc_ret_type, CB_SCHEMA, CB_DOCUMENT, analyze_regex_expr, \
     analyze_field_key_ret_type, analyze_other_field_type, analyze_dict_schema_fields, analyze_flat_list_schema_fields, \
@@ -17,7 +17,8 @@ _DEFAULT_CB_SCHEMAS = (
     analyze_schema_item_field,
     analyze_dict_schema_fields,
     analyze_flat_list_schema_fields,
-    analyze_schema_acc_list
+    analyze_schema_acc_list,
+    analyze_self_classvar_variables_schema
 )
 
 _DEFAULT_CB_DOCUMENTS = (
@@ -43,6 +44,8 @@ def run_analyze_schema(
         result = cb_schema(schema)
         if not result:
             LOGGER.error(result.msg)
+            if result.tip:
+                LOGGER.info(f'FIX:\n{result.tip}\n')
             errors.append(result)
 
     fields = schema.__get_mro_fields__()
