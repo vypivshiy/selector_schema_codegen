@@ -1,266 +1,245 @@
-# Sscgen DSL syntax explain
 
-## Fileds explain
+# Explain read configs
 
-To begin with, I'll give you a simple scheme for extracting data from a page.
+To read such configs quickly and correctly, you only need to understand two things:
+
+* **CSS selectors** - to find the necessary elements in HTML
+* **Regex** - to cut out pieces of text using a template.
+
+---
+
+## Idea
+
+DSL is designed to **describe HTML parsers as briefly, clearly, and legibly** as if you were writing a **recipe**:
+"Take all the links, get their `href`, count the `meta` tags, and transfer them to a table."
+
+---
+
+## High-level API
+
+* **`D()`** - (Document)
+  The main builder of expressions. Through a chain of calls, it determines ** what exactly and how to extract** from an HTML document or element.
+
+* **`R()`** - alias `D().raw()`.
+  It is used if you want to work with **raw text** (for example, to apply regular expression).
+
+* **`N()`** - (Nested)
+  Passes the current document or element to a **nested parser** (another class) to assemble a more complex data structure.
+
+* **`__SPLIT_DOC__`**
+  Specifies **how to split the document** into pieces before parsing.
+
+* **`ItemSchema`**
+  A schema class for describing **a single object**. Returns the result as a dictionary.
+
+* **`ListSchema`**
+  Schema class for **lists**. Divides the document using `__SPLIT_DOC__`, then parses each element.
+
+* **Default values  `.default()`**
+  In order for the parser to be stable and not fall off if something is missing in the HTML, you can set the default value.
+
+>[!note]
+> the default offset must **match the type** of what the expression returns (list, number, boolean, etc.).
+
+
+* **docstrings**
+  A feature has been added to transfer docstring to the code, as it may be important to describe which http endpoints to send requests to and how to prepare an HTML document and what errors may occur.
+
+
+---
+
+## Example
 
 ```python
-from ssc_codegen import ItemSchema, ListSchema, D, R, N
+from ssc_genfrom ssc_codegen import ItemSchema, ListSchema, D, R, N
+
+class MetaItems(ListSchema):
+    # find all elements <meta> with name AND property attributes
+    __SPLIT_DOC__ = D().css_all("meta[name][property]")
+    # send to next defined fields:
+
+    # and parse this elements
+    name = D().attr("name")
+    property = D().attr("property")
 
 
-class MetaTable(ListSchema):
-    # TIP: provide all attr keys to selector for increase extract stability
-    __SPLIT_DOC__ = D().css_all("meta[property][content]")
-
-    key = D().attr("property")
-    value = D().attr("content")
-
-
+# this docstring will be transferred to the generated code.
+# recommended pass to docstring HOWTO prepare html document input
 class Page(ItemSchema):
-    # alias D().css("title").text()
+    """Demo scraper config
+
+    USAGE:
+        GET <any html document>
+    """
+
+    # shortcut pseudo selector ::text == .text()
+    # alias: D().css("title").text()
     title = D().css("title::text")
-    # alias:
-    # D().default([]).css_all("a[href]").attr("href")
+
+    # shortcut default value init
+    # !!! type must match the final result of the chain function execution.
+    # alias: D().default([]).css_all("a[href]").attr("href")
     hrefs = D([]).css_all("a[href]::attr(href)")
-    # alias:
-    # D().default(False).raw().re(r"(<meta)").to_bool()
+
+    # work with raw string
+    # to optimize the regular expression search for this example, 
+    # it is best to extract part of the elements from the <head> element:
+    # D(False).css("head::raw").re(r"(<meta[^>]+>)").to_bool()
+    # D(False).css("head").raw().re(r"(<meta[^>]+>)").to_bool()
+    # alias: D().default(False).raw().re(r"(<meta)").to_bool()
     has_meta_tag = R(False).re(r"(<meta[^>]+>)").to_bool()
+
+    # cast to array lenght example
+    # alias: D().default(0).css_all("meta").to_len()
     meta_count = D(0).css_all("meta").to_len()
+
+    # send document object to `MetaTable` class and parse it
     meta_table = N().sub_parser(MetaTable)
 ```
 
-It will be equivalent to javascript code:
+visualization works
 
-```javascript
-class MetaTable {
-  constructor(doc) {
-    this._doc = doc;
-  }
-  _splitDoc(v) {
-    return Array.from(v.querySelectorAll("meta[property][content]"));
-  }
-  _parseKey(v) {
-    return v.getAttribute("property");
-  }
-  _parseValue(v) {
-    return v.getAttribute("content");
-  }
-  parse() {
-    return Array.from(this._splitDoc(this._doc)).map((e) => ({
-      key: this._parseKey(e),
-      value: this._parseValue(e),
-    }));
-  }
-}
-
-class Page {
-  constructor(doc) {
-    this._doc = doc;
-  }
-
-  _parseTitle(v) {
-    let v0 = v.querySelector("title");
-    return typeof v0.textContent === "undefined"
-      ? v0.documentElement.textContent
-      : v0.textContent;
-  }
-  _parseHrefs(v) {
-    let v0 = v;
-    try {
-      let v1 = Array.from(v0.querySelectorAll("a[href]"));
-      return v1.map((e) => e.getAttribute("href"));
-    } catch (Error) {
-      return [];
-    }
-  }
-  _parseHasMetaTag(v) {
-    let v0 = v;
-    try {
-      let v1 =
-        typeof v0.outerHTML === "undefined"
-          ? v0.documentElement.outerHTML
-          : v0.outerHTML;
-      let v2 = v1.match(/(<meta)/)[1];
-
-      return v2 || v2 === 0 ? true : false;
-    } catch (Error) {
-      return false;
-    }
-  }
-  _parseMetaCount(v) {
-    let v0 = v;
-    try {
-      let v1 = Array.from(v0.querySelectorAll("meta"));
-
-      return v1.length;
-    } catch (Error) {
-      return 0;
-    }
-  }
-  _parseMetaTable(v) {
-    return new MetaTable(v).parse();
-  }
-  parse() {
-    return {
-      title: this._parseTitle(this._doc),
-      hrefs: this._parseHrefs(this._doc),
-      has_meta_tag: this._parseHasMetaTag(this._doc),
-      meta_count: this._parseMetaCount(this._doc),
-      meta_table: this._parseMetaTable(this._doc),
-    };
-  }
-}
+```mermaid
+flowchart TD
+    HTML["HTML document input"]
+    
+    HTML --> Page["Page (ItemSchema)"]
+    
+    %% title
+    Page --> Title["title"]
+    Title --> TitleD["D()"]
+    TitleD --> TitleCss[".css('title::text')"]
+    
+    %% hrefs
+    Page --> Hrefs["hrefs"]
+    Hrefs --> HrefsD["D([])"]
+    HrefsD --> HrefsCssAll[".css_all('a[href]::attr(href)')"]
+    HrefsCssAll --> HrefsDefault[".default([])"]
+    
+    %% has_meta_tag
+    Page --> HasMeta["has_meta_tag"]
+    HasMeta --> HasMetaR["R(False)"]
+    HasMetaR --> HasMetaRe[".re('(<meta[^>]+>)')"]
+    HasMetaRe --> HasMetaBool[".to_bool()"]
+    
+    %% meta_count
+    Page --> MetaCount["meta_count"]
+    MetaCount --> MetaCountD["D(0)"]
+    MetaCountD --> MetaCountCssAll[".css_all('meta')"]
+    MetaCountCssAll --> MetaCountLen[".to_len()"]
+    MetaCountLen --> MetaCountDefault[".default(0)"]
+    
+    %% meta_table
+    Page --> MetaTable["meta_table"]
+    MetaTable --> MetaTableN["N()"]
+    MetaTableN --> MetaTableSub[".sub_parser(MetaTable)"]
+    
+    %% MetaTable
+    MetaTableSub --> MetaTableClass["MetaTable"]
+    MetaTableClass --> MetaTableObj["\_\_SPLIT_DOC\_\_ = D().css_all('meta[property][content]')"]
+    MetaTableObj --> MetaSplit
+    %% итерация по элементам
+    MetaSplit --> MetaElement["element 1"]
+    MetaSplit --> MetaElement2["element N"]
+    
+    MetaElement --> MetaKey["key"]
+    MetaKey --> MetaKeyD["D()"]
+    MetaKeyD --> MetaKeyAttr[".attr('property')"]
+    
+    MetaElement --> MetaValue["value"]
+    MetaValue --> MetaValueD["D()"]
+    MetaValueD --> MetaValueAttr[".attr('content')"]
+    
+    MetaElement2 --> MetaKey2["key"]
+    MetaKey2 --> MetaKeyD2["D()"]
+    MetaKeyD2 --> MetaKeyAttr2[".attr('property')"]
+    
+    MetaElement2 --> MetaValue2["value"]
+    MetaValue2 --> MetaValueD2["D()"]
+    MetaValueD2 --> MetaValueAttr2[".attr('content')"]
 ```
 
-Eexplanation of the syntax:
+## Reccomendation implementation and read
 
-D() - indicates that the first input element is a Document or Element.
+1. Name the input structure by its name or prefix like `Main`, `Page`, if a large number of nested structures are assumed.
+1. **Look at the class type** ('ItemSchema` or `ListSchema') - it tells you whether the result will be a list or an object.
+2. **Each field = rule**: "what to get and how to process".
+3. **D / R / N** markers:
+   * D - standart extract data: 
+      1. first selectors
+      2. next string operations
+      3. last - final cast to type (optional)
+   * R - works with raw html document or element
+   * N - passing a document or element to a sub-parser
+4. **.default()** - **.default()** — "insurance": sets the default value so that the parser always returns the expected type.
+5. **Shortcut-aliases** — show a simplified entry form.
 
-You can set the default value at the beginning if, for example, there may be no value in the field or if the code block may cause an error.
+## Other structures
 
-```
-D().default([]).css_all("a[href]").attr("href")
-# short version
-D([]).css_all("a[href]::attr(href)")
-```
+These structures are placed in a separate section because they are situational in application.
 
-available pseudoselecors aliases:
-
-| CSS           | XPATH        | fn_call      | desc                    |
-| ------------- | ------------ | ------------ | ----------------------- |
-| `::text`      | `/text()`    | `.text()`    | extract text (deep)     |
-| `::raw`       | `/raw()`     | `.raw()`     | extract outherHtml      |
-| `::attr(key)` | `@attr(key)` | `.attr(key)` | extract attribute value |
-
-R() - shortcut of D().raw() - call extract outherHtml
-Maybe used for extract anything data by regular expressions and basic string operations
-
-N() - means that the document or selected element will be passed to another parser and it will return the specified structure.:
-
-## Schemas
-
-### ItemSchema
-
-The common way to serialize data
-
-```python
-from ssc_codegen import ItemSchema, D
-
-class Page(ItemSchema):
-    title = D().css("title:text")
-    hrefs = D().css_all("a[href]::attr(href)")
-```
-
-returns the structure of the form:
-
-```
-{title: ..., hrefs: [...]}
-```
-
-### ListSchema
-
-The second common structure, implementations for parsing data in the form of cards and other iterable HTML elements.
-
-Recommended to be used with `ItemSchema` to indicate the entry point:
-
-
-```python
-from ssc_codegen import ItemSchema, ListSchema, D, N
-
-
-class MetaContent(ListSchema):
-    __SPLIT_DOC__ = D().css_all("meta[property][content]")
-
-    proprerty = D().attr("property")
-    content = D().attr("content")
-
-class Page(ItemSchema):
-    title = D().css("title::text")
-    meta = N().sub_parser(MetaContent)
-```
-
-returns the structure of the form:
-
-```
-{title: ..., meta: [{proprerty: ..., content: ...}, ...]}
-```
+The first two listed will be enough to cover most tasks.
 
 ### DictSchema
 
-Situational structure, creates data with an arbitrary dictionary and value.
-The key must always be of type str.
+Generating a parser with a key with an arbitrary value
 
 ```python
-from ssc_codegen import ItemSchema, DictSchema, D, N
+class Meta(DictSchema):
+    __SPLIT_DOC__ = D().css_all("meta[name][property]")
 
-class MetaContent(DictSchema):
-    __SPLIT_DOC__ = D().css_all("meta[property][content]")
+    # should be always as string
+    __KEY__ = D().attr("name")
 
-    __KEY__ = D().attr("property")
-    __VALUE__ = D().attr("content")
-
-class Page(ItemSchema):
-    title = D().css("title::text")
-    meta = N().sub_parser(MetaContent)
+    # can be other types
+    __VALUE__ = D().attr("property")
 ```
 
-returns the structure of the form:
+- It is necessary to declare `__SPLIT_DOC__`, `__KEY__`, `__VALUE__`
+- `__KEY__` - must be a string
+- `__VALUE__` - can be any type
 
-```
-{title: ..., meta: {__KEY__1: __VALUE__1, __KEY__2: __VALUE__2, ...}}
-```
+### FlatListShema
 
-### FlatListSchema
-
-Situational structure, creates a flat data list:
+The most unused data structure
 
 ```python
-from ssc_codegen import ItemSchema, FlatListSchema, D, N
-
-class MetaContent(FlatListSchema):
-    __SPLIT_DOC__ = D().css_all("meta[content]")
-    __ITEM__ = D().attr("content")
+from ssc_codegen import DictSchema, D, FlatListSchema
 
 
-class Page(ItemSchema):
-    title = D().css("title::text")
-    # alias:
-    # D().css_all("meta[content]::attr(content)")
-    meta_content = N().sub_parser(MetaContent)
-```
+# equivalent EXPR
+# D([]).css_all("a[href]::attr(href)")
+class AHrefs(FlatListSchema):
+    __SPLIT_DOC__ = D().css_all("a[href]")
 
-returns the structure of the form:
-
-```
-{title: ..., meta_content: [...]}
+    __ITEM__ = D().attr("href")
 ```
 
 ### AccUniqueListSchema
 
-A situational structure that parses all the data from a sheet, collects it into one sheet, and then returns unique values.
+A situational structure where unique values need to be accumulated from a series of data.
 
-> The order of the elements is not guaranteed!
+The order of the elements is not guaranteed.
 
 ```python
-from ssc_codegen import ItemSchema, FlatListSchema, D, N
+from ssc_codegen import AccUniqueListSchema, D
 
-class Socials(AccUniqueListSchema):
-    # WARNING:
-    # shorten link selectors can be add a side effect
-    # and capture urls like `example*x*.com/` or `foobar*x*.com/`.
-    # this example not be coverage this corner cases
-    twitter = D([]).css_all("[src*='twitter.com'],[href*='twitter.com'],[src*='x.com'],[href*='x.com']::attr(href,src)")
-    tiktok = D([]).css_all("[src*='tiktok.com'],[href*='tiktok.com']::attr(href,src)")
-    youtube = D([]).css_all("[src*='youtube.com'],[href*='youtube.com']::attr(href,src)")
-    # add other socials extractors
 
-class Page(ItemSchema):
-    title = D().css("title::text")
-    socials = N().sub_parser(Socials)
+class GitUrlParser(AccUniqueListSchema):
+    """Extract all public git links from page from
+
+    """
+    # provide default value as empty list for more stabe work
+    # all fields should be a returns array of strings type
+
+    # You can add additional attributes using the `,` combinator.
+    github = D([]).css_all('[href*="github.com"], [src*="github.com"]')
+    gitlab = D([]).css_all('a[href*="gitlab.com"]')
+    codeberg = D([]).css_all('a[href*="codeberg.org"]')
+    gittea = D([]).css_all('a[href*="gittea.dev"]')
+    # add other links
 ```
 
-returns the structure of the form:
+--- 
 
-```
-{title: ..., socials: [...]}
-```
+Next, see the implementationы in examples
