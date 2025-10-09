@@ -2,7 +2,7 @@
 
 Codegen notations:
 
-- ES8 required if you need to use re.S (re.DOTALL) regex flag, other works in ES6 
+- ES8 required if you need to use re.S (re.DOTALL) regex flag, other works in ES6
 - annotations are generated in JSDoc format
     - https://jsdoc.app/
 - method names (fields) auto convert to UpperCamelCase
@@ -482,8 +482,10 @@ def pre_start_parse_dict(node: StartParseMethod) -> str:
 
     if have_pre_validate_call(node):
         code += "this._preValidate(this._doc); "
-    code += "return Array.from(this._splitDoc(this._doc)).reduce((item, e) => "
-    "(item[this._parseKey(e)] = this._parseValue(e), item), {});"
+    code += (
+        "return Array.from(this._splitDoc(this._doc)).reduce((item, e) => "
+        + "(item[this._parseKey(e)] = this._parseValue(e), item), {});"
+    )
     return code
 
 
