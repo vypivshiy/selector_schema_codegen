@@ -1,4 +1,6 @@
-from typing import TYPE_CHECKING, Any, Type, TypeAlias, Union
+from typing import TYPE_CHECKING, Any, Type, TypeAlias, Union, cast
+from typing_extensions import assert_never
+import logging
 
 
 from .json_struct import json_struct_to_signature
@@ -13,7 +15,7 @@ class MISSING_FIELD(object):  # noqa
     pass
 
 
-EXCLUDE_KEY = object()
+LOGGER = logging.getLogger("ssc-gen")
 _T_OPT_FIELD: TypeAlias = Union["BaseDocument", Type[MISSING_FIELD]]
 
 
@@ -45,7 +47,95 @@ SIGNATURE_MAP = {
 }
 
 
-class BaseSchema:
+class SchemaMeta(type):
+    @staticmethod
+    def __fill_schema_mro(cls: Type["BaseSchema"]) -> None:
+        """magic method API for helps extract parent classes.
+
+        used in inheritance for avoid duplicate code
+        """
+        mro_schemas = list(
+            (
+                i
+                for i in cls.__mro__
+                # if issubclass(i, BaseSchema)
+                if getattr(i, "__SCHEMA_TYPE__", False)
+                and i.__SCHEMA_TYPE__ == cls.__SCHEMA_TYPE__  # type: ignore[attr-defined]
+            )
+        )
+        mro_schemas.reverse()
+        cls.__SSC_MRO__ = tuple(mro_schemas)
+
+    @staticmethod
+    def __fill_mro_fields(cls: Type["BaseSchema"]) -> None:
+        # use after fill __SSC_MRO__
+        assert cls.__SSC_MRO__ is not None, "required extract schemas mro first"
+
+        mro_fields: dict[str, "BaseDocument"] = {}
+        for klass in cls.__SSC_MRO__:
+            if (
+                klass.__SCHEMA_TYPE__
+                and klass.__SCHEMA_TYPE__ != NotImplemented
+            ):
+                tmp_attrs = vars(klass).copy()
+                for key, value in tmp_attrs.items():
+                    if value == MISSING_FIELD or callable(value):
+                        continue
+                    elif (
+                        not key.startswith("__")
+                        and not key.endswith("__")
+                        and getattr(value, "stack_last_ret", False)
+                        and not getattr(value, "__IS_LITERAL_DOC__", False)
+                    ):
+                        mro_fields[key] = value
+                    elif (
+                        key in cls.__ALLOWED_MAGIC__
+                        and getattr(value, "stack_last_ret", False)
+                        and not getattr(value, "__IS_LITERAL_DOC__", False)
+                    ):
+                        mro_fields[key] = value
+        cls.__SSC_MRO_FIELDS__ = mro_fields
+
+    @staticmethod
+    def __fill_literals(cls: Type["BaseSchema"], cls_name: str) -> None:
+        assert cls.__SSC_MRO__ is not None, "required extract schemas mro first"
+
+        mro_classvars: dict[str, "ClassVarDocument"] = {}
+        for klass in cls.__SSC_MRO__:
+            if (
+                klass.__SCHEMA_TYPE__
+                and klass.__SCHEMA_TYPE__ != NotImplemented
+            ):
+                tmp_attrs = vars(klass).copy()
+                for key, value in tmp_attrs.items():
+                    if value == MISSING_FIELD or callable(value):
+                        continue
+                    elif getattr(value, "__IS_LITERAL_DOC__", False):
+                        value = cast("ClassVarDocument", value)
+                        value.field_name = key
+                        value.struct_name = cls_name
+                        mro_classvars[key] = value
+
+        cls.__SSC_MRO_CLASSVARS__ = mro_classvars
+
+    def __new__(mcs, name, bases, namespace, **kwargs):  # type: ignore
+        cls = super().__new__(mcs, name, bases, namespace)
+        cls = cast(Type["BaseSchema"], cls)
+
+        # base classes, skip
+        # bases check if used (BaseSchema,) only
+        if cls.__SCHEMA_TYPE__ == NotImplemented or (
+            len(bases) >= 1 and bases[0].__SCHEMA_TYPE__ == NotImplemented
+        ):
+            return cls
+        mcs.__fill_schema_mro(cls)
+        mcs.__fill_mro_fields(cls)
+        mcs.__fill_literals(cls, name)
+
+        return cls
+
+
+class BaseSchema(metaclass=SchemaMeta):
     __SCHEMA_TYPE__: StructType = NotImplemented
 
     __SIGNATURE__: dict | list | None = NotImplemented
@@ -73,110 +163,113 @@ class BaseSchema:
     __VALUE__: _T_OPT_FIELD = MISSING_FIELD
     """DictSchema method for parse value"""
 
-    __EXCLUDE_SIGNATURE__: _T_OPT_FIELD = MISSING_FIELD
-
     __ALLOWED_MAGIC__ = RESERVED_METHODS
 
+    # cache nested/json schemas (N().sub_parser(), D().jsonify())
     __NESTED_SCHEMAS__: dict[str, Type["BaseSchema"]] = {}
     __JSON_SCHEMAS__: dict[str, Type["Json"]] = {}
 
+    # cached DSL attributes (auto filled by SchemaMeta)
+    __SSC_MRO_FIELDS__: dict[str, "BaseDocument"]
+    __SSC_MRO__: tuple[Type["BaseSchema"], ...]
+    # old name - literals
+    __SSC_MRO_CLASSVARS__: dict[str, "ClassVarDocument"]
+
+    # retained for API backward compatibility
     @classmethod
-    def __class_signature__(cls) -> dict[str, Any] | list[str | Any]:
+    def __class_signature__(cls) -> dict[str, Any] | list[str | Any] | None:
         """raw API interface for represent parsed items signature
 
         used for auto provide docstring API
         """
         if cls.__SIGNATURE__ != NotImplemented:
             return cls.__SIGNATURE__
-
-        match cls.__SCHEMA_TYPE__:
-            case StructType.FLAT_LIST:
-                signature = cls._get_flat_list_signature()
-            case StructType.DICT:
-                signature = cls._get_dict_signature()
-            case StructType.LIST:
-                signature = cls._get_list_signature()
-            case StructType.ITEM:
-                signature = cls._get_item_signature()
-
-            case StructType.ACC_LIST:
-                signature = [VariableType.STRING, "..."]
-            case _:
-                # code unreached
-                raise TypeError("Unknown schema type")
-        return signature
+        return cls._fill_signature_auto()
 
     @classmethod
-    def _get_list_signature(cls):  # type: ignore
-        signature = {}
-        for k, v in cls.__get_mro_fields__().items():
-            if k in cls.__ALLOWED_MAGIC__:
-                continue
-            cls._field_to_signature(k, signature, v)
-        return [signature, "..."]
-
-    @classmethod
-    def _field_to_signature(
-        cls, key: str, signature: dict[str, Any], field: "BaseDocument"
-    ) -> None:
+    def __field_to_signature(
+        cls,
+        field: "BaseDocument",
+    ) -> Any:
         """convert field to signature item"""
+        if field == MISSING_FIELD:
+            LOGGER.warning("catch empty field, skip")
+            return
+        elif field.stack_last_ret in (
+            VariableType.DOCUMENT,
+            VariableType.LIST_DOCUMENT,
+        ):
+            LOGGER.warning(
+                "field with type `%s` not allowed cast to signature, skip",
+                field.stack_last_ret.name,
+            )
+            return
+
         if field.stack_last_ret == VariableType.NESTED:
             name = [e for e in field.stack if e.kind == TokenType.EXPR_NESTED][
                 0
             ].kwargs["schema_name"]
-            signature[key] = cls.__NESTED_SCHEMAS__[name].__class_signature__()
+            return cls.__NESTED_SCHEMAS__[name].__class_signature__()
         elif field.stack_last_ret == VariableType.JSON:
             name = [e for e in field.stack if e.kind == TokenType.TO_JSON][
                 0
             ].kwargs["json_struct_name"]
             json_cls = cls.__JSON_SCHEMAS__[name]
-            signature[key] = json_struct_to_signature(json_cls)
+            return json_struct_to_signature(json_cls)
         elif getattr(field, "__IS_LITERAL_DOC__", False):
             # if classvar returns from parse entrypoint (pre inited struct_name and field_name)
             if getattr(field, "struct_name", False) and getattr(
                 field, "field_name", False
             ):
-                signature[key] = SIGNATURE_MAP[field.stack_last_ret]
+                return SIGNATURE_MAP[field.stack_last_ret]
             # else ignore classvar signature
             return
         else:
-            signature[key] = SIGNATURE_MAP[field.stack_last_ret]
+            return SIGNATURE_MAP[field.stack_last_ret]
 
     @classmethod
-    def _get_item_signature(cls):  # type: ignore
-        signature = {}
-        for k, v in cls.__get_mro_fields__().items():
-            if k in cls.__ALLOWED_MAGIC__:
-                continue
-            cls._field_to_signature(k, signature, v)
-        return signature
-
-    @classmethod
-    def _get_dict_signature(cls):  # type: ignore
-        signature = {}
-        # _field_k always string
-        field_v = cls.__VALUE__
-        cls._field_to_signature("<K>", signature, field_v)
-        signature["<KN>"] = "..."
-        return signature
-
-    @classmethod
-    def _get_flat_list_signature(cls):  # type: ignore
-        signature = []
-        field = cls.__ITEM__
-        if field.stack_last_ret == VariableType.NESTED:
-            name = [e for e in field.stack if e.kind == TokenType.EXPR_NESTED][
-                0
-            ].kwargs["schema_name"]
-            nested_class = cls.__NESTED_SCHEMAS__[name].__class_signature__()
-            signature.append(nested_class)
-        elif field.stack_last_ret == VariableType.JSON:
-            signature["__item__"] = json_struct_to_signature(
-                field.stack[-1].value
-            )
-        else:
-            signature.append(field.stack_last_ret)
-        signature.append("...")
+    def _fill_signature_auto(cls) -> list | dict:
+        match cls.__SCHEMA_TYPE__:
+            case StructType.ITEM:
+                signature = {}
+                for name, field in cls.__SSC_MRO_CLASSVARS__.items():
+                    if field._parse_returns:
+                        field_sig = cls.__field_to_signature(field)
+                        signature[name] = (
+                            field_sig
+                            + f" (classvar {field.struct_name}.{field.field_name})"
+                        )
+                for name, field in cls.__SSC_MRO_FIELDS__.items():
+                    if name.startswith("__") and name.endswith("__"):
+                        continue
+                    field_sig = cls.__field_to_signature(field)
+                    signature[name] = field_sig
+            case StructType.LIST:
+                signature = {}
+                for name, field in cls.__SSC_MRO_CLASSVARS__.items():
+                    if field._parse_returns:
+                        field_sig = cls.__field_to_signature(field)
+                        signature[name] = field_sig + " (classvar)"
+                for name, field in cls.__SSC_MRO_FIELDS__.items():
+                    if name.startswith("__") and name.endswith("__"):
+                        continue
+                    field_sig = cls.__field_to_signature(field)
+                    signature[name] = field_sig
+                signature = [signature, "..."]
+            case StructType.DICT:
+                signature = {}
+                value = cls.__field_to_signature(cls.__VALUE__)
+                signature["<k>"] = value
+                signature["<k_N>"] = "..."
+            case StructType.FLAT_LIST:
+                signature = []
+                item = cls.__field_to_signature(cls.__ITEM__)
+                signature.append(item)
+                signature.append("...")
+            case StructType.ACC_LIST:
+                signature = ["String", "..."]
+            case _:
+                assert_never(cls.__SCHEMA_TYPE__)
         return signature
 
     @classmethod
@@ -185,103 +278,16 @@ class BaseSchema:
 
         used in inheritance for avoid duplicate code
         """
-        return tuple(
-            (
-                i
-                for i in cls.__mro__
-                if issubclass(i, BaseSchema)
-                and i.__SCHEMA_TYPE__ == cls.__SCHEMA_TYPE__
-            )
-        )
-
-    @classmethod
-    def __get_mro_annotations__(cls) -> dict[str, Type]:
-        """extract all annotations (parent classes included)"""
-        cls__annotations__: dict[str, Type] = {}
-        fields = cls.__get_mro_fields__()
-        for kls in cls.__schema_mro__():
-            if kls.__annotations__:
-                for k, v in kls.__annotations__.items():
-                    if (
-                        not cls__annotations__.get(k)
-                        and fields.get(k) != MISSING_FIELD
-                    ):
-                        cls__annotations__[k] = v
-                    elif (
-                        k in cls.__ALLOWED_MAGIC__
-                        and fields.get(k) != MISSING_FIELD
-                        and not cls__annotations__.get(k)
-                    ):
-                        cls__annotations__[k] = v
-        return cls__annotations__
-
-    @classmethod
-    def _get_ssc_deep_documents(cls) -> dict[str, Union["BaseDocument", str]]:
-        """extract all fields (parent classes included)"""
-        cls__dict__: dict[str, "BaseDocument"] = {}
-        for klass in cls.__schema_mro__():
-            # copy __dict__ to avoid runtime err:
-            # RuntimeError: dictionary changed size during iteration
-            tmp_attrs = vars(klass).copy()
-            for k, v in tmp_attrs.items():
-                # if not set docstring - get from parent class
-                if (
-                    k == "__doc__"
-                    and not cls.__doc__
-                    and not cls__dict__.get("__doc__")
-                ):
-                    cls__dict__[k] = v
-                elif cls__dict__.get(k):
-                    continue
-                cls__dict__[k] = v
-        return cls__dict__
+        return cls.__SSC_MRO__
 
     @classmethod
     def __get_mro_fields__(cls) -> dict[str, "BaseDocument"]:
         """extract all fields (parent classes included)"""
-        cls__dict__ = cls._get_ssc_deep_documents()
-        fields = {}
-        for k, v in cls__dict__.items():
-            # handle magic fields `__SPLIT_DOC__`, `__PRE_VALIDATE__` etc
-            if k in cls.__ALLOWED_MAGIC__ and v != MISSING_FIELD:
-                fields[k] = v
-            # ignore other hidden fields
-            elif k.startswith("_"):
-                continue
-            # 1. only fields-like accept, ignore callables
-            # 2. ignore literals
-            elif not callable(v) and not getattr(
-                v, "__IS_LITERAL_DOC__", False
-            ):
-                fields[k] = v
-        return fields
+        return cls.__SSC_MRO_FIELDS__
 
     @classmethod
     def __get_mro_literals__(cls) -> dict[str, "ClassVarDocument"]:
-        cls__dict = cls._get_ssc_deep_documents()
-        fields = {}
-        for k, v in cls__dict.items():
-            if k.startswith("_"):
-                continue
-            if isinstance(v, str):
-                continue
-            if (
-                v
-                and not callable(v)
-                and getattr(v, "__IS_LITERAL_DOC__", False)
-            ):
-                fields[k] = v
-        return fields
-
-    def __init_subclass__(cls, **kwargs):
-        super().__init_subclass__(**kwargs)
-        # HACK: for set LiteralDocument values in inheirended subclasses
-        class_name = cls.__name__
-        for attr_name, attr_value in cls.__dict__.items():
-            if getattr(attr_value, "__IS_LITERAL_DOC__", False):
-                attr_value.struct_name = class_name
-                attr_value.field_name = attr_name
-                setattr(cls, attr_name, attr_value)
+        return cls.__SSC_MRO_CLASSVARS__
 
 
 # build-in structures
