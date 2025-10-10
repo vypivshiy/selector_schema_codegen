@@ -150,7 +150,7 @@ class AstBuilder:
 
     def _literal_struct_node(self, schema: Type[BaseSchema]) -> StructParser:
         # dont required TypeDef struct generate
-        literals = schema.__get_mro_literals__().copy()
+        literals = schema.__get_mro_classvars__().copy()
         st = StructParser(
             kwargs={
                 "name": schema.__name__,
@@ -368,7 +368,7 @@ class AstBuilder:
             kwargs={"name": schema.__name__, "struct_type": schema.__SCHEMA_TYPE__, "docstring": docstring if self.gen_docstr else "",},
             parent=self.module,
             )
-        literals = schema.__get_mro_literals__().copy()
+        literals = schema.__get_mro_classvars__().copy()
 
         for literal in literals.values():
             st.body.append(literal.expr())

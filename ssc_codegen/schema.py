@@ -324,7 +324,7 @@ class BaseSchema(metaclass=SchemaMeta):
         return cls.__SSC_MRO_FIELDS__
 
     @classmethod
-    def __get_mro_literals__(cls) -> dict[str, "ClassVarDocument"]:
+    def __get_mro_classvars__(cls) -> dict[str, "ClassVarDocument"]:
         return cls.__SSC_MRO_CLASSVARS__
 
 

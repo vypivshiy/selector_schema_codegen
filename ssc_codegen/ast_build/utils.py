@@ -151,5 +151,5 @@ def exec_module_code(path: str | Path, add_sys_path: bool = True) -> ModuleType:
 def is_literals_only_schema(schema: Type[BaseSchema]) -> bool:
     return (
         len(schema.__get_mro_fields__()) == 0
-        and len(schema.__get_mro_literals__()) > 0
+        and len(schema.__get_mro_classvars__()) > 0
     )

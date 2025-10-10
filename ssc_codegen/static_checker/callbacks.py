@@ -138,7 +138,7 @@ def analyze_schema_item_field(sc: Type["BaseSchema"]) -> AnalyzeResult:
 def analyze_self_classvar_variables_schema(
     sc: Type["BaseSchema"],
 ) -> AnalyzeResult:
-    if not sc.__get_mro_literals__():
+    if not sc.__get_mro_classvars__():
         return AnalyzeResult.ok()
     fields = sc.__get_mro_fields__()
     for name, field in fields.items():
