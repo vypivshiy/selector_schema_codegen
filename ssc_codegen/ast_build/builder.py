@@ -175,7 +175,7 @@ class AstBuilder:
         parent = node_method
         for expr in node_method.body:
             expr.parent = parent
-            if expr.kind == TokenType.EXPR_FILTER:
+            if expr.kind in (TokenType.EXPR_FILTER, TokenType.EXPR_DOC_FILTER):
                 self._ref_filter_expr(expr, expr.body)
 
     def _unwrap_default_node(
@@ -251,7 +251,7 @@ class AstBuilder:
         exprs.append(ExprNoReturn())
         method.body.extend(exprs)
         self._ref_method_exprs(method)
-        node_start_parse.body.append(ExprCallStructMethod(kwargs={"type": VariableType.NULL, "name": "__PRE_VALIDATE__",}))
+        node_start_parse.body.append(ExprCallStructMethod(kwargs={"type": VariableType.NULL, "name": "__PRE_VALIDATE__",}, ret_type=VariableType.NULL))
         return method
         # fmt: on
 
@@ -270,7 +270,11 @@ class AstBuilder:
         exprs.append(ExprReturn(ret_type=VariableType.LIST_DOCUMENT))
         method.body.extend(exprs)
         self._ref_method_exprs(method)
-        node_start_parse.body.append(ExprCallStructMethod(kwargs={"type": VariableType.LIST_DOCUMENT, "name": "__SPLIT_DOC__",}))
+        node_start_parse.body.append(
+            ExprCallStructMethod(
+                kwargs={"type": VariableType.LIST_DOCUMENT, "name": "__SPLIT_DOC__",}, 
+                ret_type=VariableType.LIST_DOCUMENT)
+            )
         return method
         # fmt: on
 
@@ -314,7 +318,7 @@ class AstBuilder:
             self._ref_method_exprs(method)
             st_fields.append(method)
             node_start_parse.body.append(
-                ExprCallStructMethod(kwargs={"type": exprs[-1].ret_type, "name": field_name,}))
+                ExprCallStructMethod(kwargs={"type": exprs[-1].ret_type, "name": field_name,}, ret_type=exprs[-1].ret_type))
         return st_fields
         # fmt: on
 
