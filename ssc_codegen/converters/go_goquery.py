@@ -113,11 +113,29 @@ from ssc_codegen.ast_ import (
     ExprListStringAnyRegex,
     ExprListStringAllRegex,
 )
+from ssc_codegen.ast_.base import BaseAstNode
 from ssc_codegen.ast_.nodes_array import ExprListUnique
-from ssc_codegen.ast_.nodes_core import ExprClassVar
+from ssc_codegen.ast_.nodes_core import (
+    ExprCallStructClassVar,
+    ExprCallStructMethod,
+    ExprClassVar,
+)
 from ssc_codegen.ast_.nodes_filter import (
+    ExprDocumentFilter,
     ExprFilter,
     FilterAnd,
+    FilterDocAttrContains,
+    FilterDocAttrEnds,
+    FilterDocAttrEqual,
+    FilterDocAttrRegex,
+    FilterDocAttrStarts,
+    FilterDocCss,
+    FilterDocHasAttr,
+    FilterDocHasRaw,
+    FilterDocHasText,
+    FilterDocIsRegexRaw,
+    FilterDocIsRegexText,
+    FilterDocXpath,
     FilterEqual,
     FilterNot,
     FilterNotEqual,
@@ -152,8 +170,11 @@ from ssc_codegen.ast_.nodes_validate import (
 )
 from ssc_codegen.converters.base import BaseCodeConverter
 from ssc_codegen.converters.helpers import (
+    get_last_ret_type,
     go_get_classvar_hook_or_value,
     is_first_node_cond,
+    is_last_var_no_ret,
+    is_pre_validate_parent,
     is_prev_node_atomic_cond,
     prev_next_var,
     have_default_expr,
@@ -162,16 +183,6 @@ from ssc_codegen.converters.helpers import (
 from ssc_codegen.converters.templates.go_goquery import (
     HELPER_FUNCTIONS,
     IMPORTS,
-    go_assert_func_add_error_check,
-    go_default_value,
-    go_func_add_error_check,
-    go_nested_expr_call,
-    go_parse_acc_unique_list_body,
-    go_parse_dict_body,
-    go_parse_flat_list_body,
-    go_parse_item_body,
-    go_parse_list_body,
-    go_pre_validate_func_call,
 )
 from ssc_codegen.str_utils import (
     wrap_backtick,
@@ -247,6 +258,49 @@ BRACKET_START = "{"
 BRACKET_END = "}"
 END = "; "
 DOCSTR = "// "
+GO_IF_ERR_NE_NIL = "if err != nil { return nil, err}; "
+GO_PRE_VALIDATE_CALL = """_, err := p.preValidate(p.Document.Selection);
+if err != nil { return nil, err; }"""
+
+
+def _go_assert_ret(node: BaseAstNode) -> str:
+    """helper call assert function and generate error handle checks.
+    Used for err := sscAssert(...) (error) functions
+
+    - if node has default expr - add `panic(err)` (first expr rescue and set default value)
+    - pre_validate function - add `return nil, err`
+    - other - add stub error value from err_var_stub map
+
+    auto set assign value if last node not returns `nil` value
+    """
+    if have_default_expr(node):
+        ret_assert = "panic(err);"
+    elif is_pre_validate_parent(node):
+        ret_assert = "return nil, err;"
+    else:
+        ret_type = get_last_ret_type(node)
+        ret_val = RETURN_ERR_TYPES[ret_type]
+        ret_assert = f"return {ret_val}, err;"
+    return ret_assert
+
+
+def _go_with_error_ret(node: BaseAstNode) -> str:
+    """helper call function and generate error handle checks.
+    Used for {{nxt_var}}, err := sscFunc(...) (T, error) functions
+
+    - if node has default expr - add `panic(err)` (first expr rescue and set default value)
+    - pre_validate function - add `return nil, err`
+    - other - add stub error value from err_var_stub map
+    """
+    if have_default_expr(node):
+        ret_err = "panic(err); "
+    elif is_pre_validate_parent(node):
+        ret_err = "return nil, err; "
+    else:
+        ret_type = get_last_ret_type(node)
+        value = RETURN_ERR_TYPES.get(ret_type, "nil")
+        ret_err = f"return {value}, err; "
+    return ret_err
 
 
 class GoConverter(BaseCodeConverter):
@@ -275,7 +329,18 @@ CONVERTER.TEST_EXCLUDE_NODES.extend(
 def py_var_to_go_var(
     item: None | str | int | float | list | tuple,
     ret_type: VariableType | None = None,
-) -> str | int | float:
+) -> str:
+    """translate python variable to golang equalent
+
+    str -> wrap to double quotes (escape `"` inculded)
+    int, float -> save as it
+
+    pass ret_type for corrent translate list or tuple:
+
+    item + VariableType.LIST_STRING -> []string{...}
+    item + VariableType.LIST_INT -> []int{...}
+    item + VariableType.LIST_FLOAT -> []float64{...}
+    """
     if item is None:
         item = "nil"
     elif isinstance(item, str):
@@ -296,12 +361,13 @@ def py_var_to_go_var(
             item = "[]int{" + ", ".join([i for i in item]) + "}"
         elif ret_type == VariableType.LIST_FLOAT:
             item = "[]float64{" + ", ".join([i for i in item]) + "}"
-    return item
+    return str(item)
 
 
 def py_regex_to_go_regex(
     pattern: str, ignore_case: bool = False, dotall: bool = False
 ) -> str:
+    """translate python regexp with flags to golang equalent"""
     flags = ""
     if ignore_case:
         flags += "i"
@@ -380,30 +446,41 @@ def pre_json_struct_field(node: JsonStructField) -> str:
     return f'{field_name} {type_} `json:"{name}"`' + END
 
 
-@CONVERTER(TypeDef.kind)
-def pre_typedef(node: TypeDef) -> str:
-    name, st_type = node.unpack_args()
-    match st_type:
-        case StructType.DICT:
-            type_ = get_typedef_field_by_name(node, "__VALUE__")
-            return f"type T{name} = map[string]{type_}" + END
-        case StructType.FLAT_LIST:
-            type_ = get_typedef_field_by_name(node, "__ITEM__")
-            return f"type T{name} = []{type_}" + END
+@CONVERTER(TypeDef.kind, StructType.DICT)
+def pre_typedef_dict(node: TypeDef) -> str:
+    name, _st_type = node.unpack_args()
+    type_ = get_typedef_field_by_name(node, "__VALUE__")
+    return f"type T{name} = map[string]{type_}" + END
 
-        case StructType.ACC_LIST:
-            return f"type T{name} = []string" + END
 
-        case StructType.ITEM | StructType.LIST:
-            return f"type T{node.name} struct {BRACKET_START}"
-        case _:
-            assert_never(st_type)
-    raise NotImplementedError("unreachable")  # noqa
+@CONVERTER(TypeDef.kind, StructType.FLAT_LIST)
+def pre_typedef_flat_list(node: TypeDef) -> str:
+    name, _st_type = node.unpack_args()
+    type_ = get_typedef_field_by_name(node, "__ITEM__")
+    return f"type T{name} = []{type_}" + END
+
+
+@CONVERTER(TypeDef.kind, StructType.ACC_LIST)
+def pre_typedef_acc_list(node: TypeDef) -> str:
+    name, _st_type = node.unpack_args()
+    return f"type T{name} = []string" + END
+
+
+@CONVERTER(TypeDef.kind, StructType.ITEM)
+def pre_typedef_item(node: TypeDef) -> str:
+    name, _st_type = node.unpack_args()
+    return f"type T{name} struct {BRACKET_START}"
+
+
+@CONVERTER(TypeDef.kind, StructType.LIST)
+def pre_typedef_list(node: TypeDef) -> str:
+    name, _st_type = node.unpack_args()
+    return f"type T{name} struct {BRACKET_START}"
 
 
 @CONVERTER.post(TypeDef.kind)
 def post_typedef(node: TypeDef) -> str:
-    name, st_type = node.unpack_args()
+    _name, st_type = node.unpack_args()
     match st_type:
         case StructType.DICT | StructType.FLAT_LIST | StructType.ACC_LIST:
             return ""
@@ -418,13 +495,13 @@ def post_typedef(node: TypeDef) -> str:
 def pre_typedef_field(node: TypeDefField) -> str:
     name, var_type, cls_nested, cls_nested_type = node.unpack_args()
     node.parent = cast(TypeDef, node.parent)
+    # already generated, skip
     if node.parent.struct_type in (
         StructType.DICT,
         StructType.FLAT_LIST,
         StructType.ACC_LIST,
     ):
         return ""
-
     elif name == "__KEY__":
         return ""
 
@@ -450,60 +527,62 @@ def _struct_parser_gen_cfg(
     add suffix `Cfg` for class (struct) name
     """
     # more idiomatic in go syntax convert all variable names to UpperCamel
-    return (
-        f"var {st_name}Cfg = struct "
-        + BRACKET_START
-        + "\n"
-        # FieldName T; ...
-        f"{END} ".join(
-            to_upper_camel_case(n.kwargs["field_name"]) + TYPES[n.ret_type]
-            for n in class_var_nodes
-        )
-        + BRACKET_END
-        # set values
-        + BRACKET_START
-        # FieldName VALUE
-        + ",  ".join(
-            to_upper_camel_case(n.kwargs["field_name"])
-            + ": "
-            # coverage corner case if value used in fmt expr
-            + py_var_to_go_var(n.value.replace("{{}}", "%s", 1), n.ret_type)
-            for n in class_var_nodes
-        )
-        + BRACKET_END
-        + END
-    )
+    code = [
+        f"var {st_name}Cfg = struct " + "{",
+    ]
+
+    # struct signature
+    for node in class_var_nodes:
+        cvar_name = to_upper_camel_case(node.kwargs["field_name"])
+        type_ = TYPES[node.ret_type]
+        code.append(f"{cvar_name} {type_};")
+    code.append("} {")
+    # set values
+    for node in class_var_nodes:
+        cvar_name = to_upper_camel_case(node.kwargs["field_name"])
+        if isinstance(node.value, str) and "{{}}" in node.value:
+            value = py_var_to_go_var(
+                node.value.replace("{{}}", "%s", 1), node.ret_type
+            )
+        else:
+            value = py_var_to_go_var(node.value, node.ret_type)
+
+        code.append(f"{cvar_name}: {value}, ")
+    code.append("}; ")
+    return "\n".join(code)
 
 
 @CONVERTER(StructParser.kind)
 def pre_struct_parser(node: StructParser) -> str:
-    # golang does not exists classvars features in struct{} types
-    # create new struct with `Cfg` suffix and default values:
+    code = []
+
+    # golang does not exists classvars features inside a struct{} types as in regular OOP languages
+    # create new struct with `Cfg` suffix with default values:
     # var type {struct_name}Cfg struct { VarName T; ... } { VarName {VALUE}; ... };
     # type {struct_name} struct { ... } + refs to {struct_name}Cfg.{VarName}
     classvars: list[ExprClassVar] = [
         i for i in node.body if i.kind == ExprClassVar.kind
     ]
     if classvars:
-        cvars_code = (
-            _struct_parser_gen_cfg(node.kwargs["name"], classvars) + "\n"
-        )
-    else:
-        cvars_code = ""
+        code.append(_struct_parser_gen_cfg(node.kwargs["name"], classvars))
+
     name = node.kwargs["name"]
     docstr = make_go_docstring(node.kwargs["docstring"], name)
+    code.extend(
+        [
+            docstr,
+            f"type {name} struct {BRACKET_START}",
+            "Document *goquery.Document;",
+            BRACKET_END,
+        ]
+    )
     # generate block code immediately, funcs attached by ptr
-    return f"""{cvars_code}{docstr}
-type {name} struct {BRACKET_START}
-Document *goquery.Document;
-{BRACKET_END}
-"""
+    return "\n".join(code)
 
 
 @CONVERTER(ExprReturn.kind)
 def pre_return(node: ExprReturn) -> str:
     prv, _ = prev_next_var(node)
-
     # nested not allowed default variable
     if node.ret_type == VariableType.NESTED:
         return f"return {prv}, nil; "
@@ -528,7 +607,15 @@ def pre_no_return(_node: ExprReturn) -> str:
 def pre_nested(node: ExprNested) -> str:
     prv, nxt = prev_next_var(node)
     sc_name, _sc_type = node.unpack_args()
-    return go_nested_expr_call(nxt_var=nxt, prv_var=prv, schema_name=sc_name)
+    # {prv}N - new Selector
+    # {prv}P - subParser obj
+    code = [
+        f"{prv}N := goquery.NewDocumentFromNode({prv}.Nodes[0]);",
+        f"{prv}P := {sc_name}" + "{" + f"{prv}N" + "};",
+        f"{nxt}, err := {prv}P.Parse();",
+        GO_IF_ERR_NE_NIL,
+    ]
+    return "\n".join(code)
 
 
 @CONVERTER(StructPreValidateMethod.kind, post_callback=lambda _: BRACKET_END)
@@ -546,22 +633,16 @@ def pre_part_doc(node: StructPartDocMethod) -> str:
     return f"func (p *{name}) splitDoc(v *goquery.Selection) (*goquery.Selection, error) {BRACKET_START}"
 
 
-@CONVERTER(StructFieldMethod.kind, post_callback=lambda _: BRACKET_END)
-def pre_parse_field(node: StructFieldMethod) -> str:
+def _get_st_field_method_ret_header(node: StructFieldMethod) -> str:
     # ret_header cases
     # 0. for simplify generate return code - always return 2 variables
     #    if field expr is exclude errors handling - second value always a `nil`
-    # 1. Nested -> T{st_name}, error
-    # 2. Nested (array) -> []T{st_name}, error
-    # 3. Json -> J{st_name}, error
-    # 4. Json (array) -> []J{st_name}, error
-    # 5. default expr -> result {ret_type}, error
-    # 6. normal -> {ret_type}, error
-    node.parent = cast(StructParser, node.parent)
-    st_name = node.parent.kwargs["name"]
-    name = MAGIC_METHODS.get(node.kwargs["name"], node.kwargs["name"])
-    fn_name = "parse" + to_upper_camel_case(name)
-
+    # 1. Nested -> (T{st_name}, error)
+    # 2. Nested (array) -> ([]T{st_name}, error)
+    # 3. Json -> (J{st_name}, error)
+    # 4. Json (array) -> ([]J{st_name}, error)
+    # 5. default expr -> (result {ret_type}, error)
+    # 6. normal -> ({ret_type}, error)
     if node.body[-1].ret_type == VariableType.NESTED:
         nested_expr = node.body[-2]
         nested_expr = cast(ExprNested, nested_expr)
@@ -587,6 +668,25 @@ def pre_parse_field(node: StructFieldMethod) -> str:
         ret_header = f"({ret_type}, err error)"
     else:
         ret_header = f"({ret_type}, error)"
+    return ret_header
+
+
+@CONVERTER(StructFieldMethod.kind, post_callback=lambda _: BRACKET_END)
+def pre_parse_field(node: StructFieldMethod) -> str:
+    # ret_header cases
+    # 0. for simplify generate return code - always return 2 variables
+    #    if field expr is exclude errors handling - second value always a `nil`
+    # 1. Nested -> T{st_name}, error
+    # 2. Nested (array) -> []T{st_name}, error
+    # 3. Json -> J{st_name}, error
+    # 4. Json (array) -> []J{st_name}, error
+    # 5. default expr -> result {ret_type}, error
+    # 6. normal -> {ret_type}, error
+    node.parent = cast(StructParser, node.parent)
+    st_name = node.parent.kwargs["name"]
+    name = MAGIC_METHODS.get(node.kwargs["name"], node.kwargs["name"])
+    fn_name = "parse" + to_upper_camel_case(name)
+    ret_header = _get_st_field_method_ret_header(node)
 
     return f"func (p *{st_name}) {fn_name}(v *goquery.Selection) {ret_header} {BRACKET_START}"
 
@@ -602,36 +702,217 @@ def pre_start_parse_method(node: StartParseMethod) -> str:
     return f"func (p *{name}) Parse() (*{ret_type}, error) {BRACKET_START}"
 
 
-@CONVERTER.post(StartParseMethod.kind)
-def post_start_parse_method(node: StartParseMethod) -> str:
-    parent = node.parent
-    parent = cast(StructParser, parent)
-    _st_name, st_type, _docstr = parent.unpack_args()
-    code = ""
+@CONVERTER.post(StartParseMethod.kind, StructType.ITEM)
+def post_start_parse_item(node: StartParseMethod) -> str:
+    struct_name, *_ = node.parent.unpack_args()
     if have_pre_validate_call(node):
-        code += go_pre_validate_func_call()
-    match st_type:
-        case StructType.ITEM:
-            code = go_parse_item_body(parent)
-        case StructType.LIST:
-            code = go_parse_list_body(parent)
-        case StructType.DICT:
-            code = go_parse_dict_body(parent)
-        case StructType.FLAT_LIST:
-            code = go_parse_flat_list_body(parent)
-        case StructType.ACC_LIST:
-            code = go_parse_acc_unique_list_body(parent)
+        code_pre_validate_call = GO_PRE_VALIDATE_CALL
+    else:
+        code_pre_validate_call = ""
+    code = [f"result := &T{struct_name}" + "{}; ", code_pre_validate_call]
+
+    for field in node.body:
+        if field.kind == ExprCallStructClassVar.kind:
+            field = cast(ExprCallStructClassVar, field)
+            var_name = (
+                field.kwargs["struct_name"]
+                + "Cfg."
+                + to_upper_camel_case(field.kwargs["field_name"])
+            )
+            field_name = to_upper_camel_case(field.kwargs["field_name"])
+            code.append(f"result.{field_name} = {var_name};")
+
+        elif (
+            not field.kwargs["name"].startswith("__")
+            and field.kind == ExprCallStructMethod.kind
+        ):
+            field = cast(ExprCallStructMethod, field)
+            field_name = to_upper_camel_case(field.kwargs["name"])
+            var_name = field.kwargs["name"]
+            code.extend(
+                [
+                    f"{var_name}, err := p.parse{field_name}(p.Document.Selection); ",
+                    GO_IF_ERR_NE_NIL,
+                    f"result.{field_name} = "
+                    + (
+                        f"*{var_name}"
+                        if field.ret_type
+                        in (VariableType.NESTED, VariableType.JSON)
+                        else var_name
+                    ),
+                ]
+            )
+    code.extend(["return result, nil; ", BRACKET_END])
+    return "\n".join(code)
+
+
+@CONVERTER.post(StartParseMethod.kind, StructType.DICT)
+def post_start_parse_dict(node: StartParseMethod) -> str:
+    struct_name, *_ = node.parent.unpack_args()
+    if have_pre_validate_call(node):
+        code_pre_validate_call = GO_PRE_VALIDATE_CALL
+    else:
+        code_pre_validate_call = ""
+
+    return "\n".join(
+        [
+            f"result := make(T{struct_name});",
+            code_pre_validate_call,
+            "docParts, err := p.splitDoc(p.Document.Selection);",
+            GO_IF_ERR_NE_NIL,
+            "for _, i := range docParts.EachIter() {",
+            "key, err := p.parseKey(i);",
+            GO_IF_ERR_NE_NIL,
+            "value, err := p.parseValue(i);",
+            GO_IF_ERR_NE_NIL,
+            "result[key] = value;",
+            BRACKET_END,
+            "return &result, nil;",
+            BRACKET_END,
+        ]
+    )
+
+
+@CONVERTER.post(StartParseMethod.kind, StructType.FLAT_LIST)
+def post_start_parse_flat_list(node: StartParseMethod) -> str:
+    struct_name, *_ = node.parent.unpack_args()
+    if have_pre_validate_call(node):
+        code_pre_validate_call = GO_PRE_VALIDATE_CALL
+    else:
+        code_pre_validate_call = ""
+
+    code = "\n".join(
+        [
+            f"result := make(T{struct_name}, 0);",
+            code_pre_validate_call,
+            "docParts, err := p.splitDoc(p.Document.Selection);",
+            GO_IF_ERR_NE_NIL,
+            "for _, i := range docParts.EachIter() {",
+            "item, err := p.parseItem(i);",
+            GO_IF_ERR_NE_NIL,
+            "result = append(result, item);",
+            BRACKET_END,
+            "return &result, nil;",
+            BRACKET_END,
+        ]
+    )
     return code
+
+
+@CONVERTER.post(StartParseMethod.kind, StructType.ACC_LIST)
+def post_start_parse_acc_list(node: StartParseMethod) -> str:
+    struct_name, *_ = node.parent.unpack_args()
+    if have_pre_validate_call(node):
+        code_pre_validate_call = GO_PRE_VALIDATE_CALL
+    else:
+        code_pre_validate_call = ""
+    code = [
+        f"result := make(T{struct_name}, 0);",
+        code_pre_validate_call,
+    ]
+    for field in node.body:
+        if (
+            not field.kwargs["name"].startswith("__")
+            and field.kind == ExprCallStructMethod.kind
+        ):
+            field = cast(ExprCallStructMethod, field)
+            field_name = to_upper_camel_case(field.kwargs["name"])
+            var_name = field.kwargs["name"]
+            code.extend(
+                [
+                    f"{var_name}, err := p.parse{field_name}(p.Document.Selection); ",
+                    GO_IF_ERR_NE_NIL,
+                    f"for _, i := range {var_name} " + "{",
+                    "result = append(result, i); ",
+                    "}",
+                ]
+            )
+    code.extend(["return &result, nil;", BRACKET_END])
+    return "\n".join(code)
+
+
+@CONVERTER.post(StartParseMethod.kind, StructType.LIST)
+def post_start_parse_list(node: StartParseMethod) -> str:
+    struct_name, *_ = node.parent.unpack_args()
+    if have_pre_validate_call(node):
+        code_pre_validate_call = GO_PRE_VALIDATE_CALL
+    else:
+        code_pre_validate_call = ""
+
+    code = [
+        f"result := make([]T{struct_name}, 0);",
+        code_pre_validate_call,
+        "docParts, err := p.splitDoc(p.Document.Selection);",
+        GO_IF_ERR_NE_NIL,
+        "for _, i := range docParts.EachIter() {",
+        f"item := T{struct_name}" + "{}",
+    ]
+
+    for field in node.body:
+        if field.kind == ExprCallStructClassVar.kind:
+            field = cast(ExprCallStructClassVar, field)
+            var_name = (
+                field.kwargs["struct_name"]
+                + "Cfg."
+                + to_upper_camel_case(field.kwargs["field_name"])
+            )
+            field_name = to_upper_camel_case(field.kwargs["field_name"])
+            code.append(f"item.{field_name} = {var_name};")
+
+        elif (
+            not field.kwargs["name"].startswith("__")
+            and field.kind == ExprCallStructMethod.kind
+        ):
+            field = cast(ExprCallStructMethod, field)
+            field_name = to_upper_camel_case(field.kwargs["name"])
+            var_name = field.kwargs["name"]
+            code.extend(
+                [
+                    f"{var_name}, err := p.parse{field_name}(p.Document.Selection); ",
+                    GO_IF_ERR_NE_NIL,
+                    f"item.{field_name} = "
+                    + (
+                        f"*{var_name}"
+                        if field.ret_type
+                        in (VariableType.NESTED, VariableType.JSON)
+                        else var_name
+                    ),
+                ]
+            )
+    code.extend(
+        [
+            "result = append(result, item);",
+            BRACKET_END,
+            "return &result, nil; ",
+            BRACKET_END,
+        ]
+    )
+    return "\n".join(code)
 
 
 @CONVERTER(ExprDefaultValueStart.kind)
 def pre_default_start(node: ExprDefaultValueStart) -> str:
     # implement default value via defer func(){ ... }() + recover();
     prv, nxt = prev_next_var(node)
-    value = go_get_classvar_hook_or_value(node, "value")
-    # ret_type = get_last_ret_type(node)
 
-    return go_default_value(nxt_var=nxt, prv_var=prv, value=value)
+    value, *_ = node.unpack_args()
+    if cvar_hook := node.classvar_hooks.get("value", None):
+        value = "Cfg" + ".".join(cvar_hook.literal_ref_name)
+    else:
+        ret_type = get_last_ret_type(node)
+        value = py_var_to_go_var(value, ret_type)
+
+    return "\n".join(
+        [
+            "defer func() {",
+            "if r := recover(); r != nil {",
+            "err = nil;",
+            f"result = {value}",
+            "}",
+            "}()",
+            f"{nxt} := {prv}",
+        ]
+    )
 
 
 @CONVERTER(ExprStringFormat.kind)
@@ -728,7 +1009,7 @@ def pre_list_str_replace(node: ExprListStringReplace) -> str:
 
 @CONVERTER(ExprStringRegex.kind)
 def pre_str_regex(node: ExprStringRegex) -> str:
-    prv, _ = prev_next_var(node)
+    prv, nxt = prev_next_var(node)
 
     pattern, group, ignore_case, dotall = node.unpack_args()
     if node.classvar_hooks.get("pattern"):
@@ -737,24 +1018,31 @@ def pre_str_regex(node: ExprStringRegex) -> str:
         pattern = py_regex_to_go_regex(pattern, ignore_case, dotall)
 
     # sscRegexMatch(v string, re *regexp.Regexp, g int) (string, error)
-    return go_func_add_error_check(
-        node,
-        call_func=f"sscRegexMatch({prv}, regexp.MustCompile({pattern}), {group})",
-    )
+    code = [
+        f"{nxt}, err := sscRegexMatch({prv}, regexp.MustCompile({pattern}), {group})",
+        "if err != nil {",
+        _go_with_error_ret(node),
+        "}",
+    ]
+    return "\n".join(code)
 
 
 @CONVERTER(ExprStringRegexAll.kind)
 def pre_str_regex_all(node: ExprStringRegexAll) -> str:
-    prv, _ = prev_next_var(node)
+    prv, nxt = prev_next_var(node)
     if node.classvar_hooks.get("pattern"):
         pattern = go_get_classvar_hook_or_value(node, "pattern")
     else:
         pattern, ignore_case, dotall = node.unpack_args()
         pattern = py_regex_to_go_regex(pattern, ignore_case, dotall)
     # sscRegexFindAll(v string, re *regexp.Regexp) ([]string, error)
-    return go_func_add_error_check(
-        node, call_func=f"sscRegexFindAll({prv}, regexp.MustCompile({pattern}))"
-    )
+    code = [
+        f"{nxt}, err := sscRegexFindAll({prv}, regexp.MustCompile({pattern}))",
+        "if err != nil {",
+        _go_with_error_ret(node),
+        "}",
+    ]
+    return "\n".join(code)
 
 
 @CONVERTER(ExprStringRegexSub.kind)
@@ -799,43 +1087,58 @@ def pre_list_str_join(node: ExprListStringJoin) -> str:
 
 @CONVERTER(ExprIsEqual.kind)
 def pre_is_equal(node: ExprIsEqual) -> str:
-    prv, _ = prev_next_var(node)
+    prv, nxt = prev_next_var(node)
     item = go_get_classvar_hook_or_value(node, "item")
     msg = go_get_classvar_hook_or_value(node, "msg")
 
     # sscAssertEqual[T comparable](v1, v2 T, msg string) error
-    return go_assert_func_add_error_check(
-        node, call_func=f"sscAssertEqual({prv}, {item}, {msg})"
-    )
+    code = [
+        f"err := sscAssertEqual({prv}, {item}, {msg})",
+        "if err != nil {",
+        _go_assert_ret(node),
+        "}",
+        "" if is_last_var_no_ret(node) else f"{nxt} := {prv}; ",
+    ]
+    return "\n".join(code)
 
 
 @CONVERTER(ExprIsNotEqual.kind)
 def pre_is_not_equal(node: ExprIsNotEqual) -> str:
-    prv, _ = prev_next_var(node)
+    prv, nxt = prev_next_var(node)
     item = go_get_classvar_hook_or_value(node, "item")
     msg = go_get_classvar_hook_or_value(node, "msg")
 
     # sscAssertNotEqual[T comparable](v1, v2 T, msg string) error
-    return go_assert_func_add_error_check(
-        node, call_func=f"sscAssertNotEqual({prv}, {item}, {msg})"
-    )
+    code = [
+        f"err := sscAssertNotEqual({prv}, {item}, {msg})",
+        "if err != nil {",
+        _go_assert_ret(node),
+        "}",
+        "" if is_last_var_no_ret(node) else f"{nxt} := {prv}; ",
+    ]
+    return "\n".join(code)
 
 
 @CONVERTER(ExprIsContains.kind)
 def pre_is_contains(node: ExprIsContains) -> str:
-    prv, _nxt = prev_next_var(node)
+    prv, nxt = prev_next_var(node)
     item = go_get_classvar_hook_or_value(node, "item")
     msg = go_get_classvar_hook_or_value(node, "msg")
 
     # sscAssertContains[S ~[]E, E comparable](v1 S, v2 E, msg string) error
-    return go_assert_func_add_error_check(
-        node, call_func=f"sscAssertContains({prv}, {item}, {msg})"
-    )
+    code = [
+        f"err := sscAssertContains({prv}, {item}, {msg})",
+        "if err != nil {",
+        _go_assert_ret(node),
+        "}",
+        "" if is_last_var_no_ret(node) else f"{nxt} := {prv}; ",
+    ]
+    return "\n".join(code)
 
 
 @CONVERTER(ExprStringIsRegex.kind)
 def pre_is_regex(node: ExprStringIsRegex) -> str:
-    prv, _ = prev_next_var(node)
+    prv, nxt = prev_next_var(node)
     if node.classvar_hooks.get("pattern"):
         pattern = go_get_classvar_hook_or_value(node, "pattern")
     else:
@@ -844,31 +1147,40 @@ def pre_is_regex(node: ExprStringIsRegex) -> str:
 
     msg = go_get_classvar_hook_or_value(node, "msg")
     # sscAssertRegex(v string, re *regexp.Regexp, msg string) error
-    return go_assert_func_add_error_check(
-        node,
-        call_func=f"sscAssertRegex({prv}, regexp.MustCompile({pattern}), {msg})",
-    )
+    code = [
+        f"err := sscAssertRegex({prv}, {pattern}, {msg})",
+        "if err != nil {",
+        _go_assert_ret(node),
+        "}",
+        "" if is_last_var_no_ret(node) else f"{nxt} := {prv}; ",
+    ]
+    return "\n".join(code)
 
 
 @CONVERTER(ExprListStringAnyRegex.kind)
 def pre_list_str_any_is_regex(node: ExprListStringAnyRegex) -> str:
-    prv, _ = prev_next_var(node)
+    prv, nxt = prev_next_var(node)
     if node.classvar_hooks.get("pattern"):
         pattern = go_get_classvar_hook_or_value(node, "pattern")
     else:
         pattern, ignore_case, msg = node.unpack_args()
         pattern = py_regex_to_go_regex(pattern, ignore_case)
     msg = go_get_classvar_hook_or_value(node, "msg")
+
     # sscAssertSliceAnyRegex(v []string, re *regexp.Regexp, msg string) error
-    return go_assert_func_add_error_check(
-        node,
-        call_func=f"sscAssertSliceAnyRegex({prv}, regexp.MustCompile({pattern}), {msg})",
-    )
+    code = [
+        f"err := sscAssertSliceAnyRegex({prv}, {pattern}, {msg})",
+        "if err != nil {",
+        _go_assert_ret(node),
+        "}",
+        "" if is_last_var_no_ret(node) else f"{nxt} := {prv}; ",
+    ]
+    return "\n".join(code)
 
 
 @CONVERTER(ExprListStringAllRegex.kind)
 def pre_list_str_all_is_regex(node: ExprListStringAllRegex) -> str:
-    prv, _ = prev_next_var(node)
+    prv, nxt = prev_next_var(node)
     if node.classvar_hooks.get("pattern"):
         pattern = go_get_classvar_hook_or_value(node, "pattern")
     else:
@@ -877,22 +1189,31 @@ def pre_list_str_all_is_regex(node: ExprListStringAllRegex) -> str:
     msg = go_get_classvar_hook_or_value(node, "msg")
 
     # sscAssertSliceAllRegex(v []string, re *regexp.Regexp, msg string) error
-    return go_assert_func_add_error_check(
-        node,
-        call_func=f"sscAssertSliceAllRegex({prv}, regexp.MustCompile({pattern}), {msg})",
-    )
+    code = [
+        f"err := sscAssertSliceAllRegex({prv}, {pattern}, {msg})",
+        "if err != nil {",
+        _go_assert_ret(node),
+        "}",
+        "" if is_last_var_no_ret(node) else f"{nxt} := {prv}; ",
+    ]
+    return "\n".join(code)
 
 
 @CONVERTER(ExprIsCss.kind)
 def pre_is_css(node: ExprIsCss) -> str:
-    prv, _ = prev_next_var(node)
+    prv, nxt = prev_next_var(node)
     query = go_get_classvar_hook_or_value(node, "query")
     msg = go_get_classvar_hook_or_value(node, "msg")
 
     # sscAssertCss(v *goquery.Selection, query, msg string) error
-    return go_assert_func_add_error_check(
-        node, call_func=f"sscAssertCss({prv}, {query}, {msg})"
-    )
+    code = [
+        f"err := sscAssertCss({prv}, {query}, {msg})",
+        "if err != nil {",
+        _go_assert_ret(node),
+        "}",
+        "" if is_last_var_no_ret(node) else f"{nxt} := {prv}; ",
+    ]
+    return "\n".join(code)
 
 
 @CONVERTER(ExprIsXpath.kind)
@@ -902,58 +1223,88 @@ def pre_is_xpath(_: ExprIsXpath) -> str:
 
 @CONVERTER(ExprHasAttr.kind)
 def pre_has_attr(node: ExprHasAttr) -> str:
-    prv, _ = prev_next_var(node)
+    prv, nxt = prev_next_var(node)
     key = go_get_classvar_hook_or_value(node, "key")
     msg = go_get_classvar_hook_or_value(node, "msg")
 
     # sscAssertHasAttr(v *goquery.Selection, key, msg string) error
-    return go_assert_func_add_error_check(
-        node, call_func=f"sscAssertHasAttr({prv}, {key}, {msg})"
-    )
+    code = [
+        f"err := sscAssertHasAttr({prv}, {key}, {msg})",
+        "if err != nil {",
+        _go_assert_ret(node),
+        "}",
+        "" if is_last_var_no_ret(node) else f"{nxt} := {prv}; ",
+    ]
+    return "\n".join(code)
 
 
 @CONVERTER(ExprListHasAttr.kind)
 def pre_list_has_attr(node: ExprListHasAttr) -> str:
-    prv, _ = prev_next_var(node)
+    prv, nxt = prev_next_var(node)
     key = go_get_classvar_hook_or_value(node, "key")
     msg = go_get_classvar_hook_or_value(node, "msg")
 
     # sscAssertHasAttr(v *goquery.Selection, key, msg string) error
-    return go_assert_func_add_error_check(
-        node, call_func=f"sscAssertHasAttr({prv}, {key}, {msg})"
-    )
+    code = [
+        f"err := sscAssertHasAttr({prv}, {key}, {msg})",
+        "if err != nil {",
+        _go_assert_ret(node),
+        "}",
+        "" if is_last_var_no_ret(node) else f"{nxt} := {prv}; ",
+    ]
+    return "\n".join(code)
 
 
 @CONVERTER(ExprToInt.kind)
 def pre_to_int(node: ExprToInt) -> str:
-    prv, _ = prev_next_var(node)
+    prv, nxt = prev_next_var(node)
     # func sscStrToInt(v string) (int, error)
-    return go_func_add_error_check(node, call_func=f"sscStrToInt({prv})")
+    code = [
+        f"{nxt}, err := sscStrToInt({prv})",
+        "if err != nil {",
+        _go_with_error_ret(node),
+        "}",
+    ]
+    return "\n".join(code)
 
 
 @CONVERTER(ExprToListInt.kind)
 def pre_to_list_int(node: ExprToListInt) -> str:
-    prv, _ = prev_next_var(node)
+    prv, nxt = prev_next_var(node)
     # sscSliceStrToSliceInt(v []string) ([]int, error)
-    return go_func_add_error_check(
-        node, call_func=f"sscSliceStrToSliceInt({prv})"
-    )
+    code = [
+        f"{nxt}, err := sscSliceStrToSliceInt({prv})",
+        "if err != nil {",
+        _go_with_error_ret(node),
+        "}",
+    ]
+    return "\n".join(code)
 
 
 @CONVERTER(ExprToFloat.kind)
 def pre_to_float(node: ExprToFloat) -> str:
-    prv, _ = prev_next_var(node)
+    prv, nxt = prev_next_var(node)
     # sscStrToFloat(v string) (float64, error)
-    return go_func_add_error_check(node, call_func=f"sscStrToFloat({prv})")
+    code = [
+        f"{nxt}, err := sscStrToFloat({prv})",
+        "if err != nil {",
+        _go_with_error_ret(node),
+        "}",
+    ]
+    return "\n".join(code)
 
 
 @CONVERTER(ExprToListFloat.kind)
 def pre_to_list_float(node: ExprToListFloat) -> str:
     prv, nxt = prev_next_var(node)
     # sscSliceStrToSliceFloat(v []string) ([]float64, error)
-    return go_func_add_error_check(
-        node, call_func=f"sscSliceStrToSliceFloat({prv})"
-    )
+    code = [
+        f"{nxt}, err := sscSliceStrToSliceFloat({prv})",
+        "if err != nil {",
+        _go_with_error_ret(node),
+        "}",
+    ]
+    return "\n".join(code)
 
 
 @CONVERTER(ExprToListLength.kind)
@@ -969,14 +1320,11 @@ def pre_to_bool(node: ExprToBool) -> str:
         # https://pkg.go.dev/gopkg.in/goquery.v1#Selection.Length
         case VariableType.DOCUMENT | VariableType.LIST_DOCUMENT:
             code = f"{nxt} := {prv} != nil && {prv}.Length() > 0; "
-
         case VariableType.STRING:
             code = f'{nxt} := {prv} != nil && {prv} != ""; '
-
         # `0` is true
         case VariableType.INT | VariableType.FLOAT:
             code = f"{nxt} := {prv} != nil; "
-
         # build-in array
         case (
             VariableType.LIST_STRING
@@ -997,41 +1345,54 @@ def pre_jsonify(node: ExprJsonify) -> str:
 
     # we work with unstructured undocumented data
     # anonymous json structs will add too much complexity
-    # use gjson lib for simplify extract json part
+    # use gjson lib for simplify extract json parts
+    code = []
     if query:
+        # 1. test json-like string and query
         query = wrap_double_quotes(query)
+        code.extend(
+            [
+                f"result{nxt} := gjson.Get({prv}, {query});",
+                f"if !result{nxt}.Exists() " + "{",
+                f'return nil, fmt.Errorf("not valid json %v", {prv});',
+                "}",
+            ]
+        )
+        # serialize to struct
         if is_array:
-            expr = (
-                f"{nxt} := []{name}"
-                + "{};\n"
-                + f"json.Unmarshal([]byte(result{nxt}.Raw), &{nxt}); "
+            code.extend(
+                [
+                    f"{nxt} := []{name}" + "{};",
+                    f"json.Unmarshal([]byte(result{nxt}.Raw), &{nxt}); ",
+                ]
             )
         else:
-            expr = (
-                f"{nxt} := {name}"
-                + "{}; "
-                + f"json.Unmarshal([]byte(result{nxt}.Raw), &{nxt});"
+            code.extend(
+                [
+                    f"{nxt} := {name}" + "{};",
+                    f"json.Unmarshal([]byte(result{nxt}.Raw), &{nxt});",
+                ]
             )
-        return (
-            f"result{nxt} := gjson.Get({prv}, {query});\n"
-            + f"if !result{nxt}.Exists() "
-            + BRACKET_START
-            + f'return nil, fmt.Errorf("not valid json %v", {prv});\n'
-            + BRACKET_END
-            + "\n"
-            + expr
+        return "\n".join(code)
+
+    # fallback to standart json module
+    # (not required complex extract logic for full parse json-like string)
+    if is_array:
+        code.extend(
+            [
+                f"{nxt} := []{name}" + "{};",
+                f"json.Unmarshal([]byte({prv}), &{nxt});",
+            ]
         )
 
-    # or use standart json module (not required complex extract logic for full parse json-like string)
-    if is_array:
-        return (
-            f"{nxt} := []{name}"
-            + "{}; "
-            + f"json.Unmarshal([]byte({prv}), &{nxt});"
+    else:
+        code.extend(
+            [
+                f"{nxt} := {name}" + "{}; ",
+                f"json.Unmarshal([]byte({prv}), &{nxt});",
+            ]
         )
-    return (
-        f"{nxt} := {name}" + "{}; " + f"json.Unmarshal([]byte({prv}), &{nxt});"
-    )
+    return "\n".join(code)
 
 
 @CONVERTER(ExprCss.kind)
@@ -1072,9 +1433,13 @@ def pre_html_attr(node: ExprGetHtmlAttr) -> str:
         # singe call
         # sscGetAttr(a *goquery.Selection, key string) (string, error)
         key = wrap_double_quotes(key)
-        return go_func_add_error_check(
-            node, call_func=f"sscGetAttr({prv}, {key})"
-        )
+        code = [
+            f"{nxt}, err := sscGetAttr({prv}, {key}); ",
+            "if err != nil {",
+            _go_with_error_ret(node),
+            "}",
+        ]
+        return "\n".join(code)
     # sscGetManyAttrs(a *goquery.Selection, keys []string) []string
     key = py_var_to_go_var(keys, VariableType.LIST_STRING)
     return f"{nxt} := sscGetManyAttrs({prv}, {key}){END}"
@@ -1089,12 +1454,16 @@ def pre_html_attr_all(node: ExprGetHtmlAttrAll) -> str:
         key = keys[0]
         key = wrap_double_quotes(keys[0])
         # sscEachGetAttrs(a *goquery.Selection, key string) ([]string, error)
-        return go_func_add_error_check(
-            node, call_func=f"sscEachGetAttrs({prv}, {key})"
-        )
+        code = [
+            f"{nxt}, err := sscEachGetAttrs({prv}, {key});",
+            "if err != nil {",
+            _go_with_error_ret(node),
+            "}",
+        ]
+        return "\n".join(code)
     key = py_var_to_go_var(keys)
     # sscEachGetManyAttrs(a *goquery.Selection, keys []string) []string
-    return f"{nxt} := sscEachGetManyAttrs({prv}, {key}){END}"
+    return f"{nxt} := sscEachGetManyAttrs({prv}, {key});"
 
 
 @CONVERTER(ExprMapAttrs.kind)
@@ -1116,27 +1485,39 @@ def pre_html_map_attr_all(node: ExprMapAttrsAll) -> str:
 @CONVERTER(ExprGetHtmlText.kind)
 def pre_html_text(node: ExprGetHtmlText) -> str:
     prv, nxt = prev_next_var(node)
-    return f"{nxt} := {prv}.Text(){END}"
+    return f"{nxt} := {prv}.Text();"
 
 
 @CONVERTER(ExprGetHtmlTextAll.kind)
 def pre_html_text_all(node: ExprGetHtmlTextAll) -> str:
     prv, nxt = prev_next_var(node)
     # sscEachGetText(a *goquery.Selection) []string
-    return f"{nxt} := sscEachGetText({prv}){END}"
+    return f"{nxt} := sscEachGetText({prv});"
 
 
 @CONVERTER(ExprGetHtmlRaw.kind)
 def pre_html_raw(node: ExprGetHtmlRaw) -> str:
     prv, nxt = prev_next_var(node)
-    return go_func_add_error_check(node, f"{prv}.Html()")
+    code = [
+        f"{nxt}, err := {prv}.Html();",
+        "if err != nil {",
+        _go_with_error_ret(node),
+        "}",
+    ]
+    return "\n".join(code)
 
 
 @CONVERTER(ExprGetHtmlRawAll.kind)
 def pre_html_raw_all(node: ExprGetHtmlRawAll) -> str:
     prv, nxt = prev_next_var(node)
     # sscHtmlRawAll(a *goquery.Selection) ([]string, error)
-    return go_func_add_error_check(node, f"sscHtmlRawAll({prv})")
+    code = [
+        f"{nxt}, err := sscHtmlRawAll({prv});",
+        "if err != nil {",
+        _go_with_error_ret(node),
+        "}",
+    ]
+    return "\n".join(code)
 
 
 @CONVERTER(ExprStringRmPrefix.kind)
@@ -1198,6 +1579,8 @@ def pre_str_repl_map(node: ExprStringMapReplace) -> str:
     prv, nxt = prev_next_var(node)
     olds, news = node.unpack_args()
     # accept array as [old1, new1, old2, new2, ...]
+    # based on `strings.NewReplacer(p...).Replace(v)`
+    # https://pkg.go.dev/strings#Replacer
     repl_arr = []
     for old, new in zip(olds, news):
         repl_arr.append(old)
@@ -1212,6 +1595,8 @@ def pre_list_str_repl_map(node: ExprListStringMapReplace) -> str:
     prv, nxt = prev_next_var(node)
     olds, news = node.unpack_args()
     # accept array as [old1, new1, old2, new2, ...]
+    # based on `strings.NewReplacer(p...).Replace(v)`
+    # https://pkg.go.dev/strings#Replacer
     repl_arr = []
     for old, new in zip(olds, news):
         repl_arr.append(old)
@@ -1414,3 +1799,181 @@ def pre_css_remove_element(node: ExprCssElementRemove):
     prv, nxt = prev_next_var(node)
     query = go_get_classvar_hook_or_value(node, "query")
     return f"{prv}.RemoveFiltered({query}); {nxt} := {prv}; "
+
+
+# DOCUMENT FILTER
+@CONVERTER(ExprDocumentFilter.kind, post_callback=lambda _: "});")
+def pre_document_filter(node: ExprDocumentFilter) -> str:
+    prv, nxt = prev_next_var(node)
+    return (
+        f"{nxt} := {prv}.FilterFunction(func(i int, s *goquery.Selection) bool "
+        + "{"
+    )
+
+
+@CONVERTER(FilterDocCss.kind)
+def pre_doc_filter_css(node: FilterDocCss) -> str:
+    query = node.kwargs["query"]
+    query = wrap_double_quotes(query)
+    expr = f"s.Find({query}).Size() > 0"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return "&& " + expr
+    return expr
+
+
+@CONVERTER(FilterDocHasAttr.kind)
+def pre_doc_filter_has_attr(node: FilterDocHasAttr) -> str:
+    keys = node.kwargs["keys"]
+    if len(keys) == 1:
+        key = py_var_to_go_var(keys[0], VariableType.STRING)
+        expr = f's.AttrOr({key}, "") != ""'
+    else:
+        key = py_var_to_go_var(keys, VariableType.LIST_STRING)
+        # func sscDocFhasAnyAttribute(sel *goquery.Selection, attrs []string) bool
+        expr = f"sscDocFhasAnyAttribute(s, {keys})"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return "&& " + expr
+    return expr
+
+
+@CONVERTER(FilterDocAttrEqual.kind)
+def pre_doc_filter_attr_eq(node: FilterDocAttrEqual) -> str:
+    key, values = node.unpack_args()
+    key = py_var_to_go_var(key, VariableType.STRING)
+    if len(values) == 1:
+        value = py_var_to_go_var(values[0], VariableType.STRING)
+        # func sscDocFAttrEq(sel *goquery.Selection, key string, value string) bool
+        expr = f"sscDocFAttrEq(s, {key}, {value})"
+    else:
+        value = py_var_to_go_var(values, VariableType.LIST_STRING)
+        # func sscDocFAnyAttrEq(sel *goquery.Selection, key string, values []string) bool
+        expr = f"sscDocFAnyAttrEq(s, {key}, {value})"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return "&& " + expr
+    return expr
+
+
+@CONVERTER(FilterDocAttrContains.kind)
+def pre_doc_filter_attr_contains(node: FilterDocAttrContains) -> str:
+    key, values = node.unpack_args()
+    key = py_var_to_go_var(key, VariableType.STRING)
+    if len(values) == 1:
+        value = py_var_to_go_var(values[0], VariableType.STRING)
+        # func sscDocFAttrContains(sel *goquery.Selection, key string, value string) bool
+        expr = f"sscDocFAttrContains(s, {key}, {value})"
+    else:
+        value = py_var_to_go_var(values, VariableType.LIST_STRING)
+        # func sscDocFAnyAttrContains(sel *goquery.Selection, key string, values []string) bool
+        expr = f"sscDocFAnyAttrContains(s, {key}, {value})"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return "&& " + expr
+    return expr
+
+
+@CONVERTER(FilterDocAttrStarts.kind)
+def pre_doc_filter_attr_starts(node: FilterDocAttrStarts) -> str:
+    key, values = node.unpack_args()
+    key = py_var_to_go_var(key, VariableType.STRING)
+
+    if len(values) == 1:
+        value = py_var_to_go_var(values[0], VariableType.STRING)
+        # func sscDocFAttrStarts(sel *goquery.Selection, key string, value string) bool
+        expr = f"sscDocFAttrStarts(s, {key}, {value})"
+    else:
+        value = py_var_to_go_var(values, VariableType.LIST_STRING)
+        # func sscDocFAttrAnyStarts(sel *goquery.Selection, key string, []values string) bool
+        expr = f"sscDocFAttrAnyStarts(s, {key}, {value})"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return "&& " + expr
+    return expr
+
+
+@CONVERTER(FilterDocAttrEnds.kind)
+def pre_doc_filter_attr_ends(node: FilterDocAttrEnds) -> str:
+    key, values = node.unpack_args()
+    key = py_var_to_go_var(key, VariableType.STRING)
+
+    if len(values) == 1:
+        # func sscDocFAttrEnds(sel *goquery.Selection, key string, value string) bool
+        value = py_var_to_go_var(values[0], VariableType.STRING)
+        expr = f"sscDocFAttrEnds(s, {key}, {value})"
+    else:
+        value = py_var_to_go_var(values, VariableType.LIST_STRING)
+        # func sscDocFAttrAnyEnds(sel *goquery.Selection, key string, []values string) bool
+        expr = f"sscDocFAttrAnyEnds(s, {key}, {value})"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return "&& " + expr
+    return expr
+
+
+@CONVERTER(FilterDocAttrRegex.kind)
+def pre_doc_filter_attr_re(node: FilterDocAttrRegex) -> str:
+    key, pattern, ignore_case = node.unpack_args()
+    pattern = py_regex_to_go_regex(pattern, ignore_case)
+    key = py_var_to_go_var(key, VariableType.STRING)
+
+    # func sscDocFAttrIsRegex(sel *goquery.Selection, key string, pattern string) bool
+    expr = f"sscDocFAttrIsRegex(s, {key}, {pattern})"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return "&& " + expr
+    return expr
+
+
+@CONVERTER(FilterDocIsRegexText.kind)
+def pre_doc_filter_is_regex_text(node: FilterDocIsRegexText) -> str:
+    pattern, ignore_case = node.unpack_args()
+
+    pattern = py_regex_to_go_regex(pattern, ignore_case)
+    expr = f"regexp.MustCompile({pattern}).MatchString(s.Text())"
+
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return "&& " + expr
+    return expr
+
+
+@CONVERTER(FilterDocIsRegexRaw.kind)
+def pre_doc_filter_is_regex_raw(node: FilterDocIsRegexRaw) -> str:
+    pattern, ignore_case = node.unpack_args()
+
+    pattern = py_regex_to_go_regex(pattern, ignore_case)
+    expr = f"regexp.MustCompile({pattern}).MatchString(s.Html())"
+
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return "&& " + expr
+    return expr
+
+
+@CONVERTER(FilterDocHasText.kind)
+def pre_doc_filter_has_text(node: FilterDocHasText) -> str:
+    values = node.kwargs["values"]
+    if len(values) == 1:
+        value = py_var_to_go_var(values[0], VariableType.STRING)
+        expr = f"strings.Contains(s.Text(), {value})"
+    else:
+        # func sscDocFAnyTextContains(sel *goquery.Selection, values []string) bool
+        value = py_var_to_go_var(values, VariableType.LIST_STRING)
+        expr = f"sscDocFAnyTextContains(s, {value})"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return f" && {expr}"
+    return expr
+
+
+@CONVERTER(FilterDocHasRaw.kind)
+def pre_doc_filter_has_raw(node: FilterDocHasRaw) -> str:
+    values = node.kwargs["values"]
+
+    if len(values) == 1:
+        value = py_var_to_go_var(values[0], VariableType.STRING)
+        expr = f"strings.Contains(s.Html(), {value})"
+    else:
+        # func sscDocFAnyRawContains(sel *goquery.Selection, values []string) bool
+        value = py_var_to_go_var(values, VariableType.LIST_STRING)
+        expr = f"sscDocFAnyRawContains(s, {value})"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return f" && {expr}"
+    return expr
+
+
+@CONVERTER(FilterDocXpath.kind)
+def pre_doc_filter_xpath(node: FilterDocXpath) -> str:
+    raise NotImplementedError("goquery not support XPATH")

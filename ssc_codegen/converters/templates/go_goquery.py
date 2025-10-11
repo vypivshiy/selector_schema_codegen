@@ -1,25 +1,3 @@
-from typing import Any, cast
-from jinja2 import Template
-
-from ssc_codegen.ast_.base import BaseAstNode
-from ssc_codegen.ast_.nodes_core import (
-    ExprCallStructClassVar,
-    ExprCallStructMethod,
-    ExprDefaultValueStart,
-    StartParseMethod,
-    StructParser,
-)
-from ssc_codegen.converters.helpers import (
-    get_last_ret_type,
-    get_struct_field_method_by_name,
-    have_default_expr,
-    is_last_var_no_ret,
-    is_pre_validate_parent,
-    prev_next_var,
-)
-from ssc_codegen.str_utils import to_lower_camel_case, to_upper_camel_case
-from ssc_codegen.tokens import StructType, TokenType, VariableType
-
 IMPORTS = """package $PACKAGE$
 
 import (
@@ -369,369 +347,94 @@ func sscMapAttrs(a *goquery.Selection) []string {
     })
     return r
 }
-"""
 
-_CODE_PRE_VALIDATE_CALL = """_, err := p.preValidate(p.Document.Selection);
-if err != nil{
-return nil, err;
+func sscDocFhasAnyAttribute(sel *goquery.Selection, attrs []string) bool {
+	for _, attr := range attrs {
+		if sel.AttrOr(attr, "") != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func sscDocFAttrEq(sel *goquery.Selection, key string, value string) bool {
+	v, _ := sel.Attr(key)
+	return v == value
+}
+
+func sscDocFAnyAttrEq(sel *goquery.Selection, key string, values []string) bool {
+	for _, v := range values {
+		if sscDocFAttrEq(sel, key, v) {
+			return true
+		}
+	}
+	return false
+}
+
+func sscDocFAttrContains(sel *goquery.Selection, key string, value string) bool {
+	v, _ := sel.Attr(key)
+	return strings.Contains(v, value)
+}
+
+func sscDocFAnyAttrContains(sel *goquery.Selection, key string, values []string) bool {
+	for _, v := range values {
+		if sscDocFAttrContains(sel, key, v) {
+			return true
+		}
+	}
+	return false
+}
+
+func sscDocFAttrStarts(sel *goquery.Selection, key string, value string) bool {
+	v, _ := sel.Attr(key)
+	return strings.HasPrefix(v, value)
+}
+
+func sscDocFAttrAnyStarts(sel *goquery.Selection, key string, values []string) bool {
+	for _, v := range values {
+		if sscDocFAttrStarts(sel, key, v) {
+			return true
+		}
+	}
+	return false
+}
+
+func sscDocFAttrEnds(sel *goquery.Selection, key string, value string) bool {
+	v, _ := sel.Attr(key)
+	return strings.HasSuffix(v, value)
+}
+
+func sscDocFAttrAnyEnds(sel *goquery.Selection, key string, values []string) bool {
+	for _, v := range values {
+		if sscDocFAttrEnds(sel, key, v) {
+			return true
+		}
+	}
+	return false
+}
+
+func sscDocFAttrIsRegex(sel *goquery.Selection, key string, pattern string) bool {
+	v, _ := sel.Attr(key)
+	return regexp.MustCompile(pattern).MatchString(v)
+}
+
+func sscDocFAnyTextContains(sel *goquery.Selection, values []string) bool {
+    t := sel.Text()
+	for _, v := range values {
+		if strings.Contains(t, v) {
+			return true
+		}
+	}
+	return false
+}
+
+func sscDocFAnyRawContains(sel *goquery.Selection, values []string) bool {
+    t := sel.Html()
+	for _, v := range values {
+		if strings.Contains(t, v) {
+			return true
+		}
+	}
+	return false
 }
 """
-
-J2_START_PARSE_ITEM_BODY = Template("""
-{% for var_name, method_name in methods %}
-{#- required drop star char for Nested and Json structures -#}
-{{ var_name.lstrip('*') }}, err := p.parse{{ method_name }}(p.Document.Selection);
-if err != nil {
-    return nil, err;
-}
-{% endfor %}
-item := T{{ struct_name }} {
-{{ st_args|join(', ') }},
-};
-return &item, nil;
-}
-""")
-
-
-def go_parse_item_body(node: StructParser) -> str:
-    assert node.struct_type == StructType.ITEM
-
-    # st_args - pushed to struct as arguments
-    struct_name, *_ = node.unpack_args()
-    st_args: list[str] = []
-    # var_name, method_name, is_classvar
-    methods: list[tuple[str, str]] = []
-    start_parse_node: StartParseMethod = node.find_node_by_token(
-        StartParseMethod.kind
-    )
-    for field in start_parse_node.body:
-        # MAGIC_METHODS = {"__ITEM__": "Item", "__KEY__": "Key", "__VALUE__": "Value",
-        if isinstance(field, ExprCallStructMethod) and not field.kwargs[
-            "name"
-        ].startswith("__"):
-            field = cast(ExprCallStructMethod, field)
-            var_name = to_lower_camel_case(field.kwargs["field_name"])
-            method_name = to_upper_camel_case(field.kwargs["name"])
-            # TokenType.STRUCT_CALL_FUNCTION
-            # get return type by field['kwargs']['type']
-            if field.kwargs["type"] in (VariableType.NESTED, VariableType.JSON):
-                var_name = "*" + var_name
-            # remove pointer (st_args contains var names and insert to struct)
-            st_args.append(var_name)
-            methods.append((var_name, method_name))
-        elif isinstance(field, ExprCallStructClassVar):
-            field = cast(ExprCallStructClassVar, field)
-            # add only classvar reference
-            var_name = (
-                field.kwargs["struct_name"]
-                + "Cfg."
-                + to_upper_camel_case(field.kwargs["field_name"])
-            )
-            st_args.append(var_name)
-
-    return J2_START_PARSE_ITEM_BODY.render(
-        methods=methods, st_args=st_args, struct_name=struct_name
-    )
-
-
-_J2_START_PARSE_LIST_BODY = Template(
-    """
-items := make([]T{{ struct_name }}, 0);
-docParts, err := p.splitDoc(p.Document.Selection);
-if err != nil {
-    return nil, err;
-}
-
-for _, i := range docParts.EachIter() {
-{% for var_name, method_name in methods %}
-    {#- required drop star char for Nested and Json structures -#}
-    {{ var_name.lstrip('*') }}, err := p.parse{{ method_name }}(i);
-    if err != nil {
-        return nil, err;
-    }
-{% endfor %}
-    item := T{{ struct_name }} {
-        {{ st_args|join(', ') }},
-    };
-    items = append(items, item);
-}
-return &items, nil;
-}
-"""
-)
-
-
-def go_parse_list_body(node: StructParser) -> str:
-    assert node.struct_type == StructType.LIST
-
-    struct_name, *_ = node.unpack_args()
-    st_args: list[str] = []
-    methods: list[tuple[str, str]] = []
-    start_parse_node = node.find_node_by_token(TokenType.STRUCT_PARSE_START)
-
-    for field in start_parse_node.body:
-        field = cast(ExprCallStructMethod, field)
-        # MAGIC_METHODS = {"__ITEM__": "Item", "__KEY__": "Key", "__VALUE__": "Value",
-        if isinstance(field, ExprCallStructMethod) and not field.kwargs[
-            "name"
-        ].startswith("__"):
-            method_name = to_upper_camel_case(field.kwargs["name"])
-            var_name = to_lower_camel_case(method_name)
-            if field.kwargs["type"] in (VariableType.NESTED, VariableType.JSON):
-                var_name = "*" + var_name
-            st_args.append(var_name)
-            methods.append((var_name, method_name))
-        elif isinstance(field, ExprCallStructClassVar):
-            field = cast(ExprCallStructClassVar, field)
-            # add only classvar reference
-            var_name = (
-                field.kwargs["struct_name"]
-                + "Cfg."
-                + to_upper_camel_case(field.kwargs["field_name"])
-            )
-            st_args.append(var_name)
-
-    return _J2_START_PARSE_LIST_BODY.render(
-        methods=methods, st_args=st_args, struct_name=struct_name
-    )
-
-
-_J2_START_PARSE_DICT_BODY = Template("""
-items := make(T{{ struct_name }});
-docParts, err := p.splitDoc(p.Document.Selection);
-if err != nil {
-    return nil, err;
-}
-
-for _, i := range docParts.EachIter() {
-    key, err := p.parseKey(i);
-    if err != nil {
-        return nil, err;
-    }
-
-    {{ var_value }}, err := p.parseValue(i);
-    if err != nil {
-        return nil, err;
-    }
-
-    items[key] = {{ var_value }};
-}
-
-return &items, nil;
-}
-""")
-
-
-def go_parse_dict_body(node: StructParser) -> str:
-    assert node.struct_type == StructType.DICT
-
-    struct_name, *_ = node.unpack_args()
-    value_field = get_struct_field_method_by_name(node, "__VALUE__")
-    default_is_nil = False
-    if have_default_expr(value_field):
-        expr_default = value_field.body[0]
-        expr_default = cast(ExprDefaultValueStart, expr_default)
-        default_is_nil = expr_default.kwargs["value"] is None
-    var_value = "&value" if default_is_nil else "value"
-    return _J2_START_PARSE_DICT_BODY.render(
-        struct_name=struct_name, var_value=var_value
-    )
-
-
-_J2_START_PARSE_FLAT_LIST_BODY = Template(
-    """
-    items := make(T{{ struct_name }}, 0);
-    docParts, err := p.splitDoc(p.Document.Selection);
-    if err != nil {
-        return nil, err;
-    }
-
-    for _, i := range docParts.EachIter() {
-        {{ var }}, err := p.parseItem(i);
-        if err != nil {
-            return nil, err;
-        }
-
-        items = append(items, {{ var }});
-    }
-
-    return &items, nil;
-    }
-    """
-)
-
-
-def go_parse_flat_list_body(node: StructParser) -> str:
-    assert node.struct_type == StructType.FLAT_LIST
-
-    struct_name, *_ = node.unpack_args()
-    item_field = get_struct_field_method_by_name(node, "__ITEM__")
-    default_is_nil = False
-    if have_default_expr(item_field):
-        expr_default = item_field.body[0]
-        expr_default = cast(ExprDefaultValueStart, expr_default)
-        default_is_nil = expr_default.kwargs["value"] is None
-    var = "&item" if default_is_nil else "item"
-    return _J2_START_PARSE_FLAT_LIST_BODY.render(
-        struct_name=struct_name, var=var
-    )
-
-
-# TODO: maybe conflict var and field names
-_J2_START_PARSE_ACC_LIST_BODY = Template(
-    """
-__items := make(T{{ struct_name }}, 0);
-{% for var_name, method_name in methods %}
-{{ var_name }}, err := p.parse{{ method_name }}(p.Document.Selection);
-if err != nil {
-    return nil, err;
-}
-for _, i := range {{ var_name }} {
-    __items = append(__items, i);
-}
-{% endfor %}
-{# sscSliceStrUnique(v []string) []string #}
-return &sscSliceStrUnique(__items), nil;
-}
-"""
-)
-
-
-def go_parse_acc_unique_list_body(node: StructParser) -> str:
-    assert node.struct_type == StructType.ACC_LIST
-
-    struct_name, *_ = node.unpack_args()
-    st_args: list[str] = []
-    methods: list[tuple[str, str]] = []
-    start_parse_node = [
-        i for i in node.body if i.kind == TokenType.STRUCT_PARSE_START
-    ][0]
-
-    for field in start_parse_node.body:
-        field = cast(ExprCallStructMethod, field)
-        # MAGIC_METHODS = {"__ITEM__": "Item", "__KEY__": "Key", "__VALUE__": "Value",
-        if field.kwargs["name"].startswith("__"):
-            continue
-        method_name = to_upper_camel_case(field.kwargs["name"])
-        var_name = to_lower_camel_case(method_name)
-        st_args.append(var_name)
-        methods.append((var_name, method_name))
-    return _J2_START_PARSE_ACC_LIST_BODY.render(
-        methods=methods, struct_name=struct_name
-    )
-
-
-_J2_PRE_NESTED = Template("""{{ tmp_doc }} := goquery.NewDocumentFromNode({{ prv }}.Nodes[0]);
-{{ tmp_st }} := {{ sc_name }}{ {{ tmp_doc }} };
-{{ nxt }}, err := {{ tmp_st }}.Parse();
-if err != nil {
-    return nil, err;
-}
-""")
-
-
-RETURN_ERR_STUBS = {
-    VariableType.STRING: '""',
-    VariableType.INT: "-1",
-    VariableType.FLOAT: "-1.0",
-    VariableType.LIST_STRING: "nil",
-    VariableType.OPTIONAL_STRING: "nil",
-    VariableType.OPTIONAL_LIST_STRING: "nil",
-    VariableType.NULL: "nil",
-    VariableType.OPTIONAL_INT: "nil",
-    VariableType.LIST_INT: "nil",
-    VariableType.OPTIONAL_FLOAT: "nil",
-    VariableType.LIST_FLOAT: "nil",
-    VariableType.OPTIONAL_LIST_FLOAT: "nil",
-    VariableType.BOOL: "false",
-    VariableType.NESTED: "nil",
-    VariableType.JSON: "nil",
-}
-
-
-def go_pre_validate_func_call() -> str:
-    return _CODE_PRE_VALIDATE_CALL
-
-
-def go_nested_expr_call(nxt_var: str, prv_var: str, schema_name: str) -> str:
-    tmp_doc = f"{nxt_var}Doc"
-    tmp_st = f"{nxt_var}St"
-    return _J2_PRE_NESTED.render(
-        tmp_doc=tmp_doc,
-        tmp_st=tmp_st,
-        nxt=nxt_var,
-        prv=prv_var,
-        sc_name=schema_name,
-    )
-
-
-J2_PRE_DEFAULT_START = Template("""defer func() {
-    if r := recover(); r != nil {
-{#- set err=nil if value == nil -#}
-        err = nil;
-        result = {{ value }};
-    }
-}()
-{{ nxt }} := {{ prv }};
-""")
-
-
-def go_default_value(nxt_var: str, prv_var: str, value: Any) -> str:
-    return J2_PRE_DEFAULT_START.render(nxt=nxt_var, prv=prv_var, value=value)
-
-
-def go_func_add_error_check(
-    node: BaseAstNode,
-    call_func: str,
-    err_var_stub: dict[VariableType, str] = RETURN_ERR_STUBS,
-) -> str:
-    """helper call function and generate error handle checks.
-    Used for {{nxt_var}}, err := sscFunc(...) (T, error) functions
-
-    - if node has default expr - add `panic(err)` (first expr rescue and set default value)
-    - pre_validate function - add `return nil, err`
-    - other - add stub error value from err_var_stub map
-
-    """
-    _, nxt_var = prev_next_var(node)
-    expr = f"{nxt_var}, err := {call_func}; if err != nil " + "{ "
-    if have_default_expr(node):
-        expr += "panic(err); "
-    elif is_pre_validate_parent(node):
-        expr += "return nil, err; "
-    else:
-        ret_type = get_last_ret_type(node)
-        value = err_var_stub.get(ret_type, "nil")
-        expr += f"return {value}, err; "
-    expr += "} "
-    return expr
-
-
-def go_assert_func_add_error_check(
-    node: BaseAstNode,
-    call_func: str,
-    err_var_stub: dict[VariableType, str] = RETURN_ERR_STUBS,
-) -> str:
-    """helper call assert function and generate error handle checks.
-    Used for err := sscAssert(...) (error) functions
-
-    - if node has default expr - add `panic(err)` (first expr rescue and set default value)
-    - pre_validate function - add `return nil, err`
-    - other - add stub error value from err_var_stub map
-
-    auto set assign value if last node not returns `nil` value
-    """
-    prv_var, nxt_var = prev_next_var(node)
-    expr = f"err := {call_func}; if err != nil " + "{ "
-    if have_default_expr(node):
-        expr += "panic(err); "
-    elif is_pre_validate_parent(node):
-        expr += "return nil, err; "
-    else:
-        ret_type = get_last_ret_type(node)
-        value = err_var_stub.get(ret_type, "nil")
-        expr += f"return {value}, err; "
-    expr += "} "
-    if not is_last_var_no_ret(node):
-        expr += f"{nxt_var} := {prv_var}; "
-    return expr
