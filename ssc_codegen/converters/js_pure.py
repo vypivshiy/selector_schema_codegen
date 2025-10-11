@@ -187,14 +187,6 @@ DOCSTR_END = "*/"
 DOCSTR_SEP = "* "
 CONVERTER = BaseCodeConverter(debug_comment_prefix="// ")
 # javascript not support typing/annotations
-CONVERTER.TEST_EXCLUDE_NODES.extend(
-    [
-        TokenType.TYPEDEF,
-        TokenType.TYPEDEF_FIELD,
-        TokenType.JSON_STRUCT,
-        TokenType.JSON_FIELD,
-    ]
-)
 
 
 # TODO: move to string_utils
