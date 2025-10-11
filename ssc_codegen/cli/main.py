@@ -478,7 +478,7 @@ def parse_from_url(
     ] = True,
 ) -> None:
     from ssc_codegen.compiler import Compiler
-    from ssc_codegen.converters.py_parsel import CONVERTER
+    from ssc_codegen.converters.py_bs4 import CONVERTER
 
     cls_target, schema_config = _validate_parser_target(cls_target)
 
