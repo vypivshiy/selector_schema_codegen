@@ -159,7 +159,7 @@ class DictData(DictSchema):
     }
     ```
     """
-    __SIGNATURE__ = {"useless": "wiki", "table": "info", "..."}
+    __SIGNATURE__ = {"useless": "wiki", "table": "info", "...": "..."}
 
     __SPLIT_DOC__ = D().css_all("table tr")
 
