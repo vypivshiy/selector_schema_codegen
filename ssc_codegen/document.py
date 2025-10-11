@@ -1823,6 +1823,7 @@ class DocumentFilter(BaseDocument):
         ignore_case: bool = False,
     ) -> Self:
         """check if pattern matched result in value"""
+        
         pattern, literal_hooks = self._resolve_literal_hook("pattern", pattern)
 
         if not isinstance(pattern, str):
@@ -1844,6 +1845,12 @@ class DocumentFilter(BaseDocument):
         return self
 
     def and_(self, filter_expr: "DocumentFilter") -> Self:
+        """extend filter by logical AND
+
+        pseudocode example:
+
+            this_filter AND filter_expr
+        """
         if self.stack[0].kind in (FilterAnd.kind, FilterOr.kind):
             LOGGER.warning(
                 "logic AND: first node is `%s`", self.stack[0].kind.name
@@ -1853,6 +1860,12 @@ class DocumentFilter(BaseDocument):
         return self
 
     def or_(self, filter_expr: "DocumentFilter") -> Self:
+        """extend filter by logical OR
+
+        pseudocode example:
+
+            this_filter OR filter_expr
+        """
         if self.stack[0].kind in (FilterAnd.kind, FilterOr.kind):
             LOGGER.warning(
                 "logic OR: first node is `%s`", self.stack[0].kind.name
@@ -1862,55 +1875,108 @@ class DocumentFilter(BaseDocument):
         return self
 
     def len_eq(self, value: int) -> Self:
+        """check string value by len. return true if len value is equal
+
+        pseudocode example:
+
+            len(item) == value 
+        """
         self._add(FilterStrLenEq(kwargs={"length": value}))
         return self
 
     def len_ne(self, value: int) -> Self:
+        """check string value by len. return true if len value is not equal
+
+        pseudocode example:
+
+            len(item) != value 
+        """
         self._add(FilterStrLenNe(kwargs={"length": value}))
         return self
 
     def len_lt(self, value: int) -> Self:
+        """check string value by len. return true if len value less
+
+        pseudocode example:
+
+            len(item) < value 
+        """
         self._add(FilterStrLenLt(kwargs={"length": value}))
         return self
 
     def len_le(self, value: int) -> Self:
+        """check string value by len. return true if len value less or equal
+
+        pseudocode example:
+
+            len(item) <= value 
+        """
         self._add(FilterStrLenLe(kwargs={"length": value}))
         return self
 
     def len_gt(self, value: int) -> Self:
+        """check string value by len. return true if len value is bigger
+
+        pseudocode example:
+
+            len(item) > value 
+        """
         self._add(FilterStrLenGt(kwargs={"length": value}))
         return self
 
     def len_ge(self, value: int) -> Self:
+        """check string value by len. return true if len value is bigger or equal
+
+        pseudocode example:
+
+            len(item) >= value 
+        """
         self._add(FilterStrLenGe(kwargs={"length": value}))
         return self
 
     def not_(self, filter_expr: "DocumentFilter") -> Self:
+        """add inverted filter_expr (aka not)
+
+        pseudocode example:
+
+            this_filter and not filter_expr
+            this_filter && !(filter_expr) 
+        """
         tmp_stack = filter_expr.stack.copy()
         self._add(FilterNot(body=tmp_stack))
         return self
 
     def __or__(self, other: "DocumentFilter") -> "DocumentFilter":
-        """syntax suger F().or_(...)"""
+        """syntax suger for F().or_(other)"""
         new_filter = DocumentFilter()
         new_filter.stack.extend(self.stack)
         return new_filter.or_(other)
 
     def __and__(self, other: "DocumentFilter") -> "DocumentFilter":
-        """syntax sugar F().and_(...)"""
+        """syntax suger for F().and_(other)"""
         new_filter = DocumentFilter()
         new_filter.stack.extend(self.stack)
         return new_filter.and_(other)
 
     def __invert__(self) -> "DocumentFilter":
-        """syntax sugar F().not_(...)"""
+        """syntax sugar for F().not_(other)"""
         new_filter = DocumentFilter()
         new_filter.stack.extend(self.stack)
         return DocumentFilter().not_(new_filter)
 
     # ignoring Liskov substitution principle for the sake of filter DSL expressiveness
     def __eq__(self, other: int | str | Sequence[str]) -> "DocumentFilter":  # type: ignore[override]
-        """syntax sugar F().eq(...)"""
+        """syntax sugar of len_eq and eq methods:
+        
+        if other is INT:
+            this_filter.len_eq(other) == (this_filter == other)
+        
+        if other is string:
+            this_filter.eq(other) == (this_filter == "other")
+        
+        if other is Sequence[string]:
+            this_filter.eq(*["item1", "item2", ...]) == (this_filter == ["item1", "item2", ...])
+        """
         new_filter = DocumentFilter()
         new_filter.stack.extend(self.stack)
         if isinstance(other, int):
@@ -1921,7 +1987,17 @@ class DocumentFilter(BaseDocument):
         return new_filter.eq(*other)
 
     def __ne__(self, other: int | str | Sequence[str]) -> "DocumentFilter":  # type: ignore[override]
-        """syntax sugar F().ne(...)"""
+        """syntax sugar of len_ne and ne methods:
+        
+        if other is INT:
+            this_filter.len_ne(other) == (this_filter != other)
+        
+        if other is string:
+            this_filter.ne(other) == (this_filter != "other")
+        
+        if other is Sequence[string]:
+            this_filter.ne(*["item1", "item2", ...]) == (this_filter != ["item1", "item2", ...])
+        """
         new_filter = DocumentFilter()
         new_filter.stack.extend(self.stack)
         if isinstance(other, int):
@@ -1932,21 +2008,38 @@ class DocumentFilter(BaseDocument):
         return new_filter.ne(*other)
 
     def __lt__(self, other: int) -> "DocumentFilter":
+        """syntax sugar of len_lt method:
+
+        this_filter.len_lt(other) == (this_filter < other)
+        """
+
         new_filter = DocumentFilter()
         new_filter.stack.extend(self.stack)
         return new_filter.len_lt(other)
 
     def __le__(self, other: int) -> "DocumentFilter":
+        """syntax sugar of len_le method:
+
+        this_filter.len_le(other) == (this_filter <= other)
+        """
         new_filter = DocumentFilter()
         new_filter.stack.extend(self.stack)
         return new_filter.len_le(other)
 
     def __gt__(self, other: int) -> "DocumentFilter":
+        """syntax sugar of len_gt method:
+
+        this_filter.len_gt(other) == (this_filter > other)
+        """
         new_filter = DocumentFilter()
         new_filter.stack.extend(self.stack)
         return new_filter.len_gt(other)
 
     def __ge__(self, other: int) -> "DocumentFilter":
+        """syntax sugar of len_ge method:
+
+        this_filter.len_ge(other) == (this_filter >= other)
+        """
         new_filter = DocumentFilter()
         new_filter.stack.extend(self.stack)
         return new_filter.len_ge(other)
@@ -2047,10 +2140,12 @@ class DocumentElementsFilter(BaseDocument):
     """Special filter marker collections for .filter() argument (type: LIST_DOCUMENT)"""
 
     def css(self, query: str) -> Self:
+        """returns true if filtered element match element by query"""
         self._add(FilterDocCss(kwargs={"query": query}))
         return self
 
     def xpath(self, query: str) -> Self:
+        """returns true if filtered element match element by query"""
         self._add(FilterDocXpath(kwargs={"query": query}))
         return self
 
@@ -2265,6 +2360,12 @@ class DocumentElementsFilter(BaseDocument):
         return self
 
     def and_(self, filter_expr: "DocumentElementsFilter") -> Self:
+        """extend filter by logical AND
+
+        pseudocode example:
+
+            this_filter AND filter_expr
+        """
         if self.stack[0].kind in (FilterAnd.kind, FilterOr.kind):
             LOGGER.warning(
                 "logic AND: first node is `%s`", self.stack[0].kind.name
@@ -2274,15 +2375,27 @@ class DocumentElementsFilter(BaseDocument):
         return self
 
     def or_(self, filter_expr: "DocumentElementsFilter") -> Self:
+        """extend filter by logical OR
+
+        pseudocode example:
+
+            this_filter OR filter_expr
+        """
         if self.stack[0].kind in (FilterAnd.kind, FilterOr.kind):
             LOGGER.warning(
-                "logic AND: first node is `%s`", self.stack[0].kind.name
+                "logic OR: first node is `%s`", self.stack[0].kind.name
             )
         tmp_stack = filter_expr.stack.copy()
         self._add(FilterOr(body=tmp_stack))
         return self
 
     def not_(self, filter_expr: "DocumentElementsFilter"):
+        """extend filter by logical NOT
+
+        pseudocode example:
+
+            this_filter NOT filter_expr
+        """
         tmp_stack = filter_expr.stack.copy()
         self._add(FilterNot(body=tmp_stack))
         return self
@@ -2290,7 +2403,7 @@ class DocumentElementsFilter(BaseDocument):
     def __or__(
         self, other: "DocumentElementsFilter"
     ) -> "DocumentElementsFilter":
-        """syntax sugar F().or_(expr)"""
+        """syntax sugar F().or_(other)"""
         new_filter = DocumentElementsFilter()
         new_filter.stack.extend(self.stack)
         return new_filter.or_(other)
@@ -2298,13 +2411,13 @@ class DocumentElementsFilter(BaseDocument):
     def __and__(
         self, other: "DocumentElementsFilter"
     ) -> "DocumentElementsFilter":
-        """syntax sugar F().and_(expr)"""
+        """syntax sugar F().and_(other)"""
         new_filter = DocumentElementsFilter()
         new_filter.stack.extend(self.stack)
         return new_filter.or_(other)
 
     def __invert__(self) -> "DocumentElementsFilter":
-        """syntax sugar F().not_(expr)"""
+        """syntax sugar F().not_(other)"""
         new_filter = DocumentElementsFilter()
         new_filter.stack.extend(self.stack)
         return DocumentElementsFilter().not_(new_filter)
