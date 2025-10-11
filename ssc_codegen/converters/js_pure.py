@@ -149,19 +149,7 @@ from ssc_codegen.converters.helpers import (
     is_first_node_cond,
     is_prev_node_atomic_cond,
 )
-from ssc_codegen.converters.templates.js_pure import (
-    HELPER_FUNCTIONS,
-    J2_STRUCT_INIT,
-    J2_PRE_LIST_STR_TRIM,
-    J2_PRE_STR_LEFT_TRIM,
-    J2_PRE_LIST_STR_LEFT_TRIM,
-    J2_PRE_STR_RIGHT_TRIM,
-    J2_PRE_LIST_STR_RIGHT_TRIM,
-    J2_PRE_XPATH,
-    J2_PRE_XPATH_ALL,
-    J2_PRE_STR_TRIM,
-    J2_IS_XPATH,
-)
+from ssc_codegen.converters.templates.js_pure import HELPER_FUNCTIONS
 from ssc_codegen.str_utils import (
     wrap_backtick,
     to_upper_camel_case,
@@ -299,7 +287,17 @@ def pre_parse_field(node: StructFieldMethod) -> str:
 
 @CONVERTER(StructInitMethod.kind)
 def pre_struct_init(_node: StructInitMethod) -> str:
-    return J2_STRUCT_INIT
+    code = [
+        "constructor(doc){",
+        "if (typeof doc === 'string'){",
+        "this._doc = new DOMParser().parseFromString(doc, 'text/html');",
+        "} else if (doc instanceof Document || doc instanceof Element){",
+        "this._doc = doc.cloneNode(true);",
+        "} else {",
+        'throw new Error("Invalid input: Expected a Document, Element, or string");}',
+        "}",
+    ]
+    return "\n".join(code)
 
 
 JSDOC_TYPES = {
@@ -576,42 +574,88 @@ def pre_list_str_fmt(node: ExprListStringFormat) -> str:
 def pre_str_trim(node: ExprStringTrim) -> str:
     prv, nxt = prev_next_var(node)
     substr = js_get_classvar_hook_or_value(node, "substr")
-    return J2_PRE_STR_TRIM.render(nxt=nxt, prv=prv, substr=substr)
+    code = [
+        f"let {nxt} = (function (str, chars) {{",
+        "return str.replace(new RegExp(`^[${chars}]+|[${chars}]+$`, 'g'), '');",
+        f"}})({prv}, {substr});",
+    ]
+    return "\n".join(code)
 
 
 @CONVERTER(ExprListStringTrim.kind)
 def pre_list_str_trim(node: ExprListStringTrim) -> str:
     prv, nxt = prev_next_var(node)
     substr = js_get_classvar_hook_or_value(node, "substr")
-    return J2_PRE_LIST_STR_TRIM.render(prv=prv, nxt=nxt, substr=substr)
+    code = [
+        f"let {nxt} = {prv}.map(e =>",
+        "(function (str, chars) {",
+        "return str.replace(new RegExp(`^[${chars}]+|[${chars}]+$`, 'g'), '');",
+        f"}})(e, {substr})",
+        ");",
+    ]
+    return "\n".join(code)
 
 
 @CONVERTER(ExprStringLeftTrim.kind)
 def pre_str_left_trim(node: ExprStringLeftTrim) -> str:
     prv, nxt = prev_next_var(node)
     substr = js_get_classvar_hook_or_value(node, "substr")
-    return J2_PRE_STR_LEFT_TRIM.render(prv=prv, nxt=nxt, substr=substr)
+    """
+    let {{ nxt }} = (function (str, chars) {
+        return str.replace(new RegExp(`^[${chars}]+`, 'g'), '');
+    })({{ prv }}, {{ substr }});
+    """
+    code = [
+        f"let {nxt} = (function (str, chars) {{",
+        "return str.replace(new RegExp(`^[${chars}]+`, 'g'), '');",
+        f"}})({prv}, {substr});",
+    ]
+    return "\n".join(code)
 
 
 @CONVERTER(ExprListStringLeftTrim.kind)
 def pre_list_str_left_trim(node: ExprListStringLeftTrim) -> str:
     prv, nxt = prev_next_var(node)
     substr = js_get_classvar_hook_or_value(node, "substr")
-    return J2_PRE_LIST_STR_LEFT_TRIM.render(prv=prv, nxt=nxt, substr=substr)
+
+    code = [
+        f"let {nxt} = {prv}.map(e =>",
+        "(function (str, chars) {",
+        "return str.replace(new RegExp(`^[${chars}]+`, 'g'), '');",
+        f"}})(e, {substr})",
+    ]
+    return "\n".join(code)
 
 
 @CONVERTER(ExprStringRightTrim.kind)
 def pre_str_right_trim(node: ExprStringRightTrim) -> str:
     prv, nxt = prev_next_var(node)
     substr = js_get_classvar_hook_or_value(node, "substr")
-    return J2_PRE_STR_RIGHT_TRIM.render(prv=prv, nxt=nxt, substr=substr)
+    """
+    let {{ nxt }} = (function (str, chars) {
+        return str.replace(new RegExp(`[${chars}]+$`, 'g'), '');
+    })({{ prv }}, {{ substr }});
+    """
+    code = [
+        f"let {nxt} = (function (str, chars) {{",
+        "return str.replace(new RegExp(`[${chars}]+$`, 'g'), '');",
+        f"}})({prv}, {substr});",
+    ]
+    return "\n".join(code)
 
 
 @CONVERTER(ExprListStringRightTrim.kind)
 def pre_list_str_right_trim(node: ExprListStringRightTrim) -> str:
     prv, nxt = prev_next_var(node)
     substr = js_get_classvar_hook_or_value(node, "substr")
-    return J2_PRE_LIST_STR_RIGHT_TRIM.render(prv=prv, nxt=nxt, substr=substr)
+    code = [
+        f"let {nxt} = {prv}.map(e =>",
+        "(function (str, chars) {",
+        "return str.replace(new RegExp(`[${chars}]+$`, 'g'), '');",
+        f"}})(e, {substr})",
+        ");",
+    ]
+    return "\n".join(code)
 
 
 @CONVERTER(ExprStringSplit.kind)
@@ -814,11 +858,14 @@ def pre_is_xpath(node: ExprIsXpath) -> str:
     prv, nxt = prev_next_var(node)
     query = js_get_classvar_hook_or_value(node, "query")
     msg = js_get_classvar_hook_or_value(node, "msg")
-
-    expr = J2_IS_XPATH.render(prv=prv, nxt=nxt, msg=msg, query=query)
-    if is_last_var_no_ret(node):
-        return expr
-    return expr + f"let {nxt} = {prv};"
+    code = [
+        f"if (document.evaluate({query}, {prv}, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue === null) {{",
+        f"throw new Error({msg});",
+        "}",
+    ]
+    if not is_last_var_no_ret(node):
+        code.append(f"let {nxt} = {prv};")
+    return "\n".join(code)
 
 
 @CONVERTER(ExprToInt.kind)
@@ -884,7 +931,13 @@ def pre_css_all(node: ExprCssAll) -> str:
 def pre_xpath(node: ExprXpath) -> str:
     prv, nxt = prev_next_var(node)
     query = js_get_classvar_hook_or_value(node, "query")
-    return J2_PRE_XPATH.render(prv=prv, nxt=nxt, query=query)
+
+    code = [
+        f"let {nxt} = document.evaluate(",
+        f"{query}, {prv}, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null",
+        ").singleNodeValue;",
+    ]
+    return "\n".join(code)
 
 
 @CONVERTER(ExprXpathAll.kind)
@@ -892,9 +945,15 @@ def pre_xpath_all(node: ExprXpathAll) -> str:
     prv, nxt = prev_next_var(node)
     query = js_get_classvar_hook_or_value(node, "query")
     snapshot_var = f"s{nxt}"
-    return J2_PRE_XPATH_ALL.render(
-        prv=prv, nxt=nxt, query=query, snapshot_var=snapshot_var
-    )
+    code = [
+        f"let {snapshot_var} = {prv}.evaluate(",
+        f"{query}, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null",
+        ");",
+        f"let {nxt} = Array.from({{ length: {snapshot_var}.snapshotLength }}, (_, i) => ",
+        f"{snapshot_var}.snapshotItem(i)",
+        ");",
+    ]
+    return "\n".join(code)
 
 
 @CONVERTER(ExprGetHtmlAttr.kind)
