@@ -1,5 +1,10 @@
 """htmlparser lua 5.2+ or luajit 2.0+ impl
 
+Used as PoC:
+
+- translation PCRE regex syntax to lua string pattern matcher
+- translation CSS combinators and several pseudo selectors to equal functions
+
 Convert to pure lua, if you dont use pcre-regex dependency
 
 dependencies:
@@ -122,6 +127,21 @@ from ssc_codegen.ast_.nodes_core import (
     TypeDef,
     TypeDefField,
 )
+from ssc_codegen.ast_.nodes_filter import (
+    ExprDocumentFilter,
+    FilterDocAttrContains,
+    FilterDocAttrEnds,
+    FilterDocAttrEqual,
+    FilterDocAttrRegex,
+    FilterDocAttrStarts,
+    FilterDocCss,
+    FilterDocHasAttr,
+    FilterDocHasRaw,
+    FilterDocHasText,
+    FilterDocIsRegexRaw,
+    FilterDocIsRegexText,
+    FilterDocXpath,
+)
 from ssc_codegen.converters.base import BaseCodeConverter
 from ssc_codegen.converters.helpers import (
     have_pre_validate_call,
@@ -152,6 +172,24 @@ class LuaConverter(BaseCodeConverter):
 
 
 CONVERTER = LuaConverter(debug_comment_prefix="-- ")
+CONVERTER.TEST_EXCLUDE_NODES.extend(
+    # currently, this PoC translator not implemented document filter operaions
+    [
+        ExprDocumentFilter.kind,
+        FilterDocCss.kind,
+        FilterDocXpath.kind,  # TODO: move to callback and throw NotImplementedError
+        FilterDocHasAttr.kind,
+        FilterDocAttrEqual.kind,
+        FilterDocAttrStarts.kind,
+        FilterDocAttrEnds.kind,
+        FilterDocAttrContains.kind,
+        FilterDocAttrRegex.kind,
+        FilterDocHasRaw.kind,
+        FilterDocHasText.kind,
+        FilterDocIsRegexText.kind,
+        FilterDocIsRegexRaw.kind,
+    ]
+)
 
 IMPORTS = r"""
 local htmlparser = require("htmlparser"); 
