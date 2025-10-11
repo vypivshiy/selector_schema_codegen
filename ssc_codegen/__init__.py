@@ -1,4 +1,4 @@
-from ssc_codegen.document import HTMLDocument, ClassVarDocument, StringDocument, ArrayDocument, AssertDocument, NestedDocument, \
+from ssc_codegen.document import DocumentElementsFilter, HTMLDocument, ClassVarDocument, StringDocument, ArrayDocument, AssertDocument, NestedDocument, \
     DefaultDocument, \
     NumericDocument, JsonDocument, BooleanDocument, DocumentFilter
 from ssc_codegen.json_struct import Json
@@ -7,7 +7,7 @@ from ssc_codegen.schema import ItemSchema, DictSchema, ListSchema, FlatListSchem
 
 setup_logger()
 
-VERSION = "0.11.0"
+VERSION = "0.12.0"
 
 
 class __MISSING(object):
@@ -66,6 +66,11 @@ def R(default: None | str | int | float | list | __MISSING = _NO_DEFAULT) -> Doc
 def F() -> DocumentFilter:
     """Shortcut as a DocumentFilter() object"""
     return DocumentFilter()
+
+
+def FE() -> DocumentElementsFilter:
+    """Shortcut as a DocumentElementsFilter() object"""
+    return DocumentElementsFilter()
 
 
 def CV(value: int | str | float | bool | None | list, self_cls_path: str | None = None, *, returns: bool = False) -> ClassVarDocument:
