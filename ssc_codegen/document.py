@@ -2,7 +2,7 @@
 
 from functools import wraps
 import logging
-from typing import Any, Callable, Type, Pattern, Sequence, TypeVar
+from typing import Any, Callable, Type, Pattern, Sequence, TypeVar, Union
 from re import Pattern as RePattern
 
 from cssselect import SelectorSyntaxError
@@ -83,6 +83,21 @@ from ssc_codegen.ast_ import (
 )
 from ssc_codegen.ast_.nodes_cast import ExprJsonifyDynamic
 from ssc_codegen.ast_.nodes_core import ExprClassVar
+from ssc_codegen.ast_.nodes_filter import (
+    ExprDocumentFilter,
+    FilterDocAttrContains,
+    FilterDocAttrEnds,
+    FilterDocAttrEqual,
+    FilterDocAttrRegex,
+    FilterDocAttrStarts,
+    FilterDocCss,
+    FilterDocHasAttr,
+    FilterDocHasRaw,
+    FilterDocHasText,
+    FilterDocIsRegexRaw,
+    FilterDocIsRegexText,
+    FilterDocXpath,
+)
 from ssc_codegen.ast_.nodes_selectors import (
     ExprCssElementRemove,
     ExprMapAttrs,
@@ -703,13 +718,20 @@ class ArrayDocument(BaseDocument):
         self._add(ExprToListLength(accept_type=expected_type))
         return self
 
-    @validate_types(VariableType.LIST_STRING)
-    def filter(self, expr: "DocumentFilter") -> Self:
+    @validate_types(VariableType.LIST_STRING, VariableType.LIST_DOCUMENT)
+    def filter(
+        self, expr: Union["DocumentFilter", "DocumentElementsFilter"]
+    ) -> Self:
         """filter array of strings by F() expr
+        or array of elements by FE() expr
 
         - accept LIST_STRING, return LIST_STRING
+        - accept LIST_DOCUMENT, return LIST_DOCUMENT
         """
-        self._add(ExprFilter(body=expr.stack))
+        if isinstance(expr, DocumentElementsFilter):
+            self._add(ExprDocumentFilter(body=expr.stack))
+        else:
+            self._add(ExprFilter(body=expr.stack))
         return self
 
     @validate_types(VariableType.LIST_STRING)
@@ -1719,7 +1741,7 @@ class JsonDocument(BaseDocument):
 
 
 class DocumentFilter(BaseDocument):
-    """Special filter marker collections for .filter() argument"""
+    """Special filter marker collections for .filter() argument (type: LIST_STRING)"""
 
     def eq(self, *values: str) -> Self:
         """check if value equal
@@ -2019,3 +2041,270 @@ class ClassVarDocument(BaseDocument):
         if self.struct_name and self.field_name:
             return f"ClassVar({self.struct_name}.{self.field_name} = {self._value!r}, returns = {self._parse_returns})"
         return f"ClassVar({self._value!r}, returns = {self._parse_returns})"
+
+
+class DocumentElementsFilter(BaseDocument):
+    """Special filter marker collections for .filter() argument (type: LIST_DOCUMENT)"""
+
+    def css(self, query: str) -> Self:
+        self._add(FilterDocCss(kwargs={"query": query}))
+        return self
+
+    def xpath(self, query: str) -> Self:
+        self._add(FilterDocXpath(kwargs={"query": query}))
+        return self
+
+    def has_text(self, *values: str) -> Self:
+        """check if element contains value in text element  Node
+
+        multiple values converts to logical OR
+
+        pseudocode example:
+
+            FE().has_text("foo") -> "foo" in element.textContent
+
+            FE().has_text("bar", "foo") -> ("bar" in element.textContent | "foo" in element.textContent)
+        """
+        self._add(FilterDocHasText(kwargs={"values": values}))
+        return self
+
+    def has_raw(self, *values: str) -> Self:
+        """check if element contains value in raw element Node
+
+        multiple values converts to logical OR
+
+        pseudocode example:
+
+            FE().has_raw("foo") -> "foo" in element.outerHTML
+
+            FE().has_raw("bar", "foo") -> ("bar" in element.outerHTML | "foo" in element.outerHTML)
+        """
+        self._add(FilterDocHasRaw(kwargs={"values": values}))
+        return self
+
+    def re_text(
+        self,
+        pattern: str | RePattern[str],
+        ignore_case: bool = False,
+    ) -> Self:
+        """check if element text matched by regex
+
+        pseudocode example:
+            FE().text_re(r"foo") -> in element.textContent.match(r"foo")
+        """
+        if not isinstance(pattern, str):
+            ignore_case = is_ignore_case_regex(pattern)  # type: ignore
+
+        pattern = unverbosify_regex(pattern)  # type: ignore
+        result = analyze_re_expression(pattern, allow_empty_groups=True)
+        if not result:
+            LOGGER.warning(result.msg)
+        self._add(
+            FilterDocIsRegexText(
+                kwargs={"pattern": pattern, "ignore_case": ignore_case}
+            )
+        )
+
+    def re_raw(
+        self, pattern: str | RePattern[str], ignore_case: bool = False
+    ) -> Self:
+        """check if element text matched by regex
+
+        pseudocode example:
+            FE().text_re(r"foo") -> in element.outerHTML.match(r"foo")
+        """
+        if not isinstance(pattern, str):
+            ignore_case = is_ignore_case_regex(pattern)  # type: ignore
+
+        pattern = unverbosify_regex(pattern)  # type: ignore
+        result = analyze_re_expression(pattern, allow_empty_groups=True)
+        if not result:
+            LOGGER.warning(result.msg)
+        self._add(
+            FilterDocIsRegexRaw(
+                kwargs={"pattern": pattern, "ignore_case": ignore_case}
+            )
+        )
+        return self
+
+    def has_attr(self, *keys: str) -> Self:
+        """check if element contains attribure by key
+
+        multiple values converts to logical OR
+
+        pseudocode example:
+
+            FE().has_attr("href") -> element.hasAttribute("href")
+            FE().has_attr("href", "src") -> element.hasAttribute("href") || element.hasAttribute("src")
+        """
+        self._add(FilterDocHasAttr(kwargs={"keys": keys}))
+        return self
+
+    def attr_eq(self, key: str, *values: str) -> Self:
+        """check if element attribure equal by value
+
+        multiple values converts to logical OR
+
+        pseudocode example:
+
+            FE().attr_eq("href", "example.com") -> element.hasAttribute("href") && element["href"] == "example.com"
+            FE().attr_eq("href", "foo", "bar") -> element.hasAttribute("href") && (element["href"] == "foo" || element["href"] == "bar")
+        """
+        # check first attribute check for generate more stable expr
+        # if has_attr exists - skip else add it
+        for expr in self.stack:
+            if (
+                expr.kind == FilterDocHasAttr.kind
+                and key in expr.kwargs["keys"]
+            ):
+                break
+        else:
+            self.has_attr(key)
+        self._add(FilterDocAttrEqual(kwargs={"key": key, "values": values}))
+        return self
+
+    def attr_starts(self, key: str, *values: str) -> Self:
+        """check if element attribure starts by value
+
+        multiple values converts to logical OR
+
+        pseudocode example:
+
+            FE().attr_eq("href", "http") -> element.hasAttribute("href") && element["href"].starts("http")
+            FE().attr_eq("href", "foo", "bar") -> element.hasAttribute("href") && (element["href"].starts("foo") || element["href"].starts("bar"))
+        """
+        for expr in self.stack:
+            if (
+                expr.kind == FilterDocHasAttr.kind
+                and key in expr.kwargs["keys"]
+            ):
+                break
+        else:
+            self.has_attr(key)
+        self._add(FilterDocAttrStarts(kwargs={"key": key, "values": values}))
+        return self
+
+    def attr_ends(self, key: str, *values: str) -> Self:
+        """check if element attribure ends by value
+
+        multiple values converts to logical OR
+
+        pseudocode example:
+
+            FE().attr_eq("href", "/api") -> element.hasAttribute("href") && element["href"].ends("/api")
+            FE().attr_eq("href", "foo", "bar") -> element.hasAttribute("href") && (element["href"].ends("foo") || element["href"].ends("bar"))
+        """
+        for expr in self.stack:
+            if (
+                expr.kind == FilterDocHasAttr.kind
+                and key in expr.kwargs["keys"]
+            ):
+                break
+        else:
+            self.has_attr(key)
+        self._add(FilterDocAttrEnds(kwargs={"key": key, "values": values}))
+        return self
+
+    def attr_contains(self, key: str, *values: str) -> Self:
+        """check if element attribure contains by value
+
+        multiple values converts to logical OR
+
+        pseudocode example:
+
+            FE().attr_eq("href", "user=") -> element.hasAttribute("href") && "user=" in element["href"]
+            FE().attr_eq("href", "foo", "bar") -> element.hasAttribute("href") && ("foo" in element["href"] || "bar" in element["href"])
+        """
+        for expr in self.stack:
+            if (
+                expr.kind == FilterDocHasAttr.kind
+                and key in expr.kwargs["keys"]
+            ):
+                break
+        else:
+            self.has_attr(key)
+        self._add(FilterDocAttrContains(kwargs={"key": key, "values": values}))
+        return self
+
+    def attr_re(
+        self, key: str, pattern: str | Pattern[str], ignore_case: bool = False
+    ) -> Self:
+        """check if element attribure matched by regex
+
+        multiple values converts to logical OR
+
+        pseudocode example:
+
+            FE().attr_eq("href", "\d+") -> element.hasAttribute("href") && element["href"].match(\d+)
+            FE().attr_eq("href", "foo", "bar") -> element.hasAttribute("href") && (element["href"].match("foo") || element["href"].match("foo"))
+        """
+        if not isinstance(pattern, str):
+            ignore_case = is_ignore_case_regex(pattern)  # type: ignore
+
+        pattern = unverbosify_regex(pattern)  # type: ignore
+        result = analyze_re_expression(pattern, allow_empty_groups=True)
+        if not result:
+            LOGGER.warning(result.msg)
+        for expr in self.stack:
+            if (
+                expr.kind == FilterDocHasAttr.kind
+                and key in expr.kwargs["keys"]
+            ):
+                break
+        else:
+            self.has_attr(key)
+        self._add(
+            FilterDocAttrRegex(
+                kwargs={
+                    "key": key,
+                    "pattern": pattern,
+                    "ignore_case": ignore_case,
+                }
+            )
+        )
+        return self
+
+    def and_(self, filter_expr: "DocumentElementsFilter") -> Self:
+        if self.stack[0].kind in (FilterAnd.kind, FilterOr.kind):
+            LOGGER.warning(
+                "logic AND: first node is `%s`", self.stack[0].kind.name
+            )
+        tmp_stack = filter_expr.stack.copy()
+        self._add(FilterAnd(body=tmp_stack))
+        return self
+
+    def or_(self, filter_expr: "DocumentElementsFilter") -> Self:
+        if self.stack[0].kind in (FilterAnd.kind, FilterOr.kind):
+            LOGGER.warning(
+                "logic AND: first node is `%s`", self.stack[0].kind.name
+            )
+        tmp_stack = filter_expr.stack.copy()
+        self._add(FilterOr(body=tmp_stack))
+        return self
+
+    def not_(self, filter_expr: "DocumentElementsFilter"):
+        tmp_stack = filter_expr.stack.copy()
+        self._add(FilterNot(body=tmp_stack))
+        return self
+
+    def __or__(
+        self, other: "DocumentElementsFilter"
+    ) -> "DocumentElementsFilter":
+        """syntax sugar F().or_(expr)"""
+        new_filter = DocumentElementsFilter()
+        new_filter.stack.extend(self.stack)
+        return new_filter.or_(other)
+
+    def __and__(
+        self, other: "DocumentElementsFilter"
+    ) -> "DocumentElementsFilter":
+        """syntax sugar F().and_(expr)"""
+        new_filter = DocumentElementsFilter()
+        new_filter.stack.extend(self.stack)
+        return new_filter.or_(other)
+
+    def __invert__(self) -> "DocumentElementsFilter":
+        """syntax sugar F().not_(expr)"""
+        new_filter = DocumentElementsFilter()
+        new_filter.stack.extend(self.stack)
+        return DocumentElementsFilter().not_(new_filter)

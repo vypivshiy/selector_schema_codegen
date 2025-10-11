@@ -223,12 +223,15 @@ class TokenType(IntEnum):
     # bool
     TO_BOOL = auto()
 
-    # FILTER
+    # FILTER (LIST_STRING)
     EXPR_FILTER = auto()
 
+    # reused in
+    # EXPR_DOC_FILTER
     FILTER_OR = auto()
     FILTER_AND = auto()
     FILTER_NOT = auto()
+
     # FILTER EXPR (STR)
     FILTER_STR_IN = auto()
     FILTER_STR_STARTS = auto()
@@ -244,6 +247,24 @@ class TokenType(IntEnum):
 
     FILTER_EQ = auto()
     FILTER_NE = auto()
+
+    # FILTER (LIST_DOCUMENT)
+    EXPR_DOC_FILTER = auto()
+
+    FILTER_DOC_CSS = auto()
+    FILTER_DOC_XPATH = auto()
+    FILTER_DOC_HAS_TEXT = auto()
+    FILTER_DOC_HAS_RAW = auto()
+    FILTER_DOC_HAS_ATTR = auto()
+
+    FILTER_DOC_ATTR_EQ = auto()
+    FILTER_DOC_ATTR_STARTS = auto()
+    FILTER_DOC_ATTR_ENDS = auto()
+    FILTER_DOC_ATTR_CONTAINS = auto()
+    FILTER_DOC_ATTR_RE_MATCH = auto()
+
+    FILTER_DOC_IS_RE_TEXT = auto()
+    FILTER_DOC_IS_RE_RAW = auto()
 
 
 # collections of tokens (for static chekcks, etc)

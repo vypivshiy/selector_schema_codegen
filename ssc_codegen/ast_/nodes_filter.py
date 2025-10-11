@@ -12,24 +12,26 @@ from ssc_codegen.tokens import TokenType, VariableType
 @dataclass(kw_only=True)
 class FilterOr(BaseAstNode[T_EMPTY_KWARGS, tuple]):
     kind: ClassVar[TokenType] = TokenType.FILTER_OR
-    accept_type: VariableType = VariableType.STRING
-    ret_type: VariableType = VariableType.STRING
+    # cast for reuse in Elements filters
+    # real accept: VariableType.STRING, VariableType.DOCUMENT
+    accept_type: VariableType = VariableType.ANY
+    ret_type: VariableType = VariableType.ANY
     # TODO: typing body accept Filter-like nodes
 
 
 @dataclass(kw_only=True)
 class FilterAnd(BaseAstNode[T_EMPTY_KWARGS, tuple]):
     kind: ClassVar[TokenType] = TokenType.FILTER_AND
-    accept_type: VariableType = VariableType.STRING
-    ret_type: VariableType = VariableType.STRING
+    accept_type: VariableType = VariableType.ANY
+    ret_type: VariableType = VariableType.ANY
     # TODO: typing body accept Filter-like nodes
 
 
 @dataclass(kw_only=True)
 class FilterNot(BaseAstNode[T_EMPTY_KWARGS, tuple]):
     kind: ClassVar[TokenType] = TokenType.FILTER_NOT
-    accept_type: VariableType = VariableType.STRING
-    ret_type: VariableType = VariableType.STRING
+    accept_type: VariableType = VariableType.ANY
+    ret_type: VariableType = VariableType.ANY
     # TODO: typing body accept Filter-like nodes
 
 
@@ -149,3 +151,135 @@ class ExprFilter(BaseAstNode[T_EMPTY_KWARGS, tuple]):
     accept_type: VariableType = VariableType.LIST_STRING
     ret_type: VariableType = VariableType.LIST_STRING
     # TODO: typing body accept Filter-like nodes
+
+
+# Elements filters
+@dataclass(kw_only=True)
+class ExprDocumentFilter(BaseAstNode[T_EMPTY_KWARGS, tuple]):
+    kind: ClassVar[TokenType] = TokenType.EXPR_DOC_FILTER
+    accept_type: VariableType = VariableType.LIST_DOCUMENT
+    ret_type: VariableType = VariableType.LIST_DOCUMENT
+
+
+KW_FILTER_CSS_OR_XPATH = TypedDict("KW_FILTER_CSS", {"query": str})
+ARGS_FILTER_CSS_OR_XPATH = tuple[str]
+
+
+@dataclass(kw_only=True)
+class FilterDocCss(
+    BaseAstNode[KW_FILTER_CSS_OR_XPATH, ARGS_FILTER_CSS_OR_XPATH]
+):
+    kind: ClassVar[TokenType] = TokenType.FILTER_DOC_CSS
+    accept_type: VariableType = VariableType.DOCUMENT
+    ret_type: VariableType = VariableType.DOCUMENT
+
+
+@dataclass(kw_only=True)
+class FilterDocXpath(
+    BaseAstNode[KW_FILTER_CSS_OR_XPATH, ARGS_FILTER_CSS_OR_XPATH]
+):
+    kind: ClassVar[TokenType] = TokenType.FILTER_DOC_XPATH
+    accept_type: VariableType = VariableType.DOCUMENT
+    ret_type: VariableType = VariableType.DOCUMENT
+
+
+KW_FILTER_HAS_TEXT = TypedDict(
+    "KW_FILTER_HAS_TEXT", {"values": tuple[str, ...]}
+)
+ARGS_FILTER_HAS_TEXT = tuple[tuple[str, ...]]
+
+
+@dataclass(kw_only=True)
+class FilterDocHasText(BaseAstNode[KW_FILTER_HAS_TEXT, ARGS_FILTER_HAS_TEXT]):
+    kind: ClassVar[TokenType] = TokenType.FILTER_DOC_HAS_TEXT
+    accept_type: VariableType = VariableType.DOCUMENT
+    ret_type: VariableType = VariableType.DOCUMENT
+
+
+@dataclass(kw_only=True)
+class FilterDocHasRaw(BaseAstNode[KW_FILTER_HAS_TEXT, ARGS_FILTER_HAS_TEXT]):
+    kind: ClassVar[TokenType] = TokenType.FILTER_DOC_HAS_RAW
+    accept_type: VariableType = VariableType.DOCUMENT
+    ret_type: VariableType = VariableType.DOCUMENT
+
+
+KW_FILTER_HAS_ATTR = TypedDict("KW_FILTER_HAS_ATTR", {"keys": tuple[str, ...]})
+ARGS_FILTER_HAS_ATTR = tuple[tuple[str, ...]]
+
+
+@dataclass(kw_only=True)
+class FilterDocHasAttr(BaseAstNode[KW_FILTER_HAS_ATTR, ARGS_FILTER_HAS_ATTR]):
+    kind: ClassVar[TokenType] = TokenType.FILTER_DOC_HAS_ATTR
+    accept_type: VariableType = VariableType.DOCUMENT
+    ret_type: VariableType = VariableType.DOCUMENT
+
+
+KW_FILTER_ATTR = TypedDict(
+    "KW_FILTER_ATTR", {"key": str, "values": tuple[str, ...]}
+)
+ARGS_FILTER_ATTR = tuple[str, tuple[str, ...]]
+
+
+@dataclass(kw_only=True)
+class FilterDocAttrEqual(BaseAstNode[KW_FILTER_ATTR, ARGS_FILTER_ATTR]):
+    kind: ClassVar[TokenType] = TokenType.FILTER_DOC_ATTR_EQ
+    accept_type: VariableType = VariableType.DOCUMENT
+    ret_type: VariableType = VariableType.DOCUMENT
+
+
+@dataclass(kw_only=True)
+class FilterDocAttrStarts(BaseAstNode[KW_FILTER_ATTR, ARGS_FILTER_ATTR]):
+    kind: ClassVar[TokenType] = TokenType.FILTER_DOC_ATTR_STARTS
+    accept_type: VariableType = VariableType.DOCUMENT
+    ret_type: VariableType = VariableType.DOCUMENT
+
+
+@dataclass(kw_only=True)
+class FilterDocAttrEnds(BaseAstNode[KW_FILTER_ATTR, ARGS_FILTER_ATTR]):
+    kind: ClassVar[TokenType] = TokenType.FILTER_DOC_ATTR_ENDS
+    accept_type: VariableType = VariableType.DOCUMENT
+    ret_type: VariableType = VariableType.DOCUMENT
+
+
+@dataclass(kw_only=True)
+class FilterDocAttrContains(BaseAstNode[KW_FILTER_ATTR, ARGS_FILTER_ATTR]):
+    kind: ClassVar[TokenType] = TokenType.FILTER_DOC_ATTR_CONTAINS
+    accept_type: VariableType = VariableType.DOCUMENT
+    ret_type: VariableType = VariableType.DOCUMENT
+
+
+KW_FILTER_ATTR_RE = TypedDict(
+    "KW_FILTER_ATTR", {"key": str, "pattern": str, "ignore_case": bool}
+)
+ARGS_FILTER_ATTR_RE = tuple[str, str, bool]
+
+
+@dataclass(kw_only=True)
+class FilterDocAttrRegex(BaseAstNode[KW_FILTER_ATTR_RE, ARGS_FILTER_ATTR_RE]):
+    kind: ClassVar[TokenType] = TokenType.FILTER_DOC_ATTR_RE_MATCH
+    accept_type: VariableType = VariableType.DOCUMENT
+    ret_type: VariableType = VariableType.DOCUMENT
+
+
+KW_FILTER_IS_REGEX = TypedDict(
+    "KW_FILTER_IS_REGEX", {"pattern": str, "ignore_case": bool}
+)
+ARGS_FILTER_IS_REGEX = tuple[str, bool]
+
+
+@dataclass(kw_only=True)
+class FilterDocIsRegexText(
+    BaseAstNode[KW_FILTER_IS_REGEX, ARGS_FILTER_IS_REGEX]
+):
+    kind: ClassVar[TokenType] = TokenType.FILTER_DOC_IS_RE_TEXT
+    accept_type: VariableType = VariableType.DOCUMENT
+    ret_type: VariableType = VariableType.DOCUMENT
+
+
+@dataclass(kw_only=True)
+class FilterDocIsRegexRaw(
+    BaseAstNode[KW_FILTER_IS_REGEX, ARGS_FILTER_IS_REGEX]
+):
+    kind: ClassVar[TokenType] = TokenType.FILTER_DOC_IS_RE_RAW
+    accept_type: VariableType = VariableType.DOCUMENT
+    ret_type: VariableType = VariableType.DOCUMENT
