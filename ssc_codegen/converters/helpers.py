@@ -199,7 +199,7 @@ def _go_literal_expr_attr_call(node: ExprClassVar, sep: str = ".") -> str:
         raise TypeError("not found literal hook")
     cls_name, field_name = node.literal_ref_name
     # go classvars assign by Cfg{ClsName}.{FieldName}
-    return sep.join(["Cfg" + cls_name, to_upper_camel_case(field_name)])
+    return sep.join([cls_name + "Cfg", to_upper_camel_case(field_name)])
 
 
 def go_get_classvar_hook_or_value(
@@ -208,7 +208,7 @@ def go_get_classvar_hook_or_value(
     cb_literal_cast: Callable[[ExprClassVar], str] = _go_literal_expr_attr_call,
     cb_value_cast: Callable[[Any], str] | None = _go_default_cast_t,
 ) -> Any:
-    return go_get_classvar_hook_or_value(
+    return get_classvar_hook_or_value(
         node, key, cb_literal_cast=cb_literal_cast, cb_value_cast=cb_value_cast
     )
 
