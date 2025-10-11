@@ -113,6 +113,21 @@ from ssc_codegen.ast_.nodes_core import (
     TypeDef,
     TypeDefField,
 )
+from ssc_codegen.ast_.nodes_filter import (
+    ExprDocumentFilter,
+    FilterDocAttrContains,
+    FilterDocAttrEnds,
+    FilterDocAttrEqual,
+    FilterDocAttrRegex,
+    FilterDocAttrStarts,
+    FilterDocCss,
+    FilterDocHasAttr,
+    FilterDocHasRaw,
+    FilterDocHasText,
+    FilterDocIsRegexRaw,
+    FilterDocIsRegexText,
+    FilterDocXpath,
+)
 from ssc_codegen.ast_.nodes_selectors import (
     ExprCssElementRemove,
     ExprMapAttrs,
@@ -1255,3 +1270,170 @@ def pre_jsonify_dynamic(node: ExprJsonifyDynamic) -> str:
     expr = "".join(f"[{i}]" for i in jsonify_query_parse(query))
 
     return f"let {nxt} = JSON.parse({prv}){expr};"
+
+
+# document filters
+
+
+@CONVERTER(ExprDocumentFilter.kind, post_callback=lambda _: ");")
+def pre_expr_doc_filter(node: ExprDocumentFilter) -> str:
+    prv, nxt = prev_next_var(node)
+    return f"let {nxt} = {prv}.filter(i => "
+
+
+@CONVERTER(FilterDocCss.kind)
+def pre_doc_filter_css(node: FilterDocCss) -> str:
+    query = node.kwargs["query"]
+    expr = f"i.querySelector({query!r}) !== null"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return "&& " + expr
+    return expr
+
+
+@CONVERTER(FilterDocHasAttr.kind)
+def pre_doc_filter_has_attr(node: FilterDocHasAttr) -> str:
+    keys = node.kwargs["keys"]
+    if len(keys) == 1:
+        expr = f"i.hasAttribute({keys[0]!r})"
+    else:
+        val_arr = "[" + ", ".join(f"{k!r}" for k in keys) + "]"
+        expr = f"{val_arr}.some(a => i.hasAttribute(a))"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return "&& " + expr
+    return expr
+
+
+@CONVERTER(FilterDocAttrEqual.kind)
+def pre_doc_filter_attr_eq(node: FilterDocAttrEqual) -> str:
+    key, values = node.unpack_args()
+    if len(values) == 1:
+        expr = f"i.getAttribute({key!r}) === {values[0]!r}"
+    else:
+        val_arr = "[" + ", ".join(f"{v!r}" for v in values) + "]"
+        expr = f"{val_arr}.some(v => i.getAttribute({key!r}) === v)"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return "&& " + expr
+    return expr
+
+
+@CONVERTER(FilterDocAttrContains.kind)
+def pre_doc_filter_attr_contains(node: FilterDocAttrContains) -> str:
+    key, values = node.unpack_args()
+    if len(values) == 1:
+        expr = f"(i.getAttribute({key!r}) || '').includes({values[0]!r})"
+    else:
+        val_arr = "[" + ", ".join(f"{v!r}" for v in values) + "]"
+        expr = (
+            f"{val_arr}.some(v => (i.getAttribute({key!r}) || '').includes(v))"
+        )
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return "&& " + expr
+    return expr
+
+
+@CONVERTER(FilterDocAttrStarts.kind)
+def pre_doc_filter_attr_starts(node: FilterDocAttrStarts) -> str:
+    key, values = node.unpack_args()
+    if len(values) == 1:
+        expr = f"(i.getAttribute({key!r}) || '').startsWith({values[0]!r})"
+    else:
+        val_arr = "[" + ", ".join(f"{v!r}" for v in values) + "]"
+        expr = f"{val_arr}.some(val => (i.getAttribute({key!r}) || '').startsWith(val))"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return "&& " + expr
+    return expr
+
+
+@CONVERTER(FilterDocAttrEnds.kind)
+def pre_doc_filter_attr_ends(node: FilterDocAttrEnds) -> str:
+    key, values = node.unpack_args()
+    if len(values) == 1:
+        expr = f"(i.getAttribute({key!r}) || '').endsWith({values[0]!r})"
+    else:
+        val_arr = "[" + ", ".join(f"{v!r}" for v in values) + "]"
+        expr = f"{val_arr}.some(val => (i.getAttribute({key!r}) || '').endsWith(val))"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return "&& " + expr
+    return expr
+
+
+@CONVERTER(FilterDocAttrRegex.kind)
+def pre_doc_filter_attr_re(node: FilterDocAttrRegex) -> str:
+    key, pattern, ignore_case = node.unpack_args()
+    pattern_js = to_js_regexp(pattern, ignore_case, is_global=False)
+
+    attr_expr = f"(i.getAttribute({key!r}) || '')"
+    expr = f"(new RegExp({pattern_js})).test({attr_expr})"
+
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return "&& " + expr
+    return expr
+
+
+@CONVERTER(FilterDocIsRegexText.kind)
+def pre_doc_filter_is_regex_text(node: FilterDocIsRegexText) -> str:
+    pattern, ignore_case = node.unpack_args()
+
+    pattern_js = to_js_regexp(pattern, ignore_case, is_global=False)
+    expr = f"(new RegExp({pattern_js})).test(i.textContent || '')"
+
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return "&& " + expr
+    return expr
+
+
+@CONVERTER(FilterDocIsRegexRaw.kind)
+def pre_doc_filter_is_regex_raw(node: FilterDocIsRegexRaw) -> str:
+    pattern, ignore_case = node.unpack_args()
+
+    pattern_js = to_js_regexp(pattern, ignore_case, is_global=False)
+    expr = f"(new RegExp({pattern_js})).test(i.outerHTML || '')"
+
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return "&& " + expr
+    return expr
+
+
+@CONVERTER(FilterDocHasText.kind)
+def pre_doc_filter_has_text(node: FilterDocHasText) -> str:
+    values = node.kwargs["values"]
+
+    text_expr = "(i.textContent || '')"
+
+    if len(values) == 1:
+        expr = f"{text_expr}.includes({values[0]!r})"
+    else:
+        val_arr = "[" + ", ".join(f"{v!r}" for v in values) + "]"
+        expr = f"{val_arr}.some(v => {text_expr}.includes(v))"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return f" && {expr}"
+    return expr
+
+
+@CONVERTER(FilterDocHasRaw.kind)
+def pre_doc_filter_has_raw(node: FilterDocHasRaw) -> str:
+    values = node.kwargs["values"]
+
+    html_expr = "(i.outerHTML || '')"
+    if len(values) == 1:
+        expr = f"{html_expr}.includes({values[0]!r})"
+    else:
+        val_arr = "[" + ", ".join(f"{v!r}" for v in values) + "]"
+        expr = f"{val_arr}.some(v => {html_expr}.includes(v))"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return f" && {expr}"
+    return expr
+
+
+@CONVERTER(FilterDocXpath.kind)
+def pre_xpath_filter(node: FilterDocXpath) -> str:
+    query = node.kwargs["query"]
+    expr = f"""
+    (() => {{
+        const result = document.evaluate({query!r}, i, null, XPathResult.BOOLEAN_TYPE, null);
+        return result.booleanValue;
+    }})()
+    """.strip()
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return f" && {expr}"
+    return expr
