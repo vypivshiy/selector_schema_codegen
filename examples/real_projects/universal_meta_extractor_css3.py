@@ -4,10 +4,13 @@ all implementation for CSS3 selectors universal opengraph and twitter cards meta
 
 from ssc_codegen import ItemSchema, DictSchema, D, N, FE
 
-FILTER_OG_OTHER = (
-    FE().has_attr("property").attr_starts("property", "og") &
-    ~(
-        FE().attr_eq("property", "twitter:card", "twitter:title", "twitter:description", "twitter:image")
+FILTER_OG_OTHER = FE().has_attr("property").attr_starts("property", "og") & ~(
+    FE().attr_eq(
+        "property",
+        "twitter:card",
+        "twitter:title",
+        "twitter:description",
+        "twitter:image",
     )
 )
 """
@@ -21,15 +24,18 @@ meta[property^="og:"][content]
 [property="og:image"]
 )
 """
+# `attr_eq()`, `attr_starts()`, `attr_ends()`, `attr_contains()`, `attr_re()`
+# automatically add previos check `has_attr(<key>)`
+# for increase generated code stabuility and decrease boilerplate DSL code
+assert FE().has_attr("property").attr_starts("property", "twitter:") == FE().attr_starts("property", "twitter:")
 
-FILTER_TWITTER_OTHER = (
-    FE().has_attr("property").attr_starts("property", "twitter:") &
-    ~(
-        FE().attr_eq("twitter:card", "twitter:title", "twitter:description", "twitter:image")
+FILTER_TWITTER_OTHER = FE().attr_starts("property", "twitter:") & ~(
+    FE().attr_eq(
+        "twitter:card", "twitter:title", "twitter:description", "twitter:image"
     )
-    | FE().has_attr("name").attr_starts("name", "twitter:") &
-    ~(
-        FE().attr_eq("twitter:card", "twitter:title", "twitter:description", "twitter:image")
+) | FE().attr_starts("name", "twitter:") & ~(
+    FE().attr_eq(
+        "twitter:card", "twitter:title", "twitter:description", "twitter:image"
     )
 )
 """
@@ -49,6 +55,7 @@ meta[name^="twitter:"][content]:not(
 )
 """
 
+
 class MetaBase(ItemSchema):
     """standart meta tags extractor"""
 
@@ -66,7 +73,9 @@ class MetaBase(ItemSchema):
 
 
 class MetaOpenGraphOther(DictSchema):
-    __SPLIT_DOC__ = D().css_all("meta[property][content]").filter(FILTER_OG_OTHER)
+    __SPLIT_DOC__ = (
+        D().css_all("meta[property][content]").filter(FILTER_OG_OTHER)
+    )
 
     __KEY__ = D().attr("property")
     __VALUE__ = D().attr("content")
@@ -76,7 +85,9 @@ class MetaOpenGraph(ItemSchema):
     """OpenGraph (facebook/meta) metatag specs"""
 
     title = D(None).css('meta[property="og:title"][content]::attr(content)')
-    description = D(None).css('meta[property="og:description"][content]::attr(content)')
+    description = D(None).css(
+        'meta[property="og:description"][content]::attr(content)'
+    )
     url = D(None).css('meta[property="og:url"][content]::attr(content)')
     image = D(None).css('meta[property="og:image"][content]::attr(content)')
     others = N().sub_parser(MetaOpenGraphOther)
@@ -84,7 +95,7 @@ class MetaOpenGraph(ItemSchema):
 
 class MetaTwitterOther(DictSchema):
     __SPLIT_DOC__ = D().css_all(FILTER_TWITTER_OTHER)
-    # maybe contains "name" or "property" attribute 
+    # maybe contains "name" or "property" attribute
     __KEY__ = D().attr("property", "name").first()
     __VALUE__ = D().attr("content")
 
@@ -109,9 +120,10 @@ class MetaTwitter(ItemSchema):
 
 class UniversalMetaExtractor(ItemSchema):
     """entrypoint parser
-    
+
     accept any HTML page with <meta> tags
     """
+
     title = D(None).css("title::text")
 
     canonical = D(None).css('link[rel="canonical"][href]::attr(href)')
