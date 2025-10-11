@@ -29,7 +29,7 @@ Current support converters
 | ...                                      | parsel                                 | Y     | Y    | N    | ...                                   | ...                  |
 | ...                                      | selectolax (lexbor)                    | N     | Y    | N    | ...                                   | ...                  |
 | ...                                      | lxml                                   | Y     | Y    | N    | ...                                   | ...                  |
-| js (ES6)`2`                              | pure (firefox/chrome extension/nodejs) | Y     | Y    | Y    | JSdoc                                 | prettier             |
+| js (ES6)`2`                              | pure (firefox/chrome extension/nodejs) | Y     | Y    | Y    | JSDoc                                 | prettier             |
 | go (1.10+) **(UNSTABLE)**                | goquery, gjson (`4`)                   | N     | Y    | N    | struct(+json anchors), array, map     | gofmt                |
 | lua (5.2+), luajit(2+) **(UNSTABLE)**`5` | lua-htmlparser, lrexlib(opt), dkjson   | N     | Y    | N    | EmmyLua                               | LuaFormatter         |
 
