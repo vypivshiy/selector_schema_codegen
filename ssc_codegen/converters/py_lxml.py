@@ -19,6 +19,21 @@ from ssc_codegen.ast_ import (
     ExprListHasAttr,
     ExprHasAttr,
 )
+from ssc_codegen.ast_.nodes_filter import (
+    ExprDocumentFilter,
+    FilterDocAttrContains,
+    FilterDocAttrEnds,
+    FilterDocAttrEqual,
+    FilterDocAttrRegex,
+    FilterDocAttrStarts,
+    FilterDocCss,
+    FilterDocHasAttr,
+    FilterDocHasRaw,
+    FilterDocHasText,
+    FilterDocIsRegexRaw,
+    FilterDocIsRegexText,
+    FilterDocXpath,
+)
 from ssc_codegen.ast_.nodes_selectors import (
     ExprCssElementRemove,
     ExprMapAttrs,
@@ -27,10 +42,13 @@ from ssc_codegen.ast_.nodes_selectors import (
 )
 from ssc_codegen.converters.helpers import (
     get_classvar_hook_or_value,
+    is_first_node_cond,
+    is_prev_node_atomic_cond,
     prev_next_var,
     have_default_expr,
     is_last_var_no_ret,
     py_get_classvar_hook_or_value,
+    py_regex_flags,
 )
 from ssc_codegen.converters.py_base import (
     BasePyCodeConverter,
@@ -301,3 +319,165 @@ def pre_xpath_remove(node: ExprXpathElementRemove) -> str:
         + indent
         + f"{nxt} = {prv}"
     )
+
+
+# document filters
+
+
+@CONVERTER(ExprDocumentFilter.kind, post_callback=lambda _: "]")
+def pre_expr_doc_filter(node: ExprDocumentFilter) -> str:
+    indent = (
+        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
+    )
+    prv, nxt = prev_next_var(node)
+    return indent + f"{nxt} = [e for e in {prv} if "
+
+
+@CONVERTER(FilterDocCss.kind)
+def pre_doc_filter_css(node: FilterDocCss) -> str:
+    query = node.kwargs["query"]
+    expr = f"bool(etree.CSSSelector({query!r})(e))"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return "and " + expr
+    return expr
+
+
+@CONVERTER(FilterDocHasAttr.kind)
+def pre_doc_filter_has_attr(node: FilterDocHasAttr) -> str:
+    keys = node.kwargs["keys"]
+    if len(keys) == 1:
+        expr = f"{keys[0]!r} in e.attrib"
+    else:
+        expr = f"any(i in e.attrib for i in {keys})"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return "and " + expr
+    return expr
+
+
+@CONVERTER(FilterDocAttrEqual.kind)
+def pre_doc_filter_attr_eq(node: FilterDocAttrEqual) -> str:
+    key, values = node.unpack_args()
+    if len(values) == 1:
+        expr = f"e.attrib[{key!r}] == {values[0]!r}"
+    else:
+        expr = f"e.attrib[{key!r}] in {values}"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return "and " + expr
+    return expr
+
+
+@CONVERTER(FilterDocAttrContains.kind)
+def pre_doc_filter_attr_contains(node: FilterDocAttrContains) -> str:
+    key, values = node.unpack_args()
+    if len(values) == 1:
+        expr = f"{values[0]!r} in e.attrib[{key!r}]"
+    else:
+        expr = f"any(i in e.attrib[{key!r}] for i in {values})"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return "and " + expr
+    return expr
+
+
+@CONVERTER(FilterDocAttrStarts.kind)
+def pre_doc_filter_attr_starts(node: FilterDocAttrContains) -> str:
+    key, values = node.unpack_args()
+    if len(values) == 1:
+        expr = f"e.attrib[{key!r}].startswith({values[0]!r})"
+    else:
+        # str.startswith() arg allow tuple[str, ...]
+        expr = f"e.attrib[{key!r}].startswith({values})"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return "and " + expr
+    return expr
+
+
+@CONVERTER(FilterDocAttrEnds.kind)
+def pre_doc_filter_attr_ends(node: FilterDocAttrContains) -> str:
+    key, values = node.unpack_args()
+    if len(values) == 1:
+        expr = f"e.attrib[{key!r}].endswith({values[0]!r})"
+    else:
+        # str.endswith() arg allow tuple[str, ...]
+        expr = f"e.attrib[{key!r}].endswith({values})"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return "and " + expr
+    return expr
+
+
+@CONVERTER(FilterDocAttrRegex.kind)
+def pre_doc_filter_attr_re(node: FilterDocAttrRegex) -> str:
+    key, pattern, ignore_case = node.unpack_args()
+    flags = py_regex_flags(ignore_case)
+    if flags:
+        expr = f"re.search({pattern!r}, e.attrib[{key!r}], {flags})"
+    else:
+        expr = f"re.search({pattern!r}, e.attrib[{key!r}], ''))"
+    expr = f"bool({expr})"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return "and " + expr
+    return expr
+
+
+@CONVERTER(FilterDocIsRegexText.kind)
+def pre_doc_filter_is_regex_text(node: FilterDocIsRegexText) -> str:
+    pattern, ignore_case = node.unpack_args()
+
+    flags = py_regex_flags(ignore_case)
+    if flags:
+        expr = f"re.search({pattern!r}, ''.join(e.itertext()), {flags})"
+    else:
+        expr = f"re.search({pattern!r}, ''.join(e.itertext()))"
+    expr = f"bool({expr})"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return "and " + expr
+    return expr
+
+
+@CONVERTER(FilterDocIsRegexRaw.kind)
+def pre_doc_filter_is_regex_raw(node: FilterDocIsRegexText) -> str:
+    pattern, ignore_case = node.unpack_args()
+
+    flags = py_regex_flags(ignore_case)
+    if flags:
+        expr = f"re.search({pattern!r}, etree.tostring(e, encoding='unicode'), {flags})"
+    else:
+        expr = f"re.search({pattern!r}, etree.tostring(e, encoding='unicode'))"
+    expr = f"bool({expr})"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return "and " + expr
+    return expr
+
+
+@CONVERTER(FilterDocHasText.kind)
+def pre_doc_filter_has_text(node: FilterDocHasText) -> str:
+    values = node.kwargs["values"]
+    if len(values) == 1:
+        expr = f"{values[0]!r} in ''.join(e.itertext())"
+    else:
+        expr = f"any(i in ''.join(e.itertext()) for i in {values})"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return "and " + expr
+    return expr
+
+
+@CONVERTER(FilterDocHasRaw.kind)
+def pre_doc_filter_has_raw(node: FilterDocHasText) -> str:
+    values = node.kwargs["values"]
+    if len(values) == 1:
+        expr = f"{values[0]!r} in etree.tostring(e, encoding='unicode')"
+    else:
+        expr = (
+            f"any(i in etree.tostring(e, encoding='unicode') for i in {values})"
+        )
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return "and " + expr
+    return expr
+
+
+@CONVERTER(FilterDocXpath.kind)
+def pre_xpath_filter(node: FilterDocXpath) -> str:
+    query = node.kwargs["query"]
+    expr = f"bool(e.xpath({query!r}))"
+    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
+        return "and " + expr
+    return expr
