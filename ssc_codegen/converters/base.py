@@ -277,6 +277,7 @@ class BaseCodeConverter:
 
             case (
                 TokenType.EXPR_FILTER
+                | TokenType.EXPR_DOC_FILTER
                 | TokenType.FILTER_OR
                 | TokenType.FILTER_AND
                 | TokenType.FILTER_NOT
