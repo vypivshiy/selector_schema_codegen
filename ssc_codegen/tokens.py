@@ -197,7 +197,6 @@ class TokenType(IntEnum):
 
     # ASSERT
     IS_EQUAL = auto()
-    IS_NOT_EQUAL = auto()
     IS_CONTAINS = auto()
     IS_CSS = auto()
     IS_XPATH = auto()
