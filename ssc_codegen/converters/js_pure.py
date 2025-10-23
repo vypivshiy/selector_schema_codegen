@@ -19,6 +19,7 @@ SPECIAL METHODS NOTATIONS:
 - __START_PARSE__: `parse`,
 """
 
+from operator import invert
 from typing import cast
 
 from ssc_codegen.ast_ import (
@@ -51,6 +52,7 @@ from ssc_codegen.ast_ import (
     ExprIndex,
     ExprListStringJoin,
     ExprIsEqual,
+    ExprIsNotEqual,
     ExprIsContains,
     ExprStringIsRegex,
     ExprToInt,
