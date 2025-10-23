@@ -218,11 +218,16 @@ def pre_is_css(node: ExprIsCss) -> str:
     prv, nxt = prev_next_var(node)
     query = py_get_classvar_hook_or_value(node, "query")
     msg = py_get_classvar_hook_or_value(node, "msg")
+    invert = node.kwargs["invert"]
 
-    expr = indent + f"assert etree.CSSSelector({query})({prv}), {msg}"
+    expr = f"etree.CSSSelector({query})({prv})"
+    if invert:
+        expr = f"not ({expr})"
+
+    expr = indent + f"assert {expr}, {msg}"
     if is_last_var_no_ret(node):
         return expr
-    return expr + "\n" + indent + f"{nxt} = {prv}"
+    return "\n".join([expr, indent + f"{nxt} = {prv}"])
 
 
 @CONVERTER(ExprIsXpath.kind)
@@ -233,11 +238,15 @@ def pre_is_xpath(node: ExprIsXpath) -> str:
     prv, nxt = prev_next_var(node)
     query = py_get_classvar_hook_or_value(node, "query")
     msg = py_get_classvar_hook_or_value(node, "msg")
+    invert = node.kwargs["invert"]
+    expr = f"{prv}.xpath({query})"
+    if invert:
+        expr = f"not {expr}"
 
-    expr = indent + f"assert {prv}.xpath({query}), {msg}"
+    expr = indent + f"assert {expr}, {msg}"
     if is_last_var_no_ret(node):
         return expr
-    return expr + "\n" + indent + f"{nxt} = {prv}"
+    return "\n".join([expr, indent + f"{nxt} = {prv}"])
 
 
 @CONVERTER(ExprHasAttr.kind)
@@ -249,11 +258,16 @@ def pre_has_attr(node: ExprHasAttr) -> str:
     key, msg = node.unpack_args()
     key = py_get_classvar_hook_or_value(node, "key")
     msg = py_get_classvar_hook_or_value(node, "msg")
+    invert = node.kwargs["invert"]
 
-    expr = indent + f"assert {prv}.attrib[{key}], {msg}"
+    expr = f"{prv}.attrib[{key}]"
+    if invert:
+        expr = f"not ({expr})"
+
+    expr = indent + f"assert {expr}, {msg}"
     if is_last_var_no_ret(node):
         return expr
-    return expr + "\n" + indent + f"{nxt} = {prv}"
+    return "\n".join(expr, indent + f"{nxt} = {prv}")
 
 
 @CONVERTER(ExprListHasAttr.kind)
@@ -264,11 +278,16 @@ def pre_list_has_attr(node: ExprListHasAttr) -> str:
     prv, nxt = prev_next_var(node)
     key = py_get_classvar_hook_or_value(node, "key")
     msg = py_get_classvar_hook_or_value(node, "msg")
+    invert = node.kwargs["invert"]
 
-    expr = indent + f"assert all(i.attrib[{key}] for i in {prv}), {msg}"
+    expr = f"all(i.attrib[{key}] for i in {prv})"
+    if invert:
+        expr = f"not ({expr})"
+
+    expr = indent + f"assert {expr}, {msg}"
     if is_last_var_no_ret(node):
         return expr
-    return expr + "\n" + indent + f"{nxt} = {prv}"
+    return "\n".join([expr, indent + f"{nxt} = {prv}"])
 
 
 @CONVERTER(ExprMapAttrs.kind)

@@ -213,11 +213,15 @@ def pre_is_css(node: ExprIsCss) -> str:
     prv, nxt = prev_next_var(node)
     query = py_get_classvar_hook_or_value(node, "query")
     msg = py_get_classvar_hook_or_value(node, "msg")
+    invert = node.kwargs["invert"]
+    expr = f"{prv}.select_one({query})"
+    if invert:
+        expr = f"not ({expr})"
 
-    expr = indent + f"assert {prv}.select_one({query}), {msg}"
+    expr = indent + f"assert {expr}, {msg}"
     if is_last_var_no_ret(node):
         return expr
-    return expr + "\n" + indent + f"{nxt} = {prv}"
+    return "\n".join([expr, indent + f"{nxt} = {prv}"])
 
 
 @CONVERTER(ExprHasAttr.kind)
@@ -228,11 +232,14 @@ def pre_has_attr(node: ExprHasAttr) -> str:
     prv, nxt = prev_next_var(node)
     key = py_get_classvar_hook_or_value(node, "key")
     msg = py_get_classvar_hook_or_value(node, "msg")
-
-    expr = indent + f"assert {prv}.get({key!r}, None), {msg}"
+    invert = node.kwargs["invert"]
+    expr = f"{prv}.get({key!r}, None)"
+    if invert:
+        expr = f"not ({expr})"
+    expr = indent + f"assert {expr}, {msg}"
     if is_last_var_no_ret(node):
         return expr
-    return expr + "\n" + indent + f"{nxt} = {prv}"
+    return "\n".join([expr, indent + f"{nxt} = {prv}"])
 
 
 @CONVERTER(ExprListHasAttr.kind)
@@ -243,10 +250,15 @@ def pre_list_has_attr(node: ExprListHasAttr) -> str:
     prv, nxt = prev_next_var(node)
     key = py_get_classvar_hook_or_value(node, "key")
     msg = py_get_classvar_hook_or_value(node, "msg")
-    expr = indent + f"assert all(i.get({key}, None) for i in {prv}), {msg}"
+    invert = node.kwargs["invert"]
+    expr = f"all(i.get({key}, None) for i in {prv})"
+    if invert:
+        expr = f"not {expr}"
+
+    expr = indent + f"assert {expr}, {msg}"
     if is_last_var_no_ret(node):
         return expr
-    return expr + "\n" + indent + f"{nxt} = {prv}"
+    return "\n".join([expr, indent + f"{nxt} = {prv}"])
 
 
 @CONVERTER(ExprMapAttrs.kind)

@@ -227,7 +227,15 @@ func sscAssertNotEqual[T comparable](v1, v2 T, msg string) error {
 }
 
 func sscAssertContains[S ~[]E, E comparable](v1 S, v2 E, msg string) error {
-    if !(slices.Contains(v1, v2)) {
+    if !(slices.Contains(v1, v2, msg)) {
+        return fmt.Errorf("%s", msg)
+    }
+    return nil
+}
+
+func sscAssertNotContains[S ~[]E, E comparable](v1 S, v2 E, msg string) error {
+    err := sscAssertContains(v1, v2, msg)
+    if err == nil {
         return fmt.Errorf("%s", msg)
     }
     return nil
@@ -237,6 +245,14 @@ func sscAssertRegex(v string, re *regexp.Regexp, msg string) error {
     if !re.MatchString(v) {
         return fmt.Errorf(msg)
     }
+    return nil
+}
+
+func sscNotAssertRegex(v string, re *regexp.Regexp, msg string) error {
+    err := sscAssertRegex(v, re, msg)
+    if err == nil {
+        return fmt.Errorf(msg)
+    } 
     return nil
 }
 
@@ -270,12 +286,29 @@ func sscAssertCss(v *goquery.Selection, query, msg string) error {
     return nil
 }
 
+func sscAssertNotCss(v *goquery.Selection, query, msg string) error {
+    err := sscAssertCss(v, query, msg)
+    if err == nil {
+        return fmt.Errorf(msg)
+    }
+    return nil
+}
+
 func sscAssertHasAttr(v *goquery.Selection, key, msg string) error {
     if _, ok := v.Attr(key); !ok {
         return fmt.Errorf(msg)
     }
     return nil
 }
+
+func sscAssertNotHasAttr(v *goquery.Selection, key, msg string) error {
+    err := sscAssertHasAttr(v, key, msg)
+    if err == nil {
+        return return fmt.Errorf(msg) 
+    }
+    return nil
+}
+
 
 func sscSliceStrUnique(v []string) []string {
     seen := make(map[string]bool, len(v))

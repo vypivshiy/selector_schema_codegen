@@ -56,7 +56,6 @@ from ssc_codegen.ast_ import (
     ExprIndex,
     ExprListStringJoin,
     ExprIsEqual,
-    ExprIsNotEqual,
     ExprIsContains,
     ExprStringIsRegex,
     ExprToInt,
@@ -807,21 +806,11 @@ def pre_is_equal(node: ExprIsEqual) -> str:
 
     item = lua_get_classvar_hook_or_value(node, "item")
     msg = lua_get_classvar_hook_or_value(node, "msg")
-
-    expr = f"assert({item} != {prv}, {msg}); "
-    if is_last_var_no_ret(node):
-        return expr
-    return expr + f"local {nxt} = {prv}; "
-
-
-@CONVERTER(ExprIsNotEqual.kind)
-def pre_is_not_equal(node: ExprIsNotEqual) -> str:
-    prv, nxt = prev_next_var(node)
-
-    item = lua_get_classvar_hook_or_value(node, "item")
-    msg = lua_get_classvar_hook_or_value(node, "msg")
-
-    expr = f"assert({item} == {prv}, {msg}); "
+    invert = node.kwargs["invert"]
+    expr = f"{item} != {prv}, {msg}"
+    if invert:
+        expr = f"not ({expr})"
+    expr = f"assert({expr}); "
     if is_last_var_no_ret(node):
         return expr
     return expr + f"local {nxt} = {prv}; "
@@ -832,8 +821,13 @@ def pre_is_contains(node: ExprIsContains) -> str:
     prv, nxt = prev_next_var(node)
     item = lua_get_classvar_hook_or_value(node, "item")
     msg = lua_get_classvar_hook_or_value(node, "msg")
+    invert = node.kwargs["invert"]
+
     # local function contains(arr, value)
-    expr = f"assert(contains({prv}, {item}), {msg}); "
+    expr = f"contains({prv}, {item}), {msg}"
+    if invert:
+        expr = f"(not {expr})"
+    expr = f"assert({expr}, {msg}); "
     if is_last_var_no_ret(node):
         return expr
     return expr + f"local {nxt} = {prv};"
@@ -844,6 +838,7 @@ def pre_is_regex(node: ExprStringIsRegex) -> str:
     prv, nxt = prev_next_var(node)
     pattern, ignore_case, msg = node.unpack_args()
     msg = lua_get_classvar_hook_or_value(node, "msg")
+    invert = node.kwargs["invert"]
 
     if node.classvar_hooks.get("pattern"):
         if not CONVERTER.USE_PCRE:
@@ -856,7 +851,11 @@ def pre_is_regex(node: ExprStringIsRegex) -> str:
             code = f"rex.match({prv}, {pattern}) ~= nil"
         else:
             code = py_regex_to_lua_pattern(pattern, prv, mode="re") + " ~= nil"
-    expr = f"assert({code} ~= nil, {msg}); "
+    expr = f"{code} ~= nil"
+    if invert:
+        expr = f"not ({expr})"
+
+    expr = f"assert({expr}, {msg}); "
     if is_last_var_no_ret(node):
         return expr
     return expr + f"local {nxt} = {prv};"
@@ -923,6 +922,7 @@ def pre_list_str_all_is_regex(node: ExprListStringAllRegex) -> str:
 
 @CONVERTER(ExprIsCss.kind)
 def pre_is_css(node: ExprIsCss) -> str:
+    # TODO: impl asset function for backport (by call anon func???)
     prv, nxt = prev_next_var(node)
     query = lua_get_classvar_hook_or_value(node, "query")
     msg = lua_get_classvar_hook_or_value(node, "msg")

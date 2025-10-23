@@ -51,7 +51,6 @@ from ssc_codegen.ast_ import (
     ExprIndex,
     ExprListStringJoin,
     ExprIsEqual,
-    ExprIsNotEqual,
     ExprIsContains,
     ExprStringIsRegex,
     ExprToInt,
@@ -756,21 +755,12 @@ def pre_is_equal(node: ExprIsEqual) -> str:
 
     item = js_get_classvar_hook_or_value(node, "item")
     msg = js_get_classvar_hook_or_value(node, "msg")
+    invert = node.kwargs["invert"]
+    expr = f"({item} != {prv})"
+    if invert:
+        expr = f"!{expr}"
 
-    expr = f"if ({item} != {prv}) throw new Error({msg});"
-    if is_last_var_no_ret(node):
-        return expr
-    return expr + f"let {nxt} = {prv};"
-
-
-@CONVERTER(ExprIsNotEqual.kind)
-def pre_is_not_equal(node: ExprIsNotEqual) -> str:
-    prv, nxt = prev_next_var(node)
-
-    item = js_get_classvar_hook_or_value(node, "item")
-    msg = js_get_classvar_hook_or_value(node, "msg")
-
-    expr = f"if ({item} == {prv}) throw new Error({msg});"
+    expr = f"if {expr} throw new Error({msg});"
     if is_last_var_no_ret(node):
         return expr
     return expr + f"let {nxt} = {prv};"
@@ -781,8 +771,12 @@ def pre_is_contains(node: ExprIsContains) -> str:
     prv, nxt = prev_next_var(node)
     item = js_get_classvar_hook_or_value(node, "item")
     msg = js_get_classvar_hook_or_value(node, "msg")
+    invert = node.kwargs["invert"]
 
-    expr = f"if (!({item} in {prv})) throw new Error({msg});"
+    expr = f"(!({item} in {prv}))"
+    if invert:
+        expr = "({item} in {prv})"
+    expr = f"if {expr} throw new Error({msg});"
     if is_last_var_no_ret(node):
         return expr
     return expr + f"let {nxt} = {prv};"
@@ -793,13 +787,17 @@ def pre_is_regex(node: ExprStringIsRegex) -> str:
     prv, nxt = prev_next_var(node)
     pattern, ignore_case, msg = node.unpack_args()
     msg = js_get_classvar_hook_or_value(node, "msg")
+    invert = node.kwargs["invert"]
 
     if node.classvar_hooks.get("pattern"):
         pattern = js_get_classvar_hook_or_value(node, "pattern")
     else:
         pattern = to_js_regexp(pattern, ignore_case)
+    expr = f"({prv}.match({pattern}) === null)"
+    if invert:
+        expr = f"!{expr}"
 
-    expr = f"if ({prv}.match({pattern}) === null) throw new Error({msg});"
+    expr = f"if {expr} throw new Error({msg});"
     if is_last_var_no_ret(node):
         return expr
     return expr + f"let {nxt} = {prv};"
@@ -845,11 +843,14 @@ def pre_is_css(node: ExprIsCss) -> str:
     prv, nxt = prev_next_var(node)
     query = js_get_classvar_hook_or_value(node, "query")
     msg = js_get_classvar_hook_or_value(node, "msg")
+    invert = node.kwargs["invert"]
+    expr = f"({prv}.querySelector({query}) === null)"
+    if invert:
+        expr = f"!{expr}"
 
-    expr = f"if ({prv}.querySelector({query}) === null) throw new Error({msg});"
+    expr = f"if {expr} throw new Error({msg});"
     if is_last_var_no_ret(node):
         return expr
-    # HACK: avoid recalc variables
     return expr + f"let {nxt} = {prv};"
 
 
@@ -858,8 +859,14 @@ def pre_is_xpath(node: ExprIsXpath) -> str:
     prv, nxt = prev_next_var(node)
     query = js_get_classvar_hook_or_value(node, "query")
     msg = js_get_classvar_hook_or_value(node, "msg")
+    invert = node.kwargs["invert"]
+
+    expr = f"(document.evaluate({query}, {prv}, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue === null)"
+    if invert:
+        expr = f"!{expr}"
     code = [
-        f"if (document.evaluate({query}, {prv}, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue === null) {{",
+        expr,
+        "{",
         f"throw new Error({msg});",
         "}",
     ]

@@ -68,7 +68,6 @@ from ssc_codegen.ast_ import (
     ExprIndex,
     ExprListStringJoin,
     ExprIsEqual,
-    ExprIsNotEqual,
     ExprIsContains,
     ExprStringIsRegex,
     ExprToInt,
@@ -253,7 +252,6 @@ class BasePyCodeConverter(BaseCodeConverter):
             ExprIndex.kind: pre_index,
             ExprListStringJoin.kind: pre_list_str_join,
             ExprIsEqual.kind: pre_is_equal,
-            ExprIsNotEqual.kind: pre_is_not_equal,
             ExprIsContains.kind: pre_is_contains,
             ExprStringIsRegex.kind: pre_is_regex,
             ExprListStringAllRegex.kind: pre_list_str_all_is_regex,
@@ -942,29 +940,18 @@ def pre_is_equal(node: ExprIsEqual) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    item, msg = node.unpack_args()
+    item, msg, invert = node.unpack_args()
+
     item = py_get_classvar_hook_or_value(node, "item")
     msg = py_get_classvar_hook_or_value(node, "msg")
+    expr = f"{prv} != {item}"
+    if invert:
+        expr = f"not ({expr})"
 
-    expr = indent + f"assert {prv} != {item}, {msg}"
+    expr = indent + f"assert {expr}, {msg}"
     if is_last_var_no_ret(node):
         return expr
-    return expr + "\n" + indent + f"{nxt} = {prv}"
-
-
-def pre_is_not_equal(node: ExprIsNotEqual) -> str:
-    indent = (
-        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
-    )
-    prv, nxt = prev_next_var(node)
-    item, msg = node.unpack_args()
-    item = py_get_classvar_hook_or_value(node, "item")
-    msg = py_get_classvar_hook_or_value(node, "msg")
-
-    expr = indent + f"assert {prv} == {item}, {msg}"
-    if is_last_var_no_ret(node):
-        return expr
-    return expr + "\n" + indent + f"{nxt} = {prv}"
+    return "\n".join([expr, indent + f"{nxt} = {prv}"])
 
 
 def pre_is_contains(node: ExprIsContains) -> str:
@@ -972,15 +959,20 @@ def pre_is_contains(node: ExprIsContains) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    item, msg = node.unpack_args()
+    item, msg, invert = node.unpack_args()
 
     item = py_get_classvar_hook_or_value(node, "item")
     msg = py_get_classvar_hook_or_value(node, "msg")
 
-    expr = indent + f"assert {item} not in {prv}, {msg!r}"
+    if invert:
+        expr = f"{item} not in {prv}"
+    else:
+        expr = f"{item} in {prv}"
+    expr = indent + f"assert {expr}, {msg!r}"
+
     if is_last_var_no_ret(node):
         return expr
-    return expr + "\n" + indent + f"{nxt} = {prv}"
+    return "\n".join([expr, indent + f"{nxt} = {prv}"])
 
 
 def pre_is_regex(node: ExprStringIsRegex) -> str:
@@ -988,13 +980,15 @@ def pre_is_regex(node: ExprStringIsRegex) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    pattern, ignore_case, msg = node.unpack_args()
+    pattern, ignore_case, msg, invert = node.unpack_args()
 
     msg = py_get_classvar_hook_or_value(node, "msg")
 
     if node.classvar_hooks.get("pattern"):
         pattern = py_get_classvar_hook_or_value(node, "pattern")
         expr = f"re.search({pattern}, {prv})"
+        if invert:
+            expr = f"not {expr}"
     else:
         flags = py_regex_flags(ignore_case)
         if flags:
@@ -1002,10 +996,13 @@ def pre_is_regex(node: ExprStringIsRegex) -> str:
         else:
             expr = f"re.search({pattern!r}, {prv})"
 
+        if invert:
+            expr = "not " + expr
+
     expr = indent + f"assert {expr}, {msg}"
     if is_last_var_no_ret(node):
         return expr
-    return expr + "\n" + indent + f"{nxt} = {prv}"
+    return "\n".join([expr, indent + f"{nxt} = {prv}"])
 
 
 def pre_list_str_any_is_regex(node: ExprListStringAnyRegex) -> str:

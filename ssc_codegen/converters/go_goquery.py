@@ -77,7 +77,6 @@ from ssc_codegen.ast_ import (
     ExprIndex,
     ExprListStringJoin,
     ExprIsEqual,
-    ExprIsNotEqual,
     ExprIsContains,
     ExprStringIsRegex,
     ExprIsCss,
@@ -1090,27 +1089,17 @@ def pre_is_equal(node: ExprIsEqual) -> str:
     prv, nxt = prev_next_var(node)
     item = go_get_classvar_hook_or_value(node, "item")
     msg = go_get_classvar_hook_or_value(node, "msg")
+    invert = node.kwargs["invert"]
 
-    # sscAssertEqual[T comparable](v1, v2 T, msg string) error
+    if invert:
+        # func sscAssertNotEqual[T comparable](v1, v2 T, msg string) error
+        expr = f"err := sscAssertEqual({prv}, {item}, {msg})"
+    else:
+        # sscAssertEqual[T comparable](v1, v2 T, msg string) error
+        expr = f"err := sscAssertNotEqual({prv}, {item}, {msg})"
+
     code = [
-        f"err := sscAssertEqual({prv}, {item}, {msg})",
-        "if err != nil {",
-        _go_assert_ret(node),
-        "}",
-        "" if is_last_var_no_ret(node) else f"{nxt} := {prv}; ",
-    ]
-    return "\n".join(code)
-
-
-@CONVERTER(ExprIsNotEqual.kind)
-def pre_is_not_equal(node: ExprIsNotEqual) -> str:
-    prv, nxt = prev_next_var(node)
-    item = go_get_classvar_hook_or_value(node, "item")
-    msg = go_get_classvar_hook_or_value(node, "msg")
-
-    # sscAssertNotEqual[T comparable](v1, v2 T, msg string) error
-    code = [
-        f"err := sscAssertNotEqual({prv}, {item}, {msg})",
+        expr,
         "if err != nil {",
         _go_assert_ret(node),
         "}",
@@ -1124,10 +1113,17 @@ def pre_is_contains(node: ExprIsContains) -> str:
     prv, nxt = prev_next_var(node)
     item = go_get_classvar_hook_or_value(node, "item")
     msg = go_get_classvar_hook_or_value(node, "msg")
+    invert = node.kwargs["invert"]
 
-    # sscAssertContains[S ~[]E, E comparable](v1 S, v2 E, msg string) error
+    if invert:
+        # func sscAssertNotContains[S ~[]E, E comparable](v1 S, v2 E, msg string) error
+        expr = f"err := sscAssertNotContains({prv}, {item}, {msg})"
+    else:
+        # sscAssertContains[S ~[]E, E comparable](v1 S, v2 E, msg string) error
+        expr = f"err := sscAssertContains({prv}, {item}, {msg})"
+
     code = [
-        f"err := sscAssertContains({prv}, {item}, {msg})",
+        expr,
         "if err != nil {",
         _go_assert_ret(node),
         "}",
@@ -1146,9 +1142,17 @@ def pre_is_regex(node: ExprStringIsRegex) -> str:
         pattern = py_regex_to_go_regex(pattern, ignore_case)
 
     msg = go_get_classvar_hook_or_value(node, "msg")
-    # sscAssertRegex(v string, re *regexp.Regexp, msg string) error
+    invert = node.kwargs["invert"]
+
+    if invert:
+        # func sscNotAssertRegex(v string, re *regexp.Regexp, msg string) error
+        expr = f"err := sscNotAssertRegex({prv}, {pattern}, {msg})"
+    else:
+        # sscAssertRegex(v string, re *regexp.Regexp, msg string) error
+        expr = f"err := sscAssertRegex({prv}, {pattern}, {msg})"
+
     code = [
-        f"err := sscAssertRegex({prv}, {pattern}, {msg})",
+        expr,
         "if err != nil {",
         _go_assert_ret(node),
         "}",
@@ -1204,10 +1208,16 @@ def pre_is_css(node: ExprIsCss) -> str:
     prv, nxt = prev_next_var(node)
     query = go_get_classvar_hook_or_value(node, "query")
     msg = go_get_classvar_hook_or_value(node, "msg")
+    invert = node.kwargs["invert"]
 
-    # sscAssertCss(v *goquery.Selection, query, msg string) error
+    if invert:
+        # sscAssertCss(v *goquery.Selection, query, msg string) error
+        expr = f"err := sscAssertCss({prv}, {query}, {msg})"
+    else:
+        # func sscAssertNotCss(v *goquery.Selection, query, msg string) error
+        expr = f"err := sscAssertNotCss({prv}, {query}, {msg})"
     code = [
-        f"err := sscAssertCss({prv}, {query}, {msg})",
+        expr,
         "if err != nil {",
         _go_assert_ret(node),
         "}",
@@ -1226,10 +1236,17 @@ def pre_has_attr(node: ExprHasAttr) -> str:
     prv, nxt = prev_next_var(node)
     key = go_get_classvar_hook_or_value(node, "key")
     msg = go_get_classvar_hook_or_value(node, "msg")
+    invert = node.kwargs["invert"]
 
-    # sscAssertHasAttr(v *goquery.Selection, key, msg string) error
+    if invert:
+        # func sscAssertNotHasAttr(v *goquery.Selection, key, msg string) error
+        expr = f"err := sscAssertNotHasAttr({prv}, {key}, {msg})"
+    else:
+        # sscAssertHasAttr(v *goquery.Selection, key, msg string) error
+        expr = f"err := sscAssertHasAttr({prv}, {key}, {msg})"
+
     code = [
-        f"err := sscAssertHasAttr({prv}, {key}, {msg})",
+        expr,
         "if err != nil {",
         _go_assert_ret(node),
         "}",
@@ -1243,10 +1260,17 @@ def pre_list_has_attr(node: ExprListHasAttr) -> str:
     prv, nxt = prev_next_var(node)
     key = go_get_classvar_hook_or_value(node, "key")
     msg = go_get_classvar_hook_or_value(node, "msg")
+    invert = node.kwargs["invert"]
 
-    # sscAssertHasAttr(v *goquery.Selection, key, msg string) error
+    if invert:
+        # func sscAssertNotHasAttr(v *goquery.Selection, key, msg string) error
+        expr = f"err := sscAssertNotHasAttr({prv}, {key}, {msg})"
+    else:
+        # sscAssertHasAttr(v *goquery.Selection, key, msg string) error
+        expr = f"err := sscAssertHasAttr({prv}, {key}, {msg})"
+
     code = [
-        f"err := sscAssertHasAttr({prv}, {key}, {msg})",
+        expr,
         "if err != nil {",
         _go_assert_ret(node),
         "}",
