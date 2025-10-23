@@ -41,7 +41,6 @@ from ssc_codegen.ast_ import (
     ExprIsCss,
     ExprIsXpath,
     ExprIsEqual,
-    ExprIsNotEqual,
     ExprIsContains,
     ExprStringIsRegex,
     ExprNested,
@@ -1252,7 +1251,43 @@ class AssertDocument(BaseDocument):
             literal_hooks["query"].value = query
         self._add(
             ExprIsCss(
-                kwargs={"query": query, "msg": msg},
+                kwargs={"query": query, "msg": msg, "invert": False},
+                classvar_hooks=literal_hooks,
+            )
+        )
+        return self
+
+    @validate_types(VariableType.DOCUMENT)
+    def is_not_css(
+        self, query: str | ExprClassVar, msg: str | ExprClassVar = ""
+    ) -> Self:
+        """assert not css query found element. If in generated code check failed - throw exception
+
+        EXPR DO NOT MODIFY variable
+
+        - accept DOCUMENT, return DOCUMENT
+        """
+        query, literal_hooks1 = self._resolve_literal_hook("query", query)
+        msg, literal_hooks2 = self._resolve_literal_hook("msg", msg)
+        literal_hooks = literal_hooks1 | literal_hooks2
+
+        query = " ".join(query.splitlines())
+        new_query, action = parse_pseudo_css_query(query)
+        if action[0]:
+            LOGGER.warning(
+                "is_css(%s) not support pseudo parse classes, skip", repr(query)
+            )
+            query = new_query
+        try:
+            validate_css_query(query)
+        except SelectorSyntaxError:
+            LOGGER.warning("is_css `%s` is not valid css query", query)
+
+        if literal_hooks.get("query"):
+            literal_hooks["query"].value = query
+        self._add(
+            ExprIsCss(
+                kwargs={"query": query, "msg": msg, "invert": True},
                 classvar_hooks=literal_hooks,
             )
         )
@@ -1289,7 +1324,44 @@ class AssertDocument(BaseDocument):
             literal_hooks["query"].value = query
         self._add(
             ExprIsXpath(
-                kwargs={"query": query, "msg": msg},
+                kwargs={"query": query, "msg": msg, "invert": False},
+                classvar_hooks=literal_hooks,
+            )
+        )
+        return self
+
+    @validate_types(VariableType.DOCUMENT)
+    def is_not_xpath(
+        self, query: str | ExprClassVar, msg: str | ExprClassVar = ""
+    ) -> Self:
+        """assert not xpath query found element. If in generated code check failed - throw exception with passed msg
+
+        EXPR DO NOT MODIFY variable
+
+        - accept DOCUMENT, return DOCUMENT
+        """
+        query, literal_hooks1 = self._resolve_literal_hook("query", query)
+        msg, literal_hooks2 = self._resolve_literal_hook("msg", msg)
+        literal_hooks = literal_hooks1 | literal_hooks2
+
+        query = " ".join(query.splitlines())
+        new_query, action = parse_pseudo_xpath_query(query)
+        if action[0]:
+            LOGGER.warning(
+                "is_xpath(%s) not support pseudo parse classes, skip",
+                repr(query),
+            )
+            query = new_query
+        try:
+            validate_xpath_query(query)
+        except SelectorSyntaxError:
+            LOGGER.warning("is_xpath `%s` is not valid xpath query", query)
+
+        if literal_hooks.get("query"):
+            literal_hooks["query"].value = query
+        self._add(
+            ExprIsXpath(
+                kwargs={"query": query, "msg": msg, "invert": True},
                 classvar_hooks=literal_hooks,
             )
         )
@@ -1340,7 +1412,7 @@ class AssertDocument(BaseDocument):
             expected_type = VariableType.ANY
         self._add(
             ExprIsEqual(
-                kwargs={"item": value, "msg": msg},
+                kwargs={"item": value, "msg": msg, "invert": False},
                 accept_type=expected_type,
                 ret_type=expected_type,
                 classvar_hooks=literal_hooks,
@@ -1359,16 +1431,17 @@ class AssertDocument(BaseDocument):
         value: str | int | float | ExprClassVar,
         msg: str | ExprClassVar = "",
     ) -> Self:
-        """assert not equal by string value. If in generated code check failed - throw exception with passed msg
+        """assert not equal by string, int or float value. If in generated code check failed - throw exception with passed msg
 
         EXPR DO NOT MODIFY variable
 
         - accept STRING, return STRING
         - accept INT, return INT
-        - accept FLOAT, return FLOAT
+        - accept FLOAT return FLOAT
         """
         value, literal_hooks1 = self._resolve_literal_hook("item", value)
         msg, literal_hooks2 = self._resolve_literal_hook("msg", msg)
+
         literal_hooks = literal_hooks1 | literal_hooks2
 
         if (
@@ -1380,7 +1453,6 @@ class AssertDocument(BaseDocument):
             isinstance(value, bool) and self.stack_last_ret != VariableType.BOOL
         ):
             expected_type = VariableType.BOOL
-
         elif (
             isinstance(value, float)
             and self.stack_last_ret != VariableType.FLOAT
@@ -1389,13 +1461,11 @@ class AssertDocument(BaseDocument):
 
         elif isinstance(value, int) and self.stack_last_ret != VariableType.INT:
             expected_type = VariableType.INT
-
         else:
             expected_type = VariableType.ANY
-
         self._add(
-            ExprIsNotEqual(
-                kwargs={"item": value, "msg": msg},
+            ExprIsEqual(
+                kwargs={"item": value, "msg": msg, "invert": True},
                 accept_type=expected_type,
                 ret_type=expected_type,
                 classvar_hooks=literal_hooks,
@@ -1443,7 +1513,55 @@ class AssertDocument(BaseDocument):
 
         self._add(
             ExprIsContains(
-                kwargs={"item": item, "msg": msg},
+                kwargs={"item": item, "msg": msg, "invert": False},
+                accept_type=expected_type,
+                ret_type=expected_type,
+                classvar_hooks=literal_hooks,
+            )
+        )
+        return self
+
+    @validate_types(
+        VariableType.LIST_STRING, VariableType.LIST_INT, VariableType.LIST_FLOAT
+    )
+    def is_not_contains(
+        self,
+        item: str | int | float | ExprClassVar,
+        msg: str | ExprClassVar = "",
+    ) -> Self:
+        """assert not value contains in sequence. If in generated code check failed - throw exception with passed msg
+
+        EXPR DO NOT MODIFY variable
+
+        - accept LIST_STRING, return LIST_STRING
+        - accept LIST_INT, return LIST_INT
+        - accept LIST_FLOAT, return LIST_FLOAT
+        """
+        item, literal_hooks1 = self._resolve_literal_hook("item", item)
+        msg, literal_hooks2 = self._resolve_literal_hook("msg", msg)
+        literal_hooks = literal_hooks1 | literal_hooks2
+
+        if (
+            isinstance(item, str)
+            and self.stack_last_ret != VariableType.LIST_STRING
+        ):
+            expected_type = VariableType.LIST_STRING
+        elif (
+            isinstance(item, int)
+            and self.stack_last_ret != VariableType.LIST_INT
+        ):
+            expected_type = VariableType.LIST_INT
+        elif (
+            isinstance(item, float)
+            and self.stack_last_ret != VariableType.LIST_FLOAT
+        ):
+            expected_type = VariableType.LIST_FLOAT
+        else:
+            expected_type = VariableType.LIST_ANY
+
+        self._add(
+            ExprIsContains(
+                kwargs={"item": item, "msg": msg, "invert": True},
                 accept_type=expected_type,
                 ret_type=expected_type,
                 classvar_hooks=literal_hooks,
@@ -1539,6 +1657,15 @@ class AssertDocument(BaseDocument):
         """shortcut of is_regex() method"""
         return self.is_regex(pattern, msg, ignore_case)
 
+    def is_not_re(
+        self,
+        pattern: str | Pattern | ExprClassVar,
+        msg: str | ExprClassVar = "",
+        ignore_case: bool = False,
+    ) -> Self:
+        """shortcut of is_not_regex() method"""
+        return self.is_regex(pattern, msg, ignore_case)
+
     @validate_types(VariableType.STRING)
     def is_regex(
         self,
@@ -1571,6 +1698,46 @@ class AssertDocument(BaseDocument):
                     "pattern": pattern,
                     "ignore_case": ignore_case,
                     "msg": msg,
+                    "invert": False,
+                },
+                classvar_hooks=literal_hooks,
+            )
+        )
+        return self
+
+    @validate_types(VariableType.STRING)
+    def is_not_regex(
+        self,
+        pattern: str | Pattern | ExprClassVar,
+        msg: str | ExprClassVar = "",
+        ignore_case: bool = False,
+    ) -> Self:
+        """assert value not matched by regex. If in generated code check failed - throw exception with passed msg
+
+        EXPR DO NOT MODIFY variable
+
+        - accept STRING, return STRING
+        """
+        pattern, literal_hooks1 = self._resolve_literal_hook("pattern", pattern)
+        msg, literal_hooks2 = self._resolve_literal_hook("msg", msg)
+        literal_hooks = literal_hooks1 | literal_hooks2
+
+        if not isinstance(pattern, str):
+            ignore_case = is_ignore_case_regex(pattern)
+        pattern = unverbosify_regex(pattern)
+        analyze_re_expression(pattern, allow_empty_groups=True)
+
+        if literal_hooks.get("pattern"):
+            literal_hooks["pattern"].value = add_inline_regex_flags(
+                pattern, ignore_case
+            )
+        self._add(
+            ExprStringIsRegex(
+                kwargs={
+                    "pattern": pattern,
+                    "ignore_case": ignore_case,
+                    "msg": msg,
+                    "invert": True,
                 },
                 classvar_hooks=literal_hooks,
             )
@@ -1595,21 +1762,59 @@ class AssertDocument(BaseDocument):
         if self.stack_last_ret == VariableType.DOCUMENT:
             self._add(
                 ExprHasAttr(
-                    kwargs={"key": key, "msg": msg},
+                    kwargs={"key": key, "msg": msg, "invert": False},
                     classvar_hooks=literal_hooks,
                 )
             )
         elif self.stack_last_ret == VariableType.LIST_DOCUMENT:
             self._add(
                 ExprListHasAttr(
-                    kwargs={"key": key, "msg": msg},
+                    kwargs={"key": key, "msg": msg, "invert": False},
                     classvar_hooks=literal_hooks,
                 )
             )
         else:
             self._add(
                 ExprHasAttr(
-                    kwargs={"key": key, "msg": msg},
+                    kwargs={"key": key, "msg": msg, "invert": False},
+                    ret_type=self.stack_last_ret,
+                )
+            )
+        return self
+
+    @validate_types(VariableType.DOCUMENT, VariableType.LIST_DOCUMENT)
+    def has_not_attr(
+        self, key: str | ExprClassVar, msg: str | ExprClassVar = ""
+    ) -> Self:
+        """assert document has not attribute key. If in generated code check failed - throw exception with passed msg
+
+        EXPR DO NOT MODIFY variable
+
+        - accept DOCUMENT, return DOCUMENT
+        - accept LIST_DOCUMENT, return LIST_DOCUMENT
+        """
+        key, literal_hooks1 = self._resolve_literal_hook("key", key)
+        msg, literal_hooks2 = self._resolve_literal_hook("msg", msg)
+        literal_hooks = literal_hooks1 | literal_hooks2
+
+        if self.stack_last_ret == VariableType.DOCUMENT:
+            self._add(
+                ExprHasAttr(
+                    kwargs={"key": key, "msg": msg, "invert": True},
+                    classvar_hooks=literal_hooks,
+                )
+            )
+        elif self.stack_last_ret == VariableType.LIST_DOCUMENT:
+            self._add(
+                ExprListHasAttr(
+                    kwargs={"key": key, "msg": msg, "invert": True},
+                    classvar_hooks=literal_hooks,
+                )
+            )
+        else:
+            self._add(
+                ExprHasAttr(
+                    kwargs={"key": key, "msg": msg, "invert": True},
                     ret_type=self.stack_last_ret,
                 )
             )
@@ -1823,7 +2028,7 @@ class DocumentFilter(BaseDocument):
         ignore_case: bool = False,
     ) -> Self:
         """check if pattern matched result in value"""
-        
+
         pattern, literal_hooks = self._resolve_literal_hook("pattern", pattern)
 
         if not isinstance(pattern, str):
@@ -1879,7 +2084,7 @@ class DocumentFilter(BaseDocument):
 
         pseudocode example:
 
-            len(item) == value 
+            len(item) == value
         """
         self._add(FilterStrLenEq(kwargs={"length": value}))
         return self
@@ -1889,7 +2094,7 @@ class DocumentFilter(BaseDocument):
 
         pseudocode example:
 
-            len(item) != value 
+            len(item) != value
         """
         self._add(FilterStrLenNe(kwargs={"length": value}))
         return self
@@ -1899,7 +2104,7 @@ class DocumentFilter(BaseDocument):
 
         pseudocode example:
 
-            len(item) < value 
+            len(item) < value
         """
         self._add(FilterStrLenLt(kwargs={"length": value}))
         return self
@@ -1909,7 +2114,7 @@ class DocumentFilter(BaseDocument):
 
         pseudocode example:
 
-            len(item) <= value 
+            len(item) <= value
         """
         self._add(FilterStrLenLe(kwargs={"length": value}))
         return self
@@ -1919,7 +2124,7 @@ class DocumentFilter(BaseDocument):
 
         pseudocode example:
 
-            len(item) > value 
+            len(item) > value
         """
         self._add(FilterStrLenGt(kwargs={"length": value}))
         return self
@@ -1929,7 +2134,7 @@ class DocumentFilter(BaseDocument):
 
         pseudocode example:
 
-            len(item) >= value 
+            len(item) >= value
         """
         self._add(FilterStrLenGe(kwargs={"length": value}))
         return self
@@ -1940,7 +2145,7 @@ class DocumentFilter(BaseDocument):
         pseudocode example:
 
             this_filter and not filter_expr
-            this_filter && !(filter_expr) 
+            this_filter && !(filter_expr)
         """
         tmp_stack = filter_expr.stack.copy()
         self._add(FilterNot(body=tmp_stack))
@@ -1967,13 +2172,13 @@ class DocumentFilter(BaseDocument):
     # ignoring Liskov substitution principle for the sake of filter DSL expressiveness
     def __eq__(self, other: int | str | Sequence[str]) -> "DocumentFilter":  # type: ignore[override]
         """syntax sugar of len_eq and eq methods:
-        
+
         if other is INT:
             this_filter.len_eq(other) == (this_filter == other)
-        
+
         if other is string:
             this_filter.eq(other) == (this_filter == "other")
-        
+
         if other is Sequence[string]:
             this_filter.eq(*["item1", "item2", ...]) == (this_filter == ["item1", "item2", ...])
         """
@@ -1988,13 +2193,13 @@ class DocumentFilter(BaseDocument):
 
     def __ne__(self, other: int | str | Sequence[str]) -> "DocumentFilter":  # type: ignore[override]
         """syntax sugar of len_ne and ne methods:
-        
+
         if other is INT:
             this_filter.len_ne(other) == (this_filter != other)
-        
+
         if other is string:
             this_filter.ne(other) == (this_filter != "other")
-        
+
         if other is Sequence[string]:
             this_filter.ne(*["item1", "item2", ...]) == (this_filter != ["item1", "item2", ...])
         """
