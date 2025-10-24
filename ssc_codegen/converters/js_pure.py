@@ -19,7 +19,6 @@ SPECIAL METHODS NOTATIONS:
 - __START_PARSE__: `parse`,
 """
 
-from operator import invert
 from typing import cast
 
 from ssc_codegen.ast_ import (
@@ -849,8 +848,8 @@ def pre_is_css(node: ExprIsCss) -> str:
     expr = f"({prv}.querySelector({query}) === null)"
     if invert:
         expr = f"!{expr}"
-
-    expr = f"if {expr} throw new Error({msg});"
+    expr = f'if {expr}'
+    expr = f"{expr} throw new Error({msg});"
     if is_last_var_no_ret(node):
         return expr
     return expr + f"let {nxt} = {prv};"
@@ -866,8 +865,9 @@ def pre_is_xpath(node: ExprIsXpath) -> str:
     expr = f"(document.evaluate({query}, {prv}, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue === null)"
     if invert:
         expr = f"!{expr}"
+    expr = f'if {expr}'
     code = [
-        expr,
+        f"{expr}",
         "{",
         f"throw new Error({msg});",
         "}",
@@ -1073,8 +1073,11 @@ def pre_has_attr(node: ExprHasAttr) -> str:
     prv, nxt = prev_next_var(node)
     key = js_get_classvar_hook_or_value(node, "key")
     msg = js_get_classvar_hook_or_value(node, "msg")
-
-    expr = f"if (!{prv}?.hasAttribute({key})) throw new Error({msg});"
+    invert = node.kwargs["invert"]
+    expr = f"!{prv}?.hasAttribute({key})"
+    if invert:
+        expr = f'!({expr})'
+    expr = f"if ({expr})"
     if is_last_var_no_ret(node):
         return expr
     return expr + f"let {nxt} = {prv};"
@@ -1085,8 +1088,12 @@ def pre_list_has_attr(node: ExprListHasAttr) -> str:
     prv, nxt = prev_next_var(node)
     key = js_get_classvar_hook_or_value(node, "key")
     msg = js_get_classvar_hook_or_value(node, "msg")
+    invert = node.kwargs["invert"]
 
-    expr = f"if (!{prv}.every(e => e?.hasAttribute({key}))) throw new Error({msg});"
+    expr = f"!{prv}.every(e => e?.hasAttribute({key})"
+    if invert:
+        expr = f"!({expr})"
+    expr = f"if ({expr}) throw new Error({msg});"
     if is_last_var_no_ret(node):
         return expr
     return expr + f"let {nxt} = {prv};"
