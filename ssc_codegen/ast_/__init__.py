@@ -120,7 +120,6 @@ from .nodes_validate import (
     ExprIsEqual,
     ExprStringIsRegex,
     ExprIsXpath,
-    ExprIsNotEqual,
     ExprIsContains,
     ExprListStringAnyRegex,
     ExprListStringAllRegex,

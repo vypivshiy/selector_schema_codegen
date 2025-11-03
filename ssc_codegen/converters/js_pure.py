@@ -51,7 +51,6 @@ from ssc_codegen.ast_ import (
     ExprIndex,
     ExprListStringJoin,
     ExprIsEqual,
-    ExprIsNotEqual,
     ExprIsContains,
     ExprStringIsRegex,
     ExprToInt,
@@ -848,7 +847,7 @@ def pre_is_css(node: ExprIsCss) -> str:
     expr = f"({prv}.querySelector({query}) === null)"
     if invert:
         expr = f"!{expr}"
-    expr = f'if {expr}'
+    expr = f"if {expr}"
     expr = f"{expr} throw new Error({msg});"
     if is_last_var_no_ret(node):
         return expr
@@ -865,7 +864,7 @@ def pre_is_xpath(node: ExprIsXpath) -> str:
     expr = f"(document.evaluate({query}, {prv}, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue === null)"
     if invert:
         expr = f"!{expr}"
-    expr = f'if {expr}'
+    expr = f"if {expr}"
     code = [
         f"{expr}",
         "{",
@@ -1076,8 +1075,8 @@ def pre_has_attr(node: ExprHasAttr) -> str:
     invert = node.kwargs["invert"]
     expr = f"!{prv}?.hasAttribute({key})"
     if invert:
-        expr = f'!({expr})'
-    expr = f"if ({expr})"
+        expr = f"!({expr})"
+    expr = f"if ({expr}) throw new Error({msg}); "
     if is_last_var_no_ret(node):
         return expr
     return expr + f"let {nxt} = {prv};"

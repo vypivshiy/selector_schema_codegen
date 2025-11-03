@@ -29,14 +29,14 @@ CB_AST_DECORATOR = Callable[[CB_AST_BIND], CB_AST_BIND]
 
 def debug_comment_cb(node: BaseAstNode, comment_prefix: str) -> str:
     """Generate a debug comment for an AST node.
-    
+
     Creates a formatted string containing information about the node's type,
     return type (if applicable), and other relevant details for debugging purposes.
-    
+
     Args:
         node: The AST node to generate a comment for.
         comment_prefix: The prefix to add to each line of the comment.
-        
+
     Returns:
         A formatted string containing debug information about the node.
     """
@@ -61,10 +61,10 @@ def debug_comment_cb(node: BaseAstNode, comment_prefix: str) -> str:
 
 class BaseCodeConverter:
     """Base AST visitor class and code converter.
-    
-    This class serves as the foundation for converting AST nodes into code. 
+
+    This class serves as the foundation for converting AST nodes into code.
     Visitors are set using decorators that point to specific TokenTypes.
-    
+
     Decorator hooks can be overridden:
     - As defaults, __call__ methods set @pre decorator
     - @pre - First trigger visitor entrypoint
@@ -85,8 +85,8 @@ class BaseCodeConverter:
         # increase code readability and simplify codegen
 
         # TYPEDEF Impl
-        # post_callback - shortcut for minify typical end expr (eg: close parens) 
-        
+        # post_callback - shortcut for minify typical end expr (eg: close parens)
+
         # generate type for StructType.ITEM parser
         @CONVERTER(TypeDef.kind, StructType.ITEM, post_callback=lambda _: "})")
         def pre_typedef_item(node: TypeDef) -> str:
@@ -111,7 +111,7 @@ class BaseCodeConverter:
             # some impl for LIST struct
             return ""
         ```
-    
+
     Attributes:
         TEST_EXCLUDE_NODES: List of token types to exclude from tests.
     """
@@ -221,19 +221,19 @@ class BaseCodeConverter:
         for_struct_definition: StructType | None = None,
     ) -> CB_AST_DECORATOR:
         """Define a post-conversion decorator for the given TokenType.
-        
+
         This method creates a decorator that registers a function to be called
         after the main conversion of a node of the specified type. It's typically
         used for closing brackets or other logic that should happen after the
         main node processing.
-        
+
         Args:
             for_definition: The TokenType to associate with this post-conversion function.
             for_struct_definition: Optional StructType for specific struct definitions (for StartParseMethod and TypeDef).
-            
+
         Returns:
             A decorator function that registers the post-conversion handler.
-            
+
         Raises:
             TypeError: If struct definition is provided for unsupported node types.
         """
@@ -264,15 +264,15 @@ class BaseCodeConverter:
         post_callback: Callable[[BaseAstNode], str] | None = None,
     ) -> CB_AST_DECORATOR:
         """Alias for pre decorator.
-        
+
         Provides a convenient way to use the pre decorator by calling the class instance
         directly. This is equivalent to calling the pre() method.
-        
+
         Args:
             for_definition: The TokenType to associate with this conversion function.
             for_struct_definition: Optional StructType for specific struct definitions (only for StartParseMethod and TypeDef nodes).
             post_callback: Optional callback function for post-processing.
-            
+
         Returns:
             A decorator function that registers the conversion handler.
         """
@@ -284,15 +284,15 @@ class BaseCodeConverter:
         self, node: BaseAstNode, st_type: StructType | None = None
     ) -> str:
         """Convert the AST node using the pre-definition function.
-        
+
         This method applies the registered pre-conversion function to an AST node,
         optionally using a specific struct type for more granular control. It handles
         both simple node conversions and struct-specific conversions.
-        
+
         Args:
             node: The AST node to convert.
             st_type: Optional StructType for struct-specific conversions.
-            
+
         Returns:
             The result of applying the pre-conversion function to the node,
             or an empty string if no matching function is found.
@@ -318,16 +318,16 @@ class BaseCodeConverter:
         self, node: BaseAstNode, st_type: StructType | None = None
     ) -> str:
         """Convert the AST node using the post-definition function.
-        
+
         This method applies the registered post-conversion function to an AST node,
         optionally using a specific struct type for more granular control. It's typically
         used for closing brackets or other logic that should happen after the main
         node processing.
-        
+
         Args:
             node: The AST node to convert.
             st_type: Optional StructType for struct-specific conversions.
-            
+
         Returns:
             The result of applying the post-conversion function to the node,
             or an empty string if no matching function is found.
@@ -351,14 +351,14 @@ class BaseCodeConverter:
         self, ast_program: ModuleProgram, comment: str = ""
     ) -> list[str]:
         """Convert the module AST to code parts.
-        
+
         This method converts an entire module AST into a list of code parts,
         starting with an optional comment and processing all nodes in the AST.
-        
+
         Args:
             ast_program: The ModuleProgram AST node to convert.
             comment: An optional comment to include at the beginning of the output.
-            
+
         Returns:
             A list of strings representing the converted code parts,
             with empty strings filtered out.
@@ -371,15 +371,15 @@ class BaseCodeConverter:
         self, ast_entry: BaseAstNode, acc: list[str] | None = None
     ) -> list[str]:
         """Convert an AST node into code parts.
-        
+
         This method dispatches the conversion of an AST node to the appropriate
         conversion method based on the node's type. It builds up a list of code
         parts by processing the node and its children.
-        
+
         Args:
             ast_entry: The AST node to convert.
             acc: An optional accumulator list to append code parts to.
-            
+
         Returns:
             A list of strings representing the converted code parts.
         """
@@ -443,17 +443,17 @@ class BaseCodeConverter:
         self, ast_entry: FilterOr | FilterAnd | FilterNot, acc: list[str]
     ) -> None:
         """Convert a logical filter node (OR, AND, NOT) and its children.
-        
+
         This method handles the conversion of logical filter operations, appending
         the pre-conversion result, processing all child nodes, and then appending
         the post-conversion result.
-        
+
         For example, an AND filter with two children would be converted as:
         AND(body=[F1, F2]) ->
         AND ( (OPEN)
               F1 and F2
         ) (CLOSE)
-        
+
         Args:
             ast_entry: The logical filter node (FilterOr, FilterAnd, or FilterNot) to convert.
             acc: The accumulator list to append code parts to.
@@ -469,10 +469,10 @@ class BaseCodeConverter:
 
     def _convert_module(self, ast_entry: ModuleProgram, acc: list[str]) -> None:
         """Handle module conversion.
-        
+
         This method processes all nodes in a module's body by recursively converting
         each one and appending the results to the accumulator.
-        
+
         Args:
             ast_entry: The ModuleProgram node to convert.
             acc: The accumulator list to append code parts to.

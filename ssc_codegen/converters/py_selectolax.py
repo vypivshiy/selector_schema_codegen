@@ -211,7 +211,7 @@ def pre_is_css(node: ExprIsCss) -> str:
     msg = py_get_classvar_hook_or_value(node, "msg")
     invert = node.kwargs["invert"]
 
-    expr = {prv}.css_first({query})
+    expr = f"{prv}.css_first({query})"
     if invert:
         expr = f"not {expr}"
 

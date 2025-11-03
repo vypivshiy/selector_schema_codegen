@@ -963,7 +963,7 @@ def pre_is_contains(node: ExprIsContains) -> str:
 
     item = py_get_classvar_hook_or_value(node, "item")
     msg = py_get_classvar_hook_or_value(node, "msg")
-    
+
     if invert:
         expr = f"{item} not in {prv}"
     else:

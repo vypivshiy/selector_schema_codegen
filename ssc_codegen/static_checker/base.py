@@ -58,7 +58,6 @@ FMT_MAPPING_METHODS = {
     TokenType.EXPR_LIST_JOIN: "join",
     TokenType.EXPR_LIST_LEN: "to_len",
     TokenType.IS_EQUAL: "is_equal",
-    TokenType.IS_NOT_EQUAL: "is_not_equal",
     TokenType.IS_CONTAINS: "is_contains",
     TokenType.IS_CSS: "is_css",
     TokenType.IS_XPATH: "is_xpath",
