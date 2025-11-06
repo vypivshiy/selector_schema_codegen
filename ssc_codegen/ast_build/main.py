@@ -13,7 +13,7 @@ from ssc_codegen.schema import BaseSchema
 from ssc_codegen.static_checker import run_analyze_schema
 import logging
 
-LOGGER = logging.getLogger("ssc-gen")
+LOGGER = logging.getLogger("ssc_gen")
 
 
 def build_ast_module_parser(
@@ -37,6 +37,9 @@ def build_ast_module_parser(
     py_module = exec_module_code(path)
     # check code configs before build AST
     schemas = extract_schemas_from_module(py_module)
+    if len(schemas) == 0:
+        LOGGER.warning(f"{path} does not contains defined schemas")
+
     count_errors = 0
     for schema in schemas:
         errors = run_analyze_schema(schema)
