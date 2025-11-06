@@ -67,17 +67,16 @@ CONVERTER = BasePyCodeConverter()
 def pre_init(_node: StructInitMethod) -> str:
     return (
         INDENT_METHOD
-        + "def __init__(self, document: Union[str, etree._Element]) -> None:\n"
+        + "def __init__(self, document: Union[str, html.HtmlElement]) -> None:\n"
         + INDENT_METHOD_BODY
-        + "self._document = etree.HTML(document) if isinstance(document, str) else document"
+        + "self._document = html.fromstring(document) if isinstance(document, str) else document"
     )
 
 
 @CONVERTER(StructPreValidateMethod.kind)
 def pre_struct_pre_validate(_node: StructPreValidateMethod) -> str:
     return (
-        INDENT_METHOD
-        + "def _pre_validate(self, v: Union[etree._Element, List[etree._Element]]) -> None:"
+        INDENT_METHOD + "def _pre_validate(self, v: html.HtmlElement) -> None:"
     )
 
 
@@ -85,7 +84,7 @@ def pre_struct_pre_validate(_node: StructPreValidateMethod) -> str:
 def pre_struct_part_doc_method(_node: StructPartDocMethod) -> str:
     return (
         INDENT_METHOD
-        + "def _split_doc(self, v: Union[etree._Element, List[etree._Element]]) -> List[etree._Element]:"
+        + "def _split_doc(self, v: html.HtmlElement) -> List[html.HtmlElement]:"
     )
 
 
@@ -96,13 +95,13 @@ def pre_struct_field_method(node: StructFieldMethod) -> str:
     name = MAGIC_METHODS.get(name, name)
     return (
         INDENT_METHOD
-        + f"def _parse_{name}(self, v: Union[etree._Element, List[etree._Element]]) -> {type_}:"
+        + f"def _parse_{name}(self, v: html.HtmlElement) -> {type_}:"
     )
 
 
 @CONVERTER(ModuleImports.kind)
 def pre_imports(_: ModuleImports) -> str:
-    return IMPORTS_MIN + """from lxml import etree, html"""
+    return IMPORTS_MIN + """from lxml import html, etree"""
 
 
 @CONVERTER(ExprCss.kind)
@@ -112,7 +111,7 @@ def pre_css(node: ExprCss) -> str:
     )
     prv, nxt = prev_next_var(node)
     query = py_get_classvar_hook_or_value(node, "query")
-    return indent + f"{nxt} = etree.CSSSelector({query})({prv})[0]"
+    return indent + f"{nxt} = {prv}.cssselect({query})[0]"
 
 
 @CONVERTER(ExprCssAll.kind)
@@ -122,7 +121,7 @@ def pre_css_all(node: ExprCssAll) -> str:
     )
     prv, nxt = prev_next_var(node)
     query = py_get_classvar_hook_or_value(node, "query")
-    return indent + f"{nxt} = etree.CSSSelector({query})({prv})"
+    return indent + f"{nxt} = {prv}.cssselect({query})"
 
 
 @CONVERTER(ExprXpath.kind)
@@ -154,8 +153,9 @@ def pre_html_attr(node: ExprGetHtmlAttr) -> str:
     keys = node.kwargs["key"]
     if len(keys) == 1:
         key = keys[0]
-        return indent + f"{nxt} = {prv}.attrib[{key!r}]"
-    return indent + f"{nxt} = [{prv}.attrib[k] for k in {keys}]"
+        return indent + f"{nxt} = {prv}.get({key!r})"
+    key_accesses = [f"{prv}.get({k!r})" for k in keys]
+    return indent + f"{nxt} = [{', '.join(key_accesses)}]"
 
 
 @CONVERTER(ExprGetHtmlAttrAll.kind)
@@ -167,8 +167,8 @@ def pre_html_attr_all(node: ExprGetHtmlAttrAll) -> str:
     keys = node.kwargs["key"]
     if len(keys) == 1:
         key = keys[0]
-        return indent + f"{nxt} = [e.attrib[{key!r}] for e in {prv}]"
-    return indent + f"{nxt} = [e.attrib[k] for e in {prv} for k in {keys}]"
+        return indent + f"{nxt} = [e.get({key!r}) for e in {prv}]"
+    return indent + f"{nxt} = [e.get(k) for e in {prv} for k in {keys}]"
 
 
 @CONVERTER(ExprGetHtmlText.kind)
@@ -177,7 +177,7 @@ def pre_html_text(node: ExprGetHtmlText) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    return indent + f"{nxt} = ''.join({prv}.itertext())"
+    return indent + f"{nxt} = {prv}.text_content()"
 
 
 @CONVERTER(ExprGetHtmlTextAll.kind)
@@ -186,7 +186,7 @@ def pre_html_text_all(node: ExprGetHtmlTextAll) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    return indent + f"{nxt} = [text for e in {prv} for text in e.itertext()]"
+    return indent + f"{nxt} = [e.text_content() for e in {prv}]"
 
 
 @CONVERTER(ExprGetHtmlRaw.kind)
@@ -195,7 +195,7 @@ def pre_html_raw(node: ExprGetHtmlRaw) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    return indent + f"{nxt} = etree.tostring({prv}, encoding='unicode')"
+    return indent + f"{nxt} = html.tostring({prv}, encoding='unicode')"
 
 
 @CONVERTER(ExprGetHtmlRawAll.kind)
@@ -206,7 +206,7 @@ def pre_html_raw_all(node: ExprGetHtmlRawAll) -> str:
     prv, nxt = prev_next_var(node)
     return (
         indent
-        + f"{nxt} = [etree.tostring(e, encoding='unicode') for e in {prv}]"
+        + f"{nxt} = [html.tostring(e, encoding='unicode') for e in {prv}]"
     )
 
 
@@ -220,9 +220,9 @@ def pre_is_css(node: ExprIsCss) -> str:
     msg = py_get_classvar_hook_or_value(node, "msg")
     invert = node.kwargs["invert"]
 
-    expr = f"etree.CSSSelector({query})({prv})"
+    expr = f"{prv}.cssselect({query})"
     if invert:
-        expr = f"not ({expr})"
+        expr = f"not {expr}"
 
     expr = indent + f"assert {expr}, {msg}"
     if is_last_var_no_ret(node):
@@ -255,19 +255,19 @@ def pre_has_attr(node: ExprHasAttr) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    key, msg = node.unpack_args()
     key = py_get_classvar_hook_or_value(node, "key")
     msg = py_get_classvar_hook_or_value(node, "msg")
     invert = node.kwargs["invert"]
 
-    expr = f"{prv}.attrib[{key}]"
+    expr = f"{prv}.get({key}) is not None"
     if invert:
         expr = f"not ({expr})"
 
     expr = indent + f"assert {expr}, {msg}"
     if is_last_var_no_ret(node):
         return expr
-    return "\n".join(expr, indent + f"{nxt} = {prv}")
+    # Исправлено: добавлена запятая в join
+    return "\n".join([expr, indent + f"{nxt} = {prv}"])
 
 
 @CONVERTER(ExprListHasAttr.kind)
@@ -280,7 +280,7 @@ def pre_list_has_attr(node: ExprListHasAttr) -> str:
     msg = py_get_classvar_hook_or_value(node, "msg")
     invert = node.kwargs["invert"]
 
-    expr = f"all(i.attrib[{key}] for i in {prv})"
+    expr = f"all(i.get({key}) is not None for i in {prv})"
     if invert:
         expr = f"not ({expr})"
 
@@ -318,7 +318,7 @@ def pre_css_remove(node: ExprCssElementRemove) -> str:
 
     return (
         indent
-        + f"[e.getparent().remove(e) for e in etree.CSSSelector({query})({prv}) if e.getparent() is not None]\n"
+        + f"[e.getparent().remove(e) for e in {prv}.cssselect({query}) if e.getparent() is not None]\n"
         + indent
         + f"{nxt} = {prv}"
     )
@@ -365,9 +365,9 @@ def pre_doc_filter_css(node: FilterDocCss) -> str:
 def pre_doc_filter_has_attr(node: FilterDocHasAttr) -> str:
     keys = node.kwargs["keys"]
     if len(keys) == 1:
-        expr = f"{keys[0]!r} in e.attrib"
+        expr = f"e.get({keys[0]!r}) is not None"
     else:
-        expr = f"any(i in e.attrib for i in {keys})"
+        expr = f"any(e.get(i) is not None for i in {keys})"
     if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
         return "and " + expr
     return expr
@@ -377,9 +377,9 @@ def pre_doc_filter_has_attr(node: FilterDocHasAttr) -> str:
 def pre_doc_filter_attr_eq(node: FilterDocAttrEqual) -> str:
     key, values = node.unpack_args()
     if len(values) == 1:
-        expr = f"e.attrib[{key!r}] == {values[0]!r}"
+        expr = f"e.get({key!r}) == {values[0]!r}"
     else:
-        expr = f"e.attrib[{key!r}] in {values}"
+        expr = f"e.get({key!r}) in {values}"
     if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
         return "and " + expr
     return expr
@@ -389,9 +389,9 @@ def pre_doc_filter_attr_eq(node: FilterDocAttrEqual) -> str:
 def pre_doc_filter_attr_contains(node: FilterDocAttrContains) -> str:
     key, values = node.unpack_args()
     if len(values) == 1:
-        expr = f"{values[0]!r} in e.attrib[{key!r}]"
+        expr = f"{values[0]!r} in (e.get({key!r}) or '')"
     else:
-        expr = f"any(i in e.attrib[{key!r}] for i in {values})"
+        expr = f"any(i in (e.get({key!r}) or '') for i in {values})"
     if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
         return "and " + expr
     return expr
@@ -401,10 +401,10 @@ def pre_doc_filter_attr_contains(node: FilterDocAttrContains) -> str:
 def pre_doc_filter_attr_starts(node: FilterDocAttrContains) -> str:
     key, values = node.unpack_args()
     if len(values) == 1:
-        expr = f"e.attrib[{key!r}].startswith({values[0]!r})"
+        expr = f"(e.get({key!r}) or '').startswith({values[0]!r})"
     else:
         # str.startswith() arg allow tuple[str, ...]
-        expr = f"e.attrib[{key!r}].startswith({values})"
+        expr = f"(e.get({key!r}) or '').startswith({values})"
     if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
         return "and " + expr
     return expr
@@ -414,10 +414,10 @@ def pre_doc_filter_attr_starts(node: FilterDocAttrContains) -> str:
 def pre_doc_filter_attr_ends(node: FilterDocAttrContains) -> str:
     key, values = node.unpack_args()
     if len(values) == 1:
-        expr = f"e.attrib[{key!r}].endswith({values[0]!r})"
+        expr = f"(e.get({key!r}) or '').endswith({values[0]!r})"
     else:
         # str.endswith() arg allow tuple[str, ...]
-        expr = f"e.attrib[{key!r}].endswith({values})"
+        expr = f"(e.get({key!r}) or '').endswith({values})"
     if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
         return "and " + expr
     return expr
@@ -427,11 +427,12 @@ def pre_doc_filter_attr_ends(node: FilterDocAttrContains) -> str:
 def pre_doc_filter_attr_re(node: FilterDocAttrRegex) -> str:
     key, pattern, ignore_case = node.unpack_args()
     flags = py_regex_flags(ignore_case)
+
+    attr_value = f"e.get({key!r}) or ''"
     if flags:
-        expr = f"re.search({pattern!r}, e.attrib[{key!r}], {flags})"
+        expr = f"re.search({pattern!r}, {attr_value}, {flags})"
     else:
-        expr = f"re.search({pattern!r}, e.attrib[{key!r}], ''))"
-    expr = f"bool({expr})"
+        expr = f"re.search({pattern!r}, {attr_value})"
     if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
         return "and " + expr
     return expr
@@ -442,10 +443,12 @@ def pre_doc_filter_is_regex_text(node: FilterDocIsRegexText) -> str:
     pattern, ignore_case = node.unpack_args()
 
     flags = py_regex_flags(ignore_case)
+
+    text_content_call = "e.text_content()"
     if flags:
-        expr = f"re.search({pattern!r}, ''.join(e.itertext()), {flags})"
+        expr = f"re.search({pattern!r}, {text_content_call}, {flags})"
     else:
-        expr = f"re.search({pattern!r}, ''.join(e.itertext()))"
+        expr = f"re.search({pattern!r}, {text_content_call})"
     expr = f"bool({expr})"
     if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
         return "and " + expr
@@ -457,10 +460,11 @@ def pre_doc_filter_is_regex_raw(node: FilterDocIsRegexText) -> str:
     pattern, ignore_case = node.unpack_args()
 
     flags = py_regex_flags(ignore_case)
+    raw_content_call = "etree.tostring(e, encoding='unicode')"
     if flags:
-        expr = f"re.search({pattern!r}, etree.tostring(e, encoding='unicode'), {flags})"
+        expr = f"re.search({pattern!r}, {raw_content_call}, {flags})"
     else:
-        expr = f"re.search({pattern!r}, etree.tostring(e, encoding='unicode'))"
+        expr = f"re.search({pattern!r}, {raw_content_call})"
     expr = f"bool({expr})"
     if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
         return "and " + expr
@@ -470,10 +474,12 @@ def pre_doc_filter_is_regex_raw(node: FilterDocIsRegexText) -> str:
 @CONVERTER(FilterDocHasText.kind)
 def pre_doc_filter_has_text(node: FilterDocHasText) -> str:
     values = node.kwargs["values"]
+
+    text_content_call = "e.text_content()"
     if len(values) == 1:
-        expr = f"{values[0]!r} in ''.join(e.itertext())"
+        expr = f"{values[0]!r} in {text_content_call}"
     else:
-        expr = f"any(i in ''.join(e.itertext()) for i in {values})"
+        expr = f"any(i in {text_content_call} for i in {values})"
     if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
         return "and " + expr
     return expr
@@ -482,11 +488,12 @@ def pre_doc_filter_has_text(node: FilterDocHasText) -> str:
 @CONVERTER(FilterDocHasRaw.kind)
 def pre_doc_filter_has_raw(node: FilterDocHasText) -> str:
     values = node.kwargs["values"]
+
     if len(values) == 1:
-        expr = f"{values[0]!r} in etree.tostring(e, encoding='unicode')"
+        expr = f"{values[0]!r} in html.tostring(e, encoding='unicode')"
     else:
         expr = (
-            f"any(i in etree.tostring(e, encoding='unicode') for i in {values})"
+            f"any(i in html.tostring(e, encoding='unicode') for i in {values})"
         )
     if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
         return "and " + expr
