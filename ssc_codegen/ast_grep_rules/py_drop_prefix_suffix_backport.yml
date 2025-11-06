@@ -1,0 +1,47 @@
+id: py_drop_prefix_backport
+language: python
+rule:
+  pattern:
+    context: |-
+      def ssc_rm_prefix($$$) -> str:$$$
+fix: ''
+---
+id: py_fix_new_prefix_syntax
+language: python
+rule:
+  pattern:
+    context: ssc_rm_prefix($V, $P)
+fix: '$V.removeprefix($P)'
+
+---
+id: py_drop_suffix_backport
+language: python
+rule:
+  pattern:
+    context: |-
+      def ssc_rm_suffix($$$) -> str:$$$
+fix: ''
+---
+id: py_fix_new_suffix_syntax
+language: python
+rule:
+  pattern:
+    context: ssc_rm_suffix($V, $P)
+fix: '$V.removesuffix($P)'
+---
+
+id: py_drop_prefix_suffix_backport
+language: python
+rule:
+  pattern:
+    context: |-
+      def ssc_rm_prefix_and_suffix($$$) -> str:$$$
+fix: ''
+---
+id: py_fix_new_prefix_suffix_syntax
+language: python
+rule:
+  pattern:
+    context: ssc_rm_prefix_and_suffix($V, $P1, $P2)
+fix: 
+  '$V.removeprefix($P1).removesuffix($P2)'
