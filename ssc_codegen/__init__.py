@@ -7,7 +7,7 @@ from ssc_codegen.schema import ItemSchema, DictSchema, ListSchema, FlatListSchem
 
 setup_logger()
 
-VERSION = "0.13.1"
+VERSION = "0.13.2"
 
 
 class __MISSING(object):
