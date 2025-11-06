@@ -79,7 +79,7 @@ import logging
 __all__ = ["py_regex_to_lua_pattern"]
 
 
-LOGGER = logging.getLogger("ssc-gen")
+LOGGER = logging.getLogger("ssc_gen")
 
 
 @dataclass
