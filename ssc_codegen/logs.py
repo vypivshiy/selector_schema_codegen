@@ -26,8 +26,8 @@ def setup_logger(
     name: str = "ssc_gen",
     level: int = logging.INFO,
     colored: bool = True,
-    fmt: str = "[%(levelname)-8s] %(name)s: %(asctime)s - %(message)s",
-    datefmt: str = "%Y-%m-%d %H:%M:%S",
+    fmt: str = "[%(levelname)-8s] %(name)s: - %(message)s",  # %(asctime)s
+    datefmt: str | None = None,  # "%Y-%m-%d %H:%M:%S",
 ) -> logging.Logger:
     logger = logging.getLogger(name)
     logger.setLevel(level)
