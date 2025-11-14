@@ -439,7 +439,7 @@ def parse_from_file(
     ] = None,
 ) -> None:
     from ssc_codegen.compiler import Compiler
-    from ssc_codegen.converters.py_parsel import CONVERTER
+    from ssc_codegen.converters.py_lxml import CONVERTER
 
     cls_target, schema_config = _validate_parser_target(cls_target)
 
@@ -563,7 +563,7 @@ def parse_from_chrome_(
     from ssc_codegen.converters.js_pure import CONVERTER as JS_CONVERTER
     import asyncio
     from ssc_codegen.compiler import Compiler
-    from ssc_codegen.converters.py_parsel import CONVERTER
+    from ssc_codegen.converters.py_lxml import CONVERTER
 
     cls_target, schema_config = _validate_parser_target(cls_target)
 
