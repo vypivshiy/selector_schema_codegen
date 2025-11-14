@@ -11,7 +11,11 @@ from ichrome.exceptions import ChromeRuntimeError
 from typer import Argument, BadParameter, Option, Typer
 
 from ssc_codegen.ast_build import build_ast_module_parser
-from ssc_codegen.cli.ast_grep import JS_RULES, PY_RULES, PY_NEW_RM_PREFIX_SUFFIX_SYNTAX
+from ssc_codegen.cli.ast_grep import (
+    JS_RULES,
+    PY_RULES,
+    PY_NEW_RM_PREFIX_SUFFIX_SYNTAX,
+)
 from ssc_codegen.cli.cli_callbacks import cb_check_ssc_files, cb_folder_out
 from ssc_codegen.cli.cli_utils import (
     ConverterLike,
@@ -169,8 +173,13 @@ def gen_py(
         bool, Option(help=HELP_DOCSTRING, is_flag=True)
     ] = True,
     fmt_prefix_suffix_backport: Annotated[
-        bool, Option("-frps", '--fmt-remove-prefix-suffix',
-            help="[PY39+]: replace backport funcs to str.removeprefix(...) and str.removesuffix(...)")] = False
+        bool,
+        Option(
+            "-frps",
+            "--fmt-remove-prefix-suffix",
+            help="[PY39+]: replace backport funcs to str.removeprefix(...) and str.removesuffix(...)",
+        ),
+    ] = False,
 ) -> None:
     converter = import_converter(f"py_{lib.value}")
     if fmt:
@@ -180,12 +189,13 @@ def gen_py(
             f"ast-grep scan --rule {PY_RULES} -U " + "{}",
         ]
         if fmt_prefix_suffix_backport:
-            commands.append(f"ast-grep scan --rule {PY_NEW_RM_PREFIX_SUFFIX_SYNTAX} -U " + "{}")
+            commands.append(
+                f"ast-grep scan --rule {PY_NEW_RM_PREFIX_SUFFIX_SYNTAX} -U "
+                + "{}"
+            )
         fmt_cmd = create_fmt_cmd(ssc_files, prefix, suffix, out, commands)
     else:
         fmt_cmd = []
-
-
 
     generate_code(
         converter=converter,
