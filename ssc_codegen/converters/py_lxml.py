@@ -62,15 +62,38 @@ from ssc_codegen.converters.templates.py_base import IMPORTS_MIN
 
 CONVERTER = BasePyCodeConverter()
 
+"""
+# HtmlElement → сразу принимаем
+if isinstance(document, html.HtmlElement):
+    self._document = document
+    return
+
+# Строка → пробуем парсить
+if isinstance(document, str):
+    try:
+        self._document = html.fromstring(document.strip() or self.FALLBACK_HTML)
+        return
+    except (ParserError, ValueError):
+        pass
+
+# Всё остальное или ошибка → заглушка
+self._document = html.fromstring(self.FALLBACK_HTML)
+"""
+
 
 @CONVERTER(StructInitMethod.kind)
 def pre_init(_node: StructInitMethod) -> str:
-    return (
+    parts = [
         INDENT_METHOD
-        + "def __init__(self, document: Union[str, html.HtmlElement]) -> None:\n"
-        + INDENT_METHOD_BODY
-        + "self._document = html.fromstring(document) if isinstance(document, str) else document"
-    )
+        + "def __init__(self, document: Union[str, html.HtmlElement]) -> None:",
+        INDENT_METHOD * 2 + "if isinstance(document, html.HtmlElement):",
+        INDENT_METHOD * 3 + "self._document = document",
+        INDENT_METHOD * 2 + "elif isinstance(document, str):",
+        INDENT_METHOD * 3
+        + "self._document = html.fromstring(document.strip() or FALLBACK_HTML_STR)",
+        # in codegen, passed only str or html.HtmlElement objects
+    ]
+    return "\n".join(parts)
 
 
 @CONVERTER(StructPreValidateMethod.kind)
@@ -101,7 +124,15 @@ def pre_struct_field_method(node: StructFieldMethod) -> str:
 
 @CONVERTER(ModuleImports.kind)
 def pre_imports(_: ModuleImports) -> str:
-    return IMPORTS_MIN + """from lxml import html, etree"""
+    # lxml throw parse error if passed empty string
+    # most mainsteram html parser libs use `FALLBACK_HTML_STR` stub value
+    return (
+        IMPORTS_MIN
+        + """from lxml import html, etree
+    
+FALLBACK_HTML_STR = "<html><body></body></html>"
+    """
+    )
 
 
 @CONVERTER(ExprCss.kind)
