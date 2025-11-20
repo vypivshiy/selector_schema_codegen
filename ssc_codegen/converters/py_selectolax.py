@@ -84,7 +84,7 @@ def pre_struct_pre_validate(_node: StructPreValidateMethod) -> str:
 def pre_struct_part_doc_method(_node: StructPartDocMethod) -> str:
     return (
         INDENT_METHOD
-        + "def _split_doc(self, v: Union[HTMLParser, Node]) -> List[Node]:"
+        + "def _split_doc(self, v: Union[HTMLParser, Node]) -> list[Node]:"
     )
 
 

@@ -25,7 +25,6 @@ from ssc_codegen.cli.cli_utils import (
     suggest_class_name,
 )
 from ssc_codegen.cli.code_callbacks import (
-    CB_PY_CODE,
     CB_GO_CODE,
     CB_JS_CODE,
 )
@@ -208,7 +207,6 @@ def gen_py(
         xpath_to_css=to_css,
         css_to_xpath=to_xpath,
         debug_instructions=debug,
-        code_cb=CB_PY_CODE,
         gen_docstring=docstring,
     )
 

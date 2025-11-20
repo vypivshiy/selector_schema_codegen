@@ -272,7 +272,7 @@ def pre_has_attr(node: ExprHasAttr) -> str:
     expr = indent + f"assert {expr}, {msg!r}"
     if is_last_var_no_ret(node):
         return expr
-    return "\n".join(expr, indent + f"{nxt} = {prv}")
+    return "\n".join([expr, indent + f"{nxt} = {prv}"])
 
 
 @CONVERTER(ExprListHasAttr.kind)
@@ -292,7 +292,7 @@ def pre_list_has_attr(node: ExprListHasAttr) -> str:
 
     if is_last_var_no_ret(node):
         return expr
-    return "\n".join(expr, indent + f"{nxt} = {prv}")
+    return "\n".join([expr, indent + f"{nxt} = {prv}"])
 
 
 @CONVERTER(ExprMapAttrs.kind)

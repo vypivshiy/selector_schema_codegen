@@ -107,7 +107,7 @@ def pre_struct_pre_validate(_node: StructPreValidateMethod) -> str:
 def pre_struct_part_doc_method(_node: StructPartDocMethod) -> str:
     return (
         INDENT_METHOD
-        + "def _split_doc(self, v: html.HtmlElement) -> List[html.HtmlElement]:"
+        + "def _split_doc(self, v: html.HtmlElement) -> list[html.HtmlElement]:"
     )
 
 
@@ -128,8 +128,7 @@ def pre_imports(_: ModuleImports) -> str:
     # most mainsteram html parser libs use `FALLBACK_HTML_STR` stub value
     return (
         IMPORTS_MIN
-        + """from lxml import html, etree
-    
+        + """from lxml import html
 FALLBACK_HTML_STR = "<html><body></body></html>"
     """
     )

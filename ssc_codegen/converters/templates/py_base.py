@@ -1,19 +1,26 @@
-# used old style typing for support old python versions (3.8)
-
-
+# from __future__ import annotations for support old python versions (3.8)
 IMPORTS_MIN = """
+from __future__ import annotations
+
 import re
 import sys
 import json
 from html import unescape as _html_unescape
-from typing import List, Dict, TypedDict, Union, Optional, ClassVar
+from typing import TypedDict, Union, Optional, ClassVar
 from contextlib import suppress
 from functools import reduce
 
 if sys.version_info >= (3, 10):
     from types import NoneType
+    from typing import TypeAlias
 else:
     NoneType = type(None)
+
+    try:
+        from typing_extensions import TypeAlias  # noqa
+    except ImportError:
+        msg = "python < 3.10 required 'typing_extensions' dependency"
+        raise ImportError(msg)
 """
 
 
@@ -36,7 +43,7 @@ def ssc_unescape(s: str) -> str:
     return s
 
     
-def ssc_map_replace(s: str, replacements: Dict[str, str]) -> str:
+def ssc_map_replace(s: str, replacements: dict[str, str]) -> str:
     return reduce(lambda acc, kv: acc.replace(kv[0], kv[1]), replacements.items(), s)
 
     

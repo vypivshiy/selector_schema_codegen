@@ -143,24 +143,24 @@ INDENT_METHOD = INDENT_CH * 4
 INDENT_METHOD_BODY = INDENT_CH * (4 * 2)
 INDENT_DEFAULT_BODY = INDENT_CH * (4 * 3)
 TYPE_PREFIX = "T_{}"
-TYPE_DICT = "Dict[str, {}]"
-TYPE_LIST = "List[{}]"
+TYPE_DICT = "dict[str, {}]"
+TYPE_LIST = "list[{}]"
 TYPE_ITEM = "TypedDict({}, {})"
 
 TYPES = {
     VariableType.ANY: "Any",
     VariableType.STRING: "str",
-    VariableType.LIST_STRING: "List[str]",
+    VariableType.LIST_STRING: "list[str]",
     VariableType.OPTIONAL_STRING: "Optional[str]",
-    VariableType.OPTIONAL_LIST_STRING: "Optional[List[str]]",
+    VariableType.OPTIONAL_LIST_STRING: "Optional[list[str]]",
     VariableType.OPTIONAL_INT: "Optional[int]",
-    VariableType.OPTIONAL_LIST_INT: "Optional[List[int]]",
+    VariableType.OPTIONAL_LIST_INT: "Optional[list[int]]",
     VariableType.OPTIONAL_FLOAT: "Optional[float]",
-    VariableType.OPTIONAL_LIST_FLOAT: "Optional[List[float]]",
+    VariableType.OPTIONAL_LIST_FLOAT: "Optional[list[float]]",
     VariableType.INT: "int",
     VariableType.FLOAT: "float",
-    VariableType.LIST_INT: "List[int]",
-    VariableType.LIST_FLOAT: "List[float]",
+    VariableType.LIST_INT: "list[int]",
+    VariableType.LIST_FLOAT: "list[float]",
     VariableType.BOOL: "bool",
 }
 
@@ -174,11 +174,11 @@ JSON_TYPES = {
     JsonVariableType.OPTIONAL_NUMBER: "Optional[int]",
     JsonVariableType.OPTIONAL_FLOAT: "Optional[float]",
     JsonVariableType.OPTIONAL_BOOLEAN: "Optional[bool]",
-    JsonVariableType.ARRAY: "List",
-    JsonVariableType.ARRAY_FLOAT: "List[float]",
-    JsonVariableType.ARRAY_NUMBER: "List[int]",
-    JsonVariableType.ARRAY_STRING: "List[str]",
-    JsonVariableType.ARRAY_BOOLEAN: "List[bool]",
+    JsonVariableType.ARRAY: "list",
+    JsonVariableType.ARRAY_FLOAT: "list[float]",
+    JsonVariableType.ARRAY_NUMBER: "list[int]",
+    JsonVariableType.ARRAY_STRING: "list[str]",
+    JsonVariableType.ARRAY_BOOLEAN: "list[bool]",
 }
 
 LITERAL_TYPES = {
@@ -327,11 +327,11 @@ def get_typedef_field_by_name(node: TypeDef, field_name: str) -> str:
     if value.kwargs["type"] == VariableType.NESTED:
         type_ = f"T_{value.kwargs['cls_nested']}"
         if value.kwargs["cls_nested_type"] == StructType.LIST:
-            type_ = f"List[{type_}]"
+            type_ = f"list[{type_}]"
     elif value.kwargs["type"] == VariableType.JSON:
         type_ = f"J_{value.kwargs['cls_nested']}"
         if value.kwargs["cls_nested_type"] == StructType.LIST:
-            type_ = f"List[{type_}]"
+            type_ = f"list[{type_}]"
     else:
         type_ = TYPES[value.kwargs["type"]]
     return type_
@@ -346,14 +346,14 @@ def get_field_method_ret_type(node: StructFieldMethod) -> str:
             schema_name, schema_type = last_expr.unpack_args()
             type_ = f"T_{schema_name}"
             if schema_type == StructType.LIST:
-                type_ = f"List[{type_}]"
+                type_ = f"list[{type_}]"
         case VariableType.JSON:
             last_expr = node.body[-2]
             last_expr = cast(ExprJsonify, last_expr)
             json_struct_name, is_array, *_ = last_expr.unpack_args()
             type_ = f"J_{json_struct_name}"
             if is_array:
-                type_ = f"List[{type_}]"
+                type_ = f"list[{type_}]"
         case _:
             type_ = TYPES[last_expr.ret_type]
     return type_
@@ -396,7 +396,7 @@ def post_typedef_list(_: TypeDef) -> str:
 def pre_typedef_dict(node: TypeDef) -> str:
     name, _ = node.unpack_args()
     type_ = get_typedef_field_by_name(node, "__VALUE__")
-    return f"T_{name} = Dict[str, {type_}]"
+    return f"T_{name}: TypeAlias = dict[str, {type_}]"
 
 
 def post_typedef_dict(_: TypeDef) -> str:
@@ -406,7 +406,7 @@ def post_typedef_dict(_: TypeDef) -> str:
 def pre_typedef_flat_list(node: TypeDef) -> str:
     name, _ = node.unpack_args()
     type_ = get_typedef_field_by_name(node, "__VALUE__")
-    return f"T_{name} = List[{type_}]"
+    return f"T_{name}: TypeAlias = list[{type_}]"
 
 
 def post_typedef_flat_list(_: TypeDef) -> str:
@@ -415,7 +415,7 @@ def post_typedef_flat_list(_: TypeDef) -> str:
 
 def pre_typedef_acc_list(node: TypeDef) -> str:
     name, _ = node.unpack_args()
-    return f"T_{name} = List[str]"
+    return f"T_{name}: TypeAlias = list[str]"
 
 
 def post_typedef_acc_list(_: TypeDef) -> str:
@@ -438,11 +438,11 @@ def pre_typedef_field(node: TypeDefField) -> str:
     elif var_type == VariableType.NESTED:
         type_ = f"T_{cls_nested}"
         if cls_nested_type == StructType.LIST:
-            type_ = f"List[{type_}]"
+            type_ = f"list[{type_}]"
     elif var_type == VariableType.JSON:
         type_ = f"J_{cls_nested}"
         if cls_nested_type == StructType.LIST:
-            type_ = f"List[{type_}]"
+            type_ = f"list[{type_}]"
     else:
         type_ = TYPES[var_type]
     return f"{name!r}: {type_},"
@@ -466,7 +466,7 @@ def pre_json_field(node: JsonStructField) -> str:
     if json_type.type == JsonVariableType.OBJECT:
         type_ = f"J_{json_type.name}"
     elif json_type.type == JsonVariableType.ARRAY_OBJECTS:
-        type_ = f"List[J_{json_type.name}]"
+        type_ = f"list[J_{json_type.name}]"
     else:
         type_ = JSON_TYPES[json_type.type]
 
@@ -529,7 +529,7 @@ def pre_start_parse(node: StartParseMethod) -> str:
     st_type = node.parent.kwargs["struct_type"]
     type_ = f"T_{name}"
     if st_type == StructType.LIST:
-        type_ = f"List[{type_}]"
+        type_ = f"list[{type_}]"
     return INDENT_METHOD + f"def parse(self) -> {type_}:"
 
 
@@ -1010,7 +1010,7 @@ def pre_list_str_any_is_regex(node: ExprListStringAnyRegex) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    pattern, ignore_case, msg = node.unpack_args()
+    pattern, ignore_case, msg, _invert = node.unpack_args()
 
     if node.classvar_hooks.get("pattern"):
         pattern = py_get_classvar_hook_or_value(node, "pattern")
@@ -1033,7 +1033,7 @@ def pre_list_str_all_is_regex(node: ExprListStringAllRegex) -> str:
         INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
     )
     prv, nxt = prev_next_var(node)
-    pattern, ignore_case, msg = node.unpack_args()
+    pattern, ignore_case, msg, _invert = node.unpack_args()
 
     if node.classvar_hooks.get("pattern"):
         pattern = py_get_classvar_hook_or_value(node, "pattern")
@@ -1181,7 +1181,7 @@ def pre_filter_ends_with(node: FilterStrEnds) -> str:
 def pre_filter_re(node: FilterStrRe) -> str:
     pattern, ignore_case, *_ = node.unpack_args()
     if ignore_case:
-        expr = f"re.search({pattern!r}, i, re.IGNORECASE)"
+        expr = f"re.search({pattern!r}, i, re.I)"
     else:
         expr = f"re.search({pattern!r}, i)"
     if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
