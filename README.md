@@ -23,15 +23,15 @@ ssc-gen - a python-based DSL to describe parsers for html documents, which is tr
 
 Current support converters
 
-| Language                                 | HTML parser lib + dependencies         | XPath | CSS3 | CSS4 | Generated annotations, types, structs | formatter dependency |
-| ---------------------------------------- | -------------------------------------- | ----- | ---- | ---- | ------------------------------------- | -------------------- |
-| Python (3.8+)                            | bs4, lxml                              | N     | Y    | Y    | TypedDict`1`, list, dict              | ruff                 |
-| ...                                      | parsel                                 | Y     | Y    | N    | ...                                   | ...                  |
-| ...                                      | selectolax (lexbor)                    | N     | Y    | N    | ...                                   | ...                  |
-| ...                                      | lxml                                   | Y     | Y    | N    | ...                                   | ...                  |
-| js (ES6)`2`                              | pure (firefox/chrome extension/nodejs) | Y     | Y    | Y    | JSDoc                                 | prettier             |
-| go (1.10+) **(UNSTABLE)**                | goquery, gjson (`4`)                   | N     | Y    | N    | struct(+json anchors), array, map     | gofmt                |
-| lua (5.2+), luajit(2+) **(UNSTABLE)**`5` | lua-htmlparser, lrexlib(opt), dkjson   | N     | Y    | N    | EmmyLua                               | LuaFormatter         |
+| Language                                 | HTML parser lib + dependencies                         | XPath | CSS3 | CSS4 | Generated annotations, types, structs | formatter dependency |
+| ---------------------------------------- | ------------------------------------------------------ | ----- | ---- | ---- | ------------------------------------- | -------------------- |
+| Python (3.8-3.13)                        | bs4, lxml ( typing_extensions if py < 3.10 )           | N     | Y    | Y    | TypedDict`1`, list, dict              | ruff                 |
+| ...                                      | parsel ( typing_extensions if py < 3.10 )              | Y     | Y    | N    | ...                                   | ...                  |
+| ...                                      | selectolax (lexbor) ( typing_extensions if py < 3.10 ) | N     | Y    | N    | ...                                   | ...                  |
+| ...                                      | lxml ( typing_extensions if py < 3.10 )                | Y     | Y    | N    | ...                                   | ...                  |
+| js (ES6)`2`                              | pure (firefox/chrome extension/nodejs)                 | Y     | Y    | Y    | JSDoc                                 | prettier             |
+| go (1.10+) **(UNSTABLE)**                | goquery, gjson (`4`)                                   | N     | Y    | N    | struct(+json anchors), array, map     | gofmt                |
+| lua (5.2+), luajit(2+) **(UNSTABLE)**`5` | lua-htmlparser, lrexlib(opt), dkjson                   | N     | Y    | N    | EmmyLua                               | LuaFormatter         |
 
 - **CSS3** means support next selectors:
   - basic: (`tag`, `.class`, `#id`, `tag1,tag2`)
@@ -64,6 +64,7 @@ For maximum portability of the configuration to the target language:
   Check the html parser lib documentation aboud CSS selectors before implement code. Examples:
   1. Several libs not support `+` operations (eg: [selectolax(modest)](https://github.com/rushter/selectolax), [dart.universal_html](https://pub.dev/packages/universal_html))
   2. For research purpose, lua_htmlparser include converter for unsupported CSS3 query syntax
+
 2. HTML parser libs maybe not supports attribute selectors: `*=`, `~=`, `|=`, `^=`, `$=`
 3. Several libs not support pseudo classes (eg: standard [dart.html](https://dart.dev/libraries/dart-html) lib miss this feature).
 
@@ -209,7 +210,6 @@ You can use any html source:
 - use in STDIN pipelines with third-party tools like [projectdiscovery/httpx](https://github.com/projectdiscovery/httpx)
 
 ## See also
-
 
 - [Brief](docs/briefing.md) about css selectors and regular expressions
 - [Explain](docs/explain.md) short document on how to understand DSL syntax
