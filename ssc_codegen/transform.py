@@ -18,8 +18,6 @@ def target(backend: str, dependencies: list[str] | None = None):
     dependencies = dependencies or []
 
     def decorator(fn: Callable[..., list[str]]) -> Callable[..., list[str]]:
-        # пометим функцию атрибутом, но реальное связывание с классом произойдёт
-        # при определении класса — в __set_name__ (альтернатива) или вручную
         setattr(fn, "_emit_backend", backend)
         setattr(fn, "_emit_deps", dependencies)
         return fn
@@ -37,7 +35,6 @@ class BaseTransformMeta(type):
             base_impls = getattr(base, "_emit_impls", None)
             if isinstance(base_impls, dict):
                 for backend, spec in base_impls.items():
-                    # copy чтобы не делить внутренние структуры
                     impls.setdefault(
                         backend,
                         {
@@ -66,7 +63,6 @@ class BaseTransformMeta(type):
                     func=attr_value,  # type: ignore
                 )
 
-        # Каждый класс получает собственный dict, не общий со всеми
         setattr(cls, "_emit_impls", impls)
         return cls
 
@@ -94,9 +90,6 @@ class BaseTransform(metaclass=BaseTransformMeta):
     def emit(self, backend: str, prv: str, nxt: str) -> list[str]:
         spec = self.get_emit_spec(backend)
         if not spec:
-            raise RuntimeError(
-                f"No emit implementation for backend {backend} in {self.__class__.__name__}"
-            )
-        # spec["func"] — функция как определена в классе, нужно вызвать её с self
+            return []
         fn = getattr(self, spec["method_name"])
         return fn(prv, nxt)
