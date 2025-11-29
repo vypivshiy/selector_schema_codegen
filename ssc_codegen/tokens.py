@@ -87,6 +87,9 @@ class TokenType(IntEnum):
     due to the risk of race-condition or other side effects.
     """
 
+    UTILITIES = auto()
+    """used for part import logic and helper functions/constants"""
+
     # utils nodes
     CODE_START = auto()
     """insert to ast after DOCSTRING and IMPORTS tokens
@@ -99,6 +102,9 @@ class TokenType(IntEnum):
 
     maybe usef for inject custom code or logic
     """
+
+    TRANSFORM = auto()
+    TRANSFORM_IMPORTS = auto()
 
     # STRUCTS
     STRUCT = auto()

@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Sequence, TypedDict, ClassVar, TypeVar
+from typing import Sequence, TypedDict, ClassVar, TypeVar, TYPE_CHECKING
 
 from ssc_codegen.ast_.base import T_EMPTY_KWARGS, BaseAstNode
 from ssc_codegen.ast_.base import (
@@ -13,6 +13,9 @@ from ssc_codegen.tokens import (
     StructType,
     VariableType,
 )
+
+if TYPE_CHECKING:
+    from ssc_codegen.transform import BaseTransform
 
 KW_DOCSTRING = TypedDict("KW_DOCSTRING", {"value": str})
 
@@ -34,11 +37,32 @@ class Docstring(_DisableRepr, BaseAstNode[KW_DOCSTRING, tuple[str]]):
     """
 
     kind: ClassVar[TokenType] = TokenType.DOCSTRING
-    kwargs: KW_DOCSTRING
+
+
+# push transform for resolve imports (dependencies)
+KW_MODULE_IMPORTS = TypedDict(
+    "KW_MODULE_IMPORTS", {"transforms": list["BaseTransform"]}
+)
+ARGS_MODULE_IMPORTS = tuple[list["BaseTransform"]]
 
 
 @dataclass(kw_only=True)
-class ModuleImports(_DisableRepr, BaseAstNode[T_EMPTY_KWARGS, tuple]):
+class ModuleTransformImports(
+    BaseAstNode[KW_MODULE_IMPORTS, ARGS_MODULE_IMPORTS]
+):
+    """AST node representing module import transfrom dependencies.
+
+    This node contains import statements that will be added to the
+    generated module to ensure required dependencies are available.
+    """
+
+    kind: ClassVar[TokenType] = TokenType.TRANSFORM_IMPORTS
+
+
+@dataclass(kw_only=True)
+class ModuleImports(
+    _DisableRepr, BaseAstNode[KW_MODULE_IMPORTS, ARGS_MODULE_IMPORTS]
+):
     """AST node representing module import statements.
 
     This node contains import statements that will be added to the
@@ -551,3 +575,17 @@ class CodeEnd(_DisableRepr, BaseAstNode):
     """
 
     kind: ClassVar[TokenType] = TokenType.CODE_END
+
+
+KW_TRANSFORM = TypedDict("KW_TRANSFORM", {"transform": "BaseTransform"})
+ARGS_TRANSFORM = tuple["BaseTransform"]
+
+
+@dataclass(kw_only=True)
+class ExprTransform(BaseAstNode[KW_TRANSFORM, ARGS_TRANSFORM]):
+    kind: ClassVar[TokenType] = TokenType.TRANSFORM
+
+
+@dataclass(kw_only=True)
+class ModuleUtilities(_DisableRepr, BaseAstNode):
+    kind: ClassVar[TokenType] = TokenType.UTILITIES

@@ -38,7 +38,10 @@ from .nodes_core import (
     ExprClassVar,
     ExprCallStructClassVar,
     CodeStart,
-    CodeEnd
+    CodeEnd,
+    ExprTransform,
+    ModuleTransformImports,
+    ModuleUtilities
 )
 from .nodes_filter import (
     FilterOr,

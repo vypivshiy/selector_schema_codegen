@@ -3,6 +3,7 @@ from typing import MutableSequence, Type, cast
 import warnings
 from typing_extensions import Self
 
+from ssc_codegen.ast_ import ModuleTransformImports, ModuleUtilities
 from ssc_codegen.ast_.base import BaseAstNode
 from ssc_codegen.ast_.nodes_cast import ExprJsonify, ExprNested
 from ssc_codegen.ast_.nodes_core import (
@@ -113,7 +114,16 @@ class AstBuilder:
                 Docstring(kwargs={"value": module_doc}, parent=self.module)
             )
         # import node
-        self.module.body.append(ModuleImports(parent=self.module))
+        # fallback add ModuleImports.kwargs["transform"] if target language not allowed use multiple import directives
+        self.module.body.append(
+            ModuleImports(parent=self.module, kwargs={"transforms": []})
+        )
+        self.module.body.append(
+            ModuleTransformImports(
+                parent=self.module, kwargs={"transforms": []}
+            )
+        )
+        self.module.body.append(ModuleUtilities(parent=self.module))
         # CodeStart hook node
         self.module.body.append(CodeStart(parent=self.module))
         return self
@@ -398,10 +408,23 @@ class AstBuilder:
         # generate typedef as annotation node
         return st
 
+    @staticmethod
+    def is_collected_type_transform(transforms: list, target: object) -> bool:
+        for t in transforms:
+            if isinstance(t, type(target)):
+                return True
+        return False
+
     def add_struct_parsers(self, *struct_parsers: Type[BaseSchema]) -> Self:
         ssc_structs = []
         ssc_typedefs = []
+        ssc_transforms = []
         for schema in struct_parsers:
+            if schema.__SSC_TRANSFORMS__:
+                # check current used transforms for avoid generate duplicate imports
+                for t in schema.__SSC_TRANSFORMS__:
+                    if not any(isinstance(i, type(t)) for i in ssc_transforms):
+                        ssc_transforms.append(t)
             if is_literals_only_schema(schema):
                 if schema.__SCHEMA_TYPE__ != StructType.ITEM:
                     raise TypeError(
@@ -420,6 +443,21 @@ class AstBuilder:
                 continue
             ssc_typedefs.append(typedef)
         # assembly
+
+        # insert transforms imports (in high-level API provide insert dependencies)
+
+        node_transform_import = self.module.find_node_by_token(
+            ModuleTransformImports.kind
+        )
+        node_transform_import = cast(
+            ModuleTransformImports, node_transform_import
+        )
+        node_transform_import.kwargs["transforms"] = ssc_transforms.copy()
+
+        node_import = self.module.find_node_by_token(ModuleImports.kind)
+        node_import = cast(ModuleImports, node_import)
+        node_import.kwargs["transform"] = ssc_transforms.copy()
+
         self.module.body.extend(ssc_typedefs)
         self.module.body.extend(ssc_structs)
         self.module.body.append(CodeEnd(parent=self.module))

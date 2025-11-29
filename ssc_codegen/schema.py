@@ -9,6 +9,7 @@ from .tokens import StructType, TokenType, VariableType
 if TYPE_CHECKING:
     from .document import BaseDocument, ClassVarDocument
     from .json_struct import Json
+    from .transform import BaseTransform
 
 
 class MISSING_FIELD(object):  # noqa
@@ -155,6 +156,16 @@ class SchemaMeta(type):
                                     tmp_cvars.pop(cvar_name)
                                     break
 
+    @staticmethod
+    def __resolve_self_transforms(cls: Type["BaseSchema"]) -> None:
+        # called after __fill_mro_fields(cls)
+        result: list["BaseTransform"] = []
+        for field in cls.__SSC_MRO_FIELDS__.values():
+            for node in field.stack:
+                if node.kind == TokenType.TRANSFORM:
+                    result.append(node.kwargs["transform"])
+        cls.__SSC_TRANSFORMS__ = result
+
     def __new__(mcs, name, bases, namespace, **kwargs):  # type: ignore
         cls = super().__new__(mcs, name, bases, namespace)
         cls = cast(Type["BaseSchema"], cls)
@@ -169,7 +180,7 @@ class SchemaMeta(type):
         mcs.__fill_mro_fields(cls)
         mcs.__fill_literals(cls, name)
         mcs.__resolve_self_classvars(cls)
-
+        mcs.__resolve_self_transforms(cls)
         return cls
 
 
@@ -212,6 +223,9 @@ class BaseSchema(metaclass=SchemaMeta):
     __SSC_MRO__: tuple[Type["BaseSchema"], ...]
     # old name - literals
     __SSC_MRO_CLASSVARS__: dict[str, "ClassVarDocument"]
+
+    # it opmimize collect extra imports
+    __SSC_TRANSFORMS__: list["BaseTransform"]
 
     # retained for API backward compatibility
     @classmethod

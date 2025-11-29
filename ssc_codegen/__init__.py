@@ -1,6 +1,6 @@
 from ssc_codegen.document import DocumentElementsFilter, HTMLDocument, ClassVarDocument, StringDocument, ArrayDocument, AssertDocument, NestedDocument, \
     DefaultDocument, \
-    NumericDocument, JsonDocument, BooleanDocument, DocumentFilter
+    NumericDocument, JsonDocument, BooleanDocument, DocumentFilter, TransformDocument
 from ssc_codegen.json_struct import Json
 from ssc_codegen.logs import setup_logger
 from ssc_codegen.schema import ItemSchema, DictSchema, ListSchema, FlatListSchema, AccUniqueListSchema
@@ -26,7 +26,8 @@ class Document(
     DefaultDocument,
     NumericDocument,
     JsonDocument,
-    BooleanDocument
+    BooleanDocument,
+    TransformDocument
 ):
     """Special Common Document or Element marker manipulations"""
     pass

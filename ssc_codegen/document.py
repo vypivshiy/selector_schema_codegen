@@ -2,7 +2,16 @@
 
 from functools import wraps
 import logging
-from typing import Any, Callable, Type, Pattern, Sequence, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    Type,
+    Pattern,
+    Sequence,
+    TypeVar,
+    Union,
+    TYPE_CHECKING,
+)
 from re import Pattern as RePattern
 
 from cssselect import SelectorSyntaxError
@@ -13,6 +22,7 @@ from ssc_codegen.ast_ import (
     ExprDefaultValueWrapper,
     ExprCss,
     ExprCssAll,
+    ExprTransform,
     ExprXpathAll,
     ExprGetHtmlAttr,
     ExprGetHtmlText,
@@ -124,6 +134,9 @@ from ssc_codegen.pseudo_selectors import (
 from ssc_codegen.schema import BaseSchema
 from ssc_codegen.selector_utils import validate_css_query, validate_xpath_query
 from ssc_codegen.tokens import TokenType, VariableType
+
+if TYPE_CHECKING:
+    from .transform import BaseTransform
 
 LOGGER = logging.getLogger("ssc_gen")
 
@@ -2626,3 +2639,23 @@ class DocumentElementsFilter(BaseDocument):
         new_filter = DocumentElementsFilter()
         new_filter.stack.extend(self.stack)
         return DocumentElementsFilter().not_(new_filter)
+
+
+class TransformDocument(BaseDocument):
+    def transform(self, transformer: "BaseTransform") -> Self:
+        # manual test types from transformer
+        if self.stack_last_ret != transformer.accept_type:
+            LOGGER.warning(
+                "transform() [%s]: Expected type(s) %s, got %s",
+                transformer.__class__.__name__,
+                transformer.accept_type.name,
+                self.stack_last_ret.name,
+            )
+        self._add(
+            ExprTransform(
+                kwargs={"transform": transformer},
+                accept_type=transformer.accept_type,
+                ret_type=transformer.return_type,
+            )
+        )
+        return self
