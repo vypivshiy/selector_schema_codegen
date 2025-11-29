@@ -1,6 +1,7 @@
 from ssc_codegen.ast_ import (
     ExprCss,
     ExprCssAll,
+    ExprTransform,
     ModuleImports,
     ExprXpathAll,
     ExprXpath,
@@ -12,6 +13,7 @@ from ssc_codegen.ast_ import (
     ExprGetHtmlRaw,
     ExprGetHtmlRawAll,
     ExprIsCss,
+    ModuleTransformImports,
     StructInitMethod,
     StructFieldMethod,
     StructPreValidateMethod,
@@ -60,6 +62,32 @@ from ssc_codegen.converters.py_base import (
 from ssc_codegen.converters.templates.py_base import IMPORTS_MIN
 
 CONVERTER = BasePyCodeConverter()
+
+
+@CONVERTER.post(ModuleTransformImports.kind)
+def post_transform_imports(node: ModuleTransformImports) -> str:
+    transforms, *_ = node.unpack_args()
+
+    if not transforms:
+        return ""
+
+    code_imports = []
+    for t in transforms:
+        if deps := t.collect_dependencies("py_selectolax"):
+            code_imports.append("\n".join(deps))
+    return "\n".join(code_imports)
+
+
+@CONVERTER.post(ExprTransform.kind)
+def post_transform(node: ExprTransform) -> str:
+    # extend transform search provide py_bs4 module
+    prv, nxt = prev_next_var(node)
+    transform, *_ = node.unpack_args()
+    parts = transform.emit("py_selectolax", prv, nxt)
+    if have_default_expr(node):
+        code = INDENT_DEFAULT_BODY + INDENT_DEFAULT_BODY.join(parts)
+        return code
+    return INDENT_METHOD_BODY + INDENT_METHOD_BODY.join(parts)
 
 
 @CONVERTER(StructInitMethod.kind)

@@ -23,6 +23,9 @@ from typing import cast
 
 from ssc_codegen.ast_ import (
     Docstring,
+    ExprTransform,
+    ModuleTransformImports,
+    ModuleUtilities,
     StructParser,
     ExprReturn,
     ExprNoReturn,
@@ -173,7 +176,11 @@ DOCSTR_START = "/**"
 DOCSTR_END = "*/"
 DOCSTR_SEP = "* "
 CONVERTER = BaseCodeConverter(debug_comment_prefix="// ")
-# javascript not support typing/annotations
+CONVERTER.TEST_EXCLUDE_NODES.extend(
+    [
+        ModuleImports.kind,  # not use imports
+    ]
+)
 
 
 # TODO: move to string_utils
@@ -213,8 +220,30 @@ def py_sequence_to_js_array(values: tuple[str, ...] | list[str]) -> str:
     return "[" + val_arr[1:-1] + "]"
 
 
-@CONVERTER(ModuleImports.kind)
-def pre_imports(_: ModuleImports) -> str:
+@CONVERTER(ModuleTransformImports.kind)
+def pre_transform_imports(node: ModuleTransformImports) -> str:
+    transforms, *_ = node.unpack_args()
+
+    if not transforms:
+        return ""
+
+    code_imports = []
+    for t in transforms:
+        if deps := t.collect_dependencies("js_pure"):
+            code_imports.append("\n".join(deps))
+    return "\n".join(code_imports)
+
+
+@CONVERTER(ExprTransform.kind)
+def pre_transform(node: ExprTransform) -> str:
+    # extend transform search provide py_bs4 module
+    prv, nxt = prev_next_var(node)
+    transform, *_ = node.unpack_args()
+    return "\n".join(f"{i};" for i in transform.emit("js_pure", prv, nxt))
+
+
+@CONVERTER(ModuleUtilities.kind)
+def pre_imports(_: ModuleUtilities) -> str:
     return HELPER_FUNCTIONS
 
 

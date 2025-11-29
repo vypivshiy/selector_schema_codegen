@@ -51,6 +51,9 @@ from typing_extensions import assert_never
 
 from ssc_codegen.ast_ import (
     Docstring,
+    ExprTransform,
+    ModuleTransformImports,
+    ModuleUtilities,
     StructParser,
     ExprReturn,
     ExprNoReturn,
@@ -393,21 +396,37 @@ def pre_docstring(node: Docstring) -> str:
 
 @CONVERTER(ModuleImports.kind)
 def pre_module_imports(_node: ModuleImports) -> str:
+    # TODO: resolve imports
+    return IMPORTS.replace("$PACKAGE$", CONVERTER.PACKAGE)
+
+
+@CONVERTER(ModuleTransformImports.kind)
+def pre_transform_imports(node: ModuleTransformImports) -> str:
+    transforms, *_ = node.unpack_args()
+    if transforms:
+        for t in transforms:
+            if t.collect_dependencies("go_goquery"):
+                raise NotImplementedError(
+                    "Current converter implementation not support pass extra import dependencies"
+                )
+    return ""
+
+
+@CONVERTER(ExprTransform.kind)
+def pre_transform(node: ExprTransform) -> str:
+    prv, nxt = prev_next_var(node)
+    transform, *_ = node.unpack_args()
+    parts = transform.emit("go_goquery", prv, nxt)
+    return "\n" + "\n".join(parts)
+
+
+@CONVERTER(ModuleUtilities.kind)
+def pre_module_utilities(_: ModuleUtilities) -> str:
     # HACK:
-    # golang not allowed override functions, check loaded helper functions by flag
-    helper_functions = (
-        HELPER_FUNCTIONS if not CONVERTER.HELPER_FUNCS_IMPORTED else ""
-    )
-    code = (
-        # magic constant
-        IMPORTS.replace("$PACKAGE$", CONVERTER.PACKAGE)
-        # HACK: push helper functions to ModuleImports token:
-        #       its generated second after module docstring
-        + helper_functions
-    )
+    # golang not allowed override or duplicate functions, check loaded helper functions by flag
     if not CONVERTER.HELPER_FUNCS_IMPORTED:
         CONVERTER.HELPER_FUNCS_IMPORTED = True
-    return code
+    return HELPER_FUNCTIONS if not CONVERTER.HELPER_FUNCS_IMPORTED else ""
 
 
 def get_typedef_field_by_name(node: TypeDef, field_name: str) -> str:

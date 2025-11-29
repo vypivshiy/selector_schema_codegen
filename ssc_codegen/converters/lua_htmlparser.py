@@ -28,6 +28,9 @@ from typing import Any, cast
 
 from ssc_codegen.ast_ import (
     Docstring,
+    ExprTransform,
+    ModuleTransformImports,
+    ModuleUtilities,
     StructParser,
     ExprReturn,
     ExprNoReturn,
@@ -187,6 +190,7 @@ CONVERTER.TEST_EXCLUDE_NODES.extend(
         FilterDocHasText.kind,
         FilterDocIsRegexText.kind,
         FilterDocIsRegexRaw.kind,
+        # NOT IMPLEMENTED
     ]
 )
 
@@ -291,7 +295,34 @@ def py_regex_to_lua_rex_pcre(
 
 @CONVERTER(ModuleImports.kind)
 def pre_imports(_: ModuleImports) -> str:
-    return IMPORTS + "\n" + HELPER_FUNCTIONS
+    return IMPORTS
+
+
+@CONVERTER(ModuleTransformImports.kind)
+def pre_transform_imports(node: ModuleTransformImports) -> str:
+    transforms, *_ = node.unpack_args()
+
+    if not transforms:
+        return ""
+
+    code_imports = []
+    for t in transforms:
+        if deps := t.collect_dependencies("lua_htmlparser"):
+            code_imports.append("\n".join(deps))
+    return "\n".join(code_imports)
+
+
+@CONVERTER(ModuleUtilities.kind)
+def pre_utilities(_: ModuleUtilities) -> str:
+    return HELPER_FUNCTIONS
+
+
+@CONVERTER(ExprTransform.kind)
+def pre_transform(node: ExprTransform) -> str:
+    prv, nxt = prev_next_var(node)
+    transform, *_ = node.unpack_args()
+    parts = transform.emit("lua_htmlparser", prv, nxt)
+    return "\n" + "\n".join(parts)
 
 
 @CONVERTER(Docstring.kind)

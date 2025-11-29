@@ -1,6 +1,7 @@
 from ssc_codegen.ast_ import (
     ExprCss,
     ExprCssAll,
+    ExprTransform,
     ModuleImports,
     ExprXpathAll,
     ExprXpath,
@@ -12,6 +13,8 @@ from ssc_codegen.ast_ import (
     ExprGetHtmlRaw,
     ExprGetHtmlRawAll,
     ExprIsCss,
+    ModuleTransformImports,
+    ModuleUtilities,
     StructInitMethod,
     StructFieldMethod,
     StructPreValidateMethod,
@@ -62,24 +65,6 @@ from ssc_codegen.converters.templates.py_base import IMPORTS_MIN
 
 CONVERTER = BasePyCodeConverter()
 
-"""
-# HtmlElement → сразу принимаем
-if isinstance(document, html.HtmlElement):
-    self._document = document
-    return
-
-# Строка → пробуем парсить
-if isinstance(document, str):
-    try:
-        self._document = html.fromstring(document.strip() or self.FALLBACK_HTML)
-        return
-    except (ParserError, ValueError):
-        pass
-
-# Всё остальное или ошибка → заглушка
-self._document = html.fromstring(self.FALLBACK_HTML)
-"""
-
 
 @CONVERTER(StructInitMethod.kind)
 def pre_init(_node: StructInitMethod) -> str:
@@ -123,15 +108,42 @@ def pre_struct_field_method(node: StructFieldMethod) -> str:
 
 
 @CONVERTER(ModuleImports.kind)
-def pre_imports(_: ModuleImports) -> str:
+def pre_imports(node: ModuleImports) -> str:
     # lxml throw parse error if passed empty string
     # most mainsteram html parser libs use `FALLBACK_HTML_STR` stub value
-    return (
-        IMPORTS_MIN
-        + """from lxml import html
-FALLBACK_HTML_STR = "<html><body></body></html>"
-    """
-    )
+
+    return IMPORTS_MIN + "from lxml import html"
+
+
+@CONVERTER.post(ModuleTransformImports.kind)
+def post_transform_imports(node: ModuleTransformImports) -> str:
+    transforms, *_ = node.unpack_args()
+
+    if not transforms:
+        return ""
+
+    code_imports = []
+    for t in transforms:
+        if deps := t.collect_dependencies("py_lxml"):
+            code_imports.append("\n".join(deps))
+    return "\n".join(code_imports)
+
+
+@CONVERTER.post(ExprTransform.kind)
+def post_transform(node: ExprTransform) -> str:
+    # extend transform search provide py_bs4 module
+    prv, nxt = prev_next_var(node)
+    transform, *_ = node.unpack_args()
+    parts = transform.emit("py_lxml", prv, nxt)
+    if have_default_expr(node):
+        code = INDENT_DEFAULT_BODY + INDENT_DEFAULT_BODY.join(parts)
+        return code
+    return INDENT_METHOD_BODY + INDENT_METHOD_BODY.join(parts)
+
+
+@CONVERTER.post(ModuleUtilities.kind)
+def post_utilities(_: ModuleUtilities) -> str:
+    return 'FALLBACK_HTML_STR = "<html><body></body></html>"'
 
 
 @CONVERTER(ExprCss.kind)

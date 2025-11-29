@@ -35,7 +35,10 @@ from typing import cast
 
 from ssc_codegen.ast_ import (
     Docstring,
+    ExprTransform,
     ModuleImports,
+    ModuleTransformImports,
+    ModuleUtilities,
     TypeDef,
     TypeDefField,
     JsonStruct,
@@ -214,6 +217,9 @@ class BasePyCodeConverter(BaseCodeConverter):
         self.pre_definitions = {
             Docstring.kind: pre_docstring,
             ModuleImports.kind: pre_imports,
+            ModuleTransformImports.kind: pre_transform_imports,
+            ExprTransform.kind: pre_transform,
+            ModuleUtilities.kind: pre_utilities,
             TypeDefField.kind: pre_typedef_field,
             JsonStruct.kind: pre_json_struct,
             JsonStructField.kind: pre_json_field,
@@ -295,7 +301,6 @@ class BasePyCodeConverter(BaseCodeConverter):
         }
 
         self.post_definitions = {
-            ModuleImports.kind: post_imports,
             JsonStruct.kind: post_json_struct,
             ExprFilter.kind: post_expr_filter,
             FilterAnd.kind: post_filter_and,
@@ -319,6 +324,16 @@ class BasePyCodeConverter(BaseCodeConverter):
             (TypeDef.kind, StructType.FLAT_LIST): post_typedef_flat_list,
             (TypeDef.kind, StructType.ACC_LIST): post_typedef_acc_list,
         }
+
+
+def pre_transform(node: ExprTransform) -> str:
+    prv, nxt = prev_next_var(node)
+    transform, *_ = node.unpack_args()
+    parts = transform.emit("py_base", prv, nxt)
+    if have_default_expr(node):
+        code = INDENT_DEFAULT_BODY + INDENT_DEFAULT_BODY.join(parts)
+        return code
+    return INDENT_METHOD_BODY + INDENT_METHOD_BODY.join(parts)
 
 
 def get_typedef_field_by_name(node: TypeDef, field_name: str) -> str:
@@ -366,12 +381,25 @@ def pre_docstring(node: Docstring) -> str:
     return ""
 
 
-def pre_imports(_node: ModuleImports) -> str:
+def pre_utilities(_: ModuleUtilities) -> str:
+    return HELPER_FUNCTIONS
+
+
+def pre_imports(_: ModuleImports) -> str:
     return IMPORTS_MIN
 
 
-def post_imports(_: ModuleImports) -> str:
-    return HELPER_FUNCTIONS
+def pre_transform_imports(node: ModuleTransformImports) -> str:
+    transforms, *_ = node.unpack_args()
+
+    if not transforms:
+        return ""
+
+    code_imports = []
+    for t in transforms:
+        if deps := t.collect_dependencies("py_base"):
+            code_imports.append("\n".join(deps))
+    return "\n".join(code_imports)
 
 
 # TYPEDEF
