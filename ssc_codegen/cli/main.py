@@ -31,6 +31,7 @@ from ssc_codegen.cli.code_callbacks import (
 from ssc_codegen.cli.consts import (
     CMD_LUA,
     HELP_LUA_PCRE_FLAG,
+    Bs4Features,
     LuaLIBS,
     PyLIBS,
     JsLIBS,
@@ -179,6 +180,12 @@ def gen_py(
             help="[PY39+]: replace backport funcs to str.removeprefix(...) and str.removesuffix(...)",
         ),
     ] = False,
+    bs4_feature: Annotated[
+        Bs4Features,
+        Option(
+            "--bs4-feature", "-bs4f", help="[`-i bs4` only] soup feature param"
+        ),
+    ] = Bs4Features.LXML,
 ) -> None:
     converter = import_converter(f"py_{lib.value}")
     if fmt:
@@ -208,6 +215,7 @@ def gen_py(
         css_to_xpath=to_xpath,
         debug_instructions=debug,
         gen_docstring=docstring,
+        variables_patches={"BS4_FEATURE": bs4_feature},
     )
 
 

@@ -200,6 +200,8 @@ MAGIC_METHODS = {
 
 
 class BasePyCodeConverter(BaseCodeConverter):
+    BS4_FEATURE: str = "lxml"
+
     def __init__(
         self,
         debug_instructions: bool = False,

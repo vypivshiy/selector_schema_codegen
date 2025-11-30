@@ -94,11 +94,12 @@ def post_transform(node: ExprTransform) -> str:
 
 @CONVERTER(StructInitMethod.kind)
 def pre_init(_node: StructInitMethod) -> str:
+    feature = CONVERTER.BS4_FEATURE
     return (
         INDENT_METHOD
         + "def __init__(self, document: Union[bytes, str, BeautifulSoup, Tag]) -> None:\n"
         + INDENT_METHOD_BODY
-        + "self._document = BeautifulSoup(document, 'lxml') if isinstance(document, (str, bytes)) else document"
+        + f"self._document = BeautifulSoup(document, '{feature}') if isinstance(document, (str, bytes)) else document"
     )
 
 

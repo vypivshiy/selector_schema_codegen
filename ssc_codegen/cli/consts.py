@@ -12,6 +12,12 @@ class PyLIBS(StrEnum):
     LXML = "lxml"
 
 
+class Bs4Features(StrEnum):
+    HTML_PARSER = "html.parser"
+    LXML = "lxml"
+    HTML5LIB = "html5lib"
+
+
 class JsLIBS(StrEnum):
     PURE = "pure"
 
