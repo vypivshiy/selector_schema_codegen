@@ -6,7 +6,7 @@ import re
 import sys
 import json
 from html import unescape as _html_unescape
-from typing import TypedDict, Union, Optional, ClassVar
+from typing import TypedDict, Union, Optional, ClassVar, Any
 from contextlib import suppress
 from functools import reduce
 
