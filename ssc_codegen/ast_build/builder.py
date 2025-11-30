@@ -1,6 +1,6 @@
+import logging
 from types import ModuleType
 from typing import MutableSequence, Type, cast
-import warnings
 from typing_extensions import Self
 
 from ssc_codegen.ast_ import ModuleTransformImports, ModuleUtilities
@@ -45,6 +45,8 @@ from ssc_codegen.document_utlis import (
 from ssc_codegen.json_struct import Json
 from ssc_codegen.schema import BaseSchema
 from ssc_codegen.tokens import StructType, TokenType, VariableType
+
+LOGGER = logging.getLogger("ssc_gen")
 
 
 class AstBuilder:
@@ -214,9 +216,8 @@ class AstBuilder:
                         default_type = VariableType.OPTIONAL_LIST_FLOAT
                     # TODO: warning for BOOL type
                     case _:
-                        warnings.warn(
+                        LOGGER.warning(
                             f"'None' default value not allowed return type '{ret_type.name}'. ",
-                            category=SyntaxWarning,
                         )
                         default_type = VariableType.ANY
             elif isinstance(value, list):
@@ -229,10 +230,9 @@ class AstBuilder:
                     case VariableType.LIST_FLOAT:
                         default_type = VariableType.LIST_FLOAT
                     case _:
-                        warnings.warn(
+                        LOGGER.warning(
                             f"`empty list` default value not allowed return type `{ret_type.name}`. "
                             f"Expected types `{(VariableType.LIST_STRING.name, VariableType.LIST_INT, VariableType.LIST_FLOAT)}`",
-                            category=SyntaxWarning,
                         )
                         default_type = VariableType.ANY
             expr_default_start = ExprDefaultValueStart(
