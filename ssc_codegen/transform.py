@@ -25,6 +25,44 @@ def target(backend: str, dependencies: list[str] | None = None):
     return decorator
 
 
+def transform(
+    accept_type: VariableType,
+    return_type: VariableType,
+    backend: str,
+    dependencies: list[str] | None = None,
+):
+    """decorator for create new transform class with target function
+
+    Args:
+        accept_type - input variable type
+        return_type - output variable type
+        backend - target lib (py_base, js_pure, py_bs4 etc)
+        dependencies - optional required imports (push to ModuleImports() AST nodes)
+    """
+
+    def decorator(target_fn: Callable[..., list[str]]) -> type:
+        # Apply the target decorator to the function to register it
+        dependencies_list = dependencies or []
+        decorated_fn = target(backend, dependencies_list)(target_fn)
+
+        # Use the function name as the class name
+        class_name = target_fn.__name__.capitalize() + "Transform"
+
+        # Create the class with BaseTransform as base
+        new_class = type(
+            class_name,
+            (BaseTransform,),
+            {
+                "accept_type": accept_type,
+                "return_type": return_type,
+                decorated_fn.__name__: decorated_fn,
+            },
+        )
+        return new_class
+
+    return decorator
+
+
 class BaseTransformMeta(type):
     def __new__(mcs, name, bases, namespace):
         cls = super().__new__(mcs, name, bases, namespace)
