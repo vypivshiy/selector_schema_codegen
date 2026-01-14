@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Annotated, Any, Callable, List, Optional
 
 import typer
-from ichrome.exceptions import ChromeRuntimeError
 from typer import Argument, BadParameter, Option, Typer
 
 from ssc_codegen.ast_build import build_ast_module_parser
@@ -58,7 +57,6 @@ from ssc_codegen.cli.runtime_parse_runners import (
     parse_from_html_file,
     print_json_output,
     parse_from_http_request,
-    parse_from_chrome,
 )
 from ssc_codegen.json_to_scc import convert_json_to_schema_code
 
@@ -548,8 +546,8 @@ def parse_from_chrome_(
     timeout: Annotated[
         int, Option("-ti", "--timeout", help="load page timeout in seconds")
     ] = 10,
-    host: Annotated[str, Option("--host", help="cdp host")] = "localhost",
-    port: Annotated[int, Option("--port", help="cdp port")] = 9992,
+    host: Annotated[str, Option("--host", help="cdp host")] = "127.0.0.1",
+    port: Annotated[int, Option("--port", help="cdp port")] = 9922,
     headless: Annotated[
         bool, Option("-hl", "--headless", help="headless mode")
     ] = False,
@@ -565,11 +563,14 @@ def parse_from_chrome_(
             help="extra chrome options (one line, sep by comma `,`",
         ),
     ] = "",
+    pp: Annotated[
+        bool, Option("-pf", "--pretty-format", help="pretty format json output")
+    ] = True,
 ) -> None:
     from ssc_codegen.converters.js_pure import CONVERTER as JS_CONVERTER
-    import asyncio
     from ssc_codegen.compiler import Compiler
     from ssc_codegen.converters.py_lxml import CONVERTER
+    from ssc_codegen.cdp_min import parse_from_chrome
 
     cls_target, schema_config = _validate_parser_target(cls_target)
 
@@ -585,35 +586,40 @@ def parse_from_chrome_(
     if not url.startswith("http"):
         raise typer.BadParameter(f"`{url}` not a http url")
 
-    ast = build_ast_module_parser(schema_config)  # type: ignore
+    ast = build_ast_module_parser(schema_config, gen_docstring=False)  # type: ignore
     code_parts = JS_CONVERTER.convert_program(ast)
     code = CB_JS_CODE(code_parts)
-    code += f"; JSON.stringify((new {cls_target}(document).parse()))"
 
+    # IIFE wrap code
+    # https://developer.mozilla.org/en-US/docs/Glossary/IIFE
+    code = f"(() => {{ {code} return JSON.stringify((new MainCatalogue(document).parse())) }})()"
     chrome_opt = chrome_options.split(",") if chrome_options else []
     try:
-        result = asyncio.run(
-            parse_from_chrome(
-                url=url,
-                js_code=code,
-                page_load_timeout=timeout,
-                chrome_path=chrome_path,
-                host=host,
-                port=port,
-                headless=headless,
-                chrome_options=chrome_opt,
-            )
+        result = parse_from_chrome(
+            url=url,
+            js_code=code,
+            page_load_timeout=timeout,
+            chrome_path=chrome_path,
+            host=host,
+            port=port,
+            headless=headless,
+            chrome_options=chrome_opt,
         )
-    except ChromeRuntimeError as e:
+    except Exception as e:
         msg = f"{e} try manually provide chrome executable path"
         logging.error(
             "Not founded chromium executable. Try manually provide chrome executable path by `-sc` option"
         )
+        raise e
         exit(1)
     try:
         if isinstance(result, str):
             result = json.loads(result)
-        result = json.dumps(result, indent=2)
+
+        if pp:
+            result = json.dumps(result, indent=2, ensure_ascii=False)
+        else:
+            result = json.dumps(result, ensure_ascii=False)
         if out:
             out.write_text(result)
         else:
