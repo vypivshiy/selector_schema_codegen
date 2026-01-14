@@ -283,7 +283,7 @@ def pre_nested(node: ExprNested) -> str:
     return f"let {nxt} = (new {schema_name}({prv})).parse();"
 
 
-@CONVERTER(StructPreValidateMethod.kind)
+@CONVERTER(StructPreValidateMethod.kind, post_callback=lambda _: BRACKET_END)
 def pre_pre_validate(_node: StructPreValidateMethod) -> str:
     return "_preValidate(v)" + BRACKET_START
 
@@ -502,7 +502,7 @@ def pre_start_parse_list(node: StartParseMethod) -> str:
         ].startswith("__"):
             name = expr.kwargs["name"]
             method_suffix = to_upper_camel_case(expr.kwargs["name"])
-            code += f"{name}: this._parse{method_suffix}(this._doc), "
+            code += f"{name}: this._parse{method_suffix}(e), "
     code += "})); "
     return code
 
