@@ -7,4 +7,4 @@ fi
 
 set -x
 
-${PREFIX}python scripts/version.py --part patch
+${PREFIX}uv version --bump patch
