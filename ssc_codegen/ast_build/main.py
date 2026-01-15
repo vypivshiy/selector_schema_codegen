@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 from typing import Type
 
@@ -5,12 +6,15 @@ from ssc_codegen.ast_ import ModuleProgram
 
 from ssc_codegen.ast_build.builder import AstBuilder
 from ssc_codegen.ast_build.utils import (
-    exec_module_code,
     extract_schemas_from_module,
+    parse_module_ast,
+    exec_module_from_ast,
 )
+from ssc_codegen.ast_build.metadata import extract_schema_metadata
 
 from ssc_codegen.schema import BaseSchema
-from ssc_codegen.static_checker import run_analyze_schema
+from ssc_codegen.static_checker.v2 import run_analyze_schema_v2
+from ssc_codegen.static_checker.formatter import format_all_errors
 import logging
 
 LOGGER = logging.getLogger("ssc_gen")
@@ -34,24 +38,32 @@ def build_ast_module_parser(
         raise AttributeError(
             "Should be chosen one variant (css_to_xpath OR xpath_to_css)"
         )
-    py_module = exec_module_code(path)
-    # check code configs before build AST
+
+    ast_tree, _, filename = parse_module_ast(path)
+    schema_metadata_map = extract_schema_metadata(ast_tree)
+    py_module = exec_module_from_ast(ast_tree, filename)
+
     schemas = extract_schemas_from_module(py_module)
-    if len(schemas) == 0:
+    if not schemas:
         LOGGER.warning(f"{path} does not contains defined schemas")
 
-    count_errors = 0
+    all_errors = []
     for schema in schemas:
-        errors = run_analyze_schema(schema)
-        if errors > 0:
-            msg = f"{schema.__name__} founded errors: {errors}"
-            LOGGER.error(msg)
-            count_errors += errors
+        schema_meta = schema_metadata_map.get(schema.__name__)
+        errors = run_analyze_schema_v2(
+            schema,
+            schema_meta=schema_meta,
+            filename=filename,
+        )
+        all_errors.extend(errors)
 
-    if count_errors > 0:
-        msg = f"{path} errors count: {count_errors}"
-        LOGGER.error(msg)
-        raise SyntaxError("")
+        if errors:
+            LOGGER.error(f"{schema.__name__} has {len(errors)} error(s)")
+
+    if all_errors:
+        error_report = format_all_errors(all_errors)
+        print(error_report, file=sys.stderr)
+        exit(1)
 
     ast_module = AstBuilder.build_from_moduletype(
         py_module,
@@ -60,7 +72,6 @@ def build_ast_module_parser(
         gen_docstr=gen_docstring,
     )
     return ast_module
-    # static check
 
 
 def build_ast_schemas(
@@ -69,22 +80,30 @@ def build_ast_schemas(
     xpath_to_css: bool = False,
     gen_docstring: bool = False,
 ) -> ModuleProgram:
+    """this func implementation compile and run parsers in runtime, drop extra errors metadata"""
     if css_to_xpath and xpath_to_css:
         raise AttributeError(
             "Should be chosen one variant (css_to_xpath OR xpath_to_css)"
         )
-    count_errors = 0
-    for schema in schemas:
-        errors = run_analyze_schema(schema)
-        if errors > 0:
-            msg = f"{schema.__name__} founded errors: {errors}"
-            LOGGER.error(msg)
-            count_errors += errors
 
-    if count_errors > 0:
-        msg = f"scehmas errors count: {count_errors}"
-        LOGGER.error(msg)
-        raise SyntaxError
+    all_errors = []
+    for schema in schemas:
+        errors = run_analyze_schema_v2(schema)
+        all_errors.extend(errors)
+        if errors:
+            LOGGER.error(f"{schema.__name__} has {len(errors)} error(s)")
+
+    if all_errors:
+        error_report = "\n".join(
+            f"error: {err.message}"
+            + (f"\n= help: {err.tip}" if err.tip else "")
+            for err in all_errors
+        )
+        print(error_report, file=sys.stderr)
+        raise SyntaxError(
+            f"Static analysis failed with {len(all_errors)} error(s)"
+        )
+
     ast_module = AstBuilder.build_from_ssc_schemas(
         *schemas,
         css_to_xpath=css_to_xpath,

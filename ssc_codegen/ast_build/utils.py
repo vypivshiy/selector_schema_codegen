@@ -1,3 +1,4 @@
+import ast
 import json
 import logging
 import sys
@@ -153,3 +154,47 @@ def is_literals_only_schema(schema: Type[BaseSchema]) -> bool:
         len(schema.__get_mro_fields__()) == 0
         and len(schema.__get_mro_classvars__()) > 0
     )
+
+
+def parse_module_ast(path: str | Path) -> tuple[ast.Module, str, str]:
+    """Parse a Python file into AST, return (ast_tree, source_code, filename)."""
+    if isinstance(path, str):
+        path = Path(path)
+    abs_path = path.resolve()
+    source_code = abs_path.read_text(encoding="utf-8")
+    filename = str(abs_path)
+    ast_tree = ast.parse(source_code, filename=filename, mode="exec")
+    return ast_tree, source_code, filename
+
+
+def exec_module_from_ast(
+    ast_tree: ast.Module, filename: str, add_sys_path: bool = True
+) -> ModuleType:
+    """Compile and execute an AST tree, mimicking the behavior of exec_module_code."""
+    if add_sys_path:
+        _add_sys_path(Path(filename))
+
+    code = compile(ast_tree, filename=filename, mode="exec")
+    module = ModuleType("_")
+
+    exec(code, module.__dict__)
+
+    # Replicate the exact post-processing logic from exec_module_code
+    tmp_module = module.__dict__.copy()
+    main_entypoint_schemas = {}
+    for k, v in tmp_module.items():
+        if _is_ssc_cls(k, v):
+            main_entypoint_schemas[k] = v
+            module.__dict__.pop(k)
+        elif _is_not_dunder_obj(k) and isinstance(v, ModuleType):
+            for sc in extract_schemas_from_module(v):
+                if module.__dict__.get(sc.__name__):
+                    LOGGER.warning(
+                        "Schema `%s` already defined. `%s.%s` override it",
+                        sc.__name__,
+                        f"{v.__name__}.{sc.__name__}",
+                    )
+                module.__dict__[sc.__name__] = sc
+
+    module.__dict__.update(main_entypoint_schemas)
+    return module

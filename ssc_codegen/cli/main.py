@@ -641,6 +641,52 @@ def _validate_parser_target(cls_target: str) -> tuple[str, Path]:
     return cls_target, schema_config  # type: ignore
 
 
+@app.command("check", help="check ssc config file wout generate code")
+def check(
+    ssc_files: Annotated[
+        List[Path],
+        Argument(help="ssc-gen config files", callback=cb_check_ssc_files),
+    ],
+    use_css: Annotated[
+        bool, Option("-uc", "--use-css", help="allow use CSS expressions")
+    ] = True,
+    use_xpath: Annotated[
+        bool, Option("-ux", "--use-xpath", help="allow use XPATH expressions")
+    ] = False,
+):
+    from ssc_codegen.ast_build.main import (
+        exec_module_code,
+        extract_schemas_from_module,
+    )
+    from ssc_codegen.static_checker import run_analyze_schema
+
+    has_errors = False
+
+    for file_cfg in ssc_files:
+        # check ssc-gen files
+        if (
+            file_cfg.suffix != ".py"
+            and "ssc_codegen" not in file_cfg.read_text()
+        ):
+            LOGGER.info("Skip %s (not ssc-gen config)", file_cfg.name)
+            continue
+        py_module = exec_module_code(file_cfg)
+
+        schemas = extract_schemas_from_module(py_module)
+        if len(schemas) == 0:
+            LOGGER.warning(f"{file_cfg} does not contains defined schemas")
+            continue
+        for schema in schemas:
+            errors = run_analyze_schema(schema)
+            if errors == 0:
+                LOGGER.info(f"{file_cfg} found errors: {errors}")
+            else:
+                LOGGER.info(f"{file_cfg} checks passed")
+        if has_errors:
+            exit(1)
+        exit(0)
+
+
 def main() -> None:
     app()
 
