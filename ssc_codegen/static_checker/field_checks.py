@@ -9,8 +9,7 @@ from ssc_codegen.document_utlis import analyze_re_expression
 from ssc_codegen.static_checker.base import FMT_MAPPING_METHODS
 from ssc_codegen.static_checker.utils import (
     FieldCheckContext,
-    AnalysisError,
-    _prettify_expr_at,
+    AnalysisError
 )
 
 
@@ -263,7 +262,7 @@ def check_field_split_doc_ret_type(
     if ctx.field_name != "__SPLIT_DOC__":
         return []
     if ctx.document.stack_last_ret != VariableType.LIST_DOCUMENT:
-        expr_repr = _prettify_expr_at(ctx.document, len(ctx.document.stack) - 1)
+        expr_repr = "" # TODO ???
         msg = f"{ctx.schema.__name__}.{ctx.field_name} = {expr_repr}  # Expected type `{VariableType.LIST_DOCUMENT.name}`, got `{ctx.document.stack_last_ret.name}`"
         return [
             AnalysisError(
