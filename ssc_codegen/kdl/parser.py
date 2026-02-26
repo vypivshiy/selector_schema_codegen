@@ -1,10 +1,9 @@
 """Parser for KDL schema to AST conversion.
 
-This module demonstrates the visitor pattern for building AST
-from KDL document structure.
+Simplified functional implementation - no flexibility needed at AST construction stage.
 """
 
-from ssc_codegen.kdl.ckdl_types import parse, Document, Node
+from ssc_codegen.kdl.ckdl_types import Document, Node
 from ssc_codegen.kdl.ast import (
     Module,
     Imports,
@@ -45,349 +44,420 @@ from ssc_codegen.kdl.ast import (
     TypeDef,
     TypeDefField,
 )
-from ssc_codegen.kdl.tokens import VariableType
-from typing import Any, TypeVar, TypedDict, cast
-
-T_KWARGS = TypeVar("T_KWARGS", bound=TypedDict)
-T_ARGS = TypeVar("T_ARGS", bound=tuple)
-T_NODE_PARENT = TypeVar("T_NODE_PARENT", bound=BaseAstNode[T_KWARGS, T_ARGS])
-
-# TODO: impl other
+from ssc_codegen.kdl.tokens import VariableType, TokenType
+from typing import Any
 
 
-def build_expressions(
-    nodes: list[Node], defines: dict[str, Any], field: T_NODE_PARENT
-):
-    cursor_type = VariableType.DOCUMENT  # always first type
+# =============================================================================
+# EXPRESSION BUILDERS - Direct, no flexibility
+# =============================================================================
+
+def _make_select(node: Node, parent: BaseAstNode) -> tuple[Select, VariableType]:
+    """Build Select node - always returns DOCUMENT or LIST_DOCUMENT."""
+    is_all = node.name.endswith("-all")
+    mode = "css" if node.name.startswith("css") else "xpath"
+    ret_type = VariableType.LIST_DOCUMENT if is_all else VariableType.DOCUMENT
+    
+    expr = Select(
+        kwargs={"mode": mode, "query": node.args[0]},
+        parent=parent,
+        ret_type=ret_type,
+    )
+    return expr, ret_type
+
+
+def _make_extract(node: Node, parent: BaseAstNode, cursor: VariableType) -> tuple[Extract, VariableType]:
+    """Build Extract node - TEXT/RAW/ATTR."""
+    keys = tuple(node.args) if node.name == "attr" else None
+    ret_type = VariableType.LIST_STRING if cursor == VariableType.LIST_DOCUMENT else VariableType.STRING
+    
+    expr = Extract(
+        kwargs={"mode": node.name, "key": keys},
+        accept_type=cursor,
+        ret_type=ret_type,
+        parent=parent,
+    )
+    return expr, ret_type
+
+
+def _make_remove(node: Node, parent: BaseAstNode) -> Remove:
+    """Build Remove node."""
+    mode = "css" if node.name.startswith("css") else "xpath"
+    return Remove(kwargs={"mode": mode, "query": node.args[0]}, parent=parent)
+
+
+def _make_string_op(node: Node, parent: BaseAstNode, cursor: VariableType, defines: dict) -> tuple[StringOp, VariableType]:
+    """Build StringOp node - TRIM/LTRIM/RTRIM/RM-PREFIX/etc."""
+    substr = defines.get(node.args[0], node.args[0])
+    return (
+        StringOp(
+            parent=parent,
+            accept_type=cursor,
+            ret_type=cursor,
+            kwargs={"op": node.name, "substr": substr},
+        ),
+        cursor,
+    )
+
+
+def _make_format(node: Node, parent: BaseAstNode, cursor: VariableType, defines: dict) -> tuple[Format, VariableType]:
+    """Build Format node."""
+    fmt = defines.get(node.args[0], node.args[0])
+    expr = Format(accept_type=cursor, ret_type=cursor, kwargs={"fmt": fmt}, parent=parent)
+    return expr, cursor
+
+
+def _make_regex(node: Node, parent: BaseAstNode, cursor: VariableType) -> tuple[Regex, VariableType]:
+    """Build Regex node - RE/RE-ALL/RE-SUB."""
+    pattern = node.args[0]
+    repl = node.args[1] if node.name == "re-sub" else None
+    
+    if node.name == "re-all":
+        accept_type = VariableType.STRING
+        ret_type = VariableType.LIST_STRING
+    elif node.name == "re":
+        accept_type = VariableType.STRING
+        ret_type = VariableType.STRING
+    else:  # re-sub
+        accept_type = cursor
+        ret_type = cursor
+
+    return (
+        Regex(
+            accept_type=accept_type,
+            ret_type=ret_type,
+            parent=parent,
+            kwargs={"mode": node.name, "pattern": pattern, "repl": repl},
+        ),
+        ret_type,
+    )
+
+
+def _make_replace(node: Node, parent: BaseAstNode, cursor: VariableType) -> tuple[Replace | ReplaceMap, VariableType]:
+    """Build Replace or ReplaceMap node."""
+    if node.children:
+        repl_dict = {n.name: n.args[0] for n in node.children}
+        return (
+            ReplaceMap(accept_type=cursor, ret_type=cursor, parent=parent, kwargs={"repl": repl_dict}),
+            cursor,
+        )
+    else:
+        return (
+            Replace(accept_type=cursor, ret_type=cursor, parent=parent, kwargs={"old": node.args[0], "new": node.args[1]}),
+            cursor,
+        )
+
+
+def _make_cast(node: Node, parent: BaseAstNode, cursor: VariableType) -> tuple[Cast, VariableType]:
+    """Build Cast node - TO-INT/TO-FLOAT/TO-BOOL."""
+    target = node.name.replace("to-", "")  # "to-int" -> "int"
+    
+    if target == "int":
+        ret_type = VariableType.LIST_INT if cursor == VariableType.LIST_STRING else VariableType.INT
+    elif target == "float":
+        ret_type = VariableType.LIST_FLOAT if cursor == VariableType.LIST_STRING else VariableType.FLOAT
+    else:  # bool
+        ret_type = VariableType.BOOL
+
+    return (
+        Cast(accept_type=cursor, ret_type=ret_type, parent=parent, kwargs={"target": target}),
+        ret_type,
+    )
+
+
+def _make_jsonify(node: Node, parent: BaseAstNode) -> tuple[Jsonify, VariableType]:
+    """Build Jsonify node."""
+    if not node.args:
+        kwargs = {"target": None, "path": None}
+    elif len(node.args) == 1:
+        kwargs = {"target": node.args[0], "path": None}
+    else:
+        kwargs = {"target": node.args[0], "path": node.args[1]}
+    
+    return Jsonify(parent=parent, kwargs=kwargs), VariableType.JSON
+
+
+def _make_nested(node: Node, parent: BaseAstNode) -> tuple[Nested, VariableType]:
+    """Build Nested node."""
+    return Nested(parent=parent, kwargs={"target": node.args[0]}), VariableType.NESTED
+
+
+def _make_join(node: Node, parent: BaseAstNode) -> tuple[Join, VariableType]:
+    """Build Join node."""
+    return Join(parent=parent, kwargs={"sep": node.args[0]}), VariableType.STRING
+
+
+def _make_unescape(node: Node, parent: BaseAstNode, cursor: VariableType) -> tuple[Unescape, VariableType]:
+    """Build Unescape node."""
+    return Unescape(parent=parent, accept_type=cursor), VariableType.STRING
+
+
+def _make_index(node: Node, parent: BaseAstNode, cursor: VariableType) -> tuple[Index, VariableType]:
+    """Build Index node - INDEX/FIRST/LAST."""
+    # Determine ret_type from cursor
+    if cursor == VariableType.LIST_STRING:
+        ret_type = VariableType.STRING
+    elif cursor == VariableType.LIST_DOCUMENT:
+        ret_type = VariableType.DOCUMENT
+    elif cursor == VariableType.LIST_INT:
+        ret_type = VariableType.INT
+    elif cursor == VariableType.LIST_FLOAT:
+        ret_type = VariableType.FLOAT
+    else:
+        ret_type = VariableType.STRING
+
+    if node.name == "first":
+        index = 0
+    elif node.name == "last":
+        index = -1
+    else:
+        index = int(node.args[0])
+
+    return Index(parent=parent, kwargs={"index": index}, ret_type=ret_type), ret_type
+
+
+def _make_len(node: Node, parent: BaseAstNode, cursor: VariableType) -> tuple[Len, VariableType]:
+    """Build Len node."""
+    return Len(parent=parent, accept_type=cursor), VariableType.INT
+
+
+def _make_unique(node: Node, parent: BaseAstNode, cursor: VariableType) -> tuple[Unique, VariableType]:
+    """Build Unique node."""
+    keep_order = node.properties.get("keep-order", False)
+    return (
+        Unique(parent=parent, kwargs={"keep_order": keep_order}, accept_type=cursor, ret_type=cursor),
+        cursor,
+    )
+
+
+def _make_default(node: Node, parent: BaseAstNode) -> tuple[DefaultStart, DefaultEnd, VariableType]:
+    """Build Default nodes - returns start and end expressions."""
+    if node.children:
+        value = []
+    else:
+        value = node.args[0]
+    
+    expr_start = DefaultStart(parent=parent, kwargs={"value": value})
+    expr_end = DefaultEnd(parent=parent, kwargs={"value": value})
+    return expr_start, expr_end, VariableType.ANY
+
+
+def _make_filter(node: Node, parent: BaseAstNode, cursor: VariableType) -> tuple[Filter, VariableType]:
+    """Build Filter node."""
+    return Filter(parent=parent, accept_type=cursor, ret_type=cursor), cursor
+
+
+def _make_assert(node: Node, parent: BaseAstNode, cursor: VariableType) -> tuple[Assert, VariableType]:
+    """Build Assert node."""
+    return Assert(parent=parent, accept_type=cursor, ret_type=cursor), cursor
+
+
+def _make_table_match(node: Node, parent: BaseAstNode) -> tuple[TableMatch, VariableType]:
+    """Build TableMatch node."""
+    return TableMatch(parent=parent), VariableType.DOCUMENT
+
+
+# =============================================================================
+# MAIN BUILDERS
+# =============================================================================
+
+def build_expressions(nodes: list[Node], defines: dict[str, Any], field: BaseAstNode) -> None:
+    """Build expression chain for a field.
+    
+    Simplified: directly builds AST without flexible type inference.
+    """
+    cursor_type = VariableType.DOCUMENT  # always start with document
+    
     for node in nodes:
-        match node.name:
-            # selectors
-            case "css" | "css-all" | "xpath" | "xpath-all":
-                mode = "css" if node.name.startswith("css") else "xpath"
-                ret_type = (
-                    VariableType.LIST_DOCUMENT
-                    if node.name.endswith("-all")
-                    else VariableType.DOCUMENT
-                )
-                expr = Select(
-                    kwargs={"mode": mode, "query": node.args[0]},
-                    parent=field,
-                    ret_type=ret_type,
-                )
-                field.body.append(expr)
-                cursor_type = expr.ret_type
-            case "text" | "raw" | "attr":
-                keys = tuple(node.args) if node.name == "attr" else None
-                ret_type = (
-                    VariableType.LIST_STRING
-                    if cursor_type == VariableType.LIST_DOCUMENT
-                    else VariableType.STRING
-                )
-                expr = Extract(
-                    kwargs={"mode": node.name, "key": keys},
-                    accept_type=cursor_type,
-                    ret_type=ret_type,
-                    parent=field,
-                )
-                field.body.append(expr)
-                cursor_type = expr.ret_type
-            case "css-remove" | "xpath-remove":
-                mode = "css" if node.name.startswith("css") else "xpath"
-                expr = Remove(
-                    kwargs={"mode": mode, "query": node.args[0]}, parent=field
-                )
-                field.body.append(expr)
-                cursor_type = expr.ret_type
-            # string
-            case (
-                "trim"
-                | "ltrim"
-                | "rtrim"
-                | "rm-prefix"
-                | "rm-suffix"
-                | "rm-prefix-suffix"
-            ):
-                # type: LIST_STRING, STRING
-                # todo: optimize definitions: move to classvars after generate
-                substr = defines.get(node.args[0], node.args[0])
-                expr = StringOp(
-                    parent=field,
-                    accept_type=cursor_type,
-                    ret_type=cursor_type,
-                    kwargs={"op": node.name, "substr": substr},
-                )  # type: ignore
-                field.body.append(expr)
-                cursor_type = expr.ret_type
-            case "fmt":
-                fmt = defines.get(node.args[0], node.args[0])
-                expr = Format(
-                    accept_type=cursor_type,
-                    ret_type=cursor_type,
-                    kwargs={"fmt": fmt},
-                )
-                field.body.append(expr)
-                cursor_type = expr.ret_type
-            case "re" | "re-all" | "re-sub":
-                # Regex
-                # TODO: unpack regex flags, convert to inline
-                pattern = node.args[0]
-                # re-sub
-                repl = node.args[1] if node.name == "re-sub" else None
-                if node.name == "re-all":
-                    accept_type = VariableType.STRING
-                    ret_type = VariableType.LIST_STRING
-                elif node.name == "re":
-                    accept_type = VariableType.STRING
-                    ret_type = VariableType.STRING
-                else:  # re-sub
-                    accept_type = cursor_type
-                    ret_type = cursor_type
+        # SELECTORS
+        if node.name in ("css", "css-all", "xpath", "xpath-all"):
+            expr, cursor_type = _make_select(node, field)
+            field.body.append(expr)
+            
+        # EXTRACT
+        elif node.name in ("text", "raw", "attr"):
+            expr, cursor_type = _make_extract(node, field, cursor_type)
+            field.body.append(expr)
+            
+        # REMOVE
+        elif node.name in ("css-remove", "xpath-remove"):
+            expr = _make_remove(node, field)
+            field.body.append(expr)
+            
+        # STRING OPS
+        elif node.name in ("trim", "ltrim", "rtrim", "rm-prefix", "rm-suffix", "rm-prefix-suffix"):
+            expr, cursor_type = _make_string_op(node, field, cursor_type, defines)
+            field.body.append(expr)
+            
+        # FORMAT
+        elif node.name == "fmt":
+            expr, cursor_type = _make_format(node, field, cursor_type, defines)
+            field.body.append(expr)
+            
+        # REGEX
+        elif node.name in ("re", "re-all", "re-sub"):
+            expr, cursor_type = _make_regex(node, field, cursor_type)
+            field.body.append(expr)
+            
+        # REPLACE
+        elif node.name == "repl":
+            expr, cursor_type = _make_replace(node, field, cursor_type)
+            field.body.append(expr)
+            
+        # CAST
+        elif node.name in ("to-int", "to-float", "to-bool"):
+            expr, cursor_type = _make_cast(node, field, cursor_type)
+            field.body.append(expr)
+            
+        # JSONIFY
+        elif node.name == "jsonify":
+            expr, cursor_type = _make_jsonify(node, field)
+            field.body.append(expr)
+            
+        # NESTED
+        elif node.name == "nested":
+            expr, cursor_type = _make_nested(node, field)
+            field.body.append(expr)
+            
+        # JOIN
+        elif node.name == "join":
+            expr, cursor_type = _make_join(node, field)
+            field.body.append(expr)
+            
+        # UNESCAPE
+        elif node.name == "unescape":
+            expr, cursor_type = _make_unescape(node, field, cursor_type)
+            field.body.append(expr)
+            
+        # INDEX
+        elif node.name in ("index", "first", "last"):
+            expr, cursor_type = _make_index(node, field, cursor_type)
+            field.body.append(expr)
+            
+        # LEN
+        elif node.name == "len":
+            expr, cursor_type = _make_len(node, field, cursor_type)
+            field.body.append(expr)
+            
+        # UNIQUE
+        elif node.name == "unique":
+            expr, cursor_type = _make_unique(node, field, cursor_type)
+            field.body.append(expr)
+            
+        # DEFAULT
+        elif node.name == "default":
+            expr_start, expr_end, _ = _make_default(node, field)
+            field.body.insert(0, expr_start)
+            field.body.append(expr_end)
+            
+        # FILTER
+        elif node.name == "filter":
+            expr, cursor_type = _make_filter(node, field, cursor_type)
+            field.body.append(expr)
+            # TODO: filter build
+            
+        # ASSERT
+        elif node.name == "assert":
+            expr, cursor_type = _make_assert(node, field, cursor_type)
+            field.body.append(expr)
+            # TODO: assert build
+            
+        # TABLE MATCH
+        elif node.name == "match":
+            expr, cursor_type = _make_table_match(node, field)
+            field.body.append(expr)
+            # TODO: match build
 
-                expr = Regex(
-                    accept_type=accept_type,
-                    ret_type=ret_type,
-                    parent=field,
-                    kwargs={
-                        "pattern": pattern,
-                        "mode": node.name,
-                        "repl": repl,
-                    },
-                )
-                field.body.append(expr)
-                cursor_type = ret_type
-            case "repl":
-                if node.children:
-                    expr = ReplaceMap(
-                        accept_type=cursor_type,
-                        ret_type=cursor_type,
-                        parent=field,
-                        kwargs={
-                            "repl": {n.name: n.args[0] for n in node.children}
-                        },
-                    )
-                else:
-                    expr = Replace(
-                        accept_type=cursor_type,
-                        ret_type=cursor_type,
-                        parent=field,
-                        kwargs={"old": node.args[0], "new": node.args[1]},
-                    )
-                field.body.append(expr)
-                cursor_type = expr.ret_type
-            case "to-int":
-                ret_type = (
-                    VariableType.LIST_INT
-                    if cursor_type == VariableType.LIST_STRING
-                    else VariableType.INT
-                )
-                expr = Cast(
-                    accept_type=cursor_type,
-                    ret_type=ret_type,
-                    parent=field,
-                    kwargs={"target": "int"},
-                )
-                field.body.append(expr)
-                cursor_type = ret_type
-            case "to-float":
-                ret_type = (
-                    VariableType.LIST_FLOAT
-                    if cursor_type == VariableType.LIST_STRING
-                    else VariableType.FLOAT
-                )
-                expr = Cast(
-                    accept_type=cursor_type,
-                    ret_type=ret_type,
-                    parent=field,
-                    kwargs={"target": "float"},
-                )
-                field.body.append(expr)
-                cursor_type = ret_type
-            case "to-bool":
-                ret_type = VariableType.BOOL
-                expr = Cast(
-                    accept_type=cursor_type,
-                    ret_type=ret_type,
-                    parent=field,
-                    kwargs={"target": "bool"},
-                )
-                field.body.append(expr)
-                cursor_type = ret_type
-            case "jsonify":
-                ret_type = VariableType.JSON
-                if not node.args:
-                    kwargs = {"target": None, "path": None}
-                elif len(node.args) == 1:
-                    kwargs = {"target": node.args[0], "path": None}
-                else:
-                    kwargs = {"target": node.args[0], "path": node.args[1]}
-                expr = Jsonify(parent=field, kwargs=kwargs)
-                field.body.append(expr)
-                cursor_type = expr.ret_type
-            case "nested":
-                expr = Nested(parent=field, kwargs={"target": node.args[0]})
-                field.body.append(expr)
-                cursor_type = expr.ret_type
-            case "join":
-                expr = Join(parent=field, kwargs={"sep": node.args[0]})
-                field.body.append(expr)
-                cursor_type = expr.ret_type
-            case "unescape":
-                expr = Unescape(parent=field, accept_type=cursor_type)
-                field.body.append(expr)
-                cursor_type = expr.ret_type
-            # array
-            case "index" | "first" | "last":
-                match cursor_type:
-                    case VariableType.LIST_STRING:
-                        ret_type = VariableType.STRING
-                    case VariableType.LIST_DOCUMENT:
-                        ret_type = VariableType.DOCUMENT
-                    case VariableType.LIST_INT:
-                        ret_type = VariableType.INT
-                    case VariableType.LIST_FLOAT:
-                        ret_type = VariableType.FLOAT
-                    case _:
-                        ret_type = VariableType.STRING  # TODO
+        # UNKNOWN
+        else:
+            raise NotImplementedError(node.name)
 
-                if node.name == "first":
-                    expr = Index(
-                        parent=field, kwargs={"index": 0}, ret_type=ret_type
-                    )
-                elif node.name == "last":
-                    expr = Index(
-                        parent=field, kwargs={"index": -1}, ret_type=ret_type
-                    )
-                else:
-                    index = int(node.args[0])
-                    expr = Index(
-                        parent=field, kwargs={"index": index}, ret_type=ret_type
-                    )
-                field.body.append(expr)
-                cursor_type = ret_type
-            case "len":
-                # todo: test generic list
-                expr = Len(parent=field, accept_type=cursor_type)
-                field.body.append(expr)
-                cursor_type = expr.ret_type
-            case "unique":
-                keep_order = node.properties.get("keep-order", False)
-                expr = Unique(
-                    parent=field,
-                    kwargs={"keep_order": keep_order},
-                    accept_type=cursor_type,
-                    ret_type=cursor_type,
-                )
-                field.body.append(expr)
-            case "transform":
-                pass
-            case "default":
-                # empty array default shortcut
-                if node.children:  # empty node `default {}`
-                    value = []
-                else:
-                    value = node.args[0]
-                expr_start = DefaultStart(parent=field, kwargs={"value": value})
-                field.body.insert(0, expr_start)
-                expr_end = DefaultEnd(parent=field, kwargs={"value": value})
-                field.body.append(expr_end)
-            case "filter":
-                expr = Filter(
-                    parent=field, accept_type=cursor_type, ret_type=cursor_type
-                )
-                # TODO builder func, fill expr.body (node.children)
-                field.body.append(expr)
-            case "assert":
-                expr = Assert(
-                    parent=field, accept_type=cursor_type, ret_type=cursor_type
-                )
-                # TODO builder func, fill expr.body (node.children)
-                field.body.append(expr)
-            # table expr
-            case "match":
-                expr = TableMatch(parent=field)
-                # TODO builder func, fill expr.body (node.children)
-                field.body.append(expr)
-                cursor_type = expr.ret_type
-            case _:
-                raise NotImplementedError(
-                    node.name, node.args, node.properties, node.children
-                )
-    # add return expr
-    expr = Return(parent=field, accept_type=cursor_type, ret_type=cursor_type)
+    # Always add return expression
+    ret_expr = Return(parent=field, accept_type=cursor_type, ret_type=cursor_type)
     field.ret_type = cursor_type
-    field.body.append(expr)
+    field.body.append(ret_expr)
 
 
-def build_struct(
-    nodes: list[Node], defines: dict[str, Any], struct: Struct
-) -> None:
-    # generic
+def build_struct(nodes: list[Node], defines: dict[str, Any], struct: Struct) -> None:
+    """Build struct AST from KDL nodes.
+    
+    Simplified: direct mapping without flexibility.
+    """
+    # Generic init
     field_init = StructInit(parent=struct)
     struct.body.append(field_init)
 
     for node in nodes:
-        match node.name:
-            case "-doc":
-                struct.kwargs["docstring"] = node.args[0]
-            # validate func, wout modify document
-            case "-pre-validate":
-                field = StructPreValidate(parent=struct)
-                build_expressions(node.children, defines, field)
-                field.ret_type = VariableType.NULL
-                struct.body.append(field)
-            # struct type=list|dict specific
-            case "-split-doc":
-                field = StructSplit(parent=struct)
-                build_expressions(node.children, defines, field)
-                struct.body.append(field)
-            # struct type=dict specific
-            case "-key":
-                field = StructField(parent=struct, kwargs={"name": "key"})
-                build_expressions(node.children, defines, field)
-                struct.body.append(field)
-            # struct type=dict specific
-            case "-value":
-                if struct.kwargs["struct_type"] == "table":
-                    field = StructTableMatchValue(parent=struct)
-                else:
-                    field = StructField(parent=struct, kwargs={"name": "value"})
-                build_expressions(node.children, defines, field)
-                struct.body.append(field)
-            # struct type=table specific
-            case "-table":
-                field = StructTableConfig(parent=struct)
-                build_expressions(node.children, defines, field)
-                struct.body.append(field)
-            # struct type=table specific
-            case "-row":
-                field = StructTableRow(parent=struct)
-                build_expressions(node.children, defines, field)
-                struct.body.append(field)
-            # struct type=table specific
-            case "-match":
-                field = StructTableMatchKey(parent=struct)
-                build_expressions(node.children, defines, field)
-                struct.body.append(field)
-            # other fields
-            case _:
-                field = StructField(parent=struct, kwargs={"name": node.name})
-                build_expressions(node.children, defines, field)
-                struct.body.append(field)
+        # DOCSTRING
+        if node.name == "-doc":
+            struct.kwargs["docstring"] = node.args[0]
+            
+        # PRE-VALIDATE
+        elif node.name == "-pre-validate":
+            field = StructPreValidate(parent=struct)
+            build_expressions(node.children, defines, field)
+            field.ret_type = VariableType.NULL
+            struct.body.append(field)
+            
+        # SPLIT DOC
+        elif node.name == "-split-doc":
+            field = StructSplit(parent=struct)
+            build_expressions(node.children, defines, field)
+            struct.body.append(field)
+            
+        # KEY
+        elif node.name == "-key":
+            field = StructField(parent=struct, kwargs={"name": "key"})
+            build_expressions(node.children, defines, field)
+            struct.body.append(field)
+            
+        # VALUE
+        elif node.name == "-value":
+            if struct.kwargs["struct_type"] == "table":
+                field = StructTableMatchValue(parent=struct)
+            else:
+                field = StructField(parent=struct, kwargs={"name": "value"})
+            build_expressions(node.children, defines, field)
+            struct.body.append(field)
+            
+        # TABLE CONFIG
+        elif node.name == "-table":
+            field = StructTableConfig(parent=struct)
+            build_expressions(node.children, defines, field)
+            struct.body.append(field)
+            
+        # TABLE ROW
+        elif node.name == "-row":
+            field = StructTableRow(parent=struct)
+            build_expressions(node.children, defines, field)
+            struct.body.append(field)
+            
+        # TABLE MATCH KEY
+        elif node.name == "-match":
+            field = StructTableMatchKey(parent=struct)
+            build_expressions(node.children, defines, field)
+            struct.body.append(field)
+            
+        # REGULAR FIELD
+        else:
+            field = StructField(parent=struct, kwargs={"name": node.name})
+            build_expressions(node.children, defines, field)
+            struct.body.append(field)
 
 
 def typedef_from_struct(struct: Struct) -> TypeDef:
+    """Convert struct to TypeDef - simplified direct conversion."""
     is_array = struct.kwargs["struct_type"] in ("list", "table")
-
     typedef = TypeDef(kwargs={"is_array": is_array})
+    
     for field in struct.body:
         if field.kind != StructField.kind:
             continue
-        field = cast(StructField, field)
+        
         field_name = field.kwargs["name"]
-        # reference type from return expr
+        
         if field.ret_type == VariableType.NESTED:
-            nested_node = field.find_by_token(Nested.kind)
-            nested_node = cast(Nested, nested_node)
+            nested_node = field.find_by_token(TokenType.NESTED)
             typedef.body.append(
                 TypeDefField(
                     ret_type=field.ret_type,
@@ -400,7 +470,7 @@ def typedef_from_struct(struct: Struct) -> TypeDef:
                 )
             )
         elif field.ret_type == VariableType.JSON:
-            raise NotImplementedError()  # TODO: JSON REF IMPL
+            raise NotImplementedError("JSON REF not implemented")
         else:
             typedef.body.append(
                 TypeDefField(
@@ -413,54 +483,63 @@ def typedef_from_struct(struct: Struct) -> TypeDef:
                     },
                 )
             )
+    
     return typedef
 
 
 def build_module(document: Document) -> Module:
+    """Build Module AST from KDL document.
+    
+    Simplified: direct top-level processing.
+    """
     module = Module()
     defines = {}
-    typedefs, structs = [], []
-    module.body.extend(
-        [
-            Docstring(parent=module),
-            Imports(parent=module),
-            Utilities(parent=module),
-        ]
-    )
+    typedefs: list[TypeDef] = []
+    structs: list[Struct] = []
+    
+    # Standard header
+    module.body.extend([
+        Docstring(parent=module),
+        Imports(parent=module),
+        Utilities(parent=module),
+    ])
+    
     for node in document.nodes:
-        match node.name:
-            # defined, skip
-            case "doc":
-                module.body[0].kwargs["value"] = node.args[0]
-            case "define":
-                key, value = list(node.properties.items())[0]
-                # todo: check if already defined
-                defines[key] = value
-            case "struct":
-                type_ = node.properties.get("type", "item")
-                struct = Struct(
-                    parent=module,
-                    kwargs={"name": node.args[0], "struct_type": type_},
-                )
-                build_struct(node.children, defines, struct)
-                structs.append(struct)
-                # generate structure for generate static types or annotations
-                typedef = typedef_from_struct(struct)
-                typedef.parent = module
-                typedefs.append(typedef)
-            case _:
-                raise Exception(
-                    "Not impl:",
-                    node.name,
-                    node.args,
-                    node.properties,
-                    node.children,
-                )
-    # 1. typedefs insert first , second - structs
+        # DOCSTRING
+        if node.name == "doc":
+            module.body[0].kwargs["value"] = node.args[0]
+            
+        # DEFINE
+        elif node.name == "define":
+            key, value = list(node.properties.items())[0]
+            defines[key] = value
+            
+        # STRUCT
+        elif node.name == "struct":
+            type_ = node.properties.get("type", "item")
+            struct = Struct(
+                parent=module,
+                kwargs={"name": node.args[0], "struct_type": type_},
+            )
+            build_struct(node.children, defines, struct)
+            structs.append(struct)
+            
+            # Generate typedef
+            typedef = typedef_from_struct(struct)
+            typedef.parent = module
+            typedefs.append(typedef)
+            
+        # UNKNOWN
+        else:
+            raise Exception("Not impl:", node.name, node.args, node.properties, node.children)
+    
+    # Add typedefs first, then structs
     module.body.extend(typedefs)
     module.body.extend(structs)
+    
     return module
 
 
 def parse_ast(document: Document) -> Module:
+    """Entry point - parse KDL document to AST."""
     return build_module(document)
