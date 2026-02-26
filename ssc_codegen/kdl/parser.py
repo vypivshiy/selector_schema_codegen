@@ -31,8 +31,6 @@ from ssc_codegen.kdl.ast import (
     DefaultStart,
     DefaultEnd,
     Return,
-    Filter,
-    Assert,
     TableMatch,
     StructTableConfig,
     StructTableMatchKey,
@@ -43,9 +41,34 @@ from ssc_codegen.kdl.ast import (
     StructInit,
     TypeDef,
     TypeDefField,
+    # filter containers
+    LogicAnd,
+    LogicNot,
+    LogicOr,
+
+    # filter exprs (str)
+    Filter,
+    FilterCmp,
+    FilterStr,
+    FilterRe,
+    FilterRange,
+    # filter exprs (DOCUMENT)
+    FilterDoc,
+    FilterDocSelect,
+    FilterDocAttr,
+    FilterDocText,
+    FilterDocRaw,
+    FilterDocHasAttr,
+    # assert exprs (GENERIC)
+    Assert,
+    AssertCmp,
+    AssertContains,
+    AssertHasAttr,
+    AssertRe,
+    AssertSelect
 )
 from ssc_codegen.kdl.tokens import VariableType, TokenType
-from typing import Any
+from typing import Any, cast
 
 
 # =============================================================================
@@ -242,19 +265,89 @@ def _make_default(node: Node, parent: BaseAstNode) -> tuple[DefaultStart, Defaul
     return expr_start, expr_end, VariableType.ANY
 
 
-def _make_filter(node: Node, parent: BaseAstNode, cursor: VariableType) -> tuple[Filter, VariableType]:
-    """Build Filter node."""
-    return Filter(parent=parent, accept_type=cursor, ret_type=cursor), cursor
+def _make_filter_expr(nodes: list[Node], parent: Filter | LogicAnd | LogicOr | LogicNot) -> None:
+    for node in nodes:
+        # LIST_STRING | LIST_DOCUMENT
+        if node.name in ("starts", "ends", "contains", "in"):
+            expr = FilterStr(parent=parent, kwargs={'op': node.name, 'values': node.args})
+            parent.body.append(expr)
+        elif node.name in ("eq", "ne", "gt", "le", "ge", "le"):
+            expr = FilterCmp(parent=parent, kwargs={'op': node.name, 'value': node.args})
+            parent.body.append(expr)
+        elif node.name == "re":
+            # TODO regex compile
+            expr = FilterRe(parent=parent, kwargs={'pattern': node.args[0], 'ignore_case': False, 'dotall': False})
+            parent.body.append(expr)
+        elif node.name == "range":
+            # TODO: validate
+            start, end = node.args  
+            expr = FilterRange(parent=parent, kwargs={'start': int(start), 'end': int(end)})
+            parent.body.append(expr)
+        # recursive insert exprs
+        elif node.name == "and":
+            expr = LogicAnd(parent=parent)
+            _make_filter_expr(node.children, expr)
+            parent.body.append(expr)
+        elif node.name == "or":
+            expr = LogicOr(parent=parent)
+            _make_filter_expr(node.children, expr)
+            parent.body.append(expr)
+        elif node.name == "not":
+            expr = LogicNot(parent=parent)
+            _make_filter_expr(node.children, expr)
+            parent.body.append(expr)
+        else:
+            raise NotImplementedError(node.name)
+            
 
+
+def _make_filter(node: Node, parent: BaseAstNode, cursor: VariableType) -> tuple[Filter, VariableType]:
+    """Build Filter node. LIST_STR"""
+    expr = Filter(parent=parent, accept_type=cursor, ret_type=cursor)
+    _make_filter_expr(node.children, expr)
+    return expr, cursor
+
+
+def _make_assert_expr(nodes: list[Node], parent: Assert | LogicNot):
+    # TODO: check context parent.accept_type (STRING, DOCUMENT, LIST_STRING?)
+    for node in nodes:
+        # TODO: message API
+        # STRING ONLY (TODO eq, ne op only)
+        if node.name in ("eq", "ne", "gt", "le", "ge", "le"):
+            expr = AssertCmp(parent=parent, kwargs={'op': node.name, 'value': node.args[0], 'msg': ''})
+            parent.body.append(expr)
+        elif node.name == 'contains':
+            expr = AssertContains(parent=parent, kwargs={'value': node.args[0], 'msg': ''})
+            parent.body.append(expr)
+        # re-any, re-all for LIST_STRING
+        elif node.name in ('re', 're-any', 're-all'):
+            #TODO: regex check
+            expr = AssertRe(parent=parent, kwargs={'op': node.name, 'pattern': node.args[0], 'ignore_case':False, 'dotall': False, 'msg': ''})
+            parent.body.append(expr)
+        # DOCUMENT ONLY
+        elif node.name == 'attr':
+            expr = AssertHasAttr(parent=parent, kwargs={'name': node.args[0], 'msg': ''})
+            parent.body.append(expr)
+        elif node.name in ('css', 'xpath'):
+            expr = AssertSelect(parent=parent, kwargs={'mode': node.name, 'query': node.args[0], msg: ''})
+            parent.body.append(expr)
+        # currently used invert only operator
+        elif node.name == 'not':
+            expr = LogicNot(parent=parent)
+            _make_assert_expr(node.children, expr)
+        else:
+            raise NotImplementedError(node.name)
 
 def _make_assert(node: Node, parent: BaseAstNode, cursor: VariableType) -> tuple[Assert, VariableType]:
     """Build Assert node."""
-    return Assert(parent=parent, accept_type=cursor, ret_type=cursor), cursor
-
+    expr = Assert(parent=parent, accept_type=cursor, ret_type=cursor)
+    _make_assert_expr(node.children, expr)
+    return expr, cursor
 
 def _make_table_match(node: Node, parent: BaseAstNode) -> tuple[TableMatch, VariableType]:
     """Build TableMatch node."""
     return TableMatch(parent=parent), VariableType.DOCUMENT
+
 
 
 # =============================================================================

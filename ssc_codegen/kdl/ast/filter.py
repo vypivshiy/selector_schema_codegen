@@ -5,10 +5,11 @@ from dataclasses import dataclass, field
 from typing import ClassVar
 
 from .base import BaseAstNode
-from .types import KwargsFilterCompare, KwargsFilterString, KwargsFilterDef
+from .types import KwargsFilterCompare, KwargsFilterString, KwargsFilterDef, KwargsFilterRe, KwargsFilterRange
 from ssc_codegen.kdl.tokens import TokenType, VariableType
 
 
+# TODO: remove
 @dataclass(kw_only=True)
 class FilterDef(BaseAstNode[KwargsFilterDef, tuple[str]]):
     """
@@ -48,8 +49,9 @@ class Filter(BaseAstNode):
     ret_type: VariableType = field(default=VariableType.LIST_STRING)
 
 
+ARGS_FILTER_CMP = tuple[str, str | int | float | tuple[str, ...]]
 @dataclass(kw_only=True)
-class FilterCmp(BaseAstNode[KwargsFilterCompare, tuple]):
+class FilterCmp(BaseAstNode[KwargsFilterCompare, ARGS_FILTER_CMP]):
     """
     Сравнение строки или её длины.
 
@@ -62,7 +64,7 @@ class FilterCmp(BaseAstNode[KwargsFilterCompare, tuple]):
 
 
 @dataclass(kw_only=True)
-class FilterStr(BaseAstNode[KwargsFilterString, tuple]):
+class FilterStr(BaseAstNode[KwargsFilterString, tuple[str, tuple[str, ...]]]):
     """
     Строковые фильтры (OR-семантика по нескольким значениям).
 
@@ -80,7 +82,7 @@ class FilterStr(BaseAstNode[KwargsFilterString, tuple]):
 
 
 @dataclass(kw_only=True)
-class FilterRe(BaseAstNode):
+class FilterRe(BaseAstNode[KwargsFilterRe, tuple[str, bool, bool]]):
     """
     Regex-фильтр.
 
@@ -93,11 +95,11 @@ class FilterRe(BaseAstNode):
 
 
 @dataclass(kw_only=True)
-class FilterLen(BaseAstNode):
+class FilterRange(BaseAstNode[KwargsFilterRange, tuple[int, int]]):
     """
     Фильтр по длине строки.
 
-    DSL: range 10 1024  (shortcut: >10; <1024)
+    DSL: range 10 1024  (shortcut: gt 10; lt 1024)
     kwargs: op (FilterCompareOp), value (int)
     """
     kind: ClassVar[TokenType] = TokenType.FILTER_LEN

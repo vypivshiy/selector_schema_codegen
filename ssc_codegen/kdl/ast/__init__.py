@@ -73,7 +73,7 @@ from .array import Index, Len, Unique
 from .cast import Cast, Jsonify, JsonifyDynamic, Nested
 
 # Filter nodes (string pipeline)
-from .filter import FilterDef, Filter, FilterCmp, FilterStr, FilterRe, FilterLen
+from .filter import FilterDef, Filter, FilterCmp, FilterStr, FilterRe, FilterRange
 
 # Filter nodes (document pipeline)
 from .filter_doc import (
@@ -197,7 +197,7 @@ __all__ = [
     "FilterCmp",
     "FilterStr",
     "FilterRe",
-    "FilterLen",
+    "FilterRange",
 
     # Filter (document)
     "FilterDoc",

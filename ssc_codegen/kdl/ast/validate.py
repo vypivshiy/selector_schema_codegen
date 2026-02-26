@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import ClassVar
 
 from .base import BaseAstNode
-from .types import KwargsAssert, EMPTY_KWARGS, EMTPY_ARGS
+from .types import KwargsAssert, EMPTY_KWARGS, EMTPY_ARGS, KwargsAssertContains, KwargsAssertRe, KwargsAssertHasAttr, KwargsAssertSelect
 from ssc_codegen.kdl.tokens import TokenType, VariableType
 
 
@@ -27,7 +27,7 @@ class Assert(BaseAstNode[EMPTY_KWARGS, EMTPY_ARGS]):
 
 
 @dataclass(kw_only=True)
-class AssertCmp(BaseAstNode[KwargsAssert, tuple]):
+class AssertCmp(BaseAstNode[KwargsAssert, tuple[str, str | int | float, str]]):
     """
     Сравнение значения.
 
@@ -40,7 +40,7 @@ class AssertCmp(BaseAstNode[KwargsAssert, tuple]):
 
 
 @dataclass(kw_only=True)
-class AssertRe(BaseAstNode):
+class AssertRe(BaseAstNode[KwargsAssertRe, tuple[str, bool, bool, str]]):
     """
     Regex-валидация.
 
@@ -57,7 +57,7 @@ class AssertRe(BaseAstNode):
 
 
 @dataclass(kw_only=True)
-class AssertSelect(BaseAstNode):
+class AssertSelect(BaseAstNode[KwargsAssertSelect, tuple[str, str, str]]):
     """
     Валидация наличия элемента в документе.
 
@@ -70,7 +70,7 @@ class AssertSelect(BaseAstNode):
 
 
 @dataclass(kw_only=True)
-class AssertHasAttr(BaseAstNode):
+class AssertHasAttr(BaseAstNode[KwargsAssertHasAttr, tuple[str, str]]):
     """
     Валидация наличия атрибута.
 
@@ -83,7 +83,7 @@ class AssertHasAttr(BaseAstNode):
 
 
 @dataclass(kw_only=True)
-class AssertContains(BaseAstNode):
+class AssertContains(BaseAstNode[KwargsAssertContains, tuple[str, str]]):
     """
     Валидация наличия подстроки / элемента.
 

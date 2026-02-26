@@ -1,4 +1,5 @@
 """TypedDict definitions for AST node kwargs."""
+from multiprocessing.dummy import Value
 from typing import TypedDict, Literal
 from typing_extensions import NotRequired
 
@@ -21,14 +22,14 @@ RegexMode = Literal["re", "re-all", "re-sub"]
 CastTarget = Literal["int", "float", "bool"]
 
 # ========== FILTER OPERATORS ==========
-FilterCompareOp = Literal["eq", "ne", "gt", "lt", "ge", "le"]
+FilterCompareOp = Literal["eq", "ne", "gt", "le", "ge", "le"]
 FilterStringOp = Literal["starts", "ends", "contains", "in"]
 
 # ========== STRUCT TYPES ==========
 StructTypeLiteral = Literal["item", "list", "dict", "table"]
 
 # ========== ASSERT OPERATORS ==========
-AssertCmpOp = Literal["eq", "ne"]
+AssertCmpOp = Literal["eq", "ne", "gt", "le", "ge", "le"]
 
 # ========== JSON FIELD TYPES ==========
 # Примитивные типы для полей json-маппинга
@@ -80,8 +81,7 @@ class KwargsCast(TypedDict):
 class KwargsFilterCompare(TypedDict):
     """Фильтры сравнения."""
     op: FilterCompareOp
-    value: str | int | float
-    is_len: NotRequired[bool]   # True → сравниваем длину строки
+    value: str | int | float | tuple[str, ...]
 
 
 class KwargsFilterString(TypedDict):
@@ -90,6 +90,18 @@ class KwargsFilterString(TypedDict):
     values: tuple[str, ...]     # один или несколько вариантов (OR семантика)
 
 
+class KwargsFilterRe(TypedDict):
+    pattern: str
+    ignore_case: bool
+    dotall: bool
+
+
+class KwargsFilterRange(TypedDict):
+    start: int
+    end: int
+
+
+# TODO: REMOVE
 class KwargsFilterDef(TypedDict):
     """Именованный filter-define (только для inline-распаковки в DSL)."""
     name: str                   # идентификатор фильтра, напр. "F-IMAGE-PNG"
@@ -142,8 +154,31 @@ class KwargsAssert(TypedDict):
     msg: NotRequired[str]
 
 
+class KwargsAssertContains(TypedDict):
+    value: str
+    msg: NotRequired[str]
+
+
+class KwargsAssertHasAttr(TypedDict):
+    name: str
+    msg: str
+
+class KwargsAssertSelect(TypedDict):
+    mode: SelectorMode
+    query: str
+    msg: str
+
+
+class KwargsAssertRe(TypedDict):
+    op: Literal['re', 're-any', 're-all']
+    pattern: str
+    ignore_case: bool
+    dotall: bool
+    msg: str
+
+
 class KwargsDefault(TypedDict):
-    """Default значение (?? оператор)."""
+    """Default значение (default оператор)."""
     value: str | int | float | bool | list | None
 
 
