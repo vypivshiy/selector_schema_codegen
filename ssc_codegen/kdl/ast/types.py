@@ -11,14 +11,14 @@ ExtractMode = Literal["text", "attr", "raw", "attrs_map"]
 # ========== STRING OPERATIONS ==========
 StringOpMode = Literal[
     "trim", "ltrim", "rtrim",
-    "rm_prefix", "rm_suffix", "rm_prefix_suffix",
+    "rm-prefix", "rm-suffix", "rm-prefix_suffix",
 ]
 
 # ========== REGEX MODES ==========
-RegexMode = Literal["re", "re_all", "re_sub"]
+RegexMode = Literal["re", "re-all", "re-sub"]
 
 # ========== CAST TYPES ==========
-CastTarget = Literal["int", "float", "bool", "list_int", "list_float"]
+CastTarget = Literal["int", "float", "bool"]
 
 # ========== FILTER OPERATORS ==========
 FilterCompareOp = Literal["eq", "ne", "gt", "lt", "ge", "le"]
@@ -37,36 +37,39 @@ JsonFieldType = Literal["str", "int", "float", "bool", "null", "any"]
 
 # ========== KWARGS TYPE DEFINITIONS ==========
 
+
+EMPTY_KWARGS = TypedDict("EMPTY_KWARGS", {})
+EMTPY_ARGS = tuple
+
 class KwargsSelect(TypedDict):
     """Селекторы CSS/XPath."""
     mode: SelectorMode       # "css" | "xpath"
     query: str               # строка-селектор (без псевдоэлементов)
-    is_all: bool             # False → один элемент, True → все
 
 
 class KwargsExtract(TypedDict):
     """Извлечение данных из элемента."""
     mode: ExtractMode        # "text" | "attr" | "raw" | "attrs_map"
-    key: NotRequired[str]    # имя атрибута (только для mode="attr")
+    key: NotRequired[str | tuple[str, ...] | None]    # имя атрибута (только для mode="attr")
 
 
 class KwargsStringOp(TypedDict):
     """Строковые операции."""
     op: StringOpMode
-    substr: NotRequired[str]              # для rm_prefix / rm_suffix / rm_prefix_suffix
-    old: NotRequired[str]                 # для replace (устаревший путь, см. Replace)
-    new: NotRequired[str]                 # для replace (устаревший путь)
-    replacements: NotRequired[dict[str, str]]  # для repl_map
-
+    substr: str              # для rm_prefix / rm_suffix / rm_prefix_suffix
 
 class KwargsRegex(TypedDict):
     """Regex операции."""
     mode: RegexMode
     pattern: str
     group: NotRequired[int]          # номер группы (для re/re_sub)
-    repl: NotRequired[str]           # строка замены (для re_sub)
+    repl: NotRequired[str | None]           # строка замены (для re_sub)
     ignore_case: NotRequired[bool]
     dotall: NotRequired[bool]
+
+
+class KwargsFormat(TypedDict):
+    fmt: str
 
 
 class KwargsCast(TypedDict):
@@ -99,9 +102,11 @@ class KwargsStruct(TypedDict):
     docstring: NotRequired[str]
 
 
-class KwargsField(TypedDict):
+class KwargsTypeDefField(TypedDict):
     """Поле структуры / typedef / json."""
     name: str
+    nested_ref: str | None
+    json_ref: str | None
 
 
 class KwargsTable(TypedDict):
@@ -163,5 +168,38 @@ class KwargsJsonDefField(TypedDict):
     ref_name: NotRequired[str]      # если type_name ссылается на другой JsonDef
 
 
+class KwargsRepl(TypedDict):
+    old: str
+    new: str
+
+
+class KwargsMapRepl(TypedDict):
+    repl: dict[str, str]
+
+
 class KwargsDocstirng(TypedDict):
     value: str
+
+
+class KwargsJsonify(TypedDict):
+    target: str | None
+    path: str | None
+
+
+class KwargsNested(TypedDict):
+    target: str 
+
+class KwargsJoin(TypedDict):
+    sep: str
+
+
+class KwargsUnique(TypedDict):
+    keep_order: bool
+
+
+class KwargsIndex(TypedDict):
+    index: int
+
+
+class KwargsTypedef(TypedDict):
+    is_array: bool

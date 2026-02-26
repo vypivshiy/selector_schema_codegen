@@ -5,12 +5,12 @@ from dataclasses import dataclass, field
 from typing import ClassVar
 
 from .base import BaseAstNode
-from .types import KwargsAssert
+from .types import KwargsAssert, EMPTY_KWARGS, EMTPY_ARGS
 from ssc_codegen.kdl.tokens import TokenType, VariableType
 
 
 @dataclass(kw_only=True)
-class Assert(BaseAstNode):
+class Assert(BaseAstNode[EMPTY_KWARGS, EMTPY_ARGS]):
     """
     Assert-блок.
 

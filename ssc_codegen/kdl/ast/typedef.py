@@ -5,12 +5,12 @@ from dataclasses import dataclass, field
 from typing import ClassVar
 
 from .base import BaseAstNode
-from .types import KwargsField
+from .types import KwargsTypeDefField, KwargsTypedef
 from ssc_codegen.kdl.tokens import TokenType, VariableType
 
 
 @dataclass(kw_only=True)
-class TypeDef(BaseAstNode):
+class TypeDef(BaseAstNode[KwargsTypedef, tuple[bool]]):
     """
     Определение пользовательского типа (type alias / enum).
     kwargs: name (str)
@@ -22,7 +22,7 @@ class TypeDef(BaseAstNode):
 
 
 @dataclass(kw_only=True)
-class TypeDefField(BaseAstNode[KwargsField, tuple[str]]):
+class TypeDefField(BaseAstNode[KwargsTypeDefField, tuple[str, str]]):
     """
     Поле определения типа.
     kwargs: name (str)

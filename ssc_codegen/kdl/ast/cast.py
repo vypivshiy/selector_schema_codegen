@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import ClassVar
 
 from .base import BaseAstNode
-from .types import KwargsCast
+from .types import KwargsCast, KwargsJsonify, KwargsNested
 from ssc_codegen.kdl.tokens import TokenType, VariableType
 
 _CAST_TYPE_MAP: dict[str, VariableType] = {
@@ -40,7 +40,7 @@ class Cast(BaseAstNode[KwargsCast, tuple[str]]):
 
 
 @dataclass(kw_only=True)
-class Jsonify(BaseAstNode):
+class Jsonify(BaseAstNode[KwargsJsonify, tuple[str | None, str | None]]):
     """
     Десериализация JSON-строки по схеме JsonDef.
 
@@ -72,7 +72,7 @@ class JsonifyDynamic(BaseAstNode):
 
 
 @dataclass(kw_only=True)
-class Nested(BaseAstNode):
+class Nested(BaseAstNode[KwargsNested, tuple[str]]):
     """
     Вложенная схема как cast-операция.
 

@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from typing import ClassVar
 
 from .base import BaseAstNode
-from .types import KwargsJsonDef, KwargsJsonDefField, KwargsField
+from .types import KwargsJsonDef, KwargsJsonDefField, KwargsTypeDefField
 from ssc_codegen.kdl.tokens import TokenType, VariableType
 
 
@@ -74,7 +74,7 @@ class JsonStruct(BaseAstNode):
 
 
 @dataclass(kw_only=True)
-class JsonField(BaseAstNode[KwargsField, tuple[str]]):
+class JsonField(BaseAstNode[KwargsTypeDefField, tuple[str]]):
     """Поле JSON-структуры (output)."""
     kind: ClassVar[TokenType] = TokenType.JSON_FIELD
     accept_type: VariableType = field(default=VariableType.ANY)

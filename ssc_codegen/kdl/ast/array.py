@@ -6,10 +6,11 @@ from typing import ClassVar
 
 from .base import BaseAstNode
 from ssc_codegen.kdl.tokens import TokenType, VariableType
+from .types import EMPTY_KWARGS, EMTPY_ARGS, KwargsIndex, KwargsUnique
 
 
 @dataclass(kw_only=True)
-class Index(BaseAstNode):
+class Index(BaseAstNode[KwargsIndex, tuple[int]]):
     """
     Получение элемента по индексу.
 
@@ -29,7 +30,7 @@ class Index(BaseAstNode):
 
 
 @dataclass(kw_only=True)
-class Len(BaseAstNode):
+class Len(BaseAstNode[EMPTY_KWARGS, EMTPY_ARGS]):
     """
     Длина массива.
 
@@ -42,7 +43,7 @@ class Len(BaseAstNode):
 
 
 @dataclass(kw_only=True)
-class Unique(BaseAstNode):
+class Unique(BaseAstNode[KwargsUnique, tuple[bool]]):
     """
     Уникальные значения (дубликаты убираются, порядок не гарантирован).
 

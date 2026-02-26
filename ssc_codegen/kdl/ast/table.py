@@ -5,12 +5,12 @@ from dataclasses import dataclass, field
 from typing import ClassVar
 
 from .base import BaseAstNode
-from .types import KwargsTable, KwargsTableMatchKey, KwargsTableMatchValue, KwargsTableMatch
+from .types import KwargsTable, KwargsTableMatchKey, KwargsTableMatchValue, KwargsTableMatch, EMPTY_KWARGS, EMTPY_ARGS
 from ssc_codegen.kdl.tokens import TokenType, VariableType
 
 
 @dataclass(kw_only=True)
-class TableConfig(BaseAstNode[KwargsTable, tuple[str]]):
+class StructTableConfig(BaseAstNode[EMPTY_KWARGS, EMTPY_ARGS]):
     """
     Конфигурация таблицы.
     DSL: -table { css "table.table-striped" }
@@ -22,7 +22,7 @@ class TableConfig(BaseAstNode[KwargsTable, tuple[str]]):
 
 
 @dataclass(kw_only=True)
-class TableRow(BaseAstNode):
+class StructTableRow(BaseAstNode[EMPTY_KWARGS, EMTPY_ARGS]):
     """
     Селектор строк таблицы.
     DSL: -row { css "tr" }
@@ -34,7 +34,7 @@ class TableRow(BaseAstNode):
 
 
 @dataclass(kw_only=True)
-class TableMatchKey(BaseAstNode[KwargsTableMatchKey, tuple]):
+class StructTableMatchKey(BaseAstNode[EMPTY_KWARGS, EMTPY_ARGS]):
     """
     Критерий поиска нужной строки таблицы (-match).
     DSL: -match { css "th"; text; trim }
@@ -47,7 +47,7 @@ class TableMatchKey(BaseAstNode[KwargsTableMatchKey, tuple]):
 
 
 @dataclass(kw_only=True)
-class TableMatchValue(BaseAstNode[KwargsTableMatchValue, tuple]):
+class StructTableMatchValue(BaseAstNode[EMPTY_KWARGS, EMTPY_ARGS]):
     """
     Пайплайн извлечения значения из найденной строки (-value).
     DSL: -value { css "td"; text; trim }
@@ -59,7 +59,7 @@ class TableMatchValue(BaseAstNode[KwargsTableMatchValue, tuple]):
 
 
 @dataclass(kw_only=True)
-class TableMatch(BaseAstNode[KwargsTableMatch, tuple[list[str]]]):
+class TableMatch(BaseAstNode[EMPTY_KWARGS, EMTPY_ARGS]):
     """
     Match-блок внутри поля таблицы.
     DSL: match { eq "UPC" } / match { starts "Price (excl." }

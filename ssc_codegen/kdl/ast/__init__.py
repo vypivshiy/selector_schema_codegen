@@ -14,7 +14,7 @@ from .types import (
     KwargsFilterString,
     KwargsFilterDef,
     KwargsStruct,
-    KwargsField,
+    KwargsTypeDefField,
     KwargsTable,
     KwargsTableMatchKey,
     KwargsTableMatchValue,
@@ -41,10 +41,10 @@ from .struct import (
 
 # Table nodes
 from .table import (
-    TableConfig,
-    TableRow,
-    TableMatchKey,
-    TableMatchValue,
+    StructTableConfig,
+    StructTableRow,
+    StructTableMatchKey,
+    StructTableMatchValue,
     TableMatch,
 )
 
@@ -119,7 +119,7 @@ __all__ = [
     "KwargsFilterString",
     "KwargsFilterDef",
     "KwargsStruct",
-    "KwargsField",
+    "KwargsTypeDefField",
     "KwargsTable",
     "KwargsTableMatchKey",
     "KwargsTableMatchValue",
@@ -146,10 +146,10 @@ __all__ = [
     "StructNested",
 
     # Table
-    "TableConfig",
-    "TableRow",
-    "TableMatchKey",
-    "TableMatchValue",
+    "StructTableConfig",
+    "StructTableRow",
+    "StructTableMatchKey",
+    "StructTableMatchValue",
     "TableMatch",
 
     # TypeDef

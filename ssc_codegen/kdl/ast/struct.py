@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import ClassVar
 
 from .base import BaseAstNode
-from .types import KwargsStruct, KwargsField
+from .types import KwargsStruct, KwargsTypeDefField
 from ssc_codegen.kdl.tokens import TokenType, VariableType
 
 
@@ -21,7 +21,7 @@ class Struct(BaseAstNode[KwargsStruct, tuple[str, str, str]]):
 
 
 @dataclass(kw_only=True)
-class StructField(BaseAstNode[KwargsField, tuple[str]]):
+class StructField(BaseAstNode[KwargsTypeDefField, tuple[str]]):
     """
     Поле структуры.
     body — пайплайн операций (Select → Extract → StringOp → ...).
@@ -72,7 +72,7 @@ class StructInit(BaseAstNode):
 
 
 @dataclass(kw_only=True)
-class StructNested(BaseAstNode[KwargsField, tuple[str]]):
+class StructNested(BaseAstNode[KwargsTypeDefField, tuple[str]]):
     """
     Вложенная схема (ссылка по имени).
     DSL: books { Book }

@@ -3,14 +3,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import ClassVar
-
 from .base import BaseAstNode
-from .types import KwargsStringOp
+from .types import KwargsStringOp, KwargsFormat, KwargsMapRepl, KwargsRepl, KwargsJoin, EMPTY_KWARGS, EMTPY_ARGS
 from ssc_codegen.kdl.tokens import TokenType, VariableType
 
-
 @dataclass(kw_only=True)
-class StringOp(BaseAstNode[KwargsStringOp, tuple]):
+class StringOp(BaseAstNode[KwargsStringOp, tuple[str]]):
     """
     Универсальная строковая операция.
 
@@ -23,7 +21,7 @@ class StringOp(BaseAstNode[KwargsStringOp, tuple]):
 
 
 @dataclass(kw_only=True)
-class Format(BaseAstNode):
+class Format(BaseAstNode[KwargsFormat, tuple[str]]):
     """
     Форматирование строки.
 
@@ -36,7 +34,7 @@ class Format(BaseAstNode):
 
 
 @dataclass(kw_only=True)
-class Replace(BaseAstNode):
+class Replace(BaseAstNode[KwargsRepl, tuple[str, str]]):
     """
     Замена подстроки.
 
@@ -49,7 +47,7 @@ class Replace(BaseAstNode):
 
 
 @dataclass(kw_only=True)
-class ReplaceMap(BaseAstNode):
+class ReplaceMap(BaseAstNode[KwargsMapRepl, tuple[dict[str, str]]]):
     """
     Замена по словарю.
 
@@ -66,7 +64,7 @@ class ReplaceMap(BaseAstNode):
 
 
 @dataclass(kw_only=True)
-class Join(BaseAstNode):
+class Join(BaseAstNode[KwargsJoin, tuple[str]]):
     """
     Join списка строк в одну строку.
 
@@ -79,7 +77,7 @@ class Join(BaseAstNode):
 
 
 @dataclass(kw_only=True)
-class Unescape(BaseAstNode):
+class Unescape(BaseAstNode[EMPTY_KWARGS, EMTPY_ARGS]):
     """
     Unescape строки (HTML entities, unicode escape и т.п.).
 
