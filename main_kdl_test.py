@@ -26,7 +26,6 @@ Expected KdlNode interface:
 
 from __future__ import annotations
 
-from ast import arg
 from dataclasses import dataclass, field
 from typing import Callable, TypeAlias, cast
 
@@ -389,6 +388,9 @@ class AstParser:
     def _parse_expressions(
         self, kdl_nodes: list[KdlNode], parent: FieldLikeNode
     ):
+        if not kdl_nodes:
+            return
+        
         for node in kdl_nodes:
             if cb := self._context_expressions.get(node.name):
                 expr = cb(node, parent, self.ctx)
@@ -689,7 +691,7 @@ def reg_expr_re_all(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
     return ReAll(parent=parent, pattern=pattern)
 
 
-@PARSER.register_expression_node("re-all")
+@PARSER.register_expression_node("re-sub")
 def reg_expr_re_sub(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
     # apologize, last type - STRING, LIST_STRING
     prev_type = parent.body[-1].ret
@@ -749,9 +751,9 @@ def reg_expr_to_float(_: KdlNode, parent: FieldLikeNode, _2: ParseContext):
     # LIST_STRING | STRING
     prev_type = parent.body[-1].ret
     ret_type = (
-        VariableType.LIST_INT
+        VariableType.LIST_FLOAT
         if prev_type == VariableType.LIST_STRING
-        else VariableType.INT
+        else VariableType.FLOAT
     )
     return ToFloat(parent=parent, accept=prev_type, ret=ret_type)
 
@@ -827,7 +829,7 @@ def reg_expr_assert(node: KdlNode, parent: FieldLikeNode, _: ParseContext):
 @PARSER.register_expression_node("match")
 def reg_expr_match(node: KdlNode, parent: FieldLikeNode, _: ParseContext):
     prev_type = parent.body[-1].ret
-    return Assert(parent=parent, accept=prev_type, ret=prev_type)
+    return Match(parent=parent, accept=prev_type, ret=prev_type)
 
 
 # FILTER predicates
@@ -905,14 +907,14 @@ def reg_filter_re(node: KdlNode, parent: Filter, _: ParseContext):
 def reg_filter_re_all(node: KdlNode, parent: Filter, _: ParseContext):
     pattern = node.args[0]
     prev_type = parent.ret
-    return PredReAny(parent=parent, pattern=pattern, accept=prev_type, ret=prev_type)
+    return PredReAll(parent=parent, pattern=pattern, accept=prev_type, ret=prev_type)
 
 
 @PARSER.register_assert_node("re-any")
 def reg_filter_re_any(node: KdlNode, parent: Filter, _: ParseContext):
     pattern = node.args[0]
     prev_type = parent.ret
-    return PredReAll(parent=parent, pattern=pattern, accept=prev_type, ret=prev_type)
+    return PredReAny(parent=parent, pattern=pattern, accept=prev_type, ret=prev_type)
 
 
 @PARSER.register_predicate_node("css", reg_match=False)
