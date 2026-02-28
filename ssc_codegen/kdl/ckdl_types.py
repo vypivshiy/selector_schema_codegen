@@ -1,16 +1,16 @@
 from typing import Protocol, Any
 import ckdl
 
-class Node(Protocol):
+class KdlNode(Protocol):
     name: str
     args: list[Any]
     properties: dict[str, Any]
-    children: list["Node"]
+    children: list["KdlNode"]
     type_annotation: str | None
 
 
 class Document(Protocol):
-    nodes: list[Node]
+    nodes: list[KdlNode]
 
 
 def parse(s: str) -> Document:

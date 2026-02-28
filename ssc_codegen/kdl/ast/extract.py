@@ -1,34 +1,48 @@
-"""Data extraction AST nodes."""
 from __future__ import annotations
-
 from dataclasses import dataclass, field
-from typing import ClassVar
 
-from .base import BaseAstNode
-from .types import KwargsExtract
-from ssc_codegen.kdl.tokens import TokenType, VariableType
+from .base import Node
+from .types import VariableType
 
 
-@dataclass(kw_only=True)
-class Extract(BaseAstNode[KwargsExtract, tuple[str, str]]):
+@dataclass
+class Text(Node):
     """
-    Универсальное извлечение данных из элемента.
-
-    DSL:
-        text              → mode="text"
-        attr "href"       → mode="attr", key="href"
-        raw               → mode="raw"
-        attrs-map         → mode="attrs_map"
-
-    Псевдоэлементы parsel-синтаксиса (::text, ::attr(src)) разворачиваются
-    в Select + Extract на уровне AST-билдера.
-
-    kwargs: mode, key (опционально для attr)
-
-    ret_type:
-        text / attr / raw → STRING
-        attrs_map         → остаётся ANY (dict-подобный)
+    Extracts text content from element(s).
+    DOCUMENT → STRING, LIST_DOCUMENT → LIST_STRING.
+    accept/ret set by builder from cursor type.
     """
-    kind: ClassVar[TokenType] = TokenType.EXTRACT
-    accept_type: VariableType = field(default=VariableType.DOCUMENT)
-    ret_type: VariableType = field(default=VariableType.STRING)
+    accept: VariableType = field(default=VariableType.DOCUMENT)
+    ret:    VariableType = field(default=VariableType.STRING)
+
+
+@dataclass
+class Raw(Node):
+    """
+    Extracts raw HTML string from element(s).
+    DOCUMENT → STRING, LIST_DOCUMENT → LIST_STRING.
+    accept/ret set by builder from cursor type.
+    """
+    accept: VariableType = field(default=VariableType.DOCUMENT)
+    ret:    VariableType = field(default=VariableType.STRING)
+
+
+@dataclass
+class Attr(Node):
+    """
+    Extracts attribute value(s) from element(s).
+
+    Single key:
+      - DOCUMENT → STRING (error if attribute not found)
+      - LIST_DOCUMENT → LIST_STRING (error if attribute not found)
+
+    Multiple keys:
+      - always returns LIST_STRING
+      - missing attributes are skipped silently
+      - DOCUMENT → LIST_STRING, LIST_DOCUMENT → LIST_STRING
+
+    accept/ret set by builder from cursor type and len(keys).
+    """
+    keys:   tuple[str, ...] = field(default_factory=tuple)
+    accept: VariableType    = field(default=VariableType.DOCUMENT)
+    ret:    VariableType    = field(default=VariableType.STRING)

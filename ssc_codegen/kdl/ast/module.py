@@ -1,53 +1,88 @@
-"""Module-level AST nodes."""
 from __future__ import annotations
-
 from dataclasses import dataclass, field
-from typing import ClassVar
 
-from .base import BaseAstNode
-from ssc_codegen.kdl.tokens import TokenType, VariableType
-from .types import KwargsDocstirng
-
-@dataclass(kw_only=True)
-class Module(BaseAstNode):
-    """Корневой узел модуля. Содержит все top-level определения."""
-    kind: ClassVar[TokenType] = TokenType.MODULE
-    accept_type: VariableType = field(default=VariableType.ANY, repr=False)
-    ret_type: VariableType = field(default=VariableType.ANY, repr=False)
+from .base import Node
 
 
-@dataclass(kw_only=True)
-class Define(BaseAstNode):
+@dataclass
+class Module(Node):
     """
-    Константа / text substitution.
-    DSL: define NAME="value" / define RE_PAT=#"..."#
-    Заменяет устаревший `const`.
+    Root node.
+    Build order of body:
+      CodeStartHook → Docstring, Imports, Utilities
+      → JsonDef entries → TypeDef entries → Struct entries
+      → CodeEndHook
     """
-    kind: ClassVar[TokenType] = TokenType.DEFINE
-    accept_type: VariableType = field(default=VariableType.ANY)
-    ret_type: VariableType = field(default=VariableType.ANY)
+
+    def __post_init__(self):
+        self.body.extend(
+            [
+                Docstring(parent=self),
+                Imports(parent=self),
+                Utilities(parent=self),
+                CodeStartHook(parent=self),
+            ]
+        )
+
+    @property
+    def docstring(self) -> Docstring:
+        return self.body[0]  # type: ignore
+
+    @property
+    def imports(self) -> Imports:
+        return self.body[1]  # type: ignore
+
+    @property
+    def utilities(self) -> Imports:
+        return self.body[2]  # type: ignore
+
+    @property
+    def code_start(self) -> Imports:
+        return self.body[3]  # type: ignore
 
 
-@dataclass(kw_only=True)
-class Docstring(BaseAstNode[KwargsDocstirng, tuple[str]]):
-    """Документация (doc \"\"\"...\"\"\")."""
-    kind: ClassVar[TokenType] = TokenType.DOCSTRING
-    accept_type: VariableType = field(default=VariableType.ANY, repr=False)
-    ret_type: VariableType = field(default=VariableType.ANY, repr=False)
-    body: list = field(default_factory=list, repr=False)
+@dataclass
+class CodeStartHook(Node):
+    """
+    User code insertion point before all generated code.
+    Codegen emits body content verbatim at the top of the output file.
+    """
+
+    pass
 
 
-@dataclass(kw_only=True)
-class Imports(BaseAstNode):
-    """Импорты модуля."""
-    kind: ClassVar[TokenType] = TokenType.IMPORTS
-    accept_type: VariableType = field(default=VariableType.ANY, repr=False)
-    ret_type: VariableType = field(default=VariableType.ANY, repr=False)
+@dataclass
+class CodeEndHook(Node):
+    """
+    User code insertion point after all generated structs.
+    Codegen emits body content verbatim at the bottom of the output file.
+    """
+
+    pass
 
 
-@dataclass(kw_only=True)
-class Utilities(BaseAstNode):
-    """Utility-функции (хелперы для codegen)."""
-    kind: ClassVar[TokenType] = TokenType.UTILITIES
-    accept_type: VariableType = field(default=VariableType.ANY, repr=False)
-    ret_type: VariableType = field(default=VariableType.ANY, repr=False)
+@dataclass
+class Docstring(Node):
+    """Module-level docstring. DSL: doc "text" """
+
+    value: str = ""
+
+
+@dataclass
+class Imports(Node):
+    """
+    Technical node — codegen inserts required import statements into body.
+    Not produced from DSL directly; populated during codegen phase.
+    """
+
+    libs: list[str] = field(default_factory=list)
+
+
+@dataclass
+class Utilities(Node):
+    """
+    Technical node — codegen inserts shared helper functions into body.
+    Not produced from DSL directly; populated during codegen phase.
+    """
+
+    pass

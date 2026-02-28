@@ -1,34 +1,56 @@
-"""Transform AST nodes."""
 from __future__ import annotations
-
 from dataclasses import dataclass, field
-from typing import ClassVar
 
-from .base import BaseAstNode
-from ssc_codegen.kdl.tokens import TokenType, VariableType
+from .base import Node
+from .types import VariableType
 
 
-@dataclass(kw_only=True)
-class Transform(BaseAstNode):
+@dataclass
+class TransformTarget(Node):
     """
-    Кастомная трансформация (вызов пользовательской функции).
+    Per-language implementation of a transform.
 
-    DSL: transform "my_func"
-    kwargs: name (str) — имя функции из TransformImports.
+    lang    — target language identifier ("py", "js").
+    imports — import statements; each element is one import line.
+              Multiple imports passed as separate args in DSL:
+              import "from base64 import b64decode" "import hashlib"
+    code    — code template lines; each element is one line.
+              Codegen adds indentation automatically.
+              Markers:
+                {{PRV}} — variable holding the previous pipeline value (input)
+                {{NXT}} — variable that will hold the result (output)
     """
-    kind: ClassVar[TokenType] = TokenType.TRANSFORM
-    accept_type: VariableType = field(default=VariableType.ANY)
-    ret_type: VariableType = field(default=VariableType.ANY)
+    lang:    str            = ""
+    imports: tuple[str, ...] = field(default_factory=tuple)
+    code:    tuple[str, ...] = field(default_factory=tuple)
 
 
-@dataclass(kw_only=True)
-class TransformImports(BaseAstNode):
+@dataclass
+class TransformDef(Node):
     """
-    Импорты кастомных трансформаций.
+    Module-level transform definition.
+    DSL: transform name accept=TYPE return=TYPE { lang { ... } ... }
 
-    DSL: transform-imports { ... }
-    body — список импортируемых функций/модулей.
+    accept and ret must be explicit VariableType values.
+    AUTO is not allowed — transform is an explicit type contract.
+    body: list[TransformTarget]
     """
-    kind: ClassVar[TokenType] = TokenType.TRANSFORM_IMPORTS
-    accept_type: VariableType = field(default=VariableType.ANY)
-    ret_type: VariableType = field(default=VariableType.ANY)
+    name:   str          = ""
+    accept: VariableType = field(default=VariableType.AUTO)
+    ret:    VariableType = field(default=VariableType.AUTO)
+
+
+@dataclass
+class TransformCall(Node):
+    """
+    Pipeline op — calls a named TransformDef.
+    DSL: transform name  (inside a field pipeline)
+
+    accept and ret are copied from TransformDef at AST build time.
+    Build-time errors:
+      - name not found in module transforms
+      - accept type mismatches pipeline cursor
+    """
+    name:   str          = ""
+    accept: VariableType = field(default=VariableType.AUTO)
+    ret:    VariableType = field(default=VariableType.AUTO)

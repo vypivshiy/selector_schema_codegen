@@ -1,232 +1,155 @@
-"""AST nodes for KDL-based schema codegen."""
+"""
+AST nodes for the KDL Schema DSL.
 
-# Base
-from .base import BaseAstNode
+Import everything from here:
+    from kdl_ast import Module, Field, CssSelect, ...
+"""
+from .types import VariableType, StructType
 
-# Types (TypedDict kwargs)
-from .types import (
-    KwargsSelect,
-    KwargsExtract,
-    KwargsStringOp,
-    KwargsRegex,
-    KwargsCast,
-    KwargsFilterCompare,
-    KwargsFilterString,
-    KwargsFilterDef,
-    KwargsStruct,
-    KwargsTypeDefField,
-    KwargsTable,
-    KwargsTableMatchKey,
-    KwargsTableMatchValue,
-    KwargsTableMatch,
-    KwargsAssert,
-    KwargsDefault,
-    KwargsJsonDef,
-    KwargsJsonDefField,
+from .base import Node
+
+from .module import (
+    Module,
+    CodeStartHook,
+    CodeEndHook,
+    Docstring,
+    Imports,
+    Utilities,
 )
 
-# Module nodes
-from .module import Module, Define, Docstring, Imports, Utilities
-
-# Struct nodes
-from .struct import (
-    Struct,
-    StructField,
-    StructSplit,
-    StructPreValidate,
-    StructParse,
-    StructInit,
-    StructNested,
-)
-
-# Table nodes
-from .table import (
-    StructTableConfig,
-    StructTableRow,
-    StructTableMatchKey,
-    StructTableMatchValue,
-    TableMatch,
-)
-
-# TypeDef nodes
 from .typedef import TypeDef, TypeDefField
 
-# JSON definition nodes (top-level mapping)
-from .json import JsonDef, JsonDefField, JsonStruct, JsonField
+from .jsondef import JsonDef, JsonDefField
 
-# Selector nodes
-from .selectors import Select, Remove
-
-# Extract nodes
-from .extract import Extract
-
-# String nodes
-from .string import StringOp, Format, Replace, ReplaceMap, Join, Unescape
-
-# Regex nodes
-from .regex import Regex
-
-# Array nodes
-from .array import Index, Len, Unique
-
-# Cast nodes
-from .cast import Cast, Jsonify, JsonifyDynamic, Nested
-
-# Filter nodes (string pipeline)
-from .filter import FilterDef, Filter, FilterCmp, FilterStr, FilterRe, FilterRange
-
-# Filter nodes (document pipeline)
-from .filter_doc import (
-    FilterDoc,
-    FilterDocSelect,
-    FilterDocAttr,
-    FilterDocText,
-    FilterDocRaw,
-    FilterDocHasAttr,
+from .struct import (
+    Struct,
+    StructDocstring,
+    PreValidate,
+    Init,
+    InitField,
+    SplitDoc,
+    Key,
+    Value,
+    TableConfig,
+    TableRow,
+    TableMatchKey,
+    Field,
 )
 
-# Logic nodes
-from .logic import LogicAnd, LogicOr, LogicNot
-
-# Validate nodes
-from .validate import (
-    Assert,
-    AssertCmp,
-    AssertRe,
-    AssertSelect,
-    AssertHasAttr,
-    AssertContains,
+from .selectors import (
+    CssSelect,
+    CssSelectAll,
+    XpathSelect,
+    XpathSelectAll,
+    CssRemove,
+    XpathRemove,
 )
 
-# Transform nodes
-from .transform import Transform, TransformImports
+from .extract import Text, Raw, Attr
 
-# Control nodes
-from .control import Default, DefaultStart, DefaultEnd, Return
+from .string import (
+    Trim,
+    Ltrim,
+    Rtrim,
+    NormalizeSpace,
+    RmPrefix,
+    RmSuffix,
+    RmPrefixSuffix,
+    Fmt,
+    Repl,
+    ReplMap,
+    Lower,
+    Upper,
+    Split,
+    Join,
+    Unescape,
+)
 
+from .regex import Re, ReAll, ReSub
+
+from .array import Index, Slice, Len, Unique
+
+from .cast import ToInt, ToFloat, ToBool, Jsonify, Nested
+
+from .control import Self, Fallback, FallbackStart, FallbackEnd, Return
+
+from .predicate_containers import Filter, Assert, Match
+
+from .predicate_ops import (
+    PredEq,
+    PredNe,
+    PredGt,
+    PredLt,
+    PredGe,
+    PredLe,
+    PredRange,
+    PredStarts,
+    PredEnds,
+    PredContains,
+    PredIn,
+    PredRe,
+    PredReAny,
+    PredReAll,
+    PredCss,
+    PredXpath,
+    PredHasAttr,
+    PredCountEq,
+    PredCountGt,
+    PredCountLt,
+    LogicNot,
+    LogicAnd,
+    LogicOr,
+)
+
+from .transform import TransformDef, TransformTarget, TransformCall
 
 __all__ = [
-    # Base
-    "BaseAstNode",
-
-    # Types
-    "KwargsSelect",
-    "KwargsExtract",
-    "KwargsStringOp",
-    "KwargsRegex",
-    "KwargsCast",
-    "KwargsFilterCompare",
-    "KwargsFilterString",
-    "KwargsFilterDef",
-    "KwargsStruct",
-    "KwargsTypeDefField",
-    "KwargsTable",
-    "KwargsTableMatchKey",
-    "KwargsTableMatchValue",
-    "KwargsTableMatch",
-    "KwargsAssert",
-    "KwargsDefault",
-    "KwargsJsonDef",
-    "KwargsJsonDefField",
-
-    # Module
-    "Module",
-    "Define",
-    "Docstring",
-    "Imports",
-    "Utilities",
-
-    # Struct
-    "Struct",
-    "StructField",
-    "StructSplit",
-    "StructPreValidate",
-    "StructParse",
-    "StructInit",
-    "StructNested",
-
-    # Table
-    "StructTableConfig",
-    "StructTableRow",
-    "StructTableMatchKey",
-    "StructTableMatchValue",
-    "TableMatch",
-
-    # TypeDef
-    "TypeDef",
-    "TypeDefField",
-
-    # JSON
-    "JsonDef",
-    "JsonDefField",
-    "JsonStruct",
-    "JsonField",
-
-    # Selectors
-    "Select",
-    "Remove",
-
-    # Extract
-    "Extract",
-
-    # String
-    "StringOp",
-    "Format",
-    "Replace",
-    "ReplaceMap",
-    "Join",
-    "Unescape",
-
-    # Regex
-    "Regex",
-
-    # Array
-    "Index",
-    "Len",
-    "Unique",
-
-    # Cast
-    "Cast",
-    "Jsonify",
-    "JsonifyDynamic",
-    "Nested",
-
-    # Filter (string)
-    "FilterDef",
-    "Filter",
-    "FilterCmp",
-    "FilterStr",
-    "FilterRe",
-    "FilterRange",
-
-    # Filter (document)
-    "FilterDoc",
-    "FilterDocSelect",
-    "FilterDocAttr",
-    "FilterDocText",
-    "FilterDocRaw",
-    "FilterDocHasAttr",
-
-    # Logic
-    "LogicAnd",
-    "LogicOr",
-    "LogicNot",
-
-    # Validate
-    "Assert",
-    "AssertCmp",
-    "AssertRe",
-    "AssertSelect",
-    "AssertHasAttr",
-    "AssertContains",
-
-    # Transform
-    "Transform",
-    "TransformImports",
-
-    # Control
-    "Default",
-    "DefaultStart",
-    "DefaultEnd",
-    "Return",
+    # types
+    "VariableType", "StructType",
+    # base
+    "Node",
+    # module
+    "Module", "CodeStartHook", "CodeEndHook",
+    "Docstring", "Imports", "Utilities",
+    # typedef
+    "TypeDef", "TypeDefField",
+    # jsondef
+    "JsonDef", "JsonDefField",
+    # struct
+    "Struct", "StructDocstring", "PreValidate",
+    "Init", "InitField", "SplitDoc",
+    "Key", "Value",
+    "TableConfig", "TableRow", "TableMatchKey",
+    "Field",
+    # selectors
+    "CssSelect", "CssSelectAll",
+    "XpathSelect", "XpathSelectAll",
+    "CssRemove", "XpathRemove",
+    # extract
+    "Text", "Raw", "Attr",
+    # string
+    "Trim", "Ltrim", "Rtrim", "NormalizeSpace",
+    "RmPrefix", "RmSuffix", "RmPrefixSuffix",
+    "Fmt", "Repl", "ReplMap",
+    "Lower", "Upper", "Split", "Join", "Unescape",
+    # regex
+    "Re", "ReAll", "ReSub",
+    # array
+    "Index", "First", "Last", "Slice", "Len", "Unique",
+    # cast
+    "ToInt", "ToFloat", "ToBool", "Jsonify", "Nested",
+    # control
+    "Self", "Fallback", "Return",
+    # predicate containers
+    "Filter", "Assert", "Match",
+    # predicate ops
+    "PredEq", "PredNe",
+    "PredGt", "PredLt", "PredGe", "PredLe", "PredRange",
+    "PredStarts", "PredEnds", "PredContains", "PredIn",
+    "PredRe", "PredReAny", "PredReAll",
+    "PredCss", "PredXpath", "PredHasAttr",
+    "PredCountEq", "PredCountGt", "PredCountLt",
+    "LogicNot", "LogicAnd", "LogicOr",
+    # transform
+    "TransformDef", "TransformTarget", "TransformCall",
 ]

@@ -1,55 +1,52 @@
-"""Array operation AST nodes."""
 from __future__ import annotations
-
 from dataclasses import dataclass, field
-from typing import ClassVar
 
-from .base import BaseAstNode
-from ssc_codegen.kdl.tokens import TokenType, VariableType
-from .types import EMPTY_KWARGS, EMTPY_ARGS, KwargsIndex, KwargsUnique
+from .base import Node
+from .types import VariableType
+
+# Index, First, Last, Slice accept LIST_AUTO / return AUTO or LIST_AUTO.
+# Concrete types are resolved by the builder from the cursor type via
+# VariableType.scalar / VariableType.as_list helpers.
 
 
-@dataclass(kw_only=True)
-class Index(BaseAstNode[KwargsIndex, tuple[int]]):
+@dataclass
+class Index(Node):
     """
-    Получение элемента по индексу.
-
-    DSL:
-        index 0      → первый элемент
-        first        → index 0 (shortcut)
-        last         → index -1 (shortcut)
-
-    kwargs: i (int) — индекс (отрицательный — с конца)
-
-    Принимает LIST_*, возвращает соответствующий скалярный тип.
-    Конкретный тип уточняется при построении AST (LIST_STRING → STRING и т.п.).
+    Returns element at position i.
+    Negative index counts from end.
+    LIST_AUTO → AUTO (resolved by builder).
     """
-    kind: ClassVar[TokenType] = TokenType.INDEX
-    accept_type: VariableType = field(default=VariableType.LIST_ANY)
-    ret_type: VariableType = field(default=VariableType.ANY)
+    i:      int          = 0
+    accept: VariableType = field(default=VariableType.LIST_AUTO)
+    ret:    VariableType = field(default=VariableType.AUTO)
 
 
-@dataclass(kw_only=True)
-class Len(BaseAstNode[EMPTY_KWARGS, EMTPY_ARGS]):
+@dataclass
+class Slice(Node):
     """
-    Длина массива.
-
-    DSL: to-len
-    Принимает любой список, возвращает INT.
+    Returns sublist [start:end].
+    LIST_AUTO → LIST_AUTO (resolved by builder).
     """
-    kind: ClassVar[TokenType] = TokenType.LEN
-    accept_type: VariableType = field(default=VariableType.LIST_ANY)
-    ret_type: VariableType = field(default=VariableType.INT)
+    start:  int          = 0
+    end:    int          = 0
+    accept: VariableType = field(default=VariableType.LIST_AUTO)
+    ret:    VariableType = field(default=VariableType.LIST_AUTO)
 
 
-@dataclass(kw_only=True)
-class Unique(BaseAstNode[KwargsUnique, tuple[bool]]):
+@dataclass
+class Len(Node):
+    """Returns list length as INT."""
+    accept: VariableType = field(default=VariableType.LIST_AUTO)
+    ret:    VariableType = field(default=VariableType.INT)
+
+
+@dataclass
+class Unique(Node):
     """
-    Уникальные значения (дубликаты убираются, порядок не гарантирован).
-
-    DSL: unique
-    Сохраняет тип списка: LIST_STRING → LIST_STRING.
+    Removes duplicate strings from list.
+    keep_order=True — preserves original order (default: False).
+    LIST_STRING → LIST_STRING.
     """
-    kind: ClassVar[TokenType] = TokenType.UNIQUE
-    accept_type: VariableType = field(default=VariableType.LIST_STRING)
-    ret_type: VariableType = field(default=VariableType.LIST_STRING)
+    keep_order: bool         = False
+    accept:     VariableType = field(default=VariableType.LIST_STRING)
+    ret:        VariableType = field(default=VariableType.LIST_STRING)

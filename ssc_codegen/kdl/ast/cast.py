@@ -1,84 +1,62 @@
-"""Cast operation AST nodes."""
 from __future__ import annotations
-
 from dataclasses import dataclass, field
-from typing import ClassVar
 
-from .base import BaseAstNode
-from .types import KwargsCast, KwargsJsonify, KwargsNested
-from ssc_codegen.kdl.tokens import TokenType, VariableType
-
-_CAST_TYPE_MAP: dict[str, VariableType] = {
-    "int":        VariableType.INT,
-    "float":      VariableType.FLOAT,
-    "bool":       VariableType.BOOL,
-    "list_int":   VariableType.LIST_INT,
-    "list_float": VariableType.LIST_FLOAT,
-}
+from .base import Node
+from .types import VariableType
 
 
-@dataclass(kw_only=True)
-class Cast(BaseAstNode[KwargsCast, tuple[str]]):
+@dataclass
+class ToInt(Node):
     """
-    Каст типов.
-
-    DSL: to-int / to-float / to-bool / to-list-int / to-list-float
-    kwargs: target ("int"|"float"|"bool"|"list_int"|"list_float")
-
-    ret_type определяется автоматически из kwargs['target'].
-    accept_type = ANY (кастануть можно любой тип, ошибка — в рантайме).
+    Casts string(s) to integer(s).
+    STRING → INT, LIST_STRING → LIST_INT.
+    accept/ret set by builder from cursor type.
     """
-    kind: ClassVar[TokenType] = TokenType.CAST
-    accept_type: VariableType = field(default=VariableType.ANY)
-    ret_type: VariableType = field(default=VariableType.ANY)
-
-    def __post_init__(self) -> None:
-        super().__post_init__()
-        target = self.kwargs.get("target", "")
-        if target in _CAST_TYPE_MAP:
-            self.ret_type = _CAST_TYPE_MAP[target]
+    accept: VariableType = field(default=VariableType.STRING)
+    ret:    VariableType = field(default=VariableType.INT)
 
 
-@dataclass(kw_only=True)
-class Jsonify(BaseAstNode[KwargsJsonify, tuple[str | None, str | None]]):
+@dataclass
+class ToFloat(Node):
     """
-    Десериализация JSON-строки по схеме JsonDef.
-
-    DSL:
-        jsonify Quote
-        jsonify Quote path="0"
-        jsonify Quote path="1.text"
-
-    kwargs:
-        schema_name (str) — имя JsonDef
-        path?       (str) — gjson-подобный путь внутри структуры
+    Casts string(s) to float(s).
+    STRING → FLOAT, LIST_STRING → LIST_FLOAT.
+    accept/ret set by builder from cursor type.
     """
-    kind: ClassVar[TokenType] = TokenType.JSONIFY
-    accept_type: VariableType = field(default=VariableType.STRING)
-    ret_type: VariableType = field(default=VariableType.JSON)
+    accept: VariableType = field(default=VariableType.STRING)
+    ret:    VariableType = field(default=VariableType.FLOAT)
 
 
-@dataclass(kw_only=True)
-class JsonifyDynamic(BaseAstNode):
+@dataclass
+class ToBool(Node):
     """
-    Динамический JSON (без привязки к схеме).
-
-    DSL: jsonify
-    kwargs: path? (str)
+    Casts any scalar to bool.
+    AUTO → BOOL.
     """
-    kind: ClassVar[TokenType] = TokenType.JSONIFY_DYNAMIC
-    accept_type: VariableType = field(default=VariableType.STRING)
-    ret_type: VariableType = field(default=VariableType.ANY)
+    accept: VariableType = field(default=VariableType.AUTO)
+    ret:    VariableType = field(default=VariableType.BOOL)
 
 
-@dataclass(kw_only=True)
-class Nested(BaseAstNode[KwargsNested, tuple[str]]):
+@dataclass
+class Jsonify(Node):
     """
-    Вложенная схема как cast-операция.
-
-    DSL: { Book }  (имя структуры в теле поля)
-    kwargs: schema_name (str) — имя целевой Struct.
+    Deserializes a JSON string using a named json mapping definition.
+    Optional path extracts a nested value by dotted key e.g. "0.text".
+    STRING → JSON.
     """
-    kind: ClassVar[TokenType] = TokenType.NESTED
-    accept_type: VariableType = field(default=VariableType.DOCUMENT)
-    ret_type: VariableType = field(default=VariableType.NESTED)
+    schema_name: str          = ""
+    path:        str | None   = None
+    accept:      VariableType = field(default=VariableType.STRING)
+    ret:         VariableType = field(default=VariableType.JSON)
+
+
+@dataclass
+class Nested(Node):
+    """
+    Passes current document to another struct parser and returns its result.
+    Target struct can be of any type.
+    DOCUMENT → NESTED.
+    """
+    struct_name: str          = ""
+    accept:      VariableType = field(default=VariableType.DOCUMENT)
+    ret:         VariableType = field(default=VariableType.NESTED)

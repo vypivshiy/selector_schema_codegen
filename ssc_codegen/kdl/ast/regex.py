@@ -1,31 +1,48 @@
-"""Regex AST nodes."""
 from __future__ import annotations
-
 from dataclasses import dataclass, field
-from typing import ClassVar
 
-from .base import BaseAstNode
-from .types import KwargsRegex
-from ssc_codegen.kdl.tokens import TokenType, VariableType
+from .base import Node
+from .types import VariableType
+
+# Re and ReSub support map semantics:
+# STRING → STRING, LIST_STRING → LIST_STRING.
+# accept/ret are set by the builder from cursor type.
+#
+# ReAll is scalar-only: STRING → LIST_STRING.
 
 
-@dataclass(kw_only=True)
-class Regex(BaseAstNode[KwargsRegex, tuple]):
+@dataclass
+class Re(Node):
     """
-    Универсальная regex-операция.
-
-    DSL:
-        re #"(\\d+)"#               → mode="re",     group=1
-        re-all #"(\\w+)"#           → mode="re_all"  → LIST_STRING
-        re-sub #"\\s+"# repl=" "   → mode="re_sub"
-
-    kwargs: mode, pattern, group?, repl?, ignore_case?, dotall?
-
-    ret_type:
-        re     → STRING
-        re_all → LIST_STRING
-        re_sub → STRING
+    Returns first regex match per element.
+    Map semantics: STRING → STRING, LIST_STRING → LIST_STRING.
+    pattern may be a define name — substituted at parse time.
     """
-    kind: ClassVar[TokenType] = TokenType.REGEX
-    accept_type: VariableType = field(default=VariableType.STRING)
-    ret_type: VariableType = field(default=VariableType.STRING)
+    pattern: str          = ""
+    accept:  VariableType = field(default=VariableType.STRING)
+    ret:     VariableType = field(default=VariableType.STRING)
+
+
+@dataclass
+class ReAll(Node):
+    """
+    Returns all regex matches as a list.
+    Scalar input only: STRING → LIST_STRING.
+    pattern may be a define name — substituted at parse time.
+    """
+    pattern: str          = ""
+    accept:  VariableType = field(default=VariableType.STRING)
+    ret:     VariableType = field(default=VariableType.LIST_STRING)
+
+
+@dataclass
+class ReSub(Node):
+    """
+    Replaces all regex matches with repl per element.
+    Map semantics: STRING → STRING, LIST_STRING → LIST_STRING.
+    pattern may be a define name — substituted at parse time.
+    """
+    pattern: str          = ""
+    repl:    str          = ""
+    accept:  VariableType = field(default=VariableType.STRING)
+    ret:     VariableType = field(default=VariableType.STRING)

@@ -1,89 +1,158 @@
-"""String operation AST nodes."""
 from __future__ import annotations
-
 from dataclasses import dataclass, field
-from typing import ClassVar
-from .base import BaseAstNode
-from .types import KwargsStringOp, KwargsFormat, KwargsMapRepl, KwargsRepl, KwargsJoin, EMPTY_KWARGS, EMTPY_ARGS
-from ssc_codegen.kdl.tokens import TokenType, VariableType
 
-@dataclass(kw_only=True)
-class StringOp(BaseAstNode[KwargsStringOp, tuple[str]]):
+from .base import Node
+from .types import VariableType
+
+# All string nodes (except Split and Join) support map semantics:
+# STRING → STRING, LIST_STRING → LIST_STRING.
+# accept/ret are set by the builder from cursor type.
+
+
+@dataclass
+class Trim(Node):
+    """Strips leading and trailing whitespace."""
+
+    accept: VariableType = field(default=VariableType.STRING)
+    ret: VariableType = field(default=VariableType.STRING)
+    substr: str = ""
+
+
+@dataclass
+class Ltrim(Node):
+    """Strips leading whitespace."""
+
+    accept: VariableType = field(default=VariableType.STRING)
+    ret: VariableType = field(default=VariableType.STRING)
+    substr: str = ""
+
+
+@dataclass
+class Rtrim(Node):
+    """Strips trailing whitespace."""
+
+    accept: VariableType = field(default=VariableType.STRING)
+    ret: VariableType = field(default=VariableType.STRING)
+    substr: str = ""
+
+
+@dataclass
+class NormalizeSpace(Node):
+    """Collapses inner whitespace to single space, then trims."""
+
+    accept: VariableType = field(default=VariableType.STRING)
+    ret: VariableType = field(default=VariableType.STRING)
+
+
+@dataclass
+class RmPrefix(Node):
+    """Removes prefix substr if present."""
+
+    substr: str = ""
+    accept: VariableType = field(default=VariableType.STRING)
+    ret: VariableType = field(default=VariableType.STRING)
+
+
+@dataclass
+class RmSuffix(Node):
+    """Removes suffix substr if present."""
+
+    substr: str = ""
+    accept: VariableType = field(default=VariableType.STRING)
+    ret: VariableType = field(default=VariableType.STRING)
+
+
+@dataclass
+class RmPrefixSuffix(Node):
+    """Removes both prefix and suffix substr if present."""
+
+    substr: str = ""
+    accept: VariableType = field(default=VariableType.STRING)
+    ret: VariableType = field(default=VariableType.STRING)
+
+
+@dataclass
+class Fmt(Node):
     """
-    Универсальная строковая операция.
-
-    DSL: trim / ltrim / rtrim / rm-prefix "..." / rm-suffix "..." / rm-prefix-suffix "..."
-    kwargs: op (StringOpMode), substr?
+    Formats string using template.
+    {{}} is replaced with the current value.
+    template may be a define name — substituted at parse time.
     """
-    kind: ClassVar[TokenType] = TokenType.STRING
-    accept_type: VariableType = field(default=VariableType.STRING)
-    ret_type: VariableType = field(default=VariableType.STRING)
+
+    template: str = ""
+    accept: VariableType = field(default=VariableType.STRING)
+    ret: VariableType = field(default=VariableType.STRING)
 
 
-@dataclass(kw_only=True)
-class Format(BaseAstNode[KwargsFormat, tuple[str]]):
+@dataclass
+class Repl(Node):
+    """Replaces all occurrences of old with new."""
+
+    old: str = ""
+    new: str = ""
+    accept: VariableType = field(default=VariableType.STRING)
+    ret: VariableType = field(default=VariableType.STRING)
+
+
+@dataclass
+class ReplMap(Node):
     """
-    Форматирование строки.
-
-    DSL: fmt FMT_URL / fmt "https://example.com/{{}}"
-    kwargs: template (str) — строка с {{}} как placeholder.
+    Replaces multiple substrings via a mapping.
+    DSL map form:
+      repl {
+        "old1" "new1"
+        "old2" "new2"
+      }
     """
-    kind: ClassVar[TokenType] = TokenType.FORMAT
-    accept_type: VariableType = field(default=VariableType.STRING)
-    ret_type: VariableType = field(default=VariableType.STRING)
+
+    replacements: dict[str, str] = field(default_factory=dict)
+    accept: VariableType = field(default=VariableType.STRING)
+    ret: VariableType = field(default=VariableType.STRING)
 
 
-@dataclass(kw_only=True)
-class Replace(BaseAstNode[KwargsRepl, tuple[str, str]]):
+@dataclass
+class Lower(Node):
+    """Converts to lowercase."""
+
+    accept: VariableType = field(default=VariableType.STRING)
+    ret: VariableType = field(default=VariableType.STRING)
+
+
+@dataclass
+class Upper(Node):
+    """Converts to uppercase."""
+
+    accept: VariableType = field(default=VariableType.STRING)
+    ret: VariableType = field(default=VariableType.STRING)
+
+
+@dataclass
+class Split(Node):
     """
-    Замена подстроки.
-
-    DSL: repl "old" "new"
-    kwargs: old (str), new (str)
+    Splits string into list by separator.
+    STRING → LIST_STRING always (no map semantics).
     """
-    kind: ClassVar[TokenType] = TokenType.REPLACE
-    accept_type: VariableType = field(default=VariableType.STRING)
-    ret_type: VariableType = field(default=VariableType.STRING)
+
+    sep: str = ""
+    accept: VariableType = field(default=VariableType.STRING)
+    ret: VariableType = field(default=VariableType.LIST_STRING)
 
 
-@dataclass(kw_only=True)
-class ReplaceMap(BaseAstNode[KwargsMapRepl, tuple[dict[str, str]]]):
+@dataclass
+class Join(Node):
     """
-    Замена по словарю.
-
-    DSL:
-        repl {
-            "One" "1"
-            "Two" "2"
-        }
-    kwargs: replacements (dict[str, str])
+    Joins list into single string by separator.
+    LIST_STRING → STRING always.
     """
-    kind: ClassVar[TokenType] = TokenType.REPLACE_MAP
-    accept_type: VariableType = field(default=VariableType.STRING)
-    ret_type: VariableType = field(default=VariableType.STRING)
+
+    sep: str = ""
+    accept: VariableType = field(default=VariableType.LIST_STRING)
+    ret: VariableType = field(default=VariableType.STRING)
 
 
-@dataclass(kw_only=True)
-class Join(BaseAstNode[KwargsJoin, tuple[str]]):
-    """
-    Join списка строк в одну строку.
+@dataclass
+class Unescape(Node):
+    """Unescapes HTML entities and unicode escapes."""
 
-    DSL: join " " / join ","
-    kwargs: sep (str)
-    """
-    kind: ClassVar[TokenType] = TokenType.JOIN
-    accept_type: VariableType = field(default=VariableType.LIST_STRING)
-    ret_type: VariableType = field(default=VariableType.STRING)
-
-
-@dataclass(kw_only=True)
-class Unescape(BaseAstNode[EMPTY_KWARGS, EMTPY_ARGS]):
-    """
-    Unescape строки (HTML entities, unicode escape и т.п.).
-
-    DSL: unescape
-    kwargs: mode? (опционально: "html", "unicode")
-    """
-    kind: ClassVar[TokenType] = TokenType.UNESCAPE
-    accept_type: VariableType = field(default=VariableType.STRING)
-    ret_type: VariableType = field(default=VariableType.STRING)
+    accept: VariableType = field(default=VariableType.STRING)
+    ret: VariableType = field(default=VariableType.STRING)

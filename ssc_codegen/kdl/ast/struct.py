@@ -1,83 +1,166 @@
-"""Struct-level AST nodes."""
 from __future__ import annotations
-
 from dataclasses import dataclass, field
-from typing import ClassVar
 
-from .base import BaseAstNode
-from .types import KwargsStruct, KwargsTypeDefField
-from ssc_codegen.kdl.tokens import TokenType, VariableType
+from .base import Node
+from .types import VariableType, StructType
 
 
-@dataclass(kw_only=True)
-class Struct(BaseAstNode[KwargsStruct, tuple[str, str, str]]):
+@dataclass
+class Struct(Node):
     """
-    Парсер структуры (схемы).
-    kwargs: name, struct_type ("item"|"list"|"dict"|"table"), docstring?
+    Parser schema definition.
+    DSL: struct Name type=item|list|dict|table|flat { ... }
+
+    body order:
+      StructDocstring? → PreValidate? → Init? → SplitDoc?
+      → Key? → Value? → TableConfig? → TableRow? → TableMatchKey?
+      → Field...
     """
-    kind: ClassVar[TokenType] = TokenType.STRUCT
-    accept_type: VariableType = field(default=VariableType.ANY)
-    ret_type: VariableType = field(default=VariableType.ANY)
+    name:        str        = ""
+    struct_type: StructType = StructType.ITEM
+
+    def __post_init__(self):
+        self.body.extend(
+            [
+                StructDocstring(parent=self),
+                Init(parent=self),
+            ]
+        )
+
+    @property
+    def docstring(self) -> StructDocstring:
+        return self.body[0]  # type: ignore
+    
+
+    @property
+    def init(self) -> Init:
+        return self.body[1]  # type: ignore
 
 
-@dataclass(kw_only=True)
-class StructField(BaseAstNode[KwargsTypeDefField, tuple[str]]):
+@dataclass
+class StructDocstring(Node):
+    """DSL: -doc "text" """
+    value: str = ""
+
+
+@dataclass
+class PreValidate(Node):
     """
-    Поле структуры.
-    body — пайплайн операций (Select → Extract → StringOp → ...).
+    Validates the document before parsing begins.
+    Raises error on failure (caught by fallback if present).
+    DSL: -pre-validate { ... }
+    accept: DOCUMENT, ret: DOCUMENT (pass-through)
     """
-    kind: ClassVar[TokenType] = TokenType.STRUCT_FIELD
-    accept_type: VariableType = field(default=VariableType.DOCUMENT)
-    ret_type: VariableType = field(default=VariableType.ANY)
+    accept: VariableType = field(default=VariableType.DOCUMENT)
+    ret:    VariableType = field(default=VariableType.DOCUMENT)
 
 
-@dataclass(kw_only=True)
-class StructSplit(BaseAstNode):
+@dataclass
+class Init(Node):
     """
-    __SPLIT_DOC__ эквивалент.
-    DSL: -split-doc { css-all "..." }
-    body — пайплайн, возвращающий LIST_DOCUMENT.
+    Pre-computed named values cached before field parsing.
+    Execution order: after PreValidate, before SplitDoc and Fields.
+    DSL: -init { name { pipeline... } ... }
+    body: list[InitField]
     """
-    kind: ClassVar[TokenType] = TokenType.STRUCT_SPLIT
-    accept_type: VariableType = field(default=VariableType.DOCUMENT)
-    ret_type: VariableType = field(default=VariableType.LIST_DOCUMENT)
+    pass
 
 
-@dataclass(kw_only=True)
-class StructPreValidate(BaseAstNode):
+@dataclass
+class InitField(Node):
     """
-    __PRE_VALIDATE__ эквивалент.
-    DSL: -pre-validate { assert { ... } }
-    Не модифицирует документ, только валидирует.
+    Single named cached pipeline inside -init.
+    Referenced in Fields via Self(name=...).
+    ret is resolved after pipeline is built.
+
+    Separate node from Field — semantics differ:
+    InitField is cached and reachable via Self; Field produces output.
     """
-    kind: ClassVar[TokenType] = TokenType.STRUCT_PRE_VALIDATE
-    accept_type: VariableType = field(default=VariableType.DOCUMENT)
-    ret_type: VariableType = field(default=VariableType.DOCUMENT)
+    name:   str          = ""
+    accept: VariableType = field(default=VariableType.DOCUMENT)
+    ret:    VariableType = field(default=VariableType.AUTO)
 
 
-@dataclass(kw_only=True)
-class StructParse(BaseAstNode):
-    """Метод parse() схемы."""
-    kind: ClassVar[TokenType] = TokenType.STRUCT_PARSE
-    accept_type: VariableType = field(default=VariableType.DOCUMENT)
-    ret_type: VariableType = field(default=VariableType.ANY)
-
-
-@dataclass(kw_only=True)
-class StructInit(BaseAstNode):
-    """__init__() метод схемы."""
-    kind: ClassVar[TokenType] = TokenType.STRUCT_INIT
-    accept_type: VariableType = field(default=VariableType.ANY)
-    ret_type: VariableType = field(default=VariableType.ANY)
-
-
-@dataclass(kw_only=True)
-class StructNested(BaseAstNode[KwargsTypeDefField, tuple[str]]):
+@dataclass
+class SplitDoc(Node):
     """
-    Вложенная схема (ссылка по имени).
-    DSL: books { Book }
-    kwargs: name — имя структуры-цели.
+    Splits document into items for list-type structs.
+    DSL: -split-doc { ... }
+    accept: DOCUMENT, ret: LIST_DOCUMENT
+    Only valid in struct type=list.
     """
-    kind: ClassVar[TokenType] = TokenType.STRUCT_NESTED
-    accept_type: VariableType = field(default=VariableType.DOCUMENT)
-    ret_type: VariableType = field(default=VariableType.NESTED)
+    accept: VariableType = field(default=VariableType.DOCUMENT)
+    ret:    VariableType = field(default=VariableType.LIST_DOCUMENT)
+
+
+@dataclass
+class Key(Node):
+    """
+    Key extraction pipeline for dict-type structs.
+    DSL: -key { ... }
+    accept: DOCUMENT, ret: STRING
+    Only valid in struct type=dict.
+    """
+    accept: VariableType = field(default=VariableType.DOCUMENT)
+    ret:    VariableType = field(default=VariableType.STRING)
+
+
+@dataclass
+class Value(Node):
+    """
+    Value extraction pipeline for dict/table-type structs.
+    DSL: -value { ... }
+    dict:  ret can be any type.
+    table: ret must be STRING.
+    Only valid in struct type=dict or type=table.
+    """
+    accept: VariableType = field(default=VariableType.DOCUMENT)
+    ret:    VariableType = field(default=VariableType.AUTO)
+
+
+@dataclass
+class TableConfig(Node):
+    """
+    Selects the table element.
+    DSL: -table { ... }
+    accept: DOCUMENT, ret: DOCUMENT
+    Only valid in struct type=table.
+    """
+    accept: VariableType = field(default=VariableType.DOCUMENT)
+    ret:    VariableType = field(default=VariableType.DOCUMENT)
+
+
+@dataclass
+class TableRow(Node):
+    """
+    Selects table rows.
+    DSL: -row { ... }
+    accept: DOCUMENT, ret: LIST_DOCUMENT
+    Only valid in struct type=table.
+    """
+    accept: VariableType = field(default=VariableType.DOCUMENT)
+    ret:    VariableType = field(default=VariableType.LIST_DOCUMENT)
+
+
+@dataclass
+class TableMatchKey(Node):
+    """
+    Extracts key cell text from a row for match comparison.
+    DSL: -match { ... }
+    accept: DOCUMENT (row), ret: STRING
+    Only valid in struct type=table.
+    """
+    accept: VariableType = field(default=VariableType.DOCUMENT)
+    ret:    VariableType = field(default=VariableType.STRING)
+
+
+@dataclass
+class Field(Node):
+    """
+    Regular output field.
+    DSL: field-name { pipeline... }
+    ret is resolved after pipeline is built.
+    """
+    name:   str          = ""
+    accept: VariableType = field(default=VariableType.DOCUMENT)
+    ret:    VariableType = field(default=VariableType.AUTO)

@@ -1,78 +1,78 @@
-"""Control flow AST nodes."""
 from __future__ import annotations
-
 from dataclasses import dataclass, field
-from typing import ClassVar
+from typing import Any
 
-from .base import BaseAstNode
-from .types import KwargsDefault
-from ssc_codegen.kdl.tokens import TokenType, VariableType
+from .base import Node
+from .types import VariableType
 
 
-@dataclass(kw_only=True)
-class Default(BaseAstNode[KwargsDefault, tuple]):
+@dataclass
+class Self(Node):
     """
-    Значение по умолчанию (?? оператор / Nullish coalescing).
-
-    DSL:
-        ?? 0          → int
-        ?? 0.0        → float
-        ?? "none"     → str
-        ?? #false     → bool
-        ?? #null      → null
-        ?? {}         → пустой список
-
-    kwargs: value — само значение (Python-тип)
-    ret_type определяется автоматически из типа value.
+    References a pre-computed value from -init by name.
+    Must be the first operation in a Field pipeline.
+    ret is resolved at AST build time from the matching InitField.ret.
+    Build-time error if name not declared in -init.
     """
-    kind: ClassVar[TokenType] = TokenType.DEFAULT
-    accept_type: VariableType = field(default=VariableType.ANY)
-    ret_type: VariableType = field(default=VariableType.ANY)
+    name:   str          = ""
+    accept: VariableType = field(default=VariableType.AUTO)
+    ret:    VariableType = field(default=VariableType.AUTO)
+
+
+@dataclass
+class Fallback(Node):
+    """
+    Catches any error in the pipeline and returns a literal value instead.
+    Must be the last operation in a Field pipeline.
+    ret is derived from the literal type at construction time.
+
+    Literal types and their ret:
+      int        → INT
+      float      → FLOAT
+      str        → STRING
+      bool       → BOOL
+      None       → NULL
+      list (empty []) → LIST_STRING
+    """
+    value:  Any          = None
+    accept: VariableType = field(default=VariableType.AUTO)
+    ret:    VariableType = field(default=VariableType.AUTO)
 
     def __post_init__(self) -> None:
-        super().__post_init__()
-        value = self.kwargs.get("value")
-        if value is None:
-            self.ret_type = VariableType.NULL
-        elif isinstance(value, bool):
-            # bool перед int — bool является подклассом int в Python
-            self.ret_type = VariableType.BOOL
-        elif isinstance(value, int):
-            self.ret_type = VariableType.INT
-        elif isinstance(value, float):
-            self.ret_type = VariableType.FLOAT
-        elif isinstance(value, str):
-            self.ret_type = VariableType.STRING
-        elif isinstance(value, list):
-            self.ret_type = VariableType.LIST_STRING
+        if self.ret != VariableType.AUTO:
+            # already set explicitly, skip inference
+            return
+        if self.value is None:
+            self.ret = VariableType.NULL
+        elif isinstance(self.value, bool):
+            # bool before int — bool is subclass of int in Python
+            self.ret = VariableType.BOOL
+        elif isinstance(self.value, int):
+            self.ret = VariableType.INT
+        elif isinstance(self.value, float):
+            self.ret = VariableType.FLOAT
+        elif isinstance(self.value, str):
+            self.ret = VariableType.STRING
+        elif isinstance(self.value, list):
+            self.ret = VariableType.LIST_STRING
 
 
-@dataclass(kw_only=True)
-class DefaultStart(BaseAstNode[KwargsDefault, tuple]):
+@dataclass
+class FallbackStart(Fallback):
+    pass
+
+
+@dataclass
+class FallbackEnd(Fallback):
+    pass
+
+
+@dataclass
+class Return(Node):
     """
-    Начало блока default (для блочного синтаксиса).
-    Используется когда default-значение требует вычисления (не литерал).
+    Implicit last node of every pipeline.
+    Not written in DSL — inserted by the builder after the last op.
+    Carries the final ret_type of the pipeline.
     """
-    kind: ClassVar[TokenType] = TokenType.DEFAULT_START
-    accept_type: VariableType = field(default=VariableType.ANY)
-    ret_type: VariableType = field(default=VariableType.ANY)
-
-
-@dataclass(kw_only=True)
-class DefaultEnd(BaseAstNode[KwargsDefault, tuple]):
-    """Конец блока default."""
-    kind: ClassVar[TokenType] = TokenType.DEFAULT_END
-    accept_type: VariableType = field(default=VariableType.ANY)
-    ret_type: VariableType = field(default=VariableType.ANY)
-
-
-@dataclass(kw_only=True)
-class Return(BaseAstNode):
-    """
-    Return expression.
-    Явный выход из пайплайна поля с конкретным значением.
-    kwargs: value? — опциональное явное значение.
-    """
-    kind: ClassVar[TokenType] = TokenType.RETURN
-    accept_type: VariableType = field(default=VariableType.ANY)
-    ret_type: VariableType = field(default=VariableType.ANY)
+    accept: VariableType = field(default=VariableType.AUTO)
+    ret:    VariableType = field(default=VariableType.AUTO)

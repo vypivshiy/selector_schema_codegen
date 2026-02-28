@@ -1,34 +1,30 @@
-"""TypeDef AST nodes."""
 from __future__ import annotations
-
 from dataclasses import dataclass, field
-from typing import ClassVar
 
-from .base import BaseAstNode
-from .types import KwargsTypeDefField, KwargsTypedef
-from ssc_codegen.kdl.tokens import TokenType, VariableType
+from .base import Node
+from .types import VariableType, StructType
 
 
-@dataclass(kw_only=True)
-class TypeDef(BaseAstNode[KwargsTypedef, tuple[bool]]):
+@dataclass
+class TypeDefField(Node):
     """
-    Определение пользовательского типа (type alias / enum).
-    kwargs: name (str)
-    body — список TypeDefField.
+    Single field type annotation.
+
+    nested_ref — struct name when ret == NESTED.
+    json_ref   — JsonDef name when ret == JSON.
     """
-    kind: ClassVar[TokenType] = TokenType.TYPEDEF
-    accept_type: VariableType = field(default=VariableType.ANY)
-    ret_type: VariableType = field(default=VariableType.ANY)
+    name:       str          = ""
+    ret:        VariableType = field(default=VariableType.AUTO)
+    nested_ref: str | None   = None
+    json_ref:   str | None   = None
 
 
-@dataclass(kw_only=True)
-class TypeDefField(BaseAstNode[KwargsTypeDefField, tuple[str, str]]):
+@dataclass
+class TypeDef(Node):
     """
-    Поле определения типа.
-    kwargs: name (str)
-    body — список pipeline-операций для этого поля.
+    Type annotation generated from Struct after AST construction.
+    Inserted before the corresponding Struct in Module.body.
+    body: list[TypeDefField]
     """
-    kind: ClassVar[TokenType] = TokenType.TYPEDEF_FIELD
-    accept_type: VariableType = field(default=VariableType.ANY)
-    ret_type: VariableType = field(default=VariableType.ANY)
-    body: list = field(default_factory=list, repr=False)
+    name:        str        = ""
+    struct_type: StructType = StructType.ITEM
