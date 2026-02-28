@@ -59,7 +59,8 @@ class Fallback(Node):
 
 @dataclass
 class FallbackStart(Fallback):
-    pass
+    accept: VariableType = field(default=VariableType.DOCUMENT)
+    ret:    VariableType = field(default=VariableType.DOCUMENT)
 
 
 @dataclass

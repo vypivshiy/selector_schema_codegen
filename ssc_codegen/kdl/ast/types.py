@@ -10,18 +10,31 @@ class VariableType(IntEnum):
     LIST_DOCUMENT = auto()
 
     STRING        = auto()
+    OPT_STRING= auto()
     LIST_STRING   = auto()
 
     INT           = auto()
+    OPT_INT = auto()
     LIST_INT      = auto()
 
     FLOAT         = auto()
+    OPT_FLOAT= auto()
     LIST_FLOAT    = auto()
 
     BOOL          = auto()
     NULL          = auto()
     NESTED        = auto()
     JSON          = auto()
+
+
+    @property
+    def optional(self) -> VariableType:
+        _map = {
+            VariableType.STRING: VariableType.OPT_STRING,
+            VariableType.INT: VariableType.OPT_INT,
+            VariableType.FLOAT: VariableType.OPT_FLOAT,
+        }
+        return _map.get(self, self)
 
     # helpers
     @property

@@ -28,7 +28,6 @@ from __future__ import annotations
 
 from ast import arg
 from dataclasses import dataclass, field
-from re import S
 from typing import Callable, TypeAlias, cast
 
 from ssc_codegen.kdl.ckdl_types import KdlNode, parse
@@ -186,6 +185,7 @@ CallbackMatch = Callable[[KdlNode, Match, ParseContext], AstNode]
 PredicateLikeNode: TypeAlias = (
     LogicNot | LogicAnd | LogicOr | Filter | Assert | Match
 )
+CallbackPred = Callable[[KdlNode,PredicateLikeNode, ParseContext], AstNode]
 
 
 class AstParser:
@@ -206,6 +206,22 @@ class AstParser:
             self._context_handlers[name] = fn
             return fn
 
+        return decorator
+    
+
+    def register_predicate_node(self, name: str, *, 
+                                reg_filter: bool = True,
+                                reg_assert: bool = True,
+                                reg_match: bool = True) -> Callable[..., CallbackPred]:
+        """reg in filter, assert and match"""
+        def decorator(fn: CallbackPred):
+            if reg_filter:
+                self._context_filter[name] = fn
+            if reg_assert:
+                self._context_assert[name] = fn
+            if reg_match:
+                self._context_match[name] = fn
+            return fn
         return decorator
 
     def register_module_node(
@@ -253,6 +269,23 @@ class AstParser:
             return cb
 
         return decorator
+    
+    def _typedef_from_struct(self, struct: Struct, parent: Module) -> TypeDef:
+        typedef = TypeDef(parent=parent, name=struct.name, struct_type=struct.struct_type)
+        for field in struct.body:
+            if isinstance(field, Field):
+                nested_ref = ''
+                json_ref = ''
+                if field.ret == VariableType.NESTED:
+                    nested_ref = [i for i in field.body if isinstance(i, Nested)][0].struct_name
+                elif field.ret == VariableType.JSON:
+                    json_ref = [i for i in field.body if isinstance(i, Jsonify)][0].schema_name
+
+                typedef.body.append(
+                    TypeDefField(parent=typedef, ret=field.ret, 
+                                 name=field.name, nested_ref=nested_ref, json_ref=json_ref)
+                                 )
+        return typedef
 
     def parse(self, kdl_dsl: str) -> Module:
         document = parse(kdl_dsl)
@@ -275,7 +308,7 @@ class AstParser:
                 if isinstance(expr, Struct):
                     self._parse_struct(node.children, expr)
                     structs.append(expr)
-                    # TODO: gen typedef
+                    typedefs.append(self._typedef_from_struct(expr, module))
             else:
                 raise UnknownNodeError(node.name, "Unknown keyword node")
         module.body.extend(typedefs + structs)
@@ -329,22 +362,28 @@ class AstParser:
             self._parse_expressions(node.children, expr)
             parent.body.append(expr)
 
-    def _parse_filter_expr(self, kdl_nodes: list[KdlNode], parent: Filter):
+    def _parse_filter_expr(self, kdl_nodes: list[KdlNode], parent: Filter | LogicAnd | LogicNot | LogicOr):
         for node in kdl_nodes:
             if cb := self._context_filter.get(node.name):
                 expr = cb(node, parent, self.ctx)
+                if isinstance(expr, (LogicAnd, LogicOr, LogicNot)):
+                    self._parse_filter_expr(node.children, expr)
                 parent.body.append(expr)
 
-    def _parse_assert_expr(self, kdl_nodes: list[KdlNode], parent: Assert):
+    def _parse_assert_expr(self, kdl_nodes: list[KdlNode], parent: Assert | LogicAnd | LogicNot | LogicOr):
         for node in kdl_nodes:
             if cb := self._context_assert.get(node.name):
                 expr = cb(node, parent, self.ctx)
+                if isinstance(expr, (LogicAnd, LogicOr, LogicNot)):
+                    self._parse_assert_expr(node.children, expr)
                 parent.body.append(expr)
 
-    def _parse_match_expr(self, kdl_nodes: list[KdlNode], parent: Match):
+    def _parse_match_expr(self, kdl_nodes: list[KdlNode], parent: Match | LogicAnd | LogicNot | LogicOr):
         for node in kdl_nodes:
             if cb := self._context_match.get(node.name):
                 expr = cb(node, parent, self.ctx)
+                if isinstance(expr, (LogicAnd, LogicOr, LogicNot)):
+                    self._parse_match_expr(node.children, expr)
                 parent.body.append(expr)
 
     def _parse_expressions(
@@ -365,6 +404,7 @@ class AstParser:
         # auto add last expr - return
         last_ret = parent.body[-1].ret
         parent.body.append(Return(parent=parent, ret=last_ret, accept=last_ret))
+        parent.ret = last_ret
 
 
 PARSER = AstParser()
@@ -743,8 +783,12 @@ def reg_expr_nested(node: KdlNode, parent: FieldLikeNode, _2: ParseContext):
 def reg_expr_fallback(node: KdlNode, parent: FieldLikeNode, _: ParseContext):
     # apologize, this finish expr
     value = [] if not node.args else node.args[0]
+    prev_type = parent.body[-1].ret
+    # corner case: OPTIONAL TYPE
+    if value is None:
+        prev_type = prev_type.optional
     start_default = FallbackStart(parent=parent, value=value)
-    end_default = FallbackEnd(parent=parent, value=value)
+    end_default = FallbackEnd(parent=parent, value=value, accept=prev_type, ret=prev_type)
     parent.body.insert(0, start_default)
     parent.body.append(end_default)
     return Fallback(parent=parent, value=value)
@@ -780,6 +824,156 @@ def reg_expr_assert(node: KdlNode, parent: FieldLikeNode, _: ParseContext):
     return Assert(parent=parent, accept=prev_type, ret=prev_type)
 
 
+@PARSER.register_expression_node("match")
+def reg_expr_match(node: KdlNode, parent: FieldLikeNode, _: ParseContext):
+    prev_type = parent.body[-1].ret
+    return Assert(parent=parent, accept=prev_type, ret=prev_type)
+
+
+# FILTER predicates
+# CMP
+@PARSER.register_predicate_node("eq")
+def reg_filter_eq(node: KdlNode, parent: Filter, _: ParseContext):
+    prev_type = parent.ret
+    return PredEq(parent=parent, values=tuple(node.args), accept=prev_type, ret=prev_type)
+
+
+@PARSER.register_predicate_node("ne")
+def reg_filter_ne(node: KdlNode, parent: Filter, _: ParseContext):
+    prev_type = parent.ret
+    return PredNe(parent=parent, values=tuple(node.args), accept=prev_type, ret=prev_type)
+
+@PARSER.register_predicate_node("gt")
+def reg_filter_gt(node: KdlNode, parent: Filter, _: ParseContext):
+    prev_type = parent.ret
+    return PredGt(parent=parent, value=node.args[0], accept=prev_type, ret=prev_type)
+
+@PARSER.register_predicate_node("lt")
+def reg_filter_lt(node: KdlNode, parent: Filter, _: ParseContext):
+    prev_type = parent.ret
+    return PredLt(parent=parent, value=node.args[0], accept=prev_type, ret=prev_type)
+
+
+@PARSER.register_predicate_node("ge")
+def reg_filter_ge(node: KdlNode, parent: Filter, _: ParseContext):
+    prev_type = parent.ret
+    return PredGe(parent=parent, value=node.args[0], accept=prev_type, ret=prev_type)
+
+@PARSER.register_predicate_node("le")
+def reg_filter_le(node: KdlNode, parent: Filter, _: ParseContext):
+    prev_type = parent.ret
+    return PredLe(parent=parent, value=node.args[0], accept=prev_type, ret=prev_type)
+
+
+@PARSER.register_predicate_node("range")
+def reg_filter_range(node: KdlNode, parent: Filter, _: ParseContext):
+    prev_type = parent.ret
+    start, end = int(node.args[0]), int(node.args[1])
+    return PredRange(parent=parent, start=start, end=end, accept=prev_type, ret=prev_type)
+
+# string predicates
+@PARSER.register_predicate_node("starts")
+def reg_filter_starts(node: KdlNode, parent: Filter, _: ParseContext):
+    prev_type = parent.ret
+    return PredStarts(parent=parent, values=tuple(node.args), accept=prev_type, ret=prev_type)
+
+@PARSER.register_predicate_node("ends")
+def reg_filter_ends(node: KdlNode, parent: Filter, _: ParseContext):
+    prev_type = parent.ret
+    return PredEnds(parent=parent, values=tuple(node.args), accept=prev_type, ret=prev_type)
+
+@PARSER.register_predicate_node("contains")
+def reg_filter_contains(node: KdlNode, parent: Filter, _: ParseContext):
+    prev_type = parent.ret
+    return PredContains(parent=parent, values=tuple(node.args), accept=prev_type, ret=prev_type)
+
+@PARSER.register_predicate_node("in")
+def reg_filter_in(node: KdlNode, parent: Filter, _: ParseContext):
+    prev_type = parent.ret
+    return PredIn(parent=parent, values=tuple(node.args), accept=prev_type, ret=prev_type)
+
+
+# regex
+@PARSER.register_predicate_node("re")
+def reg_filter_re(node: KdlNode, parent: Filter, _: ParseContext):
+    pattern = node.args[0]
+    prev_type = parent.ret
+    return PredRe(parent=parent, pattern=pattern, accept=prev_type, ret=prev_type)
+
+
+@PARSER.register_assert_node("re-all")
+def reg_filter_re_all(node: KdlNode, parent: Filter, _: ParseContext):
+    pattern = node.args[0]
+    prev_type = parent.ret
+    return PredReAny(parent=parent, pattern=pattern, accept=prev_type, ret=prev_type)
+
+
+@PARSER.register_assert_node("re-any")
+def reg_filter_re_any(node: KdlNode, parent: Filter, _: ParseContext):
+    pattern = node.args[0]
+    prev_type = parent.ret
+    return PredReAll(parent=parent, pattern=pattern, accept=prev_type, ret=prev_type)
+
+
+@PARSER.register_predicate_node("css", reg_match=False)
+def reg_filter_css(node: KdlNode, parent: Filter, ctx: ParseContext):
+    query = ctx.property_defines.get(node.args[0], node.args[0])
+    query = cast(str, query)
+    prev_type = parent.ret
+    return PredCss(parent=parent, query=query, accept=prev_type, ret=prev_type)
+
+
+@PARSER.register_predicate_node("xpath", reg_match=False)
+def reg_filter_xpath(node: KdlNode, parent: Filter, ctx: ParseContext):
+    query = ctx.property_defines.get(node.args[0], node.args[0])
+    query = cast(str, query)
+    prev_type = parent.ret
+    return PredXpath(parent=parent, query=query, accept=prev_type, ret=prev_type)
+
+
+@PARSER.register_predicate_node("has-attr", reg_match=False)
+def reg_filter_has_attr(node: KdlNode, parent: Filter, ctx: ParseContext):
+    attr_name = ctx.property_defines.get(node.args[0], node.args[0])
+    attr_name = cast(str, attr_name)
+    prev_type = parent.ret
+    return PredHasAttr(parent=parent, name=attr_name, accept=prev_type, ret=prev_type)
+
+# assert used only expr
+@PARSER.register_assert_node("count")
+def reg_assert_count(node: KdlNode, parent: Assert, _: ParseContext):
+    prev_type = parent.ret
+    op = node.args[0]
+    value = int(node.args[1])
+    match op:
+        case "eq":
+            return PredCountEq(parent=parent, value=value, accept=prev_type, ret=prev_type)
+        case "gt":
+            return PredCountGt(parent=parent, value=value, accept=prev_type, ret=prev_type)
+        case "lt":
+            return PredCountLt(parent=parent, value=value, accept=prev_type, ret=prev_type)
+        case _:
+            raise UnknownNodeError(node.name, "Unknown count predicate operator")
+        
+@PARSER.register_predicate_node("and")
+def reg_filter_and(node: KdlNode, parent: Filter, _: ParseContext):
+    prev_type = parent.ret
+    return LogicAnd(parent=parent, accept=prev_type, ret=prev_type)
+
+
+@PARSER.register_predicate_node("not")
+def reg_filter_not(node: KdlNode, parent: Filter, _: ParseContext):
+    prev_type = parent.ret
+    return LogicNot(parent=parent, accept=prev_type, ret=prev_type)
+
+
+@PARSER.register_predicate_node("or")
+def reg_filter_or(node: KdlNode, parent: Filter, _: ParseContext):
+    prev_type = parent.ret
+    return LogicOr(parent=parent, accept=prev_type, ret=prev_type)
+
+# transform (TODO)
+
+
 if __name__ == "__main__":
     import pprint
 
@@ -798,11 +992,20 @@ struct Demo {
     title {
         css "title"
         text
+        fallback #null
     }
 
     urls {
         css-all "a"
         attr "href"
+        filter {
+            starts "http"
+            not {
+                starts "https"
+                ends ".com"
+            }
+        }
+        fallback {}
     }
 }
 '''
