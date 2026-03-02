@@ -1,10 +1,11 @@
 from dataclasses import dataclass, replace
 from typing import Callable, Type, TYPE_CHECKING
 
-from ssc_codegen.kdl.ast import Node, Field, Init, InitField
+from ssc_codegen.kdl.ast import Node
 from ssc_codegen.kdl.ast import Filter, Assert, Match
 from ssc_codegen.kdl.ast import LogicNot, LogicAnd, LogicOr
-from ssc_codegen.kdl.ast import JsonDef, TypeDef, Struct
+from ssc_codegen.kdl.ast import JsonDef, TypeDef, Struct, Init
+from ssc_codegen.kdl.ast import PreValidate, Field, InitField, SplitDoc, Key, Value, TableConfig, TableMatchKey, TableRow
 
 if TYPE_CHECKING:
     from ssc_codegen.kdl.ast import Module
@@ -42,7 +43,19 @@ CallbackNode = Callable[[Node, ConverterContext], list[str] | str]
 
 # Nodes whose body contains other container/field nodes.
 # Traversal goes deeper (depth+1), index resets to 0.
-_CONTAINER_NODES = (JsonDef, TypeDef, Struct, Init, InitField, Field)
+_CONTAINER_NODES = (JsonDef, TypeDef, Struct, Init)
+
+_PIPELINE_NODES = (
+    Field,
+    InitField,
+    PreValidate,
+    SplitDoc,
+    Key,
+    Value,
+    TableConfig,
+    TableMatchKey,
+    TableRow,
+)
 
 # Nodes whose body contains predicate ops.
 # Traversal keeps same ctx — no depth or index change.
@@ -160,13 +173,17 @@ class BaseConverter:
 
         if node.body:
             if isinstance(node, _PREDICATE_NODES):
+                # Predicate nodes: same ctx, no depth/index change
                 for child in node.body:
                     self._collect(self._emit_node(child, ctx), lines)
             elif isinstance(node, _CONTAINER_NODES):
+                # Container nodes: depth+1, index=0, NOT advanced between children
                 inner_ctx = replace(ctx, depth=ctx.depth + 1, index=0)
                 for child in node.body:
                     self._collect(self._emit_node(child, inner_ctx), lines)
-            # Field.body — handler is responsible for calling _emit_pipeline()
+            elif isinstance(node, _PIPELINE_NODES):
+                # Pipeline nodes: use _emit_pipeline which advances index
+                lines.extend(self._emit_pipeline(node.body, ctx.deeper()))
 
         if cb := self._post_callbacks.get(type(node)):
             self._collect(cb(node, ctx), lines)
