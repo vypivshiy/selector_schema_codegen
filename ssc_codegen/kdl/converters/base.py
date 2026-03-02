@@ -183,7 +183,12 @@ class BaseConverter:
                     self._collect(self._emit_node(child, inner_ctx), lines)
             elif isinstance(node, _PIPELINE_NODES):
                 # Pipeline nodes: use _emit_pipeline which advances index
-                lines.extend(self._emit_pipeline(node.body, ctx.deeper()))
+
+                # contains in InitMode (deep=3, expected 2)
+                if isinstance(node, InitField):
+                    lines.extend(self._emit_pipeline(node.body, ctx))
+                else:    
+                    lines.extend(self._emit_pipeline(node.body, ctx.deeper()))
 
         if cb := self._post_callbacks.get(type(node)):
             self._collect(cb(node, ctx), lines)

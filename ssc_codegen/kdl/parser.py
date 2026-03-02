@@ -27,7 +27,6 @@ Expected KdlNode interface:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from platform import node
 from typing import Callable, TypeAlias, cast
 
 from ssc_codegen.kdl.ckdl_types import KdlNode, parse
@@ -63,6 +62,7 @@ from ssc_codegen.kdl.ast import (
     InitField,
     Key,
     Value,
+    StartParse
 )
 # expressions
 
@@ -407,7 +407,7 @@ class AstParser:
             elif node.name == "-init":
                 expr = parent.init
                 self._parse_init_fields(node.children, expr)
-                parent.body.append(expr)
+                # parent.body.append(expr)
             elif node.name == "-pre-validate":
                 expr = PreValidate(parent=parent)
                 self._parse_expressions(node.children, expr)
@@ -440,6 +440,8 @@ class AstParser:
                 expr = Field(parent=parent, name=node.name)
                 self._parse_expressions(node.children, expr)
                 parent.body.append(expr)
+        # finally, add StartParse node
+        parent.body.append(StartParse(parent=parent))
 
     def _parse_init_fields(self, kdl_nodes: list[KdlNode], parent: Init):
         for node in kdl_nodes:
@@ -919,7 +921,7 @@ def reg_expr_self(node: KdlNode, parent: FieldLikeNode, _: ParseContext):
     # 1. get init container
     struct = parent.parent
     struct = cast(Struct, struct)
-    init_node = [i for i in struct.body if isinstance(i, Init)][0]
+    init_node = struct.init
     # 2. find field with name
     init_field = [
         i

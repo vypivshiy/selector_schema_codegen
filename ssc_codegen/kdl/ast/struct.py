@@ -175,3 +175,10 @@ class Field(Node):
     name: str = ""
     accept: VariableType = field(default=VariableType.DOCUMENT)
     ret: VariableType = field(default=VariableType.AUTO)
+
+
+@dataclass
+class StartParse(Node):
+    """Endpoint where need run parser
+    """
+    pass

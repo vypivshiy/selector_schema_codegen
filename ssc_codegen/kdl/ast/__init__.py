@@ -34,6 +34,7 @@ from .struct import (
     TableRow,
     TableMatchKey,
     Field,
+    StartParse
 )
 
 from .selectors import (
@@ -106,7 +107,6 @@ from .predicate_ops import (
     PredTextEnds,
     PredTextRe,
     PredTextStarts,
-    PredAttrContains,
     LogicNot,
     LogicAnd,
     LogicOr,
@@ -131,7 +131,7 @@ __all__ = [
     "Init", "InitField", "SplitDoc",
     "Key", "Value",
     "TableConfig", "TableRow", "TableMatchKey",
-    "Field",
+    "Field", "StartParse",
     # selectors
     "CssSelect", "CssSelectAll",
     "XpathSelect", "XpathSelectAll",
@@ -146,11 +146,11 @@ __all__ = [
     # regex
     "Re", "ReAll", "ReSub",
     # array
-    "Index", "First", "Last", "Slice", "Len", "Unique",
+    "Index", "Slice", "Len", "Unique",
     # cast
     "ToInt", "ToFloat", "ToBool", "Jsonify", "Nested",
     # control
-    "Self", "Fallback", "Return",
+    "Self", "Fallback", "FallbackStart", "FallbackEnd", "Return",
     # predicate containers
     "Filter", "Assert", "Match",
     # predicate ops
@@ -159,6 +159,9 @@ __all__ = [
     "PredStarts", "PredEnds", "PredContains", "PredIn",
     "PredRe", "PredReAny", "PredReAll",
     "PredCss", "PredXpath", "PredHasAttr",
+    "PredAttrEq", "PredAttrNe",
+    "PredAttrStarts", "PredAttrEnds", "PredAttrContains", "PredAttrRe",
+    "PredTextStarts", "PredTextEnds", "PredTextContains", "PredTextRe",
     "PredCountEq", "PredCountGt", "PredCountLt",
     "LogicNot", "LogicAnd", "LogicOr",
     # transform
