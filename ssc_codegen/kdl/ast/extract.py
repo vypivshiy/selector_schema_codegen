@@ -12,8 +12,9 @@ class Text(Node):
     DOCUMENT → STRING, LIST_DOCUMENT → LIST_STRING.
     accept/ret set by builder from cursor type.
     """
+
     accept: VariableType = field(default=VariableType.DOCUMENT)
-    ret:    VariableType = field(default=VariableType.STRING)
+    ret: VariableType = field(default=VariableType.STRING)
 
 
 @dataclass
@@ -23,8 +24,9 @@ class Raw(Node):
     DOCUMENT → STRING, LIST_DOCUMENT → LIST_STRING.
     accept/ret set by builder from cursor type.
     """
+
     accept: VariableType = field(default=VariableType.DOCUMENT)
-    ret:    VariableType = field(default=VariableType.STRING)
+    ret: VariableType = field(default=VariableType.STRING)
 
 
 @dataclass
@@ -43,6 +45,7 @@ class Attr(Node):
 
     accept/ret set by builder from cursor type and len(keys).
     """
-    keys:   tuple[str, ...] = field(default_factory=tuple)
-    accept: VariableType    = field(default=VariableType.DOCUMENT)
-    ret:    VariableType    = field(default=VariableType.STRING)
+
+    keys: tuple[str, ...] = field(default_factory=tuple)
+    accept: VariableType = field(default=VariableType.DOCUMENT)
+    ret: VariableType = field(default=VariableType.STRING)

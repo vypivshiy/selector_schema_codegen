@@ -16,9 +16,10 @@ class Index(Node):
     Negative index counts from end.
     LIST_AUTO → AUTO (resolved by builder).
     """
-    i:      int          = 0
+
+    i: int = 0
     accept: VariableType = field(default=VariableType.LIST_AUTO)
-    ret:    VariableType = field(default=VariableType.AUTO)
+    ret: VariableType = field(default=VariableType.AUTO)
 
 
 @dataclass
@@ -27,17 +28,19 @@ class Slice(Node):
     Returns sublist [start:end].
     LIST_AUTO → LIST_AUTO (resolved by builder).
     """
-    start:  int          = 0
-    end:    int          = 0
+
+    start: int = 0
+    end: int = 0
     accept: VariableType = field(default=VariableType.LIST_AUTO)
-    ret:    VariableType = field(default=VariableType.LIST_AUTO)
+    ret: VariableType = field(default=VariableType.LIST_AUTO)
 
 
 @dataclass
 class Len(Node):
     """Returns list length as INT."""
+
     accept: VariableType = field(default=VariableType.LIST_AUTO)
-    ret:    VariableType = field(default=VariableType.INT)
+    ret: VariableType = field(default=VariableType.INT)
 
 
 @dataclass
@@ -47,6 +50,7 @@ class Unique(Node):
     keep_order=True — preserves original order (default: False).
     LIST_STRING → LIST_STRING.
     """
-    keep_order: bool         = False
-    accept:     VariableType = field(default=VariableType.LIST_STRING)
-    ret:        VariableType = field(default=VariableType.LIST_STRING)
+
+    keep_order: bool = False
+    accept: VariableType = field(default=VariableType.LIST_STRING)
+    ret: VariableType = field(default=VariableType.LIST_STRING)

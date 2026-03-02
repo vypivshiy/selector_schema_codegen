@@ -14,11 +14,12 @@ class JsonDefField(Node):
     is_array    — True when field declared with {} suffix.
     ref_name    — set when type_name references another JsonDef.
     """
-    name:        str        = ""
-    type_name:   str        = ""
-    is_optional: bool       = False
-    is_array:    bool       = False
-    ref_name:    str | None = None
+
+    name: str = ""
+    type_name: str = ""
+    is_optional: bool = False
+    is_array: bool = False
+    ref_name: str | None = None
 
 
 @dataclass
@@ -28,5 +29,6 @@ class JsonDef(Node):
     DSL: json Name { ... } / json Name array=#true { ... }
     body: list[JsonDefField]
     """
-    name:     str  = ""
+
+    name: str = ""
     is_array: bool = False

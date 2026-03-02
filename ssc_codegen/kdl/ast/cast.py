@@ -12,8 +12,9 @@ class ToInt(Node):
     STRING → INT, LIST_STRING → LIST_INT.
     accept/ret set by builder from cursor type.
     """
+
     accept: VariableType = field(default=VariableType.STRING)
-    ret:    VariableType = field(default=VariableType.INT)
+    ret: VariableType = field(default=VariableType.INT)
 
 
 @dataclass
@@ -23,8 +24,9 @@ class ToFloat(Node):
     STRING → FLOAT, LIST_STRING → LIST_FLOAT.
     accept/ret set by builder from cursor type.
     """
+
     accept: VariableType = field(default=VariableType.STRING)
-    ret:    VariableType = field(default=VariableType.FLOAT)
+    ret: VariableType = field(default=VariableType.FLOAT)
 
 
 @dataclass
@@ -33,8 +35,9 @@ class ToBool(Node):
     Casts any scalar to bool.
     AUTO → BOOL.
     """
+
     accept: VariableType = field(default=VariableType.AUTO)
-    ret:    VariableType = field(default=VariableType.BOOL)
+    ret: VariableType = field(default=VariableType.BOOL)
 
 
 @dataclass
@@ -44,10 +47,11 @@ class Jsonify(Node):
     Optional path extracts a nested value by dotted key e.g. "0.text".
     STRING → JSON.
     """
-    schema_name: str          = ""
-    path:        str | None   = None
-    accept:      VariableType = field(default=VariableType.STRING)
-    ret:         VariableType = field(default=VariableType.JSON)
+
+    schema_name: str = ""
+    path: str | None = None
+    accept: VariableType = field(default=VariableType.STRING)
+    ret: VariableType = field(default=VariableType.JSON)
 
 
 @dataclass
@@ -57,6 +61,8 @@ class Nested(Node):
     Target struct can be of any type.
     DOCUMENT → NESTED.
     """
-    struct_name: str          = ""
-    accept:      VariableType = field(default=VariableType.DOCUMENT)
-    ret:         VariableType = field(default=VariableType.NESTED)
+
+    struct_name: str = ""
+    is_array: bool = False
+    accept: VariableType = field(default=VariableType.DOCUMENT)
+    ret: VariableType = field(default=VariableType.NESTED)

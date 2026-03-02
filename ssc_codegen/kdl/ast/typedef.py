@@ -13,10 +13,12 @@ class TypeDefField(Node):
     nested_ref — struct name when ret == NESTED.
     json_ref   — JsonDef name when ret == JSON.
     """
-    name:       str          = ""
-    ret:        VariableType = field(default=VariableType.AUTO)
-    nested_ref: str | None   = None
-    json_ref:   str | None   = None
+
+    name: str = ""
+    ret: VariableType = field(default=VariableType.AUTO)
+    nested_ref: str | None = None
+    json_ref: str | None = None
+    is_array: bool = False
 
 
 @dataclass
@@ -26,5 +28,6 @@ class TypeDef(Node):
     Inserted before the corresponding Struct in Module.body.
     body: list[TypeDefField]
     """
-    name:        str        = ""
+
+    name: str = ""
     struct_type: StructType = StructType.ITEM

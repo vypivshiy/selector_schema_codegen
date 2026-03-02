@@ -18,9 +18,10 @@ class Re(Node):
     Map semantics: STRING → STRING, LIST_STRING → LIST_STRING.
     pattern may be a define name — substituted at parse time.
     """
-    pattern: str          = ""
-    accept:  VariableType = field(default=VariableType.STRING)
-    ret:     VariableType = field(default=VariableType.STRING)
+
+    pattern: str = ""
+    accept: VariableType = field(default=VariableType.STRING)
+    ret: VariableType = field(default=VariableType.STRING)
 
 
 @dataclass
@@ -30,9 +31,10 @@ class ReAll(Node):
     Scalar input only: STRING → LIST_STRING.
     pattern may be a define name — substituted at parse time.
     """
-    pattern: str          = ""
-    accept:  VariableType = field(default=VariableType.STRING)
-    ret:     VariableType = field(default=VariableType.LIST_STRING)
+
+    pattern: str = ""
+    accept: VariableType = field(default=VariableType.STRING)
+    ret: VariableType = field(default=VariableType.LIST_STRING)
 
 
 @dataclass
@@ -42,7 +44,8 @@ class ReSub(Node):
     Map semantics: STRING → STRING, LIST_STRING → LIST_STRING.
     pattern may be a define name — substituted at parse time.
     """
-    pattern: str          = ""
-    repl:    str          = ""
-    accept:  VariableType = field(default=VariableType.STRING)
-    ret:     VariableType = field(default=VariableType.STRING)
+
+    pattern: str = ""
+    repl: str = ""
+    accept: VariableType = field(default=VariableType.STRING)
+    ret: VariableType = field(default=VariableType.STRING)

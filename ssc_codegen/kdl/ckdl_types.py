@@ -1,6 +1,7 @@
 from typing import Protocol, Any
 import ckdl
 
+
 class KdlNode(Protocol):
     name: str
     args: list[Any]

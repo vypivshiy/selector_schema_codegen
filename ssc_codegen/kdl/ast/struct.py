@@ -16,21 +16,21 @@ class Struct(Node):
       → Key? → Value? → TableConfig? → TableRow? → TableMatchKey?
       → Field...
     """
-    name:        str        = ""
+
+    name: str = ""
     struct_type: StructType = StructType.ITEM
 
     def __post_init__(self):
         self.body.extend(
             [
                 StructDocstring(parent=self),
-                Init(parent=self),
+                Init(parent=self)
             ]
         )
 
     @property
     def docstring(self) -> StructDocstring:
         return self.body[0]  # type: ignore
-    
 
     @property
     def init(self) -> Init:
@@ -40,6 +40,7 @@ class Struct(Node):
 @dataclass
 class StructDocstring(Node):
     """DSL: -doc "text" """
+
     value: str = ""
 
 
@@ -51,8 +52,9 @@ class PreValidate(Node):
     DSL: -pre-validate { ... }
     accept: DOCUMENT, ret: DOCUMENT (pass-through)
     """
+
     accept: VariableType = field(default=VariableType.DOCUMENT)
-    ret:    VariableType = field(default=VariableType.DOCUMENT)
+    ret: VariableType = field(default=VariableType.DOCUMENT)
 
 
 @dataclass
@@ -63,6 +65,7 @@ class Init(Node):
     DSL: -init { name { pipeline... } ... }
     body: list[InitField]
     """
+
     pass
 
 
@@ -76,9 +79,10 @@ class InitField(Node):
     Separate node from Field — semantics differ:
     InitField is cached and reachable via Self; Field produces output.
     """
-    name:   str          = ""
+
+    name: str = ""
     accept: VariableType = field(default=VariableType.DOCUMENT)
-    ret:    VariableType = field(default=VariableType.AUTO)
+    ret: VariableType = field(default=VariableType.AUTO)
 
 
 @dataclass
@@ -89,8 +93,9 @@ class SplitDoc(Node):
     accept: DOCUMENT, ret: LIST_DOCUMENT
     Only valid in struct type=list.
     """
+
     accept: VariableType = field(default=VariableType.DOCUMENT)
-    ret:    VariableType = field(default=VariableType.LIST_DOCUMENT)
+    ret: VariableType = field(default=VariableType.LIST_DOCUMENT)
 
 
 @dataclass
@@ -101,8 +106,9 @@ class Key(Node):
     accept: DOCUMENT, ret: STRING
     Only valid in struct type=dict.
     """
+
     accept: VariableType = field(default=VariableType.DOCUMENT)
-    ret:    VariableType = field(default=VariableType.STRING)
+    ret: VariableType = field(default=VariableType.STRING)
 
 
 @dataclass
@@ -114,8 +120,9 @@ class Value(Node):
     table: ret must be STRING.
     Only valid in struct type=dict or type=table.
     """
+
     accept: VariableType = field(default=VariableType.DOCUMENT)
-    ret:    VariableType = field(default=VariableType.AUTO)
+    ret: VariableType = field(default=VariableType.AUTO)
 
 
 @dataclass
@@ -126,8 +133,9 @@ class TableConfig(Node):
     accept: DOCUMENT, ret: DOCUMENT
     Only valid in struct type=table.
     """
+
     accept: VariableType = field(default=VariableType.DOCUMENT)
-    ret:    VariableType = field(default=VariableType.DOCUMENT)
+    ret: VariableType = field(default=VariableType.DOCUMENT)
 
 
 @dataclass
@@ -138,8 +146,9 @@ class TableRow(Node):
     accept: DOCUMENT, ret: LIST_DOCUMENT
     Only valid in struct type=table.
     """
+
     accept: VariableType = field(default=VariableType.DOCUMENT)
-    ret:    VariableType = field(default=VariableType.LIST_DOCUMENT)
+    ret: VariableType = field(default=VariableType.LIST_DOCUMENT)
 
 
 @dataclass
@@ -150,8 +159,9 @@ class TableMatchKey(Node):
     accept: DOCUMENT (row), ret: STRING
     Only valid in struct type=table.
     """
+
     accept: VariableType = field(default=VariableType.DOCUMENT)
-    ret:    VariableType = field(default=VariableType.STRING)
+    ret: VariableType = field(default=VariableType.STRING)
 
 
 @dataclass
@@ -161,6 +171,7 @@ class Field(Node):
     DSL: field-name { pipeline... }
     ret is resolved after pipeline is built.
     """
-    name:   str          = ""
+
+    name: str = ""
     accept: VariableType = field(default=VariableType.DOCUMENT)
-    ret:    VariableType = field(default=VariableType.AUTO)
+    ret: VariableType = field(default=VariableType.AUTO)

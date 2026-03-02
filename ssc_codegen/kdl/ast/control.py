@@ -14,9 +14,10 @@ class Self(Node):
     ret is resolved at AST build time from the matching InitField.ret.
     Build-time error if name not declared in -init.
     """
-    name:   str          = ""
+
+    name: str = ""
     accept: VariableType = field(default=VariableType.AUTO)
-    ret:    VariableType = field(default=VariableType.AUTO)
+    ret: VariableType = field(default=VariableType.AUTO)
 
 
 @dataclass
@@ -34,9 +35,10 @@ class Fallback(Node):
       None       → NULL
       list (empty []) → LIST_STRING
     """
-    value:  Any          = None
+
+    value: Any = None
     accept: VariableType = field(default=VariableType.AUTO)
-    ret:    VariableType = field(default=VariableType.AUTO)
+    ret: VariableType = field(default=VariableType.AUTO)
 
     def __post_init__(self) -> None:
         if self.ret != VariableType.AUTO:
@@ -60,7 +62,7 @@ class Fallback(Node):
 @dataclass
 class FallbackStart(Fallback):
     accept: VariableType = field(default=VariableType.DOCUMENT)
-    ret:    VariableType = field(default=VariableType.DOCUMENT)
+    ret: VariableType = field(default=VariableType.DOCUMENT)
 
 
 @dataclass
@@ -75,5 +77,6 @@ class Return(Node):
     Not written in DSL — inserted by the builder after the last op.
     Carries the final ret_type of the pipeline.
     """
+
     accept: VariableType = field(default=VariableType.AUTO)
-    ret:    VariableType = field(default=VariableType.AUTO)
+    ret: VariableType = field(default=VariableType.AUTO)

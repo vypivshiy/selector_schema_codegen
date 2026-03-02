@@ -12,8 +12,9 @@ class Filter(Node):
     Predicates in body are combined with AND by default.
     accept/ret follow the cursor list type (LIST_STRING or LIST_DOCUMENT).
     """
+
     accept: VariableType = field(default=VariableType.LIST_STRING)
-    ret:    VariableType = field(default=VariableType.LIST_STRING)
+    ret: VariableType = field(default=VariableType.LIST_STRING)
 
 
 @dataclass
@@ -24,8 +25,9 @@ class Assert(Node):
     Pass-through: accept == ret == cursor type.
     Can appear multiple times in a pipeline.
     """
+
     accept: VariableType = field(default=VariableType.AUTO)
-    ret:    VariableType = field(default=VariableType.AUTO)
+    ret: VariableType = field(default=VariableType.AUTO)
 
 
 @dataclass
@@ -37,5 +39,6 @@ class Match(Node):
     accept: DOCUMENT (row element), ret: STRING (value cell text).
     Predicates in body are combined with AND.
     """
+
     accept: VariableType = field(default=VariableType.DOCUMENT)
-    ret:    VariableType = field(default=VariableType.STRING)
+    ret: VariableType = field(default=VariableType.STRING)

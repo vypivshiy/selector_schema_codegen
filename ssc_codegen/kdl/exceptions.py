@@ -1,5 +1,3 @@
-
-
 class ParseError(Exception):
     """Raised on DSL syntax or semantic error during AST construction."""
 

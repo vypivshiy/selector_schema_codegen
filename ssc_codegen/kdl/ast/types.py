@@ -3,29 +3,28 @@ from enum import IntEnum, auto
 
 
 class VariableType(IntEnum):
-    AUTO          = auto()
-    LIST_AUTO     = auto()
+    AUTO = auto()
+    LIST_AUTO = auto()
 
-    DOCUMENT      = auto()
+    DOCUMENT = auto()
     LIST_DOCUMENT = auto()
 
-    STRING        = auto()
-    OPT_STRING= auto()
-    LIST_STRING   = auto()
+    STRING = auto()
+    OPT_STRING = auto()
+    LIST_STRING = auto()
 
-    INT           = auto()
+    INT = auto()
     OPT_INT = auto()
-    LIST_INT      = auto()
+    LIST_INT = auto()
 
-    FLOAT         = auto()
-    OPT_FLOAT= auto()
-    LIST_FLOAT    = auto()
+    FLOAT = auto()
+    OPT_FLOAT = auto()
+    LIST_FLOAT = auto()
 
-    BOOL          = auto()
-    NULL          = auto()
-    NESTED        = auto()
-    JSON          = auto()
-
+    BOOL = auto()
+    NULL = auto()
+    NESTED = auto()
+    JSON = auto()
 
     @property
     def optional(self) -> VariableType:
@@ -52,10 +51,10 @@ class VariableType(IntEnum):
         """Return scalar counterpart for list types."""
         _map = {
             VariableType.LIST_DOCUMENT: VariableType.DOCUMENT,
-            VariableType.LIST_STRING:   VariableType.STRING,
-            VariableType.LIST_INT:      VariableType.INT,
-            VariableType.LIST_FLOAT:    VariableType.FLOAT,
-            VariableType.LIST_AUTO:     VariableType.AUTO,
+            VariableType.LIST_STRING: VariableType.STRING,
+            VariableType.LIST_INT: VariableType.INT,
+            VariableType.LIST_FLOAT: VariableType.FLOAT,
+            VariableType.LIST_AUTO: VariableType.AUTO,
         }
         return _map.get(self, self)
 
@@ -64,17 +63,17 @@ class VariableType(IntEnum):
         """Return list counterpart for scalar types."""
         _map = {
             VariableType.DOCUMENT: VariableType.LIST_DOCUMENT,
-            VariableType.STRING:   VariableType.LIST_STRING,
-            VariableType.INT:      VariableType.LIST_INT,
-            VariableType.FLOAT:    VariableType.LIST_FLOAT,
-            VariableType.AUTO:     VariableType.LIST_AUTO,
+            VariableType.STRING: VariableType.LIST_STRING,
+            VariableType.INT: VariableType.LIST_INT,
+            VariableType.FLOAT: VariableType.LIST_FLOAT,
+            VariableType.AUTO: VariableType.LIST_AUTO,
         }
         return _map.get(self, self)
 
 
 class StructType(IntEnum):
-    ITEM  = auto()
-    LIST  = auto()
-    DICT  = auto()
+    ITEM = auto()
+    LIST = auto()
+    DICT = auto()
     TABLE = auto()
-    FLAT  = auto()
+    FLAT = auto()

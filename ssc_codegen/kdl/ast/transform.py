@@ -20,9 +20,10 @@ class TransformTarget(Node):
                 {{PRV}} — variable holding the previous pipeline value (input)
                 {{NXT}} — variable that will hold the result (output)
     """
-    lang:    str            = ""
+
+    lang: str = ""
     imports: tuple[str, ...] = field(default_factory=tuple)
-    code:    tuple[str, ...] = field(default_factory=tuple)
+    code: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass
@@ -35,9 +36,10 @@ class TransformDef(Node):
     AUTO is not allowed — transform is an explicit type contract.
     body: list[TransformTarget]
     """
-    name:   str          = ""
+
+    name: str = ""
     accept: VariableType = field(default=VariableType.AUTO)
-    ret:    VariableType = field(default=VariableType.AUTO)
+    ret: VariableType = field(default=VariableType.AUTO)
 
 
 @dataclass
@@ -51,6 +53,7 @@ class TransformCall(Node):
       - name not found in module transforms
       - accept type mismatches pipeline cursor
     """
-    name:   str          = ""
+
+    name: str = ""
     accept: VariableType = field(default=VariableType.AUTO)
-    ret:    VariableType = field(default=VariableType.AUTO)
+    ret: VariableType = field(default=VariableType.AUTO)
