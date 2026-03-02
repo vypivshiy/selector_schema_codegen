@@ -810,7 +810,7 @@ def pre_expr_pred_contains(node: PredContains, ctx: ConverterContext):
         cond = f"{values[0]!r} in i"
     else:
         cond = f"any(v in i for v in {values!r})"
-    if index == 0:
+    if ctx.index == 0:
         return cond
     return f"and {cond}"
 
@@ -828,7 +828,7 @@ def pre_expr_pred_eq(node: PredEq, ctx: ConverterContext):
     else:
         cond = f"any(i == v for v in {values!r})"
 
-    if index == 0:
+    if ctx.index == 0:
         return cond
     return f"and {cond}"
 
@@ -846,7 +846,7 @@ def pre_expr_pred_ne(node: PredNe, ctx: ConverterContext):
     else:
         # todo: change spec: for many args in ne - convert to all({COND...})
         cond = f"all(i != v for v in {values!r})"
-    if index == 0:
+    if ctx.index == 0:
         return cond
     return f"and {cond}"
 
@@ -858,7 +858,7 @@ def pre_expr_pred_starts(node: PredStarts, ctx: ConverterContext):
         cond = f"i.startswith({values[0]!r})"
     else:
         cond = f"any(i.startswith(v) for v in {values!r})"
-    if index == 0:
+    if ctx.index == 0:
         return cond
     return f"and {cond}"
 
@@ -870,7 +870,7 @@ def pre_expr_pred_ends(node: PredEnds, ctx: ConverterContext):
         cond = f"i.endswith({values[0]!r})"
     else:
         cond = f"any(i.endswith(v) for v in {values!r})"
-    if index == 0:
+    if ctx.index == 0:
         return cond
     return f"and {cond}"
 
