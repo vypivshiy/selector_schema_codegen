@@ -19,6 +19,8 @@ dependencies = [
     "ast-grep-cli>=0.38.1",
     "tinycss2>=1.4.0",
     "websockets>=16.0",
+    "ckdl>=1.0",
+    "tree-sitter>=0.25.2",
 ]
 
 classifiers = [
