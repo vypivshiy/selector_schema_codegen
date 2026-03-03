@@ -174,8 +174,10 @@ class BaseConverter:
         if node.body:
             if isinstance(node, _PREDICATE_NODES):
                 # Predicate nodes: same ctx, no depth/index change
+                pred_ctx = replace(ctx, index=0)
                 for child in node.body:
-                    self._collect(self._emit_node(child, ctx), lines)
+                    self._collect(self._emit_node(child, pred_ctx), lines)
+                    pred_ctx = pred_ctx.advance()
             elif isinstance(node, _CONTAINER_NODES):
                 # Container nodes: depth+1, index=0, NOT advanced between children
                 inner_ctx = replace(ctx, depth=ctx.depth + 1, index=0)
