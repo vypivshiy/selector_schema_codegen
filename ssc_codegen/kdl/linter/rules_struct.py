@@ -10,6 +10,8 @@ from __future__ import annotations
 from tree_sitter import Node
 
 from ssc_codegen.kdl.linter.base import LINTER, LintContext, DefineKind
+from ssc_codegen.kdl.linter.type_rules import check_pipeline_types
+from ssc_codegen.kdl.ast.types import VariableType as VT
 from ssc_codegen.kdl.linter.type_rules import PIPELINE_TYPE_RULES
 
 # ── known ops ──────────────────────────────────────────────────────────────────
@@ -201,20 +203,36 @@ def _check_reserved_field(
         return
 
     if field_name == "-init":
-        if not ctx.get_children_nodes(node):
+        sub_pipelines = ctx.get_children_nodes(node)
+        if not sub_pipelines:
             ctx.error(
                 node,
                 message="'-init' block must contain at least one named pipeline",
                 hint='-init {\n    my-field { css ".x"; text }\n}',
             )
+        else:
+            # type-check each named sub-pipeline and cache its ret type
+            for sub in sub_pipelines:
+                sub_name = ctx.node_name(sub)
+                if not sub_name:
+                    continue
+                sub_ops = ctx.get_children_nodes(sub)
+                if sub_ops:
+                    ret = check_pipeline_types(
+                        sub_ops, ctx, start_type=VT.DOCUMENT
+                    )
+                    ctx.inferred_define_types[sub_name] = (VT.DOCUMENT, ret)
         return
 
-    if not ctx.get_children_nodes(node):
+    ops = ctx.get_children_nodes(node)
+    if not ops:
         ctx.error(
             node,
             message=f"'{field_name}' block must contain at least one operation",
             hint=f'example: {field_name} {{ css ".item" }}',
         )
+    else:
+        check_pipeline_types(ops, ctx, start_type=VT.DOCUMENT)
 
 
 # ── regular field checks ───────────────────────────────────────────────────────
@@ -222,12 +240,21 @@ def _check_reserved_field(
 
 def _check_regular_field(node: Node, field_name: str, ctx: LintContext) -> None:
     ctx.push(field_name)
-    if not ctx.get_children_nodes(node):
+    ops = ctx.get_children_nodes(node)
+    if not ops:
         ctx.error(
             node,
             message=f"field '{field_name}' has no operations",
             hint=f'add at least one operation: {field_name} {{ css ".item"; text }}',
         )
+    else:
+        # determine start type: DOCUMENT, or self-ref type from -init
+        start = VT.DOCUMENT
+        if ops and ctx.node_name(ops[0]) == "self":
+            init_name = ctx.get_arg(ops[0], 0)
+            if init_name and init_name in ctx.inferred_define_types:
+                _, start = ctx.inferred_define_types[init_name]
+        check_pipeline_types(ops, ctx, start_type=start)
     ctx.pop()
 
 
