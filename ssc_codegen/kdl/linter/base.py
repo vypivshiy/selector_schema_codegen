@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Callable, Literal
+from functools import wraps
 
 from tree_sitter import Node
 
@@ -166,15 +167,28 @@ class AstLinter:
     """
 
     def __init__(self) -> None:
-        self._rules: dict[str, RuleFn] = {}
+        # dict[node_name, list[RuleFn]] — multiple handlers per node
+        self._rules: dict[str, list[RuleFn]] = {}
 
     def rule(self, *node_names: str) -> Callable[..., RuleFn]:
-        """Register a rule for one or more KDL node names."""
+        """Register a rule for one or more KDL node names. Multiple rules per node are allowed."""
         def decorator(fn: RuleFn) -> RuleFn:
+            @wraps(fn)
+            def wrapper(node: Node, ctx: LintContext) -> None:
+                fn(node, ctx)
+
             for name in node_names:
-                self._rules[name] = fn
-            return fn
+                self._rules.setdefault(name, []).append(wrapper)
+            return wrapper
         return decorator
+
+    def remove_rule(self, fn_name: str) -> None:
+        """Remove a rule by function name across all node registrations."""
+        for name in self._rules:
+            self._rules[name] = [
+                f for f in self._rules[name]
+                if f.__name__ != fn_name
+            ]
 
     def lint(self, src: str) -> list[LintError]:
         tree = KDL_PARSER.parse(src.encode())
@@ -182,21 +196,23 @@ class AstLinter:
         self._walk(tree.root_node, ctx)
         return ctx.errors
 
+    def replace_rule(self, fn_name: str, *node_names: str) -> Callable[..., RuleFn]:
+        """Remove existing rule by name and register new one in its place."""
+        self.remove_rule(fn_name)
+        return self.rule(*node_names)
+
     def _walk(self, node: Node, ctx: LintContext) -> None:
         if node.type == "node":
             name = ctx.node_name(node)
             if name:
-                # push path segment before dispatching
                 ctx.push(name)
-                if fn := self._rules.get(name):
+                # dispatch all registered handlers for this node name
+                for fn in self._rules.get(name, []):
                     fn(node, ctx)
-                # recurse into children
                 for child in ctx.get_children_nodes(node):
                     self._walk(child, ctx)
                 ctx.pop()
             return
-
-        # for non-node types just recurse
         for child in node.children:
             self._walk(child, ctx)
 
