@@ -369,16 +369,25 @@ class AstLinter:
                         )
 
     def _walk(
-        self, node: Node, ctx: LintContext, _in_pipeline: bool = False
+        self,
+        node: Node,
+        ctx: LintContext,
+        _in_pipeline: bool = False,
+        _in_struct_field: bool = False,
     ) -> None:
         """
         Walk the CST. _in_pipeline=True means we are inside a field pipeline
         (children of a regular field or reserved field) — ops are valid here.
         Module-level nodes and field names are not pipeline ops.
+
+        _in_struct_field=True means the current node is a direct child of a
+        struct body (i.e. a field name like 'urls' or '-split-doc').
+        Its children are pipeline operations and must be walked with
+        _in_pipeline=True.
         """
         if node.type != "node":
             for child in node.children:
-                self._walk(child, ctx, _in_pipeline)
+                self._walk(child, ctx, _in_pipeline, _in_struct_field)
             return
 
         name = ctx.node_name(node)
@@ -397,10 +406,26 @@ class AstLinter:
             for fn in self._rules.get("*", []):
                 fn(node, ctx)
 
-        # recurse — children of module-level keywords are NOT pipeline ops
-        in_child_pipeline = _in_pipeline and name not in _MODULE_KEYWORDS
+        # Determine pipeline flag for children:
+        #   - module-level keywords (struct, define, …): children are NOT ops
+        #   - struct field nodes (_in_struct_field=True): children ARE ops
+        #   - already inside a pipeline: stay in pipeline (unless entering a
+        #     module keyword, which cannot appear inside pipelines anyway)
+        if name in _MODULE_KEYWORDS:
+            # struct / define / json / transform — children are fields/directives
+            child_in_pipeline = False
+            child_in_struct_field = name == "struct"
+        elif _in_struct_field:
+            # this node IS the field name; its children are pipeline ops
+            child_in_pipeline = True
+            child_in_struct_field = False
+        else:
+            # already inside a pipeline: keep propagating
+            child_in_pipeline = _in_pipeline
+            child_in_struct_field = False
+
         for child in ctx.get_children_nodes(node):
-            self._walk(child, ctx, in_child_pipeline)
+            self._walk(child, ctx, child_in_pipeline, child_in_struct_field)
 
         ctx.pop()
 

@@ -90,7 +90,9 @@ def rule_unknown_or_define_op(node: Node, ctx: LintContext) -> None:
     """
     Fired (by _walk) only when _in_pipeline=True and no specific rule exists.
     Checks: is this a valid block define ref, scalar define misuse, or unknown op?
-    Also checks identifier args.
+
+    Note: unquoted identifier *arguments* (e.g. css-all a, attr href) are valid
+    KDL2 string literals and are intentionally not validated here.
     """
     op_name = ctx.node_name(node)
     if not op_name:
@@ -115,9 +117,10 @@ def rule_unknown_or_define_op(node: Node, ctx: LintContext) -> None:
         )
 
 
-# known ops do NOT check identifier args —
-# unquoted values like  css-all a  or  attr href  are valid string literals.
-# define ref validation in args is the user's responsibility (C-define semantics).
+# Unquoted identifier args (e.g. css-all a, attr href, re-sub PATTERN "")
+# are treated as plain strings per KDL2 semantics — no validation needed.
+# Only ops that strictly require integers (index, slice, len-*) will naturally
+# error via _require_int_args when int() fails on an identifier value.
 
 
 # ── struct ─────────────────────────────────────────────────────────────────────
