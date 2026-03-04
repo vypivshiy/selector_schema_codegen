@@ -281,6 +281,7 @@ def rule_re(node: Node, ctx: LintContext) -> None:
                 hint="use a non-capturing group (?:...) for grouping without capturing",
             )
 
+
 @LINTER.rule("re-all")
 def rule_re_all(node: Node, ctx: LintContext) -> None:
     # если внутри предикатного блока — это assert op, требуем assert
@@ -437,6 +438,7 @@ def rule_string_predicates(node: Node, ctx: LintContext) -> None:
     _require_args_count(
         node, ctx, min_count=1, example=f'{name} "value"  or  {name} "a" "b"'
     )
+
 
 # ── predicate ops — len ────────────────────────────────────────────────────────
 
