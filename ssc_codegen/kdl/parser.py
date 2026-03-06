@@ -493,6 +493,11 @@ class AstParser:
             return
 
         for node in kdl_nodes:
+            # block define inlining: if the keyword is a children_define name,
+            # expand it as if its children were written inline at this position
+            if node.name in self.ctx.children_defines and node.name not in self._context_expressions:
+                self._parse_expressions(self.ctx.children_defines[node.name], parent)
+                continue
             if cb := self._context_expressions.get(node.name):
                 expr = cb(node, parent, self.ctx)
                 if isinstance(expr, Fallback):
@@ -657,27 +662,22 @@ def reg_expr_extract_attr(
 # string
 @PARSER.register_expression_node("trim")
 def reg_expr_trim(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
-    substr = ctx.property_defines.get(node.args[0], node.args[0])
-    substr = cast(str, substr)
-    # apologize, last type - STRING, LIST_STRING
+    # trim takes no args — strips whitespace; optional substr arg for compat
+    substr = cast(str, ctx.property_defines.get(node.args[0], node.args[0])) if node.args else ""
     prev_type = parent.body[-1].ret
     return Trim(parent=parent, accept=prev_type, ret=prev_type, substr=substr)
 
 
 @PARSER.register_expression_node("ltrim")
 def reg_expr_ltrim(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
-    substr = ctx.property_defines.get(node.args[0], node.args[0])
-    substr = cast(str, substr)
-    # apologize, last type - STRING, LIST_STRING
+    substr = cast(str, ctx.property_defines.get(node.args[0], node.args[0])) if node.args else ""
     prev_type = parent.body[-1].ret
     return Ltrim(parent=parent, accept=prev_type, ret=prev_type, substr=substr)
 
 
 @PARSER.register_expression_node("rtrim")
 def reg_expr_rtrim(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
-    substr = ctx.property_defines.get(node.args[0], node.args[0])
-    substr = cast(str, substr)
-    # apologize, last type - STRING, LIST_STRING
+    substr = cast(str, ctx.property_defines.get(node.args[0], node.args[0])) if node.args else ""
     prev_type = parent.body[-1].ret
     return Rtrim(parent=parent, accept=prev_type, ret=prev_type, substr=substr)
 
@@ -737,19 +737,22 @@ def reg_expr_fmt(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
 
 @PARSER.register_expression_node("repl")
 def reg_expr_repl(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
-    # apologize, last type - STRING, LIST_STRING
     prev_type = parent.body[-1].ret
     if node.children:
-        items = {str(k): str(v) for k, v in node.properties.items()}
+        # map form: repl { "old" "new"; ... }
+        # children are KdlNodes where name="old_str", args[0]="new_str"
+        items = {str(child.name): str(child.args[0]) for child in node.children}
         return ReplMap(
             parent=parent, accept=prev_type, ret=prev_type, replacements=items
         )
+    old = cast(str, ctx.property_defines.get(node.args[0], node.args[0]))
+    new = cast(str, ctx.property_defines.get(node.args[1], node.args[1]))
     return Repl(
         parent=parent,
         accept=prev_type,
         ret=prev_type,
-        old=node.args[0],
-        new=node.args[1],
+        old=old,
+        new=new,
     )
 
 
@@ -769,12 +772,14 @@ def reg_expr_upper(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
 
 @PARSER.register_expression_node("split")
 def reg_expr_split(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
-    return Split(parent=parent, sep=node.args[0])
+    sep = cast(str, ctx.property_defines.get(node.args[0], node.args[0]))
+    return Split(parent=parent, sep=sep)
 
 
 @PARSER.register_expression_node("join")
 def reg_expr_join(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
-    return Join(parent=parent, sep=node.args[0])
+    sep = cast(str, ctx.property_defines.get(node.args[0], node.args[0]))
+    return Join(parent=parent, sep=sep)
 
 
 @PARSER.register_expression_node("unescape")
@@ -787,26 +792,24 @@ def reg_expr_unescape(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
 # regex
 @PARSER.register_expression_node("re")
 def reg_expr_re(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
-    pattern = node.args[0]
-    # TODO: extract groups, validate regex
-    return Re(parent=parent, pattern=pattern)
+    pattern = cast(str, ctx.property_defines.get(node.args[0], node.args[0]))
+    prev_type = parent.body[-1].ret
+    return Re(parent=parent, pattern=pattern, accept=prev_type, ret=prev_type)
 
 
 @PARSER.register_expression_node("re-all")
 def reg_expr_re_all(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
-    pattern = node.args[0]
-    # TODO: extract groups, validate regex
+    pattern = cast(str, ctx.property_defines.get(node.args[0], node.args[0]))
     return ReAll(parent=parent, pattern=pattern)
 
 
 @PARSER.register_expression_node("re-sub")
 def reg_expr_re_sub(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
-    # apologize, last type - STRING, LIST_STRING
     prev_type = parent.body[-1].ret
-    pattern = node.args[0]
-    # TODO: extract groups, validate regex
+    pattern = cast(str, ctx.property_defines.get(node.args[0], node.args[0]))
+    repl = cast(str, ctx.property_defines.get(node.args[1], node.args[1]))
     return ReSub(
-        parent=parent, accept=prev_type, ret=prev_type, pattern=pattern
+        parent=parent, accept=prev_type, ret=prev_type, pattern=pattern, repl=repl
     )
 
 
@@ -838,8 +841,9 @@ def reg_expr_len(node: KdlNode, parent: FieldLikeNode, _: ParseContext):
 
 
 @PARSER.register_expression_node("unique")
-def reg_expr_unique(_: KdlNode, parent: FieldLikeNode, _2: ParseContext):
-    return Unique(parent=parent)
+def reg_expr_unique(node: KdlNode, parent: FieldLikeNode, _: ParseContext):
+    keep_order = bool(node.properties.get("keep-order", False))
+    return Unique(parent=parent, keep_order=keep_order)
 
 
 @PARSER.register_expression_node("to-int")
@@ -874,12 +878,9 @@ def reg_expr_to_bool(_: KdlNode, parent: FieldLikeNode, _2: ParseContext):
 
 
 @PARSER.register_expression_node("jsonify")
-def reg_expr_jsonify(node: KdlNode, parent: FieldLikeNode, _2: ParseContext):
+def reg_expr_jsonify(node: KdlNode, parent: FieldLikeNode, _: ParseContext):
     target = node.args[0]
-    if len(node.args) == 2:
-        path = node.args[1]
-    else:
-        path = ""
+    path = cast(str, node.properties.get("path", ""))
     return Jsonify(parent=parent, schema_name=target, path=path)
 
 
