@@ -29,6 +29,7 @@ Usage:
     # JSON output for LLM pipelines
     errors, output = lint_file("demo.kdl", fmt="json")
 """
+
 from __future__ import annotations
 
 import json
@@ -39,6 +40,7 @@ from ssc_codegen.kdl.linter.base import LintError, LINTER
 
 
 # ── core formatter ─────────────────────────────────────────────────────────────
+
 
 def format_error(
     error: LintError,
@@ -68,8 +70,7 @@ def format_error(
     # location arrow
     if filepath_str:
         parts.append(
-            f"  --> {filepath_str}:{error.line}:{error.col}"
-            f"  [{error.path}]"
+            f"  --> {filepath_str}:{error.line}:{error.col}  [{error.path}]"
         )
     else:
         parts.append(f"  --> {error.path}  line {error.line}:{error.col}")
@@ -131,20 +132,23 @@ def format_errors(
 
     sections = [format_error(e, src=src, filepath=filepath) for e in errors]
 
-    n_errors   = sum(1 for e in errors if e.severity == "error")
+    n_errors = sum(1 for e in errors if e.severity == "error")
     n_warnings = sum(1 for e in errors if e.severity == "warning")
 
     summary_parts: list[str] = []
     if n_errors:
         summary_parts.append(f"{n_errors} error{'s' if n_errors != 1 else ''}")
     if n_warnings:
-        summary_parts.append(f"{n_warnings} warning{'s' if n_warnings != 1 else ''}")
+        summary_parts.append(
+            f"{n_warnings} warning{'s' if n_warnings != 1 else ''}"
+        )
 
     sections.append("aborting due to " + " and ".join(summary_parts))
     return "\n".join(sections)
 
 
 # ── file API ───────────────────────────────────────────────────────────────────
+
 
 def lint_file(
     path: str | Path,
@@ -187,6 +191,7 @@ def lint_string(
 
 
 # ── internal ───────────────────────────────────────────────────────────────────
+
 
 def _token_length(line: str, col: int) -> int:
     """Return length of the token starting at col (non-whitespace run)."""

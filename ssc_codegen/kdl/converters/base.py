@@ -5,7 +5,17 @@ from ssc_codegen.kdl.ast import Node
 from ssc_codegen.kdl.ast import Filter, Assert, Match
 from ssc_codegen.kdl.ast import LogicNot, LogicAnd, LogicOr
 from ssc_codegen.kdl.ast import JsonDef, TypeDef, Struct, Init
-from ssc_codegen.kdl.ast import PreValidate, Field, InitField, SplitDoc, Key, Value, TableConfig, TableMatchKey, TableRow
+from ssc_codegen.kdl.ast import (
+    PreValidate,
+    Field,
+    InitField,
+    SplitDoc,
+    Key,
+    Value,
+    TableConfig,
+    TableMatchKey,
+    TableRow,
+)
 
 if TYPE_CHECKING:
     from ssc_codegen.kdl.ast import Module
@@ -189,7 +199,7 @@ class BaseConverter:
                 # contains in InitMode (deep=3, expected 2)
                 if isinstance(node, InitField):
                     lines.extend(self._emit_pipeline(node.body, ctx))
-                else:    
+                else:
                     lines.extend(self._emit_pipeline(node.body, ctx.deeper()))
 
         if cb := self._post_callbacks.get(type(node)):

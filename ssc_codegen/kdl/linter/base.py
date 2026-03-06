@@ -84,6 +84,8 @@ class LintContext:
     errors: list[LintError] = field(default_factory=list)
     _path: list[str] = field(default_factory=list)
     defines: dict[str, DefineInfo] = field(default_factory=dict)
+    # cache for block-define inferred (accept, ret) pairs — populated lazily
+    inferred_define_types: dict[str, tuple] = field(default_factory=dict)
 
     # ── path ───────────────────────────────────────────────────────────────────
 

@@ -37,7 +37,7 @@ from ssc_codegen.kdl.ast import (
     Key,
     Value,
     StartParse,
-    StructDocstring
+    StructDocstring,
 )
 # expressions layer
 
@@ -126,7 +126,7 @@ from ssc_codegen.kdl.ast import (
     PredTextContains,
     PredTextEnds,
     PredTextRe,
-    PredTextStarts
+    PredTextStarts,
 )
 
 # transform
@@ -207,7 +207,7 @@ def pre_utilities(node: Utilities, _: ConverterContext):
         "    return s",
         "",
         # backport funcs
-        "if sys.version_info > 3.10:",
+        "if sys.version_info > (3, 10):",
         "    def rm_prefix(s: str, p: str) -> str:",
         "        return s.removeprefix(p)",
         "",
@@ -281,8 +281,13 @@ def pre_struct(node: Struct, ctx: ConverterContext):
 @PY_BASE_CONVERTER(StructDocstring)
 def pre_struct_docstring(node: StructDocstring, ctx: ConverterContext):
     if node.value:
-        return ['"""', node.value, '"""']
+        return [
+            f'{ctx.indent}"""',
+            f"{ctx.indent}\n".join([i for i in node.value.splitlines()]),
+            f'{ctx.indent}"""',
+        ]
     return
+
 
 @PY_BASE_CONVERTER(StartParse)
 def pre_start_parse(node: StartParse, ctx: ConverterContext):
@@ -302,7 +307,9 @@ def pre_start_parse(node: StartParse, ctx: ConverterContext):
         case StructType.TABLE:
             ret_type = f"{name}Type"
         case _:
-            raise NotImplementedError("Unknown struct type", repr(struct.struct_type))
+            raise NotImplementedError(
+                "Unknown struct type", repr(struct.struct_type)
+            )
     return f"{ctx.indent}def parse(self) -> {ret_type}:"
 
 
@@ -311,17 +318,45 @@ def post_start_parse(node: StartParse, ctx: ConverterContext):
     struct = node.parent
     struct = cast(Struct, struct)
     fields = [f for f in struct.body if isinstance(f, Field)]
+    names = [to_snake_case(f.name) for f in fields]
     lines = []
+    # TODO: pre_validate call
+    # TODO: move init fields here
     match struct.struct_type:
         case StructType.ITEM:
-            lines.append(f"{ctx.indent*2}return {{")
-            names = [to_snake_case(f.name) for f in fields]
+            # return {name: self_parse_name(self._doc), ...}
+            lines.append(f"{ctx.indent * 2}return {{")
             for name in names:
-                lines.append(f"{ctx.indent*3}{name!r}: self._parse_{name}(self._doc),")
-            lines.append(f"{ctx.indent*3}}}")
+                lines.append(
+                    f"{ctx.indent * 3}{name!r}: self._parse_{name}(self._doc),"
+                )
+            lines.append(f"{ctx.indent * 3}}}")
+        case StructType.LIST:
+            # return [{name, ...} for i in self._split_doc(self.document)]
+            lines.append(f"{ctx.indent * 2} return [{{")
+            for name in names:
+                lines.append(
+                    f"{ctx.indent * 3}{name!r}: self._parse_{name}(i),"
+                )
+            lines.append(
+                f"{ctx.indent * 3}}} for i in self._split_doc(self._doc)]"
+            )
+        case StructType.DICT:
+            lines.extend(
+                [
+                    f"{ctx.indent * 2}return {{",
+                    f"{ctx.indent * 3} self._parse_key(i): _self._parse_value()",
+                ]
+            )
+        case StructType.FLAT:
+            raise NotImplementedError()  # TODO
+        case StructType.TABLE:
+            raise NotImplementedError()  # TODO
+
         case _:
             raise NotImplementedError
     return lines
+
 
 # required overload for target backend
 @PY_BASE_CONVERTER(Init)
@@ -803,7 +838,7 @@ def pre_expr_fallback_end(node: FallbackEnd, ctx: ConverterContext):
 
 
 # predicates
-@PY_BASE_CONVERTER(Filter, post_callback=lambda _, _2: "]")
+@PY_BASE_CONVERTER(Filter, post_callback=lambda _, ctx: ctx.indent * 3 + "]")
 def pre_expr_filter(node: Filter, ctx: ConverterContext):
     # NXT = [i for i in PRV if ({CONDS...})]
     return f"{ctx.indent}{ctx.nxt} = [i for i in {ctx.prv} if "
@@ -812,7 +847,8 @@ def pre_expr_filter(node: Filter, ctx: ConverterContext):
 @PY_BASE_CONVERTER(Assert)
 def pre_expr_assert(node: Assert, ctx: ConverterContext):
     # assert ({CONDS}), msg
-    return f"assert ("
+    # TODO: WIP
+    return "assert ("
 
 
 @PY_BASE_CONVERTER.post(Assert)
@@ -823,25 +859,26 @@ def post_expr_assert(node: Assert, ctx: ConverterContext):
 @PY_BASE_CONVERTER(Match)
 def pre_expr_match(node: Match, ctx: ConverterContext):
     # if ({CONDS...}):
+    # TODO: WIP
     return f"{ctx.indent}if ("
 
 
-@PY_BASE_CONVERTER(LogicAnd, post_callback=")")
+@PY_BASE_CONVERTER(LogicAnd, post_callback=lambda _, ctx: ctx.indent * 3 + ")")
 def pre_expr_logic_and(node: LogicAnd, ctx: ConverterContext):
     # and ({CONDS...})
-    return " and ("
+    return f"{ctx.indent * 3}and ("
 
 
-@PY_BASE_CONVERTER(LogicOr, post_callback=")")
+@PY_BASE_CONVERTER(LogicOr, post_callback=lambda _, ctx: ctx.indent * 3 + ")")
 def pre_expr_logic_or(node: LogicOr, ctx: ConverterContext):
     # or ({CONDS...})
-    return " or ("
+    return f"{ctx.indent * 3}or ("
 
 
-@PY_BASE_CONVERTER(LogicNot, post_callback=")")
+@PY_BASE_CONVERTER(LogicNot, post_callback=lambda _, ctx: ctx.indent * 3 + ")")
 def pre_expr_logic_not(node: LogicNot, ctx: ConverterContext):
     # and not ({CONDS...})
-    return " and not ("
+    return f"{ctx.indent * 3}and not ("
 
 
 # note: all step-by-step conds acc by AND on
@@ -849,9 +886,9 @@ def pre_expr_logic_not(node: LogicNot, ctx: ConverterContext):
 def pre_expr_pred_css(node: PredCss, ctx: ConverterContext):
     query = repr(node.query)
     cond = f"i.select_one({query})"
-    if ctx.index == 1:
-        return ctx.indent + cond
-    return ctx.indent + f"and {cond}"
+    if ctx.index == 0:
+        return ctx.indent * 3 + cond
+    return ctx.indent * 3 + f"and {cond}"
 
 
 @PY_BASE_CONVERTER(PredXpath)
@@ -866,9 +903,9 @@ def pre_expr_pred_contains(node: PredContains, ctx: ConverterContext):
         cond = f"{values[0]!r} in i"
     else:
         cond = f"any(v in i for v in {values!r})"
-    if ctx.index == 1:
-        return cond
-    return f"and {cond}"
+    if ctx.index == 0:
+        return ctx.indent * 3 + cond
+    return ctx.indent * 3 + f"and {cond}"
 
 
 @PY_BASE_CONVERTER(PredEq)
@@ -884,9 +921,9 @@ def pre_expr_pred_eq(node: PredEq, ctx: ConverterContext):
     else:
         cond = f"any(i == v for v in {values!r})"
 
-    if ctx.index == 1:
-        return cond
-    return f" and {cond}"
+    if ctx.index == 0:
+        return ctx.indent * 3 + cond
+    return ctx.indent * 3 + f" and {cond}"
 
 
 @PY_BASE_CONVERTER(PredNe)
@@ -901,10 +938,10 @@ def pre_expr_pred_ne(node: PredNe, ctx: ConverterContext):
     # series of strings
     else:
         # todo: change spec: for many args in ne - convert to all({COND...})
-        cond = f"all(i != v for v in {values!r})"
-    if ctx.index == 1:
+        cond = ctx.indent * 3 + f"all(i != v for v in {values!r})"
+    if ctx.index == 0:
         return cond
-    return f"and {cond}"
+    return ctx.indent * 3 + f"and {cond}"
 
 
 @PY_BASE_CONVERTER(PredStarts)
@@ -914,9 +951,9 @@ def pre_expr_pred_starts(node: PredStarts, ctx: ConverterContext):
         cond = f"i.startswith({values[0]!r})"
     else:
         cond = f"any(i.startswith(v) for v in {values!r})"
-    if ctx.index == 1:
-        return cond
-    return f"and {cond}"
+    if ctx.index == 0:
+        return ctx.indent * 3 + cond
+    return ctx.indent * 3 + f"and {cond}"
 
 
 @PY_BASE_CONVERTER(PredEnds)
@@ -926,9 +963,9 @@ def pre_expr_pred_ends(node: PredEnds, ctx: ConverterContext):
         cond = f"i.endswith({values[0]!r})"
     else:
         cond = f"any(i.endswith(v) for v in {values!r})"
-    if ctx.index == 1:
-        return cond
-    return f"and {cond}"
+    if ctx.index == 0:
+        return ctx.indent * 3 + cond
+    return ctx.indent * 3 + f"and {cond}"
 
 
 # TODO: count expr simplify - reuse eq,gt,le with int argument
@@ -936,27 +973,9 @@ def pre_expr_pred_ends(node: PredEnds, ctx: ConverterContext):
 def pre_expr_pred_count_eq(node: PredCountEq, ctx: ConverterContext):
     value = node.value
     cond = f"len(i) == {value}"
-    if ctx.index == 1:
-        return cond
-    return f"and {cond}"
-
-
-@PY_BASE_CONVERTER(PredCountGt)
-def pre_expr_pred_count_gt(node: PredCountGt, ctx: ConverterContext):
-    value = node.value
-    cond = f"len(i) > {value}"
-    if ctx.index == 1:
-        return cond
-    return f"and {cond}"
-
-
-@PY_BASE_CONVERTER(PredCountLt)
-def pre_expr_pred_count_lt(node: PredCountLt, ctx: ConverterContext):
-    value = node.value
-    cond = f"len(i) < {value}"
-    if ctx.index == 1:
-        return cond
-    return f"and {cond}"
+    if ctx.index == 0:
+        return ctx.indent * 3 + cond
+    return ctx.indent * 3 + f"and {cond}"
 
 
 @PY_BASE_CONVERTER(PredHasAttr)
@@ -966,9 +985,9 @@ def pre_expr_pred_has_attr(node: PredHasAttr, ctx: ConverterContext):
         cond = f"bool(i.get({keys[0]!r}, False))"
     else:
         cond = f"any(bool(i.get(k, False)) for k in {keys!r})"
-    if ctx.index == 1:
-        return cond
-    return f"and {cond}"
+    if ctx.index == 0:
+        return ctx.indent * 3 + cond
+    return ctx.indent * 3 + f"and {cond}"
 
 
 @PY_BASE_CONVERTER(PredAttrContains)
@@ -977,12 +996,12 @@ def pre_expr_pred_attr_contains(node: PredAttrContains, ctx: ConverterContext):
     values = node.values
     # dont need check exists key
     if len(values) == 1:
-        cond = f"{values[0]!r} in i[{name!r}]"
+        cond = f"{values[0]!r} in (' '.join(i.get_attribute_list({name!r})))"
     else:
-        cond = f"any(v in i[{name!r}] for v in {values!r})"
-    if ctx.index == 1:
-        return cond
-    return f"and {cond}"
+        cond = f"any(v in (' '.join(i.get_attribute_list({name!r}))) for v in {values!r})"
+    if ctx.index == 0:
+        return ctx.indent * 3 + cond
+    return ctx.indent * 3 + f"and {cond}"
 
 
 @PY_BASE_CONVERTER(PredAttrEnds)
@@ -991,13 +1010,12 @@ def pre_expr_pred_attr_ends(node: PredAttrEnds, ctx: ConverterContext):
     values = node.values
     # dont need check exists key
     if len(values) == 1:
-        cond = f"i[{name!r}].endswith({values[0]!r})"
+        cond = f"(' '.join(i.get_attribute_list({name!r}))).endswith({values[0]!r})"
     else:
-        cond = f"any(i[{name!r}].endswith(v) for v in {values!r})"
-    if ctx.index == 1:
-        return cond
-    return f"and {cond}"
-
+        cond = f"any((' '.join(i.get_attribute_list({name!r}))).endswith(v) for v in {values!r})"
+    if ctx.index == 0:
+        return ctx.indent * 3 + cond
+    return ctx.indent * 3 + f"and {cond}"
 
 
 @PY_BASE_CONVERTER(PredAttrEq)
@@ -1006,12 +1024,12 @@ def pre_expr_pred_attr_eq(node: PredAttrEq, ctx: ConverterContext):
     values = node.values
     # dont need check exists key
     if len(values) == 1:
-        cond = f"i[{name!r}] == {values[0]!r}"
+        cond = f"(' '.join(i.get_attribute_list({name!r}))) == {values[0]!r}"
     else:
-        cond = f"any(i[{name!r}] == v for v in {values!r})"
-    if ctx.index == 1:
-        return cond
-    return f"and {cond}"
+        cond = f"any((' '.join(i.get_attribute_list({name!r}))) == v for v in {values!r})"
+    if ctx.index == 0:
+        return ctx.indent * 3 + cond
+    return ctx.indent * 3 + f"and {cond}"
 
 
 @PY_BASE_CONVERTER(PredAttrNe)
@@ -1020,12 +1038,12 @@ def pre_expr_pred_attr_ne(node: PredAttrNe, ctx: ConverterContext):
     values = node.values
     # dont need check exists key
     if len(values) == 1:
-        cond = f"i[{name!r}] != {values[0]!r}"
+        cond = f"(' '.join(i.get_attribute_list({name!r}))) != {values[0]!r}"
     else:
-        cond = f"all(i[{name!r}] != v for v in {values!r})"
-    if ctx.index == 1:
-        return cond
-    return f"and {cond}"
+        cond = f"(' '.join(i.get_attribute_list({name!r}))) != v for v in {values!r})"
+    if ctx.index == 0:
+        return ctx.indent * 3 + cond
+    return ctx.indent * 3 + f"and {cond}"
 
 
 @PY_BASE_CONVERTER(PredAttrRe)
@@ -1033,10 +1051,10 @@ def pre_expr_pred_attr_re(node: PredAttrRe, ctx: ConverterContext):
     name = node.name
     pattern = repr(node.pattern)
     # dont need check exists key
-    cond = f"bool(re.search({pattern}, i[{name!r}]))"
-    if ctx.index == 1:
-        return cond
-    return f"and {cond}"
+    cond = f"bool(re.search({pattern}, (' '.join(i.get_attribute_list({name!r})))))"
+    if ctx.index == 0:
+        return ctx.indent * 3 + cond
+    return ctx.indent * 3 + f"and {cond}"
 
 
 @PY_BASE_CONVERTER(PredAttrStarts)
@@ -1045,12 +1063,15 @@ def pre_expr_pred_attr_starts(node: PredAttrStarts, ctx: ConverterContext):
     values = node.values
     # dont need check exists key
     if len(values) == 1:
-        cond = f"i[{name!r}].startswith({values[0]!r})"
+        cond = (
+            ctx.indent * 3
+            + f"(' '.join(i.get_attribute_list({name!r}))).startswith({values[0]!r})"
+        )
     else:
-        cond = f"any(i[{name!r}].startswith(v) for v in {values!r})"
-    if ctx.index == 1:
-        return cond
-    return f"and {cond}"
+        cond = f"any((' '.join(i.get_attribute_list({name!r})).startswith(v) for v in {values!r}))"
+    if ctx.index == 0:
+        return ctx.indent * 3 + cond
+    return ctx.indent * 3 + f"and {cond}"
 
 
 @PY_BASE_CONVERTER(PredTextContains)
@@ -1060,9 +1081,9 @@ def pre_expr_pred_text_contains(node: PredTextContains, ctx: ConverterContext):
         cond = f"{values[0]!r} in i.text"
     else:
         cond = f"any(v in i.text for v in {values!r})"
-    if ctx.index == 1:
-        return cond
-    return f"and {cond}"
+    if ctx.index == 0:
+        return ctx.indent * 3 + cond
+    return ctx.indent * 3 + f"and {cond}"
 
 
 @PY_BASE_CONVERTER(PredTextEnds)
@@ -1072,18 +1093,18 @@ def pre_expr_pred_text_ends(node: PredTextEnds, ctx: ConverterContext):
         cond = f"i.text.endswith({values[0]!r})"
     else:
         cond = f"any(i.text.endswith(v) for v in {values!r})"
-    if ctx.index == 1:
-        return cond
-    return f"and {cond}"
+    if ctx.index == 0:
+        return ctx.indent * 3 + cond
+    return ctx.indent * 3 + f"and {cond}"
 
 
 @PY_BASE_CONVERTER(PredTextRe)
 def pre_expr_pred_text_re(node: PredTextRe, ctx: ConverterContext):
     pattern = repr(node.pattern)
     cond = f"bool(re.search({pattern}, i.text))"
-    if ctx.index == 1:
-        return cond
-    return f"and {cond}"
+    if ctx.index == 0:
+        return ctx.indent * 3 + cond
+    return ctx.indent * 3 + f"and {cond}"
 
 
 @PY_BASE_CONVERTER(PredTextStarts)
@@ -1093,11 +1114,9 @@ def pre_expr_pred_text_starts(node: PredTextStarts, ctx: ConverterContext):
         cond = f"i.text.startswith({values[0]!r})"
     else:
         cond = f"any(i.text.startswith(v) for v in {values!r})"
-    if ctx.index == 1:
-        return cond
-    return f"and {cond}"
-
-
+    if ctx.index == 0:
+        return ctx.indent * 3 + cond
+    return ctx.indent * 3 + f"and {cond}"
 
 
 @PY_BASE_CONVERTER(PredIn)
@@ -1107,55 +1126,55 @@ def pre_expr_pred_in(node: PredIn, ctx: ConverterContext):
         cond = f"{values[0]!r} in i"
     else:
         cond = f"any(v in i for v in {values!r})"
-    if ctx.index == 1:
-        return cond
-    return f"and {cond}"
+    if ctx.index == 0:
+        return ctx.indent * 3 + cond
+    return ctx.indent * 3 + f"and {cond}"
 
 
 @PY_BASE_CONVERTER(PredGe)
 def pre_expr_pred_ge(node: PredGe, ctx: ConverterContext):
     value = node.value
     cond = f"len(i) >= {value}"
-    if ctx.index == 1:
-        return cond
-    return f"and {cond}"
+    if ctx.index == 0:
+        return ctx.indent * 3 + cond
+    return ctx.indent * 3 + f"and {cond}"
 
 
 @PY_BASE_CONVERTER(PredGt)
 def pre_expr_pred_gt(node: PredGt, ctx: ConverterContext):
     value = node.value
     cond = f"len(i) > {value}"
-    if ctx.index == 1:
-        return cond
-    return f"and {cond}"
+    if ctx.index == 0:
+        return ctx.indent * 3 + cond
+    return ctx.indent * 3 + f"and {cond}"
 
 
 @PY_BASE_CONVERTER(PredLe)
 def pre_expr_pred_le(node: PredLe, ctx: ConverterContext):
     value = node.value
     cond = f"len(i) <= {value}"
-    if ctx.index == 1:
-        return cond
-    return f"and {cond}"
+    if ctx.index == 0:
+        return ctx.indent * 3 + cond
+    return ctx.indent * 3 + f"and {cond}"
 
 
 @PY_BASE_CONVERTER(PredLt)
 def pre_expr_pred_lt(node: PredLt, ctx: ConverterContext):
     value = node.value
     cond = f"len(i) < {value}"
-    if ctx.index == 1:
-        return cond
-    return f"and {cond}"
+    if ctx.index == 0:
+        return ctx.indent * 3 + cond
+    return ctx.indent * 3 + f"and {cond}"
 
 
 @PY_BASE_CONVERTER(PredRange)
 def pre_expr_pred_range(node: PredRange, ctx: ConverterContext):
     start = node.start
     end = node.end
-    cond = f"{end} < len(ctx.prv) < {start}"
-    if ctx.index == 1:
-        return cond
-    return f"and {cond}"
+    cond = f"{start} < len(i) < {end}"
+    if ctx.index == 0:
+        return ctx.indent * 3 + cond
+    return ctx.indent * 3 + f"and {cond}"
 
 
 @PY_BASE_CONVERTER(PredRe)
@@ -1163,9 +1182,9 @@ def pre_expr_pred_re(node: PredRe, ctx: ConverterContext):
     # TODO: convert pattern in AST build step
     pattern = repr(node.pattern)
     cond = f"bool(re.search({pattern}, i))"
-    if ctx.index == 1:
-        return cond
-    return f"and {cond}"
+    if ctx.index == 0:
+        return ctx.indent * 3 + cond
+    return ctx.indent * 3 + f"and {cond}"
 
 
 @PY_BASE_CONVERTER(PredReAll)
@@ -1173,9 +1192,9 @@ def pre_expr_pred_re_all(node: PredReAll, ctx: ConverterContext):
     # assert specific expr
     pattern = repr(node.pattern)
     cond = f"all(re.search({pattern}, j) for j in i)"
-    if ctx.index == 1:
-        return cond
-    return f"and {cond}"
+    if ctx.index == 0:
+        return ctx.indent * 3 + cond
+    return ctx.indent * 3 + f"and {cond}"
 
 
 @PY_BASE_CONVERTER(PredReAny)
@@ -1183,6 +1202,6 @@ def pre_expr_pred_re_any(node: PredReAny, ctx: ConverterContext):
     # assert specific expr
     pattern = repr(node.pattern)
     cond = f"any(re.search({pattern}, j) for j in i)"
-    if ctx.index == 1:
-        return cond
-    return f"and {cond}"
+    if ctx.index == 0:
+        return ctx.indent * 3 + cond
+    return ctx.indent * 3 + f"and {cond}"

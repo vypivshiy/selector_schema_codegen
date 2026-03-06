@@ -2,11 +2,13 @@
 Loads the compiled tree-sitter KDL language.
 The .dll/.so/.dylib must be built first via scripts/build_kdl.py
 """
+
 import ctypes
 from pathlib import Path
 from tree_sitter import Language, Parser
 
 _LIB_DIR = Path(__file__).parent
+
 
 def _find_lib() -> Path:
     for ext in ("*.dll", "*.so", "*.dylib"):
@@ -14,9 +16,9 @@ def _find_lib() -> Path:
         if candidates:
             return candidates[0]
     raise FileNotFoundError(
-        "KDL tree-sitter library not found. "
-        "Run: python scripts/build_kdl.py"
+        "KDL tree-sitter library not found. Run: python scripts/build_kdl.py"
     )
+
 
 def _load_language() -> Language:
     lib_path = _find_lib()

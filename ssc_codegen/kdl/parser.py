@@ -62,7 +62,7 @@ from ssc_codegen.kdl.ast import (
     InitField,
     Key,
     Value,
-    StartParse
+    StartParse,
 )
 # expressions
 

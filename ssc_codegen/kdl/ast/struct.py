@@ -21,12 +21,7 @@ class Struct(Node):
     struct_type: StructType = StructType.ITEM
 
     def __post_init__(self):
-        self.body.extend(
-            [
-                StructDocstring(parent=self),
-                Init(parent=self)
-            ]
-        )
+        self.body.extend([StructDocstring(parent=self), Init(parent=self)])
 
     @property
     def docstring(self) -> StructDocstring:
@@ -179,6 +174,6 @@ class Field(Node):
 
 @dataclass
 class StartParse(Node):
-    """Endpoint where need run parser
-    """
+    """Endpoint where need run parser"""
+
     pass
