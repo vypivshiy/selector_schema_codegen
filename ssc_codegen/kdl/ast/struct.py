@@ -1,5 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
+from typing import cast
 
 from .base import Node
 from .types import VariableType, StructType
@@ -19,6 +20,7 @@ class Struct(Node):
 
     name: str = ""
     struct_type: StructType = StructType.ITEM
+    keep_order: bool = False  # stuct_type=StructType.FLAT specific
 
     def __post_init__(self):
         self.body.extend([StructDocstring(parent=self), Init(parent=self)])
@@ -176,4 +178,51 @@ class Field(Node):
 class StartParse(Node):
     """Endpoint where need run parser"""
 
-    pass
+    @property
+    def struct(self) -> "Struct":
+        return cast(Struct, self.parent)
+
+    @property
+    def struct_type(self) -> StructType:
+        return self.struct.struct_type
+
+    @property
+    def use_split_doc(self) -> bool:
+        return any(isinstance(f, SplitDoc) for f in self.struct.body)
+
+    @property
+    def use_pre_validate(self) -> bool:
+        return any(isinstance(f, PreValidate) for f in self.struct.body)
+
+    @property
+    def fields(self) -> list["Field"]:
+        return [f for f in self.struct.body if isinstance(f, Field)]
+
+    @property
+    def fields_dict(self) -> tuple[Key, Value]:
+        """specific fields for struct_type=StructType.DICT"""
+        if self.struct_type != StructType.DICT:
+            raise TypeError(
+                "fields_dict allowed if struct_type == StructType.DICT"
+            )
+        fields = [f for f in self.struct.body if isinstance(f, (Key, Value))]
+        key = [f for f in fields if isinstance(f, Key)][0]
+        value = [f for f in fields if isinstance(f, Value)][0]
+        return key, value
+
+    @property
+    def fields_table(self) -> tuple[TableConfig, TableRow, TableMatchKey]:
+        """specific fields for struct_type=StructType.TABLE"""
+        if self.struct_type != StructType.TABLE:
+            raise TypeError(
+                "fields_table allowed if struct_type == StructType.TABLE"
+            )
+        fields = [
+            f
+            for f in self.struct.body
+            if isinstance(f, (TableConfig, TableRow, TableMatchKey))
+        ]
+        cfg = [f for f in fields if isinstance(f, TableConfig)][0]
+        row = [f for f in fields if isinstance(f, TableRow)][0]
+        match_key = [f for f in fields if isinstance(f, TableMatchKey)][0]
+        return cfg, row, match_key
