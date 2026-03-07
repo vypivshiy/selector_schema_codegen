@@ -1205,7 +1205,8 @@ def reg_filter_re(node: KdlNode, parent: Filter, ctx: ParseContext):
     pattern, ignore_case, dotall = _extract_regex(raw)
     prev_type = parent.ret
     return PredRe(
-        parent=parent, pattern=pattern, accept=prev_type, ret=prev_type
+        parent=parent, pattern=pattern, accept=prev_type, ret=prev_type,
+        ignore_case=ignore_case, dotall=dotall,
     )
 
 
@@ -1215,7 +1216,8 @@ def reg_filter_re_all(node: KdlNode, parent: Filter, ctx: ParseContext):
     pattern, ignore_case, dotall = _extract_regex(raw)
     prev_type = parent.ret
     return PredReAll(
-        parent=parent, pattern=pattern, accept=prev_type, ret=prev_type
+        parent=parent, pattern=pattern, accept=prev_type, ret=prev_type,
+        ignore_case=ignore_case, dotall=dotall,
     )
 
 
@@ -1225,7 +1227,8 @@ def reg_filter_re_any(node: KdlNode, parent: Filter, ctx: ParseContext):
     pattern, ignore_case, dotall = _extract_regex(raw)
     prev_type = parent.ret
     return PredReAny(
-        parent=parent, pattern=pattern, accept=prev_type, ret=prev_type
+        parent=parent, pattern=pattern, accept=prev_type, ret=prev_type,
+        ignore_case=ignore_case, dotall=dotall,
     )
 
 
@@ -1310,6 +1313,8 @@ def reg_filter_attr_re(node: KdlNode, parent: Filter, ctx: ParseContext):
         ret=prev_type,
         pattern=pattern,
         name=name,
+        ignore_case=ignore_case,
+        dotall=dotall,
     )
 
 
@@ -1354,7 +1359,8 @@ def reg_filter_predicate_text_re(
     pattern, ignore_case, dotall = _extract_regex(raw)
     prev_type = parent.ret
     return PredTextRe(
-        parent=parent, accept=prev_type, ret=prev_type, pattern=pattern
+        parent=parent, accept=prev_type, ret=prev_type, pattern=pattern,
+        ignore_case=ignore_case, dotall=dotall,
     )
 
 

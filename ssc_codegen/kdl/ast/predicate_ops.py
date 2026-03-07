@@ -110,6 +110,8 @@ class PredRe(Node):
     """Element matches pattern."""
 
     pattern: str = ""
+    ignore_case: bool = False
+    dotall: bool = False
 
 
 @dataclass
@@ -117,6 +119,8 @@ class PredReAny(Node):
     """At least one element in list matches pattern. Assert only."""
 
     pattern: str = ""
+    ignore_case: bool = False
+    dotall: bool = False
 
 
 @dataclass
@@ -124,6 +128,8 @@ class PredReAll(Node):
     """All elements in list match pattern. Assert only."""
 
     pattern: str = ""
+    ignore_case: bool = False
+    dotall: bool = False
 
 
 # =============================================================================
