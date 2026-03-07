@@ -88,7 +88,7 @@ Each field uses `match { }` to select a row by its key cell value.
 ```kdl
 struct ProductInfo type=table {
     -table { css "table.info" }
-    -row   { css "tr" }
+    -rows  { css-all "tr" }
     -match { css "th"; text; trim }
     -value { css "td"; text; trim }
 
