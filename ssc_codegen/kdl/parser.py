@@ -189,30 +189,52 @@ def _unverbosify_regex(pattern: str | _re.Pattern) -> str:
     return pattern.pattern
 
 
-def _bake_regex_pattern(value: str | _re.Pattern) -> str:
-    """Resolve a raw define value (str or compiled Pattern) to a plain pattern
-    string with inline flags (``(?i)``, ``(?s)``) baked in so the codegen
-    can emit it as a bare string literal without importing re flags.
+_INLINE_FLAGS_RE = _re.compile(r"^\(\?([a-z]+)\)")
 
-    Handles:
-    - ``re.IGNORECASE`` → prepends ``(?i)``
-    - ``re.DOTALL``     → prepends ``(?s)``
-    - ``re.VERBOSE``    → strips comments/whitespace via unverbosify_regex
+
+def _extract_inline_flags(pattern: str) -> tuple[str, bool, bool]:
+    """Strip leading ``(?flags)`` inline group from *pattern* and return
+    ``(stripped_pattern, ignore_case, dotall)``.
+
+    Only ``i`` (IGNORECASE) and ``s`` (DOTALL) are extracted; other flags
+    are left in place so the regex stays semantically identical.
+    """
+    m = _INLINE_FLAGS_RE.match(pattern)
+    if not m:
+        return pattern, False, False
+    flags_str = m.group(1)
+    ignore_case = "i" in flags_str
+    dotall = "s" in flags_str
+    remaining = flags_str.replace("i", "").replace("s", "")
+    # rebuild the inline group without i/s; drop it entirely if empty
+    if remaining:
+        prefix = f"(?{remaining})"
+    else:
+        prefix = ""
+    return prefix + pattern[m.end():], ignore_case, dotall
+
+
+def _extract_regex(value: str | _re.Pattern) -> tuple[str, bool, bool]:
+    """Resolve a raw define value (str or compiled Pattern) to
+    ``(pattern, ignore_case, dotall)``.
+
+    Handles both sources of flags:
+    - Compiled ``re.Pattern``: ``re.IGNORECASE``, ``re.DOTALL``, ``re.VERBOSE``
+    - Plain string with leading inline flags: ``(?i)``, ``(?s)``, ``(?is)`` …
+
+    The returned pattern is stripped of ``i``/``s`` inline flags so that
+    codegen can emit explicit ``re.IGNORECASE`` / ``re.DOTALL`` arguments.
     """
     if isinstance(value, str):
-        return value
-    # compiled Pattern — extract string pattern, strip VERBOSE if needed
+        return _extract_inline_flags(value)
     pattern = _unverbosify_regex(value)
     ignore_case = bool(value.flags & _re.IGNORECASE)
     dotall = bool(value.flags & _re.DOTALL)
-    flags = ""
-    if ignore_case:
-        flags += "i"
-    if dotall:
-        flags += "s"
-    if flags:
-        pattern = f"(?{flags})" + pattern
-    return pattern
+    # compiled patterns may also embed inline flags in their .pattern string
+    # (e.g. re.compile("(?i)foo") sets IGNORECASE but also keeps "(?i)" in
+    # .pattern on some Python versions) — strip to avoid double-reporting
+    pattern, ic2, ds2 = _extract_inline_flags(pattern)
+    return pattern, ignore_case or ic2, dotall or ds2
 
 
 @dataclass
@@ -914,26 +936,31 @@ def reg_expr_unescape(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
 @PARSER.register_expression_node("re")
 def reg_expr_re(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
     raw = ctx.property_defines.get(node.args[0], node.args[0])
-    pattern = _bake_regex_pattern(raw)
+    pattern, ignore_case, dotall = _extract_regex(raw)
     prev_type = parent.body[-1].ret
-    return Re(parent=parent, pattern=pattern, accept=prev_type, ret=prev_type)
+    return Re(
+        parent=parent, pattern=pattern, accept=prev_type, ret=prev_type,
+        ignore_case=ignore_case, dotall=dotall,
+    )
 
 
 @PARSER.register_expression_node("re-all")
 def reg_expr_re_all(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
     raw = ctx.property_defines.get(node.args[0], node.args[0])
-    pattern = _bake_regex_pattern(raw)
-    return ReAll(parent=parent, pattern=pattern)
+    pattern, ignore_case, dotall = _extract_regex(raw)
+    return ReAll(parent=parent, pattern=pattern, ignore_case=ignore_case, dotall=dotall)
 
 
 @PARSER.register_expression_node("re-sub")
 def reg_expr_re_sub(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
     prev_type = parent.body[-1].ret
     raw = ctx.property_defines.get(node.args[0], node.args[0])
-    pattern = _bake_regex_pattern(raw)
+    pattern, ignore_case, dotall = _extract_regex(raw)
     repl = cast(str, ctx.property_defines.get(node.args[1], node.args[1]))
     return ReSub(
-        parent=parent, accept=prev_type, ret=prev_type, pattern=pattern, repl=repl
+        parent=parent, accept=prev_type, ret=prev_type,
+        pattern=pattern, repl=repl,
+        ignore_case=ignore_case, dotall=dotall,
     )
 
 
@@ -1175,7 +1202,7 @@ def reg_filter_in(node: KdlNode, parent: Filter, _: ParseContext):
 @PARSER.register_predicate_node("re")
 def reg_filter_re(node: KdlNode, parent: Filter, ctx: ParseContext):
     raw = ctx.property_defines.get(node.args[0], node.args[0])
-    pattern = _bake_regex_pattern(raw)
+    pattern, ignore_case, dotall = _extract_regex(raw)
     prev_type = parent.ret
     return PredRe(
         parent=parent, pattern=pattern, accept=prev_type, ret=prev_type
@@ -1185,7 +1212,7 @@ def reg_filter_re(node: KdlNode, parent: Filter, ctx: ParseContext):
 @PARSER.register_assert_node("re-all")
 def reg_filter_re_all(node: KdlNode, parent: Filter, ctx: ParseContext):
     raw = ctx.property_defines.get(node.args[0], node.args[0])
-    pattern = _bake_regex_pattern(raw)
+    pattern, ignore_case, dotall = _extract_regex(raw)
     prev_type = parent.ret
     return PredReAll(
         parent=parent, pattern=pattern, accept=prev_type, ret=prev_type
@@ -1195,7 +1222,7 @@ def reg_filter_re_all(node: KdlNode, parent: Filter, ctx: ParseContext):
 @PARSER.register_assert_node("re-any")
 def reg_filter_re_any(node: KdlNode, parent: Filter, ctx: ParseContext):
     raw = ctx.property_defines.get(node.args[0], node.args[0])
-    pattern = _bake_regex_pattern(raw)
+    pattern, ignore_case, dotall = _extract_regex(raw)
     prev_type = parent.ret
     return PredReAny(
         parent=parent, pattern=pattern, accept=prev_type, ret=prev_type
@@ -1275,7 +1302,7 @@ def reg_filter_attr_contains(node: KdlNode, parent: Filter, ctx: ParseContext):
 def reg_filter_attr_re(node: KdlNode, parent: Filter, ctx: ParseContext):
     name = node.args[0]
     raw = ctx.property_defines.get(node.args[1], node.args[1])
-    pattern = _bake_regex_pattern(raw)
+    pattern, ignore_case, dotall = _extract_regex(raw)
     prev_type = parent.ret
     return PredAttrRe(
         parent=parent,
@@ -1324,7 +1351,7 @@ def reg_filter_predicate_text_re(
     node: KdlNode, parent: Filter, ctx: ParseContext
 ):
     raw = ctx.property_defines.get(node.args[0], node.args[0])
-    pattern = _bake_regex_pattern(raw)
+    pattern, ignore_case, dotall = _extract_regex(raw)
     prev_type = parent.ret
     return PredTextRe(
         parent=parent, accept=prev_type, ret=prev_type, pattern=pattern

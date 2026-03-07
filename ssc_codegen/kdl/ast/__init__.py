@@ -34,6 +34,7 @@ from .struct import (
     TableRow,
     TableMatchKey,
     Field,
+    TableField,
     StartParse
 )
 
