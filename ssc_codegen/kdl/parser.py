@@ -26,6 +26,7 @@ Expected KdlNode interface:
 
 from __future__ import annotations
 
+import re as _re
 from dataclasses import dataclass, field
 from typing import Callable, TypeAlias, cast
 
@@ -58,6 +59,7 @@ from ssc_codegen.kdl.ast import (
     TableMatchKey,
     TableRow,
     Field,
+    TableField,
     Init,
     InitField,
     Key,
@@ -160,6 +162,59 @@ from ssc_codegen.kdl.ast import JsonDef, JsonDefField
 from ssc_codegen.kdl.ast import TransformDef, TransformTarget, TransformCall
 
 
+# https://stackoverflow.com/a/14919203
+_CM1_RX = r"(?m)(?<!\\)((\\{2})*)#.*$"
+_CM2_RX = r"(\\)?((\\{2})*)(#)"
+_WS_RX = r"(\\)?((\\{2})*)(\s)\s*"
+
+
+def _unverbosify_regex(pattern: str | _re.Pattern) -> str:
+    """Strip re.VERBOSE whitespace/comments from a compiled pattern."""
+    if isinstance(pattern, str):
+        return pattern
+
+    def _strip(m):  # type: ignore[return-value]
+        if m.group(1) is None:
+            return m.group(2)
+        elif m.group(1) == "\\":
+            return m.group(2) + m.group(4)
+        raise ValueError("unexpected match in unverbosify")
+
+    if pattern.flags & _re.X:
+        return _re.sub(
+            _WS_RX,
+            _strip,
+            _re.sub(_CM2_RX, _strip, _re.sub(_CM1_RX, "\\1", pattern.pattern)),
+        )
+    return pattern.pattern
+
+
+def _bake_regex_pattern(value: str | _re.Pattern) -> str:
+    """Resolve a raw define value (str or compiled Pattern) to a plain pattern
+    string with inline flags (``(?i)``, ``(?s)``) baked in so the codegen
+    can emit it as a bare string literal without importing re flags.
+
+    Handles:
+    - ``re.IGNORECASE`` → prepends ``(?i)``
+    - ``re.DOTALL``     → prepends ``(?s)``
+    - ``re.VERBOSE``    → strips comments/whitespace via unverbosify_regex
+    """
+    if isinstance(value, str):
+        return value
+    # compiled Pattern — extract string pattern, strip VERBOSE if needed
+    pattern = _unverbosify_regex(value)
+    ignore_case = bool(value.flags & _re.IGNORECASE)
+    dotall = bool(value.flags & _re.DOTALL)
+    flags = ""
+    if ignore_case:
+        flags += "i"
+    if dotall:
+        flags += "s"
+    if flags:
+        pattern = f"(?{flags})" + pattern
+    return pattern
+
+
 @dataclass
 class ParseContext:
     property_defines: dict[str, str | int | float | bool] = field(
@@ -185,6 +240,7 @@ FieldLikeNode: TypeAlias = (
     | Key
     | Value
     | Field
+    | TableField
     | InitField
 )
 CallbackReg = Callable[[KdlNode, FieldLikeNode, ParseContext], AstNode]
@@ -289,7 +345,7 @@ class AstParser:
             parent=parent, name=struct.name, struct_type=struct.struct_type
         )
         for field in struct.body:
-            if isinstance(field, Field):
+            if isinstance(field, (Field, TableField)):
                 nested_ref = ""
                 json_ref = ""
                 is_array = False
@@ -435,7 +491,7 @@ class AstParser:
                 expr = TableConfig(parent=parent)
                 self._parse_expressions(node.children, expr)
                 parent.body.append(expr)
-            elif node.name == "-row":
+            elif node.name == "-rows":
                 expr = TableRow(parent=parent)
                 self._parse_expressions(node.children, expr)
                 parent.body.append(expr)
@@ -444,7 +500,10 @@ class AstParser:
                 self._parse_expressions(node.children, expr)
                 parent.body.append(expr)
             else:
-                expr = Field(parent=parent, name=node.name)
+                if parent.struct_type == StructType.TABLE:
+                    expr = TableField(parent=parent, name=node.name)
+                else:
+                    expr = Field(parent=parent, name=node.name)
                 self._parse_expressions(node.children, expr)
                 parent.body.append(expr)
         # finally, add StartParse node
@@ -597,6 +656,7 @@ def reg_transform(node: KdlNode, ctx: ParseContext):
 @PARSER.register_module_node("struct")
 def reg_module_struct(node: KdlNode, parent: Module, _: ParseContext):
     type_ = node.properties.get("type", "item")
+    keep_order = node.properties.get("keep-order", False)
     match type_:
         case "item":
             st_type = StructType.ITEM
@@ -610,7 +670,7 @@ def reg_module_struct(node: KdlNode, parent: Module, _: ParseContext):
             st_type = StructType.FLAT
         case _:
             raise UnknownNodeError(node.name, "Unknown struct type")
-    expr = Struct(parent=parent, name=node.args[0], struct_type=st_type)
+    expr = Struct(parent=parent, name=node.args[0], struct_type=st_type, keep_order=keep_order)
     return expr
 
 
@@ -853,21 +913,24 @@ def reg_expr_unescape(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
 # regex
 @PARSER.register_expression_node("re")
 def reg_expr_re(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
-    pattern = cast(str, ctx.property_defines.get(node.args[0], node.args[0]))
+    raw = ctx.property_defines.get(node.args[0], node.args[0])
+    pattern = _bake_regex_pattern(raw)
     prev_type = parent.body[-1].ret
     return Re(parent=parent, pattern=pattern, accept=prev_type, ret=prev_type)
 
 
 @PARSER.register_expression_node("re-all")
 def reg_expr_re_all(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
-    pattern = cast(str, ctx.property_defines.get(node.args[0], node.args[0]))
+    raw = ctx.property_defines.get(node.args[0], node.args[0])
+    pattern = _bake_regex_pattern(raw)
     return ReAll(parent=parent, pattern=pattern)
 
 
 @PARSER.register_expression_node("re-sub")
 def reg_expr_re_sub(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
     prev_type = parent.body[-1].ret
-    pattern = cast(str, ctx.property_defines.get(node.args[0], node.args[0]))
+    raw = ctx.property_defines.get(node.args[0], node.args[0])
+    pattern = _bake_regex_pattern(raw)
     repl = cast(str, ctx.property_defines.get(node.args[1], node.args[1]))
     return ReSub(
         parent=parent, accept=prev_type, ret=prev_type, pattern=pattern, repl=repl
@@ -1010,8 +1073,10 @@ def reg_expr_assert(node: KdlNode, parent: FieldLikeNode, _: ParseContext):
 
 @PARSER.register_expression_node("match")
 def reg_expr_match(node: KdlNode, parent: FieldLikeNode, _: ParseContext):
-    prev_type = parent.body[-1].ret
-    return Match(parent=parent, accept=prev_type, ret=prev_type)
+    # Match is only valid in table struct fields; it always accepts DOCUMENT
+    # and returns STRING (the value cell). It may be the first op in a field
+    # pipeline (no preceding op), so we must NOT read parent.body[-1].
+    return Match(parent=parent, accept=VariableType.DOCUMENT, ret=VariableType.STRING)
 
 
 # FILTER predicates
@@ -1108,8 +1173,9 @@ def reg_filter_in(node: KdlNode, parent: Filter, _: ParseContext):
 
 # regex
 @PARSER.register_predicate_node("re")
-def reg_filter_re(node: KdlNode, parent: Filter, _: ParseContext):
-    pattern = node.args[0]
+def reg_filter_re(node: KdlNode, parent: Filter, ctx: ParseContext):
+    raw = ctx.property_defines.get(node.args[0], node.args[0])
+    pattern = _bake_regex_pattern(raw)
     prev_type = parent.ret
     return PredRe(
         parent=parent, pattern=pattern, accept=prev_type, ret=prev_type
@@ -1117,8 +1183,9 @@ def reg_filter_re(node: KdlNode, parent: Filter, _: ParseContext):
 
 
 @PARSER.register_assert_node("re-all")
-def reg_filter_re_all(node: KdlNode, parent: Filter, _: ParseContext):
-    pattern = node.args[0]
+def reg_filter_re_all(node: KdlNode, parent: Filter, ctx: ParseContext):
+    raw = ctx.property_defines.get(node.args[0], node.args[0])
+    pattern = _bake_regex_pattern(raw)
     prev_type = parent.ret
     return PredReAll(
         parent=parent, pattern=pattern, accept=prev_type, ret=prev_type
@@ -1126,8 +1193,9 @@ def reg_filter_re_all(node: KdlNode, parent: Filter, _: ParseContext):
 
 
 @PARSER.register_assert_node("re-any")
-def reg_filter_re_any(node: KdlNode, parent: Filter, _: ParseContext):
-    pattern = node.args[0]
+def reg_filter_re_any(node: KdlNode, parent: Filter, ctx: ParseContext):
+    raw = ctx.property_defines.get(node.args[0], node.args[0])
+    pattern = _bake_regex_pattern(raw)
     prev_type = parent.ret
     return PredReAny(
         parent=parent, pattern=pattern, accept=prev_type, ret=prev_type
@@ -1206,7 +1274,8 @@ def reg_filter_attr_contains(node: KdlNode, parent: Filter, ctx: ParseContext):
 @PARSER.register_predicate_node("attr-re", reg_match=False)
 def reg_filter_attr_re(node: KdlNode, parent: Filter, ctx: ParseContext):
     name = node.args[0]
-    pattern = node.args[1]
+    raw = ctx.property_defines.get(node.args[1], node.args[1])
+    pattern = _bake_regex_pattern(raw)
     prev_type = parent.ret
     return PredAttrRe(
         parent=parent,
@@ -1254,7 +1323,8 @@ def reg_filter_predicate_text_starts(
 def reg_filter_predicate_text_re(
     node: KdlNode, parent: Filter, ctx: ParseContext
 ):
-    pattern = node.args[0]
+    raw = ctx.property_defines.get(node.args[0], node.args[0])
+    pattern = _bake_regex_pattern(raw)
     prev_type = parent.ret
     return PredTextRe(
         parent=parent, accept=prev_type, ret=prev_type, pattern=pattern
