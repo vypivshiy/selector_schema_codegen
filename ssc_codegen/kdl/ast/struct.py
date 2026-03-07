@@ -160,6 +160,24 @@ class TableMatchKey(Node):
     accept: VariableType = field(default=VariableType.DOCUMENT)
     ret: VariableType = field(default=VariableType.STRING)
 
+@dataclass
+class TableField(Node):
+    """
+    Special field for table struct.
+    Auto-generated when struct <name> type=table { ... } is parsed.
+
+    Pipeline semantics:
+      - starts with match { ... } which accepts DOCUMENT (the row) and
+        returns STRING (the value cell from -value pipeline).
+      - subsequent ops start from STRING.
+    accept: STRING  (the value cell produced by -value after match resolves the row)
+    ret:    AUTO    (resolved after pipeline is built)
+    """
+
+    name: str = ""
+    accept: VariableType = field(default=VariableType.STRING)
+    ret: VariableType = field(default=VariableType.AUTO)
+
 
 @dataclass
 class Field(Node):
@@ -195,8 +213,8 @@ class StartParse(Node):
         return any(isinstance(f, PreValidate) for f in self.struct.body)
 
     @property
-    def fields(self) -> list["Field"]:
-        return [f for f in self.struct.body if isinstance(f, Field)]
+    def fields(self) -> list["Field | TableField"]:
+        return [f for f in self.struct.body if isinstance(f, (Field, TableField))]
 
     @property
     def fields_dict(self) -> tuple[Key, Value]:
