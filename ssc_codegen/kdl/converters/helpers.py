@@ -1,4 +1,16 @@
+from __future__ import annotations
 import re
+
+from ssc_codegen.kdl.ast import (
+    PredRe,
+    PredReAll,
+    PredReAny,
+    PredTextRe,
+    PredAttrRe,
+    Re,
+    ReAll,
+    ReSub,
+)
 
 
 def to_snake_case(s: str) -> str:
@@ -70,3 +82,14 @@ def jsonify_path_to_segments(query: str) -> list[str]:
             parts.append(repr(part))
 
     return parts
+
+
+def py_pattern_re_flags(node: Re | ReAll | ReSub | PredRe | PredReAll | PredReAny | PredTextRe | PredAttrRe) -> str:
+    """Build a trailing re-flags argument string, e.g. ', re.IGNORECASE' or
+    ', re.IGNORECASE | re.DOTALL', or '' when no flags are set."""
+    parts: list[str] = []
+    if node.ignore_case:
+        parts.append("re.IGNORECASE")
+    if node.dotall:
+        parts.append("re.DOTALL")
+    return (", " + " | ".join(parts)) if parts else ""

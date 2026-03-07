@@ -9,6 +9,7 @@ from ssc_codegen.kdl.converters.helpers import (
     to_pascal_case,
     to_snake_case,
     jsonify_path_to_segments,
+    py_pattern_re_flags,
 )
 
 # module level
@@ -769,21 +770,12 @@ def pre_expr_unescape(node: Unescape, ctx: ConverterContext):
 
 
 # REGEX
-def _re_flags(node: Re | ReAll | ReSub | PredRe | PredReAll | PredReAny | PredTextRe | PredAttrRe) -> str:
-    """Build a trailing re-flags argument string, e.g. ', re.IGNORECASE' or
-    ', re.IGNORECASE | re.DOTALL', or '' when no flags are set."""
-    parts = []
-    if node.ignore_case:
-        parts.append("re.IGNORECASE")
-    if node.dotall:
-        parts.append("re.DOTALL")
-    return (", " + " | ".join(parts)) if parts else ""
 
 
 @PY_BASE_CONVERTER(Re)
 def pre_expr_re(node: Re, ctx: ConverterContext):
     pattern = repr(node.pattern)
-    flags = _re_flags(node)
+    flags = py_pattern_re_flags(node)
     if node.accept == VariableType.STRING:
         return f"{ctx.indent}{ctx.nxt} = re.search({pattern}, {ctx.prv}{flags})[1]"
     # LIST_STRING — map over items
@@ -793,7 +785,7 @@ def pre_expr_re(node: Re, ctx: ConverterContext):
 @PY_BASE_CONVERTER(ReAll)
 def pre_expr_re_all(node: ReAll, ctx: ConverterContext):
     pattern = repr(node.pattern)
-    flags = _re_flags(node)
+    flags = py_pattern_re_flags(node)
     return f"{ctx.indent}{ctx.nxt} = re.findall({pattern}, {ctx.prv}{flags})"
 
 
@@ -801,7 +793,7 @@ def pre_expr_re_all(node: ReAll, ctx: ConverterContext):
 def pre_expr_re_sub(node: ReSub, ctx: ConverterContext):
     pattern = repr(node.pattern)
     repl = repr(node.repl)
-    flags = _re_flags(node)
+    flags = py_pattern_re_flags(node)
     if node.accept == VariableType.STRING:
         return f"{ctx.indent}{ctx.nxt} = re.sub({pattern}, {repl}, {ctx.prv}{flags})"
     return f"{ctx.indent}{ctx.nxt} = [re.sub({pattern}, {repl}, i{flags}) for i in {ctx.prv}]"
@@ -1135,7 +1127,7 @@ def pre_expr_pred_attr_ne(node: PredAttrNe, ctx: ConverterContext):
 def pre_expr_pred_attr_re(node: PredAttrRe, ctx: ConverterContext):
     name = node.name
     pattern = repr(node.pattern)
-    flags = _re_flags(node)
+    flags = py_pattern_re_flags(node)
     # dont need check exists key
     cond = f"bool(re.search({pattern}, (' '.join(i.get_attribute_list({name!r}))){flags}))"
     if ctx.index == 0:
@@ -1187,7 +1179,7 @@ def pre_expr_pred_text_ends(node: PredTextEnds, ctx: ConverterContext):
 @PY_BASE_CONVERTER(PredTextRe)
 def pre_expr_pred_text_re(node: PredTextRe, ctx: ConverterContext):
     pattern = repr(node.pattern)
-    flags = _re_flags(node)
+    flags = py_pattern_re_flags(node)
     cond = f"bool(re.search({pattern}, i.text{flags}))"
     if ctx.index == 0:
         return ctx.indent + cond
@@ -1267,7 +1259,7 @@ def pre_expr_pred_range(node: PredRange, ctx: ConverterContext):
 @PY_BASE_CONVERTER(PredRe)
 def pre_expr_pred_re(node: PredRe, ctx: ConverterContext):
     pattern = repr(node.pattern)
-    flags = _re_flags(node)
+    flags = py_pattern_re_flags(node)
     cond = f"bool(re.search({pattern}, i{flags}))"
     if ctx.index == 0:
         return ctx.indent + cond
@@ -1278,7 +1270,7 @@ def pre_expr_pred_re(node: PredRe, ctx: ConverterContext):
 def pre_expr_pred_re_all(node: PredReAll, ctx: ConverterContext):
     # assert specific expr
     pattern = repr(node.pattern)
-    flags = _re_flags(node)
+    flags = py_pattern_re_flags(node)
     cond = f"all(re.search({pattern}, j{flags}) for j in i)"
     if ctx.index == 0:
         return ctx.indent + cond
@@ -1289,7 +1281,7 @@ def pre_expr_pred_re_all(node: PredReAll, ctx: ConverterContext):
 def pre_expr_pred_re_any(node: PredReAny, ctx: ConverterContext):
     # assert specific expr
     pattern = repr(node.pattern)
-    flags = _re_flags(node)
+    flags = py_pattern_re_flags(node)
     cond = f"any(re.search({pattern}, j{flags}) for j in i)"
     if ctx.index == 0:
         return ctx.indent + cond
