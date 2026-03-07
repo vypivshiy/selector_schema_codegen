@@ -49,6 +49,9 @@ class TransformCall(Node):
     DSL: transform name  (inside a field pipeline)
 
     accept and ret are copied from TransformDef at AST build time.
+    transform_def holds a back-reference to the definition so converters
+    can access language-specific implementations (imports, code templates).
+
     Build-time errors:
       - name not found in module transforms
       - accept type mismatches pipeline cursor
@@ -57,3 +60,4 @@ class TransformCall(Node):
     name: str = ""
     accept: VariableType = field(default=VariableType.AUTO)
     ret: VariableType = field(default=VariableType.AUTO)
+    transform_def: TransformDef | None = field(default=None, repr=False)

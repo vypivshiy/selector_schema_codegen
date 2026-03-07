@@ -346,25 +346,38 @@ def check_pipeline_types(
 
         # ── transform ─────────────────────────────────────────────────────────
         if op_name == "transform":
-            # accept= and return= properties declare the type contract
-            accept_str = ctx.get_prop(node, "accept")
-            return_str = ctx.get_prop(node, "return")
-            if accept_str and return_str:
-                t_accept = _parse_vt(accept_str)
-                t_ret = _parse_vt(return_str)
-                if t_accept is not None and not _compatible(current, t_accept):
-                    ctx.error(
-                        node,
-                        message=(
-                            f"'transform' expects {t_accept.name}, "
-                            f"got {current.name}"
-                        ),
-                        hint=f"pipeline type must be {t_accept.name} before this transform",
-                    )
-                current = t_ret if t_ret is not None else VT.AUTO
-            else:
-                # no type contract declared — pass through
+            # DSL: transform <name>  (pipeline call — look up by name)
+            args = ctx.get_args(node)
+            t_name = args[0] if args else None
+            if not t_name:
+                ctx.error(
+                    node,
+                    message="'transform' call requires a name argument",
+                    hint="example: transform to-base64",
+                )
                 current = VT.AUTO
+                continue
+            t_info = ctx.transforms.get(t_name)
+            if t_info is None:
+                ctx.error(
+                    node,
+                    message=f"'transform {t_name}' is not defined",
+                    hint=f"declare it at module level: transform {t_name} accept=TYPE return=TYPE {{ ... }}",
+                )
+                current = VT.AUTO
+                continue
+            t_accept = _parse_vt(t_info.accept)
+            t_ret = _parse_vt(t_info.ret)
+            if t_accept is not None and not _compatible(current, t_accept):
+                ctx.error(
+                    node,
+                    message=(
+                        f"'transform {t_name}' expects {t_accept.name}, "
+                        f"got {current.name}"
+                    ),
+                    hint=f"pipeline type must be {t_accept.name} before 'transform {t_name}'",
+                )
+            current = t_ret if t_ret is not None else VT.AUTO
             continue
 
         # ── filter ────────────────────────────────────────────────────────────

@@ -28,6 +28,16 @@ class DefineInfo:
 
 
 @dataclass
+class TransformInfo:
+    """Metadata collected from a module-level 'transform' block."""
+    name: str
+    accept: str  # raw type string, e.g. "STRING"
+    ret: str     # raw type string, e.g. "LIST_STRING"
+    langs: list[str]  # language identifiers present, e.g. ["py", "js"]
+    node: Node
+
+
+@dataclass
 class RawArg:
     """
     Positional argument with CST origin.
@@ -84,6 +94,7 @@ class LintContext:
     errors: list[LintError] = field(default_factory=list)
     _path: list[str] = field(default_factory=list)
     defines: dict[str, DefineInfo] = field(default_factory=dict)
+    transforms: dict[str, TransformInfo] = field(default_factory=dict)
     # cache for block-define inferred (accept, ret) pairs — populated lazily
     inferred_define_types: dict[str, tuple] = field(default_factory=dict)
 
@@ -330,13 +341,31 @@ class AstLinter:
 
     def _collect_defines(self, root: Node, ctx: LintContext) -> None:
         """
-        First pass — collect module-level defines into ctx.defines.
+        First pass — collect module-level defines and transforms into ctx.
 
         Scalar: define NAME=value  → prop child, no node_children
         Block:  define NAME { }   → first positional arg + node_children
+        transform NAME accept=TYPE return=TYPE { lang { ... } ... }
         """
         for node in root.children:
-            if ctx.node_name(node) != "define":
+            node_nm = ctx.node_name(node)
+            if node_nm == "transform":
+                raw_args = ctx.get_raw_args(node)
+                if raw_args:
+                    t_name = raw_args[0].value
+                    accept_str = ctx.get_prop(node, "accept") or ""
+                    ret_str = ctx.get_prop(node, "return") or ""
+                    lang_nodes = ctx.get_children_nodes(node)
+                    langs = [ctx.node_name(ln) for ln in lang_nodes if ctx.node_name(ln)]
+                    ctx.transforms[t_name] = TransformInfo(
+                        name=t_name,
+                        accept=accept_str,
+                        ret=ret_str,
+                        langs=langs,
+                        node=node,
+                    )
+                continue
+            if node_nm != "define":
                 continue
 
             children = ctx.get_children_nodes(node)

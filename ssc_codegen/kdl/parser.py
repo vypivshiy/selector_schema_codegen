@@ -156,6 +156,9 @@ from ssc_codegen.kdl.ast import (
 # json
 from ssc_codegen.kdl.ast import JsonDef, JsonDefField
 
+# transform
+from ssc_codegen.kdl.ast import TransformDef, TransformTarget, TransformCall
+
 
 @dataclass
 class ParseContext:
@@ -163,7 +166,7 @@ class ParseContext:
         default_factory=dict
     )
     children_defines: dict[str, list[KdlNode]] = field(default_factory=dict)
-    transforms: dict[str, list[KdlNode]] = field(default_factory=dict)
+    transforms: dict[str, TransformDef] = field(default_factory=dict)
     # TODO: reg init fields
     init: dict[str, dict[str, str]] = field(default_factory=dict)
 
@@ -396,7 +399,11 @@ class AstParser:
                     typedefs.append(self._typedef_from_struct(expr, module))
             else:
                 raise UnknownNodeError(node.name, "Unknown keyword node")
-        module.body.extend(typedefs + structs)
+        # wire TransformDef nodes into module (before typedefs and structs)
+        transform_defs = list(self.ctx.transforms.values())
+        for td in transform_defs:
+            td.parent = module
+        module.body.extend(transform_defs + typedefs + structs)
         return module
 
     def _parse_struct(self, kdl_nodes: list[KdlNode], parent: Struct):
@@ -487,7 +494,7 @@ class AstParser:
                 parent.body.append(expr)
 
     def _parse_expressions(
-        self, kdl_nodes: list[KdlNode], parent: FieldLikeNode
+        self, kdl_nodes: list[KdlNode], parent: FieldLikeNode, *, _add_return: bool = True
     ):
         if not kdl_nodes:
             return
@@ -496,7 +503,7 @@ class AstParser:
             # block define inlining: if the keyword is a children_define name,
             # expand it as if its children were written inline at this position
             if node.name in self.ctx.children_defines and node.name not in self._context_expressions:
-                self._parse_expressions(self.ctx.children_defines[node.name], parent)
+                self._parse_expressions(self.ctx.children_defines[node.name], parent, _add_return=False)
                 continue
             if cb := self._context_expressions.get(node.name):
                 expr = cb(node, parent, self.ctx)
@@ -509,10 +516,11 @@ class AstParser:
                 elif isinstance(expr, Match):
                     self._parse_match_expr(node.children, expr)
                 parent.body.append(expr)
-        # auto add last expr - return
-        last_ret = parent.body[-1].ret
-        parent.body.append(Return(parent=parent, ret=last_ret, accept=last_ret))
-        parent.ret = last_ret
+        # auto add last expr - return (only at the top-level call, not for inlined defines)
+        if _add_return and parent.body:
+            last_ret = parent.body[-1].ret
+            parent.body.append(Return(parent=parent, ret=last_ret, accept=last_ret))
+            parent.ret = last_ret
 
 
 PARSER = AstParser()
@@ -528,9 +536,62 @@ def reg_define(node: KdlNode, ctx: ParseContext):
         ctx.property_defines[pair[0]] = pair[1]
 
 
+_VAR_TYPE_MAP: dict[str, VariableType] = {
+    "STRING": VariableType.STRING,
+    "OPT_STRING": VariableType.OPT_STRING,
+    "LIST_STRING": VariableType.LIST_STRING,
+    "INT": VariableType.INT,
+    "OPT_INT": VariableType.OPT_INT,
+    "LIST_INT": VariableType.LIST_INT,
+    "FLOAT": VariableType.FLOAT,
+    "OPT_FLOAT": VariableType.OPT_FLOAT,
+    "LIST_FLOAT": VariableType.LIST_FLOAT,
+    "BOOL": VariableType.BOOL,
+    "NULL": VariableType.NULL,
+    "DOCUMENT": VariableType.DOCUMENT,
+    "LIST_DOCUMENT": VariableType.LIST_DOCUMENT,
+    "NESTED": VariableType.NESTED,
+    "JSON": VariableType.JSON,
+}
+
+
 @PARSER.register_module_context("transform")
 def reg_transform(node: KdlNode, ctx: ParseContext):
-    ctx.transforms[node.args[0]] = node.children
+    name = node.args[0]
+    accept_str = str(node.properties.get("accept", ""))
+    ret_str = str(node.properties.get("return", ""))
+
+    if accept_str not in _VAR_TYPE_MAP:
+        raise ParseError(f"transform '{name}': invalid accept type '{accept_str}' (AUTO not allowed)")
+    if ret_str not in _VAR_TYPE_MAP:
+        raise ParseError(f"transform '{name}': invalid return type '{ret_str}' (AUTO not allowed)")
+
+    accept_type = _VAR_TYPE_MAP[accept_str]
+    ret_type = _VAR_TYPE_MAP[ret_str]
+
+    transform_def = TransformDef(name=name, accept=accept_type, ret=ret_type)
+
+    # each child is a language block: py { import "..."; code "..." }
+    for lang_node in node.children:
+        lang = lang_node.name
+        imports: list[str] = []
+        code: list[str] = []
+
+        for item in lang_node.children:
+            if item.name == "import":
+                imports.extend(str(a) for a in item.args)
+            elif item.name == "code":
+                code.extend(str(a) for a in item.args)
+
+        target = TransformTarget(
+            parent=transform_def,
+            lang=lang,
+            imports=tuple(imports),
+            code=tuple(code),
+        )
+        transform_def.body.append(target)
+
+    ctx.transforms[name] = transform_def
 
 
 @PARSER.register_module_node("struct")
@@ -1246,4 +1307,23 @@ def reg_filter_or(node: KdlNode, parent: Filter, _: ParseContext):
     return LogicOr(parent=parent, accept=prev_type, ret=prev_type)
 
 
-# transform (TODO)
+# transform pipeline call
+@PARSER.register_expression_node("transform")
+def reg_expr_transform(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
+    name = node.args[0]
+    if name not in ctx.transforms:
+        raise BuildTimeError(f"transform '{name}' is not defined")
+    transform_def = ctx.transforms[name]
+    prev_type = parent.body[-1].ret
+    if prev_type != transform_def.accept:
+        raise BuildTimeError(
+            f"transform '{name}': pipeline type {prev_type.name!r} "
+            f"does not match accept type {transform_def.accept.name!r}"
+        )
+    return TransformCall(
+        parent=parent,
+        name=name,
+        accept=transform_def.accept,
+        ret=transform_def.ret,
+        transform_def=transform_def,
+    )

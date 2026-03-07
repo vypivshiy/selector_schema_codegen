@@ -10,9 +10,11 @@ from __future__ import annotations
 from tree_sitter import Node
 
 from ssc_codegen.kdl.linter.base import LINTER, LintContext, DefineKind
-from ssc_codegen.kdl.linter.type_rules import check_pipeline_types
+from ssc_codegen.kdl.linter.type_rules import check_pipeline_types, _parse_vt
 from ssc_codegen.kdl.ast.types import VariableType as VT
 from ssc_codegen.kdl.linter.type_rules import PIPELINE_TYPE_RULES
+
+_VALID_TRANSFORM_TYPES = frozenset({t.name for t in VT if t.name not in ("AUTO", "LIST_AUTO")})
 
 # ── known ops ──────────────────────────────────────────────────────────────────
 
@@ -41,6 +43,8 @@ _RESERVED_ALLOWED: dict[str, frozenset[str] | None] = {
 # all valid pipeline operation names
 _KNOWN_OPS: frozenset[str] = frozenset(PIPELINE_TYPE_RULES.keys()) | frozenset(
     {
+        # transform call (pipeline op — references a module-level transform)
+        "transform",
         # control
         "filter",
         "assert",
@@ -287,3 +291,132 @@ def rule_define(node: Node, ctx: LintContext) -> None:
             '  define MY_URL="https://example.com"\n'
             '  define EXTRACT { css "a"; attr "href" }',
         )
+
+
+# ── transform (module-level) ───────────────────────────────────────────────────
+
+
+@LINTER.rule("transform")
+def rule_transform(node: Node, ctx: LintContext) -> None:
+    """
+    Validate module-level transform definition:
+      transform NAME accept=TYPE return=TYPE { lang { import "..."; code "..." } ... }
+
+    Pipeline calls (transform <name> inside a field) are handled by type_rules
+    and have no accept=/return= props — skip them here.
+    """
+    # distinguish module-level definition from pipeline call:
+    # a definition always has accept= or return= properties; a call does not.
+    accept_str = ctx.get_prop(node, "accept")
+    ret_str = ctx.get_prop(node, "return")
+    lang_nodes = ctx.get_children_nodes(node)
+    is_definition = bool(accept_str or ret_str or lang_nodes)
+    if not is_definition:
+        # pipeline call — handled by type_rules; nothing to validate here
+        return
+
+    args = ctx.get_args(node)
+    if not args:
+        ctx.error(
+            node,
+            message="'transform' requires a name",
+            hint='example: transform to-base64 accept=STRING return=STRING { py { code "..." } }',
+        )
+        return
+
+    name = args[0]
+
+    # validate accept= and return= properties
+    accept_str = ctx.get_prop(node, "accept")
+    ret_str = ctx.get_prop(node, "return")
+
+    if not accept_str:
+        ctx.error(
+            node,
+            message=f"'transform {name}' missing required property 'accept'",
+            hint=f"example: transform {name} accept=STRING return=STRING {{ ... }}",
+        )
+    elif accept_str not in _VALID_TRANSFORM_TYPES:
+        ctx.error(
+            node,
+            message=f"'transform {name}': invalid accept type '{accept_str}' (AUTO is not allowed)",
+            hint=f"valid types: {', '.join(sorted(_VALID_TRANSFORM_TYPES))}",
+        )
+
+    if not ret_str:
+        ctx.error(
+            node,
+            message=f"'transform {name}' missing required property 'return'",
+            hint=f"example: transform {name} accept=STRING return=STRING {{ ... }}",
+        )
+    elif ret_str not in _VALID_TRANSFORM_TYPES:
+        ctx.error(
+            node,
+            message=f"'transform {name}': invalid return type '{ret_str}' (AUTO is not allowed)",
+            hint=f"valid types: {', '.join(sorted(_VALID_TRANSFORM_TYPES))}",
+        )
+
+    # validate language blocks
+    lang_nodes = ctx.get_children_nodes(node)
+    if not lang_nodes:
+        ctx.error(
+            node,
+            message=f"'transform {name}' has no language implementations",
+            hint="add at least one language block, e.g.: py { code \"{{NXT}} = {{PRV}}\" }",
+        )
+        return
+
+    for lang_node in lang_nodes:
+        lang = ctx.node_name(lang_node)
+        if not lang:
+            continue
+        # get impl nodes: support both multiline (proper [node] children)
+        # and single-line (bare [identifier] + [node_field] directly under [node_children])
+        impl_nodes = ctx.get_children_nodes(lang_node)
+        has_code = False
+
+        if impl_nodes:
+            # multiline format: code/import are proper child nodes
+            for impl_node in impl_nodes:
+                impl_name = ctx.node_name(impl_node)
+                if impl_name == "code":
+                    has_code = True
+                    if not ctx.get_args(impl_node):
+                        ctx.error(
+                            impl_node,
+                            message=f"'transform {name}' > '{lang}' > 'code' requires a string argument",
+                            hint='example: code "{{NXT}} = {{PRV}}"',
+                        )
+                elif impl_name == "import":
+                    if not ctx.get_args(impl_node):
+                        ctx.error(
+                            impl_node,
+                            message=f"'transform {name}' > '{lang}' > 'import' requires a string argument",
+                            hint='example: import "from base64 import b64decode"',
+                        )
+                elif impl_name:
+                    ctx.error(
+                        impl_node,
+                        message=f"'transform {name}' > '{lang}': unknown keyword '{impl_name}'",
+                        hint="only 'import' and 'code' are allowed inside language blocks",
+                    )
+        else:
+            # single-line format: code/import appear as bare identifiers
+            # directly under node_children of the lang node
+            for child in lang_node.children:
+                if child.type == "node_children":
+                    bare_names = [
+                        c.text.decode()
+                        for c in child.children
+                        if c.type == "identifier"
+                    ]
+                    if "code" in bare_names:
+                        has_code = True
+                    break
+
+        if not has_code:
+            ctx.error(
+                lang_node,
+                message=f"'transform {name}' > '{lang}' has no 'code' statement",
+                hint='add: code "{{NXT}} = {{PRV}}"',
+            )
