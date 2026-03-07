@@ -9,7 +9,8 @@
 5. [Pipeline](#5-pipeline)
 6. [define](#6-define)
 7. [transform](#7-transform)
-8. [json mapping](#8-json-mapping)
+8. [dsl / expr](#8-dsl--expr)
+9. [json mapping](#9-json-mapping)
 
 ---
 
@@ -22,6 +23,7 @@
 | `struct` | `name: str` | `type=item\|list\|dict\|table\|flat` | fields... |
 | `json` | `name: str` | `array=#true\|#false` (default `#false`) | fields... |
 | `transform` | `name: str` | `accept=TYPE return=TYPE` | lang blocks... |
+| `dsl` | `name: str` | `lang=LANG`, `accept=TYPE` (opt), `return=TYPE` (opt) | `import`, `code` |
 
 ```kdl
 doc "module description"
@@ -32,6 +34,7 @@ define RE_ID=#"(\d+)"#
 struct Book type=list { ... }
 json Author { ... }
 transform to-base64 accept=STRING return=STRING { ... }
+dsl STRIP lang="py" { code "{{NXT}} = {{PRV}}.strip()" }
 ```
 
 ---
@@ -315,7 +318,7 @@ transform name accept=TYPE return=TYPE {
 
 `accept` and `return` must be explicit `VariableType` values — `AUTO` is not allowed.
 
-Supported target languages: `py`, `js`.
+Supported target languages: `py`, `js`, `go`, `lua`, `ts`.
 
 ```kdl
 transform to-base64 accept=STRING return=STRING {
@@ -350,7 +353,64 @@ struct Demo {
 
 ---
 
-## 8. json mapping
+## 8. dsl / expr
+
+`dsl` declares a named inline code block for a specific target language at module level.
+`expr` calls a named `dsl` block (or block `define`) from inside a field pipeline.
+
+### dsl
+
+| keyword | args        | properties                        | children     |
+|---------|-------------|-----------------------------------|--------------|
+| `dsl`   | `name: str` | `lang=LANG`, `accept=TYPE` (opt), `return=TYPE` (opt) | `import`, `code` |
+
+`lang` must be one of: `py`, `js`, `go`, `lua`, `ts`.
+
+Children block:
+- `import "line1" "line2"` — optional; each arg is one import statement.
+- `code "line1" "line2"` — required; each arg is one line of code.
+
+**Markers in `code`:**
+
+| marker    | description                                          |
+| --------- | ---------------------------------------------------- |
+| `{{PRV}}` | variable holding the previous pipeline value (input) |
+| `{{NXT}}` | variable that will hold the result (output)          |
+
+```kdl
+dsl STRIP lang="py" {
+    code "{{NXT}} = {{PRV}}.strip()"
+}
+
+dsl DECODE_B64 lang="py" {
+    import "from base64 import b64decode"
+    code "{{NXT}} = b64decode({{PRV}}).decode()"
+}
+
+dsl TO_INT lang="js" {
+    code "const {{NXT}} = parseInt({{PRV}}, 10);"
+}
+```
+
+### expr
+
+| keyword | args        | properties | children |
+|---------|-------------|------------|----------|
+| `expr`  | `name: str` | —          | —        |
+
+`name` must refer to a `dsl` block or a block `define` declared at module level.
+Scalar `define` values cannot be used as `expr` targets.
+
+```kdl
+struct Demo {
+    title   { css "h1"; expr STRIP }
+    encoded { css ".b64"; attr "data-val"; expr DECODE_B64 }
+}
+```
+
+---
+
+## 9. json mapping
 
 Schema for deserializing a JSON string extracted from HTML.
 Used together with the `jsonify` operation.

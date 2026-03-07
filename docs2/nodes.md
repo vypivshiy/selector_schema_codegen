@@ -24,8 +24,10 @@
     - [Document](#document)
     - [List (assert only)](#list-assert-only)
     - [Logic](#logic)
-  - [14. Transform](#14-transform)
-  - [15. Node count summary](#15-node-count-summary)
+  - [15. Transform](#15-transform)
+  - [16. DSL / Expr](#16-dsl--expr)
+  - [17. OPT types](#17-opt-types)
+  - [18. Node count summary](#18-node-count-summary)
 
 ---
 
@@ -324,6 +326,16 @@ Used inside `Filter`, `Assert`, `Match` body. Combined with AND by default.
 | `PredCss` | `query: str` | element contains matching child |
 | `PredXpath` | `query: str` | element contains matching child |
 | `PredHasAttr` | `name: str` | element has the attribute |
+| `PredAttrEq` | `name: str`, `values: tuple[str, ...]` | attr value equals one of values (OR) |
+| `PredAttrNe` | `name: str`, `values: tuple[str, ...]` | attr value not equal (AND) |
+| `PredAttrStarts` | `name: str`, `values: tuple[str, ...]` | attr value starts with one of values (OR) |
+| `PredAttrEnds` | `name: str`, `values: tuple[str, ...]` | attr value ends with one of values (OR) |
+| `PredAttrContains` | `name: str`, `values: tuple[str, ...]` | attr value contains one of values (OR) |
+| `PredAttrRe` | `name: str`, `pattern: str` | attr value matches regex |
+| `PredTextStarts` | `values: tuple[str, ...]` | element text starts with one of values (OR) |
+| `PredTextEnds` | `values: tuple[str, ...]` | element text ends with one of values (OR) |
+| `PredTextContains` | `values: tuple[str, ...]` | element text contains one of values (OR) |
+| `PredTextRe` | `pattern: str` | element text matches regex |
 
 ### List (assert only)
 
@@ -332,6 +344,13 @@ Used inside `Filter`, `Assert`, `Match` body. Combined with AND by default.
 | `PredCountEq` | `value: int` | len == value |
 | `PredCountGt` | `value: int` | len > value |
 | `PredCountLt` | `value: int` | len < value |
+
+### Regex (assert only)
+
+| node | fields | notes |
+|------|--------|-------|
+| `PredReAny` | `pattern: str` | at least one element matches (assert only) |
+| `PredReAll` | `pattern: str` | all elements match (assert only) |
 
 ### Logic
 
@@ -343,7 +362,7 @@ Used inside `Filter`, `Assert`, `Match` body. Combined with AND by default.
 
 ---
 
-## 14. Transform
+## 15. Transform
 
 Declared at module level. Called in field pipelines via `TransformCall`.
 
@@ -368,12 +387,53 @@ TransformDef(name="to-base64", accept=STRING, ret=STRING)
 
 ---
 
-## 15. Node count summary
+## 16. DSL / Expr
+
+Declared at module level. `dsl` defines a named inline code snippet for a specific target language. `expr` calls a named `dsl` block (or block define) from within a field pipeline.
+
+| node | fields | description |
+|------|--------|-------------|
+| `DslDef` | `name: str`, `lang: str`, `imports: tuple[str, ...]`, `code: tuple[str, ...]` | module-level inline code block for a target language |
+| `ExprCall` | `name: str`, `accept: VariableType`, `ret: VariableType` | pipeline op — calls a named `dsl` block or block define |
+
+`ExprCall.accept` and `ret` are copied from the `dsl` definition or resolved from the block define at AST build time.
+Build-time error if name is not declared or refers to a scalar define.
+
+Valid `lang` values: `py`, `js`, `go`, `lua`, `ts`.
+
+```kdl
+dsl STRIP lang="py" {
+    code "{{NXT}} = {{PRV}}.strip()"
+}
+
+// usage in field pipeline:
+title { css "h1"; expr STRIP }
+```
+
+---
+
+## 17. OPT types
+
+Optional scalar types produced when `fallback #null` is used after a cast operation.
+
+| type | description |
+|------|-------------|
+| `OPT_STRING` | `STRING` or `null` |
+| `OPT_INT` | `INT` or `null` |
+| `OPT_FLOAT` | `FLOAT` or `null` |
+
+`OPT_*` types arise automatically when `fallback #null` terminates a pipeline that would otherwise return `STRING`, `INT`, or `FLOAT`.
+They are used as field return types in generated type annotations and `TypeDefField.ret_type`.
+
+---
+
+## 18. Node count summary
 
 | group | count |
 |-------|-------|
 | Module level | 6 |
 | Transform | 3 |
+| DSL / Expr | 2 |
 | TypeDef | 2 |
 | JsonDef | 2 |
 | Struct | 12 |
@@ -385,5 +445,5 @@ TransformDef(name="to-base64", accept=STRING, ret=STRING)
 | Cast | 5 |
 | Control | 3 |
 | Predicate containers | 3 |
-| Predicate ops | 20 |
-| **Total** | **87** |
+| Predicate ops | 30 |
+| **Total** | **99** |
