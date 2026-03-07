@@ -16,6 +16,8 @@ from ssc_codegen.kdl.ast import (
     TableConfig,
     TableMatchKey,
     TableRow,
+    FallbackStart,
+    FallbackEnd,
 )
 
 if TYPE_CHECKING:
@@ -185,8 +187,8 @@ class BaseConverter:
 
         if node.body:
             if isinstance(node, _PREDICATE_NODES):
-                # Predicate nodes: same ctx, no depth/index change
-                pred_ctx = replace(ctx, index=0)
+                # Predicate nodes: deeper indent, index resets to 0
+                pred_ctx = replace(ctx, depth=ctx.depth + 1, index=0)
                 for child in node.body:
                     self._collect(self._emit_node(child, pred_ctx), lines)
                     pred_ctx = pred_ctx.advance()
@@ -216,6 +218,9 @@ class BaseConverter:
         Emit pipeline nodes (Field.body, InitField.body, reserved field bodies).
         index advances after each node, depth is set by the caller.
 
+        FallbackStart/FallbackEnd are handled specially: nodes between them
+        are emitted at depth+1 so the try-block body is properly indented.
+
         Call this from within a Field/InitField handler:
 
             @CONVERTER(Field)
@@ -225,9 +230,32 @@ class BaseConverter:
                 return lines
         """
         lines: list[str] = []
+        in_fallback = False
+        fallback_ctx = ctx  # context used between FallbackStart and FallbackEnd
         for node in nodes:
-            self._collect(self._emit_node(node, ctx), lines)
-            ctx = ctx.advance()
+            if isinstance(node, FallbackStart):
+                in_fallback = True
+                self._collect(self._emit_node(node, ctx), lines)
+                # inner nodes start from same index so vN chains correctly
+                fallback_ctx = replace(ctx, depth=ctx.depth + 1)
+                # do NOT advance outer ctx — fallback body vars share index space
+                continue
+            elif isinstance(node, FallbackEnd):
+                in_fallback = False
+                # sync outer ctx index to last fallback index so that
+                # FallbackEnd.ctx.prv == last computed inner var (e.g. v3)
+                # and subsequent Return.ctx.prv is also correct
+                ctx = replace(ctx, index=fallback_ctx.index, depth=ctx.depth)
+                self._collect(self._emit_node(node, ctx), lines)
+                # do NOT advance — Return node must see the same prv
+                continue
+            if in_fallback:
+                self._collect(self._emit_node(node, fallback_ctx), lines)
+                fallback_ctx = fallback_ctx.advance()
+                ctx = replace(ctx, index=fallback_ctx.index)
+            else:
+                self._collect(self._emit_node(node, ctx), lines)
+                ctx = ctx.advance()
         return lines
 
     # ── public entry point ────────────────────────────────────────────────────
