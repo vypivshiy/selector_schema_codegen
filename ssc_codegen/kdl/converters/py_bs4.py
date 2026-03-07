@@ -27,6 +27,7 @@ from ssc_codegen.kdl.ast import (
 # struct layer
 from ssc_codegen.kdl.ast import (
     Field,
+    TableField,
     Init,
     InitField,
     PreValidate,
@@ -174,8 +175,7 @@ def pre_imports(node: Imports, _: ConverterContext):
 @PY_BASE_CONVERTER.post(Imports)
 def post_imports(node: Imports, _):
     return [
-        "from bs4 import BeautifulSoup",
-        "from bs4 import ResultSet, Tag  # noqa (typing)",
+        "from bs4 import BeautifulSoup, ResultSet, Tag",
         # todo: config from CLI
         "BS4_FEATURES = 'lxml'",
     ]
@@ -185,14 +185,19 @@ def post_imports(node: Imports, _):
 def pre_utilities(node: Utilities, _: ConverterContext):
     # TODO: helper functions
     return [
+        "_RE_HEX_ENTITY = re.compile(r'&#x([0-9a-fA-F]+);')",
+        "_RE_UNICODE_ENTITY = re.compile(r'\\\\u([0-9a-fA-F]{4})')",
+        "_RE_BYTES_ENTITY = re.compile(r'\\\\x([0-9a-fA-F]{2})')",
+        "_RE_CHARS_MAP = {'\\b': '\\b', '\\f': '\\f', '\\n': '\\n', '\\r': '\\r', '\\t': '\\t'}",
+        "\n",
         "def repl_map(s: str, rmap: Dict[str, str]) -> str",
         "    for k, v in rmap.items():",
         "        s = s.replace(k, v)",
         "    return s",
-        "",
+        "\n",
         "def normalize_text(text: str) -> str:",
         "    return ' '.join(text.split()) if text else \"\"",
-        "",
+        "\n",
         "def unseape_text(text: str) -> str:",
         "    _RE_HEX_ENTITY = re.compile(r'&#x([0-9a-fA-F]+);')",
         "    _RE_UNICODE_ENTITY = re.compile(r'\\\\u([0-9a-fA-F]{4})')",
@@ -205,22 +210,23 @@ def pre_utilities(node: Utilities, _: ConverterContext):
         "    for ch, r in _RE_CHARS_MAP.items():",
         "        s = s.replace(ch, r)",
         "    return s",
-        "",
+        "\n",
         # backport funcs
         "if sys.version_info > (3, 10):",
         "    def rm_prefix(s: str, p: str) -> str:",
         "        return s.removeprefix(p)",
-        "",
+        "\n",
         "    def rm_suffix(s: str, p: str) -> str:",
         "        return s.removesuffix(p)",
-        "",
+        "\n",
         "else:",
         "    def rm_prefix(s: str, p: str) -> str:",
         "        return s[len(p):] if s.startswith(p) else s",
-        "",
+        "\n",
         "    def rm_suffix(s: str, p: str) -> str:",
         "        return s[:-(len(p))] if s.endswith(p) else s",
-        "",
+        "\n\n",
+        "UNMATCHED_TABLE_ROW = object()"
     ]
 
 
@@ -291,50 +297,48 @@ def pre_struct_docstring(node: StructDocstring, ctx: ConverterContext):
 
 @PY_BASE_CONVERTER(StartParse)
 def pre_start_parse(node: StartParse, ctx: ConverterContext):
-    struct = node.parent
-    struct = cast(Struct, struct)
-    name = to_pascal_case(struct.name)
+    name = to_pascal_case(node.struct.name)
 
-    match struct.struct_type:
+    match node.struct_type:
         case StructType.ITEM:
             ret_type = f"{name}Type"
         case StructType.LIST:
             ret_type = f"List[{name}Type]"
         case StructType.FLAT:
-            ret_type = "Any"  # TODO
+            ret_type = "List[str]"  # TODO
         case StructType.DICT:
             ret_type = "Dict[str, str]"
         case StructType.TABLE:
             ret_type = f"{name}Type"
         case _:
             raise NotImplementedError(
-                "Unknown struct type", repr(struct.struct_type)
+                "Unknown struct type", repr(node.struct_type)
             )
     return f"{ctx.indent}def parse(self) -> {ret_type}:"
 
 
 @PY_BASE_CONVERTER.post(StartParse)
 def post_start_parse(node: StartParse, ctx: ConverterContext):
-    struct = node.parent
-    struct = cast(Struct, struct)
-    fields = [f for f in struct.body if isinstance(f, Field)]
-    names = [to_snake_case(f.name) for f in fields]
-    lines = []
+    lines: list[str] = []
+    if node.use_pre_validate:
+        lines.append(f"{ctx.indent * 2}self._pre_validate(self._doc)")
     # TODO: pre_validate call
     # TODO: move init fields here
-    match struct.struct_type:
+    match node.struct_type:
         case StructType.ITEM:
             # return {name: self_parse_name(self._doc), ...}
             lines.append(f"{ctx.indent * 2}return {{")
-            for name in names:
+            for field in node.fields:
+                name = to_snake_case(field.name)
                 lines.append(
                     f"{ctx.indent * 3}{name!r}: self._parse_{name}(self._doc),"
                 )
-            lines.append(f"{ctx.indent * 3}}}")
+            lines.append(f"{ctx.indent * 3} }}")
         case StructType.LIST:
             # return [{name, ...} for i in self._split_doc(self.document)]
             lines.append(f"{ctx.indent * 2} return [{{")
-            for name in names:
+            for field in node.fields:
+                name = to_snake_case(field.name)
                 lines.append(
                     f"{ctx.indent * 3}{name!r}: self._parse_{name}(i),"
                 )
@@ -345,13 +349,49 @@ def post_start_parse(node: StartParse, ctx: ConverterContext):
             lines.extend(
                 [
                     f"{ctx.indent * 2}return {{",
-                    f"{ctx.indent * 3} self._parse_key(i): _self._parse_value()",
+                    f"{ctx.indent * 3} self._parse_key(i): _self._parse_value(i)",
+                    f"{ctx.indent * 3} for i in self._split_doc(self._doc)",
+                    f"{ctx.indent * 3} }}",
                 ]
             )
         case StructType.FLAT:
-            raise NotImplementedError()  # TODO
+            lines.append(f"{ctx.indent * 2}result: List[str] = []")
+            for field in node.fields:
+                name = to_snake_case(field.name)
+                if field.ret == VariableType.STRING:
+                    lines.append(
+                        f"{ctx.indent * 2}result.append(self._parse_{name}(self._doc))"
+                    )
+                # LIST_STRING type
+                else:
+                    lines.append(
+                        f"{ctx.indent * 2}result.extend(self._parse_{name}(self._doc))"
+                    )
+            if node.struct.keep_order:
+                # py 3.7+ dict.fromkeys guaranteed keep order
+                lines.append(
+                    f"{ctx.indent * 2}return list(dict.fromkeys(result))"
+                )
+            else:
+                lines.append(f"{ctx.indent * 2}return list(set(result))")
         case StructType.TABLE:
-            raise NotImplementedError()  # TODO
+            # For each row in _table_rows(), run _table_match_key() to get the
+            # key string, then dispatch to the matching _parse_{field}() method.
+            # Result: {field_name: self._parse_{field}(row), ...} for the first
+            # row whose key matches each field's match predicate.
+            name = to_pascal_case(node.struct.name)
+            lines.append(f"{ctx.indent * 2}_result: {name}Type = {{}}")
+            lines.append(
+                f"{ctx.indent * 2}for _row in self._table_rows(self._doc):"
+            )
+            for f in node.fields:
+                fname = to_snake_case(f.name)
+                lines.append(
+                    f"{ctx.indent * 3}_{fname} = self._parse_{fname}(_row)"
+                )
+                lines.append(f"{ctx.indent * 3}if _{fname} != UNMATCHED_TABLE_ROW:")
+                lines.append(f"{ctx.indent * 4}_result[{fname!r}] = _{fname}")
+            lines.append(f"{ctx.indent * 2}return _result")
 
         case _:
             raise NotImplementedError
@@ -420,6 +460,20 @@ def pre_struct_field(node: Field, ctx: ConverterContext):
     return [
         f"    def _parse_{name}(self, v: Union[Tag, BeautifulSoup]) -> {ret_type}:"
     ]
+
+
+@PY_BASE_CONVERTER(TableField)
+def pre_struct_table_field(node: TableField, ctx: ConverterContext):
+    """Generate _parse_{name} method for a table struct field.
+
+    Table fields start with match { ... } which selects the matching row,
+    then subsequent ops work on the string value extracted by -value.
+    The method accepts a single table row (Tag) and returns the extracted
+    value, or UNMATCHED_TABLE_ROW sentinel if the row does not match.
+    """
+    name = to_snake_case(node.name)
+    ret_type = PY_TYPES.get(node.ret, "Any")
+    return [f"    def _parse_{name}(self, v: Union[Tag, BeautifulSoup]) -> Union[{ret_type}, object]:"]
 
 
 @PY_BASE_CONVERTER(PreValidate)
@@ -715,28 +769,42 @@ def pre_expr_unescape(node: Unescape, ctx: ConverterContext):
 
 
 # REGEX
-# TODO: handle patterns
+def _re_flags(node: Re | ReAll | ReSub | PredRe | PredReAll | PredReAny | PredTextRe | PredAttrRe) -> str:
+    """Build a trailing re-flags argument string, e.g. ', re.IGNORECASE' or
+    ', re.IGNORECASE | re.DOTALL', or '' when no flags are set."""
+    parts = []
+    if node.ignore_case:
+        parts.append("re.IGNORECASE")
+    if node.dotall:
+        parts.append("re.DOTALL")
+    return (", " + " | ".join(parts)) if parts else ""
+
+
 @PY_BASE_CONVERTER(Re)
 def pre_expr_re(node: Re, ctx: ConverterContext):
     pattern = repr(node.pattern)
-    # if node.accept == VariableType.STRING:
-    return f"{ctx.indent}{ctx.nxt} = re.search({pattern}, {ctx.prv})[1]"
+    flags = _re_flags(node)
+    if node.accept == VariableType.STRING:
+        return f"{ctx.indent}{ctx.nxt} = re.search({pattern}, {ctx.prv}{flags})[1]"
+    # LIST_STRING — map over items
+    return f"{ctx.indent}{ctx.nxt} = [re.search({pattern}, i{flags})[1] for i in {ctx.prv}]"
 
 
 @PY_BASE_CONVERTER(ReAll)
 def pre_expr_re_all(node: ReAll, ctx: ConverterContext):
     pattern = repr(node.pattern)
-    # if node.accept == VariableType.STRING:
-    return f"{ctx.indent}{ctx.nxt} = re.findall({pattern}, {ctx.prv})"
+    flags = _re_flags(node)
+    return f"{ctx.indent}{ctx.nxt} = re.findall({pattern}, {ctx.prv}{flags})"
 
 
 @PY_BASE_CONVERTER(ReSub)
 def pre_expr_re_sub(node: ReSub, ctx: ConverterContext):
     pattern = repr(node.pattern)
     repl = repr(node.repl)
+    flags = _re_flags(node)
     if node.accept == VariableType.STRING:
-        return f"{ctx.indent}{ctx.nxt} = re.sub({pattern}, {repl}, {ctx.prv})"
-    return f"{ctx.indent}{ctx.nxt} = [re.sub({pattern}, {repl}, i) for i in {ctx.prv}]"
+        return f"{ctx.indent}{ctx.nxt} = re.sub({pattern}, {repl}, {ctx.prv}{flags})"
+    return f"{ctx.indent}{ctx.nxt} = [re.sub({pattern}, {repl}, i{flags}) for i in {ctx.prv}]"
 
 
 # array
@@ -858,9 +926,24 @@ def post_expr_assert(node: Assert, ctx: ConverterContext):
 
 @PY_BASE_CONVERTER(Match)
 def pre_expr_match(node: Match, ctx: ConverterContext):
-    # if ({CONDS...}):
-    # TODO: WIP
-    return f"{ctx.indent}if ("
+    # _key = self._table_match_key(v)  — the row key to match against
+    # predicates use `i` as the current item (the key string)
+    # `i` alias lets all predicate handlers work unchanged inside match blocks
+    return [
+        f"{ctx.indent}i = self._table_match_key({ctx.prv})",
+        f"{ctx.indent}if not (",
+    ]
+
+
+@PY_BASE_CONVERTER.post(Match)
+def post_expr_match(node: Match, ctx: ConverterContext):
+    # close the condition; if it doesn't match, return sentinel
+    # if it matched, get the value cell via _parse_value and continue pipeline
+    return [
+        f"{ctx.indent}):",
+        f"{ctx.indent * 2}return UNMATCHED_TABLE_ROW",
+        f"{ctx.indent}{ctx.nxt} = self._parse_value({ctx.prv})",
+    ]
 
 
 @PY_BASE_CONVERTER(LogicAnd, post_callback=lambda _, ctx: ctx.indent * 3 + ")")
@@ -1050,8 +1133,9 @@ def pre_expr_pred_attr_ne(node: PredAttrNe, ctx: ConverterContext):
 def pre_expr_pred_attr_re(node: PredAttrRe, ctx: ConverterContext):
     name = node.name
     pattern = repr(node.pattern)
+    flags = _re_flags(node)
     # dont need check exists key
-    cond = f"bool(re.search({pattern}, (' '.join(i.get_attribute_list({name!r})))))"
+    cond = f"bool(re.search({pattern}, (' '.join(i.get_attribute_list({name!r}))){flags}))"
     if ctx.index == 0:
         return ctx.indent * 3 + cond
     return ctx.indent * 3 + f"and {cond}"
@@ -1101,7 +1185,8 @@ def pre_expr_pred_text_ends(node: PredTextEnds, ctx: ConverterContext):
 @PY_BASE_CONVERTER(PredTextRe)
 def pre_expr_pred_text_re(node: PredTextRe, ctx: ConverterContext):
     pattern = repr(node.pattern)
-    cond = f"bool(re.search({pattern}, i.text))"
+    flags = _re_flags(node)
+    cond = f"bool(re.search({pattern}, i.text{flags}))"
     if ctx.index == 0:
         return ctx.indent * 3 + cond
     return ctx.indent * 3 + f"and {cond}"
@@ -1179,9 +1264,9 @@ def pre_expr_pred_range(node: PredRange, ctx: ConverterContext):
 
 @PY_BASE_CONVERTER(PredRe)
 def pre_expr_pred_re(node: PredRe, ctx: ConverterContext):
-    # TODO: convert pattern in AST build step
     pattern = repr(node.pattern)
-    cond = f"bool(re.search({pattern}, i))"
+    flags = _re_flags(node)
+    cond = f"bool(re.search({pattern}, i{flags}))"
     if ctx.index == 0:
         return ctx.indent * 3 + cond
     return ctx.indent * 3 + f"and {cond}"
@@ -1191,7 +1276,8 @@ def pre_expr_pred_re(node: PredRe, ctx: ConverterContext):
 def pre_expr_pred_re_all(node: PredReAll, ctx: ConverterContext):
     # assert specific expr
     pattern = repr(node.pattern)
-    cond = f"all(re.search({pattern}, j) for j in i)"
+    flags = _re_flags(node)
+    cond = f"all(re.search({pattern}, j{flags}) for j in i)"
     if ctx.index == 0:
         return ctx.indent * 3 + cond
     return ctx.indent * 3 + f"and {cond}"
@@ -1201,7 +1287,8 @@ def pre_expr_pred_re_all(node: PredReAll, ctx: ConverterContext):
 def pre_expr_pred_re_any(node: PredReAny, ctx: ConverterContext):
     # assert specific expr
     pattern = repr(node.pattern)
-    cond = f"any(re.search({pattern}, j) for j in i)"
+    flags = _re_flags(node)
+    cond = f"any(re.search({pattern}, j{flags}) for j in i)"
     if ctx.index == 0:
         return ctx.indent * 3 + cond
     return ctx.indent * 3 + f"and {cond}"
