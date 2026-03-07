@@ -24,15 +24,21 @@ _ASSERT_ONLY_BLOCKS = frozenset({"assert"})
 
 
 def _in_predicate(node: Node, ctx: LintContext) -> bool:
-    """Return True if node's parent is a predicate block."""
-    return bool(node.parent and ctx.node_name(node.parent) in _PREDICATE_BLOCKS)
+    """Return True if node is inside a predicate block (walks up past node_children)."""
+    parent = node.parent
+    # tree-sitter wraps children in a 'node_children' CST node — skip it
+    if parent is not None and parent.type == "node_children":
+        parent = parent.parent
+    return bool(parent and ctx.node_name(parent) in _PREDICATE_BLOCKS)
 
 
 def _in_assert(node: Node, ctx: LintContext) -> bool:
-    """Return True if node's parent is an assert block."""
-    return bool(
-        node.parent and ctx.node_name(node.parent) in _ASSERT_ONLY_BLOCKS
-    )
+    """Return True if node is inside an assert block (walks up past node_children)."""
+    parent = node.parent
+    # tree-sitter wraps children in a 'node_children' CST node — skip it
+    if parent is not None and parent.type == "node_children":
+        parent = parent.parent
+    return bool(parent and ctx.node_name(parent) in _ASSERT_ONLY_BLOCKS)
 
 
 def _require_predicate_ctx(node: Node, ctx: LintContext) -> bool:
@@ -260,19 +266,32 @@ def rule_split_join(node: Node, ctx: LintContext) -> None:
 @LINTER.rule("re")
 def rule_re(node: Node, ctx: LintContext) -> None:
     name = ctx.node_name(node)
+    raw_args = ctx.get_raw_args(node)
     args = _require_args_count(node, ctx, exact=1, example=f'{name} #"(\\d+)"#')
     if not args:
         return
-    if not _validate_regex(node, ctx, args[0]):
+    # resolve define ref: if arg is an identifier, look up its scalar value
+    pattern = args[0]
+    if raw_args and raw_args[0].is_identifier:
+        resolved = ctx.resolve_scalar_arg(pattern)
+        if resolved is None:
+            # block define — can't validate pattern statically, skip
+            return
+        if resolved == pattern and pattern not in ctx.defines:
+            # unknown identifier, not a define — let wildcard rule handle it
+            pass
+        else:
+            pattern = resolved
+    if not _validate_regex(node, ctx, pattern):
         return
     # capture group check только для pipeline op (не в предикатном контексте)
     if not _in_predicate(node, ctx):
-        groups = re.compile(args[0]).groups
+        groups = re.compile(pattern).groups
         if groups == 0:
             ctx.error(
                 node,
                 message=f"'{name}' pattern must have exactly one capture group",
-                hint=f'wrap the match in a group: {name} #"({args[0]})"#',
+                hint=f'wrap the match in a group: {name} #"({pattern})"#',
             )
         elif groups > 1:
             ctx.error(

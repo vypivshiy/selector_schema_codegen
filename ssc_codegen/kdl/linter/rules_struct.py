@@ -24,7 +24,7 @@ _REQUIRED_RESERVED: dict[str, frozenset[str]] = {
     "item": frozenset(),
     "list": frozenset({"-split-doc"}),
     "dict": frozenset({"-key", "-value"}),
-    "table": frozenset({"-table", "-row", "-match", "-value"}),
+    "table": frozenset({"-table", "-rows", "-match", "-value"}),
     "flat": frozenset(),
 }
 
@@ -36,7 +36,7 @@ _RESERVED_ALLOWED: dict[str, frozenset[str] | None] = {
     "-key": frozenset({"dict"}),
     "-value": frozenset({"dict", "table"}),
     "-table": frozenset({"table"}),
-    "-row": frozenset({"table"}),
+    "-rows": frozenset({"table"}),
     "-match": frozenset({"table"}),
 }
 
@@ -174,7 +174,7 @@ def rule_struct(node: Node, ctx: LintContext) -> None:
         if field_name.startswith("-"):
             _check_reserved_field(field_node, field_name, struct_type, ctx)
         else:
-            _check_regular_field(field_node, field_name, ctx)
+            _check_regular_field(field_node, field_name, ctx, struct_type=struct_type)
 
     ctx.pop()
 
@@ -242,7 +242,13 @@ def _check_reserved_field(
 # ── regular field checks ───────────────────────────────────────────────────────
 
 
-def _check_regular_field(node: Node, field_name: str, ctx: LintContext) -> None:
+def _check_regular_field(
+    node: Node,
+    field_name: str,
+    ctx: LintContext,
+    *,
+    struct_type: str = "item",
+) -> None:
     ctx.push(field_name)
     ops = ctx.get_children_nodes(node)
     if not ops:
@@ -252,9 +258,20 @@ def _check_regular_field(node: Node, field_name: str, ctx: LintContext) -> None:
             hint=f'add at least one operation: {field_name} {{ css ".item"; text }}',
         )
     else:
-        # determine start type: DOCUMENT, or self-ref type from -init
+        # For table fields the pipeline starts with 'match { ... }' which
+        # accepts DOCUMENT and returns STRING (the value cell from -value).
+        # So start_type is always DOCUMENT here — match handles the transition.
+        # For regular fields: DOCUMENT, unless self-ref from -init.
         start = VT.DOCUMENT
-        if ops and ctx.node_name(ops[0]) == "self":
+        if struct_type == "table":
+            # table fields MUST start with match { ... }
+            if not ops or ctx.node_name(ops[0]) != "match":
+                ctx.error(
+                    node,
+                    message=f"table field '{field_name}' must start with 'match {{ ... }}'",
+                    hint=f"example: {field_name} {{ match {{ eq \"value\" }} }}",
+                )
+        elif ops and ctx.node_name(ops[0]) == "self":
             init_name = ctx.get_arg(ops[0], 0)
             if init_name and init_name in ctx.inferred_define_types:
                 _, start = ctx.inferred_define_types[init_name]

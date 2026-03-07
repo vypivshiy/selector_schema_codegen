@@ -31,8 +31,6 @@ define (field usage) — block defines can be referenced inside field pipelines.
 
 from __future__ import annotations
 
-import re
-
 from tree_sitter import Node
 
 from ssc_codegen.kdl.linter.base import LINTER, LintContext, DefineKind
@@ -40,12 +38,8 @@ from ssc_codegen.kdl.linter.base import LINTER, LintContext, DefineKind
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 
-# Valid target-language tags for dsl blocks
-_VALID_LANGS: frozenset[str] = frozenset({"py", "js", "go", "lua", "ts"})
-
 # Valid VariableType names for dsl accept= / return= properties
 _VALID_VT_NAMES: frozenset[str] = frozenset({
-    "AUTO", "LIST_AUTO",
     "DOCUMENT", "LIST_DOCUMENT",
     "STRING", "LIST_STRING",
     "INT", "LIST_INT",
@@ -106,14 +100,7 @@ def rule_dsl(node: Node, ctx: LintContext) -> None:
             message=f"'dsl {name}' is missing required 'lang' property",
             hint=(
                 f'specify target language: dsl {name} lang="py" {{ ... }}\n'
-                f"valid languages: {', '.join(sorted(_VALID_LANGS))}"
             ),
-        )
-    elif lang not in _VALID_LANGS:
-        ctx.warning(
-            node,
-            message=f"'dsl {name}': unknown language tag '{lang}'",
-            hint=f"known languages: {', '.join(sorted(_VALID_LANGS))}",
         )
 
     # 3. accept= / return= properties (optional, but if present must be valid types)
