@@ -13,8 +13,9 @@ Behavioural notes (established empirically):
 - `fallback ""` on LIST_DOCUMENT produces a type mismatch error.
 - `fallback {}` (empty-list sugar) requires a children block on a new line.
   Written as bare `fallback` with a children block.
-- `transform` is an unknown op at the pipeline walker level (wildcard rule),
-  but `check_pipeline_types` handles it specially. Type mismatch IS reported.
+- `transform <name>` is a pipeline call op. The linter looks up the transform
+  by name in ctx.transforms (collected from module-level transform definitions).
+  Type mismatch IS reported when the pipeline type doesn't match accept=TYPE.
 - `-init` sub-pipeline names fire "unknown operation" in the wildcard rule
   (they are not registered ops). The -init structural check still passes.
 - `match` node fires the `filter/assert/match` rule requiring children;
@@ -168,23 +169,33 @@ class TestValidPipelines:
     def test_repl_on_string(self):
         assert no_errors(field('css ".x"', "text", 'repl "a" "b"'))
 
-    def test_transform_no_contract_fires_wildcard_error(self):
-        # transform is not registered as a pipeline op rule — the wildcard
-        # "unknown operation" fires. check_pipeline_types handles it internally
-        # but the walker's wildcard catches it first.
+    def test_transform_no_name_fires_error(self):
+        # transform with no name argument fires a name-required error
         msgs = lint(field('css ".x"', "text", "transform"))
-        assert any("unknown operation" in m for m in msgs)
+        assert any("requires a name argument" in m for m in msgs)
 
-    def test_transform_with_contract_fires_wildcard_error(self):
-        # Even with accept/return props, the wildcard rule fires for transform
-        msgs = lint(field('css ".x"', "text", 'transform accept="STRING" return="INT"'))
-        assert any("unknown operation" in m for m in msgs)
+    def test_transform_undefined_fires_error(self):
+        # transform referencing an undefined name fires not-defined error
+        msgs = lint(field('css ".x"', "text", "transform nonexistent"))
+        assert any("is not defined" in m for m in msgs)
 
-    def test_transform_type_mismatch_fires_both_errors(self):
-        # Type mismatch AND wildcard "unknown operation" both fire
-        msgs = lint(field('css ".x"', 'transform accept="STRING" return="INT"'))
-        assert any("expects STRING" in m for m in msgs)
-        assert any("unknown operation" in m for m in msgs)
+    def test_transform_valid_call_no_errors(self):
+        # transform referencing a defined transform with matching types is valid
+        src = (
+            "transform to-str accept=STRING return=STRING {\n"
+            "    py {\n"
+            '        code "{{NXT}} = {{PRV}}"\n'
+            "    }\n"
+            "}\n"
+            "struct S {\n"
+            "    f {\n"
+            '        css ".x"\n'
+            "        text\n"
+            "        transform to-str\n"
+            "    }\n"
+            "}\n"
+        )
+        assert no_errors(src)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -279,11 +290,22 @@ class TestTypeMismatches:
         assert any("does not accept" in m for m in msgs)
 
     def test_transform_type_mismatch_error(self):
-        # css ".x" → DOCUMENT; transform accept="STRING" → type mismatch
-        # Both "expects STRING" (type check) and "unknown operation" (wildcard) fire
-        msgs = lint(field('css ".x"', 'transform accept="STRING" return="INT"'))
+        # css ".x" → DOCUMENT; transform to-str expects STRING → type mismatch
+        src = (
+            "transform to-str accept=STRING return=INT {\n"
+            "    py {\n"
+            '        code "{{NXT}} = int({{PRV}})"\n'
+            "    }\n"
+            "}\n"
+            "struct S {\n"
+            "    f {\n"
+            '        css ".x"\n'
+            "        transform to-str\n"
+            "    }\n"
+            "}\n"
+        )
+        msgs = lint(src)
         assert any("expects STRING" in m for m in msgs)
-        assert any("unknown operation" in m for m in msgs)
 
     @pytest.mark.parametrize("op", ["trim", "lower", "upper", "normalize-space",
                                      "to-int", "to-float", 'split " "'])

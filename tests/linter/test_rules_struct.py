@@ -135,7 +135,7 @@ class TestStructRule:
         src = (
             'struct S type="table" {\n'
             '  -table {\n    css ".t"\n  }\n'
-            '  -row {\n    css ".r"\n  }\n'
+            '  -rows {\n    css ".r"\n  }\n'
             '  -match {\n    css ".m"\n    text\n  }\n'
             '  -value {\n    css ".v"\n    text\n  }\n'
             "}\n"
@@ -282,7 +282,7 @@ class TestReservedFields:
     def test_row_invalid_in_item_error(self):
         src = (
             'struct S type="item" {\n'
-            '  -row {\n    css ".r"\n  }\n'
+            '  -rows {\n    css ".r"\n  }\n'
             '  title {\n    css ".x"\n    text\n  }\n'
             "}\n"
         )
@@ -525,6 +525,8 @@ class TestWildcardUnknownOp:
                     "attr-eq", "attr-ne", "attr-starts", "attr-ends", "attr-re",
                     "text-re", "text-starts", "text-ends", "text-contains",
                     "re-any", "gt", "lt", "ge", "le", "transform",
+                    # module-level keywords — not reported as unknown ops inside pipelines
+                    "struct", "json", "define", "dsl", "expr",
                 }
             )
         )
