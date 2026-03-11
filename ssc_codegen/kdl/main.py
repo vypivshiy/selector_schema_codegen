@@ -81,6 +81,13 @@ def generate(
             help="Print full tracebacks on errors and enable DEBUG logging.",
         ),
     ] = False,
+    skip_lint: Annotated[
+        bool,
+        typer.Option(
+            "--skip-lint",
+            help="Skip linting before code generation.",
+        ),
+    ] = False,
 ) -> None:
     """Compile KDL schema files into parser code for the chosen target."""
     from ssc_codegen.kdl import parse_ast
@@ -89,8 +96,8 @@ def generate(
         setup_debug_logging()
 
     logger.debug(
-        "generate() started: target=%s, output=%s, files=%s",
-        target, output, [str(f) for f in files],
+        "generate() started: target=%s, output=%s, files=%s, skip_lint=%s",
+        target, output, [str(f) for f in files], skip_lint,
     )
 
     # Collect all .kdl files from arguments (expand directories)
@@ -111,6 +118,23 @@ def generate(
         raise typer.Exit(code=1)
 
     logger.debug("total %d .kdl file(s) to process", len(kdl_files))
+
+    # Lint all files first (unless --skip-lint)
+    if not skip_lint:
+        from ssc_codegen.kdl.linter import lint_file
+        
+        lint_errors_found = False
+        for kdl_file in kdl_files:
+            errors, output = lint_file(kdl_file)
+            if errors:
+                lint_errors_found = True
+                typer.echo(f"\n{output}", err=True)
+        
+        if lint_errors_found:
+            typer.echo("\nLinting failed. Use --skip-lint to bypass linter.", err=True)
+            raise typer.Exit(code=1)
+        
+        logger.debug("linting passed for all files")
 
     output.mkdir(parents=True, exist_ok=True)
     ext = _FILE_EXTENSIONS[target]
@@ -137,6 +161,81 @@ def generate(
 
     if errors:
         raise typer.Exit(code=1)
+
+
+@app.command()
+def check(
+    files: Annotated[
+        List[Path],
+        typer.Argument(
+            help="One or more .kdl schema files or directories containing .kdl files to check.",
+            exists=True,
+            file_okay=True,
+            dir_okay=True,
+            readable=True,
+        ),
+    ],
+    fmt: Annotated[
+        str,
+        typer.Option(
+            "--format",
+            "-f",
+            help="Output format: 'text' (human-readable) or 'json' (for LLM pipelines).",
+        ),
+    ] = "text",
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose", "-v",
+            help="Enable DEBUG logging.",
+        ),
+    ] = False,
+) -> None:
+    """Check KDL schema files for errors without generating code."""
+    from ssc_codegen.kdl.linter import lint_file
+    
+    if verbose:
+        setup_debug_logging()
+    
+    logger.debug("check() started: files=%s, format=%s", [str(f) for f in files], fmt)
+    
+    # Collect all .kdl files from arguments (expand directories)
+    kdl_files: list[Path] = []
+    for path in files:
+        if path.is_dir():
+            found = sorted(path.rglob("*.kdl"))
+            logger.debug("  directory %s: found %d .kdl file(s)", path, len(found))
+            kdl_files.extend(found)
+        elif path.is_file():
+            kdl_files.append(path)
+        else:
+            typer.echo(f"  WARNING: {path} is neither a file nor a directory, skipping", err=True)
+    
+    if not kdl_files:
+        typer.echo("No .kdl files found to check.", err=True)
+        raise typer.Exit(code=1)
+    
+    logger.debug("total %d .kdl file(s) to check", len(kdl_files))
+    
+    # Check all files
+    all_errors = []
+    for kdl_file in kdl_files:
+        errors, output = lint_file(kdl_file, fmt=fmt)  # type: ignore
+        if errors:
+            all_errors.extend(errors)
+            typer.echo(output, err=True)
+    
+    if all_errors:
+        if fmt == "text":
+            typer.echo(f"\nFound {len(all_errors)} error(s) in {len(kdl_files)} file(s).", err=True)
+        raise typer.Exit(code=1)
+    
+    # Success
+    if fmt == "text":
+        typer.echo(f"✓ All {len(kdl_files)} file(s) passed linting.")
+    else:
+        # JSON: empty array means no errors
+        typer.echo("[]")
 
 
 def main() -> None:
