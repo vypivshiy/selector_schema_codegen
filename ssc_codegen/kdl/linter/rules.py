@@ -207,9 +207,7 @@ def rule_attr(node: Node, ctx: LintContext) -> None:
 # ── string ─────────────────────────────────────────────────────────────────────
 
 
-@LINTER.rule(
-    "normalize-space", "lower", "upper", "unescape", "trim", "ltrim", "rtrim"
-)
+@LINTER.rule("normalize-space", "lower", "upper", "unescape")
 def rule_string_no_args(node: Node, ctx: LintContext) -> None:
     name = ctx.node_name(node)
     if ctx.get_args(node):
@@ -217,6 +215,19 @@ def rule_string_no_args(node: Node, ctx: LintContext) -> None:
             node,
             message=f"'{name}' does not accept arguments",
             hint=f"remove arguments: use just '{name}'",
+        )
+
+
+@LINTER.rule("trim", "ltrim", "rtrim")
+def rule_trim(node: Node, ctx: LintContext) -> None:
+    """trim/ltrim/rtrim can optionally accept 1 argument (characters to remove)."""
+    args = ctx.get_args(node)
+    if len(args) > 1:
+        name = ctx.node_name(node)
+        ctx.error(
+            node,
+            message=f"'{name}' accepts at most 1 argument",
+            hint=f'example: {name}  or  {name} "chars"',
         )
 
 
@@ -231,7 +242,8 @@ def rule_fmt(node: Node, ctx: LintContext) -> None:
     args = _require_args_count(
         node, ctx, exact=1, example='fmt "prefix-{{}}-suffix"'
     )
-    if args and "{{}}" not in args[0]:
+    # Allow constant/define references (uppercase identifiers) or string literals with {{}}
+    if args and not (args[0].isupper() or "{{}}" in args[0]):
         ctx.error(
             node,
             message="'fmt' template is missing the '{{}}' placeholder",
@@ -386,17 +398,30 @@ def rule_nested(node: Node, ctx: LintContext) -> None:
 
 @LINTER.rule("self")
 def rule_self(node: Node, ctx: LintContext) -> None:
-    _require_args_count(node, ctx, exact=1, example="self field-name")
+    args = _require_args_count(node, ctx, exact=1, example="self field-name")
+    if args:
+        field_name = args[0]
+        if field_name not in ctx.init_fields:
+            ctx.error(
+                node,
+                message=f"'self {field_name}': field '{field_name}' not found in -init block",
+                hint=f"declare it in -init: -init {{ {field_name} {{ ... }} }}"
+            )
 
 
 @LINTER.rule("fallback")
 def rule_fallback(node: Node, ctx: LintContext) -> None:
-    _require_args_count(
-        node,
-        ctx,
-        exact=1,
-        example='fallback ""  or  fallback 0  or  fallback #null',
-    )
+    # Allow empty blocks {} for empty list/dict fallbacks
+    children = ctx.get_children_nodes(node)
+    args = ctx.get_args(node)
+    has_empty_block = ctx.has_empty_block(node)
+    
+    if not args and not children and not has_empty_block:
+        ctx.error(
+            node,
+            message="'fallback' requires exactly 1 argument or a block",
+            hint='example: fallback ""  or  fallback 0  or  fallback #null  or  fallback {}',
+        )
 
 
 # ── predicate containers ───────────────────────────────────────────────────────
@@ -411,7 +436,19 @@ def rule_predicate_container(node: Node, ctx: LintContext) -> None:
             message=f"'{name}' does not accept arguments",
             hint=f"move expressions into the children block: {name} {{ ... }}",
         )
-    if not ctx.get_children_nodes(node):
+    
+    children = ctx.get_children_nodes(node)
+    # Check for single-line syntax (operations as bare identifiers in node_children)
+    has_single_line = False
+    if not children:
+        for child in node.children:
+            if child.type == "node_children":
+                identifiers = [c for c in child.children if c.type == "identifier"]
+                if identifiers:
+                    has_single_line = True
+                break
+    
+    if not children and not has_single_line:
         ctx.error(
             node,
             message=f"'{name}' block must contain at least one predicate expression",
@@ -428,7 +465,19 @@ def rule_logic_container(node: Node, ctx: LintContext) -> None:
             message=f"'{name}' does not accept arguments",
             hint=f"move expressions into the children block: {name} {{ ... }}",
         )
-    if not ctx.get_children_nodes(node):
+    
+    children = ctx.get_children_nodes(node)
+    # Check for single-line syntax (operations as bare identifiers in node_children)
+    has_single_line = False
+    if not children:
+        for child in node.children:
+            if child.type == "node_children":
+                identifiers = [c for c in child.children if c.type == "identifier"]
+                if identifiers:
+                    has_single_line = True
+                break
+    
+    if not children and not has_single_line:
         ctx.error(
             node,
             message=f"'{name}' block must contain at least one predicate expression",

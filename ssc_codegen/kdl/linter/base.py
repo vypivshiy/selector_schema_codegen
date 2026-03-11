@@ -97,6 +97,8 @@ class LintContext:
     transforms: dict[str, TransformInfo] = field(default_factory=dict)
     # cache for block-define inferred (accept, ret) pairs — populated lazily
     inferred_define_types: dict[str, tuple] = field(default_factory=dict)
+    # InitField names from -init blocks (for validating 'self' references)
+    init_fields: set[str] = field(default_factory=set)
 
     # ── path ───────────────────────────────────────────────────────────────────
 
@@ -185,6 +187,23 @@ class LintContext:
             if child.type == "node_children":
                 return [c for c in child.children if c.type == "node"]
         return []
+    
+    def has_empty_block(self, node: Node) -> bool:
+        """Check if node has an empty {} block (node_children with no child nodes)."""
+        for child in node.children:
+            if child.type == "node_children":
+                # Has node_children, check if it's empty
+                return not any(c.type == "node" for c in child.children)
+        return False
+    
+    def has_single_line_op(self, node: Node, op_name: str) -> bool:
+        """Check if node has a single-line operation like 'nested News' (not wrapped in node)."""
+        for child in node.children:
+            if child.type == "node_children":
+                # Look for identifier matching op_name as direct child
+                identifiers = [c for c in child.children if c.type == "identifier"]
+                return len(identifiers) == 1 and identifiers[0].text.decode() == op_name
+        return False
 
     def is_define_ref(self, arg: str) -> bool:
         return arg in self.defines
@@ -405,6 +424,7 @@ class AstLinter:
         ctx: LintContext,
         _in_pipeline: bool = False,
         _in_struct_field: bool = False,
+        _in_json: bool = False,
     ) -> None:
         """
         Walk the CST. _in_pipeline=True means we are inside a field pipeline
@@ -415,10 +435,13 @@ class AstLinter:
         struct body (i.e. a field name like 'urls' or '-split-doc').
         Its children are pipeline operations and must be walked with
         _in_pipeline=True.
+        
+        _in_json=True means we are inside a json definition where fields
+        have type annotations, not pipeline operations.
         """
         if node.type != "node":
             for child in node.children:
-                self._walk(child, ctx, _in_pipeline, _in_struct_field)
+                self._walk(child, ctx, _in_pipeline, _in_struct_field, _in_json)
             return
 
         name = ctx.node_name(node)
@@ -428,14 +451,16 @@ class AstLinter:
         ctx.push(name)
 
         # dispatch specific rules
-        specific = self._rules.get(name)
-        if specific:
-            for fn in specific:
-                fn(node, ctx)
-        elif _in_pipeline:
-            # no specific rule + inside pipeline → wildcard
-            for fn in self._rules.get("*", []):
-                fn(node, ctx)
+        # Skip rule checks for JSON type annotations
+        if not _in_json:
+            specific = self._rules.get(name)
+            if specific:
+                for fn in specific:
+                    fn(node, ctx)
+            elif _in_pipeline:
+                # no specific rule + inside pipeline → wildcard
+                for fn in self._rules.get("*", []):
+                    fn(node, ctx)
 
         # Determine pipeline flag for children:
         #   - module-level keywords (struct, define, …): children are NOT ops
@@ -445,18 +470,34 @@ class AstLinter:
         if name in _MODULE_KEYWORDS:
             # struct / define / json / transform — children are fields/directives
             child_in_pipeline = False
-            child_in_struct_field = name == "struct"
+            # Both 'struct' and 'json' have children that are field definitions
+            child_in_struct_field = name in ("struct", "json")
+            child_in_json = (name == "json")
         elif _in_struct_field:
             # this node IS the field name; its children are pipeline ops
-            child_in_pipeline = True
-            child_in_struct_field = False
+            # EXCEPT for -init: its children are InitField definitions (like struct fields)
+            # EXCEPT for json: its children are type annotations, not operations
+            if name == "-init":
+                child_in_pipeline = False
+                child_in_struct_field = True  # Children are InitField names
+                child_in_json = False
+            elif _in_json:
+                # JSON field - children are type annotations, not operations
+                child_in_pipeline = False
+                child_in_struct_field = False
+                child_in_json = True
+            else:
+                child_in_pipeline = True
+                child_in_struct_field = False
+                child_in_json = False
         else:
             # already inside a pipeline: keep propagating
             child_in_pipeline = _in_pipeline
             child_in_struct_field = False
+            child_in_json = _in_json
 
         for child in ctx.get_children_nodes(node):
-            self._walk(child, ctx, child_in_pipeline, child_in_struct_field)
+            self._walk(child, ctx, child_in_pipeline, child_in_struct_field, child_in_json)
 
         ctx.pop()
 

@@ -23,7 +23,7 @@ _VALID_STRUCT_TYPES = frozenset({"item", "list", "dict", "table", "flat"})
 _REQUIRED_RESERVED: dict[str, frozenset[str]] = {
     "item": frozenset(),
     "list": frozenset({"-split-doc"}),
-    "dict": frozenset({"-key", "-value"}),
+    "dict": frozenset({"-split-doc", "-key", "-value"}),  # dict requires all three
     "table": frozenset({"-table", "-rows", "-match", "-value"}),
     "flat": frozenset(),
 }
@@ -32,7 +32,7 @@ _RESERVED_ALLOWED: dict[str, frozenset[str] | None] = {
     "-doc": None,
     "-pre-validate": None,
     "-init": None,
-    "-split-doc": frozenset({"list"}),
+    "-split-doc": frozenset({"list", "dict"}),  # dict can also use -split-doc
     "-key": frozenset({"dict"}),
     "-value": frozenset({"dict", "table"}),
     "-table": frozenset({"table"}),
@@ -220,7 +220,26 @@ def _check_reserved_field(
                 sub_name = ctx.node_name(sub)
                 if not sub_name:
                     continue
+                # Register InitField name for 'self' validation
+                ctx.init_fields.add(sub_name)
                 sub_ops = ctx.get_children_nodes(sub)
+                
+                # Check for single-line define reference (e.g., { CSS-ALL-ATTRS })
+                if not sub_ops:
+                    # Look for a single identifier in node_children (define reference)
+                    for child in sub.children:
+                        if child.type == "node_children":
+                            identifiers = [c for c in child.children if c.type == "identifier"]
+                            if len(identifiers) == 1:
+                                define_name = identifiers[0].text.decode()
+                                if define_name in ctx.defines and ctx.defines[define_name].kind == DefineKind.BLOCK:
+                                    # Expand the define block and get its operations
+                                    from ssc_codegen.kdl.linter.type_rules import _get_define_ops
+                                    expanded_ops = _get_define_ops(define_name, ctx)
+                                    if expanded_ops:
+                                        sub_ops = expanded_ops
+                            break
+                
                 if sub_ops:
                     ret = check_pipeline_types(
                         sub_ops, ctx, start_type=VT.DOCUMENT
@@ -229,14 +248,31 @@ def _check_reserved_field(
         return
 
     ops = ctx.get_children_nodes(node)
+    
+    # Check for single-line operations (e.g., { css-all ".item" } or { attr "name" })
+    # These appear as identifiers directly in node_children, not as wrapped nodes
+    has_single_line = False
     if not ops:
+        # Check if there's at least one identifier (operation) in the node_children
+        for child in node.children:
+            if child.type == "node_children":
+                identifiers = [c for c in child.children if c.type == "identifier"]
+                if identifiers:
+                    has_single_line = True
+                break
+    
+    if not ops and not has_single_line:
         ctx.error(
             node,
             message=f"'{field_name}' block must contain at least one operation",
             hint=f'example: {field_name} {{ css ".item" }}',
         )
     else:
-        check_pipeline_types(ops, ctx, start_type=VT.DOCUMENT)
+        # For -key and -value in dict, allow 'attr' and other selector operations
+        # For -split-doc, allow css-all and other selector operations  
+        # Skip type checking for single-line ops (they're not in standard node format)
+        if ops:
+            check_pipeline_types(ops, ctx, start_type=VT.DOCUMENT)
 
 
 # ── regular field checks ───────────────────────────────────────────────────────
@@ -251,31 +287,43 @@ def _check_regular_field(
 ) -> None:
     ctx.push(field_name)
     ops = ctx.get_children_nodes(node)
+    
+    # Check if field has only 'nested' - this is valid, skip type checking
+    # Handle both multiline (nested as a node) and single-line ({ nested MyStruct })
+    if len(ops) == 1 and ctx.node_name(ops[0]) == "nested":
+        ctx.pop()
+        return
+    if len(ops) == 0 and ctx.has_single_line_op(node, "nested"):
+        ctx.pop()
+        return
+    
     if not ops:
         ctx.error(
             node,
             message=f"field '{field_name}' has no operations",
             hint=f'add at least one operation: {field_name} {{ css ".item"; text }}',
         )
-    else:
-        # For table fields the pipeline starts with 'match { ... }' which
-        # accepts DOCUMENT and returns STRING (the value cell from -value).
-        # So start_type is always DOCUMENT here — match handles the transition.
-        # For regular fields: DOCUMENT, unless self-ref from -init.
-        start = VT.DOCUMENT
-        if struct_type == "table":
-            # table fields MUST start with match { ... }
-            if not ops or ctx.node_name(ops[0]) != "match":
-                ctx.error(
-                    node,
-                    message=f"table field '{field_name}' must start with 'match {{ ... }}'",
-                    hint=f"example: {field_name} {{ match {{ eq \"value\" }} }}",
-                )
-        elif ops and ctx.node_name(ops[0]) == "self":
-            init_name = ctx.get_arg(ops[0], 0)
-            if init_name and init_name in ctx.inferred_define_types:
-                _, start = ctx.inferred_define_types[init_name]
-        check_pipeline_types(ops, ctx, start_type=start)
+        ctx.pop()
+        return
+    
+    # For table fields the pipeline starts with 'match { ... }' which
+    # accepts DOCUMENT and returns STRING (the value cell from -value).
+    # So start_type is always DOCUMENT here — match handles the transition.
+    # For regular fields: DOCUMENT, unless self-ref from -init.
+    start = VT.DOCUMENT
+    if struct_type == "table":
+        # table fields MUST start with match { ... }
+        if not ops or ctx.node_name(ops[0]) != "match":
+            ctx.error(
+                node,
+                message=f"table field '{field_name}' must start with 'match {{ ... }}'",
+                hint=f"example: {field_name} {{ match {{ eq \"value\" }} }}",
+            )
+    elif ops and ctx.node_name(ops[0]) == "self":
+        init_name = ctx.get_arg(ops[0], 0)
+        if init_name and init_name in ctx.inferred_define_types:
+            _, start = ctx.inferred_define_types[init_name]
+    check_pipeline_types(ops, ctx, start_type=start)
     ctx.pop()
 
 
