@@ -160,35 +160,8 @@ def pre_docstring(node: Docstring, _: ConverterContext):
     return f'''"""{node.value}"""'''
 
 
-def _collect_transform_imports(module: Module) -> set[str]:
-    """Walk the AST and collect all imports from used transforms."""
-    imports = set()
-    
-    def walk(node):
-        """Recursively walk AST nodes."""
-        if isinstance(node, TransformCall) and node.transform_def:
-            # Find Python-specific target
-            for target in node.transform_def.body:
-                if target.lang == "py":
-                    imports.update(target.imports)
-                    break
-        
-        # Recursively walk children
-        if hasattr(node, 'body') and isinstance(node.body, list):
-            for child in node.body:
-                walk(child)
-    
-    # Walk from module root
-    walk(module)
-    return imports
-
-
 @PY_BASE_CONVERTER(Imports)
 def pre_imports(node: Imports, _: ConverterContext):
-    # Collect imports from transforms
-    module = node.parent  # Imports.parent is Module
-    transform_imports = _collect_transform_imports(module)
-    
     base_imports = [
         "import re",
         "import sys",
@@ -196,8 +169,10 @@ def pre_imports(node: Imports, _: ConverterContext):
         "from html import unescape as _html_unescape",
     ]
     
-    # Add transform imports
-    return base_imports + sorted(transform_imports)
+    # Get transform imports for Python (already collected during parsing)
+    transform_imports = sorted(node.transform_imports.get("py", set()))
+    
+    return base_imports + transform_imports
 
 
 # hook for add extra dependencies

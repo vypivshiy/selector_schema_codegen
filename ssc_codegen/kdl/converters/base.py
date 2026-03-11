@@ -148,8 +148,8 @@ class BaseConverter:
             JS_CHEERIO = JS_BASE.extend()
         """
         child = BaseConverter(var_name=self.var_name, indent=self.indent)
-        child._pre_callbacks = dict(self._pre_callbacks)
-        child._post_callbacks = dict(self._post_callbacks)
+        child._pre_callbacks = dict(self._pre_callbacks.copy())
+        child._post_callbacks = dict(self._post_callbacks.copy())
         return child
 
     # ── internal traversal ────────────────────────────────────────────────────
