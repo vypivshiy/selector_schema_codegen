@@ -457,7 +457,7 @@ def pre_struct_pre_validate(node: PreValidate, ctx: ConverterContext):
 @PY_BASE_CONVERTER(SplitDoc)
 def pre_struct_split_doc(node: SplitDoc, ctx: ConverterContext):
     return [
-        "    def _split_doc(self) -> ResultSet[Tag]:",
+        "    def _split_doc(self, v: Union[Tag, BeautifulSoup]) -> ResultSet[Tag]:",
     ]
 
 
