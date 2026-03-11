@@ -73,9 +73,13 @@ class Imports(Node):
     """
     Technical node — codegen inserts required import statements into body.
     Not produced from DSL directly; populated during codegen phase.
+    
+    transform_imports: Dict of imports by target language (e.g., {"py": {...}, "js": {...}})
+                       Collected during parsing when TransformCall nodes are created.
     """
 
     libs: list[str] = field(default_factory=list)
+    transform_imports: dict[str, set[str]] = field(default_factory=dict)
 
 
 @dataclass

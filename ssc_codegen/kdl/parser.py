@@ -1482,6 +1482,20 @@ def reg_expr_transform(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
             f"transform '{name}': pipeline type {prev_type.name!r} "
             f"does not match accept type {transform_def.accept.name!r}"
         )
+    
+    # Register transform imports in Module.imports
+    # Walk up the parent chain to find Module
+    current = parent
+    while current and not isinstance(current, Module):
+        current = current.parent
+    
+    if current and isinstance(current, Module):
+        # Add imports for all language targets in this transform
+        for target in transform_def.body:
+            if target.lang not in current.imports.transform_imports:
+                current.imports.transform_imports[target.lang] = set()
+            current.imports.transform_imports[target.lang].update(target.imports)
+    
     return TransformCall(
         parent=parent,
         name=name,
