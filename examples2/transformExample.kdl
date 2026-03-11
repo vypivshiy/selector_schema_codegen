@@ -1,0 +1,62 @@
+/*
+example add custom code
+
+syntax:
+
+transform <NAME> accept=<TYPE> return=<TYPE> {
+    <key> {
+        import string OPTIONAL 
+        code <lines> - generate code
+    }
+}
+TODO add comment how to works
+
+*/
+transform to-base64 accept=STRING return=STRING {
+    py {
+        import "from base64 import b64decode"
+        code "{{NXT}} = str(b64decode({{PRV}}))"
+    }
+    js {
+        code "const {{NXT}} = btoa({{PRV}});"
+    }
+}
+
+transform to-list-base64 accept=LIST_STRING return=LIST_STRING {
+    py {
+        import "from base64 import b64decode"
+        code "{{NXT}} = [str(b64decode(i)) for i in {{PRV}}]"
+    }
+    js {
+        code "let {{NXT}} = {{PRV}}.map(i => btoa(i));"
+    }
+}
+
+transform pow2 accept=INT return=INT {
+    py {
+        code "{{NXT}} = {{PRV}}**2"
+    }
+    js {
+        code "let {{NXT}} = {{PRV}}**2;"
+    }
+}
+
+
+// usage
+struct Main {
+    titleb64 {
+        css title
+        text
+        transform to-base64
+    }
+    urlsb64 {
+        css-all "a[href]"
+        attr href
+        transform to-list-base64
+    }
+    urls-len-pow2 {
+        css-all "a[href]"
+        len
+        transform pow2
+    }
+}
