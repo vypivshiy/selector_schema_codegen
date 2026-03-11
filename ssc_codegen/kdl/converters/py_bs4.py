@@ -9,7 +9,6 @@ from ssc_codegen.kdl.converters.helpers import (
     to_pascal_case,
     to_snake_case,
     jsonify_path_to_segments,
-    py_pattern_re_flags,
 )
 
 # module level
@@ -28,7 +27,6 @@ from ssc_codegen.kdl.ast import (
 # struct layer
 from ssc_codegen.kdl.ast import (
     Field,
-    TableField,
     Init,
     InitField,
     PreValidate,
@@ -150,7 +148,7 @@ PY_TYPES = {
     VariableType.LIST_INT: "List[int]",
     VariableType.LIST_STRING: "List[str]",
     VariableType.LIST_FLOAT: "List[float]",
-    VariableType.LIST_DOCUMENT: "ResultSet",
+    VariableType.LIST_DOCUMENT: "ResultSet[Tag]",
     VariableType.DOCUMENT: "Union[Tag, BeautifulSoup]",
     VariableType.NULL: "None",
 }
@@ -167,7 +165,7 @@ def pre_imports(node: Imports, _: ConverterContext):
     return [
         "import re",
         "import sys",
-        "from typing import TypedDict, Optional, Any, List, Dict, Union, Any",
+        "from typing import TypedDict, Optional, Any, List, Dict, Union",
         "from html import unescape as _html_unescape",
     ]
 
@@ -191,7 +189,7 @@ def pre_utilities(node: Utilities, _: ConverterContext):
         "_RE_BYTES_ENTITY = re.compile(r'\\\\x([0-9a-fA-F]{2})')",
         "_RE_CHARS_MAP = {'\\b': '\\b', '\\f': '\\f', '\\n': '\\n', '\\r': '\\r', '\\t': '\\t'}",
         "\n",
-        "def repl_map(s: str, rmap: Dict[str, str]) -> str",
+        "def repl_map(s: str, rmap: Dict[str, str]) -> str:",
         "    for k, v in rmap.items():",
         "        s = s.replace(k, v)",
         "    return s",
@@ -200,10 +198,6 @@ def pre_utilities(node: Utilities, _: ConverterContext):
         "    return ' '.join(text.split()) if text else \"\"",
         "\n",
         "def unseape_text(text: str) -> str:",
-        "    _RE_HEX_ENTITY = re.compile(r'&#x([0-9a-fA-F]+);')",
-        "    _RE_UNICODE_ENTITY = re.compile(r'\\\\u([0-9a-fA-F]{4})')",
-        "    _RE_BYTES_ENTITY = re.compile(r'\\\\x([0-9a-fA-F]{2})')",
-        "    _RE_CHARS_MAP = {'\\b': '\\b', '\\f': '\\f', '\\n': '\\n', '\\r': '\\r', '\\t': '\\t'}",
         "    s = _html_unescape(text)",
         "    s = _RE_HEX_ENTITY.sub(lambda m: chr(int(m.group(1), 16)), s)",
         "    s = _RE_UNICODE_ENTITY.sub(lambda m: chr(int(m.group(1), 16)), s)",
@@ -227,7 +221,8 @@ def pre_utilities(node: Utilities, _: ConverterContext):
         "    def rm_suffix(s: str, p: str) -> str:",
         "        return s[:-(len(p))] if s.endswith(p) else s",
         "\n\n",
-        "UNMATCHED_TABLE_ROW = object()"
+        "UNMATCHED_TABLE_ROW = object()",
+        "\n\n"
     ]
 
 
@@ -246,12 +241,7 @@ def pre_json_field(node: JsonDefField, ctx: ConverterContext):
         type_ = type_.format(type_name)
         if node.is_array:
             type_ = f"List[{type_}]"
-    elif node.ret == VariableType.NESTED and node.ref_name:
-        type_name = to_pascal_case(node.ref_name)
-        type_ = type_.format(type_name)
-        if node.is_array:
-            type_ = f"List[{type_}]"
-
+    # VariableType.NESTED not used in Json node context
     return [f"{ctx.indent}{name}: {type_}"]
 
 
@@ -337,7 +327,7 @@ def post_start_parse(node: StartParse, ctx: ConverterContext):
             lines.append(f"{ctx.indent * 3} }}")
         case StructType.LIST:
             # return [{name, ...} for i in self._split_doc(self.document)]
-            lines.append(f"{ctx.indent * 2} return [{{")
+            lines.append(f"{ctx.indent * 2}return [{{")
             for field in node.fields:
                 name = to_snake_case(field.name)
                 lines.append(
@@ -458,23 +448,12 @@ def pre_struct_field(node: Field, ctx: ConverterContext):
         ret_type = ret_type.format(nested_node.struct_name)
         if nested_node.is_array:
             ret_type = f"List[{ret_type}]"
+    # table struct fields start with match { ... } and may return a sentinel
+    if node.accept == VariableType.STRING:
+        return [f"    def _parse_{name}(self, v: str) -> Union[{ret_type}, object]:"]
     return [
         f"    def _parse_{name}(self, v: Union[Tag, BeautifulSoup]) -> {ret_type}:"
     ]
-
-
-@PY_BASE_CONVERTER(TableField)
-def pre_struct_table_field(node: TableField, ctx: ConverterContext):
-    """Generate _parse_{name} method for a table struct field.
-
-    Table fields start with match { ... } which selects the matching row,
-    then subsequent ops work on the string value extracted by -value.
-    The method accepts a single table row (Tag) and returns the extracted
-    value, or UNMATCHED_TABLE_ROW sentinel if the row does not match.
-    """
-    name = to_snake_case(node.name)
-    ret_type = PY_TYPES.get(node.ret, "Any")
-    return [f"    def _parse_{name}(self, v: Union[Tag, BeautifulSoup]) -> Union[{ret_type}, object]:"]
 
 
 @PY_BASE_CONVERTER(PreValidate)
@@ -488,7 +467,7 @@ def pre_struct_pre_validate(node: PreValidate, ctx: ConverterContext):
 @PY_BASE_CONVERTER(SplitDoc)
 def pre_struct_split_doc(node: SplitDoc, ctx: ConverterContext):
     return [
-        "    def _split_doc(self) -> ResultSet:",
+        "    def _split_doc(self) -> ResultSet[Tag]:",
     ]
 
 
@@ -601,7 +580,7 @@ def pre_expr_attr(node: Attr, ctx: ConverterContext):
     # class="foo bar" -> ["foo", "bar"]
     if node.accept == VariableType.DOCUMENT:
         if len(keys) == 1:
-            return f"{ctx.indent}{ctx.nxt} = ' '.join({ctx.prv}.get_attribute_list({keys[0]!r})"
+            return f"{ctx.indent}{ctx.nxt} = ' '.join({ctx.prv}.get_attribute_list({keys[0]!r}))"
         return f"{ctx.indent}{ctx.nxt}=[' '.join({ctx.prv}.get_attribute_list(k)) for k in {keys} if {ctx.prv}.get(k)]"
     # LIST_DOCUMENT
     if len(keys) == 1:
@@ -775,28 +754,25 @@ def pre_expr_unescape(node: Unescape, ctx: ConverterContext):
 @PY_BASE_CONVERTER(Re)
 def pre_expr_re(node: Re, ctx: ConverterContext):
     pattern = repr(node.pattern)
-    flags = py_pattern_re_flags(node)
     if node.accept == VariableType.STRING:
-        return f"{ctx.indent}{ctx.nxt} = re.search({pattern}, {ctx.prv}{flags})[1]"
+        return f"{ctx.indent}{ctx.nxt} = re.search({pattern}, {ctx.prv})[1]"
     # LIST_STRING — map over items
-    return f"{ctx.indent}{ctx.nxt} = [re.search({pattern}, i{flags})[1] for i in {ctx.prv}]"
+    return f"{ctx.indent}{ctx.nxt} = [re.search({pattern}, i)[1] for i in {ctx.prv}]"
 
 
 @PY_BASE_CONVERTER(ReAll)
 def pre_expr_re_all(node: ReAll, ctx: ConverterContext):
     pattern = repr(node.pattern)
-    flags = py_pattern_re_flags(node)
-    return f"{ctx.indent}{ctx.nxt} = re.findall({pattern}, {ctx.prv}{flags})"
+    return f"{ctx.indent}{ctx.nxt} = re.findall({pattern}, {ctx.prv})"
 
 
 @PY_BASE_CONVERTER(ReSub)
 def pre_expr_re_sub(node: ReSub, ctx: ConverterContext):
     pattern = repr(node.pattern)
     repl = repr(node.repl)
-    flags = py_pattern_re_flags(node)
     if node.accept == VariableType.STRING:
-        return f"{ctx.indent}{ctx.nxt} = re.sub({pattern}, {repl}, {ctx.prv}{flags})"
-    return f"{ctx.indent}{ctx.nxt} = [re.sub({pattern}, {repl}, i{flags}) for i in {ctx.prv}]"
+        return f"{ctx.indent}{ctx.nxt} = re.sub({pattern}, {repl}, {ctx.prv})"
+    return f"{ctx.indent}{ctx.nxt} = [re.sub({pattern}, {repl}, i) for i in {ctx.prv}]"
 
 
 # array
@@ -857,7 +833,7 @@ def pre_expr_jsonify(node: Jsonify, ctx: ConverterContext):
             if part.isdigit():
                 path += f"[{part}]"
             else:
-                path += f"[{part!r}]"
+                path += f"[{part}]"
         return f"{ctx.indent}{ctx.nxt} = json.loads({ctx.prv}){path}"
     return f"{ctx.indent}{ctx.nxt} = json.loads({ctx.prv})"
 
@@ -904,16 +880,20 @@ def pre_expr_filter(node: Filter, ctx: ConverterContext):
     return f"{ctx.indent}{ctx.nxt} = [i for i in {ctx.prv} if "
 
 
-@PY_BASE_CONVERTER(Assert)
+# TODO: msg API
+@PY_BASE_CONVERTER(Assert, post_callback=lambda _, ctx: ctx.deeper().indent + ")")
 def pre_expr_assert(node: Assert, ctx: ConverterContext):
-    # assert ({CONDS}), msg
-    # TODO: WIP
-    return "assert ("
-
+    return [
+        f"{ctx.indent}i = {ctx.prv}",
+        f"{ctx.indent}assert (",
+    ]
 
 @PY_BASE_CONVERTER.post(Assert)
 def post_expr_assert(node: Assert, ctx: ConverterContext):
-    return [f"){ctx.indent}{ctx.nxt} = {ctx.prv}"]
+    return [
+        ctx.deeper().indent + ")",
+        f'{ctx.indent}{ctx.nxt} = {ctx.prv}'
+    ]
 
 
 @PY_BASE_CONVERTER(Match)
@@ -1127,9 +1107,8 @@ def pre_expr_pred_attr_ne(node: PredAttrNe, ctx: ConverterContext):
 def pre_expr_pred_attr_re(node: PredAttrRe, ctx: ConverterContext):
     name = node.name
     pattern = repr(node.pattern)
-    flags = py_pattern_re_flags(node)
     # dont need check exists key
-    cond = f"bool(re.search({pattern}, (' '.join(i.get_attribute_list({name!r}))){flags}))"
+    cond = f"bool(re.search({pattern}, (' '.join(i.get_attribute_list({name!r})))))"
     if ctx.index == 0:
         return ctx.indent + cond
     return ctx.indent + f"and {cond}"
@@ -1179,8 +1158,7 @@ def pre_expr_pred_text_ends(node: PredTextEnds, ctx: ConverterContext):
 @PY_BASE_CONVERTER(PredTextRe)
 def pre_expr_pred_text_re(node: PredTextRe, ctx: ConverterContext):
     pattern = repr(node.pattern)
-    flags = py_pattern_re_flags(node)
-    cond = f"bool(re.search({pattern}, i.text{flags}))"
+    cond = f"bool(re.search({pattern}, i.text))"
     if ctx.index == 0:
         return ctx.indent + cond
     return ctx.indent + f"and {cond}"
@@ -1259,8 +1237,7 @@ def pre_expr_pred_range(node: PredRange, ctx: ConverterContext):
 @PY_BASE_CONVERTER(PredRe)
 def pre_expr_pred_re(node: PredRe, ctx: ConverterContext):
     pattern = repr(node.pattern)
-    flags = py_pattern_re_flags(node)
-    cond = f"bool(re.search({pattern}, i{flags}))"
+    cond = f"bool(re.search({pattern}, i))"
     if ctx.index == 0:
         return ctx.indent + cond
     return ctx.indent + f"and {cond}"
@@ -1270,8 +1247,7 @@ def pre_expr_pred_re(node: PredRe, ctx: ConverterContext):
 def pre_expr_pred_re_all(node: PredReAll, ctx: ConverterContext):
     # assert specific expr
     pattern = repr(node.pattern)
-    flags = py_pattern_re_flags(node)
-    cond = f"all(re.search({pattern}, j{flags}) for j in i)"
+    cond = f"all(re.search({pattern}, j) for j in i)"
     if ctx.index == 0:
         return ctx.indent + cond
     return ctx.indent + f"and {cond}"
@@ -1281,8 +1257,7 @@ def pre_expr_pred_re_all(node: PredReAll, ctx: ConverterContext):
 def pre_expr_pred_re_any(node: PredReAny, ctx: ConverterContext):
     # assert specific expr
     pattern = repr(node.pattern)
-    flags = py_pattern_re_flags(node)
-    cond = f"any(re.search({pattern}, j{flags}) for j in i)"
+    cond = f"any(re.search({pattern}, j) for j in i)"
     if ctx.index == 0:
         return ctx.indent + cond
     return ctx.indent + f"and {cond}"

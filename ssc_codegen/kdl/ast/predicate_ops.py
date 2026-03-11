@@ -107,29 +107,23 @@ class PredIn(Node):
 
 @dataclass
 class PredRe(Node):
-    """Element matches pattern."""
+    """Element matches pattern. Pattern is normalized to inline form with (?i) and (?s) flags."""
 
     pattern: str = ""
-    ignore_case: bool = False
-    dotall: bool = False
 
 
 @dataclass
 class PredReAny(Node):
-    """At least one element in list matches pattern. Assert only."""
+    """At least one element in list matches pattern. Assert only. Pattern is normalized to inline form."""
 
     pattern: str = ""
-    ignore_case: bool = False
-    dotall: bool = False
 
 
 @dataclass
 class PredReAll(Node):
-    """All elements in list match pattern. Assert only."""
+    """All elements in list match pattern. Assert only. Pattern is normalized to inline form."""
 
     pattern: str = ""
-    ignore_case: bool = False
-    dotall: bool = False
 
 
 # =============================================================================
@@ -200,12 +194,10 @@ class PredAttrContains(Node):
 
 @dataclass
 class PredAttrRe(Node):
-    """Element attr value match"""
+    """Element attr value match. Pattern is normalized to inline form with (?i) and (?s) flags."""
 
     name: str = ""
     pattern: str = ""
-    ignore_case: bool = False
-    dotall: bool = False
 
 
 @dataclass
@@ -231,11 +223,9 @@ class PredTextContains(Node):
 
 @dataclass
 class PredTextRe(Node):
-    """Element text match"""
+    """Element text match. Pattern is normalized to inline form with (?i) and (?s) flags."""
 
     pattern: str = ""
-    ignore_case: bool = False
-    dotall: bool = False
 
 
 # =============================================================================

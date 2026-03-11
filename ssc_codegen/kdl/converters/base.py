@@ -8,7 +8,6 @@ from ssc_codegen.kdl.ast import JsonDef, TypeDef, Struct, Init
 from ssc_codegen.kdl.ast import (
     PreValidate,
     Field,
-    TableField,
     InitField,
     SplitDoc,
     Key,
@@ -60,7 +59,6 @@ _CONTAINER_NODES = (JsonDef, TypeDef, Struct, Init)
 
 _PIPELINE_NODES = (
     Field,
-    TableField,
     InitField,
     PreValidate,
     SplitDoc,

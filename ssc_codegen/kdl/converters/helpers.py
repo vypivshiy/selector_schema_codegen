@@ -84,12 +84,4 @@ def jsonify_path_to_segments(query: str) -> list[str]:
     return parts
 
 
-def py_pattern_re_flags(node: Re | ReAll | ReSub | PredRe | PredReAll | PredReAny | PredTextRe | PredAttrRe) -> str:
-    """Build a trailing re-flags argument string, e.g. ', re.IGNORECASE' or
-    ', re.IGNORECASE | re.DOTALL', or '' when no flags are set."""
-    parts: list[str] = []
-    if node.ignore_case:
-        parts.append("re.IGNORECASE")
-    if node.dotall:
-        parts.append("re.DOTALL")
-    return (", " + " | ".join(parts)) if parts else ""
+# py_pattern_re_flags removed - flags are now always embedded inline in pattern as (?i) and (?s)

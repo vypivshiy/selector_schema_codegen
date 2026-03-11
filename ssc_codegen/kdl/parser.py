@@ -30,8 +30,10 @@ import re as _re
 from dataclasses import dataclass, field
 from typing import Callable, TypeAlias, cast
 
+from ssc_codegen.kdl._logging import logger
 from ssc_codegen.kdl.ckdl_types import KdlNode, parse
 from ssc_codegen.kdl.ast import Node as AstNode
+from ssc_codegen.kdl.regex_utils import normalize_regex_pattern
 
 # exprs
 from ssc_codegen.kdl.exceptions import (
@@ -59,7 +61,6 @@ from ssc_codegen.kdl.ast import (
     TableMatchKey,
     TableRow,
     Field,
-    TableField,
     Init,
     InitField,
     Key,
@@ -162,79 +163,6 @@ from ssc_codegen.kdl.ast import JsonDef, JsonDefField
 from ssc_codegen.kdl.ast import TransformDef, TransformTarget, TransformCall
 
 
-# https://stackoverflow.com/a/14919203
-_CM1_RX = r"(?m)(?<!\\)((\\{2})*)#.*$"
-_CM2_RX = r"(\\)?((\\{2})*)(#)"
-_WS_RX = r"(\\)?((\\{2})*)(\s)\s*"
-
-
-def _unverbosify_regex(pattern: str | _re.Pattern) -> str:
-    """Strip re.VERBOSE whitespace/comments from a compiled pattern."""
-    if isinstance(pattern, str):
-        return pattern
-
-    def _strip(m):  # type: ignore[return-value]
-        if m.group(1) is None:
-            return m.group(2)
-        elif m.group(1) == "\\":
-            return m.group(2) + m.group(4)
-        raise ValueError("unexpected match in unverbosify")
-
-    if pattern.flags & _re.X:
-        return _re.sub(
-            _WS_RX,
-            _strip,
-            _re.sub(_CM2_RX, _strip, _re.sub(_CM1_RX, "\\1", pattern.pattern)),
-        )
-    return pattern.pattern
-
-
-_INLINE_FLAGS_RE = _re.compile(r"^\(\?([a-z]+)\)")
-
-
-def _extract_inline_flags(pattern: str) -> tuple[str, bool, bool]:
-    """Strip leading ``(?flags)`` inline group from *pattern* and return
-    ``(stripped_pattern, ignore_case, dotall)``.
-
-    Only ``i`` (IGNORECASE) and ``s`` (DOTALL) are extracted; other flags
-    are left in place so the regex stays semantically identical.
-    """
-    m = _INLINE_FLAGS_RE.match(pattern)
-    if not m:
-        return pattern, False, False
-    flags_str = m.group(1)
-    ignore_case = "i" in flags_str
-    dotall = "s" in flags_str
-    remaining = flags_str.replace("i", "").replace("s", "")
-    # rebuild the inline group without i/s; drop it entirely if empty
-    if remaining:
-        prefix = f"(?{remaining})"
-    else:
-        prefix = ""
-    return prefix + pattern[m.end():], ignore_case, dotall
-
-
-def _extract_regex(value: str | _re.Pattern) -> tuple[str, bool, bool]:
-    """Resolve a raw define value (str or compiled Pattern) to
-    ``(pattern, ignore_case, dotall)``.
-
-    Handles both sources of flags:
-    - Compiled ``re.Pattern``: ``re.IGNORECASE``, ``re.DOTALL``, ``re.VERBOSE``
-    - Plain string with leading inline flags: ``(?i)``, ``(?s)``, ``(?is)`` …
-
-    The returned pattern is stripped of ``i``/``s`` inline flags so that
-    codegen can emit explicit ``re.IGNORECASE`` / ``re.DOTALL`` arguments.
-    """
-    if isinstance(value, str):
-        return _extract_inline_flags(value)
-    pattern = _unverbosify_regex(value)
-    ignore_case = bool(value.flags & _re.IGNORECASE)
-    dotall = bool(value.flags & _re.DOTALL)
-    # compiled patterns may also embed inline flags in their .pattern string
-    # (e.g. re.compile("(?i)foo") sets IGNORECASE but also keeps "(?i)" in
-    # .pattern on some Python versions) — strip to avoid double-reporting
-    pattern, ic2, ds2 = _extract_inline_flags(pattern)
-    return pattern, ignore_case or ic2, dotall or ds2
 
 
 @dataclass
@@ -246,6 +174,8 @@ class ParseContext:
     transforms: dict[str, TransformDef] = field(default_factory=dict)
     # TODO: reg init fields
     init: dict[str, dict[str, str]] = field(default_factory=dict)
+    # Store structs during parsing so nested can reference them
+    structs: dict[str, Struct] = field(default_factory=dict)
 
 
 ParentAstNode: TypeAlias = AstNode
@@ -262,7 +192,6 @@ FieldLikeNode: TypeAlias = (
     | Key
     | Value
     | Field
-    | TableField
     | InitField
 )
 CallbackReg = Callable[[KdlNode, FieldLikeNode, ParseContext], AstNode]
@@ -367,7 +296,7 @@ class AstParser:
             parent=parent, name=struct.name, struct_type=struct.struct_type
         )
         for field in struct.body:
-            if isinstance(field, (Field, TableField)):
+            if isinstance(field, Field):
                 nested_ref = ""
                 json_ref = ""
                 is_array = False
@@ -449,6 +378,7 @@ class AstParser:
             )
 
     def parse(self, kdl_dsl: str) -> Module:
+        logger.debug("parse() called, input length=%d chars", len(kdl_dsl))
         document = parse(kdl_dsl)
         module = Module()
         # collect struct, generate typedefs
@@ -458,23 +388,31 @@ class AstParser:
 
         # layer 1 - module
         for node in document.nodes:
+            logger.debug("module node: %r", node.name)
             # built-in
             if node.name == "-doc":
                 module.docstring.value = node.args[0]
+                logger.debug("  set module docstring")
             elif node.name == "json":
                 expr = self._module_handlers[node.name](node, module, self.ctx)
                 expr = cast(JsonDef, expr)
                 self._parse_json_fields(node.children, expr)
                 module.body.append(expr)
+                logger.debug("  registered json def: %r", node.args[0] if node.args else "?")
             # handlers
             elif cb := self._context_handlers.get(node.name):
+                logger.debug("  context handler: %r", node.name)
                 cb(node, self.ctx)
             elif cb := self._module_handlers.get(node.name):
                 expr = cb(node, module, self.ctx)
                 if isinstance(expr, Struct):
+                    logger.debug("  parsing struct: %r (type=%s)", expr.name, expr.struct_type)
+                    # Store struct in context so nested can reference it
+                    self.ctx.structs[expr.name] = expr
                     self._parse_struct(node.children, expr)
                     structs.append(expr)
                     typedefs.append(self._typedef_from_struct(expr, module))
+                    logger.debug("  struct done: %r, fields=%d", expr.name, len(expr.body))
             else:
                 raise UnknownNodeError(node.name, "Unknown keyword node")
         # wire TransformDef nodes into module (before typedefs and structs)
@@ -482,10 +420,16 @@ class AstParser:
         for td in transform_defs:
             td.parent = module
         module.body.extend(transform_defs + typedefs + structs)
+        logger.debug(
+            "parse() done: %d transform(s), %d typedef(s), %d struct(s)",
+            len(transform_defs), len(typedefs), len(structs),
+        )
         return module
 
     def _parse_struct(self, kdl_nodes: list[KdlNode], parent: Struct):
+        logger.debug("_parse_struct: %r, %d node(s)", parent.name, len(kdl_nodes))
         for node in kdl_nodes:
+            logger.debug("  struct node: %r", node.name)
             # built-in
             if node.name == "-doc":
                 parent.docstring.value = node.args[0]
@@ -523,11 +467,12 @@ class AstParser:
                 parent.body.append(expr)
             else:
                 if parent.struct_type == StructType.TABLE:
-                    expr = TableField(parent=parent, name=node.name)
+                    expr = Field(parent=parent, name=node.name, accept=VariableType.STRING)
                 else:
                     expr = Field(parent=parent, name=node.name)
                 self._parse_expressions(node.children, expr)
                 parent.body.append(expr)
+                logger.debug("  field %r: ret=%s", node.name, expr.ret)
         # finally, add StartParse node
         parent.body.append(StartParse(parent=parent))
 
@@ -580,14 +525,20 @@ class AstParser:
         if not kdl_nodes:
             return
 
+        logger.debug(
+            "_parse_expressions: parent=%s, %d node(s), add_return=%s",
+            type(parent).__name__, len(kdl_nodes), _add_return,
+        )
         for node in kdl_nodes:
             # block define inlining: if the keyword is a children_define name,
             # expand it as if its children were written inline at this position
             if node.name in self.ctx.children_defines and node.name not in self._context_expressions:
+                logger.debug("  inlining define: %r", node.name)
                 self._parse_expressions(self.ctx.children_defines[node.name], parent, _add_return=False)
                 continue
             if cb := self._context_expressions.get(node.name):
                 expr = cb(node, parent, self.ctx)
+                logger.debug("  expr: %r -> %s (ret=%s)", node.name, type(expr).__name__, expr.ret)
                 if isinstance(expr, Fallback):
                     continue
                 elif isinstance(expr, Filter):
@@ -602,6 +553,7 @@ class AstParser:
             last_ret = parent.body[-1].ret
             parent.body.append(Return(parent=parent, ret=last_ret, accept=last_ret))
             parent.ret = last_ret
+            logger.debug("  auto-return added: ret=%s", last_ret)
 
 
 PARSER = AstParser()
@@ -757,8 +709,12 @@ def reg_expr_xpath_remove(
 def reg_expr_extract_text(
     node: KdlNode, parent: FieldLikeNode, _: ParseContext
 ):
-    prev_node = parent.body[-1]
-    prev_type = prev_node.ret
+    # If there's no previous expression, assume DOCUMENT (root)
+    if not parent.body:
+        prev_type = VariableType.DOCUMENT
+    else:
+        prev_node = parent.body[-1]
+        prev_type = prev_node.ret
     ret_type = (
         VariableType.LIST_STRING
         if prev_type == VariableType.LIST_DOCUMENT
@@ -772,8 +728,12 @@ def reg_expr_extract_text(
 
 @PARSER.register_expression_node("raw")
 def reg_expr_extract_raw(node: KdlNode, parent: FieldLikeNode, _: ParseContext):
-    prev_node = parent.body[-1]
-    prev_type = prev_node.ret
+    # If there's no previous expression, assume DOCUMENT (root)
+    if not parent.body:
+        prev_type = VariableType.DOCUMENT
+    else:
+        prev_node = parent.body[-1]
+        prev_type = prev_node.ret
     ret_type = (
         VariableType.LIST_STRING
         if prev_type == VariableType.LIST_DOCUMENT
@@ -789,8 +749,12 @@ def reg_expr_extract_raw(node: KdlNode, parent: FieldLikeNode, _: ParseContext):
 def reg_expr_extract_attr(
     node: KdlNode, parent: FieldLikeNode, _: ParseContext
 ):
-    prev_node = parent.body[-1]
-    prev_type = prev_node.ret
+    # If there's no previous expression, assume DOCUMENT (root)
+    if not parent.body:
+        prev_type = VariableType.DOCUMENT
+    else:
+        prev_node = parent.body[-1]
+        prev_type = prev_node.ret
     ret_type = (
         VariableType.LIST_STRING
         if prev_type == VariableType.LIST_DOCUMENT
@@ -936,32 +900,25 @@ def reg_expr_unescape(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
 @PARSER.register_expression_node("re")
 def reg_expr_re(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
     raw = ctx.property_defines.get(node.args[0], node.args[0])
-    pattern, ignore_case, dotall = _extract_regex(raw)
+    pattern = normalize_regex_pattern(raw)
     prev_type = parent.body[-1].ret
-    return Re(
-        parent=parent, pattern=pattern, accept=prev_type, ret=prev_type,
-        ignore_case=ignore_case, dotall=dotall,
-    )
+    return Re(parent=parent, pattern=pattern, accept=prev_type, ret=prev_type)
 
 
 @PARSER.register_expression_node("re-all")
 def reg_expr_re_all(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
     raw = ctx.property_defines.get(node.args[0], node.args[0])
-    pattern, ignore_case, dotall = _extract_regex(raw)
-    return ReAll(parent=parent, pattern=pattern, ignore_case=ignore_case, dotall=dotall)
+    pattern = normalize_regex_pattern(raw)
+    return ReAll(parent=parent, pattern=pattern)
 
 
 @PARSER.register_expression_node("re-sub")
 def reg_expr_re_sub(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
     prev_type = parent.body[-1].ret
     raw = ctx.property_defines.get(node.args[0], node.args[0])
-    pattern, ignore_case, dotall = _extract_regex(raw)
+    pattern = normalize_regex_pattern(raw)
     repl = cast(str, ctx.property_defines.get(node.args[1], node.args[1]))
-    return ReSub(
-        parent=parent, accept=prev_type, ret=prev_type,
-        pattern=pattern, repl=repl,
-        ignore_case=ignore_case, dotall=dotall,
-    )
+    return ReSub(parent=parent, accept=prev_type, ret=prev_type, pattern=pattern, repl=repl)
 
 
 # array
@@ -1036,18 +993,14 @@ def reg_expr_jsonify(node: KdlNode, parent: FieldLikeNode, _: ParseContext):
 
 
 @PARSER.register_expression_node("nested")
-def reg_expr_nested(node: KdlNode, parent: FieldLikeNode, _2: ParseContext):
-    # 1 - field, 2 - struct, 3 - module
-    module = parent.parent.parent
-    module = cast(Module, module)
-    struct = [
-        i
-        for i in module.body
-        if isinstance(i, Struct) and i.name == node.args[0]
-    ][0]
-    struct = cast(Struct, struct)
+def reg_expr_nested(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
+    # Look up struct from context (structs are registered before being parsed)
+    struct_name = node.args[0]
+    struct = ctx.structs.get(struct_name)
+    if struct is None:
+        raise ParseError(f"nested: struct '{struct_name}' not found")
     is_array = struct.struct_type in (StructType.FLAT, StructType.LIST)
-    return Nested(parent=parent, struct_name=node.args[0], is_array=is_array)
+    return Nested(parent=parent, struct_name=struct_name, is_array=is_array)
 
 
 # control
@@ -1094,6 +1047,12 @@ def reg_expr_filter(node: KdlNode, parent: FieldLikeNode, _: ParseContext):
 
 @PARSER.register_expression_node("assert")
 def reg_expr_assert(node: KdlNode, parent: FieldLikeNode, _: ParseContext):
+    # In PreValidate, assert is the first (and only) op — there is no preceding
+    # expression, and the return type is always NULL (pre-validate never
+    # produces a value).  For all other field-like parents the previous node
+    # carries the cursor type, so we read it as usual.
+    if isinstance(parent, PreValidate) and not parent.body:
+        return Assert(parent=parent, accept=VariableType.DOCUMENT, ret=VariableType.NULL)
     prev_type = parent.body[-1].ret
     return Assert(parent=parent, accept=prev_type, ret=prev_type)
 
@@ -1202,34 +1161,25 @@ def reg_filter_in(node: KdlNode, parent: Filter, _: ParseContext):
 @PARSER.register_predicate_node("re")
 def reg_filter_re(node: KdlNode, parent: Filter, ctx: ParseContext):
     raw = ctx.property_defines.get(node.args[0], node.args[0])
-    pattern, ignore_case, dotall = _extract_regex(raw)
+    pattern = normalize_regex_pattern(raw)
     prev_type = parent.ret
-    return PredRe(
-        parent=parent, pattern=pattern, accept=prev_type, ret=prev_type,
-        ignore_case=ignore_case, dotall=dotall,
-    )
+    return PredRe(parent=parent, pattern=pattern, accept=prev_type, ret=prev_type)
 
 
 @PARSER.register_assert_node("re-all")
 def reg_filter_re_all(node: KdlNode, parent: Filter, ctx: ParseContext):
     raw = ctx.property_defines.get(node.args[0], node.args[0])
-    pattern, ignore_case, dotall = _extract_regex(raw)
+    pattern = normalize_regex_pattern(raw)
     prev_type = parent.ret
-    return PredReAll(
-        parent=parent, pattern=pattern, accept=prev_type, ret=prev_type,
-        ignore_case=ignore_case, dotall=dotall,
-    )
+    return PredReAll(parent=parent, pattern=pattern, accept=prev_type, ret=prev_type)
 
 
 @PARSER.register_assert_node("re-any")
 def reg_filter_re_any(node: KdlNode, parent: Filter, ctx: ParseContext):
     raw = ctx.property_defines.get(node.args[0], node.args[0])
-    pattern, ignore_case, dotall = _extract_regex(raw)
+    pattern = normalize_regex_pattern(raw)
     prev_type = parent.ret
-    return PredReAny(
-        parent=parent, pattern=pattern, accept=prev_type, ret=prev_type,
-        ignore_case=ignore_case, dotall=dotall,
-    )
+    return PredReAny(parent=parent, pattern=pattern, accept=prev_type, ret=prev_type)
 
 
 @PARSER.register_predicate_node("css", reg_match=False)
@@ -1305,17 +1255,9 @@ def reg_filter_attr_contains(node: KdlNode, parent: Filter, ctx: ParseContext):
 def reg_filter_attr_re(node: KdlNode, parent: Filter, ctx: ParseContext):
     name = node.args[0]
     raw = ctx.property_defines.get(node.args[1], node.args[1])
-    pattern, ignore_case, dotall = _extract_regex(raw)
+    pattern = normalize_regex_pattern(raw)
     prev_type = parent.ret
-    return PredAttrRe(
-        parent=parent,
-        accept=prev_type,
-        ret=prev_type,
-        pattern=pattern,
-        name=name,
-        ignore_case=ignore_case,
-        dotall=dotall,
-    )
+    return PredAttrRe(parent=parent, accept=prev_type, ret=prev_type, pattern=pattern, name=name)
 
 
 @PARSER.register_predicate_node("text-contains", reg_match=False)
@@ -1352,16 +1294,11 @@ def reg_filter_predicate_text_starts(
 
 
 @PARSER.register_predicate_node("text-re", reg_match=False)
-def reg_filter_predicate_text_re(
-    node: KdlNode, parent: Filter, ctx: ParseContext
-):
+def reg_filter_predicate_text_re(node: KdlNode, parent: Filter, ctx: ParseContext):
     raw = ctx.property_defines.get(node.args[0], node.args[0])
-    pattern, ignore_case, dotall = _extract_regex(raw)
+    pattern = normalize_regex_pattern(raw)
     prev_type = parent.ret
-    return PredTextRe(
-        parent=parent, accept=prev_type, ret=prev_type, pattern=pattern,
-        ignore_case=ignore_case, dotall=dotall,
-    )
+    return PredTextRe(parent=parent, accept=prev_type, ret=prev_type, pattern=pattern)
 
 
 @PARSER.register_predicate_node("attr-starts", reg_match=False)

@@ -1,0 +1,123 @@
+"""CLI for the KDL-based code generator."""
+
+from __future__ import annotations
+
+import enum
+import traceback
+from pathlib import Path
+from typing import Annotated, List
+
+import typer
+
+from ssc_codegen.kdl._logging import logger, setup_debug_logging
+
+app = typer.Typer(
+    no_args_is_help=True,
+    pretty_exceptions_enable=False,
+    help="KDL schema codegen — generate parsers from .kdl schema files.",
+)
+
+
+class Target(str, enum.Enum):
+    PY_BS4 = "py-bs4"
+    JS_PURE = "js-pure"
+
+
+_FILE_EXTENSIONS: dict[Target, str] = {
+    Target.PY_BS4: ".py",
+    Target.JS_PURE: ".js",
+}
+
+
+def _get_converter(target: Target):
+    if target == Target.PY_BS4:
+        from ssc_codegen.kdl.converters.py_bs4 import PY_BASE_CONVERTER
+        return PY_BASE_CONVERTER
+    if target == Target.JS_PURE:
+        from ssc_codegen.kdl.converters.js_pure import JS_CONVERTER
+        return JS_CONVERTER
+    raise ValueError(f"Unknown target: {target}")
+
+
+@app.command()
+def generate(
+    files: Annotated[
+        List[Path],
+        typer.Argument(
+            help="One or more .kdl schema files to compile.",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+        ),
+    ],
+    target: Annotated[
+        Target,
+        typer.Option(
+            "--target", "-t",
+            help="Target language / library.",
+            case_sensitive=False,
+        ),
+    ],
+    output: Annotated[
+        Path,
+        typer.Option(
+            "--output", "-o",
+            help="Output directory. Created automatically if it does not exist.",
+            file_okay=False,
+            dir_okay=True,
+            writable=True,
+        ),
+    ] = Path("."),
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose", "-v",
+            help="Print full tracebacks on errors and enable DEBUG logging.",
+        ),
+    ] = False,
+) -> None:
+    """Compile KDL schema files into parser code for the chosen target."""
+    from ssc_codegen.kdl import parse_ast
+
+    if verbose:
+        setup_debug_logging()
+
+    logger.debug(
+        "generate() started: target=%s, output=%s, files=%s",
+        target, output, [str(f) for f in files],
+    )
+
+    output.mkdir(parents=True, exist_ok=True)
+    ext = _FILE_EXTENSIONS[target]
+    converter = _get_converter(target)
+
+    errors: list[str] = []
+
+    for kdl_file in files:
+        out_file = output / kdl_file.with_suffix(ext).name
+        logger.debug("processing: %s -> %s", kdl_file, out_file)
+        try:
+            ast = parse_ast(path=str(kdl_file))
+            logger.debug("AST built for %s", kdl_file)
+            code = converter.convert(ast)
+            logger.debug("code generated for %s (%d chars)", kdl_file, len(code))
+            out_file.write_text(code, encoding="utf-8")
+            typer.echo(f"  {kdl_file} -> {out_file}")
+        except Exception as exc:
+            if verbose:
+                typer.echo(traceback.format_exc(), err=True)
+            else:
+                typer.echo(f"  ERROR {kdl_file}: {exc}", err=True)
+            errors.append(str(kdl_file))
+
+    if errors:
+        raise typer.Exit(code=1)
+
+
+def main() -> None:
+    app()
+
+
+if __name__ == "__main__":
+    main()
