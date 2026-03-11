@@ -48,7 +48,7 @@ dsl STRIP lang="py" { code "{{NXT}} = {{PRV}}.strip()" }
 | `item` (default) | document → single object | — |
 | `list` | document → list of objects | `-split-doc` |
 | `dict` | document → key/value pairs | `-key`, `-value` |
-| `table` | HTML `<table>` → typed fields by row match | `-table`, `-row`, `-match`, `-value` |
+| `table` | HTML `<table>` → typed fields by row match | `-table`, `-rows`, `-match`, `-value` |
 | `flat` | document → flat deduplicated `LIST_STRING` | — |
 
 ### item
@@ -88,7 +88,7 @@ Each field uses `match { }` to select a row by its key cell value.
 ```kdl
 struct ProductInfo type=table {
     -table { css "table.info" }
-    -rows  { css-all "tr" }
+    -rows   { css-all "tr" }
     -match { css "th"; text; trim }
     -value { css "td"; text; trim }
 
