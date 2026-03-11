@@ -139,6 +139,7 @@ PY_BASE_CONVERTER = BaseConverter()
 PY_TYPES = {
     VariableType.STRING: "str",
     VariableType.BOOL: "bool",
+    VariableType.INT: "int",
     VariableType.FLOAT: "float",
     VariableType.JSON: "{}Json",
     VariableType.NESTED: "{}Type",
@@ -159,15 +160,44 @@ def pre_docstring(node: Docstring, _: ConverterContext):
     return f'''"""{node.value}"""'''
 
 
+def _collect_transform_imports(module: Module) -> set[str]:
+    """Walk the AST and collect all imports from used transforms."""
+    imports = set()
+    
+    def walk(node):
+        """Recursively walk AST nodes."""
+        if isinstance(node, TransformCall) and node.transform_def:
+            # Find Python-specific target
+            for target in node.transform_def.body:
+                if target.lang == "py":
+                    imports.update(target.imports)
+                    break
+        
+        # Recursively walk children
+        if hasattr(node, 'body') and isinstance(node.body, list):
+            for child in node.body:
+                walk(child)
+    
+    # Walk from module root
+    walk(module)
+    return imports
+
+
 @PY_BASE_CONVERTER(Imports)
 def pre_imports(node: Imports, _: ConverterContext):
-    # TODO: handle from transform
-    return [
+    # Collect imports from transforms
+    module = node.parent  # Imports.parent is Module
+    transform_imports = _collect_transform_imports(module)
+    
+    base_imports = [
         "import re",
         "import sys",
         "from typing import TypedDict, Optional, Any, List, Dict, Union",
         "from html import unescape as _html_unescape",
     ]
+    
+    # Add transform imports
+    return base_imports + sorted(transform_imports)
 
 
 # hook for add extra dependencies
@@ -248,11 +278,18 @@ def pre_json_field(node: JsonDefField, ctx: ConverterContext):
 @PY_BASE_CONVERTER(TypeDef)
 def pre_typedef(node: TypeDef, _: ConverterContext):
     name = to_pascal_case(node.name)
+    if node.struct_type == StructType.DICT:
+        return f"{name}Type = Dict[str, " 
+    elif node.struct_type == StructType.FLAT:
+        return f"{name}Type = List[str]"
     return f"class {name}Type(TypedDict):"
 
 
 @PY_BASE_CONVERTER(TypeDefField)
 def pre_typedef_field(node: TypeDefField, ctx: ConverterContext):
+    # alreay created type, skip
+    if node.typedef.struct_type == StructType.FLAT:
+        return
     name = to_snake_case(node.name)
     type_ = PY_TYPES.get(node.ret, "Any")
     if node.ret == VariableType.JSON and node.json_ref:
@@ -265,7 +302,8 @@ def pre_typedef_field(node: TypeDefField, ctx: ConverterContext):
         type_ = type_.format(type_name)
         if node.is_array:
             type_ = f"List[{type_}]"
-
+    if node.typedef.struct_type == StructType.DICT and "value" in node.name.lower():
+        return f"{type_} ]"
     return [f"{ctx.indent}{name}: {type_}"]
 
 
@@ -830,6 +868,33 @@ def pre_expr_self(node: Self, ctx: ConverterContext):
     name = to_snake_case(node.name)
     # todo: standart pre calculated fields
     return f"{ctx.indent}{ctx.nxt} = self._{name}"
+
+
+@PY_BASE_CONVERTER(TransformCall)
+def pre_expr_transform_call(node: TransformCall, ctx: ConverterContext):
+    # Find the Python implementation from transform_def
+    if not node.transform_def:
+        raise ValueError(f"TransformCall '{node.name}': transform_def is None")
+    
+    # Get Python-specific target
+    py_target = None
+    for target in node.transform_def.body:
+        if target.lang == "py":
+            py_target = target
+            break
+    
+    if not py_target:
+        raise ValueError(f"TransformCall '{node.name}': no 'py' implementation found")
+    
+    # Generate code by substituting {{PRV}} and {{NXT}}
+    lines = []
+    for code_line in py_target.code:
+        # Replace placeholders
+        code_line = code_line.replace("{{PRV}}", ctx.prv)
+        code_line = code_line.replace("{{NXT}}", ctx.nxt)
+        lines.append(f"{ctx.indent}{code_line}")
+    
+    return lines
 
 
 @PY_BASE_CONVERTER(Return)
