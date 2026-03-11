@@ -297,20 +297,21 @@ class AstParser:
         typedef = TypeDef(
             parent=parent, name=struct.name, struct_type=struct.struct_type
         )
-        for field in struct.body:
-            if isinstance(field, Field):
+        for item in struct.body:
+            # Handle regular fields
+            if isinstance(item, Field):
                 nested_ref = ""
                 json_ref = ""
                 is_array = False
-                if field.ret == VariableType.NESTED:
+                if item.ret == VariableType.NESTED:
                     nested_expr = [
-                        i for i in field.body if isinstance(i, Nested)
+                        i for i in item.body if isinstance(i, Nested)
                     ][0]
                     nested_ref = nested_expr.struct_name
                     is_array = nested_expr.is_array
-                elif field.ret == VariableType.JSON:
+                elif item.ret == VariableType.JSON:
                     jsonify_expr = [
-                        i for i in field.body if isinstance(i, Jsonify)
+                        i for i in item.body if isinstance(i, Jsonify)
                     ][0]
                     json_ref = jsonify_expr.schema_name
                     is_array = jsonify_expr.is_array
@@ -318,8 +319,39 @@ class AstParser:
                 typedef.body.append(
                     TypeDefField(
                         parent=typedef,
-                        ret=field.ret,
-                        name=field.name,
+                        ret=item.ret,
+                        name=item.name,
+                        nested_ref=nested_ref,
+                        json_ref=json_ref,
+                        is_array=is_array,
+                    )
+                )
+            # Handle dict type: -key and -value
+            elif isinstance(item, (Key, Value)):
+                # For dict types, we need to add TypeDefField for key and value
+                field_name = "key" if isinstance(item, Key) else "value"
+                nested_ref = ""
+                json_ref = ""
+                is_array = False
+                
+                if item.ret == VariableType.NESTED:
+                    nested_expr = [
+                        i for i in item.body if isinstance(i, Nested)
+                    ][0]
+                    nested_ref = nested_expr.struct_name
+                    is_array = nested_expr.is_array
+                elif item.ret == VariableType.JSON:
+                    jsonify_expr = [
+                        i for i in item.body if isinstance(i, Jsonify)
+                    ][0]
+                    json_ref = jsonify_expr.schema_name
+                    is_array = jsonify_expr.is_array
+                
+                typedef.body.append(
+                    TypeDefField(
+                        parent=typedef,
+                        ret=item.ret,
+                        name=field_name,
                         nested_ref=nested_ref,
                         json_ref=json_ref,
                         is_array=is_array,

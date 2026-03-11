@@ -20,6 +20,10 @@ class TypeDefField(Node):
     json_ref: str | None = None
     is_array: bool = False
 
+    @property
+    def typedef(self) -> "TypeDef":
+        return self.parent  # type: ignore
+
 
 @dataclass
 class TypeDef(Node):
@@ -31,3 +35,7 @@ class TypeDef(Node):
 
     name: str = ""
     struct_type: StructType = StructType.ITEM
+
+    @property
+    def fields(self) -> List[TypeDefField]:
+        return self.body

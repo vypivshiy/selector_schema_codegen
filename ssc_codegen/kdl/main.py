@@ -44,10 +44,10 @@ def generate(
     files: Annotated[
         List[Path],
         typer.Argument(
-            help="One or more .kdl schema files to compile.",
+            help="One or more .kdl schema files or directories containing .kdl files to compile.",
             exists=True,
             file_okay=True,
-            dir_okay=False,
+            dir_okay=True,
             readable=True,
         ),
     ],
@@ -88,13 +88,32 @@ def generate(
         target, output, [str(f) for f in files],
     )
 
+    # Collect all .kdl files from arguments (expand directories)
+    kdl_files: list[Path] = []
+    for path in files:
+        if path.is_dir():
+            # Recursively find all .kdl files in directory
+            found = sorted(path.rglob("*.kdl"))
+            logger.debug("  directory %s: found %d .kdl file(s)", path, len(found))
+            kdl_files.extend(found)
+        elif path.is_file():
+            kdl_files.append(path)
+        else:
+            typer.echo(f"  WARNING: {path} is neither a file nor a directory, skipping", err=True)
+
+    if not kdl_files:
+        typer.echo("No .kdl files found to process.", err=True)
+        raise typer.Exit(code=1)
+
+    logger.debug("total %d .kdl file(s) to process", len(kdl_files))
+
     output.mkdir(parents=True, exist_ok=True)
     ext = _FILE_EXTENSIONS[target]
     converter = _get_converter(target)
 
     errors: list[str] = []
 
-    for kdl_file in files:
+    for kdl_file in kdl_files:
         out_file = output / kdl_file.with_suffix(ext).name
         logger.debug("processing: %s -> %s", kdl_file, out_file)
         try:
