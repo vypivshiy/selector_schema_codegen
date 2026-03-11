@@ -428,20 +428,10 @@ def pre_struct_field(node: Field, ctx: ConverterContext):
     ret_type = PY_TYPES.get(node.ret, "Any")
     # issue: how to detect if json arr or json struct simplier?
     if node.ret == VariableType.JSON:
-        struct = node.parent
-        struct = cast(Struct, struct)
-        module = struct.parent
-        module = cast(Module, module)
-
         jsonify_node = [i for i in node.body if isinstance(i, Jsonify)][0]
-        json_name = jsonify_node.schema_name
-        json_type = [
-            i
-            for i in module.body
-            if isinstance(i, JsonDef) and i.name == json_name
-        ][0]
         ret_type = ret_type.format(jsonify_node.schema_name)
-        if json_type.is_array:
+        # Use is_array from jsonify_node (after path resolution), not from JsonDef schema
+        if jsonify_node.is_array:
             ret_type = f"List[{ret_type}]"
     elif node.ret == VariableType.NESTED:
         nested_node = [i for i in node.body if isinstance(i, Nested)][0]
@@ -482,20 +472,10 @@ def pre_struct_value(node: Value, ctx: ConverterContext):
     ret_type = PY_TYPES.get(node.ret, "Any")
     # issue: how to detect if json arr or json struct simplier?
     if node.ret == VariableType.JSON:
-        struct = node.parent
-        struct = cast(Struct, struct)
-        module = struct.parent
-        module = cast(Module, module)
-
         jsonify_node = [i for i in node.body if isinstance(i, Jsonify)][0]
-        json_name = jsonify_node.schema_name
-        json_type = [
-            i
-            for i in module.body
-            if isinstance(i, JsonDef) and i.name == json_name
-        ][0]
         ret_type = ret_type.format(jsonify_node.schema_name)
-        if json_type.is_array:
+        # Use is_array from jsonify_node (after path resolution), not from JsonDef schema
+        if jsonify_node.is_array:
             ret_type = f"List[{ret_type}]"
     elif node.ret == VariableType.NESTED:
         nested_node = [i for i in node.body if isinstance(i, Nested)][0]

@@ -176,6 +176,8 @@ class ParseContext:
     init: dict[str, dict[str, str]] = field(default_factory=dict)
     # Store structs during parsing so nested can reference them
     structs: dict[str, Struct] = field(default_factory=dict)
+    # Store json definitions so jsonify can resolve types
+    json_defs: dict[str, JsonDef] = field(default_factory=dict)
 
 
 ParentAstNode: TypeAlias = AstNode
@@ -307,9 +309,11 @@ class AstParser:
                     nested_ref = nested_expr.struct_name
                     is_array = nested_expr.is_array
                 elif field.ret == VariableType.JSON:
-                    json_ref = [
+                    jsonify_expr = [
                         i for i in field.body if isinstance(i, Jsonify)
-                    ][0].schema_name
+                    ][0]
+                    json_ref = jsonify_expr.schema_name
+                    is_array = jsonify_expr.is_array
 
                 typedef.body.append(
                     TypeDefField(
@@ -397,6 +401,8 @@ class AstParser:
                 expr = self._module_handlers[node.name](node, module, self.ctx)
                 expr = cast(JsonDef, expr)
                 self._parse_json_fields(node.children, expr)
+                # Store in context for jsonify type resolution
+                self.ctx.json_defs[expr.name] = expr
                 module.body.append(expr)
                 logger.debug("  registered json def: %r", node.args[0] if node.args else "?")
             # handlers
@@ -985,11 +991,95 @@ def reg_expr_to_bool(_: KdlNode, parent: FieldLikeNode, _2: ParseContext):
     return ToBool(parent=parent, accept=prev_type)
 
 
+def _resolve_jsonify_type(json_def: JsonDef, path: str, ctx: ParseContext) -> tuple[VariableType, bool]:
+    """Resolve the return type and array flag for jsonify based on schema and path.
+    
+    Two use cases:
+    1. Path navigates WITHIN schema structure (e.g., Quote path="2.author.slug")
+       -> Try to resolve by walking the schema
+    2. Path navigates RAW JSON before applying schema (e.g., Content path="props.pageProps.data")
+       -> Schema is applied to result, return (JSON, False)
+    
+    Returns: (type, is_array)
+    
+    Examples:
+        Quote (array) + ""              -> (JSON, True)   - array of Quote
+        Quote (array) + "0"             -> (JSON, False)  - single Quote
+        Quote (array) + "2.author.slug" -> (STRING, False) - navigate within schema
+        Content + "props.pageProps.titleResults" -> (JSON, False) - raw JSON navigation
+    """
+    if not path:
+        # No path: return the schema as-is with its array flag
+        return VariableType.JSON, json_def.is_array
+    
+    # Parse path: "2.author.slug" -> ["2", "author", "slug"]
+    segments = path.split(".")
+    
+    # Try to navigate within the schema structure
+    # If any field is not found, fall back to raw JSON navigation
+    current_def = json_def
+    current_is_array = json_def.is_array
+    
+    for i, segment in enumerate(segments):
+        # If current is array and segment is numeric index -> unwrap array
+        if current_is_array and segment.isdigit():
+            current_is_array = False
+            continue
+        
+        # Try to find field in current JsonDef
+        field = None
+        for f in current_def.body:
+            if isinstance(f, JsonDefField) and f.name == segment:
+                field = f
+                break
+        
+        if field is None:
+            # Field not found in schema -> assume raw JSON navigation
+            # Schema is applied to the result of path navigation
+            # Return (JSON, False) since we're extracting from raw JSON
+            return VariableType.JSON, False
+        
+        # Last segment: return field type and array flag
+        if i == len(segments) - 1:
+            return field.ret, field.is_array
+        
+        # Navigate deeper: field must be a nested JSON reference
+        if field.ret != VariableType.JSON:
+            # Can't navigate deeper through non-JSON field
+            # This shouldn't happen in well-formed DSL, but treat as raw JSON navigation
+            return VariableType.JSON, False
+        
+        # Get nested JsonDef
+        if not field.ref_name:
+            # No reference -> can't navigate, treat as raw JSON
+            return VariableType.JSON, False
+        
+        nested_def = ctx.json_defs.get(field.ref_name)
+        if not nested_def:
+            # Schema not found -> treat as raw JSON
+            return VariableType.JSON, False
+        
+        current_def = nested_def
+        current_is_array = field.is_array
+    
+    # Shouldn't reach here, but just in case
+    return VariableType.JSON, current_is_array
+
+
 @PARSER.register_expression_node("jsonify")
-def reg_expr_jsonify(node: KdlNode, parent: FieldLikeNode, _: ParseContext):
-    target = node.args[0]
+def reg_expr_jsonify(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
+    schema_name = node.args[0]
     path = cast(str, node.properties.get("path", ""))
-    return Jsonify(parent=parent, schema_name=target, path=path)
+    
+    # Look up JSON schema
+    json_def = ctx.json_defs.get(schema_name)
+    if json_def is None:
+        raise ParseError(f"jsonify: JSON schema '{schema_name}' not found")
+    
+    # Resolve return type and array flag based on path
+    ret_type, is_array = _resolve_jsonify_type(json_def, path, ctx)
+    
+    return Jsonify(parent=parent, schema_name=schema_name, path=path, ret=ret_type, is_array=is_array)
 
 
 @PARSER.register_expression_node("nested")
