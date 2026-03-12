@@ -1,4 +1,4 @@
--doc """
+@doc """
 demo parser for https://quotes.toscrape.com/js/ 
 """
 
@@ -35,7 +35,7 @@ json Quote array=#true {
 
 struct Main {
     // allow precompute values for reuse
-    -init {
+    @init {
         raw-json {
             raw
             re JSON-PATTERN
@@ -43,20 +43,20 @@ struct Main {
     }
     data {
         // use computed value. should be a firts
-        self raw-json
+        @raw-json
         jsonify Quote
     }
     // patches example
     first-quote {
-        self raw-json
+        @raw-json
         jsonify Quote path="0"
     }
     second-quote {
-        self raw-json
+        @raw-json
         jsonify Quote path="1"
     }
     third-slug {
-        self raw-json
+        @raw-json
         jsonify Quote path="2.author.slug"
     }
 }

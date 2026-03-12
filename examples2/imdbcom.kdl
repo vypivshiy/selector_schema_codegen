@@ -1,4 +1,4 @@
--doc """
+@doc """
 
 Demonstration implementation imdb search page parser
 
@@ -14,7 +14,7 @@ define FMT-URL="https://www.imdb.com{{}}"
 
 
 struct FindPageResults type=list {
-    -split-doc {
+    @split-doc {
         css-all "ul.ipc-metadata-list > li.ipc-metadata-list-summary-item"
     }
 
@@ -82,7 +82,7 @@ json Content {
 }
 
 struct SearchPage {
-    -doc """
+    @doc """
     Extract cards result from imdb.com
 
     Page entrypoint signature:
@@ -110,3 +110,5 @@ struct SearchPage {
     }
     selector-parse { nested FindPageResults }
 }
+
+

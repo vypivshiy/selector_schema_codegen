@@ -434,7 +434,7 @@ class Article:
 **DSL:**
 ```kdl
 struct Book type=list {
-    -split-doc { css-all ".book" }
+    @split-doc { css-all ".book" }
     
     title { css ".title"; text }
     price { css ".price"; text; re #"(\d+)"#; to-float }
@@ -652,4 +652,5 @@ def test_generated_parser():
 - Используйте `py-lxml` для production (быстрее)
 - Используйте `py-bs4` для прототипирования (проще отладка)
 - Всегда запускайте `check` перед генерацией
-- Добавляйте `-doc` для документирования схем
+- Добавляйте `@doc` для документирования схем
+

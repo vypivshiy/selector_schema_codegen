@@ -1,4 +1,4 @@
--doc """
+@doc """
 Universal opengraph and twitter cards metadata extractor
 
 based on most stable artifacts as <meta> tags
@@ -54,15 +54,15 @@ struct MetaBase {
 }
 
 struct MetaOpenGraphOther type=dict {
-    -split-doc {
+    @split-doc {
         css-all CSS-OG-OTHER
     }
-    -key { attr "property" }
-    -value { attr "content" }
+    @key { attr "property" }
+    @value { attr "content" }
 }
 
 struct MetaOpenGraph {
-    -doc "OpenGraph (facebook/meta) metatag specs"
+    @doc "OpenGraph (facebook/meta) metatag specs"
 
     title {
         css "meta[property='og:title'][content]"
@@ -90,10 +90,10 @@ struct MetaOpenGraph {
 }
 
 struct MetaTwitterOther type=dict {
-    -split-doc { css-all CSS-TWITTER-OTHER }
+    @split-doc { css-all CSS-TWITTER-OTHER }
     // first - alias of `index 0`
-    -key { attr property name; first }
-    -value { attr content }
+    @key { attr property name; first }
+    @value { attr content }
 }
 
 
@@ -122,7 +122,7 @@ struct MetaTwitter {
 }
 
 struct UniversalMetaExtractor {
-    -doc """
+    @doc """
     entrypoint parser
 
     accept any HTML page with <meta> tags
@@ -151,3 +151,5 @@ struct UniversalMetaExtractor {
     open-graph { nested MetaOpenGraph }
     twitter { nested MetaTwitter }
 }
+
+

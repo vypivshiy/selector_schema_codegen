@@ -24,7 +24,7 @@ for book_el in soup.select('.book'):
 
 ```kdl
 struct Book type=list {
-    -split-doc { css-all ".book" }
+    @split-doc { css-all ".book" }
     title { css ".title"; text; trim }
     price { css ".price"; text; re #"(\d+\.\d+)"#; to-float }
 }
@@ -119,7 +119,7 @@ That's it! Now let's explore real-world examples.
 **Schema:**
 ```kdl
 struct Book type=list {
-    -split-doc { css-all ".product_pod" }
+    @split-doc { css-all ".product_pod" }
     
     name {
         css "h3 a"
@@ -137,7 +137,7 @@ struct Book type=list {
 
 **Key concepts:**
 - `type=list` - extract multiple items
-- `-split-doc` - split page into elements (one per book)
+- `@split-doc` - split page into elements (one per book)
 - `css` - CSS selector
 - `text` / `attr` - extract text or attribute
 - `re #"pattern"#` - regex with **one capture group**
@@ -166,7 +166,7 @@ define REPL-RATING {
 }
 
 struct Book type=list {
-    -split-doc { css-all ".product_pod" }
+    @split-doc { css-all ".product_pod" }
     
     name { css "h3 a"; attr "title" }
     price { css ".price_color"; text; re #"£(\d+\.\d+)"#; to-float }
@@ -214,10 +214,10 @@ Extract book details with nested product info:
 **Schema:**
 ```kdl
 struct ProductInfo type=table {
-    -table { css "table" }
-    -rows { css-all "tr" }
-    -match { css "th"; text; trim; lower }
-    -value { css "td"; text }
+    @table { css "table" }
+    @rows { css-all "tr" }
+    @match { css "th"; text; trim; lower }
+    @value { css "td"; text }
     
     upc {
         match { eq "upc" }
@@ -268,7 +268,7 @@ Combine everything:
 
 ```kdl
 struct Book type=list {
-    -split-doc { css-all ".product_pod" }
+    @split-doc { css-all ".product_pod" }
     name { css "h3 a"; attr "title" }
     price { css ".price_color"; text; re #"£(\d+\.\d+)"#; to-float }
 }
@@ -387,7 +387,7 @@ struct Main {
 
 ---
 
-### 2.2 Using `-init` for Reuse
+### 2.2 Using `@init` for Reuse
 
 Extract JSON once, use multiple times:
 
@@ -399,7 +399,7 @@ json Quote array=#true {
 }
 
 struct Main {
-    -init {
+    @init {
         raw-json {
             raw
             re JSON-PATTERN
@@ -407,17 +407,17 @@ struct Main {
     }
     
     all-quotes {
-        self raw-json
+        @raw-json
         jsonify Quote
     }
     
     first-quote {
-        self raw-json
+        @raw-json
         jsonify Quote path="0"
     }
     
     second-quote {
-        self raw-json
+        @raw-json
         jsonify Quote path="1"
     }
 }
@@ -462,12 +462,12 @@ json Quote array=#true {
 }
 
 struct Main {
-    -init {
+    @init {
         raw-json { raw; re JSON-PATTERN }
     }
     
     third-author-slug {
-        self raw-json
+        @raw-json
         jsonify Quote path="2.author.slug"
     }
 }
@@ -485,7 +485,7 @@ Extract only specific social links using predicates:
 
 ```kdl
 struct SocialLinks type=flat {
-    -split-doc {
+    @split-doc {
         css-all "a[href]"
         match {
             attr-re "href" #"^https?://(www\.)?(twitter|facebook|instagram|linkedin)"#
@@ -716,7 +716,7 @@ field { css ".title"; text }
 -init {
     raw-json { raw; re PATTERN }
 }
-field { self raw-json; jsonify Schema }
+field { @raw-json; jsonify Schema }
 ```
 
 **Nested structure:**
@@ -897,7 +897,7 @@ Use browser DevTools to verify selectors work.
 
 ```kdl
 struct Book type=list {
-    -split-doc { css-all ".book" }
+    @split-doc { css-all ".book" }
     name { css ".title"; text }
     price { css ".price"; text; re #"(\d+)"#; to-float }
 }
@@ -951,3 +951,4 @@ interface BookType {
 - 🚀 One DSL → multiple languages
 
 **Happy scraping!** 🎉
+

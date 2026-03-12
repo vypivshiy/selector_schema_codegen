@@ -1,4 +1,4 @@
--doc """
+@doc """
 Universal example socials urls extractor. Can be used in any html page
 """
 
@@ -47,11 +47,11 @@ define CSS-ALL-ATTRS {
 }
 
 struct Git type=flat {
-    -init {
+    @init {
         endpoints { CSS-ALL-ATTRS }
     }
     github {
-        self endpoints
+        @endpoints
         filter {
             contains "github.com/"
             FILTER-EXCLUDE
@@ -59,7 +59,7 @@ struct Git type=flat {
         fallback {}
     }
     gitlab {
-        self endpoints
+        @endpoints
         filter {
             contains "gitlab.com/"
             FILTER-EXCLUDE
@@ -69,7 +69,7 @@ struct Git type=flat {
 }
 
 struct Socials type=flat {
-    -init {
+    @init {
         endpoints { CSS-ALL-ATTRS }
         raw-endpoints { 
             // WARNING:
@@ -88,7 +88,7 @@ struct Socials type=flat {
         }
     }
     twitter {
-        self endpoints
+        @endpoints
         filter {
             // note: shorten link selectors can be add a side effect
             // and capture urls like `example*x*.com/` or `foobar*x*.com/`.
@@ -99,7 +99,7 @@ struct Socials type=flat {
         fallback {}
     }
     tiktok {
-        self endpoints
+        @endpoints
         filter {
             // note: shorten link selectors can be add a side effect
             // and capture urls like `example*x*.com/` or `foobar*x*.com/`.
@@ -110,7 +110,7 @@ struct Socials type=flat {
         fallback {}
     }
     youtube {
-        self endpoints
+        @endpoints
         filter {
             contains "youtube.com" "youtu.be"
             FILTER-EXCLUDE
@@ -120,14 +120,14 @@ struct Socials type=flat {
 
     // by regex extract example
     raw-twitter {
-        self raw-endpoints
+        @raw-endpoints
         filter {
             contains "twitter.com" "https://x.com"
         }
         fallback {}
     }
     raw-youtube {
-        self raw-endpoints
+        @raw-endpoints
         filter {
             contains "youtube.com" "youtu.be"
         }

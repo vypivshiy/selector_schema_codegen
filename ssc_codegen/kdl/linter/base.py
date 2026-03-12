@@ -97,7 +97,7 @@ class LintContext:
     transforms: dict[str, TransformInfo] = field(default_factory=dict)
     # cache for block-define inferred (accept, ret) pairs — populated lazily
     inferred_define_types: dict[str, tuple] = field(default_factory=dict)
-    # InitField names from -init blocks (for validating 'self' references)
+    # InitField names from @init blocks (for validating 'self' references)
     init_fields: set[str] = field(default_factory=set)
 
     # ── path ───────────────────────────────────────────────────────────────────
@@ -475,9 +475,9 @@ class AstLinter:
             child_in_json = (name == "json")
         elif _in_struct_field:
             # this node IS the field name; its children are pipeline ops
-            # EXCEPT for -init: its children are InitField definitions (like struct fields)
+            # EXCEPT for @init: its children are InitField definitions (like struct fields)
             # EXCEPT for json: its children are type annotations, not operations
-            if name == "-init":
+            if name == "@init":
                 child_in_pipeline = False
                 child_in_struct_field = True  # Children are InitField names
                 child_in_json = False

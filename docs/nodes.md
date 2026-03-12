@@ -103,7 +103,7 @@ class Docstring(Node):
 
 **DSL:**
 ```kdl
--doc """
+@doc """
 Module documentation
 Multi-line supported
 """
@@ -179,7 +179,7 @@ title {
 
 ### `InitField`
 
-Предвычисленное поле в `-init`.
+Предвычисленное поле в `@init`.
 
 ```python
 @dataclass
@@ -202,7 +202,7 @@ class InitField(Node):
 **Использование:**
 ```kdl
 data {
-    self raw-json  // Ссылка на InitField
+    @raw-json  // Ссылка на InitField
     jsonify Quote
 }
 ```
@@ -226,13 +226,13 @@ class Value(Node):
 **DSL:**
 ```kdl
 struct Metadata type=dict {
-    -split-doc { css-all "meta" }
+    @split-doc { css-all "meta" }
     
-    -key {
+    @key {
         attr "property"
     }
     
-    -value {
+    @value {
         attr "content"
     }
 }
@@ -299,10 +299,10 @@ class TableRow(Node):
 **DSL:**
 ```kdl
 struct ProductInfo type=table {
-    -table { css "table" }
-    -rows { css-all "tr" }
-    -match { css "th"; text; lower }
-    -value { css "td"; text }
+    @table { css "table" }
+    @rows { css-all "tr" }
+    @match { css "th"; text; lower }
+    @value { css "td"; text }
 }
 ```
 
@@ -1030,7 +1030,7 @@ struct Catalogue {
 
 ### `Self`
 
-Ссылка на предвычисленное значение из `-init`.
+Ссылка на предвычисленное значение из `@init`.
 
 ```python
 @dataclass
@@ -1045,7 +1045,7 @@ class Self(Node):
 }
 
 data {
-    self raw-json  // Использование
+    @raw-json  // Использование
     jsonify Quote
 }
 ```
@@ -1131,3 +1131,4 @@ class TypeDefField(Node):
 - `AUTO` - автоопределение
 
 **Все ноды типизированы** с проверкой `accept` → `ret` в compile-time.
+

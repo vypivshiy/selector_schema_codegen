@@ -575,12 +575,12 @@ data {
 }
 
 first-quote {
-    self data
+    @data
     jsonify Quote path="0"
 }
 
 author-slug {
-    self data
+    @data
     jsonify Quote path="2.author.slug"
 }
 ```
@@ -637,7 +637,7 @@ v2 = len(v1)
 **DSL:**
 ```kdl
 struct ProductInfo type=table {
-    -match { css "th"; text; lower }
+    @match { css "th"; text; lower }
     
     price {
         match { starts "price" }
@@ -985,7 +985,7 @@ v2 = Book._parse_item(v1)
 
 ### `self <name>`
 
-Использовать предвычисленное значение из `-init`.
+Использовать предвычисленное значение из `@init`.
 
 **DSL:**
 ```kdl
@@ -994,7 +994,7 @@ v2 = Book._parse_item(v1)
 }
 
 data {
-    self raw-json
+    @raw-json
     jsonify Quote
 }
 ```
@@ -1117,3 +1117,4 @@ books {
 - Правильность аргументов операций
 - Наличие required полей
 - Синтаксис regex паттернов
+

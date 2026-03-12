@@ -135,7 +135,8 @@ def generate(
             raise typer.Exit(code=1)
         
         logger.debug("linting passed for all files")
-
+    if isinstance(output, str):
+        output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
     ext = _FILE_EXTENSIONS[target]
     converter = _get_converter(target)

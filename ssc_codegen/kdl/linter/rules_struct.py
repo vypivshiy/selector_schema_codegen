@@ -22,22 +22,22 @@ _VALID_STRUCT_TYPES = frozenset({"item", "list", "dict", "table", "flat"})
 
 _REQUIRED_RESERVED: dict[str, frozenset[str]] = {
     "item": frozenset(),
-    "list": frozenset({"-split-doc"}),
-    "dict": frozenset({"-split-doc", "-key", "-value"}),  # dict requires all three
-    "table": frozenset({"-table", "-rows", "-match", "-value"}),
+    "list": frozenset({"@split-doc"}),
+    "dict": frozenset({"@split-doc", "@key", "@value"}),  # dict requires all three
+    "table": frozenset({"@table", "@rows", "@match", "@value"}),
     "flat": frozenset(),
 }
 
 _RESERVED_ALLOWED: dict[str, frozenset[str] | None] = {
-    "-doc": None,
-    "-pre-validate": None,
-    "-init": None,
-    "-split-doc": frozenset({"list", "dict"}),  # dict can also use -split-doc
-    "-key": frozenset({"dict"}),
-    "-value": frozenset({"dict", "table"}),
-    "-table": frozenset({"table"}),
-    "-rows": frozenset({"table"}),
-    "-match": frozenset({"table"}),
+    "@doc": None,
+    "@pre-validate": None,
+    "@init": None,
+    "@split-doc": frozenset({"list", "dict"}),  # dict can also use @split-doc
+    "@key": frozenset({"dict"}),
+    "@value": frozenset({"dict", "table"}),
+    "@table": frozenset({"table"}),
+    "@rows": frozenset({"table"}),
+    "@match": frozenset({"table"}),
 }
 
 # all valid pipeline operation names
@@ -95,13 +95,24 @@ _KNOWN_OPS: frozenset[str] = frozenset(PIPELINE_TYPE_RULES.keys()) | frozenset(
 def rule_unknown_or_define_op(node: Node, ctx: LintContext) -> None:
     """
     Fired (by _walk) only when _in_pipeline=True and no specific rule exists.
-    Checks: is this a valid block define ref, scalar define misuse, or unknown op?
+    Checks: is this a valid block define ref, scalar define misuse, @init reference, or unknown op?
 
     Note: unquoted identifier *arguments* (e.g. css-all a, attr href) are valid
     KDL2 string literals and are intentionally not validated here.
     """
     op_name = ctx.node_name(node)
     if not op_name:
+        return
+
+    # Check if it's a reference to @init field: @field-name
+    if op_name.startswith("@"):
+        field_name = op_name[1:]  # Remove @ prefix
+        if field_name not in ctx.init_fields:
+            ctx.error(
+                node,
+                message=f"'@{field_name}': field '{field_name}' not found in @init block",
+                hint=f"declare it in @init: @init {{ {field_name} {{ ... }} }}"
+            )
         return
 
     info = ctx.defines.get(op_name)
@@ -156,7 +167,7 @@ def rule_struct(node: Node, ctx: LintContext) -> None:
 
     fields = ctx.get_children_nodes(node)
     reserved_present = {
-        ctx.node_name(f) for f in fields if ctx.node_name(f).startswith("-")
+        ctx.node_name(f) for f in fields if ctx.node_name(f).startswith("@")
     }
 
     for req in _REQUIRED_RESERVED[struct_type]:
@@ -171,7 +182,7 @@ def rule_struct(node: Node, ctx: LintContext) -> None:
         field_name = ctx.node_name(field_node)
         if not field_name:
             continue
-        if field_name.startswith("-"):
+        if field_name.startswith("@"):
             _check_reserved_field(field_node, field_name, struct_type, ctx)
         else:
             _check_regular_field(field_node, field_name, ctx, struct_type=struct_type)
@@ -197,22 +208,22 @@ def _check_reserved_field(
         )
         return
 
-    if field_name == "-doc":
+    if field_name == "@doc":
         if not ctx.get_arg(node, 0):
             ctx.error(
                 node,
-                message="'-doc' requires a description string",
-                hint='example: -doc "description of this struct"',
+                message="'@doc' requires a description string",
+                hint='example: @doc "description of this struct"',
             )
         return
 
-    if field_name == "-init":
+    if field_name == "@init":
         sub_pipelines = ctx.get_children_nodes(node)
         if not sub_pipelines:
             ctx.error(
                 node,
-                message="'-init' block must contain at least one named pipeline",
-                hint='-init {\n    my-field { css ".x"; text }\n}',
+                message="'@init' block must contain at least one named pipeline",
+                hint='@init {\n    my-field { css ".x"; text }\n}',
             )
         else:
             # type-check each named sub-pipeline and cache its ret type
@@ -268,8 +279,8 @@ def _check_reserved_field(
             hint=f'example: {field_name} {{ css ".item" }}',
         )
     else:
-        # For -key and -value in dict, allow 'attr' and other selector operations
-        # For -split-doc, allow css-all and other selector operations  
+        # For @key and @value in dict, allow 'attr' and other selector operations
+        # For @split-doc, allow css-all and other selector operations  
         # Skip type checking for single-line ops (they're not in standard node format)
         if ops:
             check_pipeline_types(ops, ctx, start_type=VT.DOCUMENT)
@@ -307,9 +318,9 @@ def _check_regular_field(
         return
     
     # For table fields the pipeline starts with 'match { ... }' which
-    # accepts DOCUMENT and returns STRING (the value cell from -value).
+    # accepts DOCUMENT and returns STRING (the value cell from @value).
     # So start_type is always DOCUMENT here — match handles the transition.
-    # For regular fields: DOCUMENT, unless self-ref from -init.
+    # For regular fields: DOCUMENT, unless self-ref from @init.
     start = VT.DOCUMENT
     if struct_type == "table":
         # table fields MUST start with match { ... }

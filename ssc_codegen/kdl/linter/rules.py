@@ -404,9 +404,12 @@ def rule_self(node: Node, ctx: LintContext) -> None:
         if field_name not in ctx.init_fields:
             ctx.error(
                 node,
-                message=f"'self {field_name}': field '{field_name}' not found in -init block",
-                hint=f"declare it in -init: -init {{ {field_name} {{ ... }} }}"
+                message=f"'self {field_name}': field '{field_name}' not found in @init block (deprecated syntax)",
+                hint=f"declare it in @init: @init {{ {field_name} {{ ... }} }} or use new syntax: @{field_name}"
             )
+
+
+# Note: @<name> references to @init fields are checked via wildcard rule below
 
 
 @LINTER.rule("fallback")

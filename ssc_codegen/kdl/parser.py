@@ -426,7 +426,7 @@ class AstParser:
         for node in document.nodes:
             logger.debug("module node: %r", node.name)
             # built-in
-            if node.name == "-doc":
+            if node.name == "@doc":
                 module.docstring.value = node.args[0]
                 logger.debug("  set module docstring")
             elif node.name == "json":
@@ -469,37 +469,37 @@ class AstParser:
         for node in kdl_nodes:
             logger.debug("  struct node: %r", node.name)
             # built-in
-            if node.name == "-doc":
+            if node.name == "@doc":
                 parent.docstring.value = node.args[0]
-            elif node.name == "-init":
+            elif node.name == "@init":
                 expr = parent.init
                 self._parse_init_fields(node.children, expr)
                 # parent.body.append(expr)
-            elif node.name == "-pre-validate":
+            elif node.name == "@pre-validate":
                 expr = PreValidate(parent=parent)
                 self._parse_expressions(node.children, expr)
                 parent.body.append(expr)
-            elif node.name == "-split-doc":
+            elif node.name == "@split-doc":
                 expr = SplitDoc(parent=parent)
                 self._parse_expressions(node.children, expr)
                 parent.body.append(expr)
-            elif node.name == "-key":
+            elif node.name == "@key":
                 expr = Key(parent=parent)
                 self._parse_expressions(node.children, expr)
                 parent.body.append(expr)
-            elif node.name == "-value":
+            elif node.name == "@value":
                 expr = Value(parent=parent)
                 self._parse_expressions(node.children, expr)
                 parent.body.append(expr)
-            elif node.name == "-table":
+            elif node.name == "@table":
                 expr = TableConfig(parent=parent)
                 self._parse_expressions(node.children, expr)
                 parent.body.append(expr)
-            elif node.name == "-rows":
+            elif node.name == "@rows":
                 expr = TableRow(parent=parent)
                 self._parse_expressions(node.children, expr)
                 parent.body.append(expr)
-            elif node.name == "-match":
+            elif node.name == "@match":
                 expr = TableMatchKey(parent=parent)
                 self._parse_expressions(node.children, expr)
                 parent.body.append(expr)
@@ -574,6 +574,28 @@ class AstParser:
                 logger.debug("  inlining define: %r", node.name)
                 self._parse_expressions(self.ctx.children_defines[node.name], parent, _add_return=False)
                 continue
+            
+            # Check if node name starts with @ (reference to @init field)
+            if node.name.startswith("@") and not node.name.startswith("@doc"):
+                # This is a reference to an @init field: @field-name
+                field_name = node.name[1:]  # Remove @ prefix
+                struct = parent.parent
+                struct = cast(Struct, struct)
+                init_node = struct.init
+                # Find the init field
+                init_field = [
+                    i
+                    for i in init_node.body
+                    if isinstance(i, InitField) and i.name == field_name
+                ][0]
+                prev_type = init_field.ret
+                expr = Self(
+                    parent=parent, accept=prev_type, ret=prev_type, name=field_name
+                )
+                logger.debug("  expr: %r -> Self (ret=%s)", node.name, expr.ret)
+                parent.body.append(expr)
+                continue
+            
             if cb := self._context_expressions.get(node.name):
                 expr = cb(node, parent, self.ctx)
                 logger.debug("  expr: %r -> %s (ret=%s)", node.name, type(expr).__name__, expr.ret)
@@ -1145,6 +1167,8 @@ def reg_expr_fallback(node: KdlNode, parent: FieldLikeNode, _: ParseContext):
 
 @PARSER.register_expression_node("self")
 def reg_expr_self(node: KdlNode, parent: FieldLikeNode, _: ParseContext):
+    # DEPRECATED: old syntax "self field-name"
+    # Use @field-name instead
     # 1. get init container
     struct = parent.parent
     struct = cast(Struct, struct)

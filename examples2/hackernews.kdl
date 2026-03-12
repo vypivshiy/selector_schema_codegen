@@ -1,4 +1,4 @@
--doc """
+@doc """
 Example web scraper config for https://news.ycombinator.com/
 
 
@@ -41,7 +41,7 @@ define FMT-URL="https://news.ycombinator.com/{{}}"
 
 // see first dostring tags examples about selector implementatsions
 struct News type=list {
-    -split-doc {
+    @split-doc {
         css-all ".submission"
     }
 
@@ -71,7 +71,7 @@ struct News type=list {
 }
 
 struct Rating type=list {
-    -split-doc { css-all "tr > .subtext > .subline" }
+    @split-doc { css-all "tr > .subtext > .subline" }
 
     score {
         // tip: use advanced selectors for simplify logic
@@ -103,7 +103,7 @@ struct Rating type=list {
 
 
 struct MainPage {
-    -doc """
+    @doc """
     Main hacker news page
 
     Page entrypoints examples:
@@ -118,7 +118,7 @@ struct MainPage {
 }
 
 struct Comments type=list {
-    -split-doc {
+    @split-doc {
         css-all "table.comment-tree tr.comtr[id] > td > table"
     }
 
@@ -133,7 +133,7 @@ struct Comments type=list {
 }
 
 struct MainDiscussionPage {
-    -doc """
+    @doc """
 
     Main hackernews discussion page
 
@@ -160,3 +160,5 @@ struct MainDiscussionPage {
     }
     comments { nested Comments }
 }
+
+
