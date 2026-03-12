@@ -1,501 +1,655 @@
-# Руководство по реализации нового конвертера
+# Converters & Code Generation
 
-Документ описывает, как добавить новый backend-конвертер поверх `BaseConverter`.
-В качестве эталонной реализации используется `ssc_codegen/kdl/converters/py_bs4.py`.
+> **Version:** 2.0  
+> **Last Updated:** 2026-03-11
 
----
-
-## Содержание
-
-- [Концепция](#концепция)
-- [ConverterContext](#convertercontext)
-- [Система регистрации хендлеров](#система-регистрации-хендлеров)
-- [Режимы обхода AST](#режимы-обхода-ast)
-- [Структура нового конвертера](#структура-нового-конвертера)
-- [Полный список узлов для реализации](#полный-список-узлов-для-реализации)
-  - [Module level](#module-level)
-  - [Struct level](#struct-level)
-  - [Expressions — Selectors](#expressions--selectors)
-  - [Expressions — Extract](#expressions--extract)
-  - [Expressions — String](#expressions--string)
-  - [Expressions — Regex](#expressions--regex)
-  - [Expressions — Array](#expressions--array)
-  - [Expressions — Cast](#expressions--cast)
-  - [Expressions — Control](#expressions--control)
-  - [Predicates](#predicates)
-- [Паттерны кодогенерации](#паттерны-кодогенерации)
-  - [Одна переменная — один шаг](#одна-переменная--один-шаг)
-  - [Dispatch по accept-типу](#dispatch-по-accept-типу)
-  - [pre + post для блоков](#pre--post-для-блоков)
-  - [Predicate ops и AND-цепочка](#predicate-ops-и-and-цепочка)
-- [Вспомогательные функции](#вспомогательные-функции)
-- [Наследование через extend()](#наследование-через-extend)
-- [Checklist](#checklist)
+Руководство по конвертерам и генерации кода из KDL Schema DSL.
 
 ---
 
-## Концепция
+## Table of Contents
 
-Конвертер — это набор функций-хендлеров, каждый из которых принимает один AST-узел и
-`ConverterContext` и возвращает строку (или список строк) кода целевого языка.
-`BaseConverter` обходит AST автоматически и склеивает результаты в итоговый файл.
+- [Overview](#overview)
+- [Available Converters](#available-converters)
+  - [Python Converters](#python-converters)
+  - [JavaScript Converters](#javascript-converters)
+- [Converter API](#converter-api)
+  - [BaseConverter](#baseconverter)
+  - [Inheritance & Extension](#inheritance--extension)
+  - [Creating Custom Converters](#creating-custom-converters)
+- [CLI Usage](#cli-usage)
+- [Generated Code Examples](#generated-code-examples)
+- [Advanced Topics](#advanced-topics)
 
+---
+
+## Overview
+
+KDL Schema DSL компилируется в код на разных языках через систему **конвертеров**.
+
+**Архитектура:**
 ```
-Module AST
-    └── BaseConverter.convert(module)   ← точка входа
-            └── _emit_node(node, ctx)   ← рекурсивный обход
-                    ├── pre_callback(node, ctx)   → str | list[str]
-                    ├── body traversal  (авто)
-                    └── post_callback(node, ctx)  → str | list[str]
+KDL Schema → Parser → AST → Converter → Target Code
 ```
 
-Конвертер **не хранит состояния** — всё, что нужно знать при обходе, передаётся
-через `ConverterContext` и сам узел AST.
+**Ключевые особенности:**
+- **Типизированная генерация** - TypedDict для Python, interfaces для TypeScript
+- **Мультиязычность** - один DSL → несколько целевых языков
+- **Расширяемость** - простое создание новых конвертеров
+- **Наследование** - переиспользование логики через `.extend()`
 
 ---
 
-## ConverterContext
+## Available Converters
+
+### Python Converters
+
+#### `py-bs4` - BeautifulSoup4
+
+**Описание:** Генерирует Python код с использованием BeautifulSoup4.
+
+**Зависимости:**
+```python
+beautifulsoup4
+lxml  # используется как парсер для bs4
+```
+
+**Особенности:**
+- `.select()` / `.select_one()` для CSS селекторов
+- `.text` для извлечения текста
+- `.get_attribute_list()` для атрибутов
+- Поддержка всех операций DSL
+
+**Генерируемый код:**
+```python
+from bs4 import BeautifulSoup, Tag
+from typing import TypedDict, List, Union
+
+class MainType(TypedDict):
+    title: str
+    links: List[str]
+
+class Main:
+    def __init__(self, document: Union[str, BeautifulSoup]):
+        if isinstance(document, str):
+            self._doc = BeautifulSoup(document.strip() or FALLBACK_HTML_STR, features='lxml')
+        else:
+            self._doc = document
+    
+    def parse(self) -> MainType:
+        return self._parse(self._doc)
+    
+    def _parse(self, v: Union[Tag, BeautifulSoup]) -> MainType:
+        v1 = v.select_one('h1')
+        v2 = v1.text
+        v3 = v2.strip()
+        # ...
+```
+
+---
+
+#### `py-lxml` - lxml
+
+**Описание:** Генерирует Python код с использованием lxml (быстрее bs4).
+
+**Зависимости:**
+```python
+lxml
+cssselect  # для CSS селекторов
+```
+
+**Особенности:**
+- `.cssselect()` для CSS селекторов
+- `.xpath()` для XPath
+- `.text_content()` для текста
+- `.get()` для атрибутов
+- Более производительный чем bs4
+
+**Генерируемый код:**
+```python
+from lxml import html
+from lxml.html import HtmlElement
+from typing import TypedDict, List
+
+class MainType(TypedDict):
+    title: str
+
+class Main:
+    def __init__(self, document: Union[str, HtmlElement]):
+        if isinstance(document, str):
+            self._doc = html.fromstring(document.strip() or FALLBACK_HTML_STR)
+        else:
+            self._doc = document
+    
+    def _parse_title(self, v: HtmlElement) -> str:
+        v1 = v.cssselect('h1')[0]
+        v2 = v1.text_content()
+        return v2.strip()
+```
+
+**Сравнение с bs4:**
+
+| Операция | bs4 | lxml |
+|----------|-----|------|
+| CSS select | `.select_one()` | `.cssselect()[0]` |
+| CSS all | `.select()` | `.cssselect()` |
+| Text | `.text` | `.text_content()` |
+| Attr | `.get_attribute_list()` | `.get(name, '')` |
+| HTML | `str(el)` | `html.tostring(el)` |
+| Has attr | `.has_attr()` | `name in el.attrib` |
+
+---
+
+### JavaScript Converters
+
+#### `js-pure` - Pure JavaScript
+
+**Описание:** Генерирует чистый JavaScript код (browser/Node.js).
+
+**Зависимости:**
+```javascript
+// Browser: DOMParser встроен
+// Node.js: jsdom или cheerio
+```
+
+**Особенности:**
+- `.querySelector()` / `.querySelectorAll()` для CSS
+- `.textContent` для текста
+- `.getAttribute()` для атрибутов
+- Regex с JS синтаксисом
+
+**Генерируемый код:**
+```javascript
+class Main {
+    constructor(document) {
+        if (typeof document === 'string') {
+            const parser = new DOMParser();
+            this._doc = parser.parseFromString(document, 'text/html');
+        } else {
+            this._doc = document;
+        }
+    }
+    
+    parse() {
+        return this._parse(this._doc);
+    }
+    
+    _parse(v) {
+        let v1 = v.querySelector('h1');
+        let v2 = v1.textContent;
+        return v2.trim();
+    }
+}
+```
+
+---
+
+## Converter API
+
+### BaseConverter
+
+Базовый класс для всех конвертеров:
+
+```python
+class BaseConverter:
+    def __init__(self, var_name: str = "v", indent: str = "    "):
+        self.var_name = var_name
+        self.indent = indent
+        self._pre_callbacks: dict[type, Callable] = {}
+        self._post_callbacks: dict[type, Callable] = {}
+    
+    def __call__(self, node_type: type):
+        """Декоратор для регистрации handler'а."""
+        def decorator(func: Callable):
+            self._pre_callbacks[node_type] = func
+            return func
+        return decorator
+    
+    def post(self, node_type: type):
+        """Декоратор для post-обработки."""
+        def decorator(func: Callable):
+            self._post_callbacks[node_type] = func
+            return func
+        return decorator
+    
+    def extend(self) -> "BaseConverter":
+        """Создать конвертер-наследник."""
+        child = BaseConverter(var_name=self.var_name, indent=self.indent)
+        child._pre_callbacks = dict(self._pre_callbacks)
+        child._post_callbacks = dict(self._post_callbacks)
+        return child
+```
+
+---
+
+### Inheritance & Extension
+
+**Создание конвертера через наследование:**
+
+```python
+from ssc_codegen.kdl.converters import py_bs4
+from ssc_codegen.kdl.converters.base import BaseConverter
+
+# Наследуем все handlers от bs4
+PY_LXML_CONVERTER = py_bs4.PY_BASE_CONVERTER.extend()
+
+# Переопределяем только специфичные для lxml handlers
+@PY_LXML_CONVERTER(CssSelect)
+def pre_expr_css_select(node: CssSelect, ctx: ConverterContext):
+    query = repr(node.query)
+    return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.cssselect({query})[0]"
+
+@PY_LXML_CONVERTER(Text)
+def pre_expr_text(node: Text, ctx: ConverterContext):
+    if node.accept == VariableType.DOCUMENT:
+        return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.text_content()"
+    return f"{ctx.indent}{ctx.nxt} = [i.text_content() for i in {ctx.prv}]"
+```
+
+**Иерархия конвертеров:**
+
+```
+BaseConverter (базовый)
+    ↓
+PY_BASE_CONVERTER (общая Python логика)
+    ↓
+    ├→ PY_BS4_CONVERTER (BeautifulSoup4)
+    └→ PY_LXML_CONVERTER (lxml)
+
+JS_BASE_CONVERTER (общая JS логика)
+    ↓
+    ├→ JS_PURE_CONVERTER (чистый JS)
+    ├→ JS_JQUERY_CONVERTER (jQuery - будущее)
+    └→ JS_CHEERIO_CONVERTER (Cheerio - будущее)
+```
+
+---
+
+### Creating Custom Converters
+
+**Шаги создания кастомного конвертера:**
+
+1. **Наследоваться от существующего конвертера:**
+
+```python
+from ssc_codegen.kdl.converters import py_bs4
+
+MY_CONVERTER = py_bs4.PY_BASE_CONVERTER.extend()
+```
+
+2. **Переопределить необходимые handlers:**
+
+```python
+from ssc_codegen.kdl.ast import CssSelect, Text
+
+@MY_CONVERTER(CssSelect)
+def my_css_select(node: CssSelect, ctx: ConverterContext):
+    # Кастомная реализация
+    query = repr(node.query)
+    return f"{ctx.indent}{ctx.nxt} = my_custom_select({ctx.prv}, {query})"
+
+@MY_CONVERTER(Text)
+def my_text_extract(node: Text, ctx: ConverterContext):
+    return f"{ctx.indent}{ctx.nxt} = extract_text({ctx.prv})"
+```
+
+3. **Зарегистрировать в main.py:**
+
+```python
+# В ssc_codegen/kdl/main.py
+
+class Target(str, enum.Enum):
+    PY_BS4 = "py-bs4"
+    PY_LXML = "py-lxml"
+    MY_CUSTOM = "my-custom"  # Добавить
+
+def _get_converter(target: Target):
+    if target == Target.MY_CUSTOM:
+        from my_package.converters import MY_CONVERTER
+        return MY_CONVERTER
+    # ...
+```
+
+---
+
+### ConverterContext
+
+Контекст для handlers:
 
 ```python
 @dataclass
 class ConverterContext:
-    index: int = 0          # шаг внутри пайплайна (номер переменной)
-    depth: int = 0          # уровень вложенности (отступ)
-    var_name: str = "v"     # базовое имя переменной
-    indent_char: str = "    "
+    prv: str        # Имя предыдущей переменной (v1, v2, ...)
+    nxt: str        # Имя следующей переменной
+    index: int      # Индекс в pipeline
+    indent: str     # Отступ (4 пробела по умолчанию)
 ```
 
-| свойство | описание | пример при `index=2, depth=2` |
-|----------|----------|-------------------------------|
-| `ctx.prv` | входная переменная шага | `v2` |
-| `ctx.nxt` | выходная переменная шага | `v3` |
-| `ctx.indent` | строка отступа | `"        "` (8 пробелов) |
-
-Каждый expression-шаг читает из `ctx.prv` и пишет в `ctx.nxt`.
-`BaseConverter` автоматически вызывает `ctx.advance()` после каждого шага пайплайна.
-
----
-
-## Система регистрации хендлеров
+**Пример использования:**
 
 ```python
-from ssc_codegen.kdl.converters.base import BaseConverter, ConverterContext
-
-MY_CONVERTER = BaseConverter()
-
-# Основной хендлер (вызывается ДО обхода body)
-@MY_CONVERTER(NodeType)
-def _(node: NodeType, ctx: ConverterContext) -> str | list[str]:
-    ...
-
-# Дополнительный хендлер (вызывается ПОСЛЕ обхода body)
-@MY_CONVERTER.post(NodeType)
-def _(node: NodeType, ctx: ConverterContext) -> str | list[str]:
-    ...
-
-# pre + inline post за один декоратор
-@MY_CONVERTER(NodeType, post_callback=lambda _, ctx: ctx.indent + "}")
-def _(node: NodeType, ctx: ConverterContext) -> str | list[str]:
-    ...
+@CONVERTER(Trim)
+def pre_expr_trim(node: Trim, ctx: ConverterContext):
+    # ctx.prv = "v2", ctx.nxt = "v3"
+    return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.strip()"
+    # Результат: "    v3 = v2.strip()"
 ```
 
-Хендлер обязан вернуть `str`, `list[str]` или `None` (пропускается).
-Регистрировать хендлер для узла **не обязательно** — необработанные узлы молча пропускаются.
+---
+
+## CLI Usage
+
+### Basic Commands
+
+```bash
+# Генерация с указанием target
+python -m ssc_codegen.kdl.main generate schema.kdl -t py-bs4
+
+# Указать выходную директорию
+python -m ssc_codegen.kdl.main generate schema.kdl -t py-lxml -o output/
+
+# Генерация из директории
+python -m ssc_codegen.kdl.main generate schemas/ -t py-bs4
+
+# Проверка без генерации
+python -m ssc_codegen.kdl.main check schema.kdl
+
+# Пропустить линтинг
+python -m ssc_codegen.kdl.main generate schema.kdl -t py-bs4 --skip-lint
+
+# Verbose режим
+python -m ssc_codegen.kdl.main generate schema.kdl -t py-bs4 -v
+```
+
+### Targets
+
+| Target | Description | Output |
+|--------|-------------|--------|
+| `py-bs4` | Python + BeautifulSoup4 | `.py` |
+| `py-lxml` | Python + lxml | `.py` |
+| `js-pure` | Pure JavaScript | `.js` |
 
 ---
 
-## Режимы обхода AST
+## Generated Code Examples
 
-`BaseConverter._emit_node` обходит `node.body` в одном из трёх режимов
-в зависимости от типа узла:
+### Example 1: Simple Item Structure
 
-| тип узла | режим | изменение контекста |
-|----------|-------|---------------------|
-| `JsonDef`, `TypeDef`, `Struct`, `Init` | **container** | `depth+1`, `index=0` |
-| `Field`, `TableField`, `InitField`, `PreValidate`, `SplitDoc`, `Key`, `Value`, `TableConfig`, `TableMatchKey`, `TableRow` | **pipeline** | `depth+1` через `_emit_pipeline()`, `index` растёт с каждым шагом |
-| `Filter`, `Assert`, `Match`, `LogicNot`, `LogicAnd`, `LogicOr` | **predicate** | `depth+1`, `index=0`, advance после каждого дочернего узла |
+**DSL:**
+```kdl
+struct Article {
+    title {
+        css "h1"
+        text
+        trim
+    }
+    author {
+        css ".author"
+        text
+    }
+}
+```
 
-**Pipeline** — особый случай: `FallbackStart`/`FallbackEnd` создают `try/except`-блок
-с `depth+1` для тела, индексы переменных при этом сквозные.
+**Generated (py-bs4):**
+```python
+from bs4 import BeautifulSoup, Tag
+from typing import TypedDict, Union
 
-Хендлеры для pipeline-узлов (`Field`, `InitField` и т.д.) получают в `ctx` контекст
-**до** `depth+1` — сам `_emit_pipeline` вызывается внутри `BaseConverter` автоматически.
-Хендлер должен только сгенерировать заголовок метода/функции.
+class ArticleType(TypedDict):
+    title: str
+    author: str
+
+class Article:
+    def __init__(self, document: Union[str, BeautifulSoup]):
+        if isinstance(document, str):
+            self._doc = BeautifulSoup(document.strip() or FALLBACK_HTML_STR, features='lxml')
+        else:
+            self._doc = document
+    
+    def parse(self) -> ArticleType:
+        return self._parse(self._doc)
+    
+    def _parse(self, v: Union[Tag, BeautifulSoup]) -> ArticleType:
+        return {
+            "title": self._parse_title(v),
+            "author": self._parse_author(v),
+        }
+    
+    def _parse_title(self, v: Union[Tag, BeautifulSoup]) -> str:
+        v1 = v.select_one('h1')
+        v2 = v1.text
+        v3 = v2.strip()
+        return v3
+    
+    def _parse_author(self, v: Union[Tag, BeautifulSoup]) -> str:
+        v1 = v.select_one('.author')
+        v2 = v1.text
+        return v2
+```
 
 ---
 
-## Структура нового конвертера
+### Example 2: List Structure with Nested
 
-Рекомендуемая структура файла:
+**DSL:**
+```kdl
+struct Book type=list {
+    -split-doc { css-all ".book" }
+    
+    title { css ".title"; text }
+    price { css ".price"; text; re #"(\d+)"#; to-float }
+}
+
+struct Catalogue {
+    books { nested Book }
+    total { css-all ".book"; len }
+}
+```
+
+**Generated (py-lxml):**
+```python
+from lxml import html
+from lxml.html import HtmlElement
+from typing import TypedDict, List, Union
+
+class BookType(TypedDict):
+    title: str
+    price: float
+
+class Book:
+    @staticmethod
+    def _parse_item(v: HtmlElement) -> BookType:
+        return {
+            "title": Book._parse_title(v),
+            "price": Book._parse_price(v),
+        }
+    
+    @staticmethod
+    def _parse_title(v: HtmlElement) -> str:
+        v1 = v.cssselect('.title')[0]
+        v2 = v1.text_content()
+        return v2
+    
+    @staticmethod
+    def _parse_price(v: HtmlElement) -> float:
+        v1 = v.cssselect('.price')[0]
+        v2 = v1.text_content()
+        v3 = re.search(r'(\d+)', v2)[1]
+        v4 = float(v3)
+        return v4
+
+class CatalogueType(TypedDict):
+    books: List[BookType]
+    total: int
+
+class Catalogue:
+    def __init__(self, document: Union[str, HtmlElement]):
+        if isinstance(document, str):
+            self._doc = html.fromstring(document.strip() or FALLBACK_HTML_STR)
+        else:
+            self._doc = document
+    
+    def parse(self) -> CatalogueType:
+        return self._parse(self._doc)
+    
+    def _parse_books(self, v: HtmlElement) -> List[BookType]:
+        v1 = v.cssselect('.book')
+        v2 = [Book._parse_item(i) for i in v1]
+        return v2
+    
+    def _parse_total(self, v: HtmlElement) -> int:
+        v1 = v.cssselect('.book')
+        v2 = len(v1)
+        return v2
+```
+
+---
+
+### Example 3: Transform with Auto-Imports
+
+**DSL:**
+```kdl
+transform decode-base64 accept=STRING return=STRING {
+    py {
+        import "from base64 import b64decode"
+        code "{{NXT}} = b64decode({{PRV}}).decode('utf-8')"
+    }
+}
+
+struct Main {
+    content {
+        css "#data"
+        attr "data-encoded"
+        transform decode-base64
+    }
+}
+```
+
+**Generated:**
+```python
+from base64 import b64decode  # ← Автоматически добавлен
+from bs4 import BeautifulSoup, Tag
+from typing import TypedDict, Union
+
+class MainType(TypedDict):
+    content: str
+
+class Main:
+    def _parse_content(self, v: Union[Tag, BeautifulSoup]) -> str:
+        v1 = v.select_one('#data')
+        v2 = ' '.join(v1.get_attribute_list('data-encoded'))
+        v3 = b64decode(v2).decode('utf-8')  # ← Transform применен
+        return v3
+```
+
+---
+
+## Advanced Topics
+
+### Custom Type Mappings
+
+Добавление кастомных типов для генерации:
 
 ```python
-# my_converter.py
+MY_CONVERTER = py_bs4.PY_BASE_CONVERTER.extend()
 
-from ssc_codegen.kdl.converters.base import BaseConverter, ConverterContext
-from ssc_codegen.kdl.converters.helpers import to_pascal_case, to_snake_case, ...
-from ssc_codegen.kdl.ast import *   # нужные узлы
+# Добавить кастомный тип
+MY_TYPES = py_bs4.PY_TYPES.copy()
+MY_TYPES[VariableType.CUSTOM] = "MyCustomType"
 
-MY_CONVERTER = BaseConverter()
-
-# ── 1. Маппинг типов ──────────────────────────────────────────────────────────
-MY_TYPES = { VariableType.STRING: "string", ... }
-
-# ── 2. Module level ───────────────────────────────────────────────────────────
-@MY_CONVERTER(Docstring)
-...
-
-@MY_CONVERTER(Imports)
-...
-
-@MY_CONVERTER(Utilities)
-...
-
-@MY_CONVERTER(JsonDef)
-...
-
-@MY_CONVERTER(TypeDef)
-...
-
-# ── 3. Struct level ───────────────────────────────────────────────────────────
-@MY_CONVERTER(Struct)
-...
-
-@MY_CONVERTER(Init)
-...
-
-@MY_CONVERTER(StartParse)
-...
-
-@MY_CONVERTER.post(StartParse)
-...
-
-# ── 4. Expressions ────────────────────────────────────────────────────────────
-# selectors, extract, string, regex, array, cast, control ...
-
-# ── 5. Predicates ─────────────────────────────────────────────────────────────
-# filter, assert, match, pred ops ...
+@MY_CONVERTER(Field)
+def pre_struct_field(node: Field, ctx: ConverterContext):
+    ret_type = MY_TYPES.get(node.ret, "Any")
+    # ...
 ```
 
 ---
 
-## Полный список узлов для реализации
+### Post-Processing
 
-Ниже — все узлы, которые требуют хендлера. Узлы помечены:
-- ✅ — обязательно
-- ⚠️ — нужен хотя бы `NotImplementedError`, если backend не поддерживает
-- 💡 — опционально / только при поддержке фичи
-
-### Module level
-
-| узел | обязательность | что генерировать |
-|------|---------------|-----------------|
-| `Docstring` | ✅ | комментарий или строковой литерал уровня модуля |
-| `Imports` | ✅ | все импорты/require/using для целевого языка |
-| `Imports` (post) | 💡 | дополнительные зависимости (библиотека парсера и т.д.) |
-| `Utilities` | ✅ | вспомогательные функции (`repl_map`, `normalize_text`, backport'ы и т.д.) |
-| `JsonDef` | ✅ | определение типа для JSON-структуры |
-| `JsonDefField` | ✅ | поле внутри JSON-типа |
-| `TypeDef` | ✅ | определение типа возврата struct |
-| `TypeDefField` | ✅ | поле внутри TypeDef |
-
-### Struct level
-
-| узел | обязательность | что генерировать |
-|------|---------------|-----------------|
-| `Struct` | ✅ | объявление класса / структуры |
-| `StructDocstring` | 💡 | docstring внутри класса |
-| `StartParse` (pre) | ✅ | сигнатура публичного метода `parse` |
-| `StartParse` (post) | ✅ | тело `parse`: обход по полям в зависимости от `StructType` |
-| `Init` | ✅ | конструктор/init-метод; принимает документ, парсит его, инициализирует `self._doc` |
-| `InitField` | ✅ | заголовок приватного метода для pre-computed поля |
-| `Field` | ✅ | заголовок приватного метода `_parse_{name}` |
-| `TableField` | ✅ | аналог `Field`, возврат — `type | sentinel` |
-| `PreValidate` | ✅ | метод `_pre_validate`, возврат `void/None` |
-| `SplitDoc` | ✅ | метод `_split_doc`, возвращает коллекцию элементов |
-| `Key` | ✅ | метод `_parse_key`, возврат `string` |
-| `Value` | ✅ | метод `_parse_value` |
-| `TableConfig` | ✅ | метод `_table_config`, возврат одного элемента |
-| `TableMatchKey` | ✅ | метод `_table_match_key`, возврат `string` |
-| `TableRow` | ✅ | метод `_table_row`, возврат одного элемента |
-
-**Логика `StartParse.post` по `StructType`:**
-
-| `StructType` | тело `parse()` |
-|---|---|
-| `ITEM` | `return { field: _parse_field(doc), ... }` |
-| `LIST` | `return [ { field: _parse_field(i), ... } for i in _split_doc(doc) ]` |
-| `DICT` | `return { _parse_key(i): _parse_value(i) for i in _split_doc(doc) }` |
-| `FLAT` | накопить список строк через `_parse_{field}`, дедуплицировать, вернуть |
-| `TABLE` | итерировать `_table_rows(doc)`, для каждой строки вызвать `_parse_{field}`, проверить sentinel, собрать dict |
-
-### Expressions — Selectors
-
-| узел | что генерировать | если не поддерживается |
-|------|-----------------|------------------------|
-| `CssSelect` | выбрать один элемент по CSS | — |
-| `CssSelectAll` | выбрать все элементы по CSS | — |
-| `CssRemove` | удалить элементы по CSS из дерева (side-effect), переназначить переменную | — |
-| `XpathSelect` | выбрать один элемент по XPath | ⚠️ `NotImplementedError` |
-| `XpathSelectAll` | выбрать все элементы по XPath | ⚠️ `NotImplementedError` |
-| `XpathRemove` | удалить элементы по XPath | ⚠️ `NotImplementedError` |
-
-`CssRemove` — **side-effect**: модифицирует дерево на месте, затем переназначает ту же переменную:
-```
-# псевдокод
-remove_all(prv, query)
-nxt = prv
-```
-
-### Expressions — Extract
-
-| узел | DOCUMENT | LIST_DOCUMENT |
-|------|----------|---------------|
-| `Text` | извлечь текстовое содержимое элемента | map по списку |
-| `Raw` | извлечь raw HTML/XML тег как строку | map по списку |
-| `Attr` | извлечь значение атрибута(ов) | map по списку |
-
-`Attr.keys` — кортеж: если один ключ — вернуть значение напрямую; если несколько —
-пропускать отсутствующие ключи, всегда возвращать `LIST_STRING`.
-
-### Expressions — String
-
-Все узлы работают как map: `STRING → STRING`, `LIST_STRING → LIST_STRING`.
-Исключения: `Split` (`STRING → LIST_STRING`), `Join` (`LIST_STRING → STRING`).
-
-| узел | операция |
-|------|----------|
-| `Trim` | убрать пробелы / символ `substr` с обоих концов |
-| `Ltrim` | убрать с левого конца |
-| `Rtrim` | убрать с правого конца |
-| `NormalizeSpace` | схлопнуть все пробельные символы в один пробел |
-| `RmPrefix` | убрать префикс `substr` (если есть) |
-| `RmSuffix` | убрать суффикс `substr` (если есть) |
-| `RmPrefixSuffix` | убрать и префикс, и суффикс |
-| `Fmt` | подставить строку в шаблон (`node.template`, placeholder `{}`) |
-| `Repl` | заменить `node.old` на `node.new` |
-| `ReplMap` | последовательная замена по словарю `node.replacements` |
-| `Lower` | привести к нижнему регистру |
-| `Upper` | привести к верхнему регистру |
-| `Split` | разбить по разделителю `node.sep` |
-| `Join` | объединить список через `node.sep` |
-| `Unescape` | HTML/unicode/hex/bytes escapes → unicode |
-
-### Expressions — Regex
-
-| узел | accept | ret | операция |
-|------|--------|-----|----------|
-| `Re` | `STRING \| LIST_STRING` | same | извлечь первую capturing group |
-| `ReAll` | `STRING` | `LIST_STRING` | найти все совпадения |
-| `ReSub` | `STRING \| LIST_STRING` | same | заменить по шаблону |
-
-Флаги: `node.ignore_case`, `node.dotall` — используйте соответствующие флаги целевого языка.
-
-### Expressions — Array
-
-| узел | операция |
-|------|----------|
-| `Index` | взять элемент по индексу `node.i` |
-| `Slice` | срез `[node.start : node.end]` |
-| `Len` | длина коллекции |
-| `Unique` | дедупликация; `node.keep_order` — с сохранением порядка или нет |
-
-### Expressions — Cast
-
-| узел | операция |
-|------|----------|
-| `ToInt` | `STRING → INT`, `LIST_STRING → LIST_INT` |
-| `ToFloat` | `STRING → FLOAT`, `LIST_STRING → LIST_FLOAT` |
-| `ToBool` | любой тип → булево |
-| `Jsonify` | `STRING → JSON`; `node.path` — опциональный dot-path для вложенного доступа |
-| `Nested` | `DOCUMENT → NESTED`; `node.struct_name` — имя вложенного класса; вызов `.parse()` |
-
-`Jsonify.path` разбирается через `jsonify_path_to_segments()` из `helpers.py`.
-
-### Expressions — Control
-
-| узел | операция |
-|------|----------|
-| `Self` | читает pre-computed значение `InitField` по имени (`self._name` / поле инстанса) |
-| `Return` | внутри `PreValidate` — пустой return; иначе — `return prv` |
-| `FallbackStart` | открывает try/catch блок |
-| `FallbackEnd` | закрывает catch; `node.value` — возвращаемый fallback-литерал |
-
-### Predicates
-
-**Containers:**
-
-| узел | что генерировать |
-|------|-----------------|
-| `Filter` | list comprehension / filter по условию из body |
-| `Assert` | assert/throw по условию из body, затем переназначить переменную |
-| `Match` | вычислить ключ строки (`_table_match_key`), проверить условие из body, при несовпадении вернуть sentinel |
-
-**Ops** (используются внутри containers, переменная — `i`):
-
-Все predicate ops следуют единому паттерну:
-- `ctx.index == 0` → первый предикат в блоке, без логического соединителя
-- `ctx.index > 0` → добавить `AND` (или `&&`, `and` и т.д. для целевого языка)
-
-| группа | узлы | переменная | операция |
-|--------|------|-----------|----------|
-| CSS | `PredCss` | `i` (элемент) | элемент имеет child по CSS-query |
-| XPath | `PredXpath` | `i` (элемент) | элемент имеет child по XPath ⚠️ |
-| Атрибут | `PredHasAttr` | `i` | элемент имеет атрибут |
-| Атрибут | `PredAttrEq/Ne/Starts/Ends/Contains/Re` | значение атрибута | сравнение значения атрибута |
-| Текст | `PredTextStarts/Ends/Contains/Re` | `i.text` | сравнение текста элемента |
-| Строки | `PredEq`, `PredNe` | `i` (строка) | равенство; если аргумент `int` — сравнение длины |
-| Строки | `PredStarts`, `PredEnds`, `PredContains`, `PredIn` | `i` | строковые предикаты |
-| Числа | `PredGt/Lt/Ge/Le` | `len(i)` | сравнение длины |
-| Диапазон | `PredRange` | `len(i)` | `start < len < end` |
-| Длина | `PredCountEq/Gt/Lt` | `len(i)` | только для `Assert` |
-| Regex | `PredRe` | `i` | совпадение с паттерном |
-| Regex | `PredReAll`, `PredReAny` | `i` (список) | все/хотя бы один совпадают |
-| Логика | `LogicAnd`, `LogicOr`, `LogicNot` | — | группировка предикатов |
-
-Для `values: tuple[str, ...]` с несколькими значениями применяется OR-семантика (`any()`),
-кроме `PredNe` — там AND (`all()`).
-
----
-
-## Паттерны кодогенерации
-
-### Одна переменная — один шаг
-
-Каждый expression-шаг читает `ctx.prv` и пишет `ctx.nxt`:
+Добавление post-обработки для форматирования кода:
 
 ```python
-@MY_CONVERTER(SomeNode)
-def _(node, ctx):
-    return f"{ctx.indent}{ctx.nxt} = transform({ctx.prv})"
-```
-
-`BaseConverter` автоматически вызывает `ctx.advance()` после каждого шага.
-
-### Dispatch по accept-типу
-
-Многие узлы работают по-разному для `DOCUMENT` vs `LIST_DOCUMENT` (или `STRING` vs `LIST_STRING`):
-
-```python
-@MY_CONVERTER(Text)
-def _(node, ctx):
-    if node.accept == VariableType.DOCUMENT:
-        return f"{ctx.indent}{ctx.nxt} = get_text({ctx.prv})"
-    # LIST_DOCUMENT
-    return f"{ctx.indent}{ctx.nxt} = [get_text(i) for i in {ctx.prv}]"
-```
-
-### pre + post для блоков
-
-Для узлов, которые оборачивают body (предикатные контейнеры, `Fallback`), нужен pre для открытия и post для закрытия:
-
-```python
-@MY_CONVERTER(Filter, post_callback=lambda _, ctx: ctx.deeper().indent + "]")
-def _(node, ctx):
-    # открываем list comprehension
-    return f"{ctx.indent}{ctx.nxt} = [i for i in {ctx.prv} if "
-
-# body (предикаты) эмитируется автоматически между pre и post
-```
-
-### Predicate ops и AND-цепочка
-
-```python
-@MY_CONVERTER(PredStarts)
-def _(node, ctx):
-    values = node.values
-    cond = f"i.startswith({values[0]!r})" if len(values) == 1 \
-        else f"any(i.startswith(v) for v in {values!r})"
-    if ctx.index == 0:
-        return ctx.indent + cond
-    return ctx.indent + f"and {cond}"   # целевой язык: and / && / ...
+@MY_CONVERTER.post(Module)
+def post_module(node: Module, generated_code: list[str]):
+    # Форматирование через black
+    import black
+    code_str = "\n".join(generated_code)
+    return black.format_str(code_str, mode=black.Mode()).split("\n")
 ```
 
 ---
 
-## Вспомогательные функции
+### Multi-File Generation
 
-Все утилиты — в `ssc_codegen/kdl/converters/helpers.py`:
-
-| функция | описание |
-|---------|----------|
-| `to_snake_case(s)` | `"myField"` / `"my-field"` → `"my_field"` |
-| `to_pascal_case(s)` | `"my-field"` → `"MyField"` |
-| `to_camel_case(s)` | `"MyField"` → `"myField"` |
-| `to_upper_snake_case(s)` | `"myField"` → `"MY_FIELD"` |
-| `jsonify_path_to_segments(path)` | `"foo.0.bar"` → `["'foo'", "0", "'bar'"]` |
-| `py_pattern_re_flags(node)` | строит суффикс флагов regex для Python (переопределите для другого языка) |
-
-Для нового backend может понадобиться своя `{lang}_pattern_re_flags(node)`.
-
----
-
-## Наследование через extend()
-
-Если новый конвертер близок к уже существующему (например, другая CSS-библиотека
-для того же языка), используйте `extend()`:
+Генерация нескольких файлов из одного DSL:
 
 ```python
-# базовый Python-конвертер с общими хендлерами
-PY_BASE = BaseConverter()
-
-@PY_BASE(Trim)
-def _(node, ctx): ...   # общий для всех Python-бекендов
-
-# bs4-специфичный конвертер — наследует всё, переопределяет только нужное
-PY_BS4 = PY_BASE.extend()
-
-@PY_BS4(CssSelect)
-def _(node, ctx):
-    return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.select_one({node.query!r})"
-
-# selectolax — отдельный extend от базы, не от bs4
-PY_SELECTOLAX = PY_BASE.extend()
-
-@PY_SELECTOLAX(CssSelect)
-def _(node, ctx):
-    return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.css_first({node.query!r})"
+# В конвертере можно генерировать дополнительные файлы
+@MY_CONVERTER(Module)
+def pre_module(node: Module, ctx: ConverterContext):
+    # Генерация основного файла
+    main_code = [...]
+    
+    # Генерация типов в отдельный файл
+    types_code = generate_types(node)
+    with open("types.py", "w") as f:
+        f.write("\n".join(types_code))
+    
+    return main_code
 ```
-
-Родительский конвертер никогда не затрагивается регистрациями дочернего.
 
 ---
 
-## Checklist
+### Testing Generated Code
 
-При реализации нового конвертера убедитесь, что покрыты все пункты:
+```python
+# Пример теста для сгенерированного кода
+def test_generated_parser():
+    from generated.catalogue import Catalogue
+    
+    html = """
+    <div class="book">
+        <span class="title">Book 1</span>
+        <span class="price">$25.99</span>
+    </div>
+    """
+    
+    parser = Catalogue(html)
+    result = parser.parse()
+    
+    assert result["books"][0]["title"] == "Book 1"
+    assert result["books"][0]["price"] == 25.99
+```
 
-**Module level**
-- [ ] `Docstring` — модульная документация
-- [ ] `Imports` (pre + post) — все нужные импорты/зависимости
-- [ ] `Utilities` — вспомогательные функции (`repl_map`, `normalize_text`, `unescape_text`, backport'ы и т.д.)
-- [ ] `JsonDef` + `JsonDefField` — типы для JSON
-- [ ] `TypeDef` + `TypeDefField` — типы возврата struct; учесть `NESTED` и `JSON` ref с `is_array`
+---
 
-**Struct level**
-- [ ] `Struct` — объявление класса
-- [ ] `StructDocstring` — опциональная документация
-- [ ] `Init` — конструктор; принять `str | Document`, разобрать строку при необходимости, инициализировать `InitField`-поля
-- [ ] `InitField` — заголовок метода; тело эмитируется автоматически
-- [ ] `StartParse` (pre + post) — все пять `StructType`: ITEM, LIST, DICT, FLAT, TABLE
-- [ ] `Field`, `TableField`, `PreValidate`, `SplitDoc`, `Key`, `Value`, `TableConfig`, `TableMatchKey`, `TableRow`
+## Summary
 
-**Expressions**
-- [ ] Selectors: `CssSelect`, `CssSelectAll`, `CssRemove`; XPath — `NotImplementedError` если не поддерживается
-- [ ] Extract: `Text`, `Raw`, `Attr` (dispatch по DOCUMENT / LIST_DOCUMENT)
-- [ ] String: все 14 узлов (map-семантика; `Split` и `Join` — исключения)
-- [ ] Regex: `Re`, `ReAll`, `ReSub` с флагами `ignore_case`/`dotall`
-- [ ] Array: `Index`, `Slice`, `Len`, `Unique` (с `keep_order`)
-- [ ] Cast: `ToInt`, `ToFloat`, `ToBool`, `Jsonify` (с `path`), `Nested`
-- [ ] Control: `Self`, `Return`, `FallbackStart`, `FallbackEnd`
+**Ключевые моменты:**
 
-**Predicates**
-- [ ] Containers: `Filter`, `Assert`, `Match` (sentinel для table)
-- [ ] Logic: `LogicAnd`, `LogicOr`, `LogicNot`
-- [ ] Pred ops: все узлы из таблицы выше; не забыть AND-цепочку через `ctx.index`
-- [ ] Атрибутные предикаты: нормализовать multi-valued атрибуты (аналог `get_attribute_list`)
+1. **Три готовых конвертера:**
+   - `py-bs4` - BeautifulSoup4 (универсальный)
+   - `py-lxml` - lxml (производительный)
+   - `js-pure` - Pure JavaScript
 
-**Общее**
-- [ ] `PY_TYPES` / аналог для целевого языка — покрыть все `VariableType`
-- [ ] `TransformCall` — если backend поддерживает transform-хендлеры
-- [ ] Проверить, что XPath-узлы выбрасывают `NotImplementedError` (или реализованы)
-- [ ] Добавить sentinel-объект `UNMATCHED_TABLE_ROW` (или аналог) для table struct
+2. **Простое расширение через `.extend()`:**
+   - Наследование всех handlers
+   - Переопределение только нужных
+   - Чистый API
+
+3. **Автоматические фичи:**
+   - TypedDict / interfaces для типов
+   - Импорты из transforms
+   - Error handling с fallback
+
+4. **CLI интеграция:**
+   - `generate` - генерация кода
+   - `check` - только линтинг
+   - Поддержка директорий
+
+**Best Practices:**
+- Используйте `py-lxml` для production (быстрее)
+- Используйте `py-bs4` для прототипирования (проще отладка)
+- Всегда запускайте `check` перед генерацией
+- Добавляйте `-doc` для документирования схем
