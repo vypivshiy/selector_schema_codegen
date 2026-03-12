@@ -36,7 +36,7 @@ import json
 from pathlib import Path
 from typing import Literal
 
-from ssc_codegen.kdl.linter.base import LintError, LINTER
+from ssc_codegen.kdl.linter.base import LintError, LintResult, LINTER
 
 
 # ── core formatter ─────────────────────────────────────────────────────────────
@@ -150,44 +150,46 @@ def format_errors(
 # ── file API ───────────────────────────────────────────────────────────────────
 
 
-def lint_file(
-    path: str | Path,
-    fmt: Literal["text", "json"] = "text",
-) -> tuple[list[LintError], str]:
+def lint_file(filepath: str | Path) -> LintResult:
     """
-    Lint a KDL file by path. File is read once and reused for formatting.
-
-    Returns (errors, formatted_output).
-    formatted_output is empty string if no errors.
-
+    Lint a KDL schema file
+    
+    Args:
+        filepath: Path to the file
+    
+    Returns:
+        LintResult with errors and formatting methods
+    
     Usage:
-        errors, output = lint_file("schemas/demo.kdl")
-        if errors:
-            print(output)
+        result = lint_file("schemas/demo.kdl")
+        if result.has_errors():
+            print(result.format())
             sys.exit(1)
-
-        # for LLM pipeline
-        errors, output = lint_file("demo.kdl", fmt="json")
+        
+        # JSON output
+        print(result.format(style="json"))
     """
-    path = Path(path)
-    src = path.read_text(encoding="utf-8")
-    errors = LINTER.lint(src)
-    output = format_errors(errors, src=src, filepath=path, fmt=fmt)
-    return errors, output
+    filepath = Path(filepath)
+    src = filepath.read_text(encoding="utf-8")
+    return LINTER.lint(src, filepath=filepath)
 
 
-def lint_string(
-    src: str,
-    fmt: Literal["text", "json"] = "text",
-) -> tuple[list[LintError], str]:
+def lint_string(src: str) -> LintResult:
     """
-    Lint a KDL string directly. No file path shown in output.
-
-    Returns (errors, formatted_output).
+    Lint a KDL schema string (for tests)
+    
+    Args:
+        src: Source code string
+    
+    Returns:
+        LintResult with errors and formatting methods
+    
+    Usage:
+        result = lint_string(src)
+        assert not result.has_errors()
+        assert result.error_count == 0
     """
-    errors = LINTER.lint(src)
-    output = format_errors(errors, src=src, fmt=fmt)
-    return errors, output
+    return LINTER.lint(src, filepath=None)
 
 
 # ── internal ───────────────────────────────────────────────────────────────────

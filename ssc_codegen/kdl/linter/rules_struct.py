@@ -9,7 +9,8 @@ from __future__ import annotations
 
 from tree_sitter import Node
 
-from ssc_codegen.kdl.linter.base import LINTER, LintContext, DefineKind
+from ssc_codegen.kdl.linter.base import LINTER, LintContext
+from ssc_codegen.kdl.linter.types import ErrorCode, DefineKind
 from ssc_codegen.kdl.linter.type_rules import check_pipeline_types, _parse_vt
 from ssc_codegen.kdl.ast.types import VariableType as VT
 from ssc_codegen.kdl.linter.type_rules import PIPELINE_TYPE_RULES
@@ -23,7 +24,7 @@ _VALID_STRUCT_TYPES = frozenset({"item", "list", "dict", "table", "flat"})
 _REQUIRED_RESERVED: dict[str, frozenset[str]] = {
     "item": frozenset(),
     "list": frozenset({"@split-doc"}),
-    "dict": frozenset({"@split-doc", "@key", "@value"}),  # dict requires all three
+    "dict": frozenset({"@split-doc", "@key", "@value"}),
     "table": frozenset({"@table", "@rows", "@match", "@value"}),
     "flat": frozenset(),
 }
@@ -109,8 +110,9 @@ def rule_unknown_or_define_op(node: Node, ctx: LintContext) -> None:
         field_name = op_name[1:]  # Remove @ prefix
         if field_name not in ctx.init_fields:
             ctx.error(
-                node,
-                message=f"'@{field_name}': field '{field_name}' not found in @init block",
+            node,
+            ErrorCode.MISSING_ARGUMENT,
+            message=f"'@{field_name}': field '{field_name}' not found in @init block",
                 hint=f"declare it in @init: @init {{ {field_name} {{ ... }} }}"
             )
         return
@@ -120,8 +122,9 @@ def rule_unknown_or_define_op(node: Node, ctx: LintContext) -> None:
     if info is not None:
         if info.kind == DefineKind.SCALAR:
             ctx.error(
-                node,
-                message=f"'{op_name}' is a scalar define — cannot be used as a pipeline operation",
+            node,
+            ErrorCode.MISSING_ARGUMENT,
+            message=f"'{op_name}' is a scalar define — cannot be used as a pipeline operation",
                 hint=f"scalar defines substitute argument values. "
                 f"Use a block define: define {op_name} {{ ... }}",
             )
@@ -129,6 +132,7 @@ def rule_unknown_or_define_op(node: Node, ctx: LintContext) -> None:
     else:
         ctx.error(
             node,
+            ErrorCode.UNKNOWN_OPERATION,
             message=f"unknown operation '{op_name}'",
             hint=f"check spelling or declare it: define {op_name} {{ ... }}",
         )
@@ -149,6 +153,7 @@ def rule_struct(node: Node, ctx: LintContext) -> None:
     if not struct_name:
         ctx.error(
             node,
+            ErrorCode.MISSING_ARGUMENT,
             message="'struct' requires a name",
             hint="example: struct MyStruct { ... }",
         )
@@ -158,6 +163,7 @@ def rule_struct(node: Node, ctx: LintContext) -> None:
     if struct_type not in _VALID_STRUCT_TYPES:
         ctx.error(
             node,
+            ErrorCode.MISSING_ARGUMENT,
             message=f"unknown struct type '{struct_type}'",
             hint=f"valid types: {', '.join(sorted(_VALID_STRUCT_TYPES))}",
         )
@@ -173,8 +179,9 @@ def rule_struct(node: Node, ctx: LintContext) -> None:
     for req in _REQUIRED_RESERVED[struct_type]:
         if req not in reserved_present:
             ctx.error(
-                node,
-                message=f"struct type='{struct_type}' is missing required field '{req}'",
+            node,
+            ErrorCode.MISSING_ARGUMENT,
+            message=f"struct type='{struct_type}' is missing required field '{req}'",
                 hint=f"add '{req} {{ ... }}' inside the struct",
             )
 
@@ -203,6 +210,7 @@ def _check_reserved_field(
     if allowed is not None and struct_type not in allowed:
         ctx.error(
             node,
+            ErrorCode.MISSING_ARGUMENT,
             message=f"'{field_name}' is not allowed in struct type='{struct_type}'",
             hint=f"'{field_name}' is only valid in: {', '.join(sorted(allowed))}",
         )
@@ -211,8 +219,9 @@ def _check_reserved_field(
     if field_name == "@doc":
         if not ctx.get_arg(node, 0):
             ctx.error(
-                node,
-                message="'@doc' requires a description string",
+            node,
+            ErrorCode.MISSING_ARGUMENT,
+            message="'@doc' requires a description string",
                 hint='example: @doc "description of this struct"',
             )
         return
@@ -221,8 +230,9 @@ def _check_reserved_field(
         sub_pipelines = ctx.get_children_nodes(node)
         if not sub_pipelines:
             ctx.error(
-                node,
-                message="'@init' block must contain at least one named pipeline",
+            node,
+            ErrorCode.MISSING_ARGUMENT,
+            message="'@init' block must contain at least one named pipeline",
                 hint='@init {\n    my-field { css ".x"; text }\n}',
             )
         else:
@@ -275,6 +285,7 @@ def _check_reserved_field(
     if not ops and not has_single_line:
         ctx.error(
             node,
+            ErrorCode.MISSING_ARGUMENT,
             message=f"'{field_name}' block must contain at least one operation",
             hint=f'example: {field_name} {{ css ".item" }}',
         )
@@ -311,6 +322,7 @@ def _check_regular_field(
     if not ops:
         ctx.error(
             node,
+            ErrorCode.MISSING_ARGUMENT,
             message=f"field '{field_name}' has no operations",
             hint=f'add at least one operation: {field_name} {{ css ".item"; text }}',
         )
@@ -326,8 +338,9 @@ def _check_regular_field(
         # table fields MUST start with match { ... }
         if not ops or ctx.node_name(ops[0]) != "match":
             ctx.error(
-                node,
-                message=f"table field '{field_name}' must start with 'match {{ ... }}'",
+            node,
+            ErrorCode.MISSING_ARGUMENT,
+            message=f"table field '{field_name}' must start with 'match {{ ... }}'",
                 hint=f"example: {field_name} {{ match {{ eq \"value\" }} }}",
             )
     elif ops and ctx.node_name(ops[0]) == "self":
@@ -355,13 +368,15 @@ def rule_define(node: Node, ctx: LintContext) -> None:
     if children:
         if not args:
             ctx.error(
-                node,
-                message="block 'define' requires a name",
+            node,
+            ErrorCode.MISSING_ARGUMENT,
+            message="block 'define' requires a name",
                 hint='example: define EXTRACT-HREF { css "a"; attr "href" }',
             )
     elif not has_prop:
         ctx.error(
             node,
+            ErrorCode.MISSING_ARGUMENT,
             message="'define' must be scalar (NAME=value) or block (NAME { ... })",
             hint="examples:\n"
             '  define MY_URL="https://example.com"\n'
@@ -395,6 +410,7 @@ def rule_transform(node: Node, ctx: LintContext) -> None:
     if not args:
         ctx.error(
             node,
+            ErrorCode.MISSING_ARGUMENT,
             message="'transform' requires a name",
             hint='example: transform to-base64 accept=STRING return=STRING { py { code "..." } }',
         )
@@ -409,12 +425,14 @@ def rule_transform(node: Node, ctx: LintContext) -> None:
     if not accept_str:
         ctx.error(
             node,
+            ErrorCode.MISSING_ARGUMENT,
             message=f"'transform {name}' missing required property 'accept'",
             hint=f"example: transform {name} accept=STRING return=STRING {{ ... }}",
         )
     elif accept_str not in _VALID_TRANSFORM_TYPES:
         ctx.error(
             node,
+            ErrorCode.MISSING_ARGUMENT,
             message=f"'transform {name}': invalid accept type '{accept_str}' (AUTO is not allowed)",
             hint=f"valid types: {', '.join(sorted(_VALID_TRANSFORM_TYPES))}",
         )
@@ -422,12 +440,14 @@ def rule_transform(node: Node, ctx: LintContext) -> None:
     if not ret_str:
         ctx.error(
             node,
+            ErrorCode.MISSING_ARGUMENT,
             message=f"'transform {name}' missing required property 'return'",
             hint=f"example: transform {name} accept=STRING return=STRING {{ ... }}",
         )
     elif ret_str not in _VALID_TRANSFORM_TYPES:
         ctx.error(
             node,
+            ErrorCode.MISSING_ARGUMENT,
             message=f"'transform {name}': invalid return type '{ret_str}' (AUTO is not allowed)",
             hint=f"valid types: {', '.join(sorted(_VALID_TRANSFORM_TYPES))}",
         )
@@ -437,6 +457,7 @@ def rule_transform(node: Node, ctx: LintContext) -> None:
     if not lang_nodes:
         ctx.error(
             node,
+            ErrorCode.MISSING_ARGUMENT,
             message=f"'transform {name}' has no language implementations",
             hint="add at least one language block, e.g.: py { code \"{{NXT}} = {{PRV}}\" }",
         )

@@ -4,305 +4,179 @@ KDL DSL linter — base infrastructure.
 
 from __future__ import annotations
 
-from enum import Enum, auto
 from dataclasses import dataclass, field
 from typing import Callable, Literal
 from functools import wraps
+from pathlib import Path
+from enum import Enum, auto
 
-from tree_sitter import Node
+from tree_sitter import Node, Tree
 
 from ssc_codegen.kdl.linter._kdl_lang import KDL_PARSER
+from ssc_codegen.kdl.linter.types import (
+    RawArg, DefineKind, DefineInfo, TransformInfo,
+    ErrorCode, LintError
+)
 
 
-class DefineKind(Enum):
-    SCALAR = auto()  # define FOO="value"
-    BLOCK = auto()  # define FOO { ops... }
-
-
-@dataclass
-class DefineInfo:
-    name: str
-    kind: DefineKind
-    value: str | None  # SCALAR value; None for BLOCK
-    node: Node
+# ── result ─────────────────────────────────────────────────────────────────────
 
 
 @dataclass
-class TransformInfo:
-    """Metadata collected from a module-level 'transform' block."""
-    name: str
-    accept: str  # raw type string, e.g. "STRING"
-    ret: str     # raw type string, e.g. "LIST_STRING"
-    langs: list[str]  # language identifiers present, e.g. ["py", "js"]
-    node: Node
-
-
-@dataclass
-class RawArg:
-    """
-    Positional argument with CST origin.
-
-    is_identifier=True  — unquoted identifier in source → potential define ref
-                          e.g.  css-all MY-SEL  or  re-sub RE-PAT RE-REPL
-    is_identifier=False — quoted string, raw string, number, bool, null
-                          e.g.  css-all ".item"  or  re-sub #"\\d+"# ""
-    """
-
-    value: str
-    is_identifier: bool
-    node: Node
-
-
-# ── error ──────────────────────────────────────────────────────────────────────
-
-
-@dataclass
-class LintError:
-    message: str
-    hint: str
-    path: str
-    line: int
-    col: int
-    severity: Literal["error", "warning"] = "error"
-
-    def __str__(self) -> str:
-        sev = self.severity.upper()
-        return (
-            f"{sev}: {self.message}\n"
-            f"  --> {self.path}  line {self.line}:{self.col}\n"
-            f"   |\n"
-            f"   | hint: {self.hint}\n"
-        )
-
+class LintResult:
+    """Результат проверки линтера"""
+    
+    errors: list[LintError]
+    source: str
+    filepath: Path | None = None
+    
+    @property
+    def warnings(self) -> list[LintError]:
+        """Фильтр только warnings"""
+        return [e for e in self.errors if e.severity == "warning"]
+    
+    @property
+    def error_count(self) -> int:
+        """Количество ошибок (не warnings)"""
+        return sum(1 for e in self.errors if e.severity == "error")
+    
+    def has_errors(self) -> bool:
+        """Есть ли ошибки (не warnings)?"""
+        return self.error_count > 0
+    
+    def format(self, style: Literal["text", "json"] = "text") -> str:
+        """Форматирование вывода"""
+        from ssc_codegen.kdl.linter.format_errors import format_errors
+        
+        if style == "json":
+            import json
+            return json.dumps(self.to_dict(), indent=2)
+        return format_errors(self.errors, src=self.source, filepath=self.filepath)
+    
     def to_dict(self) -> dict:
+        """Для JSON API"""
         return {
-            "severity": self.severity,
-            "message": self.message,
-            "hint": self.hint,
-            "path": self.path,
-            "line": self.line,
-            "col": self.col,
+            "errors": [e.to_dict() for e in self.errors],
+            "error_count": self.error_count,
+            "warning_count": len(self.warnings),
+            "filepath": str(self.filepath) if self.filepath else None,
         }
 
 
 # ── context ────────────────────────────────────────────────────────────────────
 
 
-@dataclass
 class LintContext:
-    src: bytes
-    errors: list[LintError] = field(default_factory=list)
-    _path: list[str] = field(default_factory=list)
-    defines: dict[str, DefineInfo] = field(default_factory=dict)
-    transforms: dict[str, TransformInfo] = field(default_factory=dict)
-    # cache for block-define inferred (accept, ret) pairs — populated lazily
-    inferred_define_types: dict[str, tuple] = field(default_factory=dict)
-    # InitField names from @init blocks (for validating 'self' references)
-    init_fields: set[str] = field(default_factory=set)
+    """Облегчённый контекст, координирует компоненты"""
+    
+    def __init__(self, src: bytes):
+        from ssc_codegen.kdl.linter.navigation import NodeNavigator
+        from ssc_codegen.kdl.linter.errors import ErrorCollector
+        from ssc_codegen.kdl.linter.path import PathTracker
+        from ssc_codegen.kdl.linter.metadata import ModuleMetadata
+        
+        self.navigator = NodeNavigator(src)
+        self.collector = ErrorCollector()
+        self.path = PathTracker()
+        self.metadata = ModuleMetadata()
 
-    # ── path ───────────────────────────────────────────────────────────────────
-
+    # ── Error reporting (делегирует к collector) ───────────────────────────────
+    
+    @property
+    def errors(self) -> list[LintError]:
+        return self.collector.errors
+    
+    def error(self, node: Node, code: ErrorCode, message: str, hint: str = "") -> None:
+        self.collector.error(node, code, message, hint, self.path.current)
+    
+    def warning(self, node: Node, code: ErrorCode, message: str, hint: str = "") -> None:
+        self.collector.warning(node, code, message, hint, self.path.current)
+    
+    # ── Path tracking (делегирует к path) ──────────────────────────────────────
+    
     @property
     def current_path(self) -> str:
-        return " > ".join(self._path) if self._path else "<module>"
-
+        return self.path.current
+    
     def push(self, segment: str) -> None:
-        self._path.append(segment)
-
+        self.path.push(segment)
+    
     def pop(self) -> None:
-        if self._path:
-            self._path.pop()
+        self.path.pop()
 
-    # ── errors ─────────────────────────────────────────────────────────────────
-
-    def error(self, node: Node, message: str, hint: str = "") -> None:
-        self.errors.append(
-            LintError(
-                message=message,
-                hint=hint,
-                path=self.current_path,
-                line=node.start_point.row + 1,
-                col=node.start_point.column + 1,
-                severity="error",
-            )
-        )
-
-    def warning(self, node: Node, message: str, hint: str = "") -> None:
-        self.errors.append(
-            LintError(
-                message=message,
-                hint=hint,
-                path=self.current_path,
-                line=node.start_point.row + 1,
-                col=node.start_point.column + 1,
-                severity="warning",
-            )
-        )
-
-    # ── CST helpers ────────────────────────────────────────────────────────────
-
+    # ── Navigation shortcuts (делегирует к navigator) ─────────────────────────
+    
     def node_name(self, node: Node) -> str:
-        """First identifier child = KDL node name."""
-        for child in node.children:
-            if child.type == "identifier":
-                return child.text.decode()
-        return ""
-
+        return self.navigator.node_name(node)
+    
     def get_args(self, node: Node) -> list[str]:
-        """Positional args as plain strings (define refs resolved to their name)."""
-        return [r.value for r in self.get_raw_args(node)]
-
+        return self.navigator.get_args(node)
+    
     def get_raw_args(self, node: Node) -> list[RawArg]:
-        """
-        Positional args with is_identifier flag.
-        Skips properties (key=value pairs).
-        """
-        result = []
-        for child in node.children:
-            if child.type != "node_field":
-                continue
-            if any(c.type == "prop" for c in child.children):
-                continue  # skip properties
-            raw = self._extract_raw_arg(child)
-            if raw is not None:
-                result.append(raw)
-        return result
-
+        return self.navigator.get_raw_args(node)
+    
     def get_arg(self, node: Node, index: int) -> str | None:
-        args = self.get_args(node)
-        return args[index] if index < len(args) else None
-
+        return self.navigator.get_arg(node, index)
+    
     def get_prop(self, node: Node, key: str) -> str | None:
-        for child in node.children:
-            if child.type == "node_field":
-                for sub in child.children:
-                    if sub.type == "prop":
-                        k = sub.children[0].text.decode()
-                        if k == key:
-                            return self._extract_value(sub.children[2])
-        return None
-
+        return self.navigator.get_prop(node, key)
+    
     def get_children_nodes(self, node: Node) -> list[Node]:
-        for child in node.children:
-            if child.type == "node_children":
-                return [c for c in child.children if c.type == "node"]
-        return []
+        return self.navigator.get_children_nodes(node)
     
     def has_empty_block(self, node: Node) -> bool:
-        """Check if node has an empty {} block (node_children with no child nodes)."""
-        for child in node.children:
-            if child.type == "node_children":
-                # Has node_children, check if it's empty
-                return not any(c.type == "node" for c in child.children)
-        return False
+        return self.navigator.has_empty_block(node)
     
     def has_single_line_op(self, node: Node, op_name: str) -> bool:
-        """Check if node has a single-line operation like 'nested News' (not wrapped in node)."""
-        for child in node.children:
-            if child.type == "node_children":
-                # Look for identifier matching op_name as direct child
-                identifiers = [c for c in child.children if c.type == "identifier"]
-                return len(identifiers) == 1 and identifiers[0].text.decode() == op_name
-        return False
-
+        return self.navigator.has_single_line_op(node, op_name)
+    
+    # ── Metadata shortcuts ─────────────────────────────────────────────────────
+    
+    @property
+    def defines(self) -> dict[str, DefineInfo]:
+        return self.metadata.defines
+    
+    @property
+    def transforms(self) -> dict[str, TransformInfo]:
+        return self.metadata.transforms
+    
+    @property
+    def init_fields(self) -> set[str]:
+        return self.metadata.init_fields
+    
+    @property
+    def inferred_define_types(self) -> dict[str, tuple]:
+        return self.metadata.inferred_define_types
+    
+    # ── Define/transform helpers ───────────────────────────────────────────────
+    
     def is_define_ref(self, arg: str) -> bool:
+        """Проверить является ли аргумент ссылкой на define"""
         return arg in self.defines
-
+    
     def resolve_scalar_arg(self, arg: str) -> str | None:
-        info = self.defines.get(arg)
-        if info is None:
-            return arg
-        if info.kind == DefineKind.SCALAR:
-            return info.value
+        """Разрешить scalar define значение"""
+        if arg in self.defines:
+            info = self.defines[arg]
+            if info.kind == DefineKind.SCALAR:
+                return info.value
         return None
-
-    # ── internal ───────────────────────────────────────────────────────────────
-
-    def _extract_raw_arg(self, node_field: Node) -> RawArg | None:
-        """
-        Extract RawArg from a node_field.
-
-        CST layout for a positional arg:
-          node_field
-            value
-              identifier   ← unquoted   → is_identifier=True
-              string       ← quoted     → is_identifier=False
-              raw_string   ← #"..."#    → is_identifier=False
-              number/bool  ← literal    → is_identifier=False
-              type + ...   ← annotated  → skip annotation, read inner value
-        """
-        for val_node in node_field.children:
-            if val_node.type != "value":
-                continue
-            return self._classify_value_node(val_node)
-        return None
-
-    def _classify_value_node(self, val_node: Node) -> RawArg:
-        """Classify a 'value' CST node into a RawArg."""
-        for inner in val_node.children:
-            # skip type annotation  (type)value
-            if inner.type == "type":
-                continue
-
-            if inner.type == "identifier":
-                return RawArg(
-                    value=inner.text.decode(),
-                    is_identifier=True,
-                    node=inner,
-                )
-            if inner.type == "string":
-                # quoted string — extract content from string_fragment
-                frag = ""
-                for child in inner.children:
-                    if child.type == "string_fragment":
-                        frag = child.text.decode()
-                        break
-                return RawArg(value=frag, is_identifier=False, node=inner)
-
-            if inner.type == "raw_string":
-                # raw string #"..."# — extract content
-                frag = ""
-                for child in inner.children:
-                    if child.type == "raw_string_content":
-                        frag = child.text.decode()
-                        break
-                return RawArg(value=frag, is_identifier=False, node=inner)
-
-            # number, bool (#true/#false), #null
-            return RawArg(
-                value=inner.text.decode(),
-                is_identifier=False,
-                node=inner,
-            )
-
-        # empty value node (shouldn't happen, but be safe)
-        return RawArg(
-            value=val_node.text.decode(), is_identifier=False, node=val_node
-        )
-
-    def _extract_value(self, node: Node) -> str:
-        """Recursively extract text value (used for props and non-raw-arg contexts)."""
-        if node.type == "string":
-            for child in node.children:
-                if child.type == "string_fragment":
-                    return child.text.decode()
-            return ""
-        if node.type == "raw_string":
-            for child in node.children:
-                if child.type == "raw_string_content":
-                    return child.text.decode()
-            return ""
-        if node.type in ("value", "identifier", "prop"):
-            for child in node.children:
-                result = self._extract_value(child)
-                if result:
-                    return result
-        return node.text.decode()
 
 
 # ── linter ─────────────────────────────────────────────────────────────────────
 
 RuleFn = Callable[[Node, LintContext], None]
+
+
+class WalkContext(Enum):
+    """Контекст обхода AST"""
+    MODULE = auto()           # Top-level module
+    STRUCT_BODY = auto()      # Внутри struct { ... }
+    INIT_BLOCK = auto()       # Внутри @init { ... }
+    PIPELINE = auto()         # Внутри field { operations }
+    JSON_TYPEDEF = auto()     # Внутри json { ... }
+    SPECIAL_FIELD = auto()    # Внутри @pre-validate, @split-doc, etc.
+
 
 # keywords that appear at module level — never inside field pipelines
 _MODULE_KEYWORDS: frozenset[str] = frozenset(
@@ -325,38 +199,111 @@ class AstLinter:
     def __init__(self) -> None:
         self._rules: dict[str, list[RuleFn]] = {}
 
-    def rule(self, *node_names: str) -> Callable[..., RuleFn]:
-        """Register rule(s). Use '*' for wildcard (no specific rule)."""
-
+    def rule(self, *node_names: str, replace: bool = False) -> Callable[..., RuleFn]:
+        """
+        Регистрация правила (decorator).
+        
+        Args:
+            node_names: Имена узлов для проверки
+            replace: Заменить существующие правила (по умолчанию добавляет)
+        
+        Example:
+            @LINTER.rule("css", "css-all")
+            def my_css_rule(node, ctx):
+                ...
+            
+            # Заменить существующее правило
+            @LINTER.rule("css", replace=True)
+            def custom_css_rule(node, ctx):
+                ...
+        """
         def decorator(fn: RuleFn) -> RuleFn:
             @wraps(fn)
             def wrapper(node: Node, ctx: LintContext) -> None:
                 fn(node, ctx)
 
             for name in node_names:
-                self._rules.setdefault(name, []).append(wrapper)
+                if replace:
+                    self._rules[name] = [wrapper]
+                else:
+                    self._rules.setdefault(name, []).append(wrapper)
             return wrapper
 
         return decorator
 
-    def remove_rule(self, fn_name: str) -> None:
-        for name in self._rules:
-            self._rules[name] = [
-                f for f in self._rules[name] if f.__name__ != fn_name
-            ]
+    def remove_rule(self, node_name: str, fn: RuleFn | None = None) -> None:
+        """
+        Удалить правило.
+        
+        Args:
+            node_name: Имя узла
+            fn: Конкретная функция (если None - удалить все)
+        
+        Example:
+            # Удалить все правила для node
+            LINTER.remove_rule("deprecated-op")
+            
+            # Удалить конкретное правило
+            LINTER.remove_rule("css", my_custom_rule)
+        """
+        if node_name in self._rules:
+            if fn is None:
+                del self._rules[node_name]
+            else:
+                self._rules[node_name] = [
+                    r for r in self._rules[node_name] if r != fn
+                ]
+                if not self._rules[node_name]:
+                    del self._rules[node_name]
+    
+    def list_rules(self) -> dict[str, int]:
+        """
+        Список зарегистрированных правил.
+        
+        Returns:
+            Словарь {node_name: count_of_rules}
+        
+        Example:
+            rules = LINTER.list_rules()
+            print(f"Total rules for 'css': {rules.get('css', 0)}")
+        """
+        return {name: len(rules) for name, rules in self._rules.items()}
 
-    def replace_rule(
-        self, fn_name: str, *node_names: str
-    ) -> Callable[..., RuleFn]:
-        self.remove_rule(fn_name)
-        return self.rule(*node_names)
-
-    def lint(self, src: str) -> list[LintError]:
+    def lint(
+        self,
+        src: str,
+        filepath: Path | None = None,
+        # Для будущего incremental linting (LSP)
+        old_tree: Tree | None = None,
+        edits: list | None = None,
+    ) -> LintResult:
+        """
+        Проверить KDL схему
+        
+        Args:
+            src: Исходный код схемы
+            filepath: Путь к файлу (опционально, для вывода)
+            old_tree: Старое parse tree (для incremental, не используется)
+            edits: Список изменений (для incremental, не используется)
+        
+        Returns:
+            LintResult с ошибками и методами форматирования
+        
+        Note:
+            old_tree и edits зарезервированы для будущего incremental linting
+            в LSP server. Сейчас игнорируются.
+        """
+        # TODO: использовать old_tree для incremental parsing
         tree = KDL_PARSER.parse(src.encode())
         ctx = LintContext(src=src.encode())
         self._collect_defines(tree.root_node, ctx)
         self._walk(tree.root_node, ctx)
-        return ctx.errors
+        
+        return LintResult(
+            errors=ctx.errors,
+            source=src,
+            filepath=filepath
+        )
 
     def _collect_defines(self, root: Node, ctx: LintContext) -> None:
         """
@@ -410,7 +357,7 @@ class AstLinter:
                         if sub.type != "prop":
                             continue
                         name = sub.children[0].text.decode()
-                        value = ctx._extract_value(sub.children[2])
+                        value = ctx.navigator._extract_value(sub.children[2])
                         ctx.defines[name] = DefineInfo(
                             name=name,
                             kind=DefineKind.SCALAR,
@@ -418,87 +365,125 @@ class AstLinter:
                             node=node,
                         )
 
+    def _apply_rules_for_context(
+        self,
+        name: str,
+        node: Node,
+        ctx: LintContext,
+        walk_ctx: WalkContext
+    ) -> None:
+        """Применить правила в зависимости от контекста (Python 3.10+ match/case)"""
+        
+        match walk_ctx:
+            case WalkContext.PIPELINE:
+                # В pipeline проверяем все операции
+                if name in self._rules:
+                    for rule_fn in self._rules[name]:
+                        rule_fn(node, ctx)
+                else:
+                    # Wildcard rule для неизвестных операций
+                    for rule_fn in self._rules.get("*", []):
+                        rule_fn(node, ctx)
+            
+            case WalkContext.MODULE:
+                # На уровне модуля только module keywords
+                if name in _MODULE_KEYWORDS and name in self._rules:
+                    for rule_fn in self._rules[name]:
+                        rule_fn(node, ctx)
+            
+            case WalkContext.STRUCT_BODY | WalkContext.INIT_BLOCK:
+                # В struct/init body проверяем field names и special fields
+                if name in self._rules:
+                    for rule_fn in self._rules[name]:
+                        rule_fn(node, ctx)
+            
+            case WalkContext.JSON_TYPEDEF:
+                # В JSON typedef только структурные проверки, не операции
+                if name in self._rules:
+                    for rule_fn in self._rules[name]:
+                        rule_fn(node, ctx)
+            
+            case WalkContext.SPECIAL_FIELD:
+                # Special fields (@pre-validate, etc.) - без правил на этом уровне
+                pass
+    
+    def _determine_next_context(
+        self,
+        node: Node,
+        name: str,
+        current_ctx: WalkContext
+    ) -> WalkContext:
+        """Определить контекст для детей узла (Python 3.10+ match/case)"""
+        
+        match (current_ctx, name):
+            # Module level
+            case (WalkContext.MODULE, "struct"):
+                return WalkContext.STRUCT_BODY
+            case (WalkContext.MODULE, "json"):
+                return WalkContext.JSON_TYPEDEF
+            case (WalkContext.MODULE, "define" | "transform"):
+                return WalkContext.MODULE  # Дети defines/transforms не интересуют
+            
+            # Struct body - field names
+            case (WalkContext.STRUCT_BODY, "@init"):
+                return WalkContext.INIT_BLOCK
+            case (WalkContext.STRUCT_BODY, field_name) if field_name.startswith("@"):
+                return WalkContext.SPECIAL_FIELD
+            case (WalkContext.STRUCT_BODY, _):
+                # Regular field - дети это pipeline ops
+                return WalkContext.PIPELINE
+            
+            # Init block - field names inside @init
+            case (WalkContext.INIT_BLOCK, _):
+                # InitField children are pipelines
+                return WalkContext.PIPELINE
+            
+            # Special field - children are pipelines
+            case (WalkContext.SPECIAL_FIELD, _):
+                return WalkContext.PIPELINE
+            
+            # JSON typedef - field definitions with type annotations
+            case (WalkContext.JSON_TYPEDEF, _):
+                # Children are type annotation nodes, not operations
+                return WalkContext.JSON_TYPEDEF
+            
+            # Pipeline - stays pipeline
+            case (WalkContext.PIPELINE, _):
+                return WalkContext.PIPELINE
+            
+            # Default: keep current context
+            case _:
+                return current_ctx
+    
     def _walk(
         self,
         node: Node,
         ctx: LintContext,
-        _in_pipeline: bool = False,
-        _in_struct_field: bool = False,
-        _in_json: bool = False,
+        walk_ctx: WalkContext = WalkContext.MODULE,
     ) -> None:
-        """
-        Walk the CST. _in_pipeline=True means we are inside a field pipeline
-        (children of a regular field or reserved field) — ops are valid here.
-        Module-level nodes and field names are not pipeline ops.
-
-        _in_struct_field=True means the current node is a direct child of a
-        struct body (i.e. a field name like 'urls' or '-split-doc').
-        Its children are pipeline operations and must be walked with
-        _in_pipeline=True.
+        """Обход AST с проверкой правил (упрощенная версия с WalkContext)"""
         
-        _in_json=True means we are inside a json definition where fields
-        have type annotations, not pipeline operations.
-        """
         if node.type != "node":
             for child in node.children:
-                self._walk(child, ctx, _in_pipeline, _in_struct_field, _in_json)
+                self._walk(child, ctx, walk_ctx)
             return
-
+        
         name = ctx.node_name(node)
         if not name:
             return
-
+        
         ctx.push(name)
-
-        # dispatch specific rules
-        # Skip rule checks for JSON type annotations
-        if not _in_json:
-            specific = self._rules.get(name)
-            if specific:
-                for fn in specific:
-                    fn(node, ctx)
-            elif _in_pipeline:
-                # no specific rule + inside pipeline → wildcard
-                for fn in self._rules.get("*", []):
-                    fn(node, ctx)
-
-        # Determine pipeline flag for children:
-        #   - module-level keywords (struct, define, …): children are NOT ops
-        #   - struct field nodes (_in_struct_field=True): children ARE ops
-        #   - already inside a pipeline: stay in pipeline (unless entering a
-        #     module keyword, which cannot appear inside pipelines anyway)
-        if name in _MODULE_KEYWORDS:
-            # struct / define / json / transform — children are fields/directives
-            child_in_pipeline = False
-            # Both 'struct' and 'json' have children that are field definitions
-            child_in_struct_field = name in ("struct", "json")
-            child_in_json = (name == "json")
-        elif _in_struct_field:
-            # this node IS the field name; its children are pipeline ops
-            # EXCEPT for @init: its children are InitField definitions (like struct fields)
-            # EXCEPT for json: its children are type annotations, not operations
-            if name == "@init":
-                child_in_pipeline = False
-                child_in_struct_field = True  # Children are InitField names
-                child_in_json = False
-            elif _in_json:
-                # JSON field - children are type annotations, not operations
-                child_in_pipeline = False
-                child_in_struct_field = False
-                child_in_json = True
-            else:
-                child_in_pipeline = True
-                child_in_struct_field = False
-                child_in_json = False
-        else:
-            # already inside a pipeline: keep propagating
-            child_in_pipeline = _in_pipeline
-            child_in_struct_field = False
-            child_in_json = _in_json
-
+        
+        # Применить правила для текущего узла
+        self._apply_rules_for_context(name, node, ctx, walk_ctx)
+        
+        # Определить контекст для детей
+        next_ctx = self._determine_next_context(node, name, walk_ctx)
+        
+        # Обработать детей
         for child in ctx.get_children_nodes(node):
-            self._walk(child, ctx, child_in_pipeline, child_in_struct_field, child_in_json)
-
+            self._walk(child, ctx, next_ctx)
+        
         ctx.pop()
 
 

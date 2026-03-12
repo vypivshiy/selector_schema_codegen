@@ -125,10 +125,10 @@ def generate(
         
         lint_errors_found = False
         for kdl_file in kdl_files:
-            errors, output = lint_file(kdl_file)
-            if errors:
+            result = lint_file(kdl_file)
+            if result.has_errors():
                 lint_errors_found = True
-                typer.echo(f"\n{output}", err=True)
+                typer.echo(f"\n{result.format()}", err=True)
         
         if lint_errors_found:
             typer.echo("\nLinting failed. Use --skip-lint to bypass linter.", err=True)
@@ -219,16 +219,29 @@ def check(
     logger.debug("total %d .kdl file(s) to check", len(kdl_files))
     
     # Check all files
-    all_errors = []
-    for kdl_file in kdl_files:
-        errors, output = lint_file(kdl_file, fmt=fmt)  # type: ignore
-        if errors:
-            all_errors.extend(errors)
-            typer.echo(output, err=True)
+    all_results = []
+    total_errors = 0
     
-    if all_errors:
+    for kdl_file in kdl_files:
+        result = lint_file(kdl_file)
+        all_results.append(result)
+        
+        if result.has_errors():
+            total_errors += result.error_count
+            if fmt == "text":
+                typer.echo(result.format(style="text"), err=True)
+    
+    if total_errors > 0:
         if fmt == "text":
-            typer.echo(f"\nFound {len(all_errors)} error(s) in {len(kdl_files)} file(s).", err=True)
+            typer.echo(f"\nFound {total_errors} error(s) in {len(kdl_files)} file(s).", err=True)
+        else:
+            # JSON: output all errors from all files
+            import json
+            all_errors_json = []
+            for result in all_results:
+                if result.has_errors():
+                    all_errors_json.extend([e.to_dict() for e in result.errors])
+            typer.echo(json.dumps(all_errors_json, indent=2))
         raise typer.Exit(code=1)
     
     # Success
