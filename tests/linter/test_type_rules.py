@@ -16,8 +16,8 @@ Behavioural notes (established empirically):
 - `transform <name>` is a pipeline call op. The linter looks up the transform
   by name in ctx.transforms (collected from module-level transform definitions).
   Type mismatch IS reported when the pipeline type doesn't match accept=TYPE.
-- `-init` sub-pipeline names fire "unknown operation" in the wildcard rule
-  (they are not registered ops). The -init structural check still passes.
+- `@init` sub-pipeline names fire "unknown operation" in the wildcard rule
+  (they are not registered ops). The @init structural check still passes.
 - `match` node fires the `filter/assert/match` rule requiring children;
   used correctly only via match without children: linter reports empty-block.
   In table fields, use `match` alone on its own line — linter sees it as
@@ -405,7 +405,7 @@ class TestCompleteSchemas:
     def test_item_schema_full(self):
         src = (
             "struct Product {\n"
-            '  -doc "A product item"\n'
+            '  @doc "A product item"\n'
             '  title {\n    css "h1"\n    text\n    trim\n  }\n'
             '  price {\n    css ".price"\n    text\n    re #"([\\d\\.]+)"#\n    to-float\n  }\n'
             '  url {\n    css "a"\n    attr "href"\n  }\n'
@@ -417,7 +417,7 @@ class TestCompleteSchemas:
     def test_list_schema_full(self):
         src = (
             'struct ProductList type="list" {\n'
-            '  -split-doc {\n    css ".product"\n  }\n'
+            '  @split-doc {\n    css ".product"\n  }\n'
             '  title {\n    css "h2"\n    text\n  }\n'
             '  price {\n    css ".price"\n    text\n    to-float\n    fallback 0.0\n  }\n'
             "}\n"
@@ -427,8 +427,9 @@ class TestCompleteSchemas:
     def test_dict_schema_full(self):
         src = (
             'struct Attrs type="dict" {\n'
-            '  -key {\n    css ".label"\n    text\n    trim\n  }\n'
-            '  -value {\n    css ".val"\n    text\n  }\n'
+            '  @split-doc {\n    css-all ".attrs"\n  }\n'
+            '  @key {\n    css ".label"\n    text\n    trim\n  }\n'
+            '  @value {\n    css ".val"\n    text\n  }\n'
             "}\n"
         )
         assert no_errors(src)
@@ -571,3 +572,4 @@ class TestHypothesisPipelineTypes:
         src = field('css-all ".x"', fb)
         msgs = lint(src)
         assert any("does not match pipeline type" in m for m in msgs)
+

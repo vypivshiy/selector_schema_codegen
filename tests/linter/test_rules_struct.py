@@ -8,9 +8,9 @@ Behavioural notes (established empirically):
 - Children blocks inside reserved/regular fields MUST use multiline KDL (ops on
   separate lines). Inline semicolons inside a `{ }` block are not walked by the
   linter's child-walk (tree-sitter CST limitation).
-- `-init` sub-pipelines: the named sub-pipeline nodes (e.g. `root { css ".x" }`)
-  are walked with _in_pipeline=False inside -init, so their names are reported
-  as "unknown operation". The linter only checks that -init is non-empty.
+- `@init` sub-pipelines: the named sub-pipeline nodes (e.g. `root { css ".x" }`)
+  are walked with _in_pipeline=False inside @init, so their names are reported
+  as "unknown operation". The linter only checks that @init is non-empty.
 - `define NAME { ops }` block defines: can be used as ops in a field pipeline.
   The field must have the define name on its own line inside the field block.
 - `transform` is registered as a module-level keyword — it fires the wildcard
@@ -92,12 +92,12 @@ class TestStructRule:
             "}\n"
         )
         msgs = lint(src)
-        assert any("-split-doc" in m for m in msgs)
+        assert any("@split-doc" in m for m in msgs)
 
     def test_list_struct_with_split_doc_valid(self):
         src = (
             'struct S type="list" {\n'
-            '  -split-doc {\n    css ".x"\n  }\n'
+            '  @split-doc {\n    css ".x"\n  }\n'
             '  title {\n    css ".y"\n    text\n  }\n'
             "}\n"
         )
@@ -106,17 +106,18 @@ class TestStructRule:
     def test_dict_struct_missing_value_error(self):
         src = (
             'struct S type="dict" {\n'
-            '  -key {\n    css ".k"\n    text\n  }\n'
+            '  @key {\n    css ".k"\n    text\n  }\n'
             "}\n"
         )
         msgs = lint(src)
-        assert any("-value" in m and "missing required" in m for m in msgs)
+        assert any("@value" in m and "missing required" in m for m in msgs)
 
     def test_dict_struct_valid(self):
         src = (
             'struct S type="dict" {\n'
-            '  -key {\n    css ".k"\n    text\n  }\n'
-            '  -value {\n    css ".v"\n    text\n  }\n'
+            '  @split-doc {\n    css-all ".items"\n  }\n'
+            '  @key {\n    css ".k"\n    text\n  }\n'
+            '  @value {\n    css ".v"\n    text\n  }\n'
             "}\n"
         )
         assert no_errors(src)
@@ -125,7 +126,7 @@ class TestStructRule:
         # Only -table present; -row, -match, -value are missing
         src = (
             'struct S type="table" {\n'
-            '  -table {\n    css ".t"\n  }\n'
+            '  @table {\n    css ".t"\n  }\n'
             "}\n"
         )
         msgs = lint(src)
@@ -134,10 +135,10 @@ class TestStructRule:
     def test_table_struct_valid(self):
         src = (
             'struct S type="table" {\n'
-            '  -table {\n    css ".t"\n  }\n'
-            '  -rows {\n    css ".r"\n  }\n'
-            '  -match {\n    css ".m"\n    text\n  }\n'
-            '  -value {\n    css ".v"\n    text\n  }\n'
+            '  @table {\n    css ".t"\n  }\n'
+            '  @rows {\n    css ".r"\n  }\n'
+            '  @match {\n    css ".m"\n    text\n  }\n'
+            '  @value {\n    css ".v"\n    text\n  }\n'
             "}\n"
         )
         assert no_errors(src)
@@ -187,7 +188,7 @@ class TestReservedFields:
     def test_doc_valid(self):
         src = (
             "struct S {\n"
-            '  -doc "my description"\n'
+            '  @doc "my description"\n'
             '  title {\n    css ".x"\n    text\n  }\n'
             "}\n"
         )
@@ -196,7 +197,7 @@ class TestReservedFields:
     def test_doc_no_arg_error(self):
         src = (
             "struct S {\n"
-            "  -doc\n"
+            "  @doc\n"
             '  title {\n    css ".x"\n    text\n  }\n'
             "}\n"
         )
@@ -206,7 +207,7 @@ class TestReservedFields:
     def test_pre_validate_valid(self):
         src = (
             "struct S {\n"
-            '  -pre-validate {\n    css ".x"\n  }\n'
+            '  @pre-validate {\n    css ".x"\n  }\n'
             '  title {\n    css ".x"\n    text\n  }\n'
             "}\n"
         )
@@ -215,7 +216,7 @@ class TestReservedFields:
     def test_pre_validate_empty_error(self):
         src = (
             "struct S {\n"
-            "  -pre-validate\n"
+            "  @pre-validate\n"
             '  title {\n    css ".x"\n    text\n  }\n'
             "}\n"
         )
@@ -223,10 +224,10 @@ class TestReservedFields:
         assert any("must contain at least one operation" in m for m in msgs)
 
     def test_init_non_empty_valid(self):
-        # -init just needs at least one named sub-pipeline
+        # @init just needs at least one named sub-pipeline
         src = (
             "struct S {\n"
-            "  -init {\n"
+            "  @init {\n"
             "    root {\n"
             '      css ".root"\n'
             "    }\n"
@@ -234,15 +235,15 @@ class TestReservedFields:
             '  title {\n    css ".x"\n    text\n  }\n'
             "}\n"
         )
-        # -init block is non-empty; 'root' fires wildcard "unknown operation"
-        # but -init structural check passes
+        # @init block is non-empty; 'root' fires wildcard "unknown operation"
+        # but @init structural check passes
         msgs = lint(src)
         assert not any("must contain at least one named pipeline" in m for m in msgs)
 
     def test_init_empty_error(self):
         src = (
             "struct S {\n"
-            "  -init\n"
+            "  @init\n"
             '  title {\n    css ".x"\n    text\n  }\n'
             "}\n"
         )
@@ -252,7 +253,7 @@ class TestReservedFields:
     def test_split_doc_invalid_in_item_error(self):
         src = (
             'struct S type="item" {\n'
-            '  -split-doc {\n    css ".x"\n  }\n'
+            '  @split-doc {\n    css ".x"\n  }\n'
             '  title {\n    css ".x"\n    text\n  }\n'
             "}\n"
         )
@@ -262,7 +263,7 @@ class TestReservedFields:
     def test_key_invalid_in_item_error(self):
         src = (
             'struct S type="item" {\n'
-            '  -key {\n    css ".k"\n    text\n  }\n'
+            '  @key {\n    css ".k"\n    text\n  }\n'
             '  title {\n    css ".x"\n    text\n  }\n'
             "}\n"
         )
@@ -272,7 +273,7 @@ class TestReservedFields:
     def test_table_field_invalid_in_item_error(self):
         src = (
             'struct S type="item" {\n'
-            '  -table {\n    css ".t"\n  }\n'
+            '  @table {\n    css ".t"\n  }\n'
             '  title {\n    css ".x"\n    text\n  }\n'
             "}\n"
         )
@@ -282,7 +283,7 @@ class TestReservedFields:
     def test_row_invalid_in_item_error(self):
         src = (
             'struct S type="item" {\n'
-            '  -rows {\n    css ".r"\n  }\n'
+            '  @rows {\n    css ".r"\n  }\n'
             '  title {\n    css ".x"\n    text\n  }\n'
             "}\n"
         )
@@ -292,7 +293,7 @@ class TestReservedFields:
     def test_match_field_invalid_in_item_error(self):
         src = (
             'struct S type="item" {\n'
-            '  -match {\n    css ".m"\n    text\n  }\n'
+            '  @match {\n    css ".m"\n    text\n  }\n'
             '  title {\n    css ".x"\n    text\n  }\n'
             "}\n"
         )
@@ -302,8 +303,9 @@ class TestReservedFields:
     def test_value_valid_in_dict(self):
         src = (
             'struct S type="dict" {\n'
-            '  -key {\n    css ".k"\n    text\n  }\n'
-            '  -value {\n    css ".v"\n    text\n  }\n'
+            '  @split-doc {\n    css-all ".items"\n  }\n'
+            '  @key {\n    css ".k"\n    text\n  }\n'
+            '  @value {\n    css ".v"\n    text\n  }\n'
             "}\n"
         )
         assert no_errors(src)
@@ -312,7 +314,7 @@ class TestReservedFields:
         # -pre-validate with empty block
         src = (
             "struct S {\n"
-            "  -pre-validate\n"
+            "  @pre-validate\n"
             '  f {\n    css ".x"\n    text\n  }\n'
             "}\n"
         )
@@ -543,3 +545,5 @@ class TestWildcardUnknownOp:
         )
         msgs = lint(src)
         assert any("unknown operation" in m or "scalar define" in m for m in msgs)
+
+
