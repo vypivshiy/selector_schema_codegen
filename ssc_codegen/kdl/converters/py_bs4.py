@@ -163,6 +163,7 @@ def pre_docstring(node: Docstring, _: ConverterContext):
 @PY_BASE_CONVERTER(Imports)
 def pre_imports(node: Imports, _: ConverterContext):
     base_imports = [
+        "import json",
         "import re",
         "import sys",
         "from typing import TypedDict, Optional, Any, List, Dict, Union",
@@ -202,7 +203,10 @@ def pre_utilities(node: Utilities, _: ConverterContext):
         "def normalize_text(text: str) -> str:",
         "    return ' '.join(text.split()) if text else \"\"",
         "\n",
-        "def unseape_text(text: str) -> str:",
+        "class _UnmatchedTableRow:",
+        "    pass",
+        "\n",
+        "def unescape_text(text: str) -> str:",
         "    s = _html_unescape(text)",
         "    s = _RE_HEX_ENTITY.sub(lambda m: chr(int(m.group(1), 16)), s)",
         "    s = _RE_UNICODE_ENTITY.sub(lambda m: chr(int(m.group(1), 16)), s)",
@@ -226,7 +230,7 @@ def pre_utilities(node: Utilities, _: ConverterContext):
         "    def rm_suffix(s: str, p: str) -> str:",
         "        return s[:-(len(p))] if s.endswith(p) else s",
         "\n\n",
-        "UNMATCHED_TABLE_ROW = object()",
+        "UNMATCHED_TABLE_ROW = _UnmatchedTableRow()",
         "\n\n",
     ]
 
@@ -254,7 +258,7 @@ def pre_json_field(node: JsonDefField, ctx: ConverterContext):
 def pre_typedef(node: TypeDef, _: ConverterContext):
     name = to_pascal_case(node.name)
     if node.struct_type == StructType.DICT:
-        return f"{name}Type = Dict[str, "
+        return None
     elif node.struct_type == StructType.FLAT:
         return f"{name}Type = List[str]"
     return f"class {name}Type(TypedDict):"
@@ -277,11 +281,11 @@ def pre_typedef_field(node: TypeDefField, ctx: ConverterContext):
         type_ = type_.format(type_name)
         if node.is_array:
             type_ = f"List[{type_}]"
-    if (
-        node.typedef.struct_type == StructType.DICT
-        and "value" in node.name.lower()
-    ):
-        return f"{type_} ]"
+    if node.typedef.struct_type == StructType.DICT:
+        if to_snake_case(node.name) == "value":
+            typedef_name = to_pascal_case(node.typedef.name)
+            return f"{typedef_name}Type = Dict[str, {type_}]"
+        return None
     return [f"{ctx.indent}{name}: {type_}"]
 
 
@@ -294,11 +298,10 @@ def pre_struct(node: Struct, ctx: ConverterContext):
 @PY_BASE_CONVERTER(StructDocstring)
 def pre_struct_docstring(node: StructDocstring, ctx: ConverterContext):
     if node.value:
-        return [
-            f'{ctx.indent}"""',
-            f"{ctx.indent}\n".join([i for i in node.value.splitlines()]),
-            f'{ctx.indent}"""',
-        ]
+        lines = [f'{ctx.indent}"""']
+        lines.extend(f"{ctx.indent}{line}" for line in node.value.splitlines())
+        lines.append(f'{ctx.indent}"""')
+        return lines
     return
 
 
@@ -314,7 +317,7 @@ def pre_start_parse(node: StartParse, ctx: ConverterContext):
         case StructType.FLAT:
             ret_type = "List[str]"  # TODO
         case StructType.DICT:
-            ret_type = "Dict[str, str]"
+            ret_type = f"{name}Type"
         case StructType.TABLE:
             ret_type = f"{name}Type"
         case _:
@@ -356,7 +359,7 @@ def post_start_parse(node: StartParse, ctx: ConverterContext):
             lines.extend(
                 [
                     f"{ctx.indent * 2}return {{",
-                    f"{ctx.indent * 3} self._parse_key(i): _self._parse_value(i)",
+                    f"{ctx.indent * 3} self._parse_key(i): self._parse_value(i)",
                     f"{ctx.indent * 3} for i in self._split_doc(self._doc)",
                     f"{ctx.indent * 3} }}",
                 ]
@@ -382,14 +385,16 @@ def post_start_parse(node: StartParse, ctx: ConverterContext):
             else:
                 lines.append(f"{ctx.indent * 2}return list(set(result))")
         case StructType.TABLE:
-            # For each row in _table_rows(), run _table_match_key() to get the
-            # key string, then dispatch to the matching _parse_{field}() method.
-            # Result: {field_name: self._parse_{field}(row), ...} for the first
-            # row whose key matches each field's match predicate.
+            # For each row in _parse_table_rows(), run _table_match_key() to get
+            # the key string, then dispatch to the matching _parse_{field}()
+            # method. First successful match for each field wins.
             name = to_pascal_case(node.struct.name)
             lines.append(f"{ctx.indent * 2}_result: {name}Type = {{}}")
-            lines.append(
-                f"{ctx.indent * 2}for _row in self._table_rows(self._doc):"
+            lines.extend(
+                [
+                    f"{ctx.indent * 2}_table = self._table_config(self._doc)",
+                    f"{ctx.indent * 2}for _row in self._parse_table_rows(_table):",
+                ]
             )
             for f in node.fields:
                 fname = to_snake_case(f.name)
@@ -397,7 +402,7 @@ def post_start_parse(node: StartParse, ctx: ConverterContext):
                     f"{ctx.indent * 3}_{fname} = self._parse_{fname}(_row)"
                 )
                 lines.append(
-                    f"{ctx.indent * 3}if _{fname} != UNMATCHED_TABLE_ROW:"
+                    f"{ctx.indent * 3}if _{fname} != UNMATCHED_TABLE_ROW and {fname!r} not in _result:"
                 )
                 lines.append(f"{ctx.indent * 4}_result[{fname!r}] = _{fname}")
             lines.append(f"{ctx.indent * 2}return _result")
@@ -459,7 +464,7 @@ def pre_struct_field(node: Field, ctx: ConverterContext):
     # table struct fields start with match { ... } and may return a sentinel
     if node.accept == VariableType.STRING:
         return [
-            f"    def _parse_{name}(self, v: str) -> Union[{ret_type}, object]:"
+            f"    def _parse_{name}(self, v: Union[Tag, BeautifulSoup]) -> Union[{ret_type}, _UnmatchedTableRow]:"
         ]
     return [
         f"    def _parse_{name}(self, v: Union[Tag, BeautifulSoup]) -> {ret_type}:"
@@ -525,9 +530,8 @@ def pre_struct_table_match_key(node: TableMatchKey, ctx: ConverterContext):
 
 @PY_BASE_CONVERTER(TableRow)
 def pre_struct_table_row(node: TableRow, ctx: ConverterContext):
-    # return tag
     return [
-        "    def _table_row(self, v: Union[Tag, BeautifulSoup]) -> Union[Tag, BeautifulSoup]:"
+        "    def _parse_table_rows(self, v: Union[Tag, BeautifulSoup]) -> ResultSet[Tag]:"
     ]
 
 
@@ -585,7 +589,7 @@ def pre_expr_attr(node: Attr, ctx: ConverterContext):
     # LIST_DOCUMENT
     if len(keys) == 1:
         return f"{ctx.indent}{ctx.nxt} = [' '.join(e.get_attribute_list({keys[0]!r})) for e in {ctx.prv}]"
-    return f"{ctx.indent}{ctx.nxt} =  [' '.join(e.get_attribute_list(k)) for e in {ctx.prv} for k in {keys} if e.get(k)]"
+    return f"{ctx.indent}{ctx.nxt} = [' '.join(e.get_attribute_list(k)) for e in {ctx.prv} for k in {keys} if e.get(k)]"
 
 
 @PY_BASE_CONVERTER(Text)
@@ -636,7 +640,7 @@ def pre_expr_rtrim(node: Rtrim, ctx: ConverterContext):
         value = repr(node.substr)
     if node.accept == VariableType.STRING:
         return [f"{ctx.indent}{ctx.nxt} = {ctx.prv}.rstrip({value})"]
-    return [f"{ctx.indent}{ctx.nxt} = [i.rstrip({value}) for i in {ctx.prv}]]"]
+    return [f"{ctx.indent}{ctx.nxt} = [i.rstrip({value}) for i in {ctx.prv}]"]
 
 
 @PY_BASE_CONVERTER(RmPrefix)
@@ -646,7 +650,7 @@ def pre_expr_rm_prefix(node: RmPrefix, ctx: ConverterContext):
     if node.accept == VariableType.STRING:
         return [f"{ctx.indent}{ctx.nxt} = rm_prefix({ctx.prv}, {value})"]
     return [
-        f"{ctx.indent}{ctx.nxt} = [rm_prefix(i, {value}) for i in {ctx.prv}]]"
+        f"{ctx.indent}{ctx.nxt} = [rm_prefix(i, {value}) for i in {ctx.prv}]"
     ]
 
 
@@ -657,7 +661,7 @@ def pre_expr_rm_suffix(node: RmSuffix, ctx: ConverterContext):
     if node.accept == VariableType.STRING:
         return [f"{ctx.indent}{ctx.nxt} = rm_suffix({ctx.prv}, {value})"]
     return [
-        f"{ctx.indent}{ctx.nxt} = [rm_suffix(i, {value}) for i in {ctx.prv}]]"
+        f"{ctx.indent}{ctx.nxt} = [rm_suffix(i, {value}) for i in {ctx.prv}]"
     ]
 
 
@@ -671,7 +675,7 @@ def pre_expr_rm_prefix_suffix(node: RmPrefixSuffix, ctx: ConverterContext):
             f"{ctx.indent}{ctx.nxt} = rm_suffix(rm_prefix({ctx.prv}, {prefix}), {suffix})"
         ]
     return [
-        f"{ctx.indent}{ctx.nxt} = [rm_suffix(rm_prefix(i, {prefix}), {suffix}) for i in {ctx.prv}]]"
+        f"{ctx.indent}{ctx.nxt} = [rm_suffix(rm_prefix(i, {prefix}), {suffix}) for i in {ctx.prv}]"
     ]
 
 
@@ -681,7 +685,7 @@ def pre_expr_fmt(node: Fmt, ctx: ConverterContext):
     if node.accept == VariableType.STRING:
         return [f"{ctx.indent}{ctx.nxt} = {template}.format({ctx.prv})"]
     return [
-        f"{ctx.indent}{ctx.nxt} = [{template}.format(i) for i in {ctx.prv}]]"
+        f"{ctx.indent}{ctx.nxt} = [{template}.format(i) for i in {ctx.prv}]"
     ]
 
 
@@ -692,7 +696,7 @@ def pre_expr_repl(node: Repl, ctx: ConverterContext):
     if node.accept == VariableType.STRING:
         return [f"{ctx.indent}{ctx.nxt} = {ctx.prv}.replace({old}, {new})"]
     return [
-        f"{ctx.indent}{ctx.nxt} = [i.replace({old}, {new}) for i in {ctx.prv}]]"
+        f"{ctx.indent}{ctx.nxt} = [i.replace({old}, {new}) for i in {ctx.prv}]"
     ]
 
 
@@ -1066,6 +1070,24 @@ def pre_expr_pred_count_eq(node: PredCountEq, ctx: ConverterContext):
     return ctx.indent + f"and {cond}"
 
 
+@PY_BASE_CONVERTER(PredCountGt)
+def pre_expr_pred_count_gt(node: PredCountGt, ctx: ConverterContext):
+    value = node.value
+    cond = f"len(i) > {value}"
+    if ctx.index == 0:
+        return ctx.indent + cond
+    return ctx.indent + f"and {cond}"
+
+
+@PY_BASE_CONVERTER(PredCountLt)
+def pre_expr_pred_count_lt(node: PredCountLt, ctx: ConverterContext):
+    value = node.value
+    cond = f"len(i) < {value}"
+    if ctx.index == 0:
+        return ctx.indent + cond
+    return ctx.indent + f"and {cond}"
+
+
 @PY_BASE_CONVERTER(PredHasAttr)
 def pre_expr_pred_has_attr(node: PredHasAttr, ctx: ConverterContext):
     keys = node.attrs
@@ -1097,10 +1119,11 @@ def pre_expr_pred_attr_ends(node: PredAttrEnds, ctx: ConverterContext):
     name = node.name
     values = node.values
     # dont need check exists key
+    attr_value = f"(' '.join(i.get_attribute_list({name!r})))"
     if len(values) == 1:
-        cond = f"(' '.join(i.get_attribute_list({name!r}))).endswith({values[0]!r})"
+        cond = f"{attr_value}.endswith({values[0]!r})"
     else:
-        cond = f"any((' '.join(i.get_attribute_list({name!r}))).endswith(v) for v in {values!r})"
+        cond = f"{attr_value}.endswith({tuple(values)!r})"
     if ctx.index == 0:
         return ctx.indent + cond
     return ctx.indent + f"and {cond}"
@@ -1125,10 +1148,11 @@ def pre_expr_pred_attr_ne(node: PredAttrNe, ctx: ConverterContext):
     name = node.name
     values = node.values
     # dont need check exists key
+    attr_value = f"(' '.join(i.get_attribute_list({name!r})))"
     if len(values) == 1:
-        cond = f"(' '.join(i.get_attribute_list({name!r}))) != {values[0]!r}"
+        cond = f"{attr_value} != {values[0]!r}"
     else:
-        cond = f"(' '.join(i.get_attribute_list({name!r}))) != v for v in {values!r})"
+        cond = f"all({attr_value} != v for v in {values!r})"
     if ctx.index == 0:
         return ctx.indent + cond
     return ctx.indent + f"and {cond}"
@@ -1150,13 +1174,11 @@ def pre_expr_pred_attr_starts(node: PredAttrStarts, ctx: ConverterContext):
     name = node.name
     values = node.values
     # dont need check exists key
+    attr_value = f"(' '.join(i.get_attribute_list({name!r})))"
     if len(values) == 1:
-        cond = (
-            ctx.indent
-            + f"(' '.join(i.get_attribute_list({name!r}))).startswith({values[0]!r})"
-        )
+        cond = f"{attr_value}.startswith({values[0]!r})"
     else:
-        cond = f"any((' '.join(i.get_attribute_list({name!r})).startswith(v) for v in {values!r}))"
+        cond = f"{attr_value}.startswith({tuple(values)!r})"
     if ctx.index == 0:
         return ctx.indent + cond
     return ctx.indent + f"and {cond}"
