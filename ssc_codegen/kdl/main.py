@@ -21,12 +21,16 @@ app = typer.Typer(
 class Target(str, enum.Enum):
     PY_BS4 = "py-bs4"
     PY_LXML = "py-lxml"
+    PY_PARSEL = "py-parsel"
+    PY_SLAX = "py-slax"
     JS_PURE = "js-pure"
 
 
 _FILE_EXTENSIONS: dict[Target, str] = {
     Target.PY_BS4: ".py",
     Target.PY_LXML: ".py",
+    Target.PY_PARSEL: ".py",
+    Target.PY_SLAX: ".py",
     Target.JS_PURE: ".js",
 }
 
@@ -40,6 +44,14 @@ def _get_converter(target: Target):
         from ssc_codegen.kdl.converters.py_lxml import PY_LXML_CONVERTER
 
         return PY_LXML_CONVERTER
+    if target == Target.PY_PARSEL:
+        from ssc_codegen.kdl.converters.py_parsel import PY_PARSEL_CONVERTER
+
+        return PY_PARSEL_CONVERTER
+    if target == Target.PY_SLAX:
+        from ssc_codegen.kdl.converters.py_slax import PY_SLAX_CONVERTER
+
+        return PY_SLAX_CONVERTER
     if target == Target.JS_PURE:
         from ssc_codegen.kdl.converters.js_pure import JS_CONVERTER
 
