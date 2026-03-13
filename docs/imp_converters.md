@@ -1,656 +1,655 @@
-# Converters & Code Generation
+# Implementing a Converter
 
-> **Version:** 2.0  
-> **Last Updated:** 2026-03-11
-
-Руководство по конвертерам и генерации кода из KDL Schema DSL.
-
----
-
-## Table of Contents
-
-- [Overview](#overview)
-- [Available Converters](#available-converters)
-  - [Python Converters](#python-converters)
-  - [JavaScript Converters](#javascript-converters)
-- [Converter API](#converter-api)
-  - [BaseConverter](#baseconverter)
-  - [Inheritance & Extension](#inheritance--extension)
-  - [Creating Custom Converters](#creating-custom-converters)
-- [CLI Usage](#cli-usage)
-- [Generated Code Examples](#generated-code-examples)
-- [Advanced Topics](#advanced-topics)
+> **Purpose:** General guide for implementing a new code generator backend  
+> **Scope:** Architecture, contracts, traversal model, and implementation checklist  
+> **Last Updated:** 2026-03-13
 
 ---
 
 ## Overview
 
-KDL Schema DSL компилируется в код на разных языках через систему **конвертеров**.
+A converter takes the project AST produced by `ssc_codegen.kdl.parser` and emits source code for some target runtime.
 
-**Архитектура:**
-```
-KDL Schema → Parser → AST → Converter → Target Code
+In other words:
+
+```text
+KDL schema -> AST -> converter -> generated source code
 ```
 
-**Ключевые особенности:**
-- **Типизированная генерация** - TypedDict для Python, interfaces для TypeScript
-- **Мультиязычность** - один DSL → несколько целевых языков
-- **Расширяемость** - простое создание новых конвертеров
-- **Наследование** - переиспользование логики через `.extend()`
+This document is intentionally **language-agnostic**:
+- it does **not** assume Python, JavaScript, or any specific runtime library;
+- it does **not** prescribe a DOM API;
+- it focuses on the **contracts** a converter must satisfy.
+
+A concrete converter decides:
+- how a document is represented at runtime;
+- how selectors are executed;
+- how text/attributes/raw HTML are extracted;
+- how fallback / predicates / transforms are rendered;
+- how type aliases, imports, helpers, and parser entry points are generated.
 
 ---
 
-## Available Converters
+## What a Converter Is Responsible For
 
-### Python Converters
+A converter is responsible for turning AST nodes into emitted code.
 
-#### `py-bs4` - BeautifulSoup4
+Typical responsibilities:
 
-**Описание:** Генерирует Python код с использованием BeautifulSoup4.
+1. **Module-level output**
+   - prologue / file header
+   - imports
+   - helper functions
+   - generated type declarations
+   - generated parser classes / functions
 
-**Зависимости:**
-```python
-beautifulsoup4
-lxml  # используется как парсер для bs4
-```
+2. **Container nodes**
+   - JSON schema declarations
+   - type declarations
+   - structs
+   - init blocks
 
-**Особенности:**
-- `.select()` / `.select_one()` для CSS селекторов
-- `.text` для извлечения текста
-- `.get_attribute_list()` для атрибутов
-- Поддержка всех операций DSL
+3. **Field pipelines**
+   - selectors
+   - extractors
+   - transforms
+   - casts
+   - predicates / control flow
+   - return statements
 
-**Генерируемый код:**
-```python
-from bs4 import BeautifulSoup, Tag
-from typing import TypedDict, List, Union
+4. **Runtime integration**
+   - runtime document type
+   - nested parser invocation
+   - transform invocation
+   - fallback semantics
+   - collection handling
 
-class MainType(TypedDict):
-    title: str
-    links: List[str]
+A converter is **not** responsible for:
+- parsing KDL;
+- validating DSL syntax;
+- type inference rules;
+- semantic AST construction.
 
-class Main:
-    def __init__(self, document: Union[str, BeautifulSoup]):
-        if isinstance(document, str):
-            self._doc = BeautifulSoup(document.strip() or FALLBACK_HTML_STR, features='lxml')
-        else:
-            self._doc = document
-    
-    def parse(self) -> MainType:
-        return self._parse(self._doc)
-    
-    def _parse(self, v: Union[Tag, BeautifulSoup]) -> MainType:
-        v1 = v.select_one('h1')
-        v2 = v1.text
-        v3 = v2.strip()
-        # ...
-```
+Those happen before conversion.
 
 ---
 
-#### `py-lxml` - lxml
+## Where the Core API Lives
 
-**Описание:** Генерирует Python код с использованием lxml (быстрее bs4).
+The generic converter API is implemented in:
 
-**Зависимости:**
-```python
-lxml
-cssselect  # для CSS селекторов
-```
+- `ssc_codegen/kdl/converters/base.py`
+- `ssc_codegen/kdl/converters/helpers.py`
 
-**Особенности:**
-- `.cssselect()` для CSS селекторов
-- `.xpath()` для XPath
-- `.text_content()` для текста
-- `.get()` для атрибутов
-- Более производительный чем bs4
+Important types:
 
-**Генерируемый код:**
-```python
-from lxml import html
-from lxml.html import HtmlElement
-from typing import TypedDict, List
+- `BaseConverter`
+- `ConverterContext`
 
-class MainType(TypedDict):
-    title: str
-
-class Main:
-    def __init__(self, document: Union[str, HtmlElement]):
-        if isinstance(document, str):
-            self._doc = html.fromstring(document.strip() or FALLBACK_HTML_STR)
-        else:
-            self._doc = document
-    
-    def _parse_title(self, v: HtmlElement) -> str:
-        v1 = v.cssselect('h1')[0]
-        v2 = v1.text_content()
-        return v2.strip()
-```
-
-**Сравнение с bs4:**
-
-| Операция | bs4 | lxml |
-|----------|-----|------|
-| CSS select | `.select_one()` | `.cssselect()[0]` |
-| CSS all | `.select()` | `.cssselect()` |
-| Text | `.text` | `.text_content()` |
-| Attr | `.get_attribute_list()` | `.get(name, '')` |
-| HTML | `str(el)` | `html.tostring(el)` |
-| Has attr | `.has_attr()` | `name in el.attrib` |
+The converter framework is registry-based:
+- a handler is registered for a concrete AST node type;
+- the traversal engine walks the AST;
+- each handler emits one code fragment or a list of code lines.
 
 ---
 
-### JavaScript Converters
+## Core Converter Contract
 
-#### `js-pure` - Pure JavaScript
+At the highest level, a converter must support:
 
-**Описание:** Генерирует чистый JavaScript код (browser/Node.js).
-
-**Зависимости:**
-```javascript
-// Browser: DOMParser встроен
-// Node.js: jsdom или cheerio
+```text
+Module AST -> string source code
 ```
 
-**Особенности:**
-- `.querySelector()` / `.querySelectorAll()` для CSS
-- `.textContent` для текста
-- `.getAttribute()` для атрибутов
-- Regex с JS синтаксисом
+In framework terms:
 
-**Генерируемый код:**
-```javascript
-class Main {
-    constructor(document) {
-        if (typeof document === 'string') {
-            const parser = new DOMParser();
-            this._doc = parser.parseFromString(document, 'text/html');
-        } else {
-            this._doc = document;
-        }
-    }
-    
-    parse() {
-        return this._parse(this._doc);
-    }
-    
-    _parse(v) {
-        let v1 = v.querySelector('h1');
-        let v2 = v1.textContent;
-        return v2.trim();
-    }
-}
-```
+- `BaseConverter.convert(module_ast)` traverses `module_ast.body`
+- registered handlers emit code for each node
+- the final result is a single source string
+
+A converter is therefore a combination of:
+- traversal rules from `BaseConverter`
+- handler registrations for AST node types
+- target-specific rendering decisions
 
 ---
 
-## Converter API
+## ConverterContext
 
-### BaseConverter
+`ConverterContext` carries generation state while walking the AST.
 
-Базовый класс для всех конвертеров:
+Current fields:
 
-```python
-class BaseConverter:
-    def __init__(self, var_name: str = "v", indent: str = "    "):
-        self.var_name = var_name
-        self.indent = indent
-        self._pre_callbacks: dict[type, Callable] = {}
-        self._post_callbacks: dict[type, Callable] = {}
-    
-    def __call__(self, node_type: type):
-        """Декоратор для регистрации handler'а."""
-        def decorator(func: Callable):
-            self._pre_callbacks[node_type] = func
-            return func
-        return decorator
-    
-    def post(self, node_type: type):
-        """Декоратор для post-обработки."""
-        def decorator(func: Callable):
-            self._post_callbacks[node_type] = func
-            return func
-        return decorator
-    
-    def extend(self) -> "BaseConverter":
-        """Создать конвертер-наследник."""
-        child = BaseConverter(var_name=self.var_name, indent=self.indent)
-        child._pre_callbacks = dict(self._pre_callbacks)
-        child._post_callbacks = dict(self._post_callbacks)
-        return child
+- `index` — pipeline variable index
+- `depth` — indentation depth
+- `var_name` — base variable name
+- `indent_char` — indentation unit
+
+Derived helpers:
+
+- `ctx.prv` — current input variable name
+- `ctx.nxt` — next output variable name
+- `ctx.indent` — current indentation prefix
+
+Conceptually:
+
+```text
+index=0 -> prv=v,  nxt=v1
+index=1 -> prv=v1, nxt=v2
+index=2 -> prv=v2, nxt=v3
+```
+
+This is the standard pipeline model:
+- each expression consumes `prv`
+- emits into `nxt`
+- the pipeline advances after each emitted step
+
+---
+
+## Traversal Model
+
+`BaseConverter` treats AST nodes in three different categories.
+
+### 1. Container nodes
+
+Examples:
+- `JsonDef`
+- `TypeDef`
+- `Struct`
+- `Init`
+
+Behavior:
+- traversal goes deeper (`depth + 1`)
+- pipeline index resets for the container body
+- children are emitted as nested declarations/items
+
+Use containers for:
+- declarations
+- generated type blocks
+- parser class/function bodies
+- init sections
+
+---
+
+### 2. Pipeline nodes
+
+Examples:
+- `Field`
+- `InitField`
+- `PreValidate`
+- `SplitDoc`
+- `Key`
+- `Value`
+- table-reserved fields
+
+Behavior:
+- pipeline traversal is explicit
+- handlers are expected to call `self._emit_pipeline(...)`
+- pipeline index advances between expressions
+
+Use pipeline nodes when the body means:
+
+```text
+input -> op1 -> op2 -> op3 -> result
 ```
 
 ---
 
-### Inheritance & Extension
+### 3. Predicate nodes
 
-**Создание конвертера через наследование:**
+Examples:
+- `Filter`
+- `Assert`
+- `Match`
+- `LogicNot`
+- `LogicAnd`
+- `LogicOr`
 
-```python
-from ssc_codegen.kdl.converters import py_bs4
-from ssc_codegen.kdl.converters.base import BaseConverter
+Behavior:
+- traversal stays in the same pipeline stage
+- nested predicate body is rendered as logical conditions
+- predicate blocks do not behave like ordinary field pipelines
 
-# Наследуем все handlers от bs4
-PY_LXML_CONVERTER = py_bs4.PY_BASE_CONVERTER.extend()
+Use predicate nodes for:
+- boolean conditions
+- guards
+- validation checks
+- filtering conditions
 
-# Переопределяем только специфичные для lxml handlers
-@PY_LXML_CONVERTER(CssSelect)
-def pre_expr_css_select(node: CssSelect, ctx: ConverterContext):
-    query = repr(node.query)
-    return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.cssselect({query})[0]"
+---
 
-@PY_LXML_CONVERTER(Text)
-def pre_expr_text(node: Text, ctx: ConverterContext):
-    if node.accept == VariableType.DOCUMENT:
-        return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.text_content()"
-    return f"{ctx.indent}{ctx.nxt} = [i.text_content() for i in {ctx.prv}]"
+## Handler Registration Model
+
+Handlers are registered per AST node type.
+
+The framework supports:
+
+- **pre-handlers** — emitted before traversing a node body
+- **post-handlers** — emitted after traversing a node body
+
+Conceptually:
+
+```text
+pre(node)
+  traverse body
+post(node)
 ```
 
-**Иерархия конвертеров:**
+This is useful for nodes that naturally wrap nested code, for example:
+- opening/closing blocks
+- function/class boundaries
+- try/finally or try/catch wrappers
+- condition blocks
 
-```
-BaseConverter (базовый)
-    ↓
-PY_BASE_CONVERTER (общая Python логика)
-    ↓
-    ├→ PY_BS4_CONVERTER (BeautifulSoup4)
-    └→ PY_LXML_CONVERTER (lxml)
+### Registration styles
 
-JS_BASE_CONVERTER (общая JS логика)
-    ↓
-    ├→ JS_PURE_CONVERTER (чистый JS)
-    ├→ JS_JQUERY_CONVERTER (jQuery - будущее)
-    └→ JS_CHEERIO_CONVERTER (Cheerio - будущее)
+A converter may register handlers through:
+- `converter.pre(...)`
+- `converter.post(...)`
+- `converter(...)` as shorthand for `pre(...)`
+
+### Inheritance / extension
+
+`BaseConverter.extend()` creates a child converter that inherits all handlers.
+
+This is useful when you want:
+- a shared base backend family;
+- several target dialects;
+- incremental override of only a few nodes.
+
+Even though this document is language-agnostic, the pattern is generally:
+
+```text
+generic backend base
+    -> specialized runtime A
+    -> specialized runtime B
 ```
 
 ---
 
-### Creating Custom Converters
+## Output Design Principles
 
-**Шаги создания кастомного конвертера:**
+A good converter should make the generated code:
 
-1. **Наследоваться от существующего конвертера:**
+1. **Readable**
+   - stable indentation
+   - predictable variable names
+   - simple control flow
 
-```python
-from ssc_codegen.kdl.converters import py_bs4
+2. **Deterministic**
+   - same AST -> same output layout
+   - no unstable ordering
 
-MY_CONVERTER = py_bs4.PY_BASE_CONVERTER.extend()
-```
+3. **Composable**
+   - nested structs and transforms are reusable
+   - helper functions/imports are centralized
 
-2. **Переопределить необходимые handlers:**
+4. **Runtime-minimal**
+   - generate only required helpers/imports
+   - avoid unnecessary wrappers
 
-```python
-from ssc_codegen.kdl.ast import CssSelect, Text
-
-@MY_CONVERTER(CssSelect)
-def my_css_select(node: CssSelect, ctx: ConverterContext):
-    # Кастомная реализация
-    query = repr(node.query)
-    return f"{ctx.indent}{ctx.nxt} = my_custom_select({ctx.prv}, {query})"
-
-@MY_CONVERTER(Text)
-def my_text_extract(node: Text, ctx: ConverterContext):
-    return f"{ctx.indent}{ctx.nxt} = extract_text({ctx.prv})"
-```
-
-3. **Зарегистрировать в main.py:**
-
-```python
-# В ssc_codegen/kdl/main.py
-
-class Target(str, enum.Enum):
-    PY_BS4 = "py-bs4"
-    PY_LXML = "py-lxml"
-    MY_CUSTOM = "my-custom"  # Добавить
-
-def _get_converter(target: Target):
-    if target == Target.MY_CUSTOM:
-        from my_package.converters import MY_CONVERTER
-        return MY_CONVERTER
-    # ...
-```
+5. **Semantically faithful**
+   - fallback behavior matches AST semantics
+   - predicate logic preserves original DSL meaning
+   - return types match converter expectations
 
 ---
 
-### ConverterContext
+## What Every New Converter Must Decide
 
-Контекст для handlers:
+Before implementing handlers, define the following target-level decisions.
 
-```python
-@dataclass
-class ConverterContext:
-    prv: str        # Имя предыдущей переменной (v1, v2, ...)
-    nxt: str        # Имя следующей переменной
-    index: int      # Индекс в pipeline
-    indent: str     # Отступ (4 пробела по умолчанию)
-```
+### 1. Document model
 
-**Пример использования:**
+What is the runtime value for a document node?
 
-```python
-@CONVERTER(Trim)
-def pre_expr_trim(node: Trim, ctx: ConverterContext):
-    # ctx.prv = "v2", ctx.nxt = "v3"
-    return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.strip()"
-    # Результат: "    v3 = v2.strip()"
-```
+Examples of questions:
+- Is it a tree object, DOM node, document wrapper, or plain string?
+- Are selectors evaluated on a node or on a separate query engine?
+- How are nested documents represented?
 
----
+### 2. Scalar model
 
-## CLI Usage
+How are scalar values represented?
 
-### Basic Commands
+You need clear rules for:
+- strings
+- numbers
+- booleans
+- null/none
+- arrays/lists
+- objects/maps
 
-```bash
-# Генерация с указанием target
-python -m ssc_codegen.kdl.main generate schema.kdl -t py-bs4
+### 3. Error / fallback behavior
 
-# Указать выходную директорию
-python -m ssc_codegen.kdl.main generate schema.kdl -t py-lxml -o output/
+How should fallback be rendered?
 
-# Генерация из директории
-python -m ssc_codegen.kdl.main generate schemas/ -t py-bs4
+Typical strategies:
+- try/catch or try/except
+- null checks + explicit branching
+- sentinel-based recovery
 
-# Проверка без генерации
-python -m ssc_codegen.kdl.main check schema.kdl
+### 4. Type declarations
 
-# Пропустить линтинг
-python -m ssc_codegen.kdl.main generate schema.kdl -t py-bs4 --skip-lint
+How should generated result types be represented?
 
-# Verbose режим
-python -m ssc_codegen.kdl.main generate schema.kdl -t py-bs4 -v
-```
+Possible shapes:
+- interfaces / type aliases
+- structs / records
+- plain documentation comments
+- no explicit static types at all
 
-### Targets
+### 5. Import / helper management
 
-| Target | Description | Output |
-|--------|-------------|--------|
-| `py-bs4` | Python + BeautifulSoup4 | `.py` |
-| `py-lxml` | Python + lxml | `.py` |
-| `js-pure` | Pure JavaScript | `.js` |
+How are imports/helpers inserted?
+
+You need a strategy for:
+- deduplicating imports
+- placing utilities before generated parsers
+- wiring transform-level imports
 
 ---
 
-## Generated Code Examples
+## Recommended Implementation Order
 
-### Example 1: Simple Item Structure
+When adding a new converter, implement handlers in this order.
 
-**DSL:**
-```kdl
-struct Article {
-    title {
-        css "h1"
-        text
-        trim
-    }
-    author {
-        css ".author"
-        text
-    }
-}
-```
+### Step 1. Module skeleton
 
-**Generated (py-bs4):**
-```python
-from bs4 import BeautifulSoup, Tag
-from typing import TypedDict, Union
+Start with nodes that shape the file:
+- start/end hooks
+- imports
+- utility blocks
+- docstring/header
 
-class ArticleType(TypedDict):
-    title: str
-    author: str
+Goal: produce a syntactically valid output file.
 
-class Article:
-    def __init__(self, document: Union[str, BeautifulSoup]):
-        if isinstance(document, str):
-            self._doc = BeautifulSoup(document.strip() or FALLBACK_HTML_STR, features='lxml')
-        else:
-            self._doc = document
-    
-    def parse(self) -> ArticleType:
-        return self._parse(self._doc)
-    
-    def _parse(self, v: Union[Tag, BeautifulSoup]) -> ArticleType:
-        return {
-            "title": self._parse_title(v),
-            "author": self._parse_author(v),
-        }
-    
-    def _parse_title(self, v: Union[Tag, BeautifulSoup]) -> str:
-        v1 = v.select_one('h1')
-        v2 = v1.text
-        v3 = v2.strip()
-        return v3
-    
-    def _parse_author(self, v: Union[Tag, BeautifulSoup]) -> str:
-        v1 = v.select_one('.author')
-        v2 = v1.text
-        return v2
-```
+### Step 2. Type-level declarations
 
----
+Add support for:
+- `JsonDef`
+- `TypeDef`
+- any result type declarations
 
-### Example 2: List Structure with Nested
+Goal: generated code can describe output shapes.
 
-**DSL:**
-```kdl
-struct Book type=list {
-    @split-doc { css-all ".book" }
-    
-    title { css ".title"; text }
-    price { css ".price"; text; re #"(\d+)"#; to-float }
-}
+### Step 3. Structs and entry points
 
-struct Catalogue {
-    books { nested Book }
-    total { css-all ".book"; len }
-}
-```
+Add support for:
+- `Struct`
+- parser constructor / entry method
+- per-field parsing methods
+- `Init`
 
-**Generated (py-lxml):**
-```python
-from lxml import html
-from lxml.html import HtmlElement
-from typing import TypedDict, List, Union
+Goal: a simple struct with one field can be emitted end-to-end.
 
-class BookType(TypedDict):
-    title: str
-    price: float
+### Step 4. Core pipeline expressions
 
-class Book:
-    @staticmethod
-    def _parse_item(v: HtmlElement) -> BookType:
-        return {
-            "title": Book._parse_title(v),
-            "price": Book._parse_price(v),
-        }
-    
-    @staticmethod
-    def _parse_title(v: HtmlElement) -> str:
-        v1 = v.cssselect('.title')[0]
-        v2 = v1.text_content()
-        return v2
-    
-    @staticmethod
-    def _parse_price(v: HtmlElement) -> float:
-        v1 = v.cssselect('.price')[0]
-        v2 = v1.text_content()
-        v3 = re.search(r'(\d+)', v2)[1]
-        v4 = float(v3)
-        return v4
+Implement the smallest usable pipeline subset first:
+- selectors
+- text/attr/raw extractors
+- string cleanup transforms
+- return handling
 
-class CatalogueType(TypedDict):
-    books: List[BookType]
-    total: int
+Goal: basic extraction works.
 
-class Catalogue:
-    def __init__(self, document: Union[str, HtmlElement]):
-        if isinstance(document, str):
-            self._doc = html.fromstring(document.strip() or FALLBACK_HTML_STR)
-        else:
-            self._doc = document
-    
-    def parse(self) -> CatalogueType:
-        return self._parse(self._doc)
-    
-    def _parse_books(self, v: HtmlElement) -> List[BookType]:
-        v1 = v.cssselect('.book')
-        v2 = [Book._parse_item(i) for i in v1]
-        return v2
-    
-    def _parse_total(self, v: HtmlElement) -> int:
-        v1 = v.cssselect('.book')
-        v2 = len(v1)
-        return v2
-```
+### Step 5. Collections and typed transforms
+
+Add support for:
+- list-producing selectors
+- list operations (`first`, `last`, `index`, `slice`, `len`, `unique`)
+- conversions (`to-int`, `to-float`, `to-bool`)
+
+Goal: common scraping patterns work.
+
+### Step 6. Control and predicates
+
+Add support for:
+- `FallbackStart` / `FallbackEnd`
+- `Filter`
+- `Assert`
+- `Match`
+- logical predicate containers
+
+Goal: validation and guarded extraction work.
+
+### Step 7. Structured composition
+
+Add support for:
+- `Nested`
+- `Jsonify`
+- `TransformCall`
+- table/list struct behavior
+
+Goal: full DSL coverage.
 
 ---
 
-### Example 3: Transform with Auto-Imports
+## Minimal Viable Converter Checklist
 
-**DSL:**
-```kdl
-transform decode-base64 accept=STRING return=STRING {
-    py {
-        import "from base64 import b64decode"
-        code "{{NXT}} = b64decode({{PRV}}).decode('utf-8')"
-    }
-}
+A converter is minimally practical when it can correctly emit:
 
-struct Main {
-    content {
-        css "#data"
-        attr "data-encoded"
-        transform decode-base64
-    }
-}
-```
+- module header / imports
+- at least one `Struct`
+- one simple `Field`
+- selector + extractor + return
+- fallback handling
+- nested struct invocation
+- generated type declarations
 
-**Generated:**
-```python
-from base64 import b64decode  # ← Автоматически добавлен
-from bs4 import BeautifulSoup, Tag
-from typing import TypedDict, Union
-
-class MainType(TypedDict):
-    content: str
-
-class Main:
-    def _parse_content(self, v: Union[Tag, BeautifulSoup]) -> str:
-        v1 = v.select_one('#data')
-        v2 = ' '.join(v1.get_attribute_list('data-encoded'))
-        v3 = b64decode(v2).decode('utf-8')  # ← Transform применен
-        return v3
-```
+If any of these are missing, the backend is usually not yet usable for real schemas.
 
 ---
 
-## Advanced Topics
+## Designing Handlers
 
-### Custom Type Mappings
+Each handler should answer three questions.
 
-Добавление кастомных типов для генерации:
+### 1. What is the input value?
+Usually `ctx.prv`.
 
-```python
-MY_CONVERTER = py_bs4.PY_BASE_CONVERTER.extend()
+### 2. What is the output value?
+Usually `ctx.nxt`.
 
-# Добавить кастомный тип
-MY_TYPES = py_bs4.PY_TYPES.copy()
-MY_TYPES[VariableType.CUSTOM] = "MyCustomType"
+### 3. Does this node open a nested scope?
+If yes, use pre/post emission or delegate to `_emit_pipeline()` / nested traversal.
 
-@MY_CONVERTER(Field)
-def pre_struct_field(node: Field, ctx: ConverterContext):
-    ret_type = MY_TYPES.get(node.ret, "Any")
-    # ...
-```
+### Good handler properties
 
----
+A good handler should be:
+- small;
+- deterministic;
+- side-effect free;
+- focused on one AST node type;
+- explicit about its output variable.
 
-### Post-Processing
+### Avoid
 
-Добавление post-обработки для форматирования кода:
-
-```python
-@MY_CONVERTER.post(Module)
-def post_module(node: Module, generated_code: list[str]):
-    # Форматирование через black
-    import black
-    code_str = "\n".join(generated_code)
-    return black.format_str(code_str, mode=black.Mode()).split("\n")
-```
+Avoid handlers that:
+- inspect unrelated node types;
+- duplicate traversal logic already handled by `BaseConverter`;
+- manually advance variable names outside `ConverterContext` rules;
+- mix import collection, type generation, and pipeline emission in one place.
 
 ---
 
-### Multi-File Generation
+## Fallback Semantics
 
-Генерация нескольких файлов из одного DSL:
+Fallback is special because it affects control flow.
 
-```python
-# В конвертере можно генерировать дополнительные файлы
-@MY_CONVERTER(Module)
-def pre_module(node: Module, ctx: ConverterContext):
-    # Генерация основного файла
-    main_code = [...]
-    
-    # Генерация типов в отдельный файл
-    types_code = generate_types(node)
-    with open("types.py", "w") as f:
-        f.write("\n".join(types_code))
-    
-    return main_code
-```
+In `BaseConverter._emit_pipeline(...)`:
+- `FallbackStart` opens a protected region
+- inner nodes are emitted at deeper indentation
+- `FallbackEnd` closes the region and syncs the outer pipeline index
+
+This means a converter must treat fallback as a **structural control-flow node**, not as a simple one-line expression.
+
+If your target runtime has exceptions, fallback often maps naturally to protected execution.
+If it does not, implement equivalent branching behavior explicitly.
 
 ---
 
-### Testing Generated Code
+## Nested and Structured Parsing
 
-```python
-# Пример теста для сгенерированного кода
-def test_generated_parser():
-    from generated.catalogue import Catalogue
-    
-    html = """
-    <div class="book">
-        <span class="title">Book 1</span>
-        <span class="price">$25.99</span>
-    </div>
-    """
-    
-    parser = Catalogue(html)
-    result = parser.parse()
-    
-    assert result["books"][0]["title"] == "Book 1"
-    assert result["books"][0]["price"] == 25.99
-```
+Two structured operations deserve separate design attention.
+
+### `Nested`
+
+`Nested` invokes another generated parser/entity on the current runtime value.
+
+Your converter must define:
+- how a nested parser is called;
+- how list-nested vs scalar-nested is represented;
+- whether nested parsing is static, instance-based, or helper-based.
+
+### `Jsonify`
+
+`Jsonify` converts a string value into structured data and maps it to a declared JSON schema.
+
+Your converter must define:
+- how raw string input becomes parsed JSON/runtime data;
+- how `path=...` navigation is rendered;
+- how arrays vs single objects are handled.
+
+---
+
+## Transform Support
+
+`TransformDef` and `TransformCall` are the extension points for user-defined operations.
+
+A converter must decide:
+- how transform implementations are emitted;
+- how transform imports are collected;
+- how transform calls are invoked from pipelines;
+- how typed `accept` / `ret` expectations map to runtime code.
+
+Good practice:
+- treat transform code as backend-owned runtime snippets;
+- keep transform invocation consistent with ordinary pipeline variable flow;
+- deduplicate imports/helpers introduced by transforms.
+
+---
+
+## Suggested Test Strategy
+
+A new converter should be validated at three levels.
+
+### 1. AST unit coverage
+
+Test small schemas covering:
+- scalar extraction
+- list extraction
+- fallback
+- predicates
+- nested
+- jsonify
+- transforms
+
+### 2. Golden output tests
+
+Given a schema, assert that generated code contains the expected structure:
+- imports
+- type declarations
+- parser entry points
+- field methods
+- transform helpers
+
+### 3. Runtime smoke tests
+
+If the target backend can run in CI, execute generated code on small inputs and verify:
+- output values
+- fallback behavior
+- predicate behavior
+- nested parsing
+
+---
+
+## Practical Implementation Checklist
+
+When creating a new backend, use this order:
+
+- [ ] Create a new `BaseConverter` instance or extend an existing one
+- [ ] Implement module/file skeleton handlers
+- [ ] Implement type declaration handlers
+- [ ] Implement `Struct` / `Init` / `Field` handlers
+- [ ] Implement core selector + extractor handlers
+- [ ] Implement string and regex transforms
+- [ ] Implement type conversion handlers
+- [ ] Implement fallback nodes
+- [ ] Implement predicate containers and predicate operations
+- [ ] Implement `Nested`
+- [ ] Implement `Jsonify`
+- [ ] Implement `TransformCall` / transform import wiring
+- [ ] Register the converter in CLI target selection
+- [ ] Add parser-to-output tests
+- [ ] Add runtime smoke tests if possible
+
+---
+
+## Common Failure Modes
+
+Watch for these issues when implementing a converter.
+
+### Variable chain drift
+
+Symptoms:
+- generated code uses `v3` before it exists;
+- fallback body and outer pipeline lose sync.
+
+Cause:
+- handler bypasses `ConverterContext` model.
+
+### Wrong traversal depth
+
+Symptoms:
+- nested blocks are emitted with broken indentation;
+- predicate code is rendered as pipeline code.
+
+Cause:
+- handler duplicates traversal incorrectly or assumes wrong node category.
+
+### Mixing structural and scalar semantics
+
+Symptoms:
+- `Nested` or `Jsonify` treated as plain string transforms;
+- `Filter` rendered as ordinary pipeline assignment.
+
+Cause:
+- missing distinction between pipeline nodes and structural/control nodes.
+
+### Duplicated imports/helpers
+
+Symptoms:
+- same helper emitted multiple times;
+- transform imports repeated per field.
+
+Cause:
+- no centralized import/helper emission strategy.
+
+---
+
+## Recommended Style for New Backends
+
+Prefer this approach:
+
+1. start from the smallest working converter;
+2. keep handlers focused and mechanical;
+3. centralize target-specific naming/helpers in one place;
+4. use `.extend()` when a backend is a dialect of another backend;
+5. keep AST traversal policy in `BaseConverter`, not in ad-hoc handler code.
 
 ---
 
 ## Summary
 
-**Ключевые моменты:**
+A converter in this project is:
+- a registry of AST-node handlers;
+- driven by `BaseConverter` traversal;
+- guided by `ConverterContext` variable and indentation state;
+- responsible for emitting valid target source code from semantic AST.
 
-1. **Три готовых конвертера:**
-   - `py-bs4` - BeautifulSoup4 (универсальный)
-   - `py-lxml` - lxml (производительный)
-   - `js-pure` - Pure JavaScript
+The most important design rule is:
 
-2. **Простое расширение через `.extend()`:**
-   - Наследование всех handlers
-   - Переопределение только нужных
-   - Чистый API
+> Keep the converter focused on **rendering AST semantics**, not on reparsing DSL details.
 
-3. **Автоматические фичи:**
-   - TypedDict / interfaces для типов
-   - Импорты из transforms
-   - Error handling с fallback
-
-4. **CLI интеграция:**
-   - `generate` - генерация кода
-   - `check` - только линтинг
-   - Поддержка директорий
-
-**Best Practices:**
-- Используйте `py-lxml` для production (быстрее)
-- Используйте `py-bs4` для прототипирования (проще отладка)
-- Всегда запускайте `check` перед генерацией
-- Добавляйте `@doc` для документирования схем
-
+If that boundary is kept clean, new backends stay predictable, testable, and easy to evolve.

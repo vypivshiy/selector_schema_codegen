@@ -424,8 +424,8 @@ struct Main {
 ```
 
 **Key concepts:**
-- `-init { ... }` - pre-computed values (calculated once)
-- `self <name>` - reference pre-computed value
+- `@init { ... }` - pre-computed values (calculated once)
+- `@name` - reference pre-computed value from `@init`
 - `jsonify Quote path="0"` - extract element by index
 
 **Path navigation:**
@@ -713,7 +713,7 @@ field { css ".title"; text }
 
 **Pre-compute value:**
 ```kdl
--init {
+@init {
     raw-json { raw; re PATTERN }
 }
 field { @raw-json; jsonify Schema }

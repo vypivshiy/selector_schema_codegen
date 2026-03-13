@@ -482,7 +482,7 @@ books { nested Book }
 - **Regex:** `re`, `re-all`, `re-sub`
 - **Array:** `index`, `first`, `last`, `slice`, `len`, `unique`
 - **Conversions / structured:** `to-int`, `to-float`, `to-bool`, `jsonify`, `nested`
-- **Control / logic containers:** `fallback`, `self`, `filter`, `assert`, `match`, `transform`
+- **Control / logic containers:** `fallback`, `filter`, `assert`, `match`, `transform`
 
 ---
 
@@ -521,7 +521,7 @@ struct Main {
 
 **Особенности:**
 - Вычисляются один раз при инициализации
-- Доступны через `@<name>` (новый синтаксис) или `self <name>` (deprecated)
+- Доступны через `@<name>`
 - Полезно для дорогих операций
 
 ---
@@ -795,7 +795,7 @@ links-count { css-all "a"; len }
 
 ---
 
-### `fallback` / `self` / `filter` / `assert` / `match` / `transform`
+### `fallback` / `@<name>` / `filter` / `assert` / `match` / `transform`
 
 ```kdl
 transform to-base64 accept=STRING return=STRING {
@@ -841,7 +841,7 @@ struct Example type=table {
 - `""` - строка
 
 **Примечания:**
-- `@name` — основной способ обращения к `@init` полю; `self name` остаётся совместимым expr keyword
+- `@name` — способ обращения к `@init` полю
 - `filter { ... }`, `assert { ... }`, `match { ... }` принимают predicate-узлы
 - `not { ... }`, `and { ... }`, `or { ... }` используются только внутри этих контейнеров
 

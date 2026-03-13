@@ -1,828 +1,563 @@
 # AST Nodes Reference
 
 > **Version:** 2.0  
-> **Last Updated:** 2026-03-11
+> **Last Updated:** 2026-03-13
 
-Полное описание всех AST нод в KDL Schema DSL.
-
----
-
-## Table of Contents
-
-- [Overview](#overview)
-- [Module Level Nodes](#module-level-nodes)
-- [Struct Nodes](#struct-nodes)
-- [Field Nodes](#field-nodes)
-- [Selector Nodes](#selector-nodes)
-- [Extract Nodes](#extract-nodes)
-- [String Operations](#string-operations)
-- [Type Conversion Nodes](#type-conversion-nodes)
-- [Predicate Nodes](#predicate-nodes)
-- [JSON Nodes](#json-nodes)
-- [Transform Nodes](#transform-nodes)
-- [Control Flow Nodes](#control-flow-nodes)
+Актуальная сводка AST-нод и DSL-имен на основе реализаций из `ssc_codegen/kdl/ast/*` и регистраций в `ssc_codegen/kdl/parser.py`.
 
 ---
 
 ## Overview
 
-Все AST ноды наследуются от базового класса `Node`:
+Все AST-ноды наследуются от базового класса `Node`:
 
 ```python
 @dataclass
 class Node:
-    parent: Node | None = None
-    ret: VariableType = VariableType.NULL
+    accept: VariableType = field(default=VariableType.AUTO)
+    ret: VariableType = field(default=VariableType.AUTO)
+    parent: Node | None = field(default=None, repr=False)
+    body: list[Node] = field(default_factory=list)
 ```
 
-**Основные свойства:**
-- `parent` - ссылка на родительскую ноду
-- `ret` - тип возвращаемого значения
-- Каждая нода имеет специфичные поля
+### VariableType
+
+Поддерживаемые типы:
+
+- `AUTO`, `LIST_AUTO`
+- `DOCUMENT`, `LIST_DOCUMENT`
+- `STRING`, `OPT_STRING`, `LIST_STRING`
+- `INT`, `OPT_INT`, `LIST_INT`
+- `FLOAT`, `OPT_FLOAT`, `LIST_FLOAT`
+- `BOOL`, `NULL`, `NESTED`, `JSON`
+
+### StructType
+
+- `ITEM`
+- `LIST`
+- `DICT`
+- `TABLE`
+- `FLAT`
 
 ---
 
-## Module Level Nodes
+## DSL entries recognized by parser
+
+Это не всегда отдельные AST-ноды, но это реальные имена, которые знает `parser.py`.
+
+### Module-level DSL entries
+
+- `@doc`
+- `define`
+- `transform`
+- `struct`
+- `json`
+
+### Struct-level DSL entries
+
+- `@doc`
+- `@init`
+- `@pre-validate`
+- `@split-doc`
+- `@key`
+- `@value`
+- `@table`
+- `@rows`
+- `@match`
+- `<field-name>`
+
+### Pipeline expression names
+
+- `css`, `css-all`, `xpath`, `xpath-all`, `css-remove`, `xpath-remove`
+- `text`, `raw`, `attr`
+- `trim`, `ltrim`, `rtrim`, `normalize-space`
+- `rm-prefix`, `rm-suffix`, `rm-prefix-suffix`
+- `fmt`, `repl`, `lower`, `upper`, `split`, `join`, `unescape`
+- `re`, `re-all`, `re-sub`
+- `index`, `first`, `last`, `slice`, `len`, `unique`
+- `to-int`, `to-float`, `to-bool`
+- `jsonify`, `nested`, `fallback`, `filter`, `assert`, `match`, `transform`
+- `@name` — ссылка на значение из `@init` (парсер превращает это в `Self`)
+
+### Predicate names inside `filter` / `assert` / `match`
+
+- `eq`, `ne`, `gt`, `lt`, `ge`, `le`, `range`
+- `starts`, `ends`, `contains`, `in`
+- `re`, `re-all`, `re-any`
+- `css`, `xpath`, `has-attr`
+- `attr-eq`, `attr-ne`, `attr-starts`, `attr-ends`, `attr-contains`, `attr-re`
+- `text-starts`, `text-ends`, `text-contains`, `text-re`
+- `len-eq`, `len-gt`
+- `and`, `or`, `not`
+
+> **Note:** в AST есть `PredCountLt`, но в текущем `parser.py` отдельное имя `len-lt` не зарегистрировано. Вместо этого второй раз зарегистрирован `len-eq`, который создаёт `PredCountLt`.
+
+---
+
+## Module-level AST nodes
+
+| AST class | DSL | Назначение |
+|---|---|---|
+| `Module` | — | Корневой AST-узел модуля |
+| `Docstring` | `@doc` | Документация модуля |
+| `Imports` | — | Техническая секция импортов для codegen |
+| `Utilities` | — | Техническая секция helper-функций |
+| `CodeStartHook` | — | Точка вставки кода в начале файла |
+| `CodeEndHook` | — | Точка вставки кода в конце файла |
+| `JsonDef` | `json` | JSON schema definition |
+| `TransformDef` | `transform` | Модульное определение transform |
+| `Struct` | `struct` | Описание структуры парсинга |
+| `TypeDef` | — | Автогенерируемое описание типа для `Struct` |
 
 ### `Module`
 
-Корневой узел модуля.
+`Module.__post_init__()` заранее добавляет в `body`:
 
-```python
-@dataclass
-class Module(Node):
-    name: str = ""
-    body: list[Node] = field(default_factory=list)
-    imports: Imports = field(default_factory=Imports)
-    utilities: Utilities = field(default_factory=Utilities)
-```
+1. `Docstring`
+2. `Imports`
+3. `Utilities`
+4. `CodeStartHook`
 
-**Содержит:**
-- `body` - список структур, JSON схем, transform'ов
-- `imports` - секция импортов
-- `utilities` - утилитарные функции
-
----
-
-### `Imports`
-
-Секция импортов модуля.
-
-```python
-@dataclass
-class Imports(Node):
-    libs: list[str] = field(default_factory=list)
-    transform_imports: dict[str, set[str]] = field(default_factory=dict)
-```
-
-**Особенности:**
-- `transform_imports` - импорты из transform'ов, собранные при парсинге
-- Ключи: `"py"`, `"js"` и т.д.
-- Автоматически заполняется парсером
-
-**Пример:**
-```python
-# После парсинга transform с импортами
-module.imports.transform_imports = {
-    "py": {"from base64 import b64decode"},
-    "js": set()
-}
-```
-
----
+А уже после парсинга в `body` добавляются `TransformDef`, `TypeDef`, `Struct`.
 
 ### `Docstring`
-
-Документация модуля или структуры.
 
 ```python
 @dataclass
 class Docstring(Node):
-    content: str = ""
+    value: str = ""
 ```
 
 **DSL:**
 ```kdl
-@doc """
-Module documentation
-Multi-line supported
-"""
+@doc "module docs"
 ```
 
 ---
 
-## Struct Nodes
+## Struct AST nodes
+
+| AST class | DSL | Назначение |
+|---|---|---|
+| `Struct` | `struct` | Структура парсинга |
+| `StructDocstring` | `@doc` внутри `struct` | Документация структуры |
+| `Init` | `@init` | Контейнер для предвычисляемых pipeline |
+| `InitField` | `<name>` внутри `@init` | Одно предвычисляемое значение |
+| `PreValidate` | `@pre-validate` | Валидация документа перед парсингом |
+| `SplitDoc` | `@split-doc` | Деление документа на элементы |
+| `Key` | `@key` | Ключ для `StructType.DICT` |
+| `Value` | `@value` | Значение для `DICT` / `TABLE` |
+| `TableConfig` | `@table` | Выбор таблицы |
+| `TableRow` | `@rows` | Выбор строк таблицы |
+| `TableMatchKey` | `@match` | Извлечение ключевой ячейки для table-match |
+| `Field` | `<field-name>` | Обычное выходное поле |
+| `StartParse` | — | Техническая нода, добавляется в конец `Struct.body` |
 
 ### `Struct`
 
-Основная структура данных.
-
 ```python
-@dataclass  
+@dataclass
 class Struct(Node):
     name: str = ""
     struct_type: StructType = StructType.ITEM
-    body: list[Field | Key | Value] = field(default_factory=list)
-    init: Init = field(default_factory=Init)
-    pre_validate: PreValidate | None = None
-    split_doc: SplitDoc | None = None
-    table_config: TableConfig | None = None
-    table_match_key: TableMatchKey | None = None
-    table_row: TableRow | None = None
+    keep_order: bool = False
 ```
-
-**Типы структур (`StructType`):**
-- `ITEM = 1` - один объект
-- `LIST = 2` - список объектов
-- `DICT = 3` - словарь
-- `FLAT = 4` - плоский список
-- `TABLE = 5` - таблица
 
 **DSL:**
 ```kdl
-struct MainCatalogue { ... }           // type=item (default)
-struct Book type=list { ... }
-struct Metadata type=dict { ... }
-struct ProductInfo type=table { ... }
+struct Product {}
+struct ProductList type=list {}
+struct Meta type=dict {}
+struct PriceTable type=table {}
+struct FlatList type=flat keep-order=#true {}
 ```
 
----
-
-### `Field`
-
-Поле структуры с pipeline операций.
+### `StructDocstring`
 
 ```python
 @dataclass
-class Field(Node):
-    name: str = ""
-    body: list[Node] = field(default_factory=list)
-    accept: VariableType = VariableType.DOCUMENT
+class StructDocstring(Node):
+    value: str = ""
 ```
 
 **DSL:**
 ```kdl
-title {
-    css "h1"
-    text
-    trim
+struct Example {
+    @doc "struct docs"
 }
 ```
 
-**Pipeline:**
-1. Селекторы (`css`, `xpath`)
-2. Извлечение (`text`, `attr`, `raw`)
-3. Трансформации (`trim`, `upper`, `re`)
-4. Конвертация типов (`to-int`, `to-float`)
+### `Init` / `InitField`
 
----
-
-### `InitField`
-
-Предвычисленное поле в `@init`.
-
-```python
-@dataclass
-class InitField(Node):
-    name: str = ""
-    body: list[Node] = field(default_factory=list)
-    accept: VariableType = VariableType.DOCUMENT
-```
+`Init` — контейнер, `InitField` — конкретный pipeline с именем.
 
 **DSL:**
 ```kdl
--init {
-    raw-json {
-        raw
-        re JSON-PATTERN
+struct Example {
+    @init {
+        raw-json {
+            raw
+            re #"\{.*\}"#
+        }
+    }
+
+    data {
+        @raw-json
+        jsonify Quote
     }
 }
 ```
 
-**Использование:**
+### `PreValidate`
+
+- `accept = DOCUMENT`
+- `ret = DOCUMENT`
+
+**DSL:**
 ```kdl
-data {
-    @raw-json  // Ссылка на InitField
-    jsonify Quote
+@pre-validate {
+    assert { css ".required" }
 }
 ```
 
----
+### `SplitDoc`
+
+- `accept = DOCUMENT`
+- `ret = LIST_DOCUMENT`
+
+**DSL:**
+```kdl
+@split-doc { css-all ".item" }
+```
 
 ### `Key` / `Value`
 
-Специальные поля для `type=dict`.
-
-```python
-@dataclass
-class Key(Node):
-    body: list[Node] = field(default_factory=list)
-
-@dataclass
-class Value(Node):
-    body: list[Node] = field(default_factory=list)
-```
-
 **DSL:**
 ```kdl
-struct Metadata type=dict {
+struct Meta type=dict {
     @split-doc { css-all "meta" }
-    
-    @key {
-        attr "property"
-    }
-    
-    @value {
-        attr "content"
-    }
+    @key { attr "property" }
+    @value { attr "content" }
 }
 ```
 
----
-
-### Special Struct Fields
-
-#### `PreValidate`
-
-Валидация документа перед парсингом.
-
-```python
-@dataclass
-class PreValidate(Node):
-    body: list[Node] = field(default_factory=list)
-```
-
-**DSL:**
-```kdl
--pre-validate {
-    assert { css ".required-element" }
-}
-```
-
----
-
-#### `SplitDoc`
-
-Разбиение документа на элементы (для `type=list`, `type=dict`, `type=flat`).
-
-```python
-@dataclass
-class SplitDoc(Node):
-    body: list[Node] = field(default_factory=list)
-```
-
-**DSL:**
-```kdl
--split-doc { css-all ".book-card" }
-```
-
----
-
-#### `TableConfig`, `TableMatchKey`, `TableRow`
-
-Специальные поля для `type=table`.
-
-```python
-@dataclass
-class TableConfig(Node):
-    body: list[Node] = field(default_factory=list)
-
-@dataclass
-class TableMatchKey(Node):
-    body: list[Node] = field(default_factory=list)
-
-@dataclass
-class TableRow(Node):
-    body: list[Node] = field(default_factory=list)
-```
+### `TableConfig` / `TableRow` / `TableMatchKey`
 
 **DSL:**
 ```kdl
 struct ProductInfo type=table {
     @table { css "table" }
     @rows { css-all "tr" }
-    @match { css "th"; text; lower }
-    @value { css "td"; text }
+    @match { css "th" text lower }
+    @value { css "td" text }
+}
+```
+
+### `Field`
+
+Для обычных структур `Field.accept` по умолчанию `DOCUMENT`.
+Для `type=table` поле создаётся с `accept=STRING`.
+
+### `StartParse`
+
+Техническая нода, парсер всегда добавляет её в конец `Struct.body` после разбора структуры.
+
+---
+
+## Selector nodes
+
+| AST class | DSL | Типы |
+|---|---|---|
+| `CssSelect` | `css` | `DOCUMENT -> DOCUMENT` |
+| `CssSelectAll` | `css-all` | `DOCUMENT -> LIST_DOCUMENT` |
+| `XpathSelect` | `xpath` | `DOCUMENT -> DOCUMENT` |
+| `XpathSelectAll` | `xpath-all` | `DOCUMENT -> LIST_DOCUMENT` |
+| `CssRemove` | `css-remove` | `DOCUMENT -> DOCUMENT` |
+| `XpathRemove` | `xpath-remove` | `DOCUMENT -> DOCUMENT` |
+
+**Пример:**
+```kdl
+title {
+    css "h1"
+    text
 }
 ```
 
 ---
 
-## Selector Nodes
+## Extract nodes
 
-### CSS Selectors
-
-```python
-@dataclass
-class CssSelect(Node):
-    query: str = ""
-    accept: VariableType = VariableType.DOCUMENT
-    ret: VariableType = VariableType.DOCUMENT
-
-@dataclass
-class CssSelectAll(Node):
-    query: str = ""
-    accept: VariableType = VariableType.DOCUMENT
-    ret: VariableType = VariableType.LIST_DOCUMENT
-
-@dataclass
-class CssRemove(Node):
-    query: str = ""
-    accept: VariableType = VariableType.DOCUMENT
-    ret: VariableType = VariableType.DOCUMENT
-```
-
-**DSL:**
-```kdl
-css "h1"           // CssSelect
-css-all "a"        // CssSelectAll
-css-remove ".ads"      // CssRemove
-```
-
-**Типы:**
-- `css`: `DOCUMENT → DOCUMENT`
-- `css-all`: `DOCUMENT → LIST_DOCUMENT`
-- `css-remove`: `DOCUMENT → DOCUMENT` (удаляет элементы, возвращает doc)
-
----
-
-### XPath Selectors
-
-```python
-@dataclass
-class XpathSelect(Node):
-    query: str = ""
-    accept: VariableType = VariableType.DOCUMENT
-    ret: VariableType = VariableType.DOCUMENT
-
-@dataclass
-class XpathSelectAll(Node):
-    query: str = ""
-    accept: VariableType = VariableType.DOCUMENT
-    ret: VariableType = VariableType.LIST_DOCUMENT
-
-@dataclass
-class XpathRemove(Node):
-    query: str = ""
-    accept: VariableType = VariableType.DOCUMENT
-    ret: VariableType = VariableType.DOCUMENT
-```
-
-**DSL:**
-```kdl
-xpath "//div[@class='content']"
-xpath-all "//a"
-xpath-remove "//script"
-```
-
----
-
-## Extract Nodes
-
-### `Text`
-
-Извлечение текстового содержимого.
-
-```python
-@dataclass
-class Text(Node):
-    accept: VariableType = VariableType.DOCUMENT
-    ret: VariableType = VariableType.STRING
-```
-
-**Типы:**
-- `DOCUMENT → STRING`
-- `LIST_DOCUMENT → LIST_STRING`
-
-**DSL:**
-```kdl
-title { css "h1"; text }
-```
-
-**Генерируемый код:**
-```python
-# bs4
-v2 = v1.text
-
-# lxml
-v2 = v1.text_content()
-```
-
----
+| AST class | DSL | Типы |
+|---|---|---|
+| `Text` | `text` | `DOCUMENT -> STRING`, `LIST_DOCUMENT -> LIST_STRING` |
+| `Raw` | `raw` | `DOCUMENT -> STRING`, `LIST_DOCUMENT -> LIST_STRING` |
+| `Attr` | `attr` | зависит от числа ключей и предыдущего типа |
 
 ### `Attr`
-
-Извлечение атрибутов.
 
 ```python
 @dataclass
 class Attr(Node):
     keys: tuple[str, ...] = field(default_factory=tuple)
-    accept: VariableType = VariableType.DOCUMENT
-    ret: VariableType = VariableType.STRING
 ```
 
 **DSL:**
 ```kdl
-attr "href"                      // Один атрибут
-attr "class" "data-value"        // Конкатенация атрибутов
+attr "href"
+attr "class" "data-value"
 ```
 
-**Генерируемый код:**
-```python
-# bs4
-v2 = ' '.join(v1.get_attribute_list('href'))
+Если ключ один, обычно результат скалярный. Если ключей несколько, результат используется как список строк.
 
-# lxml
-v2 = v1.get('href', '')
+---
+
+## String operation nodes
+
+| AST class | DSL |
+|---|---|
+| `Trim` | `trim` |
+| `Ltrim` | `ltrim` |
+| `Rtrim` | `rtrim` |
+| `NormalizeSpace` | `normalize-space` |
+| `RmPrefix` | `rm-prefix` |
+| `RmSuffix` | `rm-suffix` |
+| `RmPrefixSuffix` | `rm-prefix-suffix` |
+| `Fmt` | `fmt` |
+| `Repl` | `repl old new` |
+| `ReplMap` | `repl { old new ... }` |
+| `Lower` | `lower` |
+| `Upper` | `upper` |
+| `Split` | `split` |
+| `Join` | `join` |
+| `Unescape` | `unescape` |
+
+Большинство этих нод работают по map-semantics:
+
+- `STRING -> STRING`
+- `LIST_STRING -> LIST_STRING`
+
+Исключения:
+
+- `Split`: `STRING -> LIST_STRING`
+- `Join`: `LIST_STRING -> STRING`
+
+**Примеры:**
+```kdl
+name { text trim normalize-space }
+slug { text lower rm-prefix "/" rm-suffix ".html" }
+url { attr "href" fmt "https://example.com/{{}}" }
+rating { text repl "One" "1" }
+parts { text split "," }
+joined { text split "," join " | " }
 ```
 
 ---
 
-### `Raw`
+## Regex nodes
 
-Извлечение HTML кода.
+| AST class | DSL | Типы |
+|---|---|---|
+| `Re` | `re` | `STRING -> STRING`, `LIST_STRING -> LIST_STRING` |
+| `ReAll` | `re-all` | `STRING -> LIST_STRING` |
+| `ReSub` | `re-sub` | `STRING -> STRING`, `LIST_STRING -> LIST_STRING` |
+
+Паттерны нормализуются через `normalize_regex_pattern()`.
+
+**Примеры:**
+```kdl
+price { text re #"(\d+\.\d+)"# }
+nums { text re-all #"\d+"# }
+clean { text re-sub #"\s+"# " " }
+```
+
+---
+
+## Array / collection nodes
+
+| AST class | DSL | Назначение |
+|---|---|---|
+| `Index` | `index` | Взять элемент по индексу |
+| `Index` | `first` | Сокращение для первого элемента |
+| `Index` | `last` | Сокращение для последнего элемента |
+| `Slice` | `slice` | Взять диапазон |
+| `Len` | `len` | Длина списка |
+| `Unique` | `unique` | Убрать дубликаты из списка строк |
+
+**Примеры:**
+```kdl
+first-link { css-all "a" attr "href" first }
+last-link { css-all "a" attr "href" last }
+subset { css-all "a" attr "href" slice 0 10 }
+count { css-all "a" len }
+uniq { css-all "a" attr "href" unique }
+```
+
+---
+
+## Cast / conversion nodes
+
+| AST class | DSL | Типы |
+|---|---|---|
+| `ToInt` | `to-int` | `STRING -> INT`, `LIST_STRING -> LIST_INT` |
+| `ToFloat` | `to-float` | `STRING -> FLOAT`, `LIST_STRING -> LIST_FLOAT` |
+| `ToBool` | `to-bool` | `AUTO -> BOOL` |
+| `Jsonify` | `jsonify` | `STRING -> JSON` |
+| `Nested` | `nested` | `DOCUMENT -> NESTED` |
+
+### `Jsonify`
 
 ```python
 @dataclass
-class Raw(Node):
-    accept: VariableType = VariableType.DOCUMENT
-    ret: VariableType = VariableType.STRING
+class Jsonify(Node):
+    schema_name: str = ""
+    path: str | None = None
+    is_array: bool = False
 ```
 
 **DSL:**
 ```kdl
-html { css ".content"; raw }
+payload { text jsonify Quote }
+payload { text jsonify Quote path="0.author" }
 ```
 
-**Генерируемый код:**
-```python
-# bs4
-v2 = str(v1)
+### `Nested`
 
-# lxml  
-v2 = html.tostring(v1, encoding='unicode')
-```
-
----
-
-## String Operations
-
-### `Trim` / `LTrim` / `RTrim`
-
-```python
-@dataclass
-class Trim(Node):
-    accept: VariableType = VariableType.STRING
-    ret: VariableType = VariableType.STRING
-```
-
-**DSL:**
 ```kdl
-text { css "p"; text; trim }
-```
-
----
-
-### `Upper` / `Lower`
-
-```python
-@dataclass
-class Upper(Node):
-    accept: VariableType = VariableType.STRING
-    ret: VariableType = VariableType.STRING
-
-@dataclass
-class Lower(Node):
-    accept: VariableType = VariableType.STRING
-    ret: VariableType = VariableType.STRING
-```
-
----
-
-### `RmPrefix` / `RmSuffix`
-
-```python
-@dataclass
-class RmPrefix(Node):
-    value: str = ""
-    accept: VariableType = VariableType.STRING
-    ret: VariableType = VariableType.STRING
-```
-
-**DSL:**
-```kdl
-rm-prefix "../"
-rm-suffix ".html"
-```
-
----
-
-### `Fmt`
-
-Форматирование строки с шаблоном.
-
-```python
-@dataclass
-class Fmt(Node):
-    template: str = ""
-    accept: VariableType = VariableType.STRING
-    ret: VariableType = VariableType.STRING
-```
-
-**DSL:**
-```kdl
-define FMT-URL="https://example.com/{{}}"
-
-struct Example {
-    url { css "a"; attr "href"; fmt FMT-URL }
-}
-```
-
-**Генерируемый код:**
-```python
-v3 = "https://example.com/{}".format(v2)
-```
-
----
-
-### `Re` - Regex extraction
-
-```python
-@dataclass
-class Re(Node):
-    pattern: str = ""  # Inline форма с флагами: (?is)pattern
-    accept: VariableType = VariableType.STRING
-    ret: VariableType = VariableType.STRING
-```
-
-**DSL:**
-```kdl
-price { css ".price"; text; re #"(\d+\.\d+)"# }
-```
-
-**Генерируемый код:**
-```python
-v3 = re.search('(?s)\\d+\\.\\d+', v2)[1]
-```
-
-**Особенности:**
-- Паттерн нормализован: VERBOSE удален, флаги inline
-- Возвращает первую группу захвата
-
----
-
-### `ReAll` - All regex matches
-
-```python
-@dataclass
-class ReAll(Node):
-    pattern: str = ""
-    accept: VariableType = VariableType.STRING
-    ret: VariableType = VariableType.LIST_STRING
-```
-
-**DSL:**
-```kdl
-numbers { css ".text"; text; re-all #"\d+"# }
-```
-
-**Типы:**
-- `STRING → LIST_STRING`
-
----
-
-### `ReSub` - Regex substitution
-
-```python
-@dataclass
-class ReSub(Node):
-    pattern: str = ""
-    repl: str = ""
-    accept: VariableType = VariableType.STRING
-    ret: VariableType = VariableType.STRING
-```
-
-**DSL:**
-```kdl
-clean { css ".text"; text; re-sub #"\s+" " " }
-```
-
----
-
-### `Repl` - Dictionary replacement
-
-```python
-@dataclass
-class Repl(Node):
-    mapping: dict[str, str] = field(default_factory=dict)
-    accept: VariableType = VariableType.STRING
-    ret: VariableType = VariableType.STRING
-```
-
-**DSL:**
-```kdl
-define REPL-RATING {
-    repl {
-        One "1"
-        Two "2"
-    }
-}
-
-struct Example {
-    rating { css ".rating"; attr "class"; REPL-RATING }
+books {
+    css-all ".book"
+    nested Book
 }
 ```
 
 ---
 
-## Type Conversion Nodes
+## Control and flow nodes
 
-### `ToInt` / `ToFloat` / `ToBool`
-
-```python
-@dataclass
-class ToInt(Node):
-    accept: VariableType = VariableType.STRING
-    ret: VariableType = VariableType.INT
-
-@dataclass
-class ToFloat(Node):
-    accept: VariableType = VariableType.STRING
-    ret: VariableType = VariableType.FLOAT
-
-@dataclass
-class ToBool(Node):
-    accept: VariableType = VariableType.AUTO
-    ret: VariableType = VariableType.BOOL
-```
-
-**DSL:**
-```kdl
-count { css ".count"; text; to-int }
-price { css ".price"; text; to-float }
-active { css ".active"; to-bool }
-```
-
----
-
-### `Len`
-
-```python
-@dataclass
-class Len(Node):
-    accept: VariableType = VariableType.LIST_AUTO
-    ret: VariableType = VariableType.INT
-```
-
-**DSL:**
-```kdl
-links-count { css-all "a"; len }
-```
-
-**Типы:**
-- `LIST_* → INT`
-- `STRING → INT`
-
----
+| AST class | DSL | Назначение |
+|---|---|---|
+| `Fallback` | `fallback` | Вернуть literal при ошибке pipeline |
+| `FallbackStart` | — | Техническая служебная нода |
+| `FallbackEnd` | — | Техническая служебная нода |
+| `Self` | `@init-name` | Ссылка на уже вычисленное значение |
+| `Return` | — | Неявный конец pipeline |
+| `Filter` | `filter` | Фильтрация списка по предикатам |
+| `Assert` | `assert` | Проверка значения без изменения |
+| `Match` | `match` | Table-match контейнер |
 
 ### `Fallback`
 
-```python
-@dataclass
-class Fallback(Node):
-    value: str | int | float | bool | None = None
-```
-
 **DSL:**
 ```kdl
-fallback #null
-fallback #true
-fallback 0
-fallback "default"
+value { text to-int fallback 0 }
+value { text fallback #null }
+```
+
+### `Self`
+
+`Self` остаётся AST-нодой, но в DSL создаётся только через специальную ссылку:
+
+- `@name` — ссылка на `InitField`
+
+Это должен быть первый шаг pipeline.
+
+### `Return`
+
+`Return` не пишется в DSL: парсер автоматически добавляет его в конец каждого верхнеуровневого pipeline.
+
+---
+
+## Predicate container nodes
+
+| AST class | DSL | Назначение |
+|---|---|---|
+| `Filter` | `filter { ... }` | Фильтрация списков |
+| `Assert` | `assert { ... }` | Проверка без изменения значения |
+| `Match` | `match { ... }` | Выбор строки в table-парсере |
+| `LogicAnd` | `and { ... }` | Явная логическая группировка AND |
+| `LogicOr` | `or { ... }` | Логическая группировка OR |
+| `LogicNot` | `not { ... }` | Инверсия вложенного блока |
+
+**Примеры:**
+```kdl
+filter {
+    or {
+        contains "foo"
+        contains "bar"
+    }
+}
+
+assert {
+    not {
+        css ".disabled"
+    }
+}
 ```
 
 ---
 
-## Predicate Nodes
+## Predicate operation nodes
 
-Используются в `match { ... }` и `assert { ... }`.
+### Comparison / scalar predicates
 
-### String Predicates
+| AST class | DSL |
+|---|---|
+| `PredEq` | `eq` |
+| `PredNe` | `ne` |
+| `PredGt` | `gt` |
+| `PredLt` | `lt` |
+| `PredGe` | `ge` |
+| `PredLe` | `le` |
+| `PredRange` | `range` |
+| `PredStarts` | `starts` |
+| `PredEnds` | `ends` |
+| `PredContains` | `contains` |
+| `PredIn` | `in` |
 
-```python
-@dataclass
-class PredEq(Node):
-    values: tuple[str, ...] = field(default_factory=tuple)
+### Regex predicates
 
-@dataclass
-class PredStarts(Node):
-    values: tuple[str, ...] = field(default_factory=tuple)
+| AST class | DSL | Ограничения |
+|---|---|---|
+| `PredRe` | `re` | доступен в `filter`, `assert`, `match` |
+| `PredReAll` | `re-all` | только `assert` |
+| `PredReAny` | `re-any` | только `assert` |
 
-@dataclass
-class PredEnds(Node):
-    values: tuple[str, ...] = field(default_factory=tuple)
+### Document predicates
 
-@dataclass
-class PredContains(Node):
-    values: tuple[str, ...] = field(default_factory=tuple)
-```
+| AST class | DSL | Ограничения |
+|---|---|---|
+| `PredCss` | `css` | `filter`, `assert` |
+| `PredXpath` | `xpath` | `filter`, `assert` |
+| `PredHasAttr` | `has-attr` | `filter`, `assert` |
+| `PredAttrEq` | `attr-eq` | `filter`, `assert` |
+| `PredAttrNe` | `attr-ne` | `filter`, `assert` |
+| `PredAttrStarts` | `attr-starts` | `filter`, `assert` |
+| `PredAttrEnds` | `attr-ends` | `filter`, `assert` |
+| `PredAttrContains` | `attr-contains` | `filter`, `assert` |
+| `PredAttrRe` | `attr-re` | `filter`, `assert` |
+| `PredTextStarts` | `text-starts` | `filter`, `assert` |
+| `PredTextEnds` | `text-ends` | `filter`, `assert` |
+| `PredTextContains` | `text-contains` | `filter`, `assert` |
+| `PredTextRe` | `text-re` | `filter`, `assert` |
 
-**DSL:**
-```kdl
-match { eq "value" }
-match { starts "prefix" }
-match { ends "suffix" }
-match { contains "substring" }
-```
+### List-length predicates
 
----
-
-### Regex Predicates
-
-```python
-@dataclass
-class PredRe(Node):
-    pattern: str = ""  # Normalized inline form
-
-@dataclass
-class PredReAll(Node):
-    pattern: str = ""
-
-@dataclass
-class PredReAny(Node):
-    pattern: str = ""
-```
-
-**DSL:**
-```kdl
-match { re #"pattern"# }
-assert { and { contains "foo"; not { contains "bar" } } }
-filter { or { attr-starts "href" "https"; attr-starts "href" "/" } }
-```
+| AST class | Parser registration |
+|---|---|
+| `PredCountEq` | `len-eq` |
+| `PredCountGt` | `len-gt` |
+| `PredCountLt` | AST есть, но отдельное `len-lt` сейчас не зарегистрировано |
 
 ---
 
-### Attribute Predicates
+## JSON nodes
 
-```python
-@dataclass
-class PredHasAttr(Node):
-    attrs: tuple[str, ...] = field(default_factory=tuple)
-
-@dataclass
-class PredAttrEq(Node):
-    name: str = ""
-    values: tuple[str, ...] = field(default_factory=tuple)
-
-@dataclass
-class PredAttrRe(Node):
-    name: str = ""
-    pattern: str = ""
-```
-
-**DSL:**
-```kdl
-match { has-attr "class" }
-match { attr-eq "class" "active" }
-match { attr-re "href" #"^https"# }
-```
-
----
-
-### Element Predicates
-
-```python
-@dataclass
-class PredCss(Node):
-    query: str = ""
-
-@dataclass
-class PredXpath(Node):
-    query: str = ""
-```
-
-**DSL:**
-```kdl
-assert { css ".required" }
-assert { xpath "//div[@id='main']" }
-```
-
----
-
-## JSON Nodes
+| AST class | DSL |
+|---|---|
+| `JsonDef` | `json` |
+| `JsonDefField` | `<field-name> <type>` внутри `json` |
+| `Jsonify` | `jsonify` |
 
 ### `JsonDef`
-
-Определение JSON схемы.
-
-```python
-@dataclass
-class JsonDef(Node):
-    name: str = ""
-    is_array: bool = False
-    body: list[JsonDefField] = field(default_factory=list)
-```
 
 **DSL:**
 ```kdl
@@ -833,312 +568,82 @@ json Quote array=#true {
 }
 ```
 
----
-
 ### `JsonDefField`
-
-Поле JSON схемы.
 
 ```python
 @dataclass
 class JsonDefField(Node):
     name: str = ""
-    ret: VariableType = VariableType.STRING
+    type_name: str = ""
+    is_optional: bool = False
     is_array: bool = False
-    ref_name: str = ""  # Ссылка на другую JSON схему
+    ref_name: str | None = None
 ```
 
-**DSL:**
-```kdl
-text str              // ret=STRING, is_array=False
-tags (array)str       // ret=STRING, is_array=True
-author Author         // ret=JSON, ref_name="Author"
-```
+Парсер при разборе вычисляет `ret`, `is_optional`, `is_array`, `ref_name` по содержимому DSL.
 
 ---
 
-### `Jsonify`
+## Transform nodes
 
-Применение JSON схемы к данным.
-
-```python
-@dataclass
-class Jsonify(Node):
-    schema_name: str = ""
-    path: str | None = None
-    accept: VariableType = VariableType.STRING
-    ret: VariableType = VariableType.JSON
-    is_array: bool = False
-```
-
-**DSL:**
-```kdl
-jsonify Quote                       // Применить схему
-jsonify Quote path="0"              // Взять первый элемент
-jsonify Quote path="2.author.slug"  // Навигация по полям
-```
-
-**path навигация:**
-- Пустой path: применить схему к результату
-- Числовой индекс: unwrap array
-- Путь через точку: навигация по полям
-
-**is_array:**
-- `True` если результат - массив
-- `False` если результат - одиночный объект
-
----
-
-## Transform Nodes
+| AST class | DSL | Назначение |
+|---|---|---|
+| `TransformDef` | `transform` на уровне модуля | Определение transform |
+| `TransformTarget` | языковой блок (`py`, `js`, ...) | Реализация transform для языка |
+| `TransformCall` | `transform name` в pipeline | Вызов transform |
 
 ### `TransformDef`
 
-Определение transform функции.
-
-```python
-@dataclass
-class TransformDef(Node):
-    name: str = ""
-    accept: VariableType = VariableType.STRING
-    ret: VariableType = VariableType.STRING
-    body: list[TransformTarget] = field(default_factory=list)
-```
-
 **DSL:**
 ```kdl
 transform to-base64 accept=STRING return=STRING {
-    py { ... }
-    js { ... }
-}
-```
-
----
-
-### `TransformTarget`
-
-Реализация transform для конкретного языка.
-
-```python
-@dataclass
-class TransformTarget(Node):
-    lang: str = ""  # "py", "js", etc.
-    imports: list[str] = field(default_factory=list)
-    code: list[str] = field(default_factory=list)
-```
-
-**DSL:**
-```kdl
-py {
-    import "from base64 import b64decode"
-    code "{{NXT}} = str(b64decode({{PRV}}))"
-}
-```
-
-**Placeholders:**
-- `{{PRV}}` - предыдущее значение
-- `{{NXT}}` - результирующее значение
-
----
-
-### `TransformCall`
-
-Вызов transform в pipeline.
-
-```python
-@dataclass
-class TransformCall(Node):
-    name: str = ""
-    transform_def: TransformDef | None = None
-    accept: VariableType = VariableType.STRING
-    ret: VariableType = VariableType.STRING
-```
-
-**DSL:**
-```kdl
-transform to-base64 accept=STRING return=STRING {
-    py { code "{{NXT}} = {{PRV}}" }
-}
-
-struct Example {
-    title {
-        css "title"
-        text
-        transform to-base64
+    py {
+        import "from base64 import b64encode"
+        code "{{NXT}} = b64encode({{PRV}}.encode()).decode()"
     }
 }
 ```
 
-**Особенности:**
-- `transform_def` - ссылка на определение transform
-- Импорты автоматически регистрируются в `Module.imports.transform_imports`
-
----
-
-## Control Flow Nodes
-
-### `Filter`
-
-Фильтрация списка по предикатам.
+### `TransformTarget`
 
 ```python
 @dataclass
-class Filter(Node):
-    body: list[Node] = field(default_factory=list)  # Predicates
-    accept: VariableType = VariableType.LIST_DOCUMENT
-    ret: VariableType = VariableType.LIST_DOCUMENT
+class TransformTarget(Node):
+    lang: str = ""
+    imports: tuple[str, ...] = field(default_factory=tuple)
+    code: tuple[str, ...] = field(default_factory=tuple)
 ```
+
+### `TransformCall`
 
 **DSL:**
 ```kdl
-filter {
-    css ".active"
-    attr-eq "class" "highlight"
+title {
+    text
+    transform to-base64
 }
 ```
 
 ---
 
-### `Assert`
+## TypeDef nodes
 
-Проверка условия (выбрасывает исключение если false).
+| AST class | DSL |
+|---|---|
+| `TypeDef` | —, генерируется автоматически |
+| `TypeDefField` | —, генерируется автоматически |
 
-```python
-@dataclass
-class Assert(Node):
-    body: list[Node] = field(default_factory=list)  # Predicates
-```
-
-**DSL:**
-```kdl
-assert { css ".required-element" }
-assert { contains "In stock" }
-```
+`TypeDef` строится из `Struct` после парсинга и используется конвертерами для типовой информации.
 
 ---
 
-### `Nested`
+## Summary of missing/outdated items fixed in this document
 
-Вложенная структура.
+Эта версия документации синхронизирована с текущими AST и `parser.py`, в частности отражает:
 
-```python
-@dataclass
-class Nested(Node):
-    struct_name: str = ""
-    is_array: bool = False
-```
-
-**DSL:**
-```kdl
-struct Book type=list { ... }
-
-struct Catalogue {
-    books { nested Book }  // is_array=True (Book is LIST type)
-}
-```
-
----
-
-### `Self`
-
-Ссылка на предвычисленное значение из `@init`.
-
-```python
-@dataclass
-class Self(Node):
-    name: str = ""
-```
-
-**DSL:**
-```kdl
--init {
-    raw-json { raw; re PATTERN }
-}
-
-data {
-    @raw-json  // Использование
-    jsonify Quote
-}
-```
-
----
-
-### `Return`
-
-Явное возвращение значения (обычно не требуется).
-
-```python
-@dataclass
-class Return(Node):
-    pass
-```
-
----
-
-## TypeDef Nodes
-
-### `TypeDef`
-
-Определение типа для структуры (генерируется автоматически).
-
-```python
-@dataclass
-class TypeDef(Node):
-    name: str = ""
-    struct_type: StructType = StructType.ITEM
-    body: list[TypeDefField] = field(default_factory=list)
-```
-
-**Используется для генерации:**
-- Python: `TypedDict`
-- JavaScript: TypeScript interfaces
-
----
-
-### `TypeDefField`
-
-Поле TypeDef.
-
-```python
-@dataclass
-class TypeDefField(Node):
-    name: str = ""
-    ret: VariableType = VariableType.STRING
-    is_array: bool = False
-    nested_ref: str = ""  # Ссылка на nested struct
-    json_ref: str = ""    # Ссылка на JSON schema
-```
-
-**Генерируется для:**
-- Обычных полей
-- Nested полей
-- JSON полей
-- Key/Value для dict типов
-
----
-
-## Summary
-
-**Категории нод:**
-- **Module Level:** Module, Imports, Docstring
-- **Structures:** Struct, Field, InitField, Key, Value
-- **Selectors:** CssSelect, XpathSelect и варианты
-- **Extract:** Text, Attr, Raw
-- **String Ops:** Trim, Upper, Lower, Fmt, Re, Repl
-- **Type Conv:** ToInt, ToFloat, ToBool, Len, Fallback
-- **Predicates:** PredEq, PredRe, PredHasAttr и др.
-- **JSON:** JsonDef, JsonDefField, Jsonify
-- **Transforms:** TransformDef, TransformTarget, TransformCall
-- **Control:** Filter, Assert, Nested, Self, Return
-
-**Типы данных (`VariableType`):**
-- `DOCUMENT` / `LIST_DOCUMENT`
-- `STRING` / `LIST_STRING`
-- `INT` / `LIST_INT`
-- `FLOAT` / `LIST_FLOAT`
-- `BOOL`
-- `JSON`
-- `NESTED`
-- `AUTO` - автоопределение
-
-**Все ноды типизированы** с проверкой `accept` → `ret` в compile-time.
-
+- реальные DSL-имена с `@...` для struct/module special nodes
+- наличие технических нод: `CodeStartHook`, `CodeEndHook`, `Utilities`, `StartParse`, `Return`
+- отсутствовавшие expression/AST names: `StructDocstring`, `Init`, `NormalizeSpace`, `RmPrefixSuffix`, `ReplMap`, `Join`, `Unescape`, `Index`, `Slice`, `Unique`, `TransformCall`, `LogicAnd`, `LogicOr`, `LogicNot` и др.
+- полный набор parser expression names, включая `first`, `last`, `transform`, `filter`, `assert`, `match`
+- полный набор predicate names из парсера
+- отличие между AST и текущей регистрацией `len-*` предикатов в `parser.py`

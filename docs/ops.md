@@ -63,7 +63,7 @@ books { nested Book }
 - **Regex:** `re`, `re-all`, `re-sub`
 - **Array:** `index`, `first`, `last`, `slice`, `len`, `unique`
 - **Conversions / structured:** `to-int`, `to-float`, `to-bool`, `jsonify`, `nested`
-- **Control / containers:** `fallback`, `self`, `filter`, `assert`, `match`, `transform`
+- **Control / containers:** `fallback`, `filter`, `assert`, `match`, `transform`
 
 **Полный набор predicate keywords (`filter/assert/match`):**
 - **Comparisons:** `eq`, `ne`, `gt`, `lt`, `ge`, `le`, `range`, `in`
@@ -1014,13 +1014,13 @@ v2 = Book._parse_item(v1)
 
 ---
 
-### `self <name>`
+### `@<name>`
 
 Использовать предвычисленное значение из `@init`.
 
 **DSL:**
 ```kdl
--init {
+@init {
     raw-json { raw; re PATTERN }
 }
 
@@ -1030,8 +1030,9 @@ data {
 }
 ```
 
-**Генерируемый код:**
+**AST / generated code:**
 ```python
+Self(name="raw-json")
 v1 = self._raw_json  # Доступ к предвычисленному полю
 ```
 
