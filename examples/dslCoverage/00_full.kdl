@@ -1,0 +1,499 @@
+@doc """
+Comprehensive KDL DSL coverage schema.
+
+Purpose:
+- exercise code generation paths rather than extract real data;
+- keep selectors/filters intentionally synthetic but valid;
+- use CSS-oriented syntax only (no xpath-* expressions or xpath predicates);
+- stay lint-clean and generate code for current targets.
+"""
+
+define CSS-CARD=".card"
+define CSS-LINK="a[href]"
+define CSS-TABLE="table.coverage"
+define FMT-ABS="https://example.test{{}}"
+define FMT-LABEL="label={{}}"
+define RE-DIGITS=#"(\d+)"#
+define RE-FLOAT=#"(\d+\.\d+)"#
+define RE-JSON-ARRAY=#"(\[.*\])"#
+define RE-WORD=#"^[A-Za-z0-9_-]+$"#
+define RE-HAS-DIGIT=#"\d"#
+define RE-HREF=#"https?://|/"#
+define RE-CODE=#"^code"#
+
+define CLEAN-TEXT {
+    text
+    trim
+    normalize-space
+}
+
+define STRIP-URL {
+    rm-prefix "/"
+    rm-suffix ".html"
+}
+
+define REPL-STATE {
+    repl {
+        draft "0"
+        published "1"
+        archived "2"
+    }
+}
+
+define ONLY-VISIBLE-LINKS {
+    not {
+        attr-eq "data-hidden" "true"
+    }
+}
+
+transform wrap-string accept=STRING return=STRING {
+    py {
+        code "{{NXT}} = 'wrapped<' + {{PRV}} + '>'"
+    }
+    js {
+        code "let {{NXT}} = 'wrapped<' + {{PRV}} + '>';"
+    }
+}
+
+transform list-identity accept=LIST_STRING return=LIST_STRING {
+    py {
+        code "{{NXT}} = [i for i in {{PRV}}]"
+    }
+    js {
+        code "let {{NXT}} = {{PRV}}.map(i => i);"
+    }
+}
+
+transform plus-one accept=INT return=INT {
+    py {
+        code "{{NXT}} = {{PRV}} + 1"
+    }
+    js {
+        code "let {{NXT}} = {{PRV}} + 1;"
+    }
+}
+
+json JsonAuthor {
+    name str
+    slug str
+}
+
+json JsonQuote array=#true {
+    text str
+    author JsonAuthor
+    tags (array)str
+    score int
+    rating float
+    active bool
+    note str?
+}
+
+struct TinyItem {
+    title {
+        css "h1"
+        text
+        trim
+        normalize-space
+    }
+
+    active {
+        css ".is-active"
+        to-bool
+        fallback #false
+    }
+}
+
+struct CardList type=list {
+    @doc "List coverage: selectors, extraction, string ops, array ops, filters, assertions, transforms."
+
+    @pre-validate {
+        assert {
+            css CSS-CARD
+        }
+    }
+
+    @split-doc {
+        css-all CSS-CARD
+    }
+
+    clean-html {
+        css-remove ".ad, script"
+        raw
+    }
+
+    title {
+        css ".title"
+        text
+        ltrim
+        rtrim
+        trim
+        normalize-space
+        repl "foo" "bar"
+        transform wrap-string
+    }
+
+    link {
+        css CSS-LINK
+        attr "href"
+        STRIP-URL
+        fmt FMT-ABS
+    }
+
+    flags-joined {
+        css-all "[data-flag]"
+        attr "data-flag"
+        lower
+        upper
+        unique keep-order=#true
+        join ","
+        fallback ""
+    }
+
+    token-list {
+        css ".tokens"
+        text
+        split ","
+        trim
+        unescape
+        filter {
+            contains "alpha" "beta"
+            starts "tag-" "item-"
+            ends "-x" "-y"
+            in "ref" "core"
+            re RE-WORD
+        }
+        assert {
+            re-all RE-WORD
+            re-any RE-HAS-DIGIT
+        }
+        transform list-identity
+        fallback {}
+    }
+
+    logic-check {
+        css ".logic"
+        text
+        assert {
+            contains "alpha"
+            not {
+                eq "forbidden"
+            }
+            or {
+                starts "pre"
+                ends "suf"
+            }
+            and {
+                re RE-WORD
+                contains "a"
+            }
+        }
+        fallback ""
+    }
+
+    first-token {
+        css ".tokens"
+        text
+        split ","
+        trim
+        first
+        fallback ""
+    }
+
+    last-token {
+        css ".tokens"
+        text
+        split ","
+        trim
+        last
+        fallback ""
+    }
+
+    token-window {
+        css ".tokens"
+        text
+        split ","
+        trim
+        slice 0 2
+        join "|"
+        fallback ""
+    }
+
+    state-code {
+        css ".state"
+        text
+        lower
+        REPL-STATE
+        to-int
+        fallback #null
+    }
+
+    score {
+        css ".score"
+        text
+        re RE-DIGITS
+        to-int
+        transform plus-one
+        fallback 0
+    }
+
+    ratio {
+        css ".ratio"
+        text
+        re RE-FLOAT
+        to-float
+        fallback #null
+    }
+
+    raw-number-matches {
+        raw
+        re-all RE-DIGITS
+        fallback {}
+    }
+
+    filtered-links {
+        css-all CSS-LINK
+        filter {
+            css ".icon"
+            has-attr "href" "data-kind"
+            attr-eq "data-kind" "nav" "cta"
+            attr-ne "rel" "nofollow" "sponsored"
+            attr-starts "href" "/" "https://"
+            attr-ends "href" ".html" "/"
+            attr-re "href" RE-HREF
+            text-starts "Go" "Read"
+            text-ends "more" "now"
+            text-contains "guide" "docs"
+            text-re #"guide|docs"#
+            ONLY-VISIBLE-LINKS
+        }
+        attr "href" "data-alt"
+        unique keep-order=#true
+        fallback {}
+    }
+
+    all-link-html {
+        css-all CSS-LINK
+        raw
+        fallback {}
+    }
+
+    any-link-count {
+        css-all CSS-LINK
+        len
+    }
+}
+
+struct FlatCoverage type=flat keep-order=#true {
+    @init {
+        hrefs {
+            css-all CSS-LINK
+            attr "href"
+        }
+    }
+
+    cached-hrefs {
+        @hrefs
+        fallback {}
+    }
+
+    filtered-hrefs {
+        css-all CSS-LINK
+        attr "href"
+        filter {
+            contains "https://" "/"
+        }
+        fallback {}
+    }
+
+    first-href {
+        css-all CSS-LINK
+        attr "href"
+        first
+        fallback ""
+    }
+
+    token-parts {
+        css ".tokens"
+        text
+        split ","
+        trim
+        fallback {}
+    }
+}
+
+struct MetaDict type=dict {
+    @split-doc {
+        css-all "meta[name][content]"
+    }
+    @key {
+        attr "name"
+    }
+    @value {
+        attr "content"
+    }
+}
+
+struct MetaAliasDict type=dict {
+    @split-doc {
+        css-all "meta[property][content], meta[name][content]"
+    }
+    @key {
+        attr "property" "name"
+        first
+    }
+    @value {
+        attr "content"
+    }
+}
+
+struct TableCoverage type=table {
+    @pre-validate {
+        assert {
+            css "table.coverage tr"
+        }
+    }
+
+    @table {
+        css CSS-TABLE
+    }
+
+    @rows {
+        css-all "tr"
+    }
+
+    @match {
+        css "th"
+        text
+        trim
+        lower
+    }
+
+    @value {
+        css "td"
+        text
+        trim
+    }
+
+    identifier {
+        match {
+            eq "id" "identifier"
+        }
+    }
+
+    code-value {
+        match {
+            re RE-CODE
+        }
+    }
+
+    price {
+        match {
+            starts "price"
+            contains "price" "amount"
+            not {
+                eq "price-old"
+            }
+        }
+        re RE-FLOAT
+        to-float
+        fallback 0.0
+    }
+
+    tax-or-fee {
+        match {
+            ends "tax" "fee"
+        }
+        re RE-FLOAT
+        to-float
+        fallback 0.0
+    }
+
+    state {
+        match {
+            in "state" "status"
+            ne "skip" "ignore"
+        }
+        lower
+        fallback ""
+    }
+}
+
+struct CoverageRoot {
+    @doc "Entrypoint schema that ties together nested, JSON, dict, table and item/list coverage."
+
+    @init {
+        raw-json {
+            css "script[type='application/json']"
+            text
+            re RE-JSON-ARRAY
+        }
+    }
+
+    title {
+        css "title"
+        CLEAN-TEXT
+    }
+
+    canonical {
+        css "link[rel='canonical'][href]"
+        attr "href"
+        fallback #null
+    }
+
+    json-payload {
+        @raw-json
+        jsonify JsonQuote
+    }
+
+    first-author-name {
+        @raw-json
+        jsonify JsonQuote path="0.author.name"
+    }
+
+    first-score {
+        @raw-json
+        jsonify JsonQuote path="0.score"
+    }
+
+    nested-item {
+        css ".single"
+        nested TinyItem
+    }
+
+    cards {
+        nested CardList
+    }
+
+    meta-map {
+        nested MetaDict
+    }
+
+    meta-alias-map {
+        nested MetaAliasDict
+    }
+
+    table-data {
+        nested TableCoverage
+    }
+
+    flat-data {
+        nested FlatCoverage
+    }
+
+    body-size {
+        raw
+        len
+    }
+
+    code-length-ok {
+        css ".code"
+        text
+        assert {
+            gt 3
+            ge 4
+            lt 20
+            le 20
+        }
+        fallback ""
+    }
+}

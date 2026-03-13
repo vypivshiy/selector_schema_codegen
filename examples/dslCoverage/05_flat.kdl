@@ -1,0 +1,41 @@
+@doc "Focused coverage: flat structs and @init cached values."
+
+define CSS-LINK="a[href]"
+
+struct FlatCoverage type=flat keep-order=#true {
+    @init {
+        hrefs {
+            css-all CSS-LINK
+            attr "href"
+        }
+    }
+
+    cached-hrefs {
+        @hrefs
+        fallback {}
+    }
+
+    filtered-hrefs {
+        css-all CSS-LINK
+        attr "href"
+        filter {
+            contains "https://" "/"
+        }
+        fallback {}
+    }
+
+    first-href {
+        css-all CSS-LINK
+        attr "href"
+        first
+        fallback ""
+    }
+
+    token-parts {
+        css ".tokens"
+        text
+        split ","
+        trim
+        fallback {}
+    }
+}

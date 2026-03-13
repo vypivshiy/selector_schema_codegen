@@ -1,0 +1,40 @@
+@doc "Focused coverage: dict structs and key/value extraction semantics."
+
+struct MetaDict type=dict {
+    @split-doc {
+        css-all "meta[name][content]"
+    }
+
+    @key {
+        attr "name"
+    }
+
+    @value {
+        attr "content"
+    }
+}
+
+struct MetaAliasDict type=dict {
+    @split-doc {
+        css-all "meta[property][content], meta[name][content]"
+    }
+
+    @key {
+        attr "property" "name"
+        first
+    }
+
+    @value {
+        attr "content"
+    }
+}
+
+struct DictRoot {
+    named-meta {
+        nested MetaDict
+    }
+
+    alias-meta {
+        nested MetaAliasDict
+    }
+}
