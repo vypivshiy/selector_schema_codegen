@@ -155,6 +155,9 @@ from ssc_codegen.kdl.ast import (
     PredTextRe,
     PredTextStarts,
     PredRange,
+    PredCountEq,
+    PredCountGt,
+    PredCountLt,
 )
 
 # json
@@ -666,19 +669,33 @@ class AstParser:
                 )
                 continue
 
-            # Check if node name starts with @ (reference to @init field)
-            if node.name.startswith("@") and not node.name.startswith("@doc"):
-                # This is a reference to an @init field: @field-name
-                field_name = node.name[1:]  # Remove @ prefix
-                struct = parent.parent
-                struct = cast(Struct, struct)
-                init_node = struct.init
-                # Find the init field
-                init_field = [
-                    i
-                    for i in init_node.body
-                    if isinstance(i, InitField) and i.name == field_name
-                ][0]
+            # @<name> references a pre-computed value from the enclosing @init
+            if node.name.startswith("@") and node.name not in {
+                "@doc",
+                "@init",
+                "@pre-validate",
+                "@split-doc",
+                "@key",
+                "@value",
+                "@table",
+                "@rows",
+                "@match",
+            }:
+                field_name = node.name[1:]
+                struct = cast(Struct, parent.parent)
+                init_field = next(
+                    (
+                        i
+                        for i in struct.init.body
+                        if isinstance(i, InitField) and i.name == field_name
+                    ),
+                    None,
+                )
+                if init_field is None:
+                    raise BuildTimeError(
+                        f"Unknown @init reference '@{field_name}' in {type(parent).__name__}"
+                    )
+
                 prev_type = init_field.ret
                 expr = Self(
                     parent=parent,
@@ -689,6 +706,12 @@ class AstParser:
                 logger.debug("  expr: %r -> Self (ret=%s)", node.name, expr.ret)
                 parent.body.append(expr)
                 continue
+
+            if node.name == "self":
+                ref_name = str(node.args[0]) if node.args else "<name>"
+                raise BuildTimeError(
+                    f"'self {ref_name}' syntax is no longer supported; use '@{ref_name}' instead"
+                )
 
             if cb := self._context_expressions.get(node.name):
                 expr = cb(node, parent, self.ctx)
@@ -1538,24 +1561,6 @@ def reg_expr_fallback(node: KdlNode, parent: FieldLikeNode, _: ParseContext):
     return Fallback(parent=parent, value=value)
 
 
-@PARSER.register_expression_node("self")
-def reg_expr_self(node: KdlNode, parent: FieldLikeNode, _: ParseContext):
-    # DEPRECATED: old syntax "self field-name"
-    # Use @field-name instead
-    # 1. get init container
-    struct = parent.parent
-    struct = cast(Struct, struct)
-    init_node = struct.init
-    # 2. find field with name
-    init_field = [
-        i
-        for i in init_node.body
-        if isinstance(i, InitField) and i.name == node.args[0]
-    ][0]
-    prev_type = init_field.ret
-    return Self(
-        parent=parent, accept=prev_type, ret=prev_type, name=node.args[0]
-    )
 
 
 @PARSER.register_expression_node("filter")
@@ -1866,6 +1871,29 @@ def reg_filter_attr_ends(node: KdlNode, parent: Filter, ctx: ParseContext):
         values=tuple(args),
         name=name,
     )
+
+# ASSERT SCOPE ONLY
+@PARSER.register_predicate_node("len-eq", reg_match=False, reg_filter=False)
+def reg_len_eq(node: KdlNode, parent: Filter, cx: ParseContext):
+    value = node.args[1]
+    prev_type = parent.ret
+    return PredCountEq(parent=parent, accept=prev_type, ret=prev_type, value=int(value))
+
+
+# ASSERT SCOPE ONLY
+@PARSER.register_predicate_node("len-gt", reg_match=False, reg_filter=False)
+def reg_len_gt(node: KdlNode, parent: Filter, cx: ParseContext):
+    value = node.args[1]
+    prev_type = parent.ret
+    return PredCountGt(parent=parent, accept=prev_type, ret=prev_type, value=int(value))
+
+
+# ASSERT SCOPE ONLY
+@PARSER.register_predicate_node("len-lt", reg_match=False, reg_filter=False)
+def reg_len_lt(node: KdlNode, parent: Filter, cx: ParseContext):
+    value = node.args[1]
+    prev_type = parent.ret
+    return PredCountLt(parent=parent, accept=prev_type, ret=prev_type, value=int(value))
 
 
 @PARSER.register_predicate_node("and")
