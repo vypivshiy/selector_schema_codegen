@@ -39,7 +39,6 @@ from ssc_codegen.kdl.ast import (
     TypeDef,
     TypeDefField,
     Struct,
-    Module,
 )
 
 # struct layer
@@ -192,6 +191,16 @@ def py_sequence_to_js_array(values: tuple[str, ...] | list[str]) -> str:
 def _js_re_node(node) -> str:
     """Extract JS regex from a node that has a pattern attribute with inline flags."""
     return _js_re(node.pattern)
+
+
+def _js_literal(value) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str):
+        return repr(value)
+    return repr(value)
 
 
 def _and(cond: str, ctx: ConverterContext) -> str:
@@ -939,7 +948,7 @@ def pre_expr_fallback_start(node: FallbackStart, ctx: ConverterContext):
 
 @JS_CONVERTER(FallbackEnd)
 def pre_expr_fallback_end(node: FallbackEnd, ctx: ConverterContext):
-    val = repr(node.value)
+    val = _js_literal(node.value)
     ob, cb = "{", "}"
     return [
         f"{ctx.indent}{cb} catch (e) {ob}",
