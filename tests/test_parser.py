@@ -34,7 +34,7 @@ from ssc_codegen.kdl.ast import (
 )
 from ssc_codegen.kdl.ast.predicate_ops import LogicNot, PredContains, PredEq
 from ssc_codegen.kdl.ast.types import StructType, VariableType
-from ssc_codegen.kdl.exceptions import ParseError
+from ssc_codegen.kdl.exceptions import ParseError, BuildTimeError
 from ssc_codegen.kdl.parser import PARSER, parse_document
 
 
@@ -426,6 +426,26 @@ def test_parser_inlines_define_blocks_and_resolves_init_references():
     assert isinstance(from_init.body[1], Fmt)
     assert isinstance(from_init.body[-1], Return)
     assert from_init.ret == VariableType.STRING
+
+
+def test_parser_rejects_legacy_self_syntax():
+    with pytest.raises(BuildTimeError, match="no longer supported"):
+        PARSER.parse(
+            """
+            struct Main {
+                @init {
+                    seed {
+                        text
+                    }
+                }
+
+                from-init {
+                    self seed
+                    fmt \"Hello {{}}\"
+                }
+            }
+            """
+        )
 
 
 def test_parser_expands_repl_map_define_and_adds_return():
