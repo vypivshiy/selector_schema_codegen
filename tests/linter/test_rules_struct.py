@@ -30,13 +30,13 @@ from ssc_codegen.kdl.linter.format_errors import lint_string
 
 
 def lint(src: str) -> list[str]:
-    errors, _ = lint_string(src)
-    return [e.message for e in errors]
+    result = lint_string(src)
+    return [e.message for e in result.errors]
 
 
 def no_errors(src: str) -> bool:
-    errors, _ = lint_string(src)
-    return len(errors) == 0
+    result = lint_string(src)
+    return not result.has_errors()
 
 
 def item_struct(*field_lines: str) -> str:
