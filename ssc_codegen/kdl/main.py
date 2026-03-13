@@ -106,6 +106,13 @@ def generate(
             help="Skip linting before code generation.",
         ),
     ] = False,
+    css_to_xpath: Annotated[
+        bool,
+        typer.Option(
+            "--css-to-xpath",
+            help="Convert CSS selectors to XPath before code generation.",
+        ),
+    ] = False,
 ) -> None:
     """Compile KDL schema files into parser code for the chosen target."""
     from ssc_codegen.kdl import parse_ast
@@ -175,7 +182,7 @@ def generate(
         out_file = output / kdl_file.with_suffix(ext).name
         logger.debug("processing: %s -> %s", kdl_file, out_file)
         try:
-            ast = parse_ast(path=str(kdl_file))
+            ast = parse_ast(path=str(kdl_file), css_to_xpath=css_to_xpath)
             logger.debug("AST built for %s", kdl_file)
             code = converter.convert(ast)
             logger.debug(
