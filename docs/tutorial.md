@@ -769,8 +769,8 @@ price {
 Remove ads/scripts before extraction:
 ```kdl
 content {
-    css-rm ".ads"
-    css-rm "script"
+    css-remove ".ads"
+    css-remove "script"
     css ".content"
     text
 }

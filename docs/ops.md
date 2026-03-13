@@ -1,7 +1,7 @@
 # Operations Reference
 
 > **Version:** 2.0  
-> **Last Updated:** 2026-03-11
+> **Last Updated:** 2026-03-13
 
 Полный справочник по операциям и выражениям в KDL Schema DSL.
 
@@ -38,10 +38,40 @@ field-name {
 }
 ```
 
+Поддерживаются **обе формы записи**:
+
+```kdl
+field-name {
+    css "a"
+    attr "href"
+}
+
+field-name { css "a"; attr "href" }
+field-name { raw }
+books { nested Book }
+```
+
 **Типизация:**
 - Каждая операция имеет `accept` (входной тип) и `ret` (выходной тип)
 - Проверка совместимости типов в compile-time
 - Ошибки типов показываются линтером
+
+**Полный набор field expressions (`parser.py`):**
+- **Selectors:** `css`, `css-all`, `xpath`, `xpath-all`, `css-remove`, `xpath-remove`
+- **Extract:** `text`, `raw`, `attr`
+- **String:** `trim`, `ltrim`, `rtrim`, `normalize-space`, `rm-prefix`, `rm-suffix`, `rm-prefix-suffix`, `fmt`, `repl`, `lower`, `upper`, `split`, `join`, `unescape`
+- **Regex:** `re`, `re-all`, `re-sub`
+- **Array:** `index`, `first`, `last`, `slice`, `len`, `unique`
+- **Conversions / structured:** `to-int`, `to-float`, `to-bool`, `jsonify`, `nested`
+- **Control / containers:** `fallback`, `self`, `filter`, `assert`, `match`, `transform`
+
+**Полный набор predicate keywords (`filter/assert/match`):**
+- **Comparisons:** `eq`, `ne`, `gt`, `lt`, `ge`, `le`, `range`, `in`
+- **String:** `starts`, `ends`, `contains`, `re`
+- **Element existence:** `css`, `xpath`, `has-attr`
+- **Attribute-based:** `attr-eq`, `attr-ne`, `attr-contains`, `attr-re`, `attr-starts`, `attr-ends`
+- **Text-based:** `text-contains`, `text-ends`, `text-starts`, `text-re`
+- **Logic:** `and`, `or`, `not`
 
 ---
 
@@ -96,7 +126,7 @@ v2 = v1.cssselect('a')
 
 ---
 
-#### `css-rm <query>`
+#### `css-remove <query>`
 
 Удалить элементы по CSS селектору, вернуть документ.
 
@@ -105,8 +135,8 @@ v2 = v1.cssselect('a')
 **DSL:**
 ```kdl
 clean-content {
-    css-rm ".ads"
-    css-rm "script"
+    css-remove ".ads"
+    css-remove "script"
     css ".content"
     text
 }
@@ -155,7 +185,7 @@ links { xpath-all "//a[@href]" }
 
 ---
 
-#### `xpath-rm <query>`
+#### `xpath-remove <query>`
 
 Удалить элементы по XPath.
 
@@ -163,7 +193,7 @@ links { xpath-all "//a[@href]" }
 
 **DSL:**
 ```kdl
-clean { xpath-rm "//script"; xpath-rm "//style" }
+clean { xpath-remove "//script"; xpath-remove "//style" }
 ```
 
 ---
@@ -334,10 +364,12 @@ v4 = v3.removesuffix('.jpg')
 ```kdl
 define FMT-URL="https://example.com/{{}}"
 
-url {
-    css "a"
-    attr "href"
-    fmt FMT-URL
+struct Example {
+    url {
+        css "a"
+        attr "href"
+        fmt FMT-URL
+    }
 }
 ```
 
@@ -364,10 +396,12 @@ v3 = "https://example.com/{}".format(v2)
 
 **DSL:**
 ```kdl
-price {
-    css ".price"
-    text
-    re #"(\d+\.\d+)"#
+struct Example {
+    price {
+        css ".price"
+        text
+        re #"(\d+\.\d+)"#
+    }
 }
 
 // VERBOSE паттерн
@@ -378,9 +412,11 @@ define JSON-PATTERN=#"""
     ;\s+for               # END ANCHOR
 """#
 
-data {
-    raw
-    re JSON-PATTERN
+struct ExampleRegex {
+    data {
+        raw
+        re JSON-PATTERN
+    }
 }
 ```
 
@@ -462,12 +498,14 @@ define REPL-RATING {
     }
 }
 
-rating {
-    css ".star-rating"
-    attr "class"
-    rm-prefix "star-rating "
-    REPL-RATING
-    to-int
+struct Example {
+    rating {
+        css ".star-rating"
+        attr "class"
+        rm-prefix "star-rating "
+        REPL-RATING
+        to-int
+    }
 }
 ```
 
@@ -568,20 +606,28 @@ json Quote array=#true {
     author str
 }
 
-data {
-    raw
-    re JSON-PATTERN
-    jsonify Quote
-}
+struct Main {
+    @init {
+        data {
+            raw
+            re JSON-PATTERN
+        }
+    }
 
-first-quote {
-    @data
-    jsonify Quote path="0"
-}
+    all-quotes {
+        @data
+        jsonify Quote
+    }
 
-author-slug {
-    @data
-    jsonify Quote path="2.author.slug"
+    first-quote {
+        @data
+        jsonify Quote path="0"
+    }
+
+    author-slug {
+        @data
+        jsonify Quote path="2.author.slug"
+    }
 }
 ```
 
@@ -871,37 +917,22 @@ assert { xpath "//div[@id='main']" }
 
 ---
 
-### List Predicates
+### Predicate Logic
 
-#### `re-all <pattern>`
+#### `and { ... }` / `or { ... }` / `not { ... }`
 
-Все элементы списка соответствуют паттерну.
-
-**DSL:**
-```kdl
-assert { re-all #"^\d+$"# }
-```
-
-**Генерируемый код:**
-```python
-all(re.search(r'^\d+$', j) for j in i)
-```
-
----
-
-#### `re-any <pattern>`
-
-Хотя бы один элемент соответствует паттерну.
+Логические контейнеры для `filter`, `assert` и `match`.
 
 **DSL:**
 ```kdl
-assert { re-any #"error"# }
+assert { and { contains "foo"; not { contains "bar" } } }
+filter { or { attr-starts "href" "https"; attr-starts "href" "/" } }
+match { not { eq "draft" } }
 ```
 
-**Генерируемый код:**
-```python
-any(re.search(r'error', j) for j in i)
-```
+**Примечание:**
+- `not { ... }` используется **внутри** `filter`, `assert` или `match`
+- старые примеры с `re-all` / `re-any` как predicate keywords больше не актуальны для текущего `parser.py`
 
 ---
 
@@ -1021,10 +1052,12 @@ transform to-base64 accept=STRING return=STRING {
     }
 }
 
-title {
-    css "title"
-    text
-    transform to-base64
+struct Example {
+    title {
+        css "title"
+        text
+        transform to-base64
+    }
 }
 ```
 

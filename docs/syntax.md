@@ -2,7 +2,7 @@
 
 > **Version:** 2.0  
 > **Status:** Active Development  
-> **Last Updated:** 2026-03-11
+> **Last Updated:** 2026-03-13
 
 Полное руководство по синтаксису KDL Schema DSL для определения структур извлечения данных из HTML/XML документов.
 
@@ -153,10 +153,23 @@ json Quote array=#true {
 **Использование:**
 
 ```kdl
+define JSON-PATTERN=#"var data = (\[.*\])"#
+
+json Quote array=#true {
+    text str
+    author str
+}
+
 struct Main {
-    data {
-        raw
-        re JSON-PATTERN
+    @init {
+        data {
+            raw
+            re JSON-PATTERN
+        }
+    }
+
+    all-quotes {
+        @data
         jsonify Quote              // Применить схему Quote
     }
     
@@ -213,6 +226,14 @@ transform pow2 accept=INT return=INT {
 **Использование:**
 
 ```kdl
+transform to-base64 accept=STRING return=STRING {
+    py { code "{{NXT}} = {{PRV}}" }
+}
+
+transform pow2 accept=INT return=INT {
+    py { code "{{NXT}} = {{PRV}}**2" }
+}
+
 struct Main {
     titleb64 {
         css "title"
@@ -442,6 +463,27 @@ struct Example {
 4. Конвертация типов - to-int, to-float, to-bool
 5. Fallback - значение по умолчанию при ошибке
 
+**Поддерживается как многострочная, так и inline форма:**
+```kdl
+field {
+    css "a"
+    attr "href"
+}
+
+field { css "a"; attr "href" }
+field { raw }
+books { nested Book }
+```
+
+**Актуальные field expressions (`parser.py`):**
+- **Selectors:** `css`, `css-all`, `xpath`, `xpath-all`, `css-remove`, `xpath-remove`
+- **Extract:** `text`, `raw`, `attr`
+- **String:** `trim`, `ltrim`, `rtrim`, `normalize-space`, `rm-prefix`, `rm-suffix`, `rm-prefix-suffix`, `fmt`, `repl`, `lower`, `upper`, `split`, `join`, `unescape`
+- **Regex:** `re`, `re-all`, `re-sub`
+- **Array:** `index`, `first`, `last`, `slice`, `len`, `unique`
+- **Conversions / structured:** `to-int`, `to-float`, `to-bool`, `jsonify`, `nested`
+- **Control / logic containers:** `fallback`, `self`, `filter`, `assert`, `match`, `transform`
+
 ---
 
 ## Special Fields
@@ -451,6 +493,13 @@ struct Example {
 Кэширование значений для переиспользования:
 
 ```kdl
+define JSON-PATTERN=#"var data = (\[.*\])"#
+
+json Quote array=#true {
+    text str
+    author str
+}
+
 struct Main {
     @init {
         raw-json {
@@ -512,16 +561,16 @@ struct Book type=list {
 ### CSS Selectors
 
 ```kdl
-css ".class"           // Первый элемент
-css-all ".class"       // Все элементы
-css-rm ".ads"          // Удалить элементы (возвращает текущий doc)
+css ".class"              // Первый элемент
+css-all ".class"          // Все элементы
+css-remove ".ads"         // Удалить элементы (возвращает текущий doc)
 ```
 
 **Примеры:**
 ```kdl
 title { css "h1"; text }
 links { css-all "a"; attr "href" }
-clean-content { css-rm ".ads"; css ".content"; text }
+clean-content { css-remove ".ads"; css ".content"; text }
 ```
 
 ---
@@ -530,8 +579,8 @@ clean-content { css-rm ".ads"; css ".content"; text }
 
 ```kdl
 xpath "//div[@class='content']"       // Первый элемент
-xpath-all "//a"                        // Все элементы
-xpath-rm "//script"                    // Удалить элементы
+xpath-all "//a"                       // Все элементы
+xpath-remove "//script"               // Удалить элементы
 ```
 
 ---
@@ -581,6 +630,8 @@ html-content { css ".content"; raw }
 
 ```kdl
 text { css "p"; text; trim }
+text { css "p"; text; ltrim }
+text { css "p"; text; rtrim }
 ```
 
 ---
@@ -589,19 +640,30 @@ text { css "p"; text; trim }
 
 ```kdl
 tag { css ".tag"; text; lower }
+title { css "h1"; text; upper }
 ```
 
 ---
 
-### `rm-prefix` / `rm-suffix`
+### `normalize-space`
+
+```kdl
+text { css ".content"; text; normalize-space }
+```
+
+---
+
+### `rm-prefix` / `rm-suffix` / `rm-prefix-suffix`
 
 ```kdl
 url {
     css "img"
     attr "src"
     rm-prefix "../"
-    ltrim "."
+    rm-suffix ".jpg"
 }
+
+slug { text; rm-prefix-suffix "/" }
 ```
 
 ---
@@ -611,10 +673,12 @@ url {
 ```kdl
 define FMT-URL="https://example.com/{{}}"
 
-url {
-    css "a"
-    attr "href"
-    fmt FMT-URL  // https://example.com/path
+struct Example {
+    url {
+        css "a"
+        attr "href"
+        fmt FMT-URL  // https://example.com/path
+    }
 }
 ```
 
@@ -676,12 +740,26 @@ define REPL-RATING {
     }
 }
 
-rating {
-    css ".star-rating"
-    attr "class"
-    rm-prefix "star-rating "
-    REPL-RATING
+struct Example {
+    rating {
+        css ".star-rating"
+        attr "class"
+        rm-prefix "star-rating "
+        REPL-RATING
+    }
+
+    text { text; repl "foo" "bar" }
 }
+```
+
+---
+
+### `split` / `join` / `unescape`
+
+```kdl
+tags { text; split ", " }
+joined { css-all ".tag"; text; join ", " }
+html-entities { text; unescape }
 ```
 
 ---
@@ -698,33 +776,74 @@ active { css ".active"; to-bool }  // Наличие элемента → true/f
 
 ---
 
-### `len` - Длина
+### `index` / `first` / `last` / `slice` / `len` / `unique`
 
 ```kdl
-links-count { css-all "a"; len }  // Количество ссылок
+first-link { css-all "a"; first; attr "href" }
+last-link { css-all "a"; last; attr "href" }
+second-link { css-all "a"; index 1; attr "href" }
+subset { css-all "a"; attr "href"; slice 1 3 }
+unique-tags { css-all ".tag"; text; unique }
+links-count { css-all "a"; len }
 ```
 
 **Типы:**
-- `LIST_* → INT`
-- `STRING → INT`
+- `index` / `first` / `last`: `LIST_* → <item type>`
+- `slice`: `LIST_* → LIST_*`
+- `len`: `LIST_* → INT`, `STRING → INT`
+- `unique`: `LIST_* → LIST_*`
 
 ---
 
-### `fallback` - Значение по умолчанию
+### `fallback` / `self` / `filter` / `assert` / `match` / `transform`
 
 ```kdl
-is-available {
-    css ".stock"
-    to-bool
-    fallback #false
+transform to-base64 accept=STRING return=STRING {
+    py { code "{{NXT}} = {{PRV}}" }
+}
+
+struct Example type=table {
+    @init {
+        cached { text }
+    }
+    @table { css "table" }
+    @rows { css-all "tr" }
+    @match { css "th"; text }
+    @value { css "td"; text }
+
+    value {
+        @cached
+        fallback "default"
+    }
+
+    links {
+        css-all "a"
+        attr "href"
+        filter { not { contains "utm" } }
+    }
+
+    price {
+        match { starts "price" }
+    }
+
+    title {
+        css "title"
+        text
+        transform to-base64
+    }
 }
 ```
 
-**Значения:**
+**Значения для `fallback`:**
 - `#null` - null/None
 - `#true` / `#false` - boolean
 - `0` - число
 - `""` - строка
+
+**Примечания:**
+- `@name` — основной способ обращения к `@init` полю; `self name` остаётся совместимым expr keyword
+- `filter { ... }`, `assert { ... }`, `match { ... }` принимают predicate-узлы
+- `not { ... }`, `and { ... }`, `or { ... }` используются только внутри этих контейнеров
 
 ---
 
@@ -764,12 +883,18 @@ assert { xpath "//div[@id='main']" }
 
 ---
 
-### List Predicates
+### Predicate Logic
 
 ```kdl
-assert { re-all #"pattern"# }   // Все элементы соответствуют
-assert { re-any #"pattern"# }   // Хотя бы один соответствует
+assert { and { contains "foo"; not { contains "bar" } } }
+filter { or { attr-starts "href" "https"; attr-starts "href" "/" } }
+match { not { eq "draft" } }
 ```
+
+**Дополнительно поддерживаются:**
+- сравнения: `gt`, `lt`, `ge`, `le`, `range`, `in`
+- атрибуты: `attr-ne`, `attr-starts`, `attr-ends`, `attr-contains`, `attr-re`
+- текстовые предикаты: `text-contains`, `text-starts`, `text-ends`, `text-re`
 
 ---
 

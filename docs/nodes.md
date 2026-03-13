@@ -336,13 +336,13 @@ class CssRemove(Node):
 ```kdl
 css "h1"           // CssSelect
 css-all "a"        // CssSelectAll
-css-rm ".ads"      // CssRemove
+css-remove ".ads"      // CssRemove
 ```
 
 **Типы:**
 - `css`: `DOCUMENT → DOCUMENT`
 - `css-all`: `DOCUMENT → LIST_DOCUMENT`
-- `css-rm`: `DOCUMENT → DOCUMENT` (удаляет элементы, возвращает doc)
+- `css-remove`: `DOCUMENT → DOCUMENT` (удаляет элементы, возвращает doc)
 
 ---
 
@@ -372,7 +372,7 @@ class XpathRemove(Node):
 ```kdl
 xpath "//div[@class='content']"
 xpath-all "//a"
-xpath-rm "//script"
+xpath-remove "//script"
 ```
 
 ---
@@ -534,7 +534,9 @@ class Fmt(Node):
 ```kdl
 define FMT-URL="https://example.com/{{}}"
 
-url { css "a"; attr "href"; fmt FMT-URL }
+struct Example {
+    url { css "a"; attr "href"; fmt FMT-URL }
+}
 ```
 
 **Генерируемый код:**
@@ -627,7 +629,9 @@ define REPL-RATING {
     }
 }
 
-rating { css ".rating"; attr "class"; REPL-RATING }
+struct Example {
+    rating { css ".rating"; attr "class"; REPL-RATING }
+}
 ```
 
 ---
@@ -753,8 +757,8 @@ class PredReAny(Node):
 **DSL:**
 ```kdl
 match { re #"pattern"# }
-assert { re-all #"pattern"# }  // Все элементы соответствуют
-assert { re-any #"pattern"# }  // Хотя бы один
+assert { and { contains "foo"; not { contains "bar" } } }
+filter { or { attr-starts "href" "https"; attr-starts "href" "/" } }
 ```
 
 ---
@@ -951,10 +955,16 @@ class TransformCall(Node):
 
 **DSL:**
 ```kdl
-title {
-    css "title"
-    text
-    transform to-base64
+transform to-base64 accept=STRING return=STRING {
+    py { code "{{NXT}} = {{PRV}}" }
+}
+
+struct Example {
+    title {
+        css "title"
+        text
+        transform to-base64
+    }
 }
 ```
 
@@ -980,7 +990,7 @@ class Filter(Node):
 
 **DSL:**
 ```kdl
-match {
+filter {
     css ".active"
     attr-eq "class" "highlight"
 }
