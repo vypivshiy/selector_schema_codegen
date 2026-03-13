@@ -9,21 +9,21 @@ from ssc_codegen.kdl.linter.types import RawArg
 
 class NodeNavigator:
     """Утилиты для навигации по CST дереву"""
-    
+
     def __init__(self, src: bytes):
         self.src = src
-    
+
     def node_name(self, node: Node) -> str:
         """Имя узла (первый идентификатор)"""
         for child in node.children:
             if child.type == "identifier":
                 return child.text.decode()
         return ""
-    
+
     def get_args(self, node: Node) -> list[str]:
         """Получить аргументы как строки (define refs resolved to their name)"""
         return [r.value for r in self.get_raw_args(node)]
-    
+
     def get_raw_args(self, node: Node) -> list[RawArg]:
         """
         Получить аргументы с типами.
@@ -39,12 +39,12 @@ class NodeNavigator:
             if raw is not None:
                 result.append(raw)
         return result
-    
+
     def get_arg(self, node: Node, index: int) -> str | None:
         """Получить аргумент по индексу"""
         args = self.get_args(node)
         return args[index] if index < len(args) else None
-    
+
     def get_prop(self, node: Node, key: str) -> str | None:
         """Получить property значение"""
         for child in node.children:
@@ -55,14 +55,14 @@ class NodeNavigator:
                         if k == key:
                             return self._extract_value(sub.children[2])
         return None
-    
+
     def get_children_nodes(self, node: Node) -> list[Node]:
         """Получить child nodes"""
         for child in node.children:
             if child.type == "node_children":
                 return [c for c in child.children if c.type == "node"]
         return []
-    
+
     def has_empty_block(self, node: Node) -> bool:
         """Проверить пустой ли блок (node_children with no child nodes)"""
         for child in node.children:
@@ -70,18 +70,23 @@ class NodeNavigator:
                 # Has node_children, check if it's empty
                 return not any(c.type == "node" for c in child.children)
         return False
-    
+
     def has_single_line_op(self, node: Node, op_name: str) -> bool:
         """Проверить есть ли single-line операция (не wrapped in node)"""
         for child in node.children:
             if child.type == "node_children":
                 # Look for identifier matching op_name as direct child
-                identifiers = [c for c in child.children if c.type == "identifier"]
-                return len(identifiers) == 1 and identifiers[0].text.decode() == op_name
+                identifiers = [
+                    c for c in child.children if c.type == "identifier"
+                ]
+                return (
+                    len(identifiers) == 1
+                    and identifiers[0].text.decode() == op_name
+                )
         return False
-    
+
     # ── private helpers ────────────────────────────────────────────────────────
-    
+
     def _extract_raw_arg(self, node_field: Node) -> RawArg | None:
         """
         Extract RawArg from a node_field.
@@ -100,7 +105,7 @@ class NodeNavigator:
                 continue
             return self._classify_value_node(val_node)
         return None
-    
+
     def _classify_value_node(self, val_node: Node) -> RawArg:
         """Classify a 'value' CST node into a RawArg."""
         for inner in val_node.children:
@@ -143,7 +148,7 @@ class NodeNavigator:
         return RawArg(
             value=val_node.text.decode(), is_identifier=False, node=val_node
         )
-    
+
     def _extract_value(self, node: Node) -> str:
         """Recursively extract text value (used for props and non-raw-arg contexts)."""
         if node.type == "string":

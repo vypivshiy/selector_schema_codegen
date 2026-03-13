@@ -158,6 +158,7 @@ class LintError:
 @dataclass
 class RawArg:
     """Аргумент с типом (identifier vs literal)"""
+
     value: str
     is_identifier: bool
     node: Node
@@ -179,8 +180,9 @@ class DefineInfo:
 @dataclass
 class TransformInfo:
     """Metadata collected from a module-level 'transform' block."""
+
     name: str
     accept: str  # raw type string, e.g. "STRING"
-    ret: str     # raw type string, e.g. "LIST_STRING"
+    ret: str  # raw type string, e.g. "LIST_STRING"
     langs: list[str]  # language identifiers present, e.g. ["py", "js"]
     node: Node

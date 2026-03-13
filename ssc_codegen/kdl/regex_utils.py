@@ -19,11 +19,11 @@ _WS_RX = r"(\\)?((\\{2})*)(\s)\s*"
 
 def unverbosify_regex(pattern: str | _re.Pattern) -> str:
     """Strip re.VERBOSE whitespace/comments from a compiled pattern.
-    
+
     Args:
         pattern: Either a string pattern (returned as-is) or a compiled
                  re.Pattern object with optional VERBOSE flag.
-    
+
     Returns:
         The pattern string with VERBOSE formatting removed (if present).
     """
@@ -55,13 +55,13 @@ def extract_inline_flags(pattern: str) -> tuple[str, bool, bool]:
 
     Only ``i`` (IGNORECASE) and ``s`` (DOTALL) are extracted; other flags
     are left in place so the regex stays semantically identical.
-    
+
     NOTE: This also detects and strips VERBOSE flag 'x', returning it as part
     of the metadata so caller can handle verbose mode appropriately.
-    
+
     Args:
         pattern: A regex pattern string, possibly starting with (?imsux...) flags.
-    
+
     Returns:
         A tuple of (pattern_without_i_s_x_flags, ignore_case, dotall).
         If 'x' flag was present, it is removed from the pattern.
@@ -79,22 +79,22 @@ def extract_inline_flags(pattern: str) -> tuple[str, bool, bool]:
         prefix = f"(?{remaining})"
     else:
         prefix = ""
-    return prefix + pattern[m.end():], ignore_case, dotall
+    return prefix + pattern[m.end() :], ignore_case, dotall
 
 
 def add_inline_regex_flags(
     pattern: str, ignore_case: bool = False, dotall: bool = False
 ) -> str:
     """Add inline flags (?i) and/or (?s) to the beginning of a pattern.
-    
+
     Args:
         pattern: The regex pattern string.
         ignore_case: Whether to add (?i) flag.
         dotall: Whether to add (?s) flag.
-    
+
     Returns:
         Pattern with inline flags prepended, e.g., "(?is)pattern".
-    
+
     Example:
         >>> add_inline_regex_flags("foo.*bar", ignore_case=True, dotall=True)
         '(?is)foo.*bar'
@@ -119,15 +119,15 @@ def extract_regex_flags(value: str | _re.Pattern) -> tuple[str, bool, bool]:
 
     The returned pattern is stripped of ``i``/``s`` inline flags so that
     codegen can emit explicit ``re.IGNORECASE`` / ``re.DOTALL`` arguments.
-    
+
     VERBOSE patterns are converted to compact form (whitespace/comments removed).
-    
+
     Args:
         value: Either a string pattern or a compiled re.Pattern object.
-    
+
     Returns:
         A tuple of (pattern_string, ignore_case, dotall).
-    
+
     Example:
         >>> import re
         >>> pattern = re.compile(r"(?xs) foo \\s+ bar  # comment", re.VERBOSE | re.DOTALL)
@@ -148,20 +148,20 @@ def extract_regex_flags(value: str | _re.Pattern) -> tuple[str, bool, bool]:
 
 def normalize_regex_pattern(value: str | _re.Pattern) -> str:
     """Convert a regex pattern to a single-line inline form with embedded flags.
-    
+
     This function:
     1. Strips VERBOSE formatting (whitespace and comments) if present
     2. Extracts all flags (IGNORECASE, DOTALL, VERBOSE)
     3. Returns pattern with inline flags like (?is)pattern
-    
+
     This is the primary function to use when preparing regex patterns for codegen.
-    
+
     Args:
         value: Either a string pattern or a compiled re.Pattern object.
-    
+
     Returns:
         A single-line pattern string with inline flags, ready for codegen.
-    
+
     Example:
         >>> import re
         >>> pattern = re.compile(r'''(?xs)
@@ -174,12 +174,12 @@ def normalize_regex_pattern(value: str | _re.Pattern) -> str:
     if isinstance(value, _re.Pattern):
         pattern, ignore_case, dotall = extract_regex_flags(value)
         return add_inline_regex_flags(pattern, ignore_case, dotall)
-    
+
     # If it's a string, check for inline (?x) flag and handle it
     pattern = value
     ignore_case = False
     dotall = False
-    
+
     # Check for inline flags
     m = _INLINE_FLAGS_RE.match(pattern)
     if m:
@@ -187,18 +187,18 @@ def normalize_regex_pattern(value: str | _re.Pattern) -> str:
         ignore_case = "i" in flags_str
         dotall = "s" in flags_str
         has_verbose = "x" in flags_str
-        
+
         # Remove all i, s, x flags from the inline group
         remaining = flags_str.replace("i", "").replace("s", "").replace("x", "")
         if remaining:
-            pattern = f"(?{remaining})" + pattern[m.end():]
+            pattern = f"(?{remaining})" + pattern[m.end() :]
         else:
-            pattern = pattern[m.end():]
-        
+            pattern = pattern[m.end() :]
+
         # If VERBOSE flag was present, manually strip whitespace and comments
         if has_verbose:
             # Use the unverbosify logic on a fake compiled pattern
             fake_pattern = _re.compile(pattern, _re.VERBOSE)
             pattern = unverbosify_regex(fake_pattern)
-    
+
     return add_inline_regex_flags(pattern, ignore_case, dotall)

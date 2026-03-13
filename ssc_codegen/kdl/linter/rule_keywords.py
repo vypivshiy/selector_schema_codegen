@@ -39,15 +39,25 @@ from ssc_codegen.kdl.linter.base import LINTER, LintContext, DefineKind
 # ── helpers ────────────────────────────────────────────────────────────────────
 
 # Valid VariableType names for dsl accept= / return= properties
-_VALID_VT_NAMES: frozenset[str] = frozenset({
-    "DOCUMENT", "LIST_DOCUMENT",
-    "STRING", "LIST_STRING",
-    "INT", "LIST_INT",
-    "FLOAT", "LIST_FLOAT",
-    "BOOL", "NULL",
-    "NESTED", "JSON",
-    "OPT_STRING", "OPT_INT", "OPT_FLOAT",
-})
+_VALID_VT_NAMES: frozenset[str] = frozenset(
+    {
+        "DOCUMENT",
+        "LIST_DOCUMENT",
+        "STRING",
+        "LIST_STRING",
+        "INT",
+        "LIST_INT",
+        "FLOAT",
+        "LIST_FLOAT",
+        "BOOL",
+        "NULL",
+        "NESTED",
+        "JSON",
+        "OPT_STRING",
+        "OPT_INT",
+        "OPT_FLOAT",
+    }
+)
 
 
 def _get_dsl_names(ctx: LintContext) -> frozenset[str]:
@@ -98,9 +108,7 @@ def rule_dsl(node: Node, ctx: LintContext) -> None:
         ctx.error(
             node,
             message=f"'dsl {name}' is missing required 'lang' property",
-            hint=(
-                f'specify target language: dsl {name} lang="py" {{ ... }}\n'
-            ),
+            hint=(f'specify target language: dsl {name} lang="py" {{ ... }}\n'),
         )
 
     # 3. accept= / return= properties (optional, but if present must be valid types)
@@ -215,7 +223,7 @@ def rule_expr(node: Node, ctx: LintContext) -> None:
             node,
             message="'expr' requires a name argument",
             hint="example: expr MY_TRANSFORM\n"
-                 "NAME must refer to a dsl block or a block define",
+            "NAME must refer to a dsl block or a block define",
         )
         return
 
@@ -243,7 +251,7 @@ def rule_expr(node: Node, ctx: LintContext) -> None:
                 message=f"'expr {target}': '{target}' is a scalar define — cannot be used as an expr target",
                 hint=(
                     f"scalar defines substitute argument values, not code blocks.\n"
-                    f"Declare a dsl block: dsl {target} lang=\"py\" {{ code \"...\" }}\n"
+                    f'Declare a dsl block: dsl {target} lang="py" {{ code "..." }}\n'
                     f"or a block define: define {target} {{ ... }}"
                 ),
             )
@@ -255,7 +263,7 @@ def rule_expr(node: Node, ctx: LintContext) -> None:
         node,
         message=f"'expr' target '{target}' is not declared",
         hint=(
-            f"declare a dsl block: dsl {target} lang=\"py\" {{ code \"...\" }}\n"
+            f'declare a dsl block: dsl {target} lang="py" {{ code "..." }}\n'
             f"or a block define: define {target} {{ ... }}"
         ),
     )
@@ -297,7 +305,13 @@ def rule_define_field_usage(node: Node, ctx: LintContext) -> None:
     # If the grandparent is a 'node' (i.e. a field), we're inside a pipeline
     if gp.type == "node":
         field_name = ctx.node_name(gp)
-        if field_name and field_name not in ("struct", "define", "transform", "json", "dsl"):
+        if field_name and field_name not in (
+            "struct",
+            "define",
+            "transform",
+            "json",
+            "dsl",
+        ):
             ctx.error(
                 node,
                 message="'define' is a module-level keyword and cannot appear inside a field pipeline",

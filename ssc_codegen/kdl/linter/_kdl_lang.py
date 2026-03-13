@@ -26,12 +26,17 @@ def _load_language() -> Language:
     lib.tree_sitter_kdl.restype = ctypes.c_void_p
     lib.tree_sitter_kdl.argtypes = []
     ptr_int = lib.tree_sitter_kdl()
-    
+
     # Convert pointer to PyCapsule to avoid deprecated int overload
     # tree-sitter 0.21+ expects capsule or object, not int
     try:
         import ctypes.pythonapi as pythonapi
-        pythonapi.PyCapsule_New.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_void_p]
+
+        pythonapi.PyCapsule_New.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_char_p,
+            ctypes.c_void_p,
+        ]
         pythonapi.PyCapsule_New.restype = ctypes.py_object
         capsule = pythonapi.PyCapsule_New(ptr_int, None, None)
         return Language(capsule)

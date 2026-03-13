@@ -15,7 +15,9 @@ from ssc_codegen.kdl.linter.type_rules import check_pipeline_types, _parse_vt
 from ssc_codegen.kdl.ast.types import VariableType as VT
 from ssc_codegen.kdl.linter.type_rules import PIPELINE_TYPE_RULES
 
-_VALID_TRANSFORM_TYPES = frozenset({t.name for t in VT if t.name not in ("AUTO", "LIST_AUTO")})
+_VALID_TRANSFORM_TYPES = frozenset(
+    {t.name for t in VT if t.name not in ("AUTO", "LIST_AUTO")}
+)
 
 # ── known ops ──────────────────────────────────────────────────────────────────
 
@@ -110,10 +112,10 @@ def rule_unknown_or_define_op(node: Node, ctx: LintContext) -> None:
         field_name = op_name[1:]  # Remove @ prefix
         if field_name not in ctx.init_fields:
             ctx.error(
-            node,
-            ErrorCode.MISSING_ARGUMENT,
-            message=f"'@{field_name}': field '{field_name}' not found in @init block",
-                hint=f"declare it in @init: @init {{ {field_name} {{ ... }} }}"
+                node,
+                ErrorCode.MISSING_ARGUMENT,
+                message=f"'@{field_name}': field '{field_name}' not found in @init block",
+                hint=f"declare it in @init: @init {{ {field_name} {{ ... }} }}",
             )
         return
 
@@ -122,9 +124,9 @@ def rule_unknown_or_define_op(node: Node, ctx: LintContext) -> None:
     if info is not None:
         if info.kind == DefineKind.SCALAR:
             ctx.error(
-            node,
-            ErrorCode.MISSING_ARGUMENT,
-            message=f"'{op_name}' is a scalar define — cannot be used as a pipeline operation",
+                node,
+                ErrorCode.MISSING_ARGUMENT,
+                message=f"'{op_name}' is a scalar define — cannot be used as a pipeline operation",
                 hint=f"scalar defines substitute argument values. "
                 f"Use a block define: define {op_name} {{ ... }}",
             )
@@ -179,9 +181,9 @@ def rule_struct(node: Node, ctx: LintContext) -> None:
     for req in _REQUIRED_RESERVED[struct_type]:
         if req not in reserved_present:
             ctx.error(
-            node,
-            ErrorCode.MISSING_ARGUMENT,
-            message=f"struct type='{struct_type}' is missing required field '{req}'",
+                node,
+                ErrorCode.MISSING_ARGUMENT,
+                message=f"struct type='{struct_type}' is missing required field '{req}'",
                 hint=f"add '{req} {{ ... }}' inside the struct",
             )
 
@@ -192,7 +194,9 @@ def rule_struct(node: Node, ctx: LintContext) -> None:
         if field_name.startswith("@"):
             _check_reserved_field(field_node, field_name, struct_type, ctx)
         else:
-            _check_regular_field(field_node, field_name, ctx, struct_type=struct_type)
+            _check_regular_field(
+                field_node, field_name, ctx, struct_type=struct_type
+            )
 
     ctx.pop()
 
@@ -219,9 +223,9 @@ def _check_reserved_field(
     if field_name == "@doc":
         if not ctx.get_arg(node, 0):
             ctx.error(
-            node,
-            ErrorCode.MISSING_ARGUMENT,
-            message="'@doc' requires a description string",
+                node,
+                ErrorCode.MISSING_ARGUMENT,
+                message="'@doc' requires a description string",
                 hint='example: @doc "description of this struct"',
             )
         return
@@ -230,9 +234,9 @@ def _check_reserved_field(
         sub_pipelines = ctx.get_children_nodes(node)
         if not sub_pipelines:
             ctx.error(
-            node,
-            ErrorCode.MISSING_ARGUMENT,
-            message="'@init' block must contain at least one named pipeline",
+                node,
+                ErrorCode.MISSING_ARGUMENT,
+                message="'@init' block must contain at least one named pipeline",
                 hint='@init {\n    my-field { css ".x"; text }\n}',
             )
         else:
@@ -244,23 +248,36 @@ def _check_reserved_field(
                 # Register InitField name for 'self' validation
                 ctx.init_fields.add(sub_name)
                 sub_ops = ctx.get_children_nodes(sub)
-                
+
                 # Check for single-line define reference (e.g., { CSS-ALL-ATTRS })
                 if not sub_ops:
                     # Look for a single identifier in node_children (define reference)
                     for child in sub.children:
                         if child.type == "node_children":
-                            identifiers = [c for c in child.children if c.type == "identifier"]
+                            identifiers = [
+                                c
+                                for c in child.children
+                                if c.type == "identifier"
+                            ]
                             if len(identifiers) == 1:
                                 define_name = identifiers[0].text.decode()
-                                if define_name in ctx.defines and ctx.defines[define_name].kind == DefineKind.BLOCK:
+                                if (
+                                    define_name in ctx.defines
+                                    and ctx.defines[define_name].kind
+                                    == DefineKind.BLOCK
+                                ):
                                     # Expand the define block and get its operations
-                                    from ssc_codegen.kdl.linter.type_rules import _get_define_ops
-                                    expanded_ops = _get_define_ops(define_name, ctx)
+                                    from ssc_codegen.kdl.linter.type_rules import (
+                                        _get_define_ops,
+                                    )
+
+                                    expanded_ops = _get_define_ops(
+                                        define_name, ctx
+                                    )
                                     if expanded_ops:
                                         sub_ops = expanded_ops
                             break
-                
+
                 if sub_ops:
                     ret = check_pipeline_types(
                         sub_ops, ctx, start_type=VT.DOCUMENT
@@ -269,7 +286,7 @@ def _check_reserved_field(
         return
 
     ops = ctx.get_children_nodes(node)
-    
+
     # Check for single-line operations (e.g., { css-all ".item" } or { attr "name" })
     # These appear as identifiers directly in node_children, not as wrapped nodes
     has_single_line = False
@@ -277,11 +294,13 @@ def _check_reserved_field(
         # Check if there's at least one identifier (operation) in the node_children
         for child in node.children:
             if child.type == "node_children":
-                identifiers = [c for c in child.children if c.type == "identifier"]
+                identifiers = [
+                    c for c in child.children if c.type == "identifier"
+                ]
                 if identifiers:
                     has_single_line = True
                 break
-    
+
     if not ops and not has_single_line:
         ctx.error(
             node,
@@ -291,7 +310,7 @@ def _check_reserved_field(
         )
     else:
         # For @key and @value in dict, allow 'attr' and other selector operations
-        # For @split-doc, allow css-all and other selector operations  
+        # For @split-doc, allow css-all and other selector operations
         # Skip type checking for single-line ops (they're not in standard node format)
         if ops:
             check_pipeline_types(ops, ctx, start_type=VT.DOCUMENT)
@@ -309,7 +328,7 @@ def _check_regular_field(
 ) -> None:
     ctx.push(field_name)
     ops = ctx.get_children_nodes(node)
-    
+
     # Check if field has only 'nested' - this is valid, skip type checking
     # Handle both multiline (nested as a node) and single-line ({ nested MyStruct })
     if len(ops) == 1 and ctx.node_name(ops[0]) == "nested":
@@ -318,7 +337,7 @@ def _check_regular_field(
     if len(ops) == 0 and ctx.has_single_line_op(node, "nested"):
         ctx.pop()
         return
-    
+
     if not ops:
         ctx.error(
             node,
@@ -328,7 +347,7 @@ def _check_regular_field(
         )
         ctx.pop()
         return
-    
+
     # For table fields the pipeline starts with 'match { ... }' which
     # accepts DOCUMENT and returns STRING (the value cell from @value).
     # So start_type is always DOCUMENT here — match handles the transition.
@@ -338,10 +357,10 @@ def _check_regular_field(
         # table fields MUST start with match { ... }
         if not ops or ctx.node_name(ops[0]) != "match":
             ctx.error(
-            node,
-            ErrorCode.MISSING_ARGUMENT,
-            message=f"table field '{field_name}' must start with 'match {{ ... }}'",
-                hint=f"example: {field_name} {{ match {{ eq \"value\" }} }}",
+                node,
+                ErrorCode.MISSING_ARGUMENT,
+                message=f"table field '{field_name}' must start with 'match {{ ... }}'",
+                hint=f'example: {field_name} {{ match {{ eq "value" }} }}',
             )
     elif ops and ctx.node_name(ops[0]) == "self":
         init_name = ctx.get_arg(ops[0], 0)
@@ -368,9 +387,9 @@ def rule_define(node: Node, ctx: LintContext) -> None:
     if children:
         if not args:
             ctx.error(
-            node,
-            ErrorCode.MISSING_ARGUMENT,
-            message="block 'define' requires a name",
+                node,
+                ErrorCode.MISSING_ARGUMENT,
+                message="block 'define' requires a name",
                 hint='example: define EXTRACT-HREF { css "a"; attr "href" }',
             )
     elif not has_prop:
@@ -459,7 +478,7 @@ def rule_transform(node: Node, ctx: LintContext) -> None:
             node,
             ErrorCode.MISSING_ARGUMENT,
             message=f"'transform {name}' has no language implementations",
-            hint="add at least one language block, e.g.: py { code \"{{NXT}} = {{PRV}}\" }",
+            hint='add at least one language block, e.g.: py { code "{{NXT}} = {{PRV}}" }',
         )
         return
 

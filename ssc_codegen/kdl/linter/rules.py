@@ -150,9 +150,9 @@ def _require_int_args(node: Node, ctx: LintContext, args: list[str]) -> bool:
             int(arg)
         except ValueError:
             ctx.error(
-            node,
-            ErrorCode.MISSING_ARGUMENT,
-            message=f"'{name}' arguments must be integers, got '{arg}'",
+                node,
+                ErrorCode.MISSING_ARGUMENT,
+                message=f"'{name}' arguments must be integers, got '{arg}'",
                 hint=f"example: {name} 0",
             )
             return False
@@ -316,16 +316,16 @@ def rule_re(node: Node, ctx: LintContext) -> None:
         groups = re.compile(pattern).groups
         if groups == 0:
             ctx.error(
-            node,
-            ErrorCode.MISSING_ARGUMENT,
-            message=f"'{name}' pattern must have exactly one capture group",
+                node,
+                ErrorCode.MISSING_ARGUMENT,
+                message=f"'{name}' pattern must have exactly one capture group",
                 hint=f'wrap the match in a group: {name} #"({pattern})"#',
             )
         elif groups > 1:
             ctx.error(
-            node,
-            ErrorCode.MISSING_ARGUMENT,
-            message=f"'{name}' pattern must have exactly one capture group, got {groups}",
+                node,
+                ErrorCode.MISSING_ARGUMENT,
+                message=f"'{name}' pattern must have exactly one capture group, got {groups}",
                 hint="use a non-capturing group (?:...) for grouping without capturing",
             )
 
@@ -422,10 +422,10 @@ def rule_self(node: Node, ctx: LintContext) -> None:
         field_name = args[0]
         if field_name not in ctx.init_fields:
             ctx.error(
-            node,
-            ErrorCode.MISSING_ARGUMENT,
-            message=f"'self {field_name}': field '{field_name}' not found in @init block (deprecated syntax)",
-                hint=f"declare it in @init: @init {{ {field_name} {{ ... }} }} or use new syntax: @{field_name}"
+                node,
+                ErrorCode.MISSING_ARGUMENT,
+                message=f"'self {field_name}': field '{field_name}' not found in @init block (deprecated syntax)",
+                hint=f"declare it in @init: @init {{ {field_name} {{ ... }} }} or use new syntax: @{field_name}",
             )
 
 
@@ -438,7 +438,7 @@ def rule_fallback(node: Node, ctx: LintContext) -> None:
     children = ctx.get_children_nodes(node)
     args = ctx.get_args(node)
     has_empty_block = ctx.has_empty_block(node)
-    
+
     if not args and not children and not has_empty_block:
         ctx.error(
             node,
@@ -461,18 +461,20 @@ def rule_predicate_container(node: Node, ctx: LintContext) -> None:
             message=f"'{name}' does not accept arguments",
             hint=f"move expressions into the children block: {name} {{ ... }}",
         )
-    
+
     children = ctx.get_children_nodes(node)
     # Check for single-line syntax (operations as bare identifiers in node_children)
     has_single_line = False
     if not children:
         for child in node.children:
             if child.type == "node_children":
-                identifiers = [c for c in child.children if c.type == "identifier"]
+                identifiers = [
+                    c for c in child.children if c.type == "identifier"
+                ]
                 if identifiers:
                     has_single_line = True
                 break
-    
+
     if not children and not has_single_line:
         ctx.error(
             node,
@@ -492,18 +494,20 @@ def rule_logic_container(node: Node, ctx: LintContext) -> None:
             message=f"'{name}' does not accept arguments",
             hint=f"move expressions into the children block: {name} {{ ... }}",
         )
-    
+
     children = ctx.get_children_nodes(node)
     # Check for single-line syntax (operations as bare identifiers in node_children)
     has_single_line = False
     if not children:
         for child in node.children:
             if child.type == "node_children":
-                identifiers = [c for c in child.children if c.type == "identifier"]
+                identifiers = [
+                    c for c in child.children if c.type == "identifier"
+                ]
                 if identifiers:
                     has_single_line = True
                 break
-    
+
     if not children and not has_single_line:
         ctx.error(
             node,
@@ -552,17 +556,17 @@ def rule_len_eq_ne(node: Node, ctx: LintContext) -> None:
             val = int(arg)
             if val < 0:
                 ctx.error(
-            node,
-            ErrorCode.MISSING_ARGUMENT,
-            message=f"'{name}' argument must be a non-negative integer, got {val}",
+                    node,
+                    ErrorCode.MISSING_ARGUMENT,
+                    message=f"'{name}' argument must be a non-negative integer, got {val}",
                     hint=f"example: {name} 5",
                 )
                 return
         except ValueError:
             ctx.error(
-            node,
-            ErrorCode.MISSING_ARGUMENT,
-            message=f"'{name}' argument must be a non-negative integer, got '{arg}'",
+                node,
+                ErrorCode.MISSING_ARGUMENT,
+                message=f"'{name}' argument must be a non-negative integer, got '{arg}'",
                 hint=f"example: {name} 5",
             )
             return

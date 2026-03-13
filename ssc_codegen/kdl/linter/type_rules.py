@@ -292,9 +292,9 @@ def check_pipeline_types(
                 # fallback {} — only valid when current type is a list
                 if not _is_list_type(current) and current != VT.LIST_AUTO:
                     ctx.error(
-            node,
-            ErrorCode.TYPE_MISMATCH,
-            message=(
+                        node,
+                        ErrorCode.TYPE_MISMATCH,
+                        message=(
                             f"'fallback {{}}' (empty list) is only valid when the "
                             f"pipeline type is a list, got {current.name}"
                         ),
@@ -317,9 +317,9 @@ def check_pipeline_types(
                     VT.OPT_FLOAT,
                 ):
                     ctx.error(
-            node,
-            ErrorCode.TYPE_MISMATCH,
-            message=(
+                        node,
+                        ErrorCode.TYPE_MISMATCH,
+                        message=(
                             f"'fallback #null' is only valid for STRING, INT, or FLOAT, "
                             f"got {current.name}"
                         ),
@@ -333,9 +333,9 @@ def check_pipeline_types(
                     VT.LIST_AUTO,
                 ):
                     ctx.error(
-            node,
-            ErrorCode.TYPE_MISMATCH,
-            message=(
+                        node,
+                        ErrorCode.TYPE_MISMATCH,
+                        message=(
                             f"'fallback' value type {fb_type.name} does not match "
                             f"pipeline type {current.name}"
                         ),
@@ -354,9 +354,9 @@ def check_pipeline_types(
             t_name = args[0] if args else None
             if not t_name:
                 ctx.error(
-            node,
-            ErrorCode.TYPE_MISMATCH,
-            message="'transform' call requires a name argument",
+                    node,
+                    ErrorCode.TYPE_MISMATCH,
+                    message="'transform' call requires a name argument",
                     hint="example: transform to-base64",
                 )
                 current = VT.AUTO
@@ -364,9 +364,9 @@ def check_pipeline_types(
             t_info = ctx.transforms.get(t_name)
             if t_info is None:
                 ctx.error(
-            node,
-            ErrorCode.TYPE_MISMATCH,
-            message=f"'transform {t_name}' is not defined",
+                    node,
+                    ErrorCode.TYPE_MISMATCH,
+                    message=f"'transform {t_name}' is not defined",
                     hint=f"declare it at module level: transform {t_name} accept=TYPE return=TYPE {{ ... }}",
                 )
                 current = VT.AUTO
@@ -375,9 +375,9 @@ def check_pipeline_types(
             t_ret = _parse_vt(t_info.ret)
             if t_accept is not None and not _compatible(current, t_accept):
                 ctx.error(
-            node,
-            ErrorCode.TYPE_MISMATCH,
-            message=(
+                    node,
+                    ErrorCode.TYPE_MISMATCH,
+                    message=(
                         f"'transform {t_name}' expects {t_accept.name}, "
                         f"got {current.name}"
                     ),
@@ -393,9 +393,9 @@ def check_pipeline_types(
                 VT.LIST_AUTO,
             ):
                 ctx.error(
-            node,
-            ErrorCode.TYPE_MISMATCH,
-            message=f"'filter' requires a list type, got {current.name}",
+                    node,
+                    ErrorCode.TYPE_MISMATCH,
+                    message=f"'filter' requires a list type, got {current.name}",
                     hint="'filter' works on LIST_DOCUMENT or LIST_STRING — use 'css-all', 'xpath-all', 're-all', or 'split' first",
                 )
             # transparent — ret = accept
@@ -411,16 +411,16 @@ def check_pipeline_types(
             # match must be the first op in a table field pipeline
             if current != start_type:
                 ctx.error(
-            node,
-            ErrorCode.TYPE_MISMATCH,
-            message="'match' must be the first operation in the field pipeline",
+                    node,
+                    ErrorCode.TYPE_MISMATCH,
+                    message="'match' must be the first operation in the field pipeline",
                     hint="'match' selects a table row — place it before any other ops",
                 )
             elif not _compatible(current, VT.DOCUMENT):
                 ctx.error(
-            node,
-            ErrorCode.TYPE_MISMATCH,
-            message=f"'match' requires DOCUMENT, got {current.name}",
+                    node,
+                    ErrorCode.TYPE_MISMATCH,
+                    message=f"'match' requires DOCUMENT, got {current.name}",
                     hint="'match' is only valid in table-type struct fields",
                 )
             current = _resolve_ret("match", current)
@@ -452,9 +452,9 @@ def check_pipeline_types(
         accepted = [a for a, _ in pairs if a is not None]
         if accepted and not any(_compatible(current, a) for a in accepted):
             ctx.error(
-            node,
-            ErrorCode.TYPE_MISMATCH,
-            message=(
+                node,
+                ErrorCode.TYPE_MISMATCH,
+                message=(
                     f"'{op_name}' does not accept {current.name}; "
                     f"expected {' | '.join(t.name for t in accepted)}"
                 ),
