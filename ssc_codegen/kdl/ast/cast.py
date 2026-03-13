@@ -46,7 +46,7 @@ class Jsonify(Node):
     Deserializes a JSON string using a named json mapping definition.
     Optional path extracts a nested value by dotted key e.g. "0.text".
     STRING → JSON.
-    
+
     is_array: True when the result is a JSON array (e.g., Quote without index).
               False when accessing a single item (e.g., Quote[0] or Quote[0].field).
     """

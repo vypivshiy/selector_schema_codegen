@@ -168,16 +168,17 @@ def _js_str(value: str) -> str:
 
 def _js_re(pattern: str) -> str:
     """Build a JS regex literal /pattern/flags from a pattern with inline flags.
-    
+
     Pattern should have inline flags like (?i) or (?is) embedded.
     This function extracts them and converts to JS format.
     """
     import re as _re
+
     flags = ""
-    m = _re.match(r'^\(\?([a-z]+)\)', pattern)
+    m = _re.match(r"^\(\?([a-z]+)\)", pattern)
     if m:
         flags = "".join(c for c in m.group(1) if c in "ims")
-        pattern = pattern[m.end():]  # Remove the inline flags from pattern
+        pattern = pattern[m.end() :]  # Remove the inline flags from pattern
     escaped = pattern.replace("/", "\\/")
     return f"/{escaped}/{flags}"
 
@@ -240,7 +241,7 @@ def pre_imports(node: Imports, _: ConverterContext):
 
 @JS_CONVERTER(Utilities)
 def pre_utilities(node: Utilities, _: ConverterContext):
-    # TODO: wrong func _replMap 
+    # TODO: wrong func _replMap
     return [
         "const UNMATCHED_TABLE_ROW = Symbol('UNMATCHED_TABLE_ROW');",
         "",
@@ -638,9 +639,7 @@ def pre_expr_rm_prefix(node: RmPrefix, ctx: ConverterContext):
     v = repr(node.substr)
     if node.accept == VariableType.STRING:
         return f"{ctx.indent}let {ctx.nxt} = _rmPrefix({ctx.prv}, {v});"
-    return (
-        f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => _rmPrefix(s, {v}));"
-    )
+    return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => _rmPrefix(s, {v}));"
 
 
 @JS_CONVERTER(RmSuffix)
@@ -648,9 +647,7 @@ def pre_expr_rm_suffix(node: RmSuffix, ctx: ConverterContext):
     v = repr(node.substr)
     if node.accept == VariableType.STRING:
         return f"{ctx.indent}let {ctx.nxt} = _rmSuffix({ctx.prv}, {v});"
-    return (
-        f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => _rmSuffix(s, {v}));"
-    )
+    return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => _rmSuffix(s, {v}));"
 
 
 @JS_CONVERTER(RmPrefixSuffix)
@@ -686,7 +683,9 @@ def pre_expr_repl_map(node: ReplMap, ctx: ConverterContext):
     rmap = repr(dict(node.replacements))
     if node.accept == VariableType.STRING:
         return f"{ctx.indent}let {ctx.nxt} = _replMap({ctx.prv}, {rmap});"
-    return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => _replMap(s, {rmap}));"
+    return (
+        f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => _replMap(s, {rmap}));"
+    )
 
 
 @JS_CONVERTER(Lower)
@@ -719,18 +718,14 @@ def pre_expr_join(node: Join, ctx: ConverterContext):
 def pre_expr_normalize(node: NormalizeSpace, ctx: ConverterContext):
     if node.accept == VariableType.STRING:
         return f"{ctx.indent}let {ctx.nxt} = _normalizeText({ctx.prv});"
-    return (
-        f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => _normalizeText(s));"
-    )
+    return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => _normalizeText(s));"
 
 
 @JS_CONVERTER(Unescape)
 def pre_expr_unescape(node: Unescape, ctx: ConverterContext):
     if node.accept == VariableType.STRING:
         return f"{ctx.indent}let {ctx.nxt} = _unescapeText({ctx.prv});"
-    return (
-        f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => _unescapeText(s));"
-    )
+    return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => _unescapeText(s));"
 
 
 # ---------------------------------------------------------------------------
@@ -743,21 +738,20 @@ def pre_expr_re(node: Re, ctx: ConverterContext):
     rx = _js_re_node(node)
     if node.accept == VariableType.STRING:
         return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.match({rx})[1];"
-    return (
-        f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => s.match({rx})[1]);"
-    )
+    return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => s.match({rx})[1]);"
 
 
 @JS_CONVERTER(ReAll)
 def pre_expr_re_all(node: ReAll, ctx: ConverterContext):
     # Extract inline flags and add 'g' for global
     import re as _re
+
     flags = "g"
     pattern = node.pattern
-    m = _re.match(r'^\(\?([a-z]+)\)', pattern)
+    m = _re.match(r"^\(\?([a-z]+)\)", pattern)
     if m:
         flags += "".join(c for c in m.group(1) if c in "ims")
-        pattern = pattern[m.end():]
+        pattern = pattern[m.end() :]
     escaped = pattern.replace("/", "\\/")
     rx_g = f"/{escaped}/{flags}"
     return f"{ctx.indent}let {ctx.nxt} = Array.from({ctx.prv}.matchAll({rx_g}), m => m[1]);"
@@ -767,19 +761,18 @@ def pre_expr_re_all(node: ReAll, ctx: ConverterContext):
 def pre_expr_re_sub(node: ReSub, ctx: ConverterContext):
     # Extract inline flags and add 'g' for global
     import re as _re
+
     flags = "g"
     pattern = node.pattern
-    m = _re.match(r'^\(\?([a-z]+)\)', pattern)
+    m = _re.match(r"^\(\?([a-z]+)\)", pattern)
     if m:
         flags += "".join(c for c in m.group(1) if c in "ims")
-        pattern = pattern[m.end():]
+        pattern = pattern[m.end() :]
     escaped = pattern.replace("/", "\\/")
     rx_g = f"/{escaped}/{flags}"
     repl = repr(node.repl)
     if node.accept == VariableType.STRING:
-        return (
-            f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.replace({rx_g}, {repl});"
-        )
+        return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.replace({rx_g}, {repl});"
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => s.replace({rx_g}, {repl}));"
 
 
@@ -787,11 +780,12 @@ def pre_expr_re_sub(node: ReSub, ctx: ConverterContext):
 # EXPRESSIONS — ARRAY
 # ---------------------------------------------------------------------------
 
+
 @JS_CONVERTER(Index)
 def pre_expr_index(node: Index, ctx: ConverterContext):
     i = node.i
     if i < 0:
-        i = f'{ctx.prv}.length - {i}'
+        i = f"{ctx.prv}.length - {i}"
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}[{i}];"
 
 
@@ -800,9 +794,9 @@ def pre_expr_slice(node: Slice, ctx: ConverterContext):
     start = node.start
     end = node.end
     if start < 0:
-        start = f'{ctx.prv}.length - {start}'
-    if end<0:
-        end = f'{ctx.prv}.length - {end}'
+        start = f"{ctx.prv}.length - {start}"
+    if end < 0:
+        end = f"{ctx.prv}.length - {end}"
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.slice({start}, {end});"
 
 

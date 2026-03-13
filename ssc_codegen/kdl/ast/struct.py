@@ -160,6 +160,7 @@ class TableMatchKey(Node):
     accept: VariableType = field(default=VariableType.DOCUMENT)
     ret: VariableType = field(default=VariableType.STRING)
 
+
 @dataclass
 class Field(Node):
     """

@@ -21,20 +21,21 @@ import sys
 # Windows ANSI backport
 try:
     import colorama
+
     colorama.init(autoreset=False)
     _COLORAMA_AVAILABLE = True
 except ImportError:
     _COLORAMA_AVAILABLE = False
 
 # ANSI color codes (used on all platforms; colorama translates them on Windows)
-_RESET  = "\033[0m"
-_BOLD   = "\033[1m"
+_RESET = "\033[0m"
+_BOLD = "\033[1m"
 _COLORS: dict[int, str] = {
-    logging.DEBUG:    "\033[36m",   # cyan
-    logging.INFO:     "\033[32m",   # green
-    logging.WARNING:  "\033[33m",   # yellow
-    logging.ERROR:    "\033[31m",   # red
-    logging.CRITICAL: "\033[35m",   # magenta
+    logging.DEBUG: "\033[36m",  # cyan
+    logging.INFO: "\033[32m",  # green
+    logging.WARNING: "\033[33m",  # yellow
+    logging.ERROR: "\033[31m",  # red
+    logging.CRITICAL: "\033[35m",  # magenta
 }
 
 
@@ -46,7 +47,7 @@ class _ColorFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:  # noqa: A003
         color = _COLORS.get(record.levelno, "")
         level = record.levelname
-        name  = record.name
+        name = record.name
         # format the message part the normal way (handles exc_info etc.)
         record.message = record.getMessage()
         if record.exc_info and not record.exc_text:
@@ -93,7 +94,9 @@ def setup_debug_logging() -> None:
         handler = logging.StreamHandler()
         handler.setLevel(logging.DEBUG)
         formatter: logging.Formatter = (
-            _ColorFormatter() if use_color else logging.Formatter("[%(levelname)s] %(name)s: %(message)s")
+            _ColorFormatter()
+            if use_color
+            else logging.Formatter("[%(levelname)s] %(name)s: %(message)s")
         )
         handler.setFormatter(formatter)
         pkg_logger.addHandler(handler)

@@ -80,10 +80,10 @@ def pre_imports(node: Imports, _: ConverterContext):
         "from typing import TypedDict, Optional, Any, List, Dict, Union",
         "from html import unescape as _html_unescape",
     ]
-    
+
     # Get transform imports for Python (already collected during parsing)
     transform_imports = sorted(node.transform_imports.get("py", set()))
-    
+
     return base_imports + transform_imports
 
 
@@ -110,8 +110,12 @@ def pre_utilities(node: Utilities, _: ConverterContext):
 def pre_struct(node: Struct, ctx: ConverterContext):
     # Get init field names (same logic as bs4)
     init_node = node.init
-    init_node_names = [to_snake_case(f.name) for f in init_node.body if isinstance(f, InitField)]
-    
+    init_node_names = [
+        to_snake_case(f.name)
+        for f in init_node.body
+        if isinstance(f, InitField)
+    ]
+
     code = [
         f"    def __init__(self, document: Union[str, HtmlElement]):",
         f"{ctx.indent * 2}if isinstance(document, str):",
@@ -130,18 +134,17 @@ def pre_struct(node: Struct, ctx: ConverterContext):
 def pre_init_field(node: InitField, ctx: ConverterContext):
     name = to_snake_case(node.name)
     ret_type = py_bs4.PY_TYPES.get(node.ret, "Any")
-    return [
-        f"    def _init_{name}(self, v: HtmlElement) -> {ret_type}:"
-    ]
+    return [f"    def _init_{name}(self, v: HtmlElement) -> {ret_type}:"]
 
 
 @PY_LXML_CONVERTER(Field)
 def pre_struct_field(node: Field, ctx: ConverterContext):
     name = to_snake_case(node.name)
     ret_type = py_bs4.PY_TYPES.get(node.ret, "Any")
-    
+
     if node.ret == VariableType.JSON:
         from ssc_codegen.kdl.ast import Jsonify
+
         jsonify_node = [i for i in node.body if isinstance(i, Jsonify)][0]
         ret_type = ret_type.format(jsonify_node.schema_name)
         if jsonify_node.is_array:
@@ -151,12 +154,12 @@ def pre_struct_field(node: Field, ctx: ConverterContext):
         ret_type = ret_type.format(nested_node.struct_name)
         if nested_node.is_array:
             ret_type = f"List[{ret_type}]"
-    
+
     if node.accept == VariableType.STRING:
-        return [f"    def _parse_{name}(self, v: str) -> Union[{ret_type}, object]:"]
-    return [
-        f"    def _parse_{name}(self, v: HtmlElement) -> {ret_type}:"
-    ]
+        return [
+            f"    def _parse_{name}(self, v: str) -> Union[{ret_type}, object]:"
+        ]
+    return [f"    def _parse_{name}(self, v: HtmlElement) -> {ret_type}:"]
 
 
 @PY_LXML_CONVERTER(Key)
@@ -167,9 +170,10 @@ def pre_struct_key(node: Key, ctx: ConverterContext):
 @PY_LXML_CONVERTER(Value)
 def pre_struct_value(node: Value, ctx: ConverterContext):
     ret_type = py_bs4.PY_TYPES.get(node.ret, "Any")
-    
+
     if node.ret == VariableType.JSON:
         from ssc_codegen.kdl.ast import Jsonify
+
         jsonify_node = [i for i in node.body if isinstance(i, Jsonify)][0]
         ret_type = ret_type.format(jsonify_node.schema_name)
         if jsonify_node.is_array:
@@ -179,10 +183,8 @@ def pre_struct_value(node: Value, ctx: ConverterContext):
         ret_type = ret_type.format(nested_node.struct_name)
         if nested_node.is_array:
             ret_type = f"List[{ret_type}]"
-    
-    return [
-        f"    def _parse_value(self, v: HtmlElement) -> {ret_type}:"
-    ]
+
+    return [f"    def _parse_value(self, v: HtmlElement) -> {ret_type}:"]
 
 
 @PY_LXML_CONVERTER(PreValidate)
@@ -192,16 +194,12 @@ def pre_struct_pre_validate(node: PreValidate, ctx: ConverterContext):
 
 @PY_LXML_CONVERTER(SplitDoc)
 def pre_struct_split_doc(node: SplitDoc, ctx: ConverterContext):
-    return [
-        "    def _split_doc(self, v: HtmlElement) -> List[HtmlElement]:"
-    ]
+    return ["    def _split_doc(self, v: HtmlElement) -> List[HtmlElement]:"]
 
 
 @PY_LXML_CONVERTER(TableConfig)
 def pre_struct_table_config(node: TableConfig, ctx: ConverterContext):
-    return [
-        "    def _table_config(self, v: HtmlElement) -> HtmlElement:"
-    ]
+    return ["    def _table_config(self, v: HtmlElement) -> HtmlElement:"]
 
 
 @PY_LXML_CONVERTER(TableMatchKey)
@@ -211,9 +209,7 @@ def pre_struct_table_match_key(node: TableMatchKey, ctx: ConverterContext):
 
 @PY_LXML_CONVERTER(TableRow)
 def pre_struct_table_row(node: TableRow, ctx: ConverterContext):
-    return [
-        "    def _table_row(self, v: HtmlElement) -> List[HtmlElement]:"
-    ]
+    return ["    def _table_row(self, v: HtmlElement) -> List[HtmlElement]:"]
 
 
 # SELECTORS - Main differences from bs4

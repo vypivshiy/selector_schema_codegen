@@ -168,10 +168,10 @@ def pre_imports(node: Imports, _: ConverterContext):
         "from typing import TypedDict, Optional, Any, List, Dict, Union",
         "from html import unescape as _html_unescape",
     ]
-    
+
     # Get transform imports for Python (already collected during parsing)
     transform_imports = sorted(node.transform_imports.get("py", set()))
-    
+
     return base_imports + transform_imports
 
 
@@ -227,7 +227,7 @@ def pre_utilities(node: Utilities, _: ConverterContext):
         "        return s[:-(len(p))] if s.endswith(p) else s",
         "\n\n",
         "UNMATCHED_TABLE_ROW = object()",
-        "\n\n"
+        "\n\n",
     ]
 
 
@@ -254,7 +254,7 @@ def pre_json_field(node: JsonDefField, ctx: ConverterContext):
 def pre_typedef(node: TypeDef, _: ConverterContext):
     name = to_pascal_case(node.name)
     if node.struct_type == StructType.DICT:
-        return f"{name}Type = Dict[str, " 
+        return f"{name}Type = Dict[str, "
     elif node.struct_type == StructType.FLAT:
         return f"{name}Type = List[str]"
     return f"class {name}Type(TypedDict):"
@@ -277,7 +277,10 @@ def pre_typedef_field(node: TypeDefField, ctx: ConverterContext):
         type_ = type_.format(type_name)
         if node.is_array:
             type_ = f"List[{type_}]"
-    if node.typedef.struct_type == StructType.DICT and "value" in node.name.lower():
+    if (
+        node.typedef.struct_type == StructType.DICT
+        and "value" in node.name.lower()
+    ):
         return f"{type_} ]"
     return [f"{ctx.indent}{name}: {type_}"]
 
@@ -393,7 +396,9 @@ def post_start_parse(node: StartParse, ctx: ConverterContext):
                 lines.append(
                     f"{ctx.indent * 3}_{fname} = self._parse_{fname}(_row)"
                 )
-                lines.append(f"{ctx.indent * 3}if _{fname} != UNMATCHED_TABLE_ROW:")
+                lines.append(
+                    f"{ctx.indent * 3}if _{fname} != UNMATCHED_TABLE_ROW:"
+                )
                 lines.append(f"{ctx.indent * 4}_result[{fname!r}] = _{fname}")
             lines.append(f"{ctx.indent * 2}return _result")
 
@@ -453,7 +458,9 @@ def pre_struct_field(node: Field, ctx: ConverterContext):
             ret_type = f"List[{ret_type}]"
     # table struct fields start with match { ... } and may return a sentinel
     if node.accept == VariableType.STRING:
-        return [f"    def _parse_{name}(self, v: str) -> Union[{ret_type}, object]:"]
+        return [
+            f"    def _parse_{name}(self, v: str) -> Union[{ret_type}, object]:"
+        ]
     return [
         f"    def _parse_{name}(self, v: Union[Tag, BeautifulSoup]) -> {ret_type}:"
     ]
@@ -850,17 +857,19 @@ def pre_expr_transform_call(node: TransformCall, ctx: ConverterContext):
     # Find the Python implementation from transform_def
     if not node.transform_def:
         raise ValueError(f"TransformCall '{node.name}': transform_def is None")
-    
+
     # Get Python-specific target
     py_target = None
     for target in node.transform_def.body:
         if target.lang == "py":
             py_target = target
             break
-    
+
     if not py_target:
-        raise ValueError(f"TransformCall '{node.name}': no 'py' implementation found")
-    
+        raise ValueError(
+            f"TransformCall '{node.name}': no 'py' implementation found"
+        )
+
     # Generate code by substituting {{PRV}} and {{NXT}}
     lines = []
     for code_line in py_target.code:
@@ -868,7 +877,7 @@ def pre_expr_transform_call(node: TransformCall, ctx: ConverterContext):
         code_line = code_line.replace("{{PRV}}", ctx.prv)
         code_line = code_line.replace("{{NXT}}", ctx.nxt)
         lines.append(f"{ctx.indent}{code_line}")
-    
+
     return lines
 
 
@@ -894,26 +903,28 @@ def pre_expr_fallback_end(node: FallbackEnd, ctx: ConverterContext):
 
 
 # predicates
-@PY_BASE_CONVERTER(Filter, post_callback=lambda _, ctx: ctx.deeper().indent + "]")
+@PY_BASE_CONVERTER(
+    Filter, post_callback=lambda _, ctx: ctx.deeper().indent + "]"
+)
 def pre_expr_filter(node: Filter, ctx: ConverterContext):
     # NXT = [i for i in PRV if ({CONDS...})]
     return f"{ctx.indent}{ctx.nxt} = [i for i in {ctx.prv} if "
 
 
 # TODO: msg API
-@PY_BASE_CONVERTER(Assert, post_callback=lambda _, ctx: ctx.deeper().indent + ")")
+@PY_BASE_CONVERTER(
+    Assert, post_callback=lambda _, ctx: ctx.deeper().indent + ")"
+)
 def pre_expr_assert(node: Assert, ctx: ConverterContext):
     return [
         f"{ctx.indent}i = {ctx.prv}",
         f"{ctx.indent}assert (",
     ]
 
+
 @PY_BASE_CONVERTER.post(Assert)
 def post_expr_assert(node: Assert, ctx: ConverterContext):
-    return [
-        ctx.deeper().indent + ")",
-        f'{ctx.indent}{ctx.nxt} = {ctx.prv}'
-    ]
+    return [ctx.deeper().indent + ")", f"{ctx.indent}{ctx.nxt} = {ctx.prv}"]
 
 
 @PY_BASE_CONVERTER(Match)
