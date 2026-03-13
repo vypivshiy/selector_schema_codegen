@@ -9,6 +9,7 @@ from typing import Callable, Literal
 from functools import wraps
 from pathlib import Path
 from enum import Enum, auto
+import re
 
 from tree_sitter import Node, Tree
 
@@ -44,14 +45,20 @@ class LintResult:
         """Есть ли ошибки (не warnings)?"""
         return self.error_count > 0
     
-    def format(self, style: Literal["text", "json"] = "text") -> str:
+    def format(self, style: Literal["text", "json"] = "text", **kwargs) -> str:
         """Форматирование вывода"""
         from ssc_codegen.kdl.linter.format_errors import format_errors
         
         if style == "json":
             import json
             return json.dumps(self.to_dict(), indent=2)
-        return format_errors(self.errors, src=self.source, filepath=self.filepath)
+        return format_errors(
+            self.errors,
+            src=self.source,
+            filepath=self.filepath,
+            use_color=kwargs.get("use_color"),
+            context_lines=kwargs.get("context_lines", 1),
+        )
     
     def to_dict(self) -> dict:
         """Для JSON API"""
@@ -86,11 +93,53 @@ class LintContext:
     def errors(self) -> list[LintError]:
         return self.collector.errors
     
-    def error(self, node: Node, code: ErrorCode, message: str, hint: str = "") -> None:
-        self.collector.error(node, code, message, hint, self.path.current)
+    def error(
+        self,
+        node: Node,
+        code: ErrorCode,
+        message: str,
+        hint: str = "",
+        *,
+        label: str | None = None,
+        notes: list[str] | None = None,
+        end_line: int | None = None,
+        end_col: int | None = None,
+    ) -> None:
+        self.collector.error(
+            node,
+            code,
+            message,
+            hint,
+            self.path.current,
+            label=label,
+            notes=notes,
+            end_line=end_line,
+            end_col=end_col,
+        )
     
-    def warning(self, node: Node, code: ErrorCode, message: str, hint: str = "") -> None:
-        self.collector.warning(node, code, message, hint, self.path.current)
+    def warning(
+        self,
+        node: Node,
+        code: ErrorCode,
+        message: str,
+        hint: str = "",
+        *,
+        label: str | None = None,
+        notes: list[str] | None = None,
+        end_line: int | None = None,
+        end_col: int | None = None,
+    ) -> None:
+        self.collector.warning(
+            node,
+            code,
+            message,
+            hint,
+            self.path.current,
+            label=label,
+            notes=notes,
+            end_line=end_line,
+            end_col=end_col,
+        )
     
     # ── Path tracking (делегирует к path) ──────────────────────────────────────
     
@@ -295,6 +344,14 @@ class AstLinter:
         """
         # TODO: использовать old_tree для incremental parsing
         tree = KDL_PARSER.parse(src.encode())
+        syntax_errors = self._collect_syntax_errors(tree.root_node, src)
+        if syntax_errors:
+            return LintResult(
+                errors=syntax_errors,
+                source=src,
+                filepath=filepath,
+            )
+
         ctx = LintContext(src=src.encode())
         self._collect_defines(tree.root_node, ctx)
         self._walk(tree.root_node, ctx)
@@ -304,6 +361,136 @@ class AstLinter:
             source=src,
             filepath=filepath
         )
+
+    def _collect_syntax_errors(self, root: Node, src: str) -> list[LintError]:
+        """Collect parser-level syntax diagnostics from tree-sitter error nodes."""
+        if not root.has_error:
+            return []
+
+        errors: list[LintError] = []
+        seen: set[tuple[str, int, int, int, int]] = set()
+        lines = src.splitlines()
+
+        def visit(node: Node) -> None:
+            is_missing = bool(getattr(node, "is_missing", False))
+            is_error_node = node.type == "ERROR"
+            if is_error_node or is_missing:
+                start_line = node.start_point.row + 1
+                start_col = node.start_point.column + 1
+                end_line = node.end_point.row + 1
+                end_col = node.end_point.column + 1
+                key = (node.type, start_line, start_col, end_line, end_col)
+                if key not in seen:
+                    seen.add(key)
+                    errors.append(
+                        self._syntax_error_from_node(
+                            node,
+                            lines=lines,
+                            start_line=start_line,
+                            start_col=start_col,
+                            end_line=end_line,
+                            end_col=end_col,
+                        )
+                    )
+            for child in node.children:
+                visit(child)
+
+        visit(root)
+        errors.sort(key=lambda e: (e.line, e.col, e.code.value))
+        return errors
+
+    def _syntax_error_from_node(
+        self,
+        node: Node,
+        *,
+        lines: list[str],
+        start_line: int,
+        start_col: int,
+        end_line: int,
+        end_col: int,
+    ) -> LintError:
+        """Convert a tree-sitter parse error node to a LintError."""
+        if bool(getattr(node, "is_missing", False)):
+            expected = self._format_expected_node(node.type)
+            message = f"invalid KDL syntax: expected {expected}"
+            hint = "fix the incomplete construct and ensure all required tokens are present"
+            label = f"expected {expected}"
+            notes = ["parser inserted a missing node while recovering from invalid syntax"]
+        else:
+            snippet = self._node_snippet(node, lines)
+            if self._looks_like_eof_syntax_error(node, lines):
+                message = "invalid KDL syntax: unexpected end of input"
+                hint = "close all opened strings, braces, and blocks before semantic linting"
+                label = "unexpected end of input"
+            else:
+                message = "invalid KDL syntax"
+                hint = "fix malformed tokens, quotes, braces, or block structure before semantic linting"
+                label = "invalid syntax"
+            notes = [f"parser could not recover from: {snippet}"] if snippet else []
+
+        return LintError(
+            code=ErrorCode.INVALID_SYNTAX,
+            message=message,
+            hint=hint,
+            path="syntax",
+            line=start_line,
+            col=start_col,
+            end_line=end_line,
+            end_col=end_col,
+            label=label,
+            notes=notes,
+            severity="error",
+        )
+
+    def _node_snippet(self, node: Node, lines: list[str], limit: int = 80) -> str:
+        """Extract a compact text snippet for a parse error node."""
+        if not lines:
+            return ""
+
+        start_row = node.start_point.row
+        end_row = node.end_point.row
+        start_col = node.start_point.column
+        end_col = node.end_point.column
+
+        if start_row >= len(lines):
+            return ""
+
+        if start_row == end_row and start_row < len(lines):
+            snippet = lines[start_row][start_col:end_col]
+        else:
+            parts: list[str] = []
+            for idx in range(start_row, min(end_row + 1, len(lines))):
+                line = lines[idx]
+                if idx == start_row:
+                    parts.append(line[start_col:])
+                elif idx == end_row:
+                    parts.append(line[:end_col])
+                else:
+                    parts.append(line)
+            snippet = "\\n".join(parts)
+
+        snippet = re.sub(r"\s+", " ", snippet).strip()
+        if len(snippet) > limit:
+            snippet = snippet[: limit - 3].rstrip() + "..."
+        return snippet
+
+    def _looks_like_eof_syntax_error(self, node: Node, lines: list[str]) -> bool:
+        """Heuristic for parse errors caused by unexpected end-of-input."""
+        if not lines:
+            return False
+        last_line_no = len(lines)
+        last_line_len = len(lines[-1])
+        end_line = node.end_point.row + 1
+        end_col = node.end_point.column + 1
+        return end_line > last_line_no or (end_line == last_line_no and end_col >= last_line_len + 1)
+
+    def _format_expected_node(self, node_type: str) -> str:
+        """Render a human-readable expected token/node name."""
+        if not node_type:
+            return "token"
+        if node_type.isidentifier():
+            return node_type
+        return repr(node_type)
 
     def _collect_defines(self, root: Node, ctx: LintContext) -> None:
         """
@@ -398,10 +585,9 @@ class AstLinter:
                         rule_fn(node, ctx)
             
             case WalkContext.JSON_TYPEDEF:
-                # В JSON typedef только структурные проверки, не операции
-                if name in self._rules:
-                    for rule_fn in self._rules[name]:
-                        rule_fn(node, ctx)
+                # В JSON typedef поля — это объявления типов, не pipeline-операции.
+                # Правила операций не применяются (они предназначены только для pipeline).
+                pass
             
             case WalkContext.SPECIAL_FIELD:
                 # Special fields (@pre-validate, etc.) - без правил на этом уровне

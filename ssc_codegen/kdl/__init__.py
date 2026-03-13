@@ -1,12 +1,15 @@
-from ssc_codegen.kdl.parser import PARSER, Module
 from pathlib import Path
 
+from ssc_codegen.kdl.parser import Module, PARSER
 
-def parse_ast(src:str | None = None, path: str | None = None) -> Module:
+_KDL_TEXT_ENCODING = "utf-8-sig"
+
+
+def parse_ast(src: str | None = None, path: str | None = None) -> Module:
     if not src and not path:
         raise AttributeError("required src or path argument")
     if path:
-        src = Path(path).read_text()
+        src = Path(path).read_text(encoding=_KDL_TEXT_ENCODING)
     if not src:
         raise AttributeError("required src or path argument")
     return PARSER.parse(src)

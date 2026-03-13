@@ -360,6 +360,7 @@ class AstParser:
         return typedef
 
     def _parse_json_fields(self, nodes: list[KdlNode], parent: JsonDef):
+        logger.debug("_parse_json_fields: %r, %d field(s)", parent.name, len(nodes))
         for node in nodes:
             name = node.name
             # in ckdl impl, if add type in kdl, string value changed to Value()
@@ -402,16 +403,20 @@ class AstParser:
                         ref_name = ref_name.removeprefix("(array)")
                         is_array = True
                     ret_type = VariableType.JSON
-            parent.body.append(
-                JsonDefField(
-                    parent=parent,
-                    ret=ret_type,
-                    name=name,
-                    is_optional=is_optional,
-                    is_array=is_array,
-                    ref_name=ref_name,
-                )
+            jf = JsonDefField(
+                parent=parent,
+                ret=ret_type,
+                name=name,
+                is_optional=is_optional,
+                is_array=is_array,
+                ref_name=ref_name,
             )
+            logger.debug(
+                "  json field %r: ret=%s, optional=%s, array=%s%s",
+                name, ret_type, is_optional, is_array,
+                f", ref={ref_name!r}" if ref_name else "",
+            )
+            parent.body.append(jf)
 
     def parse(self, kdl_dsl: str) -> Module:
         logger.debug("parse() called, input length=%d chars", len(kdl_dsl))
@@ -515,10 +520,12 @@ class AstParser:
         parent.body.append(StartParse(parent=parent))
 
     def _parse_init_fields(self, kdl_nodes: list[KdlNode], parent: Init):
+        logger.debug("_parse_init_fields: %d field(s)", len(kdl_nodes))
         for node in kdl_nodes:
             expr = InitField(parent=parent, name=node.name)
             self._parse_expressions(node.children, expr)
             expr.ret = expr.body[-1].ret
+            logger.debug("  init field %r: ret=%s", node.name, expr.ret)
             parent.body.append(expr)
 
     def _parse_filter_expr(
@@ -526,9 +533,11 @@ class AstParser:
         kdl_nodes: list[KdlNode],
         parent: Filter | LogicAnd | LogicNot | LogicOr,
     ):
+        logger.debug("_parse_filter_expr: parent=%s, %d node(s)", type(parent).__name__, len(kdl_nodes))
         for node in kdl_nodes:
             if cb := self._context_filter.get(node.name):
                 expr = cb(node, parent, self.ctx)
+                logger.debug("  filter pred: %r -> %s", node.name, type(expr).__name__)
                 if isinstance(expr, (LogicAnd, LogicOr, LogicNot)):
                     self._parse_filter_expr(node.children, expr)
                 parent.body.append(expr)
@@ -538,9 +547,11 @@ class AstParser:
         kdl_nodes: list[KdlNode],
         parent: Assert | LogicAnd | LogicNot | LogicOr,
     ):
+        logger.debug("_parse_assert_expr: parent=%s, %d node(s)", type(parent).__name__, len(kdl_nodes))
         for node in kdl_nodes:
             if cb := self._context_assert.get(node.name):
                 expr = cb(node, parent, self.ctx)
+                logger.debug("  assert pred: %r -> %s", node.name, type(expr).__name__)
                 if isinstance(expr, (LogicAnd, LogicOr, LogicNot)):
                     self._parse_assert_expr(node.children, expr)
                 parent.body.append(expr)
@@ -550,9 +561,11 @@ class AstParser:
         kdl_nodes: list[KdlNode],
         parent: Match | LogicAnd | LogicNot | LogicOr,
     ):
+        logger.debug("_parse_match_expr: parent=%s, %d node(s)", type(parent).__name__, len(kdl_nodes))
         for node in kdl_nodes:
             if cb := self._context_match.get(node.name):
                 expr = cb(node, parent, self.ctx)
+                logger.debug("  match pred: %r -> %s", node.name, type(expr).__name__)
                 if isinstance(expr, (LogicAnd, LogicOr, LogicNot)):
                     self._parse_match_expr(node.children, expr)
                 parent.body.append(expr)
@@ -624,9 +637,11 @@ PARSER = AstParser()
 def reg_define(node: KdlNode, ctx: ParseContext):
     if node.children:
         ctx.children_defines[node.args[0]] = node.children
+        logger.debug("define: children block %r (%d child node(s))", node.args[0], len(node.children))
     else:
         pair = list(node.properties.items())[0]
         ctx.property_defines[pair[0]] = pair[1]
+        logger.debug("define: property %r = %r", pair[0], pair[1])
 
 
 _VAR_TYPE_MAP: dict[str, VariableType] = {
@@ -663,6 +678,7 @@ def reg_transform(node: KdlNode, ctx: ParseContext):
     ret_type = _VAR_TYPE_MAP[ret_str]
 
     transform_def = TransformDef(name=name, accept=accept_type, ret=ret_type)
+    logger.debug("transform %r: accept=%s, ret=%s", name, accept_str, ret_str)
 
     # each child is a language block: py { import "..."; code "..." }
     for lang_node in node.children:
@@ -682,6 +698,7 @@ def reg_transform(node: KdlNode, ctx: ParseContext):
             imports=tuple(imports),
             code=tuple(code),
         )
+        logger.debug("  transform %r lang=%r: %d import(s), %d code line(s)", name, lang, len(imports), len(code))
         transform_def.body.append(target)
 
     ctx.transforms[name] = transform_def
