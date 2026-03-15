@@ -20,7 +20,9 @@ from ssc_codegen.kdl.pseudo_selectors import (
 from ssc_codegen.kdl.selector_utils import css_to_xpath
 
 
-def convert_css_to_xpath(nodes: Iterable[object], prefix: str = "descendant-or-self::"):
+def convert_css_to_xpath(
+    nodes: Iterable[object], prefix: str = "descendant-or-self::"
+):
     """Replace CSS expressions to XPATH in AST nodes list."""
     new_nodes: list[object] = []
 
@@ -80,7 +82,9 @@ def convert_css_to_xpath(nodes: Iterable[object], prefix: str = "descendant-or-s
     return new_nodes
 
 
-def convert_css_to_xpath_module(module: object, prefix: str = "descendant-or-self::") -> None:
+def convert_css_to_xpath_module(
+    module: object, prefix: str = "descendant-or-self::"
+) -> None:
     """Recursively convert CSS selector nodes inside a Module AST."""
     if not getattr(module, "body", None):
         return

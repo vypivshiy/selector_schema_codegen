@@ -105,7 +105,9 @@ def pre_init(node: Init, ctx: ConverterContext):
 def pre_init_field(node: InitField, ctx: ConverterContext):
     name = to_snake_case(node.name)
     ret_type = py_bs4.PY_TYPES.get(node.ret, "Any")
-    return [f"    def _init_{name}(self, v: Union[Selector, SelectorList]) -> {ret_type}:"]
+    return [
+        f"    def _init_{name}(self, v: Union[Selector, SelectorList]) -> {ret_type}:"
+    ]
 
 
 @PY_PARSEL_CONVERTER(Field)
@@ -137,7 +139,9 @@ def pre_struct_field(node: Field, ctx: ConverterContext):
 
 @PY_PARSEL_CONVERTER(Key)
 def pre_struct_key(node: Key, ctx: ConverterContext):
-    return ["    def _parse_key(self, v: Union[Selector, SelectorList]) -> str:"]
+    return [
+        "    def _parse_key(self, v: Union[Selector, SelectorList]) -> str:"
+    ]
 
 
 @PY_PARSEL_CONVERTER(Value)
@@ -164,7 +168,9 @@ def pre_struct_value(node: Value, ctx: ConverterContext):
 
 @PY_PARSEL_CONVERTER(PreValidate)
 def pre_struct_pre_validate(node: PreValidate, ctx: ConverterContext):
-    return ["    def _pre_validate(self, v: Union[Selector, SelectorList]) -> None:"]
+    return [
+        "    def _pre_validate(self, v: Union[Selector, SelectorList]) -> None:"
+    ]
 
 
 @PY_PARSEL_CONVERTER(SplitDoc)
@@ -326,7 +332,9 @@ def pre_expr_pred_attr_starts(node: PredAttrStarts, ctx: ConverterContext):
     if len(values) == 1:
         cond = f"i.attrib.get({name!r}, '').startswith({values[0]!r})"
     else:
-        cond = f"any(i.attrib.get({name!r}, '').startswith(v) for v in {values!r})"
+        cond = (
+            f"any(i.attrib.get({name!r}, '').startswith(v) for v in {values!r})"
+        )
     if ctx.index == 0:
         return ctx.indent + cond
     return ctx.indent + f"and {cond}"
@@ -339,7 +347,9 @@ def pre_expr_pred_attr_ends(node: PredAttrEnds, ctx: ConverterContext):
     if len(values) == 1:
         cond = f"i.attrib.get({name!r}, '').endswith({values[0]!r})"
     else:
-        cond = f"any(i.attrib.get({name!r}, '').endswith(v) for v in {values!r})"
+        cond = (
+            f"any(i.attrib.get({name!r}, '').endswith(v) for v in {values!r})"
+        )
     if ctx.index == 0:
         return ctx.indent + cond
     return ctx.indent + f"and {cond}"
@@ -372,7 +382,9 @@ def pre_expr_pred_attr_re(node: PredAttrRe, ctx: ConverterContext):
 def pre_expr_pred_text_starts(node: PredTextStarts, ctx: ConverterContext):
     values = node.values
     if len(values) == 1:
-        cond = f"' '.join(i.xpath('.//text()').getall()).startswith({values[0]!r})"
+        cond = (
+            f"' '.join(i.xpath('.//text()').getall()).startswith({values[0]!r})"
+        )
     else:
         cond = f"any(' '.join(i.xpath('.//text()').getall()).startswith(v) for v in {values!r})"
     if ctx.index == 0:
@@ -384,7 +396,9 @@ def pre_expr_pred_text_starts(node: PredTextStarts, ctx: ConverterContext):
 def pre_expr_pred_text_ends(node: PredTextEnds, ctx: ConverterContext):
     values = node.values
     if len(values) == 1:
-        cond = f"' '.join(i.xpath('.//text()').getall()).endswith({values[0]!r})"
+        cond = (
+            f"' '.join(i.xpath('.//text()').getall()).endswith({values[0]!r})"
+        )
     else:
         cond = f"any(' '.join(i.xpath('.//text()').getall()).endswith(v) for v in {values!r})"
     if ctx.index == 0:
@@ -407,7 +421,9 @@ def pre_expr_pred_text_contains(node: PredTextContains, ctx: ConverterContext):
 @PY_PARSEL_CONVERTER(PredTextRe)
 def pre_expr_pred_text_re(node: PredTextRe, ctx: ConverterContext):
     pattern = repr(node.pattern)
-    cond = f"bool(re.search({pattern}, ' '.join(i.xpath('.//text()').getall())))"
+    cond = (
+        f"bool(re.search({pattern}, ' '.join(i.xpath('.//text()').getall())))"
+    )
     if ctx.index == 0:
         return ctx.indent + cond
     return ctx.indent + f"and {cond}"

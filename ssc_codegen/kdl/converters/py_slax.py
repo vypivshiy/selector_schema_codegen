@@ -105,7 +105,9 @@ def pre_init(node: Init, ctx: ConverterContext):
 def pre_init_field(node: InitField, ctx: ConverterContext):
     name = to_snake_case(node.name)
     ret_type = py_bs4.PY_TYPES.get(node.ret, "Any")
-    return [f"    def _init_{name}(self, v: Union[HTMLParser, Node]) -> {ret_type}:"]
+    return [
+        f"    def _init_{name}(self, v: Union[HTMLParser, Node]) -> {ret_type}:"
+    ]
 
 
 @PY_SLAX_CONVERTER(Field)
@@ -176,9 +178,7 @@ def pre_struct_split_doc(node: SplitDoc, ctx: ConverterContext):
 
 @PY_SLAX_CONVERTER(TableConfig)
 def pre_struct_table_config(node: TableConfig, ctx: ConverterContext):
-    return [
-        "    def _table_config(self, v: Union[HTMLParser, Node]) -> Node:"
-    ]
+    return ["    def _table_config(self, v: Union[HTMLParser, Node]) -> Node:"]
 
 
 @PY_SLAX_CONVERTER(TableMatchKey)

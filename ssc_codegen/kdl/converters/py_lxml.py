@@ -240,7 +240,9 @@ def pre_struct_table_match_key(node: TableMatchKey, ctx: ConverterContext):
 
 @PY_LXML_CONVERTER(TableRow)
 def pre_struct_table_row(node: TableRow, ctx: ConverterContext):
-    return ["    def _parse_table_rows(self, v: HtmlElement) -> List[HtmlElement]:"]
+    return [
+        "    def _parse_table_rows(self, v: HtmlElement) -> List[HtmlElement]:"
+    ]
 
 
 # SELECTORS - Main differences from bs4
@@ -475,5 +477,3 @@ def pre_expr_pred_text_re(node: PredTextRe, ctx: ConverterContext):
     if ctx.index == 0:
         return ctx.indent + cond
     return ctx.indent + f"and {cond}"
-
-

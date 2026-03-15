@@ -1561,8 +1561,6 @@ def reg_expr_fallback(node: KdlNode, parent: FieldLikeNode, _: ParseContext):
     return Fallback(parent=parent, value=value)
 
 
-
-
 @PARSER.register_expression_node("filter")
 def reg_expr_filter(node: KdlNode, parent: FieldLikeNode, _: ParseContext):
     prev_type = parent.body[-1].ret
@@ -1872,12 +1870,15 @@ def reg_filter_attr_ends(node: KdlNode, parent: Filter, ctx: ParseContext):
         name=name,
     )
 
+
 # ASSERT SCOPE ONLY
 @PARSER.register_predicate_node("len-eq", reg_match=False, reg_filter=False)
 def reg_len_eq(node: KdlNode, parent: Filter, cx: ParseContext):
     value = node.args[1]
     prev_type = parent.ret
-    return PredCountEq(parent=parent, accept=prev_type, ret=prev_type, value=int(value))
+    return PredCountEq(
+        parent=parent, accept=prev_type, ret=prev_type, value=int(value)
+    )
 
 
 # ASSERT SCOPE ONLY
@@ -1885,7 +1886,9 @@ def reg_len_eq(node: KdlNode, parent: Filter, cx: ParseContext):
 def reg_len_gt(node: KdlNode, parent: Filter, cx: ParseContext):
     value = node.args[1]
     prev_type = parent.ret
-    return PredCountGt(parent=parent, accept=prev_type, ret=prev_type, value=int(value))
+    return PredCountGt(
+        parent=parent, accept=prev_type, ret=prev_type, value=int(value)
+    )
 
 
 # ASSERT SCOPE ONLY
@@ -1893,7 +1896,9 @@ def reg_len_gt(node: KdlNode, parent: Filter, cx: ParseContext):
 def reg_len_lt(node: KdlNode, parent: Filter, cx: ParseContext):
     value = node.args[1]
     prev_type = parent.ret
-    return PredCountLt(parent=parent, accept=prev_type, ret=prev_type, value=int(value))
+    return PredCountLt(
+        parent=parent, accept=prev_type, ret=prev_type, value=int(value)
+    )
 
 
 @PARSER.register_predicate_node("and")
