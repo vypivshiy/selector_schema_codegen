@@ -353,7 +353,10 @@ def pre_typedef(node: TypeDef, _: ConverterContext):
             f for f in node.fields if to_camel_case(f.name) == "value"
         )
         value_type = _js_typedef_type(value_field)
-        return ["/**", f" * @typedef {{Object.<string, {value_type}>}} {name}Type"]
+        return [
+            "/**",
+            f" * @typedef {{Object.<string, {value_type}>}} {name}Type",
+        ]
     return ["/**", f" * @typedef {{Object}} {name}Type"]
 
 
@@ -466,7 +469,29 @@ def pre_struct_table_row(node: TableRow, ctx: ConverterContext):
 
 @JS_CONVERTER(StartParse)
 def pre_start_parse(node: StartParse, ctx: ConverterContext):
-    return [f"{ctx.indent}parse() " + "{"]
+    # type
+    name = to_pascal_case(node.struct.name)
+    match node.struct_type:
+        case StructType.ITEM:
+            ret_type = f"{name}Type"
+        case StructType.LIST:
+            ret_type = f"Array<{name}Type>"
+        case StructType.FLAT:
+            ret_type = "Array<string>"
+        case StructType.DICT:
+            ret_type = f"{name}Type"
+        case StructType.TABLE:
+            ret_type = f"{name}Type"
+        case _:
+            raise NotImplementedError(
+                "Unknown struct type", repr(node.struct_type)
+            )
+    return [
+        f"{ctx.indent}/**",
+        f"{ctx.indent}* @returns {{{ret_type}}}",
+        f"{ctx.indent}*/",
+        f"{ctx.indent}parse() " + "{",
+    ]
 
 
 @JS_CONVERTER.post(StartParse)
@@ -526,9 +551,12 @@ def post_start_parse(node: StartParse, ctx: ConverterContext):
                 lines.append(f"{ctx.indent * 2}return [...new Set(_result)];")
         case StructType.TABLE:
             lines.append(f"{ctx.indent * 2}let _result = " + "{};")
-            lines.append(f"{ctx.indent * 2}let _table = this._tableConfig(this._doc);")
             lines.append(
-                f"{ctx.indent * 2}for (let _row of this._tableRows(_table)) " + "{"
+                f"{ctx.indent * 2}let _table = this._tableConfig(this._doc);"
+            )
+            lines.append(
+                f"{ctx.indent * 2}for (let _row of this._tableRows(_table)) "
+                + "{"
             )
             for f in node.fields:
                 n = to_camel_case(f.name)
@@ -938,6 +966,9 @@ def pre_expr_self(node: Self, ctx: ConverterContext):
 def pre_expr_return(node: Return, ctx: ConverterContext):
     if isinstance(node.parent, PreValidate):
         return f"{ctx.indent}return;"
+    # ignore return stmt (inner in Fallback wrapper)
+    elif isinstance(node.parent.body[0], FallbackStart):
+        return
     return f"{ctx.indent}return {ctx.prv};"
 
 
@@ -951,6 +982,7 @@ def pre_expr_fallback_end(node: FallbackEnd, ctx: ConverterContext):
     val = _js_literal(node.value)
     ob, cb = "{", "}"
     return [
+        f"{ctx.indent}return {ctx.prv};",
         f"{ctx.indent}{cb} catch (e) {ob}",
         f"{ctx.indent}{ctx.indent_char}return {val};",
         f"{ctx.indent}{cb}",
@@ -1295,7 +1327,9 @@ def pre_expr_pred_lt(node: PredLt, ctx: ConverterContext):
 @JS_CONVERTER(PredRange)
 def pre_expr_pred_range(node: PredRange, ctx: ConverterContext):
     target = _pred_target(node, ctx)
-    return _and(f"{node.start} < {target}.length && {target}.length < {node.end}", ctx)
+    return _and(
+        f"{node.start} < {target}.length && {target}.length < {node.end}", ctx
+    )
 
 
 @JS_CONVERTER(PredRe)
