@@ -88,7 +88,7 @@ result: SimpleType = parser.parse()
 # {'title': 'Example Page'}
 
 # IDE autocomplete works!
-print(result['title'])  # ✅ Type-checked
+print(result['title'])  # ✅ Type-checked, IDE show compleations
 ```
 
 **Generated types:**
