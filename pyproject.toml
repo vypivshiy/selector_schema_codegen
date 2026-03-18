@@ -1,6 +1,6 @@
 [project]
 name = "ssc_codegen"
-version = "0.16.0"
+version = "0.17.0a"
 description = "Python-dsl code converter to html parser for web scraping "
 readme = "README.md"
 requires-python = ">=3.10"
@@ -16,10 +16,8 @@ dependencies = [
     # https://github.com/fastapi/typer/discussions/1215
     # https://github.com/fastapi/typer/pull/1145
     "click<8.2.0",
-    "ast-grep-cli>=0.38.1",
     "tinycss2>=1.4.0",
     "websockets>=16.0",
-    "ckdl>=1.0",
     "tree-sitter>=0.25.2",
 ]
 
@@ -45,7 +43,7 @@ Examples = "https://github.com/vypivshiy/selector_schema_codegen/examples"
 
 
 [project.scripts]
-ssc-gen = 'ssc_codegen.cli.main:main'
+ssc-gen = 'ssc_codegen.kdl.main:main'
 
 [build-system]
 requires = ["hatchling"]
@@ -56,20 +54,18 @@ include = [
   "ssc_codegen/*",
 ]
 
+[tool.hatch.build.targets.wheel]
+packages = ["ssc_codegen"]
+
 [dependency-groups]
 dev = [
+    "bs4>=0.0.2",
     "coverage>=7.6.12",
     "httpx>=0.28.1",
+    "hypothesis>=6.151.9",
     "mypy>=1.14.1",
-    "parsel>=1.10.0",
     "pytest>=8.3.4",
     "ruff>=0.9.3",
-    "selectolax>=0.3.27",
-]
-# python generated code tests
-tests = [
-    "bs4>=0.0.2",
-    "parsel>=1.10.0",
     "selectolax>=0.3.27",
 ]
 
