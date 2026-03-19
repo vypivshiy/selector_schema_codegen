@@ -189,11 +189,20 @@ class TestStringOps:
         assert no_errors(field('css ".x"', "text", op))
 
     @pytest.mark.parametrize("op", [
-        "normalize-space", "lower", "upper", "trim", "ltrim", "rtrim", "unescape",
+        "normalize-space", "lower", "upper", "unescape",
     ])
     def test_no_args_ops_reject_args(self, op: str):
         msgs = lint(field('css ".x"', "text", f'{op} "bad"'))
         assert any("does not accept arguments" in m for m in msgs)
+
+    @pytest.mark.parametrize("op", ["trim", "ltrim", "rtrim"])
+    def test_trim_accepts_one_arg(self, op: str):
+        assert no_errors(field('css ".x"', "text", f'{op} "chars"'))
+
+    @pytest.mark.parametrize("op", ["trim", "ltrim", "rtrim"])
+    def test_trim_rejects_two_args(self, op: str):
+        msgs = lint(field('css ".x"', "text", f'{op} "a" "b"'))
+        assert any("at most 1 argument" in m for m in msgs)
 
     def test_fmt_valid(self):
         # In KDL {{}} is the escaped literal {} — this is what the rule checks for
@@ -251,6 +260,8 @@ class TestStringOps:
         # Templates without {{}} → linter error ("missing the '{{}}' placeholder")
         safe = template.replace('"', "").replace("\\", "").replace("\n", "").replace("{", "").replace("}", "")
         assume(safe.strip() != "" and "{" not in safe and "}" not in safe)
+        # fmt rule skips all-uppercase strings (treated as define/constant refs)
+        assume(not safe.isupper())
         src = field('css ".x"', "text", f'fmt "{safe}"')
         msgs = lint(src)
         assert any("missing the '{{}}' placeholder" in m for m in msgs)
@@ -286,6 +297,7 @@ class TestRegexOps:
 
     def test_re_all_no_args_error(self):
         msgs = lint(field('css ".x"', "text", "re-all"))
+        print
         assert any("requires exactly 1" in m for m in msgs)
 
     def test_re_sub_valid(self):
