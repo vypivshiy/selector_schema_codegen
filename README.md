@@ -5,7 +5,7 @@ Experimental PoC implementation of a code generator based on KDL2.0 syntax DSL.
 ## install
 
 ```
-uv tool install # todo: git+ URL
+uv tool install git+https://github.com/vypivshiy/selector_schema_codegen@features-kdl
 ```
 
 ## run
@@ -15,7 +15,7 @@ generate code
 ssc-gen generate examples/ -t js-pure -o .
 ```
 
-lint syntax
+lint
 ```
 ssc-gen check examples/
 ```
@@ -26,4 +26,9 @@ see [docs](docs) and [examples](examples) how to use syntax
 
 ## LLM generate dsl config (experimental, not ready)
 
+### prompt
+
+use [SYSTEM_PROMPT](SYSTEM_PROMPT.md) for use in API pipelines or chats. before generate, call `ssc-gen check [FILES...] -f json` liner and send errors output if exists
+
+### skill
 use [kdl-schema-dsl](.agents/skills/kdl-schema-dsl) for generate config
