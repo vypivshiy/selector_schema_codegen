@@ -301,6 +301,170 @@ def check(
         typer.echo("[]")
 
 
+class _PyTarget(str, enum.Enum):
+    """Python-only targets for the run command."""
+
+    PY_BS4 = "py-bs4"
+    PY_LXML = "py-lxml"
+    PY_PARSEL = "py-parsel"
+    PY_SLAX = "py-slax"
+
+
+@app.command()
+def run(
+    schema: Annotated[
+        str,
+        typer.Argument(
+            help="Schema target in format 'path/to/schema.kdl:StructName'.",
+        ),
+    ],
+    target: Annotated[
+        _PyTarget,
+        typer.Option(
+            "--target",
+            "-t",
+            help="Target library for execution.",
+            case_sensitive=False,
+        ),
+    ] = _PyTarget.PY_BS4,
+    input_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--input",
+            "-i",
+            help="HTML input file. If omitted, reads from stdin.",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+        ),
+    ] = None,
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            "-v",
+            help="Print generated code to stderr and enable DEBUG logging.",
+        ),
+    ] = False,
+    css_to_xpath: Annotated[
+        bool,
+        typer.Option(
+            "--css-to-xpath",
+            help="Convert CSS selectors to XPath before execution.",
+        ),
+    ] = False,
+) -> None:
+    """Run a KDL schema struct against HTML input and output JSON.
+
+    \b
+    Examples:
+        cat page.html | ssc-kdl run examples/booksToScrape.kdl:MainCatalogue
+        ssc-kdl run schema.kdl:Product -i page.html
+        ssc-kdl run schema.kdl:Product -t py-lxml < page.html
+    """
+    import json
+    import sys
+
+    from ssc_codegen.kdl import parse_ast
+    from ssc_codegen.kdl.ast import Struct
+    from ssc_codegen.kdl.converters.helpers import to_pascal_case
+
+    if verbose:
+        setup_debug_logging()
+
+    # Parse schema:StructName
+    if ":" not in schema:
+        typer.echo(
+            "ERROR: schema argument must be in format 'path/to/schema.kdl:StructName'",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    file_part, struct_name = schema.rsplit(":", 1)
+    kdl_path = Path(file_part)
+    if not kdl_path.is_file():
+        typer.echo(f"ERROR: file not found: {kdl_path}", err=True)
+        raise typer.Exit(code=1)
+
+    # Build AST
+    try:
+        module_ast = parse_ast(path=str(kdl_path), css_to_xpath=css_to_xpath)
+    except Exception as exc:
+        if verbose:
+            typer.echo(traceback.format_exc(), err=True)
+        else:
+            typer.echo(f"ERROR: failed to parse {kdl_path}: {exc}", err=True)
+        raise typer.Exit(code=1)
+
+    # Verify struct exists
+    structs = [n for n in module_ast.body if isinstance(n, Struct)]
+    struct_names = [s.name for s in structs]
+    if struct_name not in struct_names:
+        typer.echo(
+            f"ERROR: struct '{struct_name}' not found in {kdl_path}. "
+            f"Available: {', '.join(struct_names)}",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    class_name = to_pascal_case(struct_name)
+
+    # Generate code
+    converter = _get_converter(Target(target.value))
+    code = converter.convert(module_ast)
+
+    if verbose:
+        typer.echo("--- generated code ---", err=True)
+        typer.echo(code, err=True)
+        typer.echo("--- end generated code ---", err=True)
+
+    # Read HTML
+    if input_file is not None:
+        html = input_file.read_text(encoding="utf-8")
+    else:
+        if sys.stdin.isatty():
+            typer.echo(
+                "Reading HTML from stdin (Ctrl+D to end, or use -i <file>)...",
+                err=True,
+            )
+        html = sys.stdin.read()
+
+    if not html.strip():
+        typer.echo("ERROR: empty HTML input", err=True)
+        raise typer.Exit(code=1)
+
+    # Execute generated code
+    namespace: dict = {}
+    try:
+        exec(code, namespace)  # noqa: S102
+    except Exception as exc:
+        if verbose:
+            typer.echo(traceback.format_exc(), err=True)
+        else:
+            typer.echo(f"ERROR: failed to execute generated code: {exc}", err=True)
+        raise typer.Exit(code=1)
+
+    cls = namespace.get(class_name)
+    if cls is None:
+        typer.echo(
+            f"ERROR: class '{class_name}' not found in generated code.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    try:
+        result = cls(html).parse()
+    except Exception as exc:
+        if verbose:
+            typer.echo(traceback.format_exc(), err=True)
+        else:
+            typer.echo(f"ERROR: parsing failed: {exc}", err=True)
+        raise typer.Exit(code=1)
+
+    typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+
 def main() -> None:
     app()
 
