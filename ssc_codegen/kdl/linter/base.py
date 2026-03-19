@@ -184,6 +184,9 @@ class LintContext:
     def has_single_line_op(self, node: Node, op_name: str) -> bool:
         return self.navigator.has_single_line_op(node, op_name)
 
+    def get_bare_op_container(self, node: Node) -> Node | None:
+        return self.navigator.get_bare_op_container(node)
+
     # ── Metadata shortcuts ─────────────────────────────────────────────────────
 
     @property
@@ -657,6 +660,10 @@ class AstLinter:
             case _:
                 return current_ctx
 
+    # Nodes whose children block contains data (not pipeline ops)
+    # and should not be walked as operations.
+    _DATA_CHILDREN_NODES: frozenset[str] = frozenset({"repl"})
+
     def _walk(
         self,
         node: Node,
@@ -682,9 +689,24 @@ class AstLinter:
         # Определить контекст для детей
         next_ctx = self._determine_next_context(node, name, walk_ctx)
 
-        # Обработать детей
-        for child in ctx.get_children_nodes(node):
-            self._walk(child, ctx, next_ctx)
+        # Skip walking children of data-only nodes (e.g. repl { "old" "new" })
+        if name not in self._DATA_CHILDREN_NODES:
+            # Обработать wrapped children (nodes terminated by `;` or newline)
+            for child in ctx.get_children_nodes(node):
+                self._walk(child, ctx, next_ctx)
+
+            # Process bare trailing op (last op without `;` in a children block).
+            # In KDL 2.0, tree-sitter represents this as bare identifier + node_field
+            # directly inside node_children, not wrapped in a `node` element.
+            bare_container = ctx.get_bare_op_container(node)
+            if bare_container is not None and next_ctx == WalkContext.PIPELINE:
+                bare_name = ctx.node_name(bare_container)
+                if bare_name:
+                    ctx.push(bare_name)
+                    self._apply_rules_for_context(
+                        bare_name, bare_container, ctx, next_ctx
+                    )
+                    ctx.pop()
 
         ctx.pop()
 

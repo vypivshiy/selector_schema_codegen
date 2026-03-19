@@ -85,6 +85,26 @@ class NodeNavigator:
                 )
         return False
 
+    def get_bare_op_container(self, node: Node) -> Node | None:
+        """
+        Return the node_children element if it contains a bare (unwrapped) trailing op.
+
+        In KDL 2.0, the last node in a children block without a `;` terminator
+        is represented by tree-sitter as bare identifier + node_field children
+        directly inside node_children, NOT wrapped in a `node` element.
+
+        Returns the node_children node itself (usable as a virtual node for
+        node_name/get_args), or None if no bare op exists.
+        """
+        for child in node.children:
+            if child.type == "node_children":
+                has_bare_ident = any(
+                    c.type == "identifier" for c in child.children
+                )
+                if has_bare_ident:
+                    return child
+        return None
+
     # ── private helpers ────────────────────────────────────────────────────────
 
     def _extract_raw_arg(self, node_field: Node) -> RawArg | None:

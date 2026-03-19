@@ -286,22 +286,10 @@ def _check_reserved_field(
         return
 
     ops = ctx.get_children_nodes(node)
+    bare_container = ctx.get_bare_op_container(node)
+    has_bare_op = bare_container is not None
 
-    # Check for single-line operations (e.g., { css-all ".item" } or { attr "name" })
-    # These appear as identifiers directly in node_children, not as wrapped nodes
-    has_single_line = False
-    if not ops:
-        # Check if there's at least one identifier (operation) in the node_children
-        for child in node.children:
-            if child.type == "node_children":
-                identifiers = [
-                    c for c in child.children if c.type == "identifier"
-                ]
-                if identifiers:
-                    has_single_line = True
-                break
-
-    if not ops and not has_single_line:
+    if not ops and not has_bare_op:
         ctx.error(
             node,
             ErrorCode.MISSING_ARGUMENT,
@@ -309,11 +297,10 @@ def _check_reserved_field(
             hint=f'example: {field_name} {{ css ".item" }}',
         )
     else:
-        # For @key and @value in dict, allow 'attr' and other selector operations
-        # For @split-doc, allow css-all and other selector operations
-        # Skip type checking for single-line ops (they're not in standard node format)
-        if ops:
-            check_pipeline_types(ops, ctx, start_type=VT.DOCUMENT)
+        all_ops = list(ops)
+        if has_bare_op and bare_container is not None:
+            all_ops.append(bare_container)
+        check_pipeline_types(all_ops, ctx, start_type=VT.DOCUMENT)
 
 
 # ── regular field checks ───────────────────────────────────────────────────────
@@ -338,7 +325,11 @@ def _check_regular_field(
         ctx.pop()
         return
 
-    if not ops:
+    # Check for bare trailing op (KDL 2.0: last op without `;` is not wrapped in node)
+    bare_container = ctx.get_bare_op_container(node)
+    has_bare_op = bare_container is not None
+
+    if not ops and not has_bare_op:
         ctx.error(
             node,
             ErrorCode.MISSING_ARGUMENT,
@@ -348,6 +339,13 @@ def _check_regular_field(
         ctx.pop()
         return
 
+    # Include bare trailing op in the pipeline for type checking.
+    # In KDL 2.0, the last op without `;` is a bare identifier in node_children
+    # and node_children itself works as a virtual node for ctx.node_name/get_args.
+    all_ops = list(ops)
+    if has_bare_op and bare_container is not None:
+        all_ops.append(bare_container)
+
     # For table fields the pipeline starts with 'match { ... }' which
     # accepts DOCUMENT and returns STRING (the value cell from @value).
     # So start_type is always DOCUMENT here — match handles the transition.
@@ -355,18 +353,18 @@ def _check_regular_field(
     start = VT.DOCUMENT
     if struct_type == "table":
         # table fields MUST start with match { ... }
-        if not ops or ctx.node_name(ops[0]) != "match":
+        if not all_ops or ctx.node_name(all_ops[0]) != "match":
             ctx.error(
                 node,
                 ErrorCode.MISSING_ARGUMENT,
                 message=f"table field '{field_name}' must start with 'match {{ ... }}'",
                 hint=f'example: {field_name} {{ match {{ eq "value" }} }}',
             )
-    elif ops and ctx.node_name(ops[0]) == "self":
-        init_name = ctx.get_arg(ops[0], 0)
+    elif all_ops and ctx.node_name(all_ops[0]) == "self":
+        init_name = ctx.get_arg(all_ops[0], 0)
         if init_name and init_name in ctx.inferred_define_types:
             _, start = ctx.inferred_define_types[init_name]
-    check_pipeline_types(ops, ctx, start_type=start)
+    check_pipeline_types(all_ops, ctx, start_type=start)
     ctx.pop()
 
 
