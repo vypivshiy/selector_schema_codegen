@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+import re
+
 from tree_sitter import Node
 
 from ssc_codegen.kdl.linter.types import RawArg
+
+# KDL 2.0 raw string: #"content"#, ##"content"##, etc.
+# Tree-sitter KDL grammar may not recognize these natively,
+# so they appear as identifier > string nodes.
+_RAW_STRING_RE = re.compile(r'^(#+)"(.*?)"\1$', re.DOTALL)
 
 
 class NodeNavigator:
@@ -134,8 +141,19 @@ class NodeNavigator:
                 continue
 
             if inner.type == "identifier":
+                text = inner.text.decode()
+                # KDL 2.0 raw strings (#"..."#) may be parsed as
+                # identifier > string by tree-sitter grammars without
+                # native raw_string support.
+                m = _RAW_STRING_RE.match(text)
+                if m:
+                    return RawArg(
+                        value=m.group(2),
+                        is_identifier=False,
+                        node=inner,
+                    )
                 return RawArg(
-                    value=inner.text.decode(),
+                    value=text,
                     is_identifier=True,
                     node=inner,
                 )
