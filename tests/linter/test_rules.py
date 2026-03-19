@@ -125,6 +125,19 @@ class TestCssSelector:
         assert not any("requires exactly 1" in m for m in msgs)
 
 
+    @pytest.mark.parametrize("op", ["css", "css-all", "css-remove"])
+    def test_invalid_css_selector(self, op: str):
+        msgs = lint(field(f'{op} "[[[invalid"'))
+        assert any("invalid CSS selector" in m for m in msgs)
+
+    @pytest.mark.parametrize("selector", [
+        ".my-class", "#id", "div > span", "a[href]",
+        ".a .b .c", "div:nth-child(2)", "*",
+    ])
+    def test_valid_css_selectors(self, selector: str):
+        assert no_errors(field(f'css "{selector}"'))
+
+
 class TestXpathSelector:
     def test_valid_xpath(self):
         assert no_errors(field('xpath "//div"'))
@@ -143,6 +156,17 @@ class TestXpathSelector:
     def test_xpath_too_many_args_error(self):
         msgs = lint(field('xpath "//a" "//b"'))
         assert any("requires exactly 1" in m for m in msgs)
+
+    @pytest.mark.parametrize("op", ["xpath", "xpath-all", "xpath-remove"])
+    def test_invalid_xpath_expression(self, op: str):
+        msgs = lint(field(f'{op} "//div[broken"'))
+        assert any("invalid XPath expression" in m for m in msgs)
+
+    @pytest.mark.parametrize("expr", [
+        "//div", "//a[@href]", "//div[@class='item']/a", "//text()", "//*",
+    ])
+    def test_valid_xpath_expressions(self, expr: str):
+        assert no_errors(field(f'xpath "{expr}"'))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

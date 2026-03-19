@@ -114,6 +114,25 @@ class NodeNavigator:
 
     # ── private helpers ────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _extract_string_content(string_node: Node) -> str:
+        """
+        Reconstruct the full string value from a 'string' CST node,
+        concatenating string_fragment and escape children.
+        """
+        _ESCAPE_MAP = {
+            '\\"': '"', "\\\\": "\\", "\\n": "\n", "\\r": "\r",
+            "\\t": "\t", "\\b": "\b", "\\f": "\f", "\\/": "/",
+        }
+        parts: list[str] = []
+        for child in string_node.children:
+            if child.type == "string_fragment":
+                parts.append(child.text.decode())
+            elif child.type == "escape":
+                esc = child.text.decode()
+                parts.append(_ESCAPE_MAP.get(esc, esc))
+        return "".join(parts)
+
     def _extract_raw_arg(self, node_field: Node) -> RawArg | None:
         """
         Extract RawArg from a node_field.
@@ -141,6 +160,17 @@ class NodeNavigator:
                 continue
 
             if inner.type == "identifier":
+                # The grammar wraps quoted strings as identifier > string.
+                # Quoted strings have string_fragment children; raw strings
+                # (#"..."#) have a string child with 0 children — skip those.
+                for sub in inner.children:
+                    if sub.type == "string" and sub.child_count > 0:
+                        return RawArg(
+                            value=self._extract_string_content(sub),
+                            is_identifier=False,
+                            node=inner,
+                        )
+
                 text = inner.text.decode()
                 # KDL 2.0 raw strings (#"..."#) may be parsed as
                 # identifier > string by tree-sitter grammars without
@@ -152,19 +182,19 @@ class NodeNavigator:
                         is_identifier=False,
                         node=inner,
                     )
+                # True bare identifier (unquoted)
                 return RawArg(
                     value=text,
                     is_identifier=True,
                     node=inner,
                 )
             if inner.type == "string":
-                # quoted string — extract content from string_fragment
-                frag = ""
-                for child in inner.children:
-                    if child.type == "string_fragment":
-                        frag = child.text.decode()
-                        break
-                return RawArg(value=frag, is_identifier=False, node=inner)
+                # quoted string — extract full content with escapes
+                return RawArg(
+                    value=self._extract_string_content(inner),
+                    is_identifier=False,
+                    node=inner,
+                )
 
             if inner.type == "raw_string":
                 # raw string #"..."# — extract content
@@ -190,10 +220,7 @@ class NodeNavigator:
     def _extract_value(self, node: Node) -> str:
         """Recursively extract text value (used for props and non-raw-arg contexts)."""
         if node.type == "string":
-            for child in node.children:
-                if child.type == "string_fragment":
-                    return child.text.decode()
-            return ""
+            return self._extract_string_content(node)
         if node.type == "raw_string":
             for child in node.children:
                 if child.type == "raw_string_content":

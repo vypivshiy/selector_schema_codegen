@@ -162,19 +162,57 @@ def _require_int_args(node: Node, ctx: LintContext, args: list[str]) -> bool:
 # ── selectors ──────────────────────────────────────────────────────────────────
 
 
+def _validate_css_selector(node: Node, ctx: LintContext, selector: str) -> bool:
+    """Validate CSS selector syntax via soupsieve. Returns True if valid."""
+    try:
+        import soupsieve
+        soupsieve.compile(selector)
+        return True
+    except Exception as e:
+        msg = str(e).split("\n")[0] if str(e) else "invalid selector"
+        ctx.error(
+            node,
+            ErrorCode.INVALID_ARGUMENT,
+            message=f"invalid CSS selector: {msg}",
+            hint='check selector syntax',
+        )
+        return False
+
+
+def _validate_xpath(node: Node, ctx: LintContext, expr: str) -> bool:
+    """Validate XPath expression syntax via lxml. Returns True if valid."""
+    try:
+        from lxml import etree
+        etree.XPath(expr)
+        return True
+    except Exception as e:
+        msg = str(e).split("\n")[0] if str(e) else "invalid expression"
+        ctx.error(
+            node,
+            ErrorCode.INVALID_ARGUMENT,
+            message=f"invalid XPath expression: {msg}",
+            hint='check XPath syntax',
+        )
+        return False
+
+
 @LINTER.rule("css", "css-all", "css-remove")
 def rule_css(node: Node, ctx: LintContext) -> None:
     name = ctx.node_name(node)
     args = _require_args_count(
         node, ctx, exact=1, example=f'{name} ".my-class"'
     )
-    if args and args[0].strip() == "":
+    if not args:
+        return
+    if args[0].strip() == "":
         ctx.error(
             node,
             ErrorCode.MISSING_ARGUMENT,
             message=f"'{name}' CSS selector must not be empty",
             hint=f'example: {name} ".my-class"',
         )
+        return
+    _validate_css_selector(node, ctx, args[0])
 
 
 @LINTER.rule("xpath", "xpath-all", "xpath-remove")
@@ -183,13 +221,17 @@ def rule_xpath(node: Node, ctx: LintContext) -> None:
     args = _require_args_count(
         node, ctx, exact=1, example=f"{name} \"//div[@class='item']\""
     )
-    if args and args[0].strip() == "":
+    if not args:
+        return
+    if args[0].strip() == "":
         ctx.error(
             node,
             ErrorCode.MISSING_ARGUMENT,
             message=f"'{name}' XPath expression must not be empty",
             hint=f'example: {name} "//div"',
         )
+        return
+    _validate_xpath(node, ctx, args[0])
 
 
 # ── extract ────────────────────────────────────────────────────────────────────
