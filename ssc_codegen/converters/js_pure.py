@@ -335,7 +335,7 @@ def pre_json_struct(node: JsonDef, _: ConverterContext):
 
 @JS_CONVERTER(JsonDefField)
 def pre_json_field(node: JsonDefField, ctx: ConverterContext):
-    name = to_camel_case(node.name)
+    name = node.alias if node.alias else node.name
     type_ = JS_TYPES.get(node.ret, "?")
     if node.ret == VariableType.JSON and node.ref_name:
         type_name = to_pascal_case(node.ref_name)
