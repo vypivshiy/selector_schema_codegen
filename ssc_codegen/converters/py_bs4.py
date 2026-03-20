@@ -962,19 +962,22 @@ def post_expr_match(node: Match, ctx: ConverterContext):
 
 @PY_BASE_CONVERTER(LogicAnd, post_callback=lambda _, ctx: ctx.indent + ")")
 def pre_expr_logic_and(node: LogicAnd, ctx: ConverterContext):
-    # and ({CONDS...})
+    if ctx.index == 0:
+        return f"{ctx.indent}("
     return f"{ctx.indent}and ("
 
 
 @PY_BASE_CONVERTER(LogicOr, post_callback=lambda _, ctx: ctx.indent + ")")
 def pre_expr_logic_or(node: LogicOr, ctx: ConverterContext):
-    # or ({CONDS...})
+    if ctx.index == 0:
+        return f"{ctx.indent}("
     return f"{ctx.indent}or ("
 
 
 @PY_BASE_CONVERTER(LogicNot, post_callback=lambda _, ctx: ctx.indent + ")")
 def pre_expr_logic_not(node: LogicNot, ctx: ConverterContext):
-    # and not ({CONDS...})
+    if ctx.index == 0:
+        return f"{ctx.indent}not ("
     return f"{ctx.indent}and not ("
 
 
