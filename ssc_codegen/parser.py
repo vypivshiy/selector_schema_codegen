@@ -451,6 +451,8 @@ class AstParser:
                         ref_name = ref_name.removeprefix("(array)")
                         is_array = True
                     ret_type = VariableType.JSON
+            # second argument is optional alias (original JSON key)
+            alias = str(node.args[1]) if len(node.args) > 1 else ""
             jf = JsonDefField(
                 parent=parent,
                 ret=ret_type,
@@ -458,14 +460,16 @@ class AstParser:
                 is_optional=is_optional,
                 is_array=is_array,
                 ref_name=ref_name,
+                alias=alias,
             )
             logger.debug(
-                "  json field %r: ret=%s, optional=%s, array=%s%s",
+                "  json field %r: ret=%s, optional=%s, array=%s%s%s",
                 name,
                 ret_type,
                 is_optional,
                 is_array,
                 f", ref={ref_name!r}" if ref_name else "",
+                f", alias={alias!r}" if alias else "",
             )
             parent.body.append(jf)
 
@@ -1694,10 +1698,12 @@ def _resolve_jsonify_type(
             current_is_array = False
             continue
 
-        # Try to find field in current JsonDef
+        # Try to find field in current JsonDef (match name or alias)
         field = None
         for f in current_def.body:
-            if isinstance(f, JsonDefField) and f.name == segment:
+            if isinstance(f, JsonDefField) and (
+                f.name == segment or f.alias == segment
+            ):
                 field = f
                 break
 
