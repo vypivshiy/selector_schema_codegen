@@ -465,6 +465,127 @@ def run(
     typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
 
 
+@app.command()
+def health(
+    schema: Annotated[
+        str,
+        typer.Argument(
+            help="Schema target in format 'path/to/schema.kdl:StructName'.",
+        ),
+    ],
+    input_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--input",
+            "-i",
+            help="HTML input file. If omitted, reads from stdin.",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+        ),
+    ] = None,
+    fmt: Annotated[
+        str,
+        typer.Option(
+            "--format",
+            "-f",
+            help="Output format: 'text' (human-readable) or 'json' (for LLM pipelines).",
+        ),
+    ] = "text",
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            "-v",
+            help="Enable DEBUG logging.",
+        ),
+    ] = False,
+    css_to_xpath: Annotated[
+        bool,
+        typer.Option(
+            "--css-to-xpath",
+            help="Convert CSS selectors to XPath before checking.",
+        ),
+    ] = False,
+) -> None:
+    """Check that all selectors in a struct match elements in the given HTML.
+
+    \b
+    Examples:
+        cat page.html | ssc-kdl health examples/booksToScrape.kdl:MainCatalogue
+        ssc-kdl health schema.kdl:Product -i page.html
+        ssc-kdl health schema.kdl:Product -f json < page.html
+    """
+    import sys
+
+    from ssc_codegen.kdl import parse_ast
+    from ssc_codegen.kdl.ast import Struct
+    from ssc_codegen.kdl.health import check_struct_health
+
+    if verbose:
+        setup_debug_logging()
+
+    # Parse schema:StructName
+    if ":" not in schema:
+        typer.echo(
+            "ERROR: schema argument must be in format 'path/to/schema.kdl:StructName'",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    file_part, struct_name = schema.rsplit(":", 1)
+    kdl_path = Path(file_part)
+    if not kdl_path.is_file():
+        typer.echo(f"ERROR: file not found: {kdl_path}", err=True)
+        raise typer.Exit(code=1)
+
+    # Build AST
+    try:
+        module_ast = parse_ast(path=str(kdl_path), css_to_xpath=css_to_xpath)
+    except Exception as exc:
+        if verbose:
+            typer.echo(traceback.format_exc(), err=True)
+        else:
+            typer.echo(f"ERROR: failed to parse {kdl_path}: {exc}", err=True)
+        raise typer.Exit(code=1)
+
+    # Find struct
+    structs = [n for n in module_ast.body if isinstance(n, Struct)]
+    struct_names = [s.name for s in structs]
+    if struct_name not in struct_names:
+        typer.echo(
+            f"ERROR: struct '{struct_name}' not found in {kdl_path}. "
+            f"Available: {', '.join(struct_names)}",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    target_struct = next(s for s in structs if s.name == struct_name)
+
+    # Read HTML
+    if input_file is not None:
+        html = input_file.read_text(encoding="utf-8")
+    else:
+        if sys.stdin.isatty():
+            typer.echo(
+                "Reading HTML from stdin (Ctrl+D to end, or use -i <file>)...",
+                err=True,
+            )
+        html = sys.stdin.read()
+
+    if not html.strip():
+        typer.echo("ERROR: empty HTML input", err=True)
+        raise typer.Exit(code=1)
+
+    # Run health check
+    result = check_struct_health(target_struct, html)
+    typer.echo(result.format(fmt=fmt))
+
+    if result.has_failures():
+        raise typer.Exit(code=1)
+
+
 def main() -> None:
     app()
 
