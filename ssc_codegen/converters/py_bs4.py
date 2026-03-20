@@ -236,15 +236,18 @@ def pre_utilities(node: Utilities, _: ConverterContext):
     ]
 
 
-@PY_BASE_CONVERTER(JsonDef)
+@PY_BASE_CONVERTER(JsonDef, post_callback="})")
 def pre_json_struct(node: JsonDef, _: ConverterContext):
     name = to_pascal_case(node.name)
-    return [f"class {name}Json(TypedDict):"]
+    return [f'{name}Json = TypedDict("{name}Json", {{']
 
 
 @PY_BASE_CONVERTER(JsonDefField)
 def pre_json_field(node: JsonDefField, ctx: ConverterContext):
-    name = to_snake_case(node.name)
+    if node.alias:
+        name = node.alias
+    else:
+        name = node.name
     type_ = PY_TYPES.get(node.ret, "Any")
     if node.ret == VariableType.JSON and node.ref_name:
         type_name = to_pascal_case(node.ref_name)
@@ -252,7 +255,7 @@ def pre_json_field(node: JsonDefField, ctx: ConverterContext):
         if node.is_array:
             type_ = f"List[{type_}]"
     # VariableType.NESTED not used in Json node context
-    return [f"{ctx.indent}{name}: {type_}"]
+    return [f"{name!r}: {type_}, "]
 
 
 @PY_BASE_CONVERTER(TypeDef)
