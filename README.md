@@ -10,17 +10,19 @@ uv tool install git+https://github.com/vypivshiy/selector_schema_codegen@feature
 
 ## usage
 
-generate code
+### generate modules
+
 ```
 ssc-gen generate examples/ -t js-pure -o .
 ```
 
-lint
+### lint syntax
+
 ```
 ssc-gen check examples/
 ```
 
-test schema by html output
+### test schema by html output
 
 from file:
 ```
@@ -31,6 +33,19 @@ from stdin:
 ```
 curl https://books.toscrape.com/ | python main.py run .\examples\booksToScrape.kdl:MainCatalogue -t py-bs4
 ```
+
+### test selectors:
+
+from file
+```
+python main.py health .\examples\booksToScrape.kdl:MainCatalogue -i index.html
+```
+
+from stdin
+```
+curl https://books.toscrape.com/catalogue/page-2.html | python main.py health .\examples\booksToScrape.kdl:MainCatalogue
+```
+
 
 ## syntax
 
