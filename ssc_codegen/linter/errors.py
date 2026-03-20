@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from tree_sitter import Node
 
-from ssc_codegen.kdl.linter.types import ErrorCode, LintError
+from ssc_codegen.linter.types import ErrorCode, LintError
 
 
 class ErrorCollector:

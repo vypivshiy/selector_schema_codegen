@@ -13,8 +13,8 @@ import re
 
 from tree_sitter import Node, Tree
 
-from ssc_codegen.kdl.linter._kdl_lang import KDL_PARSER
-from ssc_codegen.kdl.linter.types import (
+from ssc_codegen.linter._kdl_lang import KDL_PARSER
+from ssc_codegen.linter.types import (
     RawArg,
     DefineKind,
     DefineInfo,
@@ -51,7 +51,7 @@ class LintResult:
 
     def format(self, style: Literal["text", "json"] = "text", **kwargs) -> str:
         """Форматирование вывода"""
-        from ssc_codegen.kdl.linter.format_errors import format_errors
+        from ssc_codegen.linter.format_errors import format_errors
 
         if style == "json":
             import json
@@ -82,10 +82,10 @@ class LintContext:
     """Облегчённый контекст, координирует компоненты"""
 
     def __init__(self, src: bytes):
-        from ssc_codegen.kdl.linter.navigation import NodeNavigator
-        from ssc_codegen.kdl.linter.errors import ErrorCollector
-        from ssc_codegen.kdl.linter.path import PathTracker
-        from ssc_codegen.kdl.linter.metadata import ModuleMetadata
+        from ssc_codegen.linter.navigation import NodeNavigator
+        from ssc_codegen.linter.errors import ErrorCollector
+        from ssc_codegen.linter.path import PathTracker
+        from ssc_codegen.linter.metadata import ModuleMetadata
 
         self.navigator = NodeNavigator(src)
         self.collector = ErrorCollector()

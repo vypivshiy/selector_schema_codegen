@@ -9,12 +9,12 @@ Key differences from bs4:
 - .get() for attributes instead of .get_attribute_list()
 """
 
-from ssc_codegen.kdl.converters.base import ConverterContext
-from ssc_codegen.kdl.converters.helpers import to_snake_case
+from ssc_codegen.converters.base import ConverterContext
+from ssc_codegen.converters.helpers import to_snake_case
 
 # Import all AST nodes (same as bs4)
-from ssc_codegen.kdl.ast import VariableType
-from ssc_codegen.kdl.ast import (
+from ssc_codegen.ast import VariableType
+from ssc_codegen.ast import (
     Imports,
     Utilities,
     Field,
@@ -29,7 +29,7 @@ from ssc_codegen.kdl.ast import (
     TableRow,
 )
 
-from ssc_codegen.kdl.ast import (
+from ssc_codegen.ast import (
     CssSelect,
     CssSelectAll,
     XpathSelect,
@@ -41,7 +41,7 @@ from ssc_codegen.kdl.ast import (
     Raw,
 )
 
-from ssc_codegen.kdl.ast import (
+from ssc_codegen.ast import (
     PredCss,
     PredXpath,
     PredHasAttr,
@@ -57,10 +57,10 @@ from ssc_codegen.kdl.ast import (
     PredTextRe,
 )
 
-from ssc_codegen.kdl.ast import Nested
+from ssc_codegen.ast import Nested
 
 # Import the bs4 converter to inherit from it
-from ssc_codegen.kdl.converters import py_bs4
+from ssc_codegen.converters import py_bs4
 
 # Create new converter that extends bs4 (inherits all handlers)
 PY_LXML_CONVERTER = py_bs4.PY_BASE_CONVERTER.extend()
@@ -174,7 +174,7 @@ def pre_struct_field(node: Field, ctx: ConverterContext):
     ret_type = py_bs4.PY_TYPES.get(node.ret, "Any")
 
     if node.ret == VariableType.JSON:
-        from ssc_codegen.kdl.ast import Jsonify
+        from ssc_codegen.ast import Jsonify
 
         jsonify_node = [i for i in node.body if isinstance(i, Jsonify)][0]
         ret_type = ret_type.format(jsonify_node.schema_name)
@@ -203,7 +203,7 @@ def pre_struct_value(node: Value, ctx: ConverterContext):
     ret_type = py_bs4.PY_TYPES.get(node.ret, "Any")
 
     if node.ret == VariableType.JSON:
-        from ssc_codegen.kdl.ast import Jsonify
+        from ssc_codegen.ast import Jsonify
 
         jsonify_node = [i for i in node.body if isinstance(i, Jsonify)][0]
         ret_type = ret_type.format(jsonify_node.schema_name)

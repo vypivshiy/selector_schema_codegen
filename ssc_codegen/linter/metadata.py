@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from ssc_codegen.kdl.linter.types import DefineInfo, TransformInfo
+from ssc_codegen.linter.types import DefineInfo, TransformInfo
 
 
 @dataclass

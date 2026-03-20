@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from ssc_codegen.kdl.parser import Module, PARSER
+from ssc_codegen.parser import Module, PARSER
 
 _KDL_TEXT_ENCODING = "utf-8-sig"
 
@@ -19,7 +19,7 @@ def parse_ast(
         raise AttributeError("required src or path argument")
     module = PARSER.parse(src)
     if css_to_xpath:
-        from ssc_codegen.kdl.document_utils import convert_css_to_xpath_module
+        from ssc_codegen.document_utils import convert_css_to_xpath_module
 
         convert_css_to_xpath_module(module)
     return module

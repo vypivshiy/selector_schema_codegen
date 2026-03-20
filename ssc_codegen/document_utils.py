@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Iterable
 from typing_extensions import assert_never
 
-from ssc_codegen.kdl.ast import (
+from ssc_codegen.ast import (
     CssSelect,
     CssSelectAll,
     CssRemove,
@@ -13,11 +13,11 @@ from ssc_codegen.kdl.ast import (
     PredCss,
     PredXpath,
 )
-from ssc_codegen.kdl.pseudo_selectors import (
+from ssc_codegen.pseudo_selectors import (
     parse_pseudo_css_query,
     pseudo_action_to_pseudo_css,
 )
-from ssc_codegen.kdl.selector_utils import css_to_xpath
+from ssc_codegen.selector_utils import css_to_xpath
 
 
 def convert_css_to_xpath(

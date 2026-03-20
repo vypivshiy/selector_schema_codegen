@@ -22,8 +22,8 @@ from __future__ import annotations
 
 from tree_sitter import Node
 
-from ssc_codegen.kdl.ast.types import VariableType as VT
-from ssc_codegen.kdl.linter.base import LintContext, DefineKind, ErrorCode
+from ssc_codegen.ast.types import VariableType as VT
+from ssc_codegen.linter.base import LintContext, DefineKind, ErrorCode
 
 
 # ── type-pair table ────────────────────────────────────────────────────────────

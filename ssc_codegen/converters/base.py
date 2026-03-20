@@ -1,11 +1,11 @@
 from dataclasses import dataclass, replace
 from typing import Callable, Type, TYPE_CHECKING
 
-from ssc_codegen.kdl.ast import Node
-from ssc_codegen.kdl.ast import Filter, Assert, Match
-from ssc_codegen.kdl.ast import LogicNot, LogicAnd, LogicOr
-from ssc_codegen.kdl.ast import JsonDef, TypeDef, Struct, Init
-from ssc_codegen.kdl.ast import (
+from ssc_codegen.ast import Node
+from ssc_codegen.ast import Filter, Assert, Match
+from ssc_codegen.ast import LogicNot, LogicAnd, LogicOr
+from ssc_codegen.ast import JsonDef, TypeDef, Struct, Init
+from ssc_codegen.ast import (
     PreValidate,
     Field,
     InitField,
@@ -20,7 +20,7 @@ from ssc_codegen.kdl.ast import (
 )
 
 if TYPE_CHECKING:
-    from ssc_codegen.kdl.ast import Module
+    from ssc_codegen.ast import Module
 
 
 @dataclass

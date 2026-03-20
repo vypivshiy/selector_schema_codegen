@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Literal
 
-from ssc_codegen.kdl.ast import (
+from ssc_codegen.ast import (
     CssSelect,
     CssSelectAll,
     CssRemove,
@@ -24,7 +24,7 @@ from ssc_codegen.kdl.ast import (
     TableMatchKey,
     Struct,
 )
-from ssc_codegen.kdl.ast.base import Node as AstNode
+from ssc_codegen.ast.base import Node as AstNode
 
 
 # selector types that expect exactly one match (or non-None)
@@ -112,7 +112,11 @@ class HealthResult:
                 "fail": "FAIL",
                 "warn": "WARN",
             }[c.status]
-            detail = f"({c.matches} matches)" if c.status != "fail" else "(0 matches)"
+            detail = (
+                f"({c.matches} matches)"
+                if c.status != "fail"
+                else "(0 matches)"
+            )
             if c.message:
                 detail = c.message
             lines.append(
@@ -137,20 +141,28 @@ class HealthResult:
         return header + "\n" + "\n".join(lines)
 
 
-def _collect_selectors(node: AstNode, path_prefix: str) -> list[tuple[str, AstNode]]:
+def _collect_selectors(
+    node: AstNode, path_prefix: str
+) -> list[tuple[str, AstNode]]:
     """Walk AST node tree and collect all selector nodes with their path."""
     results: list[tuple[str, AstNode]] = []
 
     for child in node.body:
-        if isinstance(child, _SINGLE_SELECTORS + _MULTI_SELECTORS + _REMOVE_SELECTORS):
+        if isinstance(
+            child, _SINGLE_SELECTORS + _MULTI_SELECTORS + _REMOVE_SELECTORS
+        ):
             results.append((path_prefix, child))
         elif isinstance(child, (Field, InitField)):
             child_path = f"{path_prefix}.{child.name}"
             results.extend(_collect_selectors(child, child_path))
         elif isinstance(child, SplitDoc):
-            results.extend(_collect_selectors(child, f"{path_prefix}.@split-doc"))
+            results.extend(
+                _collect_selectors(child, f"{path_prefix}.@split-doc")
+            )
         elif isinstance(child, PreValidate):
-            results.extend(_collect_selectors(child, f"{path_prefix}.@pre-validate"))
+            results.extend(
+                _collect_selectors(child, f"{path_prefix}.@pre-validate")
+            )
         elif isinstance(child, Key):
             results.extend(_collect_selectors(child, f"{path_prefix}.@key"))
         elif isinstance(child, Value):
@@ -276,7 +288,9 @@ def check_struct_health(struct: Struct, html: str) -> HealthResult:
                 query=query,
                 matches=count,
                 status=status,
-                message=f"({count} matches)" if status != "fail" else "(0 matches)",
+                message=f"({count} matches)"
+                if status != "fail"
+                else "(0 matches)",
             )
         )
 

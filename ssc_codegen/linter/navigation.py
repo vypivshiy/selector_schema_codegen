@@ -6,7 +6,7 @@ import re
 
 from tree_sitter import Node
 
-from ssc_codegen.kdl.linter.types import RawArg
+from ssc_codegen.linter.types import RawArg
 
 # KDL 2.0 raw string: #"content"#, ##"content"##, etc.
 # Tree-sitter KDL grammar may not recognize these natively,
@@ -121,8 +121,14 @@ class NodeNavigator:
         concatenating string_fragment and escape children.
         """
         _ESCAPE_MAP = {
-            '\\"': '"', "\\\\": "\\", "\\n": "\n", "\\r": "\r",
-            "\\t": "\t", "\\b": "\b", "\\f": "\f", "\\/": "/",
+            '\\"': '"',
+            "\\\\": "\\",
+            "\\n": "\n",
+            "\\r": "\r",
+            "\\t": "\t",
+            "\\b": "\b",
+            "\\f": "\f",
+            "\\/": "/",
         }
         parts: list[str] = []
         for child in string_node.children:

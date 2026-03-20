@@ -33,21 +33,21 @@ from typing import Any, Callable, TypeAlias, Protocol, cast
 
 from tree_sitter import Node as TSNode
 
-from ssc_codegen.kdl._logging import logger
-from ssc_codegen.kdl.ast import Node as AstNode
-from ssc_codegen.kdl.exceptions import (
+from ssc_codegen._logging import logger
+from ssc_codegen.ast import Node as AstNode
+from ssc_codegen.exceptions import (
     ParseError,
     BuildTimeError,
     UnknownNodeError,
 )
-from ssc_codegen.kdl.linter._kdl_lang import KDL_PARSER
-from ssc_codegen.kdl.regex_utils import normalize_regex_pattern
+from ssc_codegen.linter._kdl_lang import KDL_PARSER
+from ssc_codegen.regex_utils import normalize_regex_pattern
 
 # types
-from ssc_codegen.kdl.ast import StructType, VariableType
+from ssc_codegen.ast import StructType, VariableType
 
 # module layer
-from ssc_codegen.kdl.ast import (
+from ssc_codegen.ast import (
     Module,
     Struct,
     TypeDef,
@@ -55,7 +55,7 @@ from ssc_codegen.kdl.ast import (
 )
 
 # stuct layer
-from ssc_codegen.kdl.ast import (
+from ssc_codegen.ast import (
     PreValidate,
     SplitDoc,
     TableConfig,
@@ -71,7 +71,7 @@ from ssc_codegen.kdl.ast import (
 # expressions
 
 # selectors
-from ssc_codegen.kdl.ast import (
+from ssc_codegen.ast import (
     CssSelect,
     CssSelectAll,
     XpathSelect,
@@ -81,10 +81,10 @@ from ssc_codegen.kdl.ast import (
 )
 
 # extract
-from ssc_codegen.kdl.ast import Text, Raw, Attr
+from ssc_codegen.ast import Text, Raw, Attr
 
 # string
-from ssc_codegen.kdl.ast import (
+from ssc_codegen.ast import (
     Trim,
     Ltrim,
     Rtrim,
@@ -103,16 +103,16 @@ from ssc_codegen.kdl.ast import (
 )
 
 # regex
-from ssc_codegen.kdl.ast import Re, ReAll, ReSub
+from ssc_codegen.ast import Re, ReAll, ReSub
 
 # array
-from ssc_codegen.kdl.ast import Index, Slice, Len, Unique
+from ssc_codegen.ast import Index, Slice, Len, Unique
 
 # casts
-from ssc_codegen.kdl.ast import ToInt, ToFloat, ToBool, Jsonify, Nested
+from ssc_codegen.ast import ToInt, ToFloat, ToBool, Jsonify, Nested
 
 # control
-from ssc_codegen.kdl.ast import (
+from ssc_codegen.ast import (
     Self,
     Fallback,
     Return,
@@ -121,13 +121,13 @@ from ssc_codegen.kdl.ast import (
 )
 
 # predicate containers
-from ssc_codegen.kdl.ast import Filter, Assert, Match
+from ssc_codegen.ast import Filter, Assert, Match
 
 # predicate logic
-from ssc_codegen.kdl.ast import LogicOr, LogicAnd, LogicNot
+from ssc_codegen.ast import LogicOr, LogicAnd, LogicNot
 
 # predicate ops
-from ssc_codegen.kdl.ast import (
+from ssc_codegen.ast import (
     PredEq,
     PredNe,
     PredGt,
@@ -161,10 +161,10 @@ from ssc_codegen.kdl.ast import (
 )
 
 # json
-from ssc_codegen.kdl.ast import JsonDef, JsonDefField
+from ssc_codegen.ast import JsonDef, JsonDefField
 
 # transform
-from ssc_codegen.kdl.ast import TransformDef, TransformTarget, TransformCall
+from ssc_codegen.ast import TransformDef, TransformTarget, TransformCall
 
 
 class KdlNode(Protocol):

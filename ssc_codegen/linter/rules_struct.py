@@ -9,11 +9,11 @@ from __future__ import annotations
 
 from tree_sitter import Node
 
-from ssc_codegen.kdl.linter.base import LINTER, LintContext
-from ssc_codegen.kdl.linter.types import ErrorCode, DefineKind
-from ssc_codegen.kdl.linter.type_rules import check_pipeline_types, _parse_vt
-from ssc_codegen.kdl.ast.types import VariableType as VT
-from ssc_codegen.kdl.linter.type_rules import PIPELINE_TYPE_RULES
+from ssc_codegen.linter.base import LINTER, LintContext
+from ssc_codegen.linter.types import ErrorCode, DefineKind
+from ssc_codegen.linter.type_rules import check_pipeline_types, _parse_vt
+from ssc_codegen.ast.types import VariableType as VT
+from ssc_codegen.linter.type_rules import PIPELINE_TYPE_RULES
 
 _VALID_TRANSFORM_TYPES = frozenset(
     {t.name for t in VT if t.name not in ("AUTO", "LIST_AUTO")}
@@ -267,7 +267,7 @@ def _check_reserved_field(
                                     == DefineKind.BLOCK
                                 ):
                                     # Expand the define block and get its operations
-                                    from ssc_codegen.kdl.linter.type_rules import (
+                                    from ssc_codegen.linter.type_rules import (
                                         _get_define_ops,
                                     )
 

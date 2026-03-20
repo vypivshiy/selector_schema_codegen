@@ -1,18 +1,18 @@
 from typing import cast
 
-from ssc_codegen.kdl.converters.base import ConverterContext, BaseConverter
+from ssc_codegen.converters.base import ConverterContext, BaseConverter
 
 # types
-from ssc_codegen.kdl.ast import VariableType, StructType
+from ssc_codegen.ast import VariableType, StructType
 
-from ssc_codegen.kdl.converters.helpers import (
+from ssc_codegen.converters.helpers import (
     to_pascal_case,
     to_snake_case,
     jsonify_path_to_segments,
 )
 
 # module level
-from ssc_codegen.kdl.ast import (
+from ssc_codegen.ast import (
     Docstring,
     Imports,
     Utilities,
@@ -25,7 +25,7 @@ from ssc_codegen.kdl.ast import (
 )
 
 # struct layer
-from ssc_codegen.kdl.ast import (
+from ssc_codegen.ast import (
     Field,
     Init,
     InitField,
@@ -42,7 +42,7 @@ from ssc_codegen.kdl.ast import (
 # expressions layer
 
 # selectors
-from ssc_codegen.kdl.ast import (
+from ssc_codegen.ast import (
     CssSelect,
     CssSelectAll,
     XpathSelect,
@@ -55,7 +55,7 @@ from ssc_codegen.kdl.ast import (
 )
 
 # string
-from ssc_codegen.kdl.ast import (
+from ssc_codegen.ast import (
     Trim,
     Ltrim,
     Rtrim,
@@ -74,19 +74,19 @@ from ssc_codegen.kdl.ast import (
 )
 
 # regex
-from ssc_codegen.kdl.ast import Re, ReAll, ReSub
+from ssc_codegen.ast import Re, ReAll, ReSub
 
 # Array
-from ssc_codegen.kdl.ast import Index, Slice, Len, Unique
+from ssc_codegen.ast import Index, Slice, Len, Unique
 
 # casts
-from ssc_codegen.kdl.ast import ToInt, ToFloat, ToBool, Jsonify, Nested
+from ssc_codegen.ast import ToInt, ToFloat, ToBool, Jsonify, Nested
 
 # controls
-from ssc_codegen.kdl.ast import FallbackStart, FallbackEnd, Self, Return
+from ssc_codegen.ast import FallbackStart, FallbackEnd, Self, Return
 
 # predicates
-from ssc_codegen.kdl.ast import (
+from ssc_codegen.ast import (
     Filter,
     Assert,
     Match,
@@ -96,7 +96,7 @@ from ssc_codegen.kdl.ast import (
 )
 
 # pred exprs
-from ssc_codegen.kdl.ast import (
+from ssc_codegen.ast import (
     PredCss,
     PredContains,
     PredCountEq,
@@ -130,7 +130,7 @@ from ssc_codegen.kdl.ast import (
 )
 
 # transform
-from ssc_codegen.kdl.ast import TransformCall
+from ssc_codegen.ast import TransformCall
 
 
 PY_BASE_CONVERTER = BaseConverter()

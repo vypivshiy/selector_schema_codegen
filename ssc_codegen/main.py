@@ -9,7 +9,7 @@ from typing import Annotated, List
 
 import typer
 
-from ssc_codegen.kdl._logging import logger, setup_debug_logging
+from ssc_codegen._logging import logger, setup_debug_logging
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -37,23 +37,23 @@ _FILE_EXTENSIONS: dict[Target, str] = {
 
 def _get_converter(target: Target):
     if target == Target.PY_BS4:
-        from ssc_codegen.kdl.converters.py_bs4 import PY_BASE_CONVERTER
+        from ssc_codegen.converters.py_bs4 import PY_BASE_CONVERTER
 
         return PY_BASE_CONVERTER
     if target == Target.PY_LXML:
-        from ssc_codegen.kdl.converters.py_lxml import PY_LXML_CONVERTER
+        from ssc_codegen.converters.py_lxml import PY_LXML_CONVERTER
 
         return PY_LXML_CONVERTER
     if target == Target.PY_PARSEL:
-        from ssc_codegen.kdl.converters.py_parsel import PY_PARSEL_CONVERTER
+        from ssc_codegen.converters.py_parsel import PY_PARSEL_CONVERTER
 
         return PY_PARSEL_CONVERTER
     if target == Target.PY_SLAX:
-        from ssc_codegen.kdl.converters.py_slax import PY_SLAX_CONVERTER
+        from ssc_codegen.converters.py_slax import PY_SLAX_CONVERTER
 
         return PY_SLAX_CONVERTER
     if target == Target.JS_PURE:
-        from ssc_codegen.kdl.converters.js_pure import JS_CONVERTER
+        from ssc_codegen.converters.js_pure import JS_CONVERTER
 
         return JS_CONVERTER
     raise ValueError(f"Unknown target: {target}")
@@ -115,7 +115,7 @@ def generate(
     ] = False,
 ) -> None:
     """Compile KDL schema files into parser code for the chosen target."""
-    from ssc_codegen.kdl import parse_ast
+    from ssc_codegen import parse_ast
 
     if verbose:
         setup_debug_logging()
@@ -154,7 +154,7 @@ def generate(
 
     # Lint all files first (unless --skip-lint)
     if not skip_lint:
-        from ssc_codegen.kdl.linter import lint_file
+        from ssc_codegen.linter import lint_file
 
         lint_errors_found = False
         for kdl_file in kdl_files:
@@ -231,7 +231,7 @@ def check(
     ] = False,
 ) -> None:
     """Check KDL schema files for errors without generating code."""
-    from ssc_codegen.kdl.linter import lint_file
+    from ssc_codegen.linter import lint_file
 
     if verbose:
         setup_debug_logging()
@@ -366,9 +366,9 @@ def run(
     import json
     import sys
 
-    from ssc_codegen.kdl import parse_ast
-    from ssc_codegen.kdl.ast import Struct
-    from ssc_codegen.kdl.converters.helpers import to_pascal_case
+    from ssc_codegen import parse_ast
+    from ssc_codegen.ast import Struct
+    from ssc_codegen.converters.helpers import to_pascal_case
 
     if verbose:
         setup_debug_logging()
@@ -442,7 +442,9 @@ def run(
         if verbose:
             typer.echo(traceback.format_exc(), err=True)
         else:
-            typer.echo(f"ERROR: failed to execute generated code: {exc}", err=True)
+            typer.echo(
+                f"ERROR: failed to execute generated code: {exc}", err=True
+            )
         raise typer.Exit(code=1)
 
     cls = namespace.get(class_name)
@@ -519,9 +521,9 @@ def health(
     """
     import sys
 
-    from ssc_codegen.kdl import parse_ast
-    from ssc_codegen.kdl.ast import Struct
-    from ssc_codegen.kdl.health import check_struct_health
+    from ssc_codegen import parse_ast
+    from ssc_codegen.ast import Struct
+    from ssc_codegen.health import check_struct_health
 
     if verbose:
         setup_debug_logging()

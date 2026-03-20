@@ -1,16 +1,16 @@
-"""Logging configuration for ssc_codegen.kdl.
+"""Logging configuration for ssc_codegen.
 
 Usage
 -----
 Import the logger in any submodule::
 
-    from ssc_codegen.kdl._logging import logger
+    from ssc_codegen._logging import logger
 
 To enable DEBUG output from the CLI, pass ``--verbose`` / ``-v`` flag,
 or configure it manually::
 
     import logging
-    logging.getLogger("ssc_codegen.kdl").setLevel(logging.DEBUG)
+    logging.getLogger("ssc_codegen").setLevel(logging.DEBUG)
 """
 
 from __future__ import annotations
@@ -66,20 +66,20 @@ class _ColorFormatter(logging.Formatter):
         return msg
 
 
-# Single named logger for the entire ssc_codegen.kdl package.
+# Single named logger for the entire ssc_codegen package.
 # All child loggers (parser, main, …) are children of this one,
-# so a single ``logging.getLogger("ssc_codegen.kdl").setLevel(DEBUG)``
+# so a single ``logging.getLogger("ssc_codegen").setLevel(DEBUG)``
 # enables everything at once.
-logger = logging.getLogger("ssc_codegen.kdl")
+logger = logging.getLogger("ssc_codegen")
 
 
 def setup_debug_logging() -> None:
-    """Enable DEBUG-level logging to stderr for the ssc_codegen.kdl logger.
+    """Enable DEBUG-level logging to stderr for the ssc_codegen logger.
 
     Called by the CLI when ``--verbose`` is passed.
     Idempotent: calling multiple times is safe.
     """
-    pkg_logger = logging.getLogger("ssc_codegen.kdl")
+    pkg_logger = logging.getLogger("ssc_codegen")
     if pkg_logger.level > logging.DEBUG or pkg_logger.level == logging.NOTSET:
         pkg_logger.setLevel(logging.DEBUG)
 

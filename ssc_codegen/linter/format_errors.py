@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import Literal
 
-from ssc_codegen.kdl.linter.base import LINTER, LintError, LintResult
+from ssc_codegen.linter.base import LINTER, LintError, LintResult
 
 _KDL_TEXT_ENCODING = "utf-8-sig"
 

@@ -1,17 +1,6 @@
 from __future__ import annotations
 import re
 
-from ssc_codegen.kdl.ast import (
-    PredRe,
-    PredReAll,
-    PredReAny,
-    PredTextRe,
-    PredAttrRe,
-    Re,
-    ReAll,
-    ReSub,
-)
-
 
 def to_snake_case(s: str) -> str:
     """

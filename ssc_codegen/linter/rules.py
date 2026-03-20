@@ -12,8 +12,8 @@ import re
 
 from tree_sitter import Node
 
-from ssc_codegen.kdl.linter.base import LINTER, LintContext
-from ssc_codegen.kdl.linter.types import ErrorCode
+from ssc_codegen.linter.base import LINTER, LintContext
+from ssc_codegen.linter.types import ErrorCode
 
 
 # ── helpers ────────────────────────────────────────────────────────────────────
@@ -166,6 +166,7 @@ def _validate_css_selector(node: Node, ctx: LintContext, selector: str) -> bool:
     """Validate CSS selector syntax via soupsieve. Returns True if valid."""
     try:
         import soupsieve
+
         soupsieve.compile(selector)
         return True
     except Exception as e:
@@ -174,7 +175,7 @@ def _validate_css_selector(node: Node, ctx: LintContext, selector: str) -> bool:
             node,
             ErrorCode.INVALID_ARGUMENT,
             message=f"invalid CSS selector: {msg}",
-            hint='check selector syntax',
+            hint="check selector syntax",
         )
         return False
 
@@ -183,6 +184,7 @@ def _validate_xpath(node: Node, ctx: LintContext, expr: str) -> bool:
     """Validate XPath expression syntax via lxml. Returns True if valid."""
     try:
         from lxml import etree
+
         etree.XPath(expr)
         return True
     except Exception as e:
@@ -191,7 +193,7 @@ def _validate_xpath(node: Node, ctx: LintContext, expr: str) -> bool:
             node,
             ErrorCode.INVALID_ARGUMENT,
             message=f"invalid XPath expression: {msg}",
-            hint='check XPath syntax',
+            hint="check XPath syntax",
         )
         return False
 
