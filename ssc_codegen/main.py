@@ -581,7 +581,7 @@ def health(
         raise typer.Exit(code=1)
 
     # Run health check
-    result = check_struct_health(target_struct, html)
+    result = check_struct_health(target_struct, html, module=module_ast)
     typer.echo(result.format(fmt=fmt))
 
     if result.has_failures():

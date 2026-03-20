@@ -14,6 +14,7 @@ from ssc_codegen.ast import (
     XpathSelectAll,
     XpathRemove,
     Fallback,
+    Nested,
     Field,
     InitField,
     SplitDoc,
@@ -24,6 +25,7 @@ from ssc_codegen.ast import (
     TableRow,
     TableMatchKey,
     Struct,
+    Module,
 )
 from ssc_codegen.ast.base import Node as AstNode
 
@@ -155,6 +157,14 @@ class _SelectorInfo:
     fallback_value: str | None = None  # repr of default value, or None
 
 
+@dataclass
+class _NestedRef:
+    """Internal: a nested struct reference found in a pipeline."""
+
+    path: str  # e.g. "MainCatalogue.books"
+    struct_name: str  # target struct name
+
+
 def _find_fallback(node: AstNode) -> str | None:
     """Check if a pipeline node (Field, etc.) contains a Fallback and return its repr'd value."""
     for child in node.body:
@@ -165,42 +175,59 @@ def _find_fallback(node: AstNode) -> str | None:
 
 def _collect_selectors(
     node: AstNode, path_prefix: str, fallback: str | None = None
-) -> list[_SelectorInfo]:
-    """Walk AST node tree and collect all selector nodes with their path and fallback info."""
-    results: list[_SelectorInfo] = []
+) -> tuple[list[_SelectorInfo], list[_NestedRef]]:
+    """Walk AST node tree and collect all selector nodes and nested references."""
+    selectors: list[_SelectorInfo] = []
+    nested_refs: list[_NestedRef] = []
 
     for child in node.body:
         if isinstance(
             child, _SINGLE_SELECTORS + _MULTI_SELECTORS + _REMOVE_SELECTORS
         ):
-            results.append(_SelectorInfo(path=path_prefix, node=child, fallback_value=fallback))
+            selectors.append(_SelectorInfo(path=path_prefix, node=child, fallback_value=fallback))
+        elif isinstance(child, Nested):
+            nested_refs.append(_NestedRef(path=path_prefix, struct_name=child.struct_name))
         elif isinstance(child, (Field, InitField)):
             child_path = f"{path_prefix}.{child.name}"
             child_fallback = _find_fallback(child)
-            results.extend(_collect_selectors(child, child_path, child_fallback))
+            child_sels, child_nested = _collect_selectors(child, child_path, child_fallback)
+            selectors.extend(child_sels)
+            nested_refs.extend(child_nested)
         elif isinstance(child, SplitDoc):
-            results.extend(
-                _collect_selectors(child, f"{path_prefix}.@split-doc")
-            )
+            s, n = _collect_selectors(child, f"{path_prefix}.@split-doc")
+            selectors.extend(s)
+            nested_refs.extend(n)
         elif isinstance(child, PreValidate):
-            results.extend(
-                _collect_selectors(child, f"{path_prefix}.@pre-validate")
-            )
+            s, n = _collect_selectors(child, f"{path_prefix}.@pre-validate")
+            selectors.extend(s)
+            nested_refs.extend(n)
         elif isinstance(child, Key):
-            results.extend(_collect_selectors(child, f"{path_prefix}.@key"))
+            s, n = _collect_selectors(child, f"{path_prefix}.@key")
+            selectors.extend(s)
+            nested_refs.extend(n)
         elif isinstance(child, Value):
-            results.extend(_collect_selectors(child, f"{path_prefix}.@value"))
+            s, n = _collect_selectors(child, f"{path_prefix}.@value")
+            selectors.extend(s)
+            nested_refs.extend(n)
         elif isinstance(child, TableConfig):
-            results.extend(_collect_selectors(child, f"{path_prefix}.@table"))
+            s, n = _collect_selectors(child, f"{path_prefix}.@table")
+            selectors.extend(s)
+            nested_refs.extend(n)
         elif isinstance(child, TableRow):
-            results.extend(_collect_selectors(child, f"{path_prefix}.@row"))
+            s, n = _collect_selectors(child, f"{path_prefix}.@row")
+            selectors.extend(s)
+            nested_refs.extend(n)
         elif isinstance(child, TableMatchKey):
-            results.extend(_collect_selectors(child, f"{path_prefix}.@match"))
+            s, n = _collect_selectors(child, f"{path_prefix}.@match")
+            selectors.extend(s)
+            nested_refs.extend(n)
         else:
             # recurse into any other node that might contain selectors
-            results.extend(_collect_selectors(child, path_prefix, fallback))
+            s, n = _collect_selectors(child, path_prefix, fallback)
+            selectors.extend(s)
+            nested_refs.extend(n)
 
-    return results
+    return selectors, nested_refs
 
 
 def _selector_type_name(node: AstNode) -> str:
@@ -234,15 +261,46 @@ def _check_xpath(html_tree, query: str) -> int:
         return -1
 
 
-def check_struct_health(struct: Struct, html: str) -> HealthResult:
-    """Check all selectors in a struct against HTML."""
+def check_struct_health(
+    struct: Struct, html: str, module: Module | None = None
+) -> HealthResult:
+    """Check all selectors in a struct (and nested structs) against HTML."""
     from bs4 import BeautifulSoup
+
+    # build struct lookup from module
+    struct_map: dict[str, Struct] = {}
+    if module is not None:
+        struct_map = {
+            s.name: s for s in module.body if isinstance(s, Struct)
+        }
 
     soup = BeautifulSoup(html, "lxml")
     result = HealthResult(struct_name=struct.name)
 
-    # collect all selectors
-    selectors = _collect_selectors(struct, struct.name)
+    # collect selectors + nested refs, then recurse into nested structs
+    visited: set[str] = set()
+    _check_struct_recursive(
+        struct, struct.name, soup, html, struct_map, result, visited
+    )
+
+    return result
+
+
+def _check_struct_recursive(
+    struct: Struct,
+    path_prefix: str,
+    soup,
+    html: str,
+    struct_map: dict[str, Struct],
+    result: HealthResult,
+    visited: set[str],
+) -> None:
+    """Recursively check selectors in struct and its nested structs."""
+    if struct.name in visited:
+        return
+    visited.add(struct.name)
+
+    selectors, nested_refs = _collect_selectors(struct, path_prefix)
 
     # check if we need lxml for xpath
     has_xpath = any(isinstance(info.node, _XPATH_TYPES) for info in selectors)
@@ -331,4 +389,12 @@ def check_struct_health(struct: Struct, html: str) -> HealthResult:
             )
         )
 
-    return result
+    # recurse into nested structs
+    for ref in nested_refs:
+        nested_struct = struct_map.get(ref.struct_name)
+        if nested_struct is None:
+            continue
+        nested_path = f"{ref.path}[{ref.struct_name}]"
+        _check_struct_recursive(
+            nested_struct, nested_path, soup, html, struct_map, result, visited
+        )
