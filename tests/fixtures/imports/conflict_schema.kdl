@@ -1,0 +1,8 @@
+import "./shared_defines.kdl"
+
+// this define conflicts with imported FMT-BASE
+define FMT-BASE="https://conflict.com/{{}}"
+
+struct Dummy {
+    x { css "x"; text }
+}

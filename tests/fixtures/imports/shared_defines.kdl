@@ -1,0 +1,7 @@
+// shared defines for import testing
+define FMT-BASE="https://example.com/{{}}"
+define RE-PRICE=#"(\d+\.\d+)"#
+
+define STRIP-PREFIX {
+    rm-prefix "/"
+}

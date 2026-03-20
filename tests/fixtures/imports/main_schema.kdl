@@ -1,0 +1,19 @@
+// imports everything from shared files
+import "./shared_defines.kdl"
+import "./shared_struct.kdl"
+
+struct Page {
+    url {
+        css "a"
+        attr "href"
+        STRIP-PREFIX
+        fmt FMT-BASE
+    }
+    price {
+        css ".price"
+        text
+        re RE-PRICE
+        to-float
+    }
+    item { nested SharedItem }
+}
