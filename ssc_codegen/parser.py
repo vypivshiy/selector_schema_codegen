@@ -1787,6 +1787,10 @@ def reg_expr_fallback(node: KdlNode, parent: FieldLikeNode, _: ParseContext):
 
 @PARSER.register_expression_node("filter")
 def reg_expr_filter(node: KdlNode, parent: FieldLikeNode, _: ParseContext):
+    if not parent.body:
+        return Filter(
+            parent=parent, accept=VariableType.DOCUMENT, ret=VariableType.DOCUMENT
+        )
     prev_type = parent.body[-1].ret
     return Filter(parent=parent, accept=prev_type, ret=prev_type)
 
@@ -1800,6 +1804,10 @@ def reg_expr_assert(node: KdlNode, parent: FieldLikeNode, _: ParseContext):
     if isinstance(parent, PreValidate) and not parent.body:
         return Assert(
             parent=parent, accept=VariableType.DOCUMENT, ret=VariableType.NULL
+        )
+    if not parent.body:
+        return Assert(
+            parent=parent, accept=VariableType.DOCUMENT, ret=VariableType.DOCUMENT
         )
     prev_type = parent.body[-1].ret
     return Assert(parent=parent, accept=prev_type, ret=prev_type)
