@@ -13,6 +13,7 @@ from ssc_codegen.ast import (
     XpathSelect,
     XpathSelectAll,
     XpathRemove,
+    Fallback,
     Field,
     InitField,
     SplitDoc,
@@ -48,9 +49,10 @@ class SelectorCheck:
     matches: int  # number of elements matched
     status: Literal["ok", "fail", "warn"]  # ok/fail/warn
     message: str = ""
+    fallback_value: str | None = None  # repr of fallback default if present
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "path": self.path,
             "selector_type": self.selector_type,
             "query": self.query,
@@ -58,6 +60,9 @@ class SelectorCheck:
             "status": self.status,
             "message": self.message,
         }
+        if self.fallback_value is not None:
+            d["fallback"] = self.fallback_value
+        return d
 
 
 @dataclass
@@ -141,20 +146,38 @@ class HealthResult:
         return header + "\n" + "\n".join(lines)
 
 
+@dataclass
+class _SelectorInfo:
+    """Internal: a collected selector with its context."""
+
+    path: str
+    node: AstNode
+    fallback_value: str | None = None  # repr of default value, or None
+
+
+def _find_fallback(node: AstNode) -> str | None:
+    """Check if a pipeline node (Field, etc.) contains a Fallback and return its repr'd value."""
+    for child in node.body:
+        if isinstance(child, Fallback):
+            return repr(child.value)
+    return None
+
+
 def _collect_selectors(
-    node: AstNode, path_prefix: str
-) -> list[tuple[str, AstNode]]:
-    """Walk AST node tree and collect all selector nodes with their path."""
-    results: list[tuple[str, AstNode]] = []
+    node: AstNode, path_prefix: str, fallback: str | None = None
+) -> list[_SelectorInfo]:
+    """Walk AST node tree and collect all selector nodes with their path and fallback info."""
+    results: list[_SelectorInfo] = []
 
     for child in node.body:
         if isinstance(
             child, _SINGLE_SELECTORS + _MULTI_SELECTORS + _REMOVE_SELECTORS
         ):
-            results.append((path_prefix, child))
+            results.append(_SelectorInfo(path=path_prefix, node=child, fallback_value=fallback))
         elif isinstance(child, (Field, InitField)):
             child_path = f"{path_prefix}.{child.name}"
-            results.extend(_collect_selectors(child, child_path))
+            child_fallback = _find_fallback(child)
+            results.extend(_collect_selectors(child, child_path, child_fallback))
         elif isinstance(child, SplitDoc):
             results.extend(
                 _collect_selectors(child, f"{path_prefix}.@split-doc")
@@ -175,7 +198,7 @@ def _collect_selectors(
             results.extend(_collect_selectors(child, f"{path_prefix}.@match"))
         else:
             # recurse into any other node that might contain selectors
-            results.extend(_collect_selectors(child, path_prefix))
+            results.extend(_collect_selectors(child, path_prefix, fallback))
 
     return results
 
@@ -222,7 +245,7 @@ def check_struct_health(struct: Struct, html: str) -> HealthResult:
     selectors = _collect_selectors(struct, struct.name)
 
     # check if we need lxml for xpath
-    has_xpath = any(isinstance(s, _XPATH_TYPES) for _, s in selectors)
+    has_xpath = any(isinstance(info.node, _XPATH_TYPES) for info in selectors)
     lxml_tree = None
     if has_xpath:
         try:
@@ -232,7 +255,8 @@ def check_struct_health(struct: Struct, html: str) -> HealthResult:
         except ImportError:
             pass
 
-    for path, sel_node in selectors:
+    for info in selectors:
+        sel_node = info.node
         query = sel_node.query  # type: ignore[attr-defined]
         sel_type = _selector_type_name(sel_node)
 
@@ -243,7 +267,7 @@ def check_struct_health(struct: Struct, html: str) -> HealthResult:
             if lxml_tree is None:
                 result.checks.append(
                     SelectorCheck(
-                        path=path,
+                        path=info.path,
                         selector_type=sel_type,
                         query=query,
                         matches=0,
@@ -260,7 +284,7 @@ def check_struct_health(struct: Struct, html: str) -> HealthResult:
         if count == -1:
             result.checks.append(
                 SelectorCheck(
-                    path=path,
+                    path=info.path,
                     selector_type=sel_type,
                     query=query,
                     matches=0,
@@ -273,7 +297,7 @@ def check_struct_health(struct: Struct, html: str) -> HealthResult:
         # evaluate result
         if isinstance(sel_node, _REMOVE_SELECTORS):
             # remove selectors: 0 matches is just a warning
-            status = "ok" if count > 0 else "warn"
+            status: Literal["ok", "fail", "warn"] = "ok" if count > 0 else "warn"
         elif isinstance(sel_node, _SINGLE_SELECTORS):
             status = "ok" if count >= 1 else "fail"
         elif isinstance(sel_node, _MULTI_SELECTORS):
@@ -281,16 +305,29 @@ def check_struct_health(struct: Struct, html: str) -> HealthResult:
         else:
             status = "ok" if count > 0 else "fail"
 
+        # downgrade FAIL → WARN when field has fallback
+        fallback_value = info.fallback_value
+        if status == "fail" and fallback_value is not None:
+            status = "warn"
+
+        if status == "ok":
+            message = f"({count} matches)"
+        elif status == "warn" and fallback_value is not None and count == 0:
+            message = f"(0 matches, fallback={fallback_value})"
+        elif status == "warn":
+            message = f"({count} matches)"
+        else:
+            message = "(0 matches)"
+
         result.checks.append(
             SelectorCheck(
-                path=path,
+                path=info.path,
                 selector_type=sel_type,
                 query=query,
                 matches=count,
                 status=status,
-                message=f"({count} matches)"
-                if status != "fail"
-                else "(0 matches)",
+                message=message,
+                fallback_value=fallback_value if count == 0 else None,
             )
         )
 
