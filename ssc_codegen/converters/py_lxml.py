@@ -71,6 +71,7 @@ PY_LXML_CONVERTER = py_bs4.PY_BASE_CONVERTER.extend()
 @PY_LXML_CONVERTER(Imports)
 def pre_imports(node: Imports, _: ConverterContext):
     base_imports = [
+        "import json",
         "import re",
         "import sys",
         "from typing import TypedDict, Optional, Any, List, Dict, Union",
