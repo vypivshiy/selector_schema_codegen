@@ -120,7 +120,7 @@ def pre_utilities(node: Utilities, _: ConverterContext):
         "        s = s.replace(ch, r)",
         "    return s",
         "\n",
-        "if sys.version_info > (3, 10):",
+        "if sys.version_info >= (3, 9):",
         "    def rm_prefix(s: str, p: str) -> str:",
         "        return s.removeprefix(p)",
         "\n",

@@ -216,7 +216,8 @@ def pre_utilities(node: Utilities, _: ConverterContext):
         "    return s",
         "\n",
         # backport funcs
-        "if sys.version_info > (3, 10):",
+        # https://docs.python.org/3/library/stdtypes.html#str.removeprefix
+        "if sys.version_info >= (3, 9):",
         "    def rm_prefix(s: str, p: str) -> str:",
         "        return s.removeprefix(p)",
         "\n",
