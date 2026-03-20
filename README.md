@@ -8,7 +8,7 @@ Experimental PoC implementation of a code generator based on KDL2.0 syntax DSL.
 uv tool install git+https://github.com/vypivshiy/selector_schema_codegen@features-kdl
 ```
 
-## run
+## usage
 
 generate code
 ```
@@ -18,6 +18,18 @@ ssc-gen generate examples/ -t js-pure -o .
 lint
 ```
 ssc-gen check examples/
+```
+
+test schema by html output
+
+from file:
+```
+python main.py run .\examples\booksToScrape.kdl:MainCatalogue -t py-bs4 -i index.html
+```
+
+from stdin:
+```
+curl https://books.toscrape.com/ | python main.py run .\examples\booksToScrape.kdl:MainCatalogue -t py-bs4
 ```
 
 ## syntax
