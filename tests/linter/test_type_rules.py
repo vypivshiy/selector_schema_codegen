@@ -1,5 +1,5 @@
 """
-Tests for ssc_codegen/kdl/linter/type_rules.py
+Tests for ssc_codegen/linter/type_rules.py
 
 Covers pipeline type inference and type-mismatch detection.
 
@@ -30,7 +30,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from ssc_codegen.kdl.linter.format_errors import lint_string
+from ssc_codegen.linter.format_errors import lint_string
 
 
 # ── helpers ────────────────────────────────────────────────────────────────────

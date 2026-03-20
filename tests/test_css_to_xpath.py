@@ -1,8 +1,8 @@
 import pytest
 
-from ssc_codegen.kdl import parse_ast
-from ssc_codegen.kdl.selector_utils import css_to_xpath
-from ssc_codegen.kdl.ast import (
+from ssc_codegen import parse_ast
+from ssc_codegen.selector_utils import css_to_xpath
+from ssc_codegen.ast import (
     Struct,
     Field,
     Filter,

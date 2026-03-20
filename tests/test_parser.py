@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from ssc_codegen.kdl.ast import (
+from ssc_codegen.ast import (
     Assert,
     Attr,
     CssSelect,
@@ -32,10 +32,10 @@ from ssc_codegen.kdl.ast import (
     TypeDef,
     Value,
 )
-from ssc_codegen.kdl.ast.predicate_ops import LogicNot, PredContains, PredEq
-from ssc_codegen.kdl.ast.types import StructType, VariableType
-from ssc_codegen.kdl.exceptions import ParseError, BuildTimeError
-from ssc_codegen.kdl.parser import PARSER, parse_document
+from ssc_codegen.ast.predicate_ops import LogicNot, PredContains, PredEq
+from ssc_codegen.ast.types import StructType, VariableType
+from ssc_codegen.exceptions import ParseError, BuildTimeError
+from ssc_codegen.parser import PARSER, parse_document
 
 
 EXAMPLES = [

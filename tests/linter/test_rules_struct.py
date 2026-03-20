@@ -1,5 +1,5 @@
 """
-Tests for ssc_codegen/kdl/linter/rules_struct.py
+Tests for ssc_codegen/linter/rules_struct.py
 
 Covers: struct name/type validation, required reserved fields, reserved field
 checks, regular field checks, define rules, and the wildcard unknown-op rule.
@@ -23,7 +23,7 @@ import pytest
 from hypothesis import given, assume, settings, HealthCheck
 from hypothesis import strategies as st
 
-from ssc_codegen.kdl.linter.format_errors import lint_string
+from ssc_codegen.linter.format_errors import lint_string
 
 
 # ── helpers ────────────────────────────────────────────────────────────────────

@@ -27,7 +27,7 @@ import pytest
 from hypothesis import given, assume, settings, HealthCheck
 from hypothesis import strategies as st
 
-from ssc_codegen.kdl.linter.format_errors import lint_string
+from ssc_codegen.linter.format_errors import lint_string
 
 
 # ── helpers ────────────────────────────────────────────────────────────────────
@@ -321,7 +321,6 @@ class TestRegexOps:
 
     def test_re_all_no_args_error(self):
         msgs = lint(field('css ".x"', "text", "re-all"))
-        print
         assert any("requires exactly 1" in m for m in msgs)
 
     def test_re_sub_valid(self):
