@@ -29,6 +29,7 @@ from __future__ import annotations
 import ast as _py_ast
 import re as _re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, TypeAlias, Protocol, cast
 
 from tree_sitter import Node as TSNode
@@ -190,6 +191,14 @@ class Document:
 
 
 @dataclass
+class ImportRegistry:
+    """Shared across recursive import resolution to detect cycles and cache results."""
+
+    in_progress: set[str] = field(default_factory=set)  # absolute paths being parsed
+    completed: dict[str, "ParseContext"] = field(default_factory=dict)  # path -> parsed context
+
+
+@dataclass
 class ParseContext:
     property_defines: dict[str, str | int | float | bool] = field(
         default_factory=dict
@@ -202,6 +211,18 @@ class ParseContext:
     structs: dict[str, Struct] = field(default_factory=dict)
     # Store json definitions so jsonify can resolve types
     json_defs: dict[str, JsonDef] = field(default_factory=dict)
+    # Path of the file being parsed (for resolving relative imports)
+    source_path: Path | None = None
+
+    def all_names(self) -> set[str]:
+        """Return all defined names for conflict detection."""
+        return (
+            set(self.property_defines)
+            | set(self.children_defines)
+            | set(self.transforms)
+            | set(self.structs)
+            | set(self.json_defs)
+        )
 
 
 ParentAstNode: TypeAlias = AstNode
@@ -448,24 +469,56 @@ class AstParser:
             )
             parent.body.append(jf)
 
-    def parse(self, kdl_dsl: str) -> Module:
+    def parse(
+        self,
+        kdl_dsl: str,
+        *,
+        source_path: Path | None = None,
+        _import_registry: ImportRegistry | None = None,
+    ) -> Module:
         logger.debug("parse() called, input length=%d chars", len(kdl_dsl))
-        self.ctx = ParseContext()
+        self.ctx = ParseContext(source_path=source_path)
         document = parse_document(kdl_dsl)
         module = Module()
-        # collect struct, generate typedefs
-        # tydefes shoud be instert before parse structs
+
+        if _import_registry is None:
+            _import_registry = ImportRegistry()
+
+        # pass 1 — resolve imports (must run before anything else)
+        for node in document.nodes:
+            if node.name == "import":
+                self._handle_import(node, module, _import_registry)
+
+        # snapshot imported names for conflict detection
+        imported_names: set[str] = self.ctx.all_names()
+
+        # collect imported structs/typedefs/json_defs/transforms for module body
+        imported_structs: list[Struct] = list(self.ctx.structs.values())
+        imported_typedefs: list[TypeDef] = [
+            self._typedef_from_struct(s, module) for s in imported_structs
+        ]
+        imported_json_defs: list[JsonDef] = list(self.ctx.json_defs.values())
+        imported_transforms: list[TransformDef] = list(self.ctx.transforms.values())
+
+        # pass 2 — everything else
         structs: list[Struct] = []
         typedefs: list[TypeDef] = []
 
-        # layer 1 - module
         for node in document.nodes:
+            if node.name == "import":
+                continue  # already handled
+
             logger.debug("module node: %r", node.name)
             # built-in
             if node.name == "@doc":
                 module.docstring.value = node.args[0]
                 logger.debug("  set module docstring")
             elif node.name == "json":
+                json_name = node.args[0] if node.args else ""
+                if json_name in imported_names:
+                    raise ParseError(
+                        f"Name conflict: json '{json_name}' conflicts with imported name"
+                    )
                 expr = self._module_handlers[node.name](node, module, self.ctx)
                 expr = cast(JsonDef, expr)
                 self._parse_json_fields(node.children, expr)
@@ -476,13 +529,30 @@ class AstParser:
                     "  registered json def: %r",
                     node.args[0] if node.args else "?",
                 )
-            # handlers
+            elif node.name == "define":
+                # check conflict before delegating to handler
+                self._check_define_conflict(node, imported_names)
+                cb = self._context_handlers[node.name]
+                cb(node, self.ctx)
+            elif node.name == "transform":
+                t_name = node.args[0] if node.args else ""
+                if t_name in imported_names:
+                    raise ParseError(
+                        f"Name conflict: transform '{t_name}' conflicts with imported name"
+                    )
+                cb = self._context_handlers[node.name]
+                cb(node, self.ctx)
+            # other handlers
             elif cb := self._context_handlers.get(node.name):
                 logger.debug("  context handler: %r", node.name)
                 cb(node, self.ctx)
             elif cb := self._module_handlers.get(node.name):
                 expr = cb(node, module, self.ctx)
                 if isinstance(expr, Struct):
+                    if expr.name in imported_names:
+                        raise ParseError(
+                            f"Name conflict: struct '{expr.name}' conflicts with imported name"
+                        )
                     logger.debug(
                         "  parsing struct: %r (type=%s)",
                         expr.name,
@@ -500,18 +570,172 @@ class AstParser:
                     )
             else:
                 raise UnknownNodeError(node.name, "Unknown keyword node")
-        # wire TransformDef nodes into module (before typedefs and structs)
-        transform_defs = list(self.ctx.transforms.values())
-        for td in transform_defs:
+
+        # wire all nodes into module body:
+        # imported transforms + local transforms, then imported + local typedefs/structs
+        local_transform_defs = [
+            td for td in self.ctx.transforms.values()
+            if td not in imported_transforms
+        ]
+        all_transforms = imported_transforms + local_transform_defs
+        for td in all_transforms:
             td.parent = module
-        module.body.extend(transform_defs + typedefs + structs)
+
+        # re-parent imported nodes
+        for node in imported_structs + imported_typedefs + imported_json_defs:
+            node.parent = module
+
+        module.body.extend(
+            imported_json_defs
+            + all_transforms
+            + imported_typedefs
+            + imported_structs
+            + typedefs
+            + structs
+        )
         logger.debug(
-            "parse() done: %d transform(s), %d typedef(s), %d struct(s)",
-            len(transform_defs),
-            len(typedefs),
-            len(structs),
+            "parse() done: %d transform(s), %d typedef(s), %d struct(s) "
+            "(imported: %d struct(s), %d json(s))",
+            len(all_transforms),
+            len(imported_typedefs) + len(typedefs),
+            len(imported_structs) + len(structs),
+            len(imported_structs),
+            len(imported_json_defs),
         )
         return module
+
+    # ── Import resolution ─────────────────────────────────────────────────
+
+    _KDL_TEXT_ENCODING = "utf-8-sig"
+
+    def _handle_import(
+        self,
+        node: KdlNode,
+        module: Module,
+        registry: ImportRegistry,
+    ) -> None:
+        """Process a single import node."""
+        if not node.args:
+            raise ParseError("import requires a path argument")
+
+        raw_path = str(node.args[0])
+        source_path = self.ctx.source_path
+        if source_path is None:
+            raise ParseError(
+                "Cannot use 'import' when parsing from string without a file path"
+            )
+
+        # resolve relative path
+        import_path = (source_path.parent / raw_path).resolve()
+
+        if not import_path.is_file():
+            raise ParseError(f"import: file not found: {import_path}")
+
+        # selective import names
+        selective: set[str] | None = None
+        if node.children:
+            selective = {child.name for child in node.children}
+
+        logger.debug(
+            "import %r -> %s%s",
+            raw_path,
+            import_path,
+            f" selective={selective}" if selective else "",
+        )
+
+        # resolve (parses file, caches result, handles circular detection)
+        imported_ctx = self._resolve_import(import_path, registry)
+
+        # validate selective names exist
+        if selective is not None:
+            available = imported_ctx.all_names()
+            missing = selective - available
+            if missing:
+                raise ParseError(
+                    f"import {raw_path}: names not found: {', '.join(sorted(missing))}"
+                )
+
+        # merge into current context
+        self._merge_imported_context(imported_ctx, selective, import_path)
+
+    def _resolve_import(
+        self,
+        import_path: Path,
+        registry: ImportRegistry,
+    ) -> ParseContext:
+        """Parse an imported file and return its ParseContext."""
+        import_key = str(import_path)
+
+        if import_key in registry.completed:
+            return registry.completed[import_key]
+
+        if import_key in registry.in_progress:
+            raise ParseError(f"Circular import detected: {import_path}")
+
+        registry.in_progress.add(import_key)
+        try:
+            src = import_path.read_text(encoding=self._KDL_TEXT_ENCODING)
+            # Save current context
+            saved_ctx = self.ctx
+            try:
+                self.parse(
+                    src,
+                    source_path=import_path,
+                    _import_registry=registry,
+                )
+                result_ctx = self.ctx
+            finally:
+                # Restore caller's context
+                self.ctx = saved_ctx
+        finally:
+            registry.in_progress.discard(import_key)
+
+        registry.completed[import_key] = result_ctx
+        return result_ctx
+
+    def _check_define_conflict(self, node: KdlNode, imported_names: set[str]) -> None:
+        """Check if a define node conflicts with imported names."""
+        if node.children:
+            # block define: name is first arg
+            name = node.args[0] if node.args else ""
+        else:
+            # scalar define: names are property keys
+            for key in node.properties:
+                if key in imported_names:
+                    raise ParseError(
+                        f"Name conflict: define '{key}' conflicts with imported name"
+                    )
+            return
+        if name in imported_names:
+            raise ParseError(
+                f"Name conflict: define '{name}' conflicts with imported name"
+            )
+
+    def _merge_imported_context(
+        self,
+        imported_ctx: ParseContext,
+        selective: set[str] | None,
+        import_path: Path,
+    ) -> None:
+        """Merge imported ParseContext into self.ctx with conflict detection."""
+        target = self.ctx
+
+        def _check_and_merge_dict(target_dict, source_dict, kind: str):
+            for name, val in source_dict.items():
+                if selective is not None and name not in selective:
+                    continue
+                if name in target_dict:
+                    raise ParseError(
+                        f"Name conflict: {kind} '{name}' already defined "
+                        f"(imported from {import_path})"
+                    )
+                target_dict[name] = val
+
+        _check_and_merge_dict(target.property_defines, imported_ctx.property_defines, "define")
+        _check_and_merge_dict(target.children_defines, imported_ctx.children_defines, "define")
+        _check_and_merge_dict(target.transforms, imported_ctx.transforms, "transform")
+        _check_and_merge_dict(target.structs, imported_ctx.structs, "struct")
+        _check_and_merge_dict(target.json_defs, imported_ctx.json_defs, "json")
 
     def _parse_struct(self, kdl_nodes: list[KdlNode], parent: Struct):
         logger.debug(

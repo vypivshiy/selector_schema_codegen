@@ -243,6 +243,7 @@ _MODULE_KEYWORDS: frozenset[str] = frozenset(
         "json",
         "define",
         "transform",
+        "import",
     }
 )
 
@@ -365,6 +366,7 @@ class AstLinter:
             )
 
         ctx = LintContext(src=src.encode())
+        self._collect_imports(tree.root_node, ctx, filepath)
         self._collect_defines(tree.root_node, ctx)
         self._walk(tree.root_node, ctx)
 
@@ -509,6 +511,76 @@ class AstLinter:
         if node_type.isidentifier():
             return node_type
         return repr(node_type)
+
+    _KDL_TEXT_ENCODING = "utf-8-sig"
+
+    def _collect_imports(
+        self,
+        root: Node,
+        ctx: LintContext,
+        filepath: Path | None,
+        visited: set[str] | None = None,
+    ) -> None:
+        """Resolve import nodes and merge imported defines/transforms into ctx."""
+        if visited is None:
+            visited = set()
+        if filepath is not None:
+            visited.add(str(filepath.resolve()))
+
+        for node in root.children:
+            node_nm = ctx.node_name(node)
+            if node_nm != "import":
+                continue
+            if filepath is None:
+                continue  # can't resolve imports without a file path
+
+            raw_args = ctx.get_raw_args(node)
+            if not raw_args:
+                continue
+            raw_path = raw_args[0].value
+            import_path = (filepath.parent / raw_path).resolve()
+            import_key = str(import_path)
+
+            if import_key in visited:
+                continue  # circular or already imported
+            if not import_path.is_file():
+                continue  # parser will catch this error
+
+            # selective names
+            children = ctx.get_children_nodes(node)
+            selective: set[str] | None = None
+            if children:
+                imp_ctx = LintContext(src=ctx.navigator._src)
+                selective = set()
+                for child in children:
+                    child_name = imp_ctx.node_name(child) if hasattr(child, 'children') else ""
+                    # children are tree-sitter nodes from current file's context
+                    nm = ctx.node_name(child)
+                    if nm:
+                        selective.add(nm)
+
+            visited.add(import_key)
+            try:
+                imp_src = import_path.read_text(encoding=self._KDL_TEXT_ENCODING)
+            except OSError:
+                continue
+            imp_tree = KDL_PARSER.parse(imp_src.encode())
+            imp_ctx = LintContext(src=imp_src.encode())
+
+            # recursively collect imports from imported file
+            self._collect_imports(imp_tree.root_node, imp_ctx, import_path, visited)
+            # collect defines/transforms from imported file
+            self._collect_defines(imp_tree.root_node, imp_ctx)
+
+            # merge into current context (filtered by selective if set)
+            for name, info in imp_ctx.defines.items():
+                if selective is not None and name not in selective:
+                    continue
+                ctx.defines.setdefault(name, info)
+            for name, info in imp_ctx.transforms.items():
+                if selective is not None and name not in selective:
+                    continue
+                ctx.transforms.setdefault(name, info)
 
     def _collect_defines(self, root: Node, ctx: LintContext) -> None:
         """

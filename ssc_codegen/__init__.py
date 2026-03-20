@@ -13,11 +13,13 @@ def parse_ast(
 ) -> Module:
     if not src and not path:
         raise AttributeError("required src or path argument")
+    source_path: Path | None = None
     if path:
-        src = Path(path).read_text(encoding=_KDL_TEXT_ENCODING)
+        source_path = Path(path).resolve()
+        src = source_path.read_text(encoding=_KDL_TEXT_ENCODING)
     if not src:
         raise AttributeError("required src or path argument")
-    module = PARSER.parse(src)
+    module = PARSER.parse(src, source_path=source_path)
     if css_to_xpath:
         from ssc_codegen.document_utils import convert_css_to_xpath_module
 
