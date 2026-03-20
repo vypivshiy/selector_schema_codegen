@@ -13,6 +13,8 @@ class JsonDefField(Node):
     is_optional — True when field declared with ? suffix (value | null).
     is_array    — True when field declared with {} suffix.
     ref_name    — set when type_name references another JsonDef.
+    alias       — original JSON key when it differs from name
+                  (e.g. name="context", alias="@context").
     """
 
     name: str = ""
@@ -20,6 +22,7 @@ class JsonDefField(Node):
     is_optional: bool = False
     is_array: bool = False
     ref_name: str | None = None
+    alias: str = ""
 
 
 @dataclass
