@@ -1,8 +1,7 @@
 # KDL Schema DSL — Syntax Reference
 
-> **Version:** 2.0  
-> **Status:** Active Development  
-> **Last Updated:** 2026-03-13
+> **Version:** 2.1
+> **Last Updated:** 2026-03-21
 
 Полное руководство по синтаксису KDL Schema DSL для определения структур извлечения данных из HTML/XML документов.
 
@@ -12,40 +11,77 @@
 
 - [Overview](#overview)
 - [Module Level](#module-level)
-  - [Documentation](#documentation)
-  - [Defines](#defines)
-  - [JSON Mappings](#json-mappings)
-  - [Transforms](#transforms)
-  - [Structs](#structs)
+  - [import](#import)
+  - [@doc](#doc)
+  - [define](#define)
+  - [json](#json-mappings)
+  - [transform](#transform)
+  - [dsl](#dsl)
+  - [struct](#struct)
 - [Struct Types](#struct-types)
-- [Fields](#fields)
 - [Special Fields](#special-fields)
-- [Selectors](#selectors)
-- [Extract Operations](#extract-operations)
-- [String Operations](#string-operations)
-- [Type Conversions](#type-conversions)
-- [Predicates](#predicates)
-- [Examples](#examples)
+- [Regular Fields](#regular-fields)
+- [Pipeline](#pipeline)
 
 ---
 
 ## Overview
 
-KDL Schema DSL - это декларативный язык для описания структур извлечения данных из HTML/XML документов. Компилируется в код на Python (BeautifulSoup4, lxml, selectolax) и JavaScript.
+KDL Schema DSL - это декларативный язык для описания структур извлечения данных из HTML/XML документов. Компилируется в код на Python (BeautifulSoup4, lxml, parsel, selectolax) и JavaScript.
 
 **Основные концепции:**
+- **Module** - файл с определениями: imports, defines, json, transforms, structs
 - **Struct** - структура данных с полями
 - **Field** - поле с pipeline операций
 - **Pipeline** - последовательность операций извлечения и трансформации
-- **Selector** - выбор элементов (CSS, XPath)
-- **Extract** - извлечение данных (text, attr, raw)
-- **Transform** - преобразование данных
 
 ---
 
 ## Module Level
 
-### Documentation
+Модуль (файл `.kdl`) может содержать следующие объявления верхнего уровня:
+
+```kdl
+import "./shared.kdl"
+
+@doc "Module description"
+
+define BASE-URL="https://example.com"
+define EXTRACT { css ".x"; text }
+
+json Schema { field str }
+
+transform my-fn accept=STRING return=STRING {
+    py { code "{{NXT}} = {{PRV}}.upper()" }
+}
+
+dsl my-dsl lang=py {
+    code "{{NXT}} = {{PRV}}.upper()"
+}
+
+struct MyStruct type=item { ... }
+```
+
+---
+
+### import
+
+Импорт определений из других файлов:
+
+```kdl
+import "./shared_defines.kdl"
+import "./shared_struct.kdl"
+```
+
+**Особенности:**
+- Импортируются `define`, `transform`, `dsl`, `json`, `struct` определения
+- Пути относительные от текущего файла
+- Поддерживается транзитивный импорт
+- Обнаружение циклических импортов
+
+---
+
+### @doc
 
 Документирование модуля и структур:
 
@@ -58,34 +94,28 @@ Usage:
 """
 
 struct Main {
-    @doc """
-    Extract quotes from JSON embedded in HTML
-    
-    Returns: List of Quote objects
-    """
+    @doc "Extract quotes from JSON embedded in HTML"
     // fields...
 }
 ```
 
-**Особенности:**
-- Используется синтаксис `@doc` с многострочными строками
 - Документация переносится в сгенерированный код
-- Поддерживает Markdown форматирование
+- Поддерживает многострочные строки
 
 ---
 
-### Defines
+### define
 
-Определение констант и переменных для переиспользования:
+Определение констант и блочных выражений для переиспользования.
+
+#### Скалярные define
 
 ```kdl
-// Простые значения
+// Строки
 define BASE-URL="https://example.com"
-define MAX-ITEMS=100
 
 // Шаблоны с placeholder {{}}
 define FMT-URL="https://books.toscrape.com/catalogue/{{}}"
-define FMT-PAGE="https://example.com/page-{{}}.html"
 
 // Regex patterns (с VERBOSE флагом)
 define JSON-PATTERN=#"""
@@ -98,8 +128,27 @@ define JSON-PATTERN=#"""
     )
     ;\s+for              # END ANCHOR
 """#
+```
 
-// Replacement mappings
+Скалярные define подставляются как значения аргументов:
+
+```kdl
+field {
+    css "a"
+    attr "href"
+    fmt FMT-URL     // подставляется значение FMT-URL
+    re JSON-PATTERN // подставляется regex
+}
+```
+
+#### Блочные define
+
+```kdl
+define EXTRACT-HREF {
+    css "a"
+    attr "href"
+}
+
 define REPL-RATING {
     repl {
         One "1"
@@ -111,16 +160,32 @@ define REPL-RATING {
 }
 ```
 
-**Типы defines:**
-- `str` - строковые значения
-- `int` / `float` - числовые значения
-- `Pattern` - regex паттерны (автоматически компилируются)
-- `repl` - маппинги для замены
+Блочные define вызываются как операции в pipeline или через `expr`:
 
-**Особенности VERBOSE regex:**
-- Флаг `(?x)` позволяет использовать пробелы и комментарии
-- Автоматически конвертируется в inline форму при генерации
-- Флаги `(?i)` и `(?s)` встраиваются как `(?is)pattern`
+```kdl
+field {
+    EXTRACT-HREF       // раскрывается в: css "a"; attr "href"
+    trim
+}
+
+// или
+field {
+    expr EXTRACT-HREF  // то же самое, явный вызов
+    trim
+}
+
+rating {
+    css ".star-rating"
+    attr "class"
+    REPL-RATING        // блочный define с repl
+    to-int
+}
+```
+
+**Типизация блочных define:**
+- Тип вычисляется автоматически из содержимого
+- Поддерживается цепочка define (один define вызывает другой)
+- Обнаружение циклических ссылок
 
 ---
 
@@ -150,34 +215,24 @@ json Quote array=#true {
 - `(array)type` - маркер массива для поля
 - Ссылки на другие JSON структуры по имени
 
-**Использование:**
+**Использование с `jsonify`:**
 
 ```kdl
-define JSON-PATTERN=#"var data = (\[.*\])"#
-
-json Quote array=#true {
-    text str
-    author str
-}
-
 struct Main {
     @init {
-        data {
-            raw
-            re JSON-PATTERN
-        }
+        data { raw; re JSON-PATTERN }
     }
 
     all-quotes {
         @data
         jsonify Quote              // Применить схему Quote
     }
-    
+
     first-quote {
         @data
-        jsonify Quote path="0"     // Взять первый элемент массива
+        jsonify Quote path="0"     // Первый элемент массива
     }
-    
+
     author-slug {
         @data
         jsonify Quote path="2.author.slug"  // Навигация по вложенным полям
@@ -187,15 +242,15 @@ struct Main {
 
 **path навигация:**
 - `""` - применить схему к результату
-- `"0"`, `"1"` - индекс в массиве (unwrap)
+- `"0"`, `"1"` - индекс в массиве
 - `"field"` - доступ к полю
 - `"0.author.slug"` - комбинация
 
 ---
 
-### Transforms
+### transform
 
-Пользовательские функции преобразования с мультиязычной поддержкой:
+Пользовательские функции трансформации с мультиязычной поддержкой:
 
 ```kdl
 transform to-base64 accept=STRING return=STRING {
@@ -208,56 +263,82 @@ transform to-base64 accept=STRING return=STRING {
         code "{{NXT}} = atob({{PRV}})"
     }
 }
-
-transform to-list-base64 accept=LIST_STRING return=LIST_STRING {
-    py {
-        import "from base64 import b64decode"
-        code "{{NXT}} = [str(b64decode(i)) for i in {{PRV}}]"
-    }
-}
-
-transform pow2 accept=INT return=INT {
-    py {
-        code "{{NXT}} = {{PRV}}**2"
-    }
-}
 ```
+
+**Свойства:**
+- `accept` - входной тип (обязательно, AUTO не допускается)
+- `return` - выходной тип (обязательно, AUTO не допускается)
+
+**Языковые блоки:**
+- `py { ... }`, `js { ... }`, `go { ... }`, `lua { ... }` и т.д.
+- `import "..."` - добавляется в секцию импортов (опционально)
+- `code "..."` - код трансформации (обязательно, может быть несколько строк)
+
+**Маркеры:**
+- `{{PRV}}` - предыдущее значение в pipeline (вход)
+- `{{NXT}}` - следующее значение (выход/результат)
 
 **Использование:**
 
 ```kdl
-transform to-base64 accept=STRING return=STRING {
-    py { code "{{NXT}} = {{PRV}}" }
-}
-
-transform pow2 accept=INT return=INT {
-    py { code "{{NXT}} = {{PRV}}**2" }
-}
-
 struct Main {
-    titleb64 {
+    title {
         css "title"
         text
-        transform to-base64  // Применить трансформ
-    }
-    
-    urls-count {
-        css-all "a"
-        len
-        transform pow2
+        transform to-base64
     }
 }
 ```
 
-**Особенности:**
-- `{{PRV}}` - предыдущее значение в pipeline
-- `{{NXT}}` - следующее значение (результат)
-- `import` - автоматически добавляется в секцию импортов
-- Типизация: `accept` и `return` проверяются в compile-time
+---
+
+### dsl
+
+Именованные инлайн-блоки кода для одного языка. Упрощённая альтернатива `transform`:
+
+```kdl
+dsl upper-py lang=py {
+    code "{{NXT}} = {{PRV}}.upper()"
+}
+
+dsl decode-b64 lang=py accept=STRING return=STRING {
+    import "from base64 import b64decode"
+    code "{{NXT}} = b64decode({{PRV}}).decode()"
+}
+```
+
+**Свойства:**
+- `lang` - язык реализации (обязательно): `py`, `js`, `go`, `lua`, ...
+- `accept` - входной тип (опционально)
+- `return` - выходной тип (опционально)
+
+**Дочерние элементы:**
+- `import "..."` - импорты (опционально, может быть несколько)
+- `code "..." "..." ...` - строки кода (обязательно, минимум одна)
+
+**Использование через `expr`:**
+
+```kdl
+struct Main {
+    title {
+        css "title"
+        text
+        expr upper-py    // вызвать dsl блок
+    }
+}
+```
+
+**Отличия от transform:**
+
+| | transform | dsl |
+|---|---|---|
+| Мультиязычность | Да (py, js, ...) | Один язык |
+| accept/return | Обязательно | Опционально |
+| Вызов | `transform NAME` | `expr NAME` |
 
 ---
 
-### Structs
+### struct
 
 Основная единица - структура данных:
 
@@ -266,13 +347,14 @@ struct <Name> type=<StructType> {
     // special fields
     @doc "..."
     @init { ... }
-    @split-doc { ... }
     @pre-validate { ... }
+    @split-doc { ... }
+    @key { ... }
+    @value { ... }
     @table { ... }
     @rows { ... }
     @match { ... }
-    @value { ... }
-    
+
     // regular fields
     field-name { ... }
 }
@@ -287,80 +369,70 @@ struct <Name> type=<StructType> {
 Извлечение одного объекта:
 
 ```kdl
-struct MainCatalogue {
-    title {
-        css "h1"
-        text
-    }
-    description {
-        css ".description"
-        text
-    }
+struct Article {
+    title { css "h1"; text }
+    author { css ".author"; text }
 }
 ```
 
-**Использование:**
-```python
-parser = MainCatalogue(html)
-result = parser.parse()  # -> dict
-```
+**Результат:** `{"title": "...", "author": "..."}`
 
 ---
 
 ### `type=list`
 
-Извлечение списка объектов:
+Извлечение списка объектов. Требуется `@split-doc`.
 
 ```kdl
 struct Book type=list {
     @split-doc { css-all ".book-card" }
-    
-    name {
-        css ".title"
-        text
-    }
-    price {
-        css ".price"
-        text
-        re #"(\d+\.?\d*)"#
-        to-float
-    }
+
+    name { css ".title"; text }
+    price { css ".price"; text; re #"(\d+\.?\d*)"#; to-float }
 }
 ```
 
-**Особенности:**
-- Требуется `@split-doc` для разбиения на элементы
-- Каждое поле обрабатывает один элемент списка
-
-**Использование:**
-```python
-parser = Book(html)
-result = parser.parse()  # -> List[dict]
-```
+**Результат:** `[{"name": "...", "price": 9.99}, ...]`
 
 ---
 
 ### `type=flat`
 
-Извлечение списка без вложенности (один селектор):
+Плоский список без вложенности. Требуется `@split-doc`.
 
 ```kdl
 struct Links type=flat {
     @split-doc { css-all "a" }
-    
-    url {
-        attr "href"
-    }
+    url { attr "href" }
 }
 ```
 
-**Результат:** `[url1, url2, url3]` вместо `[{url: url1}, {url: url2}, ...]`
+**Результат:** `["url1", "url2", "url3"]`
+
+---
+
+### `type=dict`
+
+Извлечение словаря key-value. Требуется `@split-doc`, `@key`, `@value`.
+
+```kdl
+struct MetaOG type=dict {
+    @split-doc {
+        css-all "meta[property^='og:']"
+        match { has-attr "property" "content" }
+    }
+    @key { attr "property"; rm-prefix "og:" }
+    @value { attr "content" }
+}
+```
+
+**Результат:** `{"title": "...", "description": "...", ...}`
 
 ---
 
 ### `type=table`
 
-Извлечение данных из HTML таблиц:
+Извлечение данных из HTML таблиц. Требуется `@table`, `@rows`, `@match`, `@value`.
 
 ```kdl
 struct ProductInfo type=table {
@@ -368,7 +440,7 @@ struct ProductInfo type=table {
     @rows { css-all "tr" }
     @match { css "th"; text; trim; lower }
     @value { css "td"; text }
-    
+
     upc {
         match { eq "upc" }
     }
@@ -386,120 +458,29 @@ struct ProductInfo type=table {
 }
 ```
 
-**Специальные поля:**
-- `@table` - селектор таблицы
-- `@rows` - селектор строк
-- `@match` - pipeline для извлечения ключа из строки
-- `@value` - pipeline для извлечения значения из строки
-
-**Поля:**
-- `match { ... }` - предикаты для сопоставления ключа
-- После match - обычный pipeline для обработки значения
-
----
-
-### `type=dict`
-
-Извлечение словаря key-value:
-
-```kdl
-struct MetaOpenGraphOther type=dict {
-    @split-doc {
-        css-all "meta[property^='og:']"
-        match { 
-            has-attr "property" "content"
-        }
-    }
-    
-    @key {
-        attr "property"
-        rm-prefix "og:"
-    }
-    
-    @value {
-        attr "content"
-    }
-}
-```
-
-**Результат:** `{"title": "...", "description": "...", ...}`
-
-**Специальные поля:**
-- `@key` - pipeline для извлечения ключа
-- `@value` - pipeline для извлечения значения
-
----
-
-## Fields
-
-Обычные поля с pipeline операций:
-
-```kdl
-struct Example {
-    field-name {
-        // 1. Selector
-        css "h1"
-        
-        // 2. Extract
-        text
-        
-        // 3. Transform
-        trim
-        upper
-        
-        // 4. Type conversion
-        to-int
-        
-        // 5. Fallback
-        fallback "default"
-    }
-}
-```
-
-**Pipeline выполняется последовательно:**
-1. Селекторы - выбор элементов
-2. Извлечение - text, attr, raw
-3. Трансформации - trim, upper, fmt, re, ...
-4. Конвертация типов - to-int, to-float, to-bool
-5. Fallback - значение по умолчанию при ошибке
-
-**Поддерживается как многострочная, так и inline форма:**
-```kdl
-field {
-    css "a"
-    attr "href"
-}
-
-field { css "a"; attr "href" }
-field { raw }
-books { nested Book }
-```
-
-**Актуальные field expressions (`parser.py`):**
-- **Selectors:** `css`, `css-all`, `xpath`, `xpath-all`, `css-remove`, `xpath-remove`
-- **Extract:** `text`, `raw`, `attr`
-- **String:** `trim`, `ltrim`, `rtrim`, `normalize-space`, `rm-prefix`, `rm-suffix`, `rm-prefix-suffix`, `fmt`, `repl`, `lower`, `upper`, `split`, `join`, `unescape`
-- **Regex:** `re`, `re-all`, `re-sub`
-- **Array:** `index`, `first`, `last`, `slice`, `len`, `unique`
-- **Conversions / structured:** `to-int`, `to-float`, `to-bool`, `jsonify`, `nested`
-- **Control / logic containers:** `fallback`, `filter`, `assert`, `match`, `transform`
+**Результат:** `{"upc": "abc123", "price": 51.77, "is_available": true}`
 
 ---
 
 ## Special Fields
 
-### `@init` - Предвычисленные значения
+| Field | Struct Types | Описание |
+|-------|-------------|----------|
+| `@doc` | все | Документация структуры |
+| `@pre-validate` | все | Валидация документа перед парсингом |
+| `@init` | все | Предвычисленные (кэшированные) значения |
+| `@split-doc` | list, flat, dict | Разбиение на элементы |
+| `@key` | dict | Pipeline для извлечения ключа |
+| `@value` | dict, table | Pipeline для извлечения значения |
+| `@table` | table | Селектор таблицы |
+| `@rows` | table | Селектор строк |
+| `@match` | table | Pipeline для извлечения ключа из строки |
 
-Кэширование значений для переиспользования:
+### @init
+
+Предвычисленные значения, доступные через `@<name>`:
 
 ```kdl
-define JSON-PATTERN=#"var data = (\[.*\])"#
-
-json Quote array=#true {
-    text str
-    author str
-}
-
 struct Main {
     @init {
         raw-json {
@@ -511,538 +492,88 @@ struct Main {
             attr "href"
         }
     }
-    
+
     data {
-        @raw-json  // Использование предвычисленного значения
+        @raw-json          // ссылка на @init поле
         jsonify Quote
     }
 }
 ```
 
-**Особенности:**
-- Вычисляются один раз при инициализации
-- Доступны через `@<name>`
-- Полезно для дорогих операций
+### @pre-validate
 
----
-
-### `@pre-validate` - Валидация документа
-
-Проверка наличия ключевых элементов:
+Проверка наличия элементов перед парсингом:
 
 ```kdl
 struct Book type=list {
     @pre-validate {
-        assert { css ".col-lg-3 .thumbnail" }
+        assert { css ".product_pod" }
     }
-    // fields...
+    // ...
 }
 ```
 
-**Выбрасывает исключение** если элемент не найден.
+### @split-doc
 
----
-
-### `@split-doc` - Разбиение на элементы
-
-Для `type=list`, `type=flat`, `type=dict`:
+Разбиение документа на элементы для `list`/`flat`/`dict`:
 
 ```kdl
-struct Book type=list {
-    @split-doc { css-all ".book-card" }
-    // каждое поле обрабатывает один элемент из списка
+@split-doc { css-all ".book-card" }
+
+// с фильтрацией
+@split-doc {
+    css-all "a[href]"
+    match { attr-starts "href" "https" }
 }
 ```
 
 ---
 
-## Selectors
+## Regular Fields
 
-### CSS Selectors
-
-```kdl
-css ".class"              // Первый элемент
-css-all ".class"          // Все элементы
-css-remove ".ads"         // Удалить элементы (возвращает текущий doc)
-```
-
-**Примеры:**
-```kdl
-title { css "h1"; text }
-links { css-all "a"; attr "href" }
-clean-content { css-remove ".ads"; css ".content"; text }
-```
-
----
-
-### XPath Selectors
+Обычные поля с pipeline операций:
 
 ```kdl
-xpath "//div[@class='content']"       // Первый элемент
-xpath-all "//a"                       // Все элементы
-xpath-remove "//script"               // Удалить элементы
-```
-
----
-
-## Extract Operations
-
-### `text` - Извлечение текста
-
-```kdl
-title { css "h1"; text }
-```
-
-**Типы:**
-- `DOCUMENT → STRING`
-- `LIST_DOCUMENT → LIST_STRING`
-
----
-
-### `attr` - Извлечение атрибутов
-
-```kdl
-url { css "a"; attr "href" }
-classes { css "div"; attr "class" "data-attr" }  // Конкатенация атрибутов
-```
-
-**Типы:**
-- `DOCUMENT → STRING`
-- `LIST_DOCUMENT → LIST_STRING`
-
----
-
-### `raw` - HTML код
-
-```kdl
-html-content { css ".content"; raw }
-```
-
-**Типы:**
-- `DOCUMENT → STRING`
-- `LIST_DOCUMENT → LIST_STRING`
-
----
-
-## String Operations
-
-### `trim` / `ltrim` / `rtrim`
-
-```kdl
-text { css "p"; text; trim }
-text { css "p"; text; ltrim }
-text { css "p"; text; rtrim }
-```
-
----
-
-### `upper` / `lower`
-
-```kdl
-tag { css ".tag"; text; lower }
-title { css "h1"; text; upper }
-```
-
----
-
-### `normalize-space`
-
-```kdl
-text { css ".content"; text; normalize-space }
-```
-
----
-
-### `rm-prefix` / `rm-suffix` / `rm-prefix-suffix`
-
-```kdl
-url {
-    css "img"
-    attr "src"
-    rm-prefix "../"
-    rm-suffix ".jpg"
-}
-
-slug { text; rm-prefix-suffix "/" }
-```
-
----
-
-### `fmt` - Форматирование
-
-```kdl
-define FMT-URL="https://example.com/{{}}"
-
 struct Example {
-    url {
-        css "a"
-        attr "href"
-        fmt FMT-URL  // https://example.com/path
-    }
-}
-```
-
-**Placeholder:** `{{}}`
-
----
-
-### `re` - Regex извлечение
-
-```kdl
-price {
-    css ".price"
-    text
-    re #"(\d+\.\d+)"#  // Извлечь первую группу
-}
-```
-
-**Типы:**
-- `STRING → STRING`
-- `LIST_STRING → LIST_STRING` (map)
-
----
-
-### `re-all` - Все совпадения
-
-```kdl
-numbers {
-    css ".content"
-    text
-    re-all #"\d+"#  // ["1", "2", "3"]
-}
-```
-
-**Типы:**
-- `STRING → LIST_STRING`
-
----
-
-### `re-sub` - Замена
-
-```kdl
-clean {
-    css ".text"
-    text
-    re-sub #"\s+" " "  // Заменить множественные пробелы
-}
-```
-
----
-
-### `repl` - Замена по словарю
-
-```kdl
-define REPL-RATING {
-    repl {
-        One "1"
-        Two "2"
-        Three "3"
-    }
-}
-
-struct Example {
-    rating {
-        css ".star-rating"
-        attr "class"
-        rm-prefix "star-rating "
-        REPL-RATING
-    }
-
-    text { text; repl "foo" "bar" }
-}
-```
-
----
-
-### `split` / `join` / `unescape`
-
-```kdl
-tags { text; split ", " }
-joined { css-all ".tag"; text; join ", " }
-html-entities { text; unescape }
-```
-
----
-
-## Type Conversions
-
-### `to-int` / `to-float` / `to-bool`
-
-```kdl
-count { css ".count"; text; to-int }
-price { css ".price"; text; re #"(\d+\.\d+)"#; to-float }
-active { css ".active"; to-bool }  // Наличие элемента → true/false
-```
-
----
-
-### `index` / `first` / `last` / `slice` / `len` / `unique`
-
-```kdl
-first-link { css-all "a"; first; attr "href" }
-last-link { css-all "a"; last; attr "href" }
-second-link { css-all "a"; index 1; attr "href" }
-subset { css-all "a"; attr "href"; slice 1 3 }
-unique-tags { css-all ".tag"; text; unique }
-links-count { css-all "a"; len }
-```
-
-**Типы:**
-- `index` / `first` / `last`: `LIST_* → <item type>`
-- `slice`: `LIST_* → LIST_*`
-- `len`: `LIST_* → INT`, `STRING → INT`
-- `unique`: `LIST_* → LIST_*`
-
----
-
-### `fallback` / `@<name>` / `filter` / `assert` / `match` / `transform`
-
-```kdl
-transform to-base64 accept=STRING return=STRING {
-    py { code "{{NXT}} = {{PRV}}" }
-}
-
-struct Example type=table {
-    @init {
-        cached { text }
-    }
-    @table { css "table" }
-    @rows { css-all "tr" }
-    @match { css "th"; text }
-    @value { css "td"; text }
-
-    value {
-        @cached
-        fallback "default"
-    }
-
-    links {
-        css-all "a"
-        attr "href"
-        filter { not { contains "utm" } }
-    }
-
-    price {
-        match { starts "price" }
-    }
-
-    title {
-        css "title"
-        text
-        transform to-base64
-    }
-}
-```
-
-**Значения для `fallback`:**
-- `#null` - null/None
-- `#true` / `#false` - boolean
-- `0` - число
-- `""` - строка
-
-**Примечания:**
-- `@name` — способ обращения к `@init` полю
-- `filter { ... }`, `assert { ... }`, `match { ... }` принимают predicate-узлы
-- `not { ... }`, `and { ... }`, `or { ... }` используются только внутри этих контейнеров
-
----
-
-## Predicates
-
-Используются в `match { ... }` и `assert { ... }`:
-
-### String Predicates
-
-```kdl
-match { eq "value" }              // Равно
-match { ne "value" }              // Не равно
-match { starts "prefix" }         // Начинается с
-match { ends "suffix" }           // Заканчивается на
-match { contains "substring" }    // Содержит
-match { re #"pattern"# }          // Regex
-```
-
----
-
-### Attribute Predicates
-
-```kdl
-match { has-attr "class" }
-match { attr-eq "class" "active" }
-match { attr-re "href" #"^https"# }
-```
-
----
-
-### Element Predicates
-
-```kdl
-assert { css ".required-element" }     // Элемент существует
-assert { xpath "//div[@id='main']" }
-```
-
----
-
-### Predicate Logic
-
-```kdl
-assert { and { contains "foo"; not { contains "bar" } } }
-filter { or { attr-starts "href" "https"; attr-starts "href" "/" } }
-match { not { eq "draft" } }
-```
-
-**Дополнительно поддерживаются:**
-- сравнения: `gt`, `lt`, `ge`, `le`, `range`, `in`
-- атрибуты: `attr-ne`, `attr-starts`, `attr-ends`, `attr-contains`, `attr-re`
-- текстовые предикаты: `text-contains`, `text-starts`, `text-ends`, `text-re`
-
----
-
-## Examples
-
-### Простая структура
-
-```kdl
-struct Article {
+    // многострочная форма
     title {
         css "h1"
         text
-    }
-    author {
-        css ".author"
-        text
-    }
-    content {
-        css ".content"
-        text
         trim
     }
-}
-```
 
----
+    // inline форма
+    link { css "a"; attr "href" }
 
-### Список с nested структурой
+    // однострочная (bare) форма
+    html { raw }
 
-```kdl
-struct Book type=list {
-    @split-doc { css-all ".book" }
-    
-    title { css ".title"; text }
-    price { css ".price"; text; re #"(\d+)"#; to-float }
-}
-
-struct Catalogue {
+    // nested
     books { nested Book }
-    total-count { css-all ".book"; len }
 }
 ```
 
 ---
 
-### JSON парсинг с path
+## Pipeline
+
+Каждое поле содержит **pipeline** - последовательность операций:
+
+```
+Selector -> Extract -> Transform -> Convert -> Result
+```
 
 ```kdl
-define JSON-PATTERN=#"var data = (\[.*\])"#
-
-json Quote array=#true {
-    text str
-    author str
-}
-
-struct Main {
-    @init {
-        raw-json { raw; re JSON-PATTERN }
-    }
-    
-    all-quotes {
-        @raw-json
-        jsonify Quote
-    }
-    
-    first-quote {
-        @raw-json
-        jsonify Quote path="0"
-    }
+price {
+    css ".price"         // DOCUMENT -> DOCUMENT
+    text                 // DOCUMENT -> STRING
+    trim                 // STRING -> STRING
+    re #"(\d+\.\d+)"#   // STRING -> STRING
+    to-float             // STRING -> FLOAT
+    fallback 0.0         // FLOAT (с fallback)
 }
 ```
 
----
-
-### Таблица с валидацией
-
-```kdl
-struct ProductInfo type=table {
-    @table { css "table.info" }
-    @rows { css-all "tr" }
-    @match { css "th"; text; lower }
-    @value { css "td"; text }
-    
-    @pre-validate {
-        assert { css "table.info" }
-    }
-    
-    price {
-        match { starts "price" }
-        re #"(\d+\.\d+)"#
-        to-float
-    }
-    
-    stock {
-        match { eq "availability" }
-        assert { contains "In stock" }
-        to-bool
-        fallback #false
-    }
-}
-```
-
----
-
-### Transform с импортами
-
-```kdl
-transform decode-base64 accept=STRING return=STRING {
-    py {
-        import "from base64 import b64decode"
-        code "{{NXT}} = b64decode({{PRV}}).decode('utf-8')"
-    }
-}
-
-struct Main {
-    encoded {
-        css "#data"
-        attr "data-encoded"
-        transform decode-base64
-    }
-}
-```
-
----
-
-## Summary
-
-**Основные концепции:**
-- Pipeline-based обработка данных
-- Типизированные операции с проверкой в compile-time
-- Переиспользование через `define`, `transform`, `nested`
-- Мультиязычная кодогенерация (Python, JavaScript)
-- Линтинг и валидация на этапе компиляции
-
-**Поддерживаемые генераторы:**
-- `py-bs4` - Python + BeautifulSoup4
-- `py-lxml` - Python + lxml
-- `js-pure` - JavaScript (pure)
-
-**CLI:**
-```bash
-# Генерация кода
-ssc-kdl generate schema.kdl -t py-bs4
-
-# Проверка синтаксиса
-ssc-kdl check schema.kdl
-
-# Генерация из директории
-ssc-kdl generate schemas/ -t py-lxml -o output/
-```
-
+Полный список операций см. в [operations.md](operations.md).
+Предикаты (filter, assert, match) см. в [predicates.md](predicates.md).
+Система типов см. в [types.md](types.md).
