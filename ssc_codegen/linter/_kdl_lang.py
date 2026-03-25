@@ -4,14 +4,24 @@ The .dll/.so/.dylib must be built first via scripts/build_kdl.py
 """
 
 import ctypes
+import platform
+import sys
 from pathlib import Path
 from tree_sitter import Language, Parser
 
 _LIB_DIR = Path(__file__).parent
 
+_PLATFORM_EXT_ORDER: tuple[str, ...]
+if sys.platform == "win32":
+    _PLATFORM_EXT_ORDER = ("*.dll", "*.so", "*.dylib")
+elif platform.system() == "Darwin":
+    _PLATFORM_EXT_ORDER = ("*.dylib", "*.so", "*.dll")
+else:
+    _PLATFORM_EXT_ORDER = ("*.so", "*.dylib", "*.dll")
+
 
 def _find_lib() -> Path:
-    for ext in ("*.dll", "*.so", "*.dylib"):
+    for ext in _PLATFORM_EXT_ORDER:
         candidates = list(_LIB_DIR.glob(ext))
         if candidates:
             return candidates[0]

@@ -6,7 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
 VENDOR = ROOT / "vendor" / "tree-sitter-kdl"
-OUT = ROOT / "ssc_codegen" / "kdl" / "linter"
+OUT = ROOT / "ssc_codegen" / "linter"
 BUILD_TEMP = ROOT / "build" / "temp"
 
 
