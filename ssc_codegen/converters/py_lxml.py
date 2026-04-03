@@ -55,6 +55,7 @@ from ssc_codegen.ast import (
     PredTextEnds,
     PredTextContains,
     PredTextRe,
+    Jsonify
 )
 
 from ssc_codegen.ast import Nested
@@ -66,6 +67,9 @@ from ssc_codegen.converters import py_bs4
 PY_LXML_CONVERTER = py_bs4.PY_BASE_CONVERTER.extend()
 
 # Override specific handlers for lxml
+PY_TYPES = py_bs4.PY_TYPES.copy()
+PY_TYPES[VariableType.DOCUMENT] = "HtmlElement"
+PY_TYPES[VariableType.LIST_DOCUMENT] = "List[HtmlElement]"
 
 
 @PY_LXML_CONVERTER(Imports)
@@ -165,18 +169,16 @@ def pre_init(node: Init, ctx: ConverterContext):
 @PY_LXML_CONVERTER(InitField)
 def pre_init_field(node: InitField, ctx: ConverterContext):
     name = to_snake_case(node.name)
-    ret_type = py_bs4.PY_TYPES.get(node.ret, "Any")
+    ret_type = PY_TYPES.get(node.ret, "Any")
     return [f"    def _init_{name}(self, v: HtmlElement) -> {ret_type}:"]
 
 
 @PY_LXML_CONVERTER(Field)
 def pre_struct_field(node: Field, ctx: ConverterContext):
     name = to_snake_case(node.name)
-    ret_type = py_bs4.PY_TYPES.get(node.ret, "Any")
+    ret_type = PY_TYPES.get(node.ret, "Any")
 
     if node.ret == VariableType.JSON:
-        from ssc_codegen.ast import Jsonify
-
         jsonify_node = [i for i in node.body if isinstance(i, Jsonify)][0]
         ret_type = ret_type.format(jsonify_node.schema_name)
         if jsonify_node.is_array:
@@ -201,11 +203,9 @@ def pre_struct_key(node: Key, ctx: ConverterContext):
 
 @PY_LXML_CONVERTER(Value)
 def pre_struct_value(node: Value, ctx: ConverterContext):
-    ret_type = py_bs4.PY_TYPES.get(node.ret, "Any")
+    ret_type = PY_TYPES.get(node.ret, "Any")
 
     if node.ret == VariableType.JSON:
-        from ssc_codegen.ast import Jsonify
-
         jsonify_node = [i for i in node.body if isinstance(i, Jsonify)][0]
         ret_type = ret_type.format(jsonify_node.schema_name)
         if jsonify_node.is_array:

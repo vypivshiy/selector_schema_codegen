@@ -52,7 +52,10 @@ from ssc_codegen.converters import py_bs4
 
 
 PY_SLAX_CONVERTER = py_bs4.PY_BASE_CONVERTER.extend()
+PY_TYPES = py_bs4.PY_TYPES.copy()
 
+PY_TYPES[VariableType.DOCUMENT] = "Node"
+PY_TYPES[VariableType.LIST_DOCUMENT] = "List[Node]"
 
 @PY_SLAX_CONVERTER(Imports)
 def pre_imports(node: Imports, _: ConverterContext):
@@ -104,7 +107,7 @@ def pre_init(node: Init, ctx: ConverterContext):
 @PY_SLAX_CONVERTER(InitField)
 def pre_init_field(node: InitField, ctx: ConverterContext):
     name = to_snake_case(node.name)
-    ret_type = py_bs4.PY_TYPES.get(node.ret, "Any")
+    ret_type = PY_TYPES.get(node.ret, "Any")
     return [
         f"    def _init_{name}(self, v: Union[HTMLParser, Node]) -> {ret_type}:"
     ]
@@ -113,7 +116,7 @@ def pre_init_field(node: InitField, ctx: ConverterContext):
 @PY_SLAX_CONVERTER(Field)
 def pre_struct_field(node: Field, ctx: ConverterContext):
     name = to_snake_case(node.name)
-    ret_type = py_bs4.PY_TYPES.get(node.ret, "Any")
+    ret_type = PY_TYPES.get(node.ret, "Any")
 
     if node.ret == VariableType.JSON:
         from ssc_codegen.ast import Jsonify
@@ -144,7 +147,7 @@ def pre_struct_key(node: Key, ctx: ConverterContext):
 
 @PY_SLAX_CONVERTER(Value)
 def pre_struct_value(node: Value, ctx: ConverterContext):
-    ret_type = py_bs4.PY_TYPES.get(node.ret, "Any")
+    ret_type = PY_TYPES.get(node.ret, "Any")
 
     if node.ret == VariableType.JSON:
         from ssc_codegen.ast import Jsonify

@@ -54,7 +54,9 @@ from ssc_codegen.converters import py_bs4
 
 
 PY_PARSEL_CONVERTER = py_bs4.PY_BASE_CONVERTER.extend()
-
+PY_TYPES = py_bs4.PY_TYPES.copy()
+PY_TYPES[VariableType.DOCUMENT] = "Selector"
+PY_TYPES[VariableType.LIST_DOCUMENT] = "SelectorList"
 
 @PY_PARSEL_CONVERTER(Imports)
 def pre_imports(node: Imports, _: ConverterContext):
