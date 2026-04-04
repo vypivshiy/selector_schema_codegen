@@ -1598,24 +1598,44 @@ def reg_expr_re_sub(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
 
 
 # array
+def _resolve_index_types(
+    parent: FieldLikeNode,
+) -> tuple[VariableType, VariableType]:
+    """Resolve accept/ret for index/first/last from the previous node's type."""
+    if parent.body:
+        prev_type = parent.body[-1].ret
+        accept = prev_type
+        ret = prev_type.scalar if prev_type.is_list else prev_type
+    else:
+        accept = VariableType.LIST_AUTO
+        ret = VariableType.AUTO
+    return accept, ret
+
+
 @PARSER.register_expression_node("index")
 def reg_expr_index(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
-    return Index(parent=parent, i=int(node.args[0]))
+    accept, ret = _resolve_index_types(parent)
+    return Index(parent=parent, i=int(node.args[0]), accept=accept, ret=ret)
 
 
 @PARSER.register_expression_node("first")
 def reg_expr_first(_: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
-    return Index(parent=parent, i=0)
+    accept, ret = _resolve_index_types(parent)
+    return Index(parent=parent, i=0, accept=accept, ret=ret)
 
 
 @PARSER.register_expression_node("last")
 def reg_expr_last(_: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
-    return Index(parent=parent, i=-1)
+    accept, ret = _resolve_index_types(parent)
+    return Index(parent=parent, i=-1, accept=accept, ret=ret)
 
 
 @PARSER.register_expression_node("slice")
 def reg_expr_slice(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
     start, end = int(node.args[0]), int(node.args[1])
+    if parent.body:
+        prev_type = parent.body[-1].ret
+        return Slice(parent=parent, start=start, end=end, accept=prev_type, ret=prev_type)
     return Slice(parent=parent, start=start, end=end)
 
 
