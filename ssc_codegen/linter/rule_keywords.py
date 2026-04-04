@@ -51,14 +51,11 @@ _VALID_VT_NAMES: frozenset[str] = frozenset(
         "LIST_FLOAT",
         "BOOL",
         "NULL",
-        "NESTED",
-        "JSON",
         "OPT_STRING",
         "OPT_INT",
         "OPT_FLOAT",
     }
 )
-
 
 def _get_dsl_names(ctx: LintContext) -> frozenset[str]:
     """
