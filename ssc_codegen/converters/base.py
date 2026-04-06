@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, replace
-from typing import Callable, Type, TYPE_CHECKING
+from typing import Any, Callable, Type, TYPE_CHECKING
 
 from ssc_codegen.ast import Node
 from ssc_codegen.ast import Filter, Assert, Match
@@ -74,10 +76,14 @@ _PIPELINE_NODES = (
 _PREDICATE_NODES = (Filter, Assert, Match, LogicNot, LogicAnd, LogicOr)
 
 
+CallbackFile = Callable[["Module", dict[str, Any]], str]
+
+
 class BaseConverter:
     def __init__(self, *, var_name: str = "v", indent: str = " " * 4) -> None:
         self._pre_callbacks: dict[Type[Node], CallbackNode] = {}
         self._post_callbacks: dict[Type[Node], CallbackNode] = {}
+        self._file_providers: dict[str, CallbackFile] = {}
         self.var_name = var_name
         self.indent = indent
 
@@ -117,7 +123,48 @@ class BaseConverter:
     ) -> Callable[..., CallbackNode]:
         return self.pre(node_type, post_callback=post_callback)
 
-    def extend(self) -> "BaseConverter":
+    def file(self, filename: str) -> Callable[..., CallbackFile]:
+        """Register a support file provider.
+
+        The decorated function receives (module_ast, meta) and returns
+        the file content as a string.  *meta* is a dict of extra
+        key-value pairs forwarded from ``convert_all(**meta)``.
+
+        Example::
+
+            @GO_CONVERTER.file("sscgen_core.go")
+            def go_core(module: Module, meta: dict) -> str:
+                pkg = meta.get("package", "parser")
+                return f"package {pkg}\\n..."
+        """
+
+        def decorator(fn: CallbackFile) -> CallbackFile:
+            self._file_providers[filename] = fn
+            return fn
+
+        return decorator
+
+    @property
+    def has_support_files(self) -> bool:
+        return bool(self._file_providers)
+
+    def convert_all(
+        self, module_ast: "Module", **meta: Any
+    ) -> dict[str, str]:
+        """Return main file and support files as ``{filename: content}``.
+
+        The main file is stored under key ``""`` (empty string).
+        Support files use the filenames registered via ``@converter.file()``.
+
+        *meta* kwargs are forwarded to every file-provider callback.
+        """
+        result: dict[str, str] = {}
+        for name, provider in self._file_providers.items():
+            result[name] = provider(module_ast, meta)
+        result[""] = self.convert(module_ast)
+        return result
+
+    def extend(self) -> BaseConverter:
         """
         Create a new converter that inherits all handlers from this one.
         New registrations on the child override inherited handlers.
@@ -148,8 +195,9 @@ class BaseConverter:
             JS_CHEERIO = JS_BASE.extend()
         """
         child = BaseConverter(var_name=self.var_name, indent=self.indent)
-        child._pre_callbacks = dict(self._pre_callbacks.copy())
-        child._post_callbacks = dict(self._post_callbacks.copy())
+        child._pre_callbacks = dict(self._pre_callbacks)
+        child._post_callbacks = dict(self._post_callbacks)
+        child._file_providers = dict(self._file_providers)
         return child
 
     # ── internal traversal ────────────────────────────────────────────────────

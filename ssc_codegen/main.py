@@ -5,7 +5,7 @@ from __future__ import annotations
 import enum
 import traceback
 from pathlib import Path
-from typing import Annotated, List
+from typing import Annotated, List, Optional
 
 import typer
 
@@ -113,6 +113,13 @@ def generate(
             help="Convert CSS selectors to XPath before code generation.",
         ),
     ] = False,
+    package: Annotated[
+        Optional[str],
+        typer.Option(
+            "--package",
+            help="Package/module name for generated code. Default: output directory name.",
+        ),
+    ] = None,
 ) -> None:
     """Compile KDL schema files into parser code for the chosen target."""
     from ssc_codegen import parse_ast
@@ -178,17 +185,30 @@ def generate(
 
     errors: list[str] = []
 
+    meta = {"package": package or output.name}
+
     for kdl_file in kdl_files:
         out_file = output / kdl_file.with_suffix(ext).name
         logger.debug("processing: %s -> %s", kdl_file, out_file)
         try:
             ast = parse_ast(path=str(kdl_file), css_to_xpath=css_to_xpath)
             logger.debug("AST built for %s", kdl_file)
-            code = converter.convert(ast)
+
+            if converter.has_support_files:
+                files = converter.convert_all(ast, **meta)
+                for name, content in files.items():
+                    target_path = out_file if name == "" else output / name
+                    target_path.write_text(content, encoding="utf-8")
+                    if name:
+                        typer.echo(f"  -> {target_path}")
+                code = files[""]
+            else:
+                code = converter.convert(ast)
+                out_file.write_text(code, encoding="utf-8")
+
             logger.debug(
                 "code generated for %s (%d chars)", kdl_file, len(code)
             )
-            out_file.write_text(code, encoding="utf-8")
             typer.echo(f"  {kdl_file} -> {out_file}")
         except Exception as exc:
             if verbose:

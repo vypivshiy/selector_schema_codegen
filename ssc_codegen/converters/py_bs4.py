@@ -102,6 +102,10 @@ from ssc_codegen.ast import (
     PredCountEq,
     PredCountGt,
     PredCountLt,
+    PredCountNe,
+    PredCountGe,
+    PredCountLe,
+    PredCountRange,
     PredEnds,
     PredEq,
     PredGe,
@@ -1091,6 +1095,41 @@ def pre_expr_pred_count_gt(node: PredCountGt, ctx: ConverterContext):
 def pre_expr_pred_count_lt(node: PredCountLt, ctx: ConverterContext):
     value = node.value
     cond = f"len(i) < {value}"
+    if ctx.index == 0:
+        return ctx.indent + cond
+    return ctx.indent + f"and {cond}"
+
+
+@PY_BASE_CONVERTER(PredCountNe)
+def pre_expr_pred_count_ne(node: PredCountNe, ctx: ConverterContext):
+    value = node.value
+    cond = f"len(i) != {value}"
+    if ctx.index == 0:
+        return ctx.indent + cond
+    return ctx.indent + f"and {cond}"
+
+
+@PY_BASE_CONVERTER(PredCountGe)
+def pre_expr_pred_count_ge(node: PredCountGe, ctx: ConverterContext):
+    value = node.value
+    cond = f"len(i) >= {value}"
+    if ctx.index == 0:
+        return ctx.indent + cond
+    return ctx.indent + f"and {cond}"
+
+
+@PY_BASE_CONVERTER(PredCountLe)
+def pre_expr_pred_count_le(node: PredCountLe, ctx: ConverterContext):
+    value = node.value
+    cond = f"len(i) <= {value}"
+    if ctx.index == 0:
+        return ctx.indent + cond
+    return ctx.indent + f"and {cond}"
+
+
+@PY_BASE_CONVERTER(PredCountRange)
+def pre_expr_pred_count_range(node: PredCountRange, ctx: ConverterContext):
+    cond = f"{node.start} < len(i) < {node.end}"
     if ctx.index == 0:
         return ctx.indent + cond
     return ctx.indent + f"and {cond}"

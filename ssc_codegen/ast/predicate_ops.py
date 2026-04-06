@@ -254,6 +254,35 @@ class PredCountLt(Node):
     value: int = 0
 
 
+@dataclass
+class PredCountNe(Node):
+    """len(list) != value. Assert only."""
+
+    value: int = 0
+
+
+@dataclass
+class PredCountGe(Node):
+    """len(list) >= value. Assert only."""
+
+    value: int = 0
+
+
+@dataclass
+class PredCountLe(Node):
+    """len(list) <= value. Assert only."""
+
+    value: int = 0
+
+
+@dataclass
+class PredCountRange(Node):
+    """start < len(list) < end. Assert only."""
+
+    start: int = 0
+    end: int = 0
+
+
 # =============================================================================
 # Logic
 # =============================================================================

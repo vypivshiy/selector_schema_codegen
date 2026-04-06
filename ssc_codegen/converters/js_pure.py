@@ -118,6 +118,10 @@ from ssc_codegen.ast import (
     PredCountEq,
     PredCountGt,
     PredCountLt,
+    PredCountNe,
+    PredCountGe,
+    PredCountLe,
+    PredCountRange,
     PredEnds,
     PredEq,
     PredGe,
@@ -1169,6 +1173,30 @@ def pre_expr_pred_count_gt(node: PredCountGt, ctx: ConverterContext):
 def pre_expr_pred_count_lt(node: PredCountLt, ctx: ConverterContext):
     target = _pred_target(node, ctx)
     return _and(f"{target}.length < {node.value}", ctx)
+
+
+@JS_CONVERTER(PredCountNe)
+def pre_expr_pred_count_ne(node: PredCountNe, ctx: ConverterContext):
+    target = _pred_target(node, ctx)
+    return _and(f"{target}.length !== {node.value}", ctx)
+
+
+@JS_CONVERTER(PredCountGe)
+def pre_expr_pred_count_ge(node: PredCountGe, ctx: ConverterContext):
+    target = _pred_target(node, ctx)
+    return _and(f"{target}.length >= {node.value}", ctx)
+
+
+@JS_CONVERTER(PredCountLe)
+def pre_expr_pred_count_le(node: PredCountLe, ctx: ConverterContext):
+    target = _pred_target(node, ctx)
+    return _and(f"{target}.length <= {node.value}", ctx)
+
+
+@JS_CONVERTER(PredCountRange)
+def pre_expr_pred_count_range(node: PredCountRange, ctx: ConverterContext):
+    target = _pred_target(node, ctx)
+    return _and(f"{target}.length > {node.start} && {target}.length < {node.end}", ctx)
 
 
 @JS_CONVERTER(PredHasAttr)

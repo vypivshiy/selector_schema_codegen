@@ -97,6 +97,10 @@ from .predicate_ops import (
     PredCountEq,
     PredCountGt,
     PredCountLt,
+    PredCountNe,
+    PredCountGe,
+    PredCountLe,
+    PredCountRange,
     PredAttrEnds,
     PredAttrEq,
     PredAttrNe,
@@ -163,6 +167,7 @@ __all__ = [
     "PredAttrStarts", "PredAttrEnds", "PredAttrContains", "PredAttrRe",
     "PredTextStarts", "PredTextEnds", "PredTextContains", "PredTextRe",
     "PredCountEq", "PredCountGt", "PredCountLt",
+    "PredCountNe", "PredCountGe", "PredCountLe", "PredCountRange",
     "LogicNot", "LogicAnd", "LogicOr",
     # transform
     "TransformDef", "TransformTarget", "TransformCall",

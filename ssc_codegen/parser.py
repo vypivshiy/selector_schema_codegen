@@ -159,6 +159,10 @@ from ssc_codegen.ast import (
     PredCountEq,
     PredCountGt,
     PredCountLt,
+    PredCountNe,
+    PredCountGe,
+    PredCountLe,
+    PredCountRange,
 )
 
 # json
@@ -2156,6 +2160,46 @@ def reg_len_lt(node: KdlNode, parent: Filter, cx: ParseContext):
     prev_type = parent.ret
     return PredCountLt(
         parent=parent, accept=prev_type, ret=prev_type, value=int(value)
+    )
+
+
+# ASSERT SCOPE ONLY
+@PARSER.register_predicate_node("len-ne", reg_match=False, reg_filter=False)
+def reg_len_ne(node: KdlNode, parent: Filter, cx: ParseContext):
+    value = node.args[1]
+    prev_type = parent.ret
+    return PredCountNe(
+        parent=parent, accept=prev_type, ret=prev_type, value=int(value)
+    )
+
+
+# ASSERT SCOPE ONLY
+@PARSER.register_predicate_node("len-ge", reg_match=False, reg_filter=False)
+def reg_len_ge(node: KdlNode, parent: Filter, cx: ParseContext):
+    value = node.args[1]
+    prev_type = parent.ret
+    return PredCountGe(
+        parent=parent, accept=prev_type, ret=prev_type, value=int(value)
+    )
+
+
+# ASSERT SCOPE ONLY
+@PARSER.register_predicate_node("len-le", reg_match=False, reg_filter=False)
+def reg_len_le(node: KdlNode, parent: Filter, cx: ParseContext):
+    value = node.args[1]
+    prev_type = parent.ret
+    return PredCountLe(
+        parent=parent, accept=prev_type, ret=prev_type, value=int(value)
+    )
+
+
+# ASSERT SCOPE ONLY
+@PARSER.register_predicate_node("len-range", reg_match=False, reg_filter=False)
+def reg_len_range(node: KdlNode, parent: Filter, cx: ParseContext):
+    start, end = int(node.args[0]), int(node.args[1])
+    prev_type = parent.ret
+    return PredCountRange(
+        parent=parent, accept=prev_type, ret=prev_type, start=start, end=end
     )
 
 
