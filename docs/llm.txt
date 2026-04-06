@@ -1,0 +1,280 @@
+# ssc_codegen — KDL Schema DSL v2.1 Reference for LLMs
+
+ssc_codegen is a code generator for web scraping parsers.
+Input: .kdl schema files describing HTML extraction rules.
+Output: parser code for Python (bs4, lxml, parsel, selectolax) and JavaScript (DOM API).
+
+Pipeline: .kdl schema -> tree-sitter parser -> AST -> linter -> converter -> output code
+
+## File structure
+
+A .kdl file contains module-level declarations and struct definitions.
+
+Module-level: import, define, json, transform, dsl, struct.
+
+## import
+
+```kdl
+import "./shared.kdl"
+import "./shared.kdl" { Book PriceTransform }
+```
+
+Path is relative to current file. Transitive. Cyclic imports forbidden.
+
+## define
+
+Scalar (substituted into arguments):
+```kdl
+define BASE-URL="https://example.com/{{}}"
+define RE-PRICE=#"(\d+(?:\.\d+)?)"#
+```
+
+Block (expanded as pipeline operations):
+```kdl
+define EXTRACT-HREF {
+    css "a"
+    attr "href"
+}
+```
+
+## struct
+
+```kdl
+struct Name type=item|list|dict|table|flat {
+    field-name { pipeline... }
+}
+```
+
+### Struct types
+
+- item (default) -> dict. No required special fields.
+- list -> list[dict]. Requires: @split-doc.
+- dict -> dict[str, any]. Requires: @split-doc, @key, @value.
+- table -> dict. Requires: @table, @rows, @match, @value.
+- flat -> list[str]. No required special fields. Optional: keep-order=#true.
+
+### Special fields
+
+- @doc — documentation string
+- @pre-validate — validate document before parsing; raises error on failure
+- @init — pre-compute and cache values; referenced via @name in fields
+- @split-doc — split document into items (list, dict)
+- @key — key extraction for dict
+- @value — value extraction for dict and table
+- @table — table element selector
+- @rows — table rows selector
+- @match — extract key from row for comparison
+
+### Regular fields
+
+```kdl
+title { css "h1"; text; trim }
+link { css "a"; attr "href" }
+books { nested Book }
+```
+
+## Pipeline operations
+
+Pipeline is a chain of operations. Initial type is DOCUMENT (or @init value type).
+
+### Selectors
+
+- css <query>: DOCUMENT -> DOCUMENT
+- css-all <query>: DOCUMENT -> LIST_DOCUMENT
+- css-remove <query>: DOCUMENT -> DOCUMENT
+- xpath <query>: DOCUMENT -> DOCUMENT
+- xpath-all <query>: DOCUMENT -> LIST_DOCUMENT
+- xpath-remove <query>: DOCUMENT -> DOCUMENT
+
+### Extract
+
+- text: DOCUMENT -> STRING, LIST_DOCUMENT -> LIST_STRING
+- raw: DOCUMENT -> STRING, LIST_DOCUMENT -> LIST_STRING
+- attr <name>: DOCUMENT -> STRING, LIST_DOCUMENT -> LIST_STRING
+- attr <name1> <name2> ...: DOCUMENT -> LIST_STRING, LIST_DOCUMENT -> LIST_STRING
+
+### String operations (support map semantics: STRING and LIST_STRING)
+
+- trim [chars]
+- ltrim [chars]
+- rtrim [chars]
+- normalize-space
+- fmt <template> (template contains {{}} placeholder or scalar define name)
+- repl <old> <new>
+- repl { <old1> <new1>; <old2> <new2> }
+- lower
+- upper
+- rm-prefix <substr>
+- rm-suffix <substr>
+- rm-prefix-suffix <substr>
+- unescape
+- split <sep>: STRING -> LIST_STRING
+- join <sep>: LIST_STRING -> STRING
+
+### Regex
+
+- re <pattern>: STRING -> STRING (requires exactly one capturing group)
+- re-all <pattern>: STRING -> LIST_STRING
+- re-sub <pattern> <repl>: STRING -> STRING
+
+### Array
+
+- index <i>: LIST_* -> scalar
+- first: LIST_* -> scalar (alias for index 0)
+- last: LIST_* -> scalar (alias for index -1)
+- slice <start> <end>: LIST_* -> LIST_*
+- len: LIST_* -> INT
+- unique: LIST_STRING -> LIST_STRING
+
+### Conversions
+
+- to-int: STRING -> INT, LIST_STRING -> LIST_INT
+- to-float: STRING -> FLOAT, LIST_STRING -> LIST_FLOAT
+- to-bool: any scalar -> BOOL
+
+### Structured
+
+- nested <StructName>: DOCUMENT -> NESTED (terminal type)
+- jsonify <SchemaName> [path="..."]: STRING -> JSON (terminal type)
+
+### Control
+
+- filter { predicates... } — filter lists by predicates, LIST_* only
+- assert { predicates... } — validate without changing value
+- match { predicates... } — select table row, must be first op in table fields
+- fallback <value> — default value on error; fallback #null makes type optional
+- fallback {} — empty list fallback, LIST_* only
+- @name / self name — reference @init value (self is deprecated)
+- transform <Name> — call named transform
+- expr <Name> — call dsl block or block define
+
+## Type system
+
+Scalar: DOCUMENT, STRING, INT, FLOAT, BOOL, NULL, NESTED, JSON
+List: LIST_DOCUMENT, LIST_STRING, LIST_INT, LIST_FLOAT
+Optional: OPT_STRING, OPT_INT, OPT_FLOAT
+Auto: AUTO, LIST_AUTO (internal, for type inference)
+
+NESTED and JSON are terminal — pipeline ends after nested/jsonify.
+fallback #null converts STRING->OPT_STRING, INT->OPT_INT, FLOAT->OPT_FLOAT.
+
+## Predicates
+
+Used inside filter, assert, match containers.
+Logic containers: not, and, or.
+
+### String predicates (filter, assert, match)
+
+- eq <value...> — equals any
+- ne <value...> — not equals any
+- starts <value...> — starts with any
+- ends <value...> — ends with any
+- contains <value...> — contains any
+- in <value...> — equals one of
+- re <pattern> — matches regex
+
+### Attribute predicates (filter, assert; not match)
+
+- has-attr <name...>
+- attr-eq <attr> <value...>
+- attr-ne <attr> <value...>
+- attr-starts <attr> <value...>
+- attr-ends <attr> <value...>
+- attr-contains <attr> <value...>
+- attr-re <attr> <pattern>
+
+### Text predicates (filter, assert; not match)
+
+- text-re <pattern>
+- text-starts <value...>
+- text-ends <value...>
+- text-contains <value...>
+
+### Document predicates (filter, assert; not match)
+
+- css <selector> — child element exists
+- xpath <selector> — child element exists
+
+### Length predicates (assert-only)
+
+- len-eq <value...>
+- len-ne <value...>
+- len-gt <value>
+- len-lt <value>
+- len-ge <value>
+- len-le <value>
+- len-range <start> <end>
+
+### Regex predicates (assert-only)
+
+- re-any <pattern> — at least one list element matches
+- re-all <pattern> — all list elements match
+
+### Numeric predicates (assert-only)
+
+- gt <value>
+- lt <value>
+- ge <value>
+- le <value>
+
+## JSON schemas
+
+```kdl
+json Author {
+    name str
+    slug str
+}
+
+json Quote array=#true {
+    tags (array)str
+    author Author
+    text str
+}
+```
+
+Field types: str, int, float, bool, null, <RefName>.
+Modifiers: (array)type for arrays, type? for optional.
+Alias: `field-name type "original-key"`.
+
+Usage: jsonify <SchemaName> [path="dotted.path"]
+
+## transform
+
+Multi-language custom code:
+
+```kdl
+transform to-base64 accept=STRING return=STRING {
+    py {
+        import "from base64 import b64decode"
+        code "{{NXT}} = str(b64decode({{PRV}}))"
+    }
+    js {
+        code "const {{NXT}} = btoa({{PRV}});"
+    }
+}
+```
+
+accept and return are required. Cannot be AUTO or LIST_AUTO.
+Markers: {{PRV}} (input), {{NXT}} (output).
+
+## dsl
+
+Single-language inline code block:
+
+```kdl
+dsl upper-py lang=py {
+    code "{{NXT}} = {{PRV}}.upper()"
+}
+```
+
+lang is required. accept and return are optional.
+Called via: expr <Name>.
+
+## CLI
+
+```bash
+ssc-gen generate schema.kdl -t py-bs4    # generate parser code
+ssc-gen check schema.kdl                 # lint/validate schema
+```
+
+Targets: py-bs4, py-lxml, py-parsel, py-slax, js-pure.

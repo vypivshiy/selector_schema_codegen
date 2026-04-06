@@ -1,300 +1,93 @@
-# Type System
+# Система типов
 
-> **Version:** 2.1
-> **Last Updated:** 2026-03-21
+**Версия DSL:** 2.1  
+**Последнее обновление:** 2026-04-07
 
-Система типов KDL Schema DSL. Все pipeline-операции типизированы, линтер проверяет совместимость в compile-time.
-
----
-
-## Table of Contents
-
-- [VariableType](#variabletype)
-- [StructType](#structtype)
-- [Pipeline Type Flow](#pipeline-type-flow)
-- [AUTO и вывод типов](#auto-и-вывод-типов)
-- [Optional типы](#optional-типы)
-- [Таблица типов операций](#таблица-типов-операций)
-
----
+Линтер проверяет совместимость типов в pipeline на этапе компиляции.
 
 ## VariableType
 
-Перечисление всех типов значений в pipeline:
-
-### Скалярные
+Скалярные:
 
 | Тип | Описание |
-|-----|----------|
+|---|---|
 | `DOCUMENT` | HTML/XML элемент |
 | `STRING` | Строка |
 | `INT` | Целое число |
 | `FLOAT` | Число с плавающей точкой |
-| `BOOL` | Boolean |
+| `BOOL` | Логическое значение |
 | `NULL` | Null/None |
-| `NESTED` | Вложенная структура |
-| `JSON` | Результат jsonify |
+| `NESTED` | Результат `nested` (терминальный, pipeline завершается) |
+| `JSON` | Результат `jsonify` (терминальный, pipeline завершается) |
 
-### Списочные
+Списочные:
 
 | Тип | Описание |
-|-----|----------|
+|---|---|
 | `LIST_DOCUMENT` | Список элементов |
 | `LIST_STRING` | Список строк |
-| `LIST_INT` | Список целых чисел |
+| `LIST_INT` | Список целых |
 | `LIST_FLOAT` | Список float |
 
-### Optional
+Optional:
 
 | Тип | Описание |
-|-----|----------|
-| `OPT_STRING` | STRING \| null |
-| `OPT_INT` | INT \| null |
-| `OPT_FLOAT` | FLOAT \| null |
+|---|---|
+| `OPT_STRING` | `STRING | null` |
+| `OPT_INT` | `INT | null` |
+| `OPT_FLOAT` | `FLOAT | null` |
 
-### Специальные
+Специальные:
 
 | Тип | Описание |
-|-----|----------|
-| `AUTO` | Автовыведение (скалярный) |
-| `LIST_AUTO` | Автовыведение (списочный) |
+|---|---|
+| `AUTO` | Автовыведение (любой скаляр) |
+| `LIST_AUTO` | Автовыведение (любой список) |
 
-### Свойства типов
+## Поток типов в pipeline
 
-- `.is_list` - является ли списочным типом
-- `.scalar` - скалярный эквивалент (`LIST_STRING` -> `STRING`)
-- `.as_list` - списочный эквивалент (`STRING` -> `LIST_STRING`)
-- `.optional` - optional эквивалент (`STRING` -> `OPT_STRING`)
+- Pipeline обычно начинается с `DOCUMENT`.
+- `@init` поля имеют свой тип и могут менять стартовый тип поля.
+- Многие операции автоматически работают по элементам списка (map-семантика).
+- `index`/`first`/`last` превращают список в скаляр.
 
----
-
-## StructType
-
-Тип структуры определяет форму результата:
-
-| Тип | Результат | Обязательные поля |
-|-----|-----------|-------------------|
-| `ITEM` | `dict` | - |
-| `LIST` | `list[dict]` | `@split-doc` |
-| `FLAT` | `list[scalar]` | `@split-doc` |
-| `DICT` | `dict[str, str]` | `@split-doc`, `@key`, `@value` |
-| `TABLE` | `dict` | `@table`, `@rows`, `@match`, `@value` |
-
----
-
-## Pipeline Type Flow
-
-Каждая операция принимает тип на входе (`accept`) и возвращает тип на выходе (`ret`). Pipeline начинается с `DOCUMENT`.
-
-### Пример
-
-```kdl
-price {
-    css ".price"         // DOCUMENT -> DOCUMENT
-    text                 // DOCUMENT -> STRING
-    trim                 // STRING -> STRING
-    re #"(\d+\.\d+)"#   // STRING -> STRING
-    to-float             // STRING -> FLOAT
-    fallback 0.0         // FLOAT (с fallback)
-}
-```
-
-### Map-семантика для списков
-
-Многие операции автоматически работают со списками через map:
+Пример:
 
 ```kdl
 tags {
-    css-all ".tag"       // DOCUMENT -> LIST_DOCUMENT
-    text                 // LIST_DOCUMENT -> LIST_STRING (map)
-    trim                 // LIST_STRING -> LIST_STRING (map)
-    lower                // LIST_STRING -> LIST_STRING (map)
+    css-all ".tag"   // DOCUMENT -> LIST_DOCUMENT
+    text             // LIST_DOCUMENT -> LIST_STRING
+    lower            // LIST_STRING -> LIST_STRING
 }
 ```
 
-### Редукция списка
+## AUTO и LIST_AUTO
 
-Операции `first`, `last`, `index` преобразуют список в скаляр:
+`AUTO` и `LIST_AUTO` используются для вывода типов:
+- в блоковых `define`;
+- в `@init` до вычисления фактического типа;
+- при совместимости списков и скаляров в типчеке.
 
-```kdl
-first-link {
-    css-all "a"          // DOCUMENT -> LIST_DOCUMENT
-    first                // LIST_DOCUMENT -> DOCUMENT
-    attr "href"          // DOCUMENT -> STRING
-}
-```
+## Optional типы и fallback
 
----
-
-## AUTO и вывод типов
-
-`AUTO` и `LIST_AUTO` - специальные типы для автоматического вывода:
-
-- `AUTO` совместим с любым скалярным типом
-- `LIST_AUTO` совместим с любым списочным типом
-
-Используются в:
-- Начале pipeline (до первой операции)
-- Блочных define (тип вычисляется из содержимого)
-- `self` (ссылка на @init поле)
-
----
-
-## Optional типы
-
-`fallback #null` превращает скалярный тип в optional:
+`fallback #null` делает тип optional:
 
 ```kdl
-// STRING -> OPT_STRING
-name {
-    css ".name"
+price {
+    css ".price"
     text
-    fallback #null
-}
-
-// INT -> OPT_INT
-count {
-    css ".count"
-    text
-    to-int
-    fallback #null
+    to-float
+    fallback #null   // FLOAT -> OPT_FLOAT
 }
 ```
 
-В сгенерированном коде:
-- Python: `Optional[str]`, `Optional[int]`, `Optional[float]`
-- TypeScript: `string | null`, `number | null`
+`fallback {}` — сахар для пустого списка, разрешен только для LIST_*.
 
----
+## accept/return в transform и dsl
 
-## Таблица типов операций
+`transform` требует `accept` и `return` из набора типов, кроме `AUTO` и `LIST_AUTO`.
 
-### Selectors
+`dsl` допускает `accept` и `return` только из:
 
-| Операция | Accept | Return |
-|----------|--------|--------|
-| `css` | `DOCUMENT` | `DOCUMENT` |
-| `css-all` | `DOCUMENT` | `LIST_DOCUMENT` |
-| `css-remove` | `DOCUMENT` | `DOCUMENT` |
-| `xpath` | `DOCUMENT` | `DOCUMENT` |
-| `xpath-all` | `DOCUMENT` | `LIST_DOCUMENT` |
-| `xpath-remove` | `DOCUMENT` | `DOCUMENT` |
-
-### Extract
-
-| Операция | Accept | Return |
-|----------|--------|--------|
-| `text` | `DOCUMENT` | `STRING` |
-| `text` | `LIST_DOCUMENT` | `LIST_STRING` |
-| `raw` | `DOCUMENT` | `STRING` |
-| `raw` | `LIST_DOCUMENT` | `LIST_STRING` |
-| `attr` | `DOCUMENT` | `STRING` |
-| `attr` | `LIST_DOCUMENT` | `LIST_STRING` |
-
-### String
-
-| Операция | Accept | Return |
-|----------|--------|--------|
-| `trim`/`ltrim`/`rtrim` | `STRING` | `STRING` |
-| `upper`/`lower` | `STRING` | `STRING` |
-| `normalize-space` | `STRING` | `STRING` |
-| `rm-prefix`/`rm-suffix` | `STRING` | `STRING` |
-| `rm-prefix-suffix` | `STRING` | `STRING` |
-| `fmt` | `STRING` | `STRING` |
-| `repl` | `STRING` | `STRING` |
-| `unescape` | `STRING` | `STRING` |
-| `split` | `STRING` | `LIST_STRING` |
-| `join` | `LIST_STRING` | `STRING` |
-
-### Regex
-
-| Операция | Accept | Return |
-|----------|--------|--------|
-| `re` | `STRING` | `STRING` |
-| `re` | `LIST_STRING` | `LIST_STRING` |
-| `re-all` | `STRING` | `LIST_STRING` |
-| `re-sub` | `STRING` | `STRING` |
-
-### Type Conversions
-
-| Операция | Accept | Return |
-|----------|--------|--------|
-| `to-int` | `STRING` | `INT` |
-| `to-float` | `STRING` | `FLOAT` |
-| `to-bool` | `DOCUMENT`/`STRING`/`INT` | `BOOL` |
-
-### Array
-
-| Операция | Accept | Return |
-|----------|--------|--------|
-| `index`/`first`/`last` | `LIST_*` | `<scalar>` |
-| `slice` | `LIST_*` | `LIST_*` |
-| `len` | `LIST_*`/`STRING` | `INT` |
-| `unique` | `LIST_*` | `LIST_*` |
-
-### Control Flow
-
-| Операция | Accept | Return |
-|----------|--------|--------|
-| `filter` | `LIST_*` | `LIST_*` (прозрачный) |
-| `assert` | любой | тот же (прозрачный) |
-| `match` | `DOCUMENT` | `STRING` |
-| `fallback <value>` | любой | тот же / `OPT_*` |
-| `fallback {}` | `LIST_*` | `LIST_*` |
-| `self` | - | тип @init поля |
-
-### Structured
-
-| Операция | Accept | Return |
-|----------|--------|--------|
-| `nested` | `DOCUMENT` | `NESTED` |
-| `jsonify` | `STRING` | `JSON` |
-| `transform` | по `accept` | по `return` |
-| `expr` (dsl/define) | зависит от содержимого | зависит от содержимого |
-
----
-
-## Распространённые ошибки типов
-
-### Строковая операция на DOCUMENT
-
-```kdl
-// ОШИБКА: trim не принимает DOCUMENT
-field { css ".x"; trim }
-
-// ПРАВИЛЬНО: сначала extract
-field { css ".x"; text; trim }
-```
-
-### filter на скаляре
-
-```kdl
-// ОШИБКА: filter требует LIST_*
-field { css ".x"; text; filter { contains "a" } }
-
-// ПРАВИЛЬНО: использовать assert
-field { css ".x"; text; assert { contains "a" } }
-```
-
-### Несовместимый fallback
-
-```kdl
-// ОШИБКА: строковый fallback для INT pipeline
-field { css ".x"; text; to-int; fallback "N/A" }
-
-// ПРАВИЛЬНО: числовой fallback
-field { css ".x"; text; to-int; fallback 0 }
-
-// или null
-field { css ".x"; text; to-int; fallback #null }
-```
-
-### join на строке
-
-```kdl
-// ОШИБКА: join требует LIST_STRING
-field { css ".x"; text; join "," }
-
-// ПРАВИЛЬНО: сначала split
-field { css ".x"; text; split " "; join "," }
-```
+`DOCUMENT`, `LIST_DOCUMENT`, `STRING`, `LIST_STRING`, `INT`, `LIST_INT`, `FLOAT`,
+`LIST_FLOAT`, `BOOL`, `NULL`, `OPT_STRING`, `OPT_INT`, `OPT_FLOAT`.
