@@ -126,13 +126,15 @@ struct Product type=list {
 }
 ```
 
-### `type=flat` — list of scalar values
+### `type=flat` — deduplicated list of scalar values
 ```kdl
 struct Tags type=flat {
-    @split-doc { css-all ".tag" }
-    value { text }
+    tag1 { css-all ".primary-tag"; text }
+    tag2 { css-all ".secondary-tag"; text }
 }
 ```
+Collects strings from all fields and removes duplicates. No `@split-doc` required.
+With `keep-order=#true` preserves order of first occurrences.
 
 ### `type=table` — key-value HTML table
 ```kdl
@@ -183,7 +185,8 @@ struct MetaTags type=dict {
 | Operation | Type | Notes |
 |-----------|------|-------|
 | `text` | DOC->STR / LIST_DOC->LIST_STR | Inner text |
-| `attr "name"` | DOC->STR / LIST_DOC->LIST_STR | Attribute value |
+| `attr "name"` | DOC->STR / LIST_DOC->LIST_STR | Single attribute value |
+| `attr "n1" "n2" ...` | DOC->LIST_STR / LIST_DOC->LIST_STR | Multiple attributes as list |
 | `raw` | DOC->STR | Raw HTML string |
 
 ### String ops
@@ -360,7 +363,7 @@ Warning at line 8: unused define 'BASE-URL'
 | `type mismatch: expected DOCUMENT, got STRING` | Selector used after `text`/`attr` | Reorder — selector must come before extract ops |
 | `type mismatch: expected STRING, got INT` | e.g. `re` after `to-int` | Apply `re` before `to-int` |
 | `unknown operation '...'` | Unknown op name or typo | Check spelling against operations list |
-| `missing @split-doc` | `type=list` or `type=flat` struct without split | Add `@split-doc { css-all "..." }` |
+| `missing @split-doc` | `type=list` or `type=dict` struct without split | Add `@split-doc { css-all "..." }` |
 | `missing match{}` | `type=table` field has no predicate | Add `match { eq "key" }` as first statement in field |
 | `fallback value type mismatch` | `to-int` then `fallback "x"` | Use typed fallback: INT->`0`, FLOAT->`0.0`, BOOL->`#false`, any->`#null` |
 | `define not found: NAME` | Typo or define declared after use | Check spelling; move define above the struct |

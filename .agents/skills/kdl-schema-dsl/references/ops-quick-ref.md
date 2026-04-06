@@ -16,8 +16,8 @@
 | `OPT_STRING` | STRING \| null (via `fallback #null`) |
 | `OPT_INT` | INT \| null |
 | `OPT_FLOAT` | FLOAT \| null |
-| `NESTED` | Nested struct result |
-| `JSON` | JSON deserialized result |
+| `NESTED` | Nested struct result (terminal — pipeline ends) |
+| `JSON` | JSON deserialized result (terminal — pipeline ends) |
 
 ## Type Flow Table
 
@@ -30,6 +30,8 @@
 | `text` | LIST_DOCUMENT | LIST_STRING |
 | `attr "n"` | DOCUMENT | STRING |
 | `attr "n"` | LIST_DOCUMENT | LIST_STRING |
+| `attr "n1" "n2" ...` | DOCUMENT | LIST_STRING |
+| `attr "n1" "n2" ...` | LIST_DOCUMENT | LIST_STRING |
 | `raw` | DOCUMENT | STRING |
 | `raw` | LIST_DOCUMENT | LIST_STRING |
 | `trim/ltrim/rtrim` | STRING | STRING |
@@ -53,16 +55,13 @@
 | `REPL-DEFINE` | STRING | STRING |
 | `to-int` | STRING | INT |
 | `to-float` | STRING | FLOAT |
-| `to-bool` | DOCUMENT | BOOL |
-| `to-bool` | STRING | BOOL |
-| `to-bool` | INT | BOOL |
+| `to-bool` | any scalar | BOOL |
 | `first` | LIST_* | (scalar type) |
 | `last` | LIST_* | (scalar type) |
 | `index N` | LIST_* | (scalar type) |
 | `slice N M` | LIST_* | LIST_* |
 | `len` | LIST_* | INT |
-| `len` | STRING | INT |
-| `unique` | LIST_* | LIST_* |
+| `unique` | LIST_STRING | LIST_STRING |
 | `nested Name` | DOCUMENT | NESTED |
 | `jsonify Name` | STRING | JSON |
 | `filter { pred }` | LIST_* | LIST_* (same) |
@@ -140,7 +139,7 @@ and { ... }    or { ... }    not { ... }
 |-------|---------|---------|
 | `@doc "..."` | all | Documentation |
 | `@init { ... }` | all | Precompute shared values |
-| `@split-doc { ... }` | list, flat, dict | Split document into items |
+| `@split-doc { ... }` | list, dict | Split document into items |
 | `@pre-validate { ... }` | all | Assert before parsing |
 | `@table { ... }` | table | Select the table element |
 | `@rows { ... }` | table | Select rows |
