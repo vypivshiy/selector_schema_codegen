@@ -91,12 +91,14 @@ text           DOCUMENT      → STRING
 text           LIST_DOCUMENT → LIST_STRING      ← you now have a LIST
 attr "x"       DOCUMENT      → STRING
 attr "x"       LIST_DOCUMENT → LIST_STRING      ← you now have a LIST
+attr "a" "b"   DOCUMENT      → LIST_STRING      ← multiple keys always return LIST
+attr "a" "b"   LIST_DOCUMENT → LIST_STRING
 raw            DOCUMENT      → STRING
 raw            LIST_DOCUMENT → LIST_STRING      ← you now have a LIST
 
 first/last/index N  LIST_* → single item        ← use to collapse LIST → single value
 slice N M           LIST_* → LIST_*             ← stays a LIST
-unique              LIST_* → LIST_*             ← stays a LIST
+unique              LIST_STRING → LIST_STRING    ← stays a LIST (LIST_STRING only)
 
 trim/ltrim/rtrim/lower/upper/normalize-space/rm-prefix/rm-suffix/rm-prefix-suffix/fmt/re-sub/repl/unescape
                STRING → STRING                  ← cannot accept LIST_STRING
@@ -108,8 +110,8 @@ join "d"       LIST_STRING → STRING
 
 to-int         STRING → INT                     ← cannot accept LIST_STRING
 to-float       STRING → FLOAT
-to-bool        STRING or DOCUMENT → BOOL
-len            LIST_* or STRING → INT
+to-bool        any scalar → BOOL
+len            LIST_* → INT
 
 fmt DEFINE     STRING → STRING
 nested Name    DOCUMENT → (struct result)
@@ -194,13 +196,15 @@ struct Product type=list {
 }
 ```
 
-### `type=flat` — list of scalar values
+### `type=flat` — deduplicated list of scalar values
 ```kdl
 struct Tags type=flat {
-    @split-doc { css-all ".tag" }
-    value { text }
+    primary   { css-all ".primary-tag"; text }
+    secondary { css-all ".secondary-tag"; text }
 }
 ```
+Collects strings from all fields and removes duplicates. No `@split-doc` required.
+With `keep-order=#true` preserves order of first occurrences.
 
 ### `type=table` — HTML `<table>` with key/value rows
 
@@ -336,7 +340,7 @@ Place defines **before** any struct that references them.
 ## Available Operations Reference
 
 **Selectors:** `css "sel"` · `css-all "sel"`
-**Extract:** `text` · `attr "name"` · `raw`
+**Extract:** `text` · `attr "name"` · `attr "n1" "n2" ...` (→ LIST_STRING) · `raw`
 **String ops:** `trim` · `ltrim` · `rtrim` · `normalize-space` · `lower` · `upper` · `rm-prefix "x"` · `rm-suffix "x"` · `rm-prefix-suffix "x"` · `fmt DEFINE` · `re-sub #"p"# "r"` · `repl "f" "t"` · `split "d"` · `join "d"` · `unescape`
 **Regex:** `re #"(group)"#` (exactly 1 capture group) · `re-all #"pat"#` · `re-sub #"p"# "r"`
 **Type conv:** `to-int` · `to-float` · `to-bool`
@@ -382,7 +386,7 @@ and { ... }   or { ... }    not { ... }
 |-------|-------------|---------|
 | `@doc "..."` | all | Documentation string |
 | `@init { ... }` | all | Precompute shared values |
-| `@split-doc { ... }` | list, flat, dict | Split document into items |
+| `@split-doc { ... }` | list, dict | Split document into items |
 | `@pre-validate { ... }` | all | Assert conditions before parsing |
 | `@table { ... }` | table | Select the `<table>` element |
 | `@rows { ... }` | table | Select rows within the table |
@@ -448,7 +452,7 @@ Line 8 contains: css-all ".tag"; text; re #"(\w+)"#
 | `expected DOCUMENT, got STRING` | selector after `text`/`attr` | Move selector before extract op |
 | `expected STRING, got INT` | `re` or string op after `to-int` | Apply string/regex ops before `to-int` |
 | `unknown operation '...'` | unknown op name or typo | Check spelling against operations list |
-| `missing @split-doc` | `type=list`/`type=flat` without split | Add `@split-doc { css-all "..." }` |
+| `missing @split-doc` | `type=list`/`type=dict` without split | Add `@split-doc { css-all "..." }` |
 | `missing match{}` | `type=table` field has no predicate | Add `match { eq "key" }` as first statement in field |
 | `match must be first operation` | `match {}` not at start of table field | Move `match { ... }` to first position |
 | `fallback value type mismatch` | fallback type doesn't match pipeline output | INT→`0`, FLOAT→`0.0`, BOOL→`#false`, other→`#null` |
