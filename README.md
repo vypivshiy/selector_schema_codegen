@@ -17,7 +17,7 @@ Code generator for web scraping parsers. Describe HTML extraction rules in a dec
 ## Install
 
 ```bash
-uv tool install git+https://github.com/vypivshiy/selector_schema_codegen@features-kdl
+uv tool install ssc_codegen
 ```
 
 ## Quick example
