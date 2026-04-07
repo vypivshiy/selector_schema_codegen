@@ -12,7 +12,7 @@
 
 Ключевые файлы:
 - `__init__.py` — публичный API, импорт правил.
-- `_kdl_lang.py` — tree-sitter loader.
+- `_kdl_lang.py` — pure-Python KDL parser backend + Node adapter.
 - `base.py` — AstLinter, контексты, обход.
 - `rules.py` — аргументы и синтаксис операций.
 - `rules_struct.py` — правила структур и модульного уровня.
@@ -22,7 +22,7 @@
 
 ## Модель выполнения
 
-1. Парсинг и проверка синтаксиса tree-sitter.
+1. Парсинг и проверка синтаксиса KDL parser backend.
 2. Сбор метаданных (`define`, `transform`, `dsl`, `json`, `struct`).
 3. Обход CST с применением правил по контексту.
 4. Отдельная фаза типизации pipeline.

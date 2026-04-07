@@ -2,17 +2,17 @@
 
 ## Project overview
 
-**ssc_codegen** — code generator for web scraping parsers. Takes `.kdl` schema files (KDL 2.0 DSL) describing HTML structure and CSS selectors, parses them into an AST via tree-sitter, validates with a linter, and generates ready-to-use parser code for multiple targets.
+**ssc_codegen** — code generator for web scraping parsers. Takes `.kdl` schema files (KDL 2.0 DSL) describing HTML structure and CSS selectors, parses them into an AST via pure-Python KDL parser, validates with a linter, and generates ready-to-use parser code for multiple targets.
 
 ## Architecture
 
 ```
-.kdl schema → [tree-sitter parser] → AST → [linter] → [converter] → output code
+.kdl schema → [kdl parser] → AST → [linter] → [converter] → output code
 ```
 
 ### Key modules (`ssc_codegen/`)
 
-- `parser.py` — KDL → AST. Uses tree-sitter with a custom KDL 2.0 grammar (`linter/_kdl_lang.py` loads `kdl.so`/`.dll`/`.dylib` via ctypes)
+- `parser.py` — KDL → AST. Uses pure-Python KDL 2.0 CST parser backend (`linter/_kdl_lang.py`).
 - `ast/` — AST node types and type system
 - `linter/` — static analysis: type checking, rule validation, structural checks. `base.py` is the main linter entry point
 - `converters/` — code generators per target:
@@ -23,11 +23,10 @@
   - `js_pure.py` — JavaScript (DOM API)
 - `main.py` — CLI (typer). Commands: `generate`, `check`, `run`, `health`
 
-### Native dependency
+### Parser backend
 
-The project vendors a fork of tree-sitter-kdl (KDL 2.0 grammar) as a git submodule at `vendor/tree-sitter-kdl`. The C sources (`parser.c`, `scanner.c`) are compiled into a platform-specific shared library during wheel build via a custom hatch build hook (`hatch_build.py`).
-
-The compiled library is loaded at runtime through `ssc_codegen/linter/_kdl_lang.py` using `ctypes.CDLL`.
+The project uses an in-repo pure-Python KDL 2.0 parser implementation with CST spans.
+No native binary build step is required.
 
 ### DSL reference
 
@@ -39,7 +38,7 @@ The compiled library is loaded at runtime through `ssc_codegen/linter/_kdl_lang.
 # install dev dependencies
 uv sync
 
-# build wheel (compiles tree-sitter-kdl automatically via hatch hook)
+# build wheel
 uv build --wheel
 
 # run tests
@@ -55,8 +54,6 @@ uv run mypy ssc_codegen/
 ### Build system
 
 - Build backend: hatchling
-- Custom build hook: `hatch_build.py` — compiles `vendor/tree-sitter-kdl/src/{parser,scanner}.c` into a shared library and sets the platform-specific wheel tag (`py3-none-{platform}`)
-- CI: `cibuildwheel` + `uv` (`.github/workflows/publish.yml`)
 
 ## Testing
 

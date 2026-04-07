@@ -4,7 +4,7 @@ ssc_codegen is a code generator for web scraping parsers.
 Input: .kdl schema files describing HTML extraction rules.
 Output: parser code for Python (bs4, lxml, parsel, selectolax) and JavaScript (DOM API).
 
-Pipeline: .kdl schema -> tree-sitter parser -> AST -> linter -> converter -> output code
+Pipeline: .kdl schema -> kdl parser -> AST -> linter -> converter -> output code
 
 ## File structure
 
