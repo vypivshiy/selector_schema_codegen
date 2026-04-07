@@ -45,6 +45,16 @@ _RESERVED_ALLOWED: dict[str, frozenset[str] | None] = {
     "@match": frozenset({"table"}),
 }
 
+# Minimal boilerplate snippets for required fields (used in "did you mean" hints).
+_FIELD_SNIPPET: dict[str, str] = {
+    "@split-doc": '@split-doc { css-all "..." }',
+    "@key": '@key { attr "..." }',
+    "@value": '@value { attr "..." }',
+    "@table": '@table { css "..." }',
+    "@rows": '@rows { css-all "..." }',
+    "@match": '@match { css "..." }',
+}
+
 # all valid pipeline operation names
 _KNOWN_OPS: frozenset[str] = frozenset(PIPELINE_TYPE_RULES.keys()) | frozenset(
     {
@@ -194,14 +204,22 @@ def rule_struct(node: Node, ctx: LintContext) -> None:
         ctx.node_name(f) for f in fields if ctx.node_name(f).startswith("@")
     }
 
-    for req in _REQUIRED_RESERVED[struct_type]:
-        if req not in reserved_present:
-            ctx.error(
-                node,
-                ErrorCode.MISSING_ARGUMENT,
-                message=f"struct type='{struct_type}' is missing required field '{req}'",
-                hint=f"add '{req} {{ ... }}' inside the struct",
-            )
+    missing = sorted(_REQUIRED_RESERVED[struct_type] - reserved_present)
+    if missing:
+        fields_str = " and ".join(f"'{f}'" for f in missing)
+        snippet_lines = "\n        ".join(
+            _FIELD_SNIPPET.get(f, f"{f} {{ ... }}") for f in missing
+        )
+        ctx.error(
+            node,
+            ErrorCode.MISSING_SPECIAL_FIELD,
+            message=(
+                f"struct type='{struct_type}' is missing required field"
+                + ("s " if len(missing) > 1 else " ")
+                + fields_str
+            ),
+            hint=f"add required fields:\n        {snippet_lines}",
+        )
 
     for field_node in fields:
         field_name = ctx.node_name(field_node)
