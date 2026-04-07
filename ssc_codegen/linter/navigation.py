@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from tree_sitter import Node
+from ssc_codegen.linter._kdl_lang import Node
 
 from ssc_codegen.linter.types import RawArg
 
@@ -237,4 +237,13 @@ class NodeNavigator:
                 result = self._extract_value(child)
                 if result:
                     return result
-        return node.text.decode()
+        text = node.text.decode()
+        m = _RAW_STRING_RE.match(text)
+        if m:
+            content = m.group(2)
+            if content.startswith('""\n'):
+                content = content[2:]
+            if content.endswith('""') and "\n" in content:
+                content = content[:-2]
+            return content
+        return text

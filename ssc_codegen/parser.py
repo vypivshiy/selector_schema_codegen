@@ -32,8 +32,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, TypeAlias, Protocol, cast
 
-from tree_sitter import Node as TSNode
-
 from ssc_codegen._logging import logger
 from ssc_codegen.ast import Node as AstNode
 from ssc_codegen.exceptions import (
@@ -41,7 +39,7 @@ from ssc_codegen.exceptions import (
     BuildTimeError,
     UnknownNodeError,
 )
-from ssc_codegen.linter._kdl_lang import KDL_PARSER
+from ssc_codegen.linter._kdl_lang import KDL_PARSER, Node as TSNode
 from ssc_codegen.regex_utils import normalize_regex_pattern
 
 # types
@@ -821,6 +819,12 @@ class AstParser:
             len(kdl_nodes),
         )
         for node in kdl_nodes:
+            if (
+                node.name in self.ctx.children_defines
+                and node.name not in self._context_filter
+            ):
+                self._parse_filter_expr(self.ctx.children_defines[node.name], parent)
+                continue
             if cb := self._context_filter.get(node.name):
                 expr = cb(node, parent, self.ctx)
                 logger.debug(
@@ -841,6 +845,12 @@ class AstParser:
             len(kdl_nodes),
         )
         for node in kdl_nodes:
+            if (
+                node.name in self.ctx.children_defines
+                and node.name not in self._context_assert
+            ):
+                self._parse_assert_expr(self.ctx.children_defines[node.name], parent)
+                continue
             if cb := self._context_assert.get(node.name):
                 expr = cb(node, parent, self.ctx)
                 logger.debug(
@@ -861,6 +871,12 @@ class AstParser:
             len(kdl_nodes),
         )
         for node in kdl_nodes:
+            if (
+                node.name in self.ctx.children_defines
+                and node.name not in self._context_match
+            ):
+                self._parse_match_expr(self.ctx.children_defines[node.name], parent)
+                continue
             if cb := self._context_match.get(node.name):
                 expr = cb(node, parent, self.ctx)
                 logger.debug(
@@ -976,7 +992,11 @@ PARSER = AstParser()
 
 
 def parse_document(src: str) -> Document:
-    tree = KDL_PARSER.parse(src.encode("utf-8"))
+    try:
+        tree = KDL_PARSER.parse(src.encode("utf-8"))
+    except Exception as e:
+        msg = str(e)
+        raise ParseError(f"Invalid KDL syntax: {msg}") from e
     root = tree.root_node
     first_error = _find_first_syntax_error(root)
     if first_error is not None:
@@ -1169,11 +1189,10 @@ def _looks_like_raw_string(text: str) -> bool:
 
 
 def _decode_raw_string(text: str) -> str:
-    first_quote = text.find('"')
-    last_quote = text.rfind('"')
-    if first_quote == -1 or last_quote == -1 or last_quote <= first_quote:
+    m = _re.fullmatch(r'(#+)("""|")(.*)\2\1', text, flags=_re.DOTALL)
+    if not m:
         return text
-    return text[first_quote + 1 : last_quote]
+    return m.group(3)
 
 
 def _find_first_syntax_error(node: TSNode) -> TSNode | None:

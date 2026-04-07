@@ -176,7 +176,7 @@ def normalize_regex_pattern(value: str | _re.Pattern) -> str:
         return add_inline_regex_flags(pattern, ignore_case, dotall)
 
     # If it's a string, check for inline (?x) flag and handle it
-    pattern = value
+    pattern = value.lstrip()
     ignore_case = False
     dotall = False
 

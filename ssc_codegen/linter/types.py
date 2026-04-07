@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Literal
 
-from tree_sitter import Node
+from ssc_codegen.linter._kdl_lang import Node
 
 
 class ErrorCode(Enum):

@@ -99,6 +99,8 @@ class CSTNode:
     entries: list[CSTEntry]
     children: list["CSTNode"]
     span: Span
+    has_children_block: bool = False
+    children_block_span: Span | None = None
 
 
 @dataclass(frozen=True)
@@ -141,7 +143,6 @@ _UNICODE_SPACES = {
 }
 
 _DISALLOWED_IDENT_CHARS = set('\\/(){};[]"=#')
-_RESERVED_BARE_IDENTS = {"true", "false", "null", "inf", "-inf", "nan"}
 
 
 @dataclass
@@ -584,14 +585,6 @@ class KDLLexer:
             self.c.advance()
 
         raw = self.c.src[start.offset : self.c.i]
-        if raw in _RESERVED_BARE_IDENTS:
-            raise KDLParseError(
-                f"Reserved bare identifier {raw!r}",
-                line=start.line,
-                column=start.column,
-                offset=start.offset,
-            )
-
         return Token(TokenType.IDENT, raw, raw, Span(start, self.c.pos()))
 
 
@@ -668,6 +661,8 @@ class _Parser:
 
         entries: list[CSTEntry] = []
         children: list[CSTNode] = []
+        has_children_block = False
+        children_block_span: Span | None = None
 
         while not self._is_node_terminator() and not self._at(TokenType.LBRACE):
             if self._match(TokenType.SLASHDASH):
@@ -688,6 +683,8 @@ class _Parser:
 
             if not self._match(TokenType.LBRACE):
                 break
+            has_children_block = True
+            lbrace = self._prev()
 
             self._skip_separators()
             while not self._at(TokenType.RBRACE):
@@ -702,7 +699,8 @@ class _Parser:
                 children.append(self._parse_node())
                 self._consume_terminators()
                 self._skip_separators()
-            self._expect(TokenType.RBRACE)
+            rbrace = self._expect(TokenType.RBRACE)
+            children_block_span = Span(lbrace.span.start, rbrace.span.end)
             self._skip_separators()
 
         end = (
@@ -716,6 +714,8 @@ class _Parser:
             entries=entries,
             children=children,
             span=Span((node_type.span.start if node_type else name.span.start), end),
+            has_children_block=has_children_block,
+            children_block_span=children_block_span,
         )
 
     def _parse_entry(self) -> CSTEntry:
@@ -908,8 +908,21 @@ def _decode_quoted(raw: str) -> str:
 
 
 def _decode_multiline(content: str) -> str:
-    # Minimal normalization for PoC: CRLF/CR -> LF.
-    return content.replace("\r\n", "\n").replace("\r", "\n")
+    text = content.replace("\r\n", "\n").replace("\r", "\n")
+    if text.startswith("\n"):
+        text = text[1:]
+
+    lines = text.split("\n")
+    min_indent: int | None = None
+    for ln in lines:
+        if not ln.strip():
+            continue
+        indent = len(ln) - len(ln.lstrip(" \t"))
+        if min_indent is None or indent < min_indent:
+            min_indent = indent
+    if min_indent and min_indent > 0:
+        lines = [ln[min_indent:] if len(ln) >= min_indent else ln for ln in lines]
+    return "\n".join(lines)
 
 
 def _is_ident_continue(ch: str) -> bool:

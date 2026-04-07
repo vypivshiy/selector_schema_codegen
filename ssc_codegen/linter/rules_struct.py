@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import difflib
 
-from tree_sitter import Node
+from ssc_codegen.linter._kdl_lang import Node
 
 from ssc_codegen.linter.base import LINTER, LintContext
 from ssc_codegen.linter.types import ErrorCode, DefineKind

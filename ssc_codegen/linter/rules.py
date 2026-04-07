@@ -11,7 +11,7 @@ from __future__ import annotations
 import ast
 import re
 
-from tree_sitter import Node
+from ssc_codegen.linter._kdl_lang import Node
 
 from ssc_codegen.linter.base import LINTER, LintContext
 from ssc_codegen.linter.types import ErrorCode
@@ -83,7 +83,7 @@ def _validate_regex(node: Node, ctx: LintContext, pattern: str) -> bool:
     Validate regex pattern. Reports error and returns False if invalid.
     """
     try:
-        re.compile(pattern)
+        re.compile(pattern.lstrip())
         return True
     except re.error as e:
         ctx.error(
@@ -481,11 +481,12 @@ def rule_re(node: Node, ctx: LintContext) -> None:
             pass
         else:
             pattern = resolved
-    if not _validate_regex(node, ctx, pattern):
+    normalized = pattern.lstrip()
+    if not _validate_regex(node, ctx, normalized):
         return
     # capture group check только для pipeline op (не в предикатном контексте)
     if not _in_predicate(node, ctx):
-        groups = re.compile(pattern).groups
+        groups = re.compile(normalized).groups
         if groups == 0:
             ctx.error(
                 node,

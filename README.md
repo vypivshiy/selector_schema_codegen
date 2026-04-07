@@ -3,7 +3,7 @@
 Code generator for web scraping parsers. Describe HTML extraction rules in a declarative KDL 2.0 DSL, then generate ready-to-use parser code for multiple languages and libraries.
 
 ```
-.kdl schema --> [tree-sitter parser] --> AST --> [linter] --> [converter] --> output code
+.kdl schema --> [kdl parser] --> AST --> [linter] --> [converter] --> output code
 ```
 
 ## Features
@@ -118,7 +118,7 @@ Use the [kdl-schema-dsl](.agents/skills/kdl-schema-dsl) skill for automatic gene
 
 ```bash
 uv sync                  # install dependencies
-uv build --wheel         # build (compiles tree-sitter-kdl via hatch hook)
+uv build --wheel         # build wheel
 uv run pytest            # run tests
 uv run ruff check ssc_codegen/
 ```

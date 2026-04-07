@@ -1,3 +1,0 @@
-[submodule "vendor/tree-sitter-kdl"]
-	path = vendor/tree-sitter-kdl
-	url = https://github.com/Tam1SH/tree-sitter-kdl

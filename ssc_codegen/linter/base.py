@@ -11,9 +11,8 @@ from pathlib import Path
 from enum import Enum, auto
 import re
 
-from tree_sitter import Node, Tree
-
 from ssc_codegen.linter._kdl_lang import KDL_PARSER
+from ssc_codegen.linter._kdl_lang import KDL_PARSER, Node, Tree
 from ssc_codegen.linter.types import (
     RawArg,
     DefineKind,
@@ -356,7 +355,30 @@ class AstLinter:
             в LSP server. Сейчас игнорируются.
         """
         # TODO: использовать old_tree для incremental parsing
-        tree = KDL_PARSER.parse(src.encode())
+        try:
+            tree = KDL_PARSER.parse(src.encode())
+        except Exception as e:
+            msg = str(e)
+            line = 1
+            col = 1
+            m = re.search(r" at (\\d+):(\\d+)", msg)
+            if m:
+                line = int(m.group(1))
+                col = int(m.group(2))
+            return LintResult(
+                errors=[
+                    LintError(
+                        code=ErrorCode.INVALID_SYNTAX,
+                        message=f"invalid KDL syntax: {msg}",
+                        hint="fix malformed tokens, quotes, braces, or block structure before semantic linting",
+                        path="syntax",
+                        line=line,
+                        col=col,
+                    )
+                ],
+                source=src,
+                filepath=filepath,
+            )
         syntax_errors = self._collect_syntax_errors(tree.root_node, src)
         if syntax_errors:
             return LintResult(
@@ -561,7 +583,10 @@ class AstLinter:
                 imp_src = import_path.read_text(encoding=self._KDL_TEXT_ENCODING)
             except OSError:
                 continue
-            imp_tree = KDL_PARSER.parse(imp_src.encode())
+            try:
+                imp_tree = KDL_PARSER.parse(imp_src.encode())
+            except Exception:
+                continue
             imp_ctx = LintContext(src=imp_src.encode())
 
             # recursively collect imports from imported file

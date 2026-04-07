@@ -31,7 +31,7 @@ define (field usage) — block defines can be referenced inside field pipelines.
 
 from __future__ import annotations
 
-from tree_sitter import Node
+from ssc_codegen.linter._kdl_lang import Node
 
 from ssc_codegen.linter.base import LINTER, LintContext, DefineKind
 

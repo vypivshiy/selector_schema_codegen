@@ -20,7 +20,7 @@ Design notes:
 
 from __future__ import annotations
 
-from tree_sitter import Node
+from ssc_codegen.linter._kdl_lang import Node
 
 from ssc_codegen.ast.types import VariableType as VT
 from ssc_codegen.linter.base import LintContext, DefineKind, ErrorCode
