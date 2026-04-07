@@ -4,7 +4,7 @@ KDL DSL linter — base infrastructure.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable, Literal
 from functools import wraps
 from pathlib import Path
@@ -550,11 +550,8 @@ class AstLinter:
             children = ctx.get_children_nodes(node)
             selective: set[str] | None = None
             if children:
-                imp_ctx = LintContext(src=ctx.navigator._src)
                 selective = set()
                 for child in children:
-                    child_name = imp_ctx.node_name(child) if hasattr(child, 'children') else ""
-                    # children are tree-sitter nodes from current file's context
                     nm = ctx.node_name(child)
                     if nm:
                         selective.add(nm)
@@ -734,7 +731,17 @@ class AstLinter:
 
     # Nodes whose children block contains data (not pipeline ops)
     # and should not be walked as operations.
-    _DATA_CHILDREN_NODES: frozenset[str] = frozenset({"repl"})
+    _DATA_CHILDREN_NODES: frozenset[str] = frozenset(
+        {
+            "repl",
+            "css",
+            "css-all",
+            "xpath",
+            "xpath-all",
+            "css-remove",
+            "xpath-remove",
+        }
+    )
 
     def _walk(
         self,

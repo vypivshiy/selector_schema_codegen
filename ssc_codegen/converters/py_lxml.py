@@ -251,24 +251,82 @@ def pre_struct_table_row(node: TableRow, ctx: ConverterContext):
 
 @PY_LXML_CONVERTER(CssSelect)
 def pre_expr_css_select(node: CssSelect, ctx: ConverterContext):
+    if node.queries:
+        lines: list[str] = []
+        res_var = f"_res_{ctx.nxt}"
+        for i, query in enumerate(node.queries):
+            q = repr(query)
+            if i == 0:
+                lines.append(f"{ctx.indent}{res_var} = {ctx.prv}.cssselect({q})")
+                lines.append(
+                    f"{ctx.indent}{ctx.nxt} = {res_var}[0] if {res_var} else None"
+                )
+            else:
+                lines.append(f"{ctx.indent}if {ctx.nxt} is None:")
+                lines.append(
+                    f"{ctx.indent}    {res_var} = {ctx.prv}.cssselect({q})"
+                )
+                lines.append(
+                    f"{ctx.indent}    {ctx.nxt} = {res_var}[0] if {res_var} else None"
+                )
+        return lines
     query = repr(node.query)
     return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.cssselect({query})[0]"
 
 
 @PY_LXML_CONVERTER(CssSelectAll)
 def pre_expr_css_select_all(node: CssSelectAll, ctx: ConverterContext):
+    if node.queries:
+        lines: list[str] = []
+        for i, query in enumerate(node.queries):
+            q = repr(query)
+            if i == 0:
+                lines.append(f"{ctx.indent}{ctx.nxt} = {ctx.prv}.cssselect({q})")
+            else:
+                lines.append(f"{ctx.indent}if not {ctx.nxt}:")
+                lines.append(
+                    f"{ctx.indent}    {ctx.nxt} = {ctx.prv}.cssselect({q})"
+                )
+        return lines
     query = repr(node.query)
     return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.cssselect({query})"
 
 
 @PY_LXML_CONVERTER(XpathSelect)
 def pre_expr_xpath_select(node: XpathSelect, ctx: ConverterContext):
+    if node.queries:
+        lines: list[str] = []
+        res_var = f"_res_{ctx.nxt}"
+        for i, query in enumerate(node.queries):
+            q = repr(query)
+            if i == 0:
+                lines.append(f"{ctx.indent}{res_var} = {ctx.prv}.xpath({q})")
+                lines.append(
+                    f"{ctx.indent}{ctx.nxt} = {res_var}[0] if {res_var} else None"
+                )
+            else:
+                lines.append(f"{ctx.indent}if {ctx.nxt} is None:")
+                lines.append(f"{ctx.indent}    {res_var} = {ctx.prv}.xpath({q})")
+                lines.append(
+                    f"{ctx.indent}    {ctx.nxt} = {res_var}[0] if {res_var} else None"
+                )
+        return lines
     query = repr(node.query)
     return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.xpath({query})[0]"
 
 
 @PY_LXML_CONVERTER(XpathSelectAll)
 def pre_expr_xpath_select_all(node: XpathSelectAll, ctx: ConverterContext):
+    if node.queries:
+        lines: list[str] = []
+        for i, query in enumerate(node.queries):
+            q = repr(query)
+            if i == 0:
+                lines.append(f"{ctx.indent}{ctx.nxt} = {ctx.prv}.xpath({q})")
+            else:
+                lines.append(f"{ctx.indent}if not {ctx.nxt}:")
+                lines.append(f"{ctx.indent}    {ctx.nxt} = {ctx.prv}.xpath({q})")
+        return lines
     query = repr(node.query)
     return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.xpath({query})"
 

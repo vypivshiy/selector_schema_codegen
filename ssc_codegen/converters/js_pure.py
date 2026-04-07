@@ -19,8 +19,6 @@ SPECIAL METHODS NOTATIONS:
 - __START_PARSE__: `parse`,
 """
 
-from typing import cast
-
 from ssc_codegen.converters.base import ConverterContext, BaseConverter
 from ssc_codegen.ast import VariableType, StructType
 from ssc_codegen.converters.helpers import (
@@ -148,10 +146,6 @@ from ssc_codegen.ast import (
     PredTextRe,
     PredTextStarts,
 )
-
-# transform
-from ssc_codegen.ast import TransformCall
-
 
 JS_CONVERTER = BaseConverter(indent=" " * 2)
 
@@ -588,18 +582,65 @@ def post_start_parse(node: StartParse, ctx: ConverterContext):
 
 @JS_CONVERTER(CssSelect)
 def pre_expr_css_select(node: CssSelect, ctx: ConverterContext):
+    if node.queries:
+        lines: list[str] = []
+        for i, query in enumerate(node.queries):
+            q = repr(query)
+            if i == 0:
+                lines.append(
+                    f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.querySelector({q});"
+                )
+            else:
+                lines.append(
+                    f"{ctx.indent}if ({ctx.nxt} === null) {ctx.nxt} = {ctx.prv}.querySelector({q});"
+                )
+        return lines
     q = repr(node.query)
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.querySelector({q});"
 
 
 @JS_CONVERTER(CssSelectAll)
 def pre_expr_css_select_all(node: CssSelectAll, ctx: ConverterContext):
+    if node.queries:
+        lines: list[str] = []
+        for i, query in enumerate(node.queries):
+            q = repr(query)
+            if i == 0:
+                lines.append(
+                    f"{ctx.indent}let {ctx.nxt} = Array.from({ctx.prv}.querySelectorAll({q}));"
+                )
+            else:
+                lines.append(
+                    f"{ctx.indent}if ({ctx.nxt}.length === 0) {ctx.nxt} = Array.from({ctx.prv}.querySelectorAll({q}));"
+                )
+        return lines
     q = repr(node.query)
     return f"{ctx.indent}let {ctx.nxt} = Array.from({ctx.prv}.querySelectorAll({q}));"
 
 
 @JS_CONVERTER(XpathSelect)
 def pre_expr_xpath_select(node: XpathSelect, ctx: ConverterContext):
+    if node.queries:
+        lines: list[str] = []
+        for i, query in enumerate(node.queries):
+            q = repr(query)
+            if i == 0:
+                lines.extend(
+                    [
+                        f"{ctx.indent}let xr{ctx.nxt} = document.evaluate({q}, {ctx.prv}, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);",
+                        f"{ctx.indent}let {ctx.nxt} = xr{ctx.nxt}.singleNodeValue;",
+                    ]
+                )
+            else:
+                lines.extend(
+                    [
+                        f"{ctx.indent}if ({ctx.nxt} === null) {{",
+                        f"{ctx.indent}    xr{ctx.nxt} = document.evaluate({q}, {ctx.prv}, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);",
+                        f"{ctx.indent}    {ctx.nxt} = xr{ctx.nxt}.singleNodeValue;",
+                        f"{ctx.indent}}}",
+                    ]
+                )
+        return lines
     q = repr(node.query)
     return [
         f"{ctx.indent}let xr{ctx.nxt} = document.evaluate({q}, {ctx.prv}, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);",
@@ -609,6 +650,29 @@ def pre_expr_xpath_select(node: XpathSelect, ctx: ConverterContext):
 
 @JS_CONVERTER(XpathSelectAll)
 def pre_expr_xpath_select_all(node: XpathSelectAll, ctx: ConverterContext):
+    if node.queries:
+        lines: list[str] = []
+        for i, query in enumerate(node.queries):
+            q = repr(query)
+            if i == 0:
+                lines.extend(
+                    [
+                        f"{ctx.indent}let xr{ctx.nxt} = document.evaluate({q}, {ctx.prv}, null, XPathResult.ORDERED_NODE_ITERATOR_TYPE, null);",
+                        f"{ctx.indent}let {ctx.nxt} = []; let xrn{ctx.nxt} = xr{ctx.nxt}.iterateNext();",
+                        f"{ctx.indent}while (xrn{ctx.nxt}) {{ {ctx.nxt}.push(xrn{ctx.nxt}); xrn{ctx.nxt} = xr{ctx.nxt}.iterateNext(); }}",
+                    ]
+                )
+            else:
+                lines.extend(
+                    [
+                        f"{ctx.indent}if ({ctx.nxt}.length === 0) {{",
+                        f"{ctx.indent}    xr{ctx.nxt} = document.evaluate({q}, {ctx.prv}, null, XPathResult.ORDERED_NODE_ITERATOR_TYPE, null);",
+                        f"{ctx.indent}    xrn{ctx.nxt} = xr{ctx.nxt}.iterateNext();",
+                        f"{ctx.indent}    while (xrn{ctx.nxt}) {{ {ctx.nxt}.push(xrn{ctx.nxt}); xrn{ctx.nxt} = xr{ctx.nxt}.iterateNext(); }}",
+                        f"{ctx.indent}}}",
+                    ]
+                )
+        return lines
     q = repr(node.query)
     return [
         f"{ctx.indent}let xr{ctx.nxt} = document.evaluate({q}, {ctx.prv}, null, XPathResult.ORDERED_NODE_ITERATOR_TYPE, null);",

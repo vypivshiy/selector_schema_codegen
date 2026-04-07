@@ -1321,32 +1321,52 @@ def reg_module_json(node: KdlNode, parent: Module, _: ParseContext):
 
 
 # selectors
+def _resolve_selector_arg(
+    query: str | int | float | bool, ctx: ParseContext
+) -> str:
+    value = ctx.property_defines.get(query, query)
+    return value if isinstance(value, str) else str(value)
+
+
+def _resolve_selector_child_name(name: str, ctx: ParseContext) -> str:
+    value = ctx.property_defines.get(name, _decode_scalar(name))
+    return value if isinstance(value, str) else str(value)
+
+
 @PARSER.register_expression_node("css")
 def reg_expr_css(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
-    query = ctx.property_defines.get(node.args[0], node.args[0])
-    query = cast(str, query)
-    return CssSelect(parent=parent, query=query)
+    if node.children:
+        queries = [_resolve_selector_child_name(c.name, ctx) for c in node.children]
+        return CssSelect(parent=parent, queries=queries)
+    query = _resolve_selector_arg(node.args[0], ctx)
+    return CssSelect(parent=parent, query=cast(str, query))
 
 
 @PARSER.register_expression_node("css-all")
 def reg_expr_css_all(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
-    query = ctx.property_defines.get(node.args[0], node.args[0])
-    query = cast(str, query)
-    return CssSelectAll(parent=parent, query=query)
+    if node.children:
+        queries = [_resolve_selector_child_name(c.name, ctx) for c in node.children]
+        return CssSelectAll(parent=parent, queries=queries)
+    query = _resolve_selector_arg(node.args[0], ctx)
+    return CssSelectAll(parent=parent, query=cast(str, query))
 
 
 @PARSER.register_expression_node("xpath")
 def reg_expr_xpath(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
-    query = ctx.property_defines.get(node.args[0], node.args[0])
-    query = cast(str, query)
-    return XpathSelect(parent=parent, query=query)
+    if node.children:
+        queries = [_resolve_selector_child_name(c.name, ctx) for c in node.children]
+        return XpathSelect(parent=parent, queries=queries)
+    query = _resolve_selector_arg(node.args[0], ctx)
+    return XpathSelect(parent=parent, query=cast(str, query))
 
 
 @PARSER.register_expression_node("xpath-all")
 def reg_expr_xpath_all(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
-    query = ctx.property_defines.get(node.args[0], node.args[0])
-    query = cast(str, query)
-    return XpathSelectAll(parent=parent, query=query)
+    if node.children:
+        queries = [_resolve_selector_child_name(c.name, ctx) for c in node.children]
+        return XpathSelectAll(parent=parent, queries=queries)
+    query = _resolve_selector_arg(node.args[0], ctx)
+    return XpathSelectAll(parent=parent, query=cast(str, query))
 
 
 @PARSER.register_expression_node("css-remove")

@@ -17,6 +17,29 @@
 | `xpath-all <query>` | `DOCUMENT -> LIST_DOCUMENT` |
 | `xpath-remove <query>` | `DOCUMENT -> DOCUMENT` |
 
+Дополнительно для `css`, `css-all`, `xpath`, `xpath-all` поддерживается
+блочный pattern-match синтаксис:
+
+```kdl
+title {
+    css {
+        ".article-title"
+        "h1.title"
+        "h1"
+    }
+    text
+}
+```
+
+Правила:
+- Можно использовать либо один аргумент (`css ".title"`), либо block
+  (`css { ".a"; ".b" }`), но не одновременно.
+- В block должно быть минимум 2 селектора.
+- Селекторы проверяются по порядку; берется первый непустой результат.
+- Если ни один селектор не подошел, поведение как у обычного `css`/`xpath`
+  (ошибка на этапе выполнения pipeline, если нет `fallback`).
+- `css-remove` и `xpath-remove` block-синтаксис не поддерживают.
+
 ## Extract
 
 | Операция | Тип |

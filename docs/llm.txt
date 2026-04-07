@@ -86,6 +86,19 @@ Pipeline is a chain of operations. Initial type is DOCUMENT (or @init value type
 - xpath-all <query>: DOCUMENT -> LIST_DOCUMENT
 - xpath-remove <query>: DOCUMENT -> DOCUMENT
 
+Alternative selector form (pattern-match, ordered fallback):
+- css { <query1>; <query2>; ... } (or multiline children)
+- css-all { <query1>; <query2>; ... }
+- xpath { <query1>; <query2>; ... }
+- xpath-all { <query1>; <query2>; ... }
+
+Pattern-match rules:
+- Use either one argument or block children, not both.
+- Block form requires at least 2 selectors.
+- Try selectors in order; use first non-empty result.
+- If all selectors are empty, behavior is same as a failed single selector.
+- css-remove/xpath-remove do not support block pattern-match form.
+
 ### Extract
 
 - text: DOCUMENT -> STRING, LIST_DOCUMENT -> LIST_STRING

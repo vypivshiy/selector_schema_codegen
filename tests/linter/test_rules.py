@@ -112,6 +112,61 @@ class TestCssSelector:
         msgs = lint(field('css-all ".a" ".b"'))
         assert any("requires exactly 1" in m for m in msgs)
 
+    def test_css_block_pattern_match_valid(self):
+        src = (
+            "struct S {\n"
+            "  f {\n"
+            "    css {\n"
+            '      ".a"\n'
+            '      ".b"\n'
+            "    }\n"
+            "    text\n"
+            "  }\n"
+            "}\n"
+        )
+        assert no_errors(src)
+
+    def test_css_all_block_requires_at_least_two_selectors(self):
+        src = (
+            "struct S {\n"
+            "  f {\n"
+            "    css-all {\n"
+            '      ".a"\n'
+            "    }\n"
+            "  }\n"
+            "}\n"
+        )
+        msgs = lint(src)
+        assert any("block requires at least 2 selectors" in m for m in msgs)
+
+    def test_css_block_and_arg_together_error(self):
+        src = (
+            "struct S {\n"
+            "  f {\n"
+            '    css ".x" {\n'
+            '      ".a"\n'
+            '      ".b"\n'
+            "    }\n"
+            "  }\n"
+            "}\n"
+        )
+        msgs = lint(src)
+        assert any("use either argument or block" in m for m in msgs)
+
+    def test_css_remove_block_not_supported(self):
+        src = (
+            "struct S {\n"
+            "  f {\n"
+            "    css-remove {\n"
+            '      ".ad"\n'
+            '      ".banner"\n'
+            "    }\n"
+            "  }\n"
+            "}\n"
+        )
+        msgs = lint(src)
+        assert any("requires exactly 1" in m for m in msgs)
+
     @given(
         st.text(min_size=1, alphabet=st.characters(whitelist_categories=("Ll", "Lu", "Nd"), whitelist_characters="-.#_"))
         .filter(lambda s: s.strip() != "")
@@ -155,6 +210,61 @@ class TestXpathSelector:
 
     def test_xpath_too_many_args_error(self):
         msgs = lint(field('xpath "//a" "//b"'))
+        assert any("requires exactly 1" in m for m in msgs)
+
+    def test_xpath_block_pattern_match_valid(self):
+        src = (
+            "struct S {\n"
+            "  f {\n"
+            "    xpath {\n"
+            '      "//a"\n'
+            '      "//button"\n'
+            "    }\n"
+            "    text\n"
+            "  }\n"
+            "}\n"
+        )
+        assert no_errors(src)
+
+    def test_xpath_all_block_requires_at_least_two_selectors(self):
+        src = (
+            "struct S {\n"
+            "  f {\n"
+            "    xpath-all {\n"
+            '      "//a"\n'
+            "    }\n"
+            "  }\n"
+            "}\n"
+        )
+        msgs = lint(src)
+        assert any("block requires at least 2 selectors" in m for m in msgs)
+
+    def test_xpath_block_and_arg_together_error(self):
+        src = (
+            "struct S {\n"
+            "  f {\n"
+            '    xpath "//a" {\n'
+            '      "//b"\n'
+            '      "//c"\n'
+            "    }\n"
+            "  }\n"
+            "}\n"
+        )
+        msgs = lint(src)
+        assert any("use either argument or block" in m for m in msgs)
+
+    def test_xpath_remove_block_not_supported(self):
+        src = (
+            "struct S {\n"
+            "  f {\n"
+            "    xpath-remove {\n"
+            '      "//script"\n'
+            '      "//style"\n'
+            "    }\n"
+            "  }\n"
+            "}\n"
+        )
+        msgs = lint(src)
         assert any("requires exactly 1" in m for m in msgs)
 
     @pytest.mark.parametrize("op", ["xpath", "xpath-all", "xpath-remove"])

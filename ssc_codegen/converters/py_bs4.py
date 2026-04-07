@@ -1,5 +1,3 @@
-from typing import cast
-
 from ssc_codegen.converters.base import ConverterContext, BaseConverter
 
 # types
@@ -21,7 +19,6 @@ from ssc_codegen.ast import (
     TypeDef,
     TypeDefField,
     Struct,
-    Module,
 )
 
 # struct layer
@@ -550,12 +547,36 @@ def pre_struct_table_row(node: TableRow, ctx: ConverterContext):
 # SELECTORS
 @PY_BASE_CONVERTER(CssSelect)
 def pre_expr_css_select(node: CssSelect, ctx: ConverterContext):
+    if node.queries:
+        lines: list[str] = []
+        for i, query in enumerate(node.queries):
+            q = repr(query)
+            if i == 0:
+                lines.append(f"{ctx.indent}{ctx.nxt} = {ctx.prv}.select_one({q})")
+            else:
+                lines.append(f"{ctx.indent}if {ctx.nxt} is None:")
+                lines.append(
+                    f"{ctx.indent}    {ctx.nxt} = {ctx.prv}.select_one({q})"
+                )
+        return lines
     query = repr(node.query)
     return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.select_one({query})"
 
 
 @PY_BASE_CONVERTER(CssSelectAll)
 def pre_expr_css_select_all(node: CssSelectAll, ctx: ConverterContext):
+    if node.queries:
+        lines: list[str] = []
+        for i, query in enumerate(node.queries):
+            q = repr(query)
+            if i == 0:
+                lines.append(f"{ctx.indent}{ctx.nxt} = {ctx.prv}.select({q})")
+            else:
+                lines.append(f"{ctx.indent}if not {ctx.nxt}:")
+                lines.append(
+                    f"{ctx.indent}    {ctx.nxt} = {ctx.prv}.select({q})"
+                )
+        return lines
     query = repr(node.query)
     return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.select({query})"
 

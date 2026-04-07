@@ -205,24 +205,68 @@ def pre_struct_table_row(node: TableRow, ctx: ConverterContext):
 
 @PY_PARSEL_CONVERTER(CssSelect)
 def pre_expr_css_select(node: CssSelect, ctx: ConverterContext):
+    if node.queries:
+        lines: list[str] = []
+        for i, query in enumerate(node.queries):
+            q = repr(query)
+            if i == 0:
+                lines.append(f"{ctx.indent}{ctx.nxt} = {ctx.prv}.css({q})")
+            else:
+                lines.append(f"{ctx.indent}if not {ctx.nxt}:")
+                lines.append(f"{ctx.indent}    {ctx.nxt} = {ctx.prv}.css({q})")
+        return lines
     query = repr(node.query)
     return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.css({query})"
 
 
 @PY_PARSEL_CONVERTER(CssSelectAll)
 def pre_expr_css_select_all(node: CssSelectAll, ctx: ConverterContext):
+    if node.queries:
+        lines: list[str] = []
+        for i, query in enumerate(node.queries):
+            q = repr(query)
+            if i == 0:
+                lines.append(f"{ctx.indent}{ctx.nxt} = {ctx.prv}.css({q})")
+            else:
+                lines.append(f"{ctx.indent}if not {ctx.nxt}:")
+                lines.append(f"{ctx.indent}    {ctx.nxt} = {ctx.prv}.css({q})")
+        return lines
     query = repr(node.query)
     return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.css({query})"
 
 
 @PY_PARSEL_CONVERTER(XpathSelect)
 def pre_expr_xpath_select(node: XpathSelect, ctx: ConverterContext):
+    if node.queries:
+        lines: list[str] = []
+        for i, query in enumerate(node.queries):
+            q = repr(query)
+            if i == 0:
+                lines.append(f"{ctx.indent}{ctx.nxt} = {ctx.prv}.xpath({q})")
+            else:
+                lines.append(f"{ctx.indent}if not {ctx.nxt}:")
+                lines.append(
+                    f"{ctx.indent}    {ctx.nxt} = {ctx.prv}.xpath({q})"
+                )
+        return lines
     query = repr(node.query)
     return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.xpath({query})"
 
 
 @PY_PARSEL_CONVERTER(XpathSelectAll)
 def pre_expr_xpath_select_all(node: XpathSelectAll, ctx: ConverterContext):
+    if node.queries:
+        lines: list[str] = []
+        for i, query in enumerate(node.queries):
+            q = repr(query)
+            if i == 0:
+                lines.append(f"{ctx.indent}{ctx.nxt} = {ctx.prv}.xpath({q})")
+            else:
+                lines.append(f"{ctx.indent}if not {ctx.nxt}:")
+                lines.append(
+                    f"{ctx.indent}    {ctx.nxt} = {ctx.prv}.xpath({q})"
+                )
+        return lines
     query = repr(node.query)
     return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.xpath({query})"
 

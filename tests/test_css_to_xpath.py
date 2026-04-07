@@ -82,3 +82,25 @@ def test_css_to_xpath_ast_conversion() -> None:
     )
     assert any(isinstance(node, PredXpath) for node in filter_node.body)
     assert not any(isinstance(node, PredCss) for node in filter_node.body)
+
+
+def test_css_to_xpath_ast_conversion_preserves_query_chains() -> None:
+    src = """
+    struct Sample {
+        title {
+            css {
+                "h1.page-title"
+                "title"
+            }
+        }
+    }
+    """
+    module = parse_ast(src=src, css_to_xpath=True)
+    struct = _get_struct(module, "Sample")
+    title = _get_field(struct, "title")
+
+    node = next(n for n in title.body if isinstance(n, XpathSelect))
+    assert node.query == ""
+    assert len(node.queries) == 2
+    assert node.queries[0] == css_to_xpath("h1.page-title")
+    assert node.queries[1] == css_to_xpath("title")

@@ -7,6 +7,7 @@ from ssc_codegen.ast import (
     Attr,
     CssSelect,
     CssSelectAll,
+    XpathSelectAll,
     Filter,
     Fmt,
     InitField,
@@ -28,7 +29,6 @@ from ssc_codegen.ast import (
     Text,
     TransformCall,
     TransformDef,
-    TransformTarget,
     TypeDef,
     Value,
 )
@@ -223,6 +223,56 @@ def test_parser_supports_inline_operation_chain_css_attr():
     assert isinstance(url.body[-1], Return)
     assert url.accept == VariableType.DOCUMENT
     assert url.ret == VariableType.STRING
+
+
+def test_parser_supports_css_pattern_match_block():
+    module = PARSER.parse(
+        '''
+        define MAIN_TITLE=".article h1"
+
+        struct Main {
+            title {
+                css {
+                    MAIN_TITLE
+                    "h1"
+                }
+                text
+            }
+        }
+        '''
+    )
+    main = _struct(module, "Main")
+    title = _field(main, "title")
+
+    assert isinstance(title.body[0], CssSelect)
+    assert title.body[0].query == ""
+    assert title.body[0].queries == [".article h1", "h1"]
+    assert isinstance(title.body[1], Text)
+    assert isinstance(title.body[-1], Return)
+
+
+def test_parser_supports_xpath_all_pattern_match_block():
+    module = PARSER.parse(
+        '''
+        struct Main {
+            links {
+                xpath-all {
+                    "//a[@href]"
+                    "//area[@href]"
+                }
+                attr "href"
+            }
+        }
+        '''
+    )
+    main = _struct(module, "Main")
+    links = _field(main, "links")
+
+    assert isinstance(links.body[0], XpathSelectAll)
+    assert links.body[0].query == ""
+    assert links.body[0].queries == ["//a[@href]", "//area[@href]"]
+    assert isinstance(links.body[1], Attr)
+    assert isinstance(links.body[-1], Return)
 
 
 

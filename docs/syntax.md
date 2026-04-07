@@ -232,5 +232,25 @@ price {
 }
 ```
 
+### Pattern-matching селекторы
+
+Для `css`, `css-all`, `xpath`, `xpath-all` можно использовать block форму
+с несколькими селекторами:
+
+```kdl
+title {
+    css {
+        ".main-title"
+        "h1.title"
+        "h1"
+    }
+    text
+}
+```
+
+Селекторы проверяются по порядку; используется первый непустой результат.
+Разрешена только одна форма вызова: либо `css ".title"`, либо `css { ... }`.
+Для `css-remove` и `xpath-remove` block форма не поддерживается.
+
 Полный список операций см. в [operations.md](operations.md).
 Предикаты см. в [predicates.md](predicates.md).

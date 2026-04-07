@@ -8,6 +8,7 @@ ctx.error() / ctx.warning() to report issues.
 
 from __future__ import annotations
 
+import ast
 import re
 
 from tree_sitter import Node
@@ -161,6 +162,27 @@ def _require_int_args(node: Node, ctx: LintContext, args: list[str]) -> bool:
 
 # ── selectors ──────────────────────────────────────────────────────────────────
 
+_RAW_STRING_RE = re.compile(r'^(#+)"(.*?)"\1$', re.DOTALL)
+
+
+def _decode_selector_child_name(raw_name: str, ctx: LintContext) -> str:
+    resolved = ctx.resolve_scalar_arg(raw_name)
+    if resolved is not None:
+        return resolved
+
+    text = raw_name.strip()
+    if text.startswith('"') and text.endswith('"'):
+        try:
+            value = ast.literal_eval(text)
+            return value if isinstance(value, str) else str(value)
+        except Exception:
+            return text[1:-1]
+
+    m = _RAW_STRING_RE.match(text)
+    if m:
+        return m.group(2)
+    return text
+
 
 def _validate_css_selector(node: Node, ctx: LintContext, selector: str) -> bool:
     """Validate CSS selector syntax via soupsieve. Returns True if valid."""
@@ -198,8 +220,114 @@ def _validate_xpath(node: Node, ctx: LintContext, expr: str) -> bool:
         return False
 
 
-@LINTER.rule("css", "css-all", "css-remove")
+@LINTER.rule("css", "css-all")
 def rule_css(node: Node, ctx: LintContext) -> None:
+    name = ctx.node_name(node)
+    args = ctx.get_args(node)
+    children = ctx.get_children_nodes(node)
+
+    if children and args:
+        ctx.error(
+            node,
+            ErrorCode.INVALID_ARGUMENT,
+            message=f"'{name}' — use either argument or block, not both",
+            hint=f'example: {name} ".class" or {name} {{ ".a"; ".b" }}',
+        )
+        return
+
+    if children:
+        if len(children) < 2:
+            ctx.error(
+                node,
+                ErrorCode.MISSING_ARGUMENT,
+                message=f"'{name}' block requires at least 2 selectors",
+                hint=f'for a single selector use: {name} ".my-class"',
+            )
+            return
+        for child in children:
+            selector = _decode_selector_child_name(ctx.node_name(child), ctx)
+            if selector.strip() == "":
+                ctx.error(
+                    child,
+                    ErrorCode.MISSING_ARGUMENT,
+                    message=f"'{name}' CSS selector must not be empty",
+                    hint=f'example: {name} ".my-class"',
+                )
+                continue
+            _validate_css_selector(child, ctx, selector)
+        return
+
+    args = _require_args_count(
+        node, ctx, exact=1, example=f'{name} ".my-class"'
+    )
+    if not args:
+        return
+    if args[0].strip() == "":
+        ctx.error(
+            node,
+            ErrorCode.MISSING_ARGUMENT,
+            message=f"'{name}' CSS selector must not be empty",
+            hint=f'example: {name} ".my-class"',
+        )
+        return
+    _validate_css_selector(node, ctx, args[0])
+
+
+@LINTER.rule("xpath", "xpath-all")
+def rule_xpath(node: Node, ctx: LintContext) -> None:
+    name = ctx.node_name(node)
+    args = ctx.get_args(node)
+    children = ctx.get_children_nodes(node)
+
+    if children and args:
+        ctx.error(
+            node,
+            ErrorCode.INVALID_ARGUMENT,
+            message=f"'{name}' — use either argument or block, not both",
+            hint=f'example: {name} "//a" or {name} {{ "//a"; "//b" }}',
+        )
+        return
+
+    if children:
+        if len(children) < 2:
+            ctx.error(
+                node,
+                ErrorCode.MISSING_ARGUMENT,
+                message=f"'{name}' block requires at least 2 selectors",
+                hint=f'for a single selector use: {name} "//div"',
+            )
+            return
+        for child in children:
+            selector = _decode_selector_child_name(ctx.node_name(child), ctx)
+            if selector.strip() == "":
+                ctx.error(
+                    child,
+                    ErrorCode.MISSING_ARGUMENT,
+                    message=f"'{name}' XPath expression must not be empty",
+                    hint=f'example: {name} "//div"',
+                )
+                continue
+            _validate_xpath(child, ctx, selector)
+        return
+
+    args = _require_args_count(
+        node, ctx, exact=1, example=f"{name} \"//div[@class='item']\""
+    )
+    if not args:
+        return
+    if args[0].strip() == "":
+        ctx.error(
+            node,
+            ErrorCode.MISSING_ARGUMENT,
+            message=f"'{name}' XPath expression must not be empty",
+            hint=f'example: {name} "//div"',
+        )
+        return
+    _validate_xpath(node, ctx, args[0])
+
+
+@LINTER.rule("css-remove")
+def rule_css_remove(node: Node, ctx: LintContext) -> None:
     name = ctx.node_name(node)
     args = _require_args_count(
         node, ctx, exact=1, example=f'{name} ".my-class"'
@@ -217,8 +345,8 @@ def rule_css(node: Node, ctx: LintContext) -> None:
     _validate_css_selector(node, ctx, args[0])
 
 
-@LINTER.rule("xpath", "xpath-all", "xpath-remove")
-def rule_xpath(node: Node, ctx: LintContext) -> None:
+@LINTER.rule("xpath-remove")
+def rule_xpath_remove(node: Node, ctx: LintContext) -> None:
     name = ctx.node_name(node)
     args = _require_args_count(
         node, ctx, exact=1, example=f"{name} \"//div[@class='item']\""

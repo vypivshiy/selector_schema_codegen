@@ -315,12 +315,22 @@ def _check_struct_recursive(
 
     for info in selectors:
         sel_node = info.node
+        queries = getattr(sel_node, "queries", [])
         query = sel_node.query  # type: ignore[attr-defined]
+        report_query = query
         sel_type = _selector_type_name(sel_node)
 
         # run the selector
         if isinstance(sel_node, _CSS_TYPES):
-            count = _check_css(soup, query)
+            if queries:
+                count = 0
+                report_query = " || ".join(queries)
+                for query in queries:
+                    count = _check_css(soup, query)
+                    if count == -1 or count > 0:
+                        break
+            else:
+                count = _check_css(soup, query)
         elif isinstance(sel_node, _XPATH_TYPES):
             if lxml_tree is None:
                 result.checks.append(
@@ -334,7 +344,15 @@ def _check_struct_recursive(
                     )
                 )
                 continue
-            count = _check_xpath(lxml_tree, query)
+            if queries:
+                count = 0
+                report_query = " || ".join(queries)
+                for query in queries:
+                    count = _check_xpath(lxml_tree, query)
+                    if count == -1 or count > 0:
+                        break
+            else:
+                count = _check_xpath(lxml_tree, query)
         else:
             continue
 
@@ -344,7 +362,7 @@ def _check_struct_recursive(
                 SelectorCheck(
                     path=info.path,
                     selector_type=sel_type,
-                    query=query,
+                    query=report_query,
                     matches=0,
                     status="fail",
                     message="invalid selector syntax",
@@ -381,7 +399,7 @@ def _check_struct_recursive(
             SelectorCheck(
                 path=info.path,
                 selector_type=sel_type,
-                query=query,
+                query=report_query,
                 matches=count,
                 status=status,
                 message=message,

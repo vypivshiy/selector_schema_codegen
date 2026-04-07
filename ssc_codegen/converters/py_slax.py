@@ -200,12 +200,34 @@ def pre_struct_table_row(node: TableRow, ctx: ConverterContext):
 
 @PY_SLAX_CONVERTER(CssSelect)
 def pre_expr_css_select(node: CssSelect, ctx: ConverterContext):
+    if node.queries:
+        lines: list[str] = []
+        for i, query in enumerate(node.queries):
+            q = repr(query)
+            if i == 0:
+                lines.append(f"{ctx.indent}{ctx.nxt} = {ctx.prv}.css_first({q})")
+            else:
+                lines.append(f"{ctx.indent}if {ctx.nxt} is None:")
+                lines.append(
+                    f"{ctx.indent}    {ctx.nxt} = {ctx.prv}.css_first({q})"
+                )
+        return lines
     query = repr(node.query)
     return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.css_first({query})"
 
 
 @PY_SLAX_CONVERTER(CssSelectAll)
 def pre_expr_css_select_all(node: CssSelectAll, ctx: ConverterContext):
+    if node.queries:
+        lines: list[str] = []
+        for i, query in enumerate(node.queries):
+            q = repr(query)
+            if i == 0:
+                lines.append(f"{ctx.indent}{ctx.nxt} = {ctx.prv}.css({q})")
+            else:
+                lines.append(f"{ctx.indent}if not {ctx.nxt}:")
+                lines.append(f"{ctx.indent}    {ctx.nxt} = {ctx.prv}.css({q})")
+        return lines
     query = repr(node.query)
     return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.css({query})"
 

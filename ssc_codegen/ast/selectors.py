@@ -8,6 +8,7 @@ from .types import VariableType
 @dataclass
 class CssSelect(Node):
     query: str = ""
+    queries: list[str] = field(default_factory=list)
     accept: VariableType = field(default=VariableType.DOCUMENT)
     ret: VariableType = field(default=VariableType.DOCUMENT)
 
@@ -15,6 +16,7 @@ class CssSelect(Node):
 @dataclass
 class CssSelectAll(Node):
     query: str = ""
+    queries: list[str] = field(default_factory=list)
     accept: VariableType = field(default=VariableType.DOCUMENT)
     ret: VariableType = field(default=VariableType.LIST_DOCUMENT)
 
@@ -22,6 +24,7 @@ class CssSelectAll(Node):
 @dataclass
 class XpathSelect(Node):
     query: str = ""
+    queries: list[str] = field(default_factory=list)
     accept: VariableType = field(default=VariableType.DOCUMENT)
     ret: VariableType = field(default=VariableType.DOCUMENT)
 
@@ -29,6 +32,7 @@ class XpathSelect(Node):
 @dataclass
 class XpathSelectAll(Node):
     query: str = ""
+    queries: list[str] = field(default_factory=list)
     accept: VariableType = field(default=VariableType.DOCUMENT)
     ret: VariableType = field(default=VariableType.LIST_DOCUMENT)
 

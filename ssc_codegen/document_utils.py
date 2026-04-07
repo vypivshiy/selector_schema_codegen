@@ -34,17 +34,29 @@ def convert_css_to_xpath(
             new_nodes.append(expr)
             continue
 
-        query = expr.query
-        query, pseudo_action = parse_pseudo_css_query(query)
-        new_query = css_to_xpath(query, prefix=prefix)
-        if pseudo_action[0]:
-            new_query += pseudo_action_to_pseudo_css(*pseudo_action)
+        if getattr(expr, "queries", None):
+            new_queries: list[str] = []
+            for query in expr.queries:
+                q, pseudo_action = parse_pseudo_css_query(query)
+                converted = css_to_xpath(q, prefix=prefix)
+                if pseudo_action[0]:
+                    converted += pseudo_action_to_pseudo_css(*pseudo_action)
+                new_queries.append(converted)
+            new_query = ""
+        else:
+            query = expr.query
+            query, pseudo_action = parse_pseudo_css_query(query)
+            new_query = css_to_xpath(query, prefix=prefix)
+            if pseudo_action[0]:
+                new_query += pseudo_action_to_pseudo_css(*pseudo_action)
+            new_queries = []
 
         if isinstance(expr, CssSelect):
             new_nodes.append(
                 XpathSelect(
                     parent=expr.parent,
                     query=new_query,
+                    queries=new_queries,
                     accept=expr.accept,
                     ret=expr.ret,
                 )
@@ -54,6 +66,7 @@ def convert_css_to_xpath(
                 XpathSelectAll(
                     parent=expr.parent,
                     query=new_query,
+                    queries=new_queries,
                     accept=expr.accept,
                     ret=expr.ret,
                 )
