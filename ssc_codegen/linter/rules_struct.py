@@ -7,6 +7,8 @@ inside a struct field list, or inside a field pipeline.
 
 from __future__ import annotations
 
+import difflib
+
 from tree_sitter import Node
 
 from ssc_codegen.linter.base import LINTER, LintContext
@@ -132,11 +134,25 @@ def rule_unknown_or_define_op(node: Node, ctx: LintContext) -> None:
             )
         # block define — valid
     else:
+        # Build candidate pool: built-in ops + block defines + transforms
+        candidates = sorted(
+            _KNOWN_OPS
+            | {k for k, v in ctx.defines.items() if v.kind == DefineKind.BLOCK}
+            | set(ctx.transforms)
+        )
+        suggestions = difflib.get_close_matches(
+            op_name, candidates, n=3, cutoff=0.6
+        )
+        if suggestions:
+            quoted = " or ".join(f"'{s}'" for s in suggestions)
+            hint = f"did you mean {quoted}?"
+        else:
+            hint = f"check spelling or declare it: define {op_name} {{ ... }}"
         ctx.error(
             node,
             ErrorCode.UNKNOWN_OPERATION,
             message=f"unknown operation '{op_name}'",
-            hint=f"check spelling or declare it: define {op_name} {{ ... }}",
+            hint=hint,
         )
 
 
