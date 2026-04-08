@@ -10,19 +10,26 @@ from ssc_codegen.kdl.parser import (
 )
 
 
-def test_kdl_parser_parses_project_examples():
-    parser = KDL2CSTParser()
-    examples = [
-        Path("examples/booksToScrape.kdl"),
-        Path("examples/quotesToScrape.kdl"),
-        Path("examples/transformExample.kdl"),
-        Path("examples/imdbcom.kdl"),
-    ]
+_ROOT = Path(__file__).parent.parent
+_ALL_KDL_FILES = (
+    list((_ROOT / "examples").glob("*.kdl"))
+    + list((_ROOT / "tests/kdl_test_cases/input").glob("*.kdl"))
+)
+_VALID_KDL_FILES = [f for f in _ALL_KDL_FILES if not f.name.endswith("_fail.kdl")]
+_INVALID_KDL_FILES = [f for f in _ALL_KDL_FILES if f.name.endswith("_fail.kdl")]
 
-    for path in examples:
-        doc = parser.parse(path.read_text(encoding="utf-8-sig"))
-        assert len(doc.nodes) > 0
-        assert doc.span.end.offset >= doc.span.start.offset
+
+@pytest.mark.parametrize("file", _VALID_KDL_FILES, ids=lambda p: p.name)
+def test_orig_kdl2_valid_cases(file: Path):
+    parser = KDL2CSTParser()
+    doc = parser.parse(file.read_text(encoding="utf-8-sig"))
+    assert doc.span.end.offset >= doc.span.start.offset
+
+
+@pytest.mark.parametrize("file", _INVALID_KDL_FILES, ids=lambda p: p.name)
+def test_orig_kdl2_invalid_cases(file: Path):
+    with pytest.raises(KDLParseError):
+        KDL2CSTParser().parse(file.read_text(encoding="utf-8-sig"))
 
 
 def test_kdl_parser_keeps_spans_and_entries():

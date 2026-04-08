@@ -144,6 +144,9 @@ _UNICODE_SPACES = {
 
 _DISALLOWED_IDENT_CHARS = set('\\/(){};[]"=#')
 
+# Bare identifiers that are reserved in KDL2 (must use # prefix or quotes)
+_RESERVED_BARE_IDS = {"true", "false", "null", "inf", "nan", "-inf"}
+
 
 @dataclass
 class _Cursor:
@@ -402,14 +405,33 @@ class KDLLexer:
 
         if self.c.startswith('"""'):
             self.c.advance(3)
+            # KDL2: multiline string content must begin with a newline
+            if not self.c.eof() and not (self.c.startswith("\r\n") or self.c.cur() in _NEWLINES):
+                raise KDLParseError(
+                    "Multiline string must begin with a newline immediately after opening \"\"\"",
+                    line=start.line, column=start.column, offset=start.offset,
+                )
             content_start = self.c.i
             while not self.c.eof():
                 if self.c.startswith('"""'):
                     content = self.c.src[content_start : self.c.i]
                     self.c.advance(3)
                     raw = self.c.src[start.offset : self.c.i]
-                    return Token(TokenType.STRING, raw, _decode_multiline(content), Span(start, self.c.pos()))
-                if self.c.startswith("\\") and self._try_consume_escline():
+                    try:
+                        value = _decode_multiline(content, is_raw=False)
+                    except ValueError as exc:
+                        raise KDLParseError(
+                            str(exc), line=start.line, column=start.column, offset=start.offset
+                        ) from exc
+                    return Token(TokenType.STRING, raw, value, Span(start, self.c.pos()))
+                if self.c.startswith("\\"):
+                    if self._try_consume_escline():
+                        continue
+                    # Non-escline escape (e.g. \"): consume \ and the escaped char
+                    # so the next char is not mistaken for the closing """
+                    self.c.advance()
+                    if not self.c.eof():
+                        self.c.advance()
                     continue
                 if self.c.startswith("\r\n"):
                     self.c.advance(2)
@@ -424,8 +446,24 @@ class KDLLexer:
 
         # single-line quoted string
         self.c.advance()
-        escaped = False
         while not self.c.eof():
+            ch = self.c.cur()
+            if ch == "\\":
+                self.c.advance()  # consume backslash
+                if self.c.eof():
+                    break
+                # whitespace escape: consume \ and all following whitespace (including newlines)
+                if self.c.cur() in _UNICODE_SPACES or self.c.cur() in _NEWLINES or self.c.startswith("\r\n"):
+                    while not self.c.eof():
+                        if self.c.startswith("\r\n"):
+                            self.c.advance(2)
+                        elif self.c.cur() in _NEWLINES or self.c.cur() in _UNICODE_SPACES:
+                            self.c.advance()
+                        else:
+                            break
+                else:
+                    self.c.advance()  # consume the single escaped char
+                continue
             if self.c.startswith("\r\n"):
                 pos = self.c.pos()
                 raise KDLParseError(
@@ -434,7 +472,6 @@ class KDLLexer:
                     column=pos.column,
                     offset=pos.offset,
                 )
-            ch = self.c.cur()
             if ch in _NEWLINES:
                 pos = self.c.pos()
                 raise KDLParseError(
@@ -443,18 +480,16 @@ class KDLLexer:
                     column=pos.column,
                     offset=pos.offset,
                 )
-            if escaped:
-                escaped = False
-                self.c.advance()
-                continue
-            if ch == "\\":
-                escaped = True
-                self.c.advance()
-                continue
             if ch == '"':
                 self.c.advance()
                 raw = self.c.src[start.offset : self.c.i]
-                return Token(TokenType.STRING, raw, _decode_quoted(raw), Span(start, self.c.pos()))
+                try:
+                    value = _decode_quoted(raw)
+                except ValueError as exc:
+                    raise KDLParseError(
+                        str(exc), line=start.line, column=start.column, offset=start.offset,
+                    ) from exc
+                return Token(TokenType.STRING, raw, value, Span(start, self.c.pos()))
             self.c.advance()
 
         raise KDLParseError(
@@ -502,6 +537,13 @@ class KDLLexer:
         closing = ('"""' if qlen == 3 else '"') + ("#" * hashes)
 
         self.c.advance(len(opening))
+        # KDL2: multiline raw string content must begin with a newline
+        if qlen == 3:
+            if not self.c.eof() and not (self.c.startswith("\r\n") or self.c.cur() in _NEWLINES):
+                raise KDLParseError(
+                    "Multiline raw string must begin with a newline immediately after opening delimiter",
+                    line=start.line, column=start.column, offset=start.offset,
+                )
         content_start = self.c.i
 
         while not self.c.eof():
@@ -509,9 +551,23 @@ class KDLLexer:
                 content = self.c.src[content_start : self.c.i]
                 self.c.advance(len(closing))
                 raw = self.c.src[start.offset : self.c.i]
-                value = _decode_multiline(content) if qlen == 3 else content
+                if qlen == 3:
+                    try:
+                        value = _decode_multiline(content, is_raw=True)
+                    except ValueError as exc:
+                        raise KDLParseError(
+                            str(exc), line=start.line, column=start.column, offset=start.offset
+                        ) from exc
+                else:
+                    value = content
                 return Token(TokenType.STRING, raw, value, Span(start, self.c.pos()))
 
+            # single-quote raw strings cannot contain newlines
+            if qlen == 1 and (self.c.startswith("\r\n") or self.c.cur() in _NEWLINES):
+                raise KDLParseError(
+                    "Newline in single-quote raw string",
+                    line=start.line, column=start.column, offset=start.offset,
+                )
             if self.c.startswith("\r\n"):
                 self.c.advance(2)
                 continue
@@ -539,6 +595,11 @@ class KDLLexer:
                 value = _parse_int_like(raw, base)
                 start = self.c.pos()
                 self.c.advance(len(raw))
+                if _is_ident_continue(self.c.cur()):
+                    raise KDLParseError(
+                        f"Invalid number: {raw!r} immediately followed by {self.c.cur()!r}",
+                        line=start.line, column=start.column, offset=start.offset,
+                    )
                 return Token(typ, raw, value, Span(start, self.c.pos()))
 
         m = _DECIMAL_RE.match(rem)
@@ -546,6 +607,11 @@ class KDLLexer:
             raw = m.group(0)
             start = self.c.pos()
             self.c.advance(len(raw))
+            if _is_ident_continue(self.c.cur()):
+                raise KDLParseError(
+                    f"Invalid number: {raw!r} immediately followed by {self.c.cur()!r}",
+                    line=start.line, column=start.column, offset=start.offset,
+                )
             norm = raw.replace("_", "")
             value: int | float
             if "." in norm or "e" in norm or "E" in norm:
@@ -582,9 +648,17 @@ class KDLLexer:
         start = self.c.pos()
         self.c.advance()
         while not self.c.eof() and _is_ident_continue(self.c.cur()):
+            self._check_disallowed_literal()
             self.c.advance()
 
         raw = self.c.src[start.offset : self.c.i]
+        if raw in _RESERVED_BARE_IDS:
+            raise KDLParseError(
+                f"Reserved identifier {raw!r} is not valid as a bare identifier in KDL2",
+                line=start.line,
+                column=start.column,
+                offset=start.offset,
+            )
         return Token(TokenType.IDENT, raw, raw, Span(start, self.c.pos()))
 
 
@@ -609,11 +683,16 @@ class _Parser:
             if self._match(TokenType.SLASHDASH):
                 self._skip_separators()
                 self._parse_discarded_component(allow_node=True)
+                consumed = self._consume_terminators()
+                if not consumed and not self._at(TokenType.EOF):
+                    raise self._error_here("Expected newline or semicolon after node")
                 self._skip_separators()
                 continue
 
             nodes.append(self._parse_node())
-            self._consume_terminators()
+            consumed = self._consume_terminators()
+            if not consumed and not self._at(TokenType.EOF):
+                raise self._error_here("Expected newline or semicolon after node")
             self._skip_separators()
 
         end = self._peek().span.end
@@ -664,13 +743,28 @@ class _Parser:
         has_children_block = False
         children_block_span: Span | None = None
 
+        # Zero-space: track end offset of last significant token before each entry
+        prev_end = name.span.end.offset
+
         while not self._is_node_terminator() and not self._at(TokenType.LBRACE):
             if self._match(TokenType.SLASHDASH):
                 self._skip_separators()
+                if self._at(TokenType.LBRACE):
+                    # Slashdash-discarded children block: after this, no more entries
+                    # are allowed (children-block position reached). Discard it and
+                    # exit the entries loop so the "while True" block takes over.
+                    self._discard_children_block()
+                    break
                 self._parse_discarded_component(allow_node=False)
-                self._skip_separators()
+                # Do NOT skip separators here: leave newlines to terminate the node
                 continue
-            entries.append(self._parse_entry())
+            # Require whitespace before each entry
+            next_tok = self._peek()
+            if next_tok.span.start.offset == prev_end:
+                raise self._error_tok(next_tok, "Expected whitespace before entry")
+            entry = self._parse_entry()
+            prev_end = entry.span.end.offset
+            entries.append(entry)
 
         while True:
             if self._match(TokenType.SLASHDASH):
@@ -683,6 +777,8 @@ class _Parser:
 
             if not self._match(TokenType.LBRACE):
                 break
+            if has_children_block:
+                raise self._error_here("Node cannot have multiple children blocks")
             has_children_block = True
             lbrace = self._prev()
 
@@ -701,7 +797,8 @@ class _Parser:
                 self._skip_separators()
             rbrace = self._expect(TokenType.RBRACE)
             children_block_span = Span(lbrace.span.start, rbrace.span.end)
-            self._skip_separators()
+            # Do NOT call _skip_separators() here: leave any trailing newlines
+            # for the document/parent level to consume as node terminators.
 
         end = (
             self._prev().span.end
@@ -770,9 +867,11 @@ class _Parser:
     def _is_node_terminator(self) -> bool:
         return self._at(TokenType.NEWLINE) or self._at(TokenType.SEMI) or self._at(TokenType.RBRACE) or self._at(TokenType.EOF)
 
-    def _consume_terminators(self) -> None:
+    def _consume_terminators(self) -> bool:
+        consumed = False
         while self._match(TokenType.NEWLINE) or self._match(TokenType.SEMI):
-            pass
+            consumed = True
+        return consumed
 
     def _skip_separators(self) -> None:
         while self._at(TokenType.NEWLINE) or self._at(TokenType.SEMI):
@@ -854,6 +953,7 @@ def _parse_int_like(raw: str, base: int) -> int:
 
 
 def _decode_quoted(raw: str) -> str:
+    """Decode a quoted string. Raises ValueError for invalid escape sequences."""
     body = raw[1:-1]
     out: list[str] = []
     i = 0
@@ -867,8 +967,7 @@ def _decode_quoted(raw: str) -> str:
 
         i += 1
         if i >= len(body):
-            out.append("\\")
-            break
+            raise ValueError("Unterminated escape sequence at end of string")
 
         esc = body[i]
         if esc == "n":
@@ -883,46 +982,234 @@ def _decode_quoted(raw: str) -> str:
             out.append("\f")
         elif esc == "\\":
             out.append("\\")
-        elif esc == "/":
-            out.append("/")
         elif esc == '"':
             out.append('"')
         elif esc == "u" and i + 1 < len(body) and body[i + 1] == "{":
             end = body.find("}", i + 2)
             if end == -1:
-                out.append("\\u")
-            else:
-                hex_part = body[i + 2 : end]
-                if 1 <= len(hex_part) <= 6 and all(c in "0123456789abcdefABCDEF" for c in hex_part):
-                    cp = int(hex_part, 16)
-                    out.append(chr(cp))
-                    i = end
-                else:
-                    out.append("\\u{" + hex_part + "}")
-                    i = end
+                raise ValueError("Unterminated \\u{} escape sequence")
+            hex_part = body[i + 2 : end]
+            if not (1 <= len(hex_part) <= 6) or not all(c in "0123456789abcdefABCDEF" for c in hex_part):
+                raise ValueError(f"Invalid \\u{{}} escape: \\u{{{hex_part}}}")
+            cp = int(hex_part, 16)
+            if 0xD800 <= cp <= 0xDFFF:
+                raise ValueError(f"Surrogate code point U+{cp:04X} is not a valid Unicode scalar value")
+            if cp > 0x10FFFF:
+                raise ValueError(f"Code point U+{cp:X} exceeds maximum Unicode scalar value U+10FFFF")
+            out.append(chr(cp))
+            i = end
+        elif esc == "s":
+            out.append(" ")
+        elif esc in _UNICODE_SPACES or esc in _NEWLINES:
+            # whitespace escape: skip \ and all consecutive whitespace
+            while i < len(body) and (body[i] in _UNICODE_SPACES or body[i] in _NEWLINES):
+                i += 1
+            continue
         else:
-            out.append("\\" + esc)
+            raise ValueError(f"Invalid escape sequence: \\{esc}")
         i += 1
 
     return "".join(out)
 
 
-def _decode_multiline(content: str) -> str:
+def _count_trailing_backslashes(s: str) -> int:
+    count = 0
+    i = len(s) - 1
+    while i >= 0 and s[i] == "\\":
+        count += 1
+        i -= 1
+    return count
+
+
+def _extract_prefix_from_closing_raw(raw: str) -> str:
+    """Determine the indent prefix from the closing-delimiter line raw string.
+
+    The prefix is all initial literal Unicode-whitespace characters.  Any
+    whitespace-escape sequence (``\\<ws>`` or ``\\s``) that follows terminates
+    the literal prefix region and is itself silently consumed.  Anything else
+    on the closing line is an error.
+    """
+    i = 0
+    prefix_chars: list[str] = []
+    while i < len(raw):
+        ch = raw[i]
+        if ch in _UNICODE_SPACES:
+            prefix_chars.append(ch)
+            i += 1
+        elif ch == "\\":
+            i += 1
+            if i >= len(raw):
+                raise ValueError("Unterminated escape on closing delimiter line")
+            esc = raw[i]
+            if esc in _UNICODE_SPACES or esc in _NEWLINES:
+                # Whitespace escape: consume all following whitespace; no prefix contribution.
+                while i < len(raw) and (raw[i] in _UNICODE_SPACES or raw[i] in _NEWLINES):
+                    i += 1
+            elif esc == "s":
+                # \\s = single space: also terminates the literal prefix region.
+                i += 1
+            else:
+                raise ValueError(
+                    f"Non-whitespace escape on closing delimiter line: \\{esc!r}"
+                )
+        else:
+            raise ValueError(
+                f"Non-whitespace character on closing delimiter line: {ch!r}"
+            )
+    return "".join(prefix_chars)
+
+
+def _multiline_extract_prefix(
+    lines: list[str], *, is_raw: bool
+) -> tuple[str, list[str]]:
+    """Return (prefix, content_lines) from the split lines of a multiline string body.
+
+    The closing-delimiter's indentation defines the required prefix.
+    Two cases:
+    - Normal: the last element of *lines* is the closing-delimiter's line.
+    - Escline-before-close: the second-to-last line ends with an odd number of
+      backslashes (an escline), meaning its trailing ``\\`` + the following newline
+      was consumed by the escline mechanism.  The "effective closing raw" is the
+      content before that ``\\`` concatenated with the last line.  If that combined
+      text is not purely whitespace, a ValueError is raised.
+    """
+    if not is_raw and len(lines) >= 2:
+        n = _count_trailing_backslashes(lines[-2])
+        if n % 2 == 1:
+            # Escline connects the second-to-last line into the closing delimiter.
+            effective_closing = lines[-2][:-1] + lines[-1]
+            prefix = _extract_prefix_from_closing_raw(effective_closing)
+            return prefix, lines[:-2]
+
+    closing_raw = lines[-1]
+    prefix = _extract_prefix_from_closing_raw(closing_raw)
+    return prefix, lines[:-1]
+
+
+def _multiline_resolve_esclines(lines: list[str]) -> list[str]:
+    """Merge continuation lines created by esclines (lines ending with odd-count backslashes)."""
+    result: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        n = _count_trailing_backslashes(line)
+        if n % 2 == 1:
+            # Escline: strip the single trailing backslash and merge with next line.
+            merged = line[:-1]
+            i += 1
+            while i < len(lines):
+                nxt = lines[i]
+                n2 = _count_trailing_backslashes(nxt)
+                if n2 % 2 == 1:
+                    merged += nxt[:-1]
+                    i += 1
+                else:
+                    merged += nxt
+                    i += 1
+                    break
+            result.append(merged)
+        else:
+            result.append(line)
+            i += 1
+    return result
+
+
+def _decode_multiline(content: str, *, is_raw: bool = False) -> str:
     text = content.replace("\r\n", "\n").replace("\r", "\n")
     if text.startswith("\n"):
         text = text[1:]
 
     lines = text.split("\n")
-    min_indent: int | None = None
-    for ln in lines:
-        if not ln.strip():
+
+    # Determine prefix and separate content lines from the closing-delimiter section.
+    prefix, content_lines = _multiline_extract_prefix(lines, is_raw=is_raw)
+
+    # For non-raw strings, merge continuation lines produced by esclines.
+    if not is_raw:
+        logical_lines = _multiline_resolve_esclines(content_lines)
+    else:
+        logical_lines = content_lines
+
+    # Every non-blank logical line must literally start with the prefix.
+    # Blank lines (lines consisting entirely of Unicode whitespace) are exempt from
+    # prefix validation and are treated as empty lines.
+    result_lines: list[str] = []
+    for line in logical_lines:
+        if not line or all(c in _UNICODE_SPACES for c in line):
+            result_lines.append("")
+        elif line.startswith(prefix):
+            result_lines.append(line[len(prefix):])
+        else:
+            raise ValueError(
+                f"Content line does not match required prefix {prefix!r}: {line!r}"
+            )
+    result = "\n".join(result_lines)
+
+    if not is_raw:
+        result = _decode_escape_body(result)
+
+    return result
+
+
+def _decode_escape_body(body: str) -> str:
+    """Decode KDL2 escape sequences in an already-stripped string body."""
+    out: list[str] = []
+    i = 0
+    while i < len(body):
+        ch = body[i]
+        if ch != "\\":
+            out.append(ch)
+            i += 1
             continue
-        indent = len(ln) - len(ln.lstrip(" \t"))
-        if min_indent is None or indent < min_indent:
-            min_indent = indent
-    if min_indent and min_indent > 0:
-        lines = [ln[min_indent:] if len(ln) >= min_indent else ln for ln in lines]
-    return "\n".join(lines)
+        i += 1
+        if i >= len(body):
+            raise ValueError("Unterminated escape sequence at end of string")
+        esc = body[i]
+        if esc == "n":
+            out.append("\n")
+        elif esc == "r":
+            out.append("\r")
+        elif esc == "t":
+            out.append("\t")
+        elif esc == "b":
+            out.append("\b")
+        elif esc == "f":
+            out.append("\f")
+        elif esc == "\\":
+            out.append("\\")
+        elif esc == '"':
+            out.append('"')
+        elif esc == "u" and i + 1 < len(body) and body[i + 1] == "{":
+            end = body.find("}", i + 2)
+            if end == -1:
+                raise ValueError("Unterminated \\u{} escape sequence")
+            hex_part = body[i + 2 : end]
+            if not (1 <= len(hex_part) <= 6) or not all(
+                c in "0123456789abcdefABCDEF" for c in hex_part
+            ):
+                raise ValueError(f"Invalid \\u{{}} escape: \\u{{{hex_part}}}")
+            cp = int(hex_part, 16)
+            if 0xD800 <= cp <= 0xDFFF:
+                raise ValueError(
+                    f"Surrogate code point U+{cp:04X} is not a valid Unicode scalar value"
+                )
+            if cp > 0x10FFFF:
+                raise ValueError(
+                    f"Code point U+{cp:X} exceeds maximum Unicode scalar value U+10FFFF"
+                )
+            out.append(chr(cp))
+            i = end
+        elif esc == "s":
+            out.append(" ")
+        elif esc in _UNICODE_SPACES or esc in _NEWLINES:
+            # Whitespace escape: consume \ and all following whitespace/newlines.
+            while i < len(body) and (body[i] in _UNICODE_SPACES or body[i] in _NEWLINES):
+                i += 1
+            continue
+        else:
+            raise ValueError(f"Invalid escape sequence: \\{esc}")
+        i += 1
+    return "".join(out)
 
 
 def _is_ident_continue(ch: str) -> bool:
