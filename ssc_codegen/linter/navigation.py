@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import re
 
 from ssc_codegen.linter._kdl_lang import Node
@@ -120,6 +121,18 @@ class NodeNavigator:
         Reconstruct the full string value from a 'string' CST node,
         concatenating string_fragment and escape children.
         """
+        # Some tree-sitter KDL variants place escaped characters directly into
+        # string_fragment text without dedicated `escape` child nodes.
+        # Parse from the original quoted literal first when possible.
+        raw = string_node.text.decode()
+        if raw.startswith('"') and raw.endswith('"'):
+            try:
+                parsed = ast.literal_eval(raw)
+                if isinstance(parsed, str):
+                    return parsed
+            except Exception:
+                pass
+
         _ESCAPE_MAP = {
             '\\"': '"',
             "\\\\": "\\",

@@ -524,7 +524,8 @@ class TestWildcardUnknownOp:
                     "assert", "match", "not", "and", "or", "eq", "ne", "starts",
                     "ends", "contains", "in", "len-eq", "len-ne", "len-gt",
                     "len-lt", "len-ge", "len-le", "len-range", "has-attr",
-                    "attr-eq", "attr-ne", "attr-starts", "attr-ends", "attr-re",
+                    "attr-eq", "attr-ne", "attr-starts", "attr-ends",
+                    "attr-contains", "attr-re",
                     "text-re", "text-starts", "text-ends", "text-contains",
                     "re-any", "gt", "lt", "ge", "le", "transform",
                     # module-level keywords — not reported as unknown ops inside pipelines
@@ -545,5 +546,4 @@ class TestWildcardUnknownOp:
         )
         msgs = lint(src)
         assert any("unknown operation" in m or "scalar define" in m for m in msgs)
-
 

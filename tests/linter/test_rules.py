@@ -192,6 +192,17 @@ class TestCssSelector:
     def test_valid_css_selectors(self, selector: str):
         assert no_errors(field(f'css "{selector}"'))
 
+    def test_css_selector_with_escaped_quotes(self):
+        src = (
+            "struct S {\n"
+            "  f {\n"
+            '    css "meta[property=\\"og:url\\"]"\n'
+            "    text\n"
+            "  }\n"
+            "}\n"
+        )
+        assert no_errors(src)
+
 
 class TestXpathSelector:
     def test_valid_xpath(self):
@@ -634,6 +645,7 @@ class TestPredicateOpsOutsideContext:
     @pytest.mark.parametrize("op_src", [
         'has-attr "href"', 'attr-eq "href" "val"', 'attr-ne "href" "val"',
         'attr-starts "href" "val"', 'attr-ends "href" "val"',
+        'attr-contains "href" "val"',
     ])
     def test_document_predicates_outside_predicate_block_error(self, op_src: str):
         msgs = lint(field('css ".x"', op_src))

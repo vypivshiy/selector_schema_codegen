@@ -779,7 +779,13 @@ def rule_has_attr(node: Node, ctx: LintContext) -> None:
     )
 
 
-@LINTER.rule("attr-eq", "attr-ne", "attr-starts", "attr-ends")
+@LINTER.rule(
+    "attr-eq",
+    "attr-ne",
+    "attr-starts",
+    "attr-ends",
+    "attr-contains",
+)
 def rule_attr_value_predicates(node: Node, ctx: LintContext) -> None:
     if not _require_predicate_ctx(node, ctx):
         return

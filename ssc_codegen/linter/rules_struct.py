@@ -89,6 +89,7 @@ _KNOWN_OPS: frozenset[str] = frozenset(PIPELINE_TYPE_RULES.keys()) | frozenset(
         "attr-ne",
         "attr-starts",
         "attr-ends",
+        "attr-contains",
         "attr-re",
         "text-re",
         "text-starts",
