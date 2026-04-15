@@ -24,6 +24,7 @@ class Target(str, enum.Enum):
     PY_PARSEL = "py-parsel"
     PY_SLAX = "py-slax"
     JS_PURE = "js-pure"
+    GO_GOQUERY = "go-goquery"
 
 
 _FILE_EXTENSIONS: dict[Target, str] = {
@@ -32,6 +33,7 @@ _FILE_EXTENSIONS: dict[Target, str] = {
     Target.PY_PARSEL: ".py",
     Target.PY_SLAX: ".py",
     Target.JS_PURE: ".js",
+    Target.GO_GOQUERY: ".go",
 }
 
 
@@ -56,6 +58,10 @@ def _get_converter(target: Target):
         from ssc_codegen.converters.js_pure import JS_CONVERTER
 
         return JS_CONVERTER
+    if target == Target.GO_GOQUERY:
+        from ssc_codegen.converters.go_goquery import GO_GOQUERY_CONVERTER
+
+        return GO_GOQUERY_CONVERTER
     raise ValueError(f"Unknown target: {target}")
 
 

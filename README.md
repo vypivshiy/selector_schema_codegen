@@ -55,7 +55,7 @@ ssc-gen generate examples/ -t js-pure -o ./output
 ssc-gen generate schema.kdl -t go-goquery -o ./parsers --package scraper
 ```
 
-Targets: `py-bs4`, `py-lxml`, `py-parsel`, `py-slax`, `js-pure`
+Targets: `py-bs4`, `py-lxml`, `py-parsel`, `py-slax`, `js-pure`, `go-goquery`
 
 ### Lint schemas
 
