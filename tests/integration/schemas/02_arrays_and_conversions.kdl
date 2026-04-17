@@ -1,0 +1,138 @@
+@doc "Focused coverage: list/string array operations, regex extraction, conversions and list transforms."
+
+define CSS-CARD=".card"
+define CSS-LINK="a[href]"
+define RE-DIGITS=#"(\d+)"#
+define RE-FLOAT=#"(\d+\.\d+)"#
+define RE-WORD=#"^[A-Za-z0-9_-]+$"#
+define RE-HAS-DIGIT=#"\d"#
+
+define REPL-STATE {
+    repl {
+        draft "0"
+        published "1"
+        archived "2"
+    }
+}
+
+transform list-identity accept=LIST_STRING return=LIST_STRING {
+    py {
+        code "{{NXT}} = [i for i in {{PRV}}]"
+    }
+    js {
+        code "let {{NXT}} = {{PRV}}.map(i => i);"
+    }
+}
+
+transform plus-one accept=INT return=INT {
+    py {
+        code "{{NXT}} = {{PRV}} + 1"
+    }
+    js {
+        code "let {{NXT}} = {{PRV}} + 1;"
+    }
+}
+
+struct ArraysAndConversions type=list {
+    @split-doc {
+        css-all CSS-CARD
+    }
+
+    flags-joined {
+        css-all "[data-flag]"
+        attr "data-flag"
+        lower
+        upper
+        unique keep-order=#true
+        join ","
+        fallback ""
+    }
+
+    token-list {
+        css ".tokens"
+        text
+        split ","
+        trim
+        unescape
+        assert {
+            re-all RE-WORD
+            re-any RE-HAS-DIGIT
+        }
+        transform list-identity
+        fallback {}
+    }
+
+    first-token {
+        css ".tokens"
+        text
+        split ","
+        trim
+        first
+        fallback ""
+    }
+
+    second-token {
+        css ".tokens"
+        text
+        split ","
+        trim
+        index 1
+        fallback ""
+    }
+
+    last-token {
+        css ".tokens"
+        text
+        split ","
+        trim
+        last
+        fallback ""
+    }
+
+    token-window {
+        css ".tokens"
+        text
+        split ","
+        trim
+        slice 0 2
+        join "|"
+        fallback ""
+    }
+
+    state-code {
+        css ".state"
+        text
+        lower
+        REPL-STATE
+        to-int
+        fallback #null
+    }
+
+    score {
+        css ".score"
+        text
+        re RE-DIGITS
+        to-int
+        transform plus-one
+        fallback 0
+    }
+
+    ratio {
+        css ".ratio"
+        text
+        re RE-FLOAT
+        to-float
+        fallback #null
+    }
+
+    raw-number-matches {
+        raw
+        re-all RE-DIGITS
+        fallback {}
+    }
+
+    any-link-count {
+        css-all CSS-LINK
+        len
+    }
+}

@@ -1,0 +1,11 @@
+// level2 imports from shared_defines (transitive)
+import "./shared_defines.kdl"
+
+struct Level2Item {
+    price {
+        css ".price"
+        text
+        re RE-PRICE
+        to-float
+    }
+}

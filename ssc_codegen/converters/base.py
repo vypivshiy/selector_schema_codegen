@@ -1,577 +1,331 @@
-from typing import Callable, ClassVar, cast, Any, TypeVar
+from __future__ import annotations
 
-from ssc_codegen.ast_ import (
-    BaseAstNode,
-    ModuleProgram,
-    Docstring,
-    ModuleImports,
-    TypeDef,
-    TypeDefField,
-    JsonStruct,
-    JsonStructField,
-    StructParser,
-    StructFieldMethod,
-    StructInitMethod,
-    StructPartDocMethod,
-    StructPreValidateMethod,
-    StartParseMethod,
-    FilterOr,
-    FilterAnd,
-    FilterNot,
+from dataclasses import dataclass, field, replace
+from typing import Any, Callable, Type, TYPE_CHECKING
+
+from ssc_codegen.ast import Node
+from ssc_codegen.ast import Filter, Assert, Match
+from ssc_codegen.ast import LogicNot, LogicAnd, LogicOr
+from ssc_codegen.ast import JsonDef, TypeDef, Struct, Init
+from ssc_codegen.ast import (
+    PreValidate,
+    Field,
+    InitField,
+    SplitDoc,
+    Key,
+    Value,
+    TableConfig,
+    TableMatchKey,
+    TableRow,
+    FallbackStart,
+    FallbackEnd,
 )
-from ssc_codegen.tokens import StructType, TokenType
 
-T_NODE = TypeVar("T_NODE", bound=BaseAstNode[Any, Any])
-CB_FMT_DEBUG_COMMENT = Callable[[BaseAstNode[Any, Any], str], str]
-CB_AST_BIND = Callable[[T_NODE], str]
-CB_AST_DECORATOR = Callable[[CB_AST_BIND], CB_AST_BIND]
+if TYPE_CHECKING:
+    from ssc_codegen.ast import Module
 
 
-def debug_comment_cb(node: BaseAstNode, comment_prefix: str) -> str:
-    """Generate a debug comment for an AST node.
+@dataclass
+class ConverterContext:
+    index: int = 0
+    depth: int = 0
+    var_name: str = "v"
+    indent_char: str = " " * 4
+    meta: dict = field(default_factory=dict)
 
-    Creates a formatted string containing information about the node's type,
-    return type (if applicable), and other relevant details for debugging purposes.
-
-    Args:
-        node: The AST node to generate a comment for.
-        comment_prefix: The prefix to add to each line of the comment.
-
-    Returns:
-        A formatted string containing debug information about the node.
-    """
-    match node.kind:
-        case TokenType.EXPR_RETURN:
-            token = f"{comment_prefix}Token: {node.kind.name} ret_type: {node.ret_type.name}"
-        case TokenType.EXPR_NO_RETURN:
-            token = f"{comment_prefix}Token: {node.kind.name}"
-        case TokenType.STRUCT_PARSE_START:
-            parent = node.parent
-            parent = cast(StructParser, parent)
-            return f"{comment_prefix}Token: {node.kind.name}, type: {parent.struct_type.name}"
-        case _:
-            token = f"{comment_prefix}Token: {node.kind.name}, kwargs: {node.kwargs}"
-    if node.classvar_hooks:
-        fmt_hooks = ", ".join(
-            f"{v.kind.name} {v.kwargs}" for v in node.classvar_hooks.values()
+    @property
+    def prv(self) -> str:
+        return (
+            self.var_name if self.index == 0 else f"{self.var_name}{self.index}"
         )
-        return f"{token}\n{comment_prefix}{fmt_hooks}"
-    return token
-
-
-class BaseCodeConverter:
-    """Base AST visitor class and code converter.
-
-    This class serves as the foundation for converting AST nodes into code.
-    Visitors are set using decorators that point to specific TokenTypes.
-
-    Decorator hooks can be overridden:
-    - As defaults, __call__ methods set @pre decorator
-    - @pre - First trigger visitor entrypoint
-    - @post - Second trigger visitor entrypoint (for closing brackets or other logic).
-    It will be called when the broadcast of all nodes and the container body is transpiled.
-
-    Example:
-        ```
-        CONVERTER = BaseCodeConverter()
-
-        # recommended use <node>.kind call as key in decorators instead TokenType.<TOKEN>
-        @CONVERTER(ModuleImports.kind)
-        def pre_imports(_node: ModuleImports) -> str:
-            # implement imports stmt
-            return '''from bs4 import BeautifulSoap'''
-
-        # TypeDef and StartParseMethod node allow add extra second shortcut as StructType for
-        # increase code readability and simplify codegen
-
-        # TYPEDEF Impl
-        # post_callback - shortcut for minify typical end expr (eg: close parens)
-
-        # generate type for StructType.ITEM parser
-        @CONVERTER(TypeDef.kind, StructType.ITEM, post_callback=lambda _: "})")
-        def pre_typedef_item(node: TypeDef) -> str:
-            name, _ = node.unpack_args()
-            return f'T_{name} = TypedDict("T_{name}", ' + "{"
-
-        # generate type for StructType.DICT parser
-        @CONVERTER(TypeDef.kind, StructType.DICT)
-        def pre_typedef_dict(node: TypeDef) -> str:
-            name, _ = node.unpack_args()
-            type_ = get_typedef_field_by_name(node, "__VALUE__")
-            return f"T_{name} = Dict[str, {type_}]"
-
-        # StartParse impl
-        @CONVERTER(StartParseMethod.kind, StructType.ITEM)
-        def pre_start_parse_item(node: StartParseMethod) -> str:
-            # some impl for ItEM struct
-            return ""
-
-        @CONVERTER(StartParseMethod.kind, StructType.LIST)
-        def pre_start_parse_list(node: StartParseMethod) -> str:
-            # some impl for LIST struct
-            return ""
-        ```
-
-    Attributes:
-        TEST_EXCLUDE_NODES: List of token types to exclude from tests.
-    """
-
-    TEST_EXCLUDE_NODES: ClassVar[list[TokenType]] = [
-        # build-ins, not used in converters
-        TokenType.VARIABLE,
-        TokenType.EXPR_DEFAULT,
-        TokenType.MODULE,
-        TokenType.CODE_START,
-        TokenType.CODE_END,
-        TokenType.STRUCT_CALL_FUNCTION,
-        TokenType.STRUCT_CALL_CLASSVAR,
-    ]
-    """Developer class variable that marks nodes to exclude in tests."""
-
-    def __init__(
-        self,
-        debug_instructions: bool = False,
-        debug_comment_prefix: str = "",
-        comment_prefix_sep: str = "\n",
-        debug_cb: CB_FMT_DEBUG_COMMENT = debug_comment_cb,
-    ) -> None:
-        """
-        Arguments:
-        debug_instructions: enable debug instructions (add comment for every generated instruction. used in debug codegen output)
-        debug_comment_prefix: comment line prefix (used in debug codegen output)
-        debug_cb: callback formatting comment (used in debug codegen output)
-        """
-        self._debug_instructions = debug_instructions
-        self._debug_comment_prefix = debug_comment_prefix
-        self._debug_cb = debug_cb
-        self._comment_prefix_sep = comment_prefix_sep
-        self.pre_definitions: dict[
-            TokenType | int | tuple[TokenType, StructType], CB_AST_BIND
-        ] = {}
-        self.post_definitions: dict[
-            TokenType | int | tuple[TokenType, StructType], CB_AST_BIND
-        ] = {}
 
     @property
-    def comment_prefix_sep(self) -> str:
-        return self._comment_prefix_sep
-
-    @comment_prefix_sep.setter
-    def comment_prefix_sep(self, comment_prefix_sep: str) -> None:
-        self._comment_prefix_sep = comment_prefix_sep
+    def nxt(self) -> str:
+        return f"{self.var_name}{self.index + 1}"
 
     @property
-    def comment_prefix(self) -> str:
-        return self._debug_comment_prefix
+    def indent(self) -> str:
+        return self.indent_char * self.depth
 
-    @comment_prefix.setter
-    def comment_prefix(self, value: str) -> None:
-        self._debug_comment_prefix = value
+    def advance(self) -> "ConverterContext":
+        return replace(self, index=self.index + 1)
 
-    @property
-    def debug_instructions(self) -> bool:
-        return self._debug_instructions
+    def deeper(self) -> "ConverterContext":
+        return replace(self, depth=self.depth + 1)
 
-    @debug_instructions.setter
-    def debug_instructions(self, value: bool) -> None:
-        self._debug_instructions = value
+
+CallbackNode = Callable[[Node, ConverterContext], list[str] | str]
+
+# Nodes whose body contains other container/field nodes.
+# Traversal goes deeper (depth+1), index resets to 0.
+_CONTAINER_NODES = (JsonDef, TypeDef, Struct, Init)
+
+_PIPELINE_NODES = (
+    Field,
+    InitField,
+    PreValidate,
+    SplitDoc,
+    Key,
+    Value,
+    TableConfig,
+    TableMatchKey,
+    TableRow,
+)
+
+# Nodes whose body contains predicate ops.
+# Traversal keeps same ctx — no depth or index change.
+_PREDICATE_NODES = (Filter, Assert, Match, LogicNot, LogicAnd, LogicOr)
+
+
+CallbackFile = Callable[["Module", dict[str, Any]], str]
+
+
+class BaseConverter:
+    def __init__(self, *, var_name: str = "v", indent: str = " " * 4) -> None:
+        self._pre_callbacks: dict[Type[Node], CallbackNode] = {}
+        self._post_callbacks: dict[Type[Node], CallbackNode] = {}
+        self._file_providers: dict[str, CallbackFile] = {}
+        self.var_name = var_name
+        self.indent = indent
+
+    # ── decorators ────────────────────────────────────────────────────────────
 
     def pre(
         self,
-        for_definition: TokenType,
-        for_struct_definition: StructType | None = None,
+        node_type: Type[Node],
         *,
-        post_callback: Callable[[BaseAstNode], str] | str | None = None,
-    ) -> CB_AST_DECORATOR:
-        """Define a pre-conversion decorator for the given TokenType.
-
-        optional allow set post callback for simple string casts like close brackets etc
-
-        StartParseMethod and TypeDef nodes has shortcut (StartParseMethod.kind, StructType.<TYPE>) for simplify callback generators
-        """
-        if for_struct_definition and for_definition not in (
-            StartParseMethod.kind,
-            TypeDef.kind,
-        ):
-            raise TypeError(
-                "Add struct definition allowed only for `StartParseMethod` and `TypeDef` nodes"
-            )
-
-        def decorator(func: CB_AST_BIND) -> CB_AST_BIND:
-            if for_struct_definition:
-                self.pre_definitions[
-                    (for_definition, for_struct_definition)
-                ] = func
-            else:
-                self.pre_definitions[for_definition] = func
-            return func
-
-        if post_callback:
-            if for_struct_definition:
-                self.post_definitions[
-                    (for_definition, for_struct_definition)
-                ] = post_callback  # type: ignore[assignment]
-            self.post_definitions[for_definition] = post_callback  # type: ignore[assignment]
+        post_callback: CallbackNode | str | None = None,
+    ) -> Callable[..., CallbackNode]:
+        def decorator(fn: CallbackNode) -> CallbackNode:
+            self._pre_callbacks[node_type] = fn
+            if post_callback:
+                if isinstance(post_callback, str):
+                    self._post_callbacks[node_type] = (
+                        lambda _, _2: post_callback
+                    )  # type: ignore
+                else:
+                    self._post_callbacks[node_type] = post_callback
+            return fn
 
         return decorator
 
-    def post(
-        self,
-        for_definition: TokenType,
-        for_struct_definition: StructType | None = None,
-    ) -> CB_AST_DECORATOR:
-        """Define a post-conversion decorator for the given TokenType.
-
-        This method creates a decorator that registers a function to be called
-        after the main conversion of a node of the specified type. It's typically
-        used for closing brackets or other logic that should happen after the
-        main node processing.
-
-        Args:
-            for_definition: The TokenType to associate with this post-conversion function.
-            for_struct_definition: Optional StructType for specific struct definitions (for StartParseMethod and TypeDef).
-
-        Returns:
-            A decorator function that registers the post-conversion handler.
-
-        Raises:
-            TypeError: If struct definition is provided for unsupported node types.
-        """
-        if for_struct_definition and for_definition not in (
-            StartParseMethod.kind,
-            TypeDef.kind,
-        ):
-            raise TypeError(
-                "Add struct definition allowed only for `StartParseMethod` or `TypeDef` nodes"
-            )
-
-        def decorator(func: CB_AST_BIND) -> CB_AST_BIND:
-            if for_struct_definition:
-                self.post_definitions[
-                    (for_definition, for_struct_definition)
-                ] = func
-            else:
-                self.post_definitions[for_definition] = func
-            return func
+    def post(self, node_type: Type[Node]) -> Callable[..., CallbackNode]:
+        def decorator(fn: CallbackNode) -> CallbackNode:
+            self._post_callbacks[node_type] = fn
+            return fn
 
         return decorator
 
     def __call__(
         self,
-        for_definition: TokenType,
-        for_struct_definition: StructType | None = None,
+        node_type: Type[Node],
         *,
-        post_callback: Callable[[BaseAstNode], str] | None = None,
-    ) -> CB_AST_DECORATOR:
-        """Alias for pre decorator.
+        post_callback: CallbackNode | str | None = None,
+    ) -> Callable[..., CallbackNode]:
+        return self.pre(node_type, post_callback=post_callback)
 
-        Provides a convenient way to use the pre decorator by calling the class instance
-        directly. This is equivalent to calling the pre() method.
+    def file(self, filename: str) -> Callable[..., CallbackFile]:
+        """Register a support file provider.
 
-        Args:
-            for_definition: The TokenType to associate with this conversion function.
-            for_struct_definition: Optional StructType for specific struct definitions (only for StartParseMethod and TypeDef nodes).
-            post_callback: Optional callback function for post-processing.
+        The decorated function receives (module_ast, meta) and returns
+        the file content as a string.  *meta* is a dict of extra
+        key-value pairs forwarded from ``convert_all(**meta)``.
 
-        Returns:
-            A decorator function that registers the conversion handler.
+        Example::
+
+            @GO_CONVERTER.file("sscgen_core.go")
+            def go_core(module: Module, meta: dict) -> str:
+                pkg = meta.get("package", "parser")
+                return f"package {pkg}\\n..."
         """
-        return self.pre(
-            for_definition, for_struct_definition, post_callback=post_callback
+
+        def decorator(fn: CallbackFile) -> CallbackFile:
+            self._file_providers[filename] = fn
+            return fn
+
+        return decorator
+
+    @property
+    def has_support_files(self) -> bool:
+        return bool(self._file_providers)
+
+    def convert_all(self, module_ast: "Module", **meta: Any) -> dict[str, str]:
+        """Return main file and support files as ``{filename: content}``.
+
+        The main file is stored under key ``""`` (empty string).
+        Support files use the filenames registered via ``@converter.file()``.
+
+        *meta* kwargs are forwarded to every file-provider callback.
+        """
+        result: dict[str, str] = {}
+        for name, provider in self._file_providers.items():
+            result[name] = provider(module_ast, meta)
+        result[""] = self.convert(module_ast, **meta)
+        return result
+
+    def extend(self) -> BaseConverter:
+        """
+        Create a new converter that inherits all handlers from this one.
+        New registrations on the child override inherited handlers.
+        Parent is never affected.
+
+        Example hierarchy:
+
+            PY_BASE = BaseConverter()
+
+            @PY_BASE(CssSelect)
+            def _(node, ctx): return f"{ctx.nxt} = ..."  # generic
+
+            # bs4 overrides css, inherits everything else
+            PY_BS4 = PY_BASE.extend()
+
+            @PY_BS4(CssSelect)
+            def _(node, ctx): return f"{ctx.nxt} = {ctx.prv}.select_one(...)"
+
+            # selectolax — separate extend from base, not from bs4
+            PY_SELECTOLAX = PY_BASE.extend()
+
+            @PY_SELECTOLAX(CssSelect)
+            def _(node, ctx): return f"{ctx.nxt} = {ctx.prv}.css_first(...)"
+
+            # js dialects
+            JS_BASE = BaseConverter()
+            JS_JQUERY = JS_BASE.extend()
+            JS_CHEERIO = JS_BASE.extend()
+        """
+        child = BaseConverter(var_name=self.var_name, indent=self.indent)
+        child._pre_callbacks = dict(self._pre_callbacks)
+        child._post_callbacks = dict(self._post_callbacks)
+        child._file_providers = dict(self._file_providers)
+        return child
+
+    # ── internal traversal ────────────────────────────────────────────────────
+
+    def _collect(
+        self, result: list[str] | str | None, lines: list[str]
+    ) -> None:
+        """Append handler result to lines, skip empty."""
+        if not result:
+            return
+        if isinstance(result, str):
+            lines.append(result)
+        else:
+            lines.extend(r for r in result if r)
+
+    def _emit_node(self, node: Node, ctx: ConverterContext) -> list[str]:
+        """
+        Emit a single node:
+          1. pre callback
+          2. body traversal — three modes:
+               _PREDICATE_NODES  (Filter/Assert/Match/Logic*):
+                   same ctx, no depth/index change
+               _CONTAINER_NODES  (JsonDef/TypeDef/Struct/Init/InitField):
+                   depth+1, index resets to 0
+               Field and other pipeline-body nodes:
+                   NOT auto-traversed — handler calls _emit_pipeline() explicitly
+          3. post callback
+        """
+        lines: list[str] = []
+
+        if cb := self._pre_callbacks.get(type(node)):
+            self._collect(cb(node, ctx), lines)
+
+        if node.body:
+            if isinstance(node, _PREDICATE_NODES):
+                # Predicate nodes: deeper indent, index resets to 0
+                pred_ctx = replace(ctx, depth=ctx.depth + 1, index=0)
+                for child in node.body:
+                    self._collect(self._emit_node(child, pred_ctx), lines)
+                    pred_ctx = pred_ctx.advance()
+            elif isinstance(node, _CONTAINER_NODES):
+                # Container nodes: depth+1, index=0, NOT advanced between children
+                inner_ctx = replace(ctx, depth=ctx.depth + 1, index=0)
+                for child in node.body:
+                    self._collect(self._emit_node(child, inner_ctx), lines)
+            elif isinstance(node, _PIPELINE_NODES):
+                # Pipeline nodes: use _emit_pipeline which advances index
+
+                # contains in InitMode (deep=3, expected 2)
+                if isinstance(node, InitField):
+                    lines.extend(self._emit_pipeline(node.body, ctx))
+                else:
+                    lines.extend(self._emit_pipeline(node.body, ctx.deeper()))
+
+        if cb := self._post_callbacks.get(type(node)):
+            self._collect(cb(node, ctx), lines)
+
+        return lines
+
+    def _emit_pipeline(
+        self, nodes: list[Node], ctx: ConverterContext
+    ) -> list[str]:
+        """
+        Emit pipeline nodes (Field.body, InitField.body, reserved field bodies).
+        index advances after each node, depth is set by the caller.
+
+        FallbackStart/FallbackEnd are handled specially: nodes between them
+        are emitted at depth+1 so the try-block body is properly indented.
+
+        Call this from within a Field/InitField handler:
+
+            @CONVERTER(Field)
+            def _(node: Field, ctx: ConverterContext) -> list[str]:
+                lines = [f"{ctx.indent}def _parse_{node.name}(self, v):"]
+                lines += CONVERTER._emit_pipeline(node.body, ctx.deeper())
+                return lines
+        """
+        lines: list[str] = []
+        in_fallback = False
+        fallback_ctx = ctx  # context used between FallbackStart and FallbackEnd
+        for node in nodes:
+            if isinstance(node, FallbackStart):
+                in_fallback = True
+                self._collect(self._emit_node(node, ctx), lines)
+                # inner nodes start from same index so vN chains correctly
+                fallback_ctx = replace(ctx, depth=ctx.depth + 1)
+                # do NOT advance outer ctx — fallback body vars share index space
+                continue
+            elif isinstance(node, FallbackEnd):
+                in_fallback = False
+                # sync outer ctx index to last fallback index so that
+                # FallbackEnd.ctx.prv == last computed inner var (e.g. v3)
+                # and subsequent Return.ctx.prv is also correct
+                ctx = replace(ctx, index=fallback_ctx.index, depth=ctx.depth)
+                self._collect(self._emit_node(node, ctx), lines)
+                # do NOT advance — Return node must see the same prv
+                continue
+            if in_fallback:
+                self._collect(self._emit_node(node, fallback_ctx), lines)
+                fallback_ctx = fallback_ctx.advance()
+                ctx = replace(ctx, index=fallback_ctx.index)
+            else:
+                self._collect(self._emit_node(node, ctx), lines)
+                ctx = ctx.advance()
+        return lines
+
+    # ── public entry point ────────────────────────────────────────────────────
+
+    def convert(self, module_ast: "Module", **meta: Any) -> str:
+        """
+        Traverse Module.body and emit code.
+
+        Module.body order (mirrors build order):
+          CodeStartHook, Docstring, Imports, Utilities,
+          JsonDef*, TypeDef*, Struct*, CodeEndHook
+
+        Container nodes (JsonDef, TypeDef, Struct, Init, InitField) are
+        traversed automatically with depth+1.
+
+        Field.body pipeline traversal must be triggered manually from the
+        Field handler via self._emit_pipeline().
+
+        *meta* kwargs (e.g. http_client="httpx") are forwarded to every node
+        handler via ctx.meta so handlers can vary output based on build options.
+        """
+        ctx = ConverterContext(
+            var_name=self.var_name, indent_char=self.indent, meta=dict(meta)
         )
-
-    def _pre_convert_node(
-        self, node: BaseAstNode, st_type: StructType | None = None
-    ) -> str:
-        """Convert the AST node using the pre-definition function.
-
-        This method applies the registered pre-conversion function to an AST node,
-        optionally using a specific struct type for more granular control. It handles
-        both simple node conversions and struct-specific conversions.
-
-        Args:
-            node: The AST node to convert.
-            st_type: Optional StructType for struct-specific conversions.
-
-        Returns:
-            The result of applying the pre-conversion function to the node,
-            or an empty string if no matching function is found.
-        """
-        # syntax sugar: split generate start_parse methods by part callbacks
-        if (
-            node.kind in (StartParseMethod.kind, TypeDef.kind)
-            and st_type
-            and (pre_func := self.pre_definitions.get((node.kind, st_type)))
-        ):
-            if self.debug_instructions:
-                return f"{self._debug_cb(node, self.comment_prefix)}{self.comment_prefix_sep}{pre_func(node)}"
-            return pre_func(node)
-
-        # old realisation use
-        if pre_func := self.pre_definitions.get(node.kind):
-            if self.debug_instructions:
-                return f"{self._debug_cb(node, self.comment_prefix)}{self.comment_prefix_sep}{pre_func(node)}"
-            return pre_func(node)
-        return ""
-
-    def _post_convert_node(
-        self, node: BaseAstNode, st_type: StructType | None = None
-    ) -> str:
-        """Convert the AST node using the post-definition function.
-
-        This method applies the registered post-conversion function to an AST node,
-        optionally using a specific struct type for more granular control. It's typically
-        used for closing brackets or other logic that should happen after the main
-        node processing.
-
-        Args:
-            node: The AST node to convert.
-            st_type: Optional StructType for struct-specific conversions.
-
-        Returns:
-            The result of applying the post-conversion function to the node,
-            or an empty string if no matching function is found.
-        """
-        # syntax sugar: split generate start_parse methods by part callbacks
-        if (
-            node.kind in (StartParseMethod.kind, TypeDef.kind)
-            and st_type
-            and StartParseMethod.kind
-            and (post_func := self.post_definitions.get((node.kind, st_type)))
-        ):
-            if self.debug_instructions:
-                return f"{self._debug_cb(node, self.comment_prefix)}{self.comment_prefix_sep}{post_func(node)}"
-            return post_func(node)
-
-        if post_func := self.post_definitions.get(node.kind):
-            return post_func(node)
-        return ""
-
-    def convert_program(
-        self, ast_program: ModuleProgram, comment: str = ""
-    ) -> list[str]:
-        """Convert the module AST to code parts.
-
-        This method converts an entire module AST into a list of code parts,
-        starting with an optional comment and processing all nodes in the AST.
-
-        Args:
-            ast_program: The ModuleProgram AST node to convert.
-            comment: An optional comment to include at the beginning of the output.
-
-        Returns:
-            A list of strings representing the converted code parts,
-            with empty strings filtered out.
-        """
-        acc = [comment]
-        result = self.convert(ast_program, acc)
-        return [i for i in result if i]
-
-    def convert(
-        self, ast_entry: BaseAstNode, acc: list[str] | None = None
-    ) -> list[str]:
-        """Convert an AST node into code parts.
-
-        This method dispatches the conversion of an AST node to the appropriate
-        conversion method based on the node's type. It builds up a list of code
-        parts by processing the node and its children.
-
-        Args:
-            ast_entry: The AST node to convert.
-            acc: An optional accumulator list to append code parts to.
-
-        Returns:
-            A list of strings representing the converted code parts.
-        """
-        acc = acc or []
-        match ast_entry.kind:
-            case TokenType.MODULE:
-                ast_entry = cast(ModuleProgram, ast_entry)
-                self._convert_module(ast_entry, acc)
-            case TokenType.DOCSTRING:
-                ast_entry = cast(Docstring, ast_entry)
-                self._convert_docstring(ast_entry, acc)
-            case TokenType.IMPORTS:
-                ast_entry = cast(ModuleImports, ast_entry)
-                self._convert_imports(ast_entry, acc)
-            case TokenType.TYPEDEF:
-                ast_entry = cast(TypeDef, ast_entry)
-                self._convert_typedef(ast_entry, acc)
-            case TokenType.TYPEDEF_FIELD:
-                ast_entry = cast(TypeDefField, ast_entry)
-                self._convert_typedef_field(ast_entry, acc)
-            case TokenType.STRUCT:
-                ast_entry = cast(StructParser, ast_entry)
-                self._convert_struct(ast_entry, acc)
-            case TokenType.JSON_STRUCT:
-                ast_entry = cast(JsonStruct, ast_entry)
-                self._convert_json_struct(ast_entry, acc)
-            case TokenType.JSON_FIELD:
-                ast_entry = cast(JsonStructField, ast_entry)
-                self._convert_json_struct_field(ast_entry, acc)
-
-            case (
-                TokenType.EXPR_FILTER
-                | TokenType.EXPR_DOC_FILTER
-                | TokenType.FILTER_OR
-                | TokenType.FILTER_AND
-                | TokenType.FILTER_NOT
-            ):
-                ast_entry = cast(FilterOr | FilterAnd | FilterNot, ast_entry)
-                self._convert_logic_filter(ast_entry, acc)
-            case (
-                TokenType.STRUCT_PART_DOCUMENT
-                | TokenType.STRUCT_PRE_VALIDATE
-                | TokenType.STRUCT_PARSE_START
-                | TokenType.STRUCT_FIELD
-                | TokenType.STRUCT_INIT
-            ):
-                ast_entry = cast(
-                    StructFieldMethod
-                    | StartParseMethod
-                    | StructPartDocMethod
-                    | StructPreValidateMethod
-                    | StructInitMethod,
-                    ast_entry,
-                )
-                self._convert_struct_method(ast_entry, acc)
-            case _:
-                self._convert_default(ast_entry, acc)
-        return acc
-
-    def _convert_logic_filter(
-        self, ast_entry: FilterOr | FilterAnd | FilterNot, acc: list[str]
-    ) -> None:
-        """Convert a logical filter node (OR, AND, NOT) and its children.
-
-        This method handles the conversion of logical filter operations, appending
-        the pre-conversion result, processing all child nodes, and then appending
-        the post-conversion result.
-
-        For example, an AND filter with two children would be converted as:
-        AND(body=[F1, F2]) ->
-        AND ( (OPEN)
-              F1 and F2
-        ) (CLOSE)
-
-        Args:
-            ast_entry: The logical filter node (FilterOr, FilterAnd, or FilterNot) to convert.
-            acc: The accumulator list to append code parts to.
-        """
-        # AND(body=[F1, F2]) ->
-        # AND ( (OPEN)
-        #       F1 and F2
-        # ) (CLOSE)
-        acc.append(self._pre_convert_node(ast_entry))
-        for node in ast_entry.body:
-            self.convert(node, acc)
-        acc.append(self._post_convert_node(ast_entry))
-
-    def _convert_module(self, ast_entry: ModuleProgram, acc: list[str]) -> None:
-        """Handle module conversion.
-
-        This method processes all nodes in a module's body by recursively converting
-        each one and appending the results to the accumulator.
-
-        Args:
-            ast_entry: The ModuleProgram node to convert.
-            acc: The accumulator list to append code parts to.
-        """
-        for node in ast_entry.body:
-            self.convert(node, acc)
-
-    def _convert_docstring(self, ast_entry: Docstring, acc: list[str]) -> None:
-        """Handle docstring conversion."""
-        acc.append(self._pre_convert_node(ast_entry))
-        acc.append(self._post_convert_node(ast_entry))
-
-    def _convert_imports(
-        self, ast_entry: ModuleImports, acc: list[str]
-    ) -> None:
-        """Handle imports conversion."""
-        acc.append(self._pre_convert_node(ast_entry))
-        acc.append(self._post_convert_node(ast_entry))
-
-    def _convert_typedef(self, ast_entry: TypeDef, acc: list[str]) -> None:
-        """Handle typedef conversion."""
-        _, st_type = ast_entry.unpack_args()
-        self._convert_node_with_struct_type(ast_entry, acc)
-        # acc.append(self._pre_convert_node(ast_entry))
-        # # TYPEDEF_FIELD call
-        # for node in ast_entry.body:
-        #     self.convert(node, acc)
-        # acc.append(self._post_convert_node(ast_entry))
-
-    def _convert_typedef_field(
-        self, ast_entry: TypeDefField, acc: list[str]
-    ) -> None:
-        """Handle typedef field conversion."""
-        acc.append(self._pre_convert_node(ast_entry))
-        acc.append(self._post_convert_node(ast_entry))
-
-    def _convert_json_struct(
-        self, ast_entry: JsonStruct, acc: list[str]
-    ) -> None:
-        acc.append(self._pre_convert_node(ast_entry))
-        # JSON_ST_FIELD call
-        for node in ast_entry.body:
-            self.convert(node, acc)
-        acc.append(self._post_convert_node(ast_entry))
-
-    def _convert_json_struct_field(
-        self, ast_entry: JsonStructField, acc: list[str]
-    ) -> None:
-        acc.append(self._pre_convert_node(ast_entry))
-        acc.append(self._post_convert_node(ast_entry))
-
-    def _convert_struct(self, ast_entry: StructParser, acc: list[str]) -> None:
-        """Handle struct conversion."""
-        # pre_CLASS/STRUCT HEADER
-        # pre_CONSTRUCTOR post_CONSTRUCTOR
-        # BODY
-        # post_CLASS/STRUCT
-        # class header (with docstring) -> constructor -> body -> class footer
-        acc.append(self._pre_convert_node(ast_entry))
-        for node in ast_entry.body:
-            self.convert(node, acc)
-        acc.append(self._post_convert_node(ast_entry))
-
-    def _convert_node_with_struct_type(
-        self, ast_entry: StartParseMethod | TypeDef, acc: list[str]
-    ) -> None:
-        if isinstance(ast_entry, StartParseMethod):
-            st_node = ast_entry.parent
-            st_node = cast(StructParser | TypeDef, ast_entry.parent)
-            st_type = st_node.kwargs["struct_type"]
-        else:
-            # TYPEDEF
-            _, st_type = ast_entry.unpack_args()
-        # 0.11 new shortcut API (with backport support)
-        acc.append(self._pre_convert_node(ast_entry, st_type))
-        for node in ast_entry.body:
-            self.convert(node, acc)
-        acc.append(self._post_convert_node(ast_entry, st_type))
-
-    def _convert_struct_method(
-        self,
-        ast_entry: StructFieldMethod
-        | StructInitMethod
-        | StructPartDocMethod
-        | StructPreValidateMethod
-        | StartParseMethod,
-        acc: list[str],
-    ) -> None:
-        """Handle struct method headers and bodies."""
-        if ast_entry.kind == StartParseMethod.kind:
-            ast_entry = cast(StartParseMethod, ast_entry)
-            self._convert_node_with_struct_type(ast_entry, acc)
-        else:
-            acc.append(self._pre_convert_node(ast_entry))
-            for node in ast_entry.body:
-                self.convert(node, acc)
-            acc.append(self._post_convert_node(ast_entry))
-
-    def _convert_default(self, ast_entry: BaseAstNode, acc: list[str]) -> None:
-        """Handle default node conversion."""
-        acc.append(self._pre_convert_node(ast_entry))
-        acc.append(self._post_convert_node(ast_entry))
+        lines: list[str] = []
+        for node in module_ast.body:
+            self._collect(self._emit_node(node, ctx), lines)
+        return "\n".join(lines)

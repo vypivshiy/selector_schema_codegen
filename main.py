@@ -1,4 +1,4 @@
-from ssc_codegen.cli.main import main
+from ssc_codegen.main import main
 
 if __name__ == "__main__":
     main()

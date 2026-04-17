@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>DSL Coverage Fixture</title>
+    <link rel="canonical" href="https://example.test/coverage" />
+    <meta name="description" content="Coverage description" />
+    <meta property="og:title" content="Coverage OG Title" />
+    <meta name="keywords" content="alpha,beta,core" />
+  </head>
+  <body>
+    <h1>Coverage Root</h1>
+
+    <section class="single">
+      <h1>  Single Item Title  </h1>
+      <span class="is-active">true</span>
+    </section>
+
+    <section class="nested">
+      <div class="nested-card">
+        <span class="name"> Nested One </span>
+        <a href="/nested/one.html">Nested Link</a>
+      </div>
+      <div class="nested-card">
+        <span class="name">Nested Two</span>
+        <a href="/nested/two.html">Nested Link</a>
+      </div>
+    </section>
+
+    <section class="cards">
+      <article class="card" data-card="1">
+        <div class="ad">Advertisement</div>
+        <script>var ignored = true;</script>
+        <h2 class="title">  foo Title One  </h2>
+        <div class="slug">__slug-one__</div>
+        <div class="code">foo   bar</div>
+        <div class="logic">prealpha</div>
+        <div class="state">Published</div>
+        <div class="score">Score: 41</div>
+        <div class="ratio">Ratio: 0.75</div>
+        <div class="tokens">tag-core-alpha1-x, item-beta2-y, ref3</div>
+        <span class="is-active">true</span>
+
+        <div data-flag="Alpha"></div>
+        <div data-flag="Beta"></div>
+        <div data-flag="Alpha"></div>
+
+        <a class="icon-link" href="/guide.html" data-kind="nav" data-alt="alt-1" rel="noopener">
+          <span class="icon"></span>
+          Go guide now
+        </a>
+        <a href="https://example.test/docs/" data-kind="cta" data-alt="alt-2">
+          <span class="icon"></span>
+          Read docs more
+        </a>
+      </article>
+
+      <article class="card" data-card="2">
+        <h2 class="title">  foo Title Two  </h2>
+        <div class="slug">__slug-two__</div>
+        <div class="code">code-4</div>
+        <div class="logic">prealpha</div>
+        <div class="state">Draft</div>
+        <div class="score">Score: 18</div>
+        <div class="ratio">Ratio: 1.50</div>
+        <div class="tokens">tag-core-alpha1-x, item-beta2-y, ref3</div>
+        <span class="is-active">true</span>
+
+        <div data-flag="Gamma"></div>
+        <div data-flag="Delta"></div>
+
+        <a class="icon-link" href="/readme/" data-kind="nav" data-alt="alt-3">
+          <span class="icon"></span>
+          Read guide now
+        </a>
+      </article>
+    </section>
+
+    <table class="coverage">
+      <tr><th>Identifier</th><td>ABC-123</td></tr>
+      <tr><th>code-1</th><td>CODE-1</td></tr>
+      <tr><th>price amount</th><td>9.99</td></tr>
+      <tr><th>tax</th><td>1.25</td></tr>
+      <tr><th>status</th><td>Active</td></tr>
+    </table>
+
+    <script type="application/json">
+      [
+        {
+          "text": "Quote one",
+          "author": {"name": "Author One", "slug": "author-one"},
+          "tags": ["alpha", "beta"],
+          "score": 7,
+          "rating": 4.5,
+          "active": true,
+          "note": "note text"
+        },
+        {
+          "text": "Quote two",
+          "author": {"name": "Author Two", "slug": "author-two"},
+          "tags": ["core"],
+          "score": 12,
+          "rating": 3.0,
+          "active": false,
+          "note": null
+        }
+      ]
+    </script>
+  </body>
+</html>

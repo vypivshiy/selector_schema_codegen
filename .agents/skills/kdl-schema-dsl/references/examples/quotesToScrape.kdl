@@ -1,0 +1,62 @@
+@doc """
+demo parser for https://quotes.toscrape.com/js/ 
+"""
+
+// TIP: allowed use VERBOSE FLAGS for simplify and document patterns
+// it automatically converts to inline
+define JSON-PATTERN=#"""
+(?xs)
+    var\s+data\s*=\s*     # START ANCHOR var data =
+    (
+        \[                # START ARRAY
+        .*                # JSON DATA
+        \]                # END ARRAY
+    )
+    ;\s+for              # END ANCHOR
+"""#
+
+// json mapping
+json Author {
+    // keys should be same as original structure
+    name str
+    goodreads_links str
+    slug str
+}
+
+// mark entrypoint - array
+json Quote array=#true {
+    // add type (array) mark
+    tags (array)str
+    // reference structure
+    author Author
+    text str
+}
+
+
+struct Main {
+    // allow precompute values for reuse
+    @init {
+        raw-json {
+            raw
+            re JSON-PATTERN
+        }
+    }
+    data {
+        // use computed value. should be a firts
+        @raw-json
+        jsonify Quote
+    }
+    // patches example
+    first-quote {
+        @raw-json
+        jsonify Quote path="0"
+    }
+    second-quote {
+        @raw-json
+        jsonify Quote path="1"
+    }
+    third-slug {
+        @raw-json
+        jsonify Quote path="2.author.slug"
+    }
+}

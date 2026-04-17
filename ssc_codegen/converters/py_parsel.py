@@ -1,533 +1,478 @@
-from ssc_codegen.ast_ import (
-    ExprCss,
-    ExprCssAll,
-    ExprTransform,
-    ModuleImports,
-    ExprXpathAll,
-    ExprXpath,
-    ExprIsXpath,
-    ExprGetHtmlAttr,
-    ExprGetHtmlAttrAll,
-    ExprGetHtmlText,
-    ExprGetHtmlTextAll,
-    ExprGetHtmlRaw,
-    ExprGetHtmlRawAll,
-    ExprIsCss,
-    ModuleTransformImports,
-    StructInitMethod,
-    StructFieldMethod,
-    StructPreValidateMethod,
-    StructPartDocMethod,
-    ExprListHasAttr,
-    ExprHasAttr,
+"""
+parsel converter - inherits from py_bs4 and overrides selector/extract behaviors
+using parsel.Selector/SelectorList API.
+"""
+
+from ssc_codegen.converters.base import ConverterContext
+from ssc_codegen.converters.helpers import to_snake_case
+
+from ssc_codegen.ast import VariableType
+from ssc_codegen.ast import (
+    Imports,
+    Utilities,
+    Field,
+    Init,
+    InitField,
+    Key,
+    Value,
+    PreValidate,
+    SplitDoc,
+    TableConfig,
+    TableMatchKey,
+    TableRow,
 )
-from ssc_codegen.ast_.nodes_filter import (
-    ExprDocumentFilter,
-    FilterDocAttrContains,
-    FilterDocAttrEnds,
-    FilterDocAttrEqual,
-    FilterDocAttrRegex,
-    FilterDocAttrStarts,
-    FilterDocCss,
-    FilterDocHasAttr,
-    FilterDocHasRaw,
-    FilterDocHasText,
-    FilterDocIsRegexRaw,
-    FilterDocIsRegexText,
-    FilterDocXpath,
+
+from ssc_codegen.ast import (
+    CssSelect,
+    CssSelectAll,
+    XpathSelect,
+    XpathSelectAll,
+    CssRemove,
+    XpathRemove,
+    Attr,
+    Text,
+    Raw,
+    PredCss,
+    PredXpath,
+    PredHasAttr,
+    PredAttrEq,
+    PredAttrNe,
+    PredAttrStarts,
+    PredAttrEnds,
+    PredAttrContains,
+    PredAttrRe,
+    PredTextStarts,
+    PredTextEnds,
+    PredTextContains,
+    PredTextRe,
 )
-from ssc_codegen.ast_.nodes_selectors import (
-    ExprCssElementRemove,
-    ExprMapAttrs,
-    ExprMapAttrsAll,
-    ExprXpathElementRemove,
-)
-from ssc_codegen.converters.helpers import (
-    is_first_node_cond,
-    is_prev_node_atomic_cond,
-    prev_next_var,
-    have_default_expr,
-    is_last_var_no_ret,
-    py_get_classvar_hook_or_value,
-    py_regex_flags,
-)
-from ssc_codegen.converters.py_base import (
-    BasePyCodeConverter,
-    INDENT_DEFAULT_BODY,
-    INDENT_METHOD_BODY,
-    INDENT_METHOD,
-    MAGIC_METHODS,
-    get_field_method_ret_type,
-)
-from ssc_codegen.converters.templates.py_base import IMPORTS_MIN
 
-CONVERTER = BasePyCodeConverter()
+from ssc_codegen.ast import Nested
 
 
-@CONVERTER.post(ModuleTransformImports.kind)
-def post_transform_imports(node: ModuleTransformImports) -> str:
-    transforms, *_ = node.unpack_args()
-
-    if not transforms:
-        return ""
-
-    code_imports = []
-    for t in transforms:
-        if deps := t.collect_dependencies("py_parsel"):
-            code_imports.append("\n".join(deps))
-    return "\n".join(code_imports)
+from ssc_codegen.converters import py_bs4
 
 
-@CONVERTER.post(ExprTransform.kind)
-def post_transform(node: ExprTransform) -> str:
-    # extend transform search provide py_bs4 module
-    prv, nxt = prev_next_var(node)
-    transform, *_ = node.unpack_args()
-    parts = transform.emit("py_parsel", prv, nxt)
-    if have_default_expr(node):
-        code = INDENT_DEFAULT_BODY + INDENT_DEFAULT_BODY.join(parts)
-        return code
-    return INDENT_METHOD_BODY + INDENT_METHOD_BODY.join(parts)
+PY_PARSEL_CONVERTER = py_bs4.PY_BASE_CONVERTER.extend()
+PY_TYPES = py_bs4.PY_TYPES.copy()
+PY_TYPES[VariableType.DOCUMENT] = "Selector"
+PY_TYPES[VariableType.LIST_DOCUMENT] = "SelectorList"
 
 
-@CONVERTER(StructInitMethod.kind)
-def pre_init(_node: StructInitMethod) -> str:
-    return (
-        INDENT_METHOD
-        + "def __init__(self, document: Union[str, Selector, SelectorList]) -> None:\n"
-        + INDENT_METHOD_BODY
-        + "self._document = Selector(document) if isinstance(document, str) else document"
-    )
+@PY_PARSEL_CONVERTER(Imports)
+def pre_imports(node: Imports, _: ConverterContext):
+    base_imports = [
+        "import re",
+        "import sys",
+        "from typing import TypedDict, Optional, Any, List, Dict, Union",
+        "from html import unescape as _html_unescape",
+    ]
+
+    transform_imports = sorted(node.transform_imports.get("py", set()))
+
+    return base_imports + transform_imports
 
 
-@CONVERTER(StructPreValidateMethod.kind)
-def pre_struct_pre_validate(_node: StructPreValidateMethod) -> str:
-    return (
-        INDENT_METHOD
-        + "def _pre_validate(self, v: Union[Selector, SelectorList]) -> None:"
-    )
+@PY_PARSEL_CONVERTER.post(Imports)
+def post_imports(node: Imports, ctx: ConverterContext):
+    lines = ["from parsel import Selector, SelectorList"]
+    lines.extend(py_bs4.http_client_import(ctx))
+    return lines
 
 
-@CONVERTER(StructPartDocMethod.kind)
-def pre_struct_part_doc_method(_node: StructPartDocMethod) -> str:
-    return (
-        INDENT_METHOD
-        + "def _split_doc(self, v: Union[Selector, SelectorList]) -> SelectorList:"
-    )
+@PY_PARSEL_CONVERTER(Utilities)
+def pre_utilities(node: Utilities, ctx: ConverterContext):
+    return py_bs4.pre_utilities(node, ctx)
 
 
-@CONVERTER(StructFieldMethod.kind)
-def pre_struct_field_method(node: StructFieldMethod) -> str:
-    name = node.kwargs["name"]
-    type_ = get_field_method_ret_type(node)
-    name = MAGIC_METHODS.get(name, name)
-    return (
-        INDENT_METHOD
-        + f"def _parse_{name}(self, v: Union[Selector, SelectorList]) -> {type_}:"
-    )
+@PY_PARSEL_CONVERTER(Init)
+def pre_init(node: Init, ctx: ConverterContext):
+    init_node_names: list[str] = []
+    for i in node.body:
+        if isinstance(i, InitField):
+            name = to_snake_case(i.name)
+            init_node_names.append(name)
+    code = [
+        f"{ctx.indent}def __init__(self, document: Union[str, Selector, SelectorList]):",
+        f"{ctx.indent * 2}if isinstance(document, str):",
+        f"{ctx.indent * 3}self._doc = Selector(document)",
+        f"{ctx.indent * 2}else:",
+        f"{ctx.indent * 3}self._doc = document",
+    ]
+    for name in init_node_names:
+        code.append(
+            f"{ctx.indent * 2}self._{name} = self._init_{name}(self._doc)"
+        )
+    return code
 
 
-@CONVERTER(ModuleImports.kind)
-def pre_imports(_: ModuleImports) -> str:
-    return IMPORTS_MIN + "from parsel import Selector, SelectorList"
+@PY_PARSEL_CONVERTER(InitField)
+def pre_init_field(node: InitField, ctx: ConverterContext):
+    name = to_snake_case(node.name)
+    ret_type = py_bs4.PY_TYPES.get(node.ret, "Any")
+    return [
+        f"    def _init_{name}(self, v: Union[Selector, SelectorList]) -> {ret_type}:"
+    ]
 
 
-@CONVERTER(ExprCss.kind)
-def pre_css(node: ExprCss) -> str:
-    indent = (
-        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
-    )
-    prv, nxt = prev_next_var(node)
-    query = py_get_classvar_hook_or_value(node, "query")
-    return indent + f"{nxt} = {prv}.css({query})"
+@PY_PARSEL_CONVERTER(Field)
+def pre_struct_field(node: Field, ctx: ConverterContext):
+    name = to_snake_case(node.name)
+    ret_type = py_bs4.PY_TYPES.get(node.ret, "Any")
+
+    if node.ret == VariableType.JSON:
+        from ssc_codegen.ast import Jsonify
+
+        jsonify_node = [i for i in node.body if isinstance(i, Jsonify)][0]
+        ret_type = ret_type.format(jsonify_node.schema_name)
+        if jsonify_node.is_array:
+            ret_type = f"List[{ret_type}]"
+    elif node.ret == VariableType.NESTED:
+        nested_node = [i for i in node.body if isinstance(i, Nested)][0]
+        ret_type = ret_type.format(nested_node.struct_name)
+        if nested_node.is_array:
+            ret_type = f"List[{ret_type}]"
+
+    if node.accept == VariableType.STRING:
+        return [
+            f"    def _parse_{name}(self, v: Union[Selector, SelectorList]) -> Union[{ret_type}, _UnmatchedTableRow]:"
+        ]
+    return [
+        f"    def _parse_{name}(self, v: Union[Selector, SelectorList]) -> {ret_type}:"
+    ]
 
 
-@CONVERTER(ExprCssAll.kind)
-def pre_css_all(node: ExprCssAll) -> str:
-    indent = (
-        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
-    )
-    prv, nxt = prev_next_var(node)
-    query = py_get_classvar_hook_or_value(node, "query")
-    return indent + f"{nxt} = {prv}.css({query})"
+@PY_PARSEL_CONVERTER(Key)
+def pre_struct_key(node: Key, ctx: ConverterContext):
+    return [
+        "    def _parse_key(self, v: Union[Selector, SelectorList]) -> str:"
+    ]
 
 
-@CONVERTER(ExprXpath.kind)
-def pre_xpath(node: ExprXpath) -> str:
-    indent = (
-        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
-    )
-    prv, nxt = prev_next_var(node)
-    query = py_get_classvar_hook_or_value(node, "query")
-    return indent + f"{nxt} = {prv}.xpath({query})"
+@PY_PARSEL_CONVERTER(Value)
+def pre_struct_value(node: Value, ctx: ConverterContext):
+    ret_type = py_bs4.PY_TYPES.get(node.ret, "Any")
+
+    if node.ret == VariableType.JSON:
+        from ssc_codegen.ast import Jsonify
+
+        jsonify_node = [i for i in node.body if isinstance(i, Jsonify)][0]
+        ret_type = ret_type.format(jsonify_node.schema_name)
+        if jsonify_node.is_array:
+            ret_type = f"List[{ret_type}]"
+    elif node.ret == VariableType.NESTED:
+        nested_node = [i for i in node.body if isinstance(i, Nested)][0]
+        ret_type = ret_type.format(nested_node.struct_name)
+        if nested_node.is_array:
+            ret_type = f"List[{ret_type}]"
+
+    return [
+        f"    def _parse_value(self, v: Union[Selector, SelectorList]) -> {ret_type}:"
+    ]
 
 
-@CONVERTER(ExprXpathAll.kind)
-def pre_xpath_all(node: ExprXpathAll) -> str:
-    indent = (
-        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
-    )
-    prv, nxt = prev_next_var(node)
-    query = py_get_classvar_hook_or_value(node, "query")
-    return indent + f"{nxt} = {prv}.xpath({query})"
+@PY_PARSEL_CONVERTER(PreValidate)
+def pre_struct_pre_validate(node: PreValidate, ctx: ConverterContext):
+    return [
+        "    def _pre_validate(self, v: Union[Selector, SelectorList]) -> None:"
+    ]
 
 
-@CONVERTER(ExprGetHtmlAttr.kind)
-def pre_html_attr(node: ExprGetHtmlAttr) -> str:
-    indent = (
-        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
-    )
-    prv, nxt = prev_next_var(node)
-    keys = node.kwargs["key"]
+@PY_PARSEL_CONVERTER(SplitDoc)
+def pre_struct_split_doc(node: SplitDoc, ctx: ConverterContext):
+    return [
+        "    def _split_doc(self, v: Union[Selector, SelectorList]) -> SelectorList:"
+    ]
+
+
+@PY_PARSEL_CONVERTER(TableConfig)
+def pre_struct_table_config(node: TableConfig, ctx: ConverterContext):
+    return [
+        "    def _table_config(self, v: Union[Selector, SelectorList]) -> Selector:"
+    ]
+
+
+@PY_PARSEL_CONVERTER(TableMatchKey)
+def pre_struct_table_match_key(node: TableMatchKey, ctx: ConverterContext):
+    return [
+        "    def _table_match_key(self, v: Union[Selector, SelectorList]) -> str:"
+    ]
+
+
+@PY_PARSEL_CONVERTER(TableRow)
+def pre_struct_table_row(node: TableRow, ctx: ConverterContext):
+    return [
+        "    def _parse_table_rows(self, v: Union[Selector, SelectorList]) -> SelectorList:"
+    ]
+
+
+@PY_PARSEL_CONVERTER(CssSelect)
+def pre_expr_css_select(node: CssSelect, ctx: ConverterContext):
+    if node.queries:
+        lines: list[str] = []
+        for i, query in enumerate(node.queries):
+            q = repr(query)
+            if i == 0:
+                lines.append(f"{ctx.indent}{ctx.nxt} = {ctx.prv}.css({q})")
+            else:
+                lines.append(f"{ctx.indent}if not {ctx.nxt}:")
+                lines.append(f"{ctx.indent}    {ctx.nxt} = {ctx.prv}.css({q})")
+        return lines
+    query = repr(node.query)
+    return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.css({query})"
+
+
+@PY_PARSEL_CONVERTER(CssSelectAll)
+def pre_expr_css_select_all(node: CssSelectAll, ctx: ConverterContext):
+    if node.queries:
+        lines: list[str] = []
+        for i, query in enumerate(node.queries):
+            q = repr(query)
+            if i == 0:
+                lines.append(f"{ctx.indent}{ctx.nxt} = {ctx.prv}.css({q})")
+            else:
+                lines.append(f"{ctx.indent}if not {ctx.nxt}:")
+                lines.append(f"{ctx.indent}    {ctx.nxt} = {ctx.prv}.css({q})")
+        return lines
+    query = repr(node.query)
+    return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.css({query})"
+
+
+@PY_PARSEL_CONVERTER(XpathSelect)
+def pre_expr_xpath_select(node: XpathSelect, ctx: ConverterContext):
+    if node.queries:
+        lines: list[str] = []
+        for i, query in enumerate(node.queries):
+            q = repr(query)
+            if i == 0:
+                lines.append(f"{ctx.indent}{ctx.nxt} = {ctx.prv}.xpath({q})")
+            else:
+                lines.append(f"{ctx.indent}if not {ctx.nxt}:")
+                lines.append(
+                    f"{ctx.indent}    {ctx.nxt} = {ctx.prv}.xpath({q})"
+                )
+        return lines
+    query = repr(node.query)
+    return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.xpath({query})"
+
+
+@PY_PARSEL_CONVERTER(XpathSelectAll)
+def pre_expr_xpath_select_all(node: XpathSelectAll, ctx: ConverterContext):
+    if node.queries:
+        lines: list[str] = []
+        for i, query in enumerate(node.queries):
+            q = repr(query)
+            if i == 0:
+                lines.append(f"{ctx.indent}{ctx.nxt} = {ctx.prv}.xpath({q})")
+            else:
+                lines.append(f"{ctx.indent}if not {ctx.nxt}:")
+                lines.append(
+                    f"{ctx.indent}    {ctx.nxt} = {ctx.prv}.xpath({q})"
+                )
+        return lines
+    query = repr(node.query)
+    return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.xpath({query})"
+
+
+@PY_PARSEL_CONVERTER(CssRemove)
+def pre_expr_css_remove(node: CssRemove, ctx: ConverterContext):
+    query = repr(node.query)
+    return [
+        f"{ctx.indent}[i.root.getparent().remove(i.root) for i in {ctx.prv}.css({query}) if i.root.getparent() is not None]",
+        f"{ctx.indent}{ctx.nxt} = {ctx.prv}",
+    ]
+
+
+@PY_PARSEL_CONVERTER(XpathRemove)
+def pre_expr_xpath_remove(node: XpathRemove, ctx: ConverterContext):
+    query = repr(node.query)
+    return [
+        f"{ctx.indent}[i.root.getparent().remove(i.root) for i in {ctx.prv}.xpath({query}) if i.root.getparent() is not None]",
+        f"{ctx.indent}{ctx.nxt} = {ctx.prv}",
+    ]
+
+
+@PY_PARSEL_CONVERTER(Text)
+def pre_expr_text(node: Text, ctx: ConverterContext):
+    if node.accept == VariableType.DOCUMENT:
+        return f"{ctx.indent}{ctx.nxt} = ' '.join({ctx.prv}.xpath('.//text()').getall())"
+    return f"{ctx.indent}{ctx.nxt} = [' '.join(i.xpath('.//text()').getall()) for i in {ctx.prv}]"
+
+
+@PY_PARSEL_CONVERTER(Raw)
+def pre_expr_raw(node: Raw, ctx: ConverterContext):
+    if node.accept == VariableType.DOCUMENT:
+        return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.get()"
+    return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.getall()"
+
+
+@PY_PARSEL_CONVERTER(Attr)
+def pre_expr_attr(node: Attr, ctx: ConverterContext):
+    keys = node.keys
+    if node.accept == VariableType.DOCUMENT:
+        if len(keys) == 1:
+            return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.attrib[{keys[0]!r}]"
+        return f"{ctx.indent}{ctx.nxt} = [{ctx.prv}.attrib[k] for k in {keys} if {ctx.prv}.attrib.get(k)]"
     if len(keys) == 1:
-        key = keys[0]
-        return indent + f"{nxt} = {prv}.attrib[{key!r}]"
-    return (
-        indent
-        + f"{nxt} = [{prv}.attrib[k] for k in {keys} if {prv}.attrib.get(k)]"
-    )
+        return f"{ctx.indent}{ctx.nxt} = [e.attrib[{keys[0]!r}] for e in {ctx.prv}]"
+    return f"{ctx.indent}{ctx.nxt} = [e.attrib[k] for e in {ctx.prv} for k in {keys} if e.attrib.get(k)]"
 
 
-@CONVERTER(ExprGetHtmlAttrAll.kind)
-def pre_html_attr_all(node: ExprGetHtmlAttrAll) -> str:
-    indent = (
-        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
-    )
-    prv, nxt = prev_next_var(node)
-    keys = node.kwargs["key"]
-    if len(keys) == 1:
-        key = keys[0]
-        return indent + f"{nxt} = [e.attrib[{key!r}] for e in {prv}]"
-    return (
-        indent
-        + f"{nxt} = [e.attrib[k] for e in {prv} for k in {keys} if e.attrib.get(k)]"
-    )
+@PY_PARSEL_CONVERTER(PredCss)
+def pre_expr_pred_css(node: PredCss, ctx: ConverterContext):
+    query = repr(node.query)
+    cond = f"bool(i.css({query}))"
+    if ctx.index == 0:
+        return ctx.indent + cond
+    return ctx.indent + f"and {cond}"
 
 
-@CONVERTER(ExprGetHtmlText.kind)
-def pre_html_text(node: ExprGetHtmlText) -> str:
-    indent = (
-        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
-    )
-    prv, nxt = prev_next_var(node)
-    return indent + f'{nxt} = " ".join({prv}.xpath(".//text()").getall())'
+@PY_PARSEL_CONVERTER(PredXpath)
+def pre_expr_pred_xpath(node: PredXpath, ctx: ConverterContext):
+    query = repr(node.query)
+    cond = f"bool(i.xpath({query}))"
+    if ctx.index == 0:
+        return ctx.indent + cond
+    return ctx.indent + f"and {cond}"
 
 
-@CONVERTER(ExprGetHtmlTextAll.kind)
-def pre_html_text_all(node: ExprGetHtmlTextAll) -> str:
-    indent = (
-        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
-    )
-    prv, nxt = prev_next_var(node)
-    return (
-        indent
-        + f'{nxt} = [" ".join(e.xpath(".//text()").getall()) for e in {prv}]'
-    )
-
-
-@CONVERTER(ExprGetHtmlRaw.kind)
-def pre_html_raw(node: ExprGetHtmlRaw) -> str:
-    indent = (
-        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
-    )
-    prv, nxt = prev_next_var(node)
-    return indent + f"{nxt} = {prv}.get()"
-
-
-@CONVERTER(ExprGetHtmlRawAll.kind)
-def pre_html_raw_all(node: ExprGetHtmlRawAll) -> str:
-    indent = (
-        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
-    )
-    prv, nxt = prev_next_var(node)
-    return indent + f"{nxt} = {prv}.getall()"
-
-
-@CONVERTER(ExprIsCss.kind)
-def pre_is_css(node: ExprIsCss) -> str:
-    indent = (
-        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
-    )
-    prv, nxt = prev_next_var(node)
-    query = py_get_classvar_hook_or_value(node, "query")
-    msg = py_get_classvar_hook_or_value(node, "msg")
-    invert = node.kwargs["invert"]
-
-    expr = f"{prv}.css({query})"
-    if invert:
-        expr = f"not ({expr})"
-
-    expr = indent + f"assert {expr}, {msg}"
-    if is_last_var_no_ret(node):
-        return expr
-    return "\n".join([expr, indent + f"{nxt} = {prv}"])
-
-
-@CONVERTER(ExprIsXpath.kind)
-def pre_is_xpath(node: ExprIsXpath) -> str:
-    indent = (
-        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
-    )
-    prv, nxt = prev_next_var(node)
-    query = py_get_classvar_hook_or_value(node, "query")
-    msg = py_get_classvar_hook_or_value(node, "msg")
-    invert = node.kwargs["invert"]
-
-    expr = f"{prv}.xpath({query})"
-    if invert:
-        f"not ({expr})"
-
-    expr = indent + f"assert {expr}, {msg}"
-    if is_last_var_no_ret(node):
-        return expr
-    return "\n".join([expr, indent + f"{nxt} = {prv}"])
-
-
-@CONVERTER(ExprHasAttr.kind)
-def pre_has_attr(node: ExprHasAttr) -> str:
-    indent = (
-        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
-    )
-    prv, nxt = prev_next_var(node)
-    key = py_get_classvar_hook_or_value(node, "key")
-    msg = py_get_classvar_hook_or_value(node, "msg")
-    invert = node.kwargs["invert"]
-
-    expr = f"{prv}.attrib.get({key!r}, None)"
-    if invert:
-        expr = f"not ({expr})"
-
-    expr = indent + f"assert {expr}, {msg!r}"
-    if is_last_var_no_ret(node):
-        return expr
-    return "\n".join([expr, indent + f"{nxt} = {prv}"])
-
-
-@CONVERTER(ExprListHasAttr.kind)
-def pre_list_has_attr(node: ExprListHasAttr) -> str:
-    indent = (
-        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
-    )
-    prv, nxt = prev_next_var(node)
-    key = py_get_classvar_hook_or_value(node, "key")
-    msg = py_get_classvar_hook_or_value(node, "msg")
-    invert = node.kwargs["invert"]
-
-    expr = f"all(i.attrib.get({key!r}, None) for i in {prv})"
-    if invert:
-        expr = f"not ({expr})"
-    expr = indent + f"assert {expr}, {msg!r}"
-
-    if is_last_var_no_ret(node):
-        return expr
-    return "\n".join([expr, indent + f"{nxt} = {prv}"])
-
-
-@CONVERTER(ExprMapAttrs.kind)
-def pre_map_attrs(node: ExprMapAttrs) -> str:
-    indent = (
-        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
-    )
-    prv, nxt = prev_next_var(node)
-    return indent + f"{nxt} = list({prv}.attrib.values())"
-
-
-@CONVERTER(ExprMapAttrsAll.kind)
-def pre_map_attrs_all(node: ExprMapAttrsAll) -> str:
-    indent = (
-        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
-    )
-    prv, nxt = prev_next_var(node)
-    return indent + f"{nxt} = [i for e in {prv} for i in e.attrib.values()]"
-
-
-@CONVERTER(ExprCssElementRemove.kind)
-def pre_css_remove(node: ExprCssElementRemove) -> str:
-    indent = (
-        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
-    )
-    prv, nxt = prev_next_var(node)
-    query = py_get_classvar_hook_or_value(node, "query")
-
-    return (
-        indent
-        + f"[i.root.getparent().remove(i.root) for i in {prv}.css({query})]\n"
-        + indent
-        + f"{nxt} = {prv}"
-    )
-
-
-@CONVERTER(ExprXpathElementRemove.kind)
-def pre_xpath_remove(node: ExprXpathElementRemove) -> str:
-    indent = (
-        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
-    )
-    prv, nxt = prev_next_var(node)
-    query = py_get_classvar_hook_or_value(node, "query")
-
-    return (
-        indent
-        + f"[i.root.getparent().remove(i.root) for i in {prv}.xpath({query})]\n"
-        + indent
-        + f"{nxt} = {prv}"
-    )
-
-
-# document filters
-
-
-@CONVERTER(ExprDocumentFilter.kind, post_callback=lambda _: "]")
-def pre_expr_doc_filter(node: ExprDocumentFilter) -> str:
-    indent = (
-        INDENT_DEFAULT_BODY if have_default_expr(node) else INDENT_METHOD_BODY
-    )
-    prv, nxt = prev_next_var(node)
-    return indent + f"{nxt} = [e for e in {prv} if "
-
-
-@CONVERTER(FilterDocCss.kind)
-def pre_doc_filter_css(node: FilterDocCss) -> str:
-    query = node.kwargs["query"]
-    expr = f"bool(e.css({query!r}))"
-    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
-        return "and " + expr
-    return expr
-
-
-@CONVERTER(FilterDocHasAttr.kind)
-def pre_doc_filter_has_attr(node: FilterDocHasAttr) -> str:
-    keys = node.kwargs["keys"]
-    if len(keys) == 1:
-        expr = f"{keys[0]!r} in e.attrib"
+@PY_PARSEL_CONVERTER(PredHasAttr)
+def pre_expr_pred_has_attr(node: PredHasAttr, ctx: ConverterContext):
+    attrs = node.attrs
+    if len(attrs) == 1:
+        cond = f"{attrs[0]!r} in i.attrib"
     else:
-        expr = f"any(i in e.attrib for i in {keys})"
-    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
-        return "and " + expr
-    return expr
+        cond = f"any(attr in i.attrib for attr in {attrs!r})"
+    if ctx.index == 0:
+        return ctx.indent + cond
+    return ctx.indent + f"and {cond}"
 
 
-@CONVERTER(FilterDocAttrEqual.kind)
-def pre_doc_filter_attr_eq(node: FilterDocAttrEqual) -> str:
-    key, values = node.unpack_args()
+@PY_PARSEL_CONVERTER(PredAttrEq)
+def pre_expr_pred_attr_eq(node: PredAttrEq, ctx: ConverterContext):
+    name = node.name
+    values = node.values
     if len(values) == 1:
-        expr = f"e.attrib[{key!r}] == {values[0]!r}"
+        cond = f"i.attrib.get({name!r}, '') == {values[0]!r}"
     else:
-        expr = f"e.attrib[{key!r}] in {values}"
-    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
-        return "and " + expr
-    return expr
+        cond = f"i.attrib.get({name!r}, '') in {values!r}"
+    if ctx.index == 0:
+        return ctx.indent + cond
+    return ctx.indent + f"and {cond}"
 
 
-@CONVERTER(FilterDocAttrContains.kind)
-def pre_doc_filter_attr_contains(node: FilterDocAttrContains) -> str:
-    key, values = node.unpack_args()
+@PY_PARSEL_CONVERTER(PredAttrNe)
+def pre_expr_pred_attr_ne(node: PredAttrNe, ctx: ConverterContext):
+    name = node.name
+    values = node.values
     if len(values) == 1:
-        expr = f"{values[0]!r} in e.attrib[{key!r}]"
+        cond = f"i.attrib.get({name!r}, '') != {values[0]!r}"
     else:
-        expr = f"any(i in e.attrib[{key!r}] for i in {values})"
-    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
-        return "and " + expr
-    return expr
+        cond = f"i.attrib.get({name!r}, '') not in {values!r}"
+    if ctx.index == 0:
+        return ctx.indent + cond
+    return ctx.indent + f"and {cond}"
 
 
-@CONVERTER(FilterDocAttrStarts.kind)
-def pre_doc_filter_attr_starts(node: FilterDocAttrStarts) -> str:
-    key, values = node.unpack_args()
+@PY_PARSEL_CONVERTER(PredAttrStarts)
+def pre_expr_pred_attr_starts(node: PredAttrStarts, ctx: ConverterContext):
+    name = node.name
+    values = node.values
     if len(values) == 1:
-        expr = f"e.attrib[{key!r}].startswith({values[0]!r})"
+        cond = f"i.attrib.get({name!r}, '').startswith({values[0]!r})"
     else:
-        # str.startswith() arg allow tuple[str, ...]
-        expr = f"e.attrib[{key!r}].startswith({values})"
-    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
-        return "and " + expr
-    return expr
+        cond = (
+            f"any(i.attrib.get({name!r}, '').startswith(v) for v in {values!r})"
+        )
+    if ctx.index == 0:
+        return ctx.indent + cond
+    return ctx.indent + f"and {cond}"
 
 
-@CONVERTER(FilterDocAttrEnds.kind)
-def pre_doc_filter_attr_ends(node: FilterDocAttrEnds) -> str:
-    key, values = node.unpack_args()
+@PY_PARSEL_CONVERTER(PredAttrEnds)
+def pre_expr_pred_attr_ends(node: PredAttrEnds, ctx: ConverterContext):
+    name = node.name
+    values = node.values
     if len(values) == 1:
-        expr = f"e.attrib[{key!r}].endswith({values[0]!r})"
+        cond = f"i.attrib.get({name!r}, '').endswith({values[0]!r})"
     else:
-        # str.endswith() arg allow tuple[str, ...]
-        expr = f"e.attrib[{key!r}].endswith({values})"
-    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
-        return "and " + expr
-    return expr
+        cond = (
+            f"any(i.attrib.get({name!r}, '').endswith(v) for v in {values!r})"
+        )
+    if ctx.index == 0:
+        return ctx.indent + cond
+    return ctx.indent + f"and {cond}"
 
 
-@CONVERTER(FilterDocAttrRegex.kind)
-def pre_doc_filter_attr_re(node: FilterDocAttrRegex) -> str:
-    key, pattern, ignore_case = node.unpack_args()
-    flags = py_regex_flags(ignore_case)
-    if flags:
-        expr = f"re.search({pattern!r}, e.attrib[{key!r}], {flags})"
-    else:
-        expr = f"re.search({pattern!r}, e.attrib[{key!r}], ''))"
-    expr = f"bool({expr})"
-    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
-        return "and " + expr
-    return expr
-
-
-@CONVERTER(FilterDocIsRegexText.kind)
-def pre_doc_filter_is_regex_text(node: FilterDocIsRegexText) -> str:
-    pattern, ignore_case = node.unpack_args()
-
-    flags = py_regex_flags(ignore_case)
-    if flags:
-        expr = f're.search({pattern!r}, " ".join(e.xpath(".//text()").getall()), {flags})'
-    else:
-        expr = f're.search({pattern!r}, " ".join(e.xpath(".//text()").getall())'
-    expr = f"bool({expr})"
-    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
-        return "and " + expr
-    return expr
-
-
-@CONVERTER(FilterDocIsRegexRaw.kind)
-def pre_doc_filter_is_regex_raw(node: FilterDocIsRegexRaw) -> str:
-    pattern, ignore_case = node.unpack_args()
-
-    flags = py_regex_flags(ignore_case)
-    if flags:
-        expr = f"re.search({pattern!r}, e.get(), {flags})"
-    else:
-        expr = f"re.search({pattern!r}, e.get())"
-    expr = f"bool({expr})"
-    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
-        return "and " + expr
-    return expr
-
-
-@CONVERTER(FilterDocHasText.kind)
-def pre_doc_filter_has_text(node: FilterDocHasText) -> str:
-    values = node.kwargs["values"]
+@PY_PARSEL_CONVERTER(PredAttrContains)
+def pre_expr_pred_attr_contains(node: PredAttrContains, ctx: ConverterContext):
+    name = node.name
+    values = node.values
     if len(values) == 1:
-        expr = f'{values[0]!r} in " ".join(e.xpath(".//text()").getall()))'
+        cond = f"{values[0]!r} in i.attrib.get({name!r}, '')"
     else:
-        expr = f'any(i in " ".join(e.xpath(".//text()").getall())) for i in {values})'
-    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
-        return "and " + expr
-    return expr
+        cond = f"any(v in i.attrib.get({name!r}, '') for v in {values!r})"
+    if ctx.index == 0:
+        return ctx.indent + cond
+    return ctx.indent + f"and {cond}"
 
 
-@CONVERTER(FilterDocHasRaw.kind)
-def pre_doc_filter_has_raw(node: FilterDocHasText) -> str:
-    values = node.kwargs["values"]
+@PY_PARSEL_CONVERTER(PredAttrRe)
+def pre_expr_pred_attr_re(node: PredAttrRe, ctx: ConverterContext):
+    name = node.name
+    pattern = repr(node.pattern)
+    cond = f"bool(re.search({pattern}, i.attrib.get({name!r}, '')))"
+    if ctx.index == 0:
+        return ctx.indent + cond
+    return ctx.indent + f"and {cond}"
+
+
+@PY_PARSEL_CONVERTER(PredTextStarts)
+def pre_expr_pred_text_starts(node: PredTextStarts, ctx: ConverterContext):
+    values = node.values
     if len(values) == 1:
-        expr = f"{values[0]!r} in (e.get() or '')"
+        cond = (
+            f"' '.join(i.xpath('.//text()').getall()).startswith({values[0]!r})"
+        )
     else:
-        expr = f"any(i in (e.get() or '') for i in {values})"
-    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
-        return "and " + expr
-    return expr
+        cond = f"any(' '.join(i.xpath('.//text()').getall()).startswith(v) for v in {values!r})"
+    if ctx.index == 0:
+        return ctx.indent + cond
+    return ctx.indent + f"and {cond}"
 
 
-@CONVERTER(FilterDocXpath.kind)
-def pre_xpath_filter(node: FilterDocXpath) -> str:
-    query = node.kwargs["query"]
-    expr = f"bool(e.xpath({query!r}))"
-    if not is_first_node_cond(node) and is_prev_node_atomic_cond(node):
-        return "and " + expr
-    return expr
+@PY_PARSEL_CONVERTER(PredTextEnds)
+def pre_expr_pred_text_ends(node: PredTextEnds, ctx: ConverterContext):
+    values = node.values
+    if len(values) == 1:
+        cond = (
+            f"' '.join(i.xpath('.//text()').getall()).endswith({values[0]!r})"
+        )
+    else:
+        cond = f"any(' '.join(i.xpath('.//text()').getall()).endswith(v) for v in {values!r})"
+    if ctx.index == 0:
+        return ctx.indent + cond
+    return ctx.indent + f"and {cond}"
+
+
+@PY_PARSEL_CONVERTER(PredTextContains)
+def pre_expr_pred_text_contains(node: PredTextContains, ctx: ConverterContext):
+    values = node.values
+    if len(values) == 1:
+        cond = f"{values[0]!r} in ' '.join(i.xpath('.//text()').getall())"
+    else:
+        cond = f"any(v in ' '.join(i.xpath('.//text()').getall()) for v in {values!r})"
+    if ctx.index == 0:
+        return ctx.indent + cond
+    return ctx.indent + f"and {cond}"
+
+
+@PY_PARSEL_CONVERTER(PredTextRe)
+def pre_expr_pred_text_re(node: PredTextRe, ctx: ConverterContext):
+    pattern = repr(node.pattern)
+    cond = (
+        f"bool(re.search({pattern}, ' '.join(i.xpath('.//text()').getall())))"
+    )
+    if ctx.index == 0:
+        return ctx.indent + cond
+    return ctx.indent + f"and {cond}"

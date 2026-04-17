@@ -1,0 +1,155 @@
+@doc """
+Universal opengraph and twitter cards metadata extractor
+
+based on most stable artifacts as <meta> tags
+
+required CSS4 compatible backend parser
+
+see also:
+
+https://developer.x.com/en/docs/x-for-websites/cards/overview/markup
+
+https://ogp.me/
+"""
+
+// TODO: css selector: convert multiline query to single line
+define CSS-OG-OTHER="""
+meta[property^="og:"][content]
+:not(
+[property="og:title"], 
+[property="og:description"], 
+[property="og:url"], 
+[property="og:image"]
+)
+"""
+
+define CSS-TWITTER-OTHER="""
+meta[property^="twitter:"][content]:not(
+[property="twitter:card"],
+[property="twitter:title"],
+[property="twitter:description"],
+[property="twitter:image"]
+),
+meta[name^="twitter:"][content]:not(
+[name="twitter:card"],
+[name="twitter:title"],
+[name="twitter:description"],
+[name="twitter:image"]
+)
+"""
+
+struct MetaBase {
+    description {
+        css "meta[name='description'][content], meta[name='Description'][content]"
+        attr content
+        fallback #null
+    }
+    keywords {
+        css "meta[name='keywords'][content], meta[name='Keywords'][content]"
+        attr content
+        split ","
+        trim
+        fallback {}
+    }
+}
+
+struct MetaOpenGraphOther type=dict {
+    @split-doc {
+        css-all CSS-OG-OTHER
+    }
+    @key { attr "property" }
+    @value { attr "content" }
+}
+
+struct MetaOpenGraph {
+    @doc "OpenGraph (facebook/meta) metatag specs"
+
+    title {
+        css "meta[property='og:title'][content]"
+        attr content
+        fallback #null
+    }
+
+    description {
+        css "meta[property='og:description'][content]"
+        attr content
+        fallback #null
+    }
+
+    url {
+        css "meta[property='og:url'][content]"
+        attr content
+        fallback #null
+    }
+    image {
+        css "meta[property='og:image'][content]"
+        attr content
+        fallback #null 
+    }
+    others { nested MetaOpenGraphOther }
+}
+
+struct MetaTwitterOther type=dict {
+    @split-doc { css-all CSS-TWITTER-OTHER }
+    // first - alias of `index 0`
+    @key { attr property name; first }
+    @value { attr content }
+}
+
+
+struct MetaTwitter {
+    card {
+        css "meta[property='twitter:card'][content], meta[name='twitter:card'][content]"
+        attr content
+        fallback #null
+    }
+    title {
+        css "meta[property='twitter:title'][content], meta[name^='twitter:title'][content]"
+        attr content
+        fallback #null
+    }
+    description {
+        css "meta[property='twitter:description'][content], meta[name^='twitter:description'][content]"
+        attr content
+        fallback #null
+    }
+    image {
+        css "meta[property='twitter:image'][content], meta[name^='twitter:image'][content]"
+        attr content
+        fallback #null
+    }
+    others { nested MetaTwitterOther }
+}
+
+struct UniversalMetaExtractor {
+    @doc """
+    entrypoint parser
+
+    accept any HTML page with <meta> tags
+    """
+
+    title {
+        css "title"
+        text
+    }
+    canonical {
+        css "link[rel='canonical'][href]"
+        attr href
+        fallback #null
+    }
+    favicon {
+        css "link[rel~='icon'][href]"
+        attr href
+        fallback #null
+    }
+    rss-feeds {
+        css-all "link[type='application/rss+xml'][href], link[type='application/atom+xml'][href]"
+        attr href
+        fallback {}
+    }
+    meta { nested MetaBase }
+    open-graph { nested MetaOpenGraph }
+    twitter { nested MetaTwitter }
+}
+
+

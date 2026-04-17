@@ -1,0 +1,461 @@
+# ssc_codegen — Project Reference for LLMs
+
+ssc_codegen is a code generator for web scraping parsers.
+Input: .kdl schema files describing HTML extraction rules.
+Output: parser code for Python (bs4, lxml, parsel, selectolax), JavaScript (DOM API), Go (goquery).
+
+Pipeline: .kdl schema → KDL parser (tree-sitter) → AST → linter (type checking) → converter → output code
+
+Version: 0.17.1
+Python: >=3.10
+CLI entry point: `ssc-gen` (ssc_codegen.main:main)
+
+---
+
+## Project Structure
+
+```
+ssc_codegen/
+├── __init__.py            # parse_ast(src, path, css_to_xpath) → Module
+├── main.py                # CLI (typer): generate, check, run, health
+├── parser.py              # KDL CST → Module AST (two-pass: imports, then module nodes)
+├── document_utils.py      # CSS-to-XPath conversion for AST nodes
+├── health.py              # Selector health check against real HTML
+├── ast/                   # AST node definitions
+│   ├── __init__.py        # Re-exports all node types
+│   ├── base.py            # Node abstract base class
+│   ├── types.py           # VariableType, StructType enums
+│   ├── module.py          # Module, Docstring, Imports, Utilities, CodeStartHook, CodeEndHook
+│   ├── struct.py          # Struct, Field, Init, InitField, PreValidate, SplitDoc, Key, Value, TableConfig, TableRow, TableMatchKey, StructDocstring, StartParse, RequestConfig
+│   ├── selectors.py       # CssSelect, CssSelectAll, XpathSelect, XpathSelectAll, CssRemove, XpathRemove
+│   ├── extract.py         # Text, Raw, Attr
+│   ├── string.py          # Trim, Ltrim, Rtrim, NormalizeSpace, RmPrefix, RmSuffix, RmPrefixSuffix, Fmt, Repl, ReplMap, Lower, Upper, Split, Join, Unescape
+│   ├── regex.py           # Re, ReAll, ReSub
+│   ├── array.py           # Index, Slice, Len, Unique
+│   ├── cast.py            # ToInt, ToFloat, ToBool, Jsonify, Nested
+│   ├── control.py         # Fallback, FallbackStart, FallbackEnd, Self, Return
+│   ├── predicate_containers.py  # Filter, Assert, Match
+│   ├── predicate_ops.py   # PredEq/Ne/Gt/Lt/Ge/Le/Range, PredStarts/Ends/Contains/In/Re/ReAny/ReAll, PredCss/Xpath/HasAttr, PredAttr*, PredText*, PredCount*, LogicNot/And/Or
+│   ├── typedef.py         # TypeDef, TypeDefField
+│   ├── jsondef.py         # JsonDef, JsonDefField
+│   ├── transform.py       # TransformDef, TransformTarget, TransformCall
+│   └── helpers.py         # AST utilities
+├── parsers/               # Transport layer helpers (consumed at converter stage)
+│   ├── spec.py            # RequestSpec dataclass (normalised intermediate form)
+│   ├── curl.py            # parse_curl_to_httpx_kwargs() — POSIX curl → kwargs
+│   └── http.py            # parse_http_to_httpx_kwargs() — raw HTTP/1.1|2 → kwargs
+├── converters/            # Code generators per target language
+│   ├── base.py            # BaseConverter, ConverterContext, callback registration
+│   ├── py_bs4.py          # Python BeautifulSoup4
+│   ├── py_lxml.py         # Python lxml
+│   ├── py_parsel.py       # Python parsel (Scrapy)
+│   ├── py_slax.py         # Python selectolax
+│   ├── js_pure.py         # JavaScript vanilla DOM
+│   └── go_goquery.py      # Go goquery
+├── kdl/                   # KDL 2.0 parser (tree-sitter based)
+│   └── parser.py          # KDL2CSTParser, KDLLexer, Token/TokenType, CST node types
+└── linter/                # Schema validation
+    ├── base.py            # LintError, LintResult, LintContext, LINTER singleton
+    ├── errors.py          # ErrorCollector, ErrorCode enum
+    ├── format_errors.py   # format_errors(), lint_file(), lint_string()
+    ├── rules.py           # General syntax/structure rules
+    ├── rules_struct.py    # Struct-specific rules (type requirements, @request validation)
+    ├── rule_keywords.py   # Keyword allowlist validation
+    ├── type_rules.py      # Pipeline type checking/inference
+    ├── types.py           # ErrorCode, RawArg, DefineKind, DefineInfo, TransformInfo
+    ├── navigation.py      # NodeNavigator for tree traversal
+    ├── path.py            # PathTracker for error context
+    ├── metadata.py        # ModuleMetadata for module-level info
+    └── _kdl_lang.py       # KDL_PARSER instance (tree-sitter)
+
+tests/
+├── integration/
+│   ├── test_codegen_run.py     # End-to-end: KDL → generate → execute → verify JSON
+│   └── schemas/                # Test .kdl files (00_full through 07_table)
+├── linter/                     # Linter rule tests
+├── test_parser.py              # KDL parser tests
+├── test_imports.py             # Import/include tests
+├── test_css_to_xpath.py        # CSS→XPath conversion tests
+└── kdl_test_cases/             # KDL parser edge cases
+
+examples/                       # Real-world .kdl schemas
+docs/                           # Documentation
+├── llm.txt                     # DSL reference for LLMs (syntax-focused)
+└── learn/                      # Tutorial chapters (01-09)
+```
+
+---
+
+## CLI Commands
+
+```bash
+ssc-gen generate schema.kdl -t py-bs4 -o out/                     # generate parser code
+ssc-gen generate schema.kdl -t py-bs4 -o out/ --http-client httpx # with @request support
+ssc-gen check schema.kdl                                            # lint only (text output)
+ssc-gen check schema.kdl -f json                                    # lint only (JSON for automation)
+ssc-gen run schema.kdl:StructName -i page.html                     # generate + execute + output JSON
+ssc-gen health schema.kdl:StructName -i page.html                  # check selectors against HTML
+```
+
+Targets: py-bs4, py-lxml, py-parsel, py-slax, js-pure, go-goquery
+
+`--http-client` option (only for targets that support `@request`):
+- Python targets (py-bs4, py-lxml, py-parsel, py-slax): `requests` | `httpx` (`httpx` emits both `fetch()` and `async_fetch()`)
+- JS target (js-pure): `fetch` (default) | `axios`
+- Go target: not applicable
+
+---
+
+## Type System
+
+### VariableType enum (ast/types.py)
+
+Scalar: DOCUMENT, STRING, OPT_STRING, INT, OPT_INT, FLOAT, OPT_FLOAT, BOOL, NULL, NESTED, JSON
+List: LIST_DOCUMENT, LIST_STRING, LIST_INT, LIST_FLOAT
+Auto: AUTO, LIST_AUTO (internal, for type inference)
+
+Methods: `.optional` (STRING→OPT_STRING), `.is_list`, `.scalar` (LIST_STRING→STRING), `.as_list` (STRING→LIST_STRING)
+
+NESTED and JSON are terminal types — pipeline ends after nested/jsonify.
+`fallback #null` converts STRING→OPT_STRING, INT→OPT_INT, FLOAT→OPT_FLOAT.
+
+### StructType enum
+
+- ITEM (default): single object → dict
+- LIST: repeating elements → list[dict], requires @split-doc
+- DICT: key-value map → dict[str, any], requires @split-doc + @key + @value
+- TABLE: HTML table → dict, requires @table + @rows + @match + @value
+- FLAT: deduplicated scalars → list[str], no special fields needed
+
+---
+
+## AST Architecture
+
+All nodes inherit from `Node` base class (has `body` attribute).
+
+### Module layer
+- `Module` → top-level container, holds all children
+- `Docstring`, `Imports`, `Utilities`, `CodeStartHook`, `CodeEndHook`
+
+### Struct layer
+- `Struct(name, struct_type, keep_order)` → parser schema
+- `Field(name)` → output field with pipeline of operations
+- `Init` → container for `InitField` cached values
+- `InitField(name)` → precomputed value, referenced as `@name` via `Self` node
+- `PreValidate` → assert-based validation before parsing
+- `SplitDoc` → split document into items (for LIST/DICT types)
+- `Key`, `Value` → dict key/value extraction
+- `TableConfig`, `TableRow`, `TableMatchKey` → table struct support
+- `RequestConfig(raw_payload, response_path, response_join)` → optional transport layer config; `placeholders` property lists `{{name}}` tokens in declaration order
+- `StartParse` → marker node for parser entry
+
+### Pipeline nodes (operations within fields)
+Selectors: CssSelect, CssSelectAll, XpathSelect, XpathSelectAll, CssRemove, XpathRemove
+Extract: Text, Raw, Attr
+String: Trim, Ltrim, Rtrim, NormalizeSpace, RmPrefix, RmSuffix, RmPrefixSuffix, Fmt, Repl, ReplMap, Lower, Upper, Split, Join, Unescape
+Regex: Re, ReAll, ReSub
+Array: Index, Slice, Len, Unique
+Cast: ToInt, ToFloat, ToBool, Jsonify, Nested
+Control: Fallback, FallbackStart, FallbackEnd, Self, Return
+Predicates: Filter, Assert, Match (containers) + PredEq/Ne/Gt/Lt/... + LogicNot/And/Or
+
+### Type definitions
+- `TypeDef`, `TypeDefField` → auto-generated type annotations for structs
+- `JsonDef`, `JsonDefField` → JSON schema definitions
+
+### Transforms
+- `TransformDef` → module-level reusable transform with per-language implementations
+- `TransformTarget` → single language implementation (imports + code template)
+- `TransformCall` → invoke transform in pipeline
+
+---
+
+## Parser (parser.py)
+
+Main class: `AstParser`
+
+### Registration decorators
+- `register_module_node(name)` → top-level: doc, json, define, transform, struct
+- `register_expression_node(name)` → pipeline: css, text, trim, re, to-int, etc.
+- `register_struct_node(name)` → struct-level: @split-doc, @init, @pre-validate, etc.
+- `register_filter_node(name)` → filter predicates
+- `register_assert_node(name)` → assert predicates
+- `register_match_node(name)` → match predicates (table type)
+
+### Two-pass parsing
+1. Handle imports, collect external definitions
+2. Parse module nodes → build Module AST
+
+### Magic directive detection
+`@`-prefixed nodes inside structs are parsed via `_parse_struct()`:
+@doc, @init, @pre-validate, @split-doc, @key, @value, @table, @rows, @match, @request
+
+### Self-reference
+`@field_name` in pipelines creates `Self(name="field_name")` node, resolved to InitField value.
+
+---
+
+## Converter Architecture (converters/base.py)
+
+### BaseConverter
+
+Callback-based visitor pattern:
+```python
+converter = BaseConverter(var_name="v", indent=" " * 4)
+
+@converter.pre(NodeType, post_callback="handler_name")
+def handler(node: NodeType, ctx: ConverterContext) -> str | list[str]: ...
+
+@converter.post(NodeType)
+def handler(node: NodeType, ctx: ConverterContext) -> str | list[str]: ...
+
+@converter.file("support_file.py")
+def provider(meta: dict) -> str: ...
+```
+
+### ConverterContext
+Tracks conversion state:
+- `index` → variable counter (v0, v1, v2...)
+- `depth` → indentation level
+- `prv` → previous variable name (input)
+- `nxt` → next variable name (output)
+- `indent` → current indentation string
+- `advance()` → increment index
+- `deeper()` → increase depth
+
+### Node traversal categories
+- Container nodes (JsonDef, TypeDef, Struct, Init): depth+1, index resets
+- Pipeline nodes (Field, InitField, PreValidate, etc.): manual via `_emit_pipeline()`
+- Predicate nodes (Filter, Assert, Match, Logic*): same context, no index change
+
+### Key methods
+- `convert(module_ast) → str` — main entry, returns generated code
+- `convert_all(module_ast, **meta) → dict[str, str]` — main file + support files
+- `_emit_node(node, ctx) → list[str]` — single node with pre/post callbacks
+- `_emit_pipeline(nodes, ctx) → list[str]` — field pipeline with variable tracking
+- `extend() → BaseConverter` — create child converter (inheritance)
+
+### Converter hierarchy
+```python
+PY_BASE = BaseConverter()       # shared Python handlers
+PY_BS4 = PY_BASE.extend()      # BS4-specific overrides
+PY_LXML = PY_BASE.extend()     # lxml-specific overrides
+```
+
+---
+
+## Linter Architecture (linter/)
+
+### Core
+- `LINTER` singleton with rule registry
+- `LintContext` coordinates: navigator, collector, path, metadata
+- `LintResult` collects `LintError` instances
+- `ErrorCode` enum for error identification
+
+### Rule modules
+- `rules.py` — general syntax (keywords, definitions, struct names, pipeline order)
+- `rules_struct.py` — struct type requirements (LIST needs @split-doc, TABLE needs @match, @request validation)
+- `rule_keywords.py` — keyword allowlist validation
+- `type_rules.py` — pipeline type inference and mismatch detection
+
+### Entry points
+- `lint_file(path) → LintResult`
+- `lint_string(source) → LintResult`
+
+### Output formats
+- Text: human-readable with source context
+- JSON: array of errors for automated processing (LLM fix pipelines)
+
+---
+
+## Health Check (health.py)
+
+```python
+check_struct_health(struct, html, module=None) → HealthResult
+```
+
+Verifies selectors match elements in real HTML without code generation.
+- Single selectors (css, xpath): fail if 0 matches
+- Multi selectors (css-all, xpath-all): fail if 0 matches
+- Remove selectors: warn if 0 matches
+- Fallback downgrades fail → warn
+- Recurses into nested structs (with cycle detection)
+
+---
+
+## KDL DSL Quick Reference
+
+### Struct types and required fields
+
+```kdl
+struct Name type=item { ... }                              // default, no specials needed
+struct Name type=list { @split-doc { css-all ".item" } ... }
+struct Name type=flat { ... }                              // no specials needed
+struct Name type=dict { @split-doc {...} @key {...} @value {...} }
+struct Name type=table { @table { css "table" } @rows { css-all "tr" } fields... }
+```
+
+Table fields use @match + @value:
+```kdl
+title { @match { contains "Title" } @value { text; trim } }
+```
+
+### Pipeline order (strict)
+```
+selector → extract → string_ops → regex → array_ops → type_conv → fallback
+```
+
+### Type flow examples
+```
+css "sel"        → DOCUMENT
+css-all "sel"    → LIST_DOCUMENT
+text             : DOCUMENT → STRING, LIST_DOCUMENT → LIST_STRING
+attr "href"      : DOCUMENT → STRING, LIST_DOCUMENT → LIST_STRING
+index 0 / first  : LIST_* → scalar
+to-int           : STRING → INT, LIST_STRING → LIST_INT
+fallback #null   : STRING → OPT_STRING
+nested StructName: DOCUMENT → NESTED (terminal)
+jsonify Schema   : STRING → JSON (terminal)
+```
+
+### Pattern-match selectors
+```kdl
+css { ".primary-title"; ".fallback-title"; "h1" }   // try in order, use first hit
+```
+
+### Defines
+```kdl
+define BASE-URL="https://example.com/{{}}"
+define STRIP-URL { rm-prefix "/" rm-suffix ".html" }
+```
+
+### Init (cached values)
+```kdl
+@init {
+    base-url { css "base"; attr "href"; trim }
+}
+title { css "h1"; text; fmt @base-url }
+```
+
+### Predicates
+```kdl
+filter { attr-contains "class" "active"; not { contains "hidden" } }
+assert { len-gt 0 }
+```
+
+### Fallback
+```kdl
+price { css ".price"; text; to-float; fallback 0.0 }
+note { css ".note"; text; fallback #null }           // → OPT_STRING
+tags { css-all ".tag"; text; fallback {} }            // → empty list
+```
+
+### JSON schema + jsonify
+```kdl
+json ApiResponse { data str; status int }
+struct Parser type=item {
+    result { css "script#data"; text; jsonify ApiResponse path="response.data" }
+}
+```
+
+### Transforms (multi-language custom code)
+```kdl
+transform decode-base64 accept=STRING return=STRING {
+    py { import "from base64 import b64decode"; code "{{NXT}} = b64decode({{PRV}}).decode()" }
+    js { code "const {{NXT}} = atob({{PRV}});" }
+}
+```
+
+### Transport layer (@request)
+
+Optional struct-level directive that embeds a raw HTTP request or POSIX curl command.
+Converters parse it at codegen time (via `parsers/`) and emit an HTTP fetch method on the generated class.
+Placeholders `{{name}}` become function parameters.
+
+```kdl
+// curl form
+struct ProductInfo type=table {
+    @request """
+    curl '{{full-book-url}}'
+    """
+    ...
+}
+
+// raw HTTP form (supports HTTP/1.1 and HTTP/2)
+struct MainCatalogue {
+    @request """
+    GET /catalogue/page-{{page-num}}.html HTTP/2
+    Host: books.toscrape.com
+    Accept: text/html
+    """
+    ...
+}
+
+// with JSON response unwrapping
+struct ApiData {
+    @request response-path="payload.html" response-join="\n" """
+    POST /api HTTP/1.1
+    Host: example.com
+    Content-Type: application/json
+
+    {"id": "{{id}}"}
+    """
+    ...
+}
+```
+
+`response-path` — dot-notation JSON path into the response body to extract the HTML string.
+`response-join` — separator when the resolved path is a list of strings.
+
+Generated code (Python `httpx` example): `fetch(self, *, page_num: str) -> Self` and `async_fetch(...)`.
+
+### Nested structs
+```kdl
+struct BookList type=list {
+    @split-doc { css-all ".book" }
+    title { css ".title"; text }
+    details { nested BookDetails }
+}
+struct BookDetails type=item {
+    isbn { css ".isbn"; text }
+}
+```
+
+---
+
+## Key Architectural Patterns
+
+1. **Visitor pattern**: converters register handlers per AST node type via decorators
+2. **Pipeline variable chain**: ConverterContext maintains v0→v1→v2... for each field
+3. **Two-pass parsing**: imports first, then module body (enables cross-file references)
+4. **Linting as separate pass**: completely independent of code generation
+5. **Extensible converters**: `.extend()` creates child converter inheriting all handlers
+6. **Type-tagged containers**: VariableType/StructType enums enforce strict typing at AST level
+7. **Recursive nesting**: `Nested` node resolves via struct_map with cycle detection
+8. **Transport layer**: `@request` stores raw payload in `RequestConfig`; `parsers/` normalises curl/HTTP at codegen time into `RequestSpec`; converters emit fetch methods per target HTTP client
+
+---
+
+## Adding a New Converter Target
+
+1. Create `ssc_codegen/converters/new_target.py`
+2. Instantiate `BaseConverter()` or extend existing one
+3. Register handlers for all AST node types via `@converter.pre(NodeType)` / `@converter.post(NodeType)`
+4. Map `VariableType` → target language types
+5. Register in `main.py` Target enum and converter mapping
+6. Add file extension mapping
+
+## Adding a New AST Node
+
+1. Define node class in appropriate `ast/*.py` file (inherit from `Node`)
+2. Export from `ast/__init__.py`
+3. Register parser handler via `register_expression_node` / `register_struct_node`
+4. Add linter rules in `linter/rules.py` or `linter/type_rules.py`
+5. Add handler in each converter
+
+## Adding a New Linter Rule
+
+1. Define rule function in `linter/rules.py`, `rules_struct.py`, or `type_rules.py`
+2. Register with `@LINTER.register` decorator
+3. Add error code to `ErrorCode` enum if needed
+4. Rule receives `LintContext`, uses `ctx.collector.error()` / `ctx.collector.warning()`

@@ -1,78 +1,8 @@
-import re
-from contextlib import suppress
+from __future__ import annotations
 
-from cssselect import HTMLTranslator, SelectorSyntaxError
-from lxml import etree
-from lxml.etree import XPathSyntaxError
-
-# cssselect not support CSS4 standard syntax
-# used for particularly provide CSS 4 API
-# https://facelessuser.github.io/soupsieve/selectors/
-from soupsieve import compile as css_compile
-from soupsieve.util import SelectorSyntaxError as SoupSieveSelectorSyntaxError
+from cssselect import HTMLTranslator
 
 
 def css_to_xpath(query: str, prefix: str = "descendant-or-self::") -> str:
-    """convert css to XPATH selector"""
-    xpath = HTMLTranslator().css_to_xpath(query, prefix=prefix)
-    return xpath
-
-
-def xpath_to_css(query: str) -> str:
-    """this is the converter for simple xpath queries and exclude check operators like `contains`
-
-    EG OK:
-
-        //div[@class="product_price"]/p[@class="instock availability"]/i
-
-        div[class="product_price"] > p[class="instock availability"] > i
-
-    EG FAIL:
-        //p[contains(@class, "star-rating")]
-
-
-    NOTE:
-        cssselect not fully support CSS4 standard
-
-    """
-    # https://stackoverflow.com/a/18421383
-    css = re.sub(
-        r"\[(\d+?)\]", lambda m: "[" + str(int(m.group(1)) - 1) + "]", query
-    )
-    css = re.sub(r"/{2}", "", css)
-    css = re.sub(r"/+", " > ", css)
-    css = css.replace("@", "")
-    css = re.sub(r"\[(\d+)\]", lambda m: f":eq({m.group(1)})", css)
-    css = re.sub(r"\[@(.*?)='(. *?)\]", r'[\1 = "\2"]', css)
-    css = css.lstrip()
-
-    return css
-
-
-def validate_css_query(query: str) -> None:
-    try:
-        css_compile(query.strip('"'))
-    except SoupSieveSelectorSyntaxError:
-        # maybe is XPATH?
-        with suppress(XPathSyntaxError):
-            etree.XPath(query)  # type: ignore
-            msg = f"`{query}` looks like XPATH query, not CSS"
-            raise SelectorSyntaxError(msg)
-        msg = f"`{query}` is not valid CSS selector"
-        raise SelectorSyntaxError(msg)
-
-
-def validate_xpath_query(query: str) -> None:
-    try:
-        etree.XPath(query.strip('"'))
-        # etree.XPath accept CSS-like queries without throw exception, check it!
-        is_css = False
-        with suppress(SoupSieveSelectorSyntaxError):
-            css_compile(query.strip('"'))
-            is_css = True
-        if is_css:
-            msg = f"`{query}` looks like CSS query, not XPATH"
-            raise SelectorSyntaxError(msg)
-    except XPathSyntaxError:
-        msg = f"`{query}` is not valid XPATH selector"
-        raise SelectorSyntaxError(msg)
+    """Convert CSS selector to XPath query."""
+    return HTMLTranslator().css_to_xpath(query, prefix=prefix)

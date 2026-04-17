@@ -1,0 +1,2 @@
+import "./circular_a.kdl"
+struct B { y { css "y"; text } }

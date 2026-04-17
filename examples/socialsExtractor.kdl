@@ -1,0 +1,156 @@
+@doc """
+Universal example socials urls extractor. Can be used in any html page
+"""
+
+
+define RE-JOHN-DOE=#"(?i)john[\s\-_\.]*doe"#
+
+// regex implemented by projectdiscovery:
+// https://github.com/projectdiscovery/katana/blob/main/pkg/utils/regex.go#L7
+define RE-BODY-ENDPOINT-LIKE=#"""
+(?ix) 
+    (
+        (?:
+            (?:\.\./[A-Za-z0-9\-_/\\?&@.=%]+)
+            |
+            (?:https?://[A-Za-z0-9_\-.]+(?:\.\./)?/[A-Za-z0-9\-_/\\?&@.=%]+)
+            |
+            (?:/[A-Za-z0-9\-_/\\?&@.%]+\.(?:aspx?|action|cfm|cgi|do|pl|css|x?html?|js(?:p|on)?|pdf|php5?|py|rss))
+            |
+            (?:[A-Za-z0-9\-_?&@.%]+/[A-Za-z0-9/\\\-_?&@.%]+\.(?:aspx?|action|cfm|cgi|do|pl|css|x?html?|js(?:p|on)?|pdf|php5?|py|rss))
+        )
+    )
+"""#
+
+define FILTER-EXCLUDE {
+    not {
+        starts "info@"
+        re RE-JOHN-DOE
+        // TIP: you can manually write expr like this for increase speed
+        // this expression works faster than regexp
+        and { 
+            contains "john" "John"
+            contains "doe" "Doe"
+            }
+        // add other exclude predicates
+    }
+}
+
+// will be used for drop metricts-like endpoints
+define NOT-FILTER-METRICS-SCRIPT {
+    not { contains "ym(" "gtag(" "yaCounter" }
+}
+
+define CSS-ALL-ATTRS {
+    css-all "[href], [src], [action], [onclick], [formaction]"
+    attr "href" "src" "action" "onclick" "formaction"
+}
+
+struct Git type=flat {
+    @init {
+        endpoints { CSS-ALL-ATTRS }
+    }
+    github {
+        @endpoints
+        filter {
+            contains "github.com/"
+            FILTER-EXCLUDE
+        }
+        fallback {}
+    }
+    gitlab {
+        @endpoints
+        filter {
+            contains "gitlab.com/"
+            FILTER-EXCLUDE
+        }
+        fallback {}
+    }
+}
+
+struct Socials type=flat {
+    @init {
+        endpoints { CSS-ALL-ATTRS }
+        raw-endpoints { 
+            // WARNING:
+            // deleting elements has a **SIDE EFFECT**:
+            // if you try to find it by selector, it won't be there
+            // eg: after delete ("script,svg,img") in this tags you cannot find it!
+            css-remove "script,svg,img"
+            raw 
+            // note: too expensive expr
+            // recommended remove nessesary elements before run regex
+            // eg:
+            // { css-all "span,p,strong,form,h1,h2,h3,div"); text; re-all ... }
+            // or before run regex, delete elements: 
+            re-all RE-BODY-ENDPOINT-LIKE
+            fallback {}
+        }
+    }
+    twitter {
+        @endpoints
+        filter {
+            // note: shorten link selectors can be add a side effect
+            // and capture urls like `example*x*.com/` or `foobar*x*.com/`.
+            // this example not be coverage this corner cases
+            contains "twitter.com" "https://x.com"
+            FILTER-EXCLUDE
+        }
+        fallback {}
+    }
+    tiktok {
+        @endpoints
+        filter {
+            // note: shorten link selectors can be add a side effect
+            // and capture urls like `example*x*.com/` or `foobar*x*.com/`.
+            // this example not be coverage this corner cases
+            contains "tiktok.com"
+            FILTER-EXCLUDE
+        }
+        fallback {}
+    }
+    youtube {
+        @endpoints
+        filter {
+            contains "youtube.com" "youtu.be"
+            FILTER-EXCLUDE
+        }
+        fallback {}
+    }
+
+    // by regex extract example
+    raw-twitter {
+        @raw-endpoints
+        filter {
+            contains "twitter.com" "https://x.com"
+        }
+        fallback {}
+    }
+    raw-youtube {
+        @raw-endpoints
+        filter {
+            contains "youtube.com" "youtu.be"
+        }
+        fallback {}
+    }   
+}
+
+
+struct Contacts {
+    // use documented html features
+    phone {
+        css-all "a[href^='tel:']"
+        attr href
+        filter { NOT-FILTER-METRICS-SCRIPT }
+        unique
+        fallback {}
+    }
+    email {
+        css-all "a[href^='mailto:']"
+        attr href
+        filter { NOT-FILTER-METRICS-SCRIPT }
+        unique
+        fallback {}
+    }
+
+}

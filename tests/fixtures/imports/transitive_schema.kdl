@@ -1,0 +1,12 @@
+// imports level2 which itself imports shared_defines
+// FMT-BASE and RE-PRICE should be available transitively
+import "./level2.kdl"
+
+struct TransitivePage {
+    url {
+        css "a"
+        attr "href"
+        fmt FMT-BASE
+    }
+    item { nested Level2Item }
+}

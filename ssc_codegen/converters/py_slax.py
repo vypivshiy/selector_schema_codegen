@@ -1,0 +1,433 @@
+"""
+selectolax converter - inherits from base converter and overrides selectolax-specific APIs.
+"""
+
+from ssc_codegen.converters.base import ConverterContext
+from ssc_codegen.converters.helpers import to_snake_case
+
+from ssc_codegen.ast import VariableType
+from ssc_codegen.ast import (
+    Imports,
+    Utilities,
+    Field,
+    Init,
+    InitField,
+    Key,
+    Value,
+    PreValidate,
+    SplitDoc,
+    TableConfig,
+    TableMatchKey,
+    TableRow,
+)
+
+from ssc_codegen.ast import (
+    CssSelect,
+    CssSelectAll,
+    XpathSelect,
+    XpathSelectAll,
+    CssRemove,
+    XpathRemove,
+    Attr,
+    Text,
+    Raw,
+    PredCss,
+    PredXpath,
+    PredHasAttr,
+    PredAttrEq,
+    PredAttrNe,
+    PredAttrStarts,
+    PredAttrEnds,
+    PredAttrContains,
+    PredAttrRe,
+    PredTextStarts,
+    PredTextEnds,
+    PredTextContains,
+    PredTextRe,
+)
+
+from ssc_codegen.ast import Nested
+
+from ssc_codegen.converters import py_bs4
+
+
+PY_SLAX_CONVERTER = py_bs4.PY_BASE_CONVERTER.extend()
+PY_TYPES = py_bs4.PY_TYPES.copy()
+
+PY_TYPES[VariableType.DOCUMENT] = "Node"
+PY_TYPES[VariableType.LIST_DOCUMENT] = "List[Node]"
+
+
+@PY_SLAX_CONVERTER(Imports)
+def pre_imports(node: Imports, _: ConverterContext):
+    base_imports = [
+        "import re",
+        "import sys",
+        "from typing import TypedDict, Optional, Any, List, Dict, Union",
+        "from html import unescape as _html_unescape",
+    ]
+
+    transform_imports = sorted(node.transform_imports.get("py", set()))
+
+    return base_imports + transform_imports
+
+
+@PY_SLAX_CONVERTER.post(Imports)
+def post_imports(node: Imports, ctx: ConverterContext):
+    lines = [
+        "from selectolax.lexbor import LexborHTMLParser as HTMLParser, LexborNode as Node"
+    ]
+    lines.extend(py_bs4.http_client_import(ctx))
+    return lines
+
+
+@PY_SLAX_CONVERTER(Utilities)
+def pre_utilities(node: Utilities, ctx: ConverterContext):
+    return py_bs4.pre_utilities(node, ctx)
+
+
+@PY_SLAX_CONVERTER(Init)
+def pre_init(node: Init, ctx: ConverterContext):
+    init_node_names: list[str] = []
+    for i in node.body:
+        if isinstance(i, InitField):
+            name = to_snake_case(i.name)
+            init_node_names.append(name)
+    code = [
+        f"{ctx.indent}def __init__(self, document: Union[str, HTMLParser, Node]):",
+        f"{ctx.indent * 2}if isinstance(document, str):",
+        f"{ctx.indent * 3}self._doc = HTMLParser(document)",
+        f"{ctx.indent * 2}else:",
+        f"{ctx.indent * 3}self._doc = document",
+    ]
+    for name in init_node_names:
+        code.append(
+            f"{ctx.indent * 2}self._{name} = self._init_{name}(self._doc)"
+        )
+    return code
+
+
+@PY_SLAX_CONVERTER(InitField)
+def pre_init_field(node: InitField, ctx: ConverterContext):
+    name = to_snake_case(node.name)
+    ret_type = PY_TYPES.get(node.ret, "Any")
+    return [
+        f"    def _init_{name}(self, v: Union[HTMLParser, Node]) -> {ret_type}:"
+    ]
+
+
+@PY_SLAX_CONVERTER(Field)
+def pre_struct_field(node: Field, ctx: ConverterContext):
+    name = to_snake_case(node.name)
+    ret_type = PY_TYPES.get(node.ret, "Any")
+
+    if node.ret == VariableType.JSON:
+        from ssc_codegen.ast import Jsonify
+
+        jsonify_node = [i for i in node.body if isinstance(i, Jsonify)][0]
+        ret_type = ret_type.format(jsonify_node.schema_name)
+        if jsonify_node.is_array:
+            ret_type = f"List[{ret_type}]"
+    elif node.ret == VariableType.NESTED:
+        nested_node = [i for i in node.body if isinstance(i, Nested)][0]
+        ret_type = ret_type.format(nested_node.struct_name)
+        if nested_node.is_array:
+            ret_type = f"List[{ret_type}]"
+
+    if node.accept == VariableType.STRING:
+        return [
+            f"    def _parse_{name}(self, v: Union[HTMLParser, Node]) -> Union[{ret_type}, _UnmatchedTableRow]:"
+        ]
+    return [
+        f"    def _parse_{name}(self, v: Union[HTMLParser, Node]) -> {ret_type}:"
+    ]
+
+
+@PY_SLAX_CONVERTER(Key)
+def pre_struct_key(node: Key, ctx: ConverterContext):
+    return ["    def _parse_key(self, v: Union[HTMLParser, Node]) -> str:"]
+
+
+@PY_SLAX_CONVERTER(Value)
+def pre_struct_value(node: Value, ctx: ConverterContext):
+    ret_type = PY_TYPES.get(node.ret, "Any")
+
+    if node.ret == VariableType.JSON:
+        from ssc_codegen.ast import Jsonify
+
+        jsonify_node = [i for i in node.body if isinstance(i, Jsonify)][0]
+        ret_type = ret_type.format(jsonify_node.schema_name)
+        if jsonify_node.is_array:
+            ret_type = f"List[{ret_type}]"
+    elif node.ret == VariableType.NESTED:
+        nested_node = [i for i in node.body if isinstance(i, Nested)][0]
+        ret_type = ret_type.format(nested_node.struct_name)
+        if nested_node.is_array:
+            ret_type = f"List[{ret_type}]"
+
+    return [
+        f"    def _parse_value(self, v: Union[HTMLParser, Node]) -> {ret_type}:"
+    ]
+
+
+@PY_SLAX_CONVERTER(PreValidate)
+def pre_struct_pre_validate(node: PreValidate, ctx: ConverterContext):
+    return ["    def _pre_validate(self, v: Union[HTMLParser, Node]) -> None:"]
+
+
+@PY_SLAX_CONVERTER(SplitDoc)
+def pre_struct_split_doc(node: SplitDoc, ctx: ConverterContext):
+    return [
+        "    def _split_doc(self, v: Union[HTMLParser, Node]) -> List[Node]:"
+    ]
+
+
+@PY_SLAX_CONVERTER(TableConfig)
+def pre_struct_table_config(node: TableConfig, ctx: ConverterContext):
+    return ["    def _table_config(self, v: Union[HTMLParser, Node]) -> Node:"]
+
+
+@PY_SLAX_CONVERTER(TableMatchKey)
+def pre_struct_table_match_key(node: TableMatchKey, ctx: ConverterContext):
+    return [
+        "    def _table_match_key(self, v: Union[HTMLParser, Node]) -> str:"
+    ]
+
+
+@PY_SLAX_CONVERTER(TableRow)
+def pre_struct_table_row(node: TableRow, ctx: ConverterContext):
+    return [
+        "    def _parse_table_rows(self, v: Union[HTMLParser, Node]) -> List[Node]:"
+    ]
+
+
+@PY_SLAX_CONVERTER(CssSelect)
+def pre_expr_css_select(node: CssSelect, ctx: ConverterContext):
+    if node.queries:
+        lines: list[str] = []
+        for i, query in enumerate(node.queries):
+            q = repr(query)
+            if i == 0:
+                lines.append(
+                    f"{ctx.indent}{ctx.nxt} = {ctx.prv}.css_first({q})"
+                )
+            else:
+                lines.append(f"{ctx.indent}if {ctx.nxt} is None:")
+                lines.append(
+                    f"{ctx.indent}    {ctx.nxt} = {ctx.prv}.css_first({q})"
+                )
+        return lines
+    query = repr(node.query)
+    return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.css_first({query})"
+
+
+@PY_SLAX_CONVERTER(CssSelectAll)
+def pre_expr_css_select_all(node: CssSelectAll, ctx: ConverterContext):
+    if node.queries:
+        lines: list[str] = []
+        for i, query in enumerate(node.queries):
+            q = repr(query)
+            if i == 0:
+                lines.append(f"{ctx.indent}{ctx.nxt} = {ctx.prv}.css({q})")
+            else:
+                lines.append(f"{ctx.indent}if not {ctx.nxt}:")
+                lines.append(f"{ctx.indent}    {ctx.nxt} = {ctx.prv}.css({q})")
+        return lines
+    query = repr(node.query)
+    return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.css({query})"
+
+
+@PY_SLAX_CONVERTER(XpathSelect)
+def pre_expr_xpath_select(node: XpathSelect, ctx: ConverterContext):
+    raise NotImplementedError("selectolax not support xpath")
+
+
+@PY_SLAX_CONVERTER(XpathSelectAll)
+def pre_expr_xpath_select_all(node: XpathSelectAll, ctx: ConverterContext):
+    raise NotImplementedError("selectolax not support xpath")
+
+
+@PY_SLAX_CONVERTER(CssRemove)
+def pre_expr_css_remove(node: CssRemove, ctx: ConverterContext):
+    query = repr(node.query)
+    return [
+        f"{ctx.indent}[e.decompose() for e in {ctx.prv}.css({query})]",
+        f"{ctx.indent}{ctx.nxt} = {ctx.prv}",
+    ]
+
+
+@PY_SLAX_CONVERTER(XpathRemove)
+def pre_expr_xpath_remove(node: XpathRemove, ctx: ConverterContext):
+    raise NotImplementedError("selectolax not support xpath")
+
+
+@PY_SLAX_CONVERTER(Text)
+def pre_expr_text(node: Text, ctx: ConverterContext):
+    if node.accept == VariableType.DOCUMENT:
+        return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.text()"
+    return f"{ctx.indent}{ctx.nxt} = [i.text() for i in {ctx.prv}]"
+
+
+@PY_SLAX_CONVERTER(Raw)
+def pre_expr_raw(node: Raw, ctx: ConverterContext):
+    if node.accept == VariableType.DOCUMENT:
+        return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.html"
+    return f"{ctx.indent}{ctx.nxt} = [i.html for i in {ctx.prv}]"
+
+
+@PY_SLAX_CONVERTER(Attr)
+def pre_expr_attr(node: Attr, ctx: ConverterContext):
+    keys = node.keys
+    if node.accept == VariableType.DOCUMENT:
+        if len(keys) == 1:
+            return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.attributes[{keys[0]!r}]"
+        return f"{ctx.indent}{ctx.nxt} = [{ctx.prv}.attributes[k] for k in {keys} if {ctx.prv}.attributes.get(k)]"
+    if len(keys) == 1:
+        return f"{ctx.indent}{ctx.nxt} = [e.attributes[{keys[0]!r}] for e in {ctx.prv}]"
+    return f"{ctx.indent}{ctx.nxt} = [e.attributes[k] for e in {ctx.prv} for k in {keys} if e.attributes.get(k)]"
+
+
+@PY_SLAX_CONVERTER(PredCss)
+def pre_expr_pred_css(node: PredCss, ctx: ConverterContext):
+    query = repr(node.query)
+    cond = f"bool(i.css_first({query}))"
+    if ctx.index == 0:
+        return ctx.indent + cond
+    return ctx.indent + f"and {cond}"
+
+
+@PY_SLAX_CONVERTER(PredXpath)
+def pre_expr_pred_xpath(node: PredXpath, ctx: ConverterContext):
+    raise NotImplementedError("selectolax not support xpath")
+
+
+@PY_SLAX_CONVERTER(PredHasAttr)
+def pre_expr_pred_has_attr(node: PredHasAttr, ctx: ConverterContext):
+    attrs = node.attrs
+    if len(attrs) == 1:
+        cond = f"{attrs[0]!r} in i.attributes"
+    else:
+        cond = f"any(attr in i.attributes for attr in {attrs!r})"
+    if ctx.index == 0:
+        return ctx.indent + cond
+    return ctx.indent + f"and {cond}"
+
+
+@PY_SLAX_CONVERTER(PredAttrEq)
+def pre_expr_pred_attr_eq(node: PredAttrEq, ctx: ConverterContext):
+    name = node.name
+    values = node.values
+    if len(values) == 1:
+        cond = f"i.attributes.get({name!r}, '') == {values[0]!r}"
+    else:
+        cond = f"i.attributes.get({name!r}, '') in {values!r}"
+    if ctx.index == 0:
+        return ctx.indent + cond
+    return ctx.indent + f"and {cond}"
+
+
+@PY_SLAX_CONVERTER(PredAttrNe)
+def pre_expr_pred_attr_ne(node: PredAttrNe, ctx: ConverterContext):
+    name = node.name
+    values = node.values
+    if len(values) == 1:
+        cond = f"i.attributes.get({name!r}, '') != {values[0]!r}"
+    else:
+        cond = f"i.attributes.get({name!r}, '') not in {values!r}"
+    if ctx.index == 0:
+        return ctx.indent + cond
+    return ctx.indent + f"and {cond}"
+
+
+@PY_SLAX_CONVERTER(PredAttrStarts)
+def pre_expr_pred_attr_starts(node: PredAttrStarts, ctx: ConverterContext):
+    name = node.name
+    values = node.values
+    if len(values) == 1:
+        cond = f"i.attributes.get({name!r}, '').startswith({values[0]!r})"
+    else:
+        cond = f"any(i.attributes.get({name!r}, '').startswith(v) for v in {values!r})"
+    if ctx.index == 0:
+        return ctx.indent + cond
+    return ctx.indent + f"and {cond}"
+
+
+@PY_SLAX_CONVERTER(PredAttrEnds)
+def pre_expr_pred_attr_ends(node: PredAttrEnds, ctx: ConverterContext):
+    name = node.name
+    values = node.values
+    if len(values) == 1:
+        cond = f"i.attributes.get({name!r}, '').endswith({values[0]!r})"
+    else:
+        cond = f"any(i.attributes.get({name!r}, '').endswith(v) for v in {values!r})"
+    if ctx.index == 0:
+        return ctx.indent + cond
+    return ctx.indent + f"and {cond}"
+
+
+@PY_SLAX_CONVERTER(PredAttrContains)
+def pre_expr_pred_attr_contains(node: PredAttrContains, ctx: ConverterContext):
+    name = node.name
+    values = node.values
+    if len(values) == 1:
+        cond = f"{values[0]!r} in i.attributes.get({name!r}, '')"
+    else:
+        cond = f"any(v in i.attributes.get({name!r}, '') for v in {values!r})"
+    if ctx.index == 0:
+        return ctx.indent + cond
+    return ctx.indent + f"and {cond}"
+
+
+@PY_SLAX_CONVERTER(PredAttrRe)
+def pre_expr_pred_attr_re(node: PredAttrRe, ctx: ConverterContext):
+    name = node.name
+    pattern = repr(node.pattern)
+    cond = f"bool(re.search({pattern}, i.attributes.get({name!r}, '')))"
+    if ctx.index == 0:
+        return ctx.indent + cond
+    return ctx.indent + f"and {cond}"
+
+
+@PY_SLAX_CONVERTER(PredTextStarts)
+def pre_expr_pred_text_starts(node: PredTextStarts, ctx: ConverterContext):
+    values = node.values
+    if len(values) == 1:
+        cond = f"i.text().startswith({values[0]!r})"
+    else:
+        cond = f"any(i.text().startswith(v) for v in {values!r})"
+    if ctx.index == 0:
+        return ctx.indent + cond
+    return ctx.indent + f"and {cond}"
+
+
+@PY_SLAX_CONVERTER(PredTextEnds)
+def pre_expr_pred_text_ends(node: PredTextEnds, ctx: ConverterContext):
+    values = node.values
+    if len(values) == 1:
+        cond = f"i.text().endswith({values[0]!r})"
+    else:
+        cond = f"any(i.text().endswith(v) for v in {values!r})"
+    if ctx.index == 0:
+        return ctx.indent + cond
+    return ctx.indent + f"and {cond}"
+
+
+@PY_SLAX_CONVERTER(PredTextContains)
+def pre_expr_pred_text_contains(node: PredTextContains, ctx: ConverterContext):
+    values = node.values
+    if len(values) == 1:
+        cond = f"{values[0]!r} in i.text()"
+    else:
+        cond = f"any(v in i.text() for v in {values!r})"
+    if ctx.index == 0:
+        return ctx.indent + cond
+    return ctx.indent + f"and {cond}"
+
+
+@PY_SLAX_CONVERTER(PredTextRe)
+def pre_expr_pred_text_re(node: PredTextRe, ctx: ConverterContext):
+    pattern = repr(node.pattern)
+    cond = f"bool(re.search({pattern}, i.text()))"
+    if ctx.index == 0:
+        return ctx.indent + cond
+    return ctx.indent + f"and {cond}"

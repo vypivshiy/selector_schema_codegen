@@ -1,0 +1,7 @@
+// shared struct for import testing
+struct SharedItem {
+    title {
+        css "h1"
+        text
+    }
+}

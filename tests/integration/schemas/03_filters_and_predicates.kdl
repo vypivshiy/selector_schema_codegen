@@ -1,0 +1,68 @@
+@doc "Focused coverage: filter/assert containers and rich predicate combinations for CSS-selected values."
+
+define CSS-CARD=".card"
+define CSS-LINK="a[href]"
+define RE-WORD=#"^[A-Za-z0-9_-]+$"#
+define RE-HREF=#"https?://|/"#
+define RE-CODE=#"^code"#
+
+struct FiltersAndPredicates type=list {
+    @split-doc {
+        css-all CSS-CARD
+    }
+
+    filtered-links {
+        css-all CSS-LINK
+        filter {
+            css ".icon"
+            has-attr "href" "data-kind"
+            attr-eq "data-kind" "nav" "cta"
+            attr-ne "rel" "nofollow" "sponsored"
+            attr-starts "href" "/" "https://"
+            attr-ends "href" ".html" "/"
+            attr-re "href" RE-HREF
+            text-starts "Go" "Read"
+            text-ends "more" "now"
+            text-contains "guide" "docs"
+            text-re #"guide|docs"#
+        }
+        attr "href" "data-alt"
+        unique keep-order=#true
+        fallback {}
+    }
+
+    logic-check {
+        css ".logic"
+        text
+        assert {
+            contains "alpha"
+            not {
+                eq "forbidden"
+            }
+            or {
+                starts "pre"
+                ends "suf"
+            }
+            and {
+                re RE-WORD
+                contains "a"
+            }
+        }
+        fallback ""
+    }
+
+    numeric-check {
+        css ".code"
+        text
+        assert {
+            gt 3
+            ge 4
+            lt 20
+            le 20
+            ne "skip" "ignore"
+            in "code-4" "code-8"
+            re RE-CODE
+        }
+        fallback ""
+    }
+}
