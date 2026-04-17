@@ -65,6 +65,7 @@ from ssc_codegen.ast import (
     InitField,
     Key,
     Value,
+    RequestConfig,
     StartParse,
 )
 # expressions
@@ -784,6 +785,20 @@ class AstParser:
                 expr = TableMatchKey(parent=parent)
                 self._parse_expressions(node.children, expr)
                 parent.body.append(expr)
+            elif node.name == "@request":
+                if not node.args:
+                    raise ParseError("@request requires a multiline string argument")
+                raw_payload = str(node.args[0])
+                req = RequestConfig(parent=parent)
+                req.raw_payload = raw_payload
+                req.response_path = str(node.properties.get("response-path", ""))
+                req.response_join = str(node.properties.get("response-join", ""))
+                parent.body.append(req)
+                logger.debug(
+                    "  @request: %d chars, placeholders=%r",
+                    len(raw_payload),
+                    req.placeholders,
+                )
             else:
                 if parent.struct_type == StructType.TABLE:
                     expr = Field(

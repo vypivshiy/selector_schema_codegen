@@ -1,9 +1,12 @@
 from __future__ import annotations
+import re as _re
 from dataclasses import dataclass, field
 from typing import cast
 
 from .base import Node
 from .types import VariableType, StructType
+
+_PLACEHOLDER_RE = _re.compile(r'\{\{(\w+)\}\}')
 
 
 @dataclass
@@ -32,6 +35,17 @@ class Struct(Node):
     @property
     def init(self) -> Init:
         return self.body[1]  # type: ignore
+
+    @property
+    def request_config(self) -> "RequestConfig | None":
+        for node in self.body:
+            if isinstance(node, RequestConfig):
+                return node
+        return None
+
+    @property
+    def use_request(self) -> bool:
+        return self.request_config is not None
 
 
 @dataclass
@@ -159,6 +173,32 @@ class TableMatchKey(Node):
 
     accept: VariableType = field(default=VariableType.DOCUMENT)
     ret: VariableType = field(default=VariableType.STRING)
+
+
+@dataclass
+class RequestConfig(Node):
+    """
+    Optional transport layer config for a struct.
+    DSL: @request response-path="..." response-join="..." \"""...\"""
+
+    raw_payload stores the verbatim curl or raw HTTP string (with {{placeholders}}).
+    Transport normalization (curl/HTTP parse → kwargs) happens at converter stage.
+    """
+
+    raw_payload: str = ""
+    response_path: str = ""   # dot-notation JSON path, e.g. "payload.html"
+    response_join: str = ""   # join separator when response-path resolves to list[str]
+
+    @property
+    def placeholders(self) -> list[str]:
+        """Unique placeholder names in declaration order."""
+        seen: set[str] = set()
+        result: list[str] = []
+        for name in _PLACEHOLDER_RE.findall(self.raw_payload):
+            if name not in seen:
+                seen.add(name)
+                result.append(name)
+        return result
 
 
 @dataclass
