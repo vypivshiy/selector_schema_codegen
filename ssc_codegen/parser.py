@@ -805,7 +805,9 @@ class AstParser:
                     raise ParseError(
                         "@request requires a multiline string argument"
                     )
-                raw_payload = str(node.args[0])
+                raw_payload = str(
+                    self.ctx.property_defines.get(node.args[0], node.args[0])
+                )
                 req = RequestConfig(parent=parent)
                 req.raw_payload = raw_payload
                 req.response_path = str(
