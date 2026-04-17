@@ -41,6 +41,10 @@ struct Main {
             re JSON-PATTERN
         }
     }
+    @request """
+    curl https://quotes.toscrape.com/js/page/{{page-num}}/
+    """
+
     data {
         // use computed value. should be a firts
         @raw-json

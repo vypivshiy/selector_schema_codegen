@@ -113,6 +113,10 @@ struct MainPage {
     NOTE:
         news.votelink can be null
     """
+    @request """
+    curl https://news.ycombinator.com?p={{page-num}}
+    """
+
     news { nested News }
     ratings { nested Rating }
 }
@@ -143,6 +147,9 @@ struct MainDiscussionPage {
 
     NOTE:
         comments.reply can be null
+    """
+    @request """
+    curl https://news.ycombinator.com/item?id={{id}}
     """
 
     title { css ".titleline > a"; text }

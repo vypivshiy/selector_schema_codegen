@@ -96,6 +96,10 @@ struct SearchPage {
 
     """
 
+    @request """
+    curl 'https://www.imdb.com/find/?q={{query}}&s=tt&exact=true'
+    """
+
     /*
     TIP:
     before write selectors, overview target page
