@@ -816,6 +816,7 @@ class AstParser:
                 req.response_join = str(
                     node.properties.get("response-join", "")
                 )
+                req.name = str(node.properties.get("name", ""))
                 parent.body.append(req)
                 logger.debug(
                     "  @request: %d chars, placeholders=%r",

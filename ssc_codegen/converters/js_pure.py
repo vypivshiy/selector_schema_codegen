@@ -1519,10 +1519,12 @@ def pre_request_config(node: RequestConfig, ctx: ConverterContext):
     struct_name = to_pascal_case(node.parent.name)
     ph_names = spec.placeholders
 
+    method_name = "fetch" + (to_pascal_case(node.name) if node.name else "")
+
     # second parameter: destructured object or omitted
     client_param = "client"
     ph_param = (", {" + ", ".join(ph_names) + "}") if ph_names else ""
-    sig = f"static async fetch({client_param}{ph_param})"
+    sig = f"static async {method_name}({client_param}{ph_param})"
 
     def _response_lines(data_expr: str) -> list[str]:
         lines: list[str] = []

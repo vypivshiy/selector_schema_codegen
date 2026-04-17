@@ -1461,6 +1461,10 @@ def pre_request_config(node: RequestConfig, ctx: ConverterContext):
     if spec.placeholders:
         ph_params = ", *, " + ", ".join(f"{p}: str" for p in spec.placeholders)
 
+    suffix = ("_" + to_snake_case(node.name)) if node.name else ""
+    fetch_name = f"fetch{suffix}"
+    async_fetch_name = f"async_fetch{suffix}"
+
     call_args: list[str] = [f"{spec.method!r},", f"{render_value(spec.url)},"]
     if spec.headers:
         call_args.append(f"headers={render_dict(spec.headers)},")
@@ -1486,12 +1490,12 @@ def pre_request_config(node: RequestConfig, ctx: ConverterContext):
 
     if http_client == "httpx":
         lines = _build_request_method(
-            name="fetch", is_async=False, client_type="httpx.Client", **kwargs
+            name=fetch_name, is_async=False, client_type="httpx.Client", **kwargs
         )
         lines.append("")
         lines.extend(
             _build_request_method(
-                name="async_fetch",
+                name=async_fetch_name,
                 is_async=True,
                 client_type="httpx.AsyncClient",
                 **kwargs,
@@ -1501,5 +1505,5 @@ def pre_request_config(node: RequestConfig, ctx: ConverterContext):
 
     # requests (default)
     return _build_request_method(
-        name="fetch", is_async=False, client_type="requests.Session", **kwargs
+        name=fetch_name, is_async=False, client_type="requests.Session", **kwargs
     )

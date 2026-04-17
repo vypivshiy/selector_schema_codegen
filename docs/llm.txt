@@ -56,6 +56,7 @@ struct Name type=item|list|dict|table|flat {
 ### Special fields
 
 - @doc — documentation string
+- @request — optional HTTP constructor (see section below)
 - @pre-validate — validate document before parsing; raises error on failure
 - @init — pre-compute and cache values; referenced via @name in fields
 - @split-doc — split document into items (list, dict)
@@ -283,6 +284,75 @@ dsl upper-py lang=py {
 lang is required. accept and return are optional.
 Called via: expr <Name>.
 
+## @request
+
+Optional struct-level directive. Embeds a raw HTTP request or POSIX curl command.
+At codegen time the converter parses it and emits a `fetch()` classmethod.
+The parser module itself remains transport-agnostic — it still accepts one HTML page.
+
+### Formats
+
+curl:
+```kdl
+@request """
+curl 'https://example.com/{{slug}}'
+"""
+```
+
+Raw HTTP:
+```kdl
+@request """
+GET /catalogue/page-{{page-num}}.html HTTP/1.1
+Host: example.com
+Accept: text/html
+"""
+```
+
+### Placeholders
+
+`{{name}}` becomes a keyword-only parameter in `fetch()`, converted to snake_case.
+No placeholders → static request, `fetch(cls, client)` only.
+
+### Optional properties
+
+- `response-path="a.b.c"` — dot-notation path into JSON response body to extract HTML string
+- `response-join="\n"` — join separator when response-path resolves to list[str]
+
+```kdl
+@request response-path="payload.html" """
+POST /api HTTP/1.1
+Host: example.com
+Content-Type: application/json
+
+{"id": "{{id}}"}
+"""
+```
+
+### define with @request
+
+Scalar define can be used as the @request argument:
+```kdl
+define MY-REQ="""
+GET /{{page}} HTTP/1.1
+Host: example.com
+"""
+struct Foo {
+    @request MY-REQ
+    ...
+}
+```
+
+Placeholders inside the define string work identically to inline form.
+
+### CLI flag
+
+`--http-client` selects the generated HTTP client:
+- Python targets: `requests` (default, sync only) | `httpx` (emits both `fetch()` and `async_fetch()`)
+- JS target (js-pure): `fetch` (default) | `axios`
+- Go target: not supported
+
+Without `--http-client`, `@request` is ignored and no `fetch` method is generated.
+
 ## CLI
 
 ```bash
@@ -290,4 +360,4 @@ ssc-gen generate schema.kdl -t py-bs4    # generate parser code
 ssc-gen check schema.kdl                 # lint/validate schema
 ```
 
-Targets: py-bs4, py-lxml, py-parsel, py-slax, js-pure.
+Targets: py-bs4, py-lxml, py-parsel, py-slax, js-pure, go-goquery.

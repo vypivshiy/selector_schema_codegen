@@ -138,6 +138,7 @@ and { ... }    or { ... }    not { ... }
 | Field | Used in | Purpose |
 |-------|---------|---------|
 | `@doc "..."` | all | Documentation |
+| `@request "..."` | all | Optional HTTP constructor (needs `--http-client` at codegen) |
 | `@init { ... }` | all | Precompute shared values |
 | `@split-doc { ... }` | list, dict | Split document into items |
 | `@pre-validate { ... }` | all | Assert before parsing |

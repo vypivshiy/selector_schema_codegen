@@ -234,7 +234,33 @@ def rule_struct(node: Node, ctx: LintContext) -> None:
                 field_node, field_name, ctx, struct_type=struct_type
             )
 
+    _check_request_uniqueness(fields, ctx)
+
     ctx.pop()
+
+
+# ── @request uniqueness ────────────────────────────────────────────────────────
+
+
+def _check_request_uniqueness(fields: list, ctx: LintContext) -> None:
+    """At most one unnamed @request; no duplicate resolved method names."""
+    request_nodes = [f for f in fields if ctx.node_name(f) == "@request"]
+    if len(request_nodes) <= 1:
+        return
+
+    seen: dict[str, object] = {}
+    for node in request_nodes:
+        name = ctx.get_prop(node, "name") or ""
+        if name in seen:
+            if name:
+                message = f"duplicate @request name=\"{name}\": method name collision"
+                hint = "each @request must have a unique name= value"
+            else:
+                message = "duplicate unnamed @request: only one unnamed @request is allowed per struct"
+                hint = 'add name= to extra @request blocks: @request name="by-slug" """..."""'
+            ctx.error(node, ErrorCode.MISSING_ARGUMENT, message=message, hint=hint)
+        else:
+            seen[name] = node
 
 
 # ── reserved field checks ──────────────────────────────────────────────────────

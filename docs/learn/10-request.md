@@ -1,0 +1,156 @@
+# 10. @request — встроенный HTTP конструктор
+
+**Версия DSL:** 2.1  
+**Последнее обновление:** 2026-04-17
+
+`@request` — необязательная директива внутри `struct`. Описывает HTTP-запрос,
+который нужно выполнить, чтобы получить HTML для этого парсера. Генератор
+добавляет на класс метод `fetch()` с нужными параметрами.
+
+Это **syntax sugar**: вместо `@request` можно всегда сделать запрос вручную и
+передать HTML в конструктор. Парсер не знает о транспорте — он по-прежнему
+получает одну HTML-страницу.
+
+## Два формата записи
+
+### POSIX curl
+
+```kdl
+struct ProductPage {
+    @request """
+    curl 'https://books.toscrape.com/catalogue/{{slug}}/index.html'
+    """
+    title { css "h1"; text }
+}
+```
+
+### Сырой HTTP
+
+```kdl
+struct MainCatalogue {
+    @request """
+    GET /catalogue/page-{{page-num}}.html HTTP/1.1
+    Host: books.toscrape.com
+    Accept: text/html
+    """
+    title { css "h1"; text }
+}
+```
+
+Оба формата эквивалентны: генератор нормализует их в одно представление.
+
+## Placeholders
+
+`{{name}}` — это параметры, которые передаются в `fetch()` при вызове.
+Имена преобразуются в snake_case.
+
+```kdl
+@request """
+GET /search?q={{query}}&page={{page-num}} HTTP/1.1
+Host: example.com
+"""
+```
+
+Генерирует (Python, httpx):
+
+```python
+@classmethod
+def fetch(cls, client: httpx.Client, *, query: str, page_num: str) -> "StructName":
+    ...
+```
+
+Без placeholders — запрос статический, `fetch` принимает только `client`.
+
+## Генерация: выбор HTTP клиента
+
+Флаг `--http-client` при генерации:
+
+```bash
+# Python: requests (по умолчанию)
+ssc-gen generate schema.kdl -t py-bs4 -o out/
+
+# Python: httpx (sync + async)
+ssc-gen generate schema.kdl -t py-bs4 -o out/ --http-client httpx
+
+# JS: fetch (по умолчанию)
+ssc-gen generate schema.kdl -t js-pure -o out/
+
+# JS: axios
+ssc-gen generate schema.kdl -t js-pure -o out/ --http-client axios
+```
+
+При `--http-client httpx` генерируются два метода: `fetch()` и `async_fetch()`.
+
+Без `--http-client` методы `fetch` не генерируются, `@request` игнорируется.
+
+## response-path и response-join
+
+Если ответ сервера — JSON с HTML внутри, можно указать путь до нужного поля:
+
+```kdl
+@request response-path="payload.html" """
+POST /api/page HTTP/1.1
+Host: example.com
+Content-Type: application/json
+
+{"id": "{{id}}"}
+"""
+```
+
+Если путь разрешается в список строк:
+
+```kdl
+@request response-path="chunks" response-join="\n" """
+GET /api/doc/{{id}} HTTP/1.1
+Host: example.com
+"""
+```
+
+## define для @request
+
+Длинный запрос можно вынести в `define`:
+
+```kdl
+define HNEWS-REQ="""
+GET /?p={{page-num}} HTTP/1.1
+Host: news.ycombinator.com
+Accept: text/html
+"""
+
+struct MainPage {
+    @request HNEWS-REQ
+    news { css-all ".athing"; text }
+}
+```
+
+Правило то же, что и для остальных скалярных define: это подстановка строки в аргумент.
+Placeholders (`{{...}}`) внутри работают как обычно.
+
+## Несколько struct с @request в одном файле
+
+Каждый `struct` независим. `@request` задаётся на уровне struct, не модуля:
+
+```kdl
+struct ListPage {
+    @request """
+    GET /catalogue/page-{{page-num}}.html HTTP/1.1
+    Host: books.toscrape.com
+    """
+    books { nested BookCard }
+}
+
+struct BookCard type=list {
+    @split-doc { css-all ".product_pod" }
+    title { css "h3 a"; attr "title" }
+}
+```
+
+`BookCard` не имеет `@request` — он получает HTML через `nested` из `ListPage`,
+а не по отдельному запросу.
+
+## Что @request не делает
+
+- Не управляет пагинацией — это задача вызывающего кода.
+- Не задаёт ретраи, таймауты, куки сессии — конфигурируйте клиент снаружи.
+- Не привязывает модуль к конкретному HTTP-клиенту на уровне импортов.
+  Импорты в generated module минимальны.

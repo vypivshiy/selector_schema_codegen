@@ -247,6 +247,103 @@ Place defines **before structs** that reference them.
 
 ---
 
+## @request — HTTP constructor
+
+Optional struct-level directive. Adds a `fetch()` classmethod to the generated class.
+The parser itself remains transport-agnostic — it still receives one HTML page.
+Only generated when `--http-client` flag is passed to `ssc-gen generate`.
+
+### When to add @request
+
+Add it when the user asks to include an HTTP fetch method, or when documenting
+the exact endpoint a struct is designed for. **Never add it by default** — it is optional.
+
+### Two formats
+
+**curl:**
+```kdl
+struct ProductPage {
+    @request """
+    curl 'https://example.com/{{slug}}'
+    """
+    title { css "h1"; text }
+}
+```
+
+**Raw HTTP:**
+```kdl
+struct MainPage {
+    @request """
+    GET /?p={{page-num}} HTTP/1.1
+    Host: news.ycombinator.com
+    Accept: text/html
+    """
+    title { css "h1"; text }
+}
+```
+
+Both formats are equivalent — the generator normalises them.
+
+### Placeholders
+
+`{{name}}` → keyword parameter in `fetch()`, converted to snake_case.
+
+```kdl
+@request """
+GET /search?q={{query}}&page={{page-num}} HTTP/1.1
+Host: example.com
+"""
+```
+
+Generated (Python, httpx):
+```python
+@classmethod
+def fetch(cls, client: httpx.Client, *, query: str, page_num: str) -> "StructName": ...
+```
+
+### Optional properties
+
+```kdl
+@request response-path="payload.html" response-join="\n" """
+POST /api HTTP/1.1
+Host: example.com
+Content-Type: application/json
+
+{"id": "{{id}}"}
+"""
+```
+
+- `response-path` — dot-notation path into JSON response body to extract HTML
+- `response-join` — join separator when path resolves to list[str]
+
+### define with @request
+
+```kdl
+define HNEWS-REQ="""
+GET /?p={{page-num}} HTTP/1.1
+Host: news.ycombinator.com
+"""
+
+struct MainPage {
+    @request HNEWS-REQ
+    ...
+}
+```
+
+Scalar `define` is substituted as the argument. Placeholders inside work identically.
+
+### CLI flag
+
+```bash
+ssc-gen generate schema.kdl -t py-bs4 --http-client httpx   # sync + async
+ssc-gen generate schema.kdl -t py-bs4 --http-client requests # sync only (default)
+ssc-gen generate schema.kdl -t js-pure --http-client axios
+```
+
+Without `--http-client`, `@request` is silently ignored.
+
+---
+
 ## Imports
 
 Split schemas across multiple files:

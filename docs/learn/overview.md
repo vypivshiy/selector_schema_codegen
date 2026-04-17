@@ -16,3 +16,4 @@
 - [07. Define (переиспользование)](07-define.md)
 - [08. Transform и DSL](08-extensions.md)
 - [09. Imports](09-imports.md)
+- [10. @request — встроенный HTTP конструктор](10-request.md)

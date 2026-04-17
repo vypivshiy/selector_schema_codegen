@@ -44,8 +44,12 @@ class Struct(Node):
         return None
 
     @property
+    def request_configs(self) -> "list[RequestConfig]":
+        return [n for n in self.body if isinstance(n, RequestConfig)]
+
+    @property
     def use_request(self) -> bool:
-        return self.request_config is not None
+        return bool(self.request_configs)
 
 
 @dataclass
@@ -179,10 +183,14 @@ class TableMatchKey(Node):
 class RequestConfig(Node):
     """
     Optional transport layer config for a struct.
-    DSL: @request response-path="..." response-join="..." \"""...\"""
+    DSL: @request [name="suffix"] [response-path="..."] [response-join="..."] \"""...\"""
 
     raw_payload stores the verbatim curl or raw HTTP string (with {{placeholders}}).
     Transport normalization (curl/HTTP parse → kwargs) happens at converter stage.
+
+    name="" (unnamed) generates fetch()/async_fetch().
+    name="by-id" generates fetch_by_id()/async_fetch_by_id() (Python)
+    or fetchById() (JS).
     """
 
     raw_payload: str = ""
@@ -190,6 +198,7 @@ class RequestConfig(Node):
     response_join: str = (
         ""  # join separator when response-path resolves to list[str]
     )
+    name: str = ""  # method name suffix; "" = default fetch()
 
     @property
     def placeholders(self) -> list[str]:

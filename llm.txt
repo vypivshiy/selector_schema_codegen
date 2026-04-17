@@ -26,7 +26,7 @@ ssc_codegen/
 │   ├── base.py            # Node abstract base class
 │   ├── types.py           # VariableType, StructType enums
 │   ├── module.py          # Module, Docstring, Imports, Utilities, CodeStartHook, CodeEndHook
-│   ├── struct.py          # Struct, Field, Init, InitField, PreValidate, SplitDoc, Key, Value, TableConfig, TableRow, TableMatchKey, StructDocstring, StartParse
+│   ├── struct.py          # Struct, Field, Init, InitField, PreValidate, SplitDoc, Key, Value, TableConfig, TableRow, TableMatchKey, StructDocstring, StartParse, RequestConfig
 │   ├── selectors.py       # CssSelect, CssSelectAll, XpathSelect, XpathSelectAll, CssRemove, XpathRemove
 │   ├── extract.py         # Text, Raw, Attr
 │   ├── string.py          # Trim, Ltrim, Rtrim, NormalizeSpace, RmPrefix, RmSuffix, RmPrefixSuffix, Fmt, Repl, ReplMap, Lower, Upper, Split, Join, Unescape
@@ -40,6 +40,10 @@ ssc_codegen/
 │   ├── jsondef.py         # JsonDef, JsonDefField
 │   ├── transform.py       # TransformDef, TransformTarget, TransformCall
 │   └── helpers.py         # AST utilities
+├── parsers/               # Transport layer helpers (consumed at converter stage)
+│   ├── spec.py            # RequestSpec dataclass (normalised intermediate form)
+│   ├── curl.py            # parse_curl_to_httpx_kwargs() — POSIX curl → kwargs
+│   └── http.py            # parse_http_to_httpx_kwargs() — raw HTTP/1.1|2 → kwargs
 ├── converters/            # Code generators per target language
 │   ├── base.py            # BaseConverter, ConverterContext, callback registration
 │   ├── py_bs4.py          # Python BeautifulSoup4
@@ -55,7 +59,8 @@ ssc_codegen/
     ├── errors.py          # ErrorCollector, ErrorCode enum
     ├── format_errors.py   # format_errors(), lint_file(), lint_string()
     ├── rules.py           # General syntax/structure rules
-    ├── rules_struct.py    # Struct-specific rules (type requirements)
+    ├── rules_struct.py    # Struct-specific rules (type requirements, @request validation)
+    ├── rule_keywords.py   # Keyword allowlist validation
     ├── type_rules.py      # Pipeline type checking/inference
     ├── types.py           # ErrorCode, RawArg, DefineKind, DefineInfo, TransformInfo
     ├── navigation.py      # NodeNavigator for tree traversal
@@ -84,14 +89,20 @@ docs/                           # Documentation
 ## CLI Commands
 
 ```bash
-ssc-gen generate schema.kdl -t py-bs4 -o out/   # generate parser code
-ssc-gen check schema.kdl                          # lint only (text output)
-ssc-gen check schema.kdl -f json                  # lint only (JSON for automation)
-ssc-gen run schema.kdl:StructName -i page.html    # generate + execute + output JSON
-ssc-gen health schema.kdl:StructName -i page.html # check selectors against HTML
+ssc-gen generate schema.kdl -t py-bs4 -o out/                     # generate parser code
+ssc-gen generate schema.kdl -t py-bs4 -o out/ --http-client httpx # with @request support
+ssc-gen check schema.kdl                                            # lint only (text output)
+ssc-gen check schema.kdl -f json                                    # lint only (JSON for automation)
+ssc-gen run schema.kdl:StructName -i page.html                     # generate + execute + output JSON
+ssc-gen health schema.kdl:StructName -i page.html                  # check selectors against HTML
 ```
 
 Targets: py-bs4, py-lxml, py-parsel, py-slax, js-pure, go-goquery
+
+`--http-client` option (only for targets that support `@request`):
+- Python targets (py-bs4, py-lxml, py-parsel, py-slax): `requests` | `httpx` (`httpx` emits both `fetch()` and `async_fetch()`)
+- JS target (js-pure): `fetch` (default) | `axios`
+- Go target: not applicable
 
 ---
 
@@ -135,6 +146,7 @@ All nodes inherit from `Node` base class (has `body` attribute).
 - `SplitDoc` → split document into items (for LIST/DICT types)
 - `Key`, `Value` → dict key/value extraction
 - `TableConfig`, `TableRow`, `TableMatchKey` → table struct support
+- `RequestConfig(raw_payload, response_path, response_join)` → optional transport layer config; `placeholders` property lists `{{name}}` tokens in declaration order
 - `StartParse` → marker node for parser entry
 
 ### Pipeline nodes (operations within fields)
@@ -176,7 +188,7 @@ Main class: `AstParser`
 
 ### Magic directive detection
 `@`-prefixed nodes inside structs are parsed via `_parse_struct()`:
-@doc, @init, @pre-validate, @split-doc, @key, @value, @table, @rows, @match
+@doc, @init, @pre-validate, @split-doc, @key, @value, @table, @rows, @match, @request
 
 ### Self-reference
 `@field_name` in pipelines creates `Self(name="field_name")` node, resolved to InitField value.
@@ -242,7 +254,8 @@ PY_LXML = PY_BASE.extend()     # lxml-specific overrides
 
 ### Rule modules
 - `rules.py` — general syntax (keywords, definitions, struct names, pipeline order)
-- `rules_struct.py` — struct type requirements (LIST needs @split-doc, TABLE needs @match, etc.)
+- `rules_struct.py` — struct type requirements (LIST needs @split-doc, TABLE needs @match, @request validation)
+- `rule_keywords.py` — keyword allowlist validation
 - `type_rules.py` — pipeline type inference and mismatch detection
 
 ### Entry points
@@ -353,6 +366,49 @@ transform decode-base64 accept=STRING return=STRING {
 }
 ```
 
+### Transport layer (@request)
+
+Optional struct-level directive that embeds a raw HTTP request or POSIX curl command.
+Converters parse it at codegen time (via `parsers/`) and emit an HTTP fetch method on the generated class.
+Placeholders `{{name}}` become function parameters.
+
+```kdl
+// curl form
+struct ProductInfo type=table {
+    @request """
+    curl '{{full-book-url}}'
+    """
+    ...
+}
+
+// raw HTTP form (supports HTTP/1.1 and HTTP/2)
+struct MainCatalogue {
+    @request """
+    GET /catalogue/page-{{page-num}}.html HTTP/2
+    Host: books.toscrape.com
+    Accept: text/html
+    """
+    ...
+}
+
+// with JSON response unwrapping
+struct ApiData {
+    @request response-path="payload.html" response-join="\n" """
+    POST /api HTTP/1.1
+    Host: example.com
+    Content-Type: application/json
+
+    {"id": "{{id}}"}
+    """
+    ...
+}
+```
+
+`response-path` — dot-notation JSON path into the response body to extract the HTML string.
+`response-join` — separator when the resolved path is a list of strings.
+
+Generated code (Python `httpx` example): `fetch(self, *, page_num: str) -> Self` and `async_fetch(...)`.
+
 ### Nested structs
 ```kdl
 struct BookList type=list {
@@ -376,6 +432,7 @@ struct BookDetails type=item {
 5. **Extensible converters**: `.extend()` creates child converter inheriting all handlers
 6. **Type-tagged containers**: VariableType/StructType enums enforce strict typing at AST level
 7. **Recursive nesting**: `Nested` node resolves via struct_map with cycle detection
+8. **Transport layer**: `@request` stores raw payload in `RequestConfig`; `parsers/` normalises curl/HTTP at codegen time into `RequestSpec`; converters emit fetch methods per target HTTP client
 
 ---
 
