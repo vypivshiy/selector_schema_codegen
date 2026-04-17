@@ -164,8 +164,19 @@ struct MainCatalogue {
 
     // !!! allowed make constructors via POSIX curl or raw HTTP requests
     @request """
-    curl 'https://books.toscrape.com/catalogue/page-{{page-num}}.html' \
-        -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:149.0) Gecko/20100101 Firefox/149.0'
+    GET /catalogue/page-{{page-num}}.html HTTP/2
+    Host: books.toscrape.com
+    Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+    Accept-Language: en-US,en;q=0.9
+    Accept-Encoding: gzip, deflate, br, zstd
+    Connection: keep-alive
+    Upgrade-Insecure-Requests: 1
+    Sec-Fetch-Dest: document
+    Sec-Fetch-Mode: navigate
+    Sec-Fetch-Site: none
+    If-Modified-Since: Wed, 08 Feb 2023 21:02:32 GMT
+    If-None-Match: W/"63e40de8-c525"
+    Priority: u=0, i
     """
 
     prev-page {
