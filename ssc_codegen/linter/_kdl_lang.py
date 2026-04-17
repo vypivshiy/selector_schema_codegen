@@ -60,14 +60,18 @@ class Node:
         return None
 
     def child_by_field_name(self, name: str) -> "Node | None":
-        for child, field_name in zip(self._children, self._field_names, strict=False):
+        for child, field_name in zip(
+            self._children, self._field_names, strict=False
+        ):
             if field_name == name:
                 return child
         return None
 
     def children_by_field_name(self, name: str) -> list["Node"]:
         out: list[Node] = []
-        for child, field_name in zip(self._children, self._field_names, strict=False):
+        for child, field_name in zip(
+            self._children, self._field_names, strict=False
+        ):
             if field_name == name:
                 out.append(child)
         return out
@@ -177,8 +181,14 @@ def _build_value_node(item: CSTValue | CSTIdentifier, src: str) -> Node:
             "type",
             item.type_annotation.span.start.offset,
             item.type_annotation.span.end.offset,
-            _to_point(item.type_annotation.span.start.line, item.type_annotation.span.start.column),
-            _to_point(item.type_annotation.span.end.line, item.type_annotation.span.end.column),
+            _to_point(
+                item.type_annotation.span.start.line,
+                item.type_annotation.span.start.column,
+            ),
+            _to_point(
+                item.type_annotation.span.end.line,
+                item.type_annotation.span.end.column,
+            ),
             src,
         )
         children.append(ty)
@@ -219,7 +229,11 @@ def _build_value_node(item: CSTValue | CSTIdentifier, src: str) -> Node:
             src,
             children=[string_node],
         )
-    elif literal_raw.startswith("#") and '"' in literal_raw and literal_raw.endswith("#"):
+    elif (
+        literal_raw.startswith("#")
+        and '"' in literal_raw
+        and literal_raw.endswith("#")
+    ):
         inner = _node(
             "identifier",
             lit_start,
@@ -328,8 +342,14 @@ def _build_kdl_node(node: CSTNode, src: str) -> Node:
             "type",
             node.type_annotation.span.start.offset,
             node.type_annotation.span.end.offset,
-            _to_point(node.type_annotation.span.start.line, node.type_annotation.span.start.column),
-            _to_point(node.type_annotation.span.end.line, node.type_annotation.span.end.column),
+            _to_point(
+                node.type_annotation.span.start.line,
+                node.type_annotation.span.start.column,
+            ),
+            _to_point(
+                node.type_annotation.span.end.line,
+                node.type_annotation.span.end.column,
+            ),
             src,
         )
         children.append(ty)

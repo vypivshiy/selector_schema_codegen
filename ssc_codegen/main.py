@@ -126,12 +126,56 @@ def generate(
             help="Package/module name for generated code. Default: output directory name.",
         ),
     ] = None,
+    http_client: Annotated[
+        Optional[str],
+        typer.Option(
+            "--http-client",
+            help=(
+                "HTTP client for @request codegen. "
+                "Python targets: requests | httpx "
+                "('httpx' emits both fetch()/async_fetch()). "
+                "JS targets: fetch (default) | axios."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Compile KDL schema files into parser code for the chosen target."""
     from ssc_codegen import parse_ast
 
     if verbose:
         setup_debug_logging()
+
+    _PY_TARGETS = {
+        Target.PY_BS4,
+        Target.PY_LXML,
+        Target.PY_PARSEL,
+        Target.PY_SLAX,
+    }
+    _JS_TARGETS = {Target.JS_PURE}
+    _PY_HTTP_CLIENTS = {"requests", "httpx"}
+    _JS_HTTP_CLIENTS = {"fetch", "axios"}
+
+    if http_client is not None:
+        if target in _PY_TARGETS and http_client not in _PY_HTTP_CLIENTS:
+            typer.echo(
+                f"ERROR: Python targets accept --http-client: "
+                f"{', '.join(sorted(_PY_HTTP_CLIENTS))}. Got '{http_client}'.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        if target in _JS_TARGETS and http_client not in _JS_HTTP_CLIENTS:
+            typer.echo(
+                f"ERROR: JS targets accept --http-client: "
+                f"{', '.join(sorted(_JS_HTTP_CLIENTS))}. Got '{http_client}'.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        if target not in _PY_TARGETS and target not in _JS_TARGETS:
+            typer.echo(
+                f"ERROR: --http-client is not applicable for target '{target.value}'.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
 
     logger.debug(
         "generate() started: target=%s, output=%s, files=%s, skip_lint=%s",
@@ -191,7 +235,9 @@ def generate(
 
     errors: list[str] = []
 
-    meta = {"package": package or output.name}
+    meta: dict = {"package": package or output.name}
+    if http_client:
+        meta["http_client"] = http_client
 
     for kdl_file in kdl_files:
         out_file = output / kdl_file.with_suffix(ext).name
@@ -209,7 +255,7 @@ def generate(
                         typer.echo(f"  -> {target_path}")
                 code = files[""]
             else:
-                code = converter.convert(ast)
+                code = converter.convert(ast, **meta)
                 out_file.write_text(code, encoding="utf-8")
 
             logger.debug(

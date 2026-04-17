@@ -184,13 +184,21 @@ def _collect_selectors(
         if isinstance(
             child, _SINGLE_SELECTORS + _MULTI_SELECTORS + _REMOVE_SELECTORS
         ):
-            selectors.append(_SelectorInfo(path=path_prefix, node=child, fallback_value=fallback))
+            selectors.append(
+                _SelectorInfo(
+                    path=path_prefix, node=child, fallback_value=fallback
+                )
+            )
         elif isinstance(child, Nested):
-            nested_refs.append(_NestedRef(path=path_prefix, struct_name=child.struct_name))
+            nested_refs.append(
+                _NestedRef(path=path_prefix, struct_name=child.struct_name)
+            )
         elif isinstance(child, (Field, InitField)):
             child_path = f"{path_prefix}.{child.name}"
             child_fallback = _find_fallback(child)
-            child_sels, child_nested = _collect_selectors(child, child_path, child_fallback)
+            child_sels, child_nested = _collect_selectors(
+                child, child_path, child_fallback
+            )
             selectors.extend(child_sels)
             nested_refs.extend(child_nested)
         elif isinstance(child, SplitDoc):
@@ -270,9 +278,7 @@ def check_struct_health(
     # build struct lookup from module
     struct_map: dict[str, Struct] = {}
     if module is not None:
-        struct_map = {
-            s.name: s for s in module.body if isinstance(s, Struct)
-        }
+        struct_map = {s.name: s for s in module.body if isinstance(s, Struct)}
 
     soup = BeautifulSoup(html, "lxml")
     result = HealthResult(struct_name=struct.name)
@@ -373,7 +379,9 @@ def _check_struct_recursive(
         # evaluate result
         if isinstance(sel_node, _REMOVE_SELECTORS):
             # remove selectors: 0 matches is just a warning
-            status: Literal["ok", "fail", "warn"] = "ok" if count > 0 else "warn"
+            status: Literal["ok", "fail", "warn"] = (
+                "ok" if count > 0 else "warn"
+            )
         elif isinstance(sel_node, _SINGLE_SELECTORS):
             status = "ok" if count >= 1 else "fail"
         elif isinstance(sel_node, _MULTI_SELECTORS):

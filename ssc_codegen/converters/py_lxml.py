@@ -55,7 +55,7 @@ from ssc_codegen.ast import (
     PredTextEnds,
     PredTextContains,
     PredTextRe,
-    Jsonify
+    Jsonify,
 )
 
 from ssc_codegen.ast import Nested
@@ -89,11 +89,13 @@ def pre_imports(node: Imports, _: ConverterContext):
 
 
 @PY_LXML_CONVERTER.post(Imports)
-def post_imports(node: Imports, _):
-    return [
+def post_imports(node: Imports, ctx: ConverterContext):
+    lines = [
         "from lxml import html",
         "from lxml.html import HtmlElement",
     ]
+    lines.extend(py_bs4.http_client_import(ctx))
+    return lines
 
 
 @PY_LXML_CONVERTER(Utilities)
@@ -257,7 +259,9 @@ def pre_expr_css_select(node: CssSelect, ctx: ConverterContext):
         for i, query in enumerate(node.queries):
             q = repr(query)
             if i == 0:
-                lines.append(f"{ctx.indent}{res_var} = {ctx.prv}.cssselect({q})")
+                lines.append(
+                    f"{ctx.indent}{res_var} = {ctx.prv}.cssselect({q})"
+                )
                 lines.append(
                     f"{ctx.indent}{ctx.nxt} = {res_var}[0] if {res_var} else None"
                 )
@@ -281,7 +285,9 @@ def pre_expr_css_select_all(node: CssSelectAll, ctx: ConverterContext):
         for i, query in enumerate(node.queries):
             q = repr(query)
             if i == 0:
-                lines.append(f"{ctx.indent}{ctx.nxt} = {ctx.prv}.cssselect({q})")
+                lines.append(
+                    f"{ctx.indent}{ctx.nxt} = {ctx.prv}.cssselect({q})"
+                )
             else:
                 lines.append(f"{ctx.indent}if not {ctx.nxt}:")
                 lines.append(
@@ -306,7 +312,9 @@ def pre_expr_xpath_select(node: XpathSelect, ctx: ConverterContext):
                 )
             else:
                 lines.append(f"{ctx.indent}if {ctx.nxt} is None:")
-                lines.append(f"{ctx.indent}    {res_var} = {ctx.prv}.xpath({q})")
+                lines.append(
+                    f"{ctx.indent}    {res_var} = {ctx.prv}.xpath({q})"
+                )
                 lines.append(
                     f"{ctx.indent}    {ctx.nxt} = {res_var}[0] if {res_var} else None"
                 )
@@ -325,7 +333,9 @@ def pre_expr_xpath_select_all(node: XpathSelectAll, ctx: ConverterContext):
                 lines.append(f"{ctx.indent}{ctx.nxt} = {ctx.prv}.xpath({q})")
             else:
                 lines.append(f"{ctx.indent}if not {ctx.nxt}:")
-                lines.append(f"{ctx.indent}    {ctx.nxt} = {ctx.prv}.xpath({q})")
+                lines.append(
+                    f"{ctx.indent}    {ctx.nxt} = {ctx.prv}.xpath({q})"
+                )
         return lines
     query = repr(node.query)
     return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.xpath({query})"

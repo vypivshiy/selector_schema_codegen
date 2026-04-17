@@ -58,6 +58,7 @@ PY_TYPES = py_bs4.PY_TYPES.copy()
 PY_TYPES[VariableType.DOCUMENT] = "Selector"
 PY_TYPES[VariableType.LIST_DOCUMENT] = "SelectorList"
 
+
 @PY_PARSEL_CONVERTER(Imports)
 def pre_imports(node: Imports, _: ConverterContext):
     base_imports = [
@@ -73,8 +74,10 @@ def pre_imports(node: Imports, _: ConverterContext):
 
 
 @PY_PARSEL_CONVERTER.post(Imports)
-def post_imports(node: Imports, _):
-    return ["from parsel import Selector, SelectorList"]
+def post_imports(node: Imports, ctx: ConverterContext):
+    lines = ["from parsel import Selector, SelectorList"]
+    lines.extend(py_bs4.http_client_import(ctx))
+    return lines
 
 
 @PY_PARSEL_CONVERTER(Utilities)

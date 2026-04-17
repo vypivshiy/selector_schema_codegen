@@ -1,3 +1,4 @@
+import re as _re
 import shlex
 import json
 from typing import Dict, Any, Iterable
@@ -16,15 +17,17 @@ def parse_query_params(url: str) -> Dict[str, Any]:
 def parse_cookies(cookie_header: str) -> Dict[str, str]:
     """Parse a Cookie header string into a dict of name-value pairs."""
     cookies = {}
-    for pair in cookie_header.split(';'):
+    for pair in cookie_header.split(";"):
         pair = pair.strip()
-        if '=' in pair:
-            name, value = pair.split('=', 1)
+        if "=" in pair:
+            name, value = pair.split("=", 1)
             cookies[name.strip()] = value.strip()
     return cookies
 
 
-def parse_curl_to_httpx_kwargs(curl_command: str, ignored_flags: Iterable[str] = ("--compressed",)) -> Dict[str, Any]:
+def parse_curl_to_httpx_kwargs(
+    curl_command: str, ignored_flags: Iterable[str] = ("--compressed",)
+) -> Dict[str, Any]:
     """
     Parse a curl command string and convert it to httpx kwargs.
 
@@ -40,18 +43,22 @@ def parse_curl_to_httpx_kwargs(curl_command: str, ignored_flags: Iterable[str] =
     Raises:
         ValueError: If the command is invalid or missing required parts.
     """
+    # Normalize shell line continuations: \<optional spaces/tabs>\n<optional indent> → single space.
+    # This handles editors that leave trailing whitespace after the backslash,
+    # which would otherwise confuse shlex into producing spurious whitespace tokens.
+    normalized = _re.sub(r"\\[ \t]*\n[ \t]*", " ", curl_command.strip())
     try:
-        parts = shlex.split(curl_command.strip())
+        parts = shlex.split(normalized)
     except ValueError as e:
         raise ValueError(f"Invalid shell syntax in curl command: {e}")
 
-    if not parts or parts[0].lower() != 'curl':
+    if not parts or parts[0].lower() != "curl":
         raise ValueError("Input is not a curl command")
 
     # Remove 'curl' from parts
     parts = parts[1:]
 
-    method = 'GET'
+    method = "GET"
     url = None
     headers = {}
     data = None
@@ -66,28 +73,36 @@ def parse_curl_to_httpx_kwargs(curl_command: str, ignored_flags: Iterable[str] =
     i = 0
     while i < len(parts):
         part = parts[i]
-        if part in ('-X', '--request'):
+        if part in ("-X", "--request"):
             i += 1
             if i >= len(parts):
                 raise ValueError("Missing method after -X/--request")
             method = parts[i].upper()
-            if method not in ('GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'):
+            if method not in (
+                "GET",
+                "POST",
+                "PUT",
+                "DELETE",
+                "PATCH",
+                "HEAD",
+                "OPTIONS",
+            ):
                 raise ValueError(f"Unsupported HTTP method: {method}")
-        elif part in ('-H', '--header'):
+        elif part in ("-H", "--header"):
             i += 1
             if i >= len(parts):
                 raise ValueError("Missing header after -H/--header")
             header = parts[i]
-            if ':' not in header:
+            if ":" not in header:
                 raise ValueError(f"Invalid header format: {header}")
-            key, value = header.split(':', 1)
+            key, value = header.split(":", 1)
             headers[key.strip()] = value.strip()
-        elif part in ('-d', '--data'):
+        elif part in ("-d", "--data"):
             i += 1
             if i >= len(parts):
                 raise ValueError("Missing data after -d/--data")
             data = parts[i]
-        elif part == '--json':
+        elif part == "--json":
             i += 1
             if i >= len(parts):
                 raise ValueError("Missing JSON data after --json")
@@ -95,37 +110,42 @@ def parse_curl_to_httpx_kwargs(curl_command: str, ignored_flags: Iterable[str] =
                 json_data = json.loads(parts[i])
             except json.JSONDecodeError as e:
                 raise ValueError(f"Invalid JSON in --json: {e}")
-        elif part in ('-u', '--user'):
+        elif part in ("-u", "--user"):
             i += 1
             if i >= len(parts):
                 raise ValueError("Missing user credentials after -u/--user")
             auth = parts[i]
-        elif part in ('-F', '--form'):
+        elif part in ("-F", "--form"):
             i += 1
             if i >= len(parts):
                 raise ValueError("Missing form data after -F/--form")
             form_part = parts[i]
-            if '=' in form_part:
-                key, value = form_part.split('=', 1)
-                if not value.startswith('@'):  # Ignore files
+            if "=" in form_part:
+                key, value = form_part.split("=", 1)
+                if not value.startswith("@"):  # Ignore files
                     form_data[key] = value
-        elif part.startswith('--data-urlencode'):
+        elif part.startswith("--data-urlencode"):
             i += 1
             if i >= len(parts):
                 raise ValueError("Missing data after --data-urlencode")
             param_part = parts[i]
-            if '=' in param_part:
-                key, value = param_part.split('=', 1)
+            if "=" in param_part:
+                key, value = param_part.split("=", 1)
                 params[key] = value
             else:
-                raise ValueError("Invalid --data-urlencode format, expected key=value")
+                raise ValueError(
+                    "Invalid --data-urlencode format, expected key=value"
+                )
         elif part in ignored_flags_set:
             # Skip ignored flags
             pass
-        elif not part.startswith('-'):
-            if url is not None:
+        elif not part.startswith("-"):
+            if not part.strip():
+                pass  # skip blank tokens produced by malformed line continuations
+            elif url is not None:
                 raise ValueError("Multiple URLs provided")
-            url = part
+            else:
+                url = part
         else:
             raise ValueError(f"Unsupported curl option: {part}")
         i += 1
@@ -146,35 +166,35 @@ def parse_curl_to_httpx_kwargs(curl_command: str, ignored_flags: Iterable[str] =
 
     # Build kwargs dict
     kwargs = {
-        'method': method,
-        'url': url,
+        "method": method,
+        "url": url,
     }
 
     if headers:
-        kwargs['headers'] = headers
+        kwargs["headers"] = headers
 
     # Parse cookies from headers if present
-    if 'Cookie' in headers:
-        kwargs['cookies'] = parse_cookies(headers['Cookie'])
-        del headers['Cookie']
-        if not headers and 'headers' in kwargs:
-            del kwargs['headers']
+    if "Cookie" in headers:
+        kwargs["cookies"] = parse_cookies(headers["Cookie"])
+        del headers["Cookie"]
+        if not headers and "headers" in kwargs:
+            del kwargs["headers"]
 
     if form_data:
-        kwargs['data'] = form_data
+        kwargs["data"] = form_data
     elif json_data is not None:
-        kwargs['json'] = json_data
+        kwargs["json"] = json_data
     elif data:
-        kwargs['data'] = data
+        kwargs["data"] = data
 
     if auth:
-        if ':' not in auth:
+        if ":" not in auth:
             raise ValueError("Invalid auth format, expected 'user:pass'")
-        user, passwd = auth.split(':', 1)
-        kwargs['auth'] = (user, passwd)
+        user, passwd = auth.split(":", 1)
+        kwargs["auth"] = (user, passwd)
 
     if params:
-        kwargs['params'] = params
+        kwargs["params"] = params
 
     return kwargs
 

@@ -34,6 +34,7 @@ _REQUIRED_RESERVED: dict[str, frozenset[str]] = {
 }
 
 _RESERVED_ALLOWED: dict[str, frozenset[str] | None] = {
+    "@request": None,
     "@doc": None,
     "@pre-validate": None,
     "@init": None,
@@ -262,6 +263,19 @@ def _check_reserved_field(
                 ErrorCode.MISSING_ARGUMENT,
                 message="'@doc' requires a description string",
                 hint='example: @doc "description of this struct"',
+            )
+        return
+
+    if field_name == "@request":
+        if not ctx.get_arg(node, 0):
+            ctx.error(
+                node,
+                ErrorCode.MISSING_ARGUMENT,
+                message="'@request' requires a raw http or POSIX cURL string",
+                hint='example: @request "curl https://httpbin.org/get"',
+                notes=[
+                    "You can copy-paste cURL or raw http requests from browser devtools or sniffer"
+                ],
             )
         return
 

@@ -11,7 +11,13 @@ struct ProductInfo type=table {
 
     USAGE:
         - GET https://books.toscrape.com/catalogue/in-her-wake_980/index.html
+        - or pass url path from Book.url
     """
+
+    @request """
+    curl '{{full-book-url}}'
+    """
+
     // table selector target options
     @table { css "table" }
     @rows { css-all "tr" }
@@ -107,6 +113,11 @@ struct Book type=list {
         css ".thumbnail"
         attr "alt" 
         }
+    url {
+        css "a[href]"
+        attr href
+        fmt FMT-BASE
+    }
     image-url { 
         css ".thumbnail"
         attr "src"
@@ -150,6 +161,13 @@ struct MainCatalogue {
     """
     // use KDL2.0 syntax
     // codegen automatically resolve syntax style for target language
+
+    // !!! allowed make constructors via POSIX curl or raw HTTP requests
+    @request """
+    curl 'https://books.toscrape.com/catalogue/page-{{page-num}}.html' \
+        -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:149.0) Gecko/20100101 Firefox/149.0'
+    """
+
     prev-page {
         css ".previous a"
         attr "href"

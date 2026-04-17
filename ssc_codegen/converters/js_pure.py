@@ -19,6 +19,8 @@ SPECIAL METHODS NOTATIONS:
 - __START_PARSE__: `parse`,
 """
 
+import re as _re_module
+
 from ssc_codegen.converters.base import ConverterContext, BaseConverter
 from ssc_codegen.ast import VariableType, StructType
 from ssc_codegen.converters.helpers import (
@@ -26,6 +28,8 @@ from ssc_codegen.converters.helpers import (
     to_camel_case,
     jsonify_path_to_segments,
 )
+from ssc_codegen.parsers import parse_to_spec, normalize_placeholder_names
+from ssc_codegen.parsers.spec import _validate_json_body
 
 # module level
 from ssc_codegen.ast import (
@@ -53,6 +57,7 @@ from ssc_codegen.ast import (
     Value,
     StartParse,
     StructDocstring,
+    RequestConfig,
 )
 
 # selectors
@@ -1260,7 +1265,9 @@ def pre_expr_pred_count_le(node: PredCountLe, ctx: ConverterContext):
 @JS_CONVERTER(PredCountRange)
 def pre_expr_pred_count_range(node: PredCountRange, ctx: ConverterContext):
     target = _pred_target(node, ctx)
-    return _and(f"{target}.length > {node.start} && {target}.length < {node.end}", ctx)
+    return _and(
+        f"{target}.length > {node.start} && {target}.length < {node.end}", ctx
+    )
 
 
 @JS_CONVERTER(PredHasAttr)
@@ -1443,3 +1450,159 @@ def pre_expr_pred_re_any(node: PredReAny, ctx: ConverterContext):
     rx = _js_re_node(node)
     target = _pred_target(node, ctx)
     return _and(f"{target}.some(j => {rx}.test(j))", ctx)
+
+
+# ---------------------------------------------------------------------------
+# @request — fetch() classmethod
+# ---------------------------------------------------------------------------
+
+_JS_PH = _re_module.compile(r"\{\{([\w-]+)\}\}")
+
+
+def _js_render_value(v: str) -> str:
+    """Render a RequestSpec string value as a JS expression."""
+    if m := _JS_PH.fullmatch(v):
+        return m.group(1)
+    if _JS_PH.search(v):
+        inner = v.replace("\\", "\\\\").replace("`", "\\`")
+        inner = _JS_PH.sub(r"${\1}", inner)
+        return f"`{inner}`"
+    return repr(v)
+
+
+def _js_render_obj(d: dict[str, str]) -> str:
+    """Render a flat string dict as an inline JS object literal."""
+    if not d:
+        return "{}"
+    inner = ", ".join(
+        f"{k!r}: {_js_render_value(str(v))}" for k, v in d.items()
+    )
+    return "{" + inner + "}"
+
+
+def _js_render_json_body(raw: str) -> str:
+    """Render JSON body template (with {{placeholders}}) as a JS template literal."""
+    _validate_json_body(raw)
+    inner = raw.replace("\\", "\\\\").replace("`", "\\`")
+    inner = _JS_PH.sub(r"${\1}", inner)
+    return f"`{inner}`"
+
+
+def _js_render_body(spec) -> tuple[str, str] | None:
+    """Return (key, js_expr) for the request body, or None if empty."""
+    if spec.body_kind == "empty" or spec.body is None:
+        return None
+    if spec.body_kind == "json":
+        return ("body", _js_render_json_body(str(spec.body)))
+    if spec.body_kind == "form":
+        assert isinstance(spec.body, dict)
+        return ("body", f"new URLSearchParams({_js_render_obj(spec.body)})")
+    return ("body", _js_render_value(str(spec.body)))
+
+
+def _js_name(name: str) -> str:
+    return to_camel_case(to_snake_case(name))
+
+
+@JS_CONVERTER(RequestConfig)
+def pre_request_config(node: RequestConfig, ctx: ConverterContext):
+    spec = normalize_placeholder_names(
+        parse_to_spec(node.raw_payload), _js_name
+    )
+    http_client = ctx.meta.get("http_client", "fetch")
+
+    ind = ctx.indent_char
+    i1 = ctx.indent  # class body  (2 spaces at depth=1)
+    i2 = i1 + ind  # method body
+    i3 = i2 + ind  # options object properties
+
+    struct_name = to_pascal_case(node.parent.name)
+    ph_names = spec.placeholders
+
+    # second parameter: destructured object or omitted
+    client_param = "client"
+    ph_param = (", {" + ", ".join(ph_names) + "}") if ph_names else ""
+    sig = f"static async fetch({client_param}{ph_param})"
+
+    def _response_lines(data_expr: str) -> list[str]:
+        lines: list[str] = []
+        if node.response_path:
+            accessor = "".join(
+                f"[{p!r}]" for p in node.response_path.split(".")
+            )
+            lines.append(f"{i2}const _data = {data_expr};")
+            if node.response_join:
+                lines.append(
+                    f"{i2}const _body = _data{accessor}.join({node.response_join!r});"
+                )
+            else:
+                lines.append(f"{i2}const _body = _data{accessor};")
+        else:
+            lines.append(f"{i2}const _body = {data_expr};")
+        lines.append(f"{i2}return new {struct_name}(_body);")
+        return lines
+
+    lines: list[str] = [f"{i1}{sig} {{"]
+
+    if http_client == "fetch":
+        # Build URL: embed params into URL via URLSearchParams if present
+        if spec.params:
+            url_inner = _JS_PH.sub(r"${\1}", spec.url.replace("`", "\\`"))
+            params_obj = _js_render_obj(spec.params)
+            url_expr = f"`{url_inner}?${{new URLSearchParams({params_obj})}}`"
+        else:
+            url_expr = _js_render_value(spec.url)
+
+        # Build options object
+        options: list[str] = [f"{i3}method: {spec.method!r},"]
+        if spec.headers:
+            options.append(f"{i3}headers: {_js_render_obj(spec.headers)},")
+        if spec.cookies:
+            # fetch uses credentials/headers for cookies; emit as Cookie header
+            cookie_str = "; ".join(f"{k}={v}" for k, v in spec.cookies.items())
+            options.append(
+                f"{i3}// cookies: {cookie_str!r}  /* set via headers or credentials */"
+            )
+        body_result = _js_render_body(spec)
+        if body_result:
+            _, body_expr = body_result
+            options.append(f"{i3}body: {body_expr},")
+
+        lines.append(f"{i2}const _resp = await client({url_expr}, {{")
+        lines.extend(options)
+        lines.append(f"{i2}}});")
+        lines.append(
+            f"{i2}if (!_resp.ok) throw new Error(`HTTP ${{_resp.status}}`);"
+        )
+        if node.response_path:
+            lines.extend(_response_lines("await _resp.json()"))
+        else:
+            lines.extend(_response_lines("await _resp.text()"))
+
+    else:  # axios
+        req_props: list[str] = [
+            f"{i3}method: {spec.method!r},",
+            f"{i3}url: {_js_render_value(spec.url)},",
+        ]
+        if spec.params:
+            req_props.append(f"{i3}params: {_js_render_obj(spec.params)},")
+        if spec.headers:
+            req_props.append(f"{i3}headers: {_js_render_obj(spec.headers)},")
+        if spec.cookies:
+            req_props.append(f"{i3}// cookies: {_js_render_obj(spec.cookies)},")
+        body_result = _js_render_body(spec)
+        if body_result:
+            _, body_expr = body_result
+            # axios uses 'data' instead of 'body'
+            req_props.append(f"{i3}data: {body_expr},")
+
+        lines.append(f"{i2}const _resp = await client.request({{")
+        lines.extend(req_props)
+        lines.append(f"{i2}}});")
+        if node.response_path:
+            lines.extend(_response_lines("_resp.data"))
+        else:
+            lines.extend(_response_lines("_resp.data"))
+
+    lines.append(f"{i1}}}")
+    return lines

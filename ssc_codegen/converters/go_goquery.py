@@ -288,9 +288,17 @@ def _go_cast_expr(node: Field | Value, expr: str) -> str:
         return f"_sscAsOptionalInt({expr})"
     if type_ == "*float64":
         return f"_sscAsOptionalFloat({expr})"
-    if type_.endswith("Json") or type_.startswith("[]") and type_.endswith("Json"):
+    if (
+        type_.endswith("Json")
+        or type_.startswith("[]")
+        and type_.endswith("Json")
+    ):
         return f"_sscDecodeJSONAs[{type_}]({expr})"
-    if type_.endswith("Type") or type_.startswith("[]") and type_.endswith("Type"):
+    if (
+        type_.endswith("Type")
+        or type_.startswith("[]")
+        and type_.endswith("Type")
+    ):
         return expr
     return expr
 
@@ -343,7 +351,9 @@ def go_core(module, meta):
     go_imports = sorted(module.imports.transform_imports.get("go", set()))
     extra_imports = ""
     if go_imports:
-        extra_imports = "\n" + "\n".join(f"\t{_go_str(line)}" for line in go_imports)
+        extra_imports = "\n" + "\n".join(
+            f"\t{_go_str(line)}" for line in go_imports
+        )
 
     return f'''package {package}
 
@@ -896,7 +906,9 @@ def pre_type_def_field(node: TypeDefField, _):
         VariableType.OPT_INT,
         VariableType.OPT_FLOAT,
     )
-    return f"\t{field_name} {type_} {_go_json_tag(json_name, omitempty=omitempty)}"
+    return (
+        f"\t{field_name} {type_} {_go_json_tag(json_name, omitempty=omitempty)}"
+    )
 
 
 @GO_GOQUERY_CONVERTER.post(TypeDef)
@@ -936,13 +948,23 @@ def pre_init(node: Init, ctx: ConverterContext):
         if isinstance(child, InitField):
             method = _go_method(child.name)
             field = to_camel_case(child.name)
-            lines.append(f"\t{recv}._{field} = {recv}._init{method}({recv}.doc)")
-    lines += [f"\treturn {recv}", "}", "", f"func new{struct_name}FromSelection(sel *SSelection) *{struct_name} {{", f"\t{recv} := &{struct_name}{{doc: sel}}"]
+            lines.append(
+                f"\t{recv}._{field} = {recv}._init{method}({recv}.doc)"
+            )
+    lines += [
+        f"\treturn {recv}",
+        "}",
+        "",
+        f"func new{struct_name}FromSelection(sel *SSelection) *{struct_name} {{",
+        f"\t{recv} := &{struct_name}{{doc: sel}}",
+    ]
     for child in node.body:
         if isinstance(child, InitField):
             method = _go_method(child.name)
             field = to_camel_case(child.name)
-            lines.append(f"\t{recv}._{field} = {recv}._init{method}({recv}.doc)")
+            lines.append(
+                f"\t{recv}._{field} = {recv}._init{method}({recv}.doc)"
+            )
     lines += [f"\treturn {recv}", "}"]
     return lines
 
@@ -1103,7 +1125,12 @@ def post_start_parse(node: StartParse, ctx: ConverterContext):
                 key = _go_method(f.name)
                 val = _go_cast_expr(f, f"{recv}.{_pmethod(f.name)}(i)")
                 lines.append(f"\t\t\t{key}: {val},")
-            lines += ["\t\t}", "\t\tout = append(out, row)", "\t}", "\treturn out"]
+            lines += [
+                "\t\t}",
+                "\t\tout = append(out, row)",
+                "\t}",
+                "\treturn out",
+            ]
         case StructType.DICT:
             _, value_field = node.fields_dict
             lines += [
@@ -1121,13 +1148,21 @@ def post_start_parse(node: StartParse, ctx: ConverterContext):
             for f in node.fields:
                 method = _pmethod(f.name)
                 if f.ret == VariableType.STRING:
-                    lines.append(f"\tout = append(out, _sscAsString({recv}.{method}({recv}.doc)))")
+                    lines.append(
+                        f"\tout = append(out, _sscAsString({recv}.{method}({recv}.doc)))"
+                    )
                 else:
-                    lines.append(f"\tout = append(out, _sscAsStringSlice({recv}.{method}({recv}.doc))...)")
+                    lines.append(
+                        f"\tout = append(out, _sscAsStringSlice({recv}.{method}({recv}.doc))...)"
+                    )
             if node.struct.keep_order:
-                lines += [f"\treturn {out_type}(_sscAsStringSlice(_sscUnique(out)))"]
+                lines += [
+                    f"\treturn {out_type}(_sscAsStringSlice(_sscUnique(out)))"
+                ]
             else:
-                lines += [f"\treturn {out_type}(_sscAsStringSlice(_sscUnique(out)))"]
+                lines += [
+                    f"\treturn {out_type}(_sscAsStringSlice(_sscUnique(out)))"
+                ]
         case StructType.TABLE:
             lines += [
                 f"\tresult := {out_type}{{}}",
@@ -1158,10 +1193,16 @@ def post_start_parse(node: StartParse, ctx: ConverterContext):
 @GO_GOQUERY_CONVERTER(CssSelect)
 def expr_css(node: CssSelect, ctx: ConverterContext):
     if node.queries:
-        lines = [f"{ctx.indent}{ctx.nxt} := _sscCss({ctx.prv}, {_go_str(node.queries[0])})"]
+        lines = [
+            f"{ctx.indent}{ctx.nxt} := _sscCss({ctx.prv}, {_go_str(node.queries[0])})"
+        ]
         for q in node.queries[1:]:
-            lines.append(f"{ctx.indent}if _sscAsSelection({ctx.nxt}).Length() == 0 {{")
-            lines.append(f"{ctx.indent}\t{ctx.nxt} = _sscCss({ctx.prv}, {_go_str(q)})")
+            lines.append(
+                f"{ctx.indent}if _sscAsSelection({ctx.nxt}).Length() == 0 {{"
+            )
+            lines.append(
+                f"{ctx.indent}\t{ctx.nxt} = _sscCss({ctx.prv}, {_go_str(q)})"
+            )
             lines.append(f"{ctx.indent}}}")
         return lines
     return f"{ctx.indent}{ctx.nxt} := _sscCss({ctx.prv}, {_go_str(node.query)})"
@@ -1170,13 +1211,21 @@ def expr_css(node: CssSelect, ctx: ConverterContext):
 @GO_GOQUERY_CONVERTER(CssSelectAll)
 def expr_css_all(node: CssSelectAll, ctx: ConverterContext):
     if node.queries:
-        lines = [f"{ctx.indent}{ctx.nxt} := _sscCssAll({ctx.prv}, {_go_str(node.queries[0])})"]
+        lines = [
+            f"{ctx.indent}{ctx.nxt} := _sscCssAll({ctx.prv}, {_go_str(node.queries[0])})"
+        ]
         for q in node.queries[1:]:
-            lines.append(f"{ctx.indent}if len(_sscAsSelectionSlice({ctx.nxt})) == 0 {{")
-            lines.append(f"{ctx.indent}\t{ctx.nxt} = _sscCssAll({ctx.prv}, {_go_str(q)})")
+            lines.append(
+                f"{ctx.indent}if len(_sscAsSelectionSlice({ctx.nxt})) == 0 {{"
+            )
+            lines.append(
+                f"{ctx.indent}\t{ctx.nxt} = _sscCssAll({ctx.prv}, {_go_str(q)})"
+            )
             lines.append(f"{ctx.indent}}}")
         return lines
-    return f"{ctx.indent}{ctx.nxt} := _sscCssAll({ctx.prv}, {_go_str(node.query)})"
+    return (
+        f"{ctx.indent}{ctx.nxt} := _sscCssAll({ctx.prv}, {_go_str(node.query)})"
+    )
 
 
 @GO_GOQUERY_CONVERTER(XpathSelect)
@@ -1234,7 +1283,7 @@ def expr_rtrim(node: Rtrim, ctx: ConverterContext):
 
 @GO_GOQUERY_CONVERTER(NormalizeSpace)
 def expr_normalize(node: NormalizeSpace, ctx: ConverterContext):
-    return f"{ctx.indent}{ctx.nxt} := _sscMapString({ctx.prv}, func(s string) string {{ return strings.Join(strings.Fields(s), \" \") }})"
+    return f'{ctx.indent}{ctx.nxt} := _sscMapString({ctx.prv}, func(s string) string {{ return strings.Join(strings.Fields(s), " ") }})'
 
 
 @GO_GOQUERY_CONVERTER(Lower)
@@ -1266,7 +1315,7 @@ def expr_rm_prefix_suffix(node: RmPrefixSuffix, ctx: ConverterContext):
 @GO_GOQUERY_CONVERTER(Fmt)
 def expr_fmt(node: Fmt, ctx: ConverterContext):
     tmpl = _go_str(node.template)
-    return f"{ctx.indent}{ctx.nxt} := _sscMapString({ctx.prv}, func(s string) string {{ return strings.ReplaceAll({tmpl}, \"{{{{}}}}\", s) }})"
+    return f'{ctx.indent}{ctx.nxt} := _sscMapString({ctx.prv}, func(s string) string {{ return strings.ReplaceAll({tmpl}, "{{{{}}}}", s) }})'
 
 
 @GO_GOQUERY_CONVERTER(Repl)
@@ -1276,9 +1325,13 @@ def expr_repl(node: Repl, ctx: ConverterContext):
 
 @GO_GOQUERY_CONVERTER(ReplMap)
 def expr_repl_map(node: ReplMap, ctx: ConverterContext):
-    lines = [f"{ctx.indent}{ctx.nxt} := _sscMapString({ctx.prv}, func(s string) string {{"]
+    lines = [
+        f"{ctx.indent}{ctx.nxt} := _sscMapString({ctx.prv}, func(s string) string {{"
+    ]
     for old, new in node.replacements:
-        lines.append(f"{ctx.indent}\ts = strings.ReplaceAll(s, {_go_str(old)}, {_go_str(new)})")
+        lines.append(
+            f"{ctx.indent}\ts = strings.ReplaceAll(s, {_go_str(old)}, {_go_str(new)})"
+        )
     lines.append(f"{ctx.indent}\treturn s")
     lines.append(f"{ctx.indent}}})")
     return lines
@@ -1301,7 +1354,9 @@ def expr_unescape(node: Unescape, ctx: ConverterContext):
 
 @GO_GOQUERY_CONVERTER(Re)
 def expr_re(node: Re, ctx: ConverterContext):
-    return f"{ctx.indent}{ctx.nxt} := _sscRe({_go_str(node.pattern)}, {ctx.prv})"
+    return (
+        f"{ctx.indent}{ctx.nxt} := _sscRe({_go_str(node.pattern)}, {ctx.prv})"
+    )
 
 
 @GO_GOQUERY_CONVERTER(ReAll)
@@ -1354,8 +1409,8 @@ def expr_jsonify(node: Jsonify, ctx: ConverterContext):
     if not node.path:
         return f"{ctx.indent}{ctx.nxt} := _sscJSON({ctx.prv})"
     parts = []
-    for part in node.path.split('.'):
-        if part.lstrip('-').isdigit():
+    for part in node.path.split("."):
+        if part.lstrip("-").isdigit():
             parts.append(part)
         else:
             parts.append(_go_str(part))
@@ -1449,7 +1504,15 @@ def expr_return(node: Return, ctx: ConverterContext):
 
 @GO_GOQUERY_CONVERTER(FallbackStart)
 def expr_fallback_start(node: FallbackStart, ctx: ConverterContext):
-    return [f"{ctx.indent}var {ctx.nxt} any", f"{ctx.indent}func() {{", f"{ctx.indent}\tdefer func() {{", f"{ctx.indent}\t\tif recover() != nil {{", f"{ctx.indent}\t\t\t{ctx.nxt} = {_go_literal(getattr(node, 'value', None))}", f"{ctx.indent}\t\t}}", f"{ctx.indent}\t}}()"]
+    return [
+        f"{ctx.indent}var {ctx.nxt} any",
+        f"{ctx.indent}func() {{",
+        f"{ctx.indent}\tdefer func() {{",
+        f"{ctx.indent}\t\tif recover() != nil {{",
+        f"{ctx.indent}\t\t\t{ctx.nxt} = {_go_literal(getattr(node, 'value', None))}",
+        f"{ctx.indent}\t\t}}",
+        f"{ctx.indent}\t}}()",
+    ]
 
 
 @GO_GOQUERY_CONVERTER(FallbackEnd)
@@ -1469,19 +1532,32 @@ def expr_assert(node: Assert, ctx: ConverterContext):
 
 @GO_GOQUERY_CONVERTER.post(Assert)
 def post_assert(node: Assert, ctx: ConverterContext):
-    return [f"{ctx.indent}) {{", f"{ctx.indent}\tpanic(\"assertion failed\")", f"{ctx.indent}}}", f"{ctx.indent}{ctx.nxt} := {ctx.prv}"]
+    return [
+        f"{ctx.indent}) {{",
+        f'{ctx.indent}\tpanic("assertion failed")',
+        f"{ctx.indent}}}",
+        f"{ctx.indent}{ctx.nxt} := {ctx.prv}",
+    ]
 
 
 @GO_GOQUERY_CONVERTER(Match)
 def expr_match(node: Match, ctx: ConverterContext):
-    return [f"{ctx.indent}i := _sscAsString({to_camel_case(to_pascal_case(node.parent.parent.name))}._tableMatchKey({ctx.prv}))", f"{ctx.indent}if !("]
+    return [
+        f"{ctx.indent}i := _sscAsString({to_camel_case(to_pascal_case(node.parent.parent.name))}._tableMatchKey({ctx.prv}))",
+        f"{ctx.indent}if !(",
+    ]
 
 
 @GO_GOQUERY_CONVERTER.post(Match)
 def post_match(node: Match, ctx: ConverterContext):
     struct_name = to_pascal_case(node.parent.parent.name)
     recv = to_camel_case(struct_name)
-    return [f"{ctx.indent}) {{", f"{ctx.indent}\treturn UNMATCHED_TABLE_ROW", f"{ctx.indent}}}", f"{ctx.indent}{ctx.nxt} := {recv}._parseValue({ctx.prv})"]
+    return [
+        f"{ctx.indent}) {{",
+        f"{ctx.indent}\treturn UNMATCHED_TABLE_ROW",
+        f"{ctx.indent}}}",
+        f"{ctx.indent}{ctx.nxt} := {recv}._parseValue({ctx.prv})",
+    ]
 
 
 @GO_GOQUERY_CONVERTER(LogicAnd, post_callback=lambda _, ctx: f"{ctx.indent})")
@@ -1536,7 +1612,10 @@ def pred_eq(node: PredEq, ctx: ConverterContext):
         return _go_pred(f"len(i) == {node.values[0]}", ctx)
     if len(node.values) == 1:
         return _go_pred(f"i == {_go_str(node.values[0])}", ctx)
-    return _go_pred("(" + " || ".join([f"i == {_go_str(v)}" for v in node.values]) + ")", ctx)
+    return _go_pred(
+        "(" + " || ".join([f"i == {_go_str(v)}" for v in node.values]) + ")",
+        ctx,
+    )
 
 
 @GO_GOQUERY_CONVERTER(PredNe)
@@ -1545,27 +1624,39 @@ def pred_ne(node: PredNe, ctx: ConverterContext):
         return _go_pred(f"len(i) != {node.values[0]}", ctx)
     if len(node.values) == 1:
         return _go_pred(f"i != {_go_str(node.values[0])}", ctx)
-    return _go_pred("(" + " && ".join([f"i != {_go_str(v)}" for v in node.values]) + ")", ctx)
+    return _go_pred(
+        "(" + " && ".join([f"i != {_go_str(v)}" for v in node.values]) + ")",
+        ctx,
+    )
 
 
 @GO_GOQUERY_CONVERTER(PredIn)
 def pred_in(node: PredIn, ctx: ConverterContext):
-    return _go_pred(f"_sscStrContains({_go_str(node.value)}, []string{{i}})", ctx)
+    return _go_pred(
+        f"_sscStrContains({_go_str(node.value)}, []string{{i}})", ctx
+    )
 
 
 @GO_GOQUERY_CONVERTER(PredRe)
 def pred_re(node: PredRe, ctx: ConverterContext):
-    return _go_pred(f"regexp.MustCompile({_go_str(node.pattern)}).MatchString(i)", ctx)
+    return _go_pred(
+        f"regexp.MustCompile({_go_str(node.pattern)}).MatchString(i)", ctx
+    )
 
 
 @GO_GOQUERY_CONVERTER(PredReAny)
 def pred_re_any(node: PredReAny, ctx: ConverterContext):
-    return _go_pred(f"regexp.MustCompile({_go_str(node.pattern)}).MatchString(i)", ctx)
+    return _go_pred(
+        f"regexp.MustCompile({_go_str(node.pattern)}).MatchString(i)", ctx
+    )
 
 
 @GO_GOQUERY_CONVERTER(PredReAll)
 def pred_re_all(node: PredReAll, ctx: ConverterContext):
-    return _go_pred(f"len(regexp.MustCompile({_go_str(node.pattern)}).FindAllStringSubmatch(i, -1)) > 0", ctx)
+    return _go_pred(
+        f"len(regexp.MustCompile({_go_str(node.pattern)}).FindAllStringSubmatch(i, -1)) > 0",
+        ctx,
+    )
 
 
 @GO_GOQUERY_CONVERTER(PredHasAttr)
@@ -1576,55 +1667,147 @@ def pred_has_attr(node: PredHasAttr, ctx: ConverterContext):
 @GO_GOQUERY_CONVERTER(PredAttrEq)
 def pred_attr_eq(node: PredAttrEq, ctx: ConverterContext):
     if len(node.values) == 1:
-        return _go_pred(f"_sscPredAttr(i, {_go_str(node.attr_name)}) == {_go_str(node.values[0])}", ctx)
-    return _go_pred("(" + " || ".join([f"_sscPredAttr(i, {_go_str(node.attr_name)}) == {_go_str(v)}" for v in node.values]) + ")", ctx)
+        return _go_pred(
+            f"_sscPredAttr(i, {_go_str(node.attr_name)}) == {_go_str(node.values[0])}",
+            ctx,
+        )
+    return _go_pred(
+        "("
+        + " || ".join(
+            [
+                f"_sscPredAttr(i, {_go_str(node.attr_name)}) == {_go_str(v)}"
+                for v in node.values
+            ]
+        )
+        + ")",
+        ctx,
+    )
 
 
 @GO_GOQUERY_CONVERTER(PredAttrNe)
 def pred_attr_ne(node: PredAttrNe, ctx: ConverterContext):
     if len(node.values) == 1:
-        return _go_pred(f"_sscPredAttr(i, {_go_str(node.attr_name)}) != {_go_str(node.values[0])}", ctx)
-    return _go_pred("(" + " && ".join([f"_sscPredAttr(i, {_go_str(node.attr_name)}) != {_go_str(v)}" for v in node.values]) + ")", ctx)
+        return _go_pred(
+            f"_sscPredAttr(i, {_go_str(node.attr_name)}) != {_go_str(node.values[0])}",
+            ctx,
+        )
+    return _go_pred(
+        "("
+        + " && ".join(
+            [
+                f"_sscPredAttr(i, {_go_str(node.attr_name)}) != {_go_str(v)}"
+                for v in node.values
+            ]
+        )
+        + ")",
+        ctx,
+    )
 
 
 @GO_GOQUERY_CONVERTER(PredAttrStarts)
 def pred_attr_starts(node: PredAttrStarts, ctx: ConverterContext):
-    return _go_pred("(" + " || ".join([f"strings.HasPrefix(_sscPredAttr(i, {_go_str(node.attr_name)}), {_go_str(v)})" for v in node.values]) + ")", ctx)
+    return _go_pred(
+        "("
+        + " || ".join(
+            [
+                f"strings.HasPrefix(_sscPredAttr(i, {_go_str(node.attr_name)}), {_go_str(v)})"
+                for v in node.values
+            ]
+        )
+        + ")",
+        ctx,
+    )
 
 
 @GO_GOQUERY_CONVERTER(PredAttrEnds)
 def pred_attr_ends(node: PredAttrEnds, ctx: ConverterContext):
-    return _go_pred("(" + " || ".join([f"strings.HasSuffix(_sscPredAttr(i, {_go_str(node.attr_name)}), {_go_str(v)})" for v in node.values]) + ")", ctx)
+    return _go_pred(
+        "("
+        + " || ".join(
+            [
+                f"strings.HasSuffix(_sscPredAttr(i, {_go_str(node.attr_name)}), {_go_str(v)})"
+                for v in node.values
+            ]
+        )
+        + ")",
+        ctx,
+    )
 
 
 @GO_GOQUERY_CONVERTER(PredAttrContains)
 def pred_attr_contains(node: PredAttrContains, ctx: ConverterContext):
-    return _go_pred("(" + " || ".join([f"strings.Contains(_sscPredAttr(i, {_go_str(node.attr_name)}), {_go_str(v)})" for v in node.values]) + ")", ctx)
+    return _go_pred(
+        "("
+        + " || ".join(
+            [
+                f"strings.Contains(_sscPredAttr(i, {_go_str(node.attr_name)}), {_go_str(v)})"
+                for v in node.values
+            ]
+        )
+        + ")",
+        ctx,
+    )
 
 
 @GO_GOQUERY_CONVERTER(PredAttrRe)
 def pred_attr_re(node: PredAttrRe, ctx: ConverterContext):
-    return _go_pred(f"regexp.MustCompile({_go_str(node.pattern)}).MatchString(_sscPredAttr(i, {_go_str(node.attr_name)}))", ctx)
+    return _go_pred(
+        f"regexp.MustCompile({_go_str(node.pattern)}).MatchString(_sscPredAttr(i, {_go_str(node.attr_name)}))",
+        ctx,
+    )
 
 
 @GO_GOQUERY_CONVERTER(PredTextStarts)
 def pred_text_starts(node: PredTextStarts, ctx: ConverterContext):
-    return _go_pred("(" + " || ".join([f"strings.HasPrefix(_sscPredText(i), {_go_str(v)})" for v in node.values]) + ")", ctx)
+    return _go_pred(
+        "("
+        + " || ".join(
+            [
+                f"strings.HasPrefix(_sscPredText(i), {_go_str(v)})"
+                for v in node.values
+            ]
+        )
+        + ")",
+        ctx,
+    )
 
 
 @GO_GOQUERY_CONVERTER(PredTextEnds)
 def pred_text_ends(node: PredTextEnds, ctx: ConverterContext):
-    return _go_pred("(" + " || ".join([f"strings.HasSuffix(_sscPredText(i), {_go_str(v)})" for v in node.values]) + ")", ctx)
+    return _go_pred(
+        "("
+        + " || ".join(
+            [
+                f"strings.HasSuffix(_sscPredText(i), {_go_str(v)})"
+                for v in node.values
+            ]
+        )
+        + ")",
+        ctx,
+    )
 
 
 @GO_GOQUERY_CONVERTER(PredTextContains)
 def pred_text_contains(node: PredTextContains, ctx: ConverterContext):
-    return _go_pred("(" + " || ".join([f"strings.Contains(_sscPredText(i), {_go_str(v)})" for v in node.values]) + ")", ctx)
+    return _go_pred(
+        "("
+        + " || ".join(
+            [
+                f"strings.Contains(_sscPredText(i), {_go_str(v)})"
+                for v in node.values
+            ]
+        )
+        + ")",
+        ctx,
+    )
 
 
 @GO_GOQUERY_CONVERTER(PredTextRe)
 def pred_text_re(node: PredTextRe, ctx: ConverterContext):
-    return _go_pred(f"regexp.MustCompile({_go_str(node.pattern)}).MatchString(_sscPredText(i))", ctx)
+    return _go_pred(
+        f"regexp.MustCompile({_go_str(node.pattern)}).MatchString(_sscPredText(i))",
+        ctx,
+    )
 
 
 @GO_GOQUERY_CONVERTER(PredCountEq)
@@ -1659,7 +1842,9 @@ def pred_count_le(node: PredCountLe, ctx: ConverterContext):
 
 @GO_GOQUERY_CONVERTER(PredCountRange)
 def pred_count_range(node: PredCountRange, ctx: ConverterContext):
-    return _go_pred(f"len(i) >= {node.min_count} && len(i) <= {node.max_count}", ctx)
+    return _go_pred(
+        f"len(i) >= {node.min_count} && len(i) <= {node.max_count}", ctx
+    )
 
 
 @GO_GOQUERY_CONVERTER(PredGt)

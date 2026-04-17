@@ -6,7 +6,7 @@ from typing import cast
 from .base import Node
 from .types import VariableType, StructType
 
-_PLACEHOLDER_RE = _re.compile(r'\{\{(\w+)\}\}')
+_PLACEHOLDER_RE = _re.compile(r"\{\{([\w-]+)\}\}")
 
 
 @dataclass
@@ -186,8 +186,10 @@ class RequestConfig(Node):
     """
 
     raw_payload: str = ""
-    response_path: str = ""   # dot-notation JSON path, e.g. "payload.html"
-    response_join: str = ""   # join separator when response-path resolves to list[str]
+    response_path: str = ""  # dot-notation JSON path, e.g. "payload.html"
+    response_join: str = (
+        ""  # join separator when response-path resolves to list[str]
+    )
 
     @property
     def placeholders(self) -> list[str]:

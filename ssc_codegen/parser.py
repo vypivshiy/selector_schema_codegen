@@ -197,8 +197,12 @@ class Document:
 class ImportRegistry:
     """Shared across recursive import resolution to detect cycles and cache results."""
 
-    in_progress: set[str] = field(default_factory=set)  # absolute paths being parsed
-    completed: dict[str, "ParseContext"] = field(default_factory=dict)  # path -> parsed context
+    in_progress: set[str] = field(
+        default_factory=set
+    )  # absolute paths being parsed
+    completed: dict[str, "ParseContext"] = field(
+        default_factory=dict
+    )  # path -> parsed context
 
 
 @dataclass
@@ -505,7 +509,9 @@ class AstParser:
             self._typedef_from_struct(s, module) for s in imported_structs
         ]
         imported_json_defs: list[JsonDef] = list(self.ctx.json_defs.values())
-        imported_transforms: list[TransformDef] = list(self.ctx.transforms.values())
+        imported_transforms: list[TransformDef] = list(
+            self.ctx.transforms.values()
+        )
 
         # pass 2 — everything else
         structs: list[Struct] = []
@@ -581,7 +587,8 @@ class AstParser:
         # wire all nodes into module body:
         # imported transforms + local transforms, then imported + local typedefs/structs
         local_transform_defs = [
-            td for td in self.ctx.transforms.values()
+            td
+            for td in self.ctx.transforms.values()
             if td not in imported_transforms
         ]
         all_transforms = imported_transforms + local_transform_defs
@@ -700,7 +707,9 @@ class AstParser:
         registry.completed[import_key] = result_ctx
         return result_ctx
 
-    def _check_define_conflict(self, node: KdlNode, imported_names: set[str]) -> None:
+    def _check_define_conflict(
+        self, node: KdlNode, imported_names: set[str]
+    ) -> None:
         """Check if a define node conflicts with imported names."""
         if node.children:
             # block define: name is first arg
@@ -738,9 +747,15 @@ class AstParser:
                     )
                 target_dict[name] = val
 
-        _check_and_merge_dict(target.property_defines, imported_ctx.property_defines, "define")
-        _check_and_merge_dict(target.children_defines, imported_ctx.children_defines, "define")
-        _check_and_merge_dict(target.transforms, imported_ctx.transforms, "transform")
+        _check_and_merge_dict(
+            target.property_defines, imported_ctx.property_defines, "define"
+        )
+        _check_and_merge_dict(
+            target.children_defines, imported_ctx.children_defines, "define"
+        )
+        _check_and_merge_dict(
+            target.transforms, imported_ctx.transforms, "transform"
+        )
         _check_and_merge_dict(target.structs, imported_ctx.structs, "struct")
         _check_and_merge_dict(target.json_defs, imported_ctx.json_defs, "json")
 
@@ -787,12 +802,18 @@ class AstParser:
                 parent.body.append(expr)
             elif node.name == "@request":
                 if not node.args:
-                    raise ParseError("@request requires a multiline string argument")
+                    raise ParseError(
+                        "@request requires a multiline string argument"
+                    )
                 raw_payload = str(node.args[0])
                 req = RequestConfig(parent=parent)
                 req.raw_payload = raw_payload
-                req.response_path = str(node.properties.get("response-path", ""))
-                req.response_join = str(node.properties.get("response-join", ""))
+                req.response_path = str(
+                    node.properties.get("response-path", "")
+                )
+                req.response_join = str(
+                    node.properties.get("response-join", "")
+                )
                 parent.body.append(req)
                 logger.debug(
                     "  @request: %d chars, placeholders=%r",
@@ -838,7 +859,9 @@ class AstParser:
                 node.name in self.ctx.children_defines
                 and node.name not in self._context_filter
             ):
-                self._parse_filter_expr(self.ctx.children_defines[node.name], parent)
+                self._parse_filter_expr(
+                    self.ctx.children_defines[node.name], parent
+                )
                 continue
             if cb := self._context_filter.get(node.name):
                 expr = cb(node, parent, self.ctx)
@@ -864,7 +887,9 @@ class AstParser:
                 node.name in self.ctx.children_defines
                 and node.name not in self._context_assert
             ):
-                self._parse_assert_expr(self.ctx.children_defines[node.name], parent)
+                self._parse_assert_expr(
+                    self.ctx.children_defines[node.name], parent
+                )
                 continue
             if cb := self._context_assert.get(node.name):
                 expr = cb(node, parent, self.ctx)
@@ -890,7 +915,9 @@ class AstParser:
                 node.name in self.ctx.children_defines
                 and node.name not in self._context_match
             ):
-                self._parse_match_expr(self.ctx.children_defines[node.name], parent)
+                self._parse_match_expr(
+                    self.ctx.children_defines[node.name], parent
+                )
                 continue
             if cb := self._context_match.get(node.name):
                 expr = cb(node, parent, self.ctx)
@@ -1370,7 +1397,9 @@ def _resolve_selector_child_name(name: str, ctx: ParseContext) -> str:
 @PARSER.register_expression_node("css")
 def reg_expr_css(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
     if node.children:
-        queries = [_resolve_selector_child_name(c.name, ctx) for c in node.children]
+        queries = [
+            _resolve_selector_child_name(c.name, ctx) for c in node.children
+        ]
         return CssSelect(parent=parent, queries=queries)
     query = _resolve_selector_arg(node.args[0], ctx)
     return CssSelect(parent=parent, query=cast(str, query))
@@ -1379,7 +1408,9 @@ def reg_expr_css(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
 @PARSER.register_expression_node("css-all")
 def reg_expr_css_all(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
     if node.children:
-        queries = [_resolve_selector_child_name(c.name, ctx) for c in node.children]
+        queries = [
+            _resolve_selector_child_name(c.name, ctx) for c in node.children
+        ]
         return CssSelectAll(parent=parent, queries=queries)
     query = _resolve_selector_arg(node.args[0], ctx)
     return CssSelectAll(parent=parent, query=cast(str, query))
@@ -1388,7 +1419,9 @@ def reg_expr_css_all(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
 @PARSER.register_expression_node("xpath")
 def reg_expr_xpath(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
     if node.children:
-        queries = [_resolve_selector_child_name(c.name, ctx) for c in node.children]
+        queries = [
+            _resolve_selector_child_name(c.name, ctx) for c in node.children
+        ]
         return XpathSelect(parent=parent, queries=queries)
     query = _resolve_selector_arg(node.args[0], ctx)
     return XpathSelect(parent=parent, query=cast(str, query))
@@ -1397,7 +1430,9 @@ def reg_expr_xpath(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
 @PARSER.register_expression_node("xpath-all")
 def reg_expr_xpath_all(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
     if node.children:
-        queries = [_resolve_selector_child_name(c.name, ctx) for c in node.children]
+        queries = [
+            _resolve_selector_child_name(c.name, ctx) for c in node.children
+        ]
         return XpathSelectAll(parent=parent, queries=queries)
     query = _resolve_selector_arg(node.args[0], ctx)
     return XpathSelectAll(parent=parent, query=cast(str, query))
@@ -1693,7 +1728,9 @@ def reg_expr_slice(node: KdlNode, parent: FieldLikeNode, ctx: ParseContext):
     start, end = int(node.args[0]), int(node.args[1])
     if parent.body:
         prev_type = parent.body[-1].ret
-        return Slice(parent=parent, start=start, end=end, accept=prev_type, ret=prev_type)
+        return Slice(
+            parent=parent, start=start, end=end, accept=prev_type, ret=prev_type
+        )
     return Slice(parent=parent, start=start, end=end)
 
 
@@ -1873,7 +1910,9 @@ def reg_expr_fallback(node: KdlNode, parent: FieldLikeNode, _: ParseContext):
 def reg_expr_filter(node: KdlNode, parent: FieldLikeNode, _: ParseContext):
     if not parent.body:
         return Filter(
-            parent=parent, accept=VariableType.DOCUMENT, ret=VariableType.DOCUMENT
+            parent=parent,
+            accept=VariableType.DOCUMENT,
+            ret=VariableType.DOCUMENT,
         )
     prev_type = parent.body[-1].ret
     return Filter(parent=parent, accept=prev_type, ret=prev_type)
@@ -1891,7 +1930,9 @@ def reg_expr_assert(node: KdlNode, parent: FieldLikeNode, _: ParseContext):
         )
     if not parent.body:
         return Assert(
-            parent=parent, accept=VariableType.DOCUMENT, ret=VariableType.DOCUMENT
+            parent=parent,
+            accept=VariableType.DOCUMENT,
+            ret=VariableType.DOCUMENT,
         )
     prev_type = parent.body[-1].ret
     return Assert(parent=parent, accept=prev_type, ret=prev_type)

@@ -57,6 +57,7 @@ PY_TYPES = py_bs4.PY_TYPES.copy()
 PY_TYPES[VariableType.DOCUMENT] = "Node"
 PY_TYPES[VariableType.LIST_DOCUMENT] = "List[Node]"
 
+
 @PY_SLAX_CONVERTER(Imports)
 def pre_imports(node: Imports, _: ConverterContext):
     base_imports = [
@@ -72,10 +73,12 @@ def pre_imports(node: Imports, _: ConverterContext):
 
 
 @PY_SLAX_CONVERTER.post(Imports)
-def post_imports(node: Imports, _):
-    return [
+def post_imports(node: Imports, ctx: ConverterContext):
+    lines = [
         "from selectolax.lexbor import LexborHTMLParser as HTMLParser, LexborNode as Node"
     ]
+    lines.extend(py_bs4.http_client_import(ctx))
+    return lines
 
 
 @PY_SLAX_CONVERTER(Utilities)
@@ -205,7 +208,9 @@ def pre_expr_css_select(node: CssSelect, ctx: ConverterContext):
         for i, query in enumerate(node.queries):
             q = repr(query)
             if i == 0:
-                lines.append(f"{ctx.indent}{ctx.nxt} = {ctx.prv}.css_first({q})")
+                lines.append(
+                    f"{ctx.indent}{ctx.nxt} = {ctx.prv}.css_first({q})"
+                )
             else:
                 lines.append(f"{ctx.indent}if {ctx.nxt} is None:")
                 lines.append(

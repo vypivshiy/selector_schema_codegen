@@ -3,6 +3,7 @@ RequestSpec — normalised intermediate form produced at codegen-time from a raw
 @request payload.  Converters consume RequestSpec to emit explicit fetch() code
 for a target HTTP library; no ssc_codegen import appears in generated code.
 """
+
 from __future__ import annotations
 
 import json
@@ -13,19 +14,20 @@ from urllib.parse import urlparse, urlunparse
 from .curl import parse_curl_to_httpx_kwargs
 from .http import parse_http_to_httpx_kwargs
 
-_PH = re.compile(r'\{\{(\w+)\}\}')
+_PH = re.compile(r"\{\{([\w-]+)\}\}")
 
 # ── RequestSpec ───────────────────────────────────────────────────────────────
 
+
 @dataclass
 class RequestSpec:
-    method: str                          # "GET", "POST", …
-    url: str                             # base URL, no query string
+    method: str  # "GET", "POST", …
+    url: str  # base URL, no query string
     headers: dict[str, str] = field(default_factory=dict)
     cookies: dict[str, str] = field(default_factory=dict)
     params: dict[str, str] = field(default_factory=dict)
-    body_kind: str = "empty"             # "empty" | "json" | "form" | "raw"
-    body: str | dict | None = None       # raw template string or form dict
+    body_kind: str = "empty"  # "empty" | "json" | "form" | "raw"
+    body: str | dict | None = None  # raw template string or form dict
 
     @property
     def placeholders(self) -> list[str]:
@@ -67,6 +69,7 @@ def _iter_dict_strings(d: dict):
 
 # ── Parser → RequestSpec ─────────────────────────────────────────────────────
 
+
 def _strip_query(url: str) -> str:
     p = urlparse(url)
     return urlunparse(p._replace(query="", fragment=""))
@@ -74,9 +77,9 @@ def _strip_query(url: str) -> str:
 
 def _detect_format(payload: str) -> str:
     stripped = payload.lstrip()
-    if re.match(r'curl\s', stripped, re.IGNORECASE):
+    if re.match(r"curl\s", stripped, re.IGNORECASE):
         return "curl"
-    if re.match(r'^[A-Z]+\s+\S+\s+HTTP/\d', stripped):
+    if re.match(r"^[A-Z]+\s+\S+\s+HTTP/\d", stripped):
         return "http"
     raise ValueError(
         "Unsupported @request format: expected 'curl ...' "
@@ -108,20 +111,24 @@ def parse_to_spec(payload: str) -> RequestSpec:
     body = None
     content_type = headers.get("Content-Type", "").lower()
 
-    if "json" in kwargs or ("data" in kwargs and "application/json" in content_type):
+    if "json" in kwargs or (
+        "data" in kwargs and "application/json" in content_type
+    ):
         # "data" branch: json.loads failed in the underlying parser because
         # {{placeholders}} made the body invalid JSON, but Content-Type tells
         # us it is intended as JSON.
         body_kind = "json"
         raw_body = _extract_raw_body(payload, fmt)
-        _validate_json_body(raw_body)   # raises ValueError on genuinely bad JSON
-        body = raw_body                 # kept as raw str; rendered as f-string
+        _validate_json_body(raw_body)  # raises ValueError on genuinely bad JSON
+        body = raw_body  # kept as raw str; rendered as f-string
 
     elif "data" in kwargs:
         raw_body = _extract_raw_body(payload, fmt)
         if isinstance(kwargs["data"], dict):
             body_kind = "form"
-            body = kwargs["data"]       # dict with original values (may have placeholders)
+            body = kwargs[
+                "data"
+            ]  # dict with original values (may have placeholders)
         else:
             body_kind = "raw"
             body = raw_body
@@ -146,6 +153,7 @@ def _extract_raw_body(payload: str, fmt: str) -> str:
 
 def _curl_raw_body(payload: str) -> str:
     import shlex
+
     parts = shlex.split(payload.strip())[1:]  # drop "curl"
     i = 0
     while i < len(parts):
@@ -195,7 +203,50 @@ def _validate_json_body(raw: str) -> None:
         ) from exc
 
 
+# ── Placeholder name normalization ───────────────────────────────────────────
+
+
+def normalize_placeholder_names(
+    spec: RequestSpec, transform: "Callable[[str], str]"
+) -> RequestSpec:
+    """Return a copy of *spec* with every placeholder name passed through *transform*.
+
+    Call this before rendering so that ``{{page-num}}`` becomes e.g.
+    ``{{page_num}}`` (Python) or ``{{pageNum}}`` (JS) in all spec fields.
+    """
+    from typing import Callable  # local import to avoid top-level cost
+
+    mapping = {ph: transform(ph) for ph in spec.placeholders}
+    if all(old == new for old, new in mapping.items()):
+        return spec
+
+    def _sub(text: str) -> str:
+        return _PH.sub(
+            lambda m: "{{" + mapping.get(m.group(1), m.group(1)) + "}}", text
+        )
+
+    def _sub_dict(d: dict) -> dict:
+        return {k: _sub(str(v)) for k, v in d.items()}
+
+    new_body = spec.body
+    if isinstance(spec.body, str):
+        new_body = _sub(spec.body)
+    elif isinstance(spec.body, dict):
+        new_body = _sub_dict(spec.body)
+
+    return RequestSpec(
+        method=spec.method,
+        url=_sub(spec.url),
+        headers=_sub_dict(spec.headers),
+        cookies=_sub_dict(spec.cookies),
+        params=_sub_dict(spec.params),
+        body_kind=spec.body_kind,
+        body=new_body,
+    )
+
+
 # ── Code-generation helpers ───────────────────────────────────────────────────
+
 
 def render_value(v: str) -> str:
     """
@@ -208,7 +259,7 @@ def render_value(v: str) -> str:
     if m := _PH.fullmatch(v):
         return m.group(1)
     if _PH.search(v):
-        inner = _PH.sub(r'{\1}', v)
+        inner = _PH.sub(r"{\1}", v)
         # escape any { } that are NOT our substituted {name} fragments
         # (they were already plain chars, not placeholder braces)
         # We do this by processing the original string token-by-token.
@@ -225,12 +276,12 @@ def _escape_fstring(template: str) -> str:
     result = []
     i = 0
     while i < len(template):
-        if template[i:i+2] == "{{" and _PH.match(template, i):
+        if template[i : i + 2] == "{{" and _PH.match(template, i):
             m = _PH.match(template, i)
             result.append("{" + m.group(1) + "}")
             i = m.end()
         elif template[i] in "{}":
-            result.append(template[i] * 2)   # escape lone brace
+            result.append(template[i] * 2)  # escape lone brace
             i += 1
         else:
             result.append(template[i])

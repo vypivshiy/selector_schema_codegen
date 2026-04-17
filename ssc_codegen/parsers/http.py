@@ -14,11 +14,11 @@ def parse_query_params(url: str) -> Dict[str, Any]:
 
 def parse_multipart(body: str, boundary: str) -> Dict[str, str]:
     """Parse multipart/form-data body into a dict of field names to values (text fields only)."""
-    parts = body.split(f'--{boundary}')
+    parts = body.split(f"--{boundary}")
     data = {}
     for part in parts:
         part = part.strip()
-        if part and part != '--':
+        if part and part != "--":
             lines = part.splitlines()
             headers_part = {}
             i = 0
@@ -27,19 +27,19 @@ def parse_multipart(body: str, boundary: str) -> Dict[str, str]:
                 i += 1
             # Parse headers
             while i < len(lines) and lines[i].strip():
-                if ':' in lines[i]:
-                    k, v = lines[i].split(':', 1)
+                if ":" in lines[i]:
+                    k, v = lines[i].split(":", 1)
                     headers_part[k.strip()] = v.strip()
                 i += 1
             # Skip empty line after headers
             if i < len(lines) and not lines[i].strip():
                 i += 1
-            content = '\n'.join(lines[i:]).strip()
+            content = "\n".join(lines[i:]).strip()
             # Extract name from Content-Disposition
-            cd = headers_part.get('Content-Disposition', '')
-            if 'name=' in cd:
-                name_part = cd.split('name=')[1]
-                name = name_part.split(';')[0].strip('"')
+            cd = headers_part.get("Content-Disposition", "")
+            if "name=" in cd:
+                name_part = cd.split("name=")[1]
+                name = name_part.split(";")[0].strip('"')
                 data[name] = content
     return data
 
@@ -47,10 +47,10 @@ def parse_multipart(body: str, boundary: str) -> Dict[str, str]:
 def parse_cookies(cookie_header: str) -> Dict[str, str]:
     """Parse a Cookie header string into a dict of name-value pairs."""
     cookies = {}
-    for pair in cookie_header.split(';'):
+    for pair in cookie_header.split(";"):
         pair = pair.strip()
-        if '=' in pair:
-            name, value = pair.split('=', 1)
+        if "=" in pair:
+            name, value = pair.split("=", 1)
             cookies[name.strip()] = value.strip()
     return cookies
 
@@ -84,8 +84,8 @@ def parse_http_to_httpx_kwargs(raw_http: str) -> Dict[str, Any]:
     headers = {}
     i = 1
     while i < len(lines) and lines[i].strip():
-        if ':' in lines[i]:
-            key, value = lines[i].split(':', 1)
+        if ":" in lines[i]:
+            key, value = lines[i].split(":", 1)
             headers[key.strip()] = value.strip()
         else:
             raise ValueError(f"Invalid header line: {lines[i]}")
@@ -96,10 +96,10 @@ def parse_http_to_httpx_kwargs(raw_http: str) -> Dict[str, Any]:
         i += 1
 
     # Parse body
-    body = '\n'.join(lines[i:]) if i < len(lines) else ''
+    body = "\n".join(lines[i:]) if i < len(lines) else ""
 
     # Construct URL
-    host = headers.get('Host')
+    host = headers.get("Host")
     if host:
         url = f"https://{host}{path}"
     else:
@@ -112,20 +112,24 @@ def parse_http_to_httpx_kwargs(raw_http: str) -> Dict[str, Any]:
     json_data = None
     data = None
     if body:
-        content_type_full = headers.get('Content-Type', '')
+        content_type_full = headers.get("Content-Type", "")
         content_type = content_type_full.lower()
-        if 'multipart/form-data' in content_type:
+        if "multipart/form-data" in content_type:
             # Extract boundary
-            if 'boundary=' in content_type_full:
-                boundary = content_type_full.split('boundary=')[1].split(';')[0].strip()
+            if "boundary=" in content_type_full:
+                boundary = (
+                    content_type_full.split("boundary=")[1]
+                    .split(";")[0]
+                    .strip()
+                )
                 form_data = parse_multipart(body, boundary)
                 data = form_data  # as dict
             else:
                 data = body  # Fallback
-        elif 'application/x-www-form-urlencoded' in content_type:
+        elif "application/x-www-form-urlencoded" in content_type:
             form_data = parse_qs(body, keep_blank_values=True)
             data = {k: v[0] if len(v) == 1 else v for k, v in form_data.items()}
-        elif 'application/json' in content_type:
+        elif "application/json" in content_type:
             try:
                 json_data = json.loads(body)
             except json.JSONDecodeError:
@@ -135,32 +139,32 @@ def parse_http_to_httpx_kwargs(raw_http: str) -> Dict[str, Any]:
 
     # Parse cookies
     cookies = None
-    if 'Cookie' in headers:
-        cookies = parse_cookies(headers['Cookie'])
-        del headers['Cookie']
+    if "Cookie" in headers:
+        cookies = parse_cookies(headers["Cookie"])
+        del headers["Cookie"]
 
     # Host is auto-set by HTTP libraries from the URL
-    headers.pop('Host', None)
+    headers.pop("Host", None)
 
     # Build kwargs
     kwargs = {
-        'method': method,
-        'url': url,
+        "method": method,
+        "url": url,
     }
 
     if headers:
-        kwargs['headers'] = headers
+        kwargs["headers"] = headers
 
     if json_data is not None:
-        kwargs['json'] = json_data
+        kwargs["json"] = json_data
     elif data:
-        kwargs['data'] = data
+        kwargs["data"] = data
 
     if cookies:
-        kwargs['cookies'] = cookies
+        kwargs["cookies"] = cookies
 
     if params:
-        kwargs['params'] = params
+        kwargs["params"] = params
 
     return kwargs
 

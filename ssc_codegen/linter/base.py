@@ -580,7 +580,9 @@ class AstLinter:
 
             visited.add(import_key)
             try:
-                imp_src = import_path.read_text(encoding=self._KDL_TEXT_ENCODING)
+                imp_src = import_path.read_text(
+                    encoding=self._KDL_TEXT_ENCODING
+                )
             except OSError:
                 continue
             try:
@@ -590,7 +592,9 @@ class AstLinter:
             imp_ctx = LintContext(src=imp_src.encode())
 
             # recursively collect imports from imported file
-            self._collect_imports(imp_tree.root_node, imp_ctx, import_path, visited)
+            self._collect_imports(
+                imp_tree.root_node, imp_ctx, import_path, visited
+            )
             # collect defines/transforms from imported file
             self._collect_defines(imp_tree.root_node, imp_ctx)
 

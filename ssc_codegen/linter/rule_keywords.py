@@ -57,6 +57,7 @@ _VALID_VT_NAMES: frozenset[str] = frozenset(
     }
 )
 
+
 def _get_dsl_names(ctx: LintContext) -> frozenset[str]:
     """
     Return the set of dsl block names declared in the current module.

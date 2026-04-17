@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Type, TYPE_CHECKING
 
 from ssc_codegen.ast import Node
@@ -31,6 +31,7 @@ class ConverterContext:
     depth: int = 0
     var_name: str = "v"
     indent_char: str = " " * 4
+    meta: dict = field(default_factory=dict)
 
     @property
     def prv(self) -> str:
@@ -148,9 +149,7 @@ class BaseConverter:
     def has_support_files(self) -> bool:
         return bool(self._file_providers)
 
-    def convert_all(
-        self, module_ast: "Module", **meta: Any
-    ) -> dict[str, str]:
+    def convert_all(self, module_ast: "Module", **meta: Any) -> dict[str, str]:
         """Return main file and support files as ``{filename: content}``.
 
         The main file is stored under key ``""`` (empty string).
@@ -161,7 +160,7 @@ class BaseConverter:
         result: dict[str, str] = {}
         for name, provider in self._file_providers.items():
             result[name] = provider(module_ast, meta)
-        result[""] = self.convert(module_ast)
+        result[""] = self.convert(module_ast, **meta)
         return result
 
     def extend(self) -> BaseConverter:
@@ -306,7 +305,7 @@ class BaseConverter:
 
     # ── public entry point ────────────────────────────────────────────────────
 
-    def convert(self, module_ast: "Module") -> str:
+    def convert(self, module_ast: "Module", **meta: Any) -> str:
         """
         Traverse Module.body and emit code.
 
@@ -319,8 +318,13 @@ class BaseConverter:
 
         Field.body pipeline traversal must be triggered manually from the
         Field handler via self._emit_pipeline().
+
+        *meta* kwargs (e.g. http_client="httpx") are forwarded to every node
+        handler via ctx.meta so handlers can vary output based on build options.
         """
-        ctx = ConverterContext(var_name=self.var_name, indent_char=self.indent)
+        ctx = ConverterContext(
+            var_name=self.var_name, indent_char=self.indent, meta=dict(meta)
+        )
         lines: list[str] = []
         for node in module_ast.body:
             self._collect(self._emit_node(node, ctx), lines)
