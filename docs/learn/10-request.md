@@ -177,6 +177,75 @@ struct BookCard type=list {
 `BookCard` не имеет `@request` — он получает HTML через `nested` из `ListPage`,
 а не по отдельному запросу.
 
+## Тип возврата для `struct type=rest`
+
+REST-методы возвращают **Result-значение** вместо того чтобы бросать
+исключение. Это единообразно для всех target-языков (Python/JS/будущие Go,
+Rust) и сохраняет точную типизацию `@error`-схемы.
+
+### Форма Result
+
+| Вариант | Когда | Поля |
+|---|---|---|
+| `Ok[T]` | HTTP 2xx | `is_ok=True`, `status`, `headers`, `value: T` |
+| `<Struct>Err<Status>` | объявленный `@error <status>` | `is_ok=False`, `status`, `headers`, `value: <Schema>Json` |
+| `UnknownErr` | статус вне списка `@error` | `is_ok=False`, `status`, `headers`, `value: Any` (raw JSON или None) |
+| `TransportErr` | сеть/таймаут/DNS | `is_ok=False`, `status=0`, `headers={}`, `value=None`, `cause: str` |
+
+Все варианты имеют одинаковую структуру с полями `is_ok`/`status`/`headers`
+/`value` — дизайн специально сделан портируемым на любой target.
+
+### Python
+
+```python
+r = DummyJsonApi.get_product(session, id=1)
+if r.is_ok:
+    print(r.value["title"])          # value: ProductJson
+    print(r.headers.get("x-ratelimit-remaining"))
+elif isinstance(r, DummyJsonApiErr404):
+    print("not found:", r.value["message"])  # value: ApiErrorJson
+elif isinstance(r, TransportErr):
+    print("network failed:", r.cause)
+else:  # UnknownErr — напр. 503
+    print("unexpected status", r.status, r.value)
+```
+
+Метод **никогда не бросает** — все HTTP-, парсинг- и транспортные ошибки
+попадают в соответствующий Err-вариант.
+
+### JS/TS
+
+```js
+const r = await DummyJsonApi.getProduct(fetch, {id: 1});
+if (r.isOk) {
+    console.log(r.value.title);
+    console.log(r.headers['x-ratelimit-remaining']);
+} else if (r.status === 404) {
+    console.log('not found:', r.value.message);  // ApiErrorJson
+} else if (r.status === 0) {
+    console.log('transport:', r.cause);
+} else {
+    console.log('unknown', r.status, r.value);
+}
+```
+
+IDE narrow'ит через literal-поля `isOk: true/false` и `status: 404`.
+
+### Headers
+
+- Ключи всегда в lowercase (нормализуется на стороне клиента), значения — str.
+- Multi-value headers (напр. `Set-Cookie`) — last-wins. Для REST-API
+  крайне редкий случай.
+
+### Именование Err-подклассов
+
+```
+<PascalStructName>Err<Status>[<FieldPascal>]
+```
+
+- `@error 404 ApiError` в struct `DummyJsonApi` → `DummyJsonApiErr404`
+- `@error 200 field="error_code" ApiError` → `DummyJsonApiErr200ErrorCode`
+
 ## Что @request не делает
 
 - Не управляет пагинацией — это задача вызывающего кода.

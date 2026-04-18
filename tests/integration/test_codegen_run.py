@@ -29,6 +29,7 @@ _PY_TARGETS = {
 def _get_converter(target: str):
     module_path, attr = _PY_TARGETS[target].rsplit(":", 1)
     import importlib
+
     mod = importlib.import_module(module_path)
     return getattr(mod, attr)
 
@@ -80,7 +81,10 @@ _TARGETS = ["py-bs4", "py-lxml", "py-parsel", "py-slax"]
 
 # ── Parametrized: each schema × each target ───────────────────────────────────
 
-@pytest.mark.parametrize("schema_file,struct_name", _SCHEMAS, ids=[f"{s}:{n}" for s, n in _SCHEMAS])
+
+@pytest.mark.parametrize(
+    "schema_file,struct_name", _SCHEMAS, ids=[f"{s}:{n}" for s, n in _SCHEMAS]
+)
 @pytest.mark.parametrize("target", _TARGETS)
 def test_codegen_runs_without_error(schema_file, struct_name, target, html):
     """Generated code executes and returns a result without exceptions."""
@@ -91,14 +95,19 @@ def test_codegen_runs_without_error(schema_file, struct_name, target, html):
 
 # ── Structure validation tests (py-bs4 baseline) ─────────────────────────────
 
+
 class TestStringsBasic:
     def test_returns_list(self, html):
-        result = _run_schema(SCHEMAS_DIR / "01_strings_basic.kdl", "StringsBasic", html)
+        result = _run_schema(
+            SCHEMAS_DIR / "01_strings_basic.kdl", "StringsBasic", html
+        )
         assert isinstance(result, list)
         assert len(result) == 2
 
     def test_fields_present(self, html):
-        result = _run_schema(SCHEMAS_DIR / "01_strings_basic.kdl", "StringsBasic", html)
+        result = _run_schema(
+            SCHEMAS_DIR / "01_strings_basic.kdl", "StringsBasic", html
+        )
         for item in result:
             assert "title" in item
             assert "link" in item
@@ -106,7 +115,9 @@ class TestStringsBasic:
             assert "active_flag" in item
 
     def test_field_types(self, html):
-        result = _run_schema(SCHEMAS_DIR / "01_strings_basic.kdl", "StringsBasic", html)
+        result = _run_schema(
+            SCHEMAS_DIR / "01_strings_basic.kdl", "StringsBasic", html
+        )
         item = result[0]
         assert isinstance(item["title"], str)
         assert isinstance(item["link"], str)
@@ -116,12 +127,20 @@ class TestStringsBasic:
 
 class TestArraysAndConversions:
     def test_returns_list(self, html):
-        result = _run_schema(SCHEMAS_DIR / "02_arrays_and_conversions.kdl", "ArraysAndConversions", html)
+        result = _run_schema(
+            SCHEMAS_DIR / "02_arrays_and_conversions.kdl",
+            "ArraysAndConversions",
+            html,
+        )
         assert isinstance(result, list)
         assert len(result) == 2
 
     def test_field_types(self, html):
-        result = _run_schema(SCHEMAS_DIR / "02_arrays_and_conversions.kdl", "ArraysAndConversions", html)
+        result = _run_schema(
+            SCHEMAS_DIR / "02_arrays_and_conversions.kdl",
+            "ArraysAndConversions",
+            html,
+        )
         item = result[0]
         assert isinstance(item["token_list"], list)
         assert isinstance(item["first_token"], str)
@@ -131,18 +150,34 @@ class TestArraysAndConversions:
         assert isinstance(item["any_link_count"], int)
 
     def test_token_list_values(self, html):
-        result = _run_schema(SCHEMAS_DIR / "02_arrays_and_conversions.kdl", "ArraysAndConversions", html)
-        assert result[0]["token_list"] == ["tag-core-alpha1-x", "item-beta2-y", "ref3"]
+        result = _run_schema(
+            SCHEMAS_DIR / "02_arrays_and_conversions.kdl",
+            "ArraysAndConversions",
+            html,
+        )
+        assert result[0]["token_list"] == [
+            "tag-core-alpha1-x",
+            "item-beta2-y",
+            "ref3",
+        ]
 
 
 class TestFiltersAndPredicates:
     def test_returns_list(self, html):
-        result = _run_schema(SCHEMAS_DIR / "03_filters_and_predicates.kdl", "FiltersAndPredicates", html)
+        result = _run_schema(
+            SCHEMAS_DIR / "03_filters_and_predicates.kdl",
+            "FiltersAndPredicates",
+            html,
+        )
         assert isinstance(result, list)
         assert len(result) == 2
 
     def test_fields_present(self, html):
-        result = _run_schema(SCHEMAS_DIR / "03_filters_and_predicates.kdl", "FiltersAndPredicates", html)
+        result = _run_schema(
+            SCHEMAS_DIR / "03_filters_and_predicates.kdl",
+            "FiltersAndPredicates",
+            html,
+        )
         for item in result:
             assert "filtered_links" in item
             assert "logic_check" in item
@@ -183,11 +218,15 @@ class TestDictSchemas:
 
 class TestTableCoverage:
     def test_returns_dict(self, html):
-        result = _run_schema(SCHEMAS_DIR / "07_table.kdl", "TableCoverage", html)
+        result = _run_schema(
+            SCHEMAS_DIR / "07_table.kdl", "TableCoverage", html
+        )
         assert isinstance(result, dict)
 
     def test_field_values(self, html):
-        result = _run_schema(SCHEMAS_DIR / "07_table.kdl", "TableCoverage", html)
+        result = _run_schema(
+            SCHEMAS_DIR / "07_table.kdl", "TableCoverage", html
+        )
         assert result["identifier"] == "ABC-123"
         assert result["code_value"] == "CODE-1"
         assert result["price"] == 9.99
@@ -209,7 +248,9 @@ _XFAIL_CROSS_TARGET = {
 }
 
 
-@pytest.mark.parametrize("schema_file,struct_name", _SCHEMAS, ids=[f"{s}:{n}" for s, n in _SCHEMAS])
+@pytest.mark.parametrize(
+    "schema_file,struct_name", _SCHEMAS, ids=[f"{s}:{n}" for s, n in _SCHEMAS]
+)
 def test_all_targets_produce_same_result(schema_file, struct_name, html):
     """All Python targets produce identical parse results for the same schema."""
     if (schema_file, struct_name) in _XFAIL_CROSS_TARGET:
@@ -229,11 +270,16 @@ def test_all_targets_produce_same_result(schema_file, struct_name, html):
 
 # ── xfail: known issues with json+nested schemas ─────────────────────────────
 
-@pytest.mark.xfail(reason="JSON nested struct parsing has a known runtime issue")
+
+@pytest.mark.xfail(
+    reason="JSON nested struct parsing has a known runtime issue"
+)
 def test_json_nested_root(html):
     _run_schema(SCHEMAS_DIR / "04_json_and_nested.kdl", "JsonNestedRoot", html)
 
 
-@pytest.mark.xfail(reason="JSON nested struct parsing has a known runtime issue")
+@pytest.mark.xfail(
+    reason="JSON nested struct parsing has a known runtime issue"
+)
 def test_coverage_root_full(html):
     _run_schema(SCHEMAS_DIR / "00_full.kdl", "CoverageRoot", html)

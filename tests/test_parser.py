@@ -55,15 +55,25 @@ def _body_of_type(nodes: list[object], cls: type):
 
 
 def _struct(module, name: str) -> Struct:
-    return next(node for node in module.body if isinstance(node, Struct) and node.name == name)
+    return next(
+        node
+        for node in module.body
+        if isinstance(node, Struct) and node.name == name
+    )
 
 
 def _json_def(module, name: str) -> JsonDef:
-    return next(node for node in module.body if isinstance(node, JsonDef) and node.name == name)
+    return next(
+        node
+        for node in module.body
+        if isinstance(node, JsonDef) and node.name == name
+    )
 
 
 def _field(struct: Struct, name: str):
-    return next(node for node in struct.body if getattr(node, "name", None) == name)
+    return next(
+        node for node in struct.body if getattr(node, "name", None) == name
+    )
 
 
 def test_parse_document_decodes_literals_and_annotations():
@@ -72,14 +82,14 @@ def test_parse_document_decodes_literals_and_annotations():
             [
                 'define S="abc"',
                 'define R=#"raw"#',
-                'define T=#true',
-                'define F=#false',
-                'define N=#null',
-                'define I=123',
-                'define X=1.25',
-                'json Q {',
-                '    tags (array)str',
-                '}',
+                "define T=#true",
+                "define F=#false",
+                "define N=#null",
+                "define I=123",
+                "define X=1.25",
+                "json Q {",
+                "    tags (array)str",
+                "}",
             ]
         )
     )
@@ -125,7 +135,11 @@ def test_parser_builds_transform_defs_and_transform_calls():
     module = _parse_example("examples/transformExample.kdl")
 
     transforms = _body_of_type(module.body, TransformDef)
-    assert [t.name for t in transforms] == ["to-base64", "to-list-base64", "pow2"]
+    assert [t.name for t in transforms] == [
+        "to-base64",
+        "to-list-base64",
+        "pow2",
+    ]
     assert [t.accept for t in transforms] == [
         VariableType.STRING,
         VariableType.LIST_STRING,
@@ -138,7 +152,10 @@ def test_parser_builds_transform_defs_and_transform_calls():
     ]
 
     first_targets = transforms[0].body
-    assert [type(t).__name__ for t in first_targets] == ["TransformTarget", "TransformTarget"]
+    assert [type(t).__name__ for t in first_targets] == [
+        "TransformTarget",
+        "TransformTarget",
+    ]
     assert [t.lang for t in first_targets] == ["py", "js"]
     assert first_targets[0].imports == ("from base64 import b64decode",)
     assert first_targets[0].code == ("{{NXT}} = str(b64decode({{PRV}}))",)
@@ -172,7 +189,9 @@ def test_parser_resolves_jsonify_and_nested_nodes():
     json_parse = _field(search_page, "json-parse")
     selector_parse = _field(search_page, "selector-parse")
 
-    jsonify = next(node for node in json_parse.body if isinstance(node, Jsonify))
+    jsonify = next(
+        node for node in json_parse.body if isinstance(node, Jsonify)
+    )
 
     assert jsonify.schema_name == "Content"
     assert jsonify.path == "props.pageProps.titleResults"
@@ -186,7 +205,7 @@ def test_parser_resolves_jsonify_and_nested_nodes():
 
 def test_parser_builds_nested_node_for_inline_pipeline():
     module = PARSER.parse(
-        '''
+        """
         struct Child {
             value { css ".x"; text }
         }
@@ -194,7 +213,7 @@ def test_parser_builds_nested_node_for_inline_pipeline():
         struct Main {
             child { nested Child }
         }
-        '''
+        """
     )
     main = _struct(module, "Main")
     child = _field(main, "child")
@@ -209,11 +228,11 @@ def test_parser_builds_nested_node_for_inline_pipeline():
 
 def test_parser_supports_inline_operation_chain_css_attr():
     module = PARSER.parse(
-        '''
+        """
         struct Main {
             url { css "a"; attr "href" }
         }
-        '''
+        """
     )
     main = _struct(module, "Main")
     url = _field(main, "url")
@@ -227,7 +246,7 @@ def test_parser_supports_inline_operation_chain_css_attr():
 
 def test_parser_supports_css_pattern_match_block():
     module = PARSER.parse(
-        '''
+        """
         define MAIN_TITLE=".article h1"
 
         struct Main {
@@ -239,7 +258,7 @@ def test_parser_supports_css_pattern_match_block():
                 text
             }
         }
-        '''
+        """
     )
     main = _struct(module, "Main")
     title = _field(main, "title")
@@ -253,7 +272,7 @@ def test_parser_supports_css_pattern_match_block():
 
 def test_parser_supports_xpath_all_pattern_match_block():
     module = PARSER.parse(
-        '''
+        """
         struct Main {
             links {
                 xpath-all {
@@ -263,7 +282,7 @@ def test_parser_supports_xpath_all_pattern_match_block():
                 attr "href"
             }
         }
-        '''
+        """
     )
     main = _struct(module, "Main")
     links = _field(main, "links")
@@ -275,14 +294,13 @@ def test_parser_supports_xpath_all_pattern_match_block():
     assert isinstance(links.body[-1], Return)
 
 
-
 def test_parser_supports_inline_raw_extractor():
     module = PARSER.parse(
-        '''
+        """
         struct Main {
             html { raw }
         }
-        '''
+        """
     )
     main = _struct(module, "Main")
     html = _field(main, "html")
@@ -291,7 +309,6 @@ def test_parser_supports_inline_raw_extractor():
     assert isinstance(html.body[-1], Return)
     assert html.accept == VariableType.DOCUMENT
     assert html.ret == VariableType.STRING
-
 
 
 def test_parser_supports_inline_nested_in_books_example():
@@ -306,29 +323,34 @@ def test_parser_supports_inline_nested_in_books_example():
     assert isinstance(books.body[-1], Return)
 
 
-
 def test_parser_supports_inline_assert_block():
     module = PARSER.parse(
-        '''
+        """
         struct Main {
             title { css ".title"; text; assert { contains "foo" } }
         }
-        '''
+        """
     )
     main = _struct(module, "Main")
     title = _field(main, "title")
 
-    assert [type(node).__name__ for node in title.body] == ["CssSelect", "Text", "Assert", "Return"]
+    assert [type(node).__name__ for node in title.body] == [
+        "CssSelect",
+        "Text",
+        "Assert",
+        "Return",
+    ]
     assert_node = next(node for node in title.body if isinstance(node, Assert))
-    assert [type(node).__name__ for node in assert_node.body] == ["PredContains"]
+    assert [type(node).__name__ for node in assert_node.body] == [
+        "PredContains"
+    ]
     assert isinstance(assert_node.body[0], PredContains)
     assert title.ret == VariableType.STRING
 
 
-
 def test_parser_supports_inline_match_block():
     module = PARSER.parse(
-        '''
+        """
         struct Main type=table {
             @table { css "table" }
             @rows { css-all "tr" }
@@ -336,12 +358,15 @@ def test_parser_supports_inline_match_block():
             @value { css "td"; text }
             row-name { match { eq "Name" } }
         }
-        '''
+        """
     )
     main = _struct(module, "Main")
     row_name = _field(main, "row-name")
 
-    assert [type(node).__name__ for node in row_name.body] == ["Match", "Return"]
+    assert [type(node).__name__ for node in row_name.body] == [
+        "Match",
+        "Return",
+    ]
     match_node = row_name.body[0]
     assert isinstance(match_node, Match)
     assert [type(node).__name__ for node in match_node.body] == ["PredEq"]
@@ -349,27 +374,32 @@ def test_parser_supports_inline_match_block():
     assert row_name.ret == VariableType.STRING
 
 
-
 def test_parser_supports_inline_filter_not_block():
     module = PARSER.parse(
-        '''
+        """
         struct Main {
             links { css-all "a"; attr href; filter { not { contains "utm" } } }
         }
-        '''
+        """
     )
     main = _struct(module, "Main")
     links = _field(main, "links")
 
-    assert [type(node).__name__ for node in links.body] == ["CssSelectAll", "Attr", "Filter", "Return"]
+    assert [type(node).__name__ for node in links.body] == [
+        "CssSelectAll",
+        "Attr",
+        "Filter",
+        "Return",
+    ]
     assert isinstance(links.body[0], CssSelectAll)
     filter_node = next(node for node in links.body if isinstance(node, Filter))
     assert [type(node).__name__ for node in filter_node.body] == ["LogicNot"]
     assert isinstance(filter_node.body[0], LogicNot)
-    assert [type(node).__name__ for node in filter_node.body[0].body] == ["PredContains"]
+    assert [type(node).__name__ for node in filter_node.body[0].body] == [
+        "PredContains"
+    ]
     assert isinstance(filter_node.body[0].body[0], PredContains)
     assert links.ret == VariableType.LIST_STRING
-
 
 
 def test_parser_resolves_json_definition_field_shapes():
@@ -380,7 +410,10 @@ def test_parser_resolves_json_definition_field_shapes():
     results_fields = {field.name: field for field in results.body}
     content_fields = {field.name: field for field in content.body}
 
-    assert results_fields["titlePosterImageModel"].ref_name == "TitlePosterImageModel"
+    assert (
+        results_fields["titlePosterImageModel"].ref_name
+        == "TitlePosterImageModel"
+    )
     assert results_fields["titlePosterImageModel"].is_array is False
     assert results_fields["topCredits"].is_array is True
     assert results_fields["topCredits"].ref_name == ""
@@ -398,11 +431,21 @@ def test_parser_handles_table_struct_special_nodes_and_field_types():
 
     assert product_info.struct_type == StructType.TABLE
 
-    table_cfg = next(node for node in product_info.body if isinstance(node, TableConfig))
-    table_rows = next(node for node in product_info.body if isinstance(node, TableRow))
-    table_match = next(node for node in product_info.body if isinstance(node, TableMatchKey))
-    value_node = next(node for node in product_info.body if isinstance(node, Value))
-    pre_validate = next(node for node in product_info.body if isinstance(node, PreValidate))
+    table_cfg = next(
+        node for node in product_info.body if isinstance(node, TableConfig)
+    )
+    table_rows = next(
+        node for node in product_info.body if isinstance(node, TableRow)
+    )
+    table_match = next(
+        node for node in product_info.body if isinstance(node, TableMatchKey)
+    )
+    value_node = next(
+        node for node in product_info.body if isinstance(node, Value)
+    )
+    pre_validate = next(
+        node for node in product_info.body if isinstance(node, PreValidate)
+    )
     start_parse = product_info.body[-1]
     number_reviews = _field(product_info, "number-of-reviews")
 
@@ -451,11 +494,19 @@ def test_parser_inlines_define_blocks_and_resolves_init_references():
     )
     main = _struct(module, "Main")
 
-    init_field = next(node for node in main.init.body if isinstance(node, InitField) and node.name == "seed")
+    init_field = next(
+        node
+        for node in main.init.body
+        if isinstance(node, InitField) and node.name == "seed"
+    )
     inline_define = _field(main, "inline-define")
     from_init = _field(main, "from-init")
 
-    assert [type(node).__name__ for node in init_field.body] == ["CssSelect", "Text", "Return"]
+    assert [type(node).__name__ for node in init_field.body] == [
+        "CssSelect",
+        "Text",
+        "Return",
+    ]
     assert init_field.ret == VariableType.STRING
 
     assert [type(node).__name__ for node in inline_define.body] == [
@@ -515,8 +566,16 @@ def test_parser_preserves_split_doc_and_start_parse_flags():
     book = _struct(module, "Book")
     start_parse = book.body[-1]
 
-    assert isinstance(next(node for node in book.body if isinstance(node, SplitDoc)), SplitDoc)
+    assert isinstance(
+        next(node for node in book.body if isinstance(node, SplitDoc)), SplitDoc
+    )
     assert isinstance(start_parse, StartParse)
     assert start_parse.use_split_doc is True
     assert start_parse.use_pre_validate is True
-    assert {field.name for field in start_parse.fields} == {"name", "image-url", "rating", "price", "url"}
+    assert {field.name for field in start_parse.fields} == {
+        "name",
+        "image-url",
+        "rating",
+        "price",
+        "url",
+    }

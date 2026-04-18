@@ -24,6 +24,7 @@ Behavioural notes (established empirically):
   predicate container with no children → reports empty block. This is the
   actual behaviour; tests are aligned accordingly.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -260,11 +261,17 @@ class TestTypeMismatches:
     def test_filter_on_scalar_document_error(self):
         msgs = lint(field('css ".x"', "filter"))
         # filter with no children fires empty-block error; but type check also runs
-        assert any("requires a list type" in m or "must contain at least one" in m for m in msgs)
+        assert any(
+            "requires a list type" in m or "must contain at least one" in m
+            for m in msgs
+        )
 
     def test_filter_on_string_error(self):
         msgs = lint(field('css ".x"', "text", "filter"))
-        assert any("requires a list type" in m or "must contain at least one" in m for m in msgs)
+        assert any(
+            "requires a list type" in m or "must contain at least one" in m
+            for m in msgs
+        )
 
     def test_fallback_type_mismatch_string_on_list_error(self):
         # pipeline is LIST_DOCUMENT after css-all; scalar string fallback → mismatch
@@ -307,8 +314,18 @@ class TestTypeMismatches:
         msgs = lint(src)
         assert any("expects STRING" in m for m in msgs)
 
-    @pytest.mark.parametrize("op", ["trim", "lower", "upper", "normalize-space",
-                                     "to-int", "to-float", 'split " "'])
+    @pytest.mark.parametrize(
+        "op",
+        [
+            "trim",
+            "lower",
+            "upper",
+            "normalize-space",
+            "to-int",
+            "to-float",
+            'split " "',
+        ],
+    )
     def test_parametrize_string_ops_on_document_error(self, op: str):
         msgs = lint(field('css ".x"', op))
         assert any("does not accept" in m for m in msgs)
@@ -345,14 +362,7 @@ class TestBlockDefineTypeExpansion:
 
     def test_block_define_type_mismatch_error(self):
         # EXTRACT starts with trim (requires STRING), but pipeline is DOCUMENT
-        src = (
-            "define BAD {\n"
-            "  trim\n"
-            "}\n"
-            "struct S {\n"
-            "  f {\n    BAD\n  }\n"
-            "}\n"
-        )
+        src = "define BAD {\n  trim\n}\nstruct S {\n  f {\n    BAD\n  }\n}\n"
         msgs = lint(src)
         assert any("does not accept" in m for m in msgs)
 
@@ -440,9 +450,7 @@ class TestCompleteSchemas:
         # assert alone fires "must contain at least one". Use assert with -pre-validate style.
         # Actually just test a valid pipeline with no assert block.
         src = (
-            "struct S {\n"
-            '  title {\n    css "h1"\n    text\n    trim\n  }\n'
-            "}\n"
+            'struct S {\n  title {\n    css "h1"\n    text\n    trim\n  }\n}\n'
         )
         assert no_errors(src)
 
@@ -494,11 +502,7 @@ class TestCompleteSchemas:
         assert no_errors(src)
 
     def test_schema_with_xpath(self):
-        src = (
-            "struct S {\n"
-            '  items {\n    xpath-all "//li"\n    text\n  }\n'
-            "}\n"
-        )
+        src = 'struct S {\n  items {\n    xpath-all "//li"\n    text\n  }\n}\n'
         assert no_errors(src)
 
 
@@ -508,7 +512,14 @@ class TestCompleteSchemas:
 
 
 class TestHypothesisPipelineTypes:
-    _STRING_OPS = ["trim", "lower", "upper", "normalize-space", "ltrim", "rtrim"]
+    _STRING_OPS = [
+        "trim",
+        "lower",
+        "upper",
+        "normalize-space",
+        "ltrim",
+        "rtrim",
+    ]
     _LIST_REDUCE_OPS = ["first", "last", "index 0", "slice 0 5"]
 
     @given(st.sampled_from(_STRING_OPS))
@@ -546,14 +557,21 @@ class TestHypothesisPipelineTypes:
         msgs = lint(src)
         assert not any("does not accept" in m for m in msgs)
 
-    @given(st.sampled_from(["trim", "lower", "upper", "to-int", "to-float", 'split " "']))
+    @given(
+        st.sampled_from(
+            ["trim", "lower", "upper", "to-int", "to-float", 'split " "']
+        )
+    )
     @settings(max_examples=6)
     def test_string_ops_on_document_always_error(self, op: str):
         src = field('css ".x"', op)
         msgs = lint(src)
         assert any("does not accept" in m for m in msgs)
 
-    @given(st.integers(min_value=-50, max_value=50), st.integers(min_value=-50, max_value=50))
+    @given(
+        st.integers(min_value=-50, max_value=50),
+        st.integers(min_value=-50, max_value=50),
+    )
     @settings(max_examples=20)
     def test_slice_any_integers_no_int_error(self, a: int, b: int):
         src = field('css-all ".x"', f"slice {a} {b}")
@@ -572,4 +590,3 @@ class TestHypothesisPipelineTypes:
         src = field('css-all ".x"', fb)
         msgs = lint(src)
         assert any("does not match pipeline type" in m for m in msgs)
-

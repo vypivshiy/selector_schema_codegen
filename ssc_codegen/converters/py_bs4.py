@@ -22,6 +22,7 @@ from ssc_codegen.parsers import (
 from ssc_codegen.ast import (
     Docstring,
     Imports,
+    Module,
     Utilities,
     JsonDef,
     JsonDefField,
@@ -176,6 +177,18 @@ def pre_docstring(node: Docstring, _: ConverterContext):
     ]
 
 
+def _module_has_rest(node) -> bool:
+    """True if the given node's Module has any `struct type=rest`."""
+    module = node
+    while module is not None and not isinstance(module, Module):
+        module = getattr(module, "parent", None)
+    if module is None:
+        return False
+    return any(
+        isinstance(n, Struct) and n.is_rest for n in getattr(module, "body", [])
+    )
+
+
 @PY_BASE_CONVERTER(Imports)
 def pre_imports(node: Imports, _: ConverterContext):
     base_imports = [
@@ -185,6 +198,11 @@ def pre_imports(node: Imports, _: ConverterContext):
         "from typing import TypedDict, Optional, Any, List, Dict, Union",
         "from html import unescape as _html_unescape",
     ]
+    if _module_has_rest(node):
+        base_imports.append("from dataclasses import dataclass, field")
+        base_imports.append(
+            "from typing import Generic, Literal, Mapping, TypeVar"
+        )
 
     # Get transform imports for Python (already collected during parsing)
     transform_imports = sorted(node.transform_imports.get("py", set()))
@@ -216,7 +234,7 @@ def post_imports(node: Imports, ctx: ConverterContext):
 @PY_BASE_CONVERTER(Utilities)
 def pre_utilities(node: Utilities, _: ConverterContext):
     # TODO: helper functions
-    return [
+    lines = [
         "_RE_HEX_ENTITY = re.compile(r'&#x([0-9a-fA-F]+);')",
         "_RE_UNICODE_ENTITY = re.compile(r'\\\\u([0-9a-fA-F]{4})')",
         "_RE_BYTES_ENTITY = re.compile(r'\\\\x([0-9a-fA-F]{2})')",
@@ -260,13 +278,41 @@ def pre_utilities(node: Utilities, _: ConverterContext):
         "\n\n",
         "UNMATCHED_TABLE_ROW = _UnmatchedTableRow()",
         "\n\n",
-        "class RestApiError(Exception):",
-        "    def __init__(self, status: int, payload: Any):",
-        "        self.status = status",
-        "        self.payload = payload",
-        "        super().__init__(f'REST API error {status}: {payload!r}')",
-        "\n\n",
     ]
+    if _module_has_rest(node):
+        lines.extend(
+            [
+                "_T = TypeVar('_T')",
+                "_E = TypeVar('_E')",
+                "\n",
+                "@dataclass(frozen=True, kw_only=True)",
+                "class Ok(Generic[_T]):",
+                "    status: int",
+                "    headers: Mapping[str, str]",
+                "    value: _T",
+                "    is_ok: Literal[True] = True",
+                "\n",
+                "@dataclass(frozen=True, kw_only=True)",
+                "class Err(Generic[_E]):",
+                "    status: int",
+                "    headers: Mapping[str, str]",
+                "    value: _E",
+                "    is_ok: Literal[False] = False",
+                "\n",
+                "@dataclass(frozen=True, kw_only=True)",
+                "class UnknownErr(Err[Any]):",
+                "    pass",
+                "\n",
+                "@dataclass(frozen=True, kw_only=True)",
+                "class TransportErr(Err[None]):",
+                "    status: Literal[0] = 0",
+                "    cause: str = ''",
+                "    value: None = None",
+                "    headers: Mapping[str, str] = field(default_factory=dict)",
+                "\n\n",
+            ]
+        )
+    return lines
 
 
 @PY_BASE_CONVERTER(JsonDef, post_callback="})")
@@ -329,10 +375,46 @@ def pre_typedef_field(node: TypeDefField, ctx: ConverterContext):
     return [f"{ctx.indent}{name}: {type_}"]
 
 
+def _err_subclass_name(struct_name: str, err: ErrorResponse) -> str:
+    """Naming: `<Struct>Err<Status>[<FieldPascal>]`."""
+    base = f"{to_pascal_case(struct_name)}Err{err.status}"
+    if err.discriminator_field:
+        base += to_pascal_case(err.discriminator_field)
+    return base
+
+
+def _err_value_type(err: ErrorResponse, struct: Struct) -> str:
+    """Return the typed value annotation for an Err subclass."""
+    schema = err.schema_name
+    if not schema:
+        return "Any"
+    type_name = f"{to_pascal_case(schema)}Json"
+    module = struct.parent
+    if module is not None:
+        for n in module.body:
+            if isinstance(n, JsonDef) and n.name == schema and n.is_array:
+                return f"List[{type_name}]"
+    return type_name
+
+
 @PY_BASE_CONVERTER(Struct)
 def pre_struct(node: Struct, ctx: ConverterContext):
     name = to_pascal_case(node.name)
-    return [f"class {name}:"]
+    lines: list[str] = []
+    if node.is_rest:
+        seen: set[str] = set()
+        for err in node.errors:
+            cls_name = _err_subclass_name(node.name, err)
+            if cls_name in seen:
+                continue
+            seen.add(cls_name)
+            value_type = _err_value_type(err, node)
+            lines.append("@dataclass(frozen=True, kw_only=True)")
+            lines.append(f"class {cls_name}(Err[{value_type}]):")
+            lines.append(f"    status: Literal[{err.status}] = {err.status}")
+            lines.append("")
+    lines.append(f"class {name}:")
+    return lines
 
 
 @PY_BASE_CONVERTER(StructDocstring)
@@ -1488,8 +1570,8 @@ def _render_signature_params(placeholders: list[PlaceholderSpec]) -> str:
     return ", *, " + ", ".join(parts)
 
 
-def _resolve_response_type(node: RequestConfig) -> str:
-    """Return python type annotation for the @response= schema."""
+def _resolve_ok_payload_type(node: RequestConfig) -> str:
+    """Return the Python type annotation for the successful payload."""
     if not node.response_schema:
         return "None"
     struct = node.parent
@@ -1504,6 +1586,22 @@ def _resolve_response_type(node: RequestConfig) -> str:
     return schema_type
 
 
+def _resolve_response_type(node: RequestConfig) -> str:
+    """Return the full Result-union annotation for a REST method."""
+    payload = _resolve_ok_payload_type(node)
+    struct = node.parent
+    err_variants: list[str] = []
+    seen: set[str] = set()
+    if isinstance(struct, Struct):
+        for err in struct.errors:
+            cls_name = _err_subclass_name(struct.name, err)
+            if cls_name not in seen:
+                seen.add(cls_name)
+                err_variants.append(cls_name)
+    parts = [f"Ok[{payload}]", *err_variants, "UnknownErr", "TransportErr"]
+    return " | ".join(parts)
+
+
 def _build_rest_method(
     *,
     node: RequestConfig,
@@ -1515,12 +1613,16 @@ def _build_rest_method(
     pre_lines: list[str],
     ret_type: str,
     errors: list[ErrorResponse],
+    transport_exc: str,
     i1: str,
     i2: str,
     i3: str,
+    i4: str,
 ) -> list[str]:
     async_kw = "async " if is_async else ""
     await_kw = "await " if is_async else ""
+    struct = node.parent
+
     lines: list[str] = [
         f"{i1}@classmethod",
         f"{i1}{async_kw}def {name}(cls, client: {client_type}"
@@ -1529,38 +1631,57 @@ def _build_rest_method(
     if node.doc:
         lines.append(f'{i2}"""{node.doc}"""')
     lines.extend(pre_lines)
-    lines.append(f"{i2}_resp = {await_kw}client.request(")
-    lines.extend(f"{i3}{a}" for a in call_args)
-    lines.append(f"{i2})")
-    lines.append(f"{i2}_status = _resp.status_code")
     lines.append(f"{i2}try:")
-    lines.append(f"{i2}    _body = _resp.json()")
+    lines.append(f"{i3}_resp = {await_kw}client.request(")
+    lines.extend(f"{i4}{a}" for a in call_args)
+    lines.append(f"{i3})")
+    lines.append(f"{i2}except {transport_exc} as _exc:")
+    lines.append(f"{i3}return TransportErr(cause=repr(_exc))")
+    lines.append(f"{i2}_status = _resp.status_code")
+    lines.append(
+        f"{i2}_resp_headers = {{k.lower(): v for k, v in _resp.headers.items()}}"
+    )
+    lines.append(f"{i2}try:")
+    lines.append(f"{i3}_body = _resp.json()")
     lines.append(f"{i2}except Exception:")
-    lines.append(f"{i2}    _body = None")
+    lines.append(f"{i3}_body = None")
 
     status_errors = [e for e in errors if e.discriminator_field is None]
     field_errors = [e for e in errors if e.discriminator_field is not None]
 
-    lines.append(f"{i2}if not (200 <= _status < 300):")
-    if status_errors:
-        for err in status_errors:
-            lines.append(f"{i2}    if _status == {err.status}:")
-            lines.append(f"{i2}        raise RestApiError(_status, _body)")
-    lines.append(f"{i2}    _resp.raise_for_status()")
-
     if field_errors:
         lines.append(f"{i2}if isinstance(_body, dict):")
         for err in field_errors:
+            cls_name = _err_subclass_name(struct.name, err)
             lines.append(
-                f"{i2}    if _status == {err.status} "
+                f"{i3}if _status == {err.status} "
                 f"and {err.discriminator_field!r} in _body:"
             )
-            lines.append(f"{i2}        raise RestApiError(_status, _body)")
+            lines.append(
+                f"{i4}return {cls_name}(headers=_resp_headers, value=_body)"
+            )
 
+    lines.append(f"{i2}if 200 <= _status < 300:")
     if node.response_schema:
-        lines.append(f"{i2}return _body")
+        lines.append(
+            f"{i3}return Ok(status=_status, headers=_resp_headers, value=_body)"
+        )
     else:
-        lines.append(f"{i2}return None")
+        lines.append(
+            f"{i3}return Ok(status=_status, headers=_resp_headers, value=None)"
+        )
+
+    if status_errors:
+        for err in status_errors:
+            cls_name = _err_subclass_name(struct.name, err)
+            lines.append(f"{i2}if _status == {err.status}:")
+            lines.append(
+                f"{i3}return {cls_name}(headers=_resp_headers, value=_body)"
+            )
+
+    lines.append(
+        f"{i2}return UnknownErr(status=_status, headers=_resp_headers, value=_body)"
+    )
     return lines
 
 
@@ -1575,6 +1696,7 @@ def pre_request_config(node: RequestConfig, ctx: ConverterContext):
     i1 = ctx.indent  # class body
     i2 = i1 + ind  # method body
     i3 = i2 + ind  # request call args
+    i4 = i3 + ind  # nested (e.g. inside `if ...:`)
 
     is_rest = isinstance(node.parent, Struct) and node.parent.is_rest
     struct_name = to_pascal_case(node.parent.name)
@@ -1609,6 +1731,11 @@ def pre_request_config(node: RequestConfig, ctx: ConverterContext):
         ret_type = _resolve_response_type(node)
         errors = node.parent.errors
 
+        if http_client == "httpx":
+            transport_exc = "httpx.HTTPError"
+        else:
+            transport_exc = "requests.exceptions.RequestException"
+
         kwargs = dict(
             node=node,
             call_args=call_args,
@@ -1616,9 +1743,11 @@ def pre_request_config(node: RequestConfig, ctx: ConverterContext):
             pre_lines=pre_lines,
             ret_type=ret_type,
             errors=errors,
+            transport_exc=transport_exc,
             i1=i1,
             i2=i2,
             i3=i3,
+            i4=i4,
         )
 
         if http_client == "httpx":

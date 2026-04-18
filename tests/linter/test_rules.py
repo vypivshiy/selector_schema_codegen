@@ -20,6 +20,7 @@ IMPORTANT behavioural notes (established by empirical testing):
   are NOT visible to the linter's child-walk (CST limitation). Always use
   multiline children blocks in tests.
 """
+
 from __future__ import annotations
 
 import re
@@ -127,15 +128,7 @@ class TestCssSelector:
         assert no_errors(src)
 
     def test_css_all_block_requires_at_least_two_selectors(self):
-        src = (
-            "struct S {\n"
-            "  f {\n"
-            "    css-all {\n"
-            '      ".a"\n'
-            "    }\n"
-            "  }\n"
-            "}\n"
-        )
+        src = 'struct S {\n  f {\n    css-all {\n      ".a"\n    }\n  }\n}\n'
         msgs = lint(src)
         assert any("block requires at least 2 selectors" in m for m in msgs)
 
@@ -168,27 +161,43 @@ class TestCssSelector:
         assert any("requires exactly 1" in m for m in msgs)
 
     @given(
-        st.text(min_size=1, alphabet=st.characters(whitelist_categories=("Ll", "Lu", "Nd"), whitelist_characters="-.#_"))
-        .filter(lambda s: s.strip() != "")
+        st.text(
+            min_size=1,
+            alphabet=st.characters(
+                whitelist_categories=("Ll", "Lu", "Nd"),
+                whitelist_characters="-.#_",
+            ),
+        ).filter(lambda s: s.strip() != "")
     )
-    @settings(max_examples=25, suppress_health_check=[HealthCheck.filter_too_much])
-    def test_hypothesis_nonempty_selector_no_selector_error(self, selector: str):
+    @settings(
+        max_examples=25, suppress_health_check=[HealthCheck.filter_too_much]
+    )
+    def test_hypothesis_nonempty_selector_no_selector_error(
+        self, selector: str
+    ):
         safe = selector.replace('"', "").replace("\\", "").replace("\n", "")
         assume(safe.strip() != "")
         src = field(f'css "{safe}"')
         msgs = lint(src)
         assert not any("requires exactly 1" in m for m in msgs)
 
-
     @pytest.mark.parametrize("op", ["css", "css-all", "css-remove"])
     def test_invalid_css_selector(self, op: str):
         msgs = lint(field(f'{op} "[[[invalid"'))
         assert any("invalid CSS selector" in m for m in msgs)
 
-    @pytest.mark.parametrize("selector", [
-        ".my-class", "#id", "div > span", "a[href]",
-        ".a .b .c", "div:nth-child(2)", "*",
-    ])
+    @pytest.mark.parametrize(
+        "selector",
+        [
+            ".my-class",
+            "#id",
+            "div > span",
+            "a[href]",
+            ".a .b .c",
+            "div:nth-child(2)",
+            "*",
+        ],
+    )
     def test_valid_css_selectors(self, selector: str):
         assert no_errors(field(f'css "{selector}"'))
 
@@ -238,15 +247,7 @@ class TestXpathSelector:
         assert no_errors(src)
 
     def test_xpath_all_block_requires_at_least_two_selectors(self):
-        src = (
-            "struct S {\n"
-            "  f {\n"
-            "    xpath-all {\n"
-            '      "//a"\n'
-            "    }\n"
-            "  }\n"
-            "}\n"
-        )
+        src = 'struct S {\n  f {\n    xpath-all {\n      "//a"\n    }\n  }\n}\n'
         msgs = lint(src)
         assert any("block requires at least 2 selectors" in m for m in msgs)
 
@@ -283,9 +284,16 @@ class TestXpathSelector:
         msgs = lint(field(f'{op} "//div[broken"'))
         assert any("invalid XPath expression" in m for m in msgs)
 
-    @pytest.mark.parametrize("expr", [
-        "//div", "//a[@href]", "//div[@class='item']/a", "//text()", "//*",
-    ])
+    @pytest.mark.parametrize(
+        "expr",
+        [
+            "//div",
+            "//a[@href]",
+            "//div[@class='item']/a",
+            "//text()",
+            "//*",
+        ],
+    )
     def test_valid_xpath_expressions(self, expr: str):
         assert no_errors(field(f'xpath "{expr}"'))
 
@@ -327,15 +335,30 @@ class TestExtract:
 
 
 class TestStringOps:
-    @pytest.mark.parametrize("op", [
-        "normalize-space", "lower", "upper", "trim", "ltrim", "rtrim", "unescape",
-    ])
+    @pytest.mark.parametrize(
+        "op",
+        [
+            "normalize-space",
+            "lower",
+            "upper",
+            "trim",
+            "ltrim",
+            "rtrim",
+            "unescape",
+        ],
+    )
     def test_no_args_valid(self, op: str):
         assert no_errors(field('css ".x"', "text", op))
 
-    @pytest.mark.parametrize("op", [
-        "normalize-space", "lower", "upper", "unescape",
-    ])
+    @pytest.mark.parametrize(
+        "op",
+        [
+            "normalize-space",
+            "lower",
+            "upper",
+            "unescape",
+        ],
+    )
     def test_no_args_ops_reject_args(self, op: str):
         msgs = lint(field('css ".x"', "text", f'{op} "bad"'))
         assert any("does not accept arguments" in m for m in msgs)
@@ -387,23 +410,40 @@ class TestStringOps:
         msgs = lint(field('css-all ".x"', "text", "join"))
         assert any("requires exactly 1" in m for m in msgs)
 
-    @pytest.mark.parametrize("op", ["rm-prefix", "rm-suffix", "rm-prefix-suffix"])
+    @pytest.mark.parametrize(
+        "op", ["rm-prefix", "rm-suffix", "rm-prefix-suffix"]
+    )
     def test_rm_ops_valid(self, op: str):
         assert no_errors(field('css ".x"', "text", f'{op} "sub"'))
 
-    @pytest.mark.parametrize("op", ["rm-prefix", "rm-suffix", "rm-prefix-suffix"])
+    @pytest.mark.parametrize(
+        "op", ["rm-prefix", "rm-suffix", "rm-prefix-suffix"]
+    )
     def test_rm_ops_no_args_error(self, op: str):
         msgs = lint(field('css ".x"', "text", op))
         assert any("requires exactly 1" in m for m in msgs)
 
     @given(
-        st.text(min_size=1, alphabet=st.characters(whitelist_categories=("Ll", "Lu", "Nd"), whitelist_characters=" -_"))
-        .filter(lambda s: s.strip() != "")
+        st.text(
+            min_size=1,
+            alphabet=st.characters(
+                whitelist_categories=("Ll", "Lu", "Nd"),
+                whitelist_characters=" -_",
+            ),
+        ).filter(lambda s: s.strip() != "")
     )
-    @settings(max_examples=20, suppress_health_check=[HealthCheck.filter_too_much])
+    @settings(
+        max_examples=20, suppress_health_check=[HealthCheck.filter_too_much]
+    )
     def test_hypothesis_fmt_without_placeholder_error(self, template: str):
         # Templates without {{}} → linter error ("missing the '{{}}' placeholder")
-        safe = template.replace('"', "").replace("\\", "").replace("\n", "").replace("{", "").replace("}", "")
+        safe = (
+            template.replace('"', "")
+            .replace("\\", "")
+            .replace("\n", "")
+            .replace("{", "")
+            .replace("}", "")
+        )
         assume(safe.strip() != "" and "{" not in safe and "}" not in safe)
         # fmt rule skips all-uppercase strings (treated as define/constant refs)
         assume(not safe.isupper())
@@ -456,7 +496,9 @@ class TestRegexOps:
         assert any("invalid regex" in m for m in msgs)
 
     @given(
-        st.from_regex(r"[a-z][a-z0-9]{0,8}", fullmatch=True).map(lambda s: f"({s})")
+        st.from_regex(r"[a-z][a-z0-9]{0,8}", fullmatch=True).map(
+            lambda s: f"({s})"
+        )
     )
     @settings(max_examples=20)
     def test_hypothesis_re_valid_one_capture_group_no_error(self, pattern: str):
@@ -526,7 +568,10 @@ class TestArrayOps:
         msgs = lint(src)
         assert not any("must be integers" in m for m in msgs)
 
-    @given(st.integers(min_value=-100, max_value=0), st.integers(min_value=0, max_value=100))
+    @given(
+        st.integers(min_value=-100, max_value=0),
+        st.integers(min_value=0, max_value=100),
+    )
     @settings(max_examples=20)
     def test_hypothesis_slice_integers_no_error(self, start: int, stop: int):
         src = field('css-all ".x"', f"slice {start} {stop}")
@@ -634,32 +679,54 @@ class TestControlOps:
 
 
 class TestPredicateOpsOutsideContext:
-    @pytest.mark.parametrize("op_src", [
-        'eq "val"', 'ne "val"', 'starts "pre"', 'ends "suf"',
-        'contains "mid"', 'in "a"',
-    ])
+    @pytest.mark.parametrize(
+        "op_src",
+        [
+            'eq "val"',
+            'ne "val"',
+            'starts "pre"',
+            'ends "suf"',
+            'contains "mid"',
+            'in "a"',
+        ],
+    )
     def test_string_predicates_outside_predicate_block_error(self, op_src: str):
         msgs = lint(field('css ".x"', "text", op_src))
         assert any("only valid inside a predicate block" in m for m in msgs)
 
-    @pytest.mark.parametrize("op_src", [
-        'has-attr "href"', 'attr-eq "href" "val"', 'attr-ne "href" "val"',
-        'attr-starts "href" "val"', 'attr-ends "href" "val"',
-        'attr-contains "href" "val"',
-    ])
-    def test_document_predicates_outside_predicate_block_error(self, op_src: str):
+    @pytest.mark.parametrize(
+        "op_src",
+        [
+            'has-attr "href"',
+            'attr-eq "href" "val"',
+            'attr-ne "href" "val"',
+            'attr-starts "href" "val"',
+            'attr-ends "href" "val"',
+            'attr-contains "href" "val"',
+        ],
+    )
+    def test_document_predicates_outside_predicate_block_error(
+        self, op_src: str
+    ):
         msgs = lint(field('css ".x"', op_src))
         assert any("only valid inside a predicate block" in m for m in msgs)
 
-    @pytest.mark.parametrize("op_src", [
-        'text-starts "val"', 'text-ends "val"', 'text-contains "val"',
-        r'text-re #"\d+"#',
-    ])
+    @pytest.mark.parametrize(
+        "op_src",
+        [
+            'text-starts "val"',
+            'text-ends "val"',
+            'text-contains "val"',
+            r'text-re #"\d+"#',
+        ],
+    )
     def test_text_predicates_outside_predicate_block_error(self, op_src: str):
         msgs = lint(field('css ".x"', op_src))
         assert any("only valid inside a predicate block" in m for m in msgs)
 
-    @pytest.mark.parametrize("op", ["len-eq", "len-ne", "len-gt", "len-lt", "len-ge", "len-le"])
+    @pytest.mark.parametrize(
+        "op", ["len-eq", "len-ne", "len-gt", "len-lt", "len-ge", "len-le"]
+    )
     def test_len_predicates_outside_predicate_block_error(self, op: str):
         msgs = lint(field('css ".x"', f"{op} 5"))
         assert any("only valid inside a predicate block" in m for m in msgs)
@@ -677,7 +744,11 @@ class TestPredicateArgValidation:
         # by placing inside a valid filter block without args
         msgs = lint(filter_block("eq"))
         # context error fires first
-        assert any("only valid inside a predicate block" in m or "requires at least 1" in m for m in msgs)
+        assert any(
+            "only valid inside a predicate block" in m
+            or "requires at least 1" in m
+            for m in msgs
+        )
 
     def test_attr_re_valid_two_args(self):
         # attr-re outside predicate fires context error
@@ -696,7 +767,11 @@ class TestPredicateArgValidation:
 
     def test_re_any_no_args_error(self):
         msgs = lint(field('css ".x"', "text", "re-any"))
-        assert any("only valid inside an assert block" in m or "requires exactly 1" in m for m in msgs)
+        assert any(
+            "only valid inside an assert block" in m
+            or "requires exactly 1" in m
+            for m in msgs
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -714,7 +789,11 @@ class TestAssertOnlyOps:
     @pytest.mark.parametrize("op", ["gt", "lt", "ge", "le"])
     def test_numeric_no_args_outside_assert_error(self, op: str):
         msgs = lint(field('css ".x"', "text", op))
-        assert any("only valid inside an assert block" in m or "requires exactly 1" in m for m in msgs)
+        assert any(
+            "only valid inside an assert block" in m
+            or "requires exactly 1" in m
+            for m in msgs
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -764,8 +843,16 @@ class TestLenPredicateArgValidation:
     @pytest.mark.parametrize("op", ["len-gt", "len-lt", "len-ge", "len-le"])
     def test_len_compare_no_args_outside_context(self, op: str):
         msgs = lint(field('css ".x"', op))
-        assert any("only valid inside a predicate block" in m or "requires exactly 1" in m for m in msgs)
+        assert any(
+            "only valid inside a predicate block" in m
+            or "requires exactly 1" in m
+            for m in msgs
+        )
 
     def test_len_range_no_args_outside_context(self):
         msgs = lint(field('css ".x"', "len-range"))
-        assert any("only valid inside a predicate block" in m or "requires exactly 2" in m for m in msgs)
+        assert any(
+            "only valid inside a predicate block" in m
+            or "requires exactly 2" in m
+            for m in msgs
+        )

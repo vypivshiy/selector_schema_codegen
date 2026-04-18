@@ -166,7 +166,13 @@ class TestRestPyConverter:
         pyast.parse(code)  # must be syntactically valid
         assert "class API" in code
         assert "def get_user" in code
-        assert "RestApiError" in code
+        # Result-style: Ok/Err base classes + per-status Err subclass
+        assert "class Ok(Generic[_T]):" in code
+        assert "class Err(Generic[_E]):" in code
+        assert "class APIErr404(Err[ErrJson]):" in code
+        assert "class UnknownErr(Err[Any]):" in code
+        assert "class TransportErr(Err[None]):" in code
+        assert "RestApiError" not in code
         assert "import requests" in code
 
     def test_py_bs4_no_typeddict_for_rest(self):
@@ -190,6 +196,127 @@ class TestRestPyConverter:
         code = CONVERTER.convert(module, http_client="requests")
         assert "_status == 404" in code
         assert "_status == 500" in code
+        # routed into typed Err subclasses (no raise)
+        assert "return APIErr404(headers=_resp_headers, value=_body)" in code
+        assert "return APIErr500(headers=_resp_headers, value=_body)" in code
+        assert "raise" not in _method_bodies(code)
+
+    def test_py_bs4_method_return_type_union(self):
+        from ssc_codegen.converters.py_bs4 import (
+            PY_BASE_CONVERTER as CONVERTER,
+        )
+
+        src = _rest_src(errors="    @error 404 Err\n")
+        module = PARSER.parse(src)
+        code = CONVERTER.convert(module, http_client="requests")
+        assert "-> Ok[UserJson] | APIErr404 | UnknownErr | TransportErr" in code
+
+    def test_py_bs4_transport_error_wrapped(self):
+        from ssc_codegen.converters.py_bs4 import (
+            PY_BASE_CONVERTER as CONVERTER,
+        )
+
+        src = _rest_src()
+        module = PARSER.parse(src)
+        code = CONVERTER.convert(module, http_client="requests")
+        assert "except requests.exceptions.RequestException as _exc:" in code
+        assert "return TransportErr(cause=repr(_exc))" in code
+
+    def test_py_bs4_headers_captured(self):
+        from ssc_codegen.converters.py_bs4 import (
+            PY_BASE_CONVERTER as CONVERTER,
+        )
+
+        src = _rest_src()
+        module = PARSER.parse(src)
+        code = CONVERTER.convert(module, http_client="requests")
+        assert (
+            "_resp_headers = {k.lower(): v for k, v in _resp.headers.items()}"
+            in code
+        )
+        assert "headers=_resp_headers" in code
+
+    def test_py_bs4_unknown_status_returns_unknown_err(self):
+        from ssc_codegen.converters.py_bs4 import (
+            PY_BASE_CONVERTER as CONVERTER,
+        )
+
+        src = _rest_src(errors="    @error 404 Err\n")
+        module = PARSER.parse(src)
+        code = CONVERTER.convert(module, http_client="requests")
+        assert (
+            "return UnknownErr("
+            "status=_status, headers=_resp_headers, value=_body)" in code
+        )
+
+    def test_py_bs4_httpx_transport_exception(self):
+        from ssc_codegen.converters.py_bs4 import (
+            PY_BASE_CONVERTER as CONVERTER,
+        )
+
+        src = _rest_src()
+        module = PARSER.parse(src)
+        code = CONVERTER.convert(module, http_client="httpx")
+        assert "except httpx.HTTPError as _exc:" in code
+
+    def test_py_bs4_post_body_is_dict_not_fstring(self):
+        """Regression: POST json body used to emit `json=f'{...}'` which
+        double-encoded the body. Must now emit a native dict literal."""
+        from ssc_codegen.converters.py_bs4 import (
+            PY_BASE_CONVERTER as CONVERTER,
+        )
+
+        src = (
+            "json User { id int; name str }\n"
+            "struct API type=rest {\n"
+            '    @request name=create response=User """\n'
+            "    POST /users HTTP/1.1\n"
+            "    Host: x.com\n"
+            "    Content-Type: application/json\n"
+            "\n"
+            '    {"name": "{{name}}", "active": {{active:bool}}}\n'
+            '    """\n'
+            "}\n"
+        )
+        module = PARSER.parse(src)
+        code = CONVERTER.convert(module, http_client="requests")
+        assert "json={'name': name, 'active': active}" in code
+        # And no leftover f-string style
+        assert 'json=f"' not in code
+        assert "json=f'" not in code
+
+    def test_py_bs4_runtime_dataclasses_usable(self):
+        """Smoke: generated Ok/Err classes must construct and have is_ok."""
+        import sys
+        import types
+
+        from ssc_codegen.converters.py_bs4 import (
+            PY_BASE_CONVERTER as CONVERTER,
+        )
+
+        src = _rest_src(errors="    @error 404 Err\n")
+        module = PARSER.parse(src)
+        code = CONVERTER.convert(module, http_client="requests")
+
+        mod = types.ModuleType("_ssc_test_rest_module")
+        sys.modules[mod.__name__] = mod
+        try:
+            exec(code, mod.__dict__)
+            Ok = mod.__dict__["Ok"]
+            Err = mod.__dict__["Err"]
+            APIErr404 = mod.__dict__["APIErr404"]
+            TransportErr = mod.__dict__["TransportErr"]
+
+            ok = Ok(status=200, headers={"x-a": "1"}, value={"id": 1})
+            err = APIErr404(headers={}, value={"message": "nope"})
+            tr = TransportErr(cause="ConnectionError()")
+
+            assert ok.is_ok is True and ok.status == 200
+            assert err.is_ok is False and err.status == 404
+            assert isinstance(err, Err)
+            assert tr.is_ok is False and tr.status == 0 and tr.cause
+        finally:
+            sys.modules.pop(mod.__name__, None)
 
 
 class TestRestJsConverter:
@@ -201,7 +328,46 @@ class TestRestJsConverter:
         code = JS_CONVERTER.convert(module, http_client="fetch")
         assert "class API" in code
         assert "static async getUser" in code
-        assert "RestApiError" in code
+        # Result-style JSDoc typedefs + plain object returns
+        assert "@typedef {Object} Ok" in code
+        assert "@typedef {Object} APIErr404" in code
+        assert "@typedef {Object} UnknownErr" in code
+        assert "@typedef {Object} TransportErr" in code
+        assert "isOk: true" in code
+        assert "isOk: false" in code
+        assert "RestApiError" not in code
+
+    def test_js_method_return_type_jsdoc(self):
+        from ssc_codegen.converters.js_pure import JS_CONVERTER
+
+        src = _rest_src(errors="    @error 404 Err\n")
+        module = PARSER.parse(src)
+        code = JS_CONVERTER.convert(module, http_client="fetch")
+        assert (
+            "@returns {Promise<Ok<UserJson> | APIErr404 | UnknownErr"
+            " | TransportErr>}" in code
+        )
+
+    def test_js_transport_error_wrapped(self):
+        from ssc_codegen.converters.js_pure import JS_CONVERTER
+
+        src = _rest_src()
+        module = PARSER.parse(src)
+        code = JS_CONVERTER.convert(module, http_client="fetch")
+        assert "} catch (e) {" in code
+        assert (
+            "isOk: false, status: 0, headers: {}, value: null, "
+            "cause: String(e)" in code
+        )
+
+    def test_js_headers_captured(self):
+        from ssc_codegen.converters.js_pure import JS_CONVERTER
+
+        src = _rest_src()
+        module = PARSER.parse(src)
+        code = JS_CONVERTER.convert(module, http_client="fetch")
+        assert "Object.fromEntries([..._resp.headers.entries()])" in code
+        assert "headers: _respHeaders" in code
 
     def test_js_axios_variant(self):
         from ssc_codegen.converters.js_pure import JS_CONVERTER
@@ -210,6 +376,30 @@ class TestRestJsConverter:
         module = PARSER.parse(src)
         code = JS_CONVERTER.convert(module, http_client="axios")
         assert "client.request" in code
+
+
+def _method_bodies(code: str) -> str:
+    """Return only method bodies (everything inside `def …:` through dedent)."""
+    import re
+
+    chunks = []
+    in_method = False
+    indent = 0
+    for line in code.splitlines():
+        stripped = line.lstrip()
+        if re.match(r"(async\s+)?def \w", stripped):
+            in_method = True
+            indent = len(line) - len(stripped)
+            continue
+        if in_method:
+            if not line.strip():
+                chunks.append(line)
+                continue
+            if len(line) - len(line.lstrip()) <= indent:
+                in_method = False
+                continue
+            chunks.append(line)
+    return "\n".join(chunks)
 
 
 # ---------------------------------------------------------------------------

@@ -17,6 +17,7 @@ Behavioural notes (established empirically):
   "unknown operation" rule when used inside a pipeline (not yet implemented as
   a pipeline op in the walker).
 """
+
 from __future__ import annotations
 
 import pytest
@@ -59,9 +60,7 @@ def multiline_field(name: str, *ops: str) -> str:
 class TestStructRule:
     def test_valid_item_struct(self):
         src = (
-            "struct MyStruct {\n"
-            '  title {\n    css ".title"\n    text\n  }\n'
-            "}\n"
+            'struct MyStruct {\n  title {\n    css ".title"\n    text\n  }\n}\n'
         )
         assert no_errors(src)
 
@@ -105,9 +104,7 @@ class TestStructRule:
 
     def test_dict_struct_missing_value_error(self):
         src = (
-            'struct S type="dict" {\n'
-            '  @key {\n    css ".k"\n    text\n  }\n'
-            "}\n"
+            'struct S type="dict" {\n  @key {\n    css ".k"\n    text\n  }\n}\n'
         )
         msgs = lint(src)
         assert any("@value" in m and "missing required" in m for m in msgs)
@@ -124,11 +121,7 @@ class TestStructRule:
 
     def test_table_struct_missing_reserved_fields_error(self):
         # Only -table present; -row, -match, -value are missing
-        src = (
-            'struct S type="table" {\n'
-            '  @table {\n    css ".t"\n  }\n'
-            "}\n"
-        )
+        src = 'struct S type="table" {\n  @table {\n    css ".t"\n  }\n}\n'
         msgs = lint(src)
         assert any("missing required field" in m for m in msgs)
 
@@ -153,22 +146,26 @@ class TestStructRule:
             ),
         ).filter(lambda s: s[0].isalpha())
     )
-    @settings(max_examples=20, suppress_health_check=[HealthCheck.filter_too_much])
+    @settings(
+        max_examples=20, suppress_health_check=[HealthCheck.filter_too_much]
+    )
     def test_hypothesis_valid_struct_name_no_name_error(self, name: str):
-        src = (
-            f"struct {name} {{\n"
-            '  f {\n    css ".x"\n    text\n  }\n'
-            "}\n"
-        )
+        src = f'struct {name} {{\n  f {{\n    css ".x"\n    text\n  }}\n}}\n'
         msgs = lint(src)
         assert not any("requires a name" in m for m in msgs)
         assert not any("unknown struct type" in m for m in msgs)
 
     @given(
-        st.text(min_size=1, max_size=15, alphabet="abcdefghijklmnopqrstuvwxyz_-")
-        .filter(lambda s: s not in {"item", "list", "dict", "table", "flat"} and s[0].isalpha())
+        st.text(
+            min_size=1, max_size=15, alphabet="abcdefghijklmnopqrstuvwxyz_-"
+        ).filter(
+            lambda s: s not in {"item", "list", "dict", "table", "flat"}
+            and s[0].isalpha()
+        )
     )
-    @settings(max_examples=20, suppress_health_check=[HealthCheck.filter_too_much])
+    @settings(
+        max_examples=20, suppress_health_check=[HealthCheck.filter_too_much]
+    )
     def test_hypothesis_invalid_struct_type_error(self, bad_type: str):
         src = (
             f'struct S type="{bad_type}" {{\n'
@@ -195,12 +192,7 @@ class TestReservedFields:
         assert no_errors(src)
 
     def test_doc_no_arg_error(self):
-        src = (
-            "struct S {\n"
-            "  @doc\n"
-            '  title {\n    css ".x"\n    text\n  }\n'
-            "}\n"
-        )
+        src = 'struct S {\n  @doc\n  title {\n    css ".x"\n    text\n  }\n}\n'
         msgs = lint(src)
         assert any("requires a description string" in m for m in msgs)
 
@@ -238,17 +230,16 @@ class TestReservedFields:
         # @init block is non-empty; 'root' fires wildcard "unknown operation"
         # but @init structural check passes
         msgs = lint(src)
-        assert not any("must contain at least one named pipeline" in m for m in msgs)
+        assert not any(
+            "must contain at least one named pipeline" in m for m in msgs
+        )
 
     def test_init_empty_error(self):
-        src = (
-            "struct S {\n"
-            "  @init\n"
-            '  title {\n    css ".x"\n    text\n  }\n'
-            "}\n"
-        )
+        src = 'struct S {\n  @init\n  title {\n    css ".x"\n    text\n  }\n}\n'
         msgs = lint(src)
-        assert any("must contain at least one named pipeline" in m for m in msgs)
+        assert any(
+            "must contain at least one named pipeline" in m for m in msgs
+        )
 
     def test_split_doc_invalid_in_item_error(self):
         src = (
@@ -329,11 +320,7 @@ class TestReservedFields:
 
 class TestRegularFields:
     def test_field_with_ops_valid(self):
-        src = (
-            "struct S {\n"
-            '  title {\n    css ".x"\n    text\n  }\n'
-            "}\n"
-        )
+        src = 'struct S {\n  title {\n    css ".x"\n    text\n  }\n}\n'
         assert no_errors(src)
 
     def test_field_no_ops_error(self):
@@ -409,9 +396,11 @@ class TestDefineRule:
 
     def test_define_no_name_no_prop_error(self):
         # bare `define` with neither a prop nor a block
-        src = "define\nstruct S {\n  f {\n    css \".x\"\n    text\n  }\n}\n"
+        src = 'define\nstruct S {\n  f {\n    css ".x"\n    text\n  }\n}\n'
         msgs = lint(src)
-        assert any("must be scalar" in m or "requires a name" in m for m in msgs)
+        assert any(
+            "must be scalar" in m or "requires a name" in m for m in msgs
+        )
 
     def test_block_define_no_name_error(self):
         src = (
@@ -470,22 +459,13 @@ class TestDefineRule:
 class TestWildcardUnknownOp:
     def test_unknown_op_inside_field_error(self):
         src = (
-            "struct S {\n"
-            "  title {\n"
-            '    css ".x"\n'
-            "    totally-fake-op\n"
-            "  }\n"
-            "}\n"
+            'struct S {\n  title {\n    css ".x"\n    totally-fake-op\n  }\n}\n'
         )
         msgs = lint(src)
         assert any("unknown operation" in m for m in msgs)
 
     def test_known_op_no_wildcard_error(self):
-        src = (
-            "struct S {\n"
-            '  title {\n    css ".x"\n    text\n  }\n'
-            "}\n"
-        )
+        src = 'struct S {\n  title {\n    css ".x"\n    text\n  }\n}\n'
         msgs = lint(src)
         assert not any("unknown operation" in m for m in msgs)
 
@@ -506,7 +486,9 @@ class TestWildcardUnknownOp:
         st.text(
             min_size=3,
             max_size=20,
-            alphabet=st.characters(whitelist_categories=("Ll",), whitelist_characters="-"),
+            alphabet=st.characters(
+                whitelist_categories=("Ll",), whitelist_characters="-"
+            ),
         ).filter(
             lambda s: (
                 s[0].isalpha()
@@ -514,39 +496,106 @@ class TestWildcardUnknownOp:
                 and "--" not in s
                 and s
                 not in {
-                    "css", "css-all", "css-remove", "xpath", "xpath-all",
-                    "xpath-remove", "text", "raw", "attr", "trim", "ltrim",
-                    "rtrim", "normalize-space", "fmt", "repl", "lower", "upper",
-                    "rm-prefix", "rm-suffix", "rm-prefix-suffix", "unescape",
-                    "split", "join", "re", "re-all", "re-sub", "index", "first",
-                    "last", "slice", "len", "unique", "to-int", "to-float",
-                    "to-bool", "jsonify", "nested", "self", "fallback", "filter",
-                    "assert", "match", "not", "and", "or", "eq", "ne", "starts",
-                    "ends", "contains", "in", "len-eq", "len-ne", "len-gt",
-                    "len-lt", "len-ge", "len-le", "len-range", "has-attr",
-                    "attr-eq", "attr-ne", "attr-starts", "attr-ends",
-                    "attr-contains", "attr-re",
-                    "text-re", "text-starts", "text-ends", "text-contains",
-                    "re-any", "gt", "lt", "ge", "le", "transform",
+                    "css",
+                    "css-all",
+                    "css-remove",
+                    "xpath",
+                    "xpath-all",
+                    "xpath-remove",
+                    "text",
+                    "raw",
+                    "attr",
+                    "trim",
+                    "ltrim",
+                    "rtrim",
+                    "normalize-space",
+                    "fmt",
+                    "repl",
+                    "lower",
+                    "upper",
+                    "rm-prefix",
+                    "rm-suffix",
+                    "rm-prefix-suffix",
+                    "unescape",
+                    "split",
+                    "join",
+                    "re",
+                    "re-all",
+                    "re-sub",
+                    "index",
+                    "first",
+                    "last",
+                    "slice",
+                    "len",
+                    "unique",
+                    "to-int",
+                    "to-float",
+                    "to-bool",
+                    "jsonify",
+                    "nested",
+                    "self",
+                    "fallback",
+                    "filter",
+                    "assert",
+                    "match",
+                    "not",
+                    "and",
+                    "or",
+                    "eq",
+                    "ne",
+                    "starts",
+                    "ends",
+                    "contains",
+                    "in",
+                    "len-eq",
+                    "len-ne",
+                    "len-gt",
+                    "len-lt",
+                    "len-ge",
+                    "len-le",
+                    "len-range",
+                    "has-attr",
+                    "attr-eq",
+                    "attr-ne",
+                    "attr-starts",
+                    "attr-ends",
+                    "attr-contains",
+                    "attr-re",
+                    "text-re",
+                    "text-starts",
+                    "text-ends",
+                    "text-contains",
+                    "re-any",
+                    "gt",
+                    "lt",
+                    "ge",
+                    "le",
+                    "transform",
                     # module-level keywords — not reported as unknown ops inside pipelines
-                    "struct", "json", "define", "dsl", "expr",
+                    "struct",
+                    "json",
+                    "define",
+                    "dsl",
+                    "expr",
                     # KDL2 reserved bare identifiers — rejected at parse time,
                     # never reach the linter's unknown-op rule
-                    "true", "false", "null", "inf", "nan",
+                    "true",
+                    "false",
+                    "null",
+                    "inf",
+                    "nan",
                 }
             )
         )
     )
-    @settings(max_examples=25, suppress_health_check=[HealthCheck.filter_too_much])
+    @settings(
+        max_examples=25, suppress_health_check=[HealthCheck.filter_too_much]
+    )
     def test_hypothesis_unknown_op_produces_error(self, op_name: str):
         src = (
-            "struct S {\n"
-            "  title {\n"
-            '    css ".x"\n'
-            f"    {op_name}\n"
-            "  }\n"
-            "}\n"
+            f'struct S {{\n  title {{\n    css ".x"\n    {op_name}\n  }}\n}}\n'
         )
         msgs = lint(src)
-        assert any("unknown operation" in m or "scalar define" in m for m in msgs)
-
+        assert any(
+            "unknown operation" in m or "scalar define" in m for m in msgs
+        )

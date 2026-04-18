@@ -5,7 +5,16 @@ from pathlib import Path
 import pytest
 
 from ssc_codegen import parse_ast
-from ssc_codegen.ast import Struct, TypeDef, TransformDef, Fmt, CssSelect, Text, Attr, Nested
+from ssc_codegen.ast import (
+    Struct,
+    TypeDef,
+    TransformDef,
+    Fmt,
+    CssSelect,
+    Text,
+    Attr,
+    Nested,
+)
 from ssc_codegen.ast.types import VariableType
 from ssc_codegen.exceptions import ParseError
 
@@ -13,6 +22,7 @@ FIXTURES = Path(__file__).parent / "fixtures" / "imports"
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
+
 
 def _structs(module) -> list[Struct]:
     return [n for n in module.body if isinstance(n, Struct)]
@@ -33,6 +43,7 @@ def _field_ops(struct: Struct, field_name: str) -> list:
 
 # ── basic import ──────────────────────────────────────────────────────────────
 
+
 def test_import_defines():
     """Imported scalar and block defines are resolved in the importing module."""
     m = parse_ast(path=str(FIXTURES / "main_schema.kdl"))
@@ -48,6 +59,7 @@ def test_import_defines():
     # price pipeline: css -> text -> re -> to-float -> return
     # re node has the regex from the imported define
     from ssc_codegen.ast import Re
+
     re_node = next(op for op in price_ops if isinstance(op, Re))
     assert r"\d+" in re_node.pattern
 
@@ -80,6 +92,7 @@ def test_import_struct_has_typedef():
 
 
 # ── selective import ──────────────────────────────────────────────────────────
+
 
 def test_selective_import_includes_named():
     """Selective import only brings in requested names."""
@@ -119,6 +132,7 @@ def test_selective_import_missing_name_errors():
 
 # ── transitive import ────────────────────────────────────────────────────────
 
+
 def test_transitive_import():
     """A -> B -> C: A sees names from C."""
     m = parse_ast(path=str(FIXTURES / "transitive_schema.kdl"))
@@ -138,6 +152,7 @@ def test_transitive_import():
 
 # ── circular import detection ─────────────────────────────────────────────────
 
+
 def test_circular_import_detected():
     """Circular imports are detected and raise ParseError."""
     with pytest.raises(ParseError, match="[Cc]ircular"):
@@ -145,6 +160,7 @@ def test_circular_import_detected():
 
 
 # ── name conflict detection ───────────────────────────────────────────────────
+
 
 def test_name_conflict_define():
     """Redefining an imported define name raises ParseError."""
@@ -169,12 +185,12 @@ def test_name_conflict_struct():
 
 # ── error cases ───────────────────────────────────────────────────────────────
 
+
 def test_import_file_not_found():
     """Importing a nonexistent file raises ParseError."""
     bad_kdl = FIXTURES / "import_missing.kdl"
     bad_kdl.write_text(
-        'import "./does_not_exist.kdl"\n'
-        'struct X { x { css "x"; text } }\n',
+        'import "./does_not_exist.kdl"\nstruct X { x { css "x"; text } }\n',
         encoding="utf-8",
     )
     try:
@@ -193,6 +209,7 @@ def test_import_from_string_fails():
 
 # ── codegen with imports ──────────────────────────────────────────────────────
 
+
 def test_codegen_with_imports():
     """Code generation works with imported structs and defines."""
     from ssc_codegen.parser import PARSER
@@ -200,6 +217,7 @@ def test_codegen_with_imports():
     m = parse_ast(path=str(FIXTURES / "main_schema.kdl"))
 
     from ssc_codegen.converters.py_bs4 import PY_BASE_CONVERTER
+
     code = PY_BASE_CONVERTER.convert(m)
 
     # imported struct class is generated

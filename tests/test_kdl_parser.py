@@ -11,11 +11,12 @@ from ssc_codegen.kdl.parser import (
 
 
 _ROOT = Path(__file__).parent.parent
-_ALL_KDL_FILES = (
-    list((_ROOT / "examples").glob("*.kdl"))
-    + list((_ROOT / "tests/kdl_test_cases/input").glob("*.kdl"))
+_ALL_KDL_FILES = list((_ROOT / "examples").glob("*.kdl")) + list(
+    (_ROOT / "tests/kdl_test_cases/input").glob("*.kdl")
 )
-_VALID_KDL_FILES = [f for f in _ALL_KDL_FILES if not f.name.endswith("_fail.kdl")]
+_VALID_KDL_FILES = [
+    f for f in _ALL_KDL_FILES if not f.name.endswith("_fail.kdl")
+]
 _INVALID_KDL_FILES = [f for f in _ALL_KDL_FILES if f.name.endswith("_fail.kdl")]
 
 
@@ -58,7 +59,9 @@ struct Main {
     assert prop_entries[0].key.value == "type"
     assert prop_entries[0].value.value == "list"
 
-    arg_entries = [e for e in item.children[0].entries if isinstance(e, CSTArgEntry)]
+    arg_entries = [
+        e for e in item.children[0].entries if isinstance(e, CSTArgEntry)
+    ]
     assert arg_entries[0].value.value == "a[href]"
 
     assert item.span.start.line > 0
@@ -124,7 +127,11 @@ def test_kdl_parser_parses_radix_and_keyword_numbers():
 node 0x10 0o10 0b10 #inf #-inf #nan
 """
     doc = KDL2CSTParser().parse(src)
-    vals = [entry.value.value for entry in doc.nodes[0].entries if isinstance(entry, CSTArgEntry)]
+    vals = [
+        entry.value.value
+        for entry in doc.nodes[0].entries
+        if isinstance(entry, CSTArgEntry)
+    ]
     assert vals[0] == 16
     assert vals[1] == 8
     assert vals[2] == 2
@@ -170,7 +177,11 @@ def test_kdl_parser_raises_on_newline_in_quoted_string():
 def test_kdl_parser_supports_escline_line_continuation():
     src = 'node "a" \\\n "b"'
     doc = KDL2CSTParser().parse(src)
-    vals = [entry.value.value for entry in doc.nodes[0].entries if isinstance(entry, CSTArgEntry)]
+    vals = [
+        entry.value.value
+        for entry in doc.nodes[0].entries
+        if isinstance(entry, CSTArgEntry)
+    ]
     assert vals == ["a", "b"]
 
 
@@ -223,8 +234,14 @@ package {
 
     deps = children["dependencies"].children[0]
     assert deps.name.value == "lodash"
-    dep_args = [e.value.value for e in deps.entries if isinstance(e, CSTArgEntry)]
-    dep_props = {e.key.value: e.value.value for e in deps.entries if isinstance(e, CSTPropEntry)}
+    dep_args = [
+        e.value.value for e in deps.entries if isinstance(e, CSTArgEntry)
+    ]
+    dep_props = {
+        e.key.value: e.value.value
+        for e in deps.entries
+        if isinstance(e, CSTPropEntry)
+    }
     assert dep_args == ["^3.2.1"]
     assert dep_props["optional"] is True
     assert dep_props["alias"] == "underscore"
@@ -237,5 +254,7 @@ package {
     assert "console.log('hello, world!');" in build.entries[0].value.value
 
     matrix = children["the-matrix"]
-    matrix_vals = [e.value.value for e in matrix.entries if isinstance(e, CSTArgEntry)]
+    matrix_vals = [
+        e.value.value for e in matrix.entries if isinstance(e, CSTArgEntry)
+    ]
     assert matrix_vals == [1, 2, 3, 4, 5, 6, 7, 8, 9]

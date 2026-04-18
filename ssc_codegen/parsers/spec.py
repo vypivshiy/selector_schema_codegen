@@ -400,22 +400,83 @@ def emit_dict_builder(
 
 def render_json_body(raw: str) -> str:
     """
-    Render a JSON body template (with {{placeholders}}) as a Python f-string.
+    Render a JSON body template (with {{placeholders}}) as a Python dict/list
+    literal expression suitable for `requests(json=...)` / `httpx(json=...)`.
+
+    Placeholders become bare Python variable references at the JSON position
+    they occupied; literal strings containing embedded placeholders become
+    f-strings; everything else emits as a Python literal.
 
     Validates the JSON structure first; raises ValueError on genuinely bad JSON.
-    Uses single-quote f-string because JSON values contain double quotes.
-    Single quotes inside the body are escaped as \\'.
     """
     _validate_json_body(raw)
-    inner = _escape_fstring(raw).replace("'", "\\'")
-    return "f'" + inner + "'"
+
+    sentinels: dict[str, str] = {}  # sentinel → placeholder-name
+    out: list[str] = []
+    i = 0
+    n = len(raw)
+    in_string = False
+    while i < n:
+        if raw[i : i + 2] == "{{":
+            m = _PH.match(raw, i)
+            if m is not None:
+                name = _parse_placeholder(m).name
+                key = f"__SSC_PH_{len(sentinels)}__"
+                sentinels[key] = name
+                out.append(key if in_string else '"' + key + '"')
+                i = m.end()
+                continue
+        ch = raw[i]
+        if ch == "\\" and i + 1 < n:
+            out.append(raw[i : i + 2])
+            i += 2
+            continue
+        if ch == '"':
+            in_string = not in_string
+        out.append(ch)
+        i += 1
+    substituted = "".join(out)
+    parsed = json.loads(substituted)
+    sentinel_re = re.compile(r"__SSC_PH_\d+__")
+
+    def _emit(v: object) -> str:
+        if v is None:
+            return "None"
+        if isinstance(v, bool):
+            return "True" if v else "False"
+        if isinstance(v, (int, float)):
+            return repr(v)
+        if isinstance(v, str):
+            if v in sentinels:
+                return sentinels[v]
+            if sentinel_re.search(v):
+                # Mixed literal + placeholder(s) → f-string.
+                def _fmt(m: re.Match) -> str:
+                    return "{" + sentinels[m.group(0)] + "}"
+
+                escaped = v.replace("\\", "\\\\").replace("'", "\\'")
+                escaped = escaped.replace("{", "{{").replace("}", "}}")
+                # _fmt injects literal `{name}` after escaping, so the braces
+                # inside the injected fragment are not doubled.
+                body = sentinel_re.sub(_fmt, escaped)
+                return "f'" + body + "'"
+            return repr(v)
+        if isinstance(v, dict):
+            items = ", ".join(f"{k!r}: {_emit(val)}" for k, val in v.items())
+            return "{" + items + "}"
+        if isinstance(v, list):
+            items = ", ".join(_emit(x) for x in v)
+            return "[" + items + "]"
+        raise TypeError(f"unsupported JSON body element: {type(v).__name__}")
+
+    return _emit(parsed)
 
 
-def render_body(spec: RequestSpec) -> str | None:
+def render_body(spec: RequestSpec) -> tuple[str, str] | None:
     """
     Return the Python code fragment for the body argument, or None if empty.
 
-    Returns a (kwarg_name, code) tuple, e.g. ("json", 'f"{{...}}"').
+    Returns a (kwarg_name, code) tuple, e.g. ("json", '{"id": id}').
     """
     if spec.body_kind == "empty" or spec.body is None:
         return None

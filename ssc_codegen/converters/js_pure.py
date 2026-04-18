@@ -36,6 +36,7 @@ from ssc_codegen.parsers.spec import _validate_json_body
 from ssc_codegen.ast import (
     Docstring,
     Imports,
+    Module,
     Utilities,
     JsonDef,
     JsonDefField,
@@ -310,10 +311,21 @@ def pre_imports(node: Imports, _: ConverterContext):
     ]
 
 
+def _js_module_has_rest(node) -> bool:
+    module = node
+    while module is not None and not isinstance(module, Module):
+        module = getattr(module, "parent", None)
+    if module is None:
+        return False
+    return any(
+        isinstance(n, Struct) and n.is_rest for n in getattr(module, "body", [])
+    )
+
+
 @JS_CONVERTER(Utilities)
 def pre_utilities(node: Utilities, _: ConverterContext):
     # TODO: wrong func _replMap
-    return [
+    lines = [
         "const UNMATCHED_TABLE_ROW = Symbol('UNMATCHED_TABLE_ROW');",
         "",
         "function _replMap(s, map) {",
@@ -330,16 +342,48 @@ def pre_utilities(node: Utilities, _: ConverterContext):
         "",
         "function _rmPrefix(s, p) { return s.startsWith(p) ? s.slice(p.length) : s; }",
         "function _rmSuffix(s, p) { return s.endsWith(p) ? s.slice(0, -p.length) : s; }",
-        "",
-        "class RestApiError extends Error {",
-        "    constructor(status, payload) {",
-        "        super(`REST API error ${status}: ${JSON.stringify(payload)}`);",
-        "        this.name = 'RestApiError';",
-        "        this.status = status;",
-        "        this.payload = payload;",
-        "    }",
-        "}",
     ]
+    if _js_module_has_rest(node):
+        lines.extend(
+            [
+                "",
+                "/**",
+                " * @template T",
+                " * @typedef {Object} Ok",
+                " * @property {true} isOk",
+                " * @property {number} status",
+                " * @property {Object<string, string>} headers",
+                " * @property {T} value",
+                " */",
+                "",
+                "/**",
+                " * @template E",
+                " * @typedef {Object} Err",
+                " * @property {false} isOk",
+                " * @property {number} status",
+                " * @property {Object<string, string>} headers",
+                " * @property {E} value",
+                " */",
+                "",
+                "/**",
+                " * @typedef {Object} UnknownErr",
+                " * @property {false} isOk",
+                " * @property {number} status",
+                " * @property {Object<string, string>} headers",
+                " * @property {*} value",
+                " */",
+                "",
+                "/**",
+                " * @typedef {Object} TransportErr",
+                " * @property {false} isOk",
+                " * @property {0} status",
+                " * @property {Object<string, string>} headers",
+                " * @property {null} value",
+                " * @property {string} cause",
+                " */",
+            ]
+        )
+    return lines
 
 
 @JS_CONVERTER(JsonDef, post_callback=" */")
@@ -401,13 +445,57 @@ def pre_typedef_field(node: TypeDefField, ctx: ConverterContext):
 # ---------------------------------------------------------------------------
 
 
+def _js_err_subclass_name(struct_name: str, err) -> str:
+    base = f"{to_pascal_case(struct_name)}Err{err.status}"
+    if err.discriminator_field:
+        base += to_pascal_case(err.discriminator_field)
+    return base
+
+
+def _js_err_value_type(err, struct) -> str:
+    schema = err.schema_name
+    if not schema:
+        return "*"
+    type_name = f"{to_pascal_case(schema)}Json"
+    module = struct.parent
+    if module is not None:
+        for n in module.body:
+            if isinstance(n, JsonDef) and n.name == schema and n.is_array:
+                return f"Array<{type_name}>"
+    return type_name
+
+
 @JS_CONVERTER(Struct, post_callback="}")
 def pre_struct(node: Struct, ctx: ConverterContext):
     name = to_pascal_case(node.name)
     cls_line = f"class {name} " + "{"
-    if node.docstring.value:
-        return [*_js_docblock(node.docstring.value.splitlines()), cls_line]
-    return cls_line
+    prefix: list[str] = []
+    if node.is_rest:
+        seen: set[str] = set()
+        for err in node.errors:
+            cls_name = _js_err_subclass_name(node.name, err)
+            if cls_name in seen:
+                continue
+            seen.add(cls_name)
+            value_type = _js_err_value_type(err, node)
+            prefix.extend(
+                [
+                    "/**",
+                    f" * @typedef {{Object}} {cls_name}",
+                    " * @property {false} isOk",
+                    f" * @property {{{err.status}}} status",
+                    " * @property {Object<string, string>} headers",
+                    f" * @property {{{value_type}}} value",
+                    " */",
+                    "",
+                ]
+            )
+    doc_lines = (
+        _js_docblock(node.docstring.value.splitlines())
+        if node.docstring.value
+        else []
+    )
+    return [*prefix, *doc_lines, cls_line]
 
 
 @JS_CONVERTER(StructDocstring)
@@ -1684,9 +1772,8 @@ def _js_rest_method(node: RequestConfig, ctx: ConverterContext) -> list[str]:
     if raw_name == "fetch":
         method_name = "fetch"
 
-    placeholders = spec.placeholders  # list[PlaceholderSpec]
+    placeholders = spec.placeholders
     if placeholders:
-        # Required first, optional last (mirrors Python signature ordering).
         required = [p for p in placeholders if not p.is_optional]
         optional = [p for p in placeholders if p.is_optional]
         ordered_names = [p.name for p in required + optional]
@@ -1695,13 +1782,46 @@ def _js_rest_method(node: RequestConfig, ctx: ConverterContext) -> list[str]:
         ph_param = ""
     sig = f"static async {method_name}(client{ph_param})"
 
+    parent = node.parent
+    errors = parent.errors if isinstance(parent, Struct) else []
+    struct_name = parent.name if isinstance(parent, Struct) else ""
+
+    # Build return-type union for JSDoc
+    ok_payload = _js_ok_payload_type(node)
+    err_variants: list[str] = []
+    seen: set[str] = set()
+    for err in errors:
+        cls_name = _js_err_subclass_name(struct_name, err)
+        if cls_name not in seen:
+            seen.add(cls_name)
+            err_variants.append(cls_name)
+    return_union = " | ".join(
+        [f"Ok<{ok_payload}>", *err_variants, "UnknownErr", "TransportErr"]
+    )
+
     lines: list[str] = []
     if node.doc:
         lines.append(f"{i1}/**")
         for doc_line in node.doc.splitlines():
             lines.append(f"{i1} * {doc_line}")
         lines.append(f"{i1} */")
-    lines.extend(_js_signature_jsdoc(placeholders, i1))
+    # JSDoc: params signature + return type (merged block)
+    jsdoc_lines: list[str] = [f"{i1}/**"]
+    if placeholders:
+        jsdoc_lines.append(f"{i1} * @param {{object}} params")
+        for p in [
+            *(p for p in placeholders if not p.is_optional),
+            *(p for p in placeholders if p.is_optional),
+        ]:
+            bracket_name = (
+                f"[params.{p.name}]" if p.is_optional else f"params.{p.name}"
+            )
+            jsdoc_lines.append(
+                f"{i1} * @param {{{_js_ph_jsdoc(p)}}} {bracket_name}"
+            )
+    jsdoc_lines.append(f"{i1} * @returns {{Promise<{return_union}>}}")
+    jsdoc_lines.append(f"{i1} */")
+    lines.extend(jsdoc_lines)
     lines.append(f"{i1}{sig} {{")
 
     # Pre-body: local builders for params/headers if any entry is array or optional.
@@ -1711,41 +1831,43 @@ def _js_rest_method(node: RequestConfig, ctx: ConverterContext) -> list[str]:
     cookies_var: str | None = None
     if spec.params and _js_dict_needs_builder(spec.params):
         params_var = "_params"
-        pre_lines.extend(_js_emit_params_builder(params_var, spec.params, i2))
+        pre_lines.extend(_js_emit_params_builder(params_var, spec.params, i3))
     if spec.headers and _js_dict_needs_builder(spec.headers):
         headers_var = "_headers"
-        pre_lines.extend(_js_emit_obj_builder(headers_var, spec.headers, i2))
+        pre_lines.extend(_js_emit_obj_builder(headers_var, spec.headers, i3))
     if spec.cookies and _js_dict_needs_builder(spec.cookies):
         cookies_var = "_cookies"
-        pre_lines.extend(_js_emit_obj_builder(cookies_var, spec.cookies, i2))
+        pre_lines.extend(_js_emit_obj_builder(cookies_var, spec.cookies, i3))
+
+    # Everything below — response handling & request — goes inside try/catch
+    # so transport failures turn into TransportErr.
+    lines.append(f"{i2}let _resp;")
+    lines.append(f"{i2}try {{")
     lines.extend(pre_lines)
 
     if http_client == "axios":
         req_props: list[str] = [
-            f"{i3}method: {spec.method!r},",
-            f"{i3}url: {_js_render_value(spec.url)},",
-            f"{i3}validateStatus: () => true,",
+            f"{i4}method: {spec.method!r},",
+            f"{i4}url: {_js_render_value(spec.url)},",
+            f"{i4}validateStatus: () => true,",
         ]
         if spec.params:
             params_expr = (
                 params_var if params_var else _js_render_obj(spec.params)
             )
-            req_props.append(f"{i3}params: {params_expr},")
+            req_props.append(f"{i4}params: {params_expr},")
         if spec.headers:
             headers_expr = (
                 headers_var if headers_var else _js_render_obj(spec.headers)
             )
-            req_props.append(f"{i3}headers: {headers_expr},")
+            req_props.append(f"{i4}headers: {headers_expr},")
         body_result = _js_render_body(spec)
         if body_result:
             _, body_expr = body_result
-            req_props.append(f"{i3}data: {body_expr},")
-
-        lines.append(f"{i2}const _resp = await client.request({{")
+            req_props.append(f"{i4}data: {body_expr},")
+        lines.append(f"{i3}_resp = await client.request({{")
         lines.extend(req_props)
-        lines.append(f"{i2}}});")
-        lines.append(f"{i2}const _status = _resp.status;")
-        lines.append(f"{i2}const _body = _resp.data;")
+        lines.append(f"{i3}}});")
     else:
         if spec.params:
             url_inner = _JS_PH.sub(
@@ -1762,49 +1884,101 @@ def _js_rest_method(node: RequestConfig, ctx: ConverterContext) -> list[str]:
         else:
             url_expr = _js_render_value(spec.url)
 
-        options: list[str] = [f"{i3}method: {spec.method!r},"]
+        options: list[str] = [f"{i4}method: {spec.method!r},"]
         if spec.headers:
             headers_expr = (
                 headers_var if headers_var else _js_render_obj(spec.headers)
             )
-            options.append(f"{i3}headers: {headers_expr},")
+            options.append(f"{i4}headers: {headers_expr},")
         body_result = _js_render_body(spec)
         if body_result:
             _, body_expr = body_result
-            options.append(f"{i3}body: {body_expr},")
-
-        lines.append(f"{i2}const _resp = await client({url_expr}, {{")
+            options.append(f"{i4}body: {body_expr},")
+        lines.append(f"{i3}_resp = await client({url_expr}, {{")
         lines.extend(options)
-        lines.append(f"{i2}}});")
+        lines.append(f"{i3}}});")
+
+    lines.append(f"{i2}}} catch (e) {{")
+    lines.append(
+        f"{i3}return {{ isOk: false, status: 0, headers: {{}}, "
+        f"value: null, cause: String(e) }};"
+    )
+    lines.append(f"{i2}}}")
+
+    # Response extraction (status + headers + parsed body).
+    if http_client == "axios":
         lines.append(f"{i2}const _status = _resp.status;")
+        lines.append(
+            f"{i2}const _respHeaders = {{}}; "
+            f"for (const [k, v] of Object.entries(_resp.headers || {{}})) "
+            f"{{ _respHeaders[String(k).toLowerCase()] = String(v); }}"
+        )
+        lines.append(f"{i2}const _body = _resp.data;")
+    else:
+        lines.append(f"{i2}const _status = _resp.status;")
+        lines.append(
+            f"{i2}const _respHeaders = "
+            f"Object.fromEntries([..._resp.headers.entries()]);"
+        )
         lines.append(f"{i2}let _body = null;")
         lines.append(
             f"{i2}try {{ _body = await _resp.json(); }} catch (e) {{}}"
         )
 
-    parent = node.parent
-    errors = parent.errors if isinstance(parent, Struct) else []
     status_errors = [e for e in errors if not e.discriminator_field]
     field_errors = [e for e in errors if e.discriminator_field]
 
-    lines.append(f"{i2}if (_status < 200 || _status >= 300) {{")
-    for err in status_errors:
-        lines.append(f"{i3}if (_status === {err.status}) {{")
-        lines.append(f"{i4}throw new RestApiError(_status, _body);")
-        lines.append(f"{i3}}}")
-    lines.append(f"{i3}throw new RestApiError(_status, _body);")
-    lines.append(f"{i2}}}")
-
+    # 2xx-body discriminator check (evaluated BEFORE happy-path return).
     for err in field_errors:
         if 200 <= err.status < 300:
             field = err.discriminator_field
-            lines.append(f"{i2}if (_body && _body[{field!r}] !== undefined) {{")
-            lines.append(f"{i3}throw new RestApiError(_status, _body);")
+            lines.append(
+                f"{i2}if (_status === {err.status} && _body "
+                f"&& _body[{field!r}] !== undefined) {{"
+            )
+            lines.append(
+                f"{i3}return {{ isOk: false, status: _status, "
+                f"headers: _respHeaders, value: _body }};"
+            )
             lines.append(f"{i2}}}")
 
-    lines.append(f"{i2}return _body;")
+    lines.append(f"{i2}if (_status >= 200 && _status < 300) {{")
+    lines.append(
+        f"{i3}return {{ isOk: true, status: _status, "
+        f"headers: _respHeaders, value: _body }};"
+    )
+    lines.append(f"{i2}}}")
+
+    for err in status_errors:
+        lines.append(f"{i2}if (_status === {err.status}) {{")
+        lines.append(
+            f"{i3}return {{ isOk: false, status: _status, "
+            f"headers: _respHeaders, value: _body }};"
+        )
+        lines.append(f"{i2}}}")
+
+    lines.append(
+        f"{i2}return {{ isOk: false, status: _status, "
+        f"headers: _respHeaders, value: _body }};"
+    )
     lines.append(f"{i1}}}")
     return lines
+
+
+def _js_ok_payload_type(node: RequestConfig) -> str:
+    """Return the JSDoc type for the successful response payload."""
+    if not node.response_schema:
+        return "null"
+    struct = node.parent
+    module = struct.parent if struct is not None else None
+    schema_type = f"{to_pascal_case(node.response_schema)}Json"
+    if module is not None:
+        for n in module.body:
+            if isinstance(n, JsonDef) and n.name == node.response_schema:
+                if n.is_array:
+                    return f"Array<{schema_type}>"
+                break
+    return schema_type
 
 
 @JS_CONVERTER(RequestConfig)
