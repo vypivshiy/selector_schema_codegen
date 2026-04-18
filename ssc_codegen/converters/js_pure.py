@@ -60,6 +60,7 @@ from ssc_codegen.ast import (
     StructDocstring,
     RequestConfig,
     ErrorResponse,
+    PlaceholderSpec,
 )
 
 # selectors
@@ -1477,16 +1478,48 @@ def pre_expr_pred_re_any(node: PredReAny, ctx: ConverterContext):
 # @request — fetch() classmethod
 # ---------------------------------------------------------------------------
 
-_JS_PH = _re_module.compile(r"\{\{([\w-]+)\}\}")
+# Kept in sync with ssc_codegen/ast/struct.py:_PLACEHOLDER_RE.
+_JS_PH = _re_module.compile(
+    r"\{\{"
+    r"([A-Za-z][A-Za-z0-9_-]*)"
+    r"(?::(str|int|float|bool))?"
+    r"(\[\])?"
+    r"(\?)?"
+    r"(?:\|(repeat|csv|bracket|pipe|space))?"
+    r"\}\}"
+)
+
+_JS_STYLE_SEP = {"csv": ",", "pipe": "|", "space": " "}
+
+
+def _js_placeholder(m: "_re_module.Match[str]") -> PlaceholderSpec:
+    return PlaceholderSpec(
+        name=m.group(1),
+        type_name=m.group(2) or "str",
+        is_array=bool(m.group(3)),
+        is_optional=bool(m.group(4)),
+        style=m.group(5) or None,
+    )
+
+
+def _js_array_join(ph: PlaceholderSpec) -> str:
+    sep = _JS_STYLE_SEP[ph.style or "csv"]
+    return f"{ph.name}.map(String).join({sep!r})"
 
 
 def _js_render_value(v: str) -> str:
     """Render a RequestSpec string value as a JS expression."""
     if m := _JS_PH.fullmatch(v):
-        return m.group(1)
+        ph = _js_placeholder(m)
+        if ph.is_array and ph.style in ("csv", "pipe", "space"):
+            return _js_array_join(ph)
+        return ph.name
     if _JS_PH.search(v):
         inner = v.replace("\\", "\\\\").replace("`", "\\`")
-        inner = _JS_PH.sub(r"${\1}", inner)
+        # Template substitution: group(1) is NAME — emit ${NAME}. Scalar-only
+        # within mixed content; arrays/optional forbidden inside template literals
+        # (enforced by the linter).
+        inner = _JS_PH.sub(lambda mm: "${" + mm.group(1) + "}", inner)
         return f"`{inner}`"
     return repr(v)
 
@@ -1499,6 +1532,115 @@ def _js_render_obj(d: dict[str, str]) -> str:
         f"{k!r}: {_js_render_value(str(v))}" for k, v in d.items()
     )
     return "{" + inner + "}"
+
+
+def _js_dict_entry_placeholder(v: str) -> PlaceholderSpec | None:
+    m = _JS_PH.fullmatch(str(v))
+    return _js_placeholder(m) if m else None
+
+
+def _js_dict_needs_builder(d: dict[str, str]) -> bool:
+    """Complex dict: arrays (repeat/csv/bracket/...) or optional placeholders."""
+    for v in d.values():
+        ph = _js_dict_entry_placeholder(str(v))
+        if ph is None:
+            continue
+        if ph.is_optional or ph.is_array:
+            return True
+    return False
+
+
+def _js_emit_obj_builder(
+    varname: str, d: dict[str, str], indent: str
+) -> list[str]:
+    """Emit JS lines building a local plain object (headers/cookies)."""
+    lines = [f"{indent}const {varname} = {{}};"]
+    for key, value in d.items():
+        value = str(value)
+        ph = _js_dict_entry_placeholder(value)
+        if ph is None:
+            lines.append(
+                f"{indent}{varname}[{key!r}] = {_js_render_value(value)};"
+            )
+            continue
+        expr = _js_render_value(value)
+        if ph.is_optional:
+            lines.append(
+                f"{indent}if ({ph.name} !== undefined && {ph.name} !== null) "
+                f"{varname}[{key!r}] = {expr};"
+            )
+        else:
+            lines.append(f"{indent}{varname}[{key!r}] = {expr};")
+    return lines
+
+
+def _js_emit_params_builder(
+    varname: str, d: dict[str, str], indent: str
+) -> list[str]:
+    """Emit a URLSearchParams builder with per-entry array/optional handling."""
+    lines = [f"{indent}const {varname} = new URLSearchParams();"]
+    for key, value in d.items():
+        value = str(value)
+        ph = _js_dict_entry_placeholder(value)
+        if ph is None:
+            lines.append(
+                f"{indent}{varname}.set({key!r}, {_js_render_value(value)});"
+            )
+            continue
+        effective_key = (
+            f"{key}[]" if (ph.is_array and ph.style == "bracket") else key
+        )
+        if ph.is_array and ph.style in (None, "repeat", "bracket"):
+            op = (
+                f"for (const _v of {ph.name}) "
+                f"{varname}.append({effective_key!r}, String(_v));"
+            )
+        elif ph.is_array:  # csv / pipe / space
+            op = f"{varname}.set({effective_key!r}, {_js_array_join(ph)});"
+        else:
+            scalar = ph.name if ph.type_name == "str" else f"String({ph.name})"
+            op = f"{varname}.set({effective_key!r}, {scalar});"
+        if ph.is_optional:
+            lines.append(
+                f"{indent}if ({ph.name} !== undefined && {ph.name} !== null) {op}"
+            )
+        else:
+            lines.append(f"{indent}{op}")
+    return lines
+
+
+_JS_PRIM_JSDOC = {
+    "str": "string",
+    "int": "number",
+    "float": "number",
+    "bool": "boolean",
+}
+
+
+def _js_ph_jsdoc(ph: PlaceholderSpec) -> str:
+    """JSDoc type expression for a placeholder, e.g. 'number[]' or 'string | null'."""
+    t = _JS_PRIM_JSDOC[ph.type_name]
+    if ph.is_array:
+        t = f"{t}[]"
+    return t
+
+
+def _js_signature_jsdoc(
+    placeholders: list[PlaceholderSpec], indent: str
+) -> list[str]:
+    """Build JSDoc lines describing the destructured params argument."""
+    if not placeholders:
+        return []
+    lines = [f"{indent}/**", f"{indent} * @param {{object}} params"]
+    required = [p for p in placeholders if not p.is_optional]
+    optional = [p for p in placeholders if p.is_optional]
+    for p in required + optional:
+        bracket_name = (
+            f"[params.{p.name}]" if p.is_optional else f"params.{p.name}"
+        )
+        lines.append(f"{indent} * @param {{{_js_ph_jsdoc(p)}}} {bracket_name}")
+    lines.append(f"{indent} */")
+    return lines
 
 
 def _js_render_json_body(raw: str) -> str:
@@ -1542,8 +1684,15 @@ def _js_rest_method(node: RequestConfig, ctx: ConverterContext) -> list[str]:
     if raw_name == "fetch":
         method_name = "fetch"
 
-    ph_names = spec.placeholders
-    ph_param = (", {" + ", ".join(ph_names) + "}") if ph_names else ""
+    placeholders = spec.placeholders  # list[PlaceholderSpec]
+    if placeholders:
+        # Required first, optional last (mirrors Python signature ordering).
+        required = [p for p in placeholders if not p.is_optional]
+        optional = [p for p in placeholders if p.is_optional]
+        ordered_names = [p.name for p in required + optional]
+        ph_param = ", {" + ", ".join(ordered_names) + "}"
+    else:
+        ph_param = ""
     sig = f"static async {method_name}(client{ph_param})"
 
     lines: list[str] = []
@@ -1552,7 +1701,24 @@ def _js_rest_method(node: RequestConfig, ctx: ConverterContext) -> list[str]:
         for doc_line in node.doc.splitlines():
             lines.append(f"{i1} * {doc_line}")
         lines.append(f"{i1} */")
+    lines.extend(_js_signature_jsdoc(placeholders, i1))
     lines.append(f"{i1}{sig} {{")
+
+    # Pre-body: local builders for params/headers if any entry is array or optional.
+    pre_lines: list[str] = []
+    params_var: str | None = None
+    headers_var: str | None = None
+    cookies_var: str | None = None
+    if spec.params and _js_dict_needs_builder(spec.params):
+        params_var = "_params"
+        pre_lines.extend(_js_emit_params_builder(params_var, spec.params, i2))
+    if spec.headers and _js_dict_needs_builder(spec.headers):
+        headers_var = "_headers"
+        pre_lines.extend(_js_emit_obj_builder(headers_var, spec.headers, i2))
+    if spec.cookies and _js_dict_needs_builder(spec.cookies):
+        cookies_var = "_cookies"
+        pre_lines.extend(_js_emit_obj_builder(cookies_var, spec.cookies, i2))
+    lines.extend(pre_lines)
 
     if http_client == "axios":
         req_props: list[str] = [
@@ -1561,9 +1727,15 @@ def _js_rest_method(node: RequestConfig, ctx: ConverterContext) -> list[str]:
             f"{i3}validateStatus: () => true,",
         ]
         if spec.params:
-            req_props.append(f"{i3}params: {_js_render_obj(spec.params)},")
+            params_expr = (
+                params_var if params_var else _js_render_obj(spec.params)
+            )
+            req_props.append(f"{i3}params: {params_expr},")
         if spec.headers:
-            req_props.append(f"{i3}headers: {_js_render_obj(spec.headers)},")
+            headers_expr = (
+                headers_var if headers_var else _js_render_obj(spec.headers)
+            )
+            req_props.append(f"{i3}headers: {headers_expr},")
         body_result = _js_render_body(spec)
         if body_result:
             _, body_expr = body_result
@@ -1576,15 +1748,26 @@ def _js_rest_method(node: RequestConfig, ctx: ConverterContext) -> list[str]:
         lines.append(f"{i2}const _body = _resp.data;")
     else:
         if spec.params:
-            url_inner = _JS_PH.sub(r"${\1}", spec.url.replace("`", "\\`"))
-            params_obj = _js_render_obj(spec.params)
-            url_expr = f"`{url_inner}?${{new URLSearchParams({params_obj})}}`"
+            url_inner = _JS_PH.sub(
+                lambda mm: "${" + mm.group(1) + "}",
+                spec.url.replace("`", "\\`"),
+            )
+            if params_var:
+                url_expr = f"`{url_inner}?${{{params_var}.toString()}}`"
+            else:
+                params_obj = _js_render_obj(spec.params)
+                url_expr = (
+                    f"`{url_inner}?${{new URLSearchParams({params_obj})}}`"
+                )
         else:
             url_expr = _js_render_value(spec.url)
 
         options: list[str] = [f"{i3}method: {spec.method!r},"]
         if spec.headers:
-            options.append(f"{i3}headers: {_js_render_obj(spec.headers)},")
+            headers_expr = (
+                headers_var if headers_var else _js_render_obj(spec.headers)
+            )
+            options.append(f"{i3}headers: {headers_expr},")
         body_result = _js_render_body(spec)
         if body_result:
             _, body_expr = body_result
@@ -1640,7 +1823,8 @@ def pre_request_config(node: RequestConfig, ctx: ConverterContext):
     i3 = i2 + ind  # options object properties
 
     struct_name = to_pascal_case(node.parent.name)
-    ph_names = spec.placeholders
+    placeholders = spec.placeholders
+    ph_names = [p.name for p in placeholders]
 
     method_name = "fetch" + (to_pascal_case(node.name) if node.name else "")
 

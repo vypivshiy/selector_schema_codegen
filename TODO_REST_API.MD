@@ -223,13 +223,30 @@ MVP — только проверка присутствия поля (`field in
 
 Автосериализация при вызове `fetch(body=CreateArticleRequest{...})`. Сейчас достаточно raw payload с `{{placeholders}}`.
 
-### Query array parameters
+### Query array parameters — ✅ MVP (landed)
 
-mitm2swagger часто выводит `?genres[]=1&genres[]=2`. Варианты:
-- Placeholder синтаксис: `{{genres[]}}` — генератор разворачивает массив (`bracket`, `csv`, `repeat`)
-- Modifier: `{{genres|bracket-array}}`
+Реализовано через типизированные плейсхолдеры. Грамматика:
 
-Решение — после замера реальных кейсов.
+```
+{{ NAME [:PRIM] [[]] [?] [|STYLE] }}
+
+NAME   = [A-Za-z][A-Za-z0-9_-]*         (первый символ — буква; `-` автоконвертируется под target)
+PRIM   = str | int | float | bool       (default: str)
+STYLE  = repeat | csv | bracket | pipe | space   (только при []; default: repeat)
+```
+
+Примеры:
+- `{{id}}` — str, required (legacy)
+- `{{id:int}}`, `{{page:int?}}` — typed scalar, required/optional
+- `{{tags[]}}`, `{{tags:int[]}}` — array (repeat style by default)
+- `{{tags:int[]?|csv}}` — optional int array, csv-serialized (`?tags=1,2,3`)
+- `{{tags:int[]|bracket}}` — `?tags[]=1&tags[]=2`
+
+Генератор:
+- **Python (requests/httpx)**: `repeat` передаёт список as-is (клиент сам делает `?a=1&a=2`); `csv/pipe/space` — `','.join(...)`; `bracket` — key rewrite `tags[]`; optional → условная сборка `_params` локальной переменной.
+- **JS (fetch/axios)**: `URLSearchParams.append` для repeat/bracket, `.set` + `.map(String).join(sep)` для csv/pipe/space; JSDoc типы в сигнатуре.
+
+Линтер: conflicting types, style без `[]`, неизвестный type/style, array/`?` в URL path, коллизия с keyword — см. `ssc_codegen/linter/rules_struct.py` → `_check_request_placeholders`.
 
 ### Enum типы в `json`
 

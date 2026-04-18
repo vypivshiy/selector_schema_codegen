@@ -9,12 +9,24 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from typing import Callable
 from urllib.parse import urlparse, urlunparse
 
 from .curl import parse_curl_to_httpx_kwargs
 from .http import parse_http_to_httpx_kwargs
+from ..ast.struct import PlaceholderSpec, _parse_placeholder
 
-_PH = re.compile(r"\{\{([\w-]+)\}\}")
+# Strict placeholder regex — kept in sync with ssc_codegen/ast/struct.py.
+# Groups: 1=NAME, 2=PRIM, 3="[]", 4="?", 5=STYLE.
+_PH = re.compile(
+    r"\{\{"
+    r"([A-Za-z][A-Za-z0-9_-]*)"
+    r"(?::(str|int|float|bool))?"
+    r"(\[\])?"
+    r"(\?)?"
+    r"(?:\|(repeat|csv|bracket|pipe|space))?"
+    r"\}\}"
+)
 
 # ── RequestSpec ───────────────────────────────────────────────────────────────
 
@@ -30,17 +42,22 @@ class RequestSpec:
     body: str | dict | None = None  # raw template string or form dict
 
     @property
-    def placeholders(self) -> list[str]:
-        """All unique placeholder names in declaration order across every field."""
+    def placeholders(self) -> list[PlaceholderSpec]:
+        """All unique placeholders in declaration order across every field."""
         seen: set[str] = set()
-        result: list[str] = []
+        result: list[PlaceholderSpec] = []
         for text in _iter_strings(self):
             for m in _PH.finditer(text):
-                name = m.group(1)
-                if name not in seen:
-                    seen.add(name)
-                    result.append(name)
+                spec = _parse_placeholder(m)
+                if spec.name not in seen:
+                    seen.add(spec.name)
+                    result.append(spec)
         return result
+
+    @property
+    def placeholder_names(self) -> list[str]:
+        """Unique placeholder names in declaration order."""
+        return [p.name for p in self.placeholders]
 
 
 def _iter_strings(spec: RequestSpec):
@@ -207,23 +224,36 @@ def _validate_json_body(raw: str) -> None:
 
 
 def normalize_placeholder_names(
-    spec: RequestSpec, transform: "Callable[[str], str]"
+    spec: RequestSpec, transform: Callable[[str], str]
 ) -> RequestSpec:
     """Return a copy of *spec* with every placeholder name passed through *transform*.
 
-    Call this before rendering so that ``{{page-num}}`` becomes e.g.
-    ``{{page_num}}`` (Python) or ``{{pageNum}}`` (JS) in all spec fields.
+    Call this before rendering so that ``{{page-num:int[]?|csv}}`` becomes e.g.
+    ``{{page_num:int[]?|csv}}`` (Python) or ``{{pageNum:int[]?|csv}}`` (JS).
+    Type/array/optional/style suffixes are preserved; only NAME changes.
     """
-    from typing import Callable  # local import to avoid top-level cost
-
-    mapping = {ph: transform(ph) for ph in spec.placeholders}
+    mapping = {ph.name: transform(ph.name) for ph in spec.placeholders}
     if all(old == new for old, new in mapping.items()):
         return spec
 
     def _sub(text: str) -> str:
-        return _PH.sub(
-            lambda m: "{{" + mapping.get(m.group(1), m.group(1)) + "}}", text
-        )
+        def _replace(m: "re.Match[str]") -> str:
+            new_name = mapping.get(m.group(1), m.group(1))
+            type_part = f":{m.group(2)}" if m.group(2) else ""
+            array_part = m.group(3) or ""
+            optional_part = m.group(4) or ""
+            style_part = f"|{m.group(5)}" if m.group(5) else ""
+            return (
+                "{{"
+                + new_name
+                + type_part
+                + array_part
+                + optional_part
+                + style_part
+                + "}}"
+            )
+
+        return _PH.sub(_replace, text)
 
     def _sub_dict(d: dict) -> dict:
         return {k: _sub(str(v)) for k, v in d.items()}
@@ -248,21 +278,35 @@ def normalize_placeholder_names(
 # ── Code-generation helpers ───────────────────────────────────────────────────
 
 
+_STYLE_SEPARATOR = {"csv": ",", "pipe": "|", "space": " "}
+
+
+def _render_array_join(ph: PlaceholderSpec) -> str:
+    """Array placeholder → Python expression producing a joined string."""
+    sep = _STYLE_SEPARATOR[ph.style or "csv"]
+    return f"{sep!r}.join(str(_x) for _x in {ph.name})"
+
+
 def render_value(v: str) -> str:
     """
     Convert a RequestSpec string value to a Python code fragment.
 
-    "{{query}}"          → query            (bare variable)
-    "Bearer {{token}}"   → f"Bearer {token}"  (f-string)
-    "Mozilla/5.0"        → "Mozilla/5.0"    (string literal)
+    "{{query}}"          → query             (bare variable; scalar or repeat-array)
+    "{{tags:int[]|csv}}" → ",".join(...)     (array with explicit separator)
+    "Bearer {{token}}"   → f"Bearer {token}" (f-string, scalars only)
+    "Mozilla/5.0"        → "Mozilla/5.0"     (string literal)
     """
     if m := _PH.fullmatch(v):
-        return m.group(1)
+        ph = _parse_placeholder(m)
+        if ph.is_array and ph.style in ("csv", "pipe", "space"):
+            return _render_array_join(ph)
+        # Scalar or repeat/bracket-array → bare variable name.
+        # repeat:  requests/httpx expands list in params natively (?a=1&a=2).
+        # bracket: key rewrite happens at dict-level; value stays bare.
+        return ph.name
     if _PH.search(v):
-        inner = _PH.sub(r"{\1}", v)
-        # escape any { } that are NOT our substituted {name} fragments
-        # (they were already plain chars, not placeholder braces)
-        # We do this by processing the original string token-by-token.
+        # Mixed literal + placeholder(s) → f-string. Only scalar placeholders
+        # are valid here (arrays/optional forbidden inside f-string by linter).
         return f'f"{_escape_fstring(v)}"'
     return repr(v)
 
@@ -295,6 +339,63 @@ def render_dict(d: dict[str, str], *, indent: str = "") -> str:
         return "{}"
     inner = ", ".join(f"{k!r}: {render_value(str(v))}" for k, v in d.items())
     return "{" + inner + "}"
+
+
+def _dict_entry_placeholder(v: str) -> PlaceholderSpec | None:
+    """Return the PlaceholderSpec if value is a fullmatch placeholder, else None."""
+    m = _PH.fullmatch(str(v))
+    return _parse_placeholder(m) if m else None
+
+
+def dict_needs_builder(d: dict[str, str]) -> bool:
+    """
+    True when dict rendering requires a multi-line local builder.
+
+    Needed if any value is an optional fullmatch placeholder (conditional drop)
+    or uses bracket-style serialization (key rewrite).
+    """
+    for v in d.values():
+        ph = _dict_entry_placeholder(str(v))
+        if ph is None:
+            continue
+        if ph.is_optional:
+            return True
+        if ph.is_array and ph.style == "bracket":
+            return True
+    return False
+
+
+def emit_dict_builder(
+    varname: str, d: dict[str, str], indent: str
+) -> list[str]:
+    """
+    Emit Python lines building a local dict that supports optional drops and
+    bracket key rewrites:
+
+        _params = {}
+        if q is not None:
+            _params["q"] = q
+        _params["tags[]"] = tags
+        _params["limit"] = limit
+    """
+    lines = [f"{indent}{varname}: dict = {{}}"]
+    for key, value in d.items():
+        value = str(value)
+        ph = _dict_entry_placeholder(value)
+        if ph is None:
+            # Literal value or f-string mix — always set.
+            lines.append(f"{indent}{varname}[{key!r}] = {render_value(value)}")
+            continue
+        effective_key = (
+            f"{key}[]" if (ph.is_array and ph.style == "bracket") else key
+        )
+        expr = render_value(value)
+        if ph.is_optional:
+            lines.append(f"{indent}if {ph.name} is not None:")
+            lines.append(f"{indent}    {varname}[{effective_key!r}] = {expr}")
+        else:
+            lines.append(f"{indent}{varname}[{effective_key!r}] = {expr}")
+    return lines
 
 
 def render_json_body(raw: str) -> str:

@@ -14,6 +14,8 @@ from ssc_codegen.parsers import (
     render_value,
     render_dict,
     render_body,
+    dict_needs_builder,
+    emit_dict_builder,
 )
 
 # module level
@@ -26,6 +28,7 @@ from ssc_codegen.ast import (
     TypeDef,
     TypeDefField,
     Struct,
+    PlaceholderSpec,
 )
 
 # struct layer
@@ -1428,6 +1431,7 @@ def _build_request_method(
     struct_name: str,
     call_args: list[str],
     ph_params: str,
+    pre_lines: list[str],
     response_path: str,
     response_join: str,
     i1: str,
@@ -1439,8 +1443,9 @@ def _build_request_method(
     lines: list[str] = [
         f"{i1}@classmethod",
         f'{i1}{async_kw}def {name}(cls, client: {client_type}{ph_params}) -> "{struct_name}":',
-        f"{i2}_resp = {await_kw}client.request(",
     ]
+    lines.extend(pre_lines)
+    lines.append(f"{i2}_resp = {await_kw}client.request(")
     lines.extend(f"{i3}{a}" for a in call_args)
     lines.append(f"{i2})")
     lines.append(f"{i2}_resp.raise_for_status()")
@@ -1455,6 +1460,32 @@ def _build_request_method(
         lines.append(f"{i2}_body = _resp.text")
     lines.append(f"{i2}return cls(_body)")
     return lines
+
+
+_PY_PRIM_ANNO = {"str": "str", "int": "int", "float": "float", "bool": "bool"}
+
+
+def _ph_to_py_annotation(ph: PlaceholderSpec) -> tuple[str, str]:
+    """Return (annotation, default_suffix). Suffix is '' or ' = None'."""
+    anno = _PY_PRIM_ANNO[ph.type_name]
+    if ph.is_array:
+        anno = f"list[{anno}]"
+    if ph.is_optional:
+        return f"{anno} | None", " = None"
+    return anno, ""
+
+
+def _render_signature_params(placeholders: list[PlaceholderSpec]) -> str:
+    """Build keyword-only parameters clause: ', *, a: int, b: str | None = None'."""
+    if not placeholders:
+        return ""
+    required = [p for p in placeholders if not p.is_optional]
+    optional = [p for p in placeholders if p.is_optional]
+    parts: list[str] = []
+    for ph in required + optional:
+        anno, default = _ph_to_py_annotation(ph)
+        parts.append(f"{ph.name}: {anno}{default}")
+    return ", *, " + ", ".join(parts)
 
 
 def _resolve_response_type(node: RequestConfig) -> str:
@@ -1481,6 +1512,7 @@ def _build_rest_method(
     client_type: str,
     call_args: list[str],
     ph_params: str,
+    pre_lines: list[str],
     ret_type: str,
     errors: list[ErrorResponse],
     i1: str,
@@ -1496,6 +1528,7 @@ def _build_rest_method(
     ]
     if node.doc:
         lines.append(f'{i2}"""{node.doc}"""')
+    lines.extend(pre_lines)
     lines.append(f"{i2}_resp = {await_kw}client.request(")
     lines.extend(f"{i3}{a}" for a in call_args)
     lines.append(f"{i2})")
@@ -1545,17 +1578,25 @@ def pre_request_config(node: RequestConfig, ctx: ConverterContext):
 
     is_rest = isinstance(node.parent, Struct) and node.parent.is_rest
     struct_name = to_pascal_case(node.parent.name)
-    ph_params = ""
-    if spec.placeholders:
-        ph_params = ", *, " + ", ".join(f"{p}: str" for p in spec.placeholders)
+    ph_params = _render_signature_params(spec.placeholders)
 
+    # Pre-lines: emitted inside the method body before `client.request(...)`
+    # to build local _headers/_cookies/_params dicts when dict_needs_builder().
+    pre_lines: list[str] = []
     call_args: list[str] = [f"{spec.method!r},", f"{render_value(spec.url)},"]
-    if spec.headers:
-        call_args.append(f"headers={render_dict(spec.headers)},")
-    if spec.cookies:
-        call_args.append(f"cookies={render_dict(spec.cookies)},")
-    if spec.params:
-        call_args.append(f"params={render_dict(spec.params)},")
+
+    def _dict_arg(kwarg: str, d: dict[str, str], varname: str) -> None:
+        if not d:
+            return
+        if dict_needs_builder(d):
+            pre_lines.extend(emit_dict_builder(varname, d, i2))
+            call_args.append(f"{kwarg}={varname},")
+        else:
+            call_args.append(f"{kwarg}={render_dict(d)},")
+
+    _dict_arg("headers", spec.headers, "_headers")
+    _dict_arg("cookies", spec.cookies, "_cookies")
+    _dict_arg("params", spec.params, "_params")
     body_result = render_body(spec)
     if body_result:
         kwarg_name, body_expr = body_result
@@ -1572,6 +1613,7 @@ def pre_request_config(node: RequestConfig, ctx: ConverterContext):
             node=node,
             call_args=call_args,
             ph_params=ph_params,
+            pre_lines=pre_lines,
             ret_type=ret_type,
             errors=errors,
             i1=i1,
@@ -1613,6 +1655,7 @@ def pre_request_config(node: RequestConfig, ctx: ConverterContext):
         struct_name=struct_name,
         call_args=call_args,
         ph_params=ph_params,
+        pre_lines=pre_lines,
         response_path=node.response_path,
         response_join=node.response_join,
         i1=i1,

@@ -519,4 +519,4 @@ def test_parser_preserves_split_doc_and_start_parse_flags():
     assert isinstance(start_parse, StartParse)
     assert start_parse.use_split_doc is True
     assert start_parse.use_pre_validate is True
-    assert {field.name for field in start_parse.fields} == {"name", "image-url", "rating", "price"}
+    assert {field.name for field in start_parse.fields} == {"name", "image-url", "rating", "price", "url"}

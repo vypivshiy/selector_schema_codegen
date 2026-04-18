@@ -8,6 +8,8 @@ from .spec import (
     render_dict,
     render_json_body,
     render_body,
+    dict_needs_builder,
+    emit_dict_builder,
 )
 
 __all__ = [
@@ -18,6 +20,8 @@ __all__ = [
     "render_dict",
     "render_json_body",
     "render_body",
+    "dict_needs_builder",
+    "emit_dict_builder",
     "parse_curl_to_httpx_kwargs",
     "parse_http_to_httpx_kwargs",
 ]

@@ -313,6 +313,13 @@ Accept: text/html
 `{{name}}` becomes a keyword-only parameter in `fetch()`, converted to snake_case.
 No placeholders → static request, `fetch(cls, client)` only.
 
+**Typed placeholders:** `{{name[:type][[]][?][|style]}}`
+- `type` ∈ `str|int|float|bool` (default: str)
+- `[]` marks array; `?` marks optional (`T | None = None`)
+- `style` ∈ `repeat|csv|bracket|pipe|space` (arrays only; default: repeat)
+- Examples: `{{id:int}}`, `{{q:str?}}`, `{{tags:int[]?|csv}}`, `{{tags[]|bracket}}`
+- `[]` and `?` forbidden in URL path; style requires `[]`.
+
 ### Optional properties
 
 - `response-path="a.b.c"` — dot-notation path into JSON response body to extract HTML string

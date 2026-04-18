@@ -5,6 +5,7 @@ Covers:
 - Linter: REST-specific rule validation
 - Converters: py_bs4 and js_pure code generation
 """
+
 from __future__ import annotations
 
 import ast as pyast
@@ -35,10 +36,10 @@ def _rest_src(*, extra_requests: str = "", errors: str = "") -> str:
         "json User { id int; name str }\n"
         "json Err { code int; message str }\n"
         "struct API type=rest {\n"
-        "    @request name=get-user response=User \"\"\"\n"
+        '    @request name=get-user response=User """\n'
         "    GET /users/{{id}} HTTP/1.1\n"
         "    Host: api.example.com\n"
-        "    \"\"\"\n"
+        '    """\n'
         f"{extra_requests}"
         f"{errors}"
         "}\n"
@@ -106,14 +107,14 @@ class TestRestLinter:
         src = (
             "json User { id int }\n"
             "struct API type=rest {\n"
-            "    @request response=User \"\"\"\n"
+            '    @request response=User """\n'
             "    GET /a HTTP/1.1\n"
             "    Host: x.com\n"
-            "    \"\"\"\n"
-            "    @request response=User \"\"\"\n"
+            '    """\n'
+            '    @request response=User """\n'
             "    GET /b HTTP/1.1\n"
             "    Host: x.com\n"
-            "    \"\"\"\n"
+            '    """\n'
             "}\n"
         )
         msgs = _lint_messages(src)
@@ -127,9 +128,7 @@ class TestRestLinter:
     def test_2xx_error_requires_field(self):
         src = _rest_src(errors="    @error 200 Err\n")
         msgs = _lint_messages(src)
-        assert any(
-            "requires field= discriminator" in m for m in msgs
-        )
+        assert any("requires field= discriminator" in m for m in msgs)
 
     def test_invalid_status_range(self):
         src = _rest_src(errors="    @error 99 Err\n")
@@ -140,10 +139,10 @@ class TestRestLinter:
         src = (
             "json User { id int }\n"
             "struct API type=rest {\n"
-            "    @request response=User \"\"\"\n"
+            '    @request response=User """\n'
             "    GET /a HTTP/1.1\n"
             "    Host: x.com\n"
-            "    \"\"\"\n"
+            '    """\n'
             "}\n"
         )
         msgs = _lint_messages(src)
@@ -211,3 +210,236 @@ class TestRestJsConverter:
         module = PARSER.parse(src)
         code = JS_CONVERTER.convert(module, http_client="axios")
         assert "client.request" in code
+
+
+# ---------------------------------------------------------------------------
+# Typed placeholders (§3 plan: type / array / optional / style)
+# ---------------------------------------------------------------------------
+
+
+def _typed_rest_src(request_line: str) -> str:
+    return (
+        "json User { id int }\n"
+        "struct API type=rest {\n"
+        '    @request response=User """\n'
+        f"    {request_line}\n"
+        "    Host: api.example.com\n"
+        '    """\n'
+        "}\n"
+    )
+
+
+class TestTypedPlaceholdersAst:
+    def test_legacy_plain_name_is_str_scalar_required(self):
+        from ssc_codegen.ast.struct import _PLACEHOLDER_RE, _parse_placeholder
+
+        m = _PLACEHOLDER_RE.fullmatch("{{name}}")
+        assert m is not None
+        ph = _parse_placeholder(m)
+        assert ph.name == "name"
+        assert ph.type_name == "str"
+        assert ph.is_array is False
+        assert ph.is_optional is False
+        assert ph.style is None
+
+    @pytest.mark.parametrize(
+        "placeholder,expected",
+        [
+            ("{{id:int}}", ("id", "int", False, False, None)),
+            ("{{token?}}", ("token", "str", False, True, None)),
+            ("{{page:int?}}", ("page", "int", False, True, None)),
+            ("{{tags[]}}", ("tags", "str", True, False, None)),
+            ("{{tags:int[]}}", ("tags", "int", True, False, None)),
+            ("{{tags:int[]?}}", ("tags", "int", True, True, None)),
+            ("{{tags:int[]?|csv}}", ("tags", "int", True, True, "csv")),
+            ("{{tags:float[]|pipe}}", ("tags", "float", True, False, "pipe")),
+            ("{{flag:bool}}", ("flag", "bool", False, False, None)),
+            ("{{page-num:int?}}", ("page-num", "int", False, True, None)),
+        ],
+    )
+    def test_parse_variants(self, placeholder, expected):
+        from ssc_codegen.ast.struct import _PLACEHOLDER_RE, _parse_placeholder
+
+        m = _PLACEHOLDER_RE.fullmatch(placeholder)
+        assert m is not None, placeholder
+        ph = _parse_placeholder(m)
+        assert (
+            ph.name,
+            ph.type_name,
+            ph.is_array,
+            ph.is_optional,
+            ph.style,
+        ) == expected
+
+    @pytest.mark.parametrize(
+        "placeholder",
+        [
+            "{{_foo}}",
+            "{{0foo}}",
+            "{{-foo}}",
+            "{{foo:unknown}}",
+            "{{foo|unknown}}",
+            "{{}}",
+        ],
+    )
+    def test_invalid_placeholders_reject(self, placeholder):
+        from ssc_codegen.ast.struct import _PLACEHOLDER_RE
+
+        assert _PLACEHOLDER_RE.fullmatch(placeholder) is None
+
+
+class TestTypedPlaceholdersLinter:
+    def test_style_without_array_errors(self):
+        src = _typed_rest_src("GET /u?q={{q:str|csv}} HTTP/1.1")
+        msgs = _lint_messages(src)
+        assert any("requires array [] modifier" in m for m in msgs)
+
+    def test_conflicting_types_error(self):
+        src = _typed_rest_src("GET /u/{{id:int}}/p/{{id:str}} HTTP/1.1")
+        msgs = _lint_messages(src)
+        assert any("conflicting types" in m for m in msgs)
+
+    def test_unknown_type_error(self):
+        src = _typed_rest_src("GET /u?a={{x:bogus}} HTTP/1.1")
+        msgs = _lint_messages(src)
+        assert any("unknown type" in m for m in msgs)
+
+    def test_unknown_style_error(self):
+        src = _typed_rest_src("GET /u?a={{x:int[]|weird}} HTTP/1.1")
+        msgs = _lint_messages(src)
+        assert any("unknown style" in m for m in msgs)
+
+    def test_invalid_name_starts_with_underscore(self):
+        src = _typed_rest_src("GET /u?a={{_bad}} HTTP/1.1")
+        msgs = _lint_messages(src)
+        assert any("name must start with a letter" in m for m in msgs)
+
+    def test_invalid_name_starts_with_digit(self):
+        src = _typed_rest_src("GET /u?a={{1bad}} HTTP/1.1")
+        msgs = _lint_messages(src)
+        assert any("name must start with a letter" in m for m in msgs)
+
+    def test_array_in_path_errors(self):
+        src = _typed_rest_src("GET /u/{{ids:int[]}} HTTP/1.1")
+        msgs = _lint_messages(src)
+        assert any(
+            "array [] is not allowed inside the URL path" in m for m in msgs
+        )
+
+    def test_optional_in_path_errors(self):
+        src = _typed_rest_src("GET /u/{{id?}} HTTP/1.1")
+        msgs = _lint_messages(src)
+        assert any(
+            "optional ? is not allowed inside the URL path" in m for m in msgs
+        )
+
+    def test_keyword_name_errors(self):
+        src = _typed_rest_src("GET /u?a={{class:int}} HTTP/1.1")
+        msgs = _lint_messages(src)
+        assert any("reserved keyword" in m for m in msgs)
+
+    def test_legacy_untyped_is_clean(self):
+        src = _typed_rest_src("GET /u/{{id}} HTTP/1.1")
+        assert _lint_messages(src) == []
+
+    def test_typed_scalar_in_path_is_clean(self):
+        src = _typed_rest_src("GET /u/{{id:int}} HTTP/1.1")
+        assert _lint_messages(src) == []
+
+
+class TestTypedPlaceholdersPyCodegen:
+    def _gen(self, request_line: str) -> str:
+        from ssc_codegen.converters.py_bs4 import PY_BASE_CONVERTER
+
+        module = PARSER.parse(_typed_rest_src(request_line))
+        return PY_BASE_CONVERTER.convert(module, http_client="requests")
+
+    def test_scalar_typed_signature(self):
+        code = self._gen("GET /u?id={{id:int}} HTTP/1.1")
+        assert "id: int" in code
+
+    def test_optional_has_none_default(self):
+        code = self._gen("GET /u?q={{q:str?}} HTTP/1.1")
+        assert "q: str | None = None" in code
+
+    def test_array_annotation(self):
+        code = self._gen("GET /u?tags={{tags:int[]}} HTTP/1.1")
+        assert "tags: list[int]" in code
+
+    def test_repeat_default_passes_list_native(self):
+        # with repeat style (default) requests accepts a list directly:
+        # params={'tags': tags}  → ?tags=1&tags=2
+        code = self._gen("GET /u?tags={{tags:int[]?}} HTTP/1.1")
+        assert "_params['tags'] = tags" in code
+
+    def test_csv_style_joins_with_comma(self):
+        code = self._gen("GET /u?tags={{tags:int[]?|csv}} HTTP/1.1")
+        assert "','.join(str(_x) for _x in tags)" in code
+
+    def test_optional_builds_params_conditionally(self):
+        code = self._gen("GET /u?q={{q:str?}} HTTP/1.1")
+        assert "if q is not None:" in code
+        assert "_params['q'] = q" in code
+
+    def test_required_first_optional_last(self):
+        # required 'id' must come before optional 'q' in the signature
+        code = self._gen("GET /u/{{id:int}}?q={{q:str?}} HTTP/1.1")
+        sig_idx = code.find("def fetch")
+        sig_line = code[sig_idx : code.find("\n", sig_idx)]
+        assert sig_line.find("id: int") < sig_line.find("q: str | None")
+
+    def test_kebab_name_normalised_with_suffixes(self):
+        code = self._gen("GET /u?p={{page-num:int[]?|csv}} HTTP/1.1")
+        # NAME renamed to snake_case but type/array/optional/style preserved
+        assert "page_num: list[int] | None = None" in code
+        assert "','.join(str(_x) for _x in page_num)" in code
+
+    def test_python_code_is_syntactically_valid(self):
+        code = self._gen(
+            "GET /u/{{id:int}}?q={{q:str?}}&tags={{tags:int[]?|csv}} HTTP/1.1"
+        )
+        pyast.parse(code)  # must not raise
+
+    def test_legacy_untyped_still_str(self):
+        code = self._gen("GET /u/{{id}} HTTP/1.1")
+        assert "id: str" in code
+
+
+class TestTypedPlaceholdersJsCodegen:
+    def _gen(self, request_line: str, http_client: str = "fetch") -> str:
+        from ssc_codegen.converters.js_pure import JS_CONVERTER
+
+        module = PARSER.parse(_typed_rest_src(request_line))
+        return JS_CONVERTER.convert(module, http_client=http_client)
+
+    def test_jsdoc_scalar_types(self):
+        code = self._gen("GET /u?id={{id:int}}&q={{q:str?}} HTTP/1.1")
+        assert "@param {number} params.id" in code
+        assert "@param {string} [params.q]" in code
+
+    def test_jsdoc_array_types(self):
+        code = self._gen("GET /u?tags={{tags:int[]?}} HTTP/1.1")
+        assert "@param {number[]} [params.tags]" in code
+
+    def test_urlsearchparams_repeat_via_append(self):
+        code = self._gen("GET /u?tags={{tags:int[]?}} HTTP/1.1")
+        assert "for (const _v of tags)" in code
+        assert "_params.append('tags', String(_v))" in code
+
+    def test_urlsearchparams_csv_via_join(self):
+        code = self._gen("GET /u?tags={{tags:int[]?|csv}} HTTP/1.1")
+        assert "tags.map(String).join(',')" in code
+
+    def test_bracket_style_rewrites_key(self):
+        code = self._gen("GET /u?tags={{tags:int[]|bracket}} HTTP/1.1")
+        assert "_params.append('tags[]', String(_v))" in code
+
+    def test_optional_conditional_set(self):
+        code = self._gen("GET /u?q={{q:str?}} HTTP/1.1")
+        assert "if (q !== undefined && q !== null)" in code
+
+    def test_legacy_untyped_stays_simple(self):
+        code = self._gen("GET /u/{{id}} HTTP/1.1")
+        # No URLSearchParams-builder needed for the simple path placeholder
+        assert "new URLSearchParams();" not in code
+        assert "${id}" in code  # inline template substitution

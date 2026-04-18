@@ -6,7 +6,46 @@ from typing import cast
 from .base import Node
 from .types import VariableType, StructType
 
-_PLACEHOLDER_RE = _re.compile(r"\{\{([\w-]+)\}\}")
+# Typed placeholder grammar:
+#   {{ NAME ( : PRIM )? ( [] )? ( ? )? ( | STYLE )? }}
+#   NAME   = [A-Za-z][A-Za-z0-9_-]*         (first char must be a letter)
+#   PRIM   = str | int | float | bool       (default: str)
+#   STYLE  = repeat | csv | bracket | pipe | space   (arrays only; default: repeat)
+# Legacy `{{name}}` remains valid (groups 2-5 = None → str, scalar, required).
+_PLACEHOLDER_RE = _re.compile(
+    r"\{\{"
+    r"([A-Za-z][A-Za-z0-9_-]*)"
+    r"(?::(str|int|float|bool))?"
+    r"(\[\])?"
+    r"(\?)?"
+    r"(?:\|(repeat|csv|bracket|pipe|space))?"
+    r"\}\}"
+)
+
+# Widened pattern — any `{{…}}`-shaped token. Used by the linter to flag
+# malformed placeholders that the strict _PLACEHOLDER_RE would silently skip.
+_PLACEHOLDER_WIDE_RE = _re.compile(r"\{\{([^{}]*)\}\}")
+
+
+@dataclass
+class PlaceholderSpec:
+    """Parsed `{{…}}` token from an @request payload."""
+
+    name: str = ""
+    type_name: str = "str"  # "str" | "int" | "float" | "bool"
+    is_array: bool = False
+    is_optional: bool = False
+    style: str | None = None  # None == default "repeat" when is_array
+
+
+def _parse_placeholder(match: "_re.Match[str]") -> PlaceholderSpec:
+    return PlaceholderSpec(
+        name=match.group(1),
+        type_name=match.group(2) or "str",
+        is_array=bool(match.group(3)),
+        is_optional=bool(match.group(4)),
+        style=match.group(5) or None,
+    )
 
 
 @dataclass
@@ -216,15 +255,21 @@ class RequestConfig(Node):
     doc: str = ""  # type=rest: per-method docstring
 
     @property
-    def placeholders(self) -> list[str]:
-        """Unique placeholder names in declaration order."""
+    def placeholders(self) -> list[PlaceholderSpec]:
+        """Unique placeholders in declaration order (dedup by name)."""
         seen: set[str] = set()
-        result: list[str] = []
-        for name in _PLACEHOLDER_RE.findall(self.raw_payload):
-            if name not in seen:
-                seen.add(name)
-                result.append(name)
+        result: list[PlaceholderSpec] = []
+        for m in _PLACEHOLDER_RE.finditer(self.raw_payload):
+            spec = _parse_placeholder(m)
+            if spec.name not in seen:
+                seen.add(spec.name)
+                result.append(spec)
         return result
+
+    @property
+    def placeholder_names(self) -> list[str]:
+        """Unique placeholder names in declaration order."""
+        return [p.name for p in self.placeholders]
 
 
 @dataclass

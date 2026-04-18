@@ -146,7 +146,9 @@ All nodes inherit from `Node` base class (has `body` attribute).
 - `SplitDoc` → split document into items (for LIST/DICT types)
 - `Key`, `Value` → dict key/value extraction
 - `TableConfig`, `TableRow`, `TableMatchKey` → table struct support
-- `RequestConfig(raw_payload, response_path, response_join)` → optional transport layer config; `placeholders` property lists `{{name}}` tokens in declaration order
+- `RequestConfig(raw_payload, response_path, response_join, name, response_schema, doc)` → optional transport layer config; `placeholders` → `list[PlaceholderSpec]` (typed: `{{name[:type][[]][?][|style]}}` where `type`∈str/int/float/bool, `style`∈repeat/csv/bracket/pipe/space); `placeholder_names` for legacy callers
+- `PlaceholderSpec(name, type_name, is_array, is_optional, style)` → parsed `{{...}}` token from an `@request` payload
+- `ErrorResponse(status, schema_name, discriminator_field)` → `@error` mapping inside `type=rest` struct
 - `StartParse` → marker node for parser entry
 
 ### Pipeline nodes (operations within fields)

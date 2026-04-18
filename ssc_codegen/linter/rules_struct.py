@@ -16,6 +16,11 @@ from ssc_codegen.linter.types import ErrorCode, DefineKind
 from ssc_codegen.linter.type_rules import check_pipeline_types, _parse_vt
 from ssc_codegen.ast.types import VariableType as VT
 from ssc_codegen.linter.type_rules import PIPELINE_TYPE_RULES
+from ssc_codegen.ast.struct import (
+    _PLACEHOLDER_RE,
+    _PLACEHOLDER_WIDE_RE,
+    _parse_placeholder,
+)
 
 _VALID_TRANSFORM_TYPES = frozenset(
     {t.name for t in VT if t.name not in ("AUTO", "LIST_AUTO")}
@@ -254,6 +259,7 @@ def rule_struct(node: Node, ctx: LintContext) -> None:
                 )
 
     _check_request_uniqueness(fields, ctx, struct_type=struct_type)
+    _check_request_placeholders(fields, ctx)
     if struct_type == "rest":
         _check_rest_errors(fields, ctx)
 
@@ -303,6 +309,227 @@ def _check_request_uniqueness(
             )
         else:
             seen[name] = node
+
+
+_PY_JS_RESERVED = frozenset(
+    {
+        # common between Python and JS — avoid either-language collisions
+        "class",
+        "const",
+        "return",
+        "for",
+        "if",
+        "else",
+        "while",
+        "do",
+        "switch",
+        "case",
+        "break",
+        "continue",
+        "try",
+        "catch",
+        "finally",
+        "throw",
+        "new",
+        "this",
+        "import",
+        "export",
+        "from",
+        "as",
+        "default",
+        "true",
+        "false",
+        "null",
+        "none",
+        "in",
+        "of",
+        "void",
+        "delete",
+        "function",
+        "def",
+        "lambda",
+        "pass",
+        "yield",
+        "global",
+        "nonlocal",
+        "raise",
+        "except",
+        "with",
+        "and",
+        "or",
+        "not",
+        "is",
+        "let",
+        "var",
+        "typeof",
+        "instanceof",
+    }
+)
+
+_VALID_PRIMS = ("str", "int", "float", "bool")
+_VALID_STYLES = ("repeat", "csv", "bracket", "pipe", "space")
+
+
+def _check_request_placeholders(fields: list, ctx: LintContext) -> None:
+    """Validate typed placeholders inside @request payloads.
+
+    Rules (plan §3):
+    1. conflicting types for the same NAME within one @request
+    2. style |xxx used without [] array marker
+    3. unknown primitive type
+    4. unknown style token
+    5. NAME (post-normalization) collides with Python/JS keyword
+    6. malformed placeholder (e.g. {{_foo}}, {{1x}}, {{foo:bogus}}) — caught
+       via the widened regex
+    7. placeholder with [] inside URL path segment (not query/headers/body)
+    8. ? on a path-segment placeholder (path cannot be optional)
+    """
+    for node in fields:
+        if ctx.node_name(node) != "@request":
+            continue
+        raw = ctx.get_arg(node, 0)
+        if not isinstance(raw, str) or not raw:
+            continue
+
+        strict_spans = {
+            (m.start(), m.end()) for m in _PLACEHOLDER_RE.finditer(raw)
+        }
+        for wm in _PLACEHOLDER_WIDE_RE.finditer(raw):
+            if (wm.start(), wm.end()) in strict_spans:
+                continue
+            inner = wm.group(1)
+            # diagnose which dimension is off
+            reason = _diagnose_placeholder(inner)
+            ctx.error(
+                node,
+                ErrorCode.MISSING_ARGUMENT,
+                message=f"invalid placeholder '{{{{{inner}}}}}': {reason}",
+                hint=(
+                    "syntax: {{name[:type][[]][?][|style]}}; "
+                    "name must start with a letter; "
+                    f"type ∈ {{{', '.join(_VALID_PRIMS)}}}; "
+                    f"style ∈ {{{', '.join(_VALID_STYLES)}}}"
+                ),
+            )
+
+        specs_by_name: dict = {}
+        for m in _PLACEHOLDER_RE.finditer(raw):
+            ph = _parse_placeholder(m)
+            # rule 2: style requires array
+            if ph.style is not None and not ph.is_array:
+                ctx.error(
+                    node,
+                    ErrorCode.MISSING_ARGUMENT,
+                    message=(
+                        f"placeholder '{ph.name}': style |{ph.style} "
+                        "requires array [] modifier"
+                    ),
+                    hint=f"use {{{{{ph.name}:{ph.type_name}[]|{ph.style}}}}} instead",
+                )
+            # rule 1: conflicting spec for the same name
+            prev = specs_by_name.get(ph.name)
+            if prev is not None and prev != ph:
+                ctx.error(
+                    node,
+                    ErrorCode.MISSING_ARGUMENT,
+                    message=(
+                        f"placeholder '{ph.name}' declared with "
+                        "conflicting types in the same @request"
+                    ),
+                    hint=(
+                        "each placeholder name must use an identical "
+                        "type/array/optional/style across occurrences"
+                    ),
+                )
+            else:
+                specs_by_name[ph.name] = ph
+            # rule 5: keyword collision (name is kebab-case here; normalize
+            # to lowercase snake for keyword check — covers both targets)
+            candidate = ph.name.replace("-", "_").lower()
+            if candidate in _PY_JS_RESERVED:
+                ctx.error(
+                    node,
+                    ErrorCode.MISSING_ARGUMENT,
+                    message=(
+                        f"placeholder name '{ph.name}' collides with a "
+                        "Python/JS reserved keyword"
+                    ),
+                    hint="rename to a non-keyword identifier",
+                )
+            # rules 7,8: URL-path restrictions
+            if _is_path_span(raw, m.start(), m.end()):
+                if ph.is_array:
+                    ctx.error(
+                        node,
+                        ErrorCode.MISSING_ARGUMENT,
+                        message=(
+                            f"placeholder '{ph.name}': array [] is not "
+                            "allowed inside the URL path"
+                        ),
+                        hint="arrays belong in query/headers/body, not path",
+                    )
+                if ph.is_optional:
+                    ctx.error(
+                        node,
+                        ErrorCode.MISSING_ARGUMENT,
+                        message=(
+                            f"placeholder '{ph.name}': optional ? is not "
+                            "allowed inside the URL path"
+                        ),
+                        hint="path segments cannot be omitted — rethink the endpoint",
+                    )
+
+
+def _diagnose_placeholder(inner: str) -> str:
+    """Best-effort reason why '{{…}}' didn't match strict grammar."""
+    if not inner:
+        return "empty"
+    if not inner[0].isalpha():
+        return f"name must start with a letter, got {inner[0]!r}"
+    if ":" in inner:
+        _, _, tail = inner.partition(":")
+        # strip trailing array/optional/style before checking prim
+        prim = tail.split("[")[0].split("?")[0].split("|")[0]
+        if prim and prim not in _VALID_PRIMS:
+            return f"unknown type {prim!r} (expected one of {_VALID_PRIMS})"
+    if "|" in inner:
+        style = inner.split("|", 1)[1]
+        if style not in _VALID_STYLES:
+            return f"unknown style {style!r} (expected one of {_VALID_STYLES})"
+    return "malformed — check token order: name[:type][[]][?][|style]"
+
+
+def _is_path_span(raw: str, start: int, end: int) -> bool:
+    """True when the match is in the URL-path portion of the first request-line.
+
+    Handles indented multiline payloads — locates the first non-empty line and
+    finds the URI within it allowing leading whitespace.
+    """
+    # find the first non-empty line
+    pos = 0
+    while pos < len(raw):
+        nl = raw.find("\n", pos)
+        line_end = nl if nl >= 0 else len(raw)
+        line = raw[pos:line_end]
+        if line.strip():
+            break
+        pos = line_end + 1
+    else:
+        return False
+
+    stripped = line.strip()
+    # request-line format: METHOD URI HTTP/x.y
+    parts = stripped.split(" ", 2)
+    if len(parts) < 3 or not parts[2].startswith("HTTP/"):
+        return False
+    # uri substring location inside raw:
+    uri_in_line = stripped.index(parts[1], len(parts[0]))
+    leading_ws = len(line) - len(line.lstrip())
+    uri_start_in_raw = pos + leading_ws + uri_in_line
+    uri = parts[1]
+    q = uri.find("?")
+    path_end_in_raw = uri_start_in_raw + (q if q >= 0 else len(uri))
+    return uri_start_in_raw <= start < path_end_in_raw
 
 
 def _check_rest_errors(fields: list, ctx: LintContext) -> None:

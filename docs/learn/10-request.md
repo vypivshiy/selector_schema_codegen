@@ -61,6 +61,35 @@ def fetch(cls, client: httpx.Client, *, query: str, page_num: str) -> "StructNam
 
 Без placeholders — запрос статический, `fetch` принимает только `client`.
 
+### Типизированные плейсхолдеры
+
+По умолчанию каждый `{{name}}` — обязательный `str`. Расширенный синтаксис задаёт тип, массив, опциональность и способ сериализации массива:
+
+```
+{{ NAME [:PRIM] [[]] [?] [|STYLE] }}
+
+NAME   = [A-Za-z][A-Za-z0-9_-]*        первый символ — буква; `-` автоконвертируется
+PRIM   = str | int | float | bool       default: str
+STYLE  = repeat | csv | bracket | pipe | space   только при []; default: repeat
+```
+
+| Плейсхолдер | Python signature | URL (при `tags=[1,2]`) |
+|---|---|---|
+| `{{id}}` | `id: str` | `.../{id}` |
+| `{{id:int}}` | `id: int` | `.../{id}` |
+| `{{q:str?}}` | `q: str \| None = None` | опущен если `None` |
+| `{{tags:int[]}}` | `tags: list[int]` | `?tags=1&tags=2` (repeat) |
+| `{{tags:int[]?\|csv}}` | `tags: list[int] \| None = None` | `?tags=1,2` |
+| `{{tags:int[]\|bracket}}` | `tags: list[int]` | `?tags[]=1&tags[]=2` |
+
+Порядок параметров: required — первыми, optional (с `?`) — последними (PEP 3102 keyword-only).
+
+**Ограничения** (проверяются линтером):
+- `[]` и `?` запрещены в URL path — только query/headers/body
+- style `|...` требует `[]`
+- все повторные вхождения одного `NAME` должны иметь идентичную полную спецификацию
+- имя не должно совпадать с ключевыми словами Python/JS (`class`, `return`, …)
+
 ## Генерация: выбор HTTP клиента
 
 Флаг `--http-client` при генерации:

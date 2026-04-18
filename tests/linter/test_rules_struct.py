@@ -530,6 +530,9 @@ class TestWildcardUnknownOp:
                     "re-any", "gt", "lt", "ge", "le", "transform",
                     # module-level keywords — not reported as unknown ops inside pipelines
                     "struct", "json", "define", "dsl", "expr",
+                    # KDL2 reserved bare identifiers — rejected at parse time,
+                    # never reach the linter's unknown-op rule
+                    "true", "false", "null", "inf", "nan",
                 }
             )
         )
