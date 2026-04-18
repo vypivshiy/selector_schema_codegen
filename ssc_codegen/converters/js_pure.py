@@ -381,6 +381,23 @@ def pre_utilities(node: Utilities, _: ConverterContext):
                 " * @property {null} value",
                 " * @property {string} cause",
                 " */",
+                "",
+                "async function _parseResponse(_resp) {",
+                "    const _status = _resp.status;",
+                "    const _headers = Object.fromEntries"
+                "([..._resp.headers.entries()]);",
+                "    let _body = null;",
+                "    try { _body = await _resp.json(); } catch (e) {}",
+                "    return [_status, _headers, _body];",
+                "}",
+                "",
+                "function _parseResponseAxios(_resp) {",
+                "    const _status = _resp.status;",
+                "    const _headers = {};",
+                "    for (const [k, v] of Object.entries(_resp.headers || {})) "
+                "{ _headers[String(k).toLowerCase()] = String(v); }",
+                "    return [_status, _headers, _resp.data];",
+                "}",
             ]
         )
     return lines
@@ -501,6 +518,71 @@ def pre_struct(node: Struct, ctx: ConverterContext):
 @JS_CONVERTER(StructDocstring)
 def pre_struct_docstring(node: StructDocstring, ctx: ConverterContext):
     return None
+
+
+def _emit_dispatch_err_js(node: Struct, ctx: ConverterContext) -> list[str]:
+    """Emit `_dispatchErr` static method inside a REST class body."""
+    i1 = ctx.indent  # class-body level
+    i2 = i1 + ctx.indent_char  # method body
+    i3 = i2 + ctx.indent_char  # nested (if ...)
+
+    errors = node.errors
+    status_errors = [e for e in errors if e.discriminator_field is None]
+    field_errors = [e for e in errors if e.discriminator_field is not None]
+
+    lines: list[str] = [
+        f"{i1}static _dispatchErr(_status, _headers, _body) {{",
+        f"{i2}if (_status >= 200 && _status < 300) {{",
+    ]
+    for err in field_errors:
+        if 200 <= err.status < 300:
+            field = err.discriminator_field
+            lines.append(
+                f"{i3}if (_status === {err.status} && _body "
+                f"&& _body[{field!r}] !== undefined) {{"
+            )
+            lines.append(
+                f"{i3}{ctx.indent_char}return {{ isOk: false, "
+                f"status: _status, headers: _headers, value: _body }};"
+            )
+            lines.append(f"{i3}}}")
+    lines.append(f"{i3}return null;")
+    lines.append(f"{i2}}}")
+
+    for err in status_errors:
+        lines.append(f"{i2}if (_status === {err.status}) {{")
+        lines.append(
+            f"{i3}return {{ isOk: false, status: _status, "
+            f"headers: _headers, value: _body }};"
+        )
+        lines.append(f"{i2}}}")
+    for err in field_errors:
+        if not (200 <= err.status < 300):
+            field = err.discriminator_field
+            lines.append(
+                f"{i2}if (_status === {err.status} && _body "
+                f"&& _body[{field!r}] !== undefined) {{"
+            )
+            lines.append(
+                f"{i3}return {{ isOk: false, status: _status, "
+                f"headers: _headers, value: _body }};"
+            )
+            lines.append(f"{i2}}}")
+
+    lines.append(
+        f"{i2}return {{ isOk: false, status: _status, "
+        f"headers: _headers, value: _body }};"
+    )
+    lines.append(f"{i1}}}")
+    return lines
+
+
+@JS_CONVERTER.post(StructDocstring)
+def post_struct_docstring(node: StructDocstring, ctx: ConverterContext):
+    parent = node.parent
+    if not isinstance(parent, Struct) or not parent.is_rest:
+        return None
+    return _emit_dispatch_err_js(parent, ctx)
 
 
 @JS_CONVERTER(Init)
@@ -1905,61 +1987,23 @@ def _js_rest_method(node: RequestConfig, ctx: ConverterContext) -> list[str]:
     )
     lines.append(f"{i2}}}")
 
-    # Response extraction (status + headers + parsed body).
-    if http_client == "axios":
-        lines.append(f"{i2}const _status = _resp.status;")
-        lines.append(
-            f"{i2}const _respHeaders = {{}}; "
-            f"for (const [k, v] of Object.entries(_resp.headers || {{}})) "
-            f"{{ _respHeaders[String(k).toLowerCase()] = String(v); }}"
-        )
-        lines.append(f"{i2}const _body = _resp.data;")
-    else:
-        lines.append(f"{i2}const _status = _resp.status;")
-        lines.append(
-            f"{i2}const _respHeaders = "
-            f"Object.fromEntries([..._resp.headers.entries()]);"
-        )
-        lines.append(f"{i2}let _body = null;")
-        lines.append(
-            f"{i2}try {{ _body = await _resp.json(); }} catch (e) {{}}"
-        )
-
-    status_errors = [e for e in errors if not e.discriminator_field]
-    field_errors = [e for e in errors if e.discriminator_field]
-
-    # 2xx-body discriminator check (evaluated BEFORE happy-path return).
-    for err in field_errors:
-        if 200 <= err.status < 300:
-            field = err.discriminator_field
-            lines.append(
-                f"{i2}if (_status === {err.status} && _body "
-                f"&& _body[{field!r}] !== undefined) {{"
-            )
-            lines.append(
-                f"{i3}return {{ isOk: false, status: _status, "
-                f"headers: _respHeaders, value: _body }};"
-            )
-            lines.append(f"{i2}}}")
-
-    lines.append(f"{i2}if (_status >= 200 && _status < 300) {{")
-    lines.append(
-        f"{i3}return {{ isOk: true, status: _status, "
-        f"headers: _respHeaders, value: _body }};"
+    # Shared response extraction + dispatch
+    parser_fn = (
+        "_parseResponseAxios" if http_client == "axios" else "_parseResponse"
     )
-    lines.append(f"{i2}}}")
-
-    for err in status_errors:
-        lines.append(f"{i2}if (_status === {err.status}) {{")
-        lines.append(
-            f"{i3}return {{ isOk: false, status: _status, "
-            f"headers: _respHeaders, value: _body }};"
-        )
-        lines.append(f"{i2}}}")
-
+    parse_prefix = "" if http_client == "axios" else "await "
     lines.append(
-        f"{i2}return {{ isOk: false, status: _status, "
-        f"headers: _respHeaders, value: _body }};"
+        f"{i2}const [_status, _headers, _body] = "
+        f"{parse_prefix}{parser_fn}(_resp);"
+    )
+    struct_pascal = to_pascal_case(struct_name) if struct_name else ""
+    lines.append(
+        f"{i2}const _err = {struct_pascal}._dispatchErr(_status, _headers, _body);"
+    )
+    lines.append(f"{i2}if (_err !== null) return _err;")
+    lines.append(
+        f"{i2}return {{ isOk: true, status: _status, "
+        f"headers: _headers, value: _body }};"
     )
     lines.append(f"{i1}}}")
     return lines

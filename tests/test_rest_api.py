@@ -196,9 +196,9 @@ class TestRestPyConverter:
         code = CONVERTER.convert(module, http_client="requests")
         assert "_status == 404" in code
         assert "_status == 500" in code
-        # routed into typed Err subclasses (no raise)
-        assert "return APIErr404(headers=_resp_headers, value=_body)" in code
-        assert "return APIErr500(headers=_resp_headers, value=_body)" in code
+        # routed into typed Err subclasses via _dispatch_err (no raise)
+        assert "return APIErr404(headers=_headers, value=_body)" in code
+        assert "return APIErr500(headers=_headers, value=_body)" in code
         assert "raise" not in _method_bodies(code)
 
     def test_py_bs4_method_return_type_union(self):
@@ -230,11 +230,13 @@ class TestRestPyConverter:
         src = _rest_src()
         module = PARSER.parse(src)
         code = CONVERTER.convert(module, http_client="requests")
+        # Headers extraction centralized in _parse_response
         assert (
-            "_resp_headers = {k.lower(): v for k, v in _resp.headers.items()}"
+            "_headers = {k.lower(): v for k, v in _resp.headers.items()}"
             in code
         )
-        assert "headers=_resp_headers" in code
+        # Each method passes _headers into Ok(...)
+        assert "Ok(status=_status, headers=_headers, value=_body)" in code
 
     def test_py_bs4_unknown_status_returns_unknown_err(self):
         from ssc_codegen.converters.py_bs4 import (
@@ -244,10 +246,45 @@ class TestRestPyConverter:
         src = _rest_src(errors="    @error 404 Err\n")
         module = PARSER.parse(src)
         code = CONVERTER.convert(module, http_client="requests")
+        # UnknownErr now emitted as fallback inside _dispatch_err
         assert (
             "return UnknownErr("
-            "status=_status, headers=_resp_headers, value=_body)" in code
+            "status=_status, headers=_headers, value=_body)" in code
         )
+
+    def test_py_bs4_emits_parse_response_helper(self):
+        from ssc_codegen.converters.py_bs4 import (
+            PY_BASE_CONVERTER as CONVERTER,
+        )
+
+        src = _rest_src()
+        module = PARSER.parse(src)
+        code = CONVERTER.convert(module, http_client="requests")
+        assert "def _parse_response(_resp):" in code
+        # Used from the method body
+        assert "_status, _headers, _body = _parse_response(_resp)" in code
+
+    def test_py_bs4_emits_dispatch_err_per_struct(self):
+        from ssc_codegen.converters.py_bs4 import (
+            PY_BASE_CONVERTER as CONVERTER,
+        )
+
+        src = _rest_src(errors="    @error 404 Err\n    @error 500 Err\n")
+        module = PARSER.parse(src)
+        code = CONVERTER.convert(module, http_client="requests")
+        assert "@staticmethod" in code
+        assert (
+            "def _dispatch_err(_status: int, "
+            "_headers: Mapping[str, str], _body: Any)" in code
+        )
+        # Method body delegates routing to _dispatch_err
+        assert "cls._dispatch_err(_status, _headers, _body)" in code
+        # And no longer inlines `if _status == NNN` checks in @classmethods.
+        # (The _dispatch_err @staticmethod itself still contains such checks.)
+        import re
+
+        for match in re.finditer(r"@classmethod\s*\n(?:    [^\n]*\n)+", code):
+            assert "if _status ==" not in match.group(0)
 
     def test_py_bs4_httpx_transport_exception(self):
         from ssc_codegen.converters.py_bs4 import (
@@ -366,8 +403,10 @@ class TestRestJsConverter:
         src = _rest_src()
         module = PARSER.parse(src)
         code = JS_CONVERTER.convert(module, http_client="fetch")
+        # Header extraction centralized in _parseResponse helper
         assert "Object.fromEntries([..._resp.headers.entries()])" in code
-        assert "headers: _respHeaders" in code
+        # Method body passes _headers into Ok(...)
+        assert "headers: _headers, value: _body" in code
 
     def test_js_axios_variant(self):
         from ssc_codegen.converters.js_pure import JS_CONVERTER
@@ -376,6 +415,27 @@ class TestRestJsConverter:
         module = PARSER.parse(src)
         code = JS_CONVERTER.convert(module, http_client="axios")
         assert "client.request" in code
+        # Axios uses dedicated parser helper (headers are an object, not iterable)
+        assert "_parseResponseAxios(_resp)" in code
+
+    def test_js_emits_parse_response_helpers(self):
+        from ssc_codegen.converters.js_pure import JS_CONVERTER
+
+        src = _rest_src()
+        module = PARSER.parse(src)
+        code = JS_CONVERTER.convert(module, http_client="fetch")
+        assert "async function _parseResponse(_resp)" in code
+        assert "function _parseResponseAxios(_resp)" in code
+        assert "await _parseResponse(_resp)" in code
+
+    def test_js_emits_dispatch_err_static(self):
+        from ssc_codegen.converters.js_pure import JS_CONVERTER
+
+        src = _rest_src(errors="    @error 404 Err\n    @error 500 Err\n")
+        module = PARSER.parse(src)
+        code = JS_CONVERTER.convert(module, http_client="fetch")
+        assert "static _dispatchErr(_status, _headers, _body)" in code
+        assert "API._dispatchErr(_status, _headers, _body)" in code
 
 
 def _method_bodies(code: str) -> str:

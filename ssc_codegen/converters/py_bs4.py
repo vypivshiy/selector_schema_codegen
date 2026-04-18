@@ -310,6 +310,15 @@ def pre_utilities(node: Utilities, _: ConverterContext):
                 "    value: None = None",
                 "    headers: Mapping[str, str] = field(default_factory=dict)",
                 "\n\n",
+                "def _parse_response(_resp):",
+                "    _status = _resp.status_code",
+                "    _headers = {k.lower(): v for k, v in _resp.headers.items()}",
+                "    try:",
+                "        _body = _resp.json()",
+                "    except Exception:",
+                "        _body = None",
+                "    return _status, _headers, _body",
+                "\n\n",
             ]
         )
     return lines
@@ -397,6 +406,86 @@ def _err_value_type(err: ErrorResponse, struct: Struct) -> str:
     return type_name
 
 
+def _rest_err_union_type(struct: Struct) -> str:
+    """Return the typed union of all Err variants for _dispatch_err sig."""
+    variants: list[str] = []
+    seen: set[str] = set()
+    for err in struct.errors:
+        cls_name = _err_subclass_name(struct.name, err)
+        if cls_name not in seen:
+            seen.add(cls_name)
+            variants.append(cls_name)
+    return " | ".join([*variants, "UnknownErr", "None"])
+
+
+def _emit_dispatch_err_py(node: Struct, ctx: ConverterContext) -> list[str]:
+    """Emit the `_dispatch_err` @staticmethod lines inside a REST class.
+
+    ctx arrives from StructDocstring — already at class-body depth.
+    """
+    i1 = ctx.indent  # class-body level
+    i2 = i1 + ctx.indent_char  # method body
+    i3 = i2 + ctx.indent_char  # nested (if ...:)
+    i4 = i3 + ctx.indent_char
+
+    errors = node.errors
+    status_errors = [e for e in errors if e.discriminator_field is None]
+    field_errors = [e for e in errors if e.discriminator_field is not None]
+    union_type = _rest_err_union_type(node)
+
+    lines: list[str] = [
+        f"{i1}@staticmethod",
+        f"{i1}def _dispatch_err("
+        f"_status: int, _headers: Mapping[str, str], _body: Any"
+        f") -> {union_type}:",
+        f"{i2}if 200 <= _status < 300:",
+    ]
+
+    # 2xx field discriminators check first, inside the 2xx branch
+    if field_errors:
+        lines.append(f"{i3}if isinstance(_body, dict):")
+        emitted_field_branch = False
+        for err in field_errors:
+            if 200 <= err.status < 300:
+                cls_name = _err_subclass_name(node.name, err)
+                lines.append(
+                    f"{i4}if _status == {err.status} "
+                    f"and {err.discriminator_field!r} in _body:"
+                )
+                lines.append(
+                    f"{i4}{ctx.indent_char}return {cls_name}("
+                    f"headers=_headers, value=_body)"
+                )
+                emitted_field_branch = True
+        if not emitted_field_branch:
+            # no 2xx-field errors → drop the isinstance guard
+            lines.pop()
+    lines.append(f"{i3}return None")
+
+    # non-2xx status routing
+    for err in status_errors:
+        cls_name = _err_subclass_name(node.name, err)
+        lines.append(f"{i2}if _status == {err.status}:")
+        lines.append(f"{i3}return {cls_name}(headers=_headers, value=_body)")
+    # non-2xx field discriminators (unusual but supported)
+    for err in field_errors:
+        if not (200 <= err.status < 300):
+            cls_name = _err_subclass_name(node.name, err)
+            lines.append(
+                f"{i2}if _status == {err.status} "
+                f"and isinstance(_body, dict) "
+                f"and {err.discriminator_field!r} in _body:"
+            )
+            lines.append(
+                f"{i3}return {cls_name}(headers=_headers, value=_body)"
+            )
+
+    lines.append(
+        f"{i2}return UnknownErr(status=_status, headers=_headers, value=_body)"
+    )
+    return lines
+
+
 @PY_BASE_CONVERTER(Struct)
 def pre_struct(node: Struct, ctx: ConverterContext):
     name = to_pascal_case(node.name)
@@ -415,6 +504,16 @@ def pre_struct(node: Struct, ctx: ConverterContext):
             lines.append("")
     lines.append(f"class {name}:")
     return lines
+
+
+@PY_BASE_CONVERTER.post(StructDocstring)
+def post_struct_docstring(node: StructDocstring, ctx: ConverterContext):
+    """After the docstring emit, insert `_dispatch_err` staticmethod for REST
+    structs so it lands as the first real member of the class body."""
+    parent = node.parent
+    if not isinstance(parent, Struct) or not parent.is_rest:
+        return None
+    return _emit_dispatch_err_py(parent, ctx)
 
 
 @PY_BASE_CONVERTER(StructDocstring)
@@ -1612,7 +1711,6 @@ def _build_rest_method(
     ph_params: str,
     pre_lines: list[str],
     ret_type: str,
-    errors: list[ErrorResponse],
     transport_exc: str,
     i1: str,
     i2: str,
@@ -1621,7 +1719,6 @@ def _build_rest_method(
 ) -> list[str]:
     async_kw = "async " if is_async else ""
     await_kw = "await " if is_async else ""
-    struct = node.parent
 
     lines: list[str] = [
         f"{i1}@classmethod",
@@ -1637,50 +1734,13 @@ def _build_rest_method(
     lines.append(f"{i3})")
     lines.append(f"{i2}except {transport_exc} as _exc:")
     lines.append(f"{i3}return TransportErr(cause=repr(_exc))")
-    lines.append(f"{i2}_status = _resp.status_code")
+    lines.append(f"{i2}_status, _headers, _body = _parse_response(_resp)")
+    lines.append(f"{i2}_err = cls._dispatch_err(_status, _headers, _body)")
+    lines.append(f"{i2}if _err is not None:")
+    lines.append(f"{i3}return _err")
+    ok_value = "_body" if node.response_schema else "None"
     lines.append(
-        f"{i2}_resp_headers = {{k.lower(): v for k, v in _resp.headers.items()}}"
-    )
-    lines.append(f"{i2}try:")
-    lines.append(f"{i3}_body = _resp.json()")
-    lines.append(f"{i2}except Exception:")
-    lines.append(f"{i3}_body = None")
-
-    status_errors = [e for e in errors if e.discriminator_field is None]
-    field_errors = [e for e in errors if e.discriminator_field is not None]
-
-    if field_errors:
-        lines.append(f"{i2}if isinstance(_body, dict):")
-        for err in field_errors:
-            cls_name = _err_subclass_name(struct.name, err)
-            lines.append(
-                f"{i3}if _status == {err.status} "
-                f"and {err.discriminator_field!r} in _body:"
-            )
-            lines.append(
-                f"{i4}return {cls_name}(headers=_resp_headers, value=_body)"
-            )
-
-    lines.append(f"{i2}if 200 <= _status < 300:")
-    if node.response_schema:
-        lines.append(
-            f"{i3}return Ok(status=_status, headers=_resp_headers, value=_body)"
-        )
-    else:
-        lines.append(
-            f"{i3}return Ok(status=_status, headers=_resp_headers, value=None)"
-        )
-
-    if status_errors:
-        for err in status_errors:
-            cls_name = _err_subclass_name(struct.name, err)
-            lines.append(f"{i2}if _status == {err.status}:")
-            lines.append(
-                f"{i3}return {cls_name}(headers=_resp_headers, value=_body)"
-            )
-
-    lines.append(
-        f"{i2}return UnknownErr(status=_status, headers=_resp_headers, value=_body)"
+        f"{i2}return Ok(status=_status, headers=_headers, value={ok_value})"
     )
     return lines
 
@@ -1729,7 +1789,6 @@ def pre_request_config(node: RequestConfig, ctx: ConverterContext):
         method_name = to_snake_case(node.name) if node.name else "fetch"
         async_method_name = f"async_{method_name}"
         ret_type = _resolve_response_type(node)
-        errors = node.parent.errors
 
         if http_client == "httpx":
             transport_exc = "httpx.HTTPError"
@@ -1742,7 +1801,6 @@ def pre_request_config(node: RequestConfig, ctx: ConverterContext):
             ph_params=ph_params,
             pre_lines=pre_lines,
             ret_type=ret_type,
-            errors=errors,
             transport_exc=transport_exc,
             i1=i1,
             i2=i2,

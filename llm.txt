@@ -126,7 +126,7 @@ NESTED and JSON are terminal types — pipeline ends after nested/jsonify.
 - DICT: key-value map → dict[str, any], requires @split-doc + @key + @value
 - TABLE: HTML table → dict, requires @table + @rows + @match + @value
 - FLAT: deduplicated scalars → list[str], no special fields needed
-
+- REST: rest-api endpoint handler -> json objects. used `@request`
 ---
 
 ## AST Architecture

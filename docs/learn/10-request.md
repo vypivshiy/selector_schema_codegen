@@ -246,6 +246,25 @@ IDE narrow'ит через literal-поля `isOk: true/false` и `status: 404`.
 - `@error 404 ApiError` в struct `DummyJsonApi` → `DummyJsonApiErr404`
 - `@error 200 field="error_code" ApiError` → `DummyJsonApiErr200ErrorCode`
 
+### Внутренняя структура модуля
+
+Для устранения дублирования в REST-методах генерируются два приватных
+helper'а:
+
+- **`_parse_response(resp)`** (на уровне модуля) — извлекает
+  `(status, headers, body)` из ответа HTTP-клиента. В JS-таргете две версии:
+  `_parseResponse` для `fetch` и `_parseResponseAxios` для axios (axios
+  заранее парсит JSON и возвращает `headers` объектом).
+- **`_dispatch_err(status, headers, body)`** (static-метод каждого
+  `struct type=rest`) — маршрутизация по объявленным `@error` в нужный
+  Err-подкласс плюс `UnknownErr` для нераспознанных статусов. Возвращает
+  `None` для 2xx (или типизированный Err при сработавшем field-discriminator).
+
+Это детали реализации. Подклассы генерируемых классов (Python) могут их
+переопределять — например, чтобы добавить нестандартную логику обработки
+ошибок — но напрямую модифицировать сгенерированный файл не следует: при
+перегенерации правки теряются.
+
 ## Что @request не делает
 
 - Не управляет пагинацией — это задача вызывающего кода.
