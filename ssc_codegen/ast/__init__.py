@@ -34,6 +34,7 @@ from .struct import (
     TableRow,
     TableMatchKey,
     RequestConfig,
+    ErrorResponse,
     Field,
     StartParse,
 )
@@ -136,7 +137,7 @@ __all__ = [
     "Init", "InitField", "SplitDoc",
     "Key", "Value",
     "TableConfig", "TableRow", "TableMatchKey",
-    "RequestConfig", "Field", "StartParse",
+    "RequestConfig", "ErrorResponse", "Field", "StartParse",
     # selectors
     "CssSelect", "CssSelectAll",
     "XpathSelect", "XpathSelectAll",

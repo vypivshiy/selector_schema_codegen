@@ -26,6 +26,7 @@ from ssc_codegen.ast import VariableType, StructType
 from ssc_codegen.converters.helpers import (
     to_pascal_case,
     to_camel_case,
+    to_snake_case,
     jsonify_path_to_segments,
 )
 from ssc_codegen.parsers import parse_to_spec, normalize_placeholder_names
@@ -58,6 +59,7 @@ from ssc_codegen.ast import (
     StartParse,
     StructDocstring,
     RequestConfig,
+    ErrorResponse,
 )
 
 # selectors
@@ -327,6 +329,15 @@ def pre_utilities(node: Utilities, _: ConverterContext):
         "",
         "function _rmPrefix(s, p) { return s.startsWith(p) ? s.slice(p.length) : s; }",
         "function _rmSuffix(s, p) { return s.endsWith(p) ? s.slice(0, -p.length) : s; }",
+        "",
+        "class RestApiError extends Error {",
+        "    constructor(status, payload) {",
+        "        super(`REST API error ${status}: ${JSON.stringify(payload)}`);",
+        "        this.name = 'RestApiError';",
+        "        this.status = status;",
+        "        this.payload = payload;",
+        "    }",
+        "}",
     ]
 
 
@@ -348,8 +359,16 @@ def pre_json_field(node: JsonDefField, ctx: ConverterContext):
     return f" * @property {{{type_}}} {name}"
 
 
-@JS_CONVERTER(TypeDef, post_callback=" */")
+def _typedef_post(node: TypeDef, _: ConverterContext):
+    if node.struct_type == StructType.REST:
+        return None
+    return " */"
+
+
+@JS_CONVERTER(TypeDef, post_callback=_typedef_post)
 def pre_typedef(node: TypeDef, _: ConverterContext):
+    if node.struct_type == StructType.REST:
+        return None
     name = to_pascal_case(node.name)
     if node.struct_type == StructType.DICT:
         value_field = next(
@@ -397,6 +416,8 @@ def pre_struct_docstring(node: StructDocstring, ctx: ConverterContext):
 
 @JS_CONVERTER(Init)
 def pre_init(node: Init, ctx: ConverterContext):
+    if isinstance(node.parent, Struct) and node.parent.is_rest:
+        return None
     init_names = [
         to_camel_case(i.name) for i in node.body if isinstance(i, InitField)
     ]
@@ -1504,8 +1525,110 @@ def _js_name(name: str) -> str:
     return to_camel_case(to_snake_case(name))
 
 
+def _js_rest_method(node: RequestConfig, ctx: ConverterContext) -> list[str]:
+    """Emit a REST client method for `struct type=rest`."""
+    spec = normalize_placeholder_names(
+        parse_to_spec(node.raw_payload), _js_name
+    )
+    http_client = ctx.meta.get("http_client", "fetch")
+    ind = ctx.indent_char
+    i1 = ctx.indent
+    i2 = i1 + ind
+    i3 = i2 + ind
+    i4 = i3 + ind
+
+    raw_name = node.name or "fetch"
+    method_name = to_camel_case(to_snake_case(raw_name))
+    if raw_name == "fetch":
+        method_name = "fetch"
+
+    ph_names = spec.placeholders
+    ph_param = (", {" + ", ".join(ph_names) + "}") if ph_names else ""
+    sig = f"static async {method_name}(client{ph_param})"
+
+    lines: list[str] = []
+    if node.doc:
+        lines.append(f"{i1}/**")
+        for doc_line in node.doc.splitlines():
+            lines.append(f"{i1} * {doc_line}")
+        lines.append(f"{i1} */")
+    lines.append(f"{i1}{sig} {{")
+
+    if http_client == "axios":
+        req_props: list[str] = [
+            f"{i3}method: {spec.method!r},",
+            f"{i3}url: {_js_render_value(spec.url)},",
+            f"{i3}validateStatus: () => true,",
+        ]
+        if spec.params:
+            req_props.append(f"{i3}params: {_js_render_obj(spec.params)},")
+        if spec.headers:
+            req_props.append(f"{i3}headers: {_js_render_obj(spec.headers)},")
+        body_result = _js_render_body(spec)
+        if body_result:
+            _, body_expr = body_result
+            req_props.append(f"{i3}data: {body_expr},")
+
+        lines.append(f"{i2}const _resp = await client.request({{")
+        lines.extend(req_props)
+        lines.append(f"{i2}}});")
+        lines.append(f"{i2}const _status = _resp.status;")
+        lines.append(f"{i2}const _body = _resp.data;")
+    else:
+        if spec.params:
+            url_inner = _JS_PH.sub(r"${\1}", spec.url.replace("`", "\\`"))
+            params_obj = _js_render_obj(spec.params)
+            url_expr = f"`{url_inner}?${{new URLSearchParams({params_obj})}}`"
+        else:
+            url_expr = _js_render_value(spec.url)
+
+        options: list[str] = [f"{i3}method: {spec.method!r},"]
+        if spec.headers:
+            options.append(f"{i3}headers: {_js_render_obj(spec.headers)},")
+        body_result = _js_render_body(spec)
+        if body_result:
+            _, body_expr = body_result
+            options.append(f"{i3}body: {body_expr},")
+
+        lines.append(f"{i2}const _resp = await client({url_expr}, {{")
+        lines.extend(options)
+        lines.append(f"{i2}}});")
+        lines.append(f"{i2}const _status = _resp.status;")
+        lines.append(f"{i2}let _body = null;")
+        lines.append(
+            f"{i2}try {{ _body = await _resp.json(); }} catch (e) {{}}"
+        )
+
+    parent = node.parent
+    errors = parent.errors if isinstance(parent, Struct) else []
+    status_errors = [e for e in errors if not e.discriminator_field]
+    field_errors = [e for e in errors if e.discriminator_field]
+
+    lines.append(f"{i2}if (_status < 200 || _status >= 300) {{")
+    for err in status_errors:
+        lines.append(f"{i3}if (_status === {err.status}) {{")
+        lines.append(f"{i4}throw new RestApiError(_status, _body);")
+        lines.append(f"{i3}}}")
+    lines.append(f"{i3}throw new RestApiError(_status, _body);")
+    lines.append(f"{i2}}}")
+
+    for err in field_errors:
+        if 200 <= err.status < 300:
+            field = err.discriminator_field
+            lines.append(f"{i2}if (_body && _body[{field!r}] !== undefined) {{")
+            lines.append(f"{i3}throw new RestApiError(_status, _body);")
+            lines.append(f"{i2}}}")
+
+    lines.append(f"{i2}return _body;")
+    lines.append(f"{i1}}}")
+    return lines
+
+
 @JS_CONVERTER(RequestConfig)
 def pre_request_config(node: RequestConfig, ctx: ConverterContext):
+    if isinstance(node.parent, Struct) and node.parent.is_rest:
+        return _js_rest_method(node, ctx)
+
     spec = normalize_placeholder_names(
         parse_to_spec(node.raw_payload), _js_name
     )
@@ -1608,3 +1731,8 @@ def pre_request_config(node: RequestConfig, ctx: ConverterContext):
 
     lines.append(f"{i1}}}")
     return lines
+
+
+@JS_CONVERTER(ErrorResponse)
+def pre_error_response(node: ErrorResponse, ctx: ConverterContext):
+    return None

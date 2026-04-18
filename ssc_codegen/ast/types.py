@@ -77,3 +77,4 @@ class StructType(IntEnum):
     DICT = auto()
     TABLE = auto()
     FLAT = auto()
+    REST = auto()

@@ -43,6 +43,7 @@ from ssc_codegen.ast import (
     StartParse,
     StructDocstring,
     RequestConfig,
+    ErrorResponse,
 )
 # expressions layer
 
@@ -256,6 +257,12 @@ def pre_utilities(node: Utilities, _: ConverterContext):
         "\n\n",
         "UNMATCHED_TABLE_ROW = _UnmatchedTableRow()",
         "\n\n",
+        "class RestApiError(Exception):",
+        "    def __init__(self, status: int, payload: Any):",
+        "        self.status = status",
+        "        self.payload = payload",
+        "        super().__init__(f'REST API error {status}: {payload!r}')",
+        "\n\n",
     ]
 
 
@@ -284,6 +291,9 @@ def pre_json_field(node: JsonDefField, ctx: ConverterContext):
 @PY_BASE_CONVERTER(TypeDef)
 def pre_typedef(node: TypeDef, _: ConverterContext):
     name = to_pascal_case(node.name)
+    if node.struct_type == StructType.REST:
+        # REST structs are API clients, not data types — no type alias
+        return None
     if node.struct_type == StructType.DICT:
         return None
     elif node.struct_type == StructType.FLAT:
@@ -442,6 +452,9 @@ def post_start_parse(node: StartParse, ctx: ConverterContext):
 # required overload for target backend
 @PY_BASE_CONVERTER(Init)
 def pre_init(node: Init, ctx: ConverterContext):
+    # REST structs have no document — no __init__
+    if isinstance(node.parent, Struct) and node.parent.is_rest:
+        return None
     init_node_names: list[str] = []
     for i in node.body:
         if isinstance(i, InitField):
@@ -1444,6 +1457,80 @@ def _build_request_method(
     return lines
 
 
+def _resolve_response_type(node: RequestConfig) -> str:
+    """Return python type annotation for the @response= schema."""
+    if not node.response_schema:
+        return "None"
+    struct = node.parent
+    module = struct.parent if struct is not None else None
+    schema_type = f"{to_pascal_case(node.response_schema)}Json"
+    if module is not None:
+        for n in module.body:
+            if isinstance(n, JsonDef) and n.name == node.response_schema:
+                if n.is_array:
+                    return f"List[{schema_type}]"
+                break
+    return schema_type
+
+
+def _build_rest_method(
+    *,
+    node: RequestConfig,
+    name: str,
+    is_async: bool,
+    client_type: str,
+    call_args: list[str],
+    ph_params: str,
+    ret_type: str,
+    errors: list[ErrorResponse],
+    i1: str,
+    i2: str,
+    i3: str,
+) -> list[str]:
+    async_kw = "async " if is_async else ""
+    await_kw = "await " if is_async else ""
+    lines: list[str] = [
+        f"{i1}@classmethod",
+        f"{i1}{async_kw}def {name}(cls, client: {client_type}"
+        f"{ph_params}) -> {ret_type}:",
+    ]
+    if node.doc:
+        lines.append(f'{i2}"""{node.doc}"""')
+    lines.append(f"{i2}_resp = {await_kw}client.request(")
+    lines.extend(f"{i3}{a}" for a in call_args)
+    lines.append(f"{i2})")
+    lines.append(f"{i2}_status = _resp.status_code")
+    lines.append(f"{i2}try:")
+    lines.append(f"{i2}    _body = _resp.json()")
+    lines.append(f"{i2}except Exception:")
+    lines.append(f"{i2}    _body = None")
+
+    status_errors = [e for e in errors if e.discriminator_field is None]
+    field_errors = [e for e in errors if e.discriminator_field is not None]
+
+    lines.append(f"{i2}if not (200 <= _status < 300):")
+    if status_errors:
+        for err in status_errors:
+            lines.append(f"{i2}    if _status == {err.status}:")
+            lines.append(f"{i2}        raise RestApiError(_status, _body)")
+    lines.append(f"{i2}    _resp.raise_for_status()")
+
+    if field_errors:
+        lines.append(f"{i2}if isinstance(_body, dict):")
+        for err in field_errors:
+            lines.append(
+                f"{i2}    if _status == {err.status} "
+                f"and {err.discriminator_field!r} in _body:"
+            )
+            lines.append(f"{i2}        raise RestApiError(_status, _body)")
+
+    if node.response_schema:
+        lines.append(f"{i2}return _body")
+    else:
+        lines.append(f"{i2}return None")
+    return lines
+
+
 @PY_BASE_CONVERTER(RequestConfig)
 def pre_request_config(node: RequestConfig, ctx: ConverterContext):
     spec = normalize_placeholder_names(
@@ -1456,14 +1543,11 @@ def pre_request_config(node: RequestConfig, ctx: ConverterContext):
     i2 = i1 + ind  # method body
     i3 = i2 + ind  # request call args
 
+    is_rest = isinstance(node.parent, Struct) and node.parent.is_rest
     struct_name = to_pascal_case(node.parent.name)
     ph_params = ""
     if spec.placeholders:
         ph_params = ", *, " + ", ".join(f"{p}: str" for p in spec.placeholders)
-
-    suffix = ("_" + to_snake_case(node.name)) if node.name else ""
-    fetch_name = f"fetch{suffix}"
-    async_fetch_name = f"async_fetch{suffix}"
 
     call_args: list[str] = [f"{spec.method!r},", f"{render_value(spec.url)},"]
     if spec.headers:
@@ -1476,6 +1560,54 @@ def pre_request_config(node: RequestConfig, ctx: ConverterContext):
     if body_result:
         kwarg_name, body_expr = body_result
         call_args.append(f"{kwarg_name}={body_expr},")
+
+    if is_rest:
+        # REST method naming: kebab-case name → snake_case, "" → "fetch"
+        method_name = to_snake_case(node.name) if node.name else "fetch"
+        async_method_name = f"async_{method_name}"
+        ret_type = _resolve_response_type(node)
+        errors = node.parent.errors
+
+        kwargs = dict(
+            node=node,
+            call_args=call_args,
+            ph_params=ph_params,
+            ret_type=ret_type,
+            errors=errors,
+            i1=i1,
+            i2=i2,
+            i3=i3,
+        )
+
+        if http_client == "httpx":
+            lines = _build_rest_method(
+                name=method_name,
+                is_async=False,
+                client_type="httpx.Client",
+                **kwargs,
+            )
+            lines.append("")
+            lines.extend(
+                _build_rest_method(
+                    name=async_method_name,
+                    is_async=True,
+                    client_type="httpx.AsyncClient",
+                    **kwargs,
+                )
+            )
+            return lines
+
+        return _build_rest_method(
+            name=method_name,
+            is_async=False,
+            client_type="requests.Session",
+            **kwargs,
+        )
+
+    # Non-REST path (existing behaviour): suffix-style naming, HTML wrapping
+    suffix = ("_" + to_snake_case(node.name)) if node.name else ""
+    fetch_name = f"fetch{suffix}"
+    async_fetch_name = f"async_fetch{suffix}"
 
     kwargs = dict(
         struct_name=struct_name,
@@ -1490,7 +1622,10 @@ def pre_request_config(node: RequestConfig, ctx: ConverterContext):
 
     if http_client == "httpx":
         lines = _build_request_method(
-            name=fetch_name, is_async=False, client_type="httpx.Client", **kwargs
+            name=fetch_name,
+            is_async=False,
+            client_type="httpx.Client",
+            **kwargs,
         )
         lines.append("")
         lines.extend(
@@ -1505,5 +1640,14 @@ def pre_request_config(node: RequestConfig, ctx: ConverterContext):
 
     # requests (default)
     return _build_request_method(
-        name=fetch_name, is_async=False, client_type="requests.Session", **kwargs
+        name=fetch_name,
+        is_async=False,
+        client_type="requests.Session",
+        **kwargs,
     )
+
+
+@PY_BASE_CONVERTER(ErrorResponse)
+def pre_error_response(node: ErrorResponse, _: ConverterContext):
+    # error spec consumed by pre_request_config; no direct emission
+    return None

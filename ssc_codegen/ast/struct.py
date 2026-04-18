@@ -51,6 +51,14 @@ class Struct(Node):
     def use_request(self) -> bool:
         return bool(self.request_configs)
 
+    @property
+    def is_rest(self) -> bool:
+        return self.struct_type == StructType.REST
+
+    @property
+    def errors(self) -> "list[ErrorResponse]":
+        return [n for n in self.body if isinstance(n, ErrorResponse)]
+
 
 @dataclass
 class StructDocstring(Node):
@@ -183,7 +191,8 @@ class TableMatchKey(Node):
 class RequestConfig(Node):
     """
     Optional transport layer config for a struct.
-    DSL: @request [name="suffix"] [response-path="..."] [response-join="..."] \"""...\"""
+    DSL: @request [name="suffix"] [response-path="..."] [response-join="..."]
+                  [response=JsonSchema] [doc="..."] \"""...\"""
 
     raw_payload stores the verbatim curl or raw HTTP string (with {{placeholders}}).
     Transport normalization (curl/HTTP parse → kwargs) happens at converter stage.
@@ -191,6 +200,10 @@ class RequestConfig(Node):
     name="" (unnamed) generates fetch()/async_fetch().
     name="by-id" generates fetch_by_id()/async_fetch_by_id() (Python)
     or fetchById() (JS).
+
+    response_schema (type=rest only): json schema name for typed 2xx response.
+        Empty string = void return.
+    doc (type=rest only): per-method docstring.
     """
 
     raw_payload: str = ""
@@ -199,6 +212,8 @@ class RequestConfig(Node):
         ""  # join separator when response-path resolves to list[str]
     )
     name: str = ""  # method name suffix; "" = default fetch()
+    response_schema: str = ""  # type=rest: json schema for 2xx body
+    doc: str = ""  # type=rest: per-method docstring
 
     @property
     def placeholders(self) -> list[str]:
@@ -210,6 +225,24 @@ class RequestConfig(Node):
                 seen.add(name)
                 result.append(name)
         return result
+
+
+@dataclass
+class ErrorResponse(Node):
+    """
+    Error response mapping for type=rest struct.
+    DSL: @error <status> [field="<name>"] <JsonSchema>
+
+    status: HTTP status code [100..599].
+    schema_name: json schema reference for deserialised error body.
+    discriminator_field: optional body field name. When set, the error triggers
+        on 2xx responses where <field> is present in the parsed JSON body
+        (used for APIs that return 200 + error payload).
+    """
+
+    status: int = 0
+    schema_name: str = ""
+    discriminator_field: str | None = None
 
 
 @dataclass

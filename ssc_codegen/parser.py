@@ -66,6 +66,7 @@ from ssc_codegen.ast import (
     Key,
     Value,
     RequestConfig,
+    ErrorResponse,
     StartParse,
 )
 # expressions
@@ -817,11 +818,57 @@ class AstParser:
                     node.properties.get("response-join", "")
                 )
                 req.name = str(node.properties.get("name", ""))
+                response_schema = node.properties.get("response", "")
+                req.response_schema = str(
+                    self.ctx.property_defines.get(
+                        response_schema, response_schema
+                    )
+                )
+                doc_val = node.properties.get("doc", "")
+                req.doc = str(self.ctx.property_defines.get(doc_val, doc_val))
                 parent.body.append(req)
                 logger.debug(
                     "  @request: %d chars, placeholders=%r",
                     len(raw_payload),
                     req.placeholders,
+                )
+            elif node.name == "@error":
+                if not node.args:
+                    raise ParseError(
+                        "@error requires status and schema name: "
+                        '@error <status> [field="..."] <Schema>'
+                    )
+                if len(node.args) < 2:
+                    raise ParseError(
+                        "@error requires both status and schema name"
+                    )
+                status_raw = node.args[0]
+                try:
+                    status_int = int(status_raw)
+                except (TypeError, ValueError):
+                    raise ParseError(
+                        f"@error status must be integer, got {status_raw!r}"
+                    )
+                schema_name = str(
+                    self.ctx.property_defines.get(node.args[1], node.args[1])
+                )
+                field_prop = node.properties.get("field", None)
+                if field_prop is not None:
+                    field_prop = str(
+                        self.ctx.property_defines.get(field_prop, field_prop)
+                    )
+                err = ErrorResponse(
+                    parent=parent,
+                    status=status_int,
+                    schema_name=schema_name,
+                    discriminator_field=field_prop,
+                )
+                parent.body.append(err)
+                logger.debug(
+                    "  @error: status=%d schema=%r field=%r",
+                    status_int,
+                    schema_name,
+                    field_prop,
                 )
             else:
                 if parent.struct_type == StructType.TABLE:
@@ -835,8 +882,9 @@ class AstParser:
                 self._parse_expressions(node.children, expr)
                 parent.body.append(expr)
                 logger.debug("  field %r: ret=%s", node.name, expr.ret)
-        # finally, add StartParse node
-        parent.body.append(StartParse(parent=parent))
+        # finally, add StartParse node (skip for type=rest — no parse() method)
+        if parent.struct_type != StructType.REST:
+            parent.body.append(StartParse(parent=parent))
 
     def _parse_init_fields(self, kdl_nodes: list[KdlNode], parent: Init):
         logger.debug("_parse_init_fields: %d field(s)", len(kdl_nodes))
@@ -1363,6 +1411,8 @@ def reg_module_struct(node: KdlNode, parent: Module, _: ParseContext):
             st_type = StructType.DICT
         case "flat":
             st_type = StructType.FLAT
+        case "rest":
+            st_type = StructType.REST
         case _:
             raise UnknownNodeError(node.name, "Unknown struct type")
     expr = Struct(

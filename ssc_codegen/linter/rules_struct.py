@@ -23,7 +23,9 @@ _VALID_TRANSFORM_TYPES = frozenset(
 
 # ── known ops ──────────────────────────────────────────────────────────────────
 
-_VALID_STRUCT_TYPES = frozenset({"item", "list", "dict", "table", "flat"})
+_VALID_STRUCT_TYPES = frozenset(
+    {"item", "list", "dict", "table", "flat", "rest"}
+)
 
 _REQUIRED_RESERVED: dict[str, frozenset[str]] = {
     "item": frozenset(),
@@ -31,19 +33,21 @@ _REQUIRED_RESERVED: dict[str, frozenset[str]] = {
     "dict": frozenset({"@split-doc", "@key", "@value"}),
     "table": frozenset({"@table", "@rows", "@match", "@value"}),
     "flat": frozenset(),
+    "rest": frozenset({"@request"}),
 }
 
 _RESERVED_ALLOWED: dict[str, frozenset[str] | None] = {
     "@request": None,
     "@doc": None,
-    "@pre-validate": None,
-    "@init": None,
+    "@pre-validate": frozenset({"item", "list", "dict", "table", "flat"}),
+    "@init": frozenset({"item", "list", "dict", "table", "flat"}),
     "@split-doc": frozenset({"list", "dict"}),  # dict can also use @split-doc
     "@key": frozenset({"dict"}),
     "@value": frozenset({"dict", "table"}),
     "@table": frozenset({"table"}),
     "@rows": frozenset({"table"}),
     "@match": frozenset({"table"}),
+    "@error": frozenset({"rest"}),
 }
 
 # Minimal boilerplate snippets for required fields (used in "did you mean" hints).
@@ -230,11 +234,28 @@ def rule_struct(node: Node, ctx: LintContext) -> None:
         if field_name.startswith("@"):
             _check_reserved_field(field_node, field_name, struct_type, ctx)
         else:
-            _check_regular_field(
-                field_node, field_name, ctx, struct_type=struct_type
-            )
+            if struct_type == "rest":
+                ctx.error(
+                    field_node,
+                    ErrorCode.MISSING_ARGUMENT,
+                    message=(
+                        f"regular field '{field_name}' is not allowed "
+                        "in struct type='rest'"
+                    ),
+                    hint=(
+                        "type=rest struct contains only @request and @error "
+                        "directives; output shape is defined by the json "
+                        "schema referenced in response="
+                    ),
+                )
+            else:
+                _check_regular_field(
+                    field_node, field_name, ctx, struct_type=struct_type
+                )
 
-    _check_request_uniqueness(fields, ctx)
+    _check_request_uniqueness(fields, ctx, struct_type=struct_type)
+    if struct_type == "rest":
+        _check_rest_errors(fields, ctx)
 
     ctx.pop()
 
@@ -242,25 +263,133 @@ def rule_struct(node: Node, ctx: LintContext) -> None:
 # ── @request uniqueness ────────────────────────────────────────────────────────
 
 
-def _check_request_uniqueness(fields: list, ctx: LintContext) -> None:
-    """At most one unnamed @request; no duplicate resolved method names."""
+def _check_request_uniqueness(
+    fields: list, ctx: LintContext, *, struct_type: str = "item"
+) -> None:
+    """At most one unnamed @request; no duplicate resolved method names.
+    For type=rest with multiple @request, name= is required on every one."""
     request_nodes = [f for f in fields if ctx.node_name(f) == "@request"]
     if len(request_nodes) <= 1:
         return
+
+    if struct_type == "rest":
+        for node in request_nodes:
+            name = ctx.get_prop(node, "name") or ""
+            if not name:
+                ctx.error(
+                    node,
+                    ErrorCode.MISSING_ARGUMENT,
+                    message=(
+                        "@request in struct type='rest' with multiple "
+                        "requests requires name="
+                    ),
+                    hint='add name=<identifier>: @request name="get-one" """..."""',
+                )
 
     seen: dict[str, object] = {}
     for node in request_nodes:
         name = ctx.get_prop(node, "name") or ""
         if name in seen:
             if name:
-                message = f"duplicate @request name=\"{name}\": method name collision"
+                message = (
+                    f'duplicate @request name="{name}": method name collision'
+                )
                 hint = "each @request must have a unique name= value"
             else:
                 message = "duplicate unnamed @request: only one unnamed @request is allowed per struct"
                 hint = 'add name= to extra @request blocks: @request name="by-slug" """..."""'
-            ctx.error(node, ErrorCode.MISSING_ARGUMENT, message=message, hint=hint)
+            ctx.error(
+                node, ErrorCode.MISSING_ARGUMENT, message=message, hint=hint
+            )
         else:
             seen[name] = node
+
+
+def _check_rest_errors(fields: list, ctx: LintContext) -> None:
+    """Validate @error directives inside type=rest struct."""
+    error_nodes = [f for f in fields if ctx.node_name(f) == "@error"]
+    seen: dict[tuple[int, str | None], object] = {}
+    for node in error_nodes:
+        args = ctx.get_args(node)
+        if len(args) < 1:
+            ctx.error(
+                node,
+                ErrorCode.MISSING_ARGUMENT,
+                message="'@error' requires status code and schema name",
+                hint='example: @error 404 ApiError  or  @error 200 field="err" ApiError',
+            )
+            continue
+        status_raw = args[0]
+        try:
+            status = int(status_raw)
+        except (TypeError, ValueError):
+            ctx.error(
+                node,
+                ErrorCode.MISSING_ARGUMENT,
+                message=f"'@error' status must be integer, got {status_raw!r}",
+                hint="example: @error 404 ApiError",
+            )
+            continue
+        if not 100 <= status <= 599:
+            ctx.error(
+                node,
+                ErrorCode.MISSING_ARGUMENT,
+                message=(f"'@error' status {status} out of range [100..599]"),
+                hint="HTTP status codes are 3-digit integers in [100..599]",
+            )
+            continue
+        if len(args) < 2:
+            ctx.error(
+                node,
+                ErrorCode.MISSING_ARGUMENT,
+                message="'@error' requires schema name after status",
+                hint="example: @error 404 ApiError",
+            )
+            continue
+
+        field_prop = ctx.get_prop(node, "field")
+        if field_prop is not None:
+            field_str = str(field_prop).strip()
+            if not field_str:
+                ctx.error(
+                    node,
+                    ErrorCode.MISSING_ARGUMENT,
+                    message="'@error' field= must be a non-empty string",
+                    hint='example: @error 200 field="error_code" ApiError',
+                )
+                continue
+            field_key: str | None = field_str
+        else:
+            field_key = None
+
+        if 200 <= status < 300 and field_key is None:
+            ctx.error(
+                node,
+                ErrorCode.MISSING_ARGUMENT,
+                message=(
+                    f"'@error' on 2xx status {status} requires field= "
+                    "discriminator"
+                ),
+                hint=(
+                    "without field=, every 2xx response would be treated "
+                    'as an error; add field="<body-field>" to disambiguate'
+                ),
+            )
+            continue
+
+        key = (status, field_key)
+        if key in seen:
+            ctx.error(
+                node,
+                ErrorCode.MISSING_ARGUMENT,
+                message=(
+                    f"duplicate @error {status}"
+                    + (f' field="{field_key}"' if field_key else "")
+                ),
+                hint="each (status, field) pair must be unique within a struct",
+            )
+        else:
+            seen[key] = node
 
 
 # ── reserved field checks ──────────────────────────────────────────────────────
@@ -303,6 +432,10 @@ def _check_reserved_field(
                     "You can copy-paste cURL or raw http requests from browser devtools or sniffer"
                 ],
             )
+        return
+
+    if field_name == "@error":
+        # detailed validation is centralised in _check_rest_errors
         return
 
     if field_name == "@init":
