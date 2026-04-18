@@ -145,3 +145,6 @@ test_schemas/
 .idea/inspectionProfiles/profiles_settings.xml
 .idea/inspectionProfiles/Project_Default.xml
 .idea/libraries/Dart_SDK.xml
+
+# slopmachines
+.claude/*
