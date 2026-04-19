@@ -146,6 +146,9 @@ def parse_to_spec(payload: str) -> RequestSpec:
             body = kwargs[
                 "data"
             ]  # dict with original values (may have placeholders)
+        elif "application/x-www-form-urlencoded" in content_type:
+            body_kind = "form"
+            body = _parse_urlencoded_body(raw_body)
         else:
             body_kind = "raw"
             body = raw_body
@@ -178,6 +181,25 @@ def _curl_raw_body(payload: str) -> str:
             return parts[i + 1]
         i += 1
     return ""
+
+
+def _parse_urlencoded_body(raw: str) -> dict[str, str]:
+    """Split an application/x-www-form-urlencoded body into a dict.
+
+    Preserves ``{{placeholders}}`` intact; URL-decodes everything else so the
+    target HTTP client can re-encode without double-encoding.
+    """
+    from urllib.parse import unquote_plus
+
+    out: dict[str, str] = {}
+    if not raw:
+        return out
+    for pair in raw.split("&"):
+        if not pair:
+            continue
+        key, sep, value = pair.partition("=")
+        out[unquote_plus(key)] = unquote_plus(value) if sep else ""
+    return out
 
 
 def _http_raw_body(payload: str) -> str:
