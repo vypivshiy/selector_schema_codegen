@@ -81,6 +81,7 @@ def pre_imports(node: Imports, _: ConverterContext):
         "from typing import TypedDict, Optional, Any, List, Dict, Union",
         "from html import unescape as _html_unescape",
     ]
+    base_imports.extend(py_bs4.rest_imports(node))
 
     # Get transform imports for Python (already collected during parsing)
     transform_imports = sorted(node.transform_imports.get("py", set()))
@@ -100,7 +101,7 @@ def post_imports(node: Imports, ctx: ConverterContext):
 
 @PY_LXML_CONVERTER(Utilities)
 def pre_utilities(node: Utilities, _: ConverterContext):
-    return [
+    lines = [
         'FALLBACK_HTML_STR = "<html><body></body></html>"',
         "_RE_HEX_ENTITY = re.compile(r'&#x([0-9a-fA-F]+);')",
         "_RE_UNICODE_ENTITY = re.compile(r'\\\\u([0-9a-fA-F]{4})')",
@@ -144,6 +145,8 @@ def pre_utilities(node: Utilities, _: ConverterContext):
         "UNMATCHED_TABLE_ROW = _UnmatchedTableRow()",
         "\n\n",
     ]
+    lines.extend(py_bs4.rest_utilities(node))
+    return lines
 
 
 # Override struct __init__ to use lxml instead of BeautifulSoup

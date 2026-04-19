@@ -67,6 +67,7 @@ def pre_imports(node: Imports, _: ConverterContext):
         "from typing import TypedDict, Optional, Any, List, Dict, Union",
         "from html import unescape as _html_unescape",
     ]
+    base_imports.extend(py_bs4.rest_imports(node))
 
     transform_imports = sorted(node.transform_imports.get("py", set()))
 

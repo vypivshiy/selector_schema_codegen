@@ -189,6 +189,16 @@ def _module_has_rest(node) -> bool:
     )
 
 
+def rest_imports(node) -> list[str]:
+    """Extra imports required when the module has any `struct type=rest`."""
+    if not _module_has_rest(node):
+        return []
+    return [
+        "from dataclasses import dataclass, field",
+        "from typing import Generic, Literal, Mapping, TypeVar",
+    ]
+
+
 @PY_BASE_CONVERTER(Imports)
 def pre_imports(node: Imports, _: ConverterContext):
     base_imports = [
@@ -198,11 +208,7 @@ def pre_imports(node: Imports, _: ConverterContext):
         "from typing import TypedDict, Optional, Any, List, Dict, Union",
         "from html import unescape as _html_unescape",
     ]
-    if _module_has_rest(node):
-        base_imports.append("from dataclasses import dataclass, field")
-        base_imports.append(
-            "from typing import Generic, Literal, Mapping, TypeVar"
-        )
+    base_imports.extend(rest_imports(node))
 
     # Get transform imports for Python (already collected during parsing)
     transform_imports = sorted(node.transform_imports.get("py", set()))
@@ -279,49 +285,53 @@ def pre_utilities(node: Utilities, _: ConverterContext):
         "UNMATCHED_TABLE_ROW = _UnmatchedTableRow()",
         "\n\n",
     ]
-    if _module_has_rest(node):
-        lines.extend(
-            [
-                "_T = TypeVar('_T')",
-                "_E = TypeVar('_E')",
-                "\n",
-                "@dataclass(frozen=True, kw_only=True)",
-                "class Ok(Generic[_T]):",
-                "    status: int",
-                "    headers: Mapping[str, str]",
-                "    value: _T",
-                "    is_ok: Literal[True] = True",
-                "\n",
-                "@dataclass(frozen=True, kw_only=True)",
-                "class Err(Generic[_E]):",
-                "    status: int",
-                "    headers: Mapping[str, str]",
-                "    value: _E",
-                "    is_ok: Literal[False] = False",
-                "\n",
-                "@dataclass(frozen=True, kw_only=True)",
-                "class UnknownErr(Err[Any]):",
-                "    pass",
-                "\n",
-                "@dataclass(frozen=True, kw_only=True)",
-                "class TransportErr(Err[None]):",
-                "    status: Literal[0] = 0",
-                "    cause: str = ''",
-                "    value: None = None",
-                "    headers: Mapping[str, str] = field(default_factory=dict)",
-                "\n\n",
-                "def _parse_response(_resp):",
-                "    _status = _resp.status_code",
-                "    _headers = {k.lower(): v for k, v in _resp.headers.items()}",
-                "    try:",
-                "        _body = _resp.json()",
-                "    except Exception:",
-                "        _body = None",
-                "    return _status, _headers, _body",
-                "\n\n",
-            ]
-        )
+    lines.extend(rest_utilities(node))
     return lines
+
+
+def rest_utilities(node) -> list[str]:
+    """Ok/Err/UnknownErr/TransportErr + _parse_response block; empty if no REST."""
+    if not _module_has_rest(node):
+        return []
+    return [
+        "_T = TypeVar('_T')",
+        "_E = TypeVar('_E')",
+        "\n",
+        "@dataclass(frozen=True, kw_only=True)",
+        "class Ok(Generic[_T]):",
+        "    status: int",
+        "    headers: Mapping[str, str]",
+        "    value: _T",
+        "    is_ok: Literal[True] = True",
+        "\n",
+        "@dataclass(frozen=True, kw_only=True)",
+        "class Err(Generic[_E]):",
+        "    status: int",
+        "    headers: Mapping[str, str]",
+        "    value: _E",
+        "    is_ok: Literal[False] = False",
+        "\n",
+        "@dataclass(frozen=True, kw_only=True)",
+        "class UnknownErr(Err[Any]):",
+        "    pass",
+        "\n",
+        "@dataclass(frozen=True, kw_only=True)",
+        "class TransportErr(Err[None]):",
+        "    status: Literal[0] = 0",
+        "    cause: str = ''",
+        "    value: None = None",
+        "    headers: Mapping[str, str] = field(default_factory=dict)",
+        "\n\n",
+        "def _parse_response(_resp):",
+        "    _status = _resp.status_code",
+        "    _headers = {k.lower(): v for k, v in _resp.headers.items()}",
+        "    try:",
+        "        _body = _resp.json()",
+        "    except Exception:",
+        "        _body = None",
+        "    return _status, _headers, _body",
+        "\n\n",
+    ]
 
 
 @PY_BASE_CONVERTER(JsonDef, post_callback="})")
