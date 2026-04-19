@@ -1,26 +1,41 @@
 ---
-name: kdl-schema-dsl
+name: sscgen-dsl
 description: >
-  Generate KDL Schema DSL (v2.1) scraper configs from HTML pages and skill instructions.
-  Use this skill whenever the user wants to: generate a .kdl schema file for HTML scraping,
-  write KDL DSL for data extraction, work with KDL struct/field/pipeline syntax,
-  fix linter errors in a .kdl file, or iterate on a KDL schema based on linter feedback.
-  Trigger on any mention of "kdl", "KDL schema", "scraper schema", "DSL для скрапинга",
-  or when the user provides an HTML page + extraction task.
+  Generate KDL Schema DSL (v2.1) scraper configs for **HTML scraping** from HTML
+  pages and skill instructions. Covers struct types item / list / flat / table /
+  dict, css selectors, extract / string / regex / array / cast pipelines,
+  defines, transforms, jsonify, and the iterative linter loop.
+  Use this skill whenever the user wants to: generate a .kdl schema file for HTML
+  scraping, write KDL DSL for data extraction from HTML, work with css/css-all/
+  text/attr/raw pipelines, fix linter errors in an HTML-scraping .kdl, or iterate
+  on a KDL schema based on linter feedback.
+  Trigger on mentions of "kdl", "KDL schema", "scraper schema", "DSL для скрапинга",
+  "распарсить страницу", "вытащить из HTML", or whenever the user provides an HTML
+  page + extraction task.
+  **Do NOT use this skill for REST/JSON HTTP API clients (`struct type=rest`,
+  `@request`, `@error`, typed placeholders for HTTP) — use the sibling skill
+  `sscgen-rest` instead.** The two skills share the same DSL surface but solve
+  different problems and should not be mixed.
 ---
 
-# KDL Schema DSL — Skill
+# sscgen-dsl — Skill (HTML scraping)
 
 Generate valid **KDL Schema DSL v2.1** configs for HTML scraping from:
 - A **skill instruction** (what to extract and how)
 - An **HTML page** (structure to inspect)
 - Optionally: **linter output** (text or JSON) to fix errors
 
+> **Scope: HTML only.** This skill covers `struct type=item|list|flat|table|dict`
+> with CSS-selector pipelines. For REST/JSON HTTP APIs (`struct type=rest`,
+> `@request`/`@error`, typed `{{id:int}}` placeholders) → use the **`sscgen-rest`**
+> skill, not this one. Don't mix REST endpoints into HTML schemas.
+
 ## Constraints (always apply)
 
 - **CSS selectors only** — never use `xpath`, `xpath-all`, `xpath-remove`
 - **No removal operations** — never use `css-remove`, `xpath-remove`
 - **No advanced operations** — never use `transform`, `dsl`, `json`/`jsonify`, `re-all` unless the user explicitly requests them
+- **No `struct type=rest`** — that's `sscgen-rest` territory. If the user describes an HTTP/JSON API (endpoints, response schemas, error codes), switch skills.
 - **CSS3+ selectors preferred** — use the full set supported by the parser (see CSS Selector Tips below); prefer attribute selectors, pseudo-classes and combinators over writing extra pipeline logic
 - Prefer simple, readable pipelines
 - If extraction can be done with a smarter CSS selector, do that instead of adding ops to the pipeline
@@ -84,7 +99,8 @@ selector -> extract -> [string ops] -> [regex] -> [type conv] -> [fallback]
 2. **Then extract**: `text`, `attr "name"`, or `raw`
 3. **String ops** (optional, in order): `trim`, `lower`, `upper`, `normalize-space`, `rm-prefix`, `rm-suffix`, `rm-prefix-suffix`, `fmt`, `re-sub`, `repl`, `unescape`
 4. **Type conversion** (optional): `to-int`, `to-float`, `to-bool`
-5. **Fallback** (last): `fallback #null`, `fallback 0`, `fallback ""`
+5. **URL normalization** (if path may be relative): `fmt FMT-NAME` where `define FMT-NAME="https://site.com{{}}"` — always convert relative paths to absolute URLs
+6. **Fallback** (last): `fallback #null`, `fallback 0`, `fallback ""`
 
 #### Inline vs block syntax
 Both are valid — prefer **inline** for simple 1-3 op fields:
@@ -126,15 +142,13 @@ struct Product type=list {
 }
 ```
 
-### `type=flat` — deduplicated list of scalar values
+### `type=flat` — list of scalar values
 ```kdl
 struct Tags type=flat {
-    tag1 { css-all ".primary-tag"; text }
-    tag2 { css-all ".secondary-tag"; text }
+    // should be returns STRING or LIST_STRING
+    value { text }
 }
 ```
-Collects strings from all fields and removes duplicates. No `@split-doc` required.
-With `keep-order=#true` preserves order of first occurrences.
 
 ### `type=table` — key-value HTML table
 ```kdl
@@ -156,6 +170,48 @@ struct Info type=table {
         to-bool
         fallback #false
     }
+}
+```
+
+### `type=table` — non-table HTML (label+value in same element)
+
+`type=table` also works for repeated elements where the label and value live inside the same container (e.g. `<div><strong>Label:</strong> value</div>`). Use `@match` to extract the label from a child element and `@value` with `re-sub` to strip the label prefix from the full text.
+
+```kdl
+// HTML structure:
+// <div class="info-row"><strong>Registered: </strong>7 March 2015</div>
+// <div class="info-row"><strong>Gender: </strong>Female</div>
+// <div class="info-row"><strong>Publications: </strong>28</div>
+
+struct ProfileInfo type=table {
+    @table { css ".profile-data" }
+    @rows  { css-all ".info-row" }
+    @match { css "strong"; text; trim; lower }
+    @value { text; re-sub #"^[^:]+:\s*"# ""; trim }
+
+    registered {
+        match { starts "registered" }
+    }
+    gender {
+        match { starts "gender" }
+        fallback #null
+    }
+    publications {
+        match { starts "publications" }
+        re #"(\d+)"#
+        to-int
+        fallback 0
+    }
+}
+```
+
+Use `nested` to compose with an `item` struct that extracts non-table fields (avatar, title, etc.):
+
+```kdl
+struct MainPage {
+    display_name { css "h2"; text; trim }
+    avatar { css ".avatar img"; attr "src"; fallback #null }
+    info { nested ProfileInfo }
 }
 ```
 
@@ -185,8 +241,7 @@ struct MetaTags type=dict {
 | Operation | Type | Notes |
 |-----------|------|-------|
 | `text` | DOC->STR / LIST_DOC->LIST_STR | Inner text |
-| `attr "name"` | DOC->STR / LIST_DOC->LIST_STR | Single attribute value |
-| `attr "n1" "n2" ...` | DOC->LIST_STR / LIST_DOC->LIST_STR | Multiple attributes as list |
+| `attr "name"` | DOC->STR / LIST_DOC->LIST_STR | Attribute value |
 | `raw` | DOC->STR | Raw HTML string |
 
 ### String ops
@@ -204,6 +259,8 @@ struct MetaTags type=dict {
 
 ### Array ops
 `first` . `last` . `index N` . `slice N M` . `len` . `unique`
+
+> **Prefer `:nth-of-type(N)` over `index N`** — when selecting specific elements from a list of siblings, use CSS `:nth-of-type(N)` (1-based) directly in the selector instead of `css-all "..." ; index N`. The `index` operator has a known issue in ssc-gen where values beyond index 0 may silently fall back to the first element's result. Use `css "selector:nth-of-type(N)"` to reliably target the Nth element.
 
 ### Control
 `fallback <val>` — `#null` / `#true` / `#false` / `0` / `"str"` / `{}` (empty list)
@@ -244,103 +301,6 @@ link { expr EXTRACT-HREF; trim }
 ```
 
 Place defines **before structs** that reference them.
-
----
-
-## @request — HTTP constructor
-
-Optional struct-level directive. Adds a `fetch()` classmethod to the generated class.
-The parser itself remains transport-agnostic — it still receives one HTML page.
-Only generated when `--http-client` flag is passed to `ssc-gen generate`.
-
-### When to add @request
-
-Add it when the user asks to include an HTTP fetch method, or when documenting
-the exact endpoint a struct is designed for. **Never add it by default** — it is optional.
-
-### Two formats
-
-**curl:**
-```kdl
-struct ProductPage {
-    @request """
-    curl 'https://example.com/{{slug}}'
-    """
-    title { css "h1"; text }
-}
-```
-
-**Raw HTTP:**
-```kdl
-struct MainPage {
-    @request """
-    GET /?p={{page-num}} HTTP/1.1
-    Host: news.ycombinator.com
-    Accept: text/html
-    """
-    title { css "h1"; text }
-}
-```
-
-Both formats are equivalent — the generator normalises them.
-
-### Placeholders
-
-`{{name}}` → keyword parameter in `fetch()`, converted to snake_case.
-
-```kdl
-@request """
-GET /search?q={{query}}&page={{page-num}} HTTP/1.1
-Host: example.com
-"""
-```
-
-Generated (Python, httpx):
-```python
-@classmethod
-def fetch(cls, client: httpx.Client, *, query: str, page_num: str) -> "StructName": ...
-```
-
-### Optional properties
-
-```kdl
-@request response-path="payload.html" response-join="\n" """
-POST /api HTTP/1.1
-Host: example.com
-Content-Type: application/json
-
-{"id": "{{id}}"}
-"""
-```
-
-- `response-path` — dot-notation path into JSON response body to extract HTML
-- `response-join` — join separator when path resolves to list[str]
-
-### define with @request
-
-```kdl
-define HNEWS-REQ="""
-GET /?p={{page-num}} HTTP/1.1
-Host: news.ycombinator.com
-"""
-
-struct MainPage {
-    @request HNEWS-REQ
-    ...
-}
-```
-
-Scalar `define` is substituted as the argument. Placeholders inside work identically.
-
-### CLI flag
-
-```bash
-ssc-gen generate schema.kdl -t py-bs4 --http-client httpx   # sync + async
-ssc-gen generate schema.kdl -t py-bs4 --http-client requests # sync only (default)
-ssc-gen generate schema.kdl -t js-pure --http-client axios
-```
-
-Without `--http-client`, `@request` is silently ignored.
 
 ---
 
@@ -456,11 +416,11 @@ Warning at line 8: unused define 'BASE-URL'
 
 | Error message | Cause | Fix |
 |---------------|-------|-----|
-| `type mismatch: expected STRING, got LIST_STRING` | `css-all` feeds into op that needs single value | Add `first` / `last` / `index N` after selector, or switch to `css` |
+| `type mismatch: expected STRING, got LIST_STRING` | `css-all` feeds into op that needs single value | Switch to `css "selector:nth-of-type(N)"`, or use `first` / `last` after selector |
 | `type mismatch: expected DOCUMENT, got STRING` | Selector used after `text`/`attr` | Reorder — selector must come before extract ops |
 | `type mismatch: expected STRING, got INT` | e.g. `re` after `to-int` | Apply `re` before `to-int` |
 | `unknown operation '...'` | Unknown op name or typo | Check spelling against operations list |
-| `missing @split-doc` | `type=list` or `type=dict` struct without split | Add `@split-doc { css-all "..." }` |
+| `missing @split-doc` | `type=list` or `type=dict` struct without split (`type=flat` does NOT need it) | Add `@split-doc { css-all "..." }` |
 | `missing match{}` | `type=table` field has no predicate | Add `match { eq "key" }` as first statement in field |
 | `fallback value type mismatch` | `to-int` then `fallback "x"` | Use typed fallback: INT->`0`, FLOAT->`0.0`, BOOL->`#false`, any->`#null` |
 | `define not found: NAME` | Typo or define declared after use | Check spelling; move define above the struct |
