@@ -209,7 +209,10 @@ class TestRestPyConverter:
         src = _rest_src(errors="    @error 404 Err\n")
         module = PARSER.parse(src)
         code = CONVERTER.convert(module, http_client="requests")
-        assert "-> Ok[UserJson] | APIErr404 | UnknownErr | TransportErr" in code
+        assert (
+            "-> Union[Ok[UserJson], APIErr404, UnknownErr, TransportErr]"
+            in code
+        )
 
     def test_py_bs4_transport_error_wrapped(self):
         from ssc_codegen.converters.py_bs4 import (
@@ -610,11 +613,11 @@ class TestTypedPlaceholdersPyCodegen:
 
     def test_optional_has_none_default(self):
         code = self._gen("GET /u?q={{q:str?}} HTTP/1.1")
-        assert "q: str | None = None" in code
+        assert "q: Optional[str] = None" in code
 
     def test_array_annotation(self):
         code = self._gen("GET /u?tags={{tags:int[]}} HTTP/1.1")
-        assert "tags: list[int]" in code
+        assert "tags: List[int]" in code
 
     def test_repeat_default_passes_list_native(self):
         # with repeat style (default) requests accepts a list directly:
@@ -636,12 +639,12 @@ class TestTypedPlaceholdersPyCodegen:
         code = self._gen("GET /u/{{id:int}}?q={{q:str?}} HTTP/1.1")
         sig_idx = code.find("def fetch")
         sig_line = code[sig_idx : code.find("\n", sig_idx)]
-        assert sig_line.find("id: int") < sig_line.find("q: str | None")
+        assert sig_line.find("id: int") < sig_line.find("q: Optional[str]")
 
     def test_kebab_name_normalised_with_suffixes(self):
         code = self._gen("GET /u?p={{page-num:int[]?|csv}} HTTP/1.1")
         # NAME renamed to snake_case but type/array/optional/style preserved
-        assert "page_num: list[int] | None = None" in code
+        assert "page_num: Optional[List[int]] = None" in code
         assert "','.join(str(_x) for _x in page_num)" in code
 
     def test_python_code_is_syntactically_valid(self):

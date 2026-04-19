@@ -297,25 +297,25 @@ def rest_utilities(node) -> list[str]:
         "_T = TypeVar('_T')",
         "_E = TypeVar('_E')",
         "\n",
-        "@dataclass(frozen=True, kw_only=True)",
+        "@dataclass(frozen=True)",
         "class Ok(Generic[_T]):",
-        "    status: int",
-        "    headers: Mapping[str, str]",
-        "    value: _T",
+        "    status: int = 0",
+        "    headers: Mapping[str, str] = field(default_factory=dict)",
+        "    value: _T = None  # type: ignore[assignment]",
         "    is_ok: Literal[True] = True",
         "\n",
-        "@dataclass(frozen=True, kw_only=True)",
+        "@dataclass(frozen=True)",
         "class Err(Generic[_E]):",
-        "    status: int",
-        "    headers: Mapping[str, str]",
-        "    value: _E",
+        "    status: int = 0",
+        "    headers: Mapping[str, str] = field(default_factory=dict)",
+        "    value: _E = None  # type: ignore[assignment]",
         "    is_ok: Literal[False] = False",
         "\n",
-        "@dataclass(frozen=True, kw_only=True)",
+        "@dataclass(frozen=True)",
         "class UnknownErr(Err[Any]):",
         "    pass",
         "\n",
-        "@dataclass(frozen=True, kw_only=True)",
+        "@dataclass(frozen=True)",
         "class TransportErr(Err[None]):",
         "    status: Literal[0] = 0",
         "    cause: str = ''",
@@ -425,7 +425,7 @@ def _rest_err_union_type(struct: Struct) -> str:
         if cls_name not in seen:
             seen.add(cls_name)
             variants.append(cls_name)
-    return " | ".join([*variants, "UnknownErr", "None"])
+    return "Union[" + ", ".join([*variants, "UnknownErr", "None"]) + "]"
 
 
 def _emit_dispatch_err_py(node: Struct, ctx: ConverterContext) -> list[str]:
@@ -508,7 +508,7 @@ def pre_struct(node: Struct, ctx: ConverterContext):
                 continue
             seen.add(cls_name)
             value_type = _err_value_type(err, node)
-            lines.append("@dataclass(frozen=True, kw_only=True)")
+            lines.append("@dataclass(frozen=True)")
             lines.append(f"class {cls_name}(Err[{value_type}]):")
             lines.append(f"    status: Literal[{err.status}] = {err.status}")
             lines.append("")
@@ -1660,14 +1660,14 @@ def _ph_to_py_annotation(ph: PlaceholderSpec) -> tuple[str, str]:
     """Return (annotation, default_suffix). Suffix is '' or ' = None'."""
     anno = _PY_PRIM_ANNO[ph.type_name]
     if ph.is_array:
-        anno = f"list[{anno}]"
+        anno = f"List[{anno}]"
     if ph.is_optional:
-        return f"{anno} | None", " = None"
+        return f"Optional[{anno}]", " = None"
     return anno, ""
 
 
 def _render_signature_params(placeholders: list[PlaceholderSpec]) -> str:
-    """Build keyword-only parameters clause: ', *, a: int, b: str | None = None'."""
+    """Build keyword-only parameters clause: ', *, a: int, b: Optional[str] = None'."""
     if not placeholders:
         return ""
     required = [p for p in placeholders if not p.is_optional]
@@ -1708,7 +1708,7 @@ def _resolve_response_type(node: RequestConfig) -> str:
                 seen.add(cls_name)
                 err_variants.append(cls_name)
     parts = [f"Ok[{payload}]", *err_variants, "UnknownErr", "TransportErr"]
-    return " | ".join(parts)
+    return "Union[" + ", ".join(parts) + "]"
 
 
 def _build_rest_method(
