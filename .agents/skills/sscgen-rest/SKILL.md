@@ -251,7 +251,7 @@ curl -X POST 'https://api.example.com/auth/login' \
 |---|---|
 | `-X` / `--request` METHOD | HTTP method (default GET). Supported: GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS |
 | `-H` / `--header` "K: V" | Add request header |
-| `-d` / `--data` STR | Request body (auto-parsed as JSON if valid) |
+| `-d` / `--data` / `--data-raw` STR | Request body (auto-parsed as JSON if valid) |
 | `--json` STR | Explicit JSON body |
 | `-u` / `--user` user:pass | HTTP basic auth |
 | `-F` / `--form` k=v | multipart/form-data field |

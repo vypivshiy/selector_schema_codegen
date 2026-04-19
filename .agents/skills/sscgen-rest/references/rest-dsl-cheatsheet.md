@@ -9,8 +9,8 @@ Both produce identical generated code. Pick whichever you have at hand.
 | `GET /users/{{id:int}} HTTP/1.1`<br>`Host: api.example.com` | `curl 'https://api.example.com/users/{{id:int}}'` |
 
 Curl is especially convenient for **DevTools → Network → Copy as cURL (POSIX)**
-paste-ins. Supported flags: `-X/--request`, `-H/--header`, `-d/--data`, `--json`,
-`-u/--user`, `-F/--form`, `--data-urlencode`, `--compressed` (ignored).
+paste-ins. Supported flags: `-X/--request`, `-H/--header`, `-d/--data/--data-raw`,
+`--json`, `-u/--user`, `-F/--form`, `--data-urlencode`, `--compressed` (ignored).
 Unsupported flags raise a parse error — strip them or rewrite as raw HTTP.
 
 ## `struct type=rest` — minimal vs full

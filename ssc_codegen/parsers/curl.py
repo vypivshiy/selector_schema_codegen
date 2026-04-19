@@ -97,10 +97,10 @@ def parse_curl_to_httpx_kwargs(
                 raise ValueError(f"Invalid header format: {header}")
             key, value = header.split(":", 1)
             headers[key.strip()] = value.strip()
-        elif part in ("-d", "--data"):
+        elif part in ("-d", "--data", "--data-raw"):
             i += 1
             if i >= len(parts):
-                raise ValueError("Missing data after -d/--data")
+                raise ValueError("Missing data after -d/--data/--data-raw")
             data = parts[i]
         elif part == "--json":
             i += 1
