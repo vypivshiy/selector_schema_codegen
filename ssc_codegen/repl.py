@@ -39,8 +39,9 @@ def _try_prompt_toolkit():
             Completion,
             FuzzyWordCompleter,
         )
+        from prompt_toolkit.history import InMemoryHistory
 
-        return pt_prompt, Completer, Completion, FuzzyWordCompleter
+        return pt_prompt, Completer, Completion, FuzzyWordCompleter, InMemoryHistory
     except ImportError:
         return None
 
@@ -159,6 +160,12 @@ def _make_completer(repl: Repl):
 
     return _SsgCompleter()
 
+def _make_history():
+    if _PROMPT_TOOLKIT is None:
+        return
+    from prompt_toolkit.history import InMemoryHistory
+
+    return InMemoryHistory()
 
 def _get_converter(target: str):
     mod_path, attr = _CONVERTERS[target].rsplit(":", 1)
@@ -179,7 +186,7 @@ def _fetch_html(url: str) -> str:
     except ImportError:
         raise RuntimeError(
             "httpx is required for URL fetching. "
-            "Install with: pip install ssc-gen[repl]"
+            "Install with: pip install ssc-codegen[repl]"
         )
 
 
@@ -224,14 +231,16 @@ class Repl:
         self._generated_code: str = ""
         self._multiline_kdl: list[str] | None = None
         self._completer = _make_completer(self)
+        self._history = _make_history()
 
     def _read_line(self, prompt_str: str) -> str:
         if _PROMPT_TOOLKIT is not None:
-            pt_prompt, _, _, _ = _PROMPT_TOOLKIT
+            pt_prompt, _, _, _, _ = _PROMPT_TOOLKIT
             return pt_prompt(
                 prompt_str,
                 completer=self._completer,
                 complete_while_typing=True,
+                history=self._history
             )
         return input(prompt_str)
 
