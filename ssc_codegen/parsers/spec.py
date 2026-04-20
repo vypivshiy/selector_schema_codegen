@@ -177,7 +177,9 @@ def _curl_raw_body(payload: str) -> str:
     parts = shlex.split(payload.strip())[1:]  # drop "curl"
     i = 0
     while i < len(parts):
-        if parts[i] in ("-d", "--data", "--data-raw", "--json") and i + 1 < len(parts):
+        if parts[i] in ("-d", "--data", "--data-raw", "--json") and i + 1 < len(
+            parts
+        ):
             return parts[i + 1]
         i += 1
     return ""

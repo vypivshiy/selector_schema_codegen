@@ -660,6 +660,83 @@ def health(
         raise typer.Exit(code=1)
 
 
+@app.command(name="openapi-to-ssc", help="Experimental converter swagger openapi 3.0 to kdl DSL")
+def openapi_to_ssc(
+    spec: Annotated[
+        Path,
+        typer.Argument(
+            help="OpenAPI/Swagger spec file (YAML or JSON).",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+        ),
+    ],
+    output: Annotated[
+        Path,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Output .kdl file path.",
+            file_okay=True,
+            dir_okay=False,
+            writable=True,
+        ),
+    ],
+    endpoints: Annotated[
+        Optional[str],
+        typer.Option(
+            "--endpoints",
+            "-e",
+            help="Comma-separated endpoint filter: 'GET /pets,POST /pets'.",
+        ),
+    ] = None,
+    skip_lint: Annotated[
+        bool,
+        typer.Option(
+            "--skip-lint",
+            help="Skip lint validation of generated .kdl.",
+        ),
+    ] = False,
+) -> None:
+    """Convert an OpenAPI/Swagger spec (YAML/JSON) to a KDL REST schema file."""
+    from ssc_codegen.openapi import convert_openapi
+
+    endpoint_filter: list[tuple[str, str]] | None = None
+    if endpoints:
+        endpoint_filter = []
+        for pair in endpoints.split(","):
+            parts = pair.strip().split(None, 1)
+            if len(parts) == 2:
+                endpoint_filter.append((parts[0].upper(), parts[1]))
+            else:
+                typer.echo(
+                    f"WARNING: invalid endpoint filter '{pair}', skipping",
+                    err=True,
+                )
+
+    try:
+        text = convert_openapi(
+            spec_path=spec,
+            output_path=output,
+            endpoints=endpoint_filter,
+        )
+    except Exception as exc:
+        typer.echo(f"ERROR: {exc}", err=True)
+        raise typer.Exit(code=1)
+
+    typer.echo(f"  {spec} -> {output}")
+
+    if not skip_lint:
+        from ssc_codegen.linter import lint_file
+
+        result = lint_file(output)
+        if result.has_errors():
+            typer.echo(result.format(style="text"), err=True)
+            raise typer.Exit(code=1)
+        typer.echo("  Lint passed.")
+
+
 def main() -> None:
     app()
 

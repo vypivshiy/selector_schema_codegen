@@ -1,6 +1,6 @@
 [project]
 name = "ssc_codegen"
-version = "0.19.5"
+version = "0.20.0"
 description = "Python-dsl code converter to html parser for web scraping "
 readme = "README.md"
 requires-python = ">=3.10"
@@ -15,6 +15,7 @@ dependencies = [
     # https://github.com/fastapi/typer/discussions/1215
     # https://github.com/fastapi/typer/pull/1145
     "click<8.2.0",
+    "pyyaml>=6.0",
 ]
 
 classifiers = [
