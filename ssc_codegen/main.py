@@ -660,7 +660,152 @@ def health(
         raise typer.Exit(code=1)
 
 
-@app.command(name="openapi-to-ssc", help="Experimental converter swagger openapi 3.0 to kdl DSL")
+@app.command()
+def shell(
+    schema: Annotated[
+        str | None,
+        typer.Argument(
+            help="Schema target in format 'path/to/schema.kdl:StructName'. "
+            "If omitted, starts empty REPL.",
+        ),
+    ] = None,
+    target: Annotated[
+        _PyTarget,
+        typer.Option(
+            "--target",
+            "-t",
+            help="Python backend for the REPL.",
+            case_sensitive=False,
+        ),
+    ] = _PyTarget.PY_BS4,
+    input_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--input",
+            "-i",
+            help="HTML input file.",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+        ),
+    ] = None,
+    url: Annotated[
+        str | None,
+        typer.Option(
+            "--url",
+            help="URL to fetch HTML from.",
+        ),
+    ] = None,
+    http_client: Annotated[
+        str | None,
+        typer.Option(
+            "--http-client",
+            help="HTTP client for REST structs: httpx (default) or requests.",
+        ),
+    ] = None,
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            "-v",
+            help="Print generated code and enable DEBUG logging.",
+        ),
+    ] = False,
+    css_to_xpath: Annotated[
+        bool,
+        typer.Option(
+            "--css-to-xpath",
+            help="Convert CSS selectors to XPath.",
+        ),
+    ] = False,
+) -> None:
+    """Launch an interactive REPL shell for testing KDL schema parsers.
+
+    \b
+    Examples:
+        ssc-gen shell examples/booksToScrape.kdl:Book --url https://books.toscrape.com/
+        ssc-gen shell schema.kdl:Product -i page.html -t py-lxml
+        ssc-gen shell examples/restApiLike.kdl:DummyJsonApi --http-client httpx
+        ssc-gen shell
+    """
+    from ssc_codegen.repl import Repl, ReplState
+
+    if verbose:
+        setup_debug_logging()
+
+    state = ReplState(
+        target=target.value,
+        http_client=http_client or "httpx",
+        verbose=verbose,
+        css_to_xpath=css_to_xpath,
+    )
+
+    if input_file is not None:
+        state.html = input_file.read_text(encoding="utf-8")
+
+    if schema is not None:
+        if ":" in schema:
+            path_part, struct_name = schema.rsplit(":", 1)
+            kdl_path = Path(path_part)
+        else:
+            kdl_path = Path(schema)
+            struct_name = ""
+        if not kdl_path.is_file():
+            typer.echo(f"ERROR: file not found: {kdl_path}", err=True)
+            raise typer.Exit(code=1)
+        from ssc_codegen import parse_ast
+        from ssc_codegen.ast import Struct as StructNode
+
+        try:
+            state.module_ast = parse_ast(
+                path=str(kdl_path), css_to_xpath=css_to_xpath
+            )
+        except Exception as exc:
+            if verbose:
+                typer.echo(traceback.format_exc(), err=True)
+            else:
+                typer.echo(
+                    f"ERROR: failed to parse {kdl_path}: {exc}", err=True
+                )
+            raise typer.Exit(code=1)
+
+        state.schema_path = kdl_path
+        state.kdl_source = kdl_path.read_text(encoding="utf-8-sig")
+
+        structs = [
+            n for n in state.module_ast.body if isinstance(n, StructNode)
+        ]
+        if not struct_name:
+            if structs:
+                struct_name = structs[0].name
+        struct_names = [s.name for s in structs]
+        if struct_name and struct_name not in struct_names:
+            typer.echo(
+                f"ERROR: struct '{struct_name}' not found. "
+                f"Available: {', '.join(struct_names)}",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        state.struct_name = struct_name
+
+    if url is not None and not state.html:
+        try:
+            from ssc_codegen.repl import _fetch_html
+
+            state.html = _fetch_html(url)
+        except Exception as exc:
+            typer.echo(f"ERROR fetching URL: {exc}", err=True)
+            raise typer.Exit(code=1)
+
+    repl = Repl(state)
+    repl.cmdloop()
+
+
+@app.command(
+    name="openapi-to-ssc",
+    help="Experimental converter swagger openapi 3.0 to kdl DSL",
+)
 def openapi_to_ssc(
     spec: Annotated[
         Path,
