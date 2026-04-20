@@ -41,8 +41,8 @@ ssc_codegen/
 │   ├── transform.py       # TransformDef, TransformTarget, TransformCall
 │   └── helpers.py         # AST utilities
 ├── parsers/               # Transport layer helpers (consumed at converter stage)
-│   ├── spec.py            # RequestSpec dataclass (normalised intermediate form)
-│   ├── curl.py            # parse_curl_to_httpx_kwargs() — POSIX curl → kwargs
+│   ├── spec.py            # RequestSpec dataclass (normalised intermediate form; urlencoded bodies → form dict)
+│   ├── curl.py            # parse_curl_to_httpx_kwargs() — POSIX curl → kwargs (supports -d, --data, --data-raw, --json, -F, --data-urlencode)
 │   └── http.py            # parse_http_to_httpx_kwargs() — raw HTTP/1.1|2 → kwargs
 ├── converters/            # Code generators per target language
 │   ├── base.py            # BaseConverter, ConverterContext, callback registration
@@ -409,7 +409,19 @@ struct ApiData {
 `response-path` — dot-notation JSON path into the response body to extract the HTML string.
 `response-join` — separator when the resolved path is a list of strings.
 
-Generated code (Python `httpx` example): `fetch(self, *, page_num: str) -> Self` and `async_fetch(...)`.
+Generated code (Python `httpx`):
+- Non-REST structs: `fetch(self, *, page_num: str) -> Self` and `async_fetch(...)`.
+- `type=rest` structs: per-endpoint `@classmethod` methods with public Result type aliases.
+  Each `@request name=X` produces `XResult = Union[Ok[T], ErrVariant, UnknownErr, TransportErr]`.
+  Body with `Content-Type: application/x-www-form-urlencoded` is parsed into a form dict (`data={...}`).
+  Example:
+  ```python
+  GetProductResult = Union[Ok[ProductJson], ApiErr404, UnknownErr, TransportErr]
+
+  class Api:
+      @classmethod
+      def get_product(cls, client: httpx.Client, *, id: int) -> GetProductResult: ...
+  ```
 
 ### Nested structs
 ```kdl
