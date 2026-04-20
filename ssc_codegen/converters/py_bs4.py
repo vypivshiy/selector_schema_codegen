@@ -332,6 +332,10 @@ def pre_struct(node: Struct, ctx: ConverterContext):
             lines.append(f"class {cls_name}(Err[{value_type}]):")
             lines.append(f"    status: Literal[{err.status}] = {err.status}")
             lines.append("")
+        alias_lines = py_helpers._emit_result_aliases(node)
+        if alias_lines:
+            lines.extend(alias_lines)
+            lines.append("")
     lines.append(f"class {name}:")
     return lines
 

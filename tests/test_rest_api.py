@@ -209,10 +209,13 @@ class TestRestPyConverter:
         src = _rest_src(errors="    @error 404 Err\n")
         module = PARSER.parse(src)
         code = CONVERTER.convert(module, http_client="requests")
+        # type alias is emitted at module level
         assert (
-            "-> Union[Ok[UserJson], APIErr404, UnknownErr, TransportErr]"
+            "GetUserResult = Union[Ok[UserJson], APIErr404, UnknownErr, TransportErr]"
             in code
         )
+        # method signature uses the alias
+        assert "-> GetUserResult:" in code
 
     def test_py_bs4_transport_error_wrapped(self):
         from ssc_codegen.converters.py_bs4 import (

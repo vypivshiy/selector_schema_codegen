@@ -248,20 +248,35 @@ def _resolve_ok_payload_type(node: RequestConfig) -> str:
     return schema_type
 
 
-def _resolve_response_type(node: RequestConfig) -> str:
-    """Return the full Result-union annotation for a REST method."""
-    payload = _resolve_ok_payload_type(node)
-    struct = node.parent
-    err_variants: list[str] = []
-    seen: set[str] = set()
-    if isinstance(struct, Struct):
+def _result_alias_name(raw_name: str) -> str:
+    """Convert raw @request name to public Result type alias name."""
+    return to_pascal_case(raw_name or "fetch") + "Result"
+
+
+def _emit_result_aliases(struct: Struct) -> list[str]:
+    """Emit per-endpoint Result type alias definitions for a REST struct."""
+    lines: list[str] = []
+    for child in struct.body:
+        if not isinstance(child, RequestConfig):
+            continue
+        raw_name = child.name or "fetch"
+        alias_name = _result_alias_name(raw_name)
+        payload = _resolve_ok_payload_type(child)
+        err_variants: list[str] = []
+        seen: set[str] = set()
         for err in struct.errors:
             cls_name = _err_subclass_name(struct.name, err)
             if cls_name not in seen:
                 seen.add(cls_name)
                 err_variants.append(cls_name)
-    parts = [f"Ok[{payload}]", *err_variants, "UnknownErr", "TransportErr"]
-    return "Union[" + ", ".join(parts) + "]"
+        parts = [f"Ok[{payload}]", *err_variants, "UnknownErr", "TransportErr"]
+        lines.append(f"{alias_name} = Union[" + ", ".join(parts) + "]")
+    return lines
+
+
+def _resolve_response_type(node: RequestConfig) -> str:
+    """Return the Result type alias name for a REST method signature."""
+    return _result_alias_name(node.name)
 
 
 def _build_request_method(
