@@ -25,6 +25,140 @@ _CONVERTERS: dict[str, str] = {
 }
 _PY_TARGETS = set(_CONVERTERS)
 
+_CMD_COMPLETIONS: dict[str, tuple[str, ...]] = {
+    ":target": tuple(sorted(_CONVERTERS)),
+    ":http-client": ("httpx", "requests"),
+}
+
+
+def _try_prompt_toolkit():
+    try:
+        from prompt_toolkit import prompt as pt_prompt
+        from prompt_toolkit.completion import (
+            Completer,
+            Completion,
+            FuzzyWordCompleter,
+        )
+
+        return pt_prompt, Completer, Completion, FuzzyWordCompleter
+    except ImportError:
+        return None
+
+
+_PROMPT_TOOLKIT = _try_prompt_toolkit()
+
+
+_FILE_GLOBS: dict[str, tuple[str, ...]] = {
+    ":load": (".kdl",),
+    ":html": (".html", ".htm", ".xhtml", ".svg", ".xml"),
+}
+
+
+_STRUCT_RE = __import__("re").compile(
+    r"^\s*struct\s+([\w-]+)", __import__("re").MULTILINE
+)
+
+
+def _file_completions(cmd: str, arg: str):
+    from prompt_toolkit.completion import Completion
+
+    # :load path.kdl:Struct<tab> → struct name completions
+    if cmd == ":load" and ":" in arg:
+        file_part, struct_prefix = arg.rsplit(":", 1)
+        kdl_path = Path(file_part)
+        if kdl_path.is_file():
+            try:
+                text = kdl_path.read_text(encoding="utf-8-sig")
+            except OSError:
+                return
+            for m in _STRUCT_RE.finditer(text):
+                name = m.group(1)
+                if name.startswith(struct_prefix):
+                    yield Completion(name, start_position=-len(struct_prefix))
+        return
+
+    exts = _FILE_GLOBS.get(
+        cmd, (".kdl", ".html", ".htm", ".xhtml", ".svg", ".xml")
+    )
+    prefix_dir = Path(".")
+    prefix_name = arg
+    if "/" in arg or "\\" in arg:
+        sep = "/" if "/" in arg else "\\"
+        parent = arg.rsplit(sep, 1)[0]
+        prefix_dir = Path(parent)
+        prefix_name = arg.rsplit(sep, 1)[1]
+    if not prefix_dir.is_dir():
+        return
+    try:
+        entries = sorted(prefix_dir.iterdir())
+    except OSError:
+        return
+    for entry in entries:
+        name = entry.name
+        if entry.is_dir():
+            if name.startswith(prefix_name):
+                yield Completion(name + "/", start_position=-len(prefix_name))
+        elif any(name.endswith(ext) for ext in exts):
+            if name.startswith(prefix_name):
+                yield Completion(name, start_position=-len(prefix_name))
+
+
+def _make_completer(repl: Repl):
+    if _PROMPT_TOOLKIT is None:
+        return None
+    from prompt_toolkit.completion import (
+        Completer,
+        Completion,
+        FuzzyWordCompleter,
+    )
+
+    class _SsgCompleter(Completer):
+        def __init__(self) -> None:
+            self._py = FuzzyWordCompleter(lambda: list(repl.namespace.keys()))
+
+        def get_completions(self, document, complete_event):
+            text = document.text_before_cursor
+            if not text.startswith(":"):
+                yield from self._py.get_completions(document, complete_event)
+                return
+            parts = text.split(None, 1)
+            cmd = parts[0]
+            if len(parts) == 1 and not text.endswith(" "):
+                for name in _CMD_COMPLETIONS:
+                    if name.startswith(cmd) and name != cmd:
+                        yield Completion(name, start_position=-len(cmd))
+                for attr in dir(repl):
+                    if attr.startswith("do_") and not attr.startswith("do__"):
+                        cname = ":" + attr[3:].replace("_", "-")
+                        if cname.startswith(cmd) and cname != cmd:
+                            yield Completion(cname, start_position=-len(cmd))
+                return
+            values = _CMD_COMPLETIONS.get(cmd)
+            if values:
+                arg = parts[1] if len(parts) > 1 else ""
+                for v in values:
+                    if v.startswith(arg):
+                        yield Completion(v, start_position=-len(arg))
+                return
+            if cmd in (":load", ":html"):
+                arg = parts[1] if len(parts) > 1 else ""
+                yield from _file_completions(cmd, arg)
+                return
+            if cmd in (":view", ":field"):
+                st = repl._current_struct()
+                if st:
+                    arg = parts[1] if len(parts) > 1 else ""
+                    for node in st.body:
+                        if isinstance(node, Field) and node.name.startswith(
+                            arg
+                        ):
+                            yield Completion(
+                                node.name,
+                                start_position=-len(arg),
+                            )
+
+    return _SsgCompleter()
+
 
 def _get_converter(target: str):
     mod_path, attr = _CONVERTERS[target].rsplit(":", 1)
@@ -89,6 +223,17 @@ class Repl:
         self._console = InteractiveConsole(locals=self.namespace)
         self._generated_code: str = ""
         self._multiline_kdl: list[str] | None = None
+        self._completer = _make_completer(self)
+
+    def _read_line(self, prompt_str: str) -> str:
+        if _PROMPT_TOOLKIT is not None:
+            pt_prompt, _, _, _ = _PROMPT_TOOLKIT
+            return pt_prompt(
+                prompt_str,
+                completer=self._completer,
+                complete_while_typing=True,
+            )
+        return input(prompt_str)
 
     def cmdloop(self) -> None:
         if self.state.module_ast:
@@ -101,7 +246,7 @@ class Repl:
                     if self._multiline_kdl is not None
                     else "ssc-gen> "
                 )
-                line = input(prompt)
+                line = self._read_line(prompt)
             except (EOFError, KeyboardInterrupt):
                 print()
                 break
