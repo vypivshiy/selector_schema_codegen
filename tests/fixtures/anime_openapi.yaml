@@ -1,0 +1,75 @@
+openapi: "3.0.0"
+info:
+  title: Anime Catalogue
+  version: "1.0"
+servers:
+  - url: https://api.anime.example.com
+paths:
+  /catalogue:
+    get:
+      summary: List anime
+      parameters:
+        - name: f[sorting]
+          in: query
+          required: false
+          style: form
+          explode: false
+          schema:
+            type: string
+          example: RATING_DESC
+        - name: f[age_ratings]
+          in: query
+          description: List of age ratings
+          required: false
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+          example:
+            - R6_PLUS
+            - R12_PLUS
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnimeList"
+components:
+  schemas:
+    Anime:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        rating:
+          type: string
+          enum:
+            - G
+            - PG
+            - R
+            - R18
+        score:
+          type: number
+      required:
+        - id
+        - title
+    AnimeList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Anime"
+        total:
+          type: integer
+      required:
+        - items
