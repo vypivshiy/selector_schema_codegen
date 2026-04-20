@@ -51,6 +51,7 @@ from ssc_codegen.ast import Nested
 
 
 from ssc_codegen.converters import py_bs4
+from ssc_codegen.converters import py_helpers
 
 
 PY_PARSEL_CONVERTER = py_bs4.PY_BASE_CONVERTER.extend()
@@ -67,7 +68,7 @@ def pre_imports(node: Imports, _: ConverterContext):
         "from typing import TypedDict, Optional, Any, List, Dict, Union",
         "from html import unescape as _html_unescape",
     ]
-    base_imports.extend(py_bs4.rest_imports(node))
+    base_imports.extend(py_helpers.rest_imports(node))
 
     transform_imports = sorted(node.transform_imports.get("py", set()))
 
@@ -77,7 +78,7 @@ def pre_imports(node: Imports, _: ConverterContext):
 @PY_PARSEL_CONVERTER.post(Imports)
 def post_imports(node: Imports, ctx: ConverterContext):
     lines = ["from parsel import Selector, SelectorList"]
-    lines.extend(py_bs4.http_client_import(ctx))
+    lines.extend(py_helpers.http_client_import(ctx))
     return lines
 
 

@@ -49,6 +49,7 @@ from ssc_codegen.ast import (
 from ssc_codegen.ast import Nested
 
 from ssc_codegen.converters import py_bs4
+from ssc_codegen.converters import py_helpers
 
 
 PY_SLAX_CONVERTER = py_bs4.PY_BASE_CONVERTER.extend()
@@ -66,7 +67,7 @@ def pre_imports(node: Imports, _: ConverterContext):
         "from typing import TypedDict, Optional, Any, List, Dict, Union",
         "from html import unescape as _html_unescape",
     ]
-    base_imports.extend(py_bs4.rest_imports(node))
+    base_imports.extend(py_helpers.rest_imports(node))
 
     transform_imports = sorted(node.transform_imports.get("py", set()))
 
@@ -78,7 +79,7 @@ def post_imports(node: Imports, ctx: ConverterContext):
     lines = [
         "from selectolax.lexbor import LexborHTMLParser as HTMLParser, LexborNode as Node"
     ]
-    lines.extend(py_bs4.http_client_import(ctx))
+    lines.extend(py_helpers.http_client_import(ctx))
     return lines
 
 

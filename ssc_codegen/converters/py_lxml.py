@@ -62,6 +62,7 @@ from ssc_codegen.ast import Nested
 
 # Import the bs4 converter to inherit from it
 from ssc_codegen.converters import py_bs4
+from ssc_codegen.converters import py_helpers
 
 # Create new converter that extends bs4 (inherits all handlers)
 PY_LXML_CONVERTER = py_bs4.PY_BASE_CONVERTER.extend()
@@ -81,7 +82,7 @@ def pre_imports(node: Imports, _: ConverterContext):
         "from typing import TypedDict, Optional, Any, List, Dict, Union",
         "from html import unescape as _html_unescape",
     ]
-    base_imports.extend(py_bs4.rest_imports(node))
+    base_imports.extend(py_helpers.rest_imports(node))
 
     # Get transform imports for Python (already collected during parsing)
     transform_imports = sorted(node.transform_imports.get("py", set()))
@@ -95,7 +96,7 @@ def post_imports(node: Imports, ctx: ConverterContext):
         "from lxml import html",
         "from lxml.html import HtmlElement",
     ]
-    lines.extend(py_bs4.http_client_import(ctx))
+    lines.extend(py_helpers.http_client_import(ctx))
     return lines
 
 
@@ -145,7 +146,7 @@ def pre_utilities(node: Utilities, _: ConverterContext):
         "UNMATCHED_TABLE_ROW = _UnmatchedTableRow()",
         "\n\n",
     ]
-    lines.extend(py_bs4.rest_utilities(node))
+    lines.extend(py_helpers.rest_utilities(node))
     return lines
 
 

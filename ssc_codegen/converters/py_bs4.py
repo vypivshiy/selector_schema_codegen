@@ -1,4 +1,5 @@
 from ssc_codegen.converters.base import ConverterContext, BaseConverter
+from ssc_codegen.converters import py_helpers
 
 # types
 from ssc_codegen.ast import VariableType, StructType
@@ -22,14 +23,12 @@ from ssc_codegen.parsers import (
 from ssc_codegen.ast import (
     Docstring,
     Imports,
-    Module,
     Utilities,
     JsonDef,
     JsonDefField,
     TypeDef,
     TypeDefField,
     Struct,
-    PlaceholderSpec,
 )
 
 # struct layer
@@ -177,28 +176,6 @@ def pre_docstring(node: Docstring, _: ConverterContext):
     ]
 
 
-def _module_has_rest(node) -> bool:
-    """True if the given node's Module has any `struct type=rest`."""
-    module = node
-    while module is not None and not isinstance(module, Module):
-        module = getattr(module, "parent", None)
-    if module is None:
-        return False
-    return any(
-        isinstance(n, Struct) and n.is_rest for n in getattr(module, "body", [])
-    )
-
-
-def rest_imports(node) -> list[str]:
-    """Extra imports required when the module has any `struct type=rest`."""
-    if not _module_has_rest(node):
-        return []
-    return [
-        "from dataclasses import dataclass, field",
-        "from typing import Generic, Literal, Mapping, TypeVar",
-    ]
-
-
 @PY_BASE_CONVERTER(Imports)
 def pre_imports(node: Imports, _: ConverterContext):
     base_imports = [
@@ -208,22 +185,12 @@ def pre_imports(node: Imports, _: ConverterContext):
         "from typing import TypedDict, Optional, Any, List, Dict, Union",
         "from html import unescape as _html_unescape",
     ]
-    base_imports.extend(rest_imports(node))
+    base_imports.extend(py_helpers.rest_imports(node))
 
     # Get transform imports for Python (already collected during parsing)
     transform_imports = sorted(node.transform_imports.get("py", set()))
 
     return base_imports + transform_imports
-
-
-def http_client_import(ctx: ConverterContext) -> list[str]:
-    """Return the import line(s) for the chosen HTTP client, or [] if none."""
-    client = ctx.meta.get("http_client", "")
-    if client == "requests":
-        return ["import requests"]
-    if client == "httpx":
-        return ["import httpx"]
-    return []
 
 
 # hook for add extra dependencies
@@ -233,7 +200,7 @@ def post_imports(node: Imports, ctx: ConverterContext):
         "from bs4 import BeautifulSoup, ResultSet, Tag",
         "BS4_FEATURES = 'lxml'",
     ]
-    lines.extend(http_client_import(ctx))
+    lines.extend(py_helpers.http_client_import(ctx))
     return lines
 
 
@@ -285,53 +252,8 @@ def pre_utilities(node: Utilities, _: ConverterContext):
         "UNMATCHED_TABLE_ROW = _UnmatchedTableRow()",
         "\n\n",
     ]
-    lines.extend(rest_utilities(node))
+    lines.extend(py_helpers.rest_utilities(node))
     return lines
-
-
-def rest_utilities(node) -> list[str]:
-    """Ok/Err/UnknownErr/TransportErr + _parse_response block; empty if no REST."""
-    if not _module_has_rest(node):
-        return []
-    return [
-        "_T = TypeVar('_T')",
-        "_E = TypeVar('_E')",
-        "\n",
-        "@dataclass(frozen=True)",
-        "class Ok(Generic[_T]):",
-        "    status: int = 0",
-        "    headers: Mapping[str, str] = field(default_factory=dict)",
-        "    value: _T = None  # type: ignore[assignment]",
-        "    is_ok: Literal[True] = True",
-        "\n",
-        "@dataclass(frozen=True)",
-        "class Err(Generic[_E]):",
-        "    status: int = 0",
-        "    headers: Mapping[str, str] = field(default_factory=dict)",
-        "    value: _E = None  # type: ignore[assignment]",
-        "    is_ok: Literal[False] = False",
-        "\n",
-        "@dataclass(frozen=True)",
-        "class UnknownErr(Err[Any]):",
-        "    pass",
-        "\n",
-        "@dataclass(frozen=True)",
-        "class TransportErr(Err[None]):",
-        "    status: Literal[0] = 0",
-        "    cause: str = ''",
-        "    value: None = None",
-        "    headers: Mapping[str, str] = field(default_factory=dict)",
-        "\n\n",
-        "def _parse_response(_resp):",
-        "    _status = _resp.status_code",
-        "    _headers = {k.lower(): v for k, v in _resp.headers.items()}",
-        "    try:",
-        "        _body = _resp.json()",
-        "    except Exception:",
-        "        _body = None",
-        "    return _status, _headers, _body",
-        "\n\n",
-    ]
 
 
 @PY_BASE_CONVERTER(JsonDef, post_callback="})")
@@ -394,108 +316,6 @@ def pre_typedef_field(node: TypeDefField, ctx: ConverterContext):
     return [f"{ctx.indent}{name}: {type_}"]
 
 
-def _err_subclass_name(struct_name: str, err: ErrorResponse) -> str:
-    """Naming: `<Struct>Err<Status>[<FieldPascal>]`."""
-    base = f"{to_pascal_case(struct_name)}Err{err.status}"
-    if err.discriminator_field:
-        base += to_pascal_case(err.discriminator_field)
-    return base
-
-
-def _err_value_type(err: ErrorResponse, struct: Struct) -> str:
-    """Return the typed value annotation for an Err subclass."""
-    schema = err.schema_name
-    if not schema:
-        return "Any"
-    type_name = f"{to_pascal_case(schema)}Json"
-    module = struct.parent
-    if module is not None:
-        for n in module.body:
-            if isinstance(n, JsonDef) and n.name == schema and n.is_array:
-                return f"List[{type_name}]"
-    return type_name
-
-
-def _rest_err_union_type(struct: Struct) -> str:
-    """Return the typed union of all Err variants for _dispatch_err sig."""
-    variants: list[str] = []
-    seen: set[str] = set()
-    for err in struct.errors:
-        cls_name = _err_subclass_name(struct.name, err)
-        if cls_name not in seen:
-            seen.add(cls_name)
-            variants.append(cls_name)
-    return "Union[" + ", ".join([*variants, "UnknownErr", "None"]) + "]"
-
-
-def _emit_dispatch_err_py(node: Struct, ctx: ConverterContext) -> list[str]:
-    """Emit the `_dispatch_err` @staticmethod lines inside a REST class.
-
-    ctx arrives from StructDocstring — already at class-body depth.
-    """
-    i1 = ctx.indent  # class-body level
-    i2 = i1 + ctx.indent_char  # method body
-    i3 = i2 + ctx.indent_char  # nested (if ...:)
-    i4 = i3 + ctx.indent_char
-
-    errors = node.errors
-    status_errors = [e for e in errors if e.discriminator_field is None]
-    field_errors = [e for e in errors if e.discriminator_field is not None]
-    union_type = _rest_err_union_type(node)
-
-    lines: list[str] = [
-        f"{i1}@staticmethod",
-        f"{i1}def _dispatch_err("
-        f"_status: int, _headers: Mapping[str, str], _body: Any"
-        f") -> {union_type}:",
-        f"{i2}if 200 <= _status < 300:",
-    ]
-
-    # 2xx field discriminators check first, inside the 2xx branch
-    if field_errors:
-        lines.append(f"{i3}if isinstance(_body, dict):")
-        emitted_field_branch = False
-        for err in field_errors:
-            if 200 <= err.status < 300:
-                cls_name = _err_subclass_name(node.name, err)
-                lines.append(
-                    f"{i4}if _status == {err.status} "
-                    f"and {err.discriminator_field!r} in _body:"
-                )
-                lines.append(
-                    f"{i4}{ctx.indent_char}return {cls_name}("
-                    f"headers=_headers, value=_body)"
-                )
-                emitted_field_branch = True
-        if not emitted_field_branch:
-            # no 2xx-field errors → drop the isinstance guard
-            lines.pop()
-    lines.append(f"{i3}return None")
-
-    # non-2xx status routing
-    for err in status_errors:
-        cls_name = _err_subclass_name(node.name, err)
-        lines.append(f"{i2}if _status == {err.status}:")
-        lines.append(f"{i3}return {cls_name}(headers=_headers, value=_body)")
-    # non-2xx field discriminators (unusual but supported)
-    for err in field_errors:
-        if not (200 <= err.status < 300):
-            cls_name = _err_subclass_name(node.name, err)
-            lines.append(
-                f"{i2}if _status == {err.status} "
-                f"and isinstance(_body, dict) "
-                f"and {err.discriminator_field!r} in _body:"
-            )
-            lines.append(
-                f"{i3}return {cls_name}(headers=_headers, value=_body)"
-            )
-
-    lines.append(
-        f"{i2}return UnknownErr(status=_status, headers=_headers, value=_body)"
-    )
-    return lines
-
-
 @PY_BASE_CONVERTER(Struct)
 def pre_struct(node: Struct, ctx: ConverterContext):
     name = to_pascal_case(node.name)
@@ -503,11 +323,11 @@ def pre_struct(node: Struct, ctx: ConverterContext):
     if node.is_rest:
         seen: set[str] = set()
         for err in node.errors:
-            cls_name = _err_subclass_name(node.name, err)
+            cls_name = py_helpers._err_subclass_name(node.name, err)
             if cls_name in seen:
                 continue
             seen.add(cls_name)
-            value_type = _err_value_type(err, node)
+            value_type = py_helpers._err_value_type(err, node)
             lines.append("@dataclass(frozen=True)")
             lines.append(f"class {cls_name}(Err[{value_type}]):")
             lines.append(f"    status: Literal[{err.status}] = {err.status}")
@@ -523,7 +343,7 @@ def post_struct_docstring(node: StructDocstring, ctx: ConverterContext):
     parent = node.parent
     if not isinstance(parent, Struct) or not parent.is_rest:
         return None
-    return _emit_dispatch_err_py(parent, ctx)
+    return py_helpers._emit_dispatch_err_py(parent, ctx)
 
 
 @PY_BASE_CONVERTER(StructDocstring)
@@ -1614,147 +1434,6 @@ def pre_expr_pred_re_any(node: PredReAny, ctx: ConverterContext):
     return ctx.indent + f"and {cond}"
 
 
-def _build_request_method(
-    *,
-    name: str,
-    is_async: bool,
-    client_type: str,
-    struct_name: str,
-    call_args: list[str],
-    ph_params: str,
-    pre_lines: list[str],
-    response_path: str,
-    response_join: str,
-    i1: str,
-    i2: str,
-    i3: str,
-) -> list[str]:
-    async_kw = "async " if is_async else ""
-    await_kw = "await " if is_async else ""
-    lines: list[str] = [
-        f"{i1}@classmethod",
-        f'{i1}{async_kw}def {name}(cls, client: {client_type}{ph_params}) -> "{struct_name}":',
-    ]
-    lines.extend(pre_lines)
-    lines.append(f"{i2}_resp = {await_kw}client.request(")
-    lines.extend(f"{i3}{a}" for a in call_args)
-    lines.append(f"{i2})")
-    lines.append(f"{i2}_resp.raise_for_status()")
-    if response_path:
-        accessor = "".join(f"[{p!r}]" for p in response_path.split("."))
-        lines.append(f"{i2}_data = _resp.json()")
-        if response_join:
-            lines.append(f"{i2}_body = {response_join!r}.join(_data{accessor})")
-        else:
-            lines.append(f"{i2}_body = _data{accessor}")
-    else:
-        lines.append(f"{i2}_body = _resp.text")
-    lines.append(f"{i2}return cls(_body)")
-    return lines
-
-
-_PY_PRIM_ANNO = {"str": "str", "int": "int", "float": "float", "bool": "bool"}
-
-
-def _ph_to_py_annotation(ph: PlaceholderSpec) -> tuple[str, str]:
-    """Return (annotation, default_suffix). Suffix is '' or ' = None'."""
-    anno = _PY_PRIM_ANNO[ph.type_name]
-    if ph.is_array:
-        anno = f"List[{anno}]"
-    if ph.is_optional:
-        return f"Optional[{anno}]", " = None"
-    return anno, ""
-
-
-def _render_signature_params(placeholders: list[PlaceholderSpec]) -> str:
-    """Build keyword-only parameters clause: ', *, a: int, b: Optional[str] = None'."""
-    if not placeholders:
-        return ""
-    required = [p for p in placeholders if not p.is_optional]
-    optional = [p for p in placeholders if p.is_optional]
-    parts: list[str] = []
-    for ph in required + optional:
-        anno, default = _ph_to_py_annotation(ph)
-        parts.append(f"{ph.name}: {anno}{default}")
-    return ", *, " + ", ".join(parts)
-
-
-def _resolve_ok_payload_type(node: RequestConfig) -> str:
-    """Return the Python type annotation for the successful payload."""
-    if not node.response_schema:
-        return "None"
-    struct = node.parent
-    module = struct.parent if struct is not None else None
-    schema_type = f"{to_pascal_case(node.response_schema)}Json"
-    if module is not None:
-        for n in module.body:
-            if isinstance(n, JsonDef) and n.name == node.response_schema:
-                if n.is_array:
-                    return f"List[{schema_type}]"
-                break
-    return schema_type
-
-
-def _resolve_response_type(node: RequestConfig) -> str:
-    """Return the full Result-union annotation for a REST method."""
-    payload = _resolve_ok_payload_type(node)
-    struct = node.parent
-    err_variants: list[str] = []
-    seen: set[str] = set()
-    if isinstance(struct, Struct):
-        for err in struct.errors:
-            cls_name = _err_subclass_name(struct.name, err)
-            if cls_name not in seen:
-                seen.add(cls_name)
-                err_variants.append(cls_name)
-    parts = [f"Ok[{payload}]", *err_variants, "UnknownErr", "TransportErr"]
-    return "Union[" + ", ".join(parts) + "]"
-
-
-def _build_rest_method(
-    *,
-    node: RequestConfig,
-    name: str,
-    is_async: bool,
-    client_type: str,
-    call_args: list[str],
-    ph_params: str,
-    pre_lines: list[str],
-    ret_type: str,
-    transport_exc: str,
-    i1: str,
-    i2: str,
-    i3: str,
-    i4: str,
-) -> list[str]:
-    async_kw = "async " if is_async else ""
-    await_kw = "await " if is_async else ""
-
-    lines: list[str] = [
-        f"{i1}@classmethod",
-        f"{i1}{async_kw}def {name}(cls, client: {client_type}"
-        f"{ph_params}) -> {ret_type}:",
-    ]
-    if node.doc:
-        lines.append(f'{i2}"""{node.doc}"""')
-    lines.extend(pre_lines)
-    lines.append(f"{i2}try:")
-    lines.append(f"{i3}_resp = {await_kw}client.request(")
-    lines.extend(f"{i4}{a}" for a in call_args)
-    lines.append(f"{i3})")
-    lines.append(f"{i2}except {transport_exc} as _exc:")
-    lines.append(f"{i3}return TransportErr(cause=repr(_exc))")
-    lines.append(f"{i2}_status, _headers, _body = _parse_response(_resp)")
-    lines.append(f"{i2}_err = cls._dispatch_err(_status, _headers, _body)")
-    lines.append(f"{i2}if _err is not None:")
-    lines.append(f"{i3}return _err")
-    ok_value = "_body" if node.response_schema else "None"
-    lines.append(
-        f"{i2}return Ok(status=_status, headers=_headers, value={ok_value})"
-    )
-    return lines
-
-
 @PY_BASE_CONVERTER(RequestConfig)
 def pre_request_config(node: RequestConfig, ctx: ConverterContext):
     spec = normalize_placeholder_names(
@@ -1770,7 +1449,7 @@ def pre_request_config(node: RequestConfig, ctx: ConverterContext):
 
     is_rest = isinstance(node.parent, Struct) and node.parent.is_rest
     struct_name = to_pascal_case(node.parent.name)
-    ph_params = _render_signature_params(spec.placeholders)
+    ph_params = py_helpers._render_signature_params(spec.placeholders)
 
     # Pre-lines: emitted inside the method body before `client.request(...)`
     # to build local _headers/_cookies/_params dicts when dict_needs_builder().
@@ -1798,7 +1477,7 @@ def pre_request_config(node: RequestConfig, ctx: ConverterContext):
         # REST method naming: kebab-case name → snake_case, "" → "fetch"
         method_name = to_snake_case(node.name) if node.name else "fetch"
         async_method_name = f"async_{method_name}"
-        ret_type = _resolve_response_type(node)
+        ret_type = py_helpers._resolve_response_type(node)
 
         if http_client == "httpx":
             transport_exc = "httpx.HTTPError"
@@ -1819,7 +1498,7 @@ def pre_request_config(node: RequestConfig, ctx: ConverterContext):
         )
 
         if http_client == "httpx":
-            lines = _build_rest_method(
+            lines = py_helpers._build_rest_method(
                 name=method_name,
                 is_async=False,
                 client_type="httpx.Client",
@@ -1827,7 +1506,7 @@ def pre_request_config(node: RequestConfig, ctx: ConverterContext):
             )
             lines.append("")
             lines.extend(
-                _build_rest_method(
+                py_helpers._build_rest_method(
                     name=async_method_name,
                     is_async=True,
                     client_type="httpx.AsyncClient",
@@ -1836,7 +1515,7 @@ def pre_request_config(node: RequestConfig, ctx: ConverterContext):
             )
             return lines
 
-        return _build_rest_method(
+        return py_helpers._build_rest_method(
             name=method_name,
             is_async=False,
             client_type="requests.Session",
@@ -1861,7 +1540,7 @@ def pre_request_config(node: RequestConfig, ctx: ConverterContext):
     )
 
     if http_client == "httpx":
-        lines = _build_request_method(
+        lines = py_helpers._build_request_method(
             name=fetch_name,
             is_async=False,
             client_type="httpx.Client",
@@ -1869,7 +1548,7 @@ def pre_request_config(node: RequestConfig, ctx: ConverterContext):
         )
         lines.append("")
         lines.extend(
-            _build_request_method(
+            py_helpers._build_request_method(
                 name=async_fetch_name,
                 is_async=True,
                 client_type="httpx.AsyncClient",
@@ -1879,7 +1558,7 @@ def pre_request_config(node: RequestConfig, ctx: ConverterContext):
         return lines
 
     # requests (default)
-    return _build_request_method(
+    return py_helpers._build_request_method(
         name=fetch_name,
         is_async=False,
         client_type="requests.Session",
