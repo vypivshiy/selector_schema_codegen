@@ -1,6 +1,6 @@
 [project]
 name = "ssc_codegen"
-version = "0.20.0"
+version = "0.21.0"
 description = "Python-dsl code converter to html parser for web scraping "
 readme = "README.md"
 requires-python = ">=3.10"
@@ -41,6 +41,12 @@ Examples = "https://github.com/vypivshiy/selector_schema_codegen/examples"
 
 [project.scripts]
 ssc-gen = 'ssc_codegen.main:main'
+
+[project.optional-dependencies]
+repl = [
+    "httpx>=0.28.1",
+    "ipython>=8.39.0",
+]
 
 [build-system]
 requires = ["hatchling"]
