@@ -450,26 +450,162 @@ struct BookDetails type=item {
 
 ---
 
+## Converter Handler Map
+
+All AST nodes that require converter handlers. When adding a new node, add a handler for each column.
+Python converters (py_bs4, py_lxml, py_parsel, py_slax) share `PY_BASE_CONVERTER` — register once on it.
+JS and Go have separate converter instances.
+
+| AST Node | PY_BASE_CONVERTER | JS_CONVERTER | GO_GOQUERY_CONVERTER |
+|----------|-------------------|--------------|----------------------|
+| **Module layer** | | | |
+| Docstring | ✓ | ✓ | ✓ |
+| Imports | ✓ | ✓ | ✓ |
+| Utilities | ✓ | ✓ | ✓ |
+| **Type definitions** | | | |
+| JsonDef | ✓ | ✓ | ✓ |
+| JsonDefField | ✓ | ✓ | ✓ |
+| TypeDef | ✓ | ✓ | ✓ |
+| TypeDefField | ✓ | ✓ | ✓ |
+| **Struct layer** | | | |
+| Struct | ✓ | ✓ | ✓ |
+| StructDocstring | ✓ (.post) | ✓ (.post) | ✓ |
+| StartParse | ✓ + .post | ✓ + .post | ✓ + .post |
+| Init | ✓ | ✓ | ✓ |
+| InitField | ✓ | ✓ | ✓ + .post |
+| Field | ✓ | ✓ | ✓ + .post |
+| PreValidate | ✓ | ✓ | ✓ + .post |
+| SplitDoc | ✓ | ✓ | ✓ + .post |
+| Key | ✓ | ✓ | ✓ + .post |
+| Value | ✓ | ✓ | ✓ + .post |
+| TableConfig | ✓ | ✓ | ✓ + .post |
+| TableMatchKey | ✓ | ✓ | ✓ + .post |
+| TableRow | ✓ | ✓ | ✓ + .post |
+| RequestConfig | ✓ | ✓ | — |
+| ErrorResponse | ✓ | ✓ | — |
+| **Selectors** | | | |
+| CssSelect | ✓ | ✓ | ✓ |
+| CssSelectAll | ✓ | ✓ | ✓ |
+| XpathSelect | ✓ | ✓ | ✓ |
+| XpathSelectAll | ✓ | ✓ | ✓ |
+| CssRemove | ✓ | ✓ | ✓ |
+| XpathRemove | ✓ | ✓ | ✓ |
+| **Extract** | | | |
+| Text | ✓ | ✓ | ✓ |
+| Raw | ✓ | ✓ | ✓ |
+| Attr | ✓ | ✓ | ✓ |
+| **String ops** | | | |
+| Trim | ✓ | ✓ | ✓ |
+| Ltrim | ✓ | ✓ | ✓ |
+| Rtrim | ✓ | ✓ | ✓ |
+| NormalizeSpace | ✓ | ✓ | ✓ |
+| RmPrefix | ✓ | ✓ | ✓ |
+| RmSuffix | ✓ | ✓ | ✓ |
+| RmPrefixSuffix | ✓ | ✓ | ✓ |
+| Fmt | ✓ | ✓ | ✓ |
+| Repl | ✓ | ✓ | ✓ |
+| ReplMap | ✓ | ✓ | ✓ |
+| Lower | ✓ | ✓ | ✓ |
+| Upper | ✓ | ✓ | ✓ |
+| Split | ✓ | ✓ | ✓ |
+| Join | ✓ | ✓ | ✓ |
+| Unescape | ✓ | ✓ | ✓ |
+| **Regex** | | | |
+| Re | ✓ | ✓ | ✓ |
+| ReAll | ✓ | ✓ | ✓ |
+| ReSub | ✓ | ✓ | ✓ |
+| **Array** | | | |
+| Index | ✓ | ✓ | ✓ |
+| Slice | ✓ | ✓ | ✓ |
+| Len | ✓ | ✓ | ✓ |
+| Unique | ✓ | ✓ | ✓ |
+| **Cast** | | | |
+| ToInt | ✓ | ✓ | ✓ |
+| ToFloat | ✓ | ✓ | ✓ |
+| ToBool | ✓ | ✓ | ✓ |
+| Jsonify | ✓ | ✓ | ✓ |
+| Nested | ✓ | ✓ | ✓ |
+| **Control** | | | |
+| Self | ✓ | ✓ | ✓ |
+| Return | ✓ | ✓ | ✓ |
+| FallbackStart | ✓ | ✓ | ✓ |
+| FallbackEnd | ✓ | ✓ | ✓ |
+| TransformCall | ✓ | — | ✓ |
+| **Predicate containers** | | | |
+| Filter | ✓ + .post(Assert) | ✓ + .post | ✓ + .post |
+| Assert | ✓ .post | ✓ + .post | ✓ + .post |
+| Match | ✓ + .post | ✓ + .post | ✓ + .post |
+| LogicAnd | ✓ | ✓ | ✓ |
+| LogicOr | ✓ | ✓ | ✓ |
+| LogicNot | ✓ | ✓ | ✓ |
+| **Predicates** | | | |
+| PredCss | ✓ | ✓ | ✓ |
+| PredXpath | ✓ | ✓ | ✓ |
+| PredContains | ✓ | ✓ | ✓ |
+| PredEq | ✓ | ✓ | ✓ |
+| PredNe | ✓ | ✓ | ✓ |
+| PredStarts | ✓ | ✓ | ✓ |
+| PredEnds | ✓ | ✓ | ✓ |
+| PredIn | ✓ | ✓ | ✓ |
+| PredRe | ✓ | ✓ | ✓ |
+| PredReAny | ✓ | ✓ | ✓ |
+| PredReAll | ✓ | ✓ | ✓ |
+| PredHasAttr | ✓ | ✓ | ✓ |
+| PredAttrEq | ✓ | ✓ | ✓ |
+| PredAttrNe | ✓ | ✓ | ✓ |
+| PredAttrStarts | ✓ | ✓ | ✓ |
+| PredAttrEnds | ✓ | ✓ | ✓ |
+| PredAttrContains | ✓ | ✓ | ✓ |
+| PredAttrRe | ✓ | ✓ | ✓ |
+| PredTextStarts | ✓ | ✓ | ✓ |
+| PredTextEnds | ✓ | ✓ | ✓ |
+| PredTextContains | ✓ | ✓ | ✓ |
+| PredTextRe | ✓ | ✓ | ✓ |
+| PredCountEq | ✓ | ✓ | ✓ |
+| PredCountGt | ✓ | ✓ | ✓ |
+| PredCountLt | ✓ | ✓ | ✓ |
+| PredCountNe | ✓ | ✓ | ✓ |
+| PredCountGe | ✓ | ✓ | ✓ |
+| PredCountLe | ✓ | ✓ | ✓ |
+| PredCountRange | ✓ | ✓ | ✓ |
+| PredGt | ✓ | ✓ | ✓ |
+| PredLt | ✓ | ✓ | ✓ |
+| PredGe | ✓ | ✓ | ✓ |
+| PredLe | ✓ | ✓ | ✓ |
+| PredRange | ✓ | ✓ | ✓ |
+
+---
+
+## Adding a New Pipeline Operation (css, text, trim, re, to-int...)
+
+1. **AST node** — define in `ast/<category>.py` (inherit `Node`), add `accept`/`ret` VariableType defaults
+2. **Export** — re-export from `ast/__init__.py`
+3. **Parser** — register via `@PARSER.register_expression_node("name")` in `parser.py`; handler receives `KdlNode` args/props, creates AST node, appends to parent body
+4. **Linter type rule** — add accept→return mapping in `linter/type_rules.py` `TYPE_RULES` dict
+5. **Linter keyword** — add to allowlist in `linter/rule_keywords.py`
+6. **Converter handlers** — register on `PY_BASE_CONVERTER`, `JS_CONVERTER`, `GO_GOQUERY_CONVERTER` (see table above)
+
+## Adding a New Struct Directive (@check, @pre-validate, @split-doc...)
+
+1. **AST node** — define in `ast/struct.py` (inherit `Node`)
+2. **Export** — re-export from `ast/__init__.py`
+3. **Parser** — add `elif node.name == "@name":` branch in `_parse_struct()` (~line 776 in `parser.py`); use `self._parse_expressions(node.children, expr)` for pipeline body
+4. **Linter struct rule** — add to `_RESERVED_ALLOWED` dict in `linter/rules_struct.py:44` with allowed struct types (e.g. `frozenset({"item", "list", "dict", "table", "flat"})`)
+5. **Linter keyword** — add to allowlist in `linter/rule_keywords.py`
+6. **Converter handlers** — register on `PY_BASE_CONVERTER`, `JS_CONVERTER`, `GO_GOQUERY_CONVERTER` (see table above)
+
 ## Adding a New Converter Target
 
 1. Create `ssc_codegen/converters/new_target.py`
 2. Instantiate `BaseConverter()` or extend existing one
-3. Register handlers for all AST node types via `@converter.pre(NodeType)` / `@converter.post(NodeType)`
+3. Register handlers for all AST node types via `@converter.pre(NodeType)` / `@converter.post(NodeType)` (see table above)
 4. Map `VariableType` → target language types
 5. Register in `main.py` Target enum and converter mapping
 6. Add file extension mapping
-
-## Adding a New AST Node
-
-1. Define node class in appropriate `ast/*.py` file (inherit from `Node`)
-2. Export from `ast/__init__.py`
-3. Register parser handler via `register_expression_node` / `register_struct_node`
-4. Add linter rules in `linter/rules.py` or `linter/type_rules.py`
-5. Add handler in each converter
 
 ## Adding a New Linter Rule
 
 1. Define rule function in `linter/rules.py`, `rules_struct.py`, or `type_rules.py`
 2. Register with `@LINTER.register` decorator
-3. Add error code to `ErrorCode` enum if needed
+3. Add error code to `ErrorCode` enum (in `linter/types.py`) if needed
 4. Rule receives `LintContext`, uses `ctx.collector.error()` / `ctx.collector.warning()`
