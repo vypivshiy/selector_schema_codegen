@@ -2344,7 +2344,7 @@ def reg_filter_attr_ends(node: KdlNode, parent: Filter, ctx: ParseContext):
 # ASSERT SCOPE ONLY
 @PARSER.register_predicate_node("len-eq", reg_match=False, reg_filter=False)
 def reg_len_eq(node: KdlNode, parent: Filter, cx: ParseContext):
-    value = node.args[1]
+    value = node.args[0]
     prev_type = parent.ret
     return PredCountEq(
         parent=parent, accept=prev_type, ret=prev_type, value=int(value)
@@ -2354,7 +2354,7 @@ def reg_len_eq(node: KdlNode, parent: Filter, cx: ParseContext):
 # ASSERT SCOPE ONLY
 @PARSER.register_predicate_node("len-gt", reg_match=False, reg_filter=False)
 def reg_len_gt(node: KdlNode, parent: Filter, cx: ParseContext):
-    value = node.args[1]
+    value = node.args[0]
     prev_type = parent.ret
     return PredCountGt(
         parent=parent, accept=prev_type, ret=prev_type, value=int(value)
@@ -2364,7 +2364,7 @@ def reg_len_gt(node: KdlNode, parent: Filter, cx: ParseContext):
 # ASSERT SCOPE ONLY
 @PARSER.register_predicate_node("len-lt", reg_match=False, reg_filter=False)
 def reg_len_lt(node: KdlNode, parent: Filter, cx: ParseContext):
-    value = node.args[1]
+    value = node.args[0]
     prev_type = parent.ret
     return PredCountLt(
         parent=parent, accept=prev_type, ret=prev_type, value=int(value)
@@ -2374,7 +2374,7 @@ def reg_len_lt(node: KdlNode, parent: Filter, cx: ParseContext):
 # ASSERT SCOPE ONLY
 @PARSER.register_predicate_node("len-ne", reg_match=False, reg_filter=False)
 def reg_len_ne(node: KdlNode, parent: Filter, cx: ParseContext):
-    value = node.args[1]
+    value = node.args[0]
     prev_type = parent.ret
     return PredCountNe(
         parent=parent, accept=prev_type, ret=prev_type, value=int(value)
@@ -2384,7 +2384,7 @@ def reg_len_ne(node: KdlNode, parent: Filter, cx: ParseContext):
 # ASSERT SCOPE ONLY
 @PARSER.register_predicate_node("len-ge", reg_match=False, reg_filter=False)
 def reg_len_ge(node: KdlNode, parent: Filter, cx: ParseContext):
-    value = node.args[1]
+    value = node.args[0]
     prev_type = parent.ret
     return PredCountGe(
         parent=parent, accept=prev_type, ret=prev_type, value=int(value)
@@ -2394,7 +2394,7 @@ def reg_len_ge(node: KdlNode, parent: Filter, cx: ParseContext):
 # ASSERT SCOPE ONLY
 @PARSER.register_predicate_node("len-le", reg_match=False, reg_filter=False)
 def reg_len_le(node: KdlNode, parent: Filter, cx: ParseContext):
-    value = node.args[1]
+    value = node.args[0]
     prev_type = parent.ret
     return PredCountLe(
         parent=parent, accept=prev_type, ret=prev_type, value=int(value)
