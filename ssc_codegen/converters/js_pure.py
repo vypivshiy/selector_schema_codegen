@@ -662,23 +662,11 @@ def pre_struct_pre_validate(node: PreValidate, ctx: ConverterContext):
     ]
 
 
-@JS_CONVERTER(CheckMethod)
+@JS_CONVERTER(CheckMethod, post_callback="}")
 def pre_struct_check_method(node: CheckMethod, ctx: ConverterContext):
     method_name = to_camel_case(node.name)
     return [
         f"{ctx.indent}{method_name}() " + "{",
-        f"{ctx.indent}{ctx.indent_char}try " + "{",
-    ]
-
-
-@JS_CONVERTER.post(CheckMethod)
-def post_struct_check_method(node: CheckMethod, ctx: ConverterContext):
-    return [
-        f"{ctx.indent}{ctx.indent_char}{ctx.indent_char}return true;",
-        f"{ctx.indent}{ctx.indent_char}" + "} catch (e) {",
-        f"{ctx.indent}{ctx.indent_char}{ctx.indent_char}return false;",
-        f"{ctx.indent}{ctx.indent_char}" + "}",
-        f"{ctx.indent}" + "}",
     ]
 
 

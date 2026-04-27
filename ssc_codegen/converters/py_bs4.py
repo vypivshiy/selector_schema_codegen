@@ -544,18 +544,17 @@ def pre_struct_check_method(node: CheckMethod, ctx: ConverterContext):
 
     method_name = to_snake_case(node.name)
     return [
-        f"    def {method_name}(self) -> bool:",
-        "        try:",
+        f"    def {method_name}(self) -> bool:"
     ]
 
 
-@PY_BASE_CONVERTER.post(CheckMethod)
-def post_struct_check_method(node: CheckMethod, ctx: ConverterContext):
-    return [
-        "            return True",
-        "        except Exception:",
-        "            return False",
-    ]
+# @PY_BASE_CONVERTER.post(CheckMethod)
+# def post_struct_check_method(node: CheckMethod, ctx: ConverterContext):
+#     return [
+#         "            return True",
+#         "        except Exception:",
+#         "            return False",
+#     ]
 
 
 @PY_BASE_CONVERTER(SplitDoc)
