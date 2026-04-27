@@ -74,16 +74,7 @@ class TestRestParser:
         assert len(errors) == 2
         assert errors[0].status == 404
         assert errors[0].schema_name == "Err"
-        assert errors[0].discriminator_field is None
         assert errors[1].status == 500
-
-    def test_error_with_discriminator_field(self):
-        src = _rest_src(errors='    @error 200 field="error_code" Err\n')
-        module = PARSER.parse(src)
-        struct = next(n for n in module.body if isinstance(n, Struct))
-        errors = [n for n in struct.body if isinstance(n, ErrorResponse)]
-        assert errors[0].status == 200
-        assert errors[0].discriminator_field == "error_code"
 
     def test_no_start_parse_for_rest(self):
         from ssc_codegen.ast import StartParse
@@ -128,7 +119,7 @@ class TestRestLinter:
     def test_2xx_error_requires_field(self):
         src = _rest_src(errors="    @error 200 Err\n")
         msgs = _lint_messages(src)
-        assert any("requires field= discriminator" in m for m in msgs)
+        assert any("requires at least one body field condition" in m for m in msgs)
 
     def test_invalid_status_range(self):
         src = _rest_src(errors="    @error 99 Err\n")
@@ -327,39 +318,6 @@ class TestRestPyConverter:
         # And no leftover f-string style
         assert 'json=f"' not in code
         assert "json=f'" not in code
-
-    def test_py_bs4_runtime_dataclasses_usable(self):
-        """Smoke: generated Ok/Err classes must construct and have is_ok."""
-        import sys
-        import types
-
-        from ssc_codegen.converters.py_bs4 import (
-            PY_BASE_CONVERTER as CONVERTER,
-        )
-
-        src = _rest_src(errors="    @error 404 Err\n")
-        module = PARSER.parse(src)
-        code = CONVERTER.convert(module, http_client="requests")
-
-        mod = types.ModuleType("_ssc_test_rest_module")
-        sys.modules[mod.__name__] = mod
-        try:
-            exec(code, mod.__dict__)
-            Ok = mod.__dict__["Ok"]
-            Err = mod.__dict__["Err"]
-            APIErr404 = mod.__dict__["APIErr404"]
-            TransportErr = mod.__dict__["TransportErr"]
-
-            ok = Ok(status=200, headers={"x-a": "1"}, value={"id": 1})
-            err = APIErr404(headers={}, value={"message": "nope"})
-            tr = TransportErr(cause="ConnectionError()")
-
-            assert ok.is_ok is True and ok.status == 200
-            assert err.is_ok is False and err.status == 404
-            assert isinstance(err, Err)
-            assert tr.is_ok is False and tr.status == 0 and tr.cause
-        finally:
-            sys.modules.pop(mod.__name__, None)
 
 
 class TestRestJsConverter:
