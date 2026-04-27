@@ -99,10 +99,11 @@ def rest_utilities(node) -> list[str]:
 
 
 def _err_subclass_name(struct_name: str, err: ErrorResponse) -> str:
-    """Naming: `<Struct>Err<Status>[<FieldPascal>]`."""
+    """Naming: `<Struct>Err<Status>[<ConditionKeys>]`."""
     base = f"{to_pascal_case(struct_name)}Err{err.status}"
-    if err.discriminator_field:
-        base += to_pascal_case(err.discriminator_field)
+    if err.conditions:
+        for key in err.conditions:
+            base += to_pascal_case(key.replace(".", "_").replace("-", "_"))
     return base
 
 
@@ -132,6 +133,37 @@ def _rest_err_union_type(struct: Struct) -> str:
     return "Union[" + ", ".join([*variants, "UnknownErr", "None"]) + "]"
 
 
+def _resolve_path_expr(body_var: str, path: str) -> str:
+    """Generate a Python expression that navigates a dot-path into a JSON body.
+
+    Segments: digits → list index, else → dict key via .get().
+    """
+    parts = path.split(".")
+    expr = body_var
+    for seg in parts:
+        if seg.isdigit():
+            expr += f"[{seg}]"
+        else:
+            expr += f".get({seg!r})"
+    return expr
+
+
+def _condition_check_expr(err: ErrorResponse) -> str:
+    """Build a compound condition expression for an @error's field conditions."""
+    parts = []
+    for path, value in err.conditions.items():
+        lhs = _resolve_path_expr("_body", path)
+        if isinstance(value, bool):
+            parts.append(f"{lhs} == {value}")
+        elif value is None:
+            parts.append(f"{lhs} is None")
+        elif isinstance(value, (int, float)):
+            parts.append(f"{lhs} == {value}")
+        else:
+            parts.append(f"{lhs} == {value!r}")
+    return " and ".join(parts)
+
+
 def _emit_dispatch_err_py(node: Struct, ctx: ConverterContext) -> list[str]:
     """Emit the `_dispatch_err` @staticmethod lines inside a REST class.
 
@@ -143,8 +175,8 @@ def _emit_dispatch_err_py(node: Struct, ctx: ConverterContext) -> list[str]:
     i4 = i3 + ctx.indent_char
 
     errors = node.errors
-    status_errors = [e for e in errors if e.discriminator_field is None]
-    field_errors = [e for e in errors if e.discriminator_field is not None]
+    status_errors = [e for e in errors if not e.conditions]
+    field_errors = [e for e in errors if e.conditions]
     union_type = _rest_err_union_type(node)
 
     lines: list[str] = [
@@ -162,9 +194,9 @@ def _emit_dispatch_err_py(node: Struct, ctx: ConverterContext) -> list[str]:
         for err in field_errors:
             if 200 <= err.status < 300:
                 cls_name = _err_subclass_name(node.name, err)
+                cond = _condition_check_expr(err)
                 lines.append(
-                    f"{i4}if _status == {err.status} "
-                    f"and {err.discriminator_field!r} in _body:"
+                    f"{i4}if _status == {err.status} and {cond}:"
                 )
                 lines.append(
                     f"{i4}{ctx.indent_char}return {cls_name}("
@@ -185,10 +217,10 @@ def _emit_dispatch_err_py(node: Struct, ctx: ConverterContext) -> list[str]:
     for err in field_errors:
         if not (200 <= err.status < 300):
             cls_name = _err_subclass_name(node.name, err)
+            cond = _condition_check_expr(err)
             lines.append(
                 f"{i2}if _status == {err.status} "
-                f"and isinstance(_body, dict) "
-                f"and {err.discriminator_field!r} in _body:"
+                f"and isinstance(_body, dict) and {cond}:"
             )
             lines.append(
                 f"{i3}return {cls_name}(headers=_headers, value=_body)"

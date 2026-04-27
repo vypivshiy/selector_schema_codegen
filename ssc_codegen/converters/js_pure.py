@@ -51,6 +51,7 @@ from ssc_codegen.ast import (
     Init,
     InitField,
     PreValidate,
+    CheckMethod,
     SplitDoc,
     TableConfig,
     TableMatchKey,
@@ -464,9 +465,38 @@ def pre_typedef_field(node: TypeDefField, ctx: ConverterContext):
 
 def _js_err_subclass_name(struct_name: str, err) -> str:
     base = f"{to_pascal_case(struct_name)}Err{err.status}"
-    if err.discriminator_field:
-        base += to_pascal_case(err.discriminator_field)
+    if err.conditions:
+        for key in err.conditions:
+            base += to_pascal_case(key.replace(".", "_").replace("-", "_"))
     return base
+
+
+def _js_resolve_path_expr(body_var: str, path: str) -> str:
+    """Generate a JS expression navigating a dot-path into a JSON body."""
+    parts = path.split(".")
+    expr = body_var
+    for seg in parts:
+        if seg.isdigit():
+            expr += f"[{seg}]"
+        else:
+            expr += f"[{seg!r}]"
+    return expr
+
+
+def _js_condition_check_expr(err) -> str:
+    """Build a compound JS condition expression for @error field conditions."""
+    parts = []
+    for path, value in err.conditions.items():
+        lhs = _js_resolve_path_expr("_body", path)
+        if isinstance(value, bool):
+            parts.append(f"{lhs} === {str(value).lower()}")
+        elif value is None:
+            parts.append(f"{lhs} === null")
+        elif isinstance(value, (int, float)):
+            parts.append(f"{lhs} === {value}")
+        else:
+            parts.append(f"{lhs} === {value!r}")
+    return " && ".join(parts)
 
 
 def _js_err_value_type(err, struct) -> str:
@@ -527,8 +557,8 @@ def _emit_dispatch_err_js(node: Struct, ctx: ConverterContext) -> list[str]:
     i3 = i2 + ctx.indent_char  # nested (if ...)
 
     errors = node.errors
-    status_errors = [e for e in errors if e.discriminator_field is None]
-    field_errors = [e for e in errors if e.discriminator_field is not None]
+    status_errors = [e for e in errors if not e.conditions]
+    field_errors = [e for e in errors if e.conditions]
 
     lines: list[str] = [
         f"{i1}static _dispatchErr(_status, _headers, _body) {{",
@@ -536,10 +566,10 @@ def _emit_dispatch_err_js(node: Struct, ctx: ConverterContext) -> list[str]:
     ]
     for err in field_errors:
         if 200 <= err.status < 300:
-            field = err.discriminator_field
+            cond = _js_condition_check_expr(err)
             lines.append(
                 f"{i3}if (_status === {err.status} && _body "
-                f"&& _body[{field!r}] !== undefined) {{"
+                f"&& _body instanceof Object && {cond}) {{"
             )
             lines.append(
                 f"{i3}{ctx.indent_char}return {{ isOk: false, "
@@ -558,10 +588,10 @@ def _emit_dispatch_err_js(node: Struct, ctx: ConverterContext) -> list[str]:
         lines.append(f"{i2}}}")
     for err in field_errors:
         if not (200 <= err.status < 300):
-            field = err.discriminator_field
+            cond = _js_condition_check_expr(err)
             lines.append(
                 f"{i2}if (_status === {err.status} && _body "
-                f"&& _body[{field!r}] !== undefined) {{"
+                f"&& _body instanceof Object && {cond}) {{"
             )
             lines.append(
                 f"{i3}return {{ isOk: false, status: _status, "
@@ -629,6 +659,26 @@ def pre_struct_pre_validate(node: PreValidate, ctx: ConverterContext):
     # Don't create a local variable here - let the child nodes (Assert) handle it if needed
     return [
         f"{ctx.indent}_preValidate(v) " + "{",
+    ]
+
+
+@JS_CONVERTER(CheckMethod)
+def pre_struct_check_method(node: CheckMethod, ctx: ConverterContext):
+    method_name = to_camel_case(node.name)
+    return [
+        f"{ctx.indent}{method_name}() " + "{",
+        f"{ctx.indent}{ctx.indent_char}try " + "{",
+    ]
+
+
+@JS_CONVERTER.post(CheckMethod)
+def post_struct_check_method(node: CheckMethod, ctx: ConverterContext):
+    return [
+        f"{ctx.indent}{ctx.indent_char}{ctx.indent_char}return true;",
+        f"{ctx.indent}{ctx.indent_char}" + "} catch (e) {",
+        f"{ctx.indent}{ctx.indent_char}{ctx.indent_char}return false;",
+        f"{ctx.indent}{ctx.indent_char}" + "}",
+        f"{ctx.indent}" + "}",
     ]
 
 

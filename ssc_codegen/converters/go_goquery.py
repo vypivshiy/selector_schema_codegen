@@ -25,6 +25,7 @@ from ssc_codegen.ast import (
     Init,
     InitField,
     PreValidate,
+    CheckMethod,
     SplitDoc,
     TableConfig,
     TableMatchKey,
@@ -1009,6 +1010,18 @@ def pre_pre_validate(node: PreValidate, _):
 @GO_GOQUERY_CONVERTER.post(PreValidate)
 def post_pre_validate(node: PreValidate, _):
     return ["}"]
+
+
+@GO_GOQUERY_CONVERTER(CheckMethod)
+def pre_check_method(node: CheckMethod, _):
+    struct_name = to_pascal_case(node.parent.name)
+    recv = to_camel_case(struct_name)
+    return [f"func ({recv} *{struct_name}) {to_camel_case(node.name)}() bool {{", "\tdefer func() { recover() }()"]
+
+
+@GO_GOQUERY_CONVERTER.post(CheckMethod)
+def post_check_method(node: CheckMethod, _):
+    return ["\treturn true", "}"]
 
 
 @GO_GOQUERY_CONVERTER(SplitDoc)

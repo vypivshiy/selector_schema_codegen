@@ -1,6 +1,7 @@
 from __future__ import annotations
 import re as _re
 from dataclasses import dataclass, field
+from typing import Any
 from typing import cast
 
 from .base import Node
@@ -117,6 +118,20 @@ class PreValidate(Node):
 
     accept: VariableType = field(default=VariableType.DOCUMENT)
     ret: VariableType = field(default=VariableType.DOCUMENT)
+
+
+@dataclass
+class CheckMethod(Node):
+    """
+    Boolean check method on the parsed class.
+    DSL: @check <name> { pipeline ... }
+    Runs a pipeline on the document and returns True on success, False on failure.
+    Called manually by the user before parse().
+    """
+
+    name: str = ""
+    accept: VariableType = field(default=VariableType.DOCUMENT)
+    ret: VariableType = field(default=VariableType.BOOL)
 
 
 @dataclass
@@ -276,18 +291,18 @@ class RequestConfig(Node):
 class ErrorResponse(Node):
     """
     Error response mapping for type=rest struct.
-    DSL: @error <status> [field="<name>"] <JsonSchema>
+    DSL: @error <status> <SchemaName> [field=value ...]
 
     status: HTTP status code [100..599].
     schema_name: json schema reference for deserialised error body.
-    discriminator_field: optional body field name. When set, the error triggers
-        on 2xx responses where <field> is present in the parsed JSON body
-        (used for APIs that return 200 + error payload).
+    conditions: field=value pairs checked against the parsed JSON body.
+        Keys are dot-paths (e.g. "response.success", "data.0.type").
+        When non-empty, the error triggers on matching status + all conditions.
     """
 
     status: int = 0
     schema_name: str = ""
-    discriminator_field: str | None = None
+    conditions: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

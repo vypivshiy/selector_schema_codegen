@@ -37,6 +37,7 @@ from ssc_codegen.ast import (
     Init,
     InitField,
     PreValidate,
+    CheckMethod,
     SplitDoc,
     TableConfig,
     TableMatchKey,
@@ -534,6 +535,26 @@ def pre_struct_pre_validate(node: PreValidate, ctx: ConverterContext):
     # just validate, not modify document
     return [
         "    def _pre_validate(self, v: Union[Tag, BeautifulSoup]) -> None:"
+    ]
+
+
+@PY_BASE_CONVERTER(CheckMethod)
+def pre_struct_check_method(node: CheckMethod, ctx: ConverterContext):
+    from ssc_codegen.converters.helpers import to_snake_case
+
+    method_name = to_snake_case(node.name)
+    return [
+        f"    def {method_name}(self) -> bool:",
+        "        try:",
+    ]
+
+
+@PY_BASE_CONVERTER.post(CheckMethod)
+def post_struct_check_method(node: CheckMethod, ctx: ConverterContext):
+    return [
+        "            return True",
+        "        except Exception:",
+        "            return False",
     ]
 
 

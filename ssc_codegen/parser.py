@@ -56,6 +56,7 @@ from ssc_codegen.ast import (
 # stuct layer
 from ssc_codegen.ast import (
     PreValidate,
+    CheckMethod,
     SplitDoc,
     TableConfig,
     TableMatchKey,
@@ -461,6 +462,27 @@ class AstParser:
                     ret_type = VariableType.JSON
             # second argument is optional alias (original JSON key)
             alias = str(node.args[1]) if len(node.args) > 1 else ""
+            # scan remaining args for @modifiers (@optional, @missing, @skip)
+            skip = False
+            may_miss = False
+            for arg in node.args[2:]:
+                arg_s = str(arg)
+                if arg_s == "@skip":
+                    skip = True
+                elif arg_s == "@missing":
+                    may_miss = True
+                elif arg_s == "@optional":
+                    is_optional = True
+            # if alias was actually an @modifier, correct alias
+            if alias.startswith("@"):
+                if alias == "@skip":
+                    skip = True
+                elif alias == "@missing":
+                    may_miss = True
+                elif alias == "@optional":
+                    is_optional = True
+                alias = ""
+            doc = str(node.properties.get("doc", ""))
             jf = JsonDefField(
                 parent=parent,
                 ret=ret_type,
@@ -469,15 +491,20 @@ class AstParser:
                 is_array=is_array,
                 ref_name=ref_name,
                 alias=alias,
+                skip=skip,
+                may_miss=may_miss,
+                doc=doc,
             )
             logger.debug(
-                "  json field %r: ret=%s, optional=%s, array=%s%s%s",
+                "  json field %r: ret=%s, optional=%s, array=%s%s%s%s%s",
                 name,
                 ret_type,
                 is_optional,
                 is_array,
                 f", ref={ref_name!r}" if ref_name else "",
                 f", alias={alias!r}" if alias else "",
+                ", skip" if skip else "",
+                ", miss" if may_miss else "",
             )
             parent.body.append(jf)
 
@@ -777,6 +804,15 @@ class AstParser:
                 expr = PreValidate(parent=parent)
                 self._parse_expressions(node.children, expr)
                 parent.body.append(expr)
+            elif node.name == "@check":
+                if not node.args:
+                    raise ParseError(
+                        "@check requires a name: @check <name> { ... }"
+                    )
+                check_name = str(node.args[0])
+                expr = CheckMethod(parent=parent, name=check_name)
+                self._parse_expressions(node.children, expr)
+                parent.body.append(expr)
             elif node.name == "@split-doc":
                 expr = SplitDoc(parent=parent)
                 self._parse_expressions(node.children, expr)
@@ -836,7 +872,7 @@ class AstParser:
                 if not node.args:
                     raise ParseError(
                         "@error requires status and schema name: "
-                        '@error <status> [field="..."] <Schema>'
+                        "@error <status> <Schema> [field=value ...]"
                     )
                 if len(node.args) < 2:
                     raise ParseError(
@@ -852,23 +888,25 @@ class AstParser:
                 schema_name = str(
                     self.ctx.property_defines.get(node.args[1], node.args[1])
                 )
-                field_prop = node.properties.get("field", None)
-                if field_prop is not None:
-                    field_prop = str(
-                        self.ctx.property_defines.get(field_prop, field_prop)
+                conditions: dict[str, Any] = {}
+                for k, v in node.properties.items():
+                    key = str(
+                        self.ctx.property_defines.get(k, k)
                     )
+                    val = self.ctx.property_defines.get(v, v)
+                    conditions[key] = val
                 err = ErrorResponse(
                     parent=parent,
                     status=status_int,
                     schema_name=schema_name,
-                    discriminator_field=field_prop,
+                    conditions=conditions,
                 )
                 parent.body.append(err)
                 logger.debug(
-                    "  @error: status=%d schema=%r field=%r",
+                    "  @error: status=%d schema=%r conditions=%r",
                     status_int,
                     schema_name,
-                    field_prop,
+                    conditions,
                 )
             else:
                 if parent.struct_type == StructType.TABLE:
@@ -1310,6 +1348,24 @@ _FLOAT_RE = _re.compile(
 )
 
 
+_DEFINE_REF_RE = _re.compile(r"\{\{([A-Za-z][A-Za-z0-9_-]*)\}\}")
+
+
+def _resolve_define_references(value: str, ctx: ParseContext) -> str:
+    """Replace {{NAME}} in a scalar define value with previously-defined values."""
+
+    def _replacer(m: _re.Match) -> str:
+        name = m.group(1)
+        resolved = ctx.property_defines.get(name)
+        if resolved is None:
+            raise ParseError(
+                f"define references undefined name {name!r}"
+            )
+        return str(resolved)
+
+    return _DEFINE_REF_RE.sub(_replacer, value)
+
+
 # contexts
 @PARSER.register_module_context("define")
 def reg_define(node: KdlNode, ctx: ParseContext):
@@ -1322,7 +1378,10 @@ def reg_define(node: KdlNode, ctx: ParseContext):
         )
     else:
         pair = list(node.properties.items())[0]
-        ctx.property_defines[pair[0]] = pair[1]
+        value = pair[1]
+        if isinstance(value, str):
+            value = _resolve_define_references(value, ctx)
+        ctx.property_defines[pair[0]] = value
         logger.debug("define: property %r = %r", pair[0], pair[1])
 
 
@@ -1428,7 +1487,8 @@ def reg_module_struct(node: KdlNode, parent: Module, _: ParseContext):
 def reg_module_json(node: KdlNode, parent: Module, _: ParseContext):
     name = node.args[0]
     is_array = node.properties.get("array", False)
-    return JsonDef(parent=parent, name=name, is_array=is_array)
+    path = str(node.properties.get("path", ""))
+    return JsonDef(parent=parent, name=name, is_array=is_array, path=path)
 
 
 # expressions layer

@@ -25,6 +25,7 @@ from .struct import (
     Struct,
     StructDocstring,
     PreValidate,
+    CheckMethod,
     Init,
     InitField,
     SplitDoc,
@@ -134,7 +135,7 @@ __all__ = [
     # jsondef
     "JsonDef", "JsonDefField",
     # struct
-    "Struct", "StructDocstring", "PreValidate",
+    "Struct", "StructDocstring", "PreValidate", "CheckMethod",
     "Init", "InitField", "SplitDoc",
     "Key", "Value",
     "TableConfig", "TableRow", "TableMatchKey",

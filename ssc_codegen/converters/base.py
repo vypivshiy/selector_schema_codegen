@@ -9,6 +9,7 @@ from ssc_codegen.ast import LogicNot, LogicAnd, LogicOr
 from ssc_codegen.ast import JsonDef, TypeDef, Struct, Init
 from ssc_codegen.ast import (
     PreValidate,
+    CheckMethod,
     Field,
     InitField,
     SplitDoc,
@@ -64,6 +65,7 @@ _PIPELINE_NODES = (
     Field,
     InitField,
     PreValidate,
+    CheckMethod,
     SplitDoc,
     Key,
     Value,

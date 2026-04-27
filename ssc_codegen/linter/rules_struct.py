@@ -45,6 +45,7 @@ _RESERVED_ALLOWED: dict[str, frozenset[str] | None] = {
     "@request": None,
     "@doc": None,
     "@pre-validate": frozenset({"item", "list", "dict", "table", "flat"}),
+    "@check": frozenset({"item", "list", "dict", "table", "flat"}),
     "@init": frozenset({"item", "list", "dict", "table", "flat"}),
     "@split-doc": frozenset({"list", "dict"}),  # dict can also use @split-doc
     "@key": frozenset({"dict"}),
