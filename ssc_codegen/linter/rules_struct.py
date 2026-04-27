@@ -8,12 +8,13 @@ inside a struct field list, or inside a field pipeline.
 from __future__ import annotations
 
 import difflib
+from typing import Callable
 
 from ssc_codegen.linter._kdl_lang import Node
 
 from ssc_codegen.linter.base import LINTER, LintContext
 from ssc_codegen.linter.types import ErrorCode, DefineKind
-from ssc_codegen.linter.type_rules import check_pipeline_types, _parse_vt
+from ssc_codegen.linter.type_rules import check_pipeline_types
 from ssc_codegen.ast.types import VariableType as VT
 from ssc_codegen.linter.type_rules import PIPELINE_TYPE_RULES
 from ssc_codegen.ast.struct import (
@@ -66,22 +67,24 @@ _FIELD_SNIPPET: dict[str, str] = {
     "@match": '@match { css "..." }',
 }
 
-# all valid pipeline operation names
-_KNOWN_OPS: frozenset[str] = frozenset(PIPELINE_TYPE_RULES.keys()) | frozenset(
+# ops not tracked in PIPELINE_TYPE_RULES (type-transparent or handled specially)
+_EXTRA_PIPELINE_OPS: frozenset[str] = frozenset(
     {
-        # transform call (pipeline op — references a module-level transform)
         "transform",
-        # control
         "filter",
         "assert",
         "match",
         "fallback",
         "self",
-        # logic
         "not",
         "and",
         "or",
-        # predicate ops
+    }
+)
+
+# predicate/assert-only ops (no type signatures)
+_PREDICATE_OPS: frozenset[str] = frozenset(
+    {
         "eq",
         "ne",
         "starts",
@@ -112,6 +115,11 @@ _KNOWN_OPS: frozenset[str] = frozenset(PIPELINE_TYPE_RULES.keys()) | frozenset(
         "ge",
         "le",
     }
+)
+
+# all valid pipeline operation names
+_KNOWN_OPS: frozenset[str] = (
+    frozenset(PIPELINE_TYPE_RULES.keys()) | _EXTRA_PIPELINE_OPS | _PREDICATE_OPS
 )
 
 
@@ -534,9 +542,16 @@ def _is_path_span(raw: str, start: int, end: int) -> bool:
 
 
 def _check_rest_errors(fields: list, ctx: LintContext) -> None:
-    """Validate @error directives inside type=rest struct."""
+    """Validate @error directives inside type=rest struct.
+
+    Syntax: @error <status_code> <SchemaName> [key=value ...]
+    - key=value are body field conditions (multiple = AND)
+    - Dot-notation for nested: error.success=#false, data.0.type="error"
+    - No properties = status-only check
+    - 2xx status requires at least one condition
+    """
     error_nodes = [f for f in fields if ctx.node_name(f) == "@error"]
-    seen: dict[tuple[int, str | None], object] = {}
+    seen: dict[tuple[int, frozenset[tuple[str, str]]], object] = {}
     for node in error_nodes:
         args = ctx.get_args(node)
         if len(args) < 1:
@@ -544,7 +559,7 @@ def _check_rest_errors(fields: list, ctx: LintContext) -> None:
                 node,
                 ErrorCode.MISSING_ARGUMENT,
                 message="'@error' requires status code and schema name",
-                hint='example: @error 404 ApiError  or  @error 200 field="err" ApiError',
+                hint="example: @error 404 ApiError  or  @error 200 success=#false ErrSchema",
             )
             continue
         status_raw = args[0]
@@ -562,7 +577,7 @@ def _check_rest_errors(fields: list, ctx: LintContext) -> None:
             ctx.error(
                 node,
                 ErrorCode.MISSING_ARGUMENT,
-                message=(f"'@error' status {status} out of range [100..599]"),
+                message=f"'@error' status {status} out of range [100..599]",
                 hint="HTTP status codes are 3-digit integers in [100..599]",
             )
             continue
@@ -575,52 +590,201 @@ def _check_rest_errors(fields: list, ctx: LintContext) -> None:
             )
             continue
 
-        field_prop = ctx.get_prop(node, "field")
-        if field_prop is not None:
-            field_str = str(field_prop).strip()
-            if not field_str:
-                ctx.error(
-                    node,
-                    ErrorCode.MISSING_ARGUMENT,
-                    message="'@error' field= must be a non-empty string",
-                    hint='example: @error 200 field="error_code" ApiError',
-                )
-                continue
-            field_key: str | None = field_str
-        else:
-            field_key = None
+        # collect all properties as conditions (key=value pairs)
+        conditions = _collect_error_conditions(node, ctx)
 
-        if 200 <= status < 300 and field_key is None:
+        if 200 <= status < 300 and not conditions:
             ctx.error(
                 node,
                 ErrorCode.MISSING_ARGUMENT,
                 message=(
-                    f"'@error' on 2xx status {status} requires field= "
-                    "discriminator"
+                    f"'@error' on 2xx status {status} requires at least one "
+                    "body field condition"
                 ),
                 hint=(
-                    "without field=, every 2xx response would be treated "
-                    'as an error; add field="<body-field>" to disambiguate'
+                    "without conditions, every 2xx response would be treated "
+                    "as an error; add field=value to disambiguate\n"
+                    f"example: @error {status} {args[1]} success=#false"
                 ),
             )
             continue
 
-        key = (status, field_key)
+        key = (status, frozenset(conditions.items()))
         if key in seen:
+            cond_str = (
+                " ".join(f"{k}={v}" for k, v in sorted(conditions.items()))
+                if conditions
+                else "(status-only)"
+            )
             ctx.error(
                 node,
                 ErrorCode.MISSING_ARGUMENT,
-                message=(
-                    f"duplicate @error {status}"
-                    + (f' field="{field_key}"' if field_key else "")
-                ),
-                hint="each (status, field) pair must be unique within a struct",
+                message=f"duplicate @error {status} {cond_str}",
+                hint="each (status, conditions) combination must be unique within a struct",
             )
         else:
             seen[key] = node
 
 
+def _collect_error_conditions(node: Node, ctx: LintContext) -> dict[str, str]:
+    """Extract all key=value conditions from an @error node as a dict."""
+    conditions: dict[str, str] = {}
+    for child in node.children:
+        if child.type != "node_field":
+            continue
+        for sub in child.children:
+            if sub.type != "prop":
+                continue
+            if not sub.children:
+                continue
+            key = sub.children[0].text.decode()
+            value = ctx.navigator._extract_value(sub.children[2])
+            conditions[key] = value
+    return conditions
+
+
 # ── reserved field checks ──────────────────────────────────────────────────────
+
+
+def _check_doc_field(node: Node, field_name: str, ctx: LintContext) -> None:
+    if not ctx.get_arg(node, 0):
+        ctx.error(
+            node,
+            ErrorCode.MISSING_ARGUMENT,
+            message="'@doc' requires a description string",
+            hint='example: @doc "description of this struct"',
+        )
+
+
+def _check_request_field(node: Node, field_name: str, ctx: LintContext) -> None:
+    if not ctx.get_arg(node, 0):
+        ctx.error(
+            node,
+            ErrorCode.MISSING_ARGUMENT,
+            message="'@request' requires a raw http or POSIX cURL string",
+            hint='example: @request "curl https://httpbin.org/get"',
+            notes=[
+                "You can copy-paste cURL or raw http requests from browser devtools or sniffer"
+            ],
+        )
+
+
+def _check_error_field(node: Node, field_name: str, ctx: LintContext) -> None:
+    # detailed validation is centralised in _check_rest_errors
+    pass
+
+
+def _check_check_field(node: Node, field_name: str, ctx: LintContext) -> None:
+    sub_pipelines = ctx.get_children_nodes(node)
+    if not sub_pipelines:
+        ctx.error(
+            node,
+            ErrorCode.MISSING_ARGUMENT,
+            message="'@check' block must contain at least one named pipeline",
+            hint='@check {\n    is-cond { css ".x"; to-bool }\n}',
+            notes=[
+                "combine checks via assert { ... } blocks and guard "
+                "fallback #true / fallback #false exprs"
+            ],
+        )
+        return
+
+    for sub in sub_pipelines:
+        sub_name = ctx.node_name(sub)
+        if not sub_name:
+            continue
+        ops = ctx.get_children_nodes(sub)
+        bare = ctx.get_bare_op_container(sub)
+        if bare is not None:
+            ops = [*ops, bare]
+        if not ops:
+            continue
+        ret = check_pipeline_types(ops, ctx, start_type=VT.DOCUMENT)
+        if ret != VT.BOOL and ret != VT.AUTO:
+            ctx.error(
+                sub,
+                ErrorCode.TYPE_MISMATCH,
+                message=(
+                    f"@check '{sub_name}' pipeline returns {ret.name}, "
+                    "expected BOOL"
+                ),
+                hint="add 'to-bool' at the end, or use "
+                "'fallback #true' / 'fallback #false'",
+            )
+
+
+def _check_init_field(node: Node, field_name: str, ctx: LintContext) -> None:
+    sub_pipelines = ctx.get_children_nodes(node)
+    if not sub_pipelines:
+        ctx.error(
+            node,
+            ErrorCode.MISSING_ARGUMENT,
+            message="'@init' block must contain at least one named pipeline",
+            hint='@init {\n    my-field { css ".x"; text }\n}',
+        )
+        return
+
+    for sub in sub_pipelines:
+        sub_name = ctx.node_name(sub)
+        if not sub_name:
+            continue
+        ctx.init_fields.add(sub_name)
+        sub_ops = ctx.get_children_nodes(sub)
+
+        # Check for single-line define reference
+        if not sub_ops:
+            for child in sub.children:
+                if child.type == "node_children":
+                    identifiers = [
+                        c for c in child.children if c.type == "identifier"
+                    ]
+                    if len(identifiers) == 1:
+                        define_name = identifiers[0].text.decode()
+                        if (
+                            define_name in ctx.defines
+                            and ctx.defines[define_name].kind
+                            == DefineKind.BLOCK
+                        ):
+                            from ssc_codegen.linter.type_rules import (
+                                _get_define_ops,
+                            )
+
+                            expanded_ops = _get_define_ops(define_name, ctx)
+                            if expanded_ops:
+                                sub_ops = expanded_ops
+                    break
+
+        if sub_ops:
+            ret = check_pipeline_types(sub_ops, ctx, start_type=VT.DOCUMENT)
+            ctx.inferred_define_types[sub_name] = (VT.DOCUMENT, ret)
+
+
+def _check_default_field(node: Node, field_name: str, ctx: LintContext) -> None:
+    ops = ctx.get_children_nodes(node)
+    bare_container = ctx.get_bare_op_container(node)
+    has_bare_op = bare_container is not None
+
+    if not ops and not has_bare_op:
+        ctx.error(
+            node,
+            ErrorCode.MISSING_ARGUMENT,
+            message=f"'{field_name}' block must contain at least one operation",
+            hint=f'example: {field_name} {{ css ".item" }}',
+        )
+    else:
+        all_ops = list(ops)
+        if has_bare_op and bare_container is not None:
+            all_ops.append(bare_container)
+        check_pipeline_types(all_ops, ctx, start_type=VT.DOCUMENT)
+
+
+_RESERVED_FIELD_CHECKS: dict[str, Callable] = {
+    "@doc": _check_doc_field,
+    "@request": _check_request_field,
+    "@error": _check_error_field,
+    "@check": _check_check_field,
+    "@init": _check_init_field,
+}
 
 
 def _check_reserved_field(
@@ -639,104 +803,8 @@ def _check_reserved_field(
         )
         return
 
-    if field_name == "@doc":
-        if not ctx.get_arg(node, 0):
-            ctx.error(
-                node,
-                ErrorCode.MISSING_ARGUMENT,
-                message="'@doc' requires a description string",
-                hint='example: @doc "description of this struct"',
-            )
-        return
-
-    if field_name == "@request":
-        if not ctx.get_arg(node, 0):
-            ctx.error(
-                node,
-                ErrorCode.MISSING_ARGUMENT,
-                message="'@request' requires a raw http or POSIX cURL string",
-                hint='example: @request "curl https://httpbin.org/get"',
-                notes=[
-                    "You can copy-paste cURL or raw http requests from browser devtools or sniffer"
-                ],
-            )
-        return
-
-    if field_name == "@error":
-        # detailed validation is centralised in _check_rest_errors
-        return
-
-    if field_name == "@init":
-        sub_pipelines = ctx.get_children_nodes(node)
-        if not sub_pipelines:
-            ctx.error(
-                node,
-                ErrorCode.MISSING_ARGUMENT,
-                message="'@init' block must contain at least one named pipeline",
-                hint='@init {\n    my-field { css ".x"; text }\n}',
-            )
-        else:
-            # type-check each named sub-pipeline and cache its ret type
-            for sub in sub_pipelines:
-                sub_name = ctx.node_name(sub)
-                if not sub_name:
-                    continue
-                # Register InitField name for 'self' validation
-                ctx.init_fields.add(sub_name)
-                sub_ops = ctx.get_children_nodes(sub)
-
-                # Check for single-line define reference (e.g., { CSS-ALL-ATTRS })
-                if not sub_ops:
-                    # Look for a single identifier in node_children (define reference)
-                    for child in sub.children:
-                        if child.type == "node_children":
-                            identifiers = [
-                                c
-                                for c in child.children
-                                if c.type == "identifier"
-                            ]
-                            if len(identifiers) == 1:
-                                define_name = identifiers[0].text.decode()
-                                if (
-                                    define_name in ctx.defines
-                                    and ctx.defines[define_name].kind
-                                    == DefineKind.BLOCK
-                                ):
-                                    # Expand the define block and get its operations
-                                    from ssc_codegen.linter.type_rules import (
-                                        _get_define_ops,
-                                    )
-
-                                    expanded_ops = _get_define_ops(
-                                        define_name, ctx
-                                    )
-                                    if expanded_ops:
-                                        sub_ops = expanded_ops
-                            break
-
-                if sub_ops:
-                    ret = check_pipeline_types(
-                        sub_ops, ctx, start_type=VT.DOCUMENT
-                    )
-                    ctx.inferred_define_types[sub_name] = (VT.DOCUMENT, ret)
-        return
-
-    ops = ctx.get_children_nodes(node)
-    bare_container = ctx.get_bare_op_container(node)
-    has_bare_op = bare_container is not None
-
-    if not ops and not has_bare_op:
-        ctx.error(
-            node,
-            ErrorCode.MISSING_ARGUMENT,
-            message=f"'{field_name}' block must contain at least one operation",
-            hint=f'example: {field_name} {{ css ".item" }}',
-        )
-    else:
-        all_ops = list(ops)
-        if has_bare_op and bare_container is not None:
-            all_ops.append(bare_container)
-        check_pipeline_types(all_ops, ctx, start_type=VT.DOCUMENT)
+    checker = _RESERVED_FIELD_CHECKS.get(field_name, _check_default_field)
+    checker(node, field_name, ctx)
 
 
 # ── regular field checks ───────────────────────────────────────────────────────
@@ -834,44 +902,17 @@ def rule_define(node: Node, ctx: LintContext) -> None:
             hint="examples:\n"
             '  define MY_URL="https://example.com"\n'
             '  define EXTRACT { css "a"; attr "href" }',
+            notes=["Allow miltiple reuese scalar define:\n"
+            'define BASE-URL="example.com\n'
+            'define URL="{{BASE-URL}}/index.html"'
+            ]
         )
 
 
 # ── transform (module-level) ───────────────────────────────────────────────────
 
 
-@LINTER.rule("transform")
-def rule_transform(node: Node, ctx: LintContext) -> None:
-    """
-    Validate module-level transform definition:
-      transform NAME accept=TYPE return=TYPE { lang { import "..."; code "..." } ... }
-
-    Pipeline calls (transform <name> inside a field) are handled by type_rules
-    and have no accept=/return= props — skip them here.
-    """
-    # distinguish module-level definition from pipeline call:
-    # a definition always has accept= or return= properties; a call does not.
-    accept_str = ctx.get_prop(node, "accept")
-    ret_str = ctx.get_prop(node, "return")
-    lang_nodes = ctx.get_children_nodes(node)
-    is_definition = bool(accept_str or ret_str or lang_nodes)
-    if not is_definition:
-        # pipeline call — handled by type_rules; nothing to validate here
-        return
-
-    args = ctx.get_args(node)
-    if not args:
-        ctx.error(
-            node,
-            ErrorCode.MISSING_ARGUMENT,
-            message="'transform' requires a name",
-            hint='example: transform to-base64 accept=STRING return=STRING { py { code "..." } }',
-        )
-        return
-
-    name = args[0]
-
-    # validate accept= and return= properties
+def _validate_transform_props(node: Node, name: str, ctx: LintContext) -> None:
     accept_str = ctx.get_prop(node, "accept")
     ret_str = ctx.get_prop(node, "return")
 
@@ -905,7 +946,90 @@ def rule_transform(node: Node, ctx: LintContext) -> None:
             hint=f"valid types: {', '.join(sorted(_VALID_TRANSFORM_TYPES))}",
         )
 
-    # validate language blocks
+
+def _validate_lang_block(
+    lang_node: Node, name: str, lang: str, ctx: LintContext
+) -> None:
+    impl_nodes = ctx.get_children_nodes(lang_node)
+    has_code = False
+
+    if impl_nodes:
+        for impl_node in impl_nodes:
+            impl_name = ctx.node_name(impl_node)
+            match impl_name:
+                case "code":
+                    has_code = True
+                    if not ctx.get_args(impl_node):
+                        ctx.error(
+                            impl_node,
+                            ErrorCode.MISSING_ARGUMENT,
+                            message=f"'transform {name}' > '{lang}' > 'code' requires a string argument",
+                            hint='example: code "{{NXT}} = {{PRV}}"',
+                        )
+                case "import":
+                    if not ctx.get_args(impl_node):
+                        ctx.error(
+                            impl_node,
+                            ErrorCode.MISSING_ARGUMENT,
+                            message=f"'transform {name}' > '{lang}' > 'import' requires a string argument",
+                            hint='example: import "from base64 import b64decode"',
+                        )
+                case _:
+                    if impl_name:  # защита от пустого имени
+                        ctx.error(
+                            impl_node,
+                            ErrorCode.MISSING_ARGUMENT,
+                            message=f"'transform {name}' > '{lang}': unknown keyword '{impl_name}'",
+                            hint="only 'import' and 'code' are allowed inside language blocks",
+                        )
+    else:
+        for child in lang_node.children:
+            if child.type == "node_children":
+                bare_names = [
+                    c.text.decode()
+                    for c in child.children
+                    if c.type == "identifier"
+                ]
+                if "code" in bare_names:
+                    has_code = True
+                break
+
+    if not has_code:
+        ctx.error(
+            lang_node,
+            ErrorCode.MISSING_ARGUMENT,
+            message=f"'transform {name}' > '{lang}' has no 'code' statement",
+            hint='add: code "{{NXT}} = {{PRV}}"',
+        )
+
+
+@LINTER.rule("transform")
+def rule_transform(node: Node, ctx: LintContext) -> None:
+    """Validate module-level transform definition.
+
+    Pipeline calls (transform <name> inside a field) are handled by type_rules
+    and have no accept=/return= props — skip them here.
+    """
+    accept_str = ctx.get_prop(node, "accept")
+    ret_str = ctx.get_prop(node, "return")
+    lang_nodes = ctx.get_children_nodes(node)
+    is_definition = bool(accept_str or ret_str or lang_nodes)
+    if not is_definition:
+        return
+
+    args = ctx.get_args(node)
+    if not args:
+        ctx.error(
+            node,
+            ErrorCode.MISSING_ARGUMENT,
+            message="'transform' requires a name",
+            hint='example: transform to-base64 accept=STRING return=STRING { py { code "..." } }',
+        )
+        return
+
+    name = args[0]
+    _validate_transform_props(node, name, ctx)
+
     lang_nodes = ctx.get_children_nodes(node)
     if not lang_nodes:
         ctx.error(
@@ -918,55 +1042,5 @@ def rule_transform(node: Node, ctx: LintContext) -> None:
 
     for lang_node in lang_nodes:
         lang = ctx.node_name(lang_node)
-        if not lang:
-            continue
-        # get impl nodes: support both multiline (proper [node] children)
-        # and single-line (bare [identifier] + [node_field] directly under [node_children])
-        impl_nodes = ctx.get_children_nodes(lang_node)
-        has_code = False
-
-        if impl_nodes:
-            # multiline format: code/import are proper child nodes
-            for impl_node in impl_nodes:
-                impl_name = ctx.node_name(impl_node)
-                if impl_name == "code":
-                    has_code = True
-                    if not ctx.get_args(impl_node):
-                        ctx.error(
-                            impl_node,
-                            message=f"'transform {name}' > '{lang}' > 'code' requires a string argument",
-                            hint='example: code "{{NXT}} = {{PRV}}"',
-                        )
-                elif impl_name == "import":
-                    if not ctx.get_args(impl_node):
-                        ctx.error(
-                            impl_node,
-                            message=f"'transform {name}' > '{lang}' > 'import' requires a string argument",
-                            hint='example: import "from base64 import b64decode"',
-                        )
-                elif impl_name:
-                    ctx.error(
-                        impl_node,
-                        message=f"'transform {name}' > '{lang}': unknown keyword '{impl_name}'",
-                        hint="only 'import' and 'code' are allowed inside language blocks",
-                    )
-        else:
-            # single-line format: code/import appear as bare identifiers
-            # directly under node_children of the lang node
-            for child in lang_node.children:
-                if child.type == "node_children":
-                    bare_names = [
-                        c.text.decode()
-                        for c in child.children
-                        if c.type == "identifier"
-                    ]
-                    if "code" in bare_names:
-                        has_code = True
-                    break
-
-        if not has_code:
-            ctx.error(
-                lang_node,
-                message=f"'transform {name}' > '{lang}' has no 'code' statement",
-                hint='add: code "{{NXT}} = {{PRV}}"',
-            )
+        if lang:
+            _validate_lang_block(lang_node, name, lang, ctx)

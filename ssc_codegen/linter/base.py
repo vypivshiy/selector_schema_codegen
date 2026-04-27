@@ -12,7 +12,7 @@ from enum import Enum, auto
 import re
 
 from ssc_codegen.linter._kdl_lang import KDL_PARSER
-from ssc_codegen.linter._kdl_lang import KDL_PARSER, Node, Tree
+from ssc_codegen.linter._kdl_lang import Node, Tree
 from ssc_codegen.linter.types import (
     RawArg,
     DefineKind,

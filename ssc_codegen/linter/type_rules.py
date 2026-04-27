@@ -253,6 +253,174 @@ def _fallback_literal_type(ctx: LintContext, node: Node) -> VT | None:
     return VT.STRING
 
 
+# ── per-operation typecheckers (return updated current type) ────────────────────
+
+
+def _typecheck_fallback(node: Node, ctx: LintContext, current: VT) -> VT:
+    fb_type = _fallback_literal_type(ctx, node)
+    if fb_type is None:
+        return current
+
+    if fb_type == VT.LIST_AUTO:
+        if not _is_list_type(current) and current != VT.LIST_AUTO:
+            ctx.error(
+                node,
+                ErrorCode.TYPE_MISMATCH,
+                message=(
+                    f"'fallback {{}}' (empty list) is only valid when the "
+                    f"pipeline type is a list, got {current.name}"
+                ),
+                hint=(
+                    "use 'css-all' or 'xpath-all' to produce a list, "
+                    'or use a scalar fallback like fallback ""'
+                ),
+            )
+        return current if _is_list_type(current) else VT.LIST_AUTO
+
+    if fb_type == VT.NULL:
+        if current not in (
+            VT.STRING,
+            VT.INT,
+            VT.FLOAT,
+            VT.AUTO,
+            VT.OPT_STRING,
+            VT.OPT_INT,
+            VT.OPT_FLOAT,
+        ):
+            ctx.error(
+                node,
+                ErrorCode.TYPE_MISMATCH,
+                message=(
+                    f"'fallback #null' is only valid for STRING, INT, or FLOAT, "
+                    f"got {current.name}"
+                ),
+                hint='use a typed fallback, e.g. fallback "" or fallback 0',
+            )
+        return current.optional
+
+    # scalar fallback — must match current type
+    if not _compatible(current, fb_type) and current not in (
+        VT.AUTO,
+        VT.LIST_AUTO,
+    ):
+        ctx.error(
+            node,
+            ErrorCode.TYPE_MISMATCH,
+            message=(
+                f"'fallback' value type {fb_type.name} does not match "
+                f"pipeline type {current.name}"
+            ),
+            hint=(
+                f"use a {current.name.lower()} literal, "
+                f"or #null to make the field optional"
+            ),
+        )
+    return fb_type
+
+
+def _typecheck_transform(node: Node, ctx: LintContext, current: VT) -> VT:
+    args = ctx.get_args(node)
+    t_name = args[0] if args else None
+    if not t_name:
+        ctx.error(
+            node,
+            ErrorCode.TYPE_MISMATCH,
+            message="'transform' call requires a name argument",
+            hint="example: transform to-base64",
+        )
+        return VT.AUTO
+    t_info = ctx.transforms.get(t_name)
+    if t_info is None:
+        ctx.error(
+            node,
+            ErrorCode.TYPE_MISMATCH,
+            message=f"'transform {t_name}' is not defined",
+            hint=f"declare it at module level: transform {t_name} accept=TYPE return=TYPE {{ ... }}",
+        )
+        return VT.AUTO
+    t_accept = _parse_vt(t_info.accept)
+    t_ret = _parse_vt(t_info.ret)
+    if t_accept is not None and not _compatible(current, t_accept):
+        ctx.error(
+            node,
+            ErrorCode.TYPE_MISMATCH,
+            message=(
+                f"'transform {t_name}' expects {t_accept.name}, "
+                f"got {current.name}"
+            ),
+            hint=f"pipeline type must be {t_accept.name} before 'transform {t_name}'",
+        )
+    return t_ret if t_ret is not None else VT.AUTO
+
+
+def _typecheck_filter(node: Node, ctx: LintContext, current: VT) -> VT:
+    if not _is_list_type(current) and current not in (VT.AUTO, VT.LIST_AUTO):
+        ctx.error(
+            node,
+            ErrorCode.TYPE_MISMATCH,
+            message=f"'filter' requires a list type, got {current.name}",
+            hint=(
+                "'filter' works on LIST_DOCUMENT or LIST_STRING — "
+                "use 'css-all', 'xpath-all', 're-all', or 'split' first"
+            ),
+        )
+    return current
+
+
+def _typecheck_match(
+    node: Node, ctx: LintContext, current: VT, start_type: VT
+) -> VT:
+    if current != start_type:
+        ctx.error(
+            node,
+            ErrorCode.TYPE_MISMATCH,
+            message="'match' must be the first operation in the field pipeline",
+            hint="'match' selects a table row — place it before any other ops",
+        )
+    elif not _compatible(current, VT.DOCUMENT):
+        ctx.error(
+            node,
+            ErrorCode.TYPE_MISMATCH,
+            message=f"'match' requires DOCUMENT, got {current.name}",
+            hint="'match' is only valid in table-type struct fields",
+        )
+    return _resolve_ret("match", current)
+
+
+def _typecheck_define_or_op(
+    node: Node, ctx: LintContext, current: VT, op_name: str
+) -> VT:
+    # block define — inline expansion
+    if op_name in ctx.defines:
+        info = ctx.defines[op_name]
+        if info.kind == DefineKind.BLOCK:
+            define_ops = _get_define_ops(op_name, ctx)
+            if define_ops is None:
+                return VT.AUTO
+            return check_pipeline_types(define_ops, ctx, start_type=current)
+        # scalar define as op — already reported by wildcard rule
+        return current
+
+    # regular op
+    pairs = _OP_TYPES.get(op_name)
+    if pairs is None:
+        return VT.AUTO
+
+    accepted = [a for a, _ in pairs if a is not None]
+    if accepted and not any(_compatible(current, a) for a in accepted):
+        ctx.error(
+            node,
+            ErrorCode.TYPE_MISMATCH,
+            message=(
+                f"'{op_name}' does not accept {current.name}; "
+                f"expected {' | '.join(t.name for t in accepted)}"
+            ),
+            hint=_type_mismatch_hint(op_name, current),
+        )
+        return VT.AUTO
+    return _resolve_ret(op_name, current)
+
+
 # ── main pipeline checker ──────────────────────────────────────────────────────
 
 
@@ -265,8 +433,8 @@ def check_pipeline_types(
     Type-check a flat list of pipeline operation nodes.
     Returns the final ret type of the pipeline.
 
-    `start_type` is DOCUMENT for regular fields, or the inferred ret type
-    of the -init sub-pipeline when `self` is the first op.
+    ``start_type`` is DOCUMENT for regular fields, or the inferred ret type
+    of the @init sub-pipeline when ``self`` is the first op.
     """
     current = start_type
 
@@ -274,198 +442,21 @@ def check_pipeline_types(
         op_name = ctx.node_name(node)
         if not op_name:
             continue
-
-        # ── self ──────────────────────────────────────────────────────────────
-        if op_name == "self":
-            # accept = DOCUMENT (placeholder); actual start type is injected
-            # via start_type at call site in _check_regular_field.
-            # Here we just keep current (already set to init ret type).
-            continue
-
-        # ── fallback ──────────────────────────────────────────────────────────
-        if op_name == "fallback":
-            fb_type = _fallback_literal_type(ctx, node)
-            if fb_type is None:
-                continue
-
-            if fb_type == VT.LIST_AUTO:
-                # fallback {} — only valid when current type is a list
-                if not _is_list_type(current) and current != VT.LIST_AUTO:
-                    ctx.error(
-                        node,
-                        ErrorCode.TYPE_MISMATCH,
-                        message=(
-                            f"'fallback {{}}' (empty list) is only valid when the "
-                            f"pipeline type is a list, got {current.name}"
-                        ),
-                        hint=(
-                            "use 'css-all' or 'xpath-all' to produce a list, "
-                            'or use a scalar fallback like fallback ""'
-                        ),
-                    )
-                # ret stays as current list type (or LIST_AUTO)
-                current = current if _is_list_type(current) else VT.LIST_AUTO
-            elif fb_type == VT.NULL:
-                # #null promotes scalar to OPT_*
-                if current not in (
-                    VT.STRING,
-                    VT.INT,
-                    VT.FLOAT,
-                    VT.AUTO,
-                    VT.OPT_STRING,
-                    VT.OPT_INT,
-                    VT.OPT_FLOAT,
-                ):
-                    ctx.error(
-                        node,
-                        ErrorCode.TYPE_MISMATCH,
-                        message=(
-                            f"'fallback #null' is only valid for STRING, INT, or FLOAT, "
-                            f"got {current.name}"
-                        ),
-                        hint='use a typed fallback, e.g. fallback "" or fallback 0',
-                    )
-                current = current.optional
-            else:
-                # scalar fallback — must match current type
-                if not _compatible(current, fb_type) and current not in (
-                    VT.AUTO,
-                    VT.LIST_AUTO,
-                ):
-                    ctx.error(
-                        node,
-                        ErrorCode.TYPE_MISMATCH,
-                        message=(
-                            f"'fallback' value type {fb_type.name} does not match "
-                            f"pipeline type {current.name}"
-                        ),
-                        hint=(
-                            f"use a {current.name.lower()} literal, "
-                            f"or #null to make the field optional"
-                        ),
-                    )
-                current = fb_type
-            continue
-
-        # ── transform ─────────────────────────────────────────────────────────
-        if op_name == "transform":
-            # DSL: transform <name>  (pipeline call — look up by name)
-            args = ctx.get_args(node)
-            t_name = args[0] if args else None
-            if not t_name:
-                ctx.error(
-                    node,
-                    ErrorCode.TYPE_MISMATCH,
-                    message="'transform' call requires a name argument",
-                    hint="example: transform to-base64",
-                )
-                current = VT.AUTO
-                continue
-            t_info = ctx.transforms.get(t_name)
-            if t_info is None:
-                ctx.error(
-                    node,
-                    ErrorCode.TYPE_MISMATCH,
-                    message=f"'transform {t_name}' is not defined",
-                    hint=f"declare it at module level: transform {t_name} accept=TYPE return=TYPE {{ ... }}",
-                )
-                current = VT.AUTO
-                continue
-            t_accept = _parse_vt(t_info.accept)
-            t_ret = _parse_vt(t_info.ret)
-            if t_accept is not None and not _compatible(current, t_accept):
-                ctx.error(
-                    node,
-                    ErrorCode.TYPE_MISMATCH,
-                    message=(
-                        f"'transform {t_name}' expects {t_accept.name}, "
-                        f"got {current.name}"
-                    ),
-                    hint=f"pipeline type must be {t_accept.name} before 'transform {t_name}'",
-                )
-            current = t_ret if t_ret is not None else VT.AUTO
-            continue
-
-        # ── filter ────────────────────────────────────────────────────────────
-        if op_name == "filter":
-            if not _is_list_type(current) and current not in (
-                VT.AUTO,
-                VT.LIST_AUTO,
-            ):
-                ctx.error(
-                    node,
-                    ErrorCode.TYPE_MISMATCH,
-                    message=f"'filter' requires a list type, got {current.name}",
-                    hint="'filter' works on LIST_DOCUMENT or LIST_STRING — use 'css-all', 'xpath-all', 're-all', or 'split' first",
-                )
-            # transparent — ret = accept
-            continue
-
-        # ── assert ────────────────────────────────────────────────────────────
-        if op_name == "assert":
-            # transparent — ret = accept; predicate children checked by _walk
-            continue
-
-        # ── match ─────────────────────────────────────────────────────────────
-        if op_name == "match":
-            # match must be the first op in a table field pipeline
-            if current != start_type:
-                ctx.error(
-                    node,
-                    ErrorCode.TYPE_MISMATCH,
-                    message="'match' must be the first operation in the field pipeline",
-                    hint="'match' selects a table row — place it before any other ops",
-                )
-            elif not _compatible(current, VT.DOCUMENT):
-                ctx.error(
-                    node,
-                    ErrorCode.TYPE_MISMATCH,
-                    message=f"'match' requires DOCUMENT, got {current.name}",
-                    hint="'match' is only valid in table-type struct fields",
-                )
-            current = _resolve_ret("match", current)
-            continue
-
-        # ── block define — inline expansion ───────────────────────────────────
-        if op_name in ctx.defines:
-            info = ctx.defines[op_name]
-            if info.kind == DefineKind.BLOCK:
-                define_ops = _get_define_ops(op_name, ctx)
-                if define_ops is None:
-                    # cycle or empty — skip type checking
-                    current = VT.AUTO
-                    continue
-                # expand inline: type-check define ops starting from current type
-                current = check_pipeline_types(
-                    define_ops, ctx, start_type=current
-                )
-            # scalar define as op — already reported by wildcard rule; skip
-            continue
-
-        # ── regular op ────────────────────────────────────────────────────────
-        pairs = _OP_TYPES.get(op_name)
-        if pairs is None:
-            # unknown op — wildcard rule already reported; skip type check
-            current = VT.AUTO
-            continue
-
-        accepted = [a for a, _ in pairs if a is not None]
-        if accepted and not any(_compatible(current, a) for a in accepted):
-            ctx.error(
-                node,
-                ErrorCode.TYPE_MISMATCH,
-                message=(
-                    f"'{op_name}' does not accept {current.name}; "
-                    f"expected {' | '.join(t.name for t in accepted)}"
-                ),
-                hint=_type_mismatch_hint(op_name, current),
-            )
-            # continue with AUTO to suppress cascading errors
-            current = VT.AUTO
-            continue
-
-        current = _resolve_ret(op_name, current)
-
+        match op_name:
+            case "self":
+                pass
+            case "fallback":
+                current = _typecheck_fallback(node, ctx, current)
+            case "transform":
+                current = _typecheck_transform(node, ctx, current)
+            case "filter":
+                current = _typecheck_filter(node, ctx, current)
+            case "assert":
+                pass  # transparent — ret = accept
+            case "match":
+                current = _typecheck_match(node, ctx, current, start_type)
+            case _:
+                current = _typecheck_define_or_op(node, ctx, current, op_name)
     return current
 
 

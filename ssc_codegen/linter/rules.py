@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import ast
 import re
+from typing import Callable
 
 from ssc_codegen.linter._kdl_lang import Node
 
@@ -220,158 +221,157 @@ def _validate_xpath(node: Node, ctx: LintContext, expr: str) -> bool:
         return False
 
 
-@LINTER.rule("css", "css-all")
-def rule_css(node: Node, ctx: LintContext) -> None:
-    name = ctx.node_name(node)
-    args = ctx.get_args(node)
-    children = ctx.get_children_nodes(node)
+def _make_selector_rule(
+    validator: Callable[[Node, LintContext, str], bool],
+    *,
+    kind_label: str,
+    example_single: str,
+) -> Callable[[Node, LintContext], None]:
+    """Factory for css/css-all and xpath/xpath-all rules."""
 
-    if children and args:
-        ctx.error(
-            node,
-            ErrorCode.INVALID_ARGUMENT,
-            message=f"'{name}' — use either argument or block, not both",
-            hint=f'example: {name} ".class" or {name} {{ ".a"; ".b" }}',
+    def _selector_rule(node: Node, ctx: LintContext) -> None:
+        name = ctx.node_name(node)
+        args = ctx.get_args(node)
+        children = ctx.get_children_nodes(node)
+
+        if children and args:
+            ctx.error(
+                node,
+                ErrorCode.INVALID_ARGUMENT,
+                message=f"'{name}' — use either argument or block, not both",
+                hint=f'example: {name} "{example_single}" or '
+                f'{name} {{ "{example_single}" }}',
+            )
+            return
+
+        if children:
+            if len(children) < 2:
+                ctx.error(
+                    node,
+                    ErrorCode.MISSING_ARGUMENT,
+                    message=f"'{name}' block requires at least 2 selectors",
+                    hint=f'for a single selector use: {name} "{example_single}"',
+                )
+                return
+            for child in children:
+                selector = _decode_selector_child_name(
+                    ctx.node_name(child), ctx
+                )
+                if selector.strip() == "":
+                    ctx.error(
+                        child,
+                        ErrorCode.MISSING_ARGUMENT,
+                        message=f"'{name}' {kind_label} must not be empty",
+                        hint=f'example: {name} "{example_single}"',
+                    )
+                    continue
+                validator(child, ctx, selector)
+            return
+
+        args = _require_args_count(
+            node, ctx, exact=1, example=f'{name} "{example_single}"'
         )
-        return
-
-    if children:
-        if len(children) < 2:
+        if not args:
+            return
+        if args[0].strip() == "":
             ctx.error(
                 node,
                 ErrorCode.MISSING_ARGUMENT,
-                message=f"'{name}' block requires at least 2 selectors",
-                hint=f'for a single selector use: {name} ".my-class"',
+                message=f"'{name}' {kind_label} must not be empty",
+                hint=f'example: {name} "{example_single}"',
             )
             return
-        for child in children:
-            selector = _decode_selector_child_name(ctx.node_name(child), ctx)
-            if selector.strip() == "":
-                ctx.error(
-                    child,
-                    ErrorCode.MISSING_ARGUMENT,
-                    message=f"'{name}' CSS selector must not be empty",
-                    hint=f'example: {name} ".my-class"',
-                )
-                continue
-            _validate_css_selector(child, ctx, selector)
-        return
+        validator(node, ctx, args[0])
 
-    args = _require_args_count(
-        node, ctx, exact=1, example=f'{name} ".my-class"'
-    )
-    if not args:
-        return
-    if args[0].strip() == "":
-        ctx.error(
-            node,
-            ErrorCode.MISSING_ARGUMENT,
-            message=f"'{name}' CSS selector must not be empty",
-            hint=f'example: {name} ".my-class"',
+    return _selector_rule
+
+
+def _make_remove_selector_rule(
+    validator: Callable[[Node, LintContext, str], bool],
+    *,
+    kind_label: str,
+    example_single: str,
+) -> Callable[[Node, LintContext], None]:
+    """Factory for css-remove / xpath-remove rules."""
+
+    def _remove_rule(node: Node, ctx: LintContext) -> None:
+        name = ctx.node_name(node)
+        args = _require_args_count(
+            node, ctx, exact=1, example=f'{name} "{example_single}"'
         )
-        return
-    _validate_css_selector(node, ctx, args[0])
-
-
-@LINTER.rule("xpath", "xpath-all")
-def rule_xpath(node: Node, ctx: LintContext) -> None:
-    name = ctx.node_name(node)
-    args = ctx.get_args(node)
-    children = ctx.get_children_nodes(node)
-
-    if children and args:
-        ctx.error(
-            node,
-            ErrorCode.INVALID_ARGUMENT,
-            message=f"'{name}' — use either argument or block, not both",
-            hint=f'example: {name} "//a" or {name} {{ "//a"; "//b" }}',
-        )
-        return
-
-    if children:
-        if len(children) < 2:
+        if not args:
+            return
+        if args[0].strip() == "":
             ctx.error(
                 node,
                 ErrorCode.MISSING_ARGUMENT,
-                message=f"'{name}' block requires at least 2 selectors",
-                hint=f'for a single selector use: {name} "//div"',
+                message=f"'{name}' {kind_label} must not be empty",
+                hint=f'example: {name} "{example_single}"',
             )
             return
-        for child in children:
-            selector = _decode_selector_child_name(ctx.node_name(child), ctx)
-            if selector.strip() == "":
-                ctx.error(
-                    child,
-                    ErrorCode.MISSING_ARGUMENT,
-                    message=f"'{name}' XPath expression must not be empty",
-                    hint=f'example: {name} "//div"',
-                )
-                continue
-            _validate_xpath(child, ctx, selector)
-        return
+        validator(node, ctx, args[0])
 
-    args = _require_args_count(
-        node, ctx, exact=1, example=f"{name} \"//div[@class='item']\""
+    return _remove_rule
+
+
+rule_css = LINTER.rule("css", "css-all")(
+    _make_selector_rule(
+        _validate_css_selector,
+        kind_label="CSS selector",
+        example_single=".my-class",
     )
-    if not args:
-        return
-    if args[0].strip() == "":
-        ctx.error(
-            node,
-            ErrorCode.MISSING_ARGUMENT,
-            message=f"'{name}' XPath expression must not be empty",
-            hint=f'example: {name} "//div"',
-        )
-        return
-    _validate_xpath(node, ctx, args[0])
-
-
-@LINTER.rule("css-remove")
-def rule_css_remove(node: Node, ctx: LintContext) -> None:
-    name = ctx.node_name(node)
-    args = _require_args_count(
-        node, ctx, exact=1, example=f'{name} ".my-class"'
+)
+rule_xpath = LINTER.rule("xpath", "xpath-all")(
+    _make_selector_rule(
+        _validate_xpath,
+        kind_label="XPath expression",
+        example_single="//div",
     )
-    if not args:
-        return
-    if args[0].strip() == "":
-        ctx.error(
-            node,
-            ErrorCode.MISSING_ARGUMENT,
-            message=f"'{name}' CSS selector must not be empty",
-            hint=f'example: {name} ".my-class"',
-        )
-        return
-    _validate_css_selector(node, ctx, args[0])
-
-
-@LINTER.rule("xpath-remove")
-def rule_xpath_remove(node: Node, ctx: LintContext) -> None:
-    name = ctx.node_name(node)
-    args = _require_args_count(
-        node, ctx, exact=1, example=f"{name} \"//div[@class='item']\""
+)
+rule_css_remove = LINTER.rule("css-remove")(
+    _make_remove_selector_rule(
+        _validate_css_selector,
+        kind_label="CSS selector",
+        example_single=".my-class",
     )
-    if not args:
-        return
-    if args[0].strip() == "":
-        ctx.error(
-            node,
-            ErrorCode.MISSING_ARGUMENT,
-            message=f"'{name}' XPath expression must not be empty",
-            hint=f'example: {name} "//div"',
-        )
-        return
-    _validate_xpath(node, ctx, args[0])
+)
+rule_xpath_remove = LINTER.rule("xpath-remove")(
+    _make_remove_selector_rule(
+        _validate_xpath,
+        kind_label="XPath expression",
+        example_single="//div",
+    )
+)
 
 
 # ── extract ────────────────────────────────────────────────────────────────────
 
 
-@LINTER.rule("text", "raw")
+_NO_ARGS_OPS: tuple[str, ...] = (
+    # extract
+    "text",
+    "raw",
+    # string
+    "normalize-space",
+    "lower",
+    "upper",
+    "unescape",
+    # array
+    "first",
+    "last",
+    "len",
+    "unique",
+    # cast
+    "to-int",
+    "to-float",
+    "to-bool",
+)
+
+
+@LINTER.rule(*_NO_ARGS_OPS)
 def rule_no_args(node: Node, ctx: LintContext) -> None:
     name = ctx.node_name(node)
-    args = ctx.get_args(node)
-    if args:
+    if ctx.get_args(node):
         ctx.error(
             node,
             ErrorCode.MISSING_ARGUMENT,
@@ -388,18 +388,6 @@ def rule_attr(node: Node, ctx: LintContext) -> None:
 
 
 # ── string ─────────────────────────────────────────────────────────────────────
-
-
-@LINTER.rule("normalize-space", "lower", "upper", "unescape")
-def rule_string_no_args(node: Node, ctx: LintContext) -> None:
-    name = ctx.node_name(node)
-    if ctx.get_args(node):
-        ctx.error(
-            node,
-            ErrorCode.MISSING_ARGUMENT,
-            message=f"'{name}' does not accept arguments",
-            hint=f"remove arguments: use just '{name}'",
-        )
 
 
 @LINTER.rule("trim", "ltrim", "rtrim")
@@ -534,18 +522,6 @@ _SLICE_HINT = (
 )
 
 
-@LINTER.rule("first", "last", "len", "unique")
-def rule_array_no_args(node: Node, ctx: LintContext) -> None:
-    name = ctx.node_name(node)
-    if ctx.get_args(node):
-        ctx.error(
-            node,
-            ErrorCode.MISSING_ARGUMENT,
-            message=f"'{name}' does not accept arguments",
-            hint=f"remove arguments: use just '{name}'",
-        )
-
-
 @LINTER.rule("index")
 def rule_index(node: Node, ctx: LintContext) -> None:
     args = _require_args_count(node, ctx, exact=1, example=_INDEX_HINT)
@@ -561,18 +537,6 @@ def rule_slice(node: Node, ctx: LintContext) -> None:
 
 
 # ── cast ───────────────────────────────────────────────────────────────────────
-
-
-@LINTER.rule("to-int", "to-float", "to-bool")
-def rule_cast_no_args(node: Node, ctx: LintContext) -> None:
-    name = ctx.node_name(node)
-    if ctx.get_args(node):
-        ctx.error(
-            node,
-            ErrorCode.MISSING_ARGUMENT,
-            message=f"'{name}' does not accept arguments",
-            hint=f"remove arguments: use just '{name}'",
-        )
 
 
 @LINTER.rule("jsonify")
