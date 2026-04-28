@@ -17,6 +17,7 @@ from .parser import (
 )
 from .reader import (
     DiagnosticCollector,
+    KdlArg,
     KdlNode,
     ReadDiagnostic,
     Reader,
@@ -45,6 +46,7 @@ __all__ = [
     "Token",
     "TokenType",
     "DiagnosticCollector",
+    "KdlArg",
     "KdlNode",
     "ReadDiagnostic",
     "Reader",

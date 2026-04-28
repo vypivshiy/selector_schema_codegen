@@ -119,35 +119,52 @@ class DiagnosticCollector:
 
 
 # ---------------------------------------------------------------------------
-# KdlNode
+# KdlArg
 # ---------------------------------------------------------------------------
 
 
-def _extract_value(entry: CSTValue | CSTIdentifier) -> Any:
-    return entry.value
+@dataclass(frozen=True)
+class KdlArg:
+    value: Any
+    span: Span
+    is_identifier: bool
+
+
+# ---------------------------------------------------------------------------
+# KdlNode
+# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
 class KdlNode:
     name: str
     type_annotation: str | None
-    args: tuple[tuple[Any, Span], ...]
-    properties: MappingProxyType[str, tuple[Any, Span]]
+    args: tuple[KdlArg, ...]
+    properties: MappingProxyType[str, KdlArg]
     children: tuple[KdlNode, ...]
     span: Span
 
     @classmethod
     def from_cst(cls, node: CSTNode) -> KdlNode:
-        args: list[tuple[Any, Span]] = []
-        properties: dict[str, tuple[Any, Span]] = {}
+        args: list[KdlArg] = []
+        properties: dict[str, KdlArg] = {}
 
         for entry in node.entries:
             if isinstance(entry, CSTArgEntry):
-                args.append((_extract_value(entry.value), entry.span))
+                is_id = isinstance(entry.value, CSTIdentifier)
+                args.append(
+                    KdlArg(
+                        value=entry.value.value,
+                        span=entry.span,
+                        is_identifier=is_id,
+                    )
+                )
             elif isinstance(entry, CSTPropEntry):
-                properties[entry.key.value] = (
-                    _extract_value(entry.value),
-                    entry.span,
+                is_id = isinstance(entry.value, CSTIdentifier)
+                properties[entry.key.value] = KdlArg(
+                    value=entry.value.value,
+                    span=entry.span,
+                    is_identifier=is_id,
                 )
 
         children = tuple(cls.from_cst(c) for c in node.children)
@@ -243,8 +260,8 @@ class Reader(ABC, Generic[T_node, R]):
     def on_node(
         self,
         name: str,
-        args: tuple[tuple[Any, Span], ...],
-        properties: Mapping[str, tuple[Any, Span]],
+        args: tuple[KdlArg, ...],
+        properties: Mapping[str, KdlArg],
         children: tuple[KdlNode, ...],
         ctx: WalkContext[T_node],
     ) -> T_node: ...
@@ -392,6 +409,7 @@ def parse_into(
 
 __all__ = [
     "DiagnosticCollector",
+    "KdlArg",
     "KdlNode",
     "ReadDiagnostic",
     "Reader",

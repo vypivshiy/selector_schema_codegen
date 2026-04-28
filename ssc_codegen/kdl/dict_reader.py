@@ -5,6 +5,7 @@ from typing import Any, TypedDict
 
 from .parser import Span
 from .reader import (
+    KdlArg,
     KdlNode,
     ReadDiagnostic,
     Reader,
@@ -23,16 +24,16 @@ class DictReader(Reader[Node, list[Node]]):
     def on_node(
         self,
         name: str,
-        args: tuple[tuple[Any, Span], ...],
-        properties: Mapping[str, tuple[Any, Span]],
+        args: tuple[KdlArg, ...],
+        properties: Mapping[str, KdlArg],
         children: tuple[KdlNode, ...],
         ctx: WalkContext[Node],
     ) -> Node:
         child_nodes = ctx.walk_children()
         return Node(
             name=name,
-            args=tuple(v for v, _ in args),
-            props={k: v for k, (v, _) in properties.items()},
+            args=tuple(a.value for a in args),
+            props={k: v.value for k, v in properties.items()},
             child=child_nodes,
         )
 
