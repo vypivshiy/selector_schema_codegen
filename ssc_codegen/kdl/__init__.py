@@ -15,6 +15,18 @@ from .parser import (
     Token,
     TokenType,
 )
+from .reader import (
+    DiagnosticCollector,
+    KdlNode,
+    ReadDiagnostic,
+    Reader,
+    Severity,
+    WalkContext,
+    Walker,
+    parse_into,
+)
+
+from .dict_reader import DictReader
 
 __all__ = [
     "CSTArgEntry",
@@ -32,4 +44,13 @@ __all__ = [
     "Span",
     "Token",
     "TokenType",
+    "DiagnosticCollector",
+    "KdlNode",
+    "ReadDiagnostic",
+    "Reader",
+    "Severity",
+    "WalkContext",
+    "Walker",
+    "parse_into",
+    "DictReader"
 ]
