@@ -236,28 +236,19 @@ def _fallback_literal_type(
 ) -> VariableType | None:
     if lint.get_children_nodes(node):
         return VariableType.LIST_AUTO
-    raw_args = lint.get_raw_args(node)
+    raw_args = node.args
     if not raw_args:
         return None
     raw = raw_args[0]
     val = raw.value
-    if val in ("#true", "#false"):
+    if isinstance(val, bool):
         return VariableType.BOOL
-    if val == "#null":
+    if val is None:
         return VariableType.NULL
-    if not raw.is_identifier:
-        if "." in val or "e" in val.lower():
-            try:
-                float(val)
-                return VariableType.FLOAT
-            except ValueError:
-                return VariableType.STRING
-        try:
-            int(val)
-            return VariableType.INT
-        except ValueError:
-            pass
-        return VariableType.STRING
+    if isinstance(val, float):
+        return VariableType.FLOAT
+    if isinstance(val, int):
+        return VariableType.INT
     return VariableType.STRING
 
 
