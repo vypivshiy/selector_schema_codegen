@@ -46,7 +46,7 @@ field { css-all "selector"; filter { предикаты }; ... }
 | `text-contains <val...>` | текст элемента содержит | `text-contains "docs"` |
 | `text-starts <val...>` | текст элемента начинается с | `text-starts "Go"` |
 | `text-ends <val...>` | текст элемента заканчивается на | `text-ends "more"` |
-| `text-re <pattern>` | текст элемента по regex | `text-re #"guide\|docs"#` |
+| `text-re <pattern>` | текст элемента по regex | `text-re #"guide|docs"#` |
 | `not { ... }` | отрицание | `not { eq "hidden" }` |
 | `and { ... }` | конъюнкция | `and { starts "a"; ends "z" }` |
 | `or { ... }` | дизъюнкция | `or { eq "a"; eq "b" }` |
@@ -143,7 +143,7 @@ let v2 = v1.filter(i => (
     && [".html", "/"].some(p => i.getAttribute("href").endsWith(p))
     && new RegExp("https?://|/").test(i.getAttribute("href"))
 ));
-let v3 = v2.map(i => ["href", "data-alt"].map(a => i.getAttribute(a)).find(v => v != null));
+let v3 = v2.map(i => i.getAttribute("href"));
 ```
 
 ### Фильтрация с логическими операторами

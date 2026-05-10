@@ -11,9 +11,6 @@
 price { css ".price"; text; to-float; assert { gt 0 } }
 ```
 
-Отличие от `filter`: filter убирает неподходящие элементы из списка,
-а assert просто проверяет значение и бросает ошибку при неудаче.
-
 ## Синтаксис
 
 ```kdl
@@ -168,7 +165,7 @@ struct ProductPage {
 Python:
 
 ```python
-def _preValidate(v) {
+def _pre_validate(self, v):
     i = v
     assert (
         i.select_one(".product-card") is not None
