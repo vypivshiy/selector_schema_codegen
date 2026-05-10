@@ -10,6 +10,8 @@ from typing import Annotated, List, Optional
 import typer
 
 from ssc_codegen._logging import logger, setup_debug_logging
+from ssc_codegen.core import parse_module, format_diagnostics, ReadDiagnostic
+
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -25,6 +27,11 @@ class Target(str, enum.Enum):
     PY_SLAX = "py-slax"
     JS_PURE = "js-pure"
     GO_GOQUERY = "go-goquery"
+
+
+class FmtType(str, enum.Enum):
+    TEXT = "text"
+    JSON = "json"
 
 
 _FILE_EXTENSIONS: dict[Target, str] = {
@@ -138,9 +145,16 @@ def generate(
             ),
         ),
     ] = None,
+    fmt: Annotated[
+        FmtType,
+        typer.Option(
+            "--format",
+            "-f",
+            help="Output format: 'text' (human-readable) or 'json' (for LLM pipelines).",
+        ),
+    ] = FmtType.TEXT,
 ) -> None:
     """Compile KDL schema files into parser code for the chosen target."""
-    from ssc_codegen import parse_ast
 
     if verbose:
         setup_debug_logging()
@@ -209,24 +223,6 @@ def generate(
 
     logger.debug("total %d .kdl file(s) to process", len(kdl_files))
 
-    # Lint all files first (unless --skip-lint)
-    if not skip_lint:
-        from ssc_codegen.linter import lint_file
-
-        lint_errors_found = False
-        for kdl_file in kdl_files:
-            result = lint_file(kdl_file)
-            if result.has_errors():
-                lint_errors_found = True
-                typer.echo(f"\n{result.format()}", err=True)
-
-        if lint_errors_found:
-            typer.echo(
-                "\nLinting failed. Use --skip-lint to bypass linter.", err=True
-            )
-            raise typer.Exit(code=1)
-
-        logger.debug("linting passed for all files")
     if isinstance(output, str):
         output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
@@ -243,7 +239,11 @@ def generate(
         out_file = output / kdl_file.with_suffix(ext).name
         logger.debug("processing: %s -> %s", kdl_file, out_file)
         try:
-            ast = parse_ast(path=str(kdl_file), css_to_xpath=css_to_xpath)
+            ast, err = parse_module(kdl_file.read_text(), source_path=kdl_file)
+            if skip_lint:
+                pass
+            else:
+                errors.extend(format_diagnostics(err, fmt=fmt.value))
             logger.debug("AST built for %s", kdl_file)
 
             if converter.has_support_files:
@@ -286,13 +286,13 @@ def check(
         ),
     ],
     fmt: Annotated[
-        str,
+        FmtType,
         typer.Option(
             "--format",
             "-f",
             help="Output format: 'text' (human-readable) or 'json' (for LLM pipelines).",
         ),
-    ] = "text",
+    ] = FmtType.TEXT,
     verbose: Annotated[
         bool,
         typer.Option(
@@ -303,7 +303,6 @@ def check(
     ] = False,
 ) -> None:
     """Check KDL schema files for errors without generating code."""
-    from ssc_codegen.linter import lint_file
 
     if verbose:
         setup_debug_logging()
@@ -336,38 +335,29 @@ def check(
     logger.debug("total %d .kdl file(s) to check", len(kdl_files))
 
     # Check all files
-    all_results = []
+    all_results: list[ReadDiagnostic] = []
     total_errors = 0
 
     for kdl_file in kdl_files:
-        result = lint_file(kdl_file)
-        all_results.append(result)
+        _, errs = parse_module(kdl_file.read_text(), source_path=kdl_file)
+        all_results.extend(errs)
 
-        if result.has_errors():
-            total_errors += result.error_count
-            if fmt == "text":
-                typer.echo(result.format(style="text"), err=True)
+        if errs:
+            total_errors += len(errs)
+            # TODO: json output
+            for e in format_diagnostics(errs, fmt=fmt.value):
+                typer.echo(e, err=True)
 
     if total_errors > 0:
-        if fmt == "text":
+        if fmt == FmtType.TEXT:
             typer.echo(
                 f"\nFound {total_errors} error(s) in {len(kdl_files)} file(s).",
                 err=True,
             )
-        else:
-            # JSON: output all errors from all files
-            import json
-
-            all_errors_json = []
-            for result in all_results:
-                if result.has_errors():
-                    all_errors_json.extend([e.to_dict() for e in result.errors])
-            typer.echo(json.dumps(all_errors_json, indent=2))
         raise typer.Exit(code=1)
-
     # Success
-    if fmt == "text":
-        typer.echo(f"✓ All {len(kdl_files)} file(s) passed linting.")
+    if fmt == FmtType.TEXT:
+        typer.echo(f"All {len(kdl_files)} file(s) passed linting.")
     else:
         # JSON: empty array means no errors
         typer.echo("[]")
@@ -426,6 +416,14 @@ def run(
             help="Convert CSS selectors to XPath before execution.",
         ),
     ] = False,
+    fmt: Annotated[
+        FmtType,
+        typer.Option(
+            "--format",
+            "-f",
+            help="Output format: 'text' (human-readable) or 'json' (for LLM pipelines).",
+        ),
+    ] = FmtType.TEXT,
 ) -> None:
     """Run a KDL schema struct against HTML input and output JSON.
 
@@ -438,7 +436,6 @@ def run(
     import json
     import sys
 
-    from ssc_codegen import parse_ast
     from ssc_codegen.ast import Struct
     from ssc_codegen.converters.helpers import to_pascal_case
 
@@ -461,7 +458,12 @@ def run(
 
     # Build AST
     try:
-        module_ast = parse_ast(path=str(kdl_path), css_to_xpath=css_to_xpath)
+        module_ast, errs = parse_module(kdl_path.read_text(), source_path=kdl_path)
+        if errs:
+            for e in format_diagnostics(errs, fmt=fmt.value):
+                typer.echo(e, err=True)
+                raise typer.Exit(1)
+
     except Exception as exc:
         if verbose:
             typer.echo(traceback.format_exc(), err=True)
@@ -658,228 +660,6 @@ def health(
 
     if result.has_failures():
         raise typer.Exit(code=1)
-
-
-@app.command()
-def shell(
-    schema: Annotated[
-        str | None,
-        typer.Argument(
-            help="Schema target in format 'path/to/schema.kdl:StructName'. "
-            "If omitted, starts empty REPL.",
-        ),
-    ] = None,
-    target: Annotated[
-        _PyTarget,
-        typer.Option(
-            "--target",
-            "-t",
-            help="Python backend for the REPL.",
-            case_sensitive=False,
-        ),
-    ] = _PyTarget.PY_BS4,
-    input_file: Annotated[
-        Path | None,
-        typer.Option(
-            "--input",
-            "-i",
-            help="HTML input file.",
-            exists=True,
-            file_okay=True,
-            dir_okay=False,
-            readable=True,
-        ),
-    ] = None,
-    url: Annotated[
-        str | None,
-        typer.Option(
-            "--url",
-            help="URL to fetch HTML from.",
-        ),
-    ] = None,
-    http_client: Annotated[
-        str | None,
-        typer.Option(
-            "--http-client",
-            help="HTTP client for REST structs: httpx (default) or requests.",
-        ),
-    ] = None,
-    verbose: Annotated[
-        bool,
-        typer.Option(
-            "--verbose",
-            "-v",
-            help="Print generated code and enable DEBUG logging.",
-        ),
-    ] = False,
-    css_to_xpath: Annotated[
-        bool,
-        typer.Option(
-            "--css-to-xpath",
-            help="Convert CSS selectors to XPath.",
-        ),
-    ] = False,
-) -> None:
-    """Launch an interactive REPL shell for testing KDL schema parsers.
-
-    \b
-    Examples:
-        ssc-gen shell examples/booksToScrape.kdl:Book --url https://books.toscrape.com/
-        ssc-gen shell schema.kdl:Product -i page.html -t py-lxml
-        ssc-gen shell examples/restApiLike.kdl:DummyJsonApi --http-client httpx
-        ssc-gen shell
-    """
-    from ssc_codegen.repl import Repl, ReplState
-
-    if verbose:
-        setup_debug_logging()
-
-    state = ReplState(
-        target=target.value,
-        http_client=http_client or "httpx",
-        verbose=verbose,
-        css_to_xpath=css_to_xpath,
-    )
-
-    if input_file is not None:
-        state.html = input_file.read_text(encoding="utf-8")
-
-    if schema is not None:
-        if ":" in schema:
-            path_part, struct_name = schema.rsplit(":", 1)
-            kdl_path = Path(path_part)
-        else:
-            kdl_path = Path(schema)
-            struct_name = ""
-        if not kdl_path.is_file():
-            typer.echo(f"ERROR: file not found: {kdl_path}", err=True)
-            raise typer.Exit(code=1)
-        from ssc_codegen import parse_ast
-        from ssc_codegen.ast import Struct as StructNode
-
-        try:
-            state.module_ast = parse_ast(
-                path=str(kdl_path), css_to_xpath=css_to_xpath
-            )
-        except Exception as exc:
-            if verbose:
-                typer.echo(traceback.format_exc(), err=True)
-            else:
-                typer.echo(
-                    f"ERROR: failed to parse {kdl_path}: {exc}", err=True
-                )
-            raise typer.Exit(code=1)
-
-        state.schema_path = kdl_path
-        state.kdl_source = kdl_path.read_text(encoding="utf-8-sig")
-
-        structs = [
-            n for n in state.module_ast.body if isinstance(n, StructNode)
-        ]
-        if not struct_name:
-            if structs:
-                struct_name = structs[0].name
-        struct_names = [s.name for s in structs]
-        if struct_name and struct_name not in struct_names:
-            typer.echo(
-                f"ERROR: struct '{struct_name}' not found. "
-                f"Available: {', '.join(struct_names)}",
-                err=True,
-            )
-            raise typer.Exit(code=1)
-        state.struct_name = struct_name
-
-    if url is not None and not state.html:
-        try:
-            from ssc_codegen.repl import _fetch_html
-
-            state.html = _fetch_html(url)
-        except Exception as exc:
-            typer.echo(f"ERROR fetching URL: {exc}", err=True)
-            raise typer.Exit(code=1)
-
-    repl = Repl(state)
-    repl.cmdloop()
-
-
-@app.command(
-    name="openapi-to-ssc",
-    help="Experimental converter swagger openapi 3.0 to kdl DSL",
-)
-def openapi_to_ssc(
-    spec: Annotated[
-        Path,
-        typer.Argument(
-            help="OpenAPI/Swagger spec file (YAML or JSON).",
-            exists=True,
-            file_okay=True,
-            dir_okay=False,
-            readable=True,
-        ),
-    ],
-    output: Annotated[
-        Path,
-        typer.Option(
-            "--output",
-            "-o",
-            help="Output .kdl file path.",
-            file_okay=True,
-            dir_okay=False,
-            writable=True,
-        ),
-    ],
-    endpoints: Annotated[
-        Optional[str],
-        typer.Option(
-            "--endpoints",
-            "-e",
-            help="Comma-separated endpoint filter: 'GET /pets,POST /pets'.",
-        ),
-    ] = None,
-    skip_lint: Annotated[
-        bool,
-        typer.Option(
-            "--skip-lint",
-            help="Skip lint validation of generated .kdl.",
-        ),
-    ] = False,
-) -> None:
-    """Convert an OpenAPI/Swagger spec (YAML/JSON) to a KDL REST schema file."""
-    from ssc_codegen.openapi import convert_openapi
-
-    endpoint_filter: list[tuple[str, str]] | None = None
-    if endpoints:
-        endpoint_filter = []
-        for pair in endpoints.split(","):
-            parts = pair.strip().split(None, 1)
-            if len(parts) == 2:
-                endpoint_filter.append((parts[0].upper(), parts[1]))
-            else:
-                typer.echo(
-                    f"WARNING: invalid endpoint filter '{pair}', skipping",
-                    err=True,
-                )
-
-    try:
-        text = convert_openapi(
-            spec_path=spec,
-            output_path=output,
-            endpoints=endpoint_filter,
-        )
-    except Exception as exc:
-        typer.echo(f"ERROR: {exc}", err=True)
-        raise typer.Exit(code=1)
-
-    typer.echo(f"  {spec} -> {output}")
-
-    if not skip_lint:
-        from ssc_codegen.linter import lint_file
-
-        result = lint_file(output)
-        if result.has_errors():
-            typer.echo(result.format(style="text"), err=True)
-            raise typer.Exit(code=1)
-        typer.echo("  Lint passed.")
 
 
 def main() -> None:

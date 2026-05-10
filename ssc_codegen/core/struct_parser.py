@@ -180,38 +180,24 @@ def parse_json_fields(nodes: list[KdlNode], parent: JsonDef) -> None:
         match type_:
             case "str":
                 ret_type = (
-                    VariableType.OPT_STRING
-                    if is_optional
-                    else (
-                        VariableType.LIST_STRING
-                        if is_array
-                        else VariableType.STRING
-                    )
+                    VariableType.LIST_STRING
+                    if is_array
+                    else VariableType.STRING
                 )
             case "int":
                 ret_type = (
-                    VariableType.OPT_INT
-                    if is_optional
-                    else (
-                        VariableType.LIST_INT if is_array else VariableType.INT
-                    )
+                    VariableType.LIST_INT if is_array else VariableType.INT
                 )
             case "float":
                 ret_type = (
-                    VariableType.OPT_FLOAT
-                    if is_optional
-                    else (
-                        VariableType.LIST_FLOAT
-                        if is_array
-                        else VariableType.FLOAT
-                    )
+                    VariableType.LIST_FLOAT if is_array else VariableType.FLOAT
                 )
             case "bool":
                 ret_type = VariableType.BOOL
             case "null":
                 ret_type = VariableType.NULL
             case _:
-                ref_name = str(node.args[0].value) if node.args else ""
+                ref_name = type_
                 if ref_name.startswith("(array)"):
                     ref_name = ref_name.removeprefix("(array)")
                     is_array = True

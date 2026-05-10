@@ -412,6 +412,8 @@ def pre_json_struct(node: JsonDef, _: ConverterContext):
 
 @JS_CONVERTER(JsonDefField)
 def pre_json_field(node: JsonDefField, ctx: ConverterContext):
+    if node.skip:
+        return None
     name = node.alias if node.alias else node.name
     type_ = JS_TYPES.get(node.ret, "?")
     if node.ret == VariableType.JSON and node.ref_name:
@@ -419,6 +421,8 @@ def pre_json_field(node: JsonDefField, ctx: ConverterContext):
         type_ = type_.format(type_name)
         if node.is_array:
             type_ = f"Array<{type_}>"
+    if node.is_optional or node.may_miss:
+        type_ = f"{type_}="
     return f" * @property {{{type_}}} {name}"
 
 

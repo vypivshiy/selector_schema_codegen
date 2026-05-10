@@ -185,6 +185,11 @@ def pre_imports(node: Imports, _: ConverterContext):
         "import sys",
         "from typing import TypedDict, Optional, Any, List, Dict, Union",
         "from html import unescape as _html_unescape",
+        "",
+        "if sys.version_info >= (3, 11):",
+        "    from typing import NotRequired",
+        "else:",
+        "    from typing_extensions import NotRequired",
     ]
     base_imports.extend(py_helpers.rest_imports(node))
 
@@ -265,17 +270,19 @@ def pre_json_struct(node: JsonDef, _: ConverterContext):
 
 @PY_BASE_CONVERTER(JsonDefField)
 def pre_json_field(node: JsonDefField, ctx: ConverterContext):
-    if node.alias:
-        name = node.alias
-    else:
-        name = node.name
+    if node.skip:
+        return None
+    name = node.alias or node.name
     type_ = PY_TYPES.get(node.ret, "Any")
     if node.ret == VariableType.JSON and node.ref_name:
         type_name = to_pascal_case(node.ref_name)
         type_ = type_.format(type_name)
         if node.is_array:
             type_ = f"List[{type_}]"
-    # VariableType.NESTED not used in Json node context
+    if node.is_optional:
+        type_ = f"Optional[{type_}]"
+    if node.may_miss:
+        type_ = f"NotRequired[{type_}]"
     return [f"{name!r}: {type_}, "]
 
 
@@ -543,9 +550,7 @@ def pre_struct_check_method(node: CheckMethod, ctx: ConverterContext):
     from ssc_codegen.converters.helpers import to_snake_case
 
     method_name = to_snake_case(node.name)
-    return [
-        f"    def {method_name}(self) -> bool:"
-    ]
+    return [f"    def {method_name}(self) -> bool:"]
 
 
 # @PY_BASE_CONVERTER.post(CheckMethod)

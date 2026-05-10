@@ -36,6 +36,22 @@ json Quote array=#true {
 Модификаторы:
 - `(array)type` — массивное поле, например `(array)str`.
 - `type?` — optional поле (значение или null), например `str?`.
+- `@optional` — аналог `?` суффикса, значение или null.
+- `@missing` — поле может отсутствовать в JSON. В типах помечается как `NotRequired` (Python) / optional (JSDoc).
+- `@skip` — полностью исключить поле из генерации (не попадает в TypedDict / JSDoc).
+
+Модификаторы можно комбинировать:
+
+```kdl
+json Item {
+    url str?                          // optional через суффикс
+    url2 str @optional                // optional через модификатор
+    id str @missing                   // поле может отсутствовать
+    inner Inner
+    meta Meta @skip                   // исключить из типов
+    item2 Item @missing @optional     // комбо: может отсутствовать + nullable
+}
+```
 
 Правила:
 - `json <Name> { ... }` объявляет схему.
