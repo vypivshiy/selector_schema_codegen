@@ -43,7 +43,9 @@ def format_diagnostic(
     """Format a single diagnostic as a human-readable Rust-style string."""
     src = _resolve_src(src, filepath)
     renderer = _Renderer(use_color=_resolve_color(use_color))
-    return renderer.render(d, src=src, filepath=filepath, context_lines=context_lines)
+    return renderer.render(
+        d, src=src, filepath=filepath, context_lines=context_lines
+    )
 
 
 def format_diagnostics(
@@ -60,13 +62,17 @@ def format_diagnostics(
         return ""
 
     if fmt == "json":
-        return json.dumps([diagnostic_to_dict(d) for d in diagnostics], indent=2)
+        return json.dumps(
+            [diagnostic_to_dict(d) for d in diagnostics], indent=2
+        )
 
     src = _resolve_src(src, filepath)
     renderer = _Renderer(use_color=_resolve_color(use_color))
 
     sections = [
-        renderer.render(d, src=src, filepath=filepath, context_lines=context_lines)
+        renderer.render(
+            d, src=src, filepath=filepath, context_lines=context_lines
+        )
         for d in diagnostics
     ]
     summary = renderer.render_summary(diagnostics)
@@ -123,7 +129,9 @@ class _Renderer:
             self._red, self._yellow = _RED, _YELLOW
             self._cyan, self._magenta, self._dim = _CYAN, _MAGENTA, _DIM
         else:
-            self._red = self._yellow = self._cyan = self._magenta = self._dim = ""
+            self._red = self._yellow = self._cyan = self._magenta = (
+                self._dim
+            ) = ""
 
     # ── public render methods ─────────────────────────────────────────────────
 
@@ -139,7 +147,9 @@ class _Renderer:
         line, col = d.span.start.line, d.span.start.column
         end_line, end_col = d.span.end.line, d.span.end.column
 
-        display_start, display_end = _line_window(line, len(lines), context_lines)
+        display_start, display_end = _line_window(
+            line, len(lines), context_lines
+        )
         gutter_width = len(str(display_end))
         pad = " " * gutter_width
 
@@ -151,7 +161,15 @@ class _Renderer:
 
         if lines and 0 <= line - 1 < len(lines):
             parts += self._source_block(
-                lines, line, col, end_line, end_col, d, display_start, display_end, pad
+                lines,
+                line,
+                col,
+                end_line,
+                end_col,
+                d,
+                display_start,
+                display_end,
+                pad,
             )
         else:
             parts.append(self._gutter_blank(pad))
@@ -169,14 +187,18 @@ class _Renderer:
         if n_errors:
             counts.append(f"{n_errors} error{'s' if n_errors != 1 else ''}")
         if n_warnings:
-            counts.append(f"{n_warnings} warning{'s' if n_warnings != 1 else ''}")
+            counts.append(
+                f"{n_warnings} warning{'s' if n_warnings != 1 else ''}"
+            )
         if not counts:
             counts.append("0 diagnostics")
 
         if n_errors:
             prefix = self._styled("Lint failed", color=self._red, bold=True)
         elif n_warnings:
-            prefix = self._styled("Lint completed with warnings", color=self._yellow, bold=True)
+            prefix = self._styled(
+                "Lint completed with warnings", color=self._yellow, bold=True
+            )
         else:
             prefix = self._styled("Lint completed", color=self._cyan, bold=True)
 
@@ -186,12 +208,18 @@ class _Renderer:
 
     def _header(self, d: ReadDiagnostic) -> str:
         sev_color = self._severity_color(d.severity)
-        severity_head = self._styled(f"{d.severity.value}[{d.code}]", color=sev_color, bold=True)
+        severity_head = self._styled(
+            f"{d.severity.value}[{d.code}]", color=sev_color, bold=True
+        )
         return f"{severity_head}: {d.message}"
 
-    def _location_arrow(self, d: ReadDiagnostic, filepath: str | Path | None, pad: str) -> str:
+    def _location_arrow(
+        self, d: ReadDiagnostic, filepath: str | Path | None, pad: str
+    ) -> str:
         line, col = d.span.start.line, d.span.start.column
-        location = f"{filepath}:{line}:{col}" if filepath else f"line {line}:{col}"
+        location = (
+            f"{filepath}:{line}:{col}" if filepath else f"line {line}:{col}"
+        )
         arrow = self._styled("-->", color=self._dim)
         return f"  {arrow} {location}"
 
@@ -216,11 +244,17 @@ class _Renderer:
 
         for line_no in range(display_start, display_end + 1):
             src_line = lines[line_no - 1]
-            line_num = self._styled(f"{line_no:>{gutter_width}}", color=self._dim)
+            line_num = self._styled(
+                f"{line_no:>{gutter_width}}", color=self._dim
+            )
             parts.append(f"{line_num} {gutter_bar} {src_line}")
 
             if line_no == line:
-                parts.append(self._underline_row(col, end_col, end_line, line, src_line, d, pad))
+                parts.append(
+                    self._underline_row(
+                        col, end_col, end_line, line, src_line, d, pad
+                    )
+                )
 
         return parts
 
@@ -297,13 +331,19 @@ def _count(diagnostics: list[ReadDiagnostic], severity: Severity) -> int:
     return sum(1 for d in diagnostics if d.severity == severity)
 
 
-def _line_window(line_no: int, total_lines: int, context_lines: int) -> tuple[int, int]:
+def _line_window(
+    line_no: int, total_lines: int, context_lines: int
+) -> tuple[int, int]:
     if total_lines <= 0:
         return (line_no, line_no)
-    return max(1, line_no - context_lines), min(total_lines, line_no + context_lines)
+    return max(1, line_no - context_lines), min(
+        total_lines, line_no + context_lines
+    )
 
 
-def _build_underline(col: int, end_col: int, end_line: int, line: int, src_line: str) -> str:
+def _build_underline(
+    col: int, end_col: int, end_line: int, line: int, src_line: str
+) -> str:
     col_idx = max(col - 1, 0)
     if end_line == line and end_col > col:
         end_idx = min(end_col - 1, len(src_line))

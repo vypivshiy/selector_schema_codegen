@@ -176,8 +176,7 @@ uv run ssc-gen generate schema.kdl -t js-pure --http-client fetch    -o out/
 uv run ssc-gen generate schema.kdl -t js-pure --http-client axios    -o out/
 ```
 
-Targets: `py-bs4`, `py-lxml`, `py-parsel`, `py-slax`, `js-pure`. **Go target
-(`go-goquery`) does NOT support `@request`.**
+Targets: `py-bs4`, `py-lxml`, `py-parsel`, `py-slax`, `js-pure`.
 
 Without `--http-client` the generator silently ignores `@request` — the resulting
 file will not contain any HTTP methods.

@@ -26,7 +26,6 @@ class Target(str, enum.Enum):
     PY_PARSEL = "py-parsel"
     PY_SLAX = "py-slax"
     JS_PURE = "js-pure"
-    GO_GOQUERY = "go-goquery"
 
 
 class FmtType(str, enum.Enum):
@@ -40,7 +39,6 @@ _FILE_EXTENSIONS: dict[Target, str] = {
     Target.PY_PARSEL: ".py",
     Target.PY_SLAX: ".py",
     Target.JS_PURE: ".js",
-    Target.GO_GOQUERY: ".go",
 }
 
 
@@ -65,10 +63,6 @@ def _get_converter(target: Target):
         from ssc_codegen.converters.js_pure import JS_CONVERTER
 
         return JS_CONVERTER
-    if target == Target.GO_GOQUERY:
-        from ssc_codegen.converters.go_goquery import GO_GOQUERY_CONVERTER
-
-        return GO_GOQUERY_CONVERTER
     raise ValueError(f"Unknown target: {target}")
 
 
@@ -458,7 +452,9 @@ def run(
 
     # Build AST
     try:
-        module_ast, errs = parse_module(kdl_path.read_text(), source_path=kdl_path)
+        module_ast, errs = parse_module(
+            kdl_path.read_text(), source_path=kdl_path
+        )
         if errs:
             for e in format_diagnostics(errs, fmt=fmt.value):
                 typer.echo(e, err=True)

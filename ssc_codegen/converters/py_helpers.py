@@ -195,9 +195,7 @@ def _emit_dispatch_err_py(node: Struct, ctx: ConverterContext) -> list[str]:
             if 200 <= err.status < 300:
                 cls_name = _err_subclass_name(node.name, err)
                 cond = _condition_check_expr(err)
-                lines.append(
-                    f"{i4}if _status == {err.status} and {cond}:"
-                )
+                lines.append(f"{i4}if _status == {err.status} and {cond}:")
                 lines.append(
                     f"{i4}{ctx.indent_char}return {cls_name}("
                     f"headers=_headers, value=_body)"

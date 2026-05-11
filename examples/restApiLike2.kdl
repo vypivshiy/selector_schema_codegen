@@ -1,0 +1,63 @@
+@doc """
+Example REST API client config using DummyJSON (https://dummyjson.com).
+
+Why DummyJSON:
+  - Live, stable, no auth, no rate limits
+  - Returns structured JSON error bodies: {"message": "..."}
+  - Pagination (?limit=&skip=), search (?q=), nested objects — exercises
+    typed/optional/array placeholders end-to-end
+  - See https://dummyjson.com/docs for full surface
+
+Equivalent alternatives you can retarget by swapping host/paths:
+  - https://jsonplaceholder.typicode.com — simpler resources (posts, users,
+    comments), but 404 body is empty `{}` so @error becomes formal
+  - https://reqres.in — good for POST/PUT/DELETE demos with bodies
+  - https://httpbin.org — request-echo, useful for HTTP mechanics only
+"""
+
+
+
+json Response {
+    // skip field if your dont want parse it
+    // TODO: rewrite syntax where not needed pass type
+    meta-info int @skip
+
+    // mark if this field maybe missing and exclude in response
+    track-id str @missing
+    
+    // variants write optional
+    id int?
+    id2 int @optional 
+    // allow combine fields
+    track-id2 int @optional @missing  
+}
+
+// Error body returned on non-2xx responses, e.g. 404:
+//   {"message": "Product with id '99999' not found"}
+json ApiError {
+    message str
+}
+
+
+// ── REST struct ───────────────────────────────────────────────────────────────
+
+struct DummyJsonApi type=rest {
+    @doc """
+    DummyJSON Products API client.
+    """
+
+    @request name=create-product \ 
+    doc="Simulated product creation (not persisted)." \ 
+    response=Product \
+    """
+    POST /products/add HTTP/1.1
+    Host: dummyjson.com
+    Content-Type: application/json
+    Accept: application/json
+
+    {"title": "{{title}}", "price": {{price:float}}, "stock": {{stock:int}}}
+    """
+
+    // 404 for unknown id or unknown category slug — body: {"message": "..."}
+    @error 404 ApiError
+}

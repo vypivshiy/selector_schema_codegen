@@ -367,4 +367,4 @@ ssc-gen generate schema.kdl -t py-bs4    # generate parser code
 ssc-gen check schema.kdl                 # lint/validate schema
 ```
 
-Targets: py-bs4, py-lxml, py-parsel, py-slax, js-pure, go-goquery.
+Targets: py-bs4, py-lxml, py-parsel, py-slax, js-pure.

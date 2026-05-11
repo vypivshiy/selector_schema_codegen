@@ -51,11 +51,11 @@ ssc-gen generate schema.kdl -t py-bs4 -o ./output
 # all .kdl files in a directory
 ssc-gen generate examples/ -t js-pure -o ./output
 
-# with custom package name (for Go and other targets)
-ssc-gen generate schema.kdl -t go-goquery -o ./parsers --package scraper
+# with custom package name
+ssc-gen generate schema.kdl -t py-bs4 -o ./parsers --package scraper
 ```
 
-Targets: `py-bs4`, `py-lxml`, `py-parsel`, `py-slax`, `js-pure`, `go-goquery`
+Targets: `py-bs4`, `py-lxml`, `py-parsel`, `py-slax`, `js-pure`
 
 ### Lint schemas
 

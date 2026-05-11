@@ -50,8 +50,7 @@ ssc_codegen/
 │   ├── py_lxml.py         # Python lxml
 │   ├── py_parsel.py       # Python parsel (Scrapy)
 │   ├── py_slax.py         # Python selectolax
-│   ├── js_pure.py         # JavaScript vanilla DOM
-│   └── go_goquery.py      # Go goquery
+│   └── js_pure.py         # JavaScript vanilla DOM
 ├── kdl/                   # KDL 2.0 parser (tree-sitter based)
 │   └── parser.py          # KDL2CSTParser, KDLLexer, Token/TokenType, CST node types
 └── linter/                # Schema validation
@@ -97,7 +96,7 @@ ssc-gen run schema.kdl:StructName -i page.html                     # generate + 
 ssc-gen health schema.kdl:StructName -i page.html                  # check selectors against HTML
 ```
 
-Targets: py-bs4, py-lxml, py-parsel, py-slax, js-pure, go-goquery
+Targets: py-bs4, py-lxml, py-parsel, py-slax, js-pure
 
 `--http-client` option (only for targets that support `@request`):
 - Python targets (py-bs4, py-lxml, py-parsel, py-slax): `requests` | `httpx` (`httpx` emits both `fetch()` and `async_fetch()`)
@@ -456,123 +455,123 @@ All AST nodes that require converter handlers. When adding a new node, add a han
 Python converters (py_bs4, py_lxml, py_parsel, py_slax) share `PY_BASE_CONVERTER` — register once on it.
 JS and Go have separate converter instances.
 
-| AST Node | PY_BASE_CONVERTER | JS_CONVERTER | GO_GOQUERY_CONVERTER |
-|----------|-------------------|--------------|----------------------|
-| **Module layer** | | | |
-| Docstring | ✓ | ✓ | ✓ |
-| Imports | ✓ | ✓ | ✓ |
-| Utilities | ✓ | ✓ | ✓ |
-| **Type definitions** | | | |
-| JsonDef | ✓ | ✓ | ✓ |
-| JsonDefField | ✓ | ✓ | ✓ |
-| TypeDef | ✓ | ✓ | ✓ |
-| TypeDefField | ✓ | ✓ | ✓ |
-| **Struct layer** | | | |
-| Struct | ✓ | ✓ | ✓ |
-| StructDocstring | ✓ (.post) | ✓ (.post) | ✓ |
-| StartParse | ✓ + .post | ✓ + .post | ✓ + .post |
-| Init | ✓ | ✓ | ✓ |
-| InitField | ✓ | ✓ | ✓ + .post |
-| Field | ✓ | ✓ | ✓ + .post |
-| PreValidate | ✓ | ✓ | ✓ + .post |
-| SplitDoc | ✓ | ✓ | ✓ + .post |
-| Key | ✓ | ✓ | ✓ + .post |
-| Value | ✓ | ✓ | ✓ + .post |
-| TableConfig | ✓ | ✓ | ✓ + .post |
-| TableMatchKey | ✓ | ✓ | ✓ + .post |
-| TableRow | ✓ | ✓ | ✓ + .post |
-| RequestConfig | ✓ | ✓ | — |
-| ErrorResponse | ✓ | ✓ | — |
-| **Selectors** | | | |
-| CssSelect | ✓ | ✓ | ✓ |
-| CssSelectAll | ✓ | ✓ | ✓ |
-| XpathSelect | ✓ | ✓ | ✓ |
-| XpathSelectAll | ✓ | ✓ | ✓ |
-| CssRemove | ✓ | ✓ | ✓ |
-| XpathRemove | ✓ | ✓ | ✓ |
-| **Extract** | | | |
-| Text | ✓ | ✓ | ✓ |
-| Raw | ✓ | ✓ | ✓ |
-| Attr | ✓ | ✓ | ✓ |
-| **String ops** | | | |
-| Trim | ✓ | ✓ | ✓ |
-| Ltrim | ✓ | ✓ | ✓ |
-| Rtrim | ✓ | ✓ | ✓ |
-| NormalizeSpace | ✓ | ✓ | ✓ |
-| RmPrefix | ✓ | ✓ | ✓ |
-| RmSuffix | ✓ | ✓ | ✓ |
-| RmPrefixSuffix | ✓ | ✓ | ✓ |
-| Fmt | ✓ | ✓ | ✓ |
-| Repl | ✓ | ✓ | ✓ |
-| ReplMap | ✓ | ✓ | ✓ |
-| Lower | ✓ | ✓ | ✓ |
-| Upper | ✓ | ✓ | ✓ |
-| Split | ✓ | ✓ | ✓ |
-| Join | ✓ | ✓ | ✓ |
-| Unescape | ✓ | ✓ | ✓ |
-| **Regex** | | | |
-| Re | ✓ | ✓ | ✓ |
-| ReAll | ✓ | ✓ | ✓ |
-| ReSub | ✓ | ✓ | ✓ |
-| **Array** | | | |
-| Index | ✓ | ✓ | ✓ |
-| Slice | ✓ | ✓ | ✓ |
-| Len | ✓ | ✓ | ✓ |
-| Unique | ✓ | ✓ | ✓ |
-| **Cast** | | | |
-| ToInt | ✓ | ✓ | ✓ |
-| ToFloat | ✓ | ✓ | ✓ |
-| ToBool | ✓ | ✓ | ✓ |
-| Jsonify | ✓ | ✓ | ✓ |
-| Nested | ✓ | ✓ | ✓ |
-| **Control** | | | |
-| Self | ✓ | ✓ | ✓ |
-| Return | ✓ | ✓ | ✓ |
-| FallbackStart | ✓ | ✓ | ✓ |
-| FallbackEnd | ✓ | ✓ | ✓ |
-| TransformCall | ✓ | — | ✓ |
-| **Predicate containers** | | | |
-| Filter | ✓ + .post(Assert) | ✓ + .post | ✓ + .post |
-| Assert | ✓ .post | ✓ + .post | ✓ + .post |
-| Match | ✓ + .post | ✓ + .post | ✓ + .post |
-| LogicAnd | ✓ | ✓ | ✓ |
-| LogicOr | ✓ | ✓ | ✓ |
-| LogicNot | ✓ | ✓ | ✓ |
-| **Predicates** | | | |
-| PredCss | ✓ | ✓ | ✓ |
-| PredXpath | ✓ | ✓ | ✓ |
-| PredContains | ✓ | ✓ | ✓ |
-| PredEq | ✓ | ✓ | ✓ |
-| PredNe | ✓ | ✓ | ✓ |
-| PredStarts | ✓ | ✓ | ✓ |
-| PredEnds | ✓ | ✓ | ✓ |
-| PredIn | ✓ | ✓ | ✓ |
-| PredRe | ✓ | ✓ | ✓ |
-| PredReAny | ✓ | ✓ | ✓ |
-| PredReAll | ✓ | ✓ | ✓ |
-| PredHasAttr | ✓ | ✓ | ✓ |
-| PredAttrEq | ✓ | ✓ | ✓ |
-| PredAttrNe | ✓ | ✓ | ✓ |
-| PredAttrStarts | ✓ | ✓ | ✓ |
-| PredAttrEnds | ✓ | ✓ | ✓ |
-| PredAttrContains | ✓ | ✓ | ✓ |
-| PredAttrRe | ✓ | ✓ | ✓ |
-| PredTextStarts | ✓ | ✓ | ✓ |
-| PredTextEnds | ✓ | ✓ | ✓ |
-| PredTextContains | ✓ | ✓ | ✓ |
-| PredTextRe | ✓ | ✓ | ✓ |
-| PredCountEq | ✓ | ✓ | ✓ |
-| PredCountGt | ✓ | ✓ | ✓ |
-| PredCountLt | ✓ | ✓ | ✓ |
-| PredCountNe | ✓ | ✓ | ✓ |
-| PredCountGe | ✓ | ✓ | ✓ |
-| PredCountLe | ✓ | ✓ | ✓ |
-| PredCountRange | ✓ | ✓ | ✓ |
-| PredGt | ✓ | ✓ | ✓ |
-| PredLt | ✓ | ✓ | ✓ |
-| PredGe | ✓ | ✓ | ✓ |
-| PredLe | ✓ | ✓ | ✓ |
-| PredRange | ✓ | ✓ | ✓ |
+| AST Node | PY_BASE_CONVERTER | JS_CONVERTER |
+|----------|-------------------|--------------|
+| **Module layer** | | |
+| Docstring | ✓ | ✓ |
+| Imports | ✓ | ✓ |
+| Utilities | ✓ | ✓ |
+| **Type definitions** | | |
+| JsonDef | ✓ | ✓ |
+| JsonDefField | ✓ | ✓ |
+| TypeDef | ✓ | ✓ |
+| TypeDefField | ✓ | ✓ |
+| **Struct layer** | | |
+| Struct | ✓ | ✓ |
+| StructDocstring | ✓ (.post) | ✓ (.post) |
+| StartParse | ✓ + .post | ✓ + .post |
+| Init | ✓ | ✓ |
+| InitField | ✓ | ✓ + .post |
+| Field | ✓ | ✓ + .post |
+| PreValidate | ✓ | ✓ + .post |
+| SplitDoc | ✓ | ✓ + .post |
+| Key | ✓ | ✓ + .post |
+| Value | ✓ | ✓ + .post |
+| TableConfig | ✓ | ✓ + .post |
+| TableMatchKey | ✓ | ✓ + .post |
+| TableRow | ✓ | ✓ + .post |
+| RequestConfig | ✓ | ✓ |
+| ErrorResponse | ✓ | ✓ |
+| **Selectors** | | |
+| CssSelect | ✓ | ✓ |
+| CssSelectAll | ✓ | ✓ |
+| XpathSelect | ✓ | ✓ |
+| XpathSelectAll | ✓ | ✓ |
+| CssRemove | ✓ | ✓ |
+| XpathRemove | ✓ | ✓ |
+| **Extract** | | |
+| Text | ✓ | ✓ |
+| Raw | ✓ | ✓ |
+| Attr | ✓ | ✓ |
+| **String ops** | | |
+| Trim | ✓ | ✓ |
+| Ltrim | ✓ | ✓ |
+| Rtrim | ✓ | ✓ |
+| NormalizeSpace | ✓ | ✓ |
+| RmPrefix | ✓ | ✓ |
+| RmSuffix | ✓ | ✓ |
+| RmPrefixSuffix | ✓ | ✓ |
+| Fmt | ✓ | ✓ |
+| Repl | ✓ | ✓ |
+| ReplMap | ✓ | ✓ |
+| Lower | ✓ | ✓ |
+| Upper | ✓ | ✓ |
+| Split | ✓ | ✓ |
+| Join | ✓ | ✓ |
+| Unescape | ✓ | ✓ |
+| **Regex** | | |
+| Re | ✓ | ✓ |
+| ReAll | ✓ | ✓ |
+| ReSub | ✓ | ✓ |
+| **Array** | | |
+| Index | ✓ | ✓ |
+| Slice | ✓ | ✓ |
+| Len | ✓ | ✓ |
+| Unique | ✓ | ✓ |
+| **Cast** | | |
+| ToInt | ✓ | ✓ |
+| ToFloat | ✓ | ✓ |
+| ToBool | ✓ | ✓ |
+| Jsonify | ✓ | ✓ |
+| Nested | ✓ | ✓ |
+| **Control** | | |
+| Self | ✓ | ✓ |
+| Return | ✓ | ✓ |
+| FallbackStart | ✓ | ✓ |
+| FallbackEnd | ✓ | ✓ |
+| TransformCall | ✓ | — |
+| **Predicate containers** | | |
+| Filter | ✓ + .post(Assert) | ✓ + .post |
+| Assert | ✓ .post | ✓ + .post |
+| Match | ✓ + .post | ✓ + .post |
+| LogicAnd | ✓ | ✓ |
+| LogicOr | ✓ | ✓ |
+| LogicNot | ✓ | ✓ |
+| **Predicates** | | |
+| PredCss | ✓ | ✓ |
+| PredXpath | ✓ | ✓ |
+| PredContains | ✓ | ✓ |
+| PredEq | ✓ | ✓ |
+| PredNe | ✓ | ✓ |
+| PredStarts | ✓ | ✓ |
+| PredEnds | ✓ | ✓ |
+| PredIn | ✓ | ✓ |
+| PredRe | ✓ | ✓ |
+| PredReAny | ✓ | ✓ |
+| PredReAll | ✓ | ✓ |
+| PredHasAttr | ✓ | ✓ |
+| PredAttrEq | ✓ | ✓ |
+| PredAttrNe | ✓ | ✓ |
+| PredAttrStarts | ✓ | ✓ |
+| PredAttrEnds | ✓ | ✓ |
+| PredAttrContains | ✓ | ✓ |
+| PredAttrRe | ✓ | ✓ |
+| PredTextStarts | ✓ | ✓ |
+| PredTextEnds | ✓ | ✓ |
+| PredTextContains | ✓ | ✓ |
+| PredTextRe | ✓ | ✓ |
+| PredCountEq | ✓ | ✓ |
+| PredCountGt | ✓ | ✓ |
+| PredCountLt | ✓ | ✓ |
+| PredCountNe | ✓ | ✓ |
+| PredCountGe | ✓ | ✓ |
+| PredCountLe | ✓ | ✓ |
+| PredCountRange | ✓ | ✓ |
+| PredGt | ✓ | ✓ |
+| PredLt | ✓ | ✓ |
+| PredGe | ✓ | ✓ |
+| PredLe | ✓ | ✓ |
+| PredRange | ✓ | ✓ |
 
 ---
 
@@ -583,7 +582,7 @@ JS and Go have separate converter instances.
 3. **Parser** — register via `@PARSER.register_expression_node("name")` in `parser.py`; handler receives `KdlNode` args/props, creates AST node, appends to parent body
 4. **Linter type rule** — add accept→return mapping in `linter/type_rules.py` `TYPE_RULES` dict
 5. **Linter keyword** — add to allowlist in `linter/rule_keywords.py`
-6. **Converter handlers** — register on `PY_BASE_CONVERTER`, `JS_CONVERTER`, `GO_GOQUERY_CONVERTER` (see table above)
+6. **Converter handlers** — register on `PY_BASE_CONVERTER`, `JS_CONVERTER` (see table above)
 
 ## Adding a New Struct Directive (@check, @pre-validate, @split-doc...)
 
@@ -592,7 +591,7 @@ JS and Go have separate converter instances.
 3. **Parser** — add `elif node.name == "@name":` branch in `_parse_struct()` (~line 776 in `parser.py`); use `self._parse_expressions(node.children, expr)` for pipeline body
 4. **Linter struct rule** — add to `_RESERVED_ALLOWED` dict in `linter/rules_struct.py:44` with allowed struct types (e.g. `frozenset({"item", "list", "dict", "table", "flat"})`)
 5. **Linter keyword** — add to allowlist in `linter/rule_keywords.py`
-6. **Converter handlers** — register on `PY_BASE_CONVERTER`, `JS_CONVERTER`, `GO_GOQUERY_CONVERTER` (see table above)
+6. **Converter handlers** — register on `PY_BASE_CONVERTER`, `JS_CONVERTER` (see table above)
 
 ## Adding a New Converter Target
 
