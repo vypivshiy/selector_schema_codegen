@@ -171,7 +171,20 @@ def parse_struct(
 def parse_json_fields(nodes: list[KdlNode], parent: JsonDef) -> None:
     for node in nodes:
         name = node.name
-        type_ = str(node.args[0].value) if node.args else ""
+        modifiers: list[str] = []
+        type_ = ""
+        alias = ""
+        for arg in node.args:
+            a = str(arg.value)
+            if a.startswith("@"):
+                modifiers.append(a)
+            elif not type_:
+                type_ = a
+            else:
+                alias = a
+        skip = "@skip" in modifiers
+        if not type_ and skip:
+            type_ = "str"
         is_array = type_.startswith("(array)")
         type_ = type_.removeprefix("(array)")
         is_optional = type_.endswith("?")
@@ -202,25 +215,9 @@ def parse_json_fields(nodes: list[KdlNode], parent: JsonDef) -> None:
                     ref_name = ref_name.removeprefix("(array)")
                     is_array = True
                 ret_type = VariableType.JSON
-        alias = str(node.args[1].value) if len(node.args) > 1 else ""
-        skip = False
-        may_miss = False
-        for arg in node.args[2:]:
-            arg_s = str(arg.value)
-            if arg_s == "@skip":
-                skip = True
-            elif arg_s == "@missing":
-                may_miss = True
-            elif arg_s == "@optional":
-                is_optional = True
-        if alias.startswith("@"):
-            if alias == "@skip":
-                skip = True
-            elif alias == "@missing":
-                may_miss = True
-            elif alias == "@optional":
-                is_optional = True
-            alias = ""
+        may_miss = "@missing" in modifiers
+        if "@optional" in modifiers:
+            is_optional = True
         doc = str(
             node.properties.get(
                 "doc", KdlArg(value="", span=node.span, is_identifier=False)

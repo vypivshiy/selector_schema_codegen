@@ -34,6 +34,7 @@ from ssc_codegen.core.expressions import (
 )
 from ssc_codegen.core.linting import (
     lint_define_node,
+    lint_json_node,
     lint_struct_node,
     lint_transform_node,
 )
@@ -91,6 +92,7 @@ def handle_json(
         ).value
     )
     json_def = JsonDef(parent=module, name=name, is_array=is_array, path=path)
+    lint_json_node(node, lint)
     parse_json_fields(node.children, json_def)
     ctx.json_defs[json_def.name] = json_def
     return json_def

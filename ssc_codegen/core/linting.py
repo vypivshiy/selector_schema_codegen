@@ -902,6 +902,40 @@ def lint_transform_node(
             )
 
 
+# ── JSON field lint ──────────────────────────────────────────────────────────────
+
+
+_VALID_JSON_MODIFIERS = frozenset({"@skip", "@missing", "@optional"})
+
+
+def lint_json_node(node: KdlNode, lint: LintContext) -> None:
+    """Validate json definition fields."""
+    for field_node in lint.get_children_nodes(node):
+        args = lint.get_args(field_node)
+        has_type = False
+        has_skip = False
+        for arg in args:
+            if arg.startswith("@"):
+                if arg not in _VALID_JSON_MODIFIERS:
+                    lint.error(
+                        field_node,
+                        message=f"unknown json field modifier '{arg}'",
+                        code="E002",
+                        hint=f"valid modifiers: {', '.join(sorted(_VALID_JSON_MODIFIERS))}",
+                    )
+                if arg == "@skip":
+                    has_skip = True
+            else:
+                has_type = True
+        if not has_type and not has_skip:
+            lint.error(
+                field_node,
+                message=f"json field '{lint.node_name(field_node)}' requires a type",
+                code="E001",
+                hint='example: field-name str  or  field-name @skip',
+            )
+
+
 def lint_define_node(
     node: KdlNode, ctx: ParseContext, lint: LintContext
 ) -> None:
