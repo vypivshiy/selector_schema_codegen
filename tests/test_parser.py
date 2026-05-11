@@ -104,27 +104,34 @@ def test_parse_document_decodes_literals_and_annotations():
     )
 
     defines = [n for n in doc.nodes if n.name.value == "define"]
-    assert next(
-        e.value.value for e in defines[0].entries if hasattr(e, "key")
-    ) == "abc"
-    assert next(
-        e.value.value for e in defines[1].entries if hasattr(e, "key")
-    ) == "raw"
-    assert next(
-        e.value.value for e in defines[2].entries if hasattr(e, "key")
-    ) is True
-    assert next(
-        e.value.value for e in defines[3].entries if hasattr(e, "key")
-    ) is False
-    assert next(
-        e.value.value for e in defines[4].entries if hasattr(e, "key")
-    ) is None
-    assert next(
-        e.value.value for e in defines[5].entries if hasattr(e, "key")
-    ) == 123
-    assert next(
-        e.value.value for e in defines[6].entries if hasattr(e, "key")
-    ) == 1.25
+    assert (
+        next(e.value.value for e in defines[0].entries if hasattr(e, "key"))
+        == "abc"
+    )
+    assert (
+        next(e.value.value for e in defines[1].entries if hasattr(e, "key"))
+        == "raw"
+    )
+    assert (
+        next(e.value.value for e in defines[2].entries if hasattr(e, "key"))
+        is True
+    )
+    assert (
+        next(e.value.value for e in defines[3].entries if hasattr(e, "key"))
+        is False
+    )
+    assert (
+        next(e.value.value for e in defines[4].entries if hasattr(e, "key"))
+        is None
+    )
+    assert (
+        next(e.value.value for e in defines[5].entries if hasattr(e, "key"))
+        == 123
+    )
+    assert (
+        next(e.value.value for e in defines[6].entries if hasattr(e, "key"))
+        == 1.25
+    )
 
     json_node = [n for n in doc.nodes if n.name.value == "json"][0]
     # CST-level: type annotation prefix "(array)" is stripped; value is "str"
@@ -607,3 +614,93 @@ def test_parser_preserves_split_doc_and_start_parse_flags():
         "price",
         "url",
     }
+
+
+# ── json linter tests ──────────────────────────────────────────────────────────
+
+
+def _lint_errors(src: str) -> list[str]:
+    _, diagnostics = parse_module(src)
+    return [d.message for d in diagnostics if d.severity == Severity.ERROR]
+
+
+def _lint_warnings(src: str) -> list[str]:
+    _, diagnostics = parse_module(src)
+    return [d.message for d in diagnostics if d.severity == Severity.WARNING]
+
+
+def test_json_lint_empty_name():
+    errs = _lint_errors("json { x str }")
+    assert any("'json' requires a name" in e for e in errs)
+
+
+def test_json_lint_duplicate_name():
+    errs = _lint_errors("json Foo { x str }\njson Foo { y int }")
+    assert any("duplicate json definition 'Foo'" in e for e in errs)
+
+
+def test_json_lint_invalid_array_property():
+    errs = _lint_errors('json Foo array="yes" { x str }')
+    assert any("'array' property must be boolean" in e for e in errs)
+
+
+def test_json_lint_empty_path_property():
+    errs = _lint_errors('json Foo path="" { x str }')
+    assert any("'path' property must be a non-empty string" in e for e in errs)
+
+
+def test_json_lint_valid_array_and_path():
+    errs = _lint_errors('json Foo array=#true path="data.items" { x str }')
+    assert len(errs) == 0
+
+
+def test_json_lint_duplicate_fields():
+    errs = _lint_errors("json Foo { x str\nx int }")
+    assert any("duplicate json field 'x'" in e for e in errs)
+
+
+def test_json_lint_field_missing_type():
+    errs = _lint_errors("json Foo { x }")
+    assert any("requires a type" in e for e in errs)
+
+
+def test_json_lint_field_skip_without_type():
+    errs = _lint_errors("json Foo { x @skip }")
+    assert len(errs) == 0
+
+
+def test_json_lint_unknown_modifier():
+    errs = _lint_errors("json Foo { x str @invalid }")
+    assert any("unknown json field modifier '@invalid'" in e for e in errs)
+
+
+def test_json_lint_undefined_ref():
+    errs = _lint_errors("json A { x NonExistent }")
+    assert any(
+        "references undefined json definition 'NonExistent'" in e for e in errs
+    )
+
+
+def test_json_lint_valid_ref():
+    errs = _lint_errors("json A { x str }\njson B { y A }")
+    assert len(errs) == 0
+
+
+def test_json_lint_circular_ref():
+    errs = _lint_errors("json A { x B }\njson B { y A }")
+    assert any("circular reference" in e for e in errs)
+
+
+def test_json_lint_redundant_optional():
+    warns = _lint_warnings("json Foo { x str? @optional }")
+    assert any("redundant '@optional'" in w for w in warns)
+
+
+def test_json_lint_optional_suffix_ok():
+    errs = _lint_errors("json Foo { x str? }")
+    assert len(errs) == 0
+
+
+def test_json_lint_optional_modifier_ok():
+    errs = _lint_errors("json Foo { x str @optional }")
+    assert len(errs) == 0

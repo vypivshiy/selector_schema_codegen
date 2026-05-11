@@ -92,9 +92,11 @@ def handle_json(
         ).value
     )
     json_def = JsonDef(parent=module, name=name, is_array=is_array, path=path)
-    lint_json_node(node, lint)
+    lint_json_node(node, lint, ctx)
     parse_json_fields(node.children, json_def)
     ctx.json_defs[json_def.name] = json_def
+    if name:
+        lint.json_kdl_nodes[name] = node
     return json_def
 
 

@@ -117,6 +117,7 @@ class LintContext:
         default_factory=dict
     )
     dsl_names: set[str] = field(default_factory=set)
+    json_kdl_nodes: dict[str, "KdlNode"] = field(default_factory=dict)
     _predicate_depth: int = field(default=0)
     _predicate_context: str = ""
 

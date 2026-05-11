@@ -5,7 +5,7 @@ from __future__ import annotations
 import difflib as _difflib
 import re as _re
 
-from ssc_codegen.ast import Module, VariableType
+from ssc_codegen.ast import JsonDefField, Module, VariableType
 from ssc_codegen.kdl import KdlNode
 from ssc_codegen.core.contexts import (
     DefineKind,
@@ -906,14 +906,62 @@ def lint_transform_node(
 
 
 _VALID_JSON_MODIFIERS = frozenset({"@skip", "@missing", "@optional"})
+_VALID_JSON_TYPES = frozenset({"str", "int", "float", "bool", "null"})
 
 
-def lint_json_node(node: KdlNode, lint: LintContext) -> None:
-    """Validate json definition fields."""
+def lint_json_node(node: KdlNode, lint: LintContext, ctx: ParseContext) -> None:
+    """Validate json definition block and its fields."""
+
+    # ── block-level checks ────────────────────────────────────────────────────
+
+    name = lint.get_arg(node, 0)
+    if not name:
+        lint.error(
+            node,
+            message="'json' requires a name",
+            code="E001",
+            hint="example: json MySchema { ... }",
+        )
+        return
+
+    if name in ctx.json_defs:
+        lint.error(
+            node,
+            message=f"duplicate json definition '{name}'",
+            code="E001",
+            hint=f"rename or remove one of the 'json {name}' definitions",
+        )
+
+    array_prop = node.properties.get("array")
+    if array_prop is not None and not isinstance(array_prop.value, bool):
+        lint.error(
+            node,
+            message=f"'array' property must be boolean (#true/#false), got {array_prop.value!r}",
+            code="E002",
+            hint="example: json MySchema array=#true { ... }",
+        )
+
+    path_prop = node.properties.get("path")
+    if path_prop is not None:
+        path_val = str(path_prop.value)
+        if not path_val:
+            lint.error(
+                node,
+                message="'path' property must be a non-empty string",
+                code="E002",
+                hint='example: json MySchema path="response.data" { ... }',
+            )
+
+    # ── field-level checks ───────────────────────────────────────────────────
+
+    seen_fields: set[str] = set()
     for field_node in lint.get_children_nodes(node):
+        field_name = lint.node_name(field_node)
         args = lint.get_args(field_node)
         has_type = False
         has_skip = False
+        has_optional_modifier = False
+        has_optional_suffix = False
         for arg in args:
             if arg.startswith("@"):
                 if arg not in _VALID_JSON_MODIFIERS:
@@ -925,15 +973,103 @@ def lint_json_node(node: KdlNode, lint: LintContext) -> None:
                     )
                 if arg == "@skip":
                     has_skip = True
+                if arg == "@optional":
+                    has_optional_modifier = True
             else:
                 has_type = True
+                raw_type = arg
+                if raw_type.startswith("(array)"):
+                    raw_type = raw_type[len("(array)") :]
+                if raw_type.endswith("?"):
+                    has_optional_suffix = True
+                    raw_type = raw_type[:-1]
+                if raw_type not in _VALID_JSON_TYPES and raw_type:
+                    # might be a ref type — that's checked in post-pass
+                    pass
+
         if not has_type and not has_skip:
             lint.error(
                 field_node,
-                message=f"json field '{lint.node_name(field_node)}' requires a type",
+                message=f"json field '{field_name}' requires a type",
                 code="E001",
-                hint='example: field-name str  or  field-name @skip',
+                hint="example: field-name str  or  field-name @skip",
             )
+
+        if has_optional_modifier and has_optional_suffix:
+            lint.warning(
+                field_node,
+                message=f"json field '{field_name}': redundant '@optional' on type with '?' suffix",
+                code="W001",
+                hint="use either 'field str?' or 'field str @optional', not both",
+            )
+
+        if field_name in seen_fields:
+            lint.error(
+                field_node,
+                message=f"duplicate json field '{field_name}'",
+                code="E001",
+                hint=f"remove or rename the duplicate '{field_name}' field",
+            )
+        seen_fields.add(field_name)
+
+
+def lint_json_cross_refs(ctx: ParseContext, lint: LintContext) -> None:
+    """Post-pass: validate json cross-references and detect circular refs."""
+
+    for json_def in ctx.json_defs.values():
+        kdl_node = lint.json_kdl_nodes.get(json_def.name)
+        if not kdl_node:
+            continue
+        for field in json_def.body:
+            if not isinstance(field, JsonDefField):
+                continue
+            ref = field.ref_name
+            if ref and ref not in ctx.json_defs:
+                lint.error(
+                    kdl_node,
+                    message=f"json field '{field.name}' references undefined json definition '{ref}'",
+                    code="E300",
+                    hint=f"define 'json {ref} {{ ... }}' or fix the type name",
+                )
+
+    # circular reference detection
+    visited: set[str] = set()
+
+    def _has_cycle(name: str, stack: set[str]) -> str | None:
+        if name in stack:
+            return name
+        if name in visited:
+            return None
+        visited.add(name)
+        stack.add(name)
+        jd = ctx.json_defs.get(name)
+        if jd:
+            for field in jd.body:
+                if not isinstance(field, JsonDefField):
+                    continue
+                ref = field.ref_name
+                if ref:
+                    cycle = _has_cycle(ref, stack)
+                    if cycle:
+                        stack.discard(name)
+                        return cycle
+        stack.discard(name)
+        return None
+
+    for name in list(ctx.json_defs):
+        visited.clear()
+        stack: set[str] = set()
+        cycle = _has_cycle(name, stack)
+        if cycle:
+            kdl_node = lint.json_kdl_nodes.get(name)
+            if kdl_node:
+                lint.error(
+                    kdl_node,
+                    message=f"circular reference detected involving json definition '{name}'",
+                    code="E300",
+                    hint="break the cycle by removing or changing one of the referenced types",
+                )
+            break
 
 
 def lint_define_node(
