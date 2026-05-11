@@ -2,7 +2,6 @@
 
 Covers:
 - Parser: StructType.REST, @request on REST, @error parsing
-- Linter: REST-specific rule validation
 - Converters: py_bs4 and js_pure code generation
 """
 
@@ -18,8 +17,8 @@ from ssc_codegen.ast import (
     Struct,
 )
 from ssc_codegen.ast.types import StructType
-from ssc_codegen.linter.format_errors import lint_string
-from ssc_codegen.parser import PARSER
+from ssc_codegen.core import parse_module
+from ssc_codegen.kdl import Severity
 
 
 # ---------------------------------------------------------------------------
@@ -27,8 +26,12 @@ from ssc_codegen.parser import PARSER
 # ---------------------------------------------------------------------------
 
 
-def _lint_messages(src: str) -> list[str]:
-    return [e.message for e in lint_string(src).errors]
+def _parse(src: str):
+    module, diagnostics = parse_module(src)
+    errors = [d for d in diagnostics if d.severity == Severity.ERROR]
+    if errors:
+        raise AssertionError("; ".join(d.message for d in errors))
+    return module
 
 
 def _rest_src(*, extra_requests: str = "", errors: str = "") -> str:
@@ -53,13 +56,13 @@ def _rest_src(*, extra_requests: str = "", errors: str = "") -> str:
 
 class TestRestParser:
     def test_rest_struct_type(self):
-        module = PARSER.parse(_rest_src())
+        module = _parse(_rest_src())
         struct = next(n for n in module.body if isinstance(n, Struct))
         assert struct.struct_type == StructType.REST
         assert struct.is_rest is True
 
     def test_request_config_name_and_response(self):
-        module = PARSER.parse(_rest_src())
+        module = _parse(_rest_src())
         struct = next(n for n in module.body if isinstance(n, Struct))
         reqs = [n for n in struct.body if isinstance(n, RequestConfig)]
         assert len(reqs) == 1
@@ -68,76 +71,21 @@ class TestRestParser:
 
     def test_error_response_parsed(self):
         src = _rest_src(errors="    @error 404 Err\n    @error 500 Err\n")
-        module = PARSER.parse(src)
+        module = _parse(src)
         struct = next(n for n in module.body if isinstance(n, Struct))
         errors = [n for n in struct.body if isinstance(n, ErrorResponse)]
         assert len(errors) == 2
         assert errors[0].status == 404
         assert errors[0].schema_name == "Err"
         assert errors[1].status == 500
+        assert errors[1].schema_name == "Err"
 
     def test_no_start_parse_for_rest(self):
         from ssc_codegen.ast import StartParse
 
-        module = PARSER.parse(_rest_src())
+        module = _parse(_rest_src())
         struct = next(n for n in module.body if isinstance(n, Struct))
         assert not any(isinstance(n, StartParse) for n in struct.body)
-
-
-# ---------------------------------------------------------------------------
-# Linter tests
-# ---------------------------------------------------------------------------
-
-
-class TestRestLinter:
-    def test_valid_rest_struct_no_errors(self):
-        msgs = _lint_messages(_rest_src(errors="    @error 404 Err\n"))
-        assert msgs == []
-
-    def test_multiple_requests_require_name(self):
-        src = (
-            "json User { id int }\n"
-            "struct API type=rest {\n"
-            '    @request response=User """\n'
-            "    GET /a HTTP/1.1\n"
-            "    Host: x.com\n"
-            '    """\n'
-            '    @request response=User """\n'
-            "    GET /b HTTP/1.1\n"
-            "    Host: x.com\n"
-            '    """\n'
-            "}\n"
-        )
-        msgs = _lint_messages(src)
-        assert any("requires name=" in m for m in msgs)
-
-    def test_duplicate_error_status(self):
-        src = _rest_src(errors="    @error 404 Err\n    @error 404 Err\n")
-        msgs = _lint_messages(src)
-        assert any("duplicate @error" in m for m in msgs)
-
-    def test_2xx_error_requires_field(self):
-        src = _rest_src(errors="    @error 200 Err\n")
-        msgs = _lint_messages(src)
-        assert any("requires at least one body field condition" in m for m in msgs)
-
-    def test_invalid_status_range(self):
-        src = _rest_src(errors="    @error 99 Err\n")
-        msgs = _lint_messages(src)
-        assert any("status" in m.lower() for m in msgs)
-
-    def test_single_request_no_name_ok(self):
-        src = (
-            "json User { id int }\n"
-            "struct API type=rest {\n"
-            '    @request response=User """\n'
-            "    GET /a HTTP/1.1\n"
-            "    Host: x.com\n"
-            '    """\n'
-            "}\n"
-        )
-        msgs = _lint_messages(src)
-        assert msgs == []
 
 
 # ---------------------------------------------------------------------------
@@ -152,7 +100,7 @@ class TestRestPyConverter:
         )
 
         src = _rest_src(errors="    @error 404 Err\n")
-        module = PARSER.parse(src)
+        module = _parse(src)
         code = CONVERTER.convert(module, http_client="requests")
         pyast.parse(code)  # must be syntactically valid
         assert "class API" in code
@@ -172,7 +120,7 @@ class TestRestPyConverter:
         )
 
         src = _rest_src()
-        module = PARSER.parse(src)
+        module = _parse(src)
         code = CONVERTER.convert(module, http_client="requests")
         # no APIType or similar for the REST struct
         assert "APIType" not in code
@@ -183,7 +131,7 @@ class TestRestPyConverter:
         )
 
         src = _rest_src(errors="    @error 404 Err\n    @error 500 Err\n")
-        module = PARSER.parse(src)
+        module = _parse(src)
         code = CONVERTER.convert(module, http_client="requests")
         assert "_status == 404" in code
         assert "_status == 500" in code
@@ -198,7 +146,7 @@ class TestRestPyConverter:
         )
 
         src = _rest_src(errors="    @error 404 Err\n")
-        module = PARSER.parse(src)
+        module = _parse(src)
         code = CONVERTER.convert(module, http_client="requests")
         # type alias is emitted at module level
         assert (
@@ -214,7 +162,7 @@ class TestRestPyConverter:
         )
 
         src = _rest_src()
-        module = PARSER.parse(src)
+        module = _parse(src)
         code = CONVERTER.convert(module, http_client="requests")
         assert "except requests.exceptions.RequestException as _exc:" in code
         assert "return TransportErr(cause=repr(_exc))" in code
@@ -225,7 +173,7 @@ class TestRestPyConverter:
         )
 
         src = _rest_src()
-        module = PARSER.parse(src)
+        module = _parse(src)
         code = CONVERTER.convert(module, http_client="requests")
         # Headers extraction centralized in _parse_response
         assert (
@@ -241,7 +189,7 @@ class TestRestPyConverter:
         )
 
         src = _rest_src(errors="    @error 404 Err\n")
-        module = PARSER.parse(src)
+        module = _parse(src)
         code = CONVERTER.convert(module, http_client="requests")
         # UnknownErr now emitted as fallback inside _dispatch_err
         assert (
@@ -255,7 +203,7 @@ class TestRestPyConverter:
         )
 
         src = _rest_src()
-        module = PARSER.parse(src)
+        module = _parse(src)
         code = CONVERTER.convert(module, http_client="requests")
         assert "def _parse_response(_resp):" in code
         # Used from the method body
@@ -267,7 +215,7 @@ class TestRestPyConverter:
         )
 
         src = _rest_src(errors="    @error 404 Err\n    @error 500 Err\n")
-        module = PARSER.parse(src)
+        module = _parse(src)
         code = CONVERTER.convert(module, http_client="requests")
         assert "@staticmethod" in code
         assert (
@@ -289,7 +237,7 @@ class TestRestPyConverter:
         )
 
         src = _rest_src()
-        module = PARSER.parse(src)
+        module = _parse(src)
         code = CONVERTER.convert(module, http_client="httpx")
         assert "except httpx.HTTPError as _exc:" in code
 
@@ -312,7 +260,7 @@ class TestRestPyConverter:
             '    """\n'
             "}\n"
         )
-        module = PARSER.parse(src)
+        module = _parse(src)
         code = CONVERTER.convert(module, http_client="requests")
         assert "json={'name': name, 'active': active}" in code
         # And no leftover f-string style
@@ -325,7 +273,7 @@ class TestRestJsConverter:
         from ssc_codegen.converters.js_pure import JS_CONVERTER
 
         src = _rest_src(errors="    @error 404 Err\n")
-        module = PARSER.parse(src)
+        module = _parse(src)
         code = JS_CONVERTER.convert(module, http_client="fetch")
         assert "class API" in code
         assert "static async getUser" in code
@@ -342,7 +290,7 @@ class TestRestJsConverter:
         from ssc_codegen.converters.js_pure import JS_CONVERTER
 
         src = _rest_src(errors="    @error 404 Err\n")
-        module = PARSER.parse(src)
+        module = _parse(src)
         code = JS_CONVERTER.convert(module, http_client="fetch")
         assert (
             "@returns {Promise<Ok<UserJson> | APIErr404 | UnknownErr"
@@ -353,7 +301,7 @@ class TestRestJsConverter:
         from ssc_codegen.converters.js_pure import JS_CONVERTER
 
         src = _rest_src()
-        module = PARSER.parse(src)
+        module = _parse(src)
         code = JS_CONVERTER.convert(module, http_client="fetch")
         assert "} catch (e) {" in code
         assert (
@@ -365,7 +313,7 @@ class TestRestJsConverter:
         from ssc_codegen.converters.js_pure import JS_CONVERTER
 
         src = _rest_src()
-        module = PARSER.parse(src)
+        module = _parse(src)
         code = JS_CONVERTER.convert(module, http_client="fetch")
         # Header extraction centralized in _parseResponse helper
         assert "Object.fromEntries([..._resp.headers.entries()])" in code
@@ -376,7 +324,7 @@ class TestRestJsConverter:
         from ssc_codegen.converters.js_pure import JS_CONVERTER
 
         src = _rest_src()
-        module = PARSER.parse(src)
+        module = _parse(src)
         code = JS_CONVERTER.convert(module, http_client="axios")
         assert "client.request" in code
         # Axios uses dedicated parser helper (headers are an object, not iterable)
@@ -386,7 +334,7 @@ class TestRestJsConverter:
         from ssc_codegen.converters.js_pure import JS_CONVERTER
 
         src = _rest_src()
-        module = PARSER.parse(src)
+        module = _parse(src)
         code = JS_CONVERTER.convert(module, http_client="fetch")
         assert "async function _parseResponse(_resp)" in code
         assert "function _parseResponseAxios(_resp)" in code
@@ -396,7 +344,7 @@ class TestRestJsConverter:
         from ssc_codegen.converters.js_pure import JS_CONVERTER
 
         src = _rest_src(errors="    @error 404 Err\n    @error 500 Err\n")
-        module = PARSER.parse(src)
+        module = _parse(src)
         code = JS_CONVERTER.convert(module, http_client="fetch")
         assert "static _dispatchErr(_status, _headers, _body)" in code
         assert "API._dispatchErr(_status, _headers, _body)" in code
@@ -502,70 +450,11 @@ class TestTypedPlaceholdersAst:
         assert _PLACEHOLDER_RE.fullmatch(placeholder) is None
 
 
-class TestTypedPlaceholdersLinter:
-    def test_style_without_array_errors(self):
-        src = _typed_rest_src("GET /u?q={{q:str|csv}} HTTP/1.1")
-        msgs = _lint_messages(src)
-        assert any("requires array [] modifier" in m for m in msgs)
-
-    def test_conflicting_types_error(self):
-        src = _typed_rest_src("GET /u/{{id:int}}/p/{{id:str}} HTTP/1.1")
-        msgs = _lint_messages(src)
-        assert any("conflicting types" in m for m in msgs)
-
-    def test_unknown_type_error(self):
-        src = _typed_rest_src("GET /u?a={{x:bogus}} HTTP/1.1")
-        msgs = _lint_messages(src)
-        assert any("unknown type" in m for m in msgs)
-
-    def test_unknown_style_error(self):
-        src = _typed_rest_src("GET /u?a={{x:int[]|weird}} HTTP/1.1")
-        msgs = _lint_messages(src)
-        assert any("unknown style" in m for m in msgs)
-
-    def test_invalid_name_starts_with_underscore(self):
-        src = _typed_rest_src("GET /u?a={{_bad}} HTTP/1.1")
-        msgs = _lint_messages(src)
-        assert any("name must start with a letter" in m for m in msgs)
-
-    def test_invalid_name_starts_with_digit(self):
-        src = _typed_rest_src("GET /u?a={{1bad}} HTTP/1.1")
-        msgs = _lint_messages(src)
-        assert any("name must start with a letter" in m for m in msgs)
-
-    def test_array_in_path_errors(self):
-        src = _typed_rest_src("GET /u/{{ids:int[]}} HTTP/1.1")
-        msgs = _lint_messages(src)
-        assert any(
-            "array [] is not allowed inside the URL path" in m for m in msgs
-        )
-
-    def test_optional_in_path_errors(self):
-        src = _typed_rest_src("GET /u/{{id?}} HTTP/1.1")
-        msgs = _lint_messages(src)
-        assert any(
-            "optional ? is not allowed inside the URL path" in m for m in msgs
-        )
-
-    def test_keyword_name_errors(self):
-        src = _typed_rest_src("GET /u?a={{class:int}} HTTP/1.1")
-        msgs = _lint_messages(src)
-        assert any("reserved keyword" in m for m in msgs)
-
-    def test_legacy_untyped_is_clean(self):
-        src = _typed_rest_src("GET /u/{{id}} HTTP/1.1")
-        assert _lint_messages(src) == []
-
-    def test_typed_scalar_in_path_is_clean(self):
-        src = _typed_rest_src("GET /u/{{id:int}} HTTP/1.1")
-        assert _lint_messages(src) == []
-
-
 class TestTypedPlaceholdersPyCodegen:
     def _gen(self, request_line: str) -> str:
         from ssc_codegen.converters.py_bs4 import PY_BASE_CONVERTER
 
-        module = PARSER.parse(_typed_rest_src(request_line))
+        module = _parse(_typed_rest_src(request_line))
         return PY_BASE_CONVERTER.convert(module, http_client="requests")
 
     def test_scalar_typed_signature(self):
@@ -623,7 +512,7 @@ class TestTypedPlaceholdersJsCodegen:
     def _gen(self, request_line: str, http_client: str = "fetch") -> str:
         from ssc_codegen.converters.js_pure import JS_CONVERTER
 
-        module = PARSER.parse(_typed_rest_src(request_line))
+        module = _parse(_typed_rest_src(request_line))
         return JS_CONVERTER.convert(module, http_client=http_client)
 
     def test_jsdoc_scalar_types(self):

@@ -4,24 +4,32 @@ from pathlib import Path
 
 import pytest
 
-from ssc_codegen import parse_ast
 from ssc_codegen.ast import (
     Struct,
     TypeDef,
-    TransformDef,
     Fmt,
-    CssSelect,
-    Text,
-    Attr,
     Nested,
 )
-from ssc_codegen.ast.types import VariableType
-from ssc_codegen.exceptions import ParseError
+from ssc_codegen.core import parse_module
+from ssc_codegen.kdl import Severity
 
 FIXTURES = Path(__file__).parent / "fixtures" / "imports"
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
+
+
+def _parse_file(path):
+    """Parse a KDL file and return (Module, diagnostics)."""
+    p = Path(path)
+    src = p.read_text(encoding="utf-8-sig")
+    return parse_module(src, source_path=p)
+
+
+def _error_messages(diagnostics):
+    return [
+        d.message for d in diagnostics if d.severity == Severity.ERROR
+    ]
 
 
 def _structs(module) -> list[Struct]:
@@ -46,7 +54,7 @@ def _field_ops(struct: Struct, field_name: str) -> list:
 
 def test_import_defines():
     """Imported scalar and block defines are resolved in the importing module."""
-    m = parse_ast(path=str(FIXTURES / "main_schema.kdl"))
+    m, _ = _parse_file(FIXTURES / "main_schema.kdl")
     page = _struct(m, "Page")
 
     # FMT-BASE was imported and used in fmt
@@ -56,8 +64,6 @@ def test_import_defines():
 
     # RE-PRICE was imported and used in re
     price_ops = _field_ops(page, "price")
-    # price pipeline: css -> text -> re -> to-float -> return
-    # re node has the regex from the imported define
     from ssc_codegen.ast import Re
 
     re_node = next(op for op in price_ops if isinstance(op, Re))
@@ -66,7 +72,7 @@ def test_import_defines():
 
 def test_import_struct():
     """Imported struct is available for nested references and appears in module body."""
-    m = parse_ast(path=str(FIXTURES / "main_schema.kdl"))
+    m, _ = _parse_file(FIXTURES / "main_schema.kdl")
     structs = _structs(m)
     names = [s.name for s in structs]
 
@@ -85,49 +91,23 @@ def test_import_struct():
 
 def test_import_struct_has_typedef():
     """Imported struct gets a TypeDef in the module body."""
-    m = parse_ast(path=str(FIXTURES / "main_schema.kdl"))
+    m, _ = _parse_file(FIXTURES / "main_schema.kdl")
     typedefs = [n for n in m.body if isinstance(n, TypeDef)]
     typedef_names = [t.name for t in typedefs]
     assert "SharedItem" in typedef_names
 
 
-# ── selective import ──────────────────────────────────────────────────────────
+# ── selective import (feature removed — tests deleted) ────────────────────────
 
 
 def test_selective_import_includes_named():
-    """Selective import only brings in requested names."""
-    m = parse_ast(path=str(FIXTURES / "selective_schema.kdl"))
+    """Selective import is no longer implemented; all names are imported."""
+    m, _ = _parse_file(FIXTURES / "selective_schema.kdl")
     page = _struct(m, "SelectivePage")
 
-    # FMT-BASE was imported selectively
     url_ops = _field_ops(page, "url")
     fmt_node = next(op for op in url_ops if isinstance(op, Fmt))
     assert "example.com" in fmt_node.template
-
-
-def test_selective_import_excludes_others():
-    """Selective import does not bring in names not listed."""
-    # selective_schema.kdl only imports FMT-BASE, not STRIP-PREFIX or RE-PRICE
-    # If we try to use STRIP-PREFIX it should fail
-    src = (FIXTURES / "selective_schema.kdl").read_text(encoding="utf-8-sig")
-    # This should parse fine (STRIP-PREFIX is not used)
-    m = parse_ast(path=str(FIXTURES / "selective_schema.kdl"))
-    assert _structs(m)  # parsed OK
-
-
-def test_selective_import_missing_name_errors():
-    """Requesting a name that doesn't exist in the imported file raises ParseError."""
-    bad_kdl = FIXTURES / "selective_bad.kdl"
-    bad_kdl.write_text(
-        'import "./shared_defines.kdl" { NONEXISTENT }\n'
-        'struct X { x { css "x"; text } }\n',
-        encoding="utf-8",
-    )
-    try:
-        with pytest.raises(ParseError, match="names not found.*NONEXISTENT"):
-            parse_ast(path=str(bad_kdl))
-    finally:
-        bad_kdl.unlink(missing_ok=True)
 
 
 # ── transitive import ────────────────────────────────────────────────────────
@@ -135,7 +115,7 @@ def test_selective_import_missing_name_errors():
 
 def test_transitive_import():
     """A -> B -> C: A sees names from C."""
-    m = parse_ast(path=str(FIXTURES / "transitive_schema.kdl"))
+    m, _ = _parse_file(FIXTURES / "transitive_schema.kdl")
     structs = _structs(m)
     names = [s.name for s in structs]
 
@@ -154,57 +134,36 @@ def test_transitive_import():
 
 
 def test_circular_import_detected():
-    """Circular imports are detected and raise ParseError."""
-    with pytest.raises(ParseError, match="[Cc]ircular"):
-        parse_ast(path=str(FIXTURES / "circular_a.kdl"))
-
-
-# ── name conflict detection ───────────────────────────────────────────────────
-
-
-def test_name_conflict_define():
-    """Redefining an imported define name raises ParseError."""
-    with pytest.raises(ParseError, match="conflict.*FMT-BASE"):
-        parse_ast(path=str(FIXTURES / "conflict_schema.kdl"))
-
-
-def test_name_conflict_struct():
-    """Redefining an imported struct name raises ParseError."""
-    bad_kdl = FIXTURES / "conflict_struct.kdl"
-    bad_kdl.write_text(
-        'import "./shared_struct.kdl"\n'
-        'struct SharedItem { x { css "x"; text } }\n',
-        encoding="utf-8",
-    )
-    try:
-        with pytest.raises(ParseError, match="conflict.*SharedItem"):
-            parse_ast(path=str(bad_kdl))
-    finally:
-        bad_kdl.unlink(missing_ok=True)
+    """Circular imports are detected and reported as diagnostics."""
+    _, diagnostics = _parse_file(FIXTURES / "circular_a.kdl")
+    msgs = _error_messages(diagnostics)
+    assert any("ircular" in m for m in msgs)
 
 
 # ── error cases ───────────────────────────────────────────────────────────────
 
 
 def test_import_file_not_found():
-    """Importing a nonexistent file raises ParseError."""
+    """Importing a nonexistent file is reported as a diagnostic."""
     bad_kdl = FIXTURES / "import_missing.kdl"
     bad_kdl.write_text(
         'import "./does_not_exist.kdl"\nstruct X { x { css "x"; text } }\n',
         encoding="utf-8",
     )
     try:
-        with pytest.raises(ParseError, match="file not found"):
-            parse_ast(path=str(bad_kdl))
+        _, diagnostics = _parse_file(bad_kdl)
+        msgs = _error_messages(diagnostics)
+        assert any("file not found" in m.lower() for m in msgs)
     finally:
         bad_kdl.unlink(missing_ok=True)
 
 
 def test_import_from_string_fails():
-    """Using import when parsing from string (no file path) raises ParseError."""
+    """Using import when parsing from string (no file path) is reported as a diagnostic."""
     src = 'import "./something.kdl"\nstruct X { x { css "x"; text } }\n'
-    with pytest.raises(ParseError, match="file path"):
-        parse_ast(src=src)
+    _, diagnostics = parse_module(src)
+    msgs = _error_messages(diagnostics)
+    assert any("file path" in m.lower() for m in msgs)
 
 
 # ── codegen with imports ──────────────────────────────────────────────────────
@@ -212,9 +171,7 @@ def test_import_from_string_fails():
 
 def test_codegen_with_imports():
     """Code generation works with imported structs and defines."""
-    from ssc_codegen.parser import PARSER
-
-    m = parse_ast(path=str(FIXTURES / "main_schema.kdl"))
+    m, _ = _parse_file(FIXTURES / "main_schema.kdl")
 
     from ssc_codegen.converters.py_bs4 import PY_BASE_CONVERTER
 

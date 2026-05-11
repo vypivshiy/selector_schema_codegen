@@ -9,7 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from ssc_codegen import parse_ast
+from ssc_codegen.core import parse_module
+from ssc_codegen.kdl import Severity
 from ssc_codegen.ast import Struct
 from ssc_codegen.converters.helpers import to_pascal_case
 
@@ -41,7 +42,14 @@ def _run_schema(
     target: str = "py-bs4",
 ) -> dict | list:
     """Parse KDL, generate code, exec, instantiate class, call parse()."""
-    module_ast = parse_ast(path=str(schema_path))
+    p = Path(schema_path)
+    src = p.read_text(encoding="utf-8-sig")
+    module_ast, diagnostics = parse_module(src, source_path=p)
+    errors = [d for d in diagnostics if d.severity == Severity.ERROR]
+    if errors:
+        raise AssertionError(
+            f"Parse errors in {schema_path}: " + "; ".join(d.message for d in errors)
+        )
     structs = [n for n in module_ast.body if isinstance(n, Struct)]
     assert any(s.name == struct_name for s in structs), (
         f"struct '{struct_name}' not found, available: {[s.name for s in structs]}"

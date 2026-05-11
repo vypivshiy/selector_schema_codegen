@@ -1,6 +1,8 @@
 import pytest
 
-from ssc_codegen import parse_ast
+from ssc_codegen.core import parse_module
+from ssc_codegen.document_utils import convert_css_to_xpath_module
+from ssc_codegen.kdl import Severity
 from ssc_codegen.selector_utils import css_to_xpath
 from ssc_codegen.ast import (
     Struct,
@@ -22,6 +24,15 @@ from ssc_codegen.ast import (
 )
 def test_convert_css_to_xpath(q: str, out: str) -> None:
     assert css_to_xpath(q, prefix="//") == out
+
+
+def _parse_with_css_to_xpath(src: str):
+    module, diagnostics = parse_module(src)
+    errors = [d for d in diagnostics if d.severity == Severity.ERROR]
+    if errors:
+        raise AssertionError("; ".join(d.message for d in errors))
+    convert_css_to_xpath_module(module)
+    return module
 
 
 def _get_struct(module, name: str) -> Struct:
@@ -61,7 +72,7 @@ def test_css_to_xpath_ast_conversion() -> None:
         }
     }
     """
-    module = parse_ast(src=src, css_to_xpath=True)
+    module = _parse_with_css_to_xpath(src)
     struct = _get_struct(module, "Sample")
 
     title = _get_field(struct, "title")
@@ -95,7 +106,7 @@ def test_css_to_xpath_ast_conversion_preserves_query_chains() -> None:
         }
     }
     """
-    module = parse_ast(src=src, css_to_xpath=True)
+    module = _parse_with_css_to_xpath(src)
     struct = _get_struct(module, "Sample")
     title = _get_field(struct, "title")
 
