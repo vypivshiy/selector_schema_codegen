@@ -19,7 +19,6 @@ Equivalent alternatives you can retarget by swapping host/paths:
 
 json Response {
     // skip field if your dont want parse it
-    // TODO: rewrite syntax where not needed pass type
     meta-info @skip
 
     // mark if this field maybe missing and exclude in response

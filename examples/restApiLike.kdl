@@ -92,51 +92,62 @@ json ApiError {
 
 struct DummyJsonApi type=rest {
     @doc """
-    DummyJSON Products API client.
+    DummyJSON Products API.
+    No auth required. Rate limits: none.
 
-    Generated methods (Python, with --http-client requests):
-        get_product(client, *, id)
-        list_products(client, *, limit=None, skip=None, select=None)
-        search_products(client, *, query, limit=None)
-        products_by_category(client, *, category)
-        list_categories(client)
-        create_product(client, *, title, price, stock)
-
-    NOTE: DummyJSON's POST /products/add simulates creation (the new record
+    NOTE: POST /products/add simulates creation (the new record
     is NOT persisted server-side) — useful for testing request-body shape.
     """
 
-    @request name=get-product doc="Fetch one product by id." response=Product """
+    @request name=get-product \
+        doc="Fetch one product by id." \
+        response=Product \
+        """
     GET /products/{{id:int}} HTTP/1.1
     Host: dummyjson.com
     Accept: application/json
     """
 
-    @request name=list-products doc="Paginated product list. All params optional." response=ProductList """
+    @request name=list-products \
+        doc="Paginated product list. All params optional." \
+        response=ProductList \
+        """
     GET /products?limit={{limit:int?}}&skip={{skip:int?}}&select={{select:str[]?|csv}} HTTP/1.1
     Host: dummyjson.com
     Accept: application/json
     """
 
-    @request name=search-products doc="Full-text search." response=ProductList """
+    @request name=search-products \
+        doc="Full-text search." \
+        response=ProductList \
+        """
     GET /products/search?q={{query}}&limit={{limit:int?}} HTTP/1.1
     Host: dummyjson.com
     Accept: application/json
     """
 
-    @request name=products-by-category doc="List products in a category (slug)." response=ProductList """
+    @request name=products-by-category \
+        doc="List products in a category (slug)." \
+        response=ProductList \
+        """
     GET /products/category/{{category}} HTTP/1.1
     Host: dummyjson.com
     Accept: application/json
     """
 
-    @request name=list-categories doc="All available category slugs with metadata." response=CategoryInfo """
+    @request name=list-categories \
+        doc="All available category slugs with metadata." \
+        response=CategoryInfo \
+        """
     GET /products/categories HTTP/1.1
     Host: dummyjson.com
     Accept: application/json
     """
 
-    @request name=create-product doc="Simulated product creation (not persisted)." response=Product """
+    @request name=create-product \
+        doc="Simulated product creation (not persisted)." \
+        response=Product \
+        """
     POST /products/add HTTP/1.1
     Host: dummyjson.com
     Content-Type: application/json
