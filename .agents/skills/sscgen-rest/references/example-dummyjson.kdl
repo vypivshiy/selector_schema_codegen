@@ -47,33 +47,40 @@ json ApiError {
 
 struct DummyJsonApi type=rest {
     @doc """
-    DummyJSON Products API client.
-
-    Generated methods (Python, --http-client requests):
-        get_product(client, *, id)
-        list_products(client, *, limit=None, skip=None)
-        search_products(client, *, query, limit=None)
-        create_product(client, *, title, price, stock)
+    DummyJSON Products API.
+    No auth required. Rate limits: none.
     """
 
-    @request name=get-product doc="Fetch one product by id." response=Product """
+    @request name=get-product \
+        doc="Fetch one product by id." \
+        response=Product \
+        """
     GET /products/{{id:int}} HTTP/1.1
     Host: dummyjson.com
     Accept: application/json
     """
 
     // POSIX curl form — equivalent to raw HTTP; great for DevTools paste-ins.
-    @request name=list-products doc="Paginated product list. All params optional." response=ProductList """
+    @request name=list-products \
+        doc="Paginated product list. All params optional." \
+        response=ProductList \
+        """
     curl 'https://dummyjson.com/products?limit={{limit:int?}}&skip={{skip:int?}}' \
       -H 'Accept: application/json'
     """
 
-    @request name=search-products doc="Full-text search." response=ProductList """
+    @request name=search-products \
+        doc="Full-text search." \
+        response=ProductList \
+        """
     curl 'https://dummyjson.com/products/search?q={{query}}&limit={{limit:int?}}' \
       -H 'Accept: application/json'
     """
 
-    @request name=create-product doc="Simulated product creation (not persisted)." response=Product """
+    @request name=create-product \
+        doc="Simulated product creation (not persisted)." \
+        response=Product \
+        """
     POST /products/add HTTP/1.1
     Host: dummyjson.com
     Content-Type: application/json

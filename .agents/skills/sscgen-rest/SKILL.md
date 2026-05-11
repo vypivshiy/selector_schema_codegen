@@ -33,6 +33,9 @@ Generate `struct type=rest` schemas that become typed HTTP clients when run thro
 5. **`@error` on 2xx requires `field="<body-key>"`** discriminator.
 6. **Typed placeholders**: `[]` and `?` forbidden in URL path; `|style` requires `[]`;
    types: `str|int|float|bool`; same name = same full spec; no keyword collisions.
+7. **`@doc` describes the API semantically** (purpose, auth, base URL, rate limits).
+   Do NOT list generated method signatures — they are derived from `name=` and
+   placeholders and will rot as the schema evolves.
 
 ---
 
@@ -117,18 +120,24 @@ typed placeholders in `references/10-request.md`.
 ```kdl
 struct ApiName type=rest {
     @doc """
-    Methods (Python, --http-client requests):
-        get_post(client, *, id)
-        list_posts(client, *, limit=None, skip=None)
+    Example API — posts and comments.
+    Base URL: api.example.com
+    Auth: Bearer token (passed via client headers).
     """
 
-    @request name=get-post response=Post doc="Fetch one post by id." """
+    @request name=get-post \
+        doc="Fetch one post by id." \
+        response=Post \
+        """
     GET /posts/{{id:int}} HTTP/1.1
     Host: api.example.com
     Accept: application/json
     """
 
-    @request name=list-posts response=PostList doc="Paginated list." """
+    @request name=list-posts \
+        doc="Paginated list." \
+        response=PostList \
+        """
     curl 'https://api.example.com/posts?limit={{limit:int?}}&skip={{skip:int?}}' \
       -H 'Accept: application/json'
     """
@@ -168,7 +177,7 @@ Without `--http-client`, `@request` is silently ignored. Go target unsupported.
 
 Always emit complete, lintable `.kdl` in this order:
 
-1. `@doc` module docstring (base URL, auth notes)
+1. `@doc` module docstring (base URL, auth, purpose — no method listings)
 2. Leaf `json` schemas (innermost first — primitives, enums, small objects)
 3. Mid-level `json` schemas (domain objects referencing leaves)
 4. Envelope `json` schemas (paginated responses, wrappers, top-level arrays)

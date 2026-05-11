@@ -46,15 +46,21 @@ json UserList { users (array)User; total int }
 json ApiError { message str }
 
 struct Api type=rest {
-    @doc "Methods: get_user, list_users."
+    @doc "Users API — CRUD + pagination."
 
-    @request name=get-user response=User doc="Fetch one user." """
+    @request name=get-user \
+        response=User \
+        doc="Fetch one user." \
+        """
     GET /users/{{id:int}} HTTP/1.1
     Host: api.example.com
     Accept: application/json
     """
 
-    @request name=list-users response=UserList doc="Paginated." """
+    @request name=list-users \
+        response=UserList \
+        doc="Paginated." \
+        """
     GET /users?limit={{limit:int?}}&skip={{skip:int?}} HTTP/1.1
     Host: api.example.com
     Accept: application/json
