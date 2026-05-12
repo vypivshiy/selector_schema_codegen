@@ -18,7 +18,7 @@ Equivalent alternatives you can retarget by swapping host/paths:
 
 // ── JSON schemas ──────────────────────────────────────────────────────────────
 // camelCase JSON keys are bound to snake_case fields via alias (the second
-// string arg). See docs/json.md for full reference.
+// string arg). See references/json.md for full reference.
 
 json Dimensions {
     width float

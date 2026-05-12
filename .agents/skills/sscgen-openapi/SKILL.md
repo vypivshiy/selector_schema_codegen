@@ -239,9 +239,5 @@ If fixing errors, emit the **full corrected file**, not just changed lines.
   resolution, format selection logic, naming rules.
 - `references/example-petclinic.kdl` — obfuscated Petstore-like example
   (GET/POST/PUT/DELETE, path+query params, JSON body, aliases, errors).
-
-Authoritative upstream (read if anything is ambiguous):
-- `references` in sibling skill `sscgen-rest` — REST DSL syntax details.
-- `docs/learn/10-request.md` — full `@request` / typed placeholders spec.
-- `docs/json.md` — `json` schema syntax + alias rules.
-- `ssc_codegen/linter/rules_struct.py` — authoritative lint rules.
+- `references/10-request.md` — full `@request` / typed placeholders spec.
+- `references/json.md` — `json` schema syntax + alias rules.
