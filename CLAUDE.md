@@ -4,8 +4,17 @@
 
 # LLM workflow
 
-Перед любой задачей читай `llm.txt` целиком. Вся архитектура проекта описана там.
-Не запускай Explore агентов и не осматривай файлы самостоятельно — действуй по чеклистам из llm.txt.
+Всегда начинай с `llm_overview.md` — структура проекта, CLI, ключевые паттерны.
+Дальше читай только нужные по задаче файлы:
+
+| Файл | Когда читать |
+|------|-------------|
+| `llm_types_ast.md` | работа с AST-нодами, VariableType, StructType, добавление новых операций |
+| `llm_core.md` | парсер KDL→AST, линтинг, type checking, добавление нового синтаксиса |
+| `llm_converters.md` | кодогенерация, BaseConverter, новый target language, @request транспорт |
+| `llm_howto.md` | пошаговые инструкции: новая операция / директива / конвертер |
+
+Не запускай Explore агентов и не осматривай файлы самостоятельно — действуй по чеклистам из нужных файлов.
 
 # Dev workflow
 
@@ -35,7 +44,7 @@ uv run mypy ssc_codegen/
 
 # project structure
 
-see `llm.txt` file
+see `llm_overview.md` file
 
 # docs
 see `docs/llm.txt` file
