@@ -37,5 +37,5 @@ class TypeDef(Node):
     struct_type: StructType = StructType.ITEM
 
     @property
-    def fields(self) -> List[TypeDefField]:
+    def fields(self) -> list[TypeDefField]:
         return self.body

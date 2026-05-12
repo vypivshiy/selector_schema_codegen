@@ -31,7 +31,6 @@ from ssc_codegen.converters.helpers import (
     jsonify_path_to_segments,
 )
 from ssc_codegen.parsers import parse_to_spec, normalize_placeholder_names
-from ssc_codegen.parsers.spec import _validate_json_body
 
 JS_CONVERTER = BaseConverter(indent=" " * 2)
 
@@ -1740,7 +1739,6 @@ def _js_signature_jsdoc(
 
 def _js_render_json_body(raw: str) -> str:
     """Render JSON body template (with {{placeholders}}) as a JS template literal."""
-    _validate_json_body(raw)
     inner = raw.replace("\\", "\\\\").replace("`", "\\`")
     inner = _JS_PH.sub(r"${\1}", inner)
     return f"`{inner}`"

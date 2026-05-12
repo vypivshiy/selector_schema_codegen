@@ -918,12 +918,12 @@ class _Parser:
         if not self._match(TokenType.LPAREN):
             return None
 
-        l = self._prev()
-        ident = self._parse_identifier_like()
-        r = self._expect(TokenType.RPAREN)
+        lparen = self._prev()
+        self._parse_identifier_like()
+        rparen = self._expect(TokenType.RPAREN)
 
-        raw = self._slice(l.span.start.offset, r.span.end.offset)
-        return CSTTypeAnnotation(raw=raw, span=Span(l.span.start, r.span.end))
+        raw = self._slice(lparen.span.start.offset, rparen.span.end.offset)
+        return CSTTypeAnnotation(raw=raw, span=Span(lparen.span.start, rparen.span.end))
 
     def _parse_identifier_like(self) -> CSTIdentifier:
         tok = self._peek()

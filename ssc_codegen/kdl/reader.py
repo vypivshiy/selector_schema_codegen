@@ -12,7 +12,6 @@ from .parser import (
     CSTDocument,
     CSTNode,
     CSTPropEntry,
-    CSTValue,
     CSTIdentifier,
     Span,
 )
