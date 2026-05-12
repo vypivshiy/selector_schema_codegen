@@ -74,15 +74,24 @@ PY_TYPES[VariableType.LIST_DOCUMENT] = "List[HtmlElement]"
 
 
 @PY_LXML_CONVERTER(Imports)
-def pre_imports(node: Imports, _: ConverterContext):
-    base_imports = [
-        "import json",
-        "import re",
-        "import sys",
-        "from typing import TypedDict, Optional, Any, List, Dict, Union",
-        "from html import unescape as _html_unescape",
-    ]
-    base_imports.extend(py_helpers.rest_imports(node))
+def pre_imports(node: Imports, ctx: ConverterContext):
+    runtime = ctx.meta.get("runtime_module")
+    if runtime:
+        base_imports = [
+            "import json",
+            "import re",
+            "import sys",
+            "from typing import TypedDict, Optional, Any, List, Dict, Union",
+        ]
+    else:
+        base_imports = [
+            "import json",
+            "import re",
+            "import sys",
+            "from typing import TypedDict, Optional, Any, List, Dict, Union",
+            "from html import unescape as _html_unescape",
+        ]
+        base_imports.extend(py_helpers.rest_imports(node))
 
     # Get transform imports for Python (already collected during parsing)
     transform_imports = sorted(node.transform_imports.get("py", set()))
@@ -101,7 +110,11 @@ def post_imports(node: Imports, ctx: ConverterContext):
 
 
 @PY_LXML_CONVERTER(Utilities)
-def pre_utilities(node: Utilities, _: ConverterContext):
+def pre_utilities(node: Utilities, ctx: ConverterContext):
+    runtime = ctx.meta.get("runtime_module")
+    if runtime:
+        names = py_helpers.runtime_export_names(node, include_fallback_html=True)
+        return [f"from {runtime} import " + ", ".join(names), ""]
     lines = [
         'FALLBACK_HTML_STR = "<html><body></body></html>"',
         "_RE_HEX_ENTITY = re.compile(r'&#x([0-9a-fA-F]+);')",

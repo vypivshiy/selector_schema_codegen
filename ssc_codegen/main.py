@@ -139,6 +139,22 @@ def generate(
             ),
         ),
     ] = None,
+    separate_runtime: Annotated[
+        bool,
+        typer.Option(
+            "--separate-runtime",
+            "-R",
+            help="Extract helper functions into a separate runtime module.",
+        ),
+    ] = False,
+    runtime_name: Annotated[
+        Optional[str],
+        typer.Option(
+            "--runtime-name",
+            "-rn",
+            help="Runtime module name (default: sscgen_runtime).",
+        ),
+    ] = None,
     fmt: Annotated[
         FmtType,
         typer.Option(
@@ -185,6 +201,13 @@ def generate(
             )
             raise typer.Exit(code=1)
 
+    if separate_runtime and target in _JS_TARGETS:
+        typer.echo(
+            "ERROR: --separate-runtime is not applicable for JS targets.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
     logger.debug(
         "generate() started: target=%s, output=%s, files=%s, skip_lint=%s",
         target,
@@ -228,6 +251,14 @@ def generate(
     meta: dict = {"package": package or output.name}
     if http_client:
         meta["http_client"] = http_client
+
+    if separate_runtime:
+        from ssc_codegen.converters.py_bs4 import register_runtime_file
+
+        _runtime_name = runtime_name or "sscgen_runtime"
+        meta["runtime_module"] = _runtime_name
+        meta["_include_fallback_html"] = target == Target.PY_LXML
+        register_runtime_file(converter, _runtime_name)
 
     for kdl_file in kdl_files:
         out_file = output / kdl_file.with_suffix(ext).name

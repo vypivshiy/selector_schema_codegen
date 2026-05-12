@@ -178,20 +178,34 @@ def pre_docstring(node: Docstring, _: ConverterContext):
 
 
 @PY_BASE_CONVERTER(Imports)
-def pre_imports(node: Imports, _: ConverterContext):
-    base_imports = [
-        "import json",
-        "import re",
-        "import sys",
-        "from typing import TypedDict, Optional, Any, List, Dict, Union",
-        "from html import unescape as _html_unescape",
-        "",
-        "if sys.version_info >= (3, 11):",
-        "    from typing import NotRequired",
-        "else:",
-        "    from typing_extensions import NotRequired",
-    ]
-    base_imports.extend(py_helpers.rest_imports(node))
+def pre_imports(node: Imports, ctx: ConverterContext):
+    runtime = ctx.meta.get("runtime_module")
+    if runtime:
+        base_imports = [
+            "import json",
+            "import re",
+            "import sys",
+            "from typing import TypedDict, Optional, Any, List, Dict, Union",
+            "",
+            "if sys.version_info >= (3, 11):",
+            "    from typing import NotRequired",
+            "else:",
+            "    from typing_extensions import NotRequired",
+        ]
+    else:
+        base_imports = [
+            "import json",
+            "import re",
+            "import sys",
+            "from typing import TypedDict, Optional, Any, List, Dict, Union",
+            "from html import unescape as _html_unescape",
+            "",
+            "if sys.version_info >= (3, 11):",
+            "    from typing import NotRequired",
+            "else:",
+            "    from typing_extensions import NotRequired",
+        ]
+        base_imports.extend(py_helpers.rest_imports(node))
 
     # Get transform imports for Python (already collected during parsing)
     transform_imports = sorted(node.transform_imports.get("py", set()))
@@ -211,8 +225,12 @@ def post_imports(node: Imports, ctx: ConverterContext):
 
 
 @PY_BASE_CONVERTER(Utilities)
-def pre_utilities(node: Utilities, _: ConverterContext):
-    # TODO: helper functions
+def pre_utilities(node: Utilities, ctx: ConverterContext):
+    runtime = ctx.meta.get("runtime_module")
+    if runtime:
+        names = py_helpers.runtime_export_names(node)
+        return [f"from {runtime} import " + ", ".join(names), ""]
+
     lines = [
         "_RE_HEX_ENTITY = re.compile(r'&#x([0-9a-fA-F]+);')",
         "_RE_UNICODE_ENTITY = re.compile(r'\\\\u([0-9a-fA-F]{4})')",
@@ -1599,3 +1617,14 @@ def pre_request_config(node: RequestConfig, ctx: ConverterContext):
 def pre_error_response(node: ErrorResponse, _: ConverterContext):
     # error spec consumed by pre_request_config; no direct emission
     return None
+
+
+def register_runtime_file(
+    converter: BaseConverter, runtime_name: str = "sscgen_runtime"
+) -> None:
+    """Register a runtime module file provider on the converter."""
+
+    @converter.file(f"{runtime_name}.py")
+    def _runtime_provider(module_ast, meta):
+        include_fallback = meta.get("_include_fallback_html", False)
+        return py_helpers.runtime_module_content(module_ast, include_fallback)
