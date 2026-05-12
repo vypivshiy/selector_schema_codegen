@@ -19,8 +19,6 @@ SPECIAL METHODS NOTATIONS:
 - __START_PARSE__: `parse`,
 """
 
-import re as _re_module
-
 from ssc_codegen.converters.base import ConverterContext, BaseConverter
 from ssc_codegen.ast import VariableType as VT
 import ssc_codegen.ast as a
@@ -30,7 +28,12 @@ from ssc_codegen.converters.helpers import (
     to_snake_case,
     jsonify_path_to_segments,
 )
-from ssc_codegen.parsers import parse_to_spec, normalize_placeholder_names
+from ssc_codegen.converters.request_spec import (
+    parse_to_spec,
+    normalize_placeholder_names,
+    _PH,
+)
+from ssc_codegen.ast.struct import _parse_placeholder
 
 JS_CONVERTER = BaseConverter(indent=" " * 2)
 
@@ -1572,28 +1575,7 @@ def pre_expr_pred_re_any(node: a.PredReAny, ctx: ConverterContext):
 # @request — fetch() classmethod
 # ---------------------------------------------------------------------------
 
-# Kept in sync with ssc_codegen/ast/struct.py:_PLACEHOLDER_RE.
-_JS_PH = _re_module.compile(
-    r"\{\{"
-    r"([A-Za-z][A-Za-z0-9_-]*)"
-    r"(?::(str|int|float|bool))?"
-    r"(\[\])?"
-    r"(\?)?"
-    r"(?:\|(repeat|csv|bracket|pipe|space))?"
-    r"\}\}"
-)
-
 _JS_STYLE_SEP = {"csv": ",", "pipe": "|", "space": " "}
-
-
-def _js_placeholder(m: "_re_module.Match[str]") -> a.PlaceholderSpec:
-    return a.PlaceholderSpec(
-        name=m.group(1),
-        type_name=m.group(2) or "str",
-        is_array=bool(m.group(3)),
-        is_optional=bool(m.group(4)),
-        style=m.group(5) or None,
-    )
 
 
 def _js_array_join(ph: a.PlaceholderSpec) -> str:
@@ -1603,17 +1585,14 @@ def _js_array_join(ph: a.PlaceholderSpec) -> str:
 
 def _js_render_value(v: str) -> str:
     """Render a RequestSpec string value as a JS expression."""
-    if m := _JS_PH.fullmatch(v):
-        ph = _js_placeholder(m)
+    if m := _PH.fullmatch(v):
+        ph = _parse_placeholder(m)
         if ph.is_array and ph.style in ("csv", "pipe", "space"):
             return _js_array_join(ph)
         return ph.name
-    if _JS_PH.search(v):
+    if _PH.search(v):
         inner = v.replace("\\", "\\\\").replace("`", "\\`")
-        # Template substitution: group(1) is NAME — emit ${NAME}. Scalar-only
-        # within mixed content; arrays/optional forbidden inside template literals
-        # (enforced by the linter).
-        inner = _JS_PH.sub(lambda mm: "${" + mm.group(1) + "}", inner)
+        inner = _PH.sub(lambda mm: "${" + mm.group(1) + "}", inner)
         return f"`{inner}`"
     return repr(v)
 
@@ -1629,8 +1608,8 @@ def _js_render_obj(d: dict[str, str]) -> str:
 
 
 def _js_dict_entry_placeholder(v: str) -> a.PlaceholderSpec | None:
-    m = _JS_PH.fullmatch(str(v))
-    return _js_placeholder(m) if m else None
+    m = _PH.fullmatch(str(v))
+    return _parse_placeholder(m) if m else None
 
 
 def _js_dict_needs_builder(d: dict[str, str]) -> bool:
@@ -1740,7 +1719,7 @@ def _js_signature_jsdoc(
 def _js_render_json_body(raw: str) -> str:
     """Render JSON body template (with {{placeholders}}) as a JS template literal."""
     inner = raw.replace("\\", "\\\\").replace("`", "\\`")
-    inner = _JS_PH.sub(r"${\1}", inner)
+    inner = _PH.sub(r"${\1}", inner)
     return f"`{inner}`"
 
 
@@ -1875,7 +1854,7 @@ def _js_rest_method(node: a.RequestConfig, ctx: ConverterContext) -> list[str]:
         lines.append(f"{i3}}});")
     else:
         if spec.params:
-            url_inner = _JS_PH.sub(
+            url_inner = _PH.sub(
                 lambda mm: "${" + mm.group(1) + "}",
                 spec.url.replace("`", "\\`"),
             )
@@ -1997,7 +1976,7 @@ def pre_request_config(node: a.RequestConfig, ctx: ConverterContext):
     if http_client == "fetch":
         # Build URL: embed params into URL via URLSearchParams if present
         if spec.params:
-            url_inner = _JS_PH.sub(r"${\1}", spec.url.replace("`", "\\`"))
+            url_inner = _PH.sub(r"${\1}", spec.url.replace("`", "\\`"))
             params_obj = _js_render_obj(spec.params)
             url_expr = f"`{url_inner}?${{new URLSearchParams({params_obj})}}`"
         else:

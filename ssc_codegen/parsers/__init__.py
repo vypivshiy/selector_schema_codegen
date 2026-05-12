@@ -1,27 +1,7 @@
-from .curl import parse_curl_to_httpx_kwargs
-from .http import parse_http_to_httpx_kwargs
-from .spec import (
-    RequestSpec,
-    parse_to_spec,
-    normalize_placeholder_names,
-    render_value,
-    render_dict,
-    render_json_body,
-    render_body,
-    dict_needs_builder,
-    emit_dict_builder,
-)
+from .curl import parse_curl_command
+from .http import parse_http_request
 
 __all__ = [
-    "RequestSpec",
-    "parse_to_spec",
-    "normalize_placeholder_names",
-    "render_value",
-    "render_dict",
-    "render_json_body",
-    "render_body",
-    "dict_needs_builder",
-    "emit_dict_builder",
-    "parse_curl_to_httpx_kwargs",
-    "parse_http_to_httpx_kwargs",
+    "parse_curl_command",
+    "parse_http_request",
 ]

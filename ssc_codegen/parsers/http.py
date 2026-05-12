@@ -55,15 +55,15 @@ def parse_cookies(cookie_header: str) -> Dict[str, str]:
     return cookies
 
 
-def parse_http_to_httpx_kwargs(raw_http: str) -> Dict[str, Any]:
+def parse_http_request(raw_http: str) -> Dict[str, Any]:
     """
-    Parse a raw HTTP request string and convert it to httpx kwargs.
+    Parse a raw HTTP request string into a generic kwargs dict.
 
     Args:
         raw_http: The raw HTTP request as a string.
 
     Returns:
-        Dict containing httpx method kwargs: url, method, headers, json/data, cookies, etc.
+        Dict containing: method, url, headers, json/data, cookies, params, etc.
 
     Raises:
         ValueError: If the request is invalid or missing required parts.
@@ -179,7 +179,7 @@ Cookie: session_id=abc123; user=john
 
 {"key": "value"}"""
 
-    kwargs = parse_http_to_httpx_kwargs(raw_http)
+    kwargs = parse_http_request(raw_http)
     print(kwargs)
 
     # Test multipart
@@ -197,7 +197,7 @@ Content-Disposition: form-data; name="email"
 john@example.com
 --WebKitFormBoundary7MA4YWxkTrZu0gW--"""
 
-    kwargs_multipart = parse_http_to_httpx_kwargs(raw_multipart)
+    kwargs_multipart = parse_http_request(raw_multipart)
     print(kwargs_multipart)
 
     # Test form-urlencoded
@@ -207,12 +207,12 @@ Content-Type: application/x-www-form-urlencoded
 
 name=John+Doe&email=john%40example.com"""
 
-    kwargs_form = parse_http_to_httpx_kwargs(raw_form)
+    kwargs_form = parse_http_request(raw_form)
     print(kwargs_form)
 
     # Test query params
     raw_query = """GET /search?q=test&page=1 HTTP/1.1
 Host: api.example.com"""
 
-    kwargs_query = parse_http_to_httpx_kwargs(raw_query)
+    kwargs_query = parse_http_request(raw_query)
     print(kwargs_query)

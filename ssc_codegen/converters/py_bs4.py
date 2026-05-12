@@ -10,9 +10,11 @@ from ssc_codegen.converters.helpers import (
     to_snake_case,
     jsonify_path_to_segments,
 )
-from ssc_codegen.parsers import (
+from ssc_codegen.converters.request_spec import (
     parse_to_spec,
     normalize_placeholder_names,
+)
+from ssc_codegen.converters.py_helpers import (
     render_value,
     render_dict,
     render_body,

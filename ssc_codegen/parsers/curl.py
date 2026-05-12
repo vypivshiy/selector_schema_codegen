@@ -25,13 +25,13 @@ def parse_cookies(cookie_header: str) -> Dict[str, str]:
     return cookies
 
 
-def parse_curl_to_httpx_kwargs(
+def parse_curl_command(
     curl_command: str, ignored_flags: Iterable[str] = ("--compressed",)
 ) -> Dict[str, Any]:
     """
-    Parse a curl command string and convert it to httpx kwargs.
+    Parse a POSIX curl command string into a generic kwargs dict.
 
-    Note: POSIX only support, not windows
+    Note: POSIX only, not windows
 
     Args:
         curl_command: The curl command as a string.
@@ -202,17 +202,17 @@ def parse_curl_to_httpx_kwargs(
 # Example usage (for testing)
 if __name__ == "__main__":
     curl_cmd = 'curl -X POST -H "Content-Type: application/json" -d \'{"key": "value"}\' https://httpbin.org/post'
-    kwargs = parse_curl_to_httpx_kwargs(curl_cmd)
+    kwargs = parse_curl_command(curl_cmd)
     print(kwargs)
 
     # Test multipart form
     curl_form = 'curl -F "name=John" -F "age=30" -F "file=@image.jpg" https://httpbin.org/post'
-    kwargs_form = parse_curl_to_httpx_kwargs(curl_form)
+    kwargs_form = parse_curl_command(curl_form)
     print(kwargs_form)
 
     # Test data-urlencode
     curl_params = 'curl --data-urlencode "query=search term" --data-urlencode "page=1" https://api.example.com/search'
-    kwargs_params = parse_curl_to_httpx_kwargs(curl_params)
+    kwargs_params = parse_curl_command(curl_params)
     print(kwargs_params)
     cmd2 = """
 
@@ -237,4 +237,4 @@ if __name__ == "__main__":
 
   
   """
-    print(parse_curl_to_httpx_kwargs(cmd2))
+    print(parse_curl_command(cmd2))
