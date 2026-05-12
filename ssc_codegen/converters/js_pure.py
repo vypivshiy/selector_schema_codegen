@@ -22,7 +22,8 @@ SPECIAL METHODS NOTATIONS:
 import re as _re_module
 
 from ssc_codegen.converters.base import ConverterContext, BaseConverter
-from ssc_codegen.ast import VariableType, StructType
+from ssc_codegen.ast import VariableType as VT
+import ssc_codegen.ast as a
 from ssc_codegen.converters.helpers import (
     to_pascal_case,
     to_camel_case,
@@ -31,131 +32,6 @@ from ssc_codegen.converters.helpers import (
 )
 from ssc_codegen.parsers import parse_to_spec, normalize_placeholder_names
 from ssc_codegen.parsers.spec import _validate_json_body
-
-# module level
-from ssc_codegen.ast import (
-    Docstring,
-    Imports,
-    Module,
-    Utilities,
-    JsonDef,
-    JsonDefField,
-    TypeDef,
-    TypeDefField,
-    Struct,
-)
-
-# struct layer
-from ssc_codegen.ast import (
-    Field,
-    Init,
-    InitField,
-    PreValidate,
-    CheckMethod,
-    SplitDoc,
-    TableConfig,
-    TableMatchKey,
-    TableRow,
-    Key,
-    Value,
-    StartParse,
-    StructDocstring,
-    RequestConfig,
-    ErrorResponse,
-    PlaceholderSpec,
-)
-
-# selectors
-from ssc_codegen.ast import (
-    CssSelect,
-    CssSelectAll,
-    XpathSelect,
-    XpathSelectAll,
-    CssRemove,
-    XpathRemove,
-    Attr,
-    Text,
-    Raw,
-)
-
-# string
-from ssc_codegen.ast import (
-    Trim,
-    Ltrim,
-    Rtrim,
-    RmPrefix,
-    RmSuffix,
-    RmPrefixSuffix,
-    Fmt,
-    Repl,
-    ReplMap,
-    Lower,
-    Upper,
-    Split,
-    Join,
-    Unescape,
-    NormalizeSpace,
-)
-
-# regex
-from ssc_codegen.ast import Re, ReAll, ReSub
-
-# array
-from ssc_codegen.ast import Index, Slice, Len, Unique
-
-# casts
-from ssc_codegen.ast import ToInt, ToFloat, ToBool, Jsonify, Nested
-
-# controls
-from ssc_codegen.ast import FallbackStart, FallbackEnd, Self, Return
-
-# predicates
-from ssc_codegen.ast import (
-    Filter,
-    Assert,
-    Match,
-    LogicAnd,
-    LogicNot,
-    LogicOr,
-)
-
-# pred exprs
-from ssc_codegen.ast import (
-    PredCss,
-    PredContains,
-    PredCountEq,
-    PredCountGt,
-    PredCountLt,
-    PredCountNe,
-    PredCountGe,
-    PredCountLe,
-    PredCountRange,
-    PredEnds,
-    PredEq,
-    PredGe,
-    PredGt,
-    PredLe,
-    PredHasAttr,
-    PredIn,
-    PredLt,
-    PredNe,
-    PredRange,
-    PredRe,
-    PredReAll,
-    PredReAny,
-    PredStarts,
-    PredXpath,
-    PredAttrContains,
-    PredAttrEnds,
-    PredAttrEq,
-    PredAttrNe,
-    PredAttrRe,
-    PredAttrStarts,
-    PredTextContains,
-    PredTextEnds,
-    PredTextRe,
-    PredTextStarts,
-)
 
 JS_CONVERTER = BaseConverter(indent=" " * 2)
 
@@ -233,7 +109,7 @@ def _js_docblock(lines: list[str]) -> list[str]:
 def _find_predicate_container(node):
     cur = node.parent
     while cur:
-        if isinstance(cur, (Filter, Assert, Match, PreValidate)):
+        if isinstance(cur, (a.Filter, a.Assert, a.Match, a.PreValidate)):
             return cur
         cur = cur.parent
     return None
@@ -241,9 +117,9 @@ def _find_predicate_container(node):
 
 def _pred_target(node, ctx: ConverterContext) -> str:
     container = _find_predicate_container(node)
-    if isinstance(container, Filter):
+    if isinstance(container, a.Filter):
         return "i"
-    if isinstance(container, (Match, Assert, PreValidate)):
+    if isinstance(container, (a.Match, a.Assert, a.PreValidate)):
         return getattr(container, "_local_name", "i")
     return ctx.prv
 
@@ -251,7 +127,7 @@ def _pred_target(node, ctx: ConverterContext) -> str:
 def _pred_text_target(node, ctx: ConverterContext) -> str:
     target = _pred_target(node, ctx)
     container = _find_predicate_container(node)
-    if target == "i" and isinstance(container, Filter):
+    if target == "i" and isinstance(container, a.Filter):
         return "i.textContent"
     return target
 
@@ -260,14 +136,14 @@ def _pred_attr_target(node, ctx: ConverterContext) -> str:
     return _pred_target(node, ctx)
 
 
-def _js_typedef_type(node: TypeDefField) -> str:
+def _js_typedef_type(node: a.TypeDefField) -> str:
     type_ = JS_TYPES.get(node.ret, "?")
-    if node.ret == VariableType.JSON and node.json_ref:
+    if node.ret == VT.JSON and node.json_ref:
         type_name = to_pascal_case(node.json_ref)
         type_ = type_.format(type_name)
         if node.is_array:
             type_ = f"Array<{type_}>"
-    elif node.ret == VariableType.NESTED and node.nested_ref:
+    elif node.ret == VT.NESTED and node.nested_ref:
         type_name = to_pascal_case(node.nested_ref)
         type_ = type_.format(type_name)
         if node.is_array:
@@ -276,21 +152,21 @@ def _js_typedef_type(node: TypeDefField) -> str:
 
 
 JS_TYPES = {
-    VariableType.STRING: "string",
-    VariableType.BOOL: "boolean",
-    VariableType.INT: "number",
-    VariableType.FLOAT: "number",
-    VariableType.NULL: "null",
-    VariableType.LIST_STRING: "Array<string>",
-    VariableType.LIST_INT: "Array<number>",
-    VariableType.LIST_FLOAT: "Array<number>",
-    VariableType.DOCUMENT: "Element",
-    VariableType.LIST_DOCUMENT: "Array<Element>",
-    VariableType.OPT_STRING: "string|null",
-    VariableType.OPT_INT: "number|null",
-    VariableType.OPT_FLOAT: "number|null",
-    VariableType.JSON: "{}Json",
-    VariableType.NESTED: "{}Type",
+    VT.STRING: "string",
+    VT.BOOL: "boolean",
+    VT.INT: "number",
+    VT.FLOAT: "number",
+    VT.NULL: "null",
+    VT.LIST_STRING: "Array<string>",
+    VT.LIST_INT: "Array<number>",
+    VT.LIST_FLOAT: "Array<number>",
+    VT.DOCUMENT: "Element",
+    VT.LIST_DOCUMENT: "Array<Element>",
+    VT.OPT_STRING: "string|null",
+    VT.OPT_INT: "number|null",
+    VT.OPT_FLOAT: "number|null",
+    VT.JSON: "{}Json",
+    VT.NESTED: "{}Type",
 }
 
 
@@ -299,13 +175,13 @@ JS_TYPES = {
 # ---------------------------------------------------------------------------
 
 
-@JS_CONVERTER(Docstring)
-def pre_docstring(node: Docstring, _: ConverterContext):
+@JS_CONVERTER(a.Docstring)
+def pre_docstring(node: a.Docstring, _: ConverterContext):
     return _js_docblock(node.value.splitlines())
 
 
-@JS_CONVERTER(Imports)
-def pre_imports(node: Imports, _: ConverterContext):
+@JS_CONVERTER(a.Imports)
+def pre_imports(node: a.Imports, _: ConverterContext):
     return [
         '"use strict";',
         "// autogenerated by ssc-gen. DO NOT EDIT",
@@ -314,17 +190,18 @@ def pre_imports(node: Imports, _: ConverterContext):
 
 def _js_module_has_rest(node) -> bool:
     module = node
-    while module is not None and not isinstance(module, Module):
+    while module is not None and not isinstance(module, a.Module):
         module = getattr(module, "parent", None)
     if module is None:
         return False
     return any(
-        isinstance(n, Struct) and n.is_rest for n in getattr(module, "body", [])
+        isinstance(n, a.Struct) and n.is_rest
+        for n in getattr(module, "body", [])
     )
 
 
-@JS_CONVERTER(Utilities)
-def pre_utilities(node: Utilities, _: ConverterContext):
+@JS_CONVERTER(a.Utilities)
+def pre_utilities(node: a.Utilities, _: ConverterContext):
     # TODO: wrong func _replMap
     lines = [
         "const UNMATCHED_TABLE_ROW = Symbol('UNMATCHED_TABLE_ROW');",
@@ -404,19 +281,19 @@ def pre_utilities(node: Utilities, _: ConverterContext):
     return lines
 
 
-@JS_CONVERTER(JsonDef, post_callback=" */")
-def pre_json_struct(node: JsonDef, _: ConverterContext):
+@JS_CONVERTER(a.JsonDef, post_callback=" */")
+def pre_json_struct(node: a.JsonDef, _: ConverterContext):
     name = to_pascal_case(node.name)
     return ["/**", f" * @typedef {{Object}} {name}Json"]
 
 
-@JS_CONVERTER(JsonDefField)
-def pre_json_field(node: JsonDefField, ctx: ConverterContext):
+@JS_CONVERTER(a.JsonDefField)
+def pre_json_field(node: a.JsonDefField, ctx: ConverterContext):
     if node.skip:
         return None
     name = node.alias if node.alias else node.name
     type_ = JS_TYPES.get(node.ret, "?")
-    if node.ret == VariableType.JSON and node.ref_name:
+    if node.ret == VT.JSON and node.ref_name:
         type_name = to_pascal_case(node.ref_name)
         type_ = type_.format(type_name)
         if node.is_array:
@@ -426,18 +303,18 @@ def pre_json_field(node: JsonDefField, ctx: ConverterContext):
     return f" * @property {{{type_}}} {name}"
 
 
-def _typedef_post(node: TypeDef, _: ConverterContext):
-    if node.struct_type == StructType.REST:
+def _typedef_post(node: a.TypeDef, _: ConverterContext):
+    if node.struct_type == a.StructType.REST:
         return None
     return " */"
 
 
-@JS_CONVERTER(TypeDef, post_callback=_typedef_post)
-def pre_typedef(node: TypeDef, _: ConverterContext):
-    if node.struct_type == StructType.REST:
+@JS_CONVERTER(a.TypeDef, post_callback=_typedef_post)
+def pre_typedef(node: a.TypeDef, _: ConverterContext):
+    if node.struct_type == a.StructType.REST:
         return None
     name = to_pascal_case(node.name)
-    if node.struct_type == StructType.DICT:
+    if node.struct_type == a.StructType.DICT:
         value_field = next(
             f for f in node.fields if to_camel_case(f.name) == "value"
         )
@@ -449,13 +326,13 @@ def pre_typedef(node: TypeDef, _: ConverterContext):
     return ["/**", f" * @typedef {{Object}} {name}Type"]
 
 
-@JS_CONVERTER(TypeDefField)
-def pre_typedef_field(node: TypeDefField, ctx: ConverterContext):
-    if node.typedef.struct_type == StructType.DICT:
+@JS_CONVERTER(a.TypeDefField)
+def pre_typedef_field(node: a.TypeDefField, ctx: ConverterContext):
+    if node.typedef.struct_type == a.StructType.DICT:
         return None
 
     name = to_camel_case(node.name)
-    if node.typedef.struct_type == StructType.TABLE and name == "value":
+    if node.typedef.struct_type == a.StructType.TABLE and name == "value":
         return None
 
     type_ = _js_typedef_type(node)
@@ -511,13 +388,13 @@ def _js_err_value_type(err, struct) -> str:
     module = struct.parent
     if module is not None:
         for n in module.body:
-            if isinstance(n, JsonDef) and n.name == schema and n.is_array:
+            if isinstance(n, a.JsonDef) and n.name == schema and n.is_array:
                 return f"Array<{type_name}>"
     return type_name
 
 
-@JS_CONVERTER(Struct, post_callback="}")
-def pre_struct(node: Struct, ctx: ConverterContext):
+@JS_CONVERTER(a.Struct, post_callback="}")
+def pre_struct(node: a.Struct, ctx: ConverterContext):
     name = to_pascal_case(node.name)
     cls_line = f"class {name} " + "{"
     prefix: list[str] = []
@@ -549,12 +426,12 @@ def pre_struct(node: Struct, ctx: ConverterContext):
     return [*prefix, *doc_lines, cls_line]
 
 
-@JS_CONVERTER(StructDocstring)
-def pre_struct_docstring(node: StructDocstring, ctx: ConverterContext):
+@JS_CONVERTER(a.StructDocstring)
+def pre_struct_docstring(node: a.StructDocstring, ctx: ConverterContext):
     return None
 
 
-def _emit_dispatch_err_js(node: Struct, ctx: ConverterContext) -> list[str]:
+def _emit_dispatch_err_js(node: a.Struct, ctx: ConverterContext) -> list[str]:
     """Emit `_dispatchErr` static method inside a REST class body."""
     i1 = ctx.indent  # class-body level
     i2 = i1 + ctx.indent_char  # method body
@@ -611,20 +488,20 @@ def _emit_dispatch_err_js(node: Struct, ctx: ConverterContext) -> list[str]:
     return lines
 
 
-@JS_CONVERTER.post(StructDocstring)
-def post_struct_docstring(node: StructDocstring, ctx: ConverterContext):
+@JS_CONVERTER.post(a.StructDocstring)
+def post_struct_docstring(node: a.StructDocstring, ctx: ConverterContext):
     parent = node.parent
-    if not isinstance(parent, Struct) or not parent.is_rest:
+    if not isinstance(parent, a.Struct) or not parent.is_rest:
         return None
     return _emit_dispatch_err_js(parent, ctx)
 
 
-@JS_CONVERTER(Init)
-def pre_init(node: Init, ctx: ConverterContext):
-    if isinstance(node.parent, Struct) and node.parent.is_rest:
+@JS_CONVERTER(a.Init)
+def pre_init(node: a.Init, ctx: ConverterContext):
+    if isinstance(node.parent, a.Struct) and node.parent.is_rest:
         return None
     init_names = [
-        to_camel_case(i.name) for i in node.body if isinstance(i, InitField)
+        to_camel_case(i.name) for i in node.body if isinstance(i, a.InitField)
     ]
     lines = [
         f"{ctx.indent}constructor(document) " + "{",
@@ -644,80 +521,80 @@ def pre_init(node: Init, ctx: ConverterContext):
     return lines
 
 
-@JS_CONVERTER(InitField, post_callback=lambda _, ctx: ctx.indent + "}")
-def pre_init_field(node: InitField, ctx: ConverterContext):
+@JS_CONVERTER(a.InitField, post_callback=lambda _, ctx: ctx.indent + "}")
+def pre_init_field(node: a.InitField, ctx: ConverterContext):
     name = to_camel_case(node.name)
     cap = name[0].upper() + name[1:]
     return [f"{ctx.indent}_init{cap}(v) " + "{"]
 
 
-@JS_CONVERTER(Field, post_callback=lambda _, ctx: ctx.indent + "}")
-def pre_struct_field(node: Field, ctx: ConverterContext):
+@JS_CONVERTER(a.Field, post_callback=lambda _, ctx: ctx.indent + "}")
+def pre_struct_field(node: a.Field, ctx: ConverterContext):
     name = to_camel_case(node.name)
     cap = name[0].upper() + name[1:]
     return [f"{ctx.indent}_parse{cap}(v) " + "{"]
 
 
-@JS_CONVERTER(PreValidate, post_callback=lambda _, ctx: ctx.indent + "}")
-def pre_struct_pre_validate(node: PreValidate, ctx: ConverterContext):
-    # Don't create a local variable here - let the child nodes (Assert) handle it if needed
+@JS_CONVERTER(a.PreValidate, post_callback=lambda _, ctx: ctx.indent + "}")
+def pre_struct_pre_validate(node: a.PreValidate, ctx: ConverterContext):
+    # Don't create a local variable here - let the child nodes (a.Assert) handle it if needed
     return [
         f"{ctx.indent}_preValidate(v) " + "{",
     ]
 
 
-@JS_CONVERTER(CheckMethod, post_callback="}")
-def pre_struct_check_method(node: CheckMethod, ctx: ConverterContext):
+@JS_CONVERTER(a.CheckMethod, post_callback="}")
+def pre_struct_check_method(node: a.CheckMethod, ctx: ConverterContext):
     method_name = to_camel_case(node.name)
     return [
         f"{ctx.indent}{method_name}() " + "{",
     ]
 
 
-@JS_CONVERTER(SplitDoc, post_callback=lambda _, ctx: ctx.indent + "}")
-def pre_struct_split_doc(node: SplitDoc, ctx: ConverterContext):
+@JS_CONVERTER(a.SplitDoc, post_callback=lambda _, ctx: ctx.indent + "}")
+def pre_struct_split_doc(node: a.SplitDoc, ctx: ConverterContext):
     return [f"{ctx.indent}_splitDoc(v) " + "{"]
 
 
-@JS_CONVERTER(Key, post_callback=lambda _, ctx: ctx.indent + "}")
-def pre_struct_key(node: Key, ctx: ConverterContext):
+@JS_CONVERTER(a.Key, post_callback=lambda _, ctx: ctx.indent + "}")
+def pre_struct_key(node: a.Key, ctx: ConverterContext):
     return [f"{ctx.indent}_parseKey(v) " + "{"]
 
 
-@JS_CONVERTER(Value, post_callback=lambda _, ctx: ctx.indent + "}")
-def pre_struct_value(node: Value, ctx: ConverterContext):
+@JS_CONVERTER(a.Value, post_callback=lambda _, ctx: ctx.indent + "}")
+def pre_struct_value(node: a.Value, ctx: ConverterContext):
     return [f"{ctx.indent}_parseValue(v) " + "{"]
 
 
-@JS_CONVERTER(TableConfig, post_callback=lambda _, ctx: ctx.indent + "}")
-def pre_struct_table_config(node: TableConfig, ctx: ConverterContext):
+@JS_CONVERTER(a.TableConfig, post_callback=lambda _, ctx: ctx.indent + "}")
+def pre_struct_table_config(node: a.TableConfig, ctx: ConverterContext):
     return [f"{ctx.indent}_tableConfig(v) " + "{"]
 
 
-@JS_CONVERTER(TableMatchKey, post_callback=lambda _, ctx: ctx.indent + "}")
-def pre_struct_table_match_key(node: TableMatchKey, ctx: ConverterContext):
+@JS_CONVERTER(a.TableMatchKey, post_callback=lambda _, ctx: ctx.indent + "}")
+def pre_struct_table_match_key(node: a.TableMatchKey, ctx: ConverterContext):
     return [f"{ctx.indent}_tableMatchKey(v) " + "{"]
 
 
-@JS_CONVERTER(TableRow, post_callback=lambda _, ctx: ctx.indent + "}")
-def pre_struct_table_row(node: TableRow, ctx: ConverterContext):
+@JS_CONVERTER(a.TableRow, post_callback=lambda _, ctx: ctx.indent + "}")
+def pre_struct_table_row(node: a.TableRow, ctx: ConverterContext):
     return [f"{ctx.indent}_tableRows(v) " + "{"]
 
 
-@JS_CONVERTER(StartParse)
-def pre_start_parse(node: StartParse, ctx: ConverterContext):
+@JS_CONVERTER(a.StartParse)
+def pre_start_parse(node: a.StartParse, ctx: ConverterContext):
     # type
     name = to_pascal_case(node.struct.name)
     match node.struct_type:
-        case StructType.ITEM:
+        case a.StructType.ITEM:
             ret_type = f"{name}Type"
-        case StructType.LIST:
+        case a.StructType.LIST:
             ret_type = f"Array<{name}Type>"
-        case StructType.FLAT:
+        case a.StructType.FLAT:
             ret_type = "Array<string>"
-        case StructType.DICT:
+        case a.StructType.DICT:
             ret_type = f"{name}Type"
-        case StructType.TABLE:
+        case a.StructType.TABLE:
             ret_type = f"{name}Type"
         case _:
             raise NotImplementedError(
@@ -731,8 +608,8 @@ def pre_start_parse(node: StartParse, ctx: ConverterContext):
     ]
 
 
-@JS_CONVERTER.post(StartParse)
-def post_start_parse(node: StartParse, ctx: ConverterContext):
+@JS_CONVERTER.post(a.StartParse)
+def post_start_parse(node: a.StartParse, ctx: ConverterContext):
     lines: list[str] = []
     if node.use_pre_validate:
         lines.append(f"{ctx.indent * 2}this._preValidate(this._doc);")
@@ -742,7 +619,7 @@ def post_start_parse(node: StartParse, ctx: ConverterContext):
         return f"_parse{n[0].upper() + n[1:]}"
 
     match node.struct_type:
-        case StructType.ITEM:
+        case a.StructType.ITEM:
             lines.append(f"{ctx.indent * 2}return " + "{")
             for f in node.fields:
                 n = to_camel_case(f.name)
@@ -750,7 +627,7 @@ def post_start_parse(node: StartParse, ctx: ConverterContext):
                     f"{ctx.indent * 3}{n}: this.{_mname(f.name)}(this._doc),"
                 )
             lines.append(f"{ctx.indent * 2}" + "};")
-        case StructType.LIST:
+        case a.StructType.LIST:
             lines.append(
                 f"{ctx.indent * 2}return Array.from(this._splitDoc(this._doc)).map(i => ({{"
             )
@@ -759,7 +636,7 @@ def post_start_parse(node: StartParse, ctx: ConverterContext):
                 lines.append(f"{ctx.indent * 3}{n}: this.{_mname(f.name)}(i),")
             close = "}));"
             lines.append(f"{ctx.indent * 2}{close}")
-        case StructType.DICT:
+        case a.StructType.DICT:
             lines.extend(
                 [
                     f"{ctx.indent * 2}return Array.from(this._splitDoc(this._doc)).reduce((acc, e) => {{",
@@ -768,10 +645,10 @@ def post_start_parse(node: StartParse, ctx: ConverterContext):
                     f"{ctx.indent * 2}}}, {{}});",
                 ]
             )
-        case StructType.FLAT:
+        case a.StructType.FLAT:
             lines.append(f"{ctx.indent * 2}let _result = [];")
             for f in node.fields:
-                if f.ret == VariableType.STRING:
+                if f.ret == VT.STRING:
                     lines.append(
                         f"{ctx.indent * 2}_result.push(this.{_mname(f.name)}(this._doc));"
                     )
@@ -786,7 +663,7 @@ def post_start_parse(node: StartParse, ctx: ConverterContext):
             else:
                 # js Set guaranteed keep order
                 lines.append(f"{ctx.indent * 2}return [...new Set(_result)];")
-        case StructType.TABLE:
+        case a.StructType.TABLE:
             lines.append(f"{ctx.indent * 2}let _result = " + "{};")
             lines.append(
                 f"{ctx.indent * 2}let _table = this._tableConfig(this._doc);"
@@ -819,8 +696,8 @@ def post_start_parse(node: StartParse, ctx: ConverterContext):
 # ---------------------------------------------------------------------------
 
 
-@JS_CONVERTER(CssSelect)
-def pre_expr_css_select(node: CssSelect, ctx: ConverterContext):
+@JS_CONVERTER(a.CssSelect)
+def pre_expr_css_select(node: a.CssSelect, ctx: ConverterContext):
     if node.queries:
         lines: list[str] = []
         for i, query in enumerate(node.queries):
@@ -838,8 +715,8 @@ def pre_expr_css_select(node: CssSelect, ctx: ConverterContext):
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.querySelector({q});"
 
 
-@JS_CONVERTER(CssSelectAll)
-def pre_expr_css_select_all(node: CssSelectAll, ctx: ConverterContext):
+@JS_CONVERTER(a.CssSelectAll)
+def pre_expr_css_select_all(node: a.CssSelectAll, ctx: ConverterContext):
     if node.queries:
         lines: list[str] = []
         for i, query in enumerate(node.queries):
@@ -857,8 +734,8 @@ def pre_expr_css_select_all(node: CssSelectAll, ctx: ConverterContext):
     return f"{ctx.indent}let {ctx.nxt} = Array.from({ctx.prv}.querySelectorAll({q}));"
 
 
-@JS_CONVERTER(XpathSelect)
-def pre_expr_xpath_select(node: XpathSelect, ctx: ConverterContext):
+@JS_CONVERTER(a.XpathSelect)
+def pre_expr_xpath_select(node: a.XpathSelect, ctx: ConverterContext):
     if node.queries:
         lines: list[str] = []
         for i, query in enumerate(node.queries):
@@ -887,8 +764,8 @@ def pre_expr_xpath_select(node: XpathSelect, ctx: ConverterContext):
     ]
 
 
-@JS_CONVERTER(XpathSelectAll)
-def pre_expr_xpath_select_all(node: XpathSelectAll, ctx: ConverterContext):
+@JS_CONVERTER(a.XpathSelectAll)
+def pre_expr_xpath_select_all(node: a.XpathSelectAll, ctx: ConverterContext):
     if node.queries:
         lines: list[str] = []
         for i, query in enumerate(node.queries):
@@ -920,8 +797,8 @@ def pre_expr_xpath_select_all(node: XpathSelectAll, ctx: ConverterContext):
     ]
 
 
-@JS_CONVERTER(CssRemove)
-def pre_expr_css_remove(node: CssRemove, ctx: ConverterContext):
+@JS_CONVERTER(a.CssRemove)
+def pre_expr_css_remove(node: a.CssRemove, ctx: ConverterContext):
     q = repr(node.query)
     return [
         f"{ctx.indent}{ctx.prv}.querySelectorAll({q}).forEach(e => e.remove());",
@@ -929,8 +806,8 @@ def pre_expr_css_remove(node: CssRemove, ctx: ConverterContext):
     ]
 
 
-@JS_CONVERTER(XpathRemove)
-def pre_expr_xpath_remove(node: XpathRemove, ctx: ConverterContext):
+@JS_CONVERTER(a.XpathRemove)
+def pre_expr_xpath_remove(node: a.XpathRemove, ctx: ConverterContext):
     q = repr(node.query)
     return [
         f"for (let {ctx.prv}r = document.evaluate({q}, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null), {ctx.prv}i = {ctx.prv}r.snapshotLength; {ctx.prv}i--; ) {ctx.prv}r.snapshotItem({ctx.prv}i).remove(); ",
@@ -938,10 +815,10 @@ def pre_expr_xpath_remove(node: XpathRemove, ctx: ConverterContext):
     ]
 
 
-@JS_CONVERTER(Attr)
-def pre_expr_attr(node: Attr, ctx: ConverterContext):
+@JS_CONVERTER(a.Attr)
+def pre_expr_attr(node: a.Attr, ctx: ConverterContext):
     keys = node.keys
-    if node.accept == VariableType.DOCUMENT:
+    if node.accept == VT.DOCUMENT:
         if len(keys) == 1:
             return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.getAttribute({keys[0]!r});"
         kl = py_sequence_to_js_array(keys)
@@ -954,16 +831,16 @@ def pre_expr_attr(node: Attr, ctx: ConverterContext):
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.flatMap(el => {kl}.map(k => el.getAttribute(k)).filter(Boolean));"
 
 
-@JS_CONVERTER(Text)
-def pre_expr_text(node: Text, ctx: ConverterContext):
-    if node.accept == VariableType.DOCUMENT:
+@JS_CONVERTER(a.Text)
+def pre_expr_text(node: a.Text, ctx: ConverterContext):
+    if node.accept == VT.DOCUMENT:
         return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.textContent;"
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(el => el.textContent);"
 
 
-@JS_CONVERTER(Raw)
-def pre_expr_raw(node: Raw, ctx: ConverterContext):
-    if node.accept == VariableType.DOCUMENT:
+@JS_CONVERTER(a.Raw)
+def pre_expr_raw(node: a.Raw, ctx: ConverterContext):
+    if node.accept == VT.DOCUMENT:
         return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.outerHTML;"
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(el => el.outerHTML);"
 
@@ -973,10 +850,10 @@ def pre_expr_raw(node: Raw, ctx: ConverterContext):
 # ---------------------------------------------------------------------------
 
 
-@JS_CONVERTER(Trim)
-def pre_expr_trim(node: Trim, ctx: ConverterContext):
+@JS_CONVERTER(a.Trim)
+def pre_expr_trim(node: a.Trim, ctx: ConverterContext):
     substr = node.substr
-    if node.accept == VariableType.STRING:
+    if node.accept == VT.STRING:
         if not substr:
             return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.trim();"
         return [
@@ -995,10 +872,10 @@ def pre_expr_trim(node: Trim, ctx: ConverterContext):
     ]
 
 
-@JS_CONVERTER(Ltrim)
-def pre_expr_ltrim(node: Ltrim, ctx: ConverterContext):
+@JS_CONVERTER(a.Ltrim)
+def pre_expr_ltrim(node: a.Ltrim, ctx: ConverterContext):
     substr = node.substr
-    if node.accept == VariableType.STRING:
+    if node.accept == VT.STRING:
         if not substr:
             return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.trimStart();"
         return [
@@ -1016,10 +893,10 @@ def pre_expr_ltrim(node: Ltrim, ctx: ConverterContext):
     ]
 
 
-@JS_CONVERTER(Rtrim)
-def pre_expr_rtrim(node: Rtrim, ctx: ConverterContext):
+@JS_CONVERTER(a.Rtrim)
+def pre_expr_rtrim(node: a.Rtrim, ctx: ConverterContext):
     substr = node.substr
-    if node.accept == VariableType.STRING:
+    if node.accept == VT.STRING:
         if not substr:
             return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.trimEnd();"
         return [
@@ -1039,96 +916,96 @@ def pre_expr_rtrim(node: Rtrim, ctx: ConverterContext):
     ]
 
 
-@JS_CONVERTER(RmPrefix)
-def pre_expr_rm_prefix(node: RmPrefix, ctx: ConverterContext):
+@JS_CONVERTER(a.RmPrefix)
+def pre_expr_rm_prefix(node: a.RmPrefix, ctx: ConverterContext):
     v = repr(node.substr)
-    if node.accept == VariableType.STRING:
+    if node.accept == VT.STRING:
         return f"{ctx.indent}let {ctx.nxt} = _rmPrefix({ctx.prv}, {v});"
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => _rmPrefix(s, {v}));"
 
 
-@JS_CONVERTER(RmSuffix)
-def pre_expr_rm_suffix(node: RmSuffix, ctx: ConverterContext):
+@JS_CONVERTER(a.RmSuffix)
+def pre_expr_rm_suffix(node: a.RmSuffix, ctx: ConverterContext):
     v = repr(node.substr)
-    if node.accept == VariableType.STRING:
+    if node.accept == VT.STRING:
         return f"{ctx.indent}let {ctx.nxt} = _rmSuffix({ctx.prv}, {v});"
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => _rmSuffix(s, {v}));"
 
 
-@JS_CONVERTER(RmPrefixSuffix)
-def pre_expr_rm_prefix_suffix(node: RmPrefixSuffix, ctx: ConverterContext):
+@JS_CONVERTER(a.RmPrefixSuffix)
+def pre_expr_rm_prefix_suffix(node: a.RmPrefixSuffix, ctx: ConverterContext):
     v = repr(node.substr)
-    if node.accept == VariableType.STRING:
+    if node.accept == VT.STRING:
         return f"{ctx.indent}let {ctx.nxt} = _rmSuffix(_rmPrefix({ctx.prv}, {v}), {v});"
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => _rmSuffix(_rmPrefix(s, {v}), {v}));"
 
 
-@JS_CONVERTER(Fmt)
-def pre_expr_fmt(node: Fmt, ctx: ConverterContext):
+@JS_CONVERTER(a.Fmt)
+def pre_expr_fmt(node: a.Fmt, ctx: ConverterContext):
     tmpl = node.template.replace("{{}}", "${_v}").replace("`", "\\`")
     js_tmpl = "`" + tmpl + "`"
-    if node.accept == VariableType.STRING:
+    if node.accept == VT.STRING:
         return f"{ctx.indent}let {ctx.nxt} = ((_v) => {js_tmpl})({ctx.prv});"
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(_v => {js_tmpl});"
 
 
-@JS_CONVERTER(Repl)
-def pre_expr_repl(node: Repl, ctx: ConverterContext):
+@JS_CONVERTER(a.Repl)
+def pre_expr_repl(node: a.Repl, ctx: ConverterContext):
     old = repr(node.old)
     new = repr(node.new)
-    if node.accept == VariableType.STRING:
+    if node.accept == VT.STRING:
         return (
             f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.replaceAll({old}, {new});"
         )
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => s.replaceAll({old}, {new}));"
 
 
-@JS_CONVERTER(ReplMap)
-def pre_expr_repl_map(node: ReplMap, ctx: ConverterContext):
+@JS_CONVERTER(a.ReplMap)
+def pre_expr_repl_map(node: a.ReplMap, ctx: ConverterContext):
     rmap = repr(dict(node.replacements))
-    if node.accept == VariableType.STRING:
+    if node.accept == VT.STRING:
         return f"{ctx.indent}let {ctx.nxt} = _replMap({ctx.prv}, {rmap});"
     return (
         f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => _replMap(s, {rmap}));"
     )
 
 
-@JS_CONVERTER(Lower)
-def pre_expr_lower(node: Lower, ctx: ConverterContext):
-    if node.accept == VariableType.STRING:
+@JS_CONVERTER(a.Lower)
+def pre_expr_lower(node: a.Lower, ctx: ConverterContext):
+    if node.accept == VT.STRING:
         return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.toLowerCase();"
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => s.toLowerCase());"
 
 
-@JS_CONVERTER(Upper)
-def pre_expr_upper(node: Upper, ctx: ConverterContext):
-    if node.accept == VariableType.STRING:
+@JS_CONVERTER(a.Upper)
+def pre_expr_upper(node: a.Upper, ctx: ConverterContext):
+    if node.accept == VT.STRING:
         return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.toUpperCase();"
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => s.toUpperCase());"
 
 
-@JS_CONVERTER(Split)
-def pre_expr_split(node: Split, ctx: ConverterContext):
+@JS_CONVERTER(a.Split)
+def pre_expr_split(node: a.Split, ctx: ConverterContext):
     sep = repr(node.sep)
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.split({sep});"
 
 
-@JS_CONVERTER(Join)
-def pre_expr_join(node: Join, ctx: ConverterContext):
+@JS_CONVERTER(a.Join)
+def pre_expr_join(node: a.Join, ctx: ConverterContext):
     sep = repr(node.sep)
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.join({sep});"
 
 
-@JS_CONVERTER(NormalizeSpace)
-def pre_expr_normalize(node: NormalizeSpace, ctx: ConverterContext):
-    if node.accept == VariableType.STRING:
+@JS_CONVERTER(a.NormalizeSpace)
+def pre_expr_normalize(node: a.NormalizeSpace, ctx: ConverterContext):
+    if node.accept == VT.STRING:
         return f"{ctx.indent}let {ctx.nxt} = _normalizeText({ctx.prv});"
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => _normalizeText(s));"
 
 
-@JS_CONVERTER(Unescape)
-def pre_expr_unescape(node: Unescape, ctx: ConverterContext):
-    if node.accept == VariableType.STRING:
+@JS_CONVERTER(a.Unescape)
+def pre_expr_unescape(node: a.Unescape, ctx: ConverterContext):
+    if node.accept == VT.STRING:
         return f"{ctx.indent}let {ctx.nxt} = _unescapeText({ctx.prv});"
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => _unescapeText(s));"
 
@@ -1138,16 +1015,16 @@ def pre_expr_unescape(node: Unescape, ctx: ConverterContext):
 # ---------------------------------------------------------------------------
 
 
-@JS_CONVERTER(Re)
-def pre_expr_re(node: Re, ctx: ConverterContext):
+@JS_CONVERTER(a.Re)
+def pre_expr_re(node: a.Re, ctx: ConverterContext):
     rx = _js_re_node(node)
-    if node.accept == VariableType.STRING:
+    if node.accept == VT.STRING:
         return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.match({rx})[1];"
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => s.match({rx})[1]);"
 
 
-@JS_CONVERTER(ReAll)
-def pre_expr_re_all(node: ReAll, ctx: ConverterContext):
+@JS_CONVERTER(a.ReAll)
+def pre_expr_re_all(node: a.ReAll, ctx: ConverterContext):
     # Extract inline flags and add 'g' for global
     import re as _re
 
@@ -1162,8 +1039,8 @@ def pre_expr_re_all(node: ReAll, ctx: ConverterContext):
     return f"{ctx.indent}let {ctx.nxt} = Array.from({ctx.prv}.matchAll({rx_g}), m => m[1]);"
 
 
-@JS_CONVERTER(ReSub)
-def pre_expr_re_sub(node: ReSub, ctx: ConverterContext):
+@JS_CONVERTER(a.ReSub)
+def pre_expr_re_sub(node: a.ReSub, ctx: ConverterContext):
     # Extract inline flags and add 'g' for global
     import re as _re
 
@@ -1176,7 +1053,7 @@ def pre_expr_re_sub(node: ReSub, ctx: ConverterContext):
     escaped = pattern.replace("/", "\\/")
     rx_g = f"/{escaped}/{flags}"
     repl = repr(node.repl)
-    if node.accept == VariableType.STRING:
+    if node.accept == VT.STRING:
         return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.replace({rx_g}, {repl});"
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => s.replace({rx_g}, {repl}));"
 
@@ -1186,16 +1063,16 @@ def pre_expr_re_sub(node: ReSub, ctx: ConverterContext):
 # ---------------------------------------------------------------------------
 
 
-@JS_CONVERTER(Index)
-def pre_expr_index(node: Index, ctx: ConverterContext):
+@JS_CONVERTER(a.Index)
+def pre_expr_index(node: a.Index, ctx: ConverterContext):
     i = node.i
     if i < 0:
         i = f"{ctx.prv}.length - {i}"
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}[{i}];"
 
 
-@JS_CONVERTER(Slice)
-def pre_expr_slice(node: Slice, ctx: ConverterContext):
+@JS_CONVERTER(a.Slice)
+def pre_expr_slice(node: a.Slice, ctx: ConverterContext):
     start = node.start
     end = node.end
     if start < 0:
@@ -1205,13 +1082,13 @@ def pre_expr_slice(node: Slice, ctx: ConverterContext):
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.slice({start}, {end});"
 
 
-@JS_CONVERTER(Len)
-def pre_expr_len(node: Len, ctx: ConverterContext):
+@JS_CONVERTER(a.Len)
+def pre_expr_len(node: a.Len, ctx: ConverterContext):
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.length;"
 
 
-@JS_CONVERTER(Unique)
-def pre_expr_unique(node: Unique, ctx: ConverterContext):
+@JS_CONVERTER(a.Unique)
+def pre_expr_unique(node: a.Unique, ctx: ConverterContext):
     # js Set(...) guaranteed keep order
     return f"{ctx.indent}let {ctx.nxt} = [...new Set({ctx.prv})];"
 
@@ -1221,27 +1098,27 @@ def pre_expr_unique(node: Unique, ctx: ConverterContext):
 # ---------------------------------------------------------------------------
 
 
-@JS_CONVERTER(ToInt)
-def pre_expr_to_int(node: ToInt, ctx: ConverterContext):
-    if node.accept == VariableType.STRING:
+@JS_CONVERTER(a.ToInt)
+def pre_expr_to_int(node: a.ToInt, ctx: ConverterContext):
+    if node.accept == VT.STRING:
         return f"{ctx.indent}let {ctx.nxt} = parseInt({ctx.prv}, 10);"
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => parseInt(s, 10));"
 
 
-@JS_CONVERTER(ToFloat)
-def pre_expr_to_float(node: ToFloat, ctx: ConverterContext):
-    if node.accept == VariableType.STRING:
+@JS_CONVERTER(a.ToFloat)
+def pre_expr_to_float(node: a.ToFloat, ctx: ConverterContext):
+    if node.accept == VT.STRING:
         return f"{ctx.indent}let {ctx.nxt} = parseFloat({ctx.prv});"
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => parseFloat(s));"
 
 
-@JS_CONVERTER(ToBool)
-def pre_expr_to_bool(node: ToBool, ctx: ConverterContext):
+@JS_CONVERTER(a.ToBool)
+def pre_expr_to_bool(node: a.ToBool, ctx: ConverterContext):
     return f"{ctx.indent}let {ctx.nxt} = Boolean({ctx.prv});"
 
 
-@JS_CONVERTER(Jsonify)
-def pre_expr_jsonify(node: Jsonify, ctx: ConverterContext):
+@JS_CONVERTER(a.Jsonify)
+def pre_expr_jsonify(node: a.Jsonify, ctx: ConverterContext):
     if node.path:
         parts = jsonify_path_to_segments(node.path)
         # TODO: check negative arrays (how?)
@@ -1252,8 +1129,8 @@ def pre_expr_jsonify(node: Jsonify, ctx: ConverterContext):
     return f"{ctx.indent}let {ctx.nxt} = JSON.parse({ctx.prv});"
 
 
-@JS_CONVERTER(Nested)
-def pre_expr_nested(node: Nested, ctx: ConverterContext):
+@JS_CONVERTER(a.Nested)
+def pre_expr_nested(node: a.Nested, ctx: ConverterContext):
     cls = to_pascal_case(node.struct_name)
     return f"{ctx.indent}let {ctx.nxt} = new {cls}({ctx.prv}).parse();"
 
@@ -1263,29 +1140,29 @@ def pre_expr_nested(node: Nested, ctx: ConverterContext):
 # ---------------------------------------------------------------------------
 
 
-@JS_CONVERTER(Self)
-def pre_expr_self(node: Self, ctx: ConverterContext):
+@JS_CONVERTER(a.Self)
+def pre_expr_self(node: a.Self, ctx: ConverterContext):
     name = to_camel_case(node.name)
     return f"{ctx.indent}let {ctx.nxt} = this._{name};"
 
 
-@JS_CONVERTER(Return)
-def pre_expr_return(node: Return, ctx: ConverterContext):
-    if isinstance(node.parent, PreValidate):
+@JS_CONVERTER(a.Return)
+def pre_expr_return(node: a.Return, ctx: ConverterContext):
+    if isinstance(node.parent, a.PreValidate):
         return f"{ctx.indent}return;"
-    # ignore return stmt (inner in Fallback wrapper)
-    elif isinstance(node.parent.body[0], FallbackStart):
+    # ignore return stmt (inner in a.Fallback wrapper)
+    elif isinstance(node.parent.body[0], a.FallbackStart):
         return
     return f"{ctx.indent}return {ctx.prv};"
 
 
-@JS_CONVERTER(FallbackStart)
-def pre_expr_fallback_start(node: FallbackStart, ctx: ConverterContext):
+@JS_CONVERTER(a.FallbackStart)
+def pre_expr_fallback_start(node: a.FallbackStart, ctx: ConverterContext):
     return f"{ctx.indent}try {{"
 
 
-@JS_CONVERTER(FallbackEnd)
-def pre_expr_fallback_end(node: FallbackEnd, ctx: ConverterContext):
+@JS_CONVERTER(a.FallbackEnd)
+def pre_expr_fallback_end(node: a.FallbackEnd, ctx: ConverterContext):
     val = _js_literal(node.value)
     ob, cb = "{", "}"
     return [
@@ -1301,23 +1178,25 @@ def pre_expr_fallback_end(node: FallbackEnd, ctx: ConverterContext):
 # ---------------------------------------------------------------------------
 
 
-@JS_CONVERTER(Filter, post_callback=lambda _, ctx: ctx.deeper().indent + "));")
-def pre_expr_filter(node: Filter, ctx: ConverterContext):
+@JS_CONVERTER(
+    a.Filter, post_callback=lambda _, ctx: ctx.deeper().indent + "));"
+)
+def pre_expr_filter(node: a.Filter, ctx: ConverterContext):
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.filter(i => ("
 
 
-@JS_CONVERTER(Assert)
-def pre_expr_assert(node: Assert, ctx: ConverterContext):
-    # Only create a local if we're not already inside PreValidate
-    # PreValidate uses 'v' as the input, Assert predicates should evaluate against ctx.prv
-    if isinstance(node.parent, PreValidate):
-        # Inside PreValidate, predicates evaluate against 'v' directly
+@JS_CONVERTER(a.Assert)
+def pre_expr_assert(node: a.Assert, ctx: ConverterContext):
+    # Only create a local if we're not already inside a.PreValidate
+    # a.PreValidate uses 'v' as the input, a.Assert predicates should evaluate against ctx.prv
+    if isinstance(node.parent, a.PreValidate):
+        # Inside a.PreValidate, predicates evaluate against 'v' directly
         setattr(node, "_local_name", "v")
         return [
             f"{ctx.indent}if (!(",
         ]
     else:
-        # Outside PreValidate, create a local variable
+        # Outside a.PreValidate, create a local variable
         local = f"i{ctx.prv}"
         setattr(node, "_local_name", local)
         return [
@@ -1326,12 +1205,12 @@ def pre_expr_assert(node: Assert, ctx: ConverterContext):
         ]
 
 
-@JS_CONVERTER.post(Assert)
-def post_expr_assert(node: Assert, ctx: ConverterContext):
+@JS_CONVERTER.post(a.Assert)
+def post_expr_assert(node: a.Assert, ctx: ConverterContext):
     # TODO: message API
     ob, cb = "{", "}"
-    if isinstance(node.parent, PreValidate):
-        # Inside PreValidate, just throw and return
+    if isinstance(node.parent, a.PreValidate):
+        # Inside a.PreValidate, just throw and return
         return [
             f"{ctx.indent})) {ob} throw new Error('Assertion failed'); {cb}",
         ]
@@ -1342,8 +1221,8 @@ def post_expr_assert(node: Assert, ctx: ConverterContext):
         ]
 
 
-@JS_CONVERTER(Match)
-def pre_expr_match(node: Match, ctx: ConverterContext):
+@JS_CONVERTER(a.Match)
+def pre_expr_match(node: a.Match, ctx: ConverterContext):
     local = f"i{ctx.prv}"
     setattr(node, "_local_name", local)
     return [
@@ -1352,8 +1231,8 @@ def pre_expr_match(node: Match, ctx: ConverterContext):
     ]
 
 
-@JS_CONVERTER.post(Match)
-def post_expr_match(node: Match, ctx: ConverterContext):
+@JS_CONVERTER.post(a.Match)
+def post_expr_match(node: a.Match, ctx: ConverterContext):
     # TODO: check API
     ob, cb = "{", "}"
     return [
@@ -1362,18 +1241,18 @@ def post_expr_match(node: Match, ctx: ConverterContext):
     ]
 
 
-@JS_CONVERTER(LogicAnd, post_callback=lambda _, ctx: ctx.indent + ")")
-def pre_expr_logic_and(node: LogicAnd, ctx: ConverterContext):
+@JS_CONVERTER(a.LogicAnd, post_callback=lambda _, ctx: ctx.indent + ")")
+def pre_expr_logic_and(node: a.LogicAnd, ctx: ConverterContext):
     return _logic_prefix("&&", ctx)
 
 
-@JS_CONVERTER(LogicOr, post_callback=lambda _, ctx: ctx.indent + ")")
-def pre_expr_logic_or(node: LogicOr, ctx: ConverterContext):
+@JS_CONVERTER(a.LogicOr, post_callback=lambda _, ctx: ctx.indent + ")")
+def pre_expr_logic_or(node: a.LogicOr, ctx: ConverterContext):
     return _logic_prefix("||", ctx)
 
 
-@JS_CONVERTER(LogicNot, post_callback=lambda _, ctx: ctx.indent + ")")
-def pre_expr_logic_not(node: LogicNot, ctx: ConverterContext):
+@JS_CONVERTER(a.LogicNot, post_callback=lambda _, ctx: ctx.indent + ")")
+def pre_expr_logic_not(node: a.LogicNot, ctx: ConverterContext):
     if ctx.index == 0:
         return f"{ctx.indent}!("
     return f"{ctx.indent}&& !("
@@ -1384,21 +1263,21 @@ def pre_expr_logic_not(node: LogicNot, ctx: ConverterContext):
 # ---------------------------------------------------------------------------
 
 
-@JS_CONVERTER(PredCss)
-def pre_expr_pred_css(node: PredCss, ctx: ConverterContext):
+@JS_CONVERTER(a.PredCss)
+def pre_expr_pred_css(node: a.PredCss, ctx: ConverterContext):
     q = repr(node.query)
     target = _pred_target(node, ctx)
     return _and(f"{target}.querySelector({q}) !== null", ctx)
 
 
-@JS_CONVERTER(PredXpath)
-def pre_expr_pred_xpath(node: PredXpath, ctx: ConverterContext):
+@JS_CONVERTER(a.PredXpath)
+def pre_expr_pred_xpath(node: a.PredXpath, ctx: ConverterContext):
     # TODO: xpath API (its supported)
     raise NotImplementedError("XPath predicates not supported in pure JS")
 
 
-@JS_CONVERTER(PredContains)
-def pre_expr_pred_contains(node: PredContains, ctx: ConverterContext):
+@JS_CONVERTER(a.PredContains)
+def pre_expr_pred_contains(node: a.PredContains, ctx: ConverterContext):
     values = node.values
     target = _pred_target(node, ctx)
     cond = (
@@ -1409,8 +1288,8 @@ def pre_expr_pred_contains(node: PredContains, ctx: ConverterContext):
     return _and(cond, ctx)
 
 
-@JS_CONVERTER(PredEq)
-def pre_expr_pred_eq(node: PredEq, ctx: ConverterContext):
+@JS_CONVERTER(a.PredEq)
+def pre_expr_pred_eq(node: a.PredEq, ctx: ConverterContext):
     values = node.values
     target = _pred_target(node, ctx)
     if isinstance(values[0], int):
@@ -1422,8 +1301,8 @@ def pre_expr_pred_eq(node: PredEq, ctx: ConverterContext):
     return _and(cond, ctx)
 
 
-@JS_CONVERTER(PredNe)
-def pre_expr_pred_ne(node: PredNe, ctx: ConverterContext):
+@JS_CONVERTER(a.PredNe)
+def pre_expr_pred_ne(node: a.PredNe, ctx: ConverterContext):
     values = node.values
     target = _pred_target(node, ctx)
     if isinstance(values[0], int):
@@ -1435,8 +1314,8 @@ def pre_expr_pred_ne(node: PredNe, ctx: ConverterContext):
     return _and(cond, ctx)
 
 
-@JS_CONVERTER(PredStarts)
-def pre_expr_pred_starts(node: PredStarts, ctx: ConverterContext):
+@JS_CONVERTER(a.PredStarts)
+def pre_expr_pred_starts(node: a.PredStarts, ctx: ConverterContext):
     values = node.values
     target = _pred_target(node, ctx)
     cond = (
@@ -1447,8 +1326,8 @@ def pre_expr_pred_starts(node: PredStarts, ctx: ConverterContext):
     return _and(cond, ctx)
 
 
-@JS_CONVERTER(PredEnds)
-def pre_expr_pred_ends(node: PredEnds, ctx: ConverterContext):
+@JS_CONVERTER(a.PredEnds)
+def pre_expr_pred_ends(node: a.PredEnds, ctx: ConverterContext):
     values = node.values
     target = _pred_target(node, ctx)
     cond = (
@@ -1460,52 +1339,52 @@ def pre_expr_pred_ends(node: PredEnds, ctx: ConverterContext):
 
 
 # TODO: drop this node (new API used)
-@JS_CONVERTER(PredCountEq)
-def pre_expr_pred_count_eq(node: PredCountEq, ctx: ConverterContext):
+@JS_CONVERTER(a.PredCountEq)
+def pre_expr_pred_count_eq(node: a.PredCountEq, ctx: ConverterContext):
     target = _pred_target(node, ctx)
     return _and(f"{target}.length === {node.value}", ctx)
 
 
-@JS_CONVERTER(PredCountGt)
-def pre_expr_pred_count_gt(node: PredCountGt, ctx: ConverterContext):
+@JS_CONVERTER(a.PredCountGt)
+def pre_expr_pred_count_gt(node: a.PredCountGt, ctx: ConverterContext):
     target = _pred_target(node, ctx)
     return _and(f"{target}.length > {node.value}", ctx)
 
 
-@JS_CONVERTER(PredCountLt)
-def pre_expr_pred_count_lt(node: PredCountLt, ctx: ConverterContext):
+@JS_CONVERTER(a.PredCountLt)
+def pre_expr_pred_count_lt(node: a.PredCountLt, ctx: ConverterContext):
     target = _pred_target(node, ctx)
     return _and(f"{target}.length < {node.value}", ctx)
 
 
-@JS_CONVERTER(PredCountNe)
-def pre_expr_pred_count_ne(node: PredCountNe, ctx: ConverterContext):
+@JS_CONVERTER(a.PredCountNe)
+def pre_expr_pred_count_ne(node: a.PredCountNe, ctx: ConverterContext):
     target = _pred_target(node, ctx)
     return _and(f"{target}.length !== {node.value}", ctx)
 
 
-@JS_CONVERTER(PredCountGe)
-def pre_expr_pred_count_ge(node: PredCountGe, ctx: ConverterContext):
+@JS_CONVERTER(a.PredCountGe)
+def pre_expr_pred_count_ge(node: a.PredCountGe, ctx: ConverterContext):
     target = _pred_target(node, ctx)
     return _and(f"{target}.length >= {node.value}", ctx)
 
 
-@JS_CONVERTER(PredCountLe)
-def pre_expr_pred_count_le(node: PredCountLe, ctx: ConverterContext):
+@JS_CONVERTER(a.PredCountLe)
+def pre_expr_pred_count_le(node: a.PredCountLe, ctx: ConverterContext):
     target = _pred_target(node, ctx)
     return _and(f"{target}.length <= {node.value}", ctx)
 
 
-@JS_CONVERTER(PredCountRange)
-def pre_expr_pred_count_range(node: PredCountRange, ctx: ConverterContext):
+@JS_CONVERTER(a.PredCountRange)
+def pre_expr_pred_count_range(node: a.PredCountRange, ctx: ConverterContext):
     target = _pred_target(node, ctx)
     return _and(
         f"{target}.length > {node.start} && {target}.length < {node.end}", ctx
     )
 
 
-@JS_CONVERTER(PredHasAttr)
-def pre_expr_pred_has_attr(node: PredHasAttr, ctx: ConverterContext):
+@JS_CONVERTER(a.PredHasAttr)
+def pre_expr_pred_has_attr(node: a.PredHasAttr, ctx: ConverterContext):
     keys = node.attrs
     target = _pred_attr_target(node, ctx)
     cond = (
@@ -1516,8 +1395,8 @@ def pre_expr_pred_has_attr(node: PredHasAttr, ctx: ConverterContext):
     return _and(cond, ctx)
 
 
-@JS_CONVERTER(PredAttrEq)
-def pre_expr_pred_attr_eq(node: PredAttrEq, ctx: ConverterContext):
+@JS_CONVERTER(a.PredAttrEq)
+def pre_expr_pred_attr_eq(node: a.PredAttrEq, ctx: ConverterContext):
     name, values = node.name, node.values
     target = _pred_attr_target(node, ctx)
     cond = (
@@ -1528,8 +1407,8 @@ def pre_expr_pred_attr_eq(node: PredAttrEq, ctx: ConverterContext):
     return _and(cond, ctx)
 
 
-@JS_CONVERTER(PredAttrNe)
-def pre_expr_pred_attr_ne(node: PredAttrNe, ctx: ConverterContext):
+@JS_CONVERTER(a.PredAttrNe)
+def pre_expr_pred_attr_ne(node: a.PredAttrNe, ctx: ConverterContext):
     name, values = node.name, node.values
     target = _pred_attr_target(node, ctx)
     cond = (
@@ -1540,8 +1419,8 @@ def pre_expr_pred_attr_ne(node: PredAttrNe, ctx: ConverterContext):
     return _and(cond, ctx)
 
 
-@JS_CONVERTER(PredAttrStarts)
-def pre_expr_pred_attr_starts(node: PredAttrStarts, ctx: ConverterContext):
+@JS_CONVERTER(a.PredAttrStarts)
+def pre_expr_pred_attr_starts(node: a.PredAttrStarts, ctx: ConverterContext):
     name, values = node.name, node.values
     target = _pred_attr_target(node, ctx)
     cond = (
@@ -1552,8 +1431,8 @@ def pre_expr_pred_attr_starts(node: PredAttrStarts, ctx: ConverterContext):
     return _and(cond, ctx)
 
 
-@JS_CONVERTER(PredAttrEnds)
-def pre_expr_pred_attr_ends(node: PredAttrEnds, ctx: ConverterContext):
+@JS_CONVERTER(a.PredAttrEnds)
+def pre_expr_pred_attr_ends(node: a.PredAttrEnds, ctx: ConverterContext):
     name, values = node.name, node.values
     target = _pred_attr_target(node, ctx)
     cond = (
@@ -1564,8 +1443,10 @@ def pre_expr_pred_attr_ends(node: PredAttrEnds, ctx: ConverterContext):
     return _and(cond, ctx)
 
 
-@JS_CONVERTER(PredAttrContains)
-def pre_expr_pred_attr_contains(node: PredAttrContains, ctx: ConverterContext):
+@JS_CONVERTER(a.PredAttrContains)
+def pre_expr_pred_attr_contains(
+    node: a.PredAttrContains, ctx: ConverterContext
+):
     name, values = node.name, node.values
     target = _pred_attr_target(node, ctx)
     cond = (
@@ -1576,15 +1457,17 @@ def pre_expr_pred_attr_contains(node: PredAttrContains, ctx: ConverterContext):
     return _and(cond, ctx)
 
 
-@JS_CONVERTER(PredAttrRe)
-def pre_expr_pred_attr_re(node: PredAttrRe, ctx: ConverterContext):
+@JS_CONVERTER(a.PredAttrRe)
+def pre_expr_pred_attr_re(node: a.PredAttrRe, ctx: ConverterContext):
     rx = _js_re_node(node)
     target = _pred_attr_target(node, ctx)
     return _and(f"{rx}.test({target}.getAttribute({node.name!r}) ?? '')", ctx)
 
 
-@JS_CONVERTER(PredTextContains)
-def pre_expr_pred_text_contains(node: PredTextContains, ctx: ConverterContext):
+@JS_CONVERTER(a.PredTextContains)
+def pre_expr_pred_text_contains(
+    node: a.PredTextContains, ctx: ConverterContext
+):
     values = node.values
     target = _pred_text_target(node, ctx)
     cond = (
@@ -1595,8 +1478,8 @@ def pre_expr_pred_text_contains(node: PredTextContains, ctx: ConverterContext):
     return _and(cond, ctx)
 
 
-@JS_CONVERTER(PredTextStarts)
-def pre_expr_pred_text_starts(node: PredTextStarts, ctx: ConverterContext):
+@JS_CONVERTER(a.PredTextStarts)
+def pre_expr_pred_text_starts(node: a.PredTextStarts, ctx: ConverterContext):
     values = node.values
     target = _pred_text_target(node, ctx)
     cond = (
@@ -1607,8 +1490,8 @@ def pre_expr_pred_text_starts(node: PredTextStarts, ctx: ConverterContext):
     return _and(cond, ctx)
 
 
-@JS_CONVERTER(PredTextEnds)
-def pre_expr_pred_text_ends(node: PredTextEnds, ctx: ConverterContext):
+@JS_CONVERTER(a.PredTextEnds)
+def pre_expr_pred_text_ends(node: a.PredTextEnds, ctx: ConverterContext):
     values = node.values
     target = _pred_text_target(node, ctx)
     cond = (
@@ -1619,68 +1502,68 @@ def pre_expr_pred_text_ends(node: PredTextEnds, ctx: ConverterContext):
     return _and(cond, ctx)
 
 
-@JS_CONVERTER(PredTextRe)
-def pre_expr_pred_text_re(node: PredTextRe, ctx: ConverterContext):
+@JS_CONVERTER(a.PredTextRe)
+def pre_expr_pred_text_re(node: a.PredTextRe, ctx: ConverterContext):
     rx = _js_re_node(node)
     target = _pred_text_target(node, ctx)
     return _and(f"{rx}.test({target})", ctx)
 
 
-@JS_CONVERTER(PredIn)
-def pre_expr_pred_in(node: PredIn, ctx: ConverterContext):
+@JS_CONVERTER(a.PredIn)
+def pre_expr_pred_in(node: a.PredIn, ctx: ConverterContext):
     values = node.values
     target = _pred_target(node, ctx)
     return _and(f"{py_sequence_to_js_array(values)}.includes({target})", ctx)
 
 
-@JS_CONVERTER(PredGe)
-def pre_expr_pred_ge(node: PredGe, ctx: ConverterContext):
+@JS_CONVERTER(a.PredGe)
+def pre_expr_pred_ge(node: a.PredGe, ctx: ConverterContext):
     target = _pred_target(node, ctx)
     return _and(f"{target}.length >= {node.value}", ctx)
 
 
-@JS_CONVERTER(PredGt)
-def pre_expr_pred_gt(node: PredGt, ctx: ConverterContext):
+@JS_CONVERTER(a.PredGt)
+def pre_expr_pred_gt(node: a.PredGt, ctx: ConverterContext):
     target = _pred_target(node, ctx)
     return _and(f"{target}.length > {node.value}", ctx)
 
 
-@JS_CONVERTER(PredLe)
-def pre_expr_pred_le(node: PredLe, ctx: ConverterContext):
+@JS_CONVERTER(a.PredLe)
+def pre_expr_pred_le(node: a.PredLe, ctx: ConverterContext):
     target = _pred_target(node, ctx)
     return _and(f"{target}.length <= {node.value}", ctx)
 
 
-@JS_CONVERTER(PredLt)
-def pre_expr_pred_lt(node: PredLt, ctx: ConverterContext):
+@JS_CONVERTER(a.PredLt)
+def pre_expr_pred_lt(node: a.PredLt, ctx: ConverterContext):
     target = _pred_target(node, ctx)
     return _and(f"{target}.length < {node.value}", ctx)
 
 
-@JS_CONVERTER(PredRange)
-def pre_expr_pred_range(node: PredRange, ctx: ConverterContext):
+@JS_CONVERTER(a.PredRange)
+def pre_expr_pred_range(node: a.PredRange, ctx: ConverterContext):
     target = _pred_target(node, ctx)
     return _and(
         f"{node.start} < {target}.length && {target}.length < {node.end}", ctx
     )
 
 
-@JS_CONVERTER(PredRe)
-def pre_expr_pred_re(node: PredRe, ctx: ConverterContext):
+@JS_CONVERTER(a.PredRe)
+def pre_expr_pred_re(node: a.PredRe, ctx: ConverterContext):
     rx = _js_re_node(node)
     target = _pred_target(node, ctx)
     return _and(f"{rx}.test({target})", ctx)
 
 
-@JS_CONVERTER(PredReAll)
-def pre_expr_pred_re_all(node: PredReAll, ctx: ConverterContext):
+@JS_CONVERTER(a.PredReAll)
+def pre_expr_pred_re_all(node: a.PredReAll, ctx: ConverterContext):
     rx = _js_re_node(node)
     target = _pred_target(node, ctx)
     return _and(f"{target}.every(j => {rx}.test(j))", ctx)
 
 
-@JS_CONVERTER(PredReAny)
-def pre_expr_pred_re_any(node: PredReAny, ctx: ConverterContext):
+@JS_CONVERTER(a.PredReAny)
+def pre_expr_pred_re_any(node: a.PredReAny, ctx: ConverterContext):
     rx = _js_re_node(node)
     target = _pred_target(node, ctx)
     return _and(f"{target}.some(j => {rx}.test(j))", ctx)
@@ -1704,8 +1587,8 @@ _JS_PH = _re_module.compile(
 _JS_STYLE_SEP = {"csv": ",", "pipe": "|", "space": " "}
 
 
-def _js_placeholder(m: "_re_module.Match[str]") -> PlaceholderSpec:
-    return PlaceholderSpec(
+def _js_placeholder(m: "_re_module.Match[str]") -> a.PlaceholderSpec:
+    return a.PlaceholderSpec(
         name=m.group(1),
         type_name=m.group(2) or "str",
         is_array=bool(m.group(3)),
@@ -1714,7 +1597,7 @@ def _js_placeholder(m: "_re_module.Match[str]") -> PlaceholderSpec:
     )
 
 
-def _js_array_join(ph: PlaceholderSpec) -> str:
+def _js_array_join(ph: a.PlaceholderSpec) -> str:
     sep = _JS_STYLE_SEP[ph.style or "csv"]
     return f"{ph.name}.map(String).join({sep!r})"
 
@@ -1746,7 +1629,7 @@ def _js_render_obj(d: dict[str, str]) -> str:
     return "{" + inner + "}"
 
 
-def _js_dict_entry_placeholder(v: str) -> PlaceholderSpec | None:
+def _js_dict_entry_placeholder(v: str) -> a.PlaceholderSpec | None:
     m = _JS_PH.fullmatch(str(v))
     return _js_placeholder(m) if m else None
 
@@ -1829,7 +1712,7 @@ _JS_PRIM_JSDOC = {
 }
 
 
-def _js_ph_jsdoc(ph: PlaceholderSpec) -> str:
+def _js_ph_jsdoc(ph: a.PlaceholderSpec) -> str:
     """JSDoc type expression for a placeholder, e.g. 'number[]' or 'string | null'."""
     t = _JS_PRIM_JSDOC[ph.type_name]
     if ph.is_array:
@@ -1838,7 +1721,7 @@ def _js_ph_jsdoc(ph: PlaceholderSpec) -> str:
 
 
 def _js_signature_jsdoc(
-    placeholders: list[PlaceholderSpec], indent: str
+    placeholders: list[a.PlaceholderSpec], indent: str
 ) -> list[str]:
     """Build JSDoc lines describing the destructured params argument."""
     if not placeholders:
@@ -1879,7 +1762,7 @@ def _js_name(name: str) -> str:
     return to_camel_case(to_snake_case(name))
 
 
-def _js_rest_method(node: RequestConfig, ctx: ConverterContext) -> list[str]:
+def _js_rest_method(node: a.RequestConfig, ctx: ConverterContext) -> list[str]:
     """Emit a REST client method for `struct type=rest`."""
     spec = normalize_placeholder_names(
         parse_to_spec(node.raw_payload), _js_name
@@ -1907,8 +1790,8 @@ def _js_rest_method(node: RequestConfig, ctx: ConverterContext) -> list[str]:
     sig = f"static async {method_name}(client{ph_param})"
 
     parent = node.parent
-    errors = parent.errors if isinstance(parent, Struct) else []
-    struct_name = parent.name if isinstance(parent, Struct) else ""
+    errors = parent.errors if isinstance(parent, a.Struct) else []
+    struct_name = parent.name if isinstance(parent, a.Struct) else ""
 
     # Build return-type union for JSDoc
     ok_payload = _js_ok_payload_type(node)
@@ -2051,7 +1934,7 @@ def _js_rest_method(node: RequestConfig, ctx: ConverterContext) -> list[str]:
     return lines
 
 
-def _js_ok_payload_type(node: RequestConfig) -> str:
+def _js_ok_payload_type(node: a.RequestConfig) -> str:
     """Return the JSDoc type for the successful response payload."""
     if not node.response_schema:
         return "null"
@@ -2060,16 +1943,16 @@ def _js_ok_payload_type(node: RequestConfig) -> str:
     schema_type = f"{to_pascal_case(node.response_schema)}Json"
     if module is not None:
         for n in module.body:
-            if isinstance(n, JsonDef) and n.name == node.response_schema:
+            if isinstance(n, a.JsonDef) and n.name == node.response_schema:
                 if n.is_array:
                     return f"Array<{schema_type}>"
                 break
     return schema_type
 
 
-@JS_CONVERTER(RequestConfig)
-def pre_request_config(node: RequestConfig, ctx: ConverterContext):
-    if isinstance(node.parent, Struct) and node.parent.is_rest:
+@JS_CONVERTER(a.RequestConfig)
+def pre_request_config(node: a.RequestConfig, ctx: ConverterContext):
+    if isinstance(node.parent, a.Struct) and node.parent.is_rest:
         return _js_rest_method(node, ctx)
 
     spec = normalize_placeholder_names(
@@ -2177,6 +2060,6 @@ def pre_request_config(node: RequestConfig, ctx: ConverterContext):
     return lines
 
 
-@JS_CONVERTER(ErrorResponse)
-def pre_error_response(node: ErrorResponse, ctx: ConverterContext):
+@JS_CONVERTER(a.ErrorResponse)
+def pre_error_response(node: a.ErrorResponse, ctx: ConverterContext):
     return None
