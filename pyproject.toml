@@ -1,6 +1,6 @@
 [project]
 name = "ssc_codegen"
-version = "0.23.0a"
+version = "0.23.0"
 description = "Python-dsl code converter to html parser for web scraping "
 readme = "README.md"
 requires-python = ">=3.10"
@@ -75,19 +75,19 @@ exclude = ["__init__.py"]
 
 [tool.mypy]
 python_version = "3.10"
-pretty = true
-ignore_missing_imports = true
-disallow_untyped_defs = true
 show_error_codes = true
-no_implicit_optional = true
-mypy_path = 'ssc_codegen'
 exclude = [
-    "converters/.*\\.py$",  # to tired typing
-    "examples/.*\\.py$"
+    "ssc_codegen/ast"  # ignore built-in ast and project ast
+
 ]
 [[tool.mypy.overrides]]
 module="tests.*"
 disallow_untyped_defs = false
+
+
+[[tool.mypy.overrides]]
+module = ["colorama", "lxml", "lxml.*"]
+ignore_missing_imports = true
 
 
 [tool.coverage.report]
