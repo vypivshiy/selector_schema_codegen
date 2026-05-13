@@ -5,7 +5,7 @@ from __future__ import annotations
 import enum
 import traceback
 from pathlib import Path
-from typing import Annotated, List, Optional
+from typing import Annotated, List, Literal, Optional
 
 import typer
 
@@ -276,13 +276,13 @@ def generate(
             logger.debug("AST built for %s", kdl_file)
 
             if converter.has_support_files:
-                files = converter.convert_all(ast, **meta)
-                for name, content in files.items():
+                generated: dict[str, str] = converter.convert_all(ast, **meta)
+                for name, content in generated.items():
                     target_path = out_file if name == "" else output / name
                     target_path.write_text(content, encoding="utf-8")
                     if name:
                         typer.echo(f"  -> {target_path}")
-                code = files[""]
+                code = generated[""]
             else:
                 code = converter.convert(ast, **meta)
                 out_file.write_text(code, encoding="utf-8")
@@ -593,7 +593,7 @@ def health(
         ),
     ] = None,
     fmt: Annotated[
-        str,
+        Literal["text", "json"],
         typer.Option(
             "--format",
             "-f",
@@ -626,7 +626,7 @@ def health(
     """
     import sys
 
-    from ssc_codegen import parse_ast
+    from ssc_codegen import parse_module
     from ssc_codegen.ast import Struct
     from ssc_codegen.health import check_struct_health
 
@@ -649,7 +649,11 @@ def health(
 
     # Build AST
     try:
-        module_ast = parse_ast(path=str(kdl_path), css_to_xpath=css_to_xpath)
+        module_ast, _ = parse_module(kdl_path.read_text(), source_path=kdl_path)
+        if css_to_xpath:
+            from ssc_codegen.document_utils import convert_css_to_xpath_module
+
+            convert_css_to_xpath_module(module_ast)
     except Exception as exc:
         if verbose:
             typer.echo(traceback.format_exc(), err=True)

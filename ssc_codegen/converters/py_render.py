@@ -63,10 +63,12 @@ def _escape_fstring(template: str) -> str:
     result: list[str] = []
     i = 0
     while i < len(template):
-        if template[i : i + 2] == "{{" and _PH.match(template, i):
+        if template[i : i + 2] == "{{":
             m = _PH.match(template, i)
-            result.append("{" + m.group(1) + "}")
-            i = m.end()
+            if m:
+                result.append("{" + m.group(1) + "}")
+                i = m.end()
+                continue
         elif template[i] in "{}":
             result.append(template[i] * 2)
             i += 1

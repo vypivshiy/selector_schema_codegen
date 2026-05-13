@@ -1,3 +1,4 @@
+# mypy: ignore-errors
 """
 AST nodes for the KDL Schema DSL.
 

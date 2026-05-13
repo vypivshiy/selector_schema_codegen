@@ -109,8 +109,8 @@ def parse_http_request(raw_http: str) -> Dict[str, Any]:
     params = parse_query_params(url)
 
     # Determine data type
-    json_data = None
-    data = None
+    json_data: Any = None
+    data: dict[str, Any] | str | None = None
     if body:
         content_type_full = headers.get("Content-Type", "")
         content_type = content_type_full.lower()
@@ -123,12 +123,14 @@ def parse_http_request(raw_http: str) -> Dict[str, Any]:
                     .strip()
                 )
                 form_data = parse_multipart(body, boundary)
-                data = form_data  # as dict
+                data = form_data
             else:
                 data = body  # Fallback
         elif "application/x-www-form-urlencoded" in content_type:
-            form_data = parse_qs(body, keep_blank_values=True)
-            data = {k: v[0] if len(v) == 1 else v for k, v in form_data.items()}
+            urlencoded = parse_qs(body, keep_blank_values=True)
+            data = {
+                k: v[0] if len(v) == 1 else v for k, v in urlencoded.items()
+            }
         elif "application/json" in content_type:
             try:
                 json_data = json.loads(body)
@@ -147,7 +149,7 @@ def parse_http_request(raw_http: str) -> Dict[str, Any]:
     headers.pop("Host", None)
 
     # Build kwargs
-    kwargs = {
+    kwargs: Dict[str, Any] = {
         "method": method,
         "url": url,
     }

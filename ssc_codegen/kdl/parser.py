@@ -686,9 +686,9 @@ class KDLLexer:
                     offset=start.offset,
                 )
             norm = raw.replace("_", "")
-            value: int | float
+            value: int | float  # type: ignore[no-redef]
             if "." in norm or "e" in norm or "E" in norm:
-                value = float(norm)
+                value = float(norm)  # type: ignore[assignment]
             else:
                 value = int(norm)
             return Token(

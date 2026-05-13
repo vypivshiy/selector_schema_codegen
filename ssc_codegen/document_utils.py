@@ -7,6 +7,7 @@ from ssc_codegen.ast import (
     CssSelect,
     CssSelectAll,
     CssRemove,
+    Node,
     XpathSelect,
     XpathSelectAll,
     XpathRemove,
@@ -34,13 +35,16 @@ def convert_css_to_xpath(
             new_nodes.append(expr)
             continue
 
-        if getattr(expr, "queries", None):
+        if isinstance(expr, (CssSelect, CssSelectAll)) and expr.queries:
             new_queries: list[str] = []
             for query in expr.queries:
                 q, pseudo_action = parse_pseudo_css_query(query)
                 converted = css_to_xpath(q, prefix=prefix)
                 if pseudo_action[0]:
-                    converted += pseudo_action_to_pseudo_css(*pseudo_action)
+                    converted += pseudo_action_to_pseudo_css(
+                        pseudo_action[0],
+                        pseudo_action[1],  # type: ignore[arg-type]
+                    )
                 new_queries.append(converted)
             new_query = ""
         else:
@@ -48,7 +52,10 @@ def convert_css_to_xpath(
             query, pseudo_action = parse_pseudo_css_query(query)
             new_query = css_to_xpath(query, prefix=prefix)
             if pseudo_action[0]:
-                new_query += pseudo_action_to_pseudo_css(*pseudo_action)
+                new_query += pseudo_action_to_pseudo_css(
+                    pseudo_action[0],
+                    pseudo_action[1],  # type: ignore[arg-type]
+                )
             new_queries = []
 
         if isinstance(expr, CssSelect):
@@ -96,12 +103,12 @@ def convert_css_to_xpath(
 
 
 def convert_css_to_xpath_module(
-    module: object, prefix: str = "descendant-or-self::"
+    module: Node, prefix: str = "descendant-or-self::"
 ) -> None:
     """Recursively convert CSS selector nodes inside a Module AST."""
-    if not getattr(module, "body", None):
+    if not module.body:
         return
     module.body = convert_css_to_xpath(module.body, prefix=prefix)
     for node in module.body:
-        if getattr(node, "body", None):
+        if node.body:
             convert_css_to_xpath_module(node, prefix=prefix)

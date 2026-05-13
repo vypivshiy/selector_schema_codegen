@@ -311,7 +311,7 @@ def _typedef_post(node: a.TypeDef, _: ConverterContext):
     return " */"
 
 
-@JS_CONVERTER(a.TypeDef, post_callback=_typedef_post)
+@JS_CONVERTER(a.TypeDef, post_callback=_typedef_post)  # type: ignore[arg-type]
 def pre_typedef(node: a.TypeDef, _: ConverterContext):
     if node.struct_type == a.StructType.REST:
         return None
@@ -1068,20 +1068,17 @@ def pre_expr_re_sub(node: a.ReSub, ctx: ConverterContext):
 @JS_CONVERTER(a.Index)
 def pre_expr_index(node: a.Index, ctx: ConverterContext):
     i = node.i
-    if i < 0:
-        i = f"{ctx.prv}.length - {i}"
-    return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}[{i}];"
+    i_expr = f"{ctx.prv}.length - {i}" if i < 0 else str(i)
+    return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}[{i_expr}];"
 
 
 @JS_CONVERTER(a.Slice)
 def pre_expr_slice(node: a.Slice, ctx: ConverterContext):
     start = node.start
     end = node.end
-    if start < 0:
-        start = f"{ctx.prv}.length - {start}"
-    if end < 0:
-        end = f"{ctx.prv}.length - {end}"
-    return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.slice({start}, {end});"
+    start_expr = f"{ctx.prv}.length - {start}" if start < 0 else str(start)
+    end_expr = f"{ctx.prv}.length - {end}" if end < 0 else str(end)
+    return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.slice({start_expr}, {end_expr});"
 
 
 @JS_CONVERTER(a.Len)
@@ -1153,7 +1150,9 @@ def pre_expr_return(node: a.Return, ctx: ConverterContext):
     if isinstance(node.parent, a.PreValidate):
         return f"{ctx.indent}return;"
     # ignore return stmt (inner in a.Fallback wrapper)
-    elif isinstance(node.parent.body[0], a.FallbackStart):
+    elif node.parent is not None and isinstance(
+        node.parent.body[0], a.FallbackStart
+    ):
         return
     return f"{ctx.indent}return {ctx.prv};"
 
@@ -1299,7 +1298,7 @@ def pre_expr_pred_eq(node: a.PredEq, ctx: ConverterContext):
     elif len(values) == 1:
         cond = f"{target} === {values[0]!r}"
     else:
-        cond = f"{py_sequence_to_js_array(values)}.some(v => {target} === v)"
+        cond = f"{py_sequence_to_js_array(values)}.some(v => {target} === v)"  # type: ignore[arg-type]
     return _and(cond, ctx)
 
 
@@ -1312,7 +1311,7 @@ def pre_expr_pred_ne(node: a.PredNe, ctx: ConverterContext):
     elif len(values) == 1:
         cond = f"{target} !== {values[0]!r}"
     else:
-        cond = f"{py_sequence_to_js_array(values)}.every(v => {target} !== v)"
+        cond = f"{py_sequence_to_js_array(values)}.every(v => {target} !== v)"  # type: ignore[arg-type]
     return _and(cond, ctx)
 
 
@@ -1942,7 +1941,7 @@ def pre_request_config(node: a.RequestConfig, ctx: ConverterContext):
     i2 = i1 + ind  # method body
     i3 = i2 + ind  # options object properties
 
-    struct_name = to_pascal_case(node.parent.name)
+    struct_name = to_pascal_case(node.parent.name)  # type: ignore[union-attr]
     placeholders = spec.placeholders
     ph_names = [p.name for p in placeholders]
 

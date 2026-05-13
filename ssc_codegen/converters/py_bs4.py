@@ -838,6 +838,7 @@ def pre_expr_transform_call(node: a.TransformCall, ctx: ConverterContext):
     # Get Python-specific target
     py_target = None
     for target in node.transform_def.body:
+        assert isinstance(target, a.TransformTarget)
         if target.lang == "py":
             py_target = target
             break
@@ -1345,7 +1346,7 @@ def pre_request_config(node: a.RequestConfig, ctx: ConverterContext):
     i4 = i3 + ind  # nested (e.g. inside `if ...:`)
 
     is_rest = isinstance(node.parent, a.Struct) and node.parent.is_rest
-    struct_name = to_pascal_case(node.parent.name)
+    struct_name = to_pascal_case(node.parent.name)  # type: ignore[union-attr]
     ph_params = py_helpers.render_signature_params(spec.placeholders)
 
     # Pre-lines: emitted inside the method body before `client.request(...)`
@@ -1399,7 +1400,7 @@ def pre_request_config(node: a.RequestConfig, ctx: ConverterContext):
                 name=method_name,
                 is_async=False,
                 client_type="httpx.Client",
-                **kwargs,
+                **kwargs,  # type: ignore[arg-type]
             )
             lines.append("")
             lines.extend(
@@ -1407,7 +1408,7 @@ def pre_request_config(node: a.RequestConfig, ctx: ConverterContext):
                     name=async_method_name,
                     is_async=True,
                     client_type="httpx.AsyncClient",
-                    **kwargs,
+                    **kwargs,  # type: ignore[arg-type]
                 )
             )
             return lines
@@ -1416,7 +1417,7 @@ def pre_request_config(node: a.RequestConfig, ctx: ConverterContext):
             name=method_name,
             is_async=False,
             client_type="requests.Session",
-            **kwargs,
+            **kwargs,  # type: ignore[arg-type]
         )
 
     # Non-REST path (existing behaviour): suffix-style naming, HTML wrapping
@@ -1441,7 +1442,7 @@ def pre_request_config(node: a.RequestConfig, ctx: ConverterContext):
             name=fetch_name,
             is_async=False,
             client_type="httpx.Client",
-            **kwargs,
+            **kwargs,  # type: ignore[arg-type]
         )
         lines.append("")
         lines.extend(
@@ -1449,7 +1450,7 @@ def pre_request_config(node: a.RequestConfig, ctx: ConverterContext):
                 name=async_fetch_name,
                 is_async=True,
                 client_type="httpx.AsyncClient",
-                **kwargs,
+                **kwargs,  # type: ignore[arg-type]
             )
         )
         return lines
@@ -1459,7 +1460,7 @@ def pre_request_config(node: a.RequestConfig, ctx: ConverterContext):
         name=fetch_name,
         is_async=False,
         client_type="requests.Session",
-        **kwargs,
+        **kwargs,  # type: ignore[arg-type]
     )
 
 

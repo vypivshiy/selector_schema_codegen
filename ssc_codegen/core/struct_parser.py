@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from ssc_codegen.ast import (
@@ -13,6 +14,7 @@ from ssc_codegen.ast import (
     JsonDef,
     JsonDefField,
     Key,
+    Node,
     PreValidate,
     RequestConfig,
     SplitDoc,
@@ -34,19 +36,20 @@ from ssc_codegen.core.type_checking import check_pipeline_types
 
 
 def parse_struct(
-    kdl_nodes: list[KdlNode],
+    kdl_nodes: Sequence[KdlNode],
     parent: Struct,
     ctx: ParseContext,
     lint: LintContext,
 ) -> None:
     prev_ctx = lint.walk_context
     lint.walk_context = WalkCtx.STRUCT_BODY
+    expr: Node | CheckMethod | ErrorResponse
     for node in kdl_nodes:
         if node.name == "@doc":
             parent.docstring.value = str(node.args[0].value)
         elif node.name == "@init":
-            expr = parent.init
-            _parse_init_fields(node.children, expr, ctx, lint)
+            init_expr = parent.init
+            _parse_init_fields(node.children, init_expr, ctx, lint)
         elif node.name == "@pre-validate":
             expr = PreValidate(parent=parent)
             parse_expressions(node.children, expr, ctx, lint)
@@ -145,7 +148,7 @@ def parse_struct(
             )
             conditions: dict[str, Any] = {}
             for k, v in node.properties.items():
-                key = str(ctx.property_defines.get(k.value, k.value))
+                key = str(ctx.property_defines.get(k, k))
                 val = ctx.property_defines.get(v.value, v.value)
                 conditions[key] = val
             err = ErrorResponse(
@@ -172,7 +175,7 @@ def parse_struct(
     lint.walk_context = prev_ctx
 
 
-def parse_json_fields(nodes: list[KdlNode], parent: JsonDef) -> None:
+def parse_json_fields(nodes: Sequence[KdlNode], parent: JsonDef) -> None:
     for node in nodes:
         name = node.name
         modifiers: list[str] = []
@@ -244,7 +247,7 @@ def parse_json_fields(nodes: list[KdlNode], parent: JsonDef) -> None:
 
 
 def _parse_init_fields(
-    kdl_nodes: list[KdlNode],
+    kdl_nodes: Sequence[KdlNode],
     parent: Init,
     ctx: ParseContext,
     lint: LintContext,

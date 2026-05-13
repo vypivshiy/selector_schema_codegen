@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import ast as _py_ast
 import re as _re
+from collections.abc import Sequence
 from typing import Any, Callable, TypeAlias
 
 from ssc_codegen.ast import (
     Assert,
     Attr,
+    CheckMethod,
     CssRemove,
     CssSelect,
     CssSelectAll,
@@ -59,6 +61,7 @@ from ssc_codegen.ast import (
     ToFloat,
     ToInt,
     TransformCall,
+    TransformTarget,
     Trim,
     TypeDef,
     TypeDefField,
@@ -114,7 +117,8 @@ FieldLikeNode: TypeAlias = (
 def resolve_selector_arg(
     query: str | int | float | bool, ctx: ParseContext
 ) -> str:
-    value = ctx.property_defines.get(query, query)
+    q = str(query) if not isinstance(query, str) else query
+    value = ctx.property_defines.get(q, query)
     return value if isinstance(value, str) else str(value)
 
 
@@ -365,8 +369,8 @@ def _build_expression(
 
 
 def parse_expressions(
-    kdl_nodes: list[KdlNode],
-    parent: FieldLikeNode,
+    kdl_nodes: Sequence[KdlNode],
+    parent: FieldLikeNode | CheckMethod,
     ctx: ParseContext,
     lint: LintContext,
     *,
@@ -433,7 +437,7 @@ def parse_expressions(
             raise BuildTimeError(f"Unknown expression: {node.name}")
         lint.push(node.name)
         lint_pipeline_op(node, lint)
-        expr = handler(node, parent, ctx, lint)
+        expr = handler(node, parent, ctx, lint)  # type: ignore[assignment,arg-type]
         if isinstance(expr, Fallback):
             lint.pop()
             continue
@@ -1014,11 +1018,12 @@ def _expr_transform(
             f"transform '{name}': pipeline type {prev_type.name!r} "
             f"does not match accept type {transform_def.accept.name!r}"
         )
-    current = parent
+    current: AstNode | None = parent
     while current and not isinstance(current, Module):
         current = current.parent
-    if current and isinstance(current, Module):
+    if isinstance(current, Module):
         for target in transform_def.body:
+            assert isinstance(target, TransformTarget)
             if target.lang not in current.imports.transform_imports:
                 current.imports.transform_imports[target.lang] = set()
             current.imports.transform_imports[target.lang].update(

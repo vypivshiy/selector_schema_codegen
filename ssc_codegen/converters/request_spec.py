@@ -125,7 +125,7 @@ def parse_to_spec(payload: str) -> RequestSpec:
 
     # ── body ─────────────────────────────────────────────────────────────────
     body_kind = "empty"
-    body = None
+    body: str | dict[str, str] | None = None
     content_type = headers.get("Content-Type", "").lower()
 
     if "json" in kwargs or (

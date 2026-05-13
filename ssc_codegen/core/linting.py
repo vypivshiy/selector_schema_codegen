@@ -220,7 +220,7 @@ def lint_pipeline_op(node: KdlNode, lint: LintContext) -> None:
         lint_require_args(node, lint, exact=1, example=f'{name} "substring"')
 
     elif name == "fmt":
-        args = lint_require_args(
+        args = lint_require_args(  # type: ignore[no-redef,assignment]
             node, lint, exact=1, example='fmt "prefix-{{}}-suffix"'
         )
         if args and not (args[0].isupper() or "{{}}" in args[0]):
@@ -249,7 +249,7 @@ def lint_pipeline_op(node: KdlNode, lint: LintContext) -> None:
 
     elif name == "re":
         raw_args = lint.get_raw_args(node)
-        args = lint_require_args(
+        args = lint_require_args(  # type: ignore[assignment]
             node, lint, exact=1, example=f'{name} #"(\\d+)"#'
         )
         if args:
@@ -282,26 +282,26 @@ def lint_pipeline_op(node: KdlNode, lint: LintContext) -> None:
     elif name == "re-all":
         if lint.in_predicate and not lint_require_assert_ctx(node, lint):
             return
-        args = lint_require_args(
+        args = lint_require_args(  # type: ignore[assignment]
             node, lint, exact=1, example='re-all #"(\\d+)"#'
         )
         if args:
             lint_validate_regex(node, lint, args[0])
 
     elif name == "re-sub":
-        args = lint_require_args(
+        args = lint_require_args(  # type: ignore[assignment]
             node, lint, exact=2, example='re-sub #"\\D"# ""'
         )
         if args:
             lint_validate_regex(node, lint, args[0])
 
     elif name == "index":
-        args = lint_require_args(node, lint, exact=1, example="index 0")
+        args = lint_require_args(node, lint, exact=1, example="index 0")  # type: ignore[assignment]
         if args:
             lint_require_int_args(node, lint, args)
 
     elif name == "slice":
-        args = lint_require_args(node, lint, exact=2, example="slice 0 10")
+        args = lint_require_args(node, lint, exact=2, example="slice 0 10")  # type: ignore[assignment]
         if args:
             lint_require_int_args(node, lint, args)
 
@@ -312,7 +312,7 @@ def lint_pipeline_op(node: KdlNode, lint: LintContext) -> None:
         lint_require_args(node, lint, exact=1, example="nested MyStruct")
 
     elif name == "self":
-        args = lint_require_args(node, lint, exact=1, example="self field-name")
+        args = lint_require_args(node, lint, exact=1, example="self field-name")  # type: ignore[assignment]
         if args and args[0] not in lint.init_fields:
             lint.error(
                 node,
@@ -761,8 +761,8 @@ def lint_reserved_field(
                 hint='@init {\n    my-field { css ".x"; text }\n}',
             )
     elif field_name == "@check":
-        check_name = lint.get_args(node)
-        check_name = check_name[0] if check_name else None
+        check_args = lint.get_args(node)
+        check_name = check_args[0] if check_args else None
         ops = lint.get_children_nodes(node)
         if not ops:
             lint.error(

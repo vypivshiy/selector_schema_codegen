@@ -103,7 +103,7 @@ def handle_json(
 def handle_define(node: KdlNode, ctx: ParseContext, lint: LintContext) -> None:
     lint_define_node(node, ctx, lint)
     if node.children:
-        ctx.children_defines[str(node.args[0].value)] = node.children
+        ctx.children_defines[str(node.args[0].value)] = list(node.children)
         lint.defines[str(node.args[0].value)] = DefineInfo(
             name=str(node.args[0].value),
             kind=DefineKind.BLOCK,
@@ -261,9 +261,13 @@ def resolve_imports(
             )
             continue
 
-        imported_nodes = tuple(KdlNode.from_cst(n) for n in doc.nodes)
         imported_nodes = resolve_imports(
-            list(imported_nodes), import_path, ctx, lint, diagnostics, visited
+            [KdlNode.from_cst(n) for n in doc.nodes],
+            import_path,
+            ctx,
+            lint,
+            diagnostics,
+            visited,
         )
         imported_names: set[str] = set()
         for n in imported_nodes:

@@ -62,10 +62,10 @@ def parse_curl_command(
     url = None
     headers = {}
     data = None
-    json_data = None
+    json_data: Any = None
     auth = None
-    params = {}
-    form_data = {}
+    params: Dict[str, Any] = {}
+    form_data: Dict[str, str] = {}
 
     # Convert ignored_flags to set for fast lookup
     ignored_flags_set = set(ignored_flags)
@@ -165,7 +165,7 @@ def parse_curl_command(
             pass
 
     # Build kwargs dict
-    kwargs = {
+    kwargs: Dict[str, Any] = {
         "method": method,
         "url": url,
     }

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any, Callable
 
 from ssc_codegen.ast import (
@@ -61,7 +62,7 @@ from ssc_codegen.core.linting import lint_predicate_op
 
 
 def parse_filter_expr(
-    kdl_nodes: list[KdlNode],
+    kdl_nodes: Sequence[KdlNode],
     parent: Filter | LogicAnd | LogicNot | LogicOr,
     ctx: ParseContext,
     lint: LintContext,
@@ -76,7 +77,7 @@ def parse_filter_expr(
             )
             continue
         lint_predicate_op(node, lint)
-        expr = _build_filter_predicate(node, parent, ctx, lint)
+        expr = _build_filter_predicate(node, parent, ctx, lint)  # type: ignore[arg-type]
         if isinstance(expr, (LogicAnd, LogicOr, LogicNot)):
             parse_filter_expr(node.children, expr, ctx, lint)
         parent.body.append(expr)
@@ -85,7 +86,7 @@ def parse_filter_expr(
 
 
 def parse_assert_expr(
-    kdl_nodes: list[KdlNode],
+    kdl_nodes: Sequence[KdlNode],
     parent: Assert | LogicAnd | LogicNot | LogicOr,
     ctx: ParseContext,
     lint: LintContext,
@@ -100,7 +101,7 @@ def parse_assert_expr(
             )
             continue
         lint_predicate_op(node, lint)
-        expr = _build_assert_predicate(node, parent, ctx, lint)
+        expr = _build_assert_predicate(node, parent, ctx, lint)  # type: ignore[arg-type]
         if isinstance(expr, (LogicAnd, LogicOr, LogicNot)):
             parse_assert_expr(node.children, expr, ctx, lint)
         parent.body.append(expr)
@@ -109,7 +110,7 @@ def parse_assert_expr(
 
 
 def parse_match_expr(
-    kdl_nodes: list[KdlNode],
+    kdl_nodes: Sequence[KdlNode],
     parent: Match | LogicAnd | LogicNot | LogicOr,
     ctx: ParseContext,
     lint: LintContext,
@@ -122,7 +123,7 @@ def parse_match_expr(
             parse_match_expr(ctx.children_defines[node.name], parent, ctx, lint)
             continue
         lint_predicate_op(node, lint)
-        expr = _build_match_predicate(node, parent, ctx, lint)
+        expr = _build_match_predicate(node, parent, ctx, lint)  # type: ignore[arg-type]
         if isinstance(expr, (LogicAnd, LogicOr, LogicNot)):
             parse_match_expr(node.children, expr, ctx, lint)
         parent.body.append(expr)

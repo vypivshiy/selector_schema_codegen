@@ -102,8 +102,8 @@ class BaseConverter:
             self._pre_callbacks[node_type] = fn
             if post_callback:
                 if isinstance(post_callback, str):
-                    self._post_callbacks[node_type] = (
-                        lambda _, _2: post_callback
+                    self._post_callbacks[node_type] = lambda _, _2: (
+                        post_callback
                     )  # type: ignore
                 else:
                     self._post_callbacks[node_type] = post_callback
