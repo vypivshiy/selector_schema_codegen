@@ -45,7 +45,7 @@ def pre_imports(node: a.Imports, ctx: ConverterContext):
             "import sys",
             "from typing import TypedDict, Optional, Any, List, Dict, Union, Literal",
         ]
-        if not py_helpers._module_is_rest_only(node):
+        if not py_helpers.module_is_rest_only(node):
             base_imports.append("from html import unescape as _html_unescape")
         base_imports.extend(py_helpers.rest_imports(node))
 
@@ -58,7 +58,7 @@ def pre_imports(node: a.Imports, ctx: ConverterContext):
 @PY_LXML_CONVERTER.post(a.Imports)
 def post_imports(node: a.Imports, ctx: ConverterContext):
     lines = []
-    if not py_helpers._module_is_rest_only(node):
+    if not py_helpers.module_is_rest_only(node):
         lines.extend(
             [
                 "from lxml import html",
@@ -78,55 +78,12 @@ def pre_utilities(node: a.Utilities, ctx: ConverterContext):
         )
         return [f"from {runtime} import " + ", ".join(names), ""]
 
-    if py_helpers._module_is_rest_only(node):
+    if py_helpers.module_is_rest_only(node):
         lines = []
         lines.extend(py_helpers.rest_utilities(node))
         return lines
 
-    lines = [
-        'FALLBACK_HTML_STR = "<html><body></body></html>"',
-        "_RE_HEX_ENTITY = re.compile(r'&#x([0-9a-fA-F]+);')",
-        "_RE_UNICODE_ENTITY = re.compile(r'\\\\u([0-9a-fA-F]{4})')",
-        "_RE_BYTES_ENTITY = re.compile(r'\\\\x([0-9a-fA-F]{2})')",
-        "_RE_CHARS_MAP = {'\\\\b': '\\\\b', '\\\\f': '\\\\f', '\\\\n': '\\\\n', '\\\\r': '\\\\r', '\\\\t': '\\\\t'}",
-        "\n",
-        "def repl_map(s: str, rmap: Dict[str, str]) -> str:",
-        "    for k, v in rmap.items():",
-        "        s = s.replace(k, v)",
-        "    return s",
-        "\n",
-        "def normalize_text(text: str) -> str:",
-        "    return ' '.join(text.split()) if text else \"\"",
-        "\n",
-        "class _UnmatchedTableRow:",
-        "    pass",
-        "\n",
-        "def unescape_text(text: str) -> str:",
-        "    s = _html_unescape(text)",
-        "    s = _RE_HEX_ENTITY.sub(lambda m: chr(int(m.group(1), 16)), s)",
-        "    s = _RE_UNICODE_ENTITY.sub(lambda m: chr(int(m.group(1), 16)), s)",
-        "    s = _RE_BYTES_ENTITY.sub(lambda m: chr(int(m.group(1), 16)), s)",
-        "    for ch, r in _RE_CHARS_MAP.items():",
-        "        s = s.replace(ch, r)",
-        "    return s",
-        "\n",
-        "if sys.version_info >= (3, 9):",
-        "    def rm_prefix(s: str, p: str) -> str:",
-        "        return s.removeprefix(p)",
-        "\n",
-        "    def rm_suffix(s: str, p: str) -> str:",
-        "        return s.removesuffix(p)",
-        "\n",
-        "else:",
-        "    def rm_prefix(s: str, p: str) -> str:",
-        "        return s[len(p):] if s.startswith(p) else s",
-        "\n",
-        "    def rm_suffix(s: str, p: str) -> str:",
-        "        return s[:-(len(p))] if s.endswith(p) else s",
-        "\n\n",
-        "UNMATCHED_TABLE_ROW = _UnmatchedTableRow()",
-        "\n\n",
-    ]
+    lines = py_helpers.base_utility_lines(include_fallback_html=True)
     lines.extend(py_helpers.rest_utilities(node))
     return lines
 

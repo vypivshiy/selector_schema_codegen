@@ -26,7 +26,7 @@ def pre_imports(node: a.Imports, _: ConverterContext):
         "import sys",
         "from typing import TypedDict, Optional, Any, List, Dict, Union, Literal",
     ]
-    if not py_helpers._module_is_rest_only(node):
+    if not py_helpers.module_is_rest_only(node):
         base_imports.append("from html import unescape as _html_unescape")
     base_imports.extend(py_helpers.rest_imports(node))
 
@@ -38,7 +38,7 @@ def pre_imports(node: a.Imports, _: ConverterContext):
 @PY_SLAX_CONVERTER.post(a.Imports)
 def post_imports(node: a.Imports, ctx: ConverterContext):
     lines = []
-    if not py_helpers._module_is_rest_only(node):
+    if not py_helpers.module_is_rest_only(node):
         lines.append(
             "from selectolax.lexbor import LexborHTMLParser as HTMLParser, LexborNode as Node"
         )

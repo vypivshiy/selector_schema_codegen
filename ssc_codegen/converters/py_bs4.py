@@ -14,7 +14,7 @@ from ssc_codegen.converters.request_spec import (
     parse_to_spec,
     normalize_placeholder_names,
 )
-from ssc_codegen.converters.py_helpers import (
+from ssc_codegen.converters.py_render import (
     render_value,
     render_dict,
     render_body,
@@ -75,7 +75,7 @@ def pre_imports(node: a.Imports, ctx: ConverterContext):
             "import sys",
             "from typing import TypedDict, Optional, Any, List, Dict, Union, Literal",
         ]
-        if not py_helpers._module_is_rest_only(node):
+        if not py_helpers.module_is_rest_only(node):
             base_imports.append("from html import unescape as _html_unescape")
         base_imports.extend(
             [
@@ -98,7 +98,7 @@ def pre_imports(node: a.Imports, ctx: ConverterContext):
 @PY_BASE_CONVERTER.post(a.Imports)
 def post_imports(node: a.Imports, ctx: ConverterContext):
     lines = []
-    if not py_helpers._module_is_rest_only(node):
+    if not py_helpers.module_is_rest_only(node):
         lines.extend(
             [
                 "from bs4 import BeautifulSoup, ResultSet, Tag",
@@ -116,56 +116,12 @@ def pre_utilities(node: a.Utilities, ctx: ConverterContext):
         names = py_helpers.runtime_export_names(node)
         return [f"from {runtime} import " + ", ".join(names), ""]
 
-    if py_helpers._module_is_rest_only(node):
+    if py_helpers.module_is_rest_only(node):
         lines = []
         lines.extend(py_helpers.rest_utilities(node))
         return lines
 
-    lines = [
-        "_RE_HEX_ENTITY = re.compile(r'&#x([0-9a-fA-F]+);')",
-        "_RE_UNICODE_ENTITY = re.compile(r'\\\\u([0-9a-fA-F]{4})')",
-        "_RE_BYTES_ENTITY = re.compile(r'\\\\x([0-9a-fA-F]{2})')",
-        "_RE_CHARS_MAP = {'\\b': '\\b', '\\f': '\\f', '\\n': '\\n', '\\r': '\\r', '\\t': '\\t'}",
-        "\n",
-        "def repl_map(s: str, rmap: Dict[str, str]) -> str:",
-        "    for k, v in rmap.items():",
-        "        s = s.replace(k, v)",
-        "    return s",
-        "\n",
-        "def normalize_text(text: str) -> str:",
-        "    return ' '.join(text.split()) if text else \"\"",
-        "\n",
-        "class _UnmatchedTableRow:",
-        "    pass",
-        "\n",
-        "def unescape_text(text: str) -> str:",
-        "    s = _html_unescape(text)",
-        "    s = _RE_HEX_ENTITY.sub(lambda m: chr(int(m.group(1), 16)), s)",
-        "    s = _RE_UNICODE_ENTITY.sub(lambda m: chr(int(m.group(1), 16)), s)",
-        "    s = _RE_BYTES_ENTITY.sub(lambda m: chr(int(m.group(1), 16)), s)",
-        "    for ch, r in _RE_CHARS_MAP.items():",
-        "        s = s.replace(ch, r)",
-        "    return s",
-        "\n",
-        # backport funcs
-        # https://docs.python.org/3/library/stdtypes.html#str.removeprefix
-        "if sys.version_info >= (3, 9):",
-        "    def rm_prefix(s: str, p: str) -> str:",
-        "        return s.removeprefix(p)",
-        "\n",
-        "    def rm_suffix(s: str, p: str) -> str:",
-        "        return s.removesuffix(p)",
-        "\n",
-        "else:",
-        "    def rm_prefix(s: str, p: str) -> str:",
-        "        return s[len(p):] if s.startswith(p) else s",
-        "\n",
-        "    def rm_suffix(s: str, p: str) -> str:",
-        "        return s[:-(len(p))] if s.endswith(p) else s",
-        "\n\n",
-        "UNMATCHED_TABLE_ROW = _UnmatchedTableRow()",
-        "\n\n",
-    ]
+    lines = py_helpers.base_utility_lines()
     lines.extend(py_helpers.rest_utilities(node))
     return lines
 
@@ -239,16 +195,16 @@ def pre_struct(node: a.Struct, ctx: ConverterContext):
     if node.is_rest:
         seen: set[str] = set()
         for err in node.errors:
-            cls_name = py_helpers._err_subclass_name(node.name, err)
+            cls_name = py_helpers.err_subclass_name(node.name, err)
             if cls_name in seen:
                 continue
             seen.add(cls_name)
-            value_type = py_helpers._err_value_type(err, node)
+            value_type = py_helpers.err_value_type(err, node)
             lines.append("@dataclass(frozen=True)")
             lines.append(f"class {cls_name}(Err[{value_type}]):")
             lines.append(f"    status: Literal[{err.status}] = {err.status}")
             lines.append("")
-        alias_lines = py_helpers._emit_result_aliases(node)
+        alias_lines = py_helpers.emit_result_aliases(node)
         if alias_lines:
             lines.extend(alias_lines)
             lines.append("")
@@ -263,7 +219,7 @@ def post_struct_docstring(node: a.StructDocstring, ctx: ConverterContext):
     parent = node.parent
     if not isinstance(parent, a.Struct) or not parent.is_rest:
         return None
-    return py_helpers._emit_dispatch_err_py(parent, ctx)
+    return py_helpers.emit_dispatch_err_py(parent, ctx)
 
 
 @PY_BASE_CONVERTER(a.StructDocstring)
@@ -1390,7 +1346,7 @@ def pre_request_config(node: a.RequestConfig, ctx: ConverterContext):
 
     is_rest = isinstance(node.parent, a.Struct) and node.parent.is_rest
     struct_name = to_pascal_case(node.parent.name)
-    ph_params = py_helpers._render_signature_params(spec.placeholders)
+    ph_params = py_helpers.render_signature_params(spec.placeholders)
 
     # Pre-lines: emitted inside the method body before `client.request(...)`
     # to build local _headers/_cookies/_params dicts when dict_needs_builder().
@@ -1418,7 +1374,7 @@ def pre_request_config(node: a.RequestConfig, ctx: ConverterContext):
         # REST method naming: kebab-case name → snake_case, "" → "fetch"
         method_name = to_snake_case(node.name) if node.name else "fetch"
         async_method_name = f"async_{method_name}"
-        ret_type = py_helpers._resolve_response_type(node)
+        ret_type = py_helpers.resolve_response_type(node)
 
         if http_client == "httpx":
             transport_exc = "httpx.HTTPError"
@@ -1439,7 +1395,7 @@ def pre_request_config(node: a.RequestConfig, ctx: ConverterContext):
         )
 
         if http_client == "httpx":
-            lines = py_helpers._build_rest_method(
+            lines = py_helpers.build_rest_method(
                 name=method_name,
                 is_async=False,
                 client_type="httpx.Client",
@@ -1447,7 +1403,7 @@ def pre_request_config(node: a.RequestConfig, ctx: ConverterContext):
             )
             lines.append("")
             lines.extend(
-                py_helpers._build_rest_method(
+                py_helpers.build_rest_method(
                     name=async_method_name,
                     is_async=True,
                     client_type="httpx.AsyncClient",
@@ -1456,7 +1412,7 @@ def pre_request_config(node: a.RequestConfig, ctx: ConverterContext):
             )
             return lines
 
-        return py_helpers._build_rest_method(
+        return py_helpers.build_rest_method(
             name=method_name,
             is_async=False,
             client_type="requests.Session",
@@ -1481,7 +1437,7 @@ def pre_request_config(node: a.RequestConfig, ctx: ConverterContext):
     )
 
     if http_client == "httpx":
-        lines = py_helpers._build_request_method(
+        lines = py_helpers.build_request_method(
             name=fetch_name,
             is_async=False,
             client_type="httpx.Client",
@@ -1489,7 +1445,7 @@ def pre_request_config(node: a.RequestConfig, ctx: ConverterContext):
         )
         lines.append("")
         lines.extend(
-            py_helpers._build_request_method(
+            py_helpers.build_request_method(
                 name=async_fetch_name,
                 is_async=True,
                 client_type="httpx.AsyncClient",
@@ -1499,7 +1455,7 @@ def pre_request_config(node: a.RequestConfig, ctx: ConverterContext):
         return lines
 
     # requests (default)
-    return py_helpers._build_request_method(
+    return py_helpers.build_request_method(
         name=fetch_name,
         is_async=False,
         client_type="requests.Session",
