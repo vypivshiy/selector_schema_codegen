@@ -268,7 +268,11 @@ def generate(
             if skip_lint:
                 pass
             else:
-                errors.extend(format_diagnostics(err, fmt=fmt.value))
+                lint_output = format_diagnostics(err, fmt=fmt.value)
+                if lint_output:
+                    typer.echo(lint_output, err=True)
+                    errors.append(lint_output)
+                    continue
             logger.debug("AST built for %s", kdl_file)
 
             if converter.has_support_files:

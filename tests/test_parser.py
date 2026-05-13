@@ -704,3 +704,62 @@ def test_json_lint_optional_suffix_ok():
 def test_json_lint_optional_modifier_ok():
     errs = _lint_errors("json Foo { x str @optional }")
     assert len(errs) == 0
+
+
+# ── REST cross-ref linter tests ───────────────────────────────────────────────
+
+
+def test_rest_response_undefined_json():
+    errs = _lint_errors(
+        "struct API type=rest {\n"
+        '    @request response=Product """\n'
+        "    GET /items HTTP/1.1\n"
+        "    Host: x.com\n"
+        '    """\n'
+        "}\n"
+    )
+    assert any("references undefined json definition 'Product'" in e for e in errs)
+
+
+def test_rest_error_undefined_json():
+    errs = _lint_errors(
+        "struct API type=rest {\n"
+        "    @error 404 NotFound\n"
+        "}\n"
+    )
+    assert any("references undefined json definition 'NotFound'" in e for e in errs)
+
+
+def test_rest_response_valid_json():
+    errs = _lint_errors(
+        "json Product { id int }\n"
+        "struct API type=rest {\n"
+        '    @request response=Product """\n'
+        "    GET /items HTTP/1.1\n"
+        "    Host: x.com\n"
+        '    """\n'
+        "}\n"
+    )
+    assert not any("references undefined" in e for e in errs)
+
+
+def test_rest_error_valid_json():
+    errs = _lint_errors(
+        "json Err { code int }\n"
+        "struct API type=rest {\n"
+        "    @error 404 Err\n"
+        "}\n"
+    )
+    assert not any("references undefined" in e for e in errs)
+
+
+def test_rest_response_empty_ok():
+    errs = _lint_errors(
+        "struct API type=rest {\n"
+        '    @request """\n'
+        "    GET /items HTTP/1.1\n"
+        "    Host: x.com\n"
+        '    """\n'
+        "}\n"
+    )
+    assert not any("references undefined" in e for e in errs)

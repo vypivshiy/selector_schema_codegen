@@ -118,6 +118,10 @@ class LintContext:
     )
     dsl_names: set[str] = field(default_factory=set)
     json_kdl_nodes: dict[str, "KdlNode"] = field(default_factory=dict)
+    rest_response_refs: list[tuple["KdlNode", str]] = field(
+        default_factory=list
+    )
+    rest_error_refs: list[tuple["KdlNode", str]] = field(default_factory=list)
     _predicate_depth: int = field(default=0)
     _predicate_context: str = ""
 

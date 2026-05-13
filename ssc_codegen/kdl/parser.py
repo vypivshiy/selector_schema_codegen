@@ -923,7 +923,9 @@ class _Parser:
         rparen = self._expect(TokenType.RPAREN)
 
         raw = self._slice(lparen.span.start.offset, rparen.span.end.offset)
-        return CSTTypeAnnotation(raw=raw, span=Span(lparen.span.start, rparen.span.end))
+        return CSTTypeAnnotation(
+            raw=raw, span=Span(lparen.span.start, rparen.span.end)
+        )
 
     def _parse_identifier_like(self) -> CSTIdentifier:
         tok = self._peek()

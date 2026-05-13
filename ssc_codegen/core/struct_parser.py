@@ -121,6 +121,8 @@ def parse_struct(
                     response_schema.value, response_schema.value
                 )
             )
+            if req.response_schema and parent.struct_type == StructType.REST:
+                lint.rest_response_refs.append((node, req.response_schema))
             doc_val = node.properties.get(
                 "doc", KdlArg(value="", span=node.span, is_identifier=False)
             )
@@ -153,6 +155,8 @@ def parse_struct(
                 conditions=conditions,
             )
             parent.body.append(err)
+            if parent.struct_type == StructType.REST:
+                lint.rest_error_refs.append((node, schema_name))
         else:
             if parent.struct_type == StructType.TABLE:
                 expr = Field(

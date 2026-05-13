@@ -26,7 +26,7 @@ from ssc_codegen.core.module_handler import (
     handle_transform,
     resolve_imports,
 )
-from ssc_codegen.core.linting import lint_json_cross_refs
+from ssc_codegen.core.linting import lint_json_cross_refs, lint_rest_cross_refs
 
 
 class SscReader(Reader[KdlNode, Module]):
@@ -107,6 +107,7 @@ class SscReader(Reader[KdlNode, Module]):
 
         # post-pass: cross-reference validation
         lint_json_cross_refs(ctx, lint)
+        lint_rest_cross_refs(ctx, lint)
 
         # wire module body
         module.body.extend(

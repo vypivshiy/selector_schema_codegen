@@ -1072,6 +1072,26 @@ def lint_json_cross_refs(ctx: ParseContext, lint: LintContext) -> None:
             break
 
 
+def lint_rest_cross_refs(ctx: ParseContext, lint: LintContext) -> None:
+    """Post-pass: validate @request response and @error schema references in REST structs."""
+    for kdl_node, schema_name in lint.rest_response_refs:
+        if schema_name not in ctx.json_defs:
+            lint.error(
+                kdl_node,
+                message=f"@request response='{schema_name}' references undefined json definition '{schema_name}'",
+                code="E300",
+                hint=f"define 'json {schema_name} {{ ... }}' or fix the response name",
+            )
+    for kdl_node, schema_name in lint.rest_error_refs:
+        if schema_name not in ctx.json_defs:
+            lint.error(
+                kdl_node,
+                message=f"@error schema '{schema_name}' references undefined json definition '{schema_name}'",
+                code="E300",
+                hint=f"define 'json {schema_name} {{ ... }}' or fix the schema name",
+            )
+
+
 def lint_define_node(
     node: KdlNode, ctx: ParseContext, lint: LintContext
 ) -> None:
