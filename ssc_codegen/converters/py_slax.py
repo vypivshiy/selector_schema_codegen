@@ -24,7 +24,7 @@ def pre_imports(node: a.Imports, _: ConverterContext):
     base_imports = [
         "import re",
         "import sys",
-        "from typing import TypedDict, Optional, Any, List, Dict, Union",
+        "from typing import TypedDict, Optional, Any, List, Dict, Union, Literal",
         "from html import unescape as _html_unescape",
     ]
     base_imports.extend(py_helpers.rest_imports(node))

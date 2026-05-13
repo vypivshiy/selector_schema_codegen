@@ -36,14 +36,14 @@ def pre_imports(node: a.Imports, ctx: ConverterContext):
             "import json",
             "import re",
             "import sys",
-            "from typing import TypedDict, Optional, Any, List, Dict, Union",
+            "from typing import TypedDict, Optional, Any, List, Dict, Union, Literal",
         ]
     else:
         base_imports = [
             "import json",
             "import re",
             "import sys",
-            "from typing import TypedDict, Optional, Any, List, Dict, Union",
+            "from typing import TypedDict, Optional, Any, List, Dict, Union, Literal",
             "from html import unescape as _html_unescape",
         ]
         base_imports.extend(py_helpers.rest_imports(node))
