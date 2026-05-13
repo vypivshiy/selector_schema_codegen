@@ -47,7 +47,7 @@ struct DummyJsonApi type=rest {
 
     @request name=create-product \ 
     doc="Simulated product creation (not persisted)." \ 
-    response=Product \
+    response=Response \
     """
     POST /products/add HTTP/1.1
     Host: dummyjson.com
