@@ -546,3 +546,105 @@ class TestTypedPlaceholdersJsCodegen:
         # No URLSearchParams-builder needed for the simple path placeholder
         assert "new URLSearchParams();" not in code
         assert "${id}" in code  # inline template substitution
+
+
+# ---------------------------------------------------------------------------
+# REST-only import elimination tests
+# ---------------------------------------------------------------------------
+
+
+def _mixed_src() -> str:
+    """Schema with both HTML-parsing and REST structs."""
+    return (
+        "json User { id int; name str }\n"
+        "json Err { code int; message str }\n"
+        "struct HTMLPage type=item {\n"
+        '    title { css "h1"; text }\n'
+        "}\n"
+        "struct API type=rest {\n"
+        '    @request name=get-user response=User """\n'
+        "    GET /users/{{id}} HTTP/1.1\n"
+        "    Host: api.example.com\n"
+        '    """\n'
+        "}\n"
+    )
+
+
+class TestRestOnlyImports:
+    """Verify HTML library imports are skipped for REST-only modules."""
+
+    @pytest.mark.parametrize(
+        "converter_attr,html_import",
+        [
+            ("PY_BASE_CONVERTER", "from bs4 import"),
+            ("PY_LXML_CONVERTER", "from lxml import"),
+            ("PY_PARSEL_CONVERTER", "from parsel import"),
+            ("PY_SLAX_CONVERTER", "from selectolax.lexbor import"),
+        ],
+    )
+    def test_rest_only_no_html_import(self, converter_attr, html_import):
+        import ssc_codegen.converters.py_bs4 as _bs4
+        import ssc_codegen.converters.py_lxml as _lxml
+        import ssc_codegen.converters.py_parsel as _parsel
+        import ssc_codegen.converters.py_slax as _slax
+
+        converters = {
+            "PY_BASE_CONVERTER": _bs4.PY_BASE_CONVERTER,
+            "PY_LXML_CONVERTER": _lxml.PY_LXML_CONVERTER,
+            "PY_PARSEL_CONVERTER": _parsel.PY_PARSEL_CONVERTER,
+            "PY_SLAX_CONVERTER": _slax.PY_SLAX_CONVERTER,
+        }
+        converter = converters[converter_attr]
+        src = _rest_src(errors="    @error 404 Err\n")
+        module = _parse(src)
+        code = converter.convert(module, http_client="requests")
+        assert html_import not in code
+
+    def test_rest_only_no_html_unescape(self):
+        from ssc_codegen.converters.py_bs4 import PY_BASE_CONVERTER
+
+        src = _rest_src()
+        module = _parse(src)
+        code = PY_BASE_CONVERTER.convert(module, http_client="requests")
+        assert "_html_unescape" not in code
+
+    def test_rest_only_no_html_utilities(self):
+        from ssc_codegen.converters.py_bs4 import PY_BASE_CONVERTER
+
+        src = _rest_src()
+        module = _parse(src)
+        code = PY_BASE_CONVERTER.convert(module, http_client="requests")
+        assert "unescape_text" not in code
+        assert "normalize_text" not in code
+        assert "repl_map" not in code
+        assert "_UnmatchedTableRow" not in code
+        assert "UNMATCHED_TABLE_ROW" not in code
+        assert "_RE_HEX_ENTITY" not in code
+
+    def test_rest_only_has_rest_utilities(self):
+        from ssc_codegen.converters.py_bs4 import PY_BASE_CONVERTER
+
+        src = _rest_src(errors="    @error 404 Err\n")
+        module = _parse(src)
+        code = PY_BASE_CONVERTER.convert(module, http_client="requests")
+        assert "class Ok(Generic[_T]):" in code
+        assert "class Err(Generic[_E]):" in code
+        assert "def _parse_response(_resp):" in code
+
+    def test_rest_only_valid_python(self):
+        from ssc_codegen.converters.py_bs4 import PY_BASE_CONVERTER
+
+        src = _rest_src(errors="    @error 404 Err\n")
+        module = _parse(src)
+        code = PY_BASE_CONVERTER.convert(module, http_client="requests")
+        pyast.parse(code)
+
+    def test_mixed_module_keeps_html_imports(self):
+        from ssc_codegen.converters.py_bs4 import PY_BASE_CONVERTER
+
+        src = _mixed_src()
+        module = _parse(src)
+        code = PY_BASE_CONVERTER.convert(module, http_client="requests")
+        assert "from bs4 import" in code
+        assert "_html_unescape" in code
+        assert "unescape_text" in code

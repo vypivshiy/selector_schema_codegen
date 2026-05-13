@@ -44,8 +44,9 @@ def pre_imports(node: a.Imports, ctx: ConverterContext):
             "import re",
             "import sys",
             "from typing import TypedDict, Optional, Any, List, Dict, Union, Literal",
-            "from html import unescape as _html_unescape",
         ]
+        if not py_helpers._module_is_rest_only(node):
+            base_imports.append("from html import unescape as _html_unescape")
         base_imports.extend(py_helpers.rest_imports(node))
 
     # Get transform imports for Python (already collected during parsing)
@@ -56,10 +57,14 @@ def pre_imports(node: a.Imports, ctx: ConverterContext):
 
 @PY_LXML_CONVERTER.post(a.Imports)
 def post_imports(node: a.Imports, ctx: ConverterContext):
-    lines = [
-        "from lxml import html",
-        "from lxml.html import HtmlElement",
-    ]
+    lines = []
+    if not py_helpers._module_is_rest_only(node):
+        lines.extend(
+            [
+                "from lxml import html",
+                "from lxml.html import HtmlElement",
+            ]
+        )
     lines.extend(py_helpers.http_client_import(ctx))
     return lines
 
@@ -72,6 +77,12 @@ def pre_utilities(node: a.Utilities, ctx: ConverterContext):
             node, include_fallback_html=True
         )
         return [f"from {runtime} import " + ", ".join(names), ""]
+
+    if py_helpers._module_is_rest_only(node):
+        lines = []
+        lines.extend(py_helpers.rest_utilities(node))
+        return lines
+
     lines = [
         'FALLBACK_HTML_STR = "<html><body></body></html>"',
         "_RE_HEX_ENTITY = re.compile(r'&#x([0-9a-fA-F]+);')",

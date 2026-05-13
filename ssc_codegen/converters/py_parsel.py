@@ -26,8 +26,9 @@ def pre_imports(node: a.Imports, _: ConverterContext):
         "import re",
         "import sys",
         "from typing import TypedDict, Optional, Any, List, Dict, Union, Literal",
-        "from html import unescape as _html_unescape",
     ]
+    if not py_helpers._module_is_rest_only(node):
+        base_imports.append("from html import unescape as _html_unescape")
     base_imports.extend(py_helpers.rest_imports(node))
 
     transform_imports = sorted(node.transform_imports.get("py", set()))
@@ -37,7 +38,9 @@ def pre_imports(node: a.Imports, _: ConverterContext):
 
 @PY_PARSEL_CONVERTER.post(a.Imports)
 def post_imports(node: a.Imports, ctx: ConverterContext):
-    lines = ["from parsel import Selector, SelectorList"]
+    lines = []
+    if not py_helpers._module_is_rest_only(node):
+        lines.append("from parsel import Selector, SelectorList")
     lines.extend(py_helpers.http_client_import(ctx))
     return lines
 

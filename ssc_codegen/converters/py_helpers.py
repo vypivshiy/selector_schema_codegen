@@ -129,6 +129,19 @@ def _module_has_rest(node) -> bool:
     )
 
 
+def _module_is_rest_only(node) -> bool:
+    """True if the module has no HTML-parsing structs (all rest or empty)."""
+    module = node
+    while module is not None and not isinstance(module, a.Module):
+        module = getattr(module, "parent", None)
+    if module is None:
+        return False
+    structs = [
+        n for n in getattr(module, "body", []) if isinstance(n, a.Struct)
+    ]
+    return len(structs) == 0 or all(s.is_rest for s in structs)
+
+
 def rest_imports(node) -> list[str]:
     """Extra imports required when the module has any `struct type=rest`."""
     if not _module_has_rest(node):

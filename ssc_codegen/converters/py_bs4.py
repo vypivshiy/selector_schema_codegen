@@ -74,13 +74,18 @@ def pre_imports(node: a.Imports, ctx: ConverterContext):
             "import re",
             "import sys",
             "from typing import TypedDict, Optional, Any, List, Dict, Union, Literal",
-            "from html import unescape as _html_unescape",
-            "",
-            "if sys.version_info >= (3, 11):",
-            "    from typing import NotRequired",
-            "else:",
-            "    from typing_extensions import NotRequired",
         ]
+        if not py_helpers._module_is_rest_only(node):
+            base_imports.append("from html import unescape as _html_unescape")
+        base_imports.extend(
+            [
+                "",
+                "if sys.version_info >= (3, 11):",
+                "    from typing import NotRequired",
+                "else:",
+                "    from typing_extensions import NotRequired",
+            ]
+        )
         base_imports.extend(py_helpers.rest_imports(node))
 
     # Get transform imports for Python (already collected during parsing)
@@ -92,10 +97,14 @@ def pre_imports(node: a.Imports, ctx: ConverterContext):
 # hook for add extra dependencies
 @PY_BASE_CONVERTER.post(a.Imports)
 def post_imports(node: a.Imports, ctx: ConverterContext):
-    lines = [
-        "from bs4 import BeautifulSoup, ResultSet, Tag",
-        "BS4_FEATURES = 'lxml'",
-    ]
+    lines = []
+    if not py_helpers._module_is_rest_only(node):
+        lines.extend(
+            [
+                "from bs4 import BeautifulSoup, ResultSet, Tag",
+                "BS4_FEATURES = 'lxml'",
+            ]
+        )
     lines.extend(py_helpers.http_client_import(ctx))
     return lines
 
@@ -106,6 +115,11 @@ def pre_utilities(node: a.Utilities, ctx: ConverterContext):
     if runtime:
         names = py_helpers.runtime_export_names(node)
         return [f"from {runtime} import " + ", ".join(names), ""]
+
+    if py_helpers._module_is_rest_only(node):
+        lines = []
+        lines.extend(py_helpers.rest_utilities(node))
+        return lines
 
     lines = [
         "_RE_HEX_ENTITY = re.compile(r'&#x([0-9a-fA-F]+);')",
