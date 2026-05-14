@@ -691,18 +691,19 @@ def test_json_lint_circular_ref():
     assert any("circular reference" in e for e in errs)
 
 
-def test_json_lint_redundant_optional():
-    warns = _lint_warnings("json Foo { x str? @optional }")
-    assert any("redundant '@optional'" in w for w in warns)
-
-
 def test_json_lint_optional_suffix_ok():
     errs = _lint_errors("json Foo { x str? }")
     assert len(errs) == 0
 
 
-def test_json_lint_optional_modifier_ok():
+def test_json_lint_optional_modifier_now_error():
+    """@optional was removed; it should produce an unknown modifier error."""
     errs = _lint_errors("json Foo { x str @optional }")
+    assert any("unknown json field modifier '@optional'" in e for e in errs)
+
+
+def test_json_lint_omitempty_modifier_ok():
+    errs = _lint_errors("json Foo { x str @omitempty }")
     assert len(errs) == 0
 
 

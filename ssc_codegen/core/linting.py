@@ -905,7 +905,7 @@ def lint_transform_node(
 # ── JSON field lint ──────────────────────────────────────────────────────────────
 
 
-_VALID_JSON_MODIFIERS = frozenset({"@skip", "@missing", "@optional"})
+_VALID_JSON_MODIFIERS = frozenset({"@skip", "@omitempty"})
 _VALID_JSON_TYPES = frozenset({"str", "int", "float", "bool", "null"})
 
 
@@ -960,8 +960,6 @@ def lint_json_node(node: KdlNode, lint: LintContext, ctx: ParseContext) -> None:
         args = lint.get_args(field_node)
         has_type = False
         has_skip = False
-        has_optional_modifier = False
-        has_optional_suffix = False
         for arg in args:
             if arg.startswith("@"):
                 if arg not in _VALID_JSON_MODIFIERS:
@@ -973,15 +971,12 @@ def lint_json_node(node: KdlNode, lint: LintContext, ctx: ParseContext) -> None:
                     )
                 if arg == "@skip":
                     has_skip = True
-                if arg == "@optional":
-                    has_optional_modifier = True
             else:
                 has_type = True
                 raw_type = arg
                 if raw_type.startswith("(array)"):
                     raw_type = raw_type[len("(array)") :]
                 if raw_type.endswith("?"):
-                    has_optional_suffix = True
                     raw_type = raw_type[:-1]
                 if raw_type not in _VALID_JSON_TYPES and raw_type:
                     # might be a ref type — that's checked in post-pass
@@ -993,14 +988,6 @@ def lint_json_node(node: KdlNode, lint: LintContext, ctx: ParseContext) -> None:
                 message=f"json field '{field_name}' requires a type",
                 code="E001",
                 hint="example: field-name str  or  field-name @skip",
-            )
-
-        if has_optional_modifier and has_optional_suffix:
-            lint.warning(
-                field_node,
-                message=f"json field '{field_name}': redundant '@optional' on type with '?' suffix",
-                code="W001",
-                hint="use either 'field str?' or 'field str @optional', not both",
             )
 
         if field_name in seen_fields:

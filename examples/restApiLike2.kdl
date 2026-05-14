@@ -22,13 +22,12 @@ json Response {
     meta-info @skip
 
     // mark if this field maybe missing and exclude in response
-    track-id str @missing
-    
-    // variants write optional
+    track-id str @omitempty
+
+    // optional via ? suffix
     id int?
-    id2 int @optional 
-    // allow combine fields
-    track-id2 int @optional @missing  
+    // combine optional + omitempty
+    track-id2 int? @omitempty
 }
 
 // Error body returned on non-2xx responses, e.g. 404:

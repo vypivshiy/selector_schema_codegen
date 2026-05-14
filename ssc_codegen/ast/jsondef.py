@@ -10,7 +10,7 @@ class JsonDefField(Node):
     Single field in a JSON mapping definition.
 
     type_name   — primitive ("str", "int", "float", "bool") or ref name.
-    is_optional — True when field declared with ? suffix or @optional arg.
+    is_optional — True when field declared with ? suffix.
     is_array    — True when field declared with (array) prefix.
     ref_name    — set when type_name references another JsonDef.
     alias       — original JSON key when it differs from name.

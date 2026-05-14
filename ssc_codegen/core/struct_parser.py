@@ -222,9 +222,7 @@ def parse_json_fields(nodes: Sequence[KdlNode], parent: JsonDef) -> None:
                     ref_name = ref_name.removeprefix("(array)")
                     is_array = True
                 ret_type = VariableType.JSON
-        may_miss = "@missing" in modifiers
-        if "@optional" in modifiers:
-            is_optional = True
+        may_miss = "@omitempty" in modifiers
         doc = str(
             node.properties.get(
                 "doc", KdlArg(value="", span=node.span, is_identifier=False)

@@ -247,7 +247,7 @@ json Quote array=#true {
 ```
 
 Field types: str, int, float, bool, null, <RefName>.
-Modifiers: (array)type for arrays, type? for optional.
+Modifiers: (array)type for arrays, type? for optional, @omitempty for keys that may be absent, @skip to exclude from output.
 Alias: `field-name type "original-key"`.
 
 Usage: jsonify <SchemaName> [path="dotted.path"]
