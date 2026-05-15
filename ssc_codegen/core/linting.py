@@ -966,9 +966,29 @@ def lint_json_node(node: KdlNode, lint: LintContext, ctx: ParseContext) -> None:
     # ── field-level checks ───────────────────────────────────────────────────
 
     seen_fields: set[str] = set()
-    for field_node in lint.get_children_nodes(node):
+    _lint_json_children(lint.get_children_nodes(node), lint, ctx, seen_fields)
+
+
+def _lint_json_children(
+    children: list[KdlNode],
+    lint: LintContext,
+    ctx: ParseContext,
+    seen_fields: set[str],
+) -> None:
+    """Lint json field children, expanding block define references."""
+    for field_node in children:
         field_name = lint.node_name(field_node)
         args = lint.get_args(field_node)
+
+        # Block define expansion
+        if not args and field_name in ctx.children_defines:
+            lint.push(field_name)
+            _lint_json_children(
+                ctx.children_defines[field_name], lint, ctx, seen_fields
+            )
+            lint.pop()
+            continue
+
         has_type = False
         has_skip = False
         for arg in args:

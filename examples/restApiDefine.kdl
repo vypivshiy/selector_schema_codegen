@@ -1,0 +1,107 @@
+@doc """
+Example REST API: fictional PetStore (https://petstore.example.com/api/v1).
+
+Demonstrates block defines for shared JSON fields.
+The same PET-CORE define is expanded in multiple json schemas,
+avoiding duplication without mixins or inheritance.
+"""
+
+
+// ── Shared field groups ────────────────────────────────────────
+
+define PET-CORE {
+    id int
+    name str
+    species str
+    breed str?
+    age int?
+    weight float?
+    vaccinated bool
+}
+
+// ── Leaf JSON schemas ──────────────────────────────────────────
+
+json Owner {
+    id int
+    full_name str
+    phone str?
+    email str?
+}
+
+json VetRecord {
+    date str
+    clinic str
+    diagnosis str
+    treatment str?
+}
+
+// ── Pet variants ───────────────────────────────────────────────
+
+// Basic pet info — used in list/search endpoints
+json PetSummary {
+    PET-CORE
+    photo_url str?
+}
+
+// Full pet detail — used in single-pet endpoint
+json PetDetail {
+    PET-CORE
+    photo_url str?
+    owner Owner?
+    vet_records (array)VetRecord
+    notes str?
+}
+
+// ── Pagination ─────────────────────────────────────────────────
+
+json Pagination {
+    total int
+    page int
+    per_page int
+    total_pages int
+}
+
+json PetListResponse {
+    pets (array)PetSummary
+    pagination Pagination
+}
+
+// ── Error ──────────────────────────────────────────────────────
+
+json ApiError {
+    message str
+    code str?
+}
+
+// ── REST struct ────────────────────────────────────────────────
+
+struct PetStoreApi type=rest {
+    @doc """
+    PetStore API client.
+    No auth required for read endpoints.
+    """
+
+    @request name=list-pets doc="List pets with optional pagination." response=PetListResponse \
+    """
+    GET /api/v1/pets?page={{page:int?}}&per_page={{per_page:int?}} HTTP/1.1
+    Host: petstore.example.com
+    Accept: application/json
+    """
+
+    @request name=search-pets doc="Search pets by species or breed." response=PetListResponse \
+    """
+    GET /api/v1/pets/search?species={{species:str?}}&breed={{breed:str?}} HTTP/1.1
+    Host: petstore.example.com
+    Accept: application/json
+    """
+
+    @request name=get-pet doc="Get full pet detail by id." response=PetDetail \
+    """
+    GET /api/v1/pets/{{id:int}} HTTP/1.1
+    Host: petstore.example.com
+    Accept: application/json
+    """
+
+    @error 404 ApiError
+    @error 500 ApiError
+}

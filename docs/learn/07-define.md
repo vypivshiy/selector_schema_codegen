@@ -50,3 +50,30 @@ struct Links {
 - библиотека общих define в отдельном файле + `import`.
 
 Подробнее про импорты см. в [09-imports.md](09-imports.md).
+
+## Блочные define в json
+
+Блочный define можно использовать не только в pipeline, но и внутри `json { ... }`.
+Если json-блок содержит имя define без аргументов — дочерние узлы подставляются как json-поля:
+
+```kdl
+define ITEM-CORE {
+    id int
+    name str
+    created_at str
+}
+
+json Item {
+    ITEM-CORE
+    description str?
+}
+
+json ItemDetail {
+    ITEM-CORE
+    description str?
+    tags (array)str
+}
+```
+
+Разрешение контекстное: одни и те же дочерние узлы define в pipeline раскрываются как операции, в json — как поля.
+Имя без аргументов (`ITEM-CORE`) — это define-ссылка. Обычное поле всегда имеет аргумент-тип (`name str`), поэтому конфликта нет.

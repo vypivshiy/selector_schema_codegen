@@ -184,8 +184,14 @@ def parse_struct(
     lint.walk_context = prev_ctx
 
 
-def parse_json_fields(nodes: Sequence[KdlNode], parent: JsonDef) -> None:
+def parse_json_fields(
+    nodes: Sequence[KdlNode], parent: JsonDef, ctx: ParseContext
+) -> None:
     for node in nodes:
+        # Block define expansion in json context
+        if not node.args and node.name in ctx.children_defines:
+            parse_json_fields(ctx.children_defines[node.name], parent, ctx)
+            continue
         name = node.name
         modifiers: list[str] = []
         type_ = ""

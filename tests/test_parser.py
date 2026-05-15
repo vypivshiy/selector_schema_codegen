@@ -12,6 +12,7 @@ from ssc_codegen.ast import (
     Fmt,
     InitField,
     JsonDef,
+    JsonDefField,
     Jsonify,
     Lower,
     Match,
@@ -760,3 +761,111 @@ def test_rest_response_empty_ok():
         "}\n"
     )
     assert not any("references undefined" in e for e in errs)
+
+
+# ── Block define expansion in json ────────────────────────────────────────────
+
+
+def test_json_define_expansion_basic():
+    """Block define children expand as json fields."""
+    module = _parse(
+        "define CORE {\n"
+        "    id int\n"
+        "    name str\n"
+        "}\n"
+        "json Foo {\n"
+        "    CORE\n"
+        "    extra bool\n"
+        "}\n"
+    )
+    foo = _json_def(module, "Foo")
+    fields = {f.name: f for f in foo.body if isinstance(f, JsonDefField)}
+    assert "id" in fields
+    assert "name" in fields
+    assert "extra" in fields
+    assert fields["id"].ret == VariableType.INT
+    assert fields["name"].ret == VariableType.STRING
+    assert fields["extra"].ret == VariableType.BOOL
+
+
+def test_json_define_expansion_multiple_jsons():
+    """Same define expands in multiple json schemas."""
+    module = _parse(
+        "define BASE {\n"
+        "    id int\n"
+        "    title str\n"
+        "}\n"
+        "json Summary {\n"
+        "    BASE\n"
+        "}\n"
+        "json Detail {\n"
+        "    BASE\n"
+        "    description str?\n"
+        "}\n"
+    )
+    summary = _json_def(module, "Summary")
+    detail = _json_def(module, "Detail")
+    assert [f.name for f in summary.body if isinstance(f, JsonDefField)] == [
+        "id",
+        "title",
+    ]
+    assert [f.name for f in detail.body if isinstance(f, JsonDefField)] == [
+        "id",
+        "title",
+        "description",
+    ]
+
+
+def test_json_define_expansion_lint_ok():
+    """Define expansion passes lint with no errors."""
+    errs = _lint_errors(
+        "define F {\n"
+        "    x int\n"
+        "    y str\n"
+        "}\n"
+        "json A {\n"
+        "    F\n"
+        "    z bool\n"
+        "}\n"
+    )
+    assert len(errs) == 0
+
+
+def test_json_define_expansion_duplicate_field():
+    """Duplicate field across define and direct field is caught."""
+    errs = _lint_errors(
+        "define F {\n"
+        "    x int\n"
+        "}\n"
+        "json A {\n"
+        "    F\n"
+        "    x str\n"
+        "}\n"
+    )
+    assert any("duplicate json field 'x'" in e for e in errs)
+
+
+def test_json_define_expansion_ref_in_define():
+    """Define fields can reference other json schemas."""
+    module = _parse(
+        "define ITEM {\n"
+        "    id int\n"
+        "    tag Tag\n"
+        "}\n"
+        "json Tag {\n"
+        "    name str\n"
+        "}\n"
+        "json Item {\n"
+        "    ITEM\n"
+        "}\n"
+    )
+    item = _json_def(module, "Item")
+    tag_field = next(f for f in item.body if isinstance(f, JsonDefField) and f.name == "tag")
+    assert tag_field.ref_name == "Tag"
+    assert tag_field.ret == VariableType.JSON
+
+
+def test_json_define_expansion_bare_name_without_define_is_field():
+    """A bare name that's NOT a define gets a 'requires a type' error."""
+    errs = _lint_errors("json A {\n    mystery\n}\n")
+    assert any("requires a type" in e for e in errs)

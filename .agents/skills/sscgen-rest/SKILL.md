@@ -98,6 +98,41 @@ Modifiers: `(array)Type`, `Type?`.
 Alias: `field-name str "originalKey"`.
 Top-level array: `(array)json Tags { name str }`.
 
+**Deduplication with `define`.** When multiple `json` schemas share the same set
+of base fields, extract them into a block define and reference it as a bare name
+(no args) inside the json block:
+
+```kdl
+define PET-CORE {
+    id int
+    name str
+    species str
+    breed str?
+    vaccinated bool
+}
+
+json PetSummary {
+    PET-CORE
+    photo_url str?
+}
+
+json PetDetail {
+    PET-CORE
+    photo_url str?
+    owner Owner?
+    vet_records (array)VetRecord
+}
+```
+
+Rules for define in json:
+- A bare child node (no args) whose name matches a block define → expanded inline.
+- Normal fields always have a type arg (`name str`), so there is no ambiguity.
+- Expansion is recursive: a define can reference another define.
+- **When to use**: when ≥3 json schemas share ≥4 identical fields.
+  Do NOT use for 1–2 shared fields or 2 schemas — the define overhead is not justified.
+- **Max define body size**: 30 fields. Larger defines become hard to scan;
+  split into multiple focused defines instead.
+
 **Completeness checklist before proceeding:**
 
 1. Does every field from the real response appear in the schema? Compare

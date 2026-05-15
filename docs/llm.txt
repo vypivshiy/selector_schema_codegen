@@ -252,6 +252,26 @@ Alias: `field-name type "original-key"`.
 
 Usage: jsonify <SchemaName> [path="dotted.path"]
 
+Block defines can be used inside json blocks. A bare define name (no args) expands its children as json fields:
+
+```kdl
+define PET-CORE {
+    id int
+    name str
+    species str
+}
+
+json Pet {
+    PET-CORE
+    owner str?
+}
+
+(array)json PetList {
+    PET-CORE
+    adopted bool
+}
+```
+
 ## transform
 
 Multi-language custom code:

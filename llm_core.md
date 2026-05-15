@@ -16,10 +16,11 @@ Uses `_OP_TYPES` table for type inference.
 
 ### Struct parsing (core/struct_parser.py)
 Handles struct body: fields, @init, @pre-validate, @split-doc, @request, @error, @check.
+`parse_json_fields` expands block defines in json context (bare define name → recursive field expansion).
 
 ### Module-level handlers (core/module_handler.py)
 - `handle_define` — process define declarations
-- `handle_json` — process json schema declarations
+- `handle_json` — process json schema declarations; block defines expand as json fields when referenced inside json blocks
 - `handle_struct` — process struct declarations
 - `handle_transform` — process transform declarations
 - `resolve_imports` — resolve cross-file imports
