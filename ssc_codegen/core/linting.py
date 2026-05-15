@@ -776,6 +776,26 @@ def lint_reserved_field(
                 message=f"@check {check_name or ''}must contain 'to-bool' to guarantee BOOL return type",
                 code="E100",
             )
+    elif field_name == "@error":
+        err_args = lint.get_args(node)
+        if len(err_args) < 2:
+            lint.error(
+                node,
+                message="@error requires both status and schema name",
+                code="E001",
+                hint="example: @error 404 ApiError",
+            )
+            return
+        positional_keys = set(err_args[2:])
+        property_keys = set(node.properties.keys())
+        duplicates = positional_keys & property_keys
+        if duplicates:
+            lint.error(
+                node,
+                message=f"@error has duplicate keys: {', '.join(sorted(duplicates))}",
+                code="E400",
+                hint="each key must be either a positional arg (presence check) or a property (value check)",
+            )
 
 
 def lint_regular_field(

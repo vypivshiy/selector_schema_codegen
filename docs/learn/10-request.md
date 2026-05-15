@@ -264,9 +264,30 @@ IDE narrow'ит через literal-поля `isOk: true/false` и `status: 404`.
 
 ### Field-conditions
 
-Если API возвращает один и тот же статус-код для успешного и ошибочного ответа,
-отличающихся только структурой тела, добавьте условия по полям:
+`@error` поддерживает два режима проверки тела ответа:
 
+1. **Наличие ключа** (позиционные аргументы после SchemaName):
+```kdl
+@error 404 ApiError error detail
+```
+Сработает при status=404 И `_body` содержит ключи `error` и `detail`.
+
+2. **Равенство значения** (KDL-свойства):
+```kdl
+@error 200 ActionResponse success=#false
+```
+Сработает при status=200 И `_body.success == False`.
+
+3. **Комбинация** обоих режимов:
+```kdl
+@error 404 ApiError error detail="msg"
+```
+Сработает при status=404 И `'error' in _body` И `_body.detail == "msg"`.
+
+Один и тот же ключ нельзя указать одновременно как позиционный аргумент
+и как свойство — линтер выдаст ошибку.
+
+Пример corner case: API возвращает 200 для успеха и ошибки:
 ```kdl
 json ActionResponse {
     success bool
@@ -283,9 +304,6 @@ struct Api type=rest {
     @error 200 ActionResponse success=#false
 }
 ```
-
-Свойства после SchemaName — условия вида `field=value`. Все условия
-проверяются через AND. Ключи — dot-notation (`data.0.type`).
 
 Генерируемый dispatch:
 ```python

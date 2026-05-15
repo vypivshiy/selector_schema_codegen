@@ -291,10 +291,12 @@ class RequestConfig(Node):
 class ErrorResponse(Node):
     """
     Error response mapping for type=rest struct.
-    DSL: @error <status> <SchemaName> [field=value ...]
+    DSL: @error <status> <SchemaName> [keys...] [field=value ...]
 
     status: HTTP status code [100..599].
     schema_name: json schema reference for deserialised error body.
+    required_keys: key names that must exist in the JSON body (positional args).
+        Error triggers on matching status + all keys present.
     conditions: field=value pairs checked against the parsed JSON body.
         Keys are dot-paths (e.g. "response.success", "data.0.type").
         When non-empty, the error triggers on matching status + all conditions.
@@ -302,6 +304,7 @@ class ErrorResponse(Node):
 
     status: int = 0
     schema_name: str = ""
+    required_keys: list[str] = field(default_factory=list)
     conditions: dict[str, Any] = field(default_factory=dict)
 
 

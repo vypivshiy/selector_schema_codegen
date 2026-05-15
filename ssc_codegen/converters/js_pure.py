@@ -348,6 +348,8 @@ def pre_typedef_field(node: a.TypeDefField, ctx: ConverterContext):
 
 def _js_err_subclass_name(struct_name: str, err) -> str:
     base = f"{to_pascal_case(struct_name)}Err{err.status}"
+    for key in err.required_keys:
+        base += to_pascal_case(key.replace(".", "_").replace("-", "_"))
     if err.conditions:
         for key in err.conditions:
             base += to_pascal_case(key.replace(".", "_").replace("-", "_"))
@@ -369,6 +371,8 @@ def _js_resolve_path_expr(body_var: str, path: str) -> str:
 def _js_condition_check_expr(err) -> str:
     """Build a compound JS condition expression for @error field conditions."""
     parts = []
+    for key in err.required_keys:
+        parts.append(f"{key!r} in _body")
     for path, value in err.conditions.items():
         lhs = _js_resolve_path_expr("_body", path)
         if isinstance(value, bool):
@@ -440,8 +444,10 @@ def _emit_dispatch_err_js(node: a.Struct, ctx: ConverterContext) -> list[str]:
     i3 = i2 + ctx.indent_char  # nested (if ...)
 
     errors = node.errors
-    status_errors = [e for e in errors if not e.conditions]
-    field_errors = [e for e in errors if e.conditions]
+    status_errors = [
+        e for e in errors if not e.conditions and not e.required_keys
+    ]
+    field_errors = [e for e in errors if e.conditions or e.required_keys]
 
     lines: list[str] = [
         f"{i1}static _dispatchErr(_status, _headers, _body) {{",

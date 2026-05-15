@@ -367,7 +367,9 @@ Error response mapping for `struct type=rest`.
 ```kdl
 struct Api type=rest {
     @error 404 ApiError
+    @error 404 ApiError error
     @error 200 ActionResponse success=#false
+    @error 200 ApiError error detail="msg"
 }
 ```
 
@@ -376,7 +378,17 @@ struct Api type=rest {
 - `<status>` — HTTP status code [100..599]
 - `<SchemaName>` — json schema reference for deserialized error body
 
-### Field conditions (properties, optional)
+### Key presence checks (positional, optional)
+
+Additional positional args after SchemaName check that keys exist in the JSON body:
+
+```kdl
+@error 404 ApiError error detail
+```
+
+Triggers when status=404 AND `_body` contains both `error` and `detail` keys.
+
+### Value conditions (properties, optional)
 
 KDL properties after the positional args are field=value conditions checked against the parsed JSON body:
 
@@ -384,8 +396,17 @@ KDL properties after the positional args are field=value conditions checked agai
 - All conditions must match (AND logic)
 - Covers the corner case where the same status code is used for normal and error responses
 
-Without conditions → status-only match.
-With conditions → status + all field conditions must match.
+### Mixing both
+
+Positional keys and property conditions can be combined:
+
+```kdl
+@error 404 ApiError error detail="msg"
+```
+
+Triggers when status=404 AND `'error' in _body` AND `_body.detail == "msg"`.
+
+A key must not appear in both positional args and properties (lint error).
 
 ## CLI
 

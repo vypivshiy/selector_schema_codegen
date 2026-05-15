@@ -107,15 +107,29 @@ not `{{id}}` and `{{id:int}}`).
 
 ---
 
-## `@error` naming and Result variants
+## `@error` syntax and naming
 
 Class/typedef name: `<PascalStruct>Err<Status>[<FieldPascal>]`.
 
-| `@error` declaration in `struct DummyJsonApi` | Generated class (Python) | Generated typedef (JS) |
+### Syntax
+
+```
+@error <status:int> <SchemaName> [keys...] [key=value ...]
+```
+
+- Positional args after SchemaName → key **presence** check (`'key' in _body`)
+- KDL properties → value **equality** check (`_body.get('key') == value`)
+- Both can be mixed; same key in both is a lint error.
+
+### Examples
+
+| `@error` declaration in `struct DummyJsonApi` | Mode | Generated class |
 |---|---|---|
-| `@error 404 ApiError` | `DummyJsonApiErr404` | `DummyJsonApiErr404` |
-| `@error 500 ApiError` | `DummyJsonApiErr500` | `DummyJsonApiErr500` |
-| `@error 200 ApiError error_code=#true` | `DummyJsonApiErr200ErrorCode` | `DummyJsonApiErr200ErrorCode` |
+| `@error 404 ApiError` | status-only | `DummyJsonApiErr404` |
+| `@error 500 ApiError` | status-only | `DummyJsonApiErr500` |
+| `@error 404 ApiError error` | key presence | `DummyJsonApiErr404Error` |
+| `@error 200 ApiError error_code=#true` | value equality | `DummyJsonApiErr200ErrorCode` |
+| `@error 404 ApiError error detail="msg"` | mixed | `DummyJsonApiErr404ErrorDetail` |
 
 Universal variants (always emitted):
 - `Ok[T]` — generic 2xx wrapper, `value: T`

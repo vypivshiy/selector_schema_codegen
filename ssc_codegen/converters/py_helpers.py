@@ -257,6 +257,8 @@ def rest_utilities(node: a.Node) -> list[str]:
 def err_subclass_name(struct_name: str, err: a.ErrorResponse) -> str:
     """Naming: ``<Struct>Err<Status>[<ConditionKeys>]``."""
     base = f"{to_pascal_case(struct_name)}Err{err.status}"
+    for key in err.required_keys:
+        base += to_pascal_case(key.replace(".", "_").replace("-", "_"))
     if err.conditions:
         for key in err.conditions:
             base += to_pascal_case(key.replace(".", "_").replace("-", "_"))
@@ -304,6 +306,8 @@ def _resolve_path_expr(body_var: str, path: str) -> str:
 def _condition_check_expr(err: a.ErrorResponse) -> str:
     """Build a compound condition expression for an @error's field conditions."""
     parts: list[str] = []
+    for key in err.required_keys:
+        parts.append(f"{key!r} in _body")
     for path, value in err.conditions.items():
         lhs = _resolve_path_expr("_body", path)
         if isinstance(value, bool):
@@ -325,8 +329,10 @@ def emit_dispatch_err_py(node: a.Struct, ctx: ConverterContext) -> list[str]:
     i4 = i3 + ctx.indent_char
 
     errors = node.errors
-    status_errors = [e for e in errors if not e.conditions]
-    field_errors = [e for e in errors if e.conditions]
+    status_errors = [
+        e for e in errors if not e.conditions and not e.required_keys
+    ]
+    field_errors = [e for e in errors if e.conditions or e.required_keys]
     union_type = _rest_err_union_type(node)
 
     lines: list[str] = [

@@ -29,8 +29,8 @@ Generate `struct type=rest` schemas that become typed HTTP clients when run thro
    no `@init`, no `nested`, no `css`/`xpath`.
 2. **At least one `@request`** per struct.
 3. **Multiple `@request` → every one needs `name=<kebab-id>`** (single may omit).
-4. **`@error <status> <Schema>`**: status ∈ [100..599]; each (status, field) pair unique.
-5. **`@error` on 2xx requires field-conditions** (e.g. `success=#false`) to avoid false positives.
+4. **`@error <status> <Schema> [keys...] [key=value ...]`**: status ∈ [100..599]; positional args after Schema are key-presence checks; properties are value-equality checks; same key in both is a lint error.
+5. **`@error` on 2xx requires field-conditions** (key presence or value equality) to avoid false positives.
 6. **Typed placeholders**: `[]` and `?` forbidden in URL path; `|style` requires `[]`;
    types: `str|int|float|bool`; same name = same full spec; no keyword collisions.
 7. **`@doc` describes the API semantically** (purpose, auth, base URL, rate limits).

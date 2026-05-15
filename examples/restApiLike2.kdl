@@ -76,4 +76,8 @@ struct DummyJsonApi type=rest {
     // success and error, distinguished by a field in the response body.
     // Uncomment below to see field-conditions in action:
     // @error 200 ActionResponse success=#false
+
+    // Key-presence example: check that a key exists in the JSON body
+    // regardless of its value (positional arg after schema name).
+    // @error 400 ApiError error
 }

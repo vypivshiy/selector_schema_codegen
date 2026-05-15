@@ -146,6 +146,14 @@ def parse_struct(
             schema_name = str(
                 ctx.property_defines.get(node.args[1].value, node.args[1].value)
             )
+            required_keys: list[str] = []
+            for i in range(2, len(node.args)):
+                key = str(
+                    ctx.property_defines.get(
+                        node.args[i].value, node.args[i].value
+                    )
+                )
+                required_keys.append(key)
             conditions: dict[str, Any] = {}
             for k, v in node.properties.items():
                 key = str(ctx.property_defines.get(k, k))
@@ -155,6 +163,7 @@ def parse_struct(
                 parent=parent,
                 status=status_int,
                 schema_name=schema_name,
+                required_keys=required_keys,
                 conditions=conditions,
             )
             parent.body.append(err)

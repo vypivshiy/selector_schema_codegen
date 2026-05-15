@@ -87,6 +87,24 @@ class TestRestParser:
         struct = next(n for n in module.body if isinstance(n, Struct))
         assert not any(isinstance(n, StartParse) for n in struct.body)
 
+    def test_error_required_keys_parsed(self):
+        src = _rest_src(errors='    @error 404 Err error detail\n')
+        module = _parse(src)
+        struct = next(n for n in module.body if isinstance(n, Struct))
+        errors = [n for n in struct.body if isinstance(n, ErrorResponse)]
+        assert len(errors) == 1
+        assert errors[0].required_keys == ["error", "detail"]
+        assert errors[0].conditions == {}
+
+    def test_error_mixed_conditions_parsed(self):
+        src = _rest_src(errors='    @error 404 Err error detail="msg"\n')
+        module = _parse(src)
+        struct = next(n for n in module.body if isinstance(n, Struct))
+        errors = [n for n in struct.body if isinstance(n, ErrorResponse)]
+        assert len(errors) == 1
+        assert errors[0].required_keys == ["error"]
+        assert errors[0].conditions == {"detail": "msg"}
+
 
 # ---------------------------------------------------------------------------
 # Converter tests (smoke)
@@ -267,6 +285,41 @@ class TestRestPyConverter:
         assert 'json=f"' not in code
         assert "json=f'" not in code
 
+    def test_py_required_keys_dispatch(self):
+        from ssc_codegen.converters.py_bs4 import (
+            PY_BASE_CONVERTER as CONVERTER,
+        )
+
+        src = _rest_src(errors='    @error 404 Err error detail\n')
+        module = _parse(src)
+        code = CONVERTER.convert(module, http_client="requests")
+        assert "'error' in _body" in code
+        assert "'detail' in _body" in code
+        assert "class APIErr404ErrorDetail" in code
+
+    def test_py_mixed_conditions_dispatch(self):
+        from ssc_codegen.converters.py_bs4 import (
+            PY_BASE_CONVERTER as CONVERTER,
+        )
+
+        src = _rest_src(errors='    @error 404 Err error detail="msg"\n')
+        module = _parse(src)
+        code = CONVERTER.convert(module, http_client="requests")
+        assert "'error' in _body" in code
+        assert "_body.get('detail') == 'msg'" in code
+        assert "class APIErr404ErrorDetail" in code
+
+    def test_py_required_keys_routed_as_field_error(self):
+        from ssc_codegen.converters.py_bs4 import (
+            PY_BASE_CONVERTER as CONVERTER,
+        )
+
+        src = _rest_src(errors='    @error 404 Err error\n')
+        module = _parse(src)
+        code = CONVERTER.convert(module, http_client="requests")
+        # required_keys errors go through isinstance(_body, dict) branch
+        assert "isinstance(_body, dict)" in code
+
 
 class TestRestJsConverter:
     def test_js_generates_class(self):
@@ -348,6 +401,16 @@ class TestRestJsConverter:
         code = JS_CONVERTER.convert(module, http_client="fetch")
         assert "static _dispatchErr(_status, _headers, _body)" in code
         assert "API._dispatchErr(_status, _headers, _body)" in code
+
+    def test_js_required_keys_dispatch(self):
+        from ssc_codegen.converters.js_pure import JS_CONVERTER
+
+        src = _rest_src(errors='    @error 404 Err error detail\n')
+        module = _parse(src)
+        code = JS_CONVERTER.convert(module, http_client="fetch")
+        assert "'error' in _body" in code
+        assert "'detail' in _body" in code
+        assert "APIErr404ErrorDetail" in code
 
 
 def _method_bodies(code: str) -> str:
