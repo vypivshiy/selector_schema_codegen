@@ -42,6 +42,14 @@ json ApiError {
     message str
 }
 
+// Fictional schema for demonstrating field-condition @error matching.
+// Some APIs return 200 for both success and error, using a field like
+// "success" to distinguish. @error 200 with conditions covers this case.
+json ActionResponse {
+    success bool
+    message str
+}
+
 
 // ── REST struct ───────────────────────────────────────────────────────────────
 
@@ -91,4 +99,9 @@ struct DummyJsonApi type=rest {
 
     // 404 for unknown id — body shape: {"message": "..."}
     @error 404 ApiError
+
+    // Field-condition example (fictional): some APIs return 200 for both
+    // success and error, distinguished by a field in the response body.
+    // Uncomment below to see field-conditions in action:
+    // @error 200 ActionResponse success=#false
 }

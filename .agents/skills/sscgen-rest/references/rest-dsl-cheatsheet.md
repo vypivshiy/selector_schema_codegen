@@ -115,7 +115,7 @@ Class/typedef name: `<PascalStruct>Err<Status>[<FieldPascal>]`.
 |---|---|---|
 | `@error 404 ApiError` | `DummyJsonApiErr404` | `DummyJsonApiErr404` |
 | `@error 500 ApiError` | `DummyJsonApiErr500` | `DummyJsonApiErr500` |
-| `@error 200 field="error_code" ApiError` | `DummyJsonApiErr200ErrorCode` | `DummyJsonApiErr200ErrorCode` |
+| `@error 200 ApiError error_code=#true` | `DummyJsonApiErr200ErrorCode` | `DummyJsonApiErr200ErrorCode` |
 
 Universal variants (always emitted):
 - `Ok[T]` — generic 2xx wrapper, `value: T`

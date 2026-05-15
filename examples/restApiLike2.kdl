@@ -16,6 +16,10 @@ Equivalent alternatives you can retarget by swapping host/paths:
 """
 
 
+json OptItem {
+  a str
+  b int
+}
 
 json Response {
     // skip field if your dont want parse it
@@ -28,11 +32,20 @@ json Response {
     id int?
     // combine optional + omitempty
     track-id2 int? @omitempty
+    item OptItem?
 }
 
 // Error body returned on non-2xx responses, e.g. 404:
 //   {"message": "Product with id '99999' not found"}
 json ApiError {
+    message str
+}
+
+// Fictional schema for demonstrating field-condition @error matching.
+// Some APIs return 200 for both success and error, using a field like
+// "success" to distinguish. @error 200 with conditions covers this case.
+json ActionResponse {
+    success bool
     message str
 }
 
@@ -58,4 +71,9 @@ struct DummyJsonApi type=rest {
 
     // 404 for unknown id or unknown category slug — body: {"message": "..."}
     @error 404 ApiError
+
+    // Field-condition example (fictional): some APIs return 200 for both
+    // success and error, distinguished by a field in the response body.
+    // Uncomment below to see field-conditions in action:
+    // @error 200 ActionResponse success=#false
 }

@@ -260,7 +260,44 @@ IDE narrow'ит через literal-поля `isOk: true/false` и `status: 404`.
 ```
 
 - `@error 404 ApiError` в struct `DummyJsonApi` → `DummyJsonApiErr404`
-- `@error 200 field="error_code" ApiError` → `DummyJsonApiErr200ErrorCode`
+- `@error 200 ApiError error_code=#true` → `DummyJsonApiErr200ErrorCode`
+
+### Field-conditions
+
+Если API возвращает один и тот же статус-код для успешного и ошибочного ответа,
+отличающихся только структурой тела, добавьте условия по полям:
+
+```kdl
+json ActionResponse {
+    success bool
+    message str
+}
+
+struct Api type=rest {
+    @request response=Product """
+    GET /items/{{id:int}} HTTP/1.1
+    Host: api.example.com
+    """
+
+    // 200 с success=#false — ошибка
+    @error 200 ActionResponse success=#false
+}
+```
+
+Свойства после SchemaName — условия вида `field=value`. Все условия
+проверяются через AND. Ключи — dot-notation (`data.0.type`).
+
+Генерируемый dispatch:
+```python
+@staticmethod
+def _dispatch_err(_status, _headers, _body):
+    if 200 <= _status < 300:
+        if isinstance(_body, dict):
+            if _status == 200 and _body.get('success') == False:
+                return ApiErr200Success(headers=_headers, value=_body)
+        return None
+    ...
+```
 
 ### Внутренняя структура модуля
 
