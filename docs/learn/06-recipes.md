@@ -143,7 +143,7 @@ define JSON-PATTERN=#"""
     var\s+data\s*=\s*(\[.*\])
 """#
 
-json Quote array=#true {
+(array)json Quote {
     text str
     author str
 }

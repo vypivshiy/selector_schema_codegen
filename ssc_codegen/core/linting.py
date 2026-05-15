@@ -952,15 +952,6 @@ def lint_json_node(node: KdlNode, lint: LintContext, ctx: ParseContext) -> None:
             hint=f"rename or remove one of the 'json {name}' definitions",
         )
 
-    array_prop = node.properties.get("array")
-    if array_prop is not None and not isinstance(array_prop.value, bool):
-        lint.error(
-            node,
-            message=f"'array' property must be boolean (#true/#false), got {array_prop.value!r}",
-            code="E002",
-            hint="example: json MySchema array=#true { ... }",
-        )
-
     path_prop = node.properties.get("path")
     if path_prop is not None:
         path_val = str(path_prop.value)

@@ -639,10 +639,6 @@ def test_json_lint_duplicate_name():
     assert any("duplicate json definition 'Foo'" in e for e in errs)
 
 
-def test_json_lint_invalid_array_property():
-    errs = _lint_errors('json Foo array="yes" { x str }')
-    assert any("'array' property must be boolean" in e for e in errs)
-
 
 def test_json_lint_empty_path_property():
     errs = _lint_errors('json Foo path="" { x str }')
@@ -650,7 +646,7 @@ def test_json_lint_empty_path_property():
 
 
 def test_json_lint_valid_array_and_path():
-    errs = _lint_errors('json Foo array=#true path="data.items" { x str }')
+    errs = _lint_errors('(array)json Foo path="data.items" { x str }')
     assert len(errs) == 0
 
 

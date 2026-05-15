@@ -96,7 +96,7 @@ json ApiError { message str }
 Field types: `str | int | float | bool | null | <RefName>`.
 Modifiers: `(array)Type`, `Type?`.
 Alias: `field-name str "originalKey"`.
-Top-level array: `json Tags array=#true { name str }`.
+Top-level array: `(array)json Tags { name str }`.
 
 **Completeness checklist before proceeding:**
 
@@ -104,7 +104,7 @@ Top-level array: `json Tags array=#true { name str }`.
    `sorted(response.keys())` against the schema fields.
 2. Are nested objects extracted into their own `json` schemas (not flattened)?
 3. Are nullable fields (`"field": null` in real data) marked `Type?`?
-4. Does the response envelope match? Bare array → `array=#true`; paginated →
+4. Does the response envelope match? Bare array → `(array)json`; paginated →
    include `Meta`/`Pagination` schemas; data wrapper → envelope schema with
    `data` field.
 5. If a swagger is available: cross-reference every response schema
@@ -203,6 +203,6 @@ spot-check field names and types against it.
 ## Reference files (self-contained)
 
 - `references/10-request.md` — @request syntax, typed placeholders, curl flags, Result type
-- `references/json.md` — json schema syntax, aliases, array=#true
+- `references/json.md` — json schema syntax, aliases, (array)json
 - `references/example-dummyjson.kdl` — minimal working example (4 endpoints)
 - `references/example-restApiLike.kdl` — comprehensive example (6 endpoints)

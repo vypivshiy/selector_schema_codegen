@@ -34,7 +34,7 @@ class JsonDefField(Node):
 class JsonDef(Node):
     """
     JSON mapping definition.
-    DSL: json Name { ... } / json Name array=#true { ... } / json Name path="a.b" { ... }
+    DSL: json Name { ... } / (array)json Name { ... } / json Name path="a.b" { ... }
     body: list[JsonDefField]
     """
 

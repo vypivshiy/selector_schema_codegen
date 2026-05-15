@@ -24,7 +24,7 @@ json Author {
 }
 
 // mark entrypoint - array
-json Quote array=#true {
+(array)json Quote {
     // add type (array) mark
     tags (array)str
     // reference structure

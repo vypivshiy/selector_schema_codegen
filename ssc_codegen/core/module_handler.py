@@ -83,9 +83,7 @@ def handle_json(
     node: KdlNode, module: Module, ctx: ParseContext, lint: LintContext
 ) -> JsonDef:
     name = str(node.args[0].value) if node.args else ""
-    is_array = node.properties.get(
-        "array", KdlArg(value=False, span=node.span, is_identifier=False)
-    ).value
+    is_array = node.type_annotation == "(array)"
     path = str(
         node.properties.get(
             "path", KdlArg(value="", span=node.span, is_identifier=False)

@@ -239,7 +239,7 @@ json Author {
     slug str
 }
 
-json Quote array=#true {
+(array)json Quote {
     tags (array)str
     author Author
     text str

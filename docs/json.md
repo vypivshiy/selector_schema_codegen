@@ -15,7 +15,7 @@ json Author {
     slug str
 }
 
-json Quote array=#true {
+(array)json Quote {
     tags (array)str
     author Author
     text str
@@ -53,7 +53,7 @@ json Item {
 
 Правила:
 - `json <Name> { ... }` объявляет схему.
-- `array=#true` помечает схему как массив верхнего уровня.
+- `(array)json <Name>` помечает схему как массив верхнего уровня.
 - Поля могут ссылаться на другие `json` схемы по имени.
 
 ### Alias ключей

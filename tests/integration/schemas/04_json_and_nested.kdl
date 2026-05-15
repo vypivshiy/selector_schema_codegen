@@ -13,7 +13,7 @@ json JsonAuthor {
     slug str
 }
 
-json JsonQuote array=#true {
+(array)json JsonQuote {
     text str
     author JsonAuthor
     tags (array)str
