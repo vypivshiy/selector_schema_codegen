@@ -1111,12 +1111,24 @@ def lint_rest_cross_refs(ctx: ParseContext, lint: LintContext) -> None:
             )
 
 
+_DEFINE_NAME_RE = _re.compile(r"^[A-Z_][A-Z0-9_-]*\Z")
+
+
 def lint_define_node(
     node: KdlNode, ctx: ParseContext, lint: LintContext
 ) -> None:
     """Validate module-level define."""
     children = lint.get_children_nodes(node)
     args = lint.get_args(node)
+    if args:
+        name = args[0]
+        if not _DEFINE_NAME_RE.match(name):
+            lint.error(
+                node,
+                message=f"define name '{name}' must be UPPER_CASE ([A-Z_][A-Z0-9_-]*)",
+                code="E002",
+                hint="use UPPER_CASE: define MY-VAR=... or define MY_BLOCK { ... }",
+            )
     if children:
         if not args:
             lint.error(

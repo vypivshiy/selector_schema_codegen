@@ -20,7 +20,7 @@ from ssc_codegen.parsers.http import parse_http_request
 # Groups: 1=NAME, 2=PRIM, 3="[]", 4="?", 5=STYLE.
 _PH = re.compile(
     r"\{\{"
-    r"([A-Za-z][A-Za-z0-9_-]*)"
+    r"([a-z][a-z0-9_-]*)"
     r"(?::(str|int|float|bool))?"
     r"(\[\])?"
     r"(\?)?"

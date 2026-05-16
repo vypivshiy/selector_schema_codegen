@@ -23,11 +23,16 @@ Path is relative to current file. Transitive. Cyclic imports forbidden.
 
 ## define
 
+Names must be UPPER_CASE: `[A-Z_][A-Z0-9_-]*`.
+
 Scalar (substituted into arguments):
 ```kdl
 define BASE-URL="https://example.com/{{}}"
 define RE-PRICE=#"(\d+(?:\.\d+)?)"#
 ```
+
+Scalar define values can reference other defines via `{{NAME}}` (UPPER_CASE).
+Lowercase `{{name}}` in define values are left as-is — they become @request placeholders.
 
 Block (expanded as pipeline operations):
 ```kdl
@@ -336,9 +341,12 @@ Accept: text/html
 ### Placeholders
 
 `{{name}}` becomes a keyword-only parameter in `fetch()`, converted to snake_case.
+Placeholder names must be **lowercase**: `[a-z][a-z0-9_-]*`.
+UPPER_CASE `{{NAME}}` is reserved for define references (see `## define`).
 No placeholders → static request, `fetch(cls, client)` only.
 
 **Typed placeholders:** `{{name[:type][[]][?][|style]}}`
+- `name` must be lowercase `[a-z][a-z0-9_-]*`
 - `type` ∈ `str|int|float|bool` (default: str)
 - `[]` marks array; `?` marks optional (`T | None = None`)
 - `style` ∈ `repeat|csv|bracket|pipe|space` (arrays only; default: repeat)
@@ -364,17 +372,17 @@ Content-Type: application/json
 
 Scalar define can be used as the @request argument:
 ```kdl
-define MY-REQ="""
-GET /{{page}} HTTP/1.1
-Host: example.com
-"""
+define BASE-URL="https://example.com"
+define MY-REQ="curl {{BASE-URL}}/search?q={{query}}"
 struct Foo {
     @request MY-REQ
     ...
 }
 ```
 
-Placeholders inside the define string work identically to inline form.
+Case convention separates define references from request parameters:
+- `{{BASE-URL}}` (UPPER) → resolved at parse time from define
+- `{{query}}` (lowercase) → becomes a runtime parameter in `fetch()`
 
 ### CLI flag
 

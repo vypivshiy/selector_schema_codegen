@@ -167,7 +167,7 @@ _FLOAT_RE = _re.compile(
     r"[+-]?(?:\d(?:[\d_])*\.\d(?:[\d_])*|\d(?:[\d_])*[eE][+-]?\d(?:[\d_])*|\d(?:[\d_]*)\.\d(?:[\d_]*)[eE][+-]?\d(?:[\d_])*)\Z"
 )
 
-_DEFINE_REF_RE = _re.compile(r"\{\{([A-Za-z][A-Za-z0-9_-]*)\}\}")
+_DEFINE_REF_RE = _re.compile(r"\{\{([A-Z_][A-Z0-9_-]*)\}\}")
 
 
 def _resolve_define_references(value: str, ctx: ParseContext) -> str:
@@ -175,7 +175,7 @@ def _resolve_define_references(value: str, ctx: ParseContext) -> str:
         name = m.group(1)
         resolved = ctx.property_defines.get(name)
         if resolved is None:
-            raise ParseError(f"define references undefined name {name!r}")
+            return m.group(0)
         return str(resolved)
 
     return _DEFINE_REF_RE.sub(_replacer, value)

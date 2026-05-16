@@ -6,6 +6,17 @@
 `define` помогает переиспользовать значения и блоки операций. Логика как в C:
 это текстовая подстановка значений или операций.
 
+## Именование
+
+Имя define **обязательно** в UPPER_CASE: `[A-Z_][A-Z0-9_-]*`.
+
+```kdl
+define BASE-URL="https://example.com"     // OK
+define REQUEST-SEARCH="curl ..."           // OK
+define my-var="value"                      // ОШИБКА: lowercase
+define MyVar="value"                       // ОШИБКА: mixedCase
+```
+
 ## Скалярные define
 
 **Скалярный define** — это значение. Используется только как аргумент.
@@ -24,6 +35,19 @@ struct Book {
 ```
 
 Правило: скалярный `define` нельзя использовать как pipeline-операцию.
+
+## Подстановка define в define
+
+В значении скалярного define можно ссылаться на другой define через `{{NAME}}`:
+
+```kdl
+define BASE-URL="https://example.com"
+define API-URL="{{BASE-URL}}/api/v1"
+```
+
+Синтаксис `{{NAME}}` — это подстановка UPPER_CASE define-значений.
+Lowercase `{{name}}` **не разрешается** и передаётся как есть — это placeholder для `@request`
+(см. [10-request.md](10-request.md)).
 
 ## Блочные define
 

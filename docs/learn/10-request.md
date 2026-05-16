@@ -42,7 +42,8 @@ struct MainCatalogue {
 ## Placeholders
 
 `{{name}}` — это параметры, которые передаются в `fetch()` при вызове.
-Имена преобразуются в snake_case.
+Имена **обязательно lowercase**: `[a-z][a-z0-9_-]*`. Дефис автоконвертируется
+в snake_case при генерации.
 
 ```kdl
 @request """
@@ -66,9 +67,9 @@ def fetch(cls, client: httpx.Client, *, query: str, page_num: str) -> "StructNam
 По умолчанию каждый `{{name}}` — обязательный `str`. Расширенный синтаксис задаёт тип, массив, опциональность и способ сериализации массива:
 
 ```
-{{ NAME [:PRIM] [[]] [?] [|STYLE] }}
+{{ name [:PRIM] [[]] [?] [|STYLE] }}
 
-NAME   = [A-Za-z][A-Za-z0-9_-]*        первый символ — буква; `-` автоконвертируется
+name   = [a-z][a-z0-9_-]*              lowercase; `-` автоконвертируется в snake_case
 PRIM   = str | int | float | bool       default: str
 STYLE  = repeat | csv | bracket | pipe | space   только при []; default: repeat
 ```
@@ -154,6 +155,17 @@ struct MainPage {
 
 Правило то же, что и для остальных скалярных define: это подстановка строки в аргумент.
 Placeholders (`{{...}}`) внутри работают как обычно.
+
+**Разделение по регистру:**
+- `{{PAGE-NUM}}` (UPPER_CASE) — подстановка значения другого define
+- `{{page-num}}` (lowercase) — runtime-параметр для `fetch()`
+
+```kdl
+define BASE-URL="https://example.com"
+define MY-REQ="curl {{BASE-URL}}/search?q={{query}}"
+//                     ^^^^^^^^^ define-подстановка
+//                                           ^^^^^^^ runtime-параметр
+```
 
 ## Несколько struct с @request в одном файле
 
