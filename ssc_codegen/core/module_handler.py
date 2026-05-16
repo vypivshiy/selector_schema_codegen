@@ -12,7 +12,7 @@ from ssc_codegen.ast import (
     TransformDef,
     TransformTarget,
 )
-from ssc_codegen.exceptions import BuildTimeError, ParseError
+from ssc_codegen.exceptions import BuildTimeError
 from ssc_codegen.kdl import (
     KDL2CSTParser,
     KdlArg,
@@ -142,13 +142,19 @@ def handle_transform(
         ).value
     )
     if accept_str not in _VAR_TYPE_MAP:
-        raise ParseError(
-            f"transform '{name}': invalid accept type '{accept_str}' (AUTO not allowed)"
+        lint.error(
+            node,
+            message=f"transform '{name}': invalid accept type '{accept_str}' (AUTO not allowed)",
+            code="E002",
         )
+        return
     if ret_str not in _VAR_TYPE_MAP:
-        raise ParseError(
-            f"transform '{name}': invalid return type '{ret_str}' (AUTO not allowed)"
+        lint.error(
+            node,
+            message=f"transform '{name}': invalid return type '{ret_str}' (AUTO not allowed)",
+            code="E002",
         )
+        return
     accept_type = _VAR_TYPE_MAP[accept_str]
     ret_type = _VAR_TYPE_MAP[ret_str]
     transform_def = TransformDef(name=name, accept=accept_type, ret=ret_type)

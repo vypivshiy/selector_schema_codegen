@@ -36,7 +36,6 @@ from ssc_codegen.ast import (
 from ssc_codegen.ast.predicate_ops import LogicNot, PredContains, PredEq
 from ssc_codegen.ast.types import StructType, VariableType
 from ssc_codegen.core import parse_module
-from ssc_codegen.exceptions import BuildTimeError
 from ssc_codegen.kdl import KDL2CSTParser, KDLParseError, Severity
 
 
@@ -566,23 +565,25 @@ def test_parser_inlines_define_blocks_and_resolves_init_references():
 
 
 def test_parser_rejects_legacy_self_syntax():
-    with pytest.raises(BuildTimeError, match="no longer supported"):
-        _parse(
-            """
-            struct Main {
-                @init {
-                    seed {
-                        text
-                    }
-                }
-
-                from-init {
-                    self seed
-                    fmt \"Hello {{}}\"
+    _, diagnostics = parse_module(
+        """
+        struct Main {
+            @init {
+                seed {
+                    text
                 }
             }
-            """
-        )
+
+            from-init {
+                self seed
+                fmt "Hello {{}}"
+            }
+        }
+        """
+    )
+    errors = [d for d in diagnostics if d.severity == Severity.ERROR]
+    assert errors
+    assert "no longer supported" in errors[0].message
 
 
 def test_parser_expands_repl_map_define_and_adds_return():

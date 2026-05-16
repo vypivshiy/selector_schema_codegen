@@ -6,13 +6,17 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from ssc_codegen.ast import Module
+from ssc_codegen.exceptions import BuildTimeError, ParseError
 from ssc_codegen.kdl import (
     KDL2CSTParser,
+    KDLParseError,
     KdlArg,
     KdlNode,
+    Position,
     ReadDiagnostic,
     Reader,
     Severity,
+    Span,
     WalkContext,
     parse_into,
 )
@@ -128,6 +132,34 @@ def parse_module(
 ) -> tuple[Module, list[ReadDiagnostic]]:
     """Parse KDL source -> Module AST + diagnostics."""
     parser = KDL2CSTParser()
-    doc = parser.parse(src)
+    try:
+        doc = parser.parse(src)
+    except KDLParseError as exc:
+        pos = Position(offset=exc.offset, line=exc.line, column=exc.column)
+        span = Span(start=pos, end=pos)
+        return Module(), [
+            ReadDiagnostic(
+                message=exc.message,
+                severity=Severity.ERROR,
+                span=span,
+                path=str(source_path) if source_path else "",
+                hint="Fix the syntax error and try again.",
+                code="E000",
+                label="syntax error",
+            )
+        ]
     reader = SscReader(source_path=source_path)
-    return parse_into(doc, reader)
+    try:
+        return parse_into(doc, reader)
+    except (ParseError, BuildTimeError) as exc:
+        pos = Position(offset=0, line=0, column=0)
+        span = Span(start=pos, end=pos)
+        return Module(), [
+            ReadDiagnostic(
+                message=str(exc),
+                severity=Severity.ERROR,
+                span=span,
+                path=str(source_path) if source_path else "",
+                code="E000",
+            )
+        ]

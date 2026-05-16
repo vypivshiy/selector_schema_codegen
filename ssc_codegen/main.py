@@ -270,7 +270,9 @@ def generate(
             if skip_lint:
                 pass
             else:
-                lint_output = format_diagnostics(err, fmt=fmt.value)
+                lint_output = format_diagnostics(
+                    err, filepath=kdl_file, fmt=fmt.value
+                )
                 if lint_output:
                     typer.echo(lint_output, err=True)
                     errors.append(lint_output)
@@ -377,9 +379,9 @@ def check(
 
         if errs:
             total_errors += len(errs)
-            # TODO: json output
-            for e in format_diagnostics(errs, fmt=fmt.value):
-                typer.echo(e, err=True)
+            output = format_diagnostics(errs, filepath=kdl_file, fmt=fmt.value)
+            if output:
+                typer.echo(output, err=True)
 
     if total_errors > 0:
         if fmt == FmtType.TEXT:
@@ -495,9 +497,10 @@ def run(
             kdl_path.read_text(encoding="utf-8"), source_path=kdl_path
         )
         if errs:
-            for e in format_diagnostics(errs, fmt=fmt.value):
-                typer.echo(e, err=True)
-                raise typer.Exit(1)
+            output = format_diagnostics(errs, filepath=kdl_path, fmt=fmt.value)
+            if output:
+                typer.echo(output, err=True)
+            raise typer.Exit(1)
 
     except Exception as exc:
         if verbose:

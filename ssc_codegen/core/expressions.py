@@ -438,6 +438,9 @@ def parse_expressions(
         lint.push(node.name)
         lint_pipeline_op(node, lint)
         expr = handler(node, parent, ctx, lint)  # type: ignore[assignment,arg-type]
+        if expr is None:
+            lint.pop()
+            continue
         if isinstance(expr, Fallback):
             lint.pop()
             continue
@@ -920,7 +923,12 @@ def _expr_jsonify(
     )
     json_def = ctx.json_defs.get(schema_name)
     if json_def is None:
-        raise ParseError(f"jsonify: JSON schema '{schema_name}' not found")
+        lint.error(
+            node,
+            message=f"jsonify: JSON schema '{schema_name}' not found",
+            code="E300",
+        )
+        return None
     ret_type, is_array = resolve_jsonify_type(json_def, path, ctx)
     return Jsonify(
         parent=parent,
@@ -938,7 +946,12 @@ def _expr_nested(
     struct_name = str(node.args[0].value)
     struct = ctx.structs.get(struct_name)
     if struct is None:
-        raise ParseError(f"nested: struct '{struct_name}' not found")
+        lint.error(
+            node,
+            message=f"nested: struct '{struct_name}' not found",
+            code="E300",
+        )
+        return None
     is_array = struct.struct_type in (StructType.FLAT, StructType.LIST)
     return Nested(parent=parent, struct_name=struct_name, is_array=is_array)
 

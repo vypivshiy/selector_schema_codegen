@@ -27,7 +27,6 @@ from ssc_codegen.ast import (
     Value,
     VariableType,
 )
-from ssc_codegen.exceptions import ParseError
 from ssc_codegen.kdl import KdlArg, KdlNode
 
 from ssc_codegen.core.contexts import LintContext, ParseContext, WalkCtx
@@ -56,9 +55,12 @@ def parse_struct(
             parent.body.append(expr)
         elif node.name == "@check":
             if not node.args:
-                raise ParseError(
-                    "@check requires a name: @check <name> { ... }"
+                lint.error(
+                    node,
+                    message="@check requires a name: @check <name> { ... }",
+                    code="E001",
                 )
+                continue
             check_name = str(node.args[0].value)
             expr = CheckMethod(parent=parent, name=check_name)
             parse_expressions(node.children, expr, ctx, lint)
@@ -89,9 +91,12 @@ def parse_struct(
             parent.body.append(expr)
         elif node.name == "@request":
             if not node.args:
-                raise ParseError(
-                    "@request requires a multiline string argument"
+                lint.error(
+                    node,
+                    message="@request requires a multiline string argument",
+                    code="E001",
                 )
+                continue
             raw_payload = str(
                 ctx.property_defines.get(node.args[0].value, node.args[0].value)
             )
@@ -135,14 +140,22 @@ def parse_struct(
             parent.body.append(req)
         elif node.name == "@error":
             if not node.args or len(node.args) < 2:
-                raise ParseError("@error requires both status and schema name")
+                lint.error(
+                    node,
+                    message="@error requires both status and schema name",
+                    code="E001",
+                )
+                continue
             status_raw = node.args[0].value
             try:
                 status_int = int(status_raw)
             except (TypeError, ValueError):
-                raise ParseError(
-                    f"@error status must be integer, got {status_raw!r}"
+                lint.error(
+                    node,
+                    message=f"@error status must be integer, got {status_raw!r}",
+                    code="E002",
                 )
+                continue
             schema_name = str(
                 ctx.property_defines.get(node.args[1].value, node.args[1].value)
             )
