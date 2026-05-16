@@ -264,7 +264,9 @@ def generate(
         out_file = output / kdl_file.with_suffix(ext).name
         logger.debug("processing: %s -> %s", kdl_file, out_file)
         try:
-            ast, err = parse_module(kdl_file.read_text(), source_path=kdl_file)
+            ast, err = parse_module(
+                kdl_file.read_text(encoding="utf-8"), source_path=kdl_file
+            )
             if skip_lint:
                 pass
             else:
@@ -368,7 +370,9 @@ def check(
     total_errors = 0
 
     for kdl_file in kdl_files:
-        _, errs = parse_module(kdl_file.read_text(), source_path=kdl_file)
+        _, errs = parse_module(
+            kdl_file.read_text(encoding="utf-8"), source_path=kdl_file
+        )
         all_results.extend(errs)
 
         if errs:
@@ -488,7 +492,7 @@ def run(
     # Build AST
     try:
         module_ast, errs = parse_module(
-            kdl_path.read_text(), source_path=kdl_path
+            kdl_path.read_text(encoding="utf-8"), source_path=kdl_path
         )
         if errs:
             for e in format_diagnostics(errs, fmt=fmt.value):
@@ -649,7 +653,9 @@ def health(
 
     # Build AST
     try:
-        module_ast, _ = parse_module(kdl_path.read_text(), source_path=kdl_path)
+        module_ast, _ = parse_module(
+            kdl_path.read_text(encoding="utf-8"), source_path=kdl_path
+        )
         if css_to_xpath:
             from ssc_codegen.document_utils import convert_css_to_xpath_module
 
