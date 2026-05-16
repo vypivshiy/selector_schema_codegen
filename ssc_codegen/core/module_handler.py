@@ -47,9 +47,16 @@ def handle_struct(
     node: KdlNode, module: Module, ctx: ParseContext, lint: LintContext
 ) -> Struct:
     lint_struct_node(node, module, ctx, lint)
-    type_ = node.properties.get(
-        "type", KdlArg(value="item", span=node.span, is_identifier=True)
-    ).value
+    raw = node.type_annotation
+    type_ = (
+        raw[1:-1]
+        if raw
+        else str(
+            node.properties.get(
+                "type", KdlArg(value="item", span=node.span, is_identifier=True)
+            ).value
+        )
+    )
     keep_order = node.properties.get(
         "keep-order", KdlArg(value=False, span=node.span, is_identifier=False)
     ).value

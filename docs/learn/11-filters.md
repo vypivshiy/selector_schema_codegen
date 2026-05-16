@@ -61,7 +61,7 @@ field { css-all "selector"; filter { предикаты }; ... }
 ```kdl
 define RE-CODE=#"^code"#
 
-struct Example type=list {
+(list)struct Example {
     @split-doc { css-all ".item" }
     codes {
         css ".code"
@@ -96,7 +96,7 @@ let v3 = v2.filter(i => (new RegExp("^code").test(i)));
 define CSS-LINK="a[href]"
 define RE-HREF=#"https?://|/"#
 
-struct Links type=list {
+(list)struct Links {
     @split-doc { css-all ".card" }
     nav-links {
         css-all CSS-LINK
@@ -149,7 +149,7 @@ let v3 = v2.map(i => i.getAttribute("href"));
 ### Фильтрация с логическими операторами
 
 ```kdl
-struct Data type=list {
+(list)struct Data {
     @split-doc { css-all ".row" }
     active {
         css-all ".tag"

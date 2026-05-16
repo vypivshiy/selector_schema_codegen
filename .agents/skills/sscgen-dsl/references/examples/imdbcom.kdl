@@ -13,7 +13,7 @@ Include:
 define FMT-URL="https://www.imdb.com{{}}"
 
 
-struct FindPageResults type=list {
+(list)struct FindPageResults {
     @split-doc {
         css-all "ul.ipc-metadata-list > li.ipc-metadata-list-summary-item"
     }

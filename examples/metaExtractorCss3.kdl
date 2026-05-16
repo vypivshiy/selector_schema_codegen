@@ -73,7 +73,7 @@ struct MetaBase {
 }
 
 
-struct MetaOpenGraphOther type=dict {
+(dict)struct MetaOpenGraphOther {
     @split-doc {
         css-all "meta[property][content]"
         FILTER-OG-OTHER
@@ -112,7 +112,7 @@ struct MetaOpenGraph {
 }
 
 
-struct MetaTwitterOther type=dict {
+(dict)struct MetaTwitterOther {
     @split-doc { 
         css-all "meta[property^='twitter:'][content], meta[name^='twitter:'][content]"
         FILTER-TWITTER-OTHER

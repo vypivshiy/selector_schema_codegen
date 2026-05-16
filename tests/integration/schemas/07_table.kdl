@@ -4,7 +4,7 @@ define CSS-TABLE="table.coverage"
 define RE-FLOAT=#"(\d+\.\d+)"#
 define RE-CODE=#"^code"#
 
-struct TableCoverage type=table {
+(table)struct TableCoverage {
     @pre-validate {
         assert {
             css "table.coverage tr"

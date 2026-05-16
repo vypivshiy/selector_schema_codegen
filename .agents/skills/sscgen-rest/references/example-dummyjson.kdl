@@ -53,7 +53,7 @@ json ActionResponse {
 
 // ── REST struct ───────────────────────────────────────────────────────────────
 
-struct DummyJsonApi type=rest {
+(rest)struct DummyJsonApi {
     @doc """
     DummyJSON Products API.
     No auth required. Rate limits: none.

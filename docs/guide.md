@@ -37,7 +37,7 @@ ssc-gen check simple.kdl
 ## Пример со списком
 
 ```kdl
-struct Book type=list {
+(list)struct Book {
     @split-doc { css-all ".book" }
     title { css ".title"; text; trim }
     price { css ".price"; text; re #"(\d+\.\d+)"#; to-float }

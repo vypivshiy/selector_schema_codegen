@@ -168,7 +168,7 @@ struct ListPage {
     books { nested BookCard }
 }
 
-struct BookCard type=list {
+(list)struct BookCard {
     @split-doc { css-all ".product_pod" }
     title { css "h3 a"; attr "title" }
 }
@@ -177,7 +177,7 @@ struct BookCard type=list {
 `BookCard` не имеет `@request` — он получает HTML через `nested` из `ListPage`,
 а не по отдельному запросу.
 
-## Тип возврата для `struct type=rest`
+## Тип возврата для `(rest)struct`
 
 >[!note] О swagger openapi
 > OpenAPI отличный стандарт, когда **автор API сам документирует свой
@@ -272,7 +272,7 @@ helper'а:
   `_parseResponse` для `fetch` и `_parseResponseAxios` для axios (axios
   заранее парсит JSON и возвращает `headers` объектом).
 - **`_dispatch_err(status, headers, body)`** (static-метод каждого
-  `struct type=rest`) — маршрутизация по объявленным `@error` в нужный
+  `(rest)struct`) — маршрутизация по объявленным `@error` в нужный
   Err-подкласс плюс `UnknownErr` для нераспознанных статусов. Возвращает
   `None` для 2xx (или типизированный Err при сработавшем field-discriminator).
 

@@ -18,7 +18,7 @@ transform wrap-string accept=STRING return=STRING {
     }
 }
 
-struct StringsBasic type=list {
+(list)struct StringsBasic {
     @pre-validate {
         assert {
             css CSS-CARD

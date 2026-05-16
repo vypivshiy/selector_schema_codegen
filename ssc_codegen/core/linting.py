@@ -680,7 +680,8 @@ def lint_struct_node(
         )
         return
 
-    struct_type = lint.get_prop(node, "type") or "item"
+    raw = node.type_annotation
+    struct_type = raw[1:-1] if raw else (lint.get_prop(node, "type") or "item")
     if struct_type not in _VALID_STRUCT_TYPES:
         lint.error(
             node,

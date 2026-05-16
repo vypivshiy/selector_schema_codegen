@@ -1,6 +1,6 @@
 @doc "Focused coverage: dict structs and key/value extraction semantics."
 
-struct MetaDict type=dict {
+(dict)struct MetaDict {
     @split-doc {
         css-all "meta[name][content]"
     }
@@ -14,7 +14,7 @@ struct MetaDict type=dict {
     }
 }
 
-struct MetaAliasDict type=dict {
+(dict)struct MetaAliasDict {
     @split-doc {
         css-all "meta[property][content], meta[name][content]"
     }

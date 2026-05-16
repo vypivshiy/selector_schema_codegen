@@ -48,7 +48,7 @@ flowchart LR
 Источник: https://books.toscrape.com/
 
 ```kdl
-struct Book type=list {
+(list)struct Book {
     @split-doc { css-all ".product_pod" }
 
     title { css "h3 a"; attr "title" }
@@ -87,7 +87,7 @@ struct Main {
 Источник: https://books.toscrape.com/
 
 ```kdl
-struct Book type=list {
+(list)struct Book {
     @split-doc { css-all ".product_pod" }
     title { css "h3 a"; attr "title" }
 }
@@ -116,7 +116,7 @@ struct Main {
 Источник: https://books.toscrape.com/catalogue/in-her-wake_980/index.html
 
 ```kdl
-struct ProductInfo type=table {
+(table)struct ProductInfo {
     @table { css "table" }
     @rows { css-all "tr" }
     @match { css "th"; text; trim; lower }

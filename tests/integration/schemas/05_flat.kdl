@@ -2,7 +2,7 @@
 
 define CSS-LINK="a[href]"
 
-struct FlatCoverage type=flat keep-order=#true {
+(flat)struct FlatCoverage keep-order=#true {
     @init {
         hrefs {
             css-all CSS-LINK

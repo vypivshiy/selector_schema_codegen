@@ -53,7 +53,7 @@ struct MetaBase {
     }
 }
 
-struct MetaOpenGraphOther type=dict {
+(dict)struct MetaOpenGraphOther {
     @split-doc {
         css-all CSS-OG-OTHER
     }
@@ -89,7 +89,7 @@ struct MetaOpenGraph {
     others { nested MetaOpenGraphOther }
 }
 
-struct MetaTwitterOther type=dict {
+(dict)struct MetaTwitterOther {
     @split-doc { css-all CSS-TWITTER-OTHER }
     // first - alias of `index 0`
     @key { attr property name; first }

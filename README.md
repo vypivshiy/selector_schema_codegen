@@ -25,7 +25,7 @@ uv tool install ssc_codegen
 `books.kdl`:
 
 ```kdl
-struct Book type=list {
+(list)struct Book {
     @split-doc { css-all ".product-card" }
 
     title { css ".title"; text }

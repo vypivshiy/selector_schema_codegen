@@ -22,6 +22,10 @@ NESTED and JSON are terminal types — pipeline ends after nested/jsonify.
 - FLAT: deduplicated scalars → list[str], no special fields needed
 - REST: rest-api endpoint handler → json objects, uses `@request`
 
+**Syntax**: struct types can be specified in KDL two ways:
+- **Recommended**: prefix form — `(list)struct Foo { ... }`, `(dict)struct Bar { ... }`, etc.
+- **Legacy** (still works): property form — `struct name="Foo" type="list" { ... }`
+
 ---
 
 ## AST Architecture

@@ -13,7 +13,7 @@ paste-ins. Supported flags: `-X/--request`, `-H/--header`, `-d/--data/--data-raw
 `--json`, `-u/--user`, `-F/--form`, `--data-urlencode`, `--compressed` (ignored).
 Unsupported flags raise a parse error — strip them or rewrite as raw HTTP.
 
-## `struct type=rest` — minimal vs full
+## `(rest)struct` — minimal vs full
 
 ### Minimal (single endpoint, no errors)
 
@@ -21,7 +21,7 @@ Raw HTTP form:
 ```kdl
 json User { id int; name str }
 
-struct Api type=rest {
+(rest)struct Api {
     @request response=User """
     GET /users/{{id:int}} HTTP/1.1
     Host: api.example.com
@@ -31,7 +31,7 @@ struct Api type=rest {
 
 Equivalent curl form:
 ```kdl
-struct Api type=rest {
+(rest)struct Api {
     @request response=User """
     curl 'https://api.example.com/users/{{id:int}}'
     """
@@ -45,7 +45,7 @@ json User { id int; name str }
 json UserList { users (array)User; total int }
 json ApiError { message str }
 
-struct Api type=rest {
+(rest)struct Api {
     @doc "Users API — CRUD + pagination."
 
     @request name=get-user \

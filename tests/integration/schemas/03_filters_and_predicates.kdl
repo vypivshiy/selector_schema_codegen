@@ -6,7 +6,7 @@ define RE-WORD=#"^[A-Za-z0-9_-]+$"#
 define RE-HREF=#"https?://|/"#
 define RE-CODE=#"^code"#
 
-struct FiltersAndPredicates type=list {
+(list)struct FiltersAndPredicates {
     @split-doc {
         css-all CSS-CARD
     }

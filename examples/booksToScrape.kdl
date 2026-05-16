@@ -5,7 +5,7 @@ example implementation for books.toscrape.com fictive shop
 // ===
 // https://books.toscrape.com/catalogue/*/index.html
 // ===
-struct ProductInfo type=table {
+(table)struct ProductInfo {
     @doc """
     parse product description from product page
 
@@ -92,7 +92,7 @@ define REPL-RATING {
         }
 }
 
-struct Book type=list {
+(list)struct Book {
     @doc """
     Exctract a book cards
 

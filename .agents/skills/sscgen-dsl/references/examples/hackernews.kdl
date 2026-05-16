@@ -40,7 +40,7 @@ select signature
 define FMT-URL="https://news.ycombinator.com/{{}}"
 
 // see first dostring tags examples about selector implementatsions
-struct News type=list {
+(list)struct News {
     @split-doc {
         css-all ".submission"
     }
@@ -70,7 +70,7 @@ struct News type=list {
     }
 }
 
-struct Rating type=list {
+(list)struct Rating {
     @split-doc { css-all "tr > .subtext > .subline" }
 
     score {
@@ -121,7 +121,7 @@ struct MainPage {
     ratings { nested Rating }
 }
 
-struct Comments type=list {
+(list)struct Comments {
     @split-doc {
         css-all "table.comment-tree tr.comtr[id] > td > table"
     }

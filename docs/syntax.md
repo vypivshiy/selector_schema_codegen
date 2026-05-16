@@ -128,7 +128,7 @@ price { text; re RE-PRICE; to-float }
 Объявление структуры результата:
 
 ```kdl
-struct Main type=item {
+struct Main {
     title { css "h1"; text }
 }
 ```

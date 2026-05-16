@@ -12,10 +12,10 @@ These rules are absolute. Violating any of them produces invalid output.
 Never use: `xpath`, `xpath-all`, `xpath-remove`, `css-remove`, `transform`, `dsl`.
 Never use CSS4 pseudo-classes: `:contains()`, `:has()`, `:is()`, `:where()`.
 Only standard CSS3 selectors are supported: tag, class, id, attribute selectors, combinators, and structural pseudo-classes (`:first-child`, `:nth-child`, `:not()`, etc.).
-If you need to match by text content — do NOT use `:contains()`. Use `@match`/`@value` with `type=table`, or use pipeline predicates (`match { eq "..." }`, `assert { contains "..." }`).
+If you need to match by text content — do NOT use `:contains()`. Use `@match`/`@value` with `(table)struct`, or use pipeline predicates (`match { eq "..." }`, `assert { contains "..." }`).
 
-**Rule 2 — HTML `<table>` elements MUST use `type=table`.**
-When the HTML contains a `<table>` with `<th>` keys and `<td>` values, you MUST use `struct ... type=table` with `@table`, `@rows`, `@match`, `@value`.
+**Rule 2 — HTML `<table>` elements MUST use `(table)struct`.**
+When the HTML contains a `<table>` with `<th>` keys and `<td>` values, you MUST use `(table)struct Name` with `@table`, `@rows`, `@match`, `@value`.
 Never try to scrape `<table>` content using `css`/`css-all` field pipelines directly — this always fails on real table structures.
 
 **Rule 3 — PIPELINE ORDER IS STRICT.**
@@ -57,7 +57,7 @@ Before writing a single line of KDL, output a scratchpad in this exact format:
 <analysis>
 PAGE TYPE: [single item | list | table | mixed]
 
-HTML TABLES DETECTED: [yes — use type=table | no]
+HTML TABLES DETECTED: [yes — use (table)struct | no]
   - if yes: table selector, th/td structure description
 
 REPEATING ELEMENT: [CSS selector for repeating card/row, or "none"]
@@ -68,8 +68,11 @@ DATA MAP:
   ...
 
 STRUCT PLAN:
-  StructName (type=X) — role: entry point / nested / helper
-  StructName (type=Y) — role: ...
+  StructName — role: entry point / nested / helper
+  (list)StructName — role: ...
+  (table)StructName — role: ...
+  (flat)StructName — role: ...
+  (dict)StructName — role: ...
 
 DEFINES NEEDED: [list any reusable URLs, regex, repl maps — or "none"]
 </analysis>
@@ -176,7 +179,7 @@ good { match { eq "price" }; re #"(\d+)"#; to-float }
 
 ## Step 3 — Struct Types
 
-### `type=item` (default) — single object
+### Bare `struct` (default, item) — single object
 ```kdl
 struct Page {
     @doc "..."
@@ -185,9 +188,9 @@ struct Page {
 }
 ```
 
-### `type=list` — repeating elements (cards, rows, items)
+### `(list)struct` — repeating elements (cards, rows, items)
 ```kdl
-struct Product type=list {
+(list)struct Product {
     @split-doc { css-all ".product-card" }
 
     name  { css ".title"; text }
@@ -196,9 +199,9 @@ struct Product type=list {
 }
 ```
 
-### `type=flat` — deduplicated list of scalar values
+### `(flat)struct` — deduplicated list of scalar values
 ```kdl
-struct Tags type=flat {
+(flat)struct Tags {
     primary   { css-all ".primary-tag"; text }
     secondary { css-all ".secondary-tag"; text }
 }
@@ -206,14 +209,14 @@ struct Tags type=flat {
 Collects strings from all fields and removes duplicates. No `@split-doc` required.
 With `keep-order=#true` preserves order of first occurrences.
 
-### `type=table` — HTML `<table>` with key/value rows
+### `(table)struct` — HTML `<table>` with key/value rows
 
 Use this whenever the HTML contains `<table><tr><th>key</th><td>value</td></tr>...</table>`.
 The `@match` pipeline extracts the key from `<th>`, `@value` extracts from `<td>`.
 Each field uses `match { }` predicates — NOT `css` selectors.
 
 ```kdl
-struct Info type=table {
+(table)struct Info {
     @table { css "table.product-info" }    // select the <table> element
     @rows  { css-all "tr" }                // split into rows
     @match { css "th"; text; trim; lower } // extract + normalise the key
@@ -236,11 +239,11 @@ struct Info type=table {
 ```
 
 When `<table>` has NO `<th>` headers (all `<td>`): use `tr:nth-child(N)` to target specific rows,
-or use `type=list` with `@split-doc { css-all "tr" }` and extract both cells per row.
+or use `(list)struct` with `@split-doc { css-all "tr" }` and extract both cells per row.
 
-### `type=dict` — dynamic key-value map (unknown keys at schema time)
+### `(dict)struct` — dynamic key-value map (unknown keys at schema time)
 ```kdl
-struct MetaTags type=dict {
+(dict)struct MetaTags {
     @split-doc {
         css-all "meta[property]"
         match { has-attr "property" "content" }
@@ -290,8 +293,8 @@ div   .card   #main
 ```
 
 **How to match by text content without `:contains()`:**
-- In `type=table`: use `@match { css "th"; text; trim; lower }` + per-field `match { eq "..." }`
-- In `type=list`/`type=item`: use `assert { contains "..." }` or `filter { contains "..." }` as pipeline predicates
+- In `(table)struct`: use `@match { css "th"; text; trim; lower }` + per-field `match { eq "..." }`
+- In `(list)struct` / bare `struct`: use `assert { contains "..." }` or `filter { contains "..." }` as pipeline predicates
 
 **Precision examples:**
 ```css
@@ -386,13 +389,13 @@ and { ... }   or { ... }    not { ... }
 |-------|-------------|---------|
 | `@doc "..."` | all | Documentation string |
 | `@init { ... }` | all | Precompute shared values |
-| `@split-doc { ... }` | list, dict | Split document into items |
+| `@split-doc { ... }` | (list), (dict) | Split document into items |
 | `@pre-validate { ... }` | all | Assert conditions before parsing |
-| `@table { ... }` | table | Select the `<table>` element |
-| `@rows { ... }` | table | Select rows within the table |
-| `@match { ... }` | table | Pipeline to extract + normalise the key |
-| `@value { ... }` | table, dict | Pipeline to extract the value |
-| `@key { ... }` | dict | Key extraction pipeline |
+| `@table { ... }` | (table) | Select the `<table>` element |
+| `@rows { ... }` | (table) | Select rows within the table |
+| `@match { ... }` | (table) | Pipeline to extract + normalise the key |
+| `@value { ... }` | (table), (dict) | Pipeline to extract the value |
+| `@key { ... }` | (dict) | Key extraction pipeline |
 
 ---
 
@@ -452,8 +455,8 @@ Line 8 contains: css-all ".tag"; text; re #"(\w+)"#
 | `expected DOCUMENT, got STRING` | selector after `text`/`attr` | Move selector before extract op |
 | `expected STRING, got INT` | `re` or string op after `to-int` | Apply string/regex ops before `to-int` |
 | `unknown operation '...'` | unknown op name or typo | Check spelling against operations list |
-| `missing @split-doc` | `type=list`/`type=dict` without split | Add `@split-doc { css-all "..." }` |
-| `missing match{}` | `type=table` field has no predicate | Add `match { eq "key" }` as first statement in field |
+| `missing @split-doc` | `(list)struct`/`(dict)struct` without split | Add `@split-doc { css-all "..." }` |
+| `missing match{}` | `(table)struct` field has no predicate | Add `match { eq "key" }` as first statement in field |
 | `match must be first operation` | `match {}` not at start of table field | Move `match { ... }` to first position |
 | `fallback value type mismatch` | fallback type doesn't match pipeline output | INT→`0`, FLOAT→`0.0`, BOOL→`#false`, other→`#null` |
 | `filter requires list type` | `filter` used on scalar STRING | Use `assert` instead of `filter` |
@@ -476,7 +479,7 @@ Always emit a complete, lintable `.kdl` file in this order:
 
 ## Full Examples
 
-### HackerNews — type=list + nested structs
+### HackerNews — (list)struct + nested structs
 ```kdl
 @doc """
 Scraper config for https://news.ycombinator.com/
@@ -484,7 +487,7 @@ Scraper config for https://news.ycombinator.com/
 
 define FMT-URL="https://news.ycombinator.com/{{}}"
 
-struct News type=list {
+(list)struct News {
     @split-doc { css-all ".submission" }
 
     title { css ".title > .titleline > a"; text }
@@ -493,7 +496,7 @@ struct News type=list {
     url   { css ".title > .titleline > a[href]"; attr "href" }
 }
 
-struct Rating type=list {
+(list)struct Rating {
     @split-doc { css-all "tr > .subtext > .subline" }
 
     score    { css "span.score[id^=\"score_\"]"; text; re-sub #"\D"# ""; to-int; fallback 0 }
@@ -514,7 +517,7 @@ struct MainPage {
 }
 ```
 
-### Books to Scrape — type=table + type=list + defines
+### Books to Scrape — (table)struct + (list)struct + defines
 ```kdl
 @doc """
 Scraper for books.toscrape.com
@@ -528,8 +531,8 @@ define REPL-RATING {
 }
 
 // HTML: <table><tr><th>UPC</th><td>a897fe...</td></tr>...</table>
-// MUST use type=table — do NOT scrape this with css field pipelines
-struct ProductInfo type=table {
+// MUST use (table)struct — do NOT scrape this with css field pipelines
+(table)struct ProductInfo {
     @table { css "table" }
     @rows  { css-all "tr" }
     @match { css "th"; text; trim; lower }
@@ -549,7 +552,7 @@ struct ProductInfo type=table {
     number-of-reviews { match { starts "number of" }; to-int; fallback 0 }
 }
 
-struct Book type=list {
+(list)struct Book {
     @split-doc { css-all ".col-lg-3" }
     @pre-validate {
         assert { css ".col-lg-3 .thumbnail" }
@@ -573,13 +576,13 @@ struct MainCatalogue {
 }
 ```
 
-### Social Links — type=flat + filter predicates
+### Social Links — (flat)struct + filter predicates
 ```kdl
 @doc """
 Extract social media links from any page
 """
 
-struct SocialLinks type=flat {
+(flat)struct SocialLinks {
     @split-doc {
         css-all "a[href]"
         match {
@@ -591,13 +594,13 @@ struct SocialLinks type=flat {
 }
 ```
 
-### Metadata — type=dict + @init
+### Metadata — (dict)struct + @init
 ```kdl
 @doc """
 Extract Open Graph metadata
 """
 
-struct OgMeta type=dict {
+(dict)struct OgMeta {
     @split-doc {
         css-all "meta[property^='og:']"
         match { has-attr "property" "content" }

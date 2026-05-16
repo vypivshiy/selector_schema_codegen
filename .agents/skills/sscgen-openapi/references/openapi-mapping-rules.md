@@ -83,8 +83,8 @@ Extract to a named `json` schema. Generate PascalCase name from the property nam
 ## Struct Naming
 
 - From `info.title`: remove spaces/special chars, PascalCase.
-- Example: `"Pet Store API"` → `struct PetStoreApi type=rest`
-- Example: `"Animevost"` → `struct AnimevostApi type=rest`
+- Example: `"Pet Store API"` → `(rest)struct PetStoreApi`
+- Example: `"Animevost"` → `(rest)struct AnimevostApi`
 
 ## @request Name Derivation
 
@@ -106,4 +106,4 @@ Order by dependency (leaves first):
 2. Composite schemas (reference leaves)
 3. Envelope schemas (reference composites)
 4. Error schemas
-5. Then the `struct type=rest`
+5. Then the `(rest)struct`

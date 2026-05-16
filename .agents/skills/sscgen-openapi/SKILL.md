@@ -2,7 +2,7 @@
 name: sscgen-openapi
 description: >
   Convert OpenAPI 3.x / Swagger 2.x specifications (YAML or JSON) into valid
-  KDL Schema DSL files (`struct type=rest` + `json` schemas).
+  KDL Schema DSL files (`(rest)struct` + `json` schemas).
   Use this skill whenever the user provides an OpenAPI/Swagger spec and wants
   a `.kdl` REST API client, or asks to convert `swagger.yaml` / `openapi.json`
   to KDL DSL.
@@ -16,7 +16,7 @@ description: >
 # sscgen-openapi — Skill
 
 Convert an **OpenAPI/Swagger specification** (YAML or JSON) into a valid
-**KDL Schema DSL** REST API client file (`struct type=rest` + `json` schemas).
+**KDL Schema DSL** REST API client file (`(rest)struct` + `json` schemas).
 
 This is a **deterministic transformation**, not creative generation. Given the
 same OpenAPI spec, the output should be identical every time.
@@ -31,7 +31,7 @@ same OpenAPI spec, the output should be identical every time.
 3. **Form-urlencoded POST bodies** MUST use curl `--data-urlencode` format
    (not raw HTTP). JSON POST bodies SHOULD use raw HTTP format.
 4. **GET requests** SHOULD use curl format for brevity.
-5. **Group endpoints** sharing the same `servers` URL into one `struct type=rest`.
+5. **Group endpoints** sharing the same `servers` URL into one `(rest)struct`.
 6. **Strict spec compliance**: if a schema has no `required` array, ALL fields
    are optional (`Type?`). No heuristics.
 7. **Lint must pass** (`uv run ssc-gen check <file> -f json`) before delivery.
@@ -159,8 +159,8 @@ Loop until exit 0. Cap at 5 iterations per line. Never deliver with lint errors.
 ## Struct naming
 
 Derive from `info.title`: PascalCase, strip spaces/special chars.
-- `"Pet Store API"` → `struct PetStoreApi type=rest`
-- `"Animevost"` → `struct AnimevostApi type=rest`
+- `"Pet Store API"` → `(rest)struct PetStoreApi`
+- `"Animevost"` → `(rest)struct AnimevostApi`
 
 ---
 
@@ -203,7 +203,7 @@ Handle both. The conversion logic is the same after $ref resolution.
 
 | Error message | Cause | Fix |
 |---|---|---|
-| `regular field ... not allowed in struct type='rest'` | Schema fields in struct body | Move to `json` blocks, reference via `response=` |
+| `regular field ... not allowed in struct type='rest'` | Schema fields in `(rest)struct` body | Move to `json` blocks, reference via `response=` |
 | `define not found: NAME` | Undeclared schema | Declare `json Name { ... }` above the struct |
 | `duplicate @error <status>` | Same status mapped twice | Keep one `@error` per status |
 | `placeholder ... [] forbidden in path` | Array placeholder in URL | Move to query string |
@@ -219,7 +219,7 @@ Always emit a complete `.kdl` file in this order:
 1. `@doc` module docstring (API title, base URL, auth notes)
 2. `json` schemas (leaves → composites → envelopes)
 3. Error-body `json` schema(s)
-4. `struct <Name> type=rest { ... }`
+4. `(rest)struct <Name> { ... }`
 
 If fixing errors, emit the **full corrected file**, not just changed lines.
 

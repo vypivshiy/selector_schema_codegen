@@ -40,10 +40,15 @@ define EXTRACT-HREF {
 ## struct
 
 ```kdl
-struct Name type=item|list|dict|table|flat {
-    field-name { pipeline... }
-}
+struct Name { ... }                    # item (default)
+(list)struct Name { ... }              # list
+(dict)struct Name { ... }              # dict
+(table)struct Name { ... }             # table
+(flat)struct Name { ... }              # flat
+(rest)struct Name { ... }              # rest (API client)
 ```
+
+The old property syntax `struct Name type=list { ... }` still works but prefer the prefix form.
 
 ### Struct types
 
@@ -382,10 +387,10 @@ Without `--http-client`, `@request` is ignored and no `fetch` method is generate
 
 ## @error
 
-Error response mapping for `struct type=rest`.
+Error response mapping for `(rest)struct`.
 
 ```kdl
-struct Api type=rest {
+(rest)struct Api {
     @error 404 ApiError
     @error 404 ApiError error
     @error 200 ActionResponse success=#false

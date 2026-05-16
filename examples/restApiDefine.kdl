@@ -1,107 +1,83 @@
 @doc """
-Example REST API: fictional PetStore (https://petstore.example.com/api/v1).
+Example REST API client config using DummyJSON (https://dummyjson.com).
 
-Demonstrates block defines for shared JSON fields.
-The same PET-CORE define is expanded in multiple json schemas,
-avoiding duplication without mixins or inheritance.
+Why DummyJSON:
+  - Live, stable, no auth, no rate limits
+  - Returns structured JSON error bodies: {"message": "..."}
+  - Pagination (?limit=&skip=), search (?q=), nested objects — exercises
+    typed/optional/array placeholders end-to-end
+  - See https://dummyjson.com/docs for full surface
+
+Equivalent alternatives you can retarget by swapping host/paths:
+  - https://jsonplaceholder.typicode.com — simpler resources (posts, users,
+    comments), but 404 body is empty `{}` so @error becomes formal
+  - https://reqres.in — good for POST/PUT/DELETE demos with bodies
+  - https://httpbin.org — request-echo, useful for HTTP mechanics only
 """
 
 
-// ── Shared field groups ────────────────────────────────────────
-
-define PET-CORE {
-    id int
-    name str
-    species str
-    breed str?
-    age int?
-    weight float?
-    vaccinated bool
+json OptItem {
+  a str
+  b int
 }
 
-// ── Leaf JSON schemas ──────────────────────────────────────────
+json Response {
+    // skip field if your dont want parse it
+    meta-info @skip
 
-json Owner {
-    id int
-    full_name str
-    phone str?
-    email str?
+    // mark if this field maybe missing and exclude in response
+    track-id str @omitempty
+
+    // optional via ? suffix
+    id int?
+    // combine optional + omitempty
+    track-id2 int? @omitempty
+    item OptItem?
 }
 
-json VetRecord {
-    date str
-    clinic str
-    diagnosis str
-    treatment str?
-}
-
-// ── Pet variants ───────────────────────────────────────────────
-
-// Basic pet info — used in list/search endpoints
-json PetSummary {
-    PET-CORE
-    photo_url str?
-}
-
-// Full pet detail — used in single-pet endpoint
-json PetDetail {
-    PET-CORE
-    photo_url str?
-    owner Owner?
-    vet_records (array)VetRecord
-    notes str?
-}
-
-// ── Pagination ─────────────────────────────────────────────────
-
-json Pagination {
-    total int
-    page int
-    per_page int
-    total_pages int
-}
-
-json PetListResponse {
-    pets (array)PetSummary
-    pagination Pagination
-}
-
-// ── Error ──────────────────────────────────────────────────────
-
+// Error body returned on non-2xx responses, e.g. 404:
+//   {"message": "Product with id '99999' not found"}
 json ApiError {
     message str
-    code str?
 }
 
-// ── REST struct ────────────────────────────────────────────────
+// Fictional schema for demonstrating field-condition @error matching.
+// Some APIs return 200 for both success and error, using a field like
+// "success" to distinguish. @error 200 with conditions covers this case.
+json ActionResponse {
+    success bool
+    message str
+}
 
-struct PetStoreApi type=rest {
+
+// ── REST struct ───────────────────────────────────────────────────────────────
+
+(rest)struct DummyJsonApi {
     @doc """
-    PetStore API client.
-    No auth required for read endpoints.
+    DummyJSON Products API client.
     """
 
-    @request name=list-pets doc="List pets with optional pagination." response=PetListResponse \
+    @request name=create-product \
+    doc="Simulated product creation (not persisted)." \
+    response=Response \
     """
-    GET /api/v1/pets?page={{page:int?}}&per_page={{per_page:int?}} HTTP/1.1
-    Host: petstore.example.com
+    POST /products/add HTTP/1.1
+    Host: dummyjson.com
+    Content-Type: application/json
     Accept: application/json
+
+    {"title": "{{title}}", "price": {{price:float}}, "stock": {{stock:int}}}
     """
 
-    @request name=search-pets doc="Search pets by species or breed." response=PetListResponse \
-    """
-    GET /api/v1/pets/search?species={{species:str?}}&breed={{breed:str?}} HTTP/1.1
-    Host: petstore.example.com
-    Accept: application/json
-    """
-
-    @request name=get-pet doc="Get full pet detail by id." response=PetDetail \
-    """
-    GET /api/v1/pets/{{id:int}} HTTP/1.1
-    Host: petstore.example.com
-    Accept: application/json
-    """
-
+    // 404 for unknown id or unknown category slug — body: {"message": "..."}
     @error 404 ApiError
-    @error 500 ApiError
+
+    // Field-condition example (fictional): some APIs return 200 for both
+    // success and error, distinguished by a field in the response body.
+    // Uncomment below to see field-conditions in action:
+    // @error 200 ActionResponse success=#false
+
+    // Key-presence example: check that a key exists in the JSON body
+    // regardless of its value (positional arg after schema name).
+    // @error 400 ApiError error
 }

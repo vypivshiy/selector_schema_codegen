@@ -103,7 +103,7 @@ struct TinyItem {
     }
 }
 
-struct CardList type=list {
+(list)struct CardList {
     @doc "List coverage: selectors, extraction, string ops, array ops, filters, assertions, transforms."
 
     @pre-validate {
@@ -283,7 +283,7 @@ struct CardList type=list {
     }
 }
 
-struct FlatCoverage type=flat keep-order=#true {
+(flat)struct FlatCoverage keep-order=#true {
     @init {
         hrefs {
             css-all CSS-LINK
@@ -321,7 +321,7 @@ struct FlatCoverage type=flat keep-order=#true {
     }
 }
 
-struct MetaDict type=dict {
+(dict)struct MetaDict {
     @split-doc {
         css-all "meta[name][content]"
     }
@@ -333,7 +333,7 @@ struct MetaDict type=dict {
     }
 }
 
-struct MetaAliasDict type=dict {
+(dict)struct MetaAliasDict {
     @split-doc {
         css-all "meta[property][content], meta[name][content]"
     }
@@ -346,7 +346,7 @@ struct MetaAliasDict type=dict {
     }
 }
 
-struct TableCoverage type=table {
+(table)struct TableCoverage {
     @pre-validate {
         assert {
             css "table.coverage tr"

@@ -1,31 +1,31 @@
 ---
 name: sscgen-rest
 description: >
-  Generate KDL Schema DSL configs for REST/JSON HTTP APIs (struct type=rest).
+  Generate KDL Schema DSL configs for REST/JSON HTTP APIs ((rest)struct).
   Use this skill whenever the user wants to: design a `.kdl` schema for an HTTP/JSON
   API client, write `@request` blocks targeting REST endpoints, declare `json`
   schemas for typed responses, define `@error <status>` mappings, work with typed
   placeholders (`{{id:int}}`, `{{tags:str[]?|csv}}`), or fix linter errors in a
   REST-style `.kdl`.
-  Trigger on: "rest api", "rest schema", "struct type=rest", "@request", "@error",
+  Trigger on: "rest api", "rest schema", "(rest)struct", "@request", "@error",
   "сгенерировать api клиент", "клиент для api", "json placeholder/dummyjson/reqres"-like
-  tasks. For HTML scraping (css/css-all/text/attr pipelines, type=item|list|table|
-  flat|dict) use the sibling skill `sscgen-dsl` instead — this skill is REST-only.
+  tasks. For HTML scraping (css/css-all/text/attr pipelines, (item)/(list)/(table)/
+  (flat)/(dict)struct) use the sibling skill `sscgen-dsl` instead — this skill is REST-only.
 ---
 
 # sscgen-rest — Skill (REST/JSON API clients)
 
-Generate `struct type=rest` schemas that become typed HTTP clients when run through
+Generate `(rest)struct` schemas that become typed HTTP clients when run through
 `ssc-gen generate ... --http-client requests|httpx|fetch|axios`.
 
 > **REST only.** This skill handles `json` schemas + `@request` + `@error`.
-> For HTML scraping (`css`, `text`, `attr`, `nested`, `type=item|list|…`) → `sscgen-dsl`.
+> For HTML scraping (`css`, `text`, `attr`, `nested`, `(item)struct / (list)struct / …`) → `sscgen-dsl`.
 
 ---
 
 ## Hard rules
 
-1. **`type=rest` body allows ONLY** `@request`, `@error`, `@doc`. No regular fields,
+1. **`(rest)struct` body allows ONLY** `@request`, `@error`, `@doc`. No regular fields,
    no `@init`, no `nested`, no `css`/`xpath`.
 2. **At least one `@request`** per struct.
 3. **Multiple `@request` → every one needs `name=<kebab-id>`** (single may omit).
@@ -42,7 +42,7 @@ Generate `struct type=rest` schemas that become typed HTTP clients when run thro
 ## Input modes
 
 ### Mode 1 — Generate from scratch
-API description → `json` schemas → `struct type=rest` → lint → emit file.
+API description → `json` schemas → `(rest)struct` → lint → emit file.
 
 ### Mode 2 — Add methods to existing struct
 Append `@request name=<unique>` blocks. Add `@error` only for uncovered statuses. Re-lint.
@@ -153,7 +153,7 @@ Rules for define in json:
 typed placeholders in `references/10-request.md`.
 
 ```kdl
-struct ApiName type=rest {
+(rest)struct ApiName {
     @doc """
     Example API — posts and comments.
     Base URL: api.example.com
@@ -217,7 +217,7 @@ Always emit complete, lintable `.kdl` in this order:
 3. Mid-level `json` schemas (domain objects referencing leaves)
 4. Envelope `json` schemas (paginated responses, wrappers, top-level arrays)
 5. Error-body `json` schema(s)
-6. `struct ApiName type=rest { ... }`
+6. `(rest)struct ApiName { ... }`
 
 Fixing lint errors → emit **full corrected file**, not patches.
 
@@ -229,9 +229,9 @@ spot-check field names and types against it.
 
 ## When not to use this skill
 
-- **HTML scraping** (css/text/attr, `type=item|list|table|flat|dict`) → `sscgen-dsl`
+- **HTML scraping** (css/text/attr, `(item)/(list)/(table)/(flat)/(dict)struct`) → `sscgen-dsl`
 - **Fetch page + parse HTML** → also `sscgen-dsl`
-- **Binary / non-JSON HTTP API** → `type=rest` requires `json` response schema; ask user
+- **Binary / non-JSON HTTP API** → `(rest)struct` requires `json` response schema; ask user
 
 ---
 

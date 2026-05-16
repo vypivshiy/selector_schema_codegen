@@ -26,7 +26,7 @@ struct ProductPage {
 Источник: https://books.toscrape.com/
 
 ```kdl
-struct Book type=list {
+(list)struct Book {
     @split-doc { css-all ".product_pod" }
     title { css "h3 a"; attr "title" }
     price { css ".price_color"; text; re #"(\d+\.\d+)"#; to-float }
@@ -43,7 +43,7 @@ struct Book type=list {
 Источник: страница с соцсетями в footer, например https://www.python.org/
 
 ```kdl
-struct SocialLinks type=flat {
+(flat)struct SocialLinks {
     @init {
         links { css-all "a[href]"; attr "href" }
     }
@@ -72,7 +72,7 @@ struct SocialLinks type=flat {
 Источник: https://books.toscrape.com/catalogue/in-her-wake_980/index.html
 
 ```kdl
-struct MetaOG type=dict {
+(dict)struct MetaOG {
     @split-doc { css-all "meta[property^='og:']" }
     @key { attr "property"; rm-prefix "og:" }
     @value { attr "content" }
@@ -96,7 +96,7 @@ flowchart LR
 ```
 
 ```kdl
-struct ProductInfo type=table {
+(table)struct ProductInfo {
     @table { css "table" }
     @rows { css-all "tr" }
     @match { css "th"; text; trim; lower }
@@ -120,7 +120,7 @@ struct ProductInfo type=table {
 Источник: https://books.toscrape.com/
 
 ```kdl
-struct Book type=list {
+(list)struct Book {
     @split-doc { css-all ".product_pod" }
     title { css "h3 a"; attr "title" }
     price { css ".price_color"; text; re #"(\d+\.\d+)"#; to-float }

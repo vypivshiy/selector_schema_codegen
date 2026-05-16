@@ -2,8 +2,8 @@
 name: sscgen-dsl
 description: >
   Generate KDL Schema DSL (v2.1) scraper configs for **HTML scraping** from HTML
-  pages and skill instructions. Covers struct types item / list / flat / table /
-  dict, css selectors, extract / string / regex / array / cast pipelines,
+  pages and skill instructions. Covers struct types (item) / (list) / (flat) / (table) /
+  (dict), css selectors, extract / string / regex / array / cast pipelines,
   defines, transforms, jsonify, and the iterative linter loop.
   Use this skill whenever the user wants to: generate a .kdl schema file for HTML
   scraping, write KDL DSL for data extraction from HTML, work with css/css-all/
@@ -12,7 +12,7 @@ description: >
   Trigger on mentions of "kdl", "KDL schema", "scraper schema", "DSL для скрапинга",
   "распарсить страницу", "вытащить из HTML", or whenever the user provides an HTML
   page + extraction task.
-  **Do NOT use this skill for REST/JSON HTTP API clients (`struct type=rest`,
+  **Do NOT use this skill for REST/JSON HTTP API clients (`(rest)struct`,
   `@request`, `@error`, typed placeholders for HTTP) — use the sibling skill
   `sscgen-rest` instead.** The two skills share the same DSL surface but solve
   different problems and should not be mixed.
@@ -25,8 +25,8 @@ Generate valid **KDL Schema DSL v2.1** configs for HTML scraping from:
 - An **HTML page** (structure to inspect)
 - Optionally: **linter output** (text or JSON) to fix errors
 
-> **Scope: HTML only.** This skill covers `struct type=item|list|flat|table|dict`
-> with CSS-selector pipelines. For REST/JSON HTTP APIs (`struct type=rest`,
+> **Scope: HTML only.** This skill covers `(item)struct / (list)struct / (flat)struct / (table)struct / (dict)struct`
+> with CSS-selector pipelines. For REST/JSON HTTP APIs (`(rest)struct`,
 > `@request`/`@error`, typed `{{id:int}}` placeholders) → use the **`sscgen-rest`**
 > skill, not this one. Don't mix REST endpoints into HTML schemas.
 
@@ -35,7 +35,7 @@ Generate valid **KDL Schema DSL v2.1** configs for HTML scraping from:
 - **CSS selectors only** — never use `xpath`, `xpath-all`, `xpath-remove`
 - **No removal operations** — never use `css-remove`, `xpath-remove`
 - **No advanced operations** — never use `transform`, `dsl`, `json`/`jsonify`, `re-all` unless the user explicitly requests them
-- **No `struct type=rest`** — that's `sscgen-rest` territory. If the user describes an HTTP/JSON API (endpoints, response schemas, error codes), switch skills.
+- **No `(rest)struct`** — that's `sscgen-rest` territory. If the user describes an HTTP/JSON API (endpoints, response schemas, error codes), switch skills.
 - **CSS3+ selectors preferred** — use the full set supported by the parser (see CSS Selector Tips below); prefer attribute selectors, pseudo-classes and combinators over writing extra pipeline logic
 - Prefer simple, readable pipelines
 - If extraction can be done with a smarter CSS selector, do that instead of adding ops to the pipeline
@@ -64,8 +64,8 @@ Inputs: existing `.kdl` + new requirements or HTML changes
 
 Before writing any KDL:
 1. Identify the **page type**: single item, list of items, table, or mixed
-2. Find **repeating patterns** (cards, rows, list items) -> these become `type=list` structs
-3. Find **key-value tables** -> `type=table` structs
+2. Find **repeating patterns** (cards, rows, list items) -> these become `(list)struct` structs
+3. Find **key-value tables** -> `(table)struct` structs
 4. Note attribute-rich selectors: use `[attr^=...]`, `[attr$=...]` etc. in CSS for precision
 5. Note what data is available: text content, attributes, nested structures
 
@@ -122,7 +122,7 @@ price {
 
 ## Struct Types Reference
 
-### `type=item` (default) — single object
+### `(item)` (default) — single object
 ```kdl
 struct Page {
     @doc "..."
@@ -131,9 +131,9 @@ struct Page {
 }
 ```
 
-### `type=list` — list of objects
+### `(list)` — list of objects
 ```kdl
-struct Product type=list {
+(list)struct Product {
     @split-doc { css-all ".product-card" }
 
     name  { css ".title"; text }
@@ -142,17 +142,17 @@ struct Product type=list {
 }
 ```
 
-### `type=flat` — list of scalar values
+### `(flat)` — list of scalar values
 ```kdl
-struct Tags type=flat {
+(flat)struct Tags {
     // should be returns STRING or LIST_STRING
     value { text }
 }
 ```
 
-### `type=table` — key-value HTML table
+### `(table)` — key-value HTML table
 ```kdl
-struct Info type=table {
+(table)struct Info {
     @table { css "table.product-info" }
     @rows  { css-all "tr" }
     @match { css "th"; text; trim; lower }
@@ -173,9 +173,9 @@ struct Info type=table {
 }
 ```
 
-### `type=table` — non-table HTML (label+value in same element)
+### `(table)` — non-table HTML (label+value in same element)
 
-`type=table` also works for repeated elements where the label and value live inside the same container (e.g. `<div><strong>Label:</strong> value</div>`). Use `@match` to extract the label from a child element and `@value` with `re-sub` to strip the label prefix from the full text.
+`(table)` also works for repeated elements where the label and value live inside the same container (e.g. `<div><strong>Label:</strong> value</div>`). Use `@match` to extract the label from a child element and `@value` with `re-sub` to strip the label prefix from the full text.
 
 ```kdl
 // HTML structure:
@@ -183,7 +183,7 @@ struct Info type=table {
 // <div class="info-row"><strong>Gender: </strong>Female</div>
 // <div class="info-row"><strong>Publications: </strong>28</div>
 
-struct ProfileInfo type=table {
+(table)struct ProfileInfo {
     @table { css ".profile-data" }
     @rows  { css-all ".info-row" }
     @match { css "strong"; text; trim; lower }
@@ -205,7 +205,7 @@ struct ProfileInfo type=table {
 }
 ```
 
-Use `nested` to compose with an `item` struct that extracts non-table fields (avatar, title, etc.):
+Use `nested` to compose with an `(item)` struct that extracts non-table fields (avatar, title, etc.):
 
 ```kdl
 struct MainPage {
@@ -215,9 +215,9 @@ struct MainPage {
 }
 ```
 
-### `type=dict` — dynamic key-value map
+### `(dict)` — dynamic key-value map
 ```kdl
-struct MetaTags type=dict {
+(dict)struct MetaTags {
     @split-doc {
         css-all "meta[property]"
         match { has-attr "property" "content" }
@@ -420,8 +420,8 @@ Warning at line 8: unused define 'BASE-URL'
 | `type mismatch: expected DOCUMENT, got STRING` | Selector used after `text`/`attr` | Reorder — selector must come before extract ops |
 | `type mismatch: expected STRING, got INT` | e.g. `re` after `to-int` | Apply `re` before `to-int` |
 | `unknown operation '...'` | Unknown op name or typo | Check spelling against operations list |
-| `missing @split-doc` | `type=list` or `type=dict` struct without split (`type=flat` does NOT need it) | Add `@split-doc { css-all "..." }` |
-| `missing match{}` | `type=table` field has no predicate | Add `match { eq "key" }` as first statement in field |
+| `missing @split-doc` | `(list)struct` or `(dict)struct` without split (`(flat)struct` does NOT need it) | Add `@split-doc { css-all "..." }` |
+| `missing match{}` | `(table)struct` field has no predicate | Add `match { eq "key" }` as first statement in field |
 | `fallback value type mismatch` | `to-int` then `fallback "x"` | Use typed fallback: INT->`0`, FLOAT->`0.0`, BOOL->`#false`, any->`#null` |
 | `define not found: NAME` | Typo or define declared after use | Check spelling; move define above the struct |
 | `filter requires list type` | `filter` used on scalar | Use `assert` instead, or ensure pipeline produces LIST_* |

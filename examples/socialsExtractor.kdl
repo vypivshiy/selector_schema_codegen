@@ -46,7 +46,7 @@ define CSS-ALL-ATTRS {
     attr "href" "src" "action" "onclick" "formaction"
 }
 
-struct Git type=flat {
+(flat)struct Git {
     @init {
         endpoints { CSS-ALL-ATTRS }
     }
@@ -68,7 +68,7 @@ struct Git type=flat {
     }
 }
 
-struct Socials type=flat {
+(flat)struct Socials {
     @init {
         endpoints { CSS-ALL-ATTRS }
         raw-endpoints { 

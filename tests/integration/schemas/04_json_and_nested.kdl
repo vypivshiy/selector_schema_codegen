@@ -36,7 +36,7 @@ struct TinyItem {
     }
 }
 
-struct TinyList type=list {
+(list)struct TinyList {
     @split-doc {
         css-all ".nested-card"
     }

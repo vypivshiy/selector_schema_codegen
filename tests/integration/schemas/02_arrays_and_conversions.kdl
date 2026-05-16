@@ -33,7 +33,7 @@ transform plus-one accept=INT return=INT {
     }
 }
 
-struct ArraysAndConversions type=list {
+(list)struct ArraysAndConversions {
     @split-doc {
         css-all CSS-CARD
     }

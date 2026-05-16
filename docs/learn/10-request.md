@@ -168,7 +168,7 @@ struct ListPage {
     books { nested BookCard }
 }
 
-struct BookCard type=list {
+(list)struct BookCard {
     @split-doc { css-all ".product_pod" }
     title { css "h3 a"; attr "title" }
 }
@@ -294,7 +294,7 @@ json ActionResponse {
     message str
 }
 
-struct Api type=rest {
+(rest)struct Api {
     @request response=Product """
     GET /items/{{id:int}} HTTP/1.1
     Host: api.example.com
