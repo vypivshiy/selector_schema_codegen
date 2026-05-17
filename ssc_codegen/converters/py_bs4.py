@@ -62,12 +62,8 @@ def pre_imports(node: a.Imports, ctx: ConverterContext):
             "import re",
             "import sys",
             "from typing import TypedDict, Optional, Any, List, Dict, Union, Literal",
-            "",
-            "if sys.version_info >= (3, 11):",
-            "    from typing import NotRequired",
-            "else:",
-            "    from typing_extensions import NotRequired",
         ]
+        base_imports.extend(py_helpers.NOT_REQUIRED_IMPORT)
     else:
         base_imports = [
             "import json",
@@ -77,15 +73,7 @@ def pre_imports(node: a.Imports, ctx: ConverterContext):
         ]
         if not py_helpers.module_is_rest_only(node):
             base_imports.append("from html import unescape as _html_unescape")
-        base_imports.extend(
-            [
-                "",
-                "if sys.version_info >= (3, 11):",
-                "    from typing import NotRequired",
-                "else:",
-                "    from typing_extensions import NotRequired",
-            ]
-        )
+        base_imports.extend(py_helpers.NOT_REQUIRED_IMPORT)
         base_imports.extend(py_helpers.rest_imports(node))
 
     # Get transform imports for Python (already collected during parsing)

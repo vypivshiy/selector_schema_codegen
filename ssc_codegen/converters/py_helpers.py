@@ -10,9 +10,21 @@ import ssc_codegen.ast as a
 from ssc_codegen.ast.struct import PlaceholderSpec
 
 from ssc_codegen.converters.base import ConverterContext
+import sys
+
 from ssc_codegen.converters.helpers import to_pascal_case
 
+NOT_REQUIRED_IMPORT: list[str] = [
+    "",
+    "if sys.version_info >= (3, 11):",
+    "    from typing import NotRequired",
+    "else:",
+    "    from typing_extensions import NotRequired",
+]
+
 __all__ = [
+    # Shared import fragments
+    "NOT_REQUIRED_IMPORT",
     # Runtime module generation
     "base_utility_lines",
     "runtime_export_names",

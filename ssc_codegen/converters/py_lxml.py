@@ -49,6 +49,8 @@ def pre_imports(node: a.Imports, ctx: ConverterContext):
             base_imports.append("from html import unescape as _html_unescape")
         base_imports.extend(py_helpers.rest_imports(node))
 
+    base_imports.extend(py_helpers.NOT_REQUIRED_IMPORT)
+
     # Get transform imports for Python (already collected during parsing)
     transform_imports = sorted(node.transform_imports.get("py", set()))
 
