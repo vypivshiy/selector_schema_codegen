@@ -20,16 +20,27 @@ PY_TYPES[VT.LIST_DOCUMENT] = "List[Node]"
 
 
 @PY_SLAX_CONVERTER(a.Imports)
-def pre_imports(node: a.Imports, _: ConverterContext):
-    base_imports = [
-        "import re",
-        "import sys",
-        "from typing import TypedDict, Optional, Any, List, Dict, Union, Literal",
-    ]
-    if not py_helpers.module_is_rest_only(node):
-        base_imports.append("from html import unescape as _html_unescape")
-    base_imports.extend(py_helpers.rest_imports(node))
-    base_imports.extend(py_helpers.NOT_REQUIRED_IMPORT)
+def pre_imports(node: a.Imports, ctx: ConverterContext):
+    runtime = ctx.meta.get("runtime_module")
+    if runtime:
+        base_imports = [
+            "import json",
+            "import re",
+            "import sys",
+            "from typing import TypedDict, Optional, Any, List, Dict, Union, Literal",
+        ]
+        base_imports.extend(py_helpers.NOT_REQUIRED_IMPORT)
+    else:
+        base_imports = [
+            "import json",
+            "import re",
+            "import sys",
+            "from typing import TypedDict, Optional, Any, List, Dict, Union, Literal",
+        ]
+        if not py_helpers.module_is_rest_only(node):
+            base_imports.append("from html import unescape as _html_unescape")
+        base_imports.extend(py_helpers.NOT_REQUIRED_IMPORT)
+        base_imports.extend(py_helpers.rest_imports(node))
 
     transform_imports = sorted(node.transform_imports.get("py", set()))
 

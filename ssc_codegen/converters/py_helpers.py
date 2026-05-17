@@ -10,7 +10,6 @@ import ssc_codegen.ast as a
 from ssc_codegen.ast.struct import PlaceholderSpec
 
 from ssc_codegen.converters.base import ConverterContext
-import sys
 
 from ssc_codegen.converters.helpers import to_pascal_case
 

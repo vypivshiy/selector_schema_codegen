@@ -260,16 +260,16 @@ def generate(
         meta["_include_fallback_html"] = target == Target.PY_LXML
         register_runtime_file(converter, _runtime_name)
 
+    # Phase 1: parse all KDL files
+    from ssc_codegen.ast import Module, Struct
+
+    parsed: list[tuple[Path, Module]] = []
     for kdl_file in kdl_files:
-        out_file = output / kdl_file.with_suffix(ext).name
-        logger.debug("processing: %s -> %s", kdl_file, out_file)
         try:
             ast, err = parse_module(
                 kdl_file.read_text(encoding="utf-8"), source_path=kdl_file
             )
-            if skip_lint:
-                pass
-            else:
+            if not skip_lint:
                 lint_output = format_diagnostics(
                     err, filepath=kdl_file, fmt=fmt.value
                 )
@@ -278,18 +278,42 @@ def generate(
                     errors.append(lint_output)
                     continue
             logger.debug("AST built for %s", kdl_file)
-
-            if converter.has_support_files:
-                generated: dict[str, str] = converter.convert_all(ast, **meta)
-                for name, content in generated.items():
-                    target_path = out_file if name == "" else output / name
-                    target_path.write_text(content, encoding="utf-8")
-                    if name:
-                        typer.echo(f"  -> {target_path}")
-                code = generated[""]
+            parsed.append((kdl_file, ast))
+        except Exception as exc:
+            if verbose:
+                typer.echo(traceback.format_exc(), err=True)
             else:
-                code = converter.convert(ast, **meta)
-                out_file.write_text(code, encoding="utf-8")
+                typer.echo(f"  ERROR {kdl_file}: {exc}", err=True)
+            errors.append(str(kdl_file))
+
+    # Phase 2: write runtime file once (if -R is used)
+    if separate_runtime and parsed:
+        from ssc_codegen.converters.py_helpers import runtime_module_content
+
+        include_fallback = target == Target.PY_LXML
+        # Pick an AST that has REST structs so the runtime includes helpers
+        ref_ast = next(
+            (
+                ast
+                for _, ast in parsed
+                if any(isinstance(n, Struct) and n.is_rest for n in ast.body)
+            ),
+            parsed[0][1],
+        )
+        runtime_path = output / f"{_runtime_name}.py"
+        runtime_path.write_text(
+            runtime_module_content(ref_ast, include_fallback),
+            encoding="utf-8",
+        )
+        typer.echo(f"  -> {runtime_path}")
+
+    # Phase 3: generate and write each main module
+    for kdl_file, ast in parsed:
+        out_file = output / kdl_file.with_suffix(ext).name
+        logger.debug("processing: %s -> %s", kdl_file, out_file)
+        try:
+            code = converter.convert(ast, **meta)
+            out_file.write_text(code, encoding="utf-8")
 
             logger.debug(
                 "code generated for %s (%d chars)", kdl_file, len(code)

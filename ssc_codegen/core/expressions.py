@@ -74,7 +74,7 @@ from ssc_codegen.ast import (
     XpathSelect,
     XpathSelectAll,
 )
-from ssc_codegen.exceptions import BuildTimeError, ParseError
+from ssc_codegen.exceptions import BuildTimeError
 from ssc_codegen.kdl import KdlArg, KdlNode
 from ssc_codegen.regex_utils import normalize_regex_pattern
 from typing import cast

@@ -711,3 +711,117 @@ class TestRestOnlyImports:
         assert "from bs4 import" in code
         assert "_html_unescape" in code
         assert "unescape_text" in code
+
+
+# ---------------------------------------------------------------------------
+# Separate runtime (-R) tests
+# ---------------------------------------------------------------------------
+
+
+def _get_all_converters():
+    import ssc_codegen.converters.py_bs4 as _bs4
+    import ssc_codegen.converters.py_lxml as _lxml
+    import ssc_codegen.converters.py_parsel as _parsel
+    import ssc_codegen.converters.py_slax as _slax
+
+    return {
+        "PY_BASE_CONVERTER": _bs4.PY_BASE_CONVERTER,
+        "PY_LXML_CONVERTER": _lxml.PY_LXML_CONVERTER,
+        "PY_PARSEL_CONVERTER": _parsel.PY_PARSEL_CONVERTER,
+        "PY_SLAX_CONVERTER": _slax.PY_SLAX_CONVERTER,
+    }
+
+
+class TestSeparateRuntime:
+    """Verify -R (separate runtime) works correctly for all Python targets."""
+
+    RUNTIME_NAME = "sscgen_runtime"
+
+    @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
+    def test_runtime_file_has_rest_helpers(self, converter_attr):
+        from ssc_codegen.converters.py_bs4 import register_runtime_file
+
+        converter = _get_all_converters()[converter_attr]
+        src = _rest_src(errors="    @error 404 Err\n")
+        module = _parse(src)
+        register_runtime_file(converter, self.RUNTIME_NAME)
+        generated = converter.convert_all(
+            module,
+            http_client="requests",
+            runtime_module=self.RUNTIME_NAME,
+        )
+        runtime = generated[f"{self.RUNTIME_NAME}.py"]
+        assert "class Ok(Generic[_T]):" in runtime
+        assert "class Err(Generic[_E]):" in runtime
+        assert "class UnknownErr(Err[Any]):" in runtime
+        assert "class TransportErr(Err[None]):" in runtime
+        assert "def _parse_response(_resp):" in runtime
+
+    @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
+    def test_main_imports_from_runtime(self, converter_attr):
+        from ssc_codegen.converters.py_bs4 import register_runtime_file
+
+        converter = _get_all_converters()[converter_attr]
+        src = _rest_src(errors="    @error 404 Err\n")
+        module = _parse(src)
+        register_runtime_file(converter, self.RUNTIME_NAME)
+        generated = converter.convert_all(
+            module,
+            http_client="requests",
+            runtime_module=self.RUNTIME_NAME,
+        )
+        code = generated[""]
+        assert f"from {self.RUNTIME_NAME} import" in code
+        assert "Ok" in code.split(f"from {self.RUNTIME_NAME} import")[1]
+
+    @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
+    def test_main_no_inline_rest_helpers(self, converter_attr):
+        from ssc_codegen.converters.py_bs4 import register_runtime_file
+
+        converter = _get_all_converters()[converter_attr]
+        src = _rest_src(errors="    @error 404 Err\n")
+        module = _parse(src)
+        register_runtime_file(converter, self.RUNTIME_NAME)
+        generated = converter.convert_all(
+            module,
+            http_client="requests",
+            runtime_module=self.RUNTIME_NAME,
+        )
+        code = generated[""]
+        # Ok/Err as class definitions should NOT be in the main module
+        assert "class Ok(Generic[_T]):" not in code
+        assert "class Err(Generic[_E]):" not in code
+        assert "def _parse_response(_resp):" not in code
+
+    @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
+    def test_main_no_redundant_rest_imports(self, converter_attr):
+        from ssc_codegen.converters.py_bs4 import register_runtime_file
+
+        converter = _get_all_converters()[converter_attr]
+        src = _rest_src(errors="    @error 404 Err\n")
+        module = _parse(src)
+        register_runtime_file(converter, self.RUNTIME_NAME)
+        generated = converter.convert_all(
+            module,
+            http_client="requests",
+            runtime_module=self.RUNTIME_NAME,
+        )
+        code = generated[""]
+        assert "from dataclasses import" not in code
+        assert "from typing import Generic, Literal, Mapping, TypeVar" not in code
+
+    @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
+    def test_main_valid_python(self, converter_attr):
+        from ssc_codegen.converters.py_bs4 import register_runtime_file
+
+        converter = _get_all_converters()[converter_attr]
+        src = _rest_src(errors="    @error 404 Err\n")
+        module = _parse(src)
+        register_runtime_file(converter, self.RUNTIME_NAME)
+        generated = converter.convert_all(
+            module,
+            http_client="requests",
+            runtime_module=self.RUNTIME_NAME,
+        )
+        pyast.parse(generated[""])
+        pyast.parse(generated[f"{self.RUNTIME_NAME}.py"])
