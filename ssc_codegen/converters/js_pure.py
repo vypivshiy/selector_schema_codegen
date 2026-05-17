@@ -594,6 +594,8 @@ def pre_start_parse(node: a.StartParse, ctx: ConverterContext):
     # type
     name = to_pascal_case(node.struct.name)
     match node.struct_type:
+        case a.StructType.REST:
+            return
         case a.StructType.ITEM:
             ret_type = f"{name}Type"
         case a.StructType.LIST:
@@ -619,6 +621,8 @@ def pre_start_parse(node: a.StartParse, ctx: ConverterContext):
 @JS_CONVERTER.post(a.StartParse)
 def post_start_parse(node: a.StartParse, ctx: ConverterContext):
     lines: list[str] = []
+    if node.struct_type == a.StructType.REST:
+        return
     if node.use_pre_validate:
         lines.append(f"{ctx.indent * 2}this._preValidate(this._doc);")
 

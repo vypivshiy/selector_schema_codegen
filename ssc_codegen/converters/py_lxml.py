@@ -93,6 +93,8 @@ def pre_utilities(node: a.Utilities, ctx: ConverterContext):
 # Override struct __init__ to use lxml instead of BeautifulSoup
 @PY_LXML_CONVERTER(a.Init)
 def pre_init(node: a.Init, ctx: ConverterContext):
+    if isinstance(node.parent, a.Struct) and node.parent.is_rest:
+        return None
     init_node_names: list[str] = []
     for i in node.body:
         if isinstance(i, a.InitField):

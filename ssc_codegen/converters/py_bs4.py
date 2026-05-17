@@ -225,6 +225,8 @@ def pre_start_parse(node: a.StartParse, ctx: ConverterContext):
     name = to_pascal_case(node.struct.name)
 
     match node.struct_type:
+        case a.StructType.REST:
+            return
         case a.StructType.ITEM:
             ret_type = f"{name}Type"
         case a.StructType.LIST:
@@ -245,10 +247,11 @@ def pre_start_parse(node: a.StartParse, ctx: ConverterContext):
 @PY_BASE_CONVERTER.post(a.StartParse)
 def post_start_parse(node: a.StartParse, ctx: ConverterContext):
     lines: list[str] = []
+    if node.struct_type == a.StructType.REST:
+        return
+
     if node.use_pre_validate:
         lines.append(f"{ctx.indent * 2}self._pre_validate(self._doc)")
-    # TODO: pre_validate call
-    # TODO: move init fields here
     match node.struct_type:
         case a.StructType.ITEM:
             # return {name: self_parse_name(self._doc), ...}
