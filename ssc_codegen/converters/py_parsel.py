@@ -28,6 +28,7 @@ def pre_imports(node: a.Imports, ctx: ConverterContext):
             "import json",
             "import re",
             "import sys",
+            "from dataclasses import dataclass",
             "from typing import TypedDict, Optional, Any, List, Dict, Union, Literal",
         ]
         base_imports.extend(py_helpers.NOT_REQUIRED_IMPORT)
@@ -36,6 +37,7 @@ def pre_imports(node: a.Imports, ctx: ConverterContext):
             "import json",
             "import re",
             "import sys",
+            "from dataclasses import dataclass",
             "from typing import TypedDict, Optional, Any, List, Dict, Union, Literal",
         ]
         if not py_helpers.module_is_rest_only(node):
