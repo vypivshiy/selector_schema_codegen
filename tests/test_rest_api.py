@@ -454,11 +454,11 @@ def _typed_rest_src(request_line: str) -> str:
 
 class TestTypedPlaceholdersAst:
     def test_legacy_plain_name_is_str_scalar_required(self):
-        from ssc_codegen.ast.struct import _PLACEHOLDER_RE, _parse_placeholder
+        from ssc_codegen.ast.struct import PLACEHOLDER_RE, parse_placeholder
 
-        m = _PLACEHOLDER_RE.fullmatch("{{name}}")
+        m = PLACEHOLDER_RE.fullmatch("{{name}}")
         assert m is not None
-        ph = _parse_placeholder(m)
+        ph = parse_placeholder(m)
         assert ph.name == "name"
         assert ph.type_name == "str"
         assert ph.is_array is False
@@ -481,11 +481,11 @@ class TestTypedPlaceholdersAst:
         ],
     )
     def test_parse_variants(self, placeholder, expected):
-        from ssc_codegen.ast.struct import _PLACEHOLDER_RE, _parse_placeholder
+        from ssc_codegen.ast.struct import PLACEHOLDER_RE, parse_placeholder
 
-        m = _PLACEHOLDER_RE.fullmatch(placeholder)
+        m = PLACEHOLDER_RE.fullmatch(placeholder)
         assert m is not None, placeholder
-        ph = _parse_placeholder(m)
+        ph = parse_placeholder(m)
         assert (
             ph.name,
             ph.type_name,
@@ -506,9 +506,9 @@ class TestTypedPlaceholdersAst:
         ],
     )
     def test_invalid_placeholders_reject(self, placeholder):
-        from ssc_codegen.ast.struct import _PLACEHOLDER_RE
+        from ssc_codegen.ast.struct import PLACEHOLDER_RE
 
-        assert _PLACEHOLDER_RE.fullmatch(placeholder) is None
+        assert PLACEHOLDER_RE.fullmatch(placeholder) is None
 
 
 class TestTypedPlaceholdersPyCodegen:
@@ -834,3 +834,89 @@ class TestSeparateRuntime:
         converter = _get_all_converters()["PY_BASE_CONVERTER"]
         register_runtime_file(converter, self.RUNTIME_NAME)
         converter.convert_all(module, runtime_module=self.RUNTIME_NAME)
+
+
+# ---------------------------------------------------------------------------
+# Placeholder linting in @request
+# ---------------------------------------------------------------------------
+
+
+class TestRequestPlaceholderLint:
+    """Verify lint catches uppercase/malformed placeholders in @request."""
+
+    @staticmethod
+    def _lint(src: str):
+        _, diagnostics = parse_module(src)
+        return [d for d in diagnostics if d.severity == Severity.ERROR]
+
+    def test_uppercase_placeholder_in_inline_request(self):
+        src = (
+            "struct S {\n"
+            '    @request """\n'
+            "    GET /search?q={{QUERY}} HTTP/1.1\n"
+            "    Host: example.com\n"
+            '    """\n'
+            '    title { css "h1"; text }\n'
+            "}\n"
+        )
+        errors = self._lint(src)
+        assert len(errors) == 1
+        assert "{{QUERY}}" in errors[0].message
+        assert "must be lowercase" in errors[0].message
+
+    def test_lowercase_placeholder_no_error(self):
+        src = (
+            "struct S {\n"
+            '    @request """\n'
+            "    GET /search?q={{query}} HTTP/1.1\n"
+            "    Host: example.com\n"
+            '    """\n'
+            '    title { css "h1"; text }\n'
+            "}\n"
+        )
+        errors = self._lint(src)
+        assert not errors
+
+    def test_mixed_upper_and_lower_flags_uppercase(self):
+        src = (
+            "struct S {\n"
+            '    @request """\n'
+            "    POST /api HTTP/1.1\n"
+            "    Host: example.com\n"
+            "    Content-Type: application/json\n"
+            "\n"
+            '    {"q": "{{query}}", "token": "{{TOKEN}}"}\n'
+            '    """\n'
+            '    title { css "h1"; text }\n'
+            "}\n"
+        )
+        errors = self._lint(src)
+        assert len(errors) == 1
+        assert "{{TOKEN}}" in errors[0].message
+
+    def test_define_with_resolved_uppercase_and_lowercase_runtime(self):
+        """define resolves {{BASE-URL}} at parse time; only {{query}} remains."""
+        src = (
+            'define BASE-URL="https://example.com"\n'
+            'define REQ="curl {{BASE-URL}}/search?q={{query}}"\n'
+            "(list)struct S {\n"
+            '    @split-doc { css-all ".item" }\n'
+            "    @request REQ\n"
+            '    title { css "h1"; text }\n'
+            "}\n"
+        )
+        errors = self._lint(src)
+        assert not errors
+
+    def test_no_placeholders_no_error(self):
+        src = (
+            "struct S {\n"
+            '    @request """\n'
+            "    GET /page HTTP/1.1\n"
+            "    Host: example.com\n"
+            '    """\n'
+            '    title { css "h1"; text }\n'
+            "}\n"
+        )
+        errors = self._lint(src)
+        assert not errors

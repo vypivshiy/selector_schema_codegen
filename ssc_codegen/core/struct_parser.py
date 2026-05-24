@@ -32,6 +32,7 @@ from ssc_codegen.kdl import KdlArg, KdlNode
 
 from ssc_codegen.core.contexts import LintContext, ParseContext, WalkCtx
 from ssc_codegen.core.expressions import parse_expressions
+from ssc_codegen.core.linting import lint_request_placeholders
 from ssc_codegen.core.type_checking import check_pipeline_types
 
 
@@ -103,6 +104,7 @@ def parse_struct(
             )
             req = RequestConfig(parent=parent)
             req.raw_payload = raw_payload
+            lint_request_placeholders(node, raw_payload, lint)
             req.response_path = str(
                 node.properties.get(
                     "response-path",

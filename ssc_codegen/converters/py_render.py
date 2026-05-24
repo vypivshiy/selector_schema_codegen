@@ -7,7 +7,7 @@ fragments suitable for `requests(...)` / `httpx(...)` call arguments.
 import json
 import re
 
-from ssc_codegen.ast.struct import PlaceholderSpec, _parse_placeholder
+from ssc_codegen.ast.struct import PlaceholderSpec, parse_placeholder
 from ssc_codegen.converters.request_spec import _PH, RequestSpec
 
 __all__ = [
@@ -46,7 +46,7 @@ def render_value(v: str) -> str:
     ``Mozilla/5.0``        -> ``"Mozilla/5.0"``     (string literal)
     """
     if m := _PH.fullmatch(v):
-        ph = _parse_placeholder(m)
+        ph = parse_placeholder(m)
         if ph.is_array and ph.style in ("csv", "pipe", "space"):
             return _render_array_join(ph)
         return ph.name
@@ -94,7 +94,7 @@ def render_dict(d: dict[str, str], *, indent: str = "") -> str:
 def _dict_entry_placeholder(v: str) -> PlaceholderSpec | None:
     """Return PlaceholderSpec if *v* is a fullmatch placeholder, else None."""
     m = _PH.fullmatch(str(v))
-    return _parse_placeholder(m) if m else None
+    return parse_placeholder(m) if m else None
 
 
 def dict_needs_builder(d: dict[str, str]) -> bool:
@@ -160,7 +160,7 @@ def render_json_body(raw: str) -> str:
         if raw[i : i + 2] == "{{":
             m = _PH.match(raw, i)
             if m is not None:
-                name = _parse_placeholder(m).name
+                name = parse_placeholder(m).name
                 key = f"__SSC_PH_{len(sentinels)}__"
                 sentinels[key] = name
                 out.append(key if in_string else '"' + key + '"')

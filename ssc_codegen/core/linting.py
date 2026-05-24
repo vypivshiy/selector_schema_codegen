@@ -6,6 +6,7 @@ import difflib as _difflib
 import re as _re
 
 from ssc_codegen.ast import JsonDefField, Module, VariableType
+from ssc_codegen.ast.struct import PLACEHOLDER_RE, PLACEHOLDER_WIDE_RE
 from ssc_codegen.kdl import KdlNode
 from ssc_codegen.core.contexts import (
     DefineKind,
@@ -796,6 +797,39 @@ def lint_reserved_field(
                 message=f"@error has duplicate keys: {', '.join(sorted(duplicates))}",
                 code="E400",
                 hint="each key must be either a positional arg (presence check) or a property (value check)",
+            )
+
+
+def lint_request_placeholders(
+    node: KdlNode, raw_payload: str, lint: LintContext
+) -> None:
+    """Validate placeholder names in an @request raw payload.
+
+    Convention: uppercase {{NAME}} is a define substitution (only resolved
+    within ``define`` values), lowercase {{name}} is a runtime fetch() param.
+    Define substitution does NOT run on @request payloads, so any remaining
+    uppercase tokens are bugs that silently become literal strings.
+    """
+    for m in PLACEHOLDER_WIDE_RE.finditer(raw_payload):
+        token = m.group(0)
+        strict = PLACEHOLDER_RE.match(token)
+        if strict is None:
+            lint.error(
+                node,
+                message=f"malformed placeholder {token!r} in @request",
+                code="E002",
+                hint="expected syntax: {{name}} or {{name:type}} (lowercase)",
+            )
+            continue
+        name = strict.group(1)
+        if name != name.lower():
+            lint.error(
+                node,
+                message=f"placeholder '{{{{{name}}}}}' in @request must be lowercase; "
+                f"uppercase names are define substitutions which don't resolve in @request",
+                code="E002",
+                hint=f"use lowercase for runtime params (e.g. {{{{{name.lower()}}}}}), "
+                f"or compose the URL in a define first",
             )
 
 

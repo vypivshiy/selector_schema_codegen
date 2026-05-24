@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 from urllib.parse import urlparse, urlunparse
 
-from ssc_codegen.ast.struct import PlaceholderSpec, _parse_placeholder
+from ssc_codegen.ast.struct import PlaceholderSpec, parse_placeholder
 from ssc_codegen.parsers.curl import parse_curl_command
 from ssc_codegen.parsers.http import parse_http_request
 
@@ -48,7 +48,7 @@ class RequestSpec:
         result: list[PlaceholderSpec] = []
         for text in _iter_strings(self):
             for m in _PH.finditer(text):
-                spec = _parse_placeholder(m)
+                spec = parse_placeholder(m)
                 if spec.name not in seen:
                     seen.add(spec.name)
                     result.append(spec)

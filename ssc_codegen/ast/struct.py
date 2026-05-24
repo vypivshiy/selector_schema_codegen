@@ -13,7 +13,7 @@ from .types import VariableType, StructType
 #   PRIM   = str | int | float | bool       (default: str)
 #   STYLE  = repeat | csv | bracket | pipe | space   (arrays only; default: repeat)
 # Legacy `{{name}}` remains valid (groups 2-5 = None → str, scalar, required).
-_PLACEHOLDER_RE = _re.compile(
+PLACEHOLDER_RE = _re.compile(
     r"\{\{"
     r"([A-Za-z][A-Za-z0-9_-]*)"
     r"(?::(str|int|float|bool))?"
@@ -25,7 +25,7 @@ _PLACEHOLDER_RE = _re.compile(
 
 # Widened pattern — any `{{…}}`-shaped token. Used by the linter to flag
 # malformed placeholders that the strict _PLACEHOLDER_RE would silently skip.
-_PLACEHOLDER_WIDE_RE = _re.compile(r"\{\{([^{}]*)\}\}")
+PLACEHOLDER_WIDE_RE = _re.compile(r"\{\{([^{}]*)\}\}")
 
 
 @dataclass
@@ -39,7 +39,7 @@ class PlaceholderSpec:
     style: str | None = None  # None == default "repeat" when is_array
 
 
-def _parse_placeholder(match: "_re.Match[str]") -> PlaceholderSpec:
+def parse_placeholder(match: "_re.Match[str]") -> PlaceholderSpec:
     return PlaceholderSpec(
         name=match.group(1),
         type_name=match.group(2) or "str",
@@ -383,8 +383,8 @@ class RequestConfig(Node):
         """Unique placeholders in declaration order (dedup by name)."""
         seen: set[str] = set()
         result: list[PlaceholderSpec] = []
-        for m in _PLACEHOLDER_RE.finditer(self.raw_payload):
-            spec = _parse_placeholder(m)
+        for m in PLACEHOLDER_RE.finditer(self.raw_payload):
+            spec = parse_placeholder(m)
             if spec.name not in seen:
                 seen.add(spec.name)
                 result.append(spec)

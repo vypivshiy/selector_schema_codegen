@@ -33,7 +33,7 @@ from ssc_codegen.converters.request_spec import (
     normalize_placeholder_names,
     _PH,
 )
-from ssc_codegen.ast.struct import _parse_placeholder
+from ssc_codegen.ast.struct import parse_placeholder
 
 JS_CONVERTER = BaseConverter(indent=" " * 2)
 
@@ -1662,7 +1662,7 @@ def _js_array_join(ph: a.PlaceholderSpec) -> str:
 def _js_render_value(v: str) -> str:
     """Render a RequestSpec string value as a JS expression."""
     if m := _PH.fullmatch(v):
-        ph = _parse_placeholder(m)
+        ph = parse_placeholder(m)
         if ph.is_array and ph.style in ("csv", "pipe", "space"):
             return _js_array_join(ph)
         return ph.name
@@ -1685,7 +1685,7 @@ def _js_render_obj(d: dict[str, str]) -> str:
 
 def _js_dict_entry_placeholder(v: str) -> a.PlaceholderSpec | None:
     m = _PH.fullmatch(str(v))
-    return _parse_placeholder(m) if m else None
+    return parse_placeholder(m) if m else None
 
 
 def _js_dict_needs_builder(d: dict[str, str]) -> bool:
