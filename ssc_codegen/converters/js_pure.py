@@ -259,7 +259,7 @@ def pre_utilities(node: a.Utilities, _: ConverterContext):
                 " * @property {string} cause",
                 " */",
                 "",
-                "async function _parseResponse(_resp) {",
+                "async function sscParseResponse(_resp) {",
                 "    const _status = _resp.status;",
                 "    const _headers = Object.fromEntries"
                 "([..._resp.headers.entries()]);",
@@ -268,7 +268,7 @@ def pre_utilities(node: a.Utilities, _: ConverterContext):
                 "    return [_status, _headers, _body];",
                 "}",
                 "",
-                "function _parseResponseAxios(_resp) {",
+                "function sscParseResponseAxios(_resp) {",
                 "    const _status = _resp.status;",
                 "    const _headers = {};",
                 "    for (const [k, v] of Object.entries(_resp.headers || {})) "
@@ -464,7 +464,7 @@ def pre_struct_rest(node: a.StructRest, ctx: ConverterContext):
     )
     lines.extend(doc_lines)
     lines.append(f"class {name} " + "{")
-    # _dispatchErr static method (first member of class body)
+    # sscDispatchErr static method (first member of class body)
     lines.extend(_emit_dispatch_err_js(node, ctx.deeper()))
     return lines
 
@@ -475,7 +475,7 @@ def pre_struct_docstring(node: a.StructDocstring, ctx: ConverterContext):
 
 
 def _emit_dispatch_err_js(node: a.Struct, ctx: ConverterContext) -> list[str]:
-    """Emit `_dispatchErr` static method inside a REST class body."""
+    """Emit `sscDispatchErr` static method inside a REST class body."""
     i1 = ctx.indent  # class-body level
     i2 = i1 + ctx.indent_char  # method body
     i3 = i2 + ctx.indent_char  # nested (if ...)
@@ -487,7 +487,7 @@ def _emit_dispatch_err_js(node: a.Struct, ctx: ConverterContext) -> list[str]:
     field_errors = [e for e in errors if e.conditions or e.required_keys]
 
     lines: list[str] = [
-        f"{i1}static _dispatchErr(_status, _headers, _body) {{",
+        f"{i1}static sscDispatchErr(_status, _headers, _body) {{",
         f"{i2}if (_status >= 200 && _status < 300) {{",
     ]
     for err in field_errors:
@@ -1964,7 +1964,7 @@ def _js_rest_method(node: a.RequestConfig, ctx: ConverterContext) -> list[str]:
 
     # Shared response extraction + dispatch
     parser_fn = (
-        "_parseResponseAxios" if http_client == "axios" else "_parseResponse"
+        "sscParseResponseAxios" if http_client == "axios" else "sscParseResponse"
     )
     parse_prefix = "" if http_client == "axios" else "await "
     lines.append(
@@ -1973,7 +1973,7 @@ def _js_rest_method(node: a.RequestConfig, ctx: ConverterContext) -> list[str]:
     )
     struct_pascal = to_pascal_case(struct_name) if struct_name else ""
     lines.append(
-        f"{i2}const _err = {struct_pascal}._dispatchErr(_status, _headers, _body);"
+        f"{i2}const _err = {struct_pascal}.sscDispatchErr(_status, _headers, _body);"
     )
     lines.append(f"{i2}if (_err !== null) return _err;")
     lines.append(

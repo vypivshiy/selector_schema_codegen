@@ -98,7 +98,7 @@ def runtime_export_names(node: a.Node) -> list[str]:
     names = list(_BASE_EXPORT_NAMES)
     if _module_has_rest(node):
         names.extend(
-            ["Ok", "Err", "UnknownErr", "TransportErr", "_parse_response"]
+            ["Ok", "Err", "UnknownErr", "TransportErr", "ssc_parse_response"]
         )
     return names
 
@@ -199,7 +199,7 @@ def rest_utilities(node: a.Node) -> list[str]:
         "    value: None = None",
         "    headers: Mapping[str, str] = field(default_factory=dict)",
         "\n\n",
-        "def _parse_response(_resp):",
+        "def ssc_parse_response(_resp):",
         "    _status = _resp.status_code",
         "    _headers = {k.lower(): v for k, v in _resp.headers.items()}",
         "    try:",
@@ -459,7 +459,7 @@ def _emit_dispatch_err(node: a.StructBase, ctx: ConverterContext) -> list[str]:
 
     lines: list[str] = [
         f"{i1}@staticmethod",
-        f"{i1}def _dispatch_err("
+        f"{i1}def ssc_dispatch_err("
         f"_status: int, _headers: Mapping[str, str], _body: Any"
         f") -> {union_type}:",
         f"{i2}if 200 <= _status < 300:",
@@ -597,7 +597,7 @@ def pre_struct_rest(node: a.StructRest, ctx: ConverterContext):
         lines.append("")
     # Class header
     lines.append(f"class {name}:")
-    # _dispatch_err staticmethod (first member of class body, needs class-level indent)
+    # ssc_dispatch_err staticmethod (first member of class body, needs class-level indent)
     lines.extend(_emit_dispatch_err(node, ctx.deeper()))
     return lines
 
@@ -1824,8 +1824,8 @@ def _emit_rest_methods(
         lines.append(f"{i3})")
         lines.append(f"{i2}except httpx.HTTPError as _exc:")
         lines.append(f"{i3}return TransportErr(cause=repr(_exc))")
-        lines.append(f"{i2}_status, _headers, _body = _parse_response(_resp)")
-        lines.append(f"{i2}_err = cls._dispatch_err(_status, _headers, _body)")
+        lines.append(f"{i2}_status, _headers, _body = ssc_parse_response(_resp)")
+        lines.append(f"{i2}_err = cls.ssc_dispatch_err(_status, _headers, _body)")
         lines.append(f"{i2}if _err is not None:")
         lines.append(f"{i3}return _err")
         lines.append(
