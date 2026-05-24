@@ -159,9 +159,7 @@ def test_parser_builds_expected_counts_for_quotes_example():
     typedefs = _body_of_type(module.body, TypeDef)
 
     assert len(structs) == 1
-    # json_defs are appended both in the loop and at finalize — names are duplicated
-    assert len(json_defs) == 4
-    assert len(set(j.name for j in json_defs)) == 2
+    assert len(json_defs) == 2
     assert len(typedefs) == 1
     assert structs[0].name == "Main"
 

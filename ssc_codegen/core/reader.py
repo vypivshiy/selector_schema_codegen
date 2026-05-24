@@ -85,8 +85,7 @@ class SscReader(Reader[KdlNode, Module]):
             if node.name == "@doc":
                 module.docstring.value = str(node.args[0].value)
             elif node.name == "json":
-                expr = handle_json(node, module, ctx, lint)
-                module.body.append(expr)
+                handle_json(node, module, ctx, lint)
             elif node.name == "struct":
                 struct = handle_struct(node, module, ctx, lint)
                 typedefs.append(typedef_from_struct(struct, module))
