@@ -36,7 +36,7 @@ def pre_imports(node: a.Imports, ctx: ConverterContext):
             "import re",
             "import sys",
             "from dataclasses import dataclass",
-            "from typing import TypedDict, Optional, Any, List, Dict, Union, Literal",
+            "from typing import TypedDict, Optional, Any, List, Dict, Union, Literal, Mapping",
         ]
     else:
         base_imports = [
@@ -44,10 +44,12 @@ def pre_imports(node: a.Imports, ctx: ConverterContext):
             "import re",
             "import sys",
             "from dataclasses import dataclass",
-            "from typing import TypedDict, Optional, Any, List, Dict, Union, Literal",
+            "from typing import TypedDict, Optional, Any, List, Dict, Union, Literal, Mapping",
         ]
         if not py_bs4.module_is_rest_only(node):
-            base_imports.append("from html import unescape as _html_unescape")
+            base_imports.append(
+                "from html import unescape as ssc_html_unescape"
+            )
         base_imports.extend(py_bs4.rest_imports(node))
 
     base_imports.extend(py_bs4.NOT_REQUIRED_IMPORT)

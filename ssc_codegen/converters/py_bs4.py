@@ -55,7 +55,7 @@ _BASE_UTILITY_LINES: list[str] = [
     "    pass",
     "",
     "def unescape_text(text: str) -> str:",
-    "    s = _html_unescape(text)",
+    "    s = ssc_html_unescape(text)",
     "    s = _RE_HEX_ENTITY.sub(lambda m: chr(int(m.group(1), 16)), s)",
     "    s = _RE_UNICODE_ENTITY.sub(lambda m: chr(int(m.group(1), 16)), s)",
     "    s = _RE_BYTES_ENTITY.sub(lambda m: chr(int(m.group(1), 16)), s)",
@@ -111,7 +111,7 @@ def runtime_module_content(node: a.Node) -> str:
         "import re",
         "import sys",
         "from typing import Dict",
-        "from html import unescape as _html_unescape",
+        "from html import unescape as ssc_html_unescape",
     ]
     has_rest = _module_has_rest(node)
     if has_rest:
@@ -252,7 +252,7 @@ def pre_imports(node: a.Imports, ctx: ConverterContext):
             "import re",
             "import sys",
             "from dataclasses import dataclass",
-            "from typing import TypedDict, Optional, Any, List, Dict, Union, Literal",
+            "from typing import TypedDict, Optional, Any, List, Dict, Union, Literal, Mapping",
         ]
         base_imports.extend(NOT_REQUIRED_IMPORT)
     else:
@@ -261,10 +261,12 @@ def pre_imports(node: a.Imports, ctx: ConverterContext):
             "import re",
             "import sys",
             "from dataclasses import dataclass",
-            "from typing import TypedDict, Optional, Any, List, Dict, Union, Literal",
+            "from typing import TypedDict, Optional, Any, List, Dict, Union, Literal, Mapping",
         ]
         if not module_is_rest_only(node):
-            base_imports.append("from html import unescape as _html_unescape")
+            base_imports.append(
+                "from html import unescape as ssc_html_unescape"
+            )
         base_imports.extend(NOT_REQUIRED_IMPORT)
         base_imports.extend(rest_imports(node))
 
