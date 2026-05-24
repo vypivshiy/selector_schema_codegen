@@ -280,6 +280,7 @@ def generate(
             parsed.append((kdl_file, ast))
         except Exception as exc:
             if verbose:
+                typer.echo(f"ERROR {kdl_file}:", err=True)
                 typer.echo(traceback.format_exc(), err=True)
             else:
                 typer.echo(f"  ERROR {kdl_file}: {exc}", err=True)
@@ -320,6 +321,7 @@ def generate(
             typer.echo(f"  {kdl_file} -> {out_file}")
         except Exception as exc:
             if verbose:
+                typer.echo(f"ERROR {kdl_file}:", err=True)
                 typer.echo(traceback.format_exc(), err=True)
             else:
                 typer.echo(f"  ERROR {kdl_file}: {exc}", err=True)
@@ -395,9 +397,18 @@ def check(
     total_errors = 0
 
     for kdl_file in kdl_files:
-        _, errs = parse_module(
-            kdl_file.read_text(encoding="utf-8"), source_path=kdl_file
-        )
+        try:
+            _, errs = parse_module(
+                kdl_file.read_text(encoding="utf-8"), source_path=kdl_file
+            )
+        except Exception as exc:
+            if verbose:
+                typer.echo(f"ERROR {kdl_file}:", err=True)
+                typer.echo(traceback.format_exc(), err=True)
+            else:
+                typer.echo(f"  ERROR {kdl_file}: {exc}", err=True)
+            total_errors += 1
+            continue
         all_results.extend(errs)
 
         if errs:

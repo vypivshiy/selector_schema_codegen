@@ -146,7 +146,6 @@ class KdlNode:
     span: Span
 
     @classmethod
-    @classmethod
     def _value_type_annotation(cls, entry_value: object) -> str | None:
         if isinstance(entry_value, CSTValue) and entry_value.type_annotation:
             return entry_value.type_annotation.raw
