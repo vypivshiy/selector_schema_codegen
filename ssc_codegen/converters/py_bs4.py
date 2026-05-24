@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 from ssc_codegen.converters.base import ConverterContext, BaseConverter
 
 from ssc_codegen.ast import VariableType as VT
@@ -1824,8 +1826,12 @@ def _emit_rest_methods(
         lines.append(f"{i3})")
         lines.append(f"{i2}except httpx.HTTPError as _exc:")
         lines.append(f"{i3}return TransportErr(cause=repr(_exc))")
-        lines.append(f"{i2}_status, _headers, _body = ssc_parse_response(_resp)")
-        lines.append(f"{i2}_err = cls.ssc_dispatch_err(_status, _headers, _body)")
+        lines.append(
+            f"{i2}_status, _headers, _body = ssc_parse_response(_resp)"
+        )
+        lines.append(
+            f"{i2}_err = cls.ssc_dispatch_err(_status, _headers, _body)"
+        )
         lines.append(f"{i2}if _err is not None:")
         lines.append(f"{i3}return _err")
         lines.append(
@@ -1903,16 +1909,36 @@ def pre_error_response(node: a.ErrorResponse, _: ConverterContext):
 
 
 def register_runtime_file(
-    converter: BaseConverter, runtime_name: str = "sscgen_runtime"
-) -> None:
-    """Register a runtime module file provider on the converter."""
+    converter: BaseConverter,
+    runtime_name: str = "sscgen_runtime",
+    *,
+    include_fallback: bool = False,
+) -> Callable[[list[a.Node]], str]:
+    """Register a runtime module file provider on the converter.
+
+    Returns a callable ``generate_runtime(modules) -> str`` that produces
+    the runtime file content for a list of parsed modules, picking the one
+    with REST structs as the reference AST automatically.
+    """
+
+    def _apply_fallback(content: str) -> str:
+        if not include_fallback:
+            return content
+        return content.replace(
+            "_RE_HEX_ENTITY",
+            'FALLBACK_HTML_STR = "<html><body></body></html>"\n\n_RE_HEX_ENTITY',
+            1,
+        )
 
     @converter.file(f"{runtime_name}.py")
     def _runtime_provider(module_ast, meta):
-        content = runtime_module_content(module_ast)
-        if meta.get("_include_fallback_html"):
-            fallback = 'FALLBACK_HTML_STR = "<html><body></body></html>"\n\n'
-            content = content.replace(
-                "_RE_HEX_ENTITY", fallback + "_RE_HEX_ENTITY", 1
-            )
-        return content
+        return _apply_fallback(runtime_module_content(module_ast))
+
+    def _generate_runtime(modules: list[a.Node]) -> str:
+        ref = next(
+            (m for m in modules if _module_has_rest(m)),
+            modules[0],
+        )
+        return _apply_fallback(runtime_module_content(ref))
+
+    return _generate_runtime

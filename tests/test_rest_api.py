@@ -824,3 +824,13 @@ class TestSeparateRuntime:
         )
         pyast.parse(generated[""])
         pyast.parse(generated[f"{self.RUNTIME_NAME}.py"])
+
+    def test_ref_ast_picks_rest_module(self):
+        """The ref_ast selection must not crash on modules with non-REST structs."""
+        from ssc_codegen.converters.py_bs4 import register_runtime_file
+
+        non_rest_src = 'struct Item { field_name { css "div" } }'
+        module = _parse(non_rest_src)
+        converter = _get_all_converters()["PY_BASE_CONVERTER"]
+        register_runtime_file(converter, self.RUNTIME_NAME)
+        converter.convert_all(module, runtime_module=self.RUNTIME_NAME)

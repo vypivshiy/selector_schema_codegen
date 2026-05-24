@@ -419,13 +419,16 @@ def pre_struct_item(node: a.StructItem, ctx: ConverterContext):
 def pre_struct_list(node: a.StructList, ctx: ConverterContext):
     return _js_struct_header(node, ctx)
 
+
 @JS_CONVERTER(a.StructFlatList, post_callback="}")
 def pre_struct_flatlist(node: a.StructFlatList, ctx: ConverterContext):
     return _js_struct_header(node, ctx)
 
+
 @JS_CONVERTER(a.StructDict, post_callback="}")
 def pre_struct_dict(node: a.StructDict, ctx: ConverterContext):
     return _js_struct_header(node, ctx)
+
 
 @JS_CONVERTER(a.StructTable, post_callback="}")
 def pre_struct_table(node: a.StructTable, ctx: ConverterContext):
@@ -1964,7 +1967,9 @@ def _js_rest_method(node: a.RequestConfig, ctx: ConverterContext) -> list[str]:
 
     # Shared response extraction + dispatch
     parser_fn = (
-        "sscParseResponseAxios" if http_client == "axios" else "sscParseResponse"
+        "sscParseResponseAxios"
+        if http_client == "axios"
+        else "sscParseResponse"
     )
     parse_prefix = "" if http_client == "axios" else "await "
     lines.append(

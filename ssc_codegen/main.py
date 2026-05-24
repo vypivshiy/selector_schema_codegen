@@ -256,11 +256,14 @@ def generate(
 
         _runtime_name = runtime_name or "sscgen_runtime"
         meta["runtime_module"] = _runtime_name
-        meta["_include_fallback_html"] = target == Target.PY_LXML
-        register_runtime_file(converter, _runtime_name)
+        generate_runtime = register_runtime_file(
+            converter,
+            _runtime_name,
+            include_fallback=(target == Target.PY_LXML),
+        )
 
     # Phase 1: parse all KDL files
-    from ssc_codegen.ast import Module, Struct
+    from ssc_codegen.ast import Module
 
     parsed: list[tuple[Path, Module]] = []
     for kdl_file in kdl_files:
@@ -288,21 +291,9 @@ def generate(
 
     # Phase 2: write runtime file once (if -R is used)
     if separate_runtime and parsed:
-        from ssc_codegen.converters.py_bs4 import runtime_module_content
-
-        include_fallback = target == Target.PY_LXML
-        # Pick an AST that has REST structs so the runtime includes helpers
-        ref_ast = next(
-            (
-                ast
-                for _, ast in parsed
-                if any(isinstance(n, Struct) and n.is_rest for n in ast.body)
-            ),
-            parsed[0][1],
-        )
         runtime_path = output / f"{_runtime_name}.py"
         runtime_path.write_text(
-            runtime_module_content(ref_ast, include_fallback),
+            generate_runtime([ast for _, ast in parsed]),
             encoding="utf-8",
         )
         typer.echo(f"  -> {runtime_path}")
