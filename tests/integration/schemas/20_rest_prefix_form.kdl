@@ -1,0 +1,17 @@
+json User {
+    id int
+    name str
+}
+
+json Err {
+    code int
+    message str
+}
+
+(rest)struct API {
+    @request response=User """
+    GET /users/{{id}} HTTP/1.1
+    Host: api.example.com
+    """
+    @error 404 Err
+}

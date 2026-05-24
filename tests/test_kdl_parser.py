@@ -258,3 +258,41 @@ package {
         e.value.value for e in matrix.entries if isinstance(e, CSTArgEntry)
     ]
     assert matrix_vals == [1, 2, 3, 4, 5, 6, 7, 8, 9]
+
+
+# ── Type annotation propagation ─────────────────────────────────────────────
+
+
+class TestTypeAnnotationPropagation:
+    def test_type_annotation_on_arg_value(self):
+        doc = KDL2CSTParser().parse('node (array)"str"')
+        arg = doc.nodes[0].entries[0]
+        assert isinstance(arg, CSTArgEntry)
+        assert arg.value.type_annotation is not None
+        assert arg.value.type_annotation.raw == "(array)"
+
+    def test_type_annotation_on_property_value(self):
+        doc = KDL2CSTParser().parse("node prop=(u8)123")
+        prop = doc.nodes[0].entries[0]
+        assert isinstance(prop, CSTPropEntry)
+        assert prop.value.type_annotation is not None
+        assert prop.value.type_annotation.raw == "(u8)"
+
+    def test_type_annotation_on_node(self):
+        doc = KDL2CSTParser().parse('(published)date "1970-01-01"')
+        assert doc.nodes[0].type_annotation is not None
+        assert doc.nodes[0].type_annotation.raw == "(published)"
+
+    def test_no_type_annotation(self):
+        doc = KDL2CSTParser().parse('node "plain"')
+        assert doc.nodes[0].type_annotation is None
+        arg = doc.nodes[0].entries[0]
+        assert isinstance(arg, CSTArgEntry)
+        assert arg.value.type_annotation is None
+
+    def test_typed_bare_identifier_value(self):
+        doc = KDL2CSTParser().parse("node (array)str")
+        arg = doc.nodes[0].entries[0]
+        assert isinstance(arg, CSTArgEntry)
+        assert arg.value.type_annotation.raw == "(array)"
+        assert arg.value.value == "str"

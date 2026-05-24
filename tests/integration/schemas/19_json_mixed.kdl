@@ -1,0 +1,49 @@
+@doc "JSON parse + HTML parse coexistence."
+
+define RE-JSON-ARRAY=#"(\[.*\])"#
+
+json JsonAuthor {
+    name str
+    slug str
+}
+
+(array)json JsonQuote {
+    text str
+    author JsonAuthor
+    tags (array)str
+    score int
+}
+
+struct TinyNested {
+    title {
+        css "h1"
+        text
+        trim
+    }
+}
+
+struct JsonMixed {
+    @init {
+        raw-json {
+            css "script#test-data"
+            text
+            re RE-JSON-ARRAY
+        }
+    }
+
+    html-title {
+        css "title"
+        text
+        trim
+    }
+
+    json-payload {
+        @raw-json
+        jsonify JsonQuote
+    }
+
+    nested-item {
+        css ".single"
+        nested TinyNested
+    }
+}

@@ -1,0 +1,11 @@
+json Q {
+    x str
+}
+
+struct M {
+    f {
+        css "s"
+        text
+        jsonify Q path="0.x"
+    }
+}

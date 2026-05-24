@@ -1,0 +1,7 @@
+json User { id int; name str }
+struct API type=rest {
+    @request response="" """
+    GET /users/{{id}} HTTP/1.1
+    Host: api.example.com
+    """
+}

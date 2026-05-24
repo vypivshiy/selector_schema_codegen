@@ -1,0 +1,9 @@
+json Err { code int; message str }
+json User { id int; name str }
+struct API type=rest {
+    @error 200 Err detail="msg"
+    @request response=User """
+    GET /users/{{id}} HTTP/1.1
+    Host: api.example.com
+    """
+}

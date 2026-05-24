@@ -24,6 +24,8 @@ from ssc_codegen.ast import (
     SplitDoc,
     StartParse,
     Struct,
+    StructRest,
+    StructTable,
     TableConfig,
     TableMatchKey,
     TableRow,
@@ -34,7 +36,7 @@ from ssc_codegen.ast import (
     Value,
 )
 from ssc_codegen.ast.predicate_ops import LogicNot, PredContains, PredEq
-from ssc_codegen.ast.types import StructType, VariableType
+from ssc_codegen.ast.types import VariableType
 from ssc_codegen.core import parse_module
 from ssc_codegen.kdl import KDL2CSTParser, KDLParseError, Severity
 
@@ -448,14 +450,12 @@ def test_parser_resolves_json_definition_field_shapes():
         == "TitlePosterImageModel"
     )
     assert results_fields["titlePosterImageModel"].is_array is False
-    # NOTE: (array) type annotation prefix is lost at CST level — is_array is always False
-    assert results_fields["topCredits"].is_array is False
+    assert results_fields["topCredits"].is_array is True
     assert results_fields["topCredits"].ref_name == ""
     assert results_fields["seriesId"].is_optional is True
     assert results_fields["seriesSeasonText"].is_optional is True
 
-    # NOTE: same CST limitation for nested json defs
-    assert content_fields["results"].is_array is False
+    assert content_fields["results"].is_array is True
     assert content_fields["results"].ref_name == "Results"
     assert content_fields["hasExactMatches"].is_optional is False
 
@@ -464,7 +464,7 @@ def test_parser_handles_table_struct_special_nodes_and_field_types():
     module = _parse_example("examples/booksToScrape.kdl")
     product_info = _struct(module, "ProductInfo")
 
-    assert product_info.struct_type == StructType.TABLE
+    assert isinstance(product_info, StructTable)
 
     table_cfg = next(
         node for node in product_info.body if isinstance(node, TableConfig)
@@ -487,7 +487,16 @@ def test_parser_handles_table_struct_special_nodes_and_field_types():
     assert isinstance(start_parse, StartParse)
     assert start_parse.use_pre_validate is True
     assert start_parse.use_split_doc is False
-    assert start_parse.fields_table == (table_cfg, table_rows, table_match)
+    assert isinstance(product_info, StructTable)
+    assert (
+        product_info.table_config,
+        product_info.table_row,
+        product_info.table_match_key,
+    ) == (
+        table_cfg,
+        table_rows,
+        table_match,
+    )
 
     assert value_node.ret == VariableType.STRING
     assert isinstance(pre_validate.body[0], Assert)
@@ -641,7 +650,6 @@ def test_json_lint_duplicate_name():
     assert any("duplicate json definition 'Foo'" in e for e in errs)
 
 
-
 def test_json_lint_empty_path_property():
     errs = _lint_errors('json Foo path="" { x str }')
     assert any("'path' property must be a non-empty string" in e for e in errs)
@@ -717,16 +725,16 @@ def test_rest_response_undefined_json():
         '    """\n'
         "}\n"
     )
-    assert any("references undefined json definition 'Product'" in e for e in errs)
+    assert any(
+        "references undefined json definition 'Product'" in e for e in errs
+    )
 
 
 def test_rest_error_undefined_json():
-    errs = _lint_errors(
-        "struct API type=rest {\n"
-        "    @error 404 NotFound\n"
-        "}\n"
+    errs = _lint_errors("struct API type=rest {\n    @error 404 NotFound\n}\n")
+    assert any(
+        "references undefined json definition 'NotFound'" in e for e in errs
     )
-    assert any("references undefined json definition 'NotFound'" in e for e in errs)
 
 
 def test_rest_response_valid_json():
@@ -744,10 +752,7 @@ def test_rest_response_valid_json():
 
 def test_rest_error_valid_json():
     errs = _lint_errors(
-        "json Err { code int }\n"
-        "struct API type=rest {\n"
-        "    @error 404 Err\n"
-        "}\n"
+        "json Err { code int }\nstruct API type=rest {\n    @error 404 Err\n}\n"
     )
     assert not any("references undefined" in e for e in errs)
 
@@ -820,14 +825,7 @@ def test_json_define_expansion_multiple_jsons():
 def test_json_define_expansion_lint_ok():
     """Define expansion passes lint with no errors."""
     errs = _lint_errors(
-        "define F {\n"
-        "    x int\n"
-        "    y str\n"
-        "}\n"
-        "json A {\n"
-        "    F\n"
-        "    z bool\n"
-        "}\n"
+        "define F {\n    x int\n    y str\n}\njson A {\n    F\n    z bool\n}\n"
     )
     assert len(errs) == 0
 
@@ -835,13 +833,7 @@ def test_json_define_expansion_lint_ok():
 def test_json_define_expansion_duplicate_field():
     """Duplicate field across define and direct field is caught."""
     errs = _lint_errors(
-        "define F {\n"
-        "    x int\n"
-        "}\n"
-        "json A {\n"
-        "    F\n"
-        "    x str\n"
-        "}\n"
+        "define F {\n    x int\n}\njson A {\n    F\n    x str\n}\n"
     )
     assert any("duplicate json field 'x'" in e for e in errs)
 
@@ -861,7 +853,9 @@ def test_json_define_expansion_ref_in_define():
         "}\n"
     )
     item = _json_def(module, "Item")
-    tag_field = next(f for f in item.body if isinstance(f, JsonDefField) and f.name == "tag")
+    tag_field = next(
+        f for f in item.body if isinstance(f, JsonDefField) and f.name == "tag"
+    )
     assert tag_field.ref_name == "Tag"
     assert tag_field.ret == VariableType.JSON
 
@@ -870,3 +864,183 @@ def test_json_define_expansion_bare_name_without_define_is_field():
     """A bare name that's NOT a define gets a 'requires a type' error."""
     errs = _lint_errors("json A {\n    mystery\n}\n")
     assert any("requires a type" in e for e in errs)
+
+
+# ── JSON field type / modifier / jsonify / REST form tests (file-based) ───────
+
+_FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def _load_fixture(*parts: str) -> str:
+    return (_FIXTURES.joinpath(*parts)).read_text(encoding="utf-8-sig")
+
+
+def _json_field(module, json_name: str, field_name: str) -> JsonDefField:
+    jdef = _json_def(module, json_name)
+    return next(
+        f
+        for f in jdef.body
+        if isinstance(f, JsonDefField) and f.name == field_name
+    )
+
+
+class TestJsonFieldTypes:
+    def test_str_field(self):
+        m = _parse(_load_fixture("json_types", "str.kdl"))
+        f = _json_field(m, "F", "x")
+        assert f.ret == VariableType.STRING
+        assert f.is_array is False
+        assert f.is_optional is False
+
+    def test_int_field(self):
+        m = _parse(_load_fixture("json_types", "int.kdl"))
+        assert _json_field(m, "F", "x").ret == VariableType.INT
+
+    def test_float_field(self):
+        m = _parse(_load_fixture("json_types", "float.kdl"))
+        assert _json_field(m, "F", "x").ret == VariableType.FLOAT
+
+    def test_bool_field(self):
+        m = _parse(_load_fixture("json_types", "bool.kdl"))
+        assert _json_field(m, "F", "x").ret == VariableType.BOOL
+
+    def test_null_field(self):
+        m = _parse(_load_fixture("json_types", "null.kdl"))
+        assert _json_field(m, "F", "x").ret == VariableType.NULL
+
+    def test_array_str(self):
+        m = _parse(_load_fixture("json_types", "array_str.kdl"))
+        f = _json_field(m, "F", "x")
+        assert f.ret == VariableType.LIST_STRING
+        assert f.is_array is True
+
+    def test_array_int(self):
+        m = _parse(_load_fixture("json_types", "array_int.kdl"))
+        f = _json_field(m, "F", "x")
+        assert f.ret == VariableType.LIST_INT
+        assert f.is_array is True
+
+    def test_optional_suffix(self):
+        m = _parse(_load_fixture("json_types", "optional.kdl"))
+        f = _json_field(m, "F", "x")
+        assert f.is_optional is True
+        assert f.ret == VariableType.STRING
+
+    def test_ref_field(self):
+        m = _parse(_load_fixture("json_types", "ref_field.kdl"))
+        f = _json_field(m, "B", "ref")
+        assert f.ref_name == "A"
+        assert f.ret == VariableType.JSON
+
+    def test_array_ref(self):
+        m = _parse(_load_fixture("json_types", "array_ref.kdl"))
+        f = _json_field(m, "B", "items")
+        assert f.ref_name == "A"
+        assert f.is_array is True
+
+
+class TestJsonFieldModifiers:
+    def test_omitempty(self):
+        m = _parse(_load_fixture("json_modifiers", "omitempty.kdl"))
+        f = _json_field(m, "F", "x")
+        assert f.may_miss is True
+        assert f.skip is False
+
+    def test_skip(self):
+        m = _parse(_load_fixture("json_modifiers", "skip.kdl"))
+        f = _json_field(m, "F", "x")
+        assert f.skip is True
+
+    def test_skip_without_type_infers_str(self):
+        m = _parse(_load_fixture("json_modifiers", "skip_no_type.kdl"))
+        f = _json_field(m, "F", "x")
+        assert f.skip is True
+        assert f.ret == VariableType.STRING
+
+    def test_alias(self):
+        m = _parse(_load_fixture("json_modifiers", "alias.kdl"))
+        f = _json_field(m, "F", "x")
+        assert f.alias == "original-key"
+
+    def test_alias_with_ref(self):
+        m = _parse(_load_fixture("json_modifiers", "alias_ref.kdl"))
+        f = _json_field(m, "B", "x")
+        assert f.alias == "orig-ref"
+        assert f.ref_name == "A"
+
+    def test_unknown_modifier_errors(self):
+        errs = _lint_errors(
+            _load_fixture("json_modifiers", "bogus_modifier.kdl")
+        )
+        assert any("unknown json field modifier '@bogus'" in e for e in errs)
+
+    def test_optional_modifier_is_error(self):
+        errs = _lint_errors(
+            _load_fixture("json_modifiers", "optional_modifier.kdl")
+        )
+        assert any("unknown json field modifier '@optional'" in e for e in errs)
+
+
+class TestJsonDefPathProperty:
+    def test_path_stored(self):
+        m = _parse(_load_fixture("json_def_path", "with_path.kdl"))
+        assert _json_def(m, "F").path == "data.items"
+
+    def test_is_array_default_false(self):
+        m = _parse(_load_fixture("json_def_path", "plain.kdl"))
+        assert _json_def(m, "F").is_array is False
+
+    def test_is_array_prefix(self):
+        m = _parse(_load_fixture("json_def_path", "array.kdl"))
+        assert _json_def(m, "F").is_array is True
+
+    def test_array_with_path_ok(self):
+        errs = _lint_errors(
+            _load_fixture("json_def_path", "array_with_path.kdl")
+        )
+        assert not errs
+
+
+class TestJsonifyAst:
+    def _jsonify_node(self, *fixture_parts: str) -> Jsonify:
+        module = _parse(_load_fixture(*fixture_parts))
+        struct = _struct(module, "M")
+        field = _field(struct, "f")
+        return next(n for n in field.body if isinstance(n, Jsonify))
+
+    def test_no_path(self):
+        j = self._jsonify_node("jsonify", "no_path.kdl")
+        assert j.schema_name == "Q"
+        assert j.path == ""
+        assert j.is_array is False
+
+    def test_with_path(self):
+        j = self._jsonify_node("jsonify", "with_path.kdl")
+        assert j.path == "0.x"
+
+    def test_array_def_is_array(self):
+        j = self._jsonify_node("jsonify", "array_def.kdl")
+        assert j.is_array is True
+
+    def test_undefined_schema_errors(self):
+        errs = _lint_errors(_load_fixture("jsonify", "undefined_schema.kdl"))
+        assert any("not found" in e.lower() for e in errs)
+
+
+class TestRestStructForms:
+    def test_prefix_form_creates_struct_rest(self):
+        m = _parse(_load_fixture("rest_forms", "prefix.kdl"))
+        s = next(n for n in m.body if isinstance(n, Struct))
+        assert isinstance(s, StructRest)
+
+    def test_property_form_creates_struct_rest(self):
+        m = _parse(_load_fixture("rest_forms", "property.kdl"))
+        s = next(n for n in m.body if isinstance(n, Struct))
+        assert isinstance(s, StructRest)
+
+    def test_both_forms_same_request_count(self):
+        m_prefix = _parse(_load_fixture("rest_forms", "prefix.kdl"))
+        m_prop = _parse(_load_fixture("rest_forms", "property.kdl"))
+        s_prefix = next(n for n in m_prefix.body if isinstance(n, StructRest))
+        s_prop = next(n for n in m_prop.body if isinstance(n, StructRest))
+        assert len(s_prefix.request_configs) == len(s_prop.request_configs)

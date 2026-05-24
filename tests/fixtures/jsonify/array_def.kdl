@@ -1,0 +1,11 @@
+(array)json Q {
+    x str
+}
+
+struct M {
+    f {
+        css "s"
+        text
+        jsonify Q
+    }
+}

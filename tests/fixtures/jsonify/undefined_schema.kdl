@@ -1,0 +1,7 @@
+struct M {
+    f {
+        css "s"
+        text
+        jsonify NoSuchSchema
+    }
+}

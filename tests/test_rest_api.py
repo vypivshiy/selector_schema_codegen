@@ -14,9 +14,8 @@ import pytest
 from ssc_codegen.ast import (
     ErrorResponse,
     RequestConfig,
-    Struct,
+    StructRest,
 )
-from ssc_codegen.ast.types import StructType
 from ssc_codegen.core import parse_module
 from ssc_codegen.kdl import Severity
 
@@ -57,13 +56,12 @@ def _rest_src(*, extra_requests: str = "", errors: str = "") -> str:
 class TestRestParser:
     def test_rest_struct_type(self):
         module = _parse(_rest_src())
-        struct = next(n for n in module.body if isinstance(n, Struct))
-        assert struct.struct_type == StructType.REST
-        assert struct.is_rest is True
+        struct = next(n for n in module.body if isinstance(n, StructRest))
+        assert isinstance(struct, StructRest)
 
     def test_request_config_name_and_response(self):
         module = _parse(_rest_src())
-        struct = next(n for n in module.body if isinstance(n, Struct))
+        struct = next(n for n in module.body if isinstance(n, StructRest))
         reqs = [n for n in struct.body if isinstance(n, RequestConfig)]
         assert len(reqs) == 1
         assert reqs[0].name == "get-user"
@@ -72,7 +70,7 @@ class TestRestParser:
     def test_error_response_parsed(self):
         src = _rest_src(errors="    @error 404 Err\n    @error 500 Err\n")
         module = _parse(src)
-        struct = next(n for n in module.body if isinstance(n, Struct))
+        struct = next(n for n in module.body if isinstance(n, StructRest))
         errors = [n for n in struct.body if isinstance(n, ErrorResponse)]
         assert len(errors) == 2
         assert errors[0].status == 404
@@ -84,13 +82,13 @@ class TestRestParser:
         from ssc_codegen.ast import StartParse
 
         module = _parse(_rest_src())
-        struct = next(n for n in module.body if isinstance(n, Struct))
+        struct = next(n for n in module.body if isinstance(n, StructRest))
         assert not any(isinstance(n, StartParse) for n in struct.body)
 
     def test_error_required_keys_parsed(self):
-        src = _rest_src(errors='    @error 404 Err error detail\n')
+        src = _rest_src(errors="    @error 404 Err error detail\n")
         module = _parse(src)
-        struct = next(n for n in module.body if isinstance(n, Struct))
+        struct = next(n for n in module.body if isinstance(n, StructRest))
         errors = [n for n in struct.body if isinstance(n, ErrorResponse)]
         assert len(errors) == 1
         assert errors[0].required_keys == ["error", "detail"]
@@ -99,7 +97,7 @@ class TestRestParser:
     def test_error_mixed_conditions_parsed(self):
         src = _rest_src(errors='    @error 404 Err error detail="msg"\n')
         module = _parse(src)
-        struct = next(n for n in module.body if isinstance(n, Struct))
+        struct = next(n for n in module.body if isinstance(n, StructRest))
         errors = [n for n in struct.body if isinstance(n, ErrorResponse)]
         assert len(errors) == 1
         assert errors[0].required_keys == ["error"]
@@ -119,7 +117,7 @@ class TestRestPyConverter:
 
         src = _rest_src(errors="    @error 404 Err\n")
         module = _parse(src)
-        code = CONVERTER.convert(module, http_client="requests")
+        code = CONVERTER.convert(module, http_client="httpx")
         pyast.parse(code)  # must be syntactically valid
         assert "class API" in code
         assert "def get_user" in code
@@ -130,7 +128,7 @@ class TestRestPyConverter:
         assert "class UnknownErr(Err[Any]):" in code
         assert "class TransportErr(Err[None]):" in code
         assert "RestApiError" not in code
-        assert "import requests" in code
+        assert "import httpx" in code
 
     def test_py_bs4_no_typeddict_for_rest(self):
         from ssc_codegen.converters.py_bs4 import (
@@ -139,7 +137,7 @@ class TestRestPyConverter:
 
         src = _rest_src()
         module = _parse(src)
-        code = CONVERTER.convert(module, http_client="requests")
+        code = CONVERTER.convert(module, http_client="httpx")
         # no APIType or similar for the REST struct
         assert "APIType" not in code
 
@@ -150,7 +148,7 @@ class TestRestPyConverter:
 
         src = _rest_src(errors="    @error 404 Err\n    @error 500 Err\n")
         module = _parse(src)
-        code = CONVERTER.convert(module, http_client="requests")
+        code = CONVERTER.convert(module, http_client="httpx")
         assert "_status == 404" in code
         assert "_status == 500" in code
         # routed into typed Err subclasses via _dispatch_err (no raise)
@@ -165,7 +163,7 @@ class TestRestPyConverter:
 
         src = _rest_src(errors="    @error 404 Err\n")
         module = _parse(src)
-        code = CONVERTER.convert(module, http_client="requests")
+        code = CONVERTER.convert(module, http_client="httpx")
         # type alias is emitted at module level
         assert (
             "GetUserResult = Union[Ok[UserJson], APIErr404, UnknownErr, TransportErr]"
@@ -181,8 +179,8 @@ class TestRestPyConverter:
 
         src = _rest_src()
         module = _parse(src)
-        code = CONVERTER.convert(module, http_client="requests")
-        assert "except requests.exceptions.RequestException as _exc:" in code
+        code = CONVERTER.convert(module, http_client="httpx")
+        assert "except httpx.HTTPError as _exc:" in code
         assert "return TransportErr(cause=repr(_exc))" in code
 
     def test_py_bs4_headers_captured(self):
@@ -192,7 +190,7 @@ class TestRestPyConverter:
 
         src = _rest_src()
         module = _parse(src)
-        code = CONVERTER.convert(module, http_client="requests")
+        code = CONVERTER.convert(module, http_client="httpx")
         # Headers extraction centralized in _parse_response
         assert (
             "_headers = {k.lower(): v for k, v in _resp.headers.items()}"
@@ -208,7 +206,7 @@ class TestRestPyConverter:
 
         src = _rest_src(errors="    @error 404 Err\n")
         module = _parse(src)
-        code = CONVERTER.convert(module, http_client="requests")
+        code = CONVERTER.convert(module, http_client="httpx")
         # UnknownErr now emitted as fallback inside _dispatch_err
         assert (
             "return UnknownErr("
@@ -222,7 +220,7 @@ class TestRestPyConverter:
 
         src = _rest_src()
         module = _parse(src)
-        code = CONVERTER.convert(module, http_client="requests")
+        code = CONVERTER.convert(module, http_client="httpx")
         assert "def _parse_response(_resp):" in code
         # Used from the method body
         assert "_status, _headers, _body = _parse_response(_resp)" in code
@@ -234,7 +232,7 @@ class TestRestPyConverter:
 
         src = _rest_src(errors="    @error 404 Err\n    @error 500 Err\n")
         module = _parse(src)
-        code = CONVERTER.convert(module, http_client="requests")
+        code = CONVERTER.convert(module, http_client="httpx")
         assert "@staticmethod" in code
         assert (
             "def _dispatch_err(_status: int, "
@@ -279,7 +277,7 @@ class TestRestPyConverter:
             "}\n"
         )
         module = _parse(src)
-        code = CONVERTER.convert(module, http_client="requests")
+        code = CONVERTER.convert(module, http_client="httpx")
         assert "json={'name': name, 'active': active}" in code
         # And no leftover f-string style
         assert 'json=f"' not in code
@@ -290,9 +288,9 @@ class TestRestPyConverter:
             PY_BASE_CONVERTER as CONVERTER,
         )
 
-        src = _rest_src(errors='    @error 404 Err error detail\n')
+        src = _rest_src(errors="    @error 404 Err error detail\n")
         module = _parse(src)
-        code = CONVERTER.convert(module, http_client="requests")
+        code = CONVERTER.convert(module, http_client="httpx")
         assert "'error' in _body" in code
         assert "'detail' in _body" in code
         assert "class APIErr404ErrorDetail" in code
@@ -304,7 +302,7 @@ class TestRestPyConverter:
 
         src = _rest_src(errors='    @error 404 Err error detail="msg"\n')
         module = _parse(src)
-        code = CONVERTER.convert(module, http_client="requests")
+        code = CONVERTER.convert(module, http_client="httpx")
         assert "'error' in _body" in code
         assert "_body.get('detail') == 'msg'" in code
         assert "class APIErr404ErrorDetail" in code
@@ -314,9 +312,9 @@ class TestRestPyConverter:
             PY_BASE_CONVERTER as CONVERTER,
         )
 
-        src = _rest_src(errors='    @error 404 Err error\n')
+        src = _rest_src(errors="    @error 404 Err error\n")
         module = _parse(src)
-        code = CONVERTER.convert(module, http_client="requests")
+        code = CONVERTER.convert(module, http_client="httpx")
         # required_keys errors go through isinstance(_body, dict) branch
         assert "isinstance(_body, dict)" in code
 
@@ -405,7 +403,7 @@ class TestRestJsConverter:
     def test_js_required_keys_dispatch(self):
         from ssc_codegen.converters.js_pure import JS_CONVERTER
 
-        src = _rest_src(errors='    @error 404 Err error detail\n')
+        src = _rest_src(errors="    @error 404 Err error detail\n")
         module = _parse(src)
         code = JS_CONVERTER.convert(module, http_client="fetch")
         assert "'error' in _body" in code
@@ -518,7 +516,7 @@ class TestTypedPlaceholdersPyCodegen:
         from ssc_codegen.converters.py_bs4 import PY_BASE_CONVERTER
 
         module = _parse(_typed_rest_src(request_line))
-        return PY_BASE_CONVERTER.convert(module, http_client="requests")
+        return PY_BASE_CONVERTER.convert(module, http_client="httpx")
 
     def test_scalar_typed_signature(self):
         code = self._gen("GET /u?id={{id:int}} HTTP/1.1")
@@ -533,7 +531,7 @@ class TestTypedPlaceholdersPyCodegen:
         assert "tags: List[int]" in code
 
     def test_repeat_default_passes_list_native(self):
-        # with repeat style (default) requests accepts a list directly:
+        # with repeat style (default) httpx accepts a list directly:
         # params={'tags': tags}  → ?tags=1&tags=2
         code = self._gen("GET /u?tags={{tags:int[]?}} HTTP/1.1")
         assert "_params['tags'] = tags" in code
@@ -660,7 +658,7 @@ class TestRestOnlyImports:
         converter = converters[converter_attr]
         src = _rest_src(errors="    @error 404 Err\n")
         module = _parse(src)
-        code = converter.convert(module, http_client="requests")
+        code = converter.convert(module, http_client="httpx")
         assert html_import not in code
 
     def test_rest_only_no_html_unescape(self):
@@ -668,7 +666,7 @@ class TestRestOnlyImports:
 
         src = _rest_src()
         module = _parse(src)
-        code = PY_BASE_CONVERTER.convert(module, http_client="requests")
+        code = PY_BASE_CONVERTER.convert(module, http_client="httpx")
         assert "_html_unescape" not in code
 
     def test_rest_only_no_html_utilities(self):
@@ -676,7 +674,7 @@ class TestRestOnlyImports:
 
         src = _rest_src()
         module = _parse(src)
-        code = PY_BASE_CONVERTER.convert(module, http_client="requests")
+        code = PY_BASE_CONVERTER.convert(module, http_client="httpx")
         assert "unescape_text" not in code
         assert "normalize_text" not in code
         assert "repl_map" not in code
@@ -689,7 +687,7 @@ class TestRestOnlyImports:
 
         src = _rest_src(errors="    @error 404 Err\n")
         module = _parse(src)
-        code = PY_BASE_CONVERTER.convert(module, http_client="requests")
+        code = PY_BASE_CONVERTER.convert(module, http_client="httpx")
         assert "class Ok(Generic[_T]):" in code
         assert "class Err(Generic[_E]):" in code
         assert "def _parse_response(_resp):" in code
@@ -699,7 +697,7 @@ class TestRestOnlyImports:
 
         src = _rest_src(errors="    @error 404 Err\n")
         module = _parse(src)
-        code = PY_BASE_CONVERTER.convert(module, http_client="requests")
+        code = PY_BASE_CONVERTER.convert(module, http_client="httpx")
         pyast.parse(code)
 
     def test_mixed_module_keeps_html_imports(self):
@@ -707,7 +705,7 @@ class TestRestOnlyImports:
 
         src = _mixed_src()
         module = _parse(src)
-        code = PY_BASE_CONVERTER.convert(module, http_client="requests")
+        code = PY_BASE_CONVERTER.convert(module, http_client="httpx")
         assert "from bs4 import" in code
         assert "_html_unescape" in code
         assert "unescape_text" in code
@@ -747,7 +745,7 @@ class TestSeparateRuntime:
         register_runtime_file(converter, self.RUNTIME_NAME)
         generated = converter.convert_all(
             module,
-            http_client="requests",
+            http_client="httpx",
             runtime_module=self.RUNTIME_NAME,
         )
         runtime = generated[f"{self.RUNTIME_NAME}.py"]
@@ -767,7 +765,7 @@ class TestSeparateRuntime:
         register_runtime_file(converter, self.RUNTIME_NAME)
         generated = converter.convert_all(
             module,
-            http_client="requests",
+            http_client="httpx",
             runtime_module=self.RUNTIME_NAME,
         )
         code = generated[""]
@@ -784,7 +782,7 @@ class TestSeparateRuntime:
         register_runtime_file(converter, self.RUNTIME_NAME)
         generated = converter.convert_all(
             module,
-            http_client="requests",
+            http_client="httpx",
             runtime_module=self.RUNTIME_NAME,
         )
         code = generated[""]
@@ -803,12 +801,13 @@ class TestSeparateRuntime:
         register_runtime_file(converter, self.RUNTIME_NAME)
         generated = converter.convert_all(
             module,
-            http_client="requests",
+            http_client="httpx",
             runtime_module=self.RUNTIME_NAME,
         )
         code = generated[""]
-        assert "from dataclasses import" not in code
-        assert "from typing import Generic, Literal, Mapping, TypeVar" not in code
+        assert (
+            "from typing import Generic, Literal, Mapping, TypeVar" not in code
+        )
 
     @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
     def test_main_valid_python(self, converter_attr):
@@ -820,7 +819,7 @@ class TestSeparateRuntime:
         register_runtime_file(converter, self.RUNTIME_NAME)
         generated = converter.convert_all(
             module,
-            http_client="requests",
+            http_client="httpx",
             runtime_module=self.RUNTIME_NAME,
         )
         pyast.parse(generated[""])

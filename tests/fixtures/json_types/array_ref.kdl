@@ -1,0 +1,7 @@
+json A {
+    id int
+}
+
+json B {
+    items (array)A
+}

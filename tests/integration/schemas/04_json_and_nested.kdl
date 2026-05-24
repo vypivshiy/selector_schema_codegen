@@ -1,6 +1,6 @@
 @doc "Focused coverage: json schemas, jsonify, nested structs and @init re-use."
 
-define RE-JSON-ARRAY=#"(\[.*\])"#
+define RE-JSON-ARRAY=#"(?s)(\[.*\])"#
 
 define CLEAN-TEXT {
     text

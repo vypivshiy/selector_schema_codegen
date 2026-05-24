@@ -1,0 +1,10 @@
+json User { id int; name str }
+struct API type=rest {
+    @request response=User """
+    POST /users HTTP/1.1
+    Host: api.example.com
+    Content-Type: application/json
+
+    {"name": "{{name}}", "active": {{active:bool}}}
+    """
+}

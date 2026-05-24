@@ -2,10 +2,9 @@
 
 from pathlib import Path
 
-import pytest
 
 from ssc_codegen.ast import (
-    Struct,
+    StructBase,
     TypeDef,
     Fmt,
     Nested,
@@ -27,24 +26,22 @@ def _parse_file(path):
 
 
 def _error_messages(diagnostics):
-    return [
-        d.message for d in diagnostics if d.severity == Severity.ERROR
-    ]
+    return [d.message for d in diagnostics if d.severity == Severity.ERROR]
 
 
-def _structs(module) -> list[Struct]:
-    return [n for n in module.body if isinstance(n, Struct)]
+def _structs(module) -> list[StructBase]:
+    return [n for n in module.body if isinstance(n, StructBase)]
 
 
-def _struct(module, name: str) -> Struct:
+def _struct(module, name: str) -> StructBase:
     return next(s for s in _structs(module) if s.name == name)
 
 
-def _field(struct: Struct, name: str):
+def _field(struct: StructBase, name: str):
     return next(n for n in struct.body if getattr(n, "name", None) == name)
 
 
-def _field_ops(struct: Struct, field_name: str) -> list:
+def _field_ops(struct: StructBase, field_name: str) -> list:
     f = _field(struct, field_name)
     return f.body
 
