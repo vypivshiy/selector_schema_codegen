@@ -146,5 +146,9 @@ test_schemas/
 .idea/inspectionProfiles/Project_Default.xml
 .idea/libraries/Dart_SDK.xml
 
+# Node.js
+node_modules/
+package-lock.json
+
 # slopmachines
 .claude/*

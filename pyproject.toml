@@ -64,6 +64,7 @@ dev = [
     "mypy>=1.14.1",
     "parsel>=1.9.1",
     "pytest>=8.3.4",
+    "respx>=0.23.1",
     "ruff>=0.9.3",
     "selectolax>=0.3.27",
 ]

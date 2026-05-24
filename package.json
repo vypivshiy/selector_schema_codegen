@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "description": "Dev dependencies for JS integration tests",
+  "devDependencies": {
+    "jsdom": "^26"
+  }
+}

@@ -122,3 +122,14 @@ uv build --wheel         # build wheel
 uv run pytest            # run tests
 uv run ruff check ssc_codegen/
 ```
+
+### Test dependencies
+
+Python tests require only `uv sync`. JS integration tests additionally need:
+
+```bash
+npm install      # installs jsdom (dev dependency in package.json)
+```
+
+Node.js must be installed and available as `node` in PATH. JS tests are automatically skipped if Node.js is not found.
+```
