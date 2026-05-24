@@ -7,8 +7,13 @@ from pathlib import Path
 from ssc_codegen.ast import (
     JsonDef,
     Module,
-    Struct,
-    StructType,
+    StructBase,
+    StructItem,
+    StructList,
+    StructFlatList,
+    StructDict,
+    StructTable,
+    StructRest,
     TransformDef,
     TransformTarget,
 )
@@ -45,7 +50,7 @@ _KDL_TEXT_ENCODING = "utf-8-sig"
 
 def handle_struct(
     node: KdlNode, module: Module, ctx: ParseContext, lint: LintContext
-) -> Struct:
+) -> StructBase:
     lint_struct_node(node, module, ctx, lint)
     raw = node.type_annotation
     type_ = (
@@ -60,25 +65,21 @@ def handle_struct(
     keep_order = node.properties.get(
         "keep-order", KdlArg(value=False, span=node.span, is_identifier=False)
     ).value
-    match type_:
-        case "item":
-            st_type = StructType.ITEM
-        case "list":
-            st_type = StructType.LIST
-        case "table":
-            st_type = StructType.TABLE
-        case "dict":
-            st_type = StructType.DICT
-        case "flat":
-            st_type = StructType.FLAT
-        case "rest":
-            st_type = StructType.REST
-        case _:
-            raise BuildTimeError(f"Unknown struct type: {type_}")
-    struct = Struct(
+    name = str(node.args[0].value)
+    cls_map: dict[str, type[StructBase]] = {
+        "item": StructItem,
+        "list": StructList,
+        "flat": StructFlatList,
+        "dict": StructDict,
+        "table": StructTable,
+        "rest": StructRest,
+    }
+    struct_cls = cls_map.get(type_)
+    if struct_cls is None:
+        raise BuildTimeError(f"Unknown struct type: {type_}")
+    struct = struct_cls(
         parent=module,
-        name=str(node.args[0].value),
-        struct_type=st_type,
+        name=name,
         keep_order=keep_order,
     )
     ctx.structs[struct.name] = struct

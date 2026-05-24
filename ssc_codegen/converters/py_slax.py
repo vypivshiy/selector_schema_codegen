@@ -9,7 +9,6 @@ from ssc_codegen.ast import VariableType as VT
 import ssc_codegen.ast as a
 
 from ssc_codegen.converters import py_bs4
-from ssc_codegen.converters import py_helpers
 
 
 PY_SLAX_CONVERTER = py_bs4.PY_BASE_CONVERTER.extend()
@@ -30,7 +29,7 @@ def pre_imports(node: a.Imports, ctx: ConverterContext):
             "from dataclasses import dataclass",
             "from typing import TypedDict, Optional, Any, List, Dict, Union, Literal",
         ]
-        base_imports.extend(py_helpers.NOT_REQUIRED_IMPORT)
+        base_imports.extend(py_bs4.NOT_REQUIRED_IMPORT)
     else:
         base_imports = [
             "import json",
@@ -39,10 +38,10 @@ def pre_imports(node: a.Imports, ctx: ConverterContext):
             "from dataclasses import dataclass",
             "from typing import TypedDict, Optional, Any, List, Dict, Union, Literal",
         ]
-        if not py_helpers.module_is_rest_only(node):
+        if not py_bs4.module_is_rest_only(node):
             base_imports.append("from html import unescape as _html_unescape")
-        base_imports.extend(py_helpers.NOT_REQUIRED_IMPORT)
-        base_imports.extend(py_helpers.rest_imports(node))
+        base_imports.extend(py_bs4.NOT_REQUIRED_IMPORT)
+        base_imports.extend(py_bs4.rest_imports(node))
 
     transform_imports = sorted(node.transform_imports.get("py", set()))
 
@@ -52,11 +51,11 @@ def pre_imports(node: a.Imports, ctx: ConverterContext):
 @PY_SLAX_CONVERTER.post(a.Imports)
 def post_imports(node: a.Imports, ctx: ConverterContext):
     lines = []
-    if not py_helpers.module_is_rest_only(node):
+    if not py_bs4.module_is_rest_only(node):
         lines.append(
             "from selectolax.lexbor import LexborHTMLParser as HTMLParser, LexborNode as Node"
         )
-    lines.extend(py_helpers.http_client_import(ctx))
+    lines.extend(py_bs4.http_client_import(ctx))
     return lines
 
 
@@ -67,7 +66,7 @@ def pre_utilities(node: a.Utilities, ctx: ConverterContext):
 
 @PY_SLAX_CONVERTER(a.Init)
 def pre_init(node: a.Init, ctx: ConverterContext):
-    if isinstance(node.parent, a.Struct) and node.parent.is_rest:
+    if isinstance(node.parent, a.StructRest):
         return None
     init_node_names: list[str] = []
     for i in node.body:

@@ -52,7 +52,8 @@ from ssc_codegen.ast import (
     Split,
     SplitDoc,
     Struct,
-    StructType,
+    StructFlatList,
+    StructList,
     TableConfig,
     TableMatchKey,
     TableRow,
@@ -253,7 +254,7 @@ def resolve_jsonify_type(
 
 def typedef_from_struct(struct: Struct, parent: Module) -> TypeDef:
     typedef = TypeDef(
-        parent=parent, name=struct.name, struct_type=struct.struct_type
+        parent=parent, name=struct.name, struct_type=struct._typedef_type
     )
     for item in struct.body:
         if isinstance(item, Field):
@@ -952,7 +953,7 @@ def _expr_nested(
             code="E300",
         )
         return None
-    is_array = struct.struct_type in (StructType.FLAT, StructType.LIST)
+    is_array = isinstance(struct, (StructFlatList, StructList))
     return Nested(parent=parent, struct_name=struct_name, is_array=is_array)
 
 

@@ -6,7 +6,7 @@ from typing import Any, Callable, Type, TYPE_CHECKING
 from ssc_codegen.ast import Node
 from ssc_codegen.ast import Filter, Assert, Match
 from ssc_codegen.ast import LogicNot, LogicAnd, LogicOr
-from ssc_codegen.ast import JsonDef, TypeDef, Struct, Init
+from ssc_codegen.ast import JsonDef, TypeDef, StructBase, Init
 from ssc_codegen.ast import (
     PreValidate,
     CheckMethod,
@@ -59,7 +59,7 @@ CallbackNode = Callable[[Node, ConverterContext], list[str] | str]
 
 # Nodes whose body contains other container/field nodes.
 # Traversal goes deeper (depth+1), index resets to 0.
-_CONTAINER_NODES = (JsonDef, TypeDef, Struct, Init)
+_CONTAINER_NODES = (JsonDef, TypeDef, StructBase, Init)
 
 _PIPELINE_NODES = (
     Field,

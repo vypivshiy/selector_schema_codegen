@@ -11,7 +11,6 @@ import ssc_codegen.ast as a
 
 
 from ssc_codegen.converters import py_bs4
-from ssc_codegen.converters import py_helpers
 
 
 PY_PARSEL_CONVERTER = py_bs4.PY_BASE_CONVERTER.extend()
@@ -31,7 +30,7 @@ def pre_imports(node: a.Imports, ctx: ConverterContext):
             "from dataclasses import dataclass",
             "from typing import TypedDict, Optional, Any, List, Dict, Union, Literal",
         ]
-        base_imports.extend(py_helpers.NOT_REQUIRED_IMPORT)
+        base_imports.extend(py_bs4.NOT_REQUIRED_IMPORT)
     else:
         base_imports = [
             "import json",
@@ -40,10 +39,10 @@ def pre_imports(node: a.Imports, ctx: ConverterContext):
             "from dataclasses import dataclass",
             "from typing import TypedDict, Optional, Any, List, Dict, Union, Literal",
         ]
-        if not py_helpers.module_is_rest_only(node):
+        if not py_bs4.module_is_rest_only(node):
             base_imports.append("from html import unescape as _html_unescape")
-        base_imports.extend(py_helpers.NOT_REQUIRED_IMPORT)
-        base_imports.extend(py_helpers.rest_imports(node))
+        base_imports.extend(py_bs4.NOT_REQUIRED_IMPORT)
+        base_imports.extend(py_bs4.rest_imports(node))
 
     transform_imports = sorted(node.transform_imports.get("py", set()))
 
@@ -53,9 +52,9 @@ def pre_imports(node: a.Imports, ctx: ConverterContext):
 @PY_PARSEL_CONVERTER.post(a.Imports)
 def post_imports(node: a.Imports, ctx: ConverterContext):
     lines = []
-    if not py_helpers.module_is_rest_only(node):
+    if not py_bs4.module_is_rest_only(node):
         lines.append("from parsel import Selector, SelectorList")
-    lines.extend(py_helpers.http_client_import(ctx))
+    lines.extend(py_bs4.http_client_import(ctx))
     return lines
 
 
@@ -66,7 +65,7 @@ def pre_utilities(node: a.Utilities, ctx: ConverterContext):
 
 @PY_PARSEL_CONVERTER(a.Init)
 def pre_init(node: a.Init, ctx: ConverterContext):
-    if isinstance(node.parent, a.Struct) and node.parent.is_rest:
+    if isinstance(node.parent, a.StructRest):
         return None
     init_node_names: list[str] = []
     for i in node.body:
@@ -187,16 +186,23 @@ def pre_struct_table_row(node: a.TableRow, ctx: ConverterContext):
 def pre_expr_css_select(node: a.CssSelect, ctx: ConverterContext):
     if node.queries:
         lines: list[str] = []
+        res_var = f"_res_{ctx.nxt}"
         for i, query in enumerate(node.queries):
             q = repr(query)
             if i == 0:
-                lines.append(f"{ctx.indent}{ctx.nxt} = {ctx.prv}.css({q})")
+                lines.append(f"{ctx.indent}{res_var} = {ctx.prv}.css({q})")
+                lines.append(
+                    f"{ctx.indent}{ctx.nxt} = {res_var}[0] if {res_var} else None"
+                )
             else:
-                lines.append(f"{ctx.indent}if not {ctx.nxt}:")
-                lines.append(f"{ctx.indent}    {ctx.nxt} = {ctx.prv}.css({q})")
+                lines.append(f"{ctx.indent}if {ctx.nxt} is None:")
+                lines.append(f"{ctx.indent}    {res_var} = {ctx.prv}.css({q})")
+                lines.append(
+                    f"{ctx.indent}    {ctx.nxt} = {res_var}[0] if {res_var} else None"
+                )
         return lines
     query = repr(node.query)
-    return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.css({query})"
+    return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.css({query})[0]"
 
 
 @PY_PARSEL_CONVERTER(a.CssSelectAll)

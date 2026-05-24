@@ -49,42 +49,33 @@ def _parse_placeholder(match: "_re.Match[str]") -> PlaceholderSpec:
     )
 
 
-@dataclass
-class Struct(Node):
-    """
-    Parser schema definition.
-    DSL: struct Name type=item|list|dict|table|flat { ... }
+# ── Base struct ──────────────────────────────────────────────────────────────
 
-    body order:
-      StructDocstring? → PreValidate? → Init? → SplitDoc?
-      → Key? → Value? → TableConfig? → TableRow? → TableMatchKey?
-      → Field...
-    """
+
+@dataclass
+class StructBase(Node):
+    """Base class for all struct AST nodes."""
 
     name: str = ""
-    struct_type: StructType = StructType.ITEM
-    keep_order: bool = False  # stuct_type=StructType.FLAT specific
+    keep_order: bool = False  # StructFlatList-specific
 
-    def __post_init__(self):
-        self.body.extend([StructDocstring(parent=self), Init(parent=self)])
+    @property
+    def _typedef_type(self) -> StructType:
+        raise NotImplementedError
 
     @property
     def docstring(self) -> StructDocstring:
         return self.body[0]  # type: ignore
 
     @property
-    def init(self) -> Init:
-        return self.body[1]  # type: ignore
-
-    @property
-    def request_config(self) -> "RequestConfig | None":
+    def request_config(self) -> RequestConfig | None:
         for node in self.body:
             if isinstance(node, RequestConfig):
                 return node
         return None
 
     @property
-    def request_configs(self) -> "list[RequestConfig]":
+    def request_configs(self) -> list[RequestConfig]:
         return [n for n in self.body if isinstance(n, RequestConfig)]
 
     @property
@@ -92,12 +83,130 @@ class Struct(Node):
         return bool(self.request_configs)
 
     @property
-    def is_rest(self) -> bool:
-        return self.struct_type == StructType.REST
+    def errors(self) -> list[ErrorResponse]:
+        return [n for n in self.body if isinstance(n, ErrorResponse)]
+
+
+# ── Concrete struct types ────────────────────────────────────────────────────
+
+
+@dataclass
+class StructItem(StructBase):
+    """Single object → dict. DSL: struct Name { ... }"""
 
     @property
-    def errors(self) -> "list[ErrorResponse]":
-        return [n for n in self.body if isinstance(n, ErrorResponse)]
+    def _typedef_type(self) -> StructType:
+        return StructType.ITEM
+
+    @property
+    def init(self) -> Init:
+        return self.body[1]  # type: ignore
+
+    def __post_init__(self):
+        self.body.extend([StructDocstring(parent=self), Init(parent=self)])
+
+
+@dataclass
+class StructList(StructBase):
+    """Repeating elements → list[dict]. Requires @split-doc."""
+
+    @property
+    def _typedef_type(self) -> StructType:
+        return StructType.LIST
+
+    @property
+    def init(self) -> Init:
+        return self.body[1]  # type: ignore
+
+    def __post_init__(self):
+        self.body.extend([StructDocstring(parent=self), Init(parent=self)])
+
+
+@dataclass
+class StructFlatList(StructBase):
+    """Deduplicated scalars → list[str]."""
+
+    @property
+    def _typedef_type(self) -> StructType:
+        return StructType.FLAT
+
+    @property
+    def init(self) -> Init:
+        return self.body[1]  # type: ignore
+
+    def __post_init__(self):
+        self.body.extend([StructDocstring(parent=self), Init(parent=self)])
+
+
+@dataclass
+class StructDict(StructBase):
+    """Key-value map → dict[str, any]. Requires @split-doc + @key + @value."""
+
+    @property
+    def _typedef_type(self) -> StructType:
+        return StructType.DICT
+
+    @property
+    def init(self) -> Init:
+        return self.body[1]  # type: ignore
+
+    @property
+    def key(self) -> Key:
+        return [n for n in self.body if isinstance(n, Key)][0]
+
+    @property
+    def value(self) -> Value:
+        return [n for n in self.body if isinstance(n, Value)][0]
+
+    def __post_init__(self):
+        self.body.extend([StructDocstring(parent=self), Init(parent=self)])
+
+
+@dataclass
+class StructTable(StructBase):
+    """HTML table → dict. Requires @table + @rows + @match + @value."""
+
+    @property
+    def _typedef_type(self) -> StructType:
+        return StructType.TABLE
+
+    @property
+    def init(self) -> Init:
+        return self.body[1]  # type: ignore
+
+    @property
+    def table_config(self) -> TableConfig:
+        return [n for n in self.body if isinstance(n, TableConfig)][0]
+
+    @property
+    def table_row(self) -> TableRow:
+        return [n for n in self.body if isinstance(n, TableRow)][0]
+
+    @property
+    def table_match_key(self) -> TableMatchKey:
+        return [n for n in self.body if isinstance(n, TableMatchKey)][0]
+
+    def __post_init__(self):
+        self.body.extend([StructDocstring(parent=self), Init(parent=self)])
+
+
+@dataclass
+class StructRest(StructBase):
+    """REST API endpoint namespace. Stores @request methods, no HTML parsing."""
+
+    @property
+    def _typedef_type(self) -> StructType:
+        return StructType.REST
+
+    def __post_init__(self):
+        self.body.append(StructDocstring(parent=self))
+
+
+# Backward-compatible alias
+Struct = StructBase
+
+
+# ── Struct child nodes ───────────────────────────────────────────────────────
 
 
 @dataclass
@@ -330,12 +439,8 @@ class StartParse(Node):
     """Endpoint where need run parser"""
 
     @property
-    def struct(self) -> "Struct":
-        return cast(Struct, self.parent)
-
-    @property
-    def struct_type(self) -> StructType:
-        return self.struct.struct_type
+    def struct(self) -> StructBase:
+        return cast(StructBase, self.parent)
 
     @property
     def use_split_doc(self) -> bool:
@@ -346,34 +451,5 @@ class StartParse(Node):
         return any(isinstance(f, PreValidate) for f in self.struct.body)
 
     @property
-    def fields(self) -> list["Field"]:
+    def fields(self) -> list[Field]:
         return [f for f in self.struct.body if isinstance(f, Field)]
-
-    @property
-    def fields_dict(self) -> tuple[Key, Value]:
-        """specific fields for struct_type=StructType.DICT"""
-        if self.struct_type != StructType.DICT:
-            raise TypeError(
-                "fields_dict allowed if struct_type == StructType.DICT"
-            )
-        fields = [f for f in self.struct.body if isinstance(f, (Key, Value))]
-        key = [f for f in fields if isinstance(f, Key)][0]
-        value = [f for f in fields if isinstance(f, Value)][0]
-        return key, value
-
-    @property
-    def fields_table(self) -> tuple[TableConfig, TableRow, TableMatchKey]:
-        """specific fields for struct_type=StructType.TABLE"""
-        if self.struct_type != StructType.TABLE:
-            raise TypeError(
-                "fields_table allowed if struct_type == StructType.TABLE"
-            )
-        fields = [
-            f
-            for f in self.struct.body
-            if isinstance(f, (TableConfig, TableRow, TableMatchKey))
-        ]
-        cfg = [f for f in fields if isinstance(f, TableConfig)][0]
-        row = [f for f in fields if isinstance(f, TableRow)][0]
-        match_key = [f for f in fields if isinstance(f, TableMatchKey)][0]
-        return cfg, row, match_key

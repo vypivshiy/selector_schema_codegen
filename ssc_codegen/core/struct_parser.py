@@ -19,8 +19,9 @@ from ssc_codegen.ast import (
     RequestConfig,
     SplitDoc,
     StartParse,
-    Struct,
-    StructType,
+    StructBase,
+    StructRest,
+    StructTable,
     TableConfig,
     TableMatchKey,
     TableRow,
@@ -36,7 +37,7 @@ from ssc_codegen.core.type_checking import check_pipeline_types
 
 def parse_struct(
     kdl_nodes: Sequence[KdlNode],
-    parent: Struct,
+    parent: StructBase,
     ctx: ParseContext,
     lint: LintContext,
 ) -> None:
@@ -129,7 +130,7 @@ def parse_struct(
                     response_schema.value, response_schema.value
                 )
             )
-            if req.response_schema and parent.struct_type == StructType.REST:
+            if req.response_schema and isinstance(parent, StructRest):
                 lint.rest_response_refs.append((node, req.response_schema))
             doc_val = node.properties.get(
                 "doc", KdlArg(value="", span=node.span, is_identifier=False)
@@ -180,10 +181,10 @@ def parse_struct(
                 conditions=conditions,
             )
             parent.body.append(err)
-            if parent.struct_type == StructType.REST:
+            if isinstance(parent, StructRest):
                 lint.rest_error_refs.append((node, schema_name))
         else:
-            if parent.struct_type == StructType.TABLE:
+            if isinstance(parent, StructTable):
                 expr = Field(
                     parent=parent, name=node.name, accept=VariableType.STRING
                 )
@@ -192,7 +193,7 @@ def parse_struct(
             parse_expressions(node.children, expr, ctx, lint)
             parent.body.append(expr)
 
-    if parent.struct_type != StructType.REST:
+    if not isinstance(parent, StructRest):
         parent.body.append(StartParse(parent=parent))
     lint.walk_context = prev_ctx
 
@@ -220,8 +221,11 @@ def parse_json_fields(
         skip = "@skip" in modifiers
         if not type_ and skip:
             type_ = "str"
-        is_array = type_.startswith("(array)")
-        type_ = type_.removeprefix("(array)")
+        is_array = any(
+            arg.type_annotation == "(array)"
+            for arg in node.args
+            if str(arg.value) == type_
+        )
         is_optional = type_.endswith("?")
         type_ = type_.rstrip("?")
         ref_name = ""
@@ -242,12 +246,16 @@ def parse_json_fields(
                 )
             case "bool":
                 ret_type = VariableType.BOOL
-            case "null":
+            case "null" | "nil":
                 ret_type = VariableType.NULL
             case _:
                 ref_name = type_
-                if ref_name.startswith("(array)"):
-                    ref_name = ref_name.removeprefix("(array)")
+                is_array_ref = any(
+                    arg.type_annotation == "(array)"
+                    for arg in node.args
+                    if str(arg.value) == ref_name
+                )
+                if is_array_ref:
                     is_array = True
                 ret_type = VariableType.JSON
         may_miss = "@omitempty" in modifiers

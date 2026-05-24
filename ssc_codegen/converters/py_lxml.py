@@ -17,7 +17,6 @@ import ssc_codegen.ast as a
 
 # Import the bs4 converter to inherit from it
 from ssc_codegen.converters import py_bs4
-from ssc_codegen.converters import py_helpers
 
 # Create new converter that extends bs4 (inherits all handlers)
 PY_LXML_CONVERTER = py_bs4.PY_BASE_CONVERTER.extend()
@@ -47,11 +46,11 @@ def pre_imports(node: a.Imports, ctx: ConverterContext):
             "from dataclasses import dataclass",
             "from typing import TypedDict, Optional, Any, List, Dict, Union, Literal",
         ]
-        if not py_helpers.module_is_rest_only(node):
+        if not py_bs4.module_is_rest_only(node):
             base_imports.append("from html import unescape as _html_unescape")
-        base_imports.extend(py_helpers.rest_imports(node))
+        base_imports.extend(py_bs4.rest_imports(node))
 
-    base_imports.extend(py_helpers.NOT_REQUIRED_IMPORT)
+    base_imports.extend(py_bs4.NOT_REQUIRED_IMPORT)
 
     # Get transform imports for Python (already collected during parsing)
     transform_imports = sorted(node.transform_imports.get("py", set()))
@@ -62,40 +61,46 @@ def pre_imports(node: a.Imports, ctx: ConverterContext):
 @PY_LXML_CONVERTER.post(a.Imports)
 def post_imports(node: a.Imports, ctx: ConverterContext):
     lines = []
-    if not py_helpers.module_is_rest_only(node):
+    if not py_bs4.module_is_rest_only(node):
         lines.extend(
             [
                 "from lxml import html",
                 "from lxml.html import HtmlElement",
             ]
         )
-    lines.extend(py_helpers.http_client_import(ctx))
+    lines.extend(py_bs4.http_client_import(ctx))
     return lines
+
+
+_FALLBACK_HTML_LINES = [
+    'FALLBACK_HTML_STR = "<html><body></body></html>"',
+    "",
+]
+_FALLBACK_HTML_EXPORT = "FALLBACK_HTML_STR"
 
 
 @PY_LXML_CONVERTER(a.Utilities)
 def pre_utilities(node: a.Utilities, ctx: ConverterContext):
     runtime = ctx.meta.get("runtime_module")
     if runtime:
-        names = py_helpers.runtime_export_names(
-            node, include_fallback_html=True
-        )
+        names = py_bs4.runtime_export_names(node)
+        names.append(_FALLBACK_HTML_EXPORT)
         return [f"from {runtime} import " + ", ".join(names), ""]
 
-    if py_helpers.module_is_rest_only(node):
+    if py_bs4.module_is_rest_only(node):
         lines = []
-        lines.extend(py_helpers.rest_utilities(node))
+        lines.extend(py_bs4.rest_utilities(node))
         return lines
 
-    lines = py_helpers.base_utility_lines(include_fallback_html=True)
-    lines.extend(py_helpers.rest_utilities(node))
+    lines = [*_FALLBACK_HTML_LINES, *py_bs4.base_utility_lines()]
+    lines.extend(py_bs4.rest_utilities(node))
     return lines
 
 
 # Override struct __init__ to use lxml instead of BeautifulSoup
 @PY_LXML_CONVERTER(a.Init)
 def pre_init(node: a.Init, ctx: ConverterContext):
-    if isinstance(node.parent, a.Struct) and node.parent.is_rest:
+    if isinstance(node.parent, a.StructRest):
         return None
     init_node_names: list[str] = []
     for i in node.body:
@@ -332,15 +337,11 @@ def pre_expr_attr(node: a.Attr, ctx: ConverterContext):
     if node.accept == VT.DOCUMENT:
         if len(keys) == 1:
             return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.get({keys[0]!r}, '')"
-        # Multiple attributes: concatenate with space
-        attrs = " + ' ' + ".join(f"{ctx.prv}.get({k!r}, '')" for k in keys)
-        return f"{ctx.indent}{ctx.nxt} = {attrs}"
+        return f"{ctx.indent}{ctx.nxt} = [{ctx.prv}.get(k) for k in {keys} if {ctx.prv}.get(k)]"
     # LIST_DOCUMENT
     if len(keys) == 1:
         return f"{ctx.indent}{ctx.nxt} = [i.get({keys[0]!r}, '') for i in {ctx.prv}]"
-    # Multiple attributes
-    attrs = " + ' ' + ".join(f"i.get({k!r}, '')" for k in keys)
-    return f"{ctx.indent}{ctx.nxt} = [{attrs} for i in {ctx.prv}]"
+    return f"{ctx.indent}{ctx.nxt} = [i.get(k) for i in {ctx.prv} for k in {keys} if i.get(k)]"
 
 
 # PREDICATES - CSS and XPath
@@ -498,3 +499,11 @@ def pre_expr_pred_text_re(node: a.PredTextRe, ctx: ConverterContext):
     if ctx.index == 0:
         return ctx.indent + cond
     return ctx.indent + f"and {cond}"
+
+
+# CONVERSION — lxml HtmlElement.__bool__ returns len(self), which is False for leaf elements
+
+
+@PY_LXML_CONVERTER(a.ToBool)
+def pre_expr_to_bool(node: a.ToBool, ctx: ConverterContext):
+    return f"{ctx.indent}{ctx.nxt} = {ctx.prv} is not None"

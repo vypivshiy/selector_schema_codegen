@@ -196,10 +196,7 @@ def _js_module_has_rest(node) -> bool:
         module = getattr(module, "parent", None)
     if module is None:
         return False
-    return any(
-        isinstance(n, a.Struct) and n.is_rest
-        for n in getattr(module, "body", [])
-    )
+    return any(isinstance(n, a.StructRest) for n in getattr(module, "body", []))
 
 
 @JS_CONVERTER(a.Utilities)
@@ -399,37 +396,77 @@ def _js_err_value_type(err, struct) -> str:
     return type_name
 
 
-@JS_CONVERTER(a.Struct, post_callback="}")
-def pre_struct(node: a.Struct, ctx: ConverterContext):
-    name = to_pascal_case(node.name)
-    cls_line = f"class {name} " + "{"
-    prefix: list[str] = []
-    if node.is_rest:
-        seen: set[str] = set()
-        for err in node.errors:
-            cls_name = _js_err_subclass_name(node.name, err)
-            if cls_name in seen:
-                continue
-            seen.add(cls_name)
-            value_type = _js_err_value_type(err, node)
-            prefix.extend(
-                [
-                    "/**",
-                    f" * @typedef {{Object}} {cls_name}",
-                    " * @property {false} isOk",
-                    f" * @property {{{err.status}}} status",
-                    " * @property {Object<string, string>} headers",
-                    f" * @property {{{value_type}}} value",
-                    " */",
-                    "",
-                ]
-            )
+# ---------------------------------------------------------------------------
+# Struct handlers — one per struct type
+# ---------------------------------------------------------------------------
+
+
+def _js_struct_header(node: a.StructBase, ctx: ConverterContext) -> list[str]:
     doc_lines = (
         _js_docblock(node.docstring.value.splitlines())
         if node.docstring.value
         else []
     )
-    return [*prefix, *doc_lines, cls_line]
+    return [*doc_lines, f"class {to_pascal_case(node.name)} " + "{"]
+
+
+@JS_CONVERTER(a.StructItem, post_callback="}")
+def pre_struct_item(node: a.StructItem, ctx: ConverterContext):
+    return _js_struct_header(node, ctx)
+
+
+@JS_CONVERTER(a.StructList, post_callback="}")
+def pre_struct_list(node: a.StructList, ctx: ConverterContext):
+    return _js_struct_header(node, ctx)
+
+@JS_CONVERTER(a.StructFlatList, post_callback="}")
+def pre_struct_flatlist(node: a.StructFlatList, ctx: ConverterContext):
+    return _js_struct_header(node, ctx)
+
+@JS_CONVERTER(a.StructDict, post_callback="}")
+def pre_struct_dict(node: a.StructDict, ctx: ConverterContext):
+    return _js_struct_header(node, ctx)
+
+@JS_CONVERTER(a.StructTable, post_callback="}")
+def pre_struct_table(node: a.StructTable, ctx: ConverterContext):
+    return _js_struct_header(node, ctx)
+
+
+@JS_CONVERTER(a.StructRest, post_callback="}")
+def pre_struct_rest(node: a.StructRest, ctx: ConverterContext):
+    name = to_pascal_case(node.name)
+    lines: list[str] = []
+    # Error JSDoc typedefs (module-level, before class)
+    seen: set[str] = set()
+    for err in node.errors:
+        cls_name = _js_err_subclass_name(node.name, err)
+        if cls_name in seen:
+            continue
+        seen.add(cls_name)
+        value_type = _js_err_value_type(err, node)
+        lines.extend(
+            [
+                "/**",
+                f" * @typedef {{Object}} {cls_name}",
+                " * @property {false} isOk",
+                f" * @property {{{err.status}}} status",
+                " * @property {Object<string, string>} headers",
+                f" * @property {{{value_type}}} value",
+                " */",
+                "",
+            ]
+        )
+    # Docblock + class header
+    doc_lines = (
+        _js_docblock(node.docstring.value.splitlines())
+        if node.docstring.value
+        else []
+    )
+    lines.extend(doc_lines)
+    lines.append(f"class {name} " + "{")
+    # _dispatchErr static method (first member of class body)
+    lines.extend(_emit_dispatch_err_js(node, ctx.deeper()))
+    return lines
 
 
 @JS_CONVERTER(a.StructDocstring)
@@ -496,17 +533,9 @@ def _emit_dispatch_err_js(node: a.Struct, ctx: ConverterContext) -> list[str]:
     return lines
 
 
-@JS_CONVERTER.post(a.StructDocstring)
-def post_struct_docstring(node: a.StructDocstring, ctx: ConverterContext):
-    parent = node.parent
-    if not isinstance(parent, a.Struct) or not parent.is_rest:
-        return None
-    return _emit_dispatch_err_js(parent, ctx)
-
-
 @JS_CONVERTER(a.Init)
 def pre_init(node: a.Init, ctx: ConverterContext):
-    if isinstance(node.parent, a.Struct) and node.parent.is_rest:
+    if isinstance(node.parent, a.StructRest):
         return None
     init_names = [
         to_camel_case(i.name) for i in node.body if isinstance(i, a.InitField)
@@ -589,27 +618,28 @@ def pre_struct_table_row(node: a.TableRow, ctx: ConverterContext):
     return [f"{ctx.indent}_tableRows(v) " + "{"]
 
 
+# ---------------------------------------------------------------------------
+# StartParse: return-type resolution + parse body generation
+# ---------------------------------------------------------------------------
+
+_JS_PARSE_RETURN_TYPE = {
+    a.StructItem: "{}Type",
+    a.StructList: "Array<{}Type>",
+    a.StructFlatList: "Array<string>",
+    a.StructDict: "{}Type",
+    a.StructTable: "{}Type",
+}
+
+
+def _js_method_name(field_name: str) -> str:
+    n = to_camel_case(field_name)
+    return f"_parse{n[0].upper() + n[1:]}"
+
+
 @JS_CONVERTER(a.StartParse)
 def pre_start_parse(node: a.StartParse, ctx: ConverterContext):
-    # type
     name = to_pascal_case(node.struct.name)
-    match node.struct_type:
-        case a.StructType.REST:
-            return
-        case a.StructType.ITEM:
-            ret_type = f"{name}Type"
-        case a.StructType.LIST:
-            ret_type = f"Array<{name}Type>"
-        case a.StructType.FLAT:
-            ret_type = "Array<string>"
-        case a.StructType.DICT:
-            ret_type = f"{name}Type"
-        case a.StructType.TABLE:
-            ret_type = f"{name}Type"
-        case _:
-            raise NotImplementedError(
-                "Unknown struct type", repr(node.struct_type)
-            )
+    ret_type = _JS_PARSE_RETURN_TYPE[type(node.struct)].format(name)
     return [
         f"{ctx.indent}/**",
         f"{ctx.indent}* @returns {{{ret_type}}}",
@@ -618,87 +648,96 @@ def pre_start_parse(node: a.StartParse, ctx: ConverterContext):
     ]
 
 
+def _js_emit_item_parse_body(
+    node: a.StartParse, ctx: ConverterContext
+) -> list[str]:
+    i2, i3 = ctx.indent * 2, ctx.indent * 3
+    lines = [f"{i2}return " + "{"]
+    for f in node.fields:
+        n = to_camel_case(f.name)
+        lines.append(f"{i3}{n}: this.{_js_method_name(f.name)}(this._doc),")
+    lines.append(f"{i2}" + "};")
+    return lines
+
+
+def _js_emit_list_parse_body(
+    node: a.StartParse, ctx: ConverterContext
+) -> list[str]:
+    i2, i3 = ctx.indent * 2, ctx.indent * 3
+    lines = [f"{i2}return Array.from(this._splitDoc(this._doc)).map(i => ({{"]
+    for f in node.fields:
+        n = to_camel_case(f.name)
+        lines.append(f"{i3}{n}: this.{_js_method_name(f.name)}(i),")
+    lines.append(f"{i2}" + "}));")
+    return lines
+
+
+def _js_emit_flatlist_parse_body(
+    node: a.StartParse, ctx: ConverterContext
+) -> list[str]:
+    parent = node.struct
+    i2 = ctx.indent * 2
+    lines = [f"{i2}let _result = [];"]
+    for f in node.fields:
+        mname = _js_method_name(f.name)
+        if f.ret == VT.STRING:
+            lines.append(f"{i2}_result.push(this.{mname}(this._doc));")
+        else:
+            lines.append(
+                f"{i2}_result = _result.concat(this.{mname}(this._doc));"
+            )
+    if parent.keep_order:
+        lines.append(f"{i2}return [...new Map(_result.map(x=>[x,x])).keys()];")
+    else:
+        lines.append(f"{i2}return [...new Set(_result)];")
+    return lines
+
+
+def _js_emit_dict_parse_body(
+    node: a.StartParse, ctx: ConverterContext
+) -> list[str]:
+    i2, i3 = ctx.indent * 2, ctx.indent * 3
+    return [
+        f"{i2}return Array.from(this._splitDoc(this._doc)).reduce((acc, e) => {{",
+        f"{i3}acc[this._parseKey(e)] = this._parseValue(e);",
+        f"{i3}return acc;",
+        f"{i2}}}, {{}});",
+    ]
+
+
+def _js_emit_table_parse_body(
+    node: a.StartParse, ctx: ConverterContext
+) -> list[str]:
+    i2, i3 = ctx.indent * 2, ctx.indent * 3
+    lines = [f"{i2}let _result = " + "{};"]
+    lines.append(f"{i2}let _table = this._tableConfig(this._doc);")
+    lines.append(f"{i2}for (let _row of this._tableRows(_table)) " + "{")
+    for f in node.fields:
+        n = to_camel_case(f.name)
+        lines.append(f"{i3}let _{n} = this.{_js_method_name(f.name)}(_row);")
+        lines.append(
+            f"{i3}if (_{n} !== UNMATCHED_TABLE_ROW && !Object.prototype.hasOwnProperty.call(_result, {repr(n)})) _result[{repr(n)}] = _{n};"
+        )
+    lines.append(f"{i2}" + "}")
+    lines.append(f"{i2}return _result;")
+    return lines
+
+
+_JS_EMIT_PARSE_BODY = {
+    a.StructItem: _js_emit_item_parse_body,
+    a.StructList: _js_emit_list_parse_body,
+    a.StructFlatList: _js_emit_flatlist_parse_body,
+    a.StructDict: _js_emit_dict_parse_body,
+    a.StructTable: _js_emit_table_parse_body,
+}
+
+
 @JS_CONVERTER.post(a.StartParse)
 def post_start_parse(node: a.StartParse, ctx: ConverterContext):
     lines: list[str] = []
-    if node.struct_type == a.StructType.REST:
-        return
     if node.use_pre_validate:
         lines.append(f"{ctx.indent * 2}this._preValidate(this._doc);")
-
-    def _mname(field_name: str) -> str:
-        n = to_camel_case(field_name)
-        return f"_parse{n[0].upper() + n[1:]}"
-
-    match node.struct_type:
-        case a.StructType.ITEM:
-            lines.append(f"{ctx.indent * 2}return " + "{")
-            for f in node.fields:
-                n = to_camel_case(f.name)
-                lines.append(
-                    f"{ctx.indent * 3}{n}: this.{_mname(f.name)}(this._doc),"
-                )
-            lines.append(f"{ctx.indent * 2}" + "};")
-        case a.StructType.LIST:
-            lines.append(
-                f"{ctx.indent * 2}return Array.from(this._splitDoc(this._doc)).map(i => ({{"
-            )
-            for f in node.fields:
-                n = to_camel_case(f.name)
-                lines.append(f"{ctx.indent * 3}{n}: this.{_mname(f.name)}(i),")
-            close = "}));"
-            lines.append(f"{ctx.indent * 2}{close}")
-        case a.StructType.DICT:
-            lines.extend(
-                [
-                    f"{ctx.indent * 2}return Array.from(this._splitDoc(this._doc)).reduce((acc, e) => {{",
-                    f"{ctx.indent * 3}acc[this._parseKey(e)] = this._parseValue(e);",
-                    f"{ctx.indent * 3}return acc;",
-                    f"{ctx.indent * 2}}}, {{}});",
-                ]
-            )
-        case a.StructType.FLAT:
-            lines.append(f"{ctx.indent * 2}let _result = [];")
-            for f in node.fields:
-                if f.ret == VT.STRING:
-                    lines.append(
-                        f"{ctx.indent * 2}_result.push(this.{_mname(f.name)}(this._doc));"
-                    )
-                else:
-                    lines.append(
-                        f"{ctx.indent * 2}_result = _result.concat(this.{_mname(f.name)}(this._doc));"
-                    )
-            if node.struct.keep_order:
-                lines.append(
-                    f"{ctx.indent * 2}return [...new Map(_result.map(x=>[x,x])).keys()];"
-                )
-            else:
-                # js Set guaranteed keep order
-                lines.append(f"{ctx.indent * 2}return [...new Set(_result)];")
-        case a.StructType.TABLE:
-            lines.append(f"{ctx.indent * 2}let _result = " + "{};")
-            lines.append(
-                f"{ctx.indent * 2}let _table = this._tableConfig(this._doc);"
-            )
-            lines.append(
-                f"{ctx.indent * 2}for (let _row of this._tableRows(_table)) "
-                + "{"
-            )
-            for f in node.fields:
-                n = to_camel_case(f.name)
-                lines.append(
-                    f"{ctx.indent * 3}let _{n} = this.{_mname(f.name)}(_row);"
-                )
-                lines.append(
-                    f"{ctx.indent * 3}if (_{n} !== UNMATCHED_TABLE_ROW && !Object.prototype.hasOwnProperty.call(_result, {repr(n)})) _result[{repr(n)}] = _{n};"
-                )
-            lines.append(f"{ctx.indent * 2}" + "}")
-            lines.append(f"{ctx.indent * 2}return _result;")
-        case _:
-            raise NotImplementedError(
-                "Unknown struct type", repr(node.struct_type)
-            )
-
+    lines.extend(_JS_EMIT_PARSE_BODY[type(node.struct)](node, ctx))
     lines.append(f"{ctx.indent}" + "}")
     return lines
 
@@ -1182,6 +1221,31 @@ def pre_expr_fallback_end(node: a.FallbackEnd, ctx: ConverterContext):
         f"{ctx.indent}{ctx.indent_char}return {val};",
         f"{ctx.indent}{cb}",
     ]
+
+
+@JS_CONVERTER(a.TransformCall)
+def pre_expr_transform_call(node: a.TransformCall, ctx: ConverterContext):
+    if not node.transform_def:
+        raise ValueError(f"TransformCall '{node.name}': transform_def is None")
+
+    js_target = None
+    for target in node.transform_def.body:
+        assert isinstance(target, a.TransformTarget)
+        if target.lang == "js":
+            js_target = target
+            break
+
+    if not js_target:
+        raise ValueError(
+            f"TransformCall '{node.name}': no 'js' implementation found"
+        )
+
+    lines = []
+    for code_line in js_target.code:
+        code_line = code_line.replace("{{PRV}}", ctx.prv)
+        code_line = code_line.replace("{{NXT}}", ctx.nxt)
+        lines.append(f"{ctx.indent}{code_line}")
+    return lines
 
 
 # ---------------------------------------------------------------------------
@@ -1936,31 +2000,23 @@ def _js_ok_payload_type(node: a.RequestConfig) -> str:
     return schema_type
 
 
-@JS_CONVERTER(a.RequestConfig)
-def pre_request_config(node: a.RequestConfig, ctx: ConverterContext):
-    if isinstance(node.parent, a.Struct) and node.parent.is_rest:
-        return _js_rest_method(node, ctx)
-
+def _js_fetch_method(node: a.RequestConfig, ctx: ConverterContext) -> list[str]:
+    """Generate non-REST async fetch method for JS (fetch API or axios)."""
     spec = normalize_placeholder_names(
         parse_to_spec(node.raw_payload), _js_name
     )
     http_client = ctx.meta.get("http_client", "fetch")
 
     ind = ctx.indent_char
-    i1 = ctx.indent  # class body  (2 spaces at depth=1)
-    i2 = i1 + ind  # method body
-    i3 = i2 + ind  # options object properties
+    i1 = ctx.indent
+    i2 = i1 + ind
+    i3 = i2 + ind
 
     struct_name = to_pascal_case(node.parent.name)  # type: ignore[union-attr]
-    placeholders = spec.placeholders
-    ph_names = [p.name for p in placeholders]
-
+    ph_names = [p.name for p in spec.placeholders]
     method_name = "fetch" + (to_pascal_case(node.name) if node.name else "")
-
-    # second parameter: destructured object or omitted
-    client_param = "client"
     ph_param = (", {" + ", ".join(ph_names) + "}") if ph_names else ""
-    sig = f"static async {method_name}({client_param}{ph_param})"
+    sig = f"static async {method_name}(client{ph_param})"
 
     def _response_lines(data_expr: str) -> list[str]:
         lines: list[str] = []
@@ -1983,7 +2039,6 @@ def pre_request_config(node: a.RequestConfig, ctx: ConverterContext):
     lines: list[str] = [f"{i1}{sig} {{"]
 
     if http_client == "fetch":
-        # Build URL: embed params into URL via URLSearchParams if present
         if spec.params:
             url_inner = _PH.sub(r"${\1}", spec.url.replace("`", "\\`"))
             params_obj = _js_render_obj(spec.params)
@@ -1991,12 +2046,10 @@ def pre_request_config(node: a.RequestConfig, ctx: ConverterContext):
         else:
             url_expr = _js_render_value(spec.url)
 
-        # Build options object
         options: list[str] = [f"{i3}method: {spec.method!r},"]
         if spec.headers:
             options.append(f"{i3}headers: {_js_render_obj(spec.headers)},")
         if spec.cookies:
-            # fetch uses credentials/headers for cookies; emit as Cookie header
             cookie_str = "; ".join(f"{k}={v}" for k, v in spec.cookies.items())
             options.append(
                 f"{i3}// cookies: {cookie_str!r}  /* set via headers or credentials */"
@@ -2031,7 +2084,6 @@ def pre_request_config(node: a.RequestConfig, ctx: ConverterContext):
         body_result = _js_render_body(spec)
         if body_result:
             _, body_expr = body_result
-            # axios uses 'data' instead of 'body'
             req_props.append(f"{i3}data: {body_expr},")
 
         lines.append(f"{i2}const _resp = await client.request({{")
@@ -2044,6 +2096,13 @@ def pre_request_config(node: a.RequestConfig, ctx: ConverterContext):
 
     lines.append(f"{i1}}}")
     return lines
+
+
+@JS_CONVERTER(a.RequestConfig)
+def pre_request_config(node: a.RequestConfig, ctx: ConverterContext):
+    if isinstance(node.parent, a.StructRest):
+        return _js_rest_method(node, ctx)
+    return _js_fetch_method(node, ctx)
 
 
 @JS_CONVERTER(a.ErrorResponse)

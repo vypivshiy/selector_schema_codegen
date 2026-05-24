@@ -13,6 +13,7 @@ from .parser import (
     CSTNode,
     CSTPropEntry,
     CSTIdentifier,
+    CSTValue,
     Span,
 )
 
@@ -127,6 +128,7 @@ class KdlArg:
     value: Any
     span: Span
     is_identifier: bool
+    type_annotation: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -144,6 +146,13 @@ class KdlNode:
     span: Span
 
     @classmethod
+    @classmethod
+    def _value_type_annotation(cls, entry_value: object) -> str | None:
+        if isinstance(entry_value, CSTValue) and entry_value.type_annotation:
+            return entry_value.type_annotation.raw
+        return None
+
+    @classmethod
     def from_cst(cls, node: CSTNode) -> KdlNode:
         args: list[KdlArg] = []
         properties: dict[str, KdlArg] = {}
@@ -156,6 +165,7 @@ class KdlNode:
                         value=entry.value.value,
                         span=entry.span,
                         is_identifier=is_id,
+                        type_annotation=cls._value_type_annotation(entry.value),
                     )
                 )
             elif isinstance(entry, CSTPropEntry):
@@ -164,6 +174,7 @@ class KdlNode:
                     value=entry.value.value,
                     span=entry.span,
                     is_identifier=is_id,
+                    type_annotation=cls._value_type_annotation(entry.value),
                 )
 
         children = tuple(cls.from_cst(c) for c in node.children)

@@ -15,6 +15,7 @@ from .module import (
     CodeEndHook,
     Docstring,
     Imports,
+    ImportsRest,
     Utilities,
 )
 
@@ -23,6 +24,13 @@ from .typedef import TypeDef, TypeDefField
 from .jsondef import JsonDef, JsonDefField
 
 from .struct import (
+    StructBase,
+    StructItem,
+    StructList,
+    StructFlatList,
+    StructDict,
+    StructTable,
+    StructRest,
     Struct,
     StructDocstring,
     PreValidate,
@@ -130,13 +138,15 @@ __all__ = [
     "Node",
     # module
     "Module", "CodeStartHook", "CodeEndHook",
-    "Docstring", "Imports", "Utilities",
+    "Docstring", "Imports", "ImportsRest", "Utilities",
     # typedef
     "TypeDef", "TypeDefField",
     # jsondef
     "JsonDef", "JsonDefField",
     # struct
-    "Struct", "StructDocstring", "PreValidate", "CheckMethod",
+    "StructBase", "StructItem", "StructList", "StructFlatList",
+    "StructDict", "StructTable", "StructRest", "Struct",
+    "StructDocstring", "PreValidate", "CheckMethod",
     "Init", "InitField", "SplitDoc",
     "Key", "Value",
     "TableConfig", "TableRow", "TableMatchKey",

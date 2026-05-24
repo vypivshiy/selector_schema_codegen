@@ -9,7 +9,7 @@ class Module(Node):
     """
     Root node.
     Build order of body:
-      CodeStartHook → Docstring, Imports, Utilities
+      CodeStartHook → Docstring, Imports, ImportsRest, Utilities
       → JsonDef entries → TypeDef entries → Struct entries
       → CodeEndHook
     """
@@ -19,6 +19,7 @@ class Module(Node):
             [
                 Docstring(parent=self),
                 Imports(parent=self),
+                ImportsRest(parent=self),
                 Utilities(parent=self),
                 CodeStartHook(parent=self),
             ]
@@ -33,12 +34,16 @@ class Module(Node):
         return self.body[1]  # type: ignore
 
     @property
-    def utilities(self) -> Imports:
+    def imports_rest(self) -> ImportsRest:
         return self.body[2]  # type: ignore
 
     @property
-    def code_start(self) -> Imports:
+    def utilities(self) -> Utilities:
         return self.body[3]  # type: ignore
+
+    @property
+    def code_start(self) -> CodeStartHook:
+        return self.body[4]  # type: ignore
 
 
 @dataclass
@@ -80,6 +85,17 @@ class Imports(Node):
 
     libs: list[str] = field(default_factory=list)
     transform_imports: dict[str, set[str]] = field(default_factory=dict)
+
+
+@dataclass
+class ImportsRest(Node):
+    """
+    Technical node — REST-specific import statements.
+    Emitted only when the module contains at least one StructRest.
+    Populated during codegen phase.
+    """
+
+    libs: list[str] = field(default_factory=list)
 
 
 @dataclass

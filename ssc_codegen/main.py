@@ -133,8 +133,7 @@ def generate(
             "--http-client",
             help=(
                 "HTTP client for @request codegen. "
-                "Python targets: requests | httpx "
-                "('httpx' emits both fetch()/async_fetch()). "
+                "Python targets: httpx (emits both fetch()/async_fetch()). "
                 "JS targets: fetch (default) | axios."
             ),
         ),
@@ -176,7 +175,7 @@ def generate(
         Target.PY_SLAX,
     }
     _JS_TARGETS = {Target.JS_PURE}
-    _PY_HTTP_CLIENTS = {"requests", "httpx"}
+    _PY_HTTP_CLIENTS = {"httpx"}
     _JS_HTTP_CLIENTS = {"fetch", "axios"}
 
     if http_client is not None:
@@ -288,7 +287,7 @@ def generate(
 
     # Phase 2: write runtime file once (if -R is used)
     if separate_runtime and parsed:
-        from ssc_codegen.converters.py_helpers import runtime_module_content
+        from ssc_codegen.converters.py_bs4 import runtime_module_content
 
         include_fallback = target == Target.PY_LXML
         # Pick an AST that has REST structs so the runtime includes helpers
