@@ -24,7 +24,7 @@ NESTED and JSON are terminal types — pipeline ends after nested/jsonify.
 
 **Syntax**: struct types can be specified in KDL two ways:
 - **Recommended**: prefix form — `(list)struct Foo { ... }`, `(dict)struct Bar { ... }`, etc.
-- **Legacy** (still works): property form — `struct name="Foo" type="list" { ... }`
+- **Legacy** (still works): argument form — `struct Foo type="list" { ... }` (name as first argument, type as property)
 
 ---
 

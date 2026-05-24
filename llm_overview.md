@@ -4,9 +4,9 @@ ssc_codegen is a code generator for web scraping parsers.
 Input: .kdl schema files describing HTML extraction rules.
 Output: parser code for Python (bs4, lxml, parsel, selectolax), JavaScript (DOM API).
 
-Pipeline: .kdl schema → KDL parser (tree-sitter) → core (AST + lint) → converter → output code
+Pipeline: .kdl schema → KDL parser (custom KDL 2.0: KDLLexer + KDL2CSTParser) → core (AST + lint) → converter → output code
 
-Version: 0.23.0a
+Version: 0.29.4
 Python: >=3.10
 CLI entry point: `ssc-gen` (ssc_codegen.main:main)
 
@@ -16,7 +16,7 @@ CLI entry point: `ssc-gen` (ssc_codegen.main:main)
 
 ```
 ssc_codegen/
-├── __init__.py            # parse_ast(src, path, css_to_xpath) → Module
+├── __init__.py            # parse_module(src, path, css_to_xpath) → Module
 ├── main.py                # CLI (typer): generate, check, run, health
 ├── _logging.py            # ANSI color logging setup
 ├── exceptions.py          # ParseError, UnknownNodeError, BuildTimeError
@@ -63,19 +63,26 @@ ssc_codegen/
 │   ├── base.py            # BaseConverter, ConverterContext, callback registration
 │   ├── helpers.py         # Naming helpers (to_snake_case, to_pascal_case, to_camel_case, jsonify_path_to_segments)
 │   ├── request_spec.py    # RequestSpec, parse_to_spec, normalize_placeholder_names
-│   ├── py_helpers.py      # Python REST/fetch method builders + Python code rendering helpers
+│   ├── py_render.py       # Python code rendering helpers for RequestSpec (render_value, render_dict, render_body)
 │   ├── py_bs4.py          # Python BeautifulSoup4 (PY_BASE_CONVERTER)
 │   ├── py_lxml.py         # Python lxml
 │   ├── py_parsel.py       # Python parsel (Scrapy)
 │   ├── py_slax.py         # Python selectolax
 │   └── js_pure.py         # JavaScript vanilla DOM
-├── kdl/                   # KDL 2.0 parser (tree-sitter based)
-│   └── parser.py          # KDL2CSTParser, KDLLexer, Token/TokenType, CST node types
+├── kdl/                   # Custom KDL 2.0 parser (NOT tree-sitter)
+│   ├── __init__.py        # Re-exports all CST, Reader, and DictReader types
+│   ├── parser.py          # KDLLexer, KDL2CSTParser, Token/TokenType, CST node types
+│   ├── reader.py          # Reader ABC, Walker, WalkContext, ReadDiagnostic, DiagnosticCollector, parse_into()
+│   └── dict_reader.py     # DictReader — KDL → Python dict (Node TypedDict)
 
 tests/
 ├── integration/
 │   ├── test_codegen_run.py     # End-to-end: KDL → generate → execute → verify JSON
-│   └── schemas/                # Test .kdl files (00_full through 07_table)
+│   ├── test_rest_codegen.py    # REST API code generation tests (mocked HTTP)
+│   ├── schemas/                # Test .kdl files (00_full through 22_rest_response_path)
+│   └── fixtures/               # Test HTML fixtures
+├── js/
+│   └── test_js_codegen.py      # JS codegen tests (Node.js + jsdom)
 ├── test_parser.py              # KDL parser tests
 ├── test_kdl_parser.py          # KDL parser edge cases
 ├── test_imports.py             # Import/include tests
@@ -95,17 +102,27 @@ docs/
 ```bash
 ssc-gen generate schema.kdl -t py-bs4 -o out/                     # generate parser code
 ssc-gen generate schema.kdl -t py-bs4 -o out/ --http-client httpx # with @request support
+ssc-gen generate schema.kdl -t py-bs4 -o out/ -R                  # separate runtime module
+ssc-gen generate schema.kdl -t py-bs4 -o out/ -R -rn my_runtime   # custom runtime name
+ssc-gen generate schema.kdl -t py-bs4 -o out/ --css-to-xpath      # CSS→XPath preprocessing
+ssc-gen generate schema.kdl -t py-bs4 -o out/ --skip-lint         # skip linting
+ssc-gen generate schema.kdl -t py-bs4 -o out/ --package mymod     # package name for generated code
+ssc-gen generate schema.kdl -t py-bs4 -o out/ -f json             # JSON output format
 ssc-gen check schema.kdl                                            # lint only (text output)
 ssc-gen check schema.kdl -f json                                    # lint only (JSON for automation)
 ssc-gen run schema.kdl:StructName -i page.html                     # generate + execute + output JSON
+ssc-gen run schema.kdl:StructName -i page.html --css-to-xpath      # with CSS→XPath
 ssc-gen health schema.kdl:StructName -i page.html                  # check selectors against HTML
+ssc-gen health schema.kdl:StructName -i page.html --css-to-xpath   # with CSS→XPath
 ```
 
 Targets: py-bs4, py-lxml, py-parsel, py-slax, js-pure
 
 `--http-client` option (only for targets that support `@request`):
-- Python targets: `requests` | `httpx` (`httpx` emits both `fetch()` and `async_fetch()`)
+- Python targets: `httpx` (emits both `fetch()` and `async_fetch()`)
 - JS target: `fetch` (default) | `axios`
+
+`--separate-runtime / -R` option: extract helper functions into a separate runtime module (default: `sscgen_runtime`). Use `--runtime-name / -rn` to customize the module name.
 
 ---
 
@@ -118,6 +135,7 @@ Targets: py-bs4, py-lxml, py-parsel, py-slax, js-pure
 5. **Type-tagged containers**: VariableType/StructType enums enforce strict typing at AST level
 6. **Recursive nesting**: `Nested` node resolves via struct_map with cycle detection
 7. **Transport layer**: `@request` stores raw payload in `RequestConfig`; `converters/request_spec.py` normalises curl/HTTP into `RequestSpec`; converters emit fetch methods per target HTTP client
+8. **Runtime separation**: `--separate-runtime` extracts helper functions into a standalone module; generated parsers import from it instead of inlining
 
 ---
 

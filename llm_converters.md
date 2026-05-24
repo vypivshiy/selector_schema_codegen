@@ -41,7 +41,7 @@ All handlers are registered via `@converter.pre(NodeType)` / `@converter.post(No
 ## RequestSpec pipeline (converters/request_spec.py)
 `parse_to_spec(raw_payload) → RequestSpec` — parses curl/raw HTTP into normalized form.
 `normalize_placeholder_names(spec, transform) → RequestSpec` — adapts placeholder names for target language.
-Python rendering helpers live in `converters/py_helpers.py`.
+Python rendering helpers live in `converters/py_render.py`.
 
 ---
 
@@ -69,3 +69,12 @@ Generated code (Python `httpx`):
 - Non-REST structs: `fetch(self, *, page_num: str) -> Self` and `async_fetch(...)`.
 - `type=rest` structs: per-endpoint `@classmethod` methods with public Result type aliases.
   Each `@request name=X` produces `XResult = Union[Ok[T], ErrVariant, UnknownErr, TransportErr]`.
+
+---
+
+## Runtime separation (--separate-runtime / -R)
+
+When enabled, helper functions are extracted into a separate runtime module instead of being inlined into each generated file.
+- Default runtime module name: `sscgen_runtime` (customizable via `--runtime-name / -rn`)
+- Generated parsers import helpers from the runtime module
+- `@converter.file()` providers registered on the converter emit the runtime file
