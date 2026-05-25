@@ -87,7 +87,7 @@ def pre_utilities(node: a.Utilities, ctx: ConverterContext):
     if runtime:
         names = py_bs4.runtime_export_names(node)
         names.append(_FALLBACK_HTML_EXPORT)
-        return [f"from {runtime} import " + ", ".join(names), ""]
+        return [f"from .{runtime} import " + ", ".join(names), ""]
 
     if py_bs4.module_is_rest_only(node):
         lines = []
@@ -352,7 +352,7 @@ def pre_expr_attr(node: a.Attr, ctx: ConverterContext):
 @PY_LXML_CONVERTER(a.PredCss)
 def pre_expr_pred_css(node: a.PredCss, ctx: ConverterContext):
     query = repr(node.query)
-    cond = f"bool(i.cssselect({query}))"
+    cond = f"i.cssselect({query}) is not None"
     if ctx.index == 0:
         return ctx.indent + cond
     return ctx.indent + f"and {cond}"
@@ -361,7 +361,7 @@ def pre_expr_pred_css(node: a.PredCss, ctx: ConverterContext):
 @PY_LXML_CONVERTER(a.PredXpath)
 def pre_expr_pred_xpath(node: a.PredXpath, ctx: ConverterContext):
     query = repr(node.query)
-    cond = f"bool(i.xpath({query}))"
+    cond = f"i.xpath({query}) is not None"
     if ctx.index == 0:
         return ctx.indent + cond
     return ctx.indent + f"and {cond}"

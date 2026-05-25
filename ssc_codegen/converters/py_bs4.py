@@ -307,7 +307,7 @@ def pre_utilities(node: a.Utilities, ctx: ConverterContext):
     runtime = ctx.meta.get("runtime_module")
     if runtime:
         names = runtime_export_names(node)
-        return [f"from {runtime} import " + ", ".join(names), ""]
+        return [f"from .{runtime} import " + ", ".join(names), ""]
 
     if module_is_rest_only(node):
         lines = []
