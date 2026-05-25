@@ -588,6 +588,7 @@ def pre_struct_check_method(node: a.CheckMethod, ctx: ConverterContext):
     method_name = to_camel_case(node.name)
     return [
         f"{ctx.indent}{method_name}() " + "{",
+        f"{ctx.deeper().indent}let {ctx.var_name} = this._doc;",
     ]
 
 

@@ -42,7 +42,7 @@ All nodes inherit from `Node` base class (has `body` attribute).
 - `Init` → container for `InitField` cached values
 - `InitField(name)` → precomputed value, referenced as `@name` via `Self` node
 - `PreValidate` → assert-based validation before parsing
-- `CheckMethod(name)` → boolean check method, runs pipeline, returns bool
+- `CheckMethod(name)` → boolean check method. Unlike Field/PreValidate, has no `v` parameter; converter initializes `v = self._doc` in the method body. Pipeline must contain `to-bool`. DSL: `@check <name> { pipeline... }`
 - `SplitDoc` → split document into items (for LIST/DICT types)
 - `Key`, `Value` → dict key/value extraction
 - `TableConfig`, `TableRow`, `TableMatchKey` → table struct support

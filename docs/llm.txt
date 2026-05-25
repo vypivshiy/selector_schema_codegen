@@ -76,6 +76,18 @@ The old property syntax `struct Name type=list { ... }` still works but prefer t
 - @rows — table rows selector
 - @match — extract key from row for comparison
 
+- @check <name> — boolean check method; runs pipeline on document, returns bool
+  Pipeline must contain `to-bool`. Use `fallback` for error recovery.
+  ```kdl
+  @check is-main {
+      assert { css ".main" }
+      to-bool
+      fallback #false
+  }
+  ```
+  Generated as a public method: `is_main(self) -> bool` (Python), `isMain()` (JS).
+  Called manually before `parse()` to check if the document matches expected structure.
+
 ### Regular fields
 
 ```kdl

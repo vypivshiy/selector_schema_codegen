@@ -808,16 +808,10 @@ def pre_struct_check_method(node: a.CheckMethod, ctx: ConverterContext):
     from ssc_codegen.converters.helpers import to_snake_case
 
     method_name = to_snake_case(node.name)
-    return [f"    def {method_name}(self) -> bool:"]
-
-
-# @PY_BASE_CONVERTER.post(a.CheckMethod)
-# def post_struct_check_method(node: a.CheckMethod, ctx: ConverterContext):
-#     return [
-#         "            return True",
-#         "        except Exception:",
-#         "            return False",
-#     ]
+    return [
+        f"    def {method_name}(self) -> bool:",
+        f"        {ctx.var_name} = self._doc",
+    ]
 
 
 @PY_BASE_CONVERTER(a.SplitDoc)
