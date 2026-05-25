@@ -900,7 +900,7 @@ wheels = [
 
 [[package]]
 name = "ssc-codegen"
-version = "0.29.5"
+version = "0.29.6"
 source = { editable = "." }
 dependencies = [
     { name = "bs4" },
