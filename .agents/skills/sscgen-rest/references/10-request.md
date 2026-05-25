@@ -95,9 +95,6 @@ STYLE  = repeat | csv | bracket | pipe | space   только при []; default
 Флаг `--http-client` при генерации:
 
 ```bash
-# Python: requests (по умолчанию)
-ssc-gen generate schema.kdl -t py-bs4 -o out/
-
 # Python: httpx (sync + async)
 ssc-gen generate schema.kdl -t py-bs4 -o out/ --http-client httpx
 

@@ -52,7 +52,7 @@ json ApiError {
     @doc """
     Pet Clinic API client.
 
-    Generated methods (Python, --http-client requests):
+    Generated methods (Python, --http-client httpx):
         list_pets(client, *, limit=None, offset=None)
         create_pet(client, *, name, category_id=None, category_name=None, status=None)
         get_pet(client, *, pet_id)

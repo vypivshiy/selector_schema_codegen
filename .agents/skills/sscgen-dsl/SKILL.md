@@ -33,7 +33,7 @@ Generate valid **KDL Schema DSL v2.1** configs for HTML scraping from:
 ## Constraints (always apply)
 
 - **CSS selectors only** — never use `xpath`, `xpath-all`, `xpath-remove`
-- **No removal operations** — never use `css-remove`, `xpath-remove`
+- **No removal operations** — never use `css-remove`, `xpath-remove`. Also `css-remove`/`xpath-remove` do not support the block pattern-match form
 - **No advanced operations** — never use `transform`, `dsl`, `json`/`jsonify`, `re-all` unless the user explicitly requests them
 - **No `(rest)struct`** — that's `sscgen-rest` territory. If the user describes an HTTP/JSON API (endpoints, response schemas, error codes), switch skills.
 - **CSS3+ selectors preferred** — use the full set supported by the parser (see CSS Selector Tips below); prefer attribute selectors, pseudo-classes and combinators over writing extra pipeline logic
@@ -150,6 +150,13 @@ struct Page {
 }
 ```
 
+With `keep-order=#true` the struct preserves insertion order (no deduplication sort):
+```kdl
+(flat)struct OrderedTags keep-order=#true {
+    value { text }
+}
+```
+
 ### `(table)` — key-value HTML table
 ```kdl
 (table)struct Info {
@@ -227,6 +234,25 @@ struct MainPage {
 }
 ```
 
+### `@check` — boolean check method
+
+`@check` creates a public method that returns `bool` to verify the document matches expected structure. Pipeline must contain `to-bool`. Called manually before `parse()`.
+
+```kdl
+struct ProductPage {
+    @check is-in-stock {
+        assert { css ".add-to-cart" }
+        to-bool
+        fallback #false
+    }
+
+    title { css "h1"; text }
+    price { css ".price"; text; to-float }
+}
+```
+
+Generated as: `is_in_stock(self) -> bool` (Python) / `isInStock()` (JS).
+
 ---
 
 ## Key Operations (CSS-only subset)
@@ -236,18 +262,23 @@ struct MainPage {
 |-----------|------|-------|
 | `css "sel"` | DOC->DOC | First match |
 | `css-all "sel"` | DOC->LIST_DOC | All matches |
+| `css { "q1"; "q2"; ... }` | DOC->DOC | Pattern-match: try selectors in order, use first non-empty result (2+ required) |
+| `css-all { "q1"; "q2"; ... }` | DOC->LIST_DOC | Pattern-match: try selectors in order, use first non-empty result (2+ required) |
 
 ### Extract
 | Operation | Type | Notes |
 |-----------|------|-------|
 | `text` | DOC->STR / LIST_DOC->LIST_STR | Inner text |
-| `attr "name"` | DOC->STR / LIST_DOC->LIST_STR | Attribute value |
+| `attr "name"` | DOC->STR / LIST_DOC->LIST_STR | Single attribute value (error if missing) |
+| `attr "n1" "n2" ...` | DOC->LIST_STR | Multiple attributes (missing attrs skipped silently) |
 | `raw` | DOC->STR | Raw HTML string |
 
 ### String ops
+All string ops support **map semantics**: STRING -> STRING and LIST_STRING -> LIST_STRING.
+
 `trim` . `ltrim` . `rtrim` . `normalize-space` . `lower` . `upper`
 `rm-prefix "x"` . `rm-suffix "x"` . `rm-prefix-suffix "x"`
-`fmt DEFINE-NAME` . `re-sub #"pat"# "repl"` . `repl "from" "to"` . `split "delim"` . `join "delim"` . `unescape`
+`fmt DEFINE-NAME` . `re-sub #"pat"# "repl"` . `repl "from" "to"` . `repl { "from1" "to1"; "from2" "to2" }` . `split "delim"` . `join "delim"` . `unescape`
 
 ### Regex
 `re #"(group)"#` -> STR->STR (first capture group)
@@ -266,7 +297,8 @@ struct MainPage {
 `fallback <val>` — `#null` / `#true` / `#false` / `0` / `"str"` / `{}` (empty list)
 `filter { <predicate> }` — filter LIST in place
 `assert { <predicate> }` — raise if false
-`nested StructName` — call another struct
+`nested StructName` — call another struct (DOCUMENT -> NESTED, terminal)
+`jsonify SchemaName [path="dotted.path"]` — deserialize JSON string (STRING -> JSON, terminal)
 
 ---
 
@@ -280,6 +312,14 @@ define BASE-URL="https://example.com"
 define FMT-URL="https://example.com/{{}}"      // {{}} = placeholder
 define RE-PRICE=#"(\d+(?:\.\d+)?)"#            // inline regex
 ```
+
+Scalar defines can reference other defines via `{{NAME}}` (UPPER_CASE) — resolved at parse time:
+```kdl
+define BASE-URL="https://example.com"
+define API-URL="{{BASE-URL}}/api/v1"           // resolves to "https://example.com/api/v1"
+```
+
+Lowercase `{{name}}` in define values are left as-is — they become `@request` placeholders at runtime.
 
 ### Block defines
 ```kdl
@@ -301,6 +341,22 @@ link { expr EXTRACT-HREF; trim }
 ```
 
 Place defines **before structs** that reference them.
+
+### Define as @request argument
+
+A scalar define can be used as the `@request` argument:
+```kdl
+define HNEWS-REQ="""
+GET /?p={{page-num}} HTTP/1.1
+Host: news.ycombinator.com
+Accept: text/html
+"""
+
+struct MainPage {
+    @request HNEWS-REQ
+    news { css-all ".athing"; text }
+}
+```
 
 ---
 

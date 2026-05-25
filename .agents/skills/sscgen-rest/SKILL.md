@@ -16,7 +16,7 @@ description: >
 # sscgen-rest — Skill (REST/JSON API clients)
 
 Generate `(rest)struct` schemas that become typed HTTP clients when run through
-`ssc-gen generate ... --http-client requests|httpx|fetch|axios`.
+`ssc-gen generate ... --http-client httpx|fetch|axios`.
 
 > **REST only.** This skill handles `json` schemas + `@request` + `@error`.
 > For HTML scraping (`css`, `text`, `attr`, `nested`, `(item)struct / (list)struct / …`) → `sscgen-dsl`.
@@ -198,13 +198,12 @@ Loop until exit 0. Cap 5 iterations on same line; then explain conflict.
 ### Step 5 — Generate code (optional)
 
 ```bash
-uv run ssc-gen generate schema.kdl -t py-bs4 --http-client requests -o out/
-uv run ssc-gen generate schema.kdl -t py-bs4 --http-client httpx    -o out/  # +async
+uv run ssc-gen generate schema.kdl -t py-bs4 --http-client httpx    -o out/  # sync + async
 uv run ssc-gen generate schema.kdl -t js-pure --http-client fetch    -o out/
 uv run ssc-gen generate schema.kdl -t js-pure --http-client axios    -o out/
 ```
 
-Without `--http-client`, `@request` is silently ignored. Go target unsupported.
+Without `--http-client`, `@request` is silently ignored.
 
 ---
 

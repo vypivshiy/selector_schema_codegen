@@ -190,8 +190,7 @@ uv run ssc-gen check schema.kdl                  # text output
 uv run ssc-gen check schema.kdl -f json          # JSON for automated fixing
 
 # generate code (REST struct requires --http-client)
-uv run ssc-gen generate schema.kdl -t py-bs4  --http-client requests -o out/
-uv run ssc-gen generate schema.kdl -t py-bs4  --http-client httpx    -o out/  # +async_fetch
+uv run ssc-gen generate schema.kdl -t py-bs4  --http-client httpx    -o out/  # sync + async_fetch
 uv run ssc-gen generate schema.kdl -t js-pure --http-client fetch    -o out/
 uv run ssc-gen generate schema.kdl -t js-pure --http-client axios    -o out/
 ```

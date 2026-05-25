@@ -24,16 +24,21 @@
 | Operation | Accept | Return |
 |-----------|--------|--------|
 | `css "sel"` | DOCUMENT | DOCUMENT |
+| `css { "q1"; "q2" }` | DOCUMENT | DOCUMENT | Pattern-match (2+ selectors, first non-empty wins) |
 | `css-all "sel"` | DOCUMENT | LIST_DOCUMENT |
+| `css-all { "q1"; "q2" }` | DOCUMENT | LIST_DOCUMENT | Pattern-match (2+ selectors, first non-empty wins) |
 | `css-remove "sel"` | DOCUMENT | DOCUMENT |
 | `text` | DOCUMENT | STRING |
 | `text` | LIST_DOCUMENT | LIST_STRING |
 | `attr "n"` | DOCUMENT | STRING |
 | `attr "n"` | LIST_DOCUMENT | LIST_STRING |
+| `attr "n1" "n2"` | DOCUMENT | LIST_STRING |
+| `attr "n1" "n2"` | LIST_DOCUMENT | LIST_STRING |
 | `raw` | DOCUMENT | STRING |
 | `raw` | LIST_DOCUMENT | LIST_STRING |
 | `trim/ltrim/rtrim` | STRING | STRING |
 | `trim/ltrim/rtrim` | LIST_STRING | LIST_STRING |
+| `normalize-space` | LIST_STRING | LIST_STRING |
 | `lower/upper` | STRING | STRING |
 | `lower/upper` | LIST_STRING | LIST_STRING |
 | `normalize-space` | STRING | STRING |
@@ -50,6 +55,7 @@
 | `re-sub #"p"# "r"` | STRING | STRING |
 | `re-sub #"p"# "r"` | LIST_STRING | LIST_STRING |
 | `repl "f" "t"` | STRING | STRING |
+| `repl { ... }` | STRING | STRING | ReplMap: multiple replacements |
 | `REPL-DEFINE` | STRING | STRING |
 | `to-int` | STRING | INT |
 | `to-float` | STRING | FLOAT |
@@ -142,6 +148,7 @@ and { ... }    or { ... }    not { ... }
 | `@init { ... }` | all | Precompute shared values |
 | `@split-doc { ... }` | list, flat, dict | Split document into items |
 | `@pre-validate { ... }` | all | Assert before parsing |
+| `@check <name> { ... }` | all | Boolean check method; pipeline must contain `to-bool` |
 | `@table { ... }` | table | Select the table element |
 | `@rows { ... }` | table | Select rows |
 | `@match { ... }` | table | Pipeline for key extraction |
