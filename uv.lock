@@ -285,15 +285,15 @@ wheels = [
 
 [[package]]
 name = "hypothesis"
-version = "6.153.2"
+version = "6.153.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "exceptiongroup", marker = "python_full_version < '3.11'" },
     { name = "sortedcontainers" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/be/48/b6fcb59469f237a75592165d986fbfc57361279df5fe20b951fcc766ba2c/hypothesis-6.153.2.tar.gz", hash = "sha256:6f53e84b51c1f6c4173d6698880ddc2d05947ca649caa552afa26a01c2d964c1", size = 474531, upload-time = "2026-05-27T03:07:59.929Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e8/c3/8c661bb893725eedeb003e85f3050274da2d77abf0847c4d61b4af53969c/hypothesis-6.153.6.tar.gz", hash = "sha256:8f7663251c57c9ee1fb6c0e919a6027cbda98d52b210dea441957d11d644c271", size = 475551, upload-time = "2026-05-27T17:43:32.524Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a7/4c/173899cce4c79d17f6b9eceec262fa0900d32506ee5ce7f4034bb519de6a/hypothesis-6.153.2-py3-none-any.whl", hash = "sha256:db489369f89ea7aa724052f4725d3839f0f9d42fed1bb92d279a221a3585e215", size = 540840, upload-time = "2026-05-27T03:07:56.942Z" },
+    { url = "https://files.pythonhosted.org/packages/bf/33/f3ec54e6fb89c2279f0dd911ba512321e70038e447d1984c35fad61840f8/hypothesis-6.153.6-py3-none-any.whl", hash = "sha256:a892e3460e4dd8cfb8525682d8901be8f5e2d2c7b352359b71a44e5def2b89c8", size = 541876, upload-time = "2026-05-27T17:43:30.807Z" },
 ]
 
 [[package]]
@@ -325,11 +325,11 @@ wheels = [
 
 [[package]]
 name = "kdlquery"
-version = "1.1.1"
+version = "1.1.2"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/62/db/91da702825373833e88ec401b300729ec50100e64d160d1eb4996700b5f3/kdlquery-1.1.1.tar.gz", hash = "sha256:1989a2ad1dd493c082862be713306589da096e75c06eda5d1991eb44739ea11f", size = 91455, upload-time = "2026-05-27T11:38:17.218Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/68/3d/fd9fe58fd36aa1b351c5cadf0d72196b28020c9ed670210f4ede7cb8677c/kdlquery-1.1.2.tar.gz", hash = "sha256:c9fa50806ca21ab99fd60dad4c362b1cc4c5ff15b3b154c679121387175747c0", size = 91775, upload-time = "2026-05-27T22:12:59.762Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d1/34/4b0a192a7b8c9d1321af77c6977997f406bf63a1ca85629f3973e2f14ca1/kdlquery-1.1.1-py3-none-any.whl", hash = "sha256:1c864cc111088ffe539c2228c3d3f570f29ae234f613dd6f116495b9c307d9b7", size = 28008, upload-time = "2026-05-27T11:38:18.413Z" },
+    { url = "https://files.pythonhosted.org/packages/ef/7b/d5a2dfd54135f0e59c36efd109c7a92f1492f9c27f9c84c228241bf5db6c/kdlquery-1.1.2-py3-none-any.whl", hash = "sha256:b39c2026fec45952f1ecb8fb5c6d831a20717070207cf4c311c50769128a82b9", size = 28253, upload-time = "2026-05-27T22:13:00.973Z" },
 ]
 
 [[package]]
@@ -899,7 +899,7 @@ wheels = [
 
 [[package]]
 name = "ssc-codegen"
-version = "0.29.6"
+version = "0.30.0"
 source = { editable = "." }
 dependencies = [
     { name = "bs4" },
@@ -933,7 +933,7 @@ requires-dist = [
     { name = "bs4", specifier = ">=0.0.2" },
     { name = "colorama", marker = "sys_platform == 'win32'", specifier = ">=0.4.6" },
     { name = "cssselect", specifier = ">=1.2.0" },
-    { name = "kdlquery", specifier = ">=1.1.1" },
+    { name = "kdlquery", specifier = ">=1.1.2" },
     { name = "lxml", specifier = ">=5.3.0" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "soupsieve", specifier = ">=2.6" },
