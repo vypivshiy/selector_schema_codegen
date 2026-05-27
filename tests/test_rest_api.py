@@ -769,8 +769,8 @@ class TestSeparateRuntime:
             runtime_module=self.RUNTIME_NAME,
         )
         code = generated[""]
-        assert f"from {self.RUNTIME_NAME} import" in code
-        assert "Ok" in code.split(f"from {self.RUNTIME_NAME} import")[1]
+        assert f"from .{self.RUNTIME_NAME} import" in code
+        assert "Ok" in code.split(f"from .{self.RUNTIME_NAME} import")[1]
 
     @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
     def test_main_no_inline_rest_helpers(self, converter_attr):
