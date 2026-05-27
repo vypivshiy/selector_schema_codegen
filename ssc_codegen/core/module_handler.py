@@ -32,12 +32,6 @@ from ssc_codegen.core.expressions import (
     _resolve_define_references,
     _VAR_TYPE_MAP,
 )
-from ssc_codegen.core.linting import (
-    lint_define_node,
-    lint_json_node,
-    lint_struct_node,
-    lint_transform_node,
-)
 from ssc_codegen.core.struct_parser import parse_json_fields, parse_struct
 
 _KDL_TEXT_ENCODING = "utf-8-sig"
@@ -46,7 +40,6 @@ _KDL_TEXT_ENCODING = "utf-8-sig"
 def handle_struct(
     node: KdlNode, module: Module, ctx: ParseContext, lint: LintContext
 ) -> StructBase:
-    lint_struct_node(node, module, ctx, lint)
     raw = node.type_annotation
     type_ = raw[1:-1] if raw else (node.get_prop("type") or "item")
     keep_order = node.get_prop("keep-order") or False
@@ -79,16 +72,12 @@ def handle_json(
     is_array = node.type_annotation == "(array)"
     path = node.get_prop("path") or ""
     json_def = JsonDef(parent=module, name=name, is_array=is_array, path=path)
-    lint_json_node(node, lint, ctx)
     parse_json_fields(node.children, json_def, ctx)
     ctx.json_defs[json_def.name] = json_def
-    if name:
-        lint.json_kdl_nodes[name] = node
     return json_def
 
 
 def handle_define(node: KdlNode, ctx: ParseContext, lint: LintContext) -> None:
-    lint_define_node(node, ctx, lint)
     if node.children:
         ctx.children_defines[str(node.args[0].value)] = list(node.children)
         lint.defines[str(node.args[0].value)] = DefineInfo(
@@ -111,7 +100,6 @@ def handle_define(node: KdlNode, ctx: ParseContext, lint: LintContext) -> None:
 def handle_transform(
     node: KdlNode, ctx: ParseContext, lint: LintContext
 ) -> None:
-    lint_transform_node(node, ctx, lint)
     name = str(node.args[0].value) if node.args else ""
     accept_str = node.get_prop("accept") or ""
     ret_str = node.get_prop("return") or ""

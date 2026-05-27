@@ -12,6 +12,7 @@ from kdlquery.types import Position, Span
 
 from ssc_codegen.core.contexts import LintContext, ParseContext
 from ssc_codegen.core.expressions import typedef_from_struct
+from ssc_codegen.core.linter import lint_nodes
 from ssc_codegen.core.module_handler import (
     handle_define,
     handle_json,
@@ -19,7 +20,6 @@ from ssc_codegen.core.module_handler import (
     handle_transform,
     resolve_imports,
 )
-from ssc_codegen.core.linting import lint_json_cross_refs, lint_rest_cross_refs
 
 
 class SscReader(Reader[KdlNode, Module]):
@@ -52,14 +52,18 @@ class SscReader(Reader[KdlNode, Module]):
             top_nodes, self._source_path, ctx, lint, diagnostics
         )
 
-        # pass 2 — collect defines and transforms
+        # pass 2 — structural pre-pass linting
+        lint_diags = lint_nodes(top_nodes, str(self._source_path or ""))
+        diagnostics.extend(lint_diags)
+
+        # pass 3 — collect defines and transforms
         for node in top_nodes:
             if node.name == "define":
                 handle_define(node, ctx, lint)
             elif node.name == "transform":
                 handle_transform(node, ctx, lint)
 
-        # pass 3 — build module
+        # pass 4 — build module
         module = Module()
         structs: list = []
         typedefs: list = []
@@ -77,24 +81,12 @@ class SscReader(Reader[KdlNode, Module]):
             elif node.name in ("define", "transform", "import"):
                 pass  # already handled
             else:
-                diagnostics.append(
-                    ReadDiagnostic(
-                        message=f"Unknown node: {node.name}",
-                        severity=Severity.ERROR,
-                        span=node.span,
-                        path=lint.path,
-                        code="E200",
-                    )
-                )
+                pass  # already reported by structural linter
             lint.pop()
 
         # wire transforms
         for td in ctx.transforms.values():
             td.parent = module
-
-        # post-pass: cross-reference validation
-        lint_json_cross_refs(ctx, lint)
-        lint_rest_cross_refs(ctx, lint)
 
         # wire module body
         module.body.extend(

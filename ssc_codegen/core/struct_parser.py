@@ -32,7 +32,6 @@ from kdlquery import KdlNode
 
 from ssc_codegen.core.contexts import LintContext, ParseContext, WalkCtx
 from ssc_codegen.core.expressions import parse_expressions
-from ssc_codegen.core.linting import lint_request_placeholders
 from ssc_codegen.core.type_checking import check_pipeline_types
 
 
@@ -104,7 +103,6 @@ def parse_struct(
             )
             req = RequestConfig(parent=parent)
             req.raw_payload = raw_payload
-            lint_request_placeholders(node, raw_payload, lint)
             req.response_path = node.get_prop("response-path") or ""
             req.response_join = node.get_prop("response-join") or ""
             req.name = node.get_prop("name") or ""
@@ -115,7 +113,7 @@ def parse_struct(
                 )
             )
             if req.response_schema and isinstance(parent, StructRest):
-                lint.rest_response_refs.append((node, req.response_schema))
+                pass  # cross-ref validation done by structural linter
             doc_val = node.get_prop("doc") or ""
             req.doc = str(ctx.property_defines.get(doc_val, doc_val))
             parent.body.append(req)
@@ -161,8 +159,6 @@ def parse_struct(
                 conditions=conditions,
             )
             parent.body.append(err)
-            if isinstance(parent, StructRest):
-                lint.rest_error_refs.append((node, schema_name))
         else:
             if isinstance(parent, StructTable):
                 expr = Field(
@@ -170,7 +166,13 @@ def parse_struct(
                 )
             else:
                 expr = Field(parent=parent, name=node.name)
-            parse_expressions(node.children, expr, ctx, lint)
+            ops = list(node.children)
+            parse_expressions(ops, expr, ctx, lint)
+            # Type inference for regular fields
+            if ops and not (len(ops) == 1 and ops[0].name == "nested"):
+                check_pipeline_types(
+                    ops, ctx, lint, start_type=VariableType.DOCUMENT
+                )
             parent.body.append(expr)
 
     if not isinstance(parent, StructRest):

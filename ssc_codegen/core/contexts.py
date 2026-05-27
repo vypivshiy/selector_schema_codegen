@@ -104,7 +104,7 @@ class ParseContext:
 
 @dataclass
 class LintContext:
-    """Lint state: defines, transforms, init_fields, walk context, path, diagnostics."""
+    """Lint state for reader-side validation (type inference, per-op checks)."""
 
     defines: dict[str, DefineInfo] = field(default_factory=dict)
     transforms: dict[str, TransformInfo] = field(default_factory=dict)
@@ -115,12 +115,6 @@ class LintContext:
     inferred_define_types: dict[str, tuple[VariableType, VariableType]] = field(
         default_factory=dict
     )
-    dsl_names: set[str] = field(default_factory=set)
-    json_kdl_nodes: dict[str, "KdlNode"] = field(default_factory=dict)
-    rest_response_refs: list[tuple["KdlNode", str]] = field(
-        default_factory=list
-    )
-    rest_error_refs: list[tuple["KdlNode", str]] = field(default_factory=list)
     _predicate_depth: int = field(default=0)
     _predicate_context: str = ""
 
