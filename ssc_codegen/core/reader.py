@@ -1,4 +1,4 @@
-"""Reader class and public API."""
+"""Public API — parse KDL source into Module AST."""
 
 from __future__ import annotations
 
@@ -7,12 +7,12 @@ from pathlib import Path
 from ssc_codegen.ast import Module
 from ssc_codegen.exceptions import BuildTimeError, ParseError
 from kdlquery import KDLParseError, parse as kdl_parse
-from kdlquery import KdlNode, ReadDiagnostic, Reader, Severity, WalkContext
+from kdlquery import ReadDiagnostic, Severity
 from kdlquery.types import Position, Span
 
 from ssc_codegen.core.contexts import LintContext, ParseContext
+from ssc_codegen.core.linter import lint_cross_refs, lint_module
 from ssc_codegen.core.expressions import typedef_from_struct
-from ssc_codegen.core.linter import lint_nodes
 from ssc_codegen.core.module_handler import (
     handle_define,
     handle_json,
@@ -22,48 +22,50 @@ from ssc_codegen.core.module_handler import (
 )
 
 
-class SscReader(Reader[KdlNode, Module]):
-    """Unified KDL -> Module AST reader with integrated linting."""
+def parse_module(
+    src: str, *, source_path: Path | None = None
+) -> tuple[Module, list[ReadDiagnostic]]:
+    """Parse KDL source -> Module AST + diagnostics."""
+    try:
+        doc = kdl_parse(src)
+    except KDLParseError as exc:
+        pos = Position(offset=0, line=exc.line, column=exc.col)
+        span = Span(start=pos, end=pos)
+        return Module(), [
+            ReadDiagnostic(
+                message=exc.msg,
+                severity=Severity.ERROR,
+                span=span,
+                path=str(source_path) if source_path else "",
+                hint="Fix the syntax error and try again.",
+                code="E000",
+                label="syntax error",
+            )
+        ]
 
-    def __init__(self, *, source_path: Path | None = None) -> None:
-        self._source_path = source_path
-        self._ctx = ParseContext(source_path=source_path)
-        self._lint = LintContext()
+    ctx = ParseContext(source_path=source_path)
+    lint = LintContext()
+    top_nodes = list(doc.nodes)
+    diagnostics: list[ReadDiagnostic] = []
 
-    def on_node(self, node: KdlNode, ctx: WalkContext[KdlNode]) -> KdlNode:
-        return node
+    # pass 1 — resolve imports (returns flat list with imported nodes)
+    top_nodes = resolve_imports(top_nodes, source_path, ctx, lint, diagnostics)
 
-    def error_node(
-        self, node: KdlNode, message: str, ctx: WalkContext[KdlNode]
-    ) -> KdlNode:
-        return node
+    # pass 2 — structural linting on KdlDocument (current file only)
+    diagnostics.extend(lint_module(doc, str(source_path or "")))
 
-    def finalize(
-        self,
-        nodes: list[KdlNode],
-        diagnostics: list[ReadDiagnostic],
-    ) -> Module:
-        ctx = self._ctx
-        lint = self._lint
-        top_nodes = nodes
+    # pass 3 — cross-ref validation on merged flat list
+    diagnostics.extend(lint_cross_refs(top_nodes, str(source_path or "")))
 
-        # pass 1 — resolve imports
-        top_nodes = resolve_imports(
-            top_nodes, self._source_path, ctx, lint, diagnostics
-        )
-
-        # pass 2 — structural pre-pass linting
-        lint_diags = lint_nodes(top_nodes, str(self._source_path or ""))
-        diagnostics.extend(lint_diags)
-
-        # pass 3 — collect defines and transforms
+    try:
+        # pass 4 — collect defines and transforms
         for node in top_nodes:
             if node.name == "define":
                 handle_define(node, ctx, lint)
             elif node.name == "transform":
                 handle_transform(node, ctx, lint)
 
-        # pass 4 — build module
+        # pass 5 — build module
         module = Module()
         structs: list = []
         typedefs: list = []
@@ -99,36 +101,6 @@ class SscReader(Reader[KdlNode, Module]):
         # merge lint diagnostics into walker diagnostics
         diagnostics.extend(lint.diagnostics)
 
-        return module
-
-
-def parse_module(
-    src: str, *, source_path: Path | None = None
-) -> tuple[Module, list[ReadDiagnostic]]:
-    """Parse KDL source -> Module AST + diagnostics."""
-    try:
-        doc = kdl_parse(src)
-    except KDLParseError as exc:
-        pos = Position(offset=0, line=exc.line, column=exc.col)
-        span = Span(start=pos, end=pos)
-        return Module(), [
-            ReadDiagnostic(
-                message=exc.msg,
-                severity=Severity.ERROR,
-                span=span,
-                path=str(source_path) if source_path else "",
-                hint="Fix the syntax error and try again.",
-                code="E000",
-                label="syntax error",
-            )
-        ]
-
-    # Walk the parsed document through the reader
-    reader = SscReader(source_path=source_path)
-    try:
-        top_nodes = list(doc.nodes)
-        diagnostics: list[ReadDiagnostic] = []
-        module = reader.finalize(top_nodes, diagnostics)
         return module, diagnostics
     except (ParseError, BuildTimeError) as exc:
         pos = Position(offset=0, line=0, column=0)

@@ -174,32 +174,6 @@ class LintContext:
     def pop(self) -> None:
         self._path_segments.pop()
 
-    def node_name(self, node: KdlNode) -> str:
-        return node.name
-
-    def get_args(self, node: KdlNode) -> list[str]:
-        return [str(a.value) for a in node.args]
-
-    def get_raw_args(self, node: KdlNode) -> list[RawArg]:
-        return [RawArg(value=str(a.value), span=a.span) for a in node.args]
-
-    def get_arg(self, node: KdlNode, index: int) -> str | None:
-        args = self.get_args(node)
-        return args[index] if index < len(args) else None
-
-    def get_prop(self, node: KdlNode, key: str) -> str | None:
-        entry = node.properties.get(key)
-        return str(entry.value) if entry else None
-
-    def get_children_nodes(self, node: KdlNode) -> list[KdlNode]:
-        return list(node.children)
-
-    def has_empty_block(self, node: KdlNode) -> bool:
-        return len(node.children) == 0
-
-    def is_define_ref(self, arg: str) -> bool:
-        return arg in self.defines
-
     def resolve_scalar_arg(self, arg: str) -> str | None:
         info = self.defines.get(arg)
         if info is not None and info.kind == DefineKind.SCALAR:

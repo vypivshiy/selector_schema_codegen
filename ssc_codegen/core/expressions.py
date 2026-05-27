@@ -81,7 +81,7 @@ from ssc_codegen.regex_utils import normalize_regex_pattern
 from typing import cast
 
 from ssc_codegen.core.contexts import LintContext, ParseContext, WalkCtx
-from ssc_codegen.core.linting import (
+from ssc_codegen.core.linter import (
     lint_pipeline_op,
     lint_validate_css,
     lint_validate_xpath,

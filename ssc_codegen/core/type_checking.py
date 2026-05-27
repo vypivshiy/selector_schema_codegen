@@ -215,8 +215,8 @@ def _get_define_ops(
         return None
     _visiting.add(define_name)
     result: list[KdlNode] = []
-    for op_node in lint.get_children_nodes(info.node):
-        op_nm = lint.node_name(op_node)
+    for op_node in info.node.children:
+        op_nm = op_node.name
         if not op_nm:
             continue
         if op_nm in ctx.children_defines:
@@ -234,7 +234,7 @@ def _get_define_ops(
 def _fallback_literal_type(
     node: KdlNode, lint: LintContext
 ) -> VariableType | None:
-    if lint.get_children_nodes(node):
+    if list(node.children):
         return VariableType.LIST_AUTO
     raw_args = node.args
     if not raw_args:
@@ -260,7 +260,7 @@ def check_pipeline_types(
 ) -> VariableType:
     current = start_type
     for node in ops:
-        op_name = lint.node_name(node)
+        op_name = node.name
         if not op_name:
             continue
 
@@ -316,7 +316,7 @@ def check_pipeline_types(
             continue
 
         if op_name == "transform":
-            args = lint.get_args(node)
+            args = [str(a.value) for a in node.args]
             t_name = args[0] if args else None
             if not t_name:
                 lint.error(

@@ -55,7 +55,7 @@ from ssc_codegen.regex_utils import normalize_regex_pattern
 from typing import cast
 
 from ssc_codegen.core.contexts import LintContext, ParseContext
-from ssc_codegen.core.linting import lint_predicate_op
+from ssc_codegen.core.linter import lint_predicate_op
 
 
 # ── Parse filter/assert/match expressions ──────────────────────────────────────

@@ -1,15 +1,18 @@
-"""Structural pre-pass linter — validates KDL tree before AST construction."""
+"""Unified linter — structural validation, inline pipeline/predicate linting, cross-refs."""
 
 from __future__ import annotations
 
+import difflib as _difflib
 import re as _re
 
 from ssc_codegen.ast import VariableType
 from ssc_codegen.ast.struct import PLACEHOLDER_RE, PLACEHOLDER_WIDE_RE
-from kdlquery import KdlNode, ReadDiagnostic, Severity
+from kdlquery import KdlDocument, KdlNode, ReadDiagnostic, Severity
 
 
-# ── Helpers ──────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Helpers
+# ═══════════════════════════════════════════════════════════════════════════════
 
 
 def _error(
@@ -58,7 +61,9 @@ def _node_args(node: KdlNode) -> list[str]:
     return [str(a.value) for a in node.args]
 
 
-# ── Constants ────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Constants
+# ═══════════════════════════════════════════════════════════════════════════════
 
 
 _VALID_STRUCT_TYPES = frozenset(
@@ -98,64 +103,125 @@ _VALID_TRANSFORM_TYPES = frozenset(
 
 _DEFINE_NAME_RE = _re.compile(r"^[A-Z_][A-Z0-9_-]*\Z")
 
+_NO_ARGS_OPS: frozenset[str] = frozenset(
+    {
+        "text",
+        "raw",
+        "normalize-space",
+        "lower",
+        "upper",
+        "unescape",
+        "first",
+        "last",
+        "len",
+        "unique",
+        "to-int",
+        "to-float",
+        "to-bool",
+    }
+)
 
-# ── Public API ───────────────────────────────────────────────────────────────────
+_TRIM_OPS: frozenset[str] = frozenset({"trim", "ltrim", "rtrim"})
+_RM_OPS: frozenset[str] = frozenset(
+    {"rm-prefix", "rm-suffix", "rm-prefix-suffix"}
+)
+_PREDICATE_BLOCKS: frozenset[str] = frozenset(
+    {"filter", "assert", "match", "not", "and", "or"}
+)
+
+_EXTRA_PIPELINE_OPS: frozenset[str] = frozenset(
+    {
+        "transform",
+        "filter",
+        "assert",
+        "match",
+        "fallback",
+        "self",
+        "not",
+        "and",
+        "or",
+    }
+)
+
+_PREDICATE_OPS: frozenset[str] = frozenset(
+    {
+        "eq",
+        "ne",
+        "starts",
+        "ends",
+        "contains",
+        "in",
+        "len-eq",
+        "len-ne",
+        "len-gt",
+        "len-lt",
+        "len-ge",
+        "len-le",
+        "len-range",
+        "has-attr",
+        "attr-eq",
+        "attr-ne",
+        "attr-starts",
+        "attr-ends",
+        "attr-contains",
+        "attr-re",
+        "text-re",
+        "text-starts",
+        "text-ends",
+        "text-contains",
+        "re-any",
+        "gt",
+        "lt",
+        "ge",
+        "le",
+    }
+)
 
 
-def lint_nodes(
-    nodes: list[KdlNode], source_path: str = ""
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Structural linting — KdlDocument API
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def lint_module(
+    doc: KdlDocument, source_path: str = ""
 ) -> list[ReadDiagnostic]:
-    """Structural pre-pass linting on flat KDL node list."""
+    """Structural pre-pass linting on the parsed KDL document."""
     diags: list[ReadDiagnostic] = []
     children_defines: dict[str, list[KdlNode]] = {}
-    _lint_top_level(nodes, source_path, diags)
-    _lint_defines(nodes, source_path, diags, children_defines)
-    _lint_transforms(nodes, source_path, diags)
-    _lint_json_defs(nodes, source_path, diags, children_defines)
-    _lint_structs(nodes, source_path, diags, children_defines)
-    _lint_cross_refs(nodes, source_path, diags)
+    _lint_top_level(doc, source_path, diags)
+    _lint_defines(doc, source_path, diags, children_defines)
+    _lint_transforms(doc, source_path, diags)
+    _lint_json_defs(doc, source_path, diags, children_defines)
+    _lint_structs(doc, source_path, diags, children_defines)
     return diags
 
 
-# ── Top-level ────────────────────────────────────────────────────────────────────
-
-
 def _lint_top_level(
-    nodes: list[KdlNode],
+    doc: KdlDocument,
     source_path: str,
     diags: list[ReadDiagnostic],
 ) -> None:
-    for node in nodes:
-        if node.name not in (
-            "@doc",
-            "json",
-            "struct",
-            "define",
-            "transform",
-            "import",
-        ):
-            diags.append(
-                _error(
-                    node,
-                    f"Unknown node: {node.name}",
-                    source_path,
-                    code="E200",
-                )
+    for node in doc.select(
+        ":root:not(@doc, json, struct, define, transform, import)"
+    ):
+        diags.append(
+            _error(
+                node,
+                f"Unknown node: {node.name}",
+                source_path,
+                code="E200",
             )
-
-
-# ── Define lint ──────────────────────────────────────────────────────────────────
+        )
 
 
 def _lint_defines(
-    nodes: list[KdlNode],
+    doc: KdlDocument,
     source_path: str,
     diags: list[ReadDiagnostic],
     children_defines: dict[str, list[KdlNode]],
 ) -> None:
-    for node in nodes:
-        if node.name != "define":
-            continue
+    for node in doc.select("define:root"):
         args = _node_args(node)
         children = list(node.children)
         if args:
@@ -194,17 +260,12 @@ def _lint_defines(
             )
 
 
-# ── Transform lint ───────────────────────────────────────────────────────────────
-
-
 def _lint_transforms(
-    nodes: list[KdlNode],
+    doc: KdlDocument,
     source_path: str,
     diags: list[ReadDiagnostic],
 ) -> None:
-    for node in nodes:
-        if node.name != "transform":
-            continue
+    for node in doc.select("transform:root"):
         accept_str = node.get_prop("accept")
         ret_str = node.get_prop("return")
         lang_nodes = list(node.children)
@@ -278,33 +339,34 @@ def _lint_transforms(
             lang = lang_node.name
             if not lang:
                 continue
-            impl_nodes = list(lang_node.children)
-            has_code = any(n.name == "code" for n in impl_nodes)
-            for impl_node in impl_nodes:
-                impl_name = impl_node.name
-                if impl_name == "code" and not _node_args(impl_node):
+            code_nodes = lang_node.select("code")
+            has_code = bool(code_nodes)
+            for code_node in code_nodes:
+                if not _node_args(code_node):
                     diags.append(
                         _error(
-                            impl_node,
+                            code_node,
                             f"'transform {name}' > '{lang}' > 'code' requires a string argument",
                             source_path,
                             code="E001",
                         )
                     )
-                elif impl_name == "import" and not _node_args(impl_node):
+            for import_node in lang_node.select("import"):
+                if not _node_args(import_node):
                     diags.append(
                         _error(
-                            impl_node,
+                            import_node,
                             f"'transform {name}' > '{lang}' > 'import' requires a string argument",
                             source_path,
                             code="E001",
                         )
                     )
-                elif impl_name and impl_name not in ("code", "import"):
+            for impl_node in lang_node.select("*"):
+                if impl_node.name not in ("code", "import"):
                     diags.append(
                         _error(
                             impl_node,
-                            f"'transform {name}' > '{lang}': unknown keyword '{impl_name}'",
+                            f"'transform {name}' > '{lang}': unknown keyword '{impl_node.name}'",
                             source_path,
                             code="E200",
                         )
@@ -320,19 +382,14 @@ def _lint_transforms(
                 )
 
 
-# ── JSON lint ────────────────────────────────────────────────────────────────────
-
-
 def _lint_json_defs(
-    nodes: list[KdlNode],
+    doc: KdlDocument,
     source_path: str,
     diags: list[ReadDiagnostic],
     children_defines: dict[str, list[KdlNode]],
 ) -> None:
     seen_json_names: set[str] = set()
-    for node in nodes:
-        if node.name != "json":
-            continue
+    for node in doc.select("json:root"):
         _lint_single_json(
             node, source_path, diags, seen_json_names, children_defines
         )
@@ -459,18 +516,13 @@ def _lint_json_children(
         seen_fields.add(field_name)
 
 
-# ── Struct lint ──────────────────────────────────────────────────────────────────
-
-
 def _lint_structs(
-    nodes: list[KdlNode],
+    doc: KdlDocument,
     source_path: str,
     diags: list[ReadDiagnostic],
     children_defines: dict[str, list[KdlNode]],
 ) -> None:
-    for node in nodes:
-        if node.name != "struct":
-            continue
+    for node in doc.select("struct:root"):
         _lint_single_struct(node, source_path, diags, children_defines)
 
 
@@ -507,10 +559,10 @@ def _lint_single_struct(
         )
         return
 
-    fields = list(node.children)
-    reserved_present = {f.name for f in fields if f.name.startswith("@")}
-
-    missing = sorted(_REQUIRED_RESERVED[struct_type] - reserved_present)
+    # Check required reserved fields using selectors
+    missing = [
+        r for r in _REQUIRED_RESERVED[struct_type] if node.select_one(r) is None
+    ]
     if missing:
         diags.append(
             _error(
@@ -523,7 +575,7 @@ def _lint_single_struct(
             )
         )
 
-    for field_node in fields:
+    for field_node in node.children:
         field_name = field_node.name
         if not field_name:
             continue
@@ -593,11 +645,9 @@ def _lint_reserved_field(
                 )
             )
         else:
-            # Validate placeholders in @request payload
             _lint_request_placeholders(node, source_path, diags)
     elif field_name == "@init":
-        sub_pipelines = list(node.children)
-        if not sub_pipelines:
+        if not list(node.children):
             diags.append(
                 _error(
                     node,
@@ -620,7 +670,7 @@ def _lint_reserved_field(
                     code="E001",
                 )
             )
-        elif not any(o.name == "to-bool" for o in ops):
+        elif node.select_one("to-bool") is None:
             diags.append(
                 _error(
                     node,
@@ -701,7 +751,6 @@ def _lint_regular_field_structural(
     children_defines: dict[str, list[KdlNode]],
 ) -> None:
     ops = list(field_node.children)
-    # Expand block defines for nested check
     expanded = _expand_defines(ops, children_defines)
     if len(expanded) == 1 and expanded[0].name == "nested":
         return
@@ -751,16 +800,17 @@ def _expand_defines(
     return result
 
 
-# ── Cross-reference lint ─────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Cross-reference linting — flat list API (needs merged nodes with imports)
+# ═══════════════════════════════════════════════════════════════════════════════
 
 
-def _lint_cross_refs(
-    nodes: list[KdlNode],
-    source_path: str,
-    diags: list[ReadDiagnostic],
-) -> None:
+def lint_cross_refs(
+    nodes: list[KdlNode], source_path: str = ""
+) -> list[ReadDiagnostic]:
+    """Cross-reference validation — needs merged node list including imports."""
+    diags: list[ReadDiagnostic] = []
     json_names: set[str] = set()
-    # json_field_refs: (field_node, field_name, ref_name, parent_json_name)
     json_field_refs: list[tuple[KdlNode, str, str, str]] = []
     rest_response_refs: list[tuple[KdlNode, str]] = []
     rest_error_refs: list[tuple[KdlNode, str]] = []
@@ -777,17 +827,15 @@ def _lint_cross_refs(
                     field_node, name or "", json_field_refs
                 )
         elif node.name == "struct":
-            for child in node.children:
-                if child.name == "@request":
-                    response = child.get_prop("response")
-                    if response:
-                        rest_response_refs.append((child, response))
-                elif child.name == "@error":
-                    schema = _node_arg(child, 1)
-                    if schema:
-                        rest_error_refs.append((child, schema))
+            for req in node.select("@request"):
+                response = req.get_prop("response")
+                if response:
+                    rest_response_refs.append((req, response))
+            for err in node.select("@error"):
+                schema = _node_arg(err, 1)
+                if schema:
+                    rest_error_refs.append((err, schema))
 
-    # Validate @request response refs
     for req_node, schema_name in rest_response_refs:
         if schema_name not in json_names:
             diags.append(
@@ -800,7 +848,6 @@ def _lint_cross_refs(
                 )
             )
 
-    # Validate @error schema refs
     for err_node, schema_name in rest_error_refs:
         if schema_name not in json_names:
             diags.append(
@@ -813,7 +860,6 @@ def _lint_cross_refs(
                 )
             )
 
-    # Validate json field type refs
     for field_node, field_name, ref_name, _parent in json_field_refs:
         if ref_name not in json_names:
             diags.append(
@@ -851,6 +897,8 @@ def _lint_cross_refs(
                 )
             break
 
+    return diags
+
 
 def _collect_json_field_refs(
     field_node: KdlNode,
@@ -858,14 +906,13 @@ def _collect_json_field_refs(
     refs: list[tuple[KdlNode, str, str, str]],
 ) -> None:
     field_name = field_node.name
-    # Only the first non-modifier arg is the type; others are alias/extra
     type_found = False
     for arg in field_node.args:
         val = str(arg.value)
         if val.startswith("@"):
             continue
         if type_found:
-            break  # remaining args are alias, not types
+            break
         type_found = True
         raw_type = val
         if raw_type.startswith("(array)"):
@@ -895,3 +942,550 @@ def _has_cycle(
             return cycle
     stack.discard(name)
     return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Inline linting — argument validation, pattern validation
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def lint_require_args(
+    node: KdlNode,
+    lint: LintContext,
+    *,
+    exact: int | None = None,
+    min_count: int | None = None,
+    max_count: int | None = None,
+    example: str = "",
+) -> list[str] | None:
+    args = _node_args(node)
+    name = node.name
+    count = len(args)
+
+    if exact is not None and count != exact:
+        noun = "argument" if exact == 1 else "arguments"
+        lint.error(
+            node,
+            message=f"'{name}' requires exactly {exact} {noun}, got {count}",
+            code="E001",
+            hint=example,
+        )
+        return None
+
+    if min_count is not None and count < min_count:
+        noun = "argument" if min_count == 1 else "arguments"
+        lint.error(
+            node,
+            message=f"'{name}' requires at least {min_count} {noun}, got {count}",
+            code="E001",
+            hint=example,
+        )
+        return None
+
+    if max_count is not None and count > max_count:
+        lint.error(
+            node,
+            message=f"'{name}' allows at most {max_count} argument(s), got {count}",
+            code="E001",
+            hint=example,
+        )
+        return None
+
+    return args
+
+
+def lint_require_int_args(
+    node: KdlNode, lint: LintContext, args: list[str]
+) -> bool:
+    name = node.name
+    for arg in args:
+        try:
+            int(arg)
+        except ValueError:
+            lint.error(
+                node,
+                message=f"'{name}' arguments must be integers, got '{arg}'",
+                code="E001",
+                hint=f"example: {name} 0",
+            )
+            return False
+    return True
+
+
+def lint_validate_regex(node: KdlNode, lint: LintContext, pattern: str) -> bool:
+    try:
+        _re.compile(pattern.lstrip())
+        return True
+    except _re.error as e:
+        lint.error(
+            node,
+            message=f"invalid regex pattern: {e.msg}",
+            code="E002",
+            hint="check regex syntax",
+        )
+        return False
+
+
+def lint_validate_css(node: KdlNode, lint: LintContext, selector: str) -> bool:
+    try:
+        import soupsieve
+
+        soupsieve.compile(selector)
+        return True
+    except Exception as e:
+        msg = str(e).split("\n")[0] if str(e) else "invalid selector"
+        lint.error(
+            node,
+            message=f"invalid CSS selector: {msg}",
+            code="E002",
+            hint="check selector syntax",
+        )
+        return False
+
+
+def lint_validate_xpath(node: KdlNode, lint: LintContext, expr: str) -> bool:
+    try:
+        from lxml import etree
+
+        etree.XPath(expr)
+        return True
+    except Exception as e:
+        msg = str(e).split("\n")[0] if str(e) else "invalid expression"
+        lint.error(
+            node,
+            message=f"invalid XPath expression: {msg}",
+            code="E002",
+            hint="check XPath syntax",
+        )
+        return False
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Inline linting — pipeline and predicate op validation
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def lint_require_predicate_ctx(node: KdlNode, lint: LintContext) -> bool:
+    if lint.in_predicate:
+        return True
+    name = node.name
+    blocks = ", ".join(sorted(_PREDICATE_BLOCKS))
+    lint.error(
+        node,
+        message=f"'{name}' is only valid inside a predicate block",
+        code="E203",
+        hint=f"wrap it in one of: {blocks}. Example: filter {{ {name} ... }}",
+    )
+    return False
+
+
+def lint_require_assert_ctx(node: KdlNode, lint: LintContext) -> bool:
+    if lint.in_assert:
+        return True
+    name = node.name
+    lint.error(
+        node,
+        message=f"'{name}' is only valid inside an assert block",
+        code="E203",
+        hint=f"example: assert {{ {name} ... }}",
+    )
+    return False
+
+
+def lint_pipeline_op(node: KdlNode, lint: LintContext) -> None:
+    """Validate a single pipeline operation node."""
+    name = node.name
+
+    if name in _NO_ARGS_OPS:
+        if node.args:
+            lint.error(
+                node,
+                message=f"'{name}' does not accept arguments",
+                code="E001",
+                hint=f"remove arguments: use just '{name}'",
+            )
+        return
+
+    if name == "attr":
+        lint_require_args(node, lint, min_count=1, example='attr "href"')
+
+    elif name in _TRIM_OPS:
+        args = _node_args(node)
+        if len(args) > 1:
+            lint.error(
+                node,
+                message=f"'{name}' accepts at most 1 argument",
+                code="E001",
+                hint=f'example: {name}  or  {name} "chars"',
+            )
+
+    elif name in _RM_OPS:
+        lint_require_args(node, lint, exact=1, example=f'{name} "substring"')
+
+    elif name == "fmt":
+        args = lint_require_args(  # type: ignore[assignment]
+            node, lint, exact=1, example='fmt "prefix-{{}}-suffix"'
+        )
+        if args and not (args[0].isupper() or "{{}}" in args[0]):
+            lint.error(
+                node,
+                message="'fmt' template is missing the '{{}}' placeholder",
+                code="E001",
+                hint=f'add placeholder to template, example: fmt "{args[0]}{{}}"',
+            )
+
+    elif name == "repl":
+        children = list(node.children)
+        args = _node_args(node)
+        if not args and not children:
+            lint.error(
+                node,
+                message="'repl' requires 2 arguments or a children block",
+                code="E001",
+                hint='example: repl "old" "new"  or  repl { "old" "new"; "foo" "bar" }',
+            )
+        elif args:
+            lint_require_args(node, lint, exact=2, example='repl "old" "new"')
+
+    elif name in ("split", "join"):
+        lint_require_args(node, lint, exact=1, example=f'{name} " "')
+
+    elif name == "re":
+        raw_args = node.args
+        args = lint_require_args(  # type: ignore[assignment]
+            node, lint, exact=1, example=f'{name} #"(\\d+)"#'
+        )
+        if args:
+            pattern = args[0]
+            if raw_args and _DEFINE_NAME_RE.match(str(raw_args[0].value)):
+                resolved = lint.resolve_scalar_arg(pattern)
+                if resolved is not None:
+                    pattern = resolved
+            normalized = pattern.lstrip()
+            if (
+                lint_validate_regex(node, lint, normalized)
+                and not lint.in_predicate
+            ):
+                groups = _re.compile(normalized).groups
+                if groups == 0:
+                    lint.error(
+                        node,
+                        message=f"'{name}' pattern must have exactly one capture group",
+                        code="E001",
+                        hint=f'wrap the match in a group: {name} #"({pattern})"#',
+                    )
+                elif groups > 1:
+                    lint.error(
+                        node,
+                        message=f"'{name}' pattern must have exactly one capture group, got {groups}",
+                        code="E001",
+                        hint="use a non-capturing group (?:...) for grouping without capturing",
+                    )
+
+    elif name == "re-all":
+        if lint.in_predicate and not lint_require_assert_ctx(node, lint):
+            return
+        args = lint_require_args(  # type: ignore[assignment]
+            node, lint, exact=1, example='re-all #"(\\d+)"#'
+        )
+        if args:
+            lint_validate_regex(node, lint, args[0])
+
+    elif name == "re-sub":
+        args = lint_require_args(  # type: ignore[assignment]
+            node, lint, exact=2, example='re-sub #"\\D"# ""'
+        )
+        if args:
+            lint_validate_regex(node, lint, args[0])
+
+    elif name == "index":
+        args = lint_require_args(node, lint, exact=1, example="index 0")  # type: ignore[assignment]
+        if args:
+            lint_require_int_args(node, lint, args)
+
+    elif name == "slice":
+        args = lint_require_args(node, lint, exact=2, example="slice 0 10")  # type: ignore[assignment]
+        if args:
+            lint_require_int_args(node, lint, args)
+
+    elif name == "jsonify":
+        lint_require_args(node, lint, exact=1, example="jsonify MySchema")
+
+    elif name == "nested":
+        lint_require_args(node, lint, exact=1, example="nested MyStruct")
+
+    elif name == "self":
+        args = lint_require_args(node, lint, exact=1, example="self field-name")  # type: ignore[assignment]
+        if args and args[0] not in lint.init_fields:
+            lint.error(
+                node,
+                message=f"'self {args[0]}': field '{args[0]}' not found in @init block (deprecated syntax)",
+                code="E301",
+                hint=f"declare it in @init: @init {{ {args[0]} {{ ... }} }} or use new syntax: @{args[0]}",
+            )
+
+    elif name == "fallback":
+        children = list(node.children)
+        args = _node_args(node)
+        if not args and not children and len(node.children) == 0:
+            pass  # empty block fallback is ok (for lists)
+        elif not args and not children:
+            lint.error(
+                node,
+                message="'fallback' requires exactly 1 argument or a block",
+                code="E001",
+                hint='example: fallback ""  or  fallback 0  or  fallback #null  or  fallback {}',
+            )
+
+    elif name in ("filter", "assert", "match"):
+        if node.args:
+            lint.error(
+                node,
+                message=f"'{name}' does not accept arguments",
+                code="E001",
+                hint=f"move expressions into the children block: {name} {{ ... }}",
+            )
+        if not list(node.children) and len(node.children) == 0:
+            lint.error(
+                node,
+                message=f"'{name}' block must contain at least one predicate expression",
+                code="E001",
+                hint=f'example: {name} {{ css ".item"; has-attr href }}',
+            )
+
+    elif name in ("not", "and", "or"):
+        if node.args:
+            lint.error(
+                node,
+                message=f"'{name}' does not accept arguments",
+                code="E001",
+                hint=f"move expressions into the children block: {name} {{ ... }}",
+            )
+        if not list(node.children) and len(node.children) == 0:
+            lint.error(
+                node,
+                message=f"'{name}' block must contain at least one predicate expression",
+                code="E001",
+                hint=f'example: {name} {{ starts "foo" }}',
+            )
+
+    # @init reference validation
+    elif name.startswith("@") and name not in {
+        "@doc",
+        "@init",
+        "@pre-validate",
+        "@split-doc",
+        "@key",
+        "@value",
+        "@table",
+        "@rows",
+        "@match",
+    }:
+        field_name = name[1:]
+        if field_name not in lint.init_fields:
+            lint.error(
+                node,
+                message=f"'@{field_name}': field '{field_name}' not found in @init block",
+                code="E301",
+                hint=f"declare it in @init: @init {{ {field_name} {{ ... }} }}",
+            )
+
+
+def lint_predicate_op(node: KdlNode, lint: LintContext) -> None:
+    """Validate a predicate operation node inside filter/assert/match."""
+    name = node.name
+
+    if name in ("eq", "ne"):
+        if not lint_require_predicate_ctx(node, lint):
+            return
+        lint_require_args(node, lint, min_count=1, example=f'{name} "value"')
+
+    elif name in ("starts", "ends", "contains", "in"):
+        if not lint_require_predicate_ctx(node, lint):
+            return
+        lint_require_args(node, lint, min_count=1, example=f'{name} "value"')
+
+    elif name in ("len-eq", "len-ne"):
+        if not lint_require_predicate_ctx(node, lint):
+            return
+        args = lint_require_args(node, lint, min_count=1, example=f"{name} 5")
+        if args:
+            for arg in args:
+                try:
+                    val = int(arg)
+                    if val < 0:
+                        lint.error(
+                            node,
+                            message=f"'{name}' argument must be non-negative, got {val}",
+                            code="E001",
+                            hint=f"example: {name} 5",
+                        )
+                        return
+                except ValueError:
+                    lint.error(
+                        node,
+                        message=f"'{name}' argument must be integer, got '{arg}'",
+                        code="E001",
+                        hint=f"example: {name} 5",
+                    )
+                    return
+
+    elif name in ("len-gt", "len-lt", "len-ge", "len-le"):
+        if not lint_require_predicate_ctx(node, lint):
+            return
+        args = lint_require_args(node, lint, exact=1, example=f"{name} 10")
+        if args:
+            lint_require_int_args(node, lint, args)
+
+    elif name == "len-range":
+        if not lint_require_predicate_ctx(node, lint):
+            return
+        args = lint_require_args(node, lint, exact=2, example="len-range 1 100")
+        if args:
+            lint_require_int_args(node, lint, args)
+
+    elif name == "has-attr":
+        if not lint_require_predicate_ctx(node, lint):
+            return
+        lint_require_args(node, lint, min_count=1, example='has-attr "href"')
+
+    elif name in (
+        "attr-eq",
+        "attr-ne",
+        "attr-starts",
+        "attr-ends",
+        "attr-contains",
+    ):
+        if not lint_require_predicate_ctx(node, lint):
+            return
+        lint_require_args(
+            node, lint, min_count=2, example=f'{name} "href" "value"'
+        )
+
+    elif name == "attr-re":
+        if not lint_require_predicate_ctx(node, lint):
+            return
+        args = lint_require_args(
+            node, lint, exact=2, example='attr-re "href" #".*\\.com$"#'
+        )
+        if args:
+            lint_validate_regex(node, lint, args[1])
+
+    elif name == "text-re":
+        if not lint_require_predicate_ctx(node, lint):
+            return
+        args = lint_require_args(
+            node, lint, exact=1, example='text-re #"\\d+"#'
+        )
+        if args:
+            lint_validate_regex(node, lint, args[0])
+
+    elif name in ("text-starts", "text-ends", "text-contains"):
+        if not lint_require_predicate_ctx(node, lint):
+            return
+        lint_require_args(node, lint, min_count=1, example=f'{name} "value"')
+
+    elif name == "re-any":
+        if not lint_require_assert_ctx(node, lint):
+            return
+        args = lint_require_args(node, lint, exact=1, example='re-any #"\\d+"#')
+        if args:
+            lint_validate_regex(node, lint, args[0])
+
+    elif name in ("gt", "lt", "ge", "le"):
+        if not lint_require_assert_ctx(node, lint):
+            return
+        lint_require_args(node, lint, exact=1, example=f"{name} 42")
+
+    elif name == "re":
+        if not lint_require_predicate_ctx(node, lint):
+            return
+        args = lint_require_args(node, lint, exact=1, example='re #"(\\d+)"#')
+        if args:
+            lint_validate_regex(node, lint, args[0])
+
+    elif name == "css":
+        if not lint_require_predicate_ctx(node, lint):
+            return
+        args = _node_args(node)
+        if args:
+            lint_validate_css(node, lint, args[0])
+
+    elif name == "xpath":
+        if not lint_require_predicate_ctx(node, lint):
+            return
+        args = _node_args(node)
+        if args:
+            lint_validate_xpath(node, lint, args[0])
+
+    elif name == "range":
+        if not lint_require_predicate_ctx(node, lint):
+            return
+        args = lint_require_args(node, lint, exact=2, example="range 1 100")
+        if args:
+            lint_require_int_args(node, lint, args)
+
+
+def lint_wildcard_op(
+    node: KdlNode, ctx: ParseContext, lint: LintContext
+) -> None:
+    """Validate unknown ops in pipeline context."""
+    from ssc_codegen.core.type_checking import _OP_TYPES
+
+    op_name = node.name
+    if not op_name:
+        return
+
+    if op_name.startswith("@"):
+        field_name = op_name[1:]
+        if field_name not in lint.init_fields:
+            lint.error(
+                node,
+                message=f"'@{field_name}': field '{field_name}' not found in @init block",
+                code="E301",
+                hint=f"declare it in @init: @init {{ {field_name} {{ ... }} }}",
+            )
+        return
+
+    info = lint.defines.get(op_name)
+    if info is not None:
+        if info.kind == DefineKind.SCALAR:
+            lint.error(
+                node,
+                message=f"'{op_name}' is a scalar define — cannot be used as a pipeline operation",
+                code="E001",
+                hint=f"use a block define: define {op_name} {{ ... }}",
+            )
+        return
+
+    _KNOWN_OPS: frozenset[str] = (
+        frozenset(_OP_TYPES.keys()) | _EXTRA_PIPELINE_OPS | _PREDICATE_OPS
+    )
+    candidates = sorted(
+        _KNOWN_OPS
+        | {k for k, v in lint.defines.items() if v.kind == DefineKind.BLOCK}
+        | set(lint.transforms)
+    )
+    suggestions = _difflib.get_close_matches(
+        op_name, candidates, n=3, cutoff=0.6
+    )
+    if suggestions:
+        hint = (
+            "did you mean " + " or ".join(f"'{s}'" for s in suggestions) + "?"
+        )
+    else:
+        hint = f"check spelling or declare it: define {op_name} {{ ... }}"
+    lint.error(
+        node,
+        message=f"unknown operation '{op_name}'",
+        code="E200",
+        hint=hint,
+    )
+
+
+# lazy imports for forward refs
+from ssc_codegen.core.contexts import (  # noqa: E402
+    DefineKind,
+    LintContext,
+    ParseContext,
+)
