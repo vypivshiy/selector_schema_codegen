@@ -16,6 +16,7 @@ dependencies = [
     # https://github.com/fastapi/typer/pull/1145
     "click<8.2.0",
     "pyyaml>=6.0",
+    "kdlquery>=1.1.0",
 ]
 
 classifiers = [

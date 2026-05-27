@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from ssc_codegen.kdl.parser import (
+from kdlquery.parser import (
     CSTArgEntry,
     CSTPropEntry,
     KDLParseError,

@@ -10,8 +10,7 @@ from pathlib import Path
 import pytest
 
 from ssc_codegen.core import parse_module
-from ssc_codegen.kdl import Severity
-from ssc_codegen.ast import StructBase
+from kdlquery import Severity
 from ssc_codegen.converters.helpers import to_pascal_case
 
 SCHEMAS_DIR = Path(__file__).parent / "schemas"

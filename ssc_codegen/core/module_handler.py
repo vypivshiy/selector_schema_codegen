@@ -18,13 +18,8 @@ from ssc_codegen.ast import (
     TransformTarget,
 )
 from ssc_codegen.exceptions import BuildTimeError
-from ssc_codegen.kdl import (
-    KDL2CSTParser,
-    KdlArg,
-    KdlNode,
-    ReadDiagnostic,
-    Severity,
-)
+from kdlquery import KdlNode, parse as kdl_parse
+from kdlquery.reader import ReadDiagnostic, Severity
 
 from ssc_codegen.core.contexts import (
     DefineKind,
@@ -53,18 +48,8 @@ def handle_struct(
 ) -> StructBase:
     lint_struct_node(node, module, ctx, lint)
     raw = node.type_annotation
-    type_ = (
-        raw[1:-1]
-        if raw
-        else str(
-            node.properties.get(
-                "type", KdlArg(value="item", span=node.span, is_identifier=True)
-            ).value
-        )
-    )
-    keep_order = node.properties.get(
-        "keep-order", KdlArg(value=False, span=node.span, is_identifier=False)
-    ).value
+    type_ = raw[1:-1] if raw else (node.get_prop("type") or "item")
+    keep_order = node.get_prop("keep-order") or False
     name = str(node.args[0].value)
     cls_map: dict[str, type[StructBase]] = {
         "item": StructItem,
@@ -92,11 +77,7 @@ def handle_json(
 ) -> JsonDef:
     name = str(node.args[0].value) if node.args else ""
     is_array = node.type_annotation == "(array)"
-    path = str(
-        node.properties.get(
-            "path", KdlArg(value="", span=node.span, is_identifier=False)
-        ).value
-    )
+    path = node.get_prop("path") or ""
     json_def = JsonDef(parent=module, name=name, is_array=is_array, path=path)
     lint_json_node(node, lint, ctx)
     parse_json_fields(node.children, json_def, ctx)
@@ -132,16 +113,8 @@ def handle_transform(
 ) -> None:
     lint_transform_node(node, ctx, lint)
     name = str(node.args[0].value) if node.args else ""
-    accept_str = str(
-        node.properties.get(
-            "accept", KdlArg(value="", span=node.span, is_identifier=True)
-        ).value
-    )
-    ret_str = str(
-        node.properties.get(
-            "return", KdlArg(value="", span=node.span, is_identifier=True)
-        ).value
-    )
+    accept_str = node.get_prop("accept") or ""
+    ret_str = node.get_prop("return") or ""
     if accept_str not in _VAR_TYPE_MAP:
         lint.error(
             node,
@@ -259,8 +232,7 @@ def resolve_imports(
             )
             continue
         try:
-            parser = KDL2CSTParser()
-            doc = parser.parse(src)
+            doc = kdl_parse(src)
         except Exception as e:
             diagnostics.append(
                 ReadDiagnostic(
@@ -274,7 +246,7 @@ def resolve_imports(
             continue
 
         imported_nodes = resolve_imports(
-            [KdlNode.from_cst(n) for n in doc.nodes],
+            list(doc.nodes),
             import_path,
             ctx,
             lint,

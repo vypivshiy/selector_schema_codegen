@@ -50,7 +50,7 @@ from ssc_codegen.ast import (
     VariableType,
 )
 from ssc_codegen.exceptions import BuildTimeError
-from ssc_codegen.kdl import KdlNode
+from kdlquery import KdlNode
 from ssc_codegen.regex_utils import normalize_regex_pattern
 from typing import cast
 

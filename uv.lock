@@ -334,6 +334,15 @@ wheels = [
 ]
 
 [[package]]
+name = "kdlquery"
+version = "1.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/92/fb/6d89e91dc1456f705a639b5f138038df969e29623626ab90f8019543710c/kdlquery-1.1.0.tar.gz", hash = "sha256:4777e0a54358526350f03809359eae70827ce3ddce11ccb7dc1386d51dacf728", size = 91445, upload-time = "2026-05-27T10:23:42.508Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8b/d9/9db1c82ebe14a1b4703728a17896c0f8c1d557a607db722ac849bf5f37d1/kdlquery-1.1.0-py3-none-any.whl", hash = "sha256:17076fcb775103b4e1bd4b649c9abb29ae423d00d3941c005dd3bd3bd1e3b316", size = 27853, upload-time = "2026-05-27T10:23:43.975Z" },
+]
+
+[[package]]
 name = "librt"
 version = "0.11.0"
 source = { registry = "https://pypi.org/simple" }
@@ -907,6 +916,7 @@ dependencies = [
     { name = "click" },
     { name = "colorama", marker = "sys_platform == 'win32'" },
     { name = "cssselect" },
+    { name = "kdlquery" },
     { name = "lxml" },
     { name = "pyyaml" },
     { name = "soupsieve" },
@@ -935,6 +945,7 @@ requires-dist = [
     { name = "click", specifier = "<8.2.0" },
     { name = "colorama", marker = "sys_platform == 'win32'", specifier = ">=0.4.6" },
     { name = "cssselect", specifier = ">=1.2.0" },
+    { name = "kdlquery", specifier = ">=1.1.0" },
     { name = "lxml", specifier = ">=5.3.0" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "soupsieve", specifier = ">=2.6" },

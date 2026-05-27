@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ssc_codegen.kdl import KdlNode
+from kdlquery import KdlNode
 
 
 class NodeAdapter:

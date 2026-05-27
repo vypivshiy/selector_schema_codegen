@@ -2,24 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from pathlib import Path
 
 from ssc_codegen.ast import Module
 from ssc_codegen.exceptions import BuildTimeError, ParseError
-from ssc_codegen.kdl import (
-    KDL2CSTParser,
-    KDLParseError,
-    KdlArg,
-    KdlNode,
-    Position,
-    ReadDiagnostic,
-    Reader,
-    Severity,
-    Span,
-    WalkContext,
-    parse_into,
-)
+from kdlquery import KDLParseError, parse as kdl_parse
+from kdlquery import KdlNode, ReadDiagnostic, Reader, Severity, WalkContext
+from kdlquery.types import Position, Span
 
 from ssc_codegen.core.contexts import LintContext, ParseContext
 from ssc_codegen.core.expressions import typedef_from_struct
@@ -41,18 +30,13 @@ class SscReader(Reader[KdlNode, Module]):
         self._ctx = ParseContext(source_path=source_path)
         self._lint = LintContext()
 
-    def on_node(
-        self,
-        name: str,
-        args: tuple[KdlArg, ...],
-        properties: Mapping[str, KdlArg],
-        children: tuple[KdlNode, ...],
-        ctx: WalkContext[KdlNode],
-    ) -> KdlNode:
-        return ctx.node
+    def on_node(self, node: KdlNode, ctx: WalkContext[KdlNode]) -> KdlNode:
+        return node
 
-    def error_node(self, message: str, ctx: WalkContext[KdlNode]) -> KdlNode:
-        return ctx.node
+    def error_node(
+        self, node: KdlNode, message: str, ctx: WalkContext[KdlNode]
+    ) -> KdlNode:
+        return node
 
     def finalize(
         self,
@@ -130,15 +114,14 @@ def parse_module(
     src: str, *, source_path: Path | None = None
 ) -> tuple[Module, list[ReadDiagnostic]]:
     """Parse KDL source -> Module AST + diagnostics."""
-    parser = KDL2CSTParser()
     try:
-        doc = parser.parse(src)
+        doc = kdl_parse(src)
     except KDLParseError as exc:
-        pos = Position(offset=exc.offset, line=exc.line, column=exc.column)
+        pos = Position(offset=0, line=exc.line, column=exc.col)
         span = Span(start=pos, end=pos)
         return Module(), [
             ReadDiagnostic(
-                message=exc.message,
+                message=exc.msg,
                 severity=Severity.ERROR,
                 span=span,
                 path=str(source_path) if source_path else "",
@@ -147,9 +130,14 @@ def parse_module(
                 label="syntax error",
             )
         ]
+
+    # Walk the parsed document through the reader
     reader = SscReader(source_path=source_path)
     try:
-        return parse_into(doc, reader)
+        top_nodes = list(doc.nodes)
+        diagnostics: list[ReadDiagnostic] = []
+        module = reader.finalize(top_nodes, diagnostics)
+        return module, diagnostics
     except (ParseError, BuildTimeError) as exc:
         pos = Position(offset=0, line=0, column=0)
         span = Span(start=pos, end=pos)

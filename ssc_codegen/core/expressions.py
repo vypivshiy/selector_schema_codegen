@@ -76,7 +76,7 @@ from ssc_codegen.ast import (
     XpathSelectAll,
 )
 from ssc_codegen.exceptions import BuildTimeError
-from ssc_codegen.kdl import KdlArg, KdlNode
+from kdlquery import KdlNode
 from ssc_codegen.regex_utils import normalize_regex_pattern
 from typing import cast
 
@@ -866,12 +866,7 @@ def _expr_len(
 def _expr_unique(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    keep_order = bool(
-        node.properties.get(
-            "keep-order",
-            KdlArg(value=False, span=node.span, is_identifier=False),
-        ).value
-    )
+    keep_order = bool(node.get_prop("keep-order") or False)
     return Unique(parent=parent, keep_order=keep_order)
 
 
@@ -917,11 +912,7 @@ def _expr_jsonify(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
     schema_name = str(node.args[0].value)
-    path = str(
-        node.properties.get(
-            "path", KdlArg(value="", span=node.span, is_identifier=False)
-        ).value
-    )
+    path = node.get_prop("path") or ""
     json_def = ctx.json_defs.get(schema_name)
     if json_def is None:
         lint.error(

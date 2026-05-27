@@ -1,4 +1,6 @@
-from .parser import (
+"""Compatibility shim — re-exports from kdlquery."""
+
+from kdlquery.parser import (
     CSTArgEntry,
     CSTDocument,
     CSTEntry,
@@ -15,9 +17,10 @@ from .parser import (
     Token,
     TokenType,
 )
-from .reader import (
+from kdlquery.dict_reader import DictReader
+from kdlquery.reader import (
     DiagnosticCollector,
-    KdlArg,
+    KdlValue,
     KdlNode,
     ReadDiagnostic,
     Reader,
@@ -27,7 +30,7 @@ from .reader import (
     parse_into,
 )
 
-from .dict_reader import DictReader
+KdlArg = KdlValue
 
 __all__ = [
     "CSTArgEntry",
@@ -54,5 +57,5 @@ __all__ = [
     "WalkContext",
     "Walker",
     "parse_into",
-    "DictReader"
+    "DictReader",
 ]

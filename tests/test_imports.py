@@ -10,7 +10,7 @@ from ssc_codegen.ast import (
     Nested,
 )
 from ssc_codegen.core import parse_module
-from ssc_codegen.kdl import Severity
+from kdlquery import Severity
 
 FIXTURES = Path(__file__).parent / "fixtures" / "imports"
 

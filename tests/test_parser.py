@@ -38,7 +38,7 @@ from ssc_codegen.ast import (
 from ssc_codegen.ast.predicate_ops import LogicNot, PredContains, PredEq
 from ssc_codegen.ast.types import VariableType
 from ssc_codegen.core import parse_module
-from ssc_codegen.kdl import KDL2CSTParser, KDLParseError, Severity
+from kdlquery import KDL2CSTParser, KDLParseError, Severity
 
 
 EXAMPLES = [

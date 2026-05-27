@@ -16,7 +16,7 @@ import pytest
 import respx
 
 from ssc_codegen.core import parse_module
-from ssc_codegen.kdl import Severity
+from kdlquery import Severity
 
 SCHEMAS_DIR = Path(__file__).parent / "schemas"
 

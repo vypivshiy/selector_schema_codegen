@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from ssc_codegen.kdl import ReadDiagnostic, Severity
+from kdlquery import ReadDiagnostic, Severity
 
 try:
     import colorama

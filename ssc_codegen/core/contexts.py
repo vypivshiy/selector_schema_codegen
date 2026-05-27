@@ -7,8 +7,8 @@ from enum import Enum, auto
 from pathlib import Path
 
 from ssc_codegen.ast import VariableType
-from ssc_codegen.kdl import KdlNode, ReadDiagnostic, Severity
-from ssc_codegen.kdl.parser import Span
+from kdlquery import KdlNode, ReadDiagnostic, Severity
+from kdlquery.types import Span
 
 
 # ── Walk context enum ──────────────────────────────────────────────────────────
@@ -55,7 +55,6 @@ class DefineKind(Enum):
 @dataclass
 class RawArg:
     value: str
-    is_identifier: bool
     span: Span
 
 
@@ -188,12 +187,7 @@ class LintContext:
         return [str(a.value) for a in node.args]
 
     def get_raw_args(self, node: KdlNode) -> list[RawArg]:
-        return [
-            RawArg(
-                value=str(a.value), is_identifier=a.is_identifier, span=a.span
-            )
-            for a in node.args
-        ]
+        return [RawArg(value=str(a.value), span=a.span) for a in node.args]
 
     def get_arg(self, node: KdlNode, index: int) -> str | None:
         args = self.get_args(node)

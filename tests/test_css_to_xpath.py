@@ -2,7 +2,7 @@ import pytest
 
 from ssc_codegen.core import parse_module
 from ssc_codegen.document_utils import convert_css_to_xpath_module
-from ssc_codegen.kdl import Severity
+from kdlquery import Severity
 from ssc_codegen.selector_utils import css_to_xpath
 from ssc_codegen.ast import (
     Struct,

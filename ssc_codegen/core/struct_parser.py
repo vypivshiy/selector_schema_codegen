@@ -28,7 +28,7 @@ from ssc_codegen.ast import (
     Value,
     VariableType,
 )
-from ssc_codegen.kdl import KdlArg, KdlNode
+from kdlquery import KdlNode
 
 from ssc_codegen.core.contexts import LintContext, ParseContext, WalkCtx
 from ssc_codegen.core.expressions import parse_expressions
@@ -105,41 +105,19 @@ def parse_struct(
             req = RequestConfig(parent=parent)
             req.raw_payload = raw_payload
             lint_request_placeholders(node, raw_payload, lint)
-            req.response_path = str(
-                node.properties.get(
-                    "response-path",
-                    KdlArg(value="", span=node.span, is_identifier=False),
-                ).value
-            )
-            req.response_join = str(
-                node.properties.get(
-                    "response-join",
-                    KdlArg(value="", span=node.span, is_identifier=False),
-                ).value
-            )
-            req.name = str(
-                node.properties.get(
-                    "name",
-                    KdlArg(value="", span=node.span, is_identifier=False),
-                ).value
-            )
-            response_schema = node.properties.get(
-                "response",
-                KdlArg(value="", span=node.span, is_identifier=False),
-            )
+            req.response_path = node.get_prop("response-path") or ""
+            req.response_join = node.get_prop("response-join") or ""
+            req.name = node.get_prop("name") or ""
+            response_schema_val = node.get_prop("response") or ""
             req.response_schema = str(
                 ctx.property_defines.get(
-                    response_schema.value, response_schema.value
+                    response_schema_val, response_schema_val
                 )
             )
             if req.response_schema and isinstance(parent, StructRest):
                 lint.rest_response_refs.append((node, req.response_schema))
-            doc_val = node.properties.get(
-                "doc", KdlArg(value="", span=node.span, is_identifier=False)
-            )
-            req.doc = str(
-                ctx.property_defines.get(doc_val.value, doc_val.value)
-            )
+            doc_val = node.get_prop("doc") or ""
+            req.doc = str(ctx.property_defines.get(doc_val, doc_val))
             parent.body.append(req)
         elif node.name == "@error":
             if not node.args or len(node.args) < 2:
@@ -261,11 +239,7 @@ def parse_json_fields(
                     is_array = True
                 ret_type = VariableType.JSON
         may_miss = "@omitempty" in modifiers
-        doc = str(
-            node.properties.get(
-                "doc", KdlArg(value="", span=node.span, is_identifier=False)
-            ).value
-        )
+        doc = node.get_prop("doc") or ""
         parent.body.append(
             JsonDefField(
                 parent=parent,

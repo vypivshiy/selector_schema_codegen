@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from ssc_codegen.ast import VariableType
-from ssc_codegen.kdl import KdlNode
+from kdlquery import KdlNode
 
 from ssc_codegen.core.contexts import DefineKind, LintContext, ParseContext
 from ssc_codegen.core.expressions import _VAR_TYPE_MAP

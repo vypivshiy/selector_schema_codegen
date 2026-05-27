@@ -17,7 +17,7 @@ from ssc_codegen.ast import (
     StructRest,
 )
 from ssc_codegen.core import parse_module
-from ssc_codegen.kdl import Severity
+from kdlquery import Severity
 
 
 # ---------------------------------------------------------------------------

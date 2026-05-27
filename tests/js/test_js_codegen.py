@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from ssc_codegen.core import parse_module
-from ssc_codegen.kdl import Severity
+from kdlquery import Severity
 from ssc_codegen.converters.js_pure import JS_CONVERTER
 from ssc_codegen.converters.helpers import to_pascal_case
 
@@ -95,7 +95,9 @@ class TestJsStringsBasic:
     def test_fields_present(self):
         r = _run_js_schema(SCHEMAS_DIR / "01_strings_basic.kdl", "StringsBasic")
         for item in r:
-            assert all(k in item for k in ("title", "link", "slug", "activeFlag"))
+            assert all(
+                k in item for k in ("title", "link", "slug", "activeFlag")
+            )
 
     def test_field_types(self):
         r = _run_js_schema(SCHEMAS_DIR / "01_strings_basic.kdl", "StringsBasic")
@@ -110,7 +112,8 @@ class TestJsStringsBasic:
 class TestJsArraysAndConversions:
     def test_structure_and_types(self):
         r = _run_js_schema(
-            SCHEMAS_DIR / "02_arrays_and_conversions.kdl", "ArraysAndConversions"
+            SCHEMAS_DIR / "02_arrays_and_conversions.kdl",
+            "ArraysAndConversions",
         )
         assert isinstance(r, list) and len(r) == 2
         item = r[0]

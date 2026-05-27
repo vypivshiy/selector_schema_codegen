@@ -7,7 +7,7 @@ import re as _re
 
 from ssc_codegen.ast import JsonDefField, Module, VariableType
 from ssc_codegen.ast.struct import PLACEHOLDER_RE, PLACEHOLDER_WIDE_RE
-from ssc_codegen.kdl import KdlNode
+from kdlquery import KdlNode
 from ssc_codegen.core.contexts import (
     DefineKind,
     LintContext,
@@ -255,7 +255,7 @@ def lint_pipeline_op(node: KdlNode, lint: LintContext) -> None:
         )
         if args:
             pattern = args[0]
-            if raw_args and raw_args[0].is_identifier:
+            if raw_args and _DEFINE_NAME_RE.match(raw_args[0].value):
                 resolved = lint.resolve_scalar_arg(pattern)
                 if resolved is not None:
                     pattern = resolved
