@@ -19,8 +19,8 @@ from ssc_codegen.converters.helpers import (
     to_snake_case,
     jsonify_path_to_segments,
 )
-from ssc_codegen.converters.request_spec import (
-    parse_to_spec,
+from ssc_codegen.request_spec import (
+    RequestSpec,
     normalize_placeholder_names,
 )
 from ssc_codegen.converters.py_render import (
@@ -332,7 +332,7 @@ def _result_alias_name(raw_name: str) -> str:
     return to_pascal_case(raw_name or "fetch") + "Result"
 
 
-def _resolve_ok_payload_type(node: a.RequestConfig) -> str:
+def _resolve_ok_payload_type(node: a.MethodRest) -> str:
     if not node.response_schema:
         return "None"
     struct = node.parent
@@ -350,7 +350,7 @@ def _resolve_ok_payload_type(node: a.RequestConfig) -> str:
 def _emit_result_aliases(struct: a.StructBase) -> list[str]:
     lines: list[str] = []
     for child in struct.body:
-        if not isinstance(child, a.RequestConfig):
+        if not isinstance(child, a.MethodRest):
             continue
         raw_name = child.name or "fetch"
         alias_name = _result_alias_name(raw_name)
@@ -1540,7 +1540,7 @@ def pre_expr_pred_re_any(node: a.PredReAny, ctx: ConverterContext):
 
 
 # ---------------------------------------------------------------------------
-# RequestConfig: spec building + REST/non-REST method generation
+# MethodBase: spec building + REST/non-REST method generation
 # ---------------------------------------------------------------------------
 
 
@@ -1573,10 +1573,20 @@ def _render_signature_params(placeholders: list[PlaceholderSpec]) -> str:
     return ", *, " + ", ".join(parts)
 
 
-def _build_request_parts(node: a.RequestConfig, ctx: ConverterContext):
-    """Parse raw HTTP payload and build all request components."""
+def _build_request_parts(node: a.MethodBase, ctx: ConverterContext):
+    """Build all request components from the pre-parsed RequestHttp child."""
+    http = node.http_request
     spec = normalize_placeholder_names(
-        parse_to_spec(node.raw_payload), to_snake_case
+        RequestSpec(
+            method=http.method,
+            url=http.url,
+            headers=dict(http.headers),
+            cookies=dict(http.cookies),
+            params=dict(http.params),
+            body_kind=http.body_kind,
+            body=http.body,
+        ),
+        to_snake_case,
     )
     ind = ctx.indent_char
     i1 = ctx.indent
@@ -1609,7 +1619,7 @@ def _build_request_parts(node: a.RequestConfig, ctx: ConverterContext):
 
 
 def _emit_rest_methods(
-    node: a.RequestConfig,
+    node: a.MethodRest,
     call_args: list[str],
     pre_lines: list[str],
     ph_params: str,
@@ -1658,7 +1668,7 @@ def _emit_rest_methods(
 
 
 def _emit_fetch_methods(
-    node: a.RequestConfig,
+    node: a.MethodFetch,
     call_args: list[str],
     pre_lines: list[str],
     ph_params: str,
@@ -1703,15 +1713,21 @@ def _emit_fetch_methods(
     return lines
 
 
-@PY_BASE_CONVERTER(a.RequestConfig)
-def pre_request_config(node: a.RequestConfig, ctx: ConverterContext):
+@PY_BASE_CONVERTER(a.MethodRest)
+def pre_method_rest(node: a.MethodRest, ctx: ConverterContext):
     _, call_args, pre_lines, ph_params, i1, i2, i3, i4 = _build_request_parts(
         node, ctx
     )
-    if isinstance(node.parent, a.StructRest):
-        return _emit_rest_methods(
-            node, call_args, pre_lines, ph_params, i1, i2, i3, i4
-        )
+    return _emit_rest_methods(
+        node, call_args, pre_lines, ph_params, i1, i2, i3, i4
+    )
+
+
+@PY_BASE_CONVERTER(a.MethodFetch)
+def pre_method_fetch(node: a.MethodFetch, ctx: ConverterContext):
+    _, call_args, pre_lines, ph_params, i1, i2, i3, _ = _build_request_parts(
+        node, ctx
+    )
     return _emit_fetch_methods(
         node, call_args, pre_lines, ph_params, i1, i2, i3
     )
@@ -1719,5 +1735,5 @@ def pre_request_config(node: a.RequestConfig, ctx: ConverterContext):
 
 @PY_BASE_CONVERTER(a.ErrorResponse)
 def pre_error_response(node: a.ErrorResponse, _: ConverterContext):
-    # error spec consumed by pre_request_config; no direct emission
+    # error spec consumed by pre_method_rest; no direct emission
     return None

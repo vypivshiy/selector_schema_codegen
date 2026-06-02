@@ -13,7 +13,7 @@ import pytest
 
 from ssc_codegen.ast import (
     ErrorResponse,
-    RequestConfig,
+    MethodRest,
     StructRest,
 )
 from ssc_codegen.core import parse_module
@@ -62,7 +62,7 @@ class TestRestParser:
     def test_request_config_name_and_response(self):
         module = _parse(_rest_src())
         struct = next(n for n in module.body if isinstance(n, StructRest))
-        reqs = [n for n in struct.body if isinstance(n, RequestConfig)]
+        reqs = [n for n in struct.body if isinstance(n, MethodRest)]
         assert len(reqs) == 1
         assert reqs[0].name == "get-user"
         assert reqs[0].response_schema == "User"

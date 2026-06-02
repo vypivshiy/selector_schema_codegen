@@ -8,7 +8,7 @@ import json
 import re
 
 from ssc_codegen.ast.struct import PlaceholderSpec, parse_placeholder
-from ssc_codegen.converters.request_spec import _PH, RequestSpec
+from ssc_codegen.request_spec import _PH, RequestSpec
 
 __all__ = [
     "render_value",
@@ -147,7 +147,7 @@ def render_json_body(raw: str) -> str:
 
     Suitable for ``requests(json=...)`` / ``httpx(json=...)``.
     """
-    from ssc_codegen.converters.request_spec import _validate_json_body
+    from ssc_codegen.request_spec import _validate_json_body
 
     _validate_json_body(raw)
 

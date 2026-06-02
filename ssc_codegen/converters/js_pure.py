@@ -28,8 +28,8 @@ from ssc_codegen.converters.helpers import (
     to_snake_case,
     jsonify_path_to_segments,
 )
-from ssc_codegen.converters.request_spec import (
-    parse_to_spec,
+from ssc_codegen.request_spec import (
+    RequestSpec,
     normalize_placeholder_names,
     _PH,
 )
@@ -1800,10 +1800,20 @@ def _js_name(name: str) -> str:
     return to_camel_case(to_snake_case(name))
 
 
-def _js_rest_method(node: a.RequestConfig, ctx: ConverterContext) -> list[str]:
+def _js_rest_method(node: a.MethodRest, ctx: ConverterContext) -> list[str]:
     """Emit a REST client method for `struct type=rest`."""
+    http = node.http_request
     spec = normalize_placeholder_names(
-        parse_to_spec(node.raw_payload), _js_name
+        RequestSpec(
+            method=http.method,
+            url=http.url,
+            headers=dict(http.headers),
+            cookies=dict(http.cookies),
+            params=dict(http.params),
+            body_kind=http.body_kind,
+            body=http.body,
+        ),
+        _js_name,
     )
     http_client = ctx.meta.get("http_client", "fetch")
     ind = ctx.indent_char
@@ -1974,7 +1984,7 @@ def _js_rest_method(node: a.RequestConfig, ctx: ConverterContext) -> list[str]:
     return lines
 
 
-def _js_ok_payload_type(node: a.RequestConfig) -> str:
+def _js_ok_payload_type(node: a.MethodRest) -> str:
     """Return the JSDoc type for the successful response payload."""
     if not node.response_schema:
         return "null"
@@ -1990,10 +2000,20 @@ def _js_ok_payload_type(node: a.RequestConfig) -> str:
     return schema_type
 
 
-def _js_fetch_method(node: a.RequestConfig, ctx: ConverterContext) -> list[str]:
+def _js_fetch_method(node: a.MethodFetch, ctx: ConverterContext) -> list[str]:
     """Generate non-REST async fetch method for JS (fetch API or axios)."""
+    http = node.http_request
     spec = normalize_placeholder_names(
-        parse_to_spec(node.raw_payload), _js_name
+        RequestSpec(
+            method=http.method,
+            url=http.url,
+            headers=dict(http.headers),
+            cookies=dict(http.cookies),
+            params=dict(http.params),
+            body_kind=http.body_kind,
+            body=http.body,
+        ),
+        _js_name,
     )
     http_client = ctx.meta.get("http_client", "fetch")
 
@@ -2088,10 +2108,13 @@ def _js_fetch_method(node: a.RequestConfig, ctx: ConverterContext) -> list[str]:
     return lines
 
 
-@JS_CONVERTER(a.RequestConfig)
-def pre_request_config(node: a.RequestConfig, ctx: ConverterContext):
-    if isinstance(node.parent, a.StructRest):
-        return _js_rest_method(node, ctx)
+@JS_CONVERTER(a.MethodRest)
+def pre_method_rest(node: a.MethodRest, ctx: ConverterContext):
+    return _js_rest_method(node, ctx)
+
+
+@JS_CONVERTER(a.MethodFetch)
+def pre_method_fetch(node: a.MethodFetch, ctx: ConverterContext):
     return _js_fetch_method(node, ctx)
 
 

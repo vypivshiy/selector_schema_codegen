@@ -49,6 +49,106 @@ def parse_placeholder(match: "_re.Match[str]") -> PlaceholderSpec:
     )
 
 
+# ── Request/Method nodes ──────────────────────────────────────────────────────
+
+
+def _iter_http_strings(http: RequestHttp):
+    """Yield every string value that may contain placeholders."""
+    yield http.url
+    yield from http.headers.values()
+    yield from http.cookies.values()
+    yield from http.params.values()
+    if isinstance(http.body, str) and http.body:
+        yield http.body
+    elif isinstance(http.body, dict):
+        yield from _iter_dict_strings(http.body)
+
+
+def _iter_dict_strings(d: dict):
+    for v in d.values():
+        if isinstance(v, str):
+            yield v
+        elif isinstance(v, dict):
+            yield from _iter_dict_strings(v)
+        elif isinstance(v, list):
+            for item in v:
+                if isinstance(item, str):
+                    yield item
+
+
+@dataclass
+class RequestHttp(Node):
+    """Parsed HTTP request — child node of MethodBase.
+
+    Created once at parse time from ``parse_to_spec(raw_payload)``;
+    converters read fields directly instead of re-parsing raw_payload.
+    """
+
+    method: str = "GET"
+    url: str = ""
+    headers: dict[str, str] = field(default_factory=dict)
+    cookies: dict[str, str] = field(default_factory=dict)
+    params: dict[str, str] = field(default_factory=dict)
+    body_kind: str = "empty"  # "empty" | "json" | "form" | "raw"
+    body: str | dict | None = None
+
+    @property
+    def placeholders(self) -> list[PlaceholderSpec]:
+        """Unique placeholders across all string fields."""
+        seen: set[str] = set()
+        result: list[PlaceholderSpec] = []
+        for text in _iter_http_strings(self):
+            for m in PLACEHOLDER_RE.finditer(text):
+                spec = parse_placeholder(m)
+                if spec.name not in seen:
+                    seen.add(spec.name)
+                    result.append(spec)
+        return result
+
+
+@dataclass
+class MethodBase(Node):
+    """Base class for @request method nodes."""
+
+    name: str = ""  # method name suffix; "" = default fetch()
+
+    @property
+    def http_request(self) -> RequestHttp:
+        return [n for n in self.body if isinstance(n, RequestHttp)][0]
+
+    @property
+    def placeholders(self) -> list[PlaceholderSpec]:
+        return self.http_request.placeholders
+
+    @property
+    def placeholder_names(self) -> list[str]:
+        return [p.name for p in self.placeholders]
+
+
+@dataclass
+class MethodFetch(MethodBase):
+    """Fetch shortcut for regular schemas (Item/List/etc).
+
+    ``fetch()`` returns a parser instance constructed from the HTTP response body.
+    """
+
+    response_path: str = ""  # dot-notation JSON path, e.g. "payload.html"
+    response_join: str = (
+        ""  # join separator when response-path resolves to list[str]
+    )
+
+
+@dataclass
+class MethodRest(MethodBase):
+    """REST method for ``type=rest`` schemas.
+
+    Method returns ``Ok/TransportErr`` union; no HTML parsing.
+    """
+
+    doc: str = ""  # per-method docstring
+    response_schema: str = ""  # json schema name for typed 2xx response
+
+
 # ── Base struct ──────────────────────────────────────────────────────────────
 
 
@@ -68,15 +168,15 @@ class StructBase(Node):
         return self.body[0]  # type: ignore
 
     @property
-    def request_config(self) -> RequestConfig | None:
+    def request_config(self) -> MethodBase | None:
         for node in self.body:
-            if isinstance(node, RequestConfig):
+            if isinstance(node, MethodBase):
                 return node
         return None
 
     @property
-    def request_configs(self) -> list[RequestConfig]:
-        return [n for n in self.body if isinstance(n, RequestConfig)]
+    def request_configs(self) -> list[MethodBase]:
+        return [n for n in self.body if isinstance(n, MethodBase)]
 
     @property
     def use_request(self) -> bool:
@@ -348,52 +448,6 @@ class TableMatchKey(Node):
 
     accept: VariableType = field(default=VariableType.DOCUMENT)
     ret: VariableType = field(default=VariableType.STRING)
-
-
-@dataclass
-class RequestConfig(Node):
-    """
-    Optional transport layer config for a struct.
-    DSL: @request [name="suffix"] [response-path="..."] [response-join="..."]
-                  [response=JsonSchema] [doc="..."] \"""...\"""
-
-    raw_payload stores the verbatim curl or raw HTTP string (with {{placeholders}}).
-    Transport normalization (curl/HTTP parse → kwargs) happens at converter stage.
-
-    name="" (unnamed) generates fetch()/async_fetch().
-    name="by-id" generates fetch_by_id()/async_fetch_by_id() (Python)
-    or fetchById() (JS).
-
-    response_schema (type=rest only): json schema name for typed 2xx response.
-        Empty string = void return.
-    doc (type=rest only): per-method docstring.
-    """
-
-    raw_payload: str = ""
-    response_path: str = ""  # dot-notation JSON path, e.g. "payload.html"
-    response_join: str = (
-        ""  # join separator when response-path resolves to list[str]
-    )
-    name: str = ""  # method name suffix; "" = default fetch()
-    response_schema: str = ""  # type=rest: json schema for 2xx body
-    doc: str = ""  # type=rest: per-method docstring
-
-    @property
-    def placeholders(self) -> list[PlaceholderSpec]:
-        """Unique placeholders in declaration order (dedup by name)."""
-        seen: set[str] = set()
-        result: list[PlaceholderSpec] = []
-        for m in PLACEHOLDER_RE.finditer(self.raw_payload):
-            spec = parse_placeholder(m)
-            if spec.name not in seen:
-                seen.add(spec.name)
-                result.append(spec)
-        return result
-
-    @property
-    def placeholder_names(self) -> list[str]:
-        """Unique placeholder names in declaration order."""
-        return [p.name for p in self.placeholders]
 
 
 @dataclass

@@ -14,9 +14,11 @@ from ssc_codegen.ast import (
     JsonDef,
     JsonDefField,
     Key,
+    MethodFetch,
+    MethodRest,
     Node,
     PreValidate,
-    RequestConfig,
+    RequestHttp,
     SplitDoc,
     StartParse,
     StructBase,
@@ -28,6 +30,7 @@ from ssc_codegen.ast import (
     Value,
     VariableType,
 )
+from ssc_codegen.request_spec import parse_to_spec
 from kdlquery import KdlNode
 
 from ssc_codegen.core.contexts import LintContext, ParseContext, WalkCtx
@@ -101,22 +104,43 @@ def parse_struct(
             raw_payload = str(
                 ctx.property_defines.get(node.args[0].value, node.args[0].value)
             )
-            req = RequestConfig(parent=parent)
-            req.raw_payload = raw_payload
-            req.response_path = node.get_prop("response-path") or ""
-            req.response_join = node.get_prop("response-join") or ""
-            req.name = node.get_prop("name") or ""
-            response_schema_val = node.get_prop("response") or ""
-            req.response_schema = str(
-                ctx.property_defines.get(
-                    response_schema_val, response_schema_val
-                )
+            spec = parse_to_spec(raw_payload)
+            http = RequestHttp(
+                method=spec.method,
+                url=spec.url,
+                headers=spec.headers,
+                cookies=spec.cookies,
+                params=spec.params,
+                body_kind=spec.body_kind,
+                body=spec.body,
             )
-            if req.response_schema and isinstance(parent, StructRest):
-                pass  # cross-ref validation done by structural linter
-            doc_val = node.get_prop("doc") or ""
-            req.doc = str(ctx.property_defines.get(doc_val, doc_val))
-            parent.body.append(req)
+            method_name = node.get_prop("name") or ""
+            if isinstance(parent, StructRest):
+                rest_method = MethodRest(parent=parent, name=method_name)
+                response_schema_val = node.get_prop("response") or ""
+                rest_method.response_schema = str(
+                    ctx.property_defines.get(
+                        response_schema_val, response_schema_val
+                    )
+                )
+                doc_val = node.get_prop("doc") or ""
+                rest_method.doc = str(
+                    ctx.property_defines.get(doc_val, doc_val)
+                )
+                http.parent = rest_method
+                rest_method.body.append(http)
+                parent.body.append(rest_method)
+            else:
+                fetch_method = MethodFetch(parent=parent, name=method_name)
+                fetch_method.response_path = (
+                    node.get_prop("response-path") or ""
+                )
+                fetch_method.response_join = (
+                    node.get_prop("response-join") or ""
+                )
+                http.parent = fetch_method
+                fetch_method.body.append(http)
+                parent.body.append(fetch_method)
         elif node.name == "@error":
             if not node.args or len(node.args) < 2:
                 lint.error(
