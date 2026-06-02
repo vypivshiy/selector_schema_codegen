@@ -68,7 +68,14 @@ ssc_codegen/
 │   ├── py_lxml.py         # Python lxml
 │   ├── py_parsel.py       # Python parsel (Scrapy)
 │   ├── py_slax.py         # Python selectolax
-│   └── js_pure.py         # JavaScript vanilla DOM
+│   ├── js_pure.py         # JavaScript vanilla DOM
+│   └── runtime/           # Runtime template constants (shared across converters)
+│       ├── __init__.py    # Re-exports public API
+│       ├── _helpers.py    # _module_has_rest, module_is_rest_only, http_client_import
+│       ├── py_base.py     # NOT_REQUIRED_IMPORT, _BASE_UTILITY_LINES, base_utility_lines()
+│       ├── py_rest.py     # rest_imports, rest_utilities, runtime_module_content, register_runtime_file
+│       ├── py_lxml.py     # _FALLBACK_HTML_LINES, _FALLBACK_HTML_EXPORT
+│       └── js_base.py     # JS_BASE_UTILITY_LINES, js_base_utility_lines()
 ├── kdl/                   # Custom KDL 2.0 parser (NOT tree-sitter)
 │   ├── __init__.py        # Re-exports all CST, Reader, and DictReader types
 │   ├── parser.py          # KDLLexer, KDL2CSTParser, Token/TokenType, CST node types
