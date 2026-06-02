@@ -252,7 +252,7 @@ def generate(
         meta["http_client"] = http_client
 
     if separate_runtime:
-        from ssc_codegen.converters.py_bs4 import register_runtime_file
+        from ssc_codegen.converters.runtime import register_runtime_file
 
         _runtime_name = runtime_name or "sscgen_runtime"
         meta["runtime_module"] = _runtime_name

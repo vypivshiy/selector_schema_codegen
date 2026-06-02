@@ -11,6 +11,17 @@ Key differences from bs4:
 
 from ssc_codegen.converters.base import ConverterContext
 from ssc_codegen.converters.helpers import to_snake_case
+from ssc_codegen.converters.runtime import (
+    _FALLBACK_HTML_LINES,
+    _FALLBACK_HTML_EXPORT,
+    module_is_rest_only,
+    http_client_import,
+    rest_imports,
+    rest_utilities,
+    runtime_export_names,
+    base_utility_lines,
+    NOT_REQUIRED_IMPORT,
+)
 
 from ssc_codegen.ast import VariableType as VT
 import ssc_codegen.ast as a
@@ -46,13 +57,13 @@ def pre_imports(node: a.Imports, ctx: ConverterContext):
             "from dataclasses import dataclass",
             "from typing import TypedDict, Optional, Any, List, Dict, Union, Literal, Mapping",
         ]
-        if not py_bs4.module_is_rest_only(node):
+        if not module_is_rest_only(node):
             base_imports.append(
                 "from html import unescape as ssc_html_unescape"
             )
-        base_imports.extend(py_bs4.rest_imports(node))
+        base_imports.extend(rest_imports(node))
 
-    base_imports.extend(py_bs4.NOT_REQUIRED_IMPORT)
+    base_imports.extend(NOT_REQUIRED_IMPORT)
 
     # Get transform imports for Python (already collected during parsing)
     transform_imports = sorted(node.transform_imports.get("py", set()))
@@ -63,39 +74,32 @@ def pre_imports(node: a.Imports, ctx: ConverterContext):
 @PY_LXML_CONVERTER.post(a.Imports)
 def post_imports(node: a.Imports, ctx: ConverterContext):
     lines = []
-    if not py_bs4.module_is_rest_only(node):
+    if not module_is_rest_only(node):
         lines.extend(
             [
                 "from lxml import html",
                 "from lxml.html import HtmlElement",
             ]
         )
-    lines.extend(py_bs4.http_client_import(ctx))
+    lines.extend(http_client_import(ctx))
     return lines
-
-
-_FALLBACK_HTML_LINES = [
-    'FALLBACK_HTML_STR = "<html><body></body></html>"',
-    "",
-]
-_FALLBACK_HTML_EXPORT = "FALLBACK_HTML_STR"
 
 
 @PY_LXML_CONVERTER(a.Utilities)
 def pre_utilities(node: a.Utilities, ctx: ConverterContext):
     runtime = ctx.meta.get("runtime_module")
     if runtime:
-        names = py_bs4.runtime_export_names(node)
+        names = runtime_export_names(node)
         names.append(_FALLBACK_HTML_EXPORT)
         return [f"from .{runtime} import " + ", ".join(names), ""]
 
-    if py_bs4.module_is_rest_only(node):
+    if module_is_rest_only(node):
         lines = []
-        lines.extend(py_bs4.rest_utilities(node))
+        lines.extend(rest_utilities(node))
         return lines
 
-    lines = [*_FALLBACK_HTML_LINES, *py_bs4.base_utility_lines()]
-    lines.extend(py_bs4.rest_utilities(node))
+    lines = [*_FALLBACK_HTML_LINES, *base_utility_lines()]
+    lines.extend(rest_utilities(node))
     return lines
 
 

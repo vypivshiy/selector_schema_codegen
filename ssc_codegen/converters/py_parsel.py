@@ -5,6 +5,12 @@ using parsel.Selector/SelectorList API.
 
 from ssc_codegen.converters.base import ConverterContext
 from ssc_codegen.converters.helpers import to_snake_case
+from ssc_codegen.converters.runtime import (
+    module_is_rest_only,
+    http_client_import,
+    NOT_REQUIRED_IMPORT,
+    rest_imports,
+)
 
 from ssc_codegen.ast import VariableType as VT
 import ssc_codegen.ast as a
@@ -30,7 +36,7 @@ def pre_imports(node: a.Imports, ctx: ConverterContext):
             "from dataclasses import dataclass",
             "from typing import TypedDict, Optional, Any, List, Dict, Union, Literal, Mapping",
         ]
-        base_imports.extend(py_bs4.NOT_REQUIRED_IMPORT)
+        base_imports.extend(NOT_REQUIRED_IMPORT)
     else:
         base_imports = [
             "import json",
@@ -39,12 +45,12 @@ def pre_imports(node: a.Imports, ctx: ConverterContext):
             "from dataclasses import dataclass",
             "from typing import TypedDict, Optional, Any, List, Dict, Union, Literal, Mapping",
         ]
-        if not py_bs4.module_is_rest_only(node):
+        if not module_is_rest_only(node):
             base_imports.append(
                 "from html import unescape as ssc_html_unescape"
             )
-        base_imports.extend(py_bs4.NOT_REQUIRED_IMPORT)
-        base_imports.extend(py_bs4.rest_imports(node))
+        base_imports.extend(NOT_REQUIRED_IMPORT)
+        base_imports.extend(rest_imports(node))
 
     transform_imports = sorted(node.transform_imports.get("py", set()))
 
@@ -54,9 +60,9 @@ def pre_imports(node: a.Imports, ctx: ConverterContext):
 @PY_PARSEL_CONVERTER.post(a.Imports)
 def post_imports(node: a.Imports, ctx: ConverterContext):
     lines = []
-    if not py_bs4.module_is_rest_only(node):
+    if not module_is_rest_only(node):
         lines.append("from parsel import Selector, SelectorList")
-    lines.extend(py_bs4.http_client_import(ctx))
+    lines.extend(http_client_import(ctx))
     return lines
 
 

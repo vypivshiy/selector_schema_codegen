@@ -34,6 +34,7 @@ from ssc_codegen.converters.request_spec import (
     _PH,
 )
 from ssc_codegen.ast.struct import parse_placeholder
+from ssc_codegen.converters.runtime.js_base import js_base_utility_lines
 
 JS_CONVERTER = BaseConverter(indent=" " * 2)
 
@@ -202,24 +203,7 @@ def _js_module_has_rest(node) -> bool:
 @JS_CONVERTER(a.Utilities)
 def pre_utilities(node: a.Utilities, _: ConverterContext):
     # TODO: wrong func _replMap
-    lines = [
-        "const UNMATCHED_TABLE_ROW = Symbol('UNMATCHED_TABLE_ROW');",
-        "",
-        "function _replMap(s, map) {",
-        "    for (const [k, v] of Object.entries(map)) s = s.split(k).join(v);",
-        "    return s;",
-        "}",
-        "",
-        "function _normalizeText(s) { return s ? s.trim().replace(/\\s+/g, ' ') : ''; }",
-        "",
-        "function _unescapeText(s) {",
-        "    const el = document.createElement('textarea');",
-        "    el.innerHTML = s; return el.value;",
-        "}",
-        "",
-        "function _rmPrefix(s, p) { return s.startsWith(p) ? s.slice(p.length) : s; }",
-        "function _rmSuffix(s, p) { return s.endsWith(p) ? s.slice(0, -p.length) : s; }",
-    ]
+    lines = js_base_utility_lines()
     if _js_module_has_rest(node):
         lines.extend(
             [
