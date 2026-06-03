@@ -1,7 +1,6 @@
 from ssc_codegen.converters.base import ConverterContext, BaseConverter
 
 from ssc_codegen.ast import VariableType as VT
-from ssc_codegen.ast.struct import PlaceholderSpec
 import ssc_codegen.ast as a
 
 from ssc_codegen.converters.runtime import (
@@ -1543,38 +1542,11 @@ def pre_expr_pred_re_any(node: a.PredReAny, ctx: ConverterContext):
 # MethodBase: spec building + REST/non-REST method generation
 # ---------------------------------------------------------------------------
 
-
-_PH_PRIM_ANNO: dict[str, str] = {
-    "str": "str",
-    "int": "int",
-    "float": "float",
-    "bool": "bool",
-}
+_PY_TYPE = {"str": "str", "int": "int", "float": "float", "bool": "bool"}
 
 
-def _ph_to_py_annotation(ph: PlaceholderSpec) -> tuple[str, str]:
-    anno = _PH_PRIM_ANNO[ph.type_name]
-    if ph.is_array:
-        anno = f"List[{anno}]"
-    if ph.is_optional:
-        return f"Optional[{anno}]", " = None"
-    return anno, ""
-
-
-def _render_signature_params(placeholders: list[PlaceholderSpec]) -> str:
-    if not placeholders:
-        return ""
-    required = [p for p in placeholders if not p.is_optional]
-    optional = [p for p in placeholders if p.is_optional]
-    parts: list[str] = []
-    for ph in required + optional:
-        anno, default = _ph_to_py_annotation(ph)
-        parts.append(f"{ph.name}: {anno}{default}")
-    return ", *, " + ", ".join(parts)
-
-
-def _build_request_parts(node: a.MethodBase, ctx: ConverterContext):
-    """Build all request components from the pre-parsed RequestHttp child."""
+def _build_request_args(node: a.MethodBase, ctx: ConverterContext):
+    """Build normalized spec, call args and pre-lines from the pre-parsed RequestHttp child."""
     http = node.http_request
     spec = normalize_placeholder_names(
         RequestSpec(
@@ -1589,45 +1561,52 @@ def _build_request_parts(node: a.MethodBase, ctx: ConverterContext):
         to_snake_case,
     )
     ind = ctx.indent_char
-    i1 = ctx.indent
-    i2 = i1 + ind
-    i3 = i2 + ind
-    i4 = i3 + ind
+    i1, i2, i3, i4 = (ctx.indent + ind * n for n in range(4))
 
-    ph_params = _render_signature_params(spec.placeholders)
+    # method signature params from placeholders (required first, optional last)
+    ph_params = ""
+    if spec.placeholders:
+        parts: list[str] = []
+        for ph in sorted(spec.placeholders, key=lambda p: p.is_optional):
+            t = _PY_TYPE[ph.type_name]
+            if ph.is_array:
+                t = f"List[{t}]"
+            parts.append(
+                f"{ph.name}: Optional[{t}] = None"
+                if ph.is_optional
+                else f"{ph.name}: {t}"
+            )
+        ph_params = ", *, " + ", ".join(parts)
+
     pre_lines: list[str] = []
     call_args: list[str] = [f"{spec.method!r},", f"{render_value(spec.url)},"]
 
-    def _dict_arg(kwarg: str, d: dict[str, str], varname: str) -> None:
+    for kwarg, d, varname in [
+        ("headers", spec.headers, "_headers"),
+        ("cookies", spec.cookies, "_cookies"),
+        ("params", spec.params, "_params"),
+    ]:
         if not d:
-            return
+            continue
         if dict_needs_builder(d):
             pre_lines.extend(emit_dict_builder(varname, d, i2))
             call_args.append(f"{kwarg}={varname},")
         else:
             call_args.append(f"{kwarg}={render_dict(d)},")
 
-    _dict_arg("headers", spec.headers, "_headers")
-    _dict_arg("cookies", spec.cookies, "_cookies")
-    _dict_arg("params", spec.params, "_params")
     body_result = render_body(spec)
     if body_result:
         kwarg_name, body_expr = body_result
         call_args.append(f"{kwarg_name}={body_expr},")
 
-    return spec, call_args, pre_lines, ph_params, i1, i2, i3, i4
+    return call_args, pre_lines, ph_params, i1, i2, i3, i4
 
 
-def _emit_rest_methods(
-    node: a.MethodRest,
-    call_args: list[str],
-    pre_lines: list[str],
-    ph_params: str,
-    i1: str,
-    i2: str,
-    i3: str,
-    i4: str,
-) -> list[str]:
+@PY_BASE_CONVERTER(a.MethodRest)
+def pre_method_rest(node: a.MethodRest, ctx: ConverterContext):
+    call_args, pre_lines, ph_params, i1, i2, i3, i4 = _build_request_args(
+        node, ctx
+    )
     method_name = to_snake_case(node.name) if node.name else "fetch"
     ret_type = _result_alias_name(node.name)
     ok_value = "_body" if node.response_schema else "None"
@@ -1667,15 +1646,11 @@ def _emit_rest_methods(
     return lines
 
 
-def _emit_fetch_methods(
-    node: a.MethodFetch,
-    call_args: list[str],
-    pre_lines: list[str],
-    ph_params: str,
-    i1: str,
-    i2: str,
-    i3: str,
-) -> list[str]:
+@PY_BASE_CONVERTER(a.MethodFetch)
+def pre_method_fetch(node: a.MethodFetch, ctx: ConverterContext):
+    call_args, pre_lines, ph_params, i1, i2, i3, _ = _build_request_args(
+        node, ctx
+    )
     struct_name = to_pascal_case(node.parent.name)  # type: ignore[union-attr]
     suffix = ("_" + to_snake_case(node.name)) if node.name else ""
     response_path = node.response_path
@@ -1713,27 +1688,6 @@ def _emit_fetch_methods(
     return lines
 
 
-@PY_BASE_CONVERTER(a.MethodRest)
-def pre_method_rest(node: a.MethodRest, ctx: ConverterContext):
-    _, call_args, pre_lines, ph_params, i1, i2, i3, i4 = _build_request_parts(
-        node, ctx
-    )
-    return _emit_rest_methods(
-        node, call_args, pre_lines, ph_params, i1, i2, i3, i4
-    )
-
-
-@PY_BASE_CONVERTER(a.MethodFetch)
-def pre_method_fetch(node: a.MethodFetch, ctx: ConverterContext):
-    _, call_args, pre_lines, ph_params, i1, i2, i3, _ = _build_request_parts(
-        node, ctx
-    )
-    return _emit_fetch_methods(
-        node, call_args, pre_lines, ph_params, i1, i2, i3
-    )
-
-
 @PY_BASE_CONVERTER(a.ErrorResponse)
 def pre_error_response(node: a.ErrorResponse, _: ConverterContext):
-    # error spec consumed by pre_method_rest; no direct emission
     return None

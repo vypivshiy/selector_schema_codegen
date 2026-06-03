@@ -1751,32 +1751,6 @@ _JS_PRIM_JSDOC = {
 }
 
 
-def _js_ph_jsdoc(ph: a.PlaceholderSpec) -> str:
-    """JSDoc type expression for a placeholder, e.g. 'number[]' or 'string | null'."""
-    t = _JS_PRIM_JSDOC[ph.type_name]
-    if ph.is_array:
-        t = f"{t}[]"
-    return t
-
-
-def _js_signature_jsdoc(
-    placeholders: list[a.PlaceholderSpec], indent: str
-) -> list[str]:
-    """Build JSDoc lines describing the destructured params argument."""
-    if not placeholders:
-        return []
-    lines = [f"{indent}/**", f"{indent} * @param {{object}} params"]
-    required = [p for p in placeholders if not p.is_optional]
-    optional = [p for p in placeholders if p.is_optional]
-    for p in required + optional:
-        bracket_name = (
-            f"[params.{p.name}]" if p.is_optional else f"params.{p.name}"
-        )
-        lines.append(f"{indent} * @param {{{_js_ph_jsdoc(p)}}} {bracket_name}")
-    lines.append(f"{indent} */")
-    return lines
-
-
 def _js_render_json_body(raw: str) -> str:
     """Render JSON body template (with {{placeholders}}) as a JS template literal."""
     inner = raw.replace("\\", "\\\\").replace("`", "\\`")
@@ -1800,8 +1774,8 @@ def _js_name(name: str) -> str:
     return to_camel_case(to_snake_case(name))
 
 
-def _js_rest_method(node: a.MethodRest, ctx: ConverterContext) -> list[str]:
-    """Emit a REST client method for `struct type=rest`."""
+def _js_build_request_args(node: a.MethodBase, ctx: ConverterContext):
+    """Build shared request parts for MethodRest/MethodFetch handlers."""
     http = node.http_request
     spec = normalize_placeholder_names(
         RequestSpec(
@@ -1817,24 +1791,88 @@ def _js_rest_method(node: a.MethodRest, ctx: ConverterContext) -> list[str]:
     )
     http_client = ctx.meta.get("http_client", "fetch")
     ind = ctx.indent_char
-    i1 = ctx.indent
-    i2 = i1 + ind
-    i3 = i2 + ind
-    i4 = i3 + ind
+    i1, i2, i3, i4 = (ctx.indent + ind * n for n in range(4))
+
+    # placeholder params (required first, optional last)
+    ph_param = ""
+    if spec.placeholders:
+        ordered = [
+            p.name
+            for p in sorted(spec.placeholders, key=lambda p: p.is_optional)
+        ]
+        ph_param = ", {" + ", ".join(ordered) + "}"
+
+    # pre-body builders + resolved expressions
+    pre_lines: list[str] = []
+
+    def _resolve(d, varname, builder_fn):
+        if not d:
+            return None
+        if _js_dict_needs_builder(d):
+            pre_lines.extend(builder_fn(varname, d, i3))
+            return varname
+        return _js_render_obj(d)
+
+    params_expr = _resolve(spec.params, "_params", _js_emit_params_builder)
+    headers_expr = _resolve(spec.headers, "_headers", _js_emit_obj_builder)
+    cookies_expr = _resolve(spec.cookies, "_cookies", _js_emit_obj_builder)
+
+    body_result = _js_render_body(spec)
+    body_expr = body_result[1] if body_result else None
+
+    return (
+        spec,
+        pre_lines,
+        ph_param,
+        http_client,
+        params_expr,
+        headers_expr,
+        cookies_expr,
+        body_expr,
+        i1,
+        i2,
+        i3,
+        i4,
+    )
+
+
+def _js_ok_payload_type(node: a.MethodRest) -> str:
+    """Return the JSDoc type for the successful response payload."""
+    if not node.response_schema:
+        return "null"
+    struct = node.parent
+    module = struct.parent if struct is not None else None
+    schema_type = f"{to_pascal_case(node.response_schema)}Json"
+    if module is not None:
+        for n in module.body:
+            if isinstance(n, a.JsonDef) and n.name == node.response_schema:
+                if n.is_array:
+                    return f"Array<{schema_type}>"
+                break
+    return schema_type
+
+
+@JS_CONVERTER(a.MethodRest)
+def pre_method_rest(node: a.MethodRest, ctx: ConverterContext):
+    (
+        spec,
+        pre_lines,
+        ph_param,
+        http_client,
+        params_expr,
+        headers_expr,
+        _cookies_expr,
+        body_expr,
+        i1,
+        i2,
+        i3,
+        i4,
+    ) = _js_build_request_args(node, ctx)
 
     raw_name = node.name or "fetch"
     method_name = to_camel_case(to_snake_case(raw_name))
     if raw_name == "fetch":
         method_name = "fetch"
-
-    placeholders = spec.placeholders
-    if placeholders:
-        required = [p for p in placeholders if not p.is_optional]
-        optional = [p for p in placeholders if p.is_optional]
-        ordered_names = [p.name for p in required + optional]
-        ph_param = ", {" + ", ".join(ordered_names) + "}"
-    else:
-        ph_param = ""
     sig = f"static async {method_name}(client{ph_param})"
 
     parent = node.parent
@@ -1860,42 +1898,19 @@ def _js_rest_method(node: a.MethodRest, ctx: ConverterContext) -> list[str]:
         for doc_line in node.doc.splitlines():
             lines.append(f"{i1} * {doc_line}")
         lines.append(f"{i1} */")
-    # JSDoc: params signature + return type (merged block)
-    jsdoc_lines: list[str] = [f"{i1}/**"]
-    if placeholders:
-        jsdoc_lines.append(f"{i1} * @param {{object}} params")
-        for p in [
-            *(p for p in placeholders if not p.is_optional),
-            *(p for p in placeholders if p.is_optional),
-        ]:
-            bracket_name = (
-                f"[params.{p.name}]" if p.is_optional else f"params.{p.name}"
-            )
-            jsdoc_lines.append(
-                f"{i1} * @param {{{_js_ph_jsdoc(p)}}} {bracket_name}"
-            )
-    jsdoc_lines.append(f"{i1} * @returns {{Promise<{return_union}>}}")
-    jsdoc_lines.append(f"{i1} */")
-    lines.extend(jsdoc_lines)
+    # JSDoc: params signature + return type
+    lines.append(f"{i1}/**")
+    for p in sorted(spec.placeholders, key=lambda p: p.is_optional):
+        t = _JS_PRIM_JSDOC[p.type_name]
+        if p.is_array:
+            t = f"{t}[]"
+        bracket = f"[params.{p.name}]" if p.is_optional else f"params.{p.name}"
+        lines.append(f"{i1} * @param {{{t}}} {bracket}")
+    lines.append(f"{i1} * @returns {{Promise<{return_union}>}}")
+    lines.append(f"{i1} */")
     lines.append(f"{i1}{sig} {{")
 
-    # Pre-body: local builders for params/headers if any entry is array or optional.
-    pre_lines: list[str] = []
-    params_var: str | None = None
-    headers_var: str | None = None
-    cookies_var: str | None = None
-    if spec.params and _js_dict_needs_builder(spec.params):
-        params_var = "_params"
-        pre_lines.extend(_js_emit_params_builder(params_var, spec.params, i3))
-    if spec.headers and _js_dict_needs_builder(spec.headers):
-        headers_var = "_headers"
-        pre_lines.extend(_js_emit_obj_builder(headers_var, spec.headers, i3))
-    if spec.cookies and _js_dict_needs_builder(spec.cookies):
-        cookies_var = "_cookies"
-        pre_lines.extend(_js_emit_obj_builder(cookies_var, spec.cookies, i3))
-
-    # Everything below — response handling & request — goes inside try/catch
-    # so transport failures turn into TransportErr.
+    # try/catch so transport failures turn into TransportErr.
     lines.append(f"{i2}let _resp;")
     lines.append(f"{i2}try {{")
     lines.extend(pre_lines)
@@ -1906,48 +1921,34 @@ def _js_rest_method(node: a.MethodRest, ctx: ConverterContext) -> list[str]:
             f"{i4}url: {_js_render_value(spec.url)},",
             f"{i4}validateStatus: () => true,",
         ]
-        if spec.params:
-            params_expr = (
-                params_var if params_var else _js_render_obj(spec.params)
-            )
+        if params_expr:
             req_props.append(f"{i4}params: {params_expr},")
-        if spec.headers:
-            headers_expr = (
-                headers_var if headers_var else _js_render_obj(spec.headers)
-            )
+        if headers_expr:
             req_props.append(f"{i4}headers: {headers_expr},")
-        body_result = _js_render_body(spec)
-        if body_result:
-            _, body_expr = body_result
+        if body_expr:
             req_props.append(f"{i4}data: {body_expr},")
         lines.append(f"{i3}_resp = await client.request({{")
         lines.extend(req_props)
         lines.append(f"{i3}}});")
     else:
-        if spec.params:
+        if params_expr:
             url_inner = _PH.sub(
                 lambda mm: "${" + mm.group(1) + "}",
                 spec.url.replace("`", "\\`"),
             )
-            if params_var:
-                url_expr = f"`{url_inner}?${{{params_var}.toString()}}`"
+            if params_expr == "_params":
+                url_expr = f"`{url_inner}?${{{params_expr}.toString()}}`"
             else:
-                params_obj = _js_render_obj(spec.params)
                 url_expr = (
-                    f"`{url_inner}?${{new URLSearchParams({params_obj})}}`"
+                    f"`{url_inner}?${{new URLSearchParams({params_expr})}}`"
                 )
         else:
             url_expr = _js_render_value(spec.url)
 
         options: list[str] = [f"{i4}method: {spec.method!r},"]
-        if spec.headers:
-            headers_expr = (
-                headers_var if headers_var else _js_render_obj(spec.headers)
-            )
+        if headers_expr:
             options.append(f"{i4}headers: {headers_expr},")
-        body_result = _js_render_body(spec)
-        if body_result:
-            _, body_expr = body_result
+        if body_expr:
             options.append(f"{i4}body: {body_expr},")
         lines.append(f"{i3}_resp = await client({url_expr}, {{")
         lines.extend(options)
@@ -1984,89 +1985,62 @@ def _js_rest_method(node: a.MethodRest, ctx: ConverterContext) -> list[str]:
     return lines
 
 
-def _js_ok_payload_type(node: a.MethodRest) -> str:
-    """Return the JSDoc type for the successful response payload."""
-    if not node.response_schema:
-        return "null"
-    struct = node.parent
-    module = struct.parent if struct is not None else None
-    schema_type = f"{to_pascal_case(node.response_schema)}Json"
-    if module is not None:
-        for n in module.body:
-            if isinstance(n, a.JsonDef) and n.name == node.response_schema:
-                if n.is_array:
-                    return f"Array<{schema_type}>"
-                break
-    return schema_type
-
-
-def _js_fetch_method(node: a.MethodFetch, ctx: ConverterContext) -> list[str]:
-    """Generate non-REST async fetch method for JS (fetch API or axios)."""
-    http = node.http_request
-    spec = normalize_placeholder_names(
-        RequestSpec(
-            method=http.method,
-            url=http.url,
-            headers=dict(http.headers),
-            cookies=dict(http.cookies),
-            params=dict(http.params),
-            body_kind=http.body_kind,
-            body=http.body,
-        ),
-        _js_name,
-    )
-    http_client = ctx.meta.get("http_client", "fetch")
-
-    ind = ctx.indent_char
-    i1 = ctx.indent
-    i2 = i1 + ind
-    i3 = i2 + ind
+@JS_CONVERTER(a.MethodFetch)
+def pre_method_fetch(node: a.MethodFetch, ctx: ConverterContext):
+    (
+        spec,
+        _pre_lines,
+        ph_param,
+        http_client,
+        params_expr,
+        headers_expr,
+        _cookies_expr,
+        body_expr,
+        i1,
+        i2,
+        i3,
+        _i4,
+    ) = _js_build_request_args(node, ctx)
 
     struct_name = to_pascal_case(node.parent.name)  # type: ignore[union-attr]
-    ph_names = [p.name for p in spec.placeholders]
     method_name = "fetch" + (to_pascal_case(node.name) if node.name else "")
-    ph_param = (", {" + ", ".join(ph_names) + "}") if ph_names else ""
-    sig = f"static async {method_name}(client{ph_param})"
 
     def _response_lines(data_expr: str) -> list[str]:
-        lines: list[str] = []
+        rl: list[str] = []
         if node.response_path:
             accessor = "".join(
                 f"[{p!r}]" for p in node.response_path.split(".")
             )
-            lines.append(f"{i2}const _data = {data_expr};")
+            rl.append(f"{i2}const _data = {data_expr};")
             if node.response_join:
-                lines.append(
+                rl.append(
                     f"{i2}const _body = _data{accessor}.join({node.response_join!r});"
                 )
             else:
-                lines.append(f"{i2}const _body = _data{accessor};")
+                rl.append(f"{i2}const _body = _data{accessor};")
         else:
-            lines.append(f"{i2}const _body = {data_expr};")
-        lines.append(f"{i2}return new {struct_name}(_body);")
-        return lines
+            rl.append(f"{i2}const _body = {data_expr};")
+        rl.append(f"{i2}return new {struct_name}(_body);")
+        return rl
 
-    lines: list[str] = [f"{i1}{sig} {{"]
+    lines: list[str] = [f"{i1}static async {method_name}(client{ph_param}) {{"]
 
     if http_client == "fetch":
-        if spec.params:
+        if params_expr:
             url_inner = _PH.sub(r"${\1}", spec.url.replace("`", "\\`"))
-            params_obj = _js_render_obj(spec.params)
-            url_expr = f"`{url_inner}?${{new URLSearchParams({params_obj})}}`"
+            url_expr = f"`{url_inner}?${{new URLSearchParams({params_expr})}}`"
         else:
             url_expr = _js_render_value(spec.url)
 
         options: list[str] = [f"{i3}method: {spec.method!r},"]
-        if spec.headers:
-            options.append(f"{i3}headers: {_js_render_obj(spec.headers)},")
+        if headers_expr:
+            options.append(f"{i3}headers: {headers_expr},")
         if spec.cookies:
             cookie_str = "; ".join(f"{k}={v}" for k, v in spec.cookies.items())
             options.append(
                 f"{i3}// cookies: {cookie_str!r}  /* set via headers or credentials */"
             )
-        body_result = _js_render_body(spec)
-        if body_result:
-            _, body_expr = body_result
+        if body_expr:
             options.append(f"{i3}body: {body_expr},")
 
         lines.append(f"{i2}const _resp = await client({url_expr}, {{")
@@ -2085,15 +2059,13 @@ def _js_fetch_method(node: a.MethodFetch, ctx: ConverterContext) -> list[str]:
             f"{i3}method: {spec.method!r},",
             f"{i3}url: {_js_render_value(spec.url)},",
         ]
-        if spec.params:
-            req_props.append(f"{i3}params: {_js_render_obj(spec.params)},")
-        if spec.headers:
-            req_props.append(f"{i3}headers: {_js_render_obj(spec.headers)},")
+        if params_expr:
+            req_props.append(f"{i3}params: {params_expr},")
+        if headers_expr:
+            req_props.append(f"{i3}headers: {headers_expr},")
         if spec.cookies:
             req_props.append(f"{i3}// cookies: {_js_render_obj(spec.cookies)},")
-        body_result = _js_render_body(spec)
-        if body_result:
-            _, body_expr = body_result
+        if body_expr:
             req_props.append(f"{i3}data: {body_expr},")
 
         lines.append(f"{i2}const _resp = await client.request({{")
@@ -2106,16 +2078,6 @@ def _js_fetch_method(node: a.MethodFetch, ctx: ConverterContext) -> list[str]:
 
     lines.append(f"{i1}}}")
     return lines
-
-
-@JS_CONVERTER(a.MethodRest)
-def pre_method_rest(node: a.MethodRest, ctx: ConverterContext):
-    return _js_rest_method(node, ctx)
-
-
-@JS_CONVERTER(a.MethodFetch)
-def pre_method_fetch(node: a.MethodFetch, ctx: ConverterContext):
-    return _js_fetch_method(node, ctx)
 
 
 @JS_CONVERTER(a.ErrorResponse)
