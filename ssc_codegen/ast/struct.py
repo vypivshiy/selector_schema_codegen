@@ -376,12 +376,13 @@ class SplitDoc(Node):
     """
     Splits document into items for list-type structs.
     DSL: -split-doc { ... }
-    accept: DOCUMENT, ret: LIST_DOCUMENT
+    accept: DOCUMENT, ret: DOCUMENT with is_array=True
     Only valid in struct type=list.
     """
 
     accept: VariableType = field(default=VariableType.DOCUMENT)
-    ret: VariableType = field(default=VariableType.LIST_DOCUMENT)
+    ret: VariableType = field(default=VariableType.DOCUMENT)
+    is_array: bool = True
 
 
 @dataclass
@@ -429,12 +430,13 @@ class TableRow(Node):
     """
     Selects table rows.
     DSL: -row { ... }
-    accept: DOCUMENT, ret: LIST_DOCUMENT
+    accept: DOCUMENT, ret: DOCUMENT with is_array=True
     Only valid in struct type=table.
     """
 
     accept: VariableType = field(default=VariableType.DOCUMENT)
-    ret: VariableType = field(default=VariableType.LIST_DOCUMENT)
+    ret: VariableType = field(default=VariableType.DOCUMENT)
+    is_array: bool = True
 
 
 @dataclass

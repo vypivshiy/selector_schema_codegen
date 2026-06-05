@@ -18,7 +18,8 @@ class CssSelectAll(Node):
     query: str = ""
     queries: list[str] = field(default_factory=list)
     accept: VariableType = field(default=VariableType.DOCUMENT)
-    ret: VariableType = field(default=VariableType.LIST_DOCUMENT)
+    ret: VariableType = field(default=VariableType.DOCUMENT)
+    is_array: bool = True
 
 
 @dataclass
@@ -34,7 +35,8 @@ class XpathSelectAll(Node):
     query: str = ""
     queries: list[str] = field(default_factory=list)
     accept: VariableType = field(default=VariableType.DOCUMENT)
-    ret: VariableType = field(default=VariableType.LIST_DOCUMENT)
+    ret: VariableType = field(default=VariableType.DOCUMENT)
+    is_array: bool = True
 
 
 @dataclass

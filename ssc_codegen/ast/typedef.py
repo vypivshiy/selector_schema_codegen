@@ -1,24 +1,15 @@
 from __future__ import annotations
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from .base import Node
-from .types import VariableType, StructType
+from .types import StructType
 
 
 @dataclass
 class TypeDefField(Node):
-    """
-    Single field type annotation.
-
-    nested_ref — struct name when ret == NESTED.
-    json_ref   — JsonDef name when ret == JSON.
-    """
+    """Single field type annotation. Type info is in ``type_info``."""
 
     name: str = ""
-    ret: VariableType = field(default=VariableType.AUTO)
-    nested_ref: str | None = None
-    json_ref: str | None = None
-    is_array: bool = False
 
     @property
     def typedef(self) -> "TypeDef":

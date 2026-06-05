@@ -39,18 +39,29 @@ PY_TYPES = {
     VT.BOOL: "bool",
     VT.INT: "int",
     VT.FLOAT: "float",
-    VT.JSON: "{}Json",
-    VT.NESTED: "{}Type",
-    VT.OPT_FLOAT: "Optional[float]",
-    VT.OPT_INT: "Optional[int]",
-    VT.OPT_STRING: "Optional[str]",
-    VT.LIST_INT: "List[int]",
-    VT.LIST_STRING: "List[str]",
-    VT.LIST_FLOAT: "List[float]",
-    VT.LIST_DOCUMENT: "ResultSet[Tag]",
-    VT.DOCUMENT: "Union[Tag, BeautifulSoup]",
     VT.NULL: "None",
+    VT.JSON: "Any",
+    VT.NESTED: "Any",
+    VT.DOCUMENT: "Union[Tag, BeautifulSoup]",
+    VT.AUTO: "Any",
 }
+
+
+def _resolve_py_type(type_info: a.TypeInfo | None) -> str:
+    """Render TypeInfo into a Python type annotation string."""
+    if type_info is None:
+        return "Any"
+    if type_info.base == VT.NESTED and type_info.ref:
+        type_ = f"{to_pascal_case(type_info.ref)}Type"
+    elif type_info.base == VT.JSON and type_info.ref:
+        type_ = f"{to_pascal_case(type_info.ref)}Json"
+    else:
+        type_ = PY_TYPES.get(type_info.base, "Any")
+    if type_info.is_array:
+        type_ = f"List[{type_}]"
+    if type_info.is_optional:
+        type_ = f"Optional[{type_}]"
+    return type_
 
 
 @PY_BASE_CONVERTER(a.Docstring)
@@ -145,18 +156,11 @@ def pre_json_struct(node: a.JsonDef, _: ConverterContext):
 
 @PY_BASE_CONVERTER(a.JsonDefField)
 def pre_json_field(node: a.JsonDefField, ctx: ConverterContext):
-    if node.skip:
+    if node.type_info and node.type_info.skip:
         return None
     name = node.alias or node.name
-    type_ = PY_TYPES.get(node.ret, "Any")
-    if node.ret == VT.JSON and node.ref_name:
-        type_name = to_pascal_case(node.ref_name)
-        type_ = type_.format(type_name)
-        if node.is_array:
-            type_ = f"List[{type_}]"
-    if node.is_optional:
-        type_ = f"Optional[{type_}]"
-    if node.may_miss:
+    type_ = _resolve_py_type(node.type_info)
+    if node.type_info and node.type_info.omitempty:
         type_ = f"NotRequired[{type_}]"
     return [f"{name!r}: {type_}, "]
 
@@ -180,17 +184,7 @@ def pre_typedef_field(node: a.TypeDefField, ctx: ConverterContext):
     if node.typedef.struct_type == a.StructType.FLAT:
         return
     name = to_snake_case(node.name)
-    type_ = PY_TYPES.get(node.ret, "Any")
-    if node.ret == VT.JSON and node.json_ref:
-        type_name = to_pascal_case(node.json_ref)
-        type_ = type_.format(type_name)
-        if node.is_array:
-            type_ = f"List[{type_}]"
-    elif node.ret == VT.NESTED and node.nested_ref:
-        type_name = to_pascal_case(node.nested_ref)
-        type_ = type_.format(type_name)
-        if node.is_array:
-            type_ = f"List[{type_}]"
+    type_ = _resolve_py_type(node.type_info)
     if node.typedef.struct_type == a.StructType.DICT:
         if to_snake_case(node.name) == "value":
             typedef_name = to_pascal_case(node.typedef.name)
@@ -486,7 +480,7 @@ def _emit_flatlist_parse_body(
     lines = [f"{i2}result: List[str] = []"]
     for field in node.fields:
         name = to_snake_case(field.name)
-        if field.ret == VT.STRING:
+        if not (field.type_info and field.type_info.is_array):
             lines.append(f"{i2}result.append(self._parse_{name}(self._doc))")
         else:
             lines.append(f"{i2}result.extend(self._parse_{name}(self._doc))")
@@ -580,8 +574,7 @@ def pre_init(node: a.Init, ctx: ConverterContext):
 @PY_BASE_CONVERTER(a.InitField)
 def pre_init_field(node: a.InitField, ctx: ConverterContext):
     name = to_snake_case(node.name)
-    # cannot return nested or json, skip check
-    ret_type = PY_TYPES.get(node.ret, "Any")
+    ret_type = _resolve_py_type(node.type_info)
     return [
         f"    def _init_{name}(self, v: Union[Tag, BeautifulSoup]) -> {ret_type}:"
     ]
@@ -590,19 +583,7 @@ def pre_init_field(node: a.InitField, ctx: ConverterContext):
 @PY_BASE_CONVERTER(a.Field)
 def pre_struct_field(node: a.Field, ctx: ConverterContext):
     name = to_snake_case(node.name)
-    ret_type = PY_TYPES.get(node.ret, "Any")
-    # issue: how to detect if json arr or json struct simplier?
-    if node.ret == VT.JSON:
-        jsonify_node = [i for i in node.body if isinstance(i, a.Jsonify)][0]
-        ret_type = ret_type.format(jsonify_node.schema_name)
-        # Use is_array from jsonify_node (after path resolution), not from a.JsonDef schema
-        if jsonify_node.is_array:
-            ret_type = f"List[{ret_type}]"
-    elif node.ret == VT.NESTED:
-        nested_node = [i for i in node.body if isinstance(i, a.Nested)][0]
-        ret_type = ret_type.format(nested_node.struct_name)
-        if nested_node.is_array:
-            ret_type = f"List[{ret_type}]"
+    ret_type = _resolve_py_type(node.type_info)
     # table struct fields start with match { ... } and may return a sentinel
     if node.accept == VT.STRING:
         return [
@@ -647,19 +628,7 @@ def pre_struct_key(node: a.Key, ctx: ConverterContext):
 
 @PY_BASE_CONVERTER(a.Value)
 def pre_struct_value(node: a.Value, ctx: ConverterContext):
-    ret_type = PY_TYPES.get(node.ret, "Any")
-    # issue: how to detect if json arr or json struct simplier?
-    if node.ret == VT.JSON:
-        jsonify_node = [i for i in node.body if isinstance(i, a.Jsonify)][0]
-        ret_type = ret_type.format(jsonify_node.schema_name)
-        # Use is_array from jsonify_node (after path resolution), not from a.JsonDef schema
-        if jsonify_node.is_array:
-            ret_type = f"List[{ret_type}]"
-    elif node.ret == VT.NESTED:
-        nested_node = [i for i in node.body if isinstance(i, a.Nested)][0]
-        ret_type = ret_type.format(nested_node.struct_name)
-        if nested_node.is_array:
-            ret_type = f"List[{ret_type}]"
+    ret_type = _resolve_py_type(node.type_info)
     return [
         f"    def _parse_value(self, v: Union[Tag, BeautifulSoup]) -> {ret_type}:"
     ]
@@ -761,11 +730,10 @@ def pre_expr_attr(node: a.Attr, ctx: ConverterContext):
     # bs4 return list of attrs if several values set in attr key, set string for API consistence
     # eg bs4 extract attrs workflow:
     # class="foo bar" -> ["foo", "bar"]
-    if node.accept == VT.DOCUMENT:
+    if not node.is_array:
         if len(keys) == 1:
             return f"{ctx.indent}{ctx.nxt} = ' '.join({ctx.prv}.get_attribute_list({keys[0]!r}))"
         return f"{ctx.indent}{ctx.nxt}=[' '.join({ctx.prv}.get_attribute_list(k)) for k in {keys} if {ctx.prv}.get(k)]"
-    # LIST_DOCUMENT
     if len(keys) == 1:
         return f"{ctx.indent}{ctx.nxt} = [' '.join(e.get_attribute_list({keys[0]!r})) for e in {ctx.prv}]"
     return f"{ctx.indent}{ctx.nxt} = [' '.join(e.get_attribute_list(k)) for e in {ctx.prv} for k in {keys} if e.get(k)]"
@@ -773,18 +741,16 @@ def pre_expr_attr(node: a.Attr, ctx: ConverterContext):
 
 @PY_BASE_CONVERTER(a.Text)
 def pre_expr_text(node: a.Text, ctx: ConverterContext):
-    if node.accept == VT.DOCUMENT:
+    if not node.is_array:
         return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.text"
-    # LIST_DOCUMENT
     return f"{ctx.indent}{ctx.nxt} = [i.text for i in {ctx.prv}]"
 
 
 @PY_BASE_CONVERTER(a.Raw)
 def pre_expr_raw(node: a.Raw, ctx: ConverterContext):
     # in bs4 for extract raw html tag, need cast by str(TAG) expr
-    if node.accept == VT.DOCUMENT:
+    if not node.is_array:
         return f"{ctx.indent}{ctx.nxt} = str({ctx.prv})"
-    # LIST_DOCUMENT
     return f"{ctx.indent}{ctx.nxt} = [str(i) for i in {ctx.prv}]"
 
 
@@ -795,7 +761,7 @@ def pre_expr_trim(node: a.Trim, ctx: ConverterContext):
         value = ""
     else:
         value = repr(node.substr)
-    if node.accept == VT.STRING:
+    if not node.is_array:
         return [f"{ctx.indent}{ctx.nxt} = {ctx.prv}.strip({value})"]
     return [f"{ctx.indent}{ctx.nxt} = [i.strip({value}) for i in {ctx.prv}]"]
 
@@ -806,7 +772,7 @@ def pre_expr_ltrim(node: a.Ltrim, ctx: ConverterContext):
         value = ""
     else:
         value = repr(node.substr)
-    if node.accept == VT.STRING:
+    if not node.is_array:
         return [f"{ctx.indent}{ctx.nxt} = {ctx.prv}.lstrip({value})"]
     return [f"{ctx.indent}{ctx.nxt} = [i.lstrip({value}) for i in {ctx.prv}]"]
 
@@ -817,7 +783,7 @@ def pre_expr_rtrim(node: a.Rtrim, ctx: ConverterContext):
         value = ""
     else:
         value = repr(node.substr)
-    if node.accept == VT.STRING:
+    if not node.is_array:
         return [f"{ctx.indent}{ctx.nxt} = {ctx.prv}.rstrip({value})"]
     return [f"{ctx.indent}{ctx.nxt} = [i.rstrip({value}) for i in {ctx.prv}]"]
 
@@ -826,7 +792,7 @@ def pre_expr_rtrim(node: a.Rtrim, ctx: ConverterContext):
 def pre_expr_rm_prefix(node: a.RmPrefix, ctx: ConverterContext):
     value = repr(node.substr)
     # TODO: backport for Python < 3.10
-    if node.accept == VT.STRING:
+    if not node.is_array:
         return [f"{ctx.indent}{ctx.nxt} = rm_prefix({ctx.prv}, {value})"]
     return [
         f"{ctx.indent}{ctx.nxt} = [rm_prefix(i, {value}) for i in {ctx.prv}]"
@@ -837,7 +803,7 @@ def pre_expr_rm_prefix(node: a.RmPrefix, ctx: ConverterContext):
 def pre_expr_rm_suffix(node: a.RmSuffix, ctx: ConverterContext):
     value = repr(node.substr)
     # TODO: backport for Python < 3.10
-    if node.accept == VT.STRING:
+    if not node.is_array:
         return [f"{ctx.indent}{ctx.nxt} = rm_suffix({ctx.prv}, {value})"]
     return [
         f"{ctx.indent}{ctx.nxt} = [rm_suffix(i, {value}) for i in {ctx.prv}]"
@@ -849,7 +815,7 @@ def pre_expr_rm_prefix_suffix(node: a.RmPrefixSuffix, ctx: ConverterContext):
     prefix = repr(node.substr)
     suffix = repr(node.substr)
     # TODO: backport for Python < 3.10
-    if node.accept == VT.STRING:
+    if not node.is_array:
         return [
             f"{ctx.indent}{ctx.nxt} = rm_suffix(rm_prefix({ctx.prv}, {prefix}), {suffix})"
         ]
@@ -861,7 +827,7 @@ def pre_expr_rm_prefix_suffix(node: a.RmPrefixSuffix, ctx: ConverterContext):
 @PY_BASE_CONVERTER(a.Fmt)
 def pre_expr_fmt(node: a.Fmt, ctx: ConverterContext):
     template = repr(node.template.replace("{{}}", "{}", 1))
-    if node.accept == VT.STRING:
+    if not node.is_array:
         return [f"{ctx.indent}{ctx.nxt} = {template}.format({ctx.prv})"]
     return [
         f"{ctx.indent}{ctx.nxt} = [{template}.format(i) for i in {ctx.prv}]"
@@ -872,7 +838,7 @@ def pre_expr_fmt(node: a.Fmt, ctx: ConverterContext):
 def pre_expr_repl(node: a.Repl, ctx: ConverterContext):
     old = repr(node.old)
     new = repr(node.new)
-    if node.accept == VT.STRING:
+    if not node.is_array:
         return [f"{ctx.indent}{ctx.nxt} = {ctx.prv}.replace({old}, {new})"]
     return [
         f"{ctx.indent}{ctx.nxt} = [i.replace({old}, {new}) for i in {ctx.prv}]"
@@ -882,7 +848,7 @@ def pre_expr_repl(node: a.Repl, ctx: ConverterContext):
 @PY_BASE_CONVERTER(a.ReplMap)
 def pre_expr_repl_map(node: a.ReplMap, ctx: ConverterContext):
     repl_dict = repr(node.replacements)
-    if node.accept == VT.STRING:
+    if not node.is_array:
         return f"{ctx.indent}{ctx.nxt} = repl_map({ctx.prv}, {repl_dict})"
     return (
         f"{ctx.indent}{ctx.nxt} = [repl_map(i, {repl_dict}) for i in {ctx.prv}]"
@@ -891,14 +857,14 @@ def pre_expr_repl_map(node: a.ReplMap, ctx: ConverterContext):
 
 @PY_BASE_CONVERTER(a.Lower)
 def pre_expr_lower(node: a.Lower, ctx: ConverterContext):
-    if node.accept == VT.STRING:
+    if not node.is_array:
         return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.lower()"
     return f"{ctx.indent}{ctx.nxt} = [i.lower() for i in {ctx.prv}]"
 
 
 @PY_BASE_CONVERTER(a.Upper)
 def pre_expr_upper(node: a.Lower, ctx: ConverterContext):
-    if node.accept == VT.STRING:
+    if not node.is_array:
         return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.upper()"
     return f"{ctx.indent}{ctx.nxt} = [i.upper() for i in {ctx.prv}]"
 
@@ -919,14 +885,14 @@ def pre_expr_join(node: a.Join, ctx: ConverterContext):
 
 @PY_BASE_CONVERTER(a.NormalizeSpace)
 def pre_expr_normalize(node: a.NormalizeSpace, ctx: ConverterContext):
-    if node.accept == VT.STRING:
+    if not node.is_array:
         return f"{ctx.indent}{ctx.nxt} = normalize_text({ctx.prv})"
     return f"{ctx.indent}{ctx.nxt} = [normalize_text(i) for i in {ctx.prv}]"
 
 
 @PY_BASE_CONVERTER(a.Unescape)
 def pre_expr_unescape(node: a.Unescape, ctx: ConverterContext):
-    if node.accept == VT.STRING:
+    if not node.is_array:
         return f"{ctx.indent}{ctx.nxt} = unescape_text({ctx.prv})"
     return f"{ctx.indent}{ctx.nxt} = [unescape_text(i) for i in {ctx.prv}]"
 
@@ -937,9 +903,9 @@ def pre_expr_unescape(node: a.Unescape, ctx: ConverterContext):
 @PY_BASE_CONVERTER(a.Re)
 def pre_expr_re(node: a.Re, ctx: ConverterContext):
     pattern = repr(node.pattern)
-    if node.accept == VT.STRING:
+    if not node.is_array:
         return f"{ctx.indent}{ctx.nxt} = re.search({pattern}, {ctx.prv})[1]"
-    # LIST_STRING — map over items
+    # LIST — map over items
     return f"{ctx.indent}{ctx.nxt} = [re.search({pattern}, i)[1] for i in {ctx.prv}]"
 
 
@@ -953,7 +919,7 @@ def pre_expr_re_all(node: a.ReAll, ctx: ConverterContext):
 def pre_expr_re_sub(node: a.ReSub, ctx: ConverterContext):
     pattern = repr(node.pattern)
     repl = repr(node.repl)
-    if node.accept == VT.STRING:
+    if not node.is_array:
         return f"{ctx.indent}{ctx.nxt} = re.sub({pattern}, {repl}, {ctx.prv})"
     return f"{ctx.indent}{ctx.nxt} = [re.sub({pattern}, {repl}, i) for i in {ctx.prv}]"
 
@@ -988,14 +954,14 @@ def pre_expr_unique(node: a.Unique, ctx: ConverterContext):
 # casts
 @PY_BASE_CONVERTER(a.ToInt)
 def pre_expr_to_int(node: a.ToInt, ctx: ConverterContext):
-    if node.accept == VT.STRING:
+    if not node.is_array:
         return f"{ctx.indent}{ctx.nxt} = int({ctx.prv})"
     return f"{ctx.indent}{ctx.nxt} = [int(i) for i in {ctx.prv}]"
 
 
 @PY_BASE_CONVERTER(a.ToFloat)
 def pre_expr_to_float(node: a.ToFloat, ctx: ConverterContext):
-    if node.accept == VT.STRING:
+    if not node.is_array:
         return f"{ctx.indent}{ctx.nxt} = float({ctx.prv})"
     return f"{ctx.indent}{ctx.nxt} = [float(i) for i in {ctx.prv}]"
 

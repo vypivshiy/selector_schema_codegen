@@ -135,7 +135,8 @@ class Split(Node):
 
     sep: str = ""
     accept: VariableType = field(default=VariableType.STRING)
-    ret: VariableType = field(default=VariableType.LIST_STRING)
+    ret: VariableType = field(default=VariableType.STRING)
+    is_array: bool = True
 
 
 @dataclass
@@ -146,7 +147,7 @@ class Join(Node):
     """
 
     sep: str = ""
-    accept: VariableType = field(default=VariableType.LIST_STRING)
+    accept: VariableType = field(default=VariableType.STRING)
     ret: VariableType = field(default=VariableType.STRING)
 
 

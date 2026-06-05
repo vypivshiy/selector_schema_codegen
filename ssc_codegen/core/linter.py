@@ -98,7 +98,18 @@ _VALID_JSON_MODIFIERS = frozenset({"@skip", "@omitempty"})
 _VALID_JSON_TYPES = frozenset({"str", "int", "float", "bool", "null", "nil"})
 
 _VALID_TRANSFORM_TYPES = frozenset(
-    {t.name for t in VariableType if t.name not in ("AUTO", "LIST_AUTO")}
+    {t.name for t in VariableType if t.name != "AUTO"}
+) | frozenset(
+    {
+        "LIST_STRING",
+        "LIST_INT",
+        "LIST_FLOAT",
+        "LIST_DOCUMENT",
+        "LIST_AUTO",
+        "OPT_STRING",
+        "OPT_INT",
+        "OPT_FLOAT",
+    }
 )
 
 _DEFINE_NAME_RE = _re.compile(r"^[A-Z_][A-Z0-9_-]*\Z")

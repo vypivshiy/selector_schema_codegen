@@ -140,17 +140,24 @@ def _pred_attr_target(node, ctx: ConverterContext) -> str:
 
 
 def _js_typedef_type(node: a.TypeDefField) -> str:
-    type_ = JS_TYPES.get(node.ret, "?")
-    if node.ret == VT.JSON and node.json_ref:
-        type_name = to_pascal_case(node.json_ref)
-        type_ = type_.format(type_name)
-        if node.is_array:
-            type_ = f"Array<{type_}>"
-    elif node.ret == VT.NESTED and node.nested_ref:
-        type_name = to_pascal_case(node.nested_ref)
-        type_ = type_.format(type_name)
-        if node.is_array:
-            type_ = f"Array<{type_}>"
+    """Render typedef field type — delegates to _resolve_js_type."""
+    return _resolve_js_type(node.type_info)
+
+
+def _resolve_js_type(type_info: a.TypeInfo | None) -> str:
+    """Render TypeInfo into a JSDoc type string."""
+    if type_info is None:
+        return "?"
+    if type_info.base == VT.NESTED and type_info.ref:
+        type_ = f"{to_pascal_case(type_info.ref)}Type"
+    elif type_info.base == VT.JSON and type_info.ref:
+        type_ = f"{to_pascal_case(type_info.ref)}Json"
+    else:
+        type_ = JS_TYPES.get(type_info.base, "?")
+    if type_info.is_array:
+        type_ = f"Array<{type_}>"
+    if type_info.is_optional:
+        type_ = f"({type_}|null)"
     return type_
 
 
@@ -160,16 +167,10 @@ JS_TYPES = {
     VT.INT: "number",
     VT.FLOAT: "number",
     VT.NULL: "null",
-    VT.LIST_STRING: "Array<string>",
-    VT.LIST_INT: "Array<number>",
-    VT.LIST_FLOAT: "Array<number>",
     VT.DOCUMENT: "Element",
-    VT.LIST_DOCUMENT: "Array<Element>",
-    VT.OPT_STRING: "string|null",
-    VT.OPT_INT: "number|null",
-    VT.OPT_FLOAT: "number|null",
-    VT.JSON: "{}Json",
-    VT.NESTED: "{}Type",
+    VT.JSON: "Any",
+    VT.NESTED: "Any",
+    VT.AUTO: "Any",
 }
 
 
@@ -272,22 +273,19 @@ def pre_json_struct(node: a.JsonDef, _: ConverterContext):
 
 @JS_CONVERTER(a.JsonDefField)
 def pre_json_field(node: a.JsonDefField, ctx: ConverterContext):
-    if node.skip:
+    if node.type_info and node.type_info.skip:
         return None
     name = node.alias if node.alias else node.name
-    type_ = JS_TYPES.get(node.ret, "?")
-    if node.ret == VT.JSON and node.ref_name:
-        type_name = to_pascal_case(node.ref_name)
-        type_ = type_.format(type_name)
-        if node.is_array:
-            type_ = f"Array<{type_}>"
-    if node.is_optional or node.may_miss:
+    type_ = _resolve_js_type(node.type_info)
+    if node.type_info and (
+        node.type_info.is_optional or node.type_info.omitempty
+    ):
         type_ = f"{type_}="
     return f" * @property {{{type_}}} {name}"
 
 
 def _typedef_post(node: a.TypeDef, _: ConverterContext):
-    if node.struct_type == a.StructType.REST:
+    if node.struct_type in (a.StructType.REST, a.StructType.FLAT):
         return None
     return " */"
 
@@ -297,6 +295,8 @@ def pre_typedef(node: a.TypeDef, _: ConverterContext):
     if node.struct_type == a.StructType.REST:
         return None
     name = to_pascal_case(node.name)
+    if node.struct_type == a.StructType.FLAT:
+        return [f"/** @typedef {{Array<string>}} {name}Type */"]
     if node.struct_type == a.StructType.DICT:
         value_field = next(
             f for f in node.fields if to_camel_case(f.name) == "value"
@@ -312,6 +312,10 @@ def pre_typedef(node: a.TypeDef, _: ConverterContext):
 @JS_CONVERTER(a.TypeDefField)
 def pre_typedef_field(node: a.TypeDefField, ctx: ConverterContext):
     if node.typedef.struct_type == a.StructType.DICT:
+        return None
+
+    # FLAT structs are already fully typed as Array<string> — no properties
+    if node.typedef.struct_type == a.StructType.FLAT:
         return None
 
     name = to_camel_case(node.name)
@@ -668,7 +672,7 @@ def _js_emit_flatlist_parse_body(
     lines = [f"{i2}let _result = [];"]
     for f in node.fields:
         mname = _js_method_name(f.name)
-        if f.ret == VT.STRING:
+        if not f.is_array:
             lines.append(f"{i2}_result.push(this.{mname}(this._doc));")
         else:
             lines.append(
@@ -857,7 +861,7 @@ def pre_expr_xpath_remove(node: a.XpathRemove, ctx: ConverterContext):
 @JS_CONVERTER(a.Attr)
 def pre_expr_attr(node: a.Attr, ctx: ConverterContext):
     keys = node.keys
-    if node.accept == VT.DOCUMENT:
+    if not node.is_array:
         if len(keys) == 1:
             return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.getAttribute({keys[0]!r});"
         kl = py_sequence_to_js_array(keys)
@@ -872,14 +876,14 @@ def pre_expr_attr(node: a.Attr, ctx: ConverterContext):
 
 @JS_CONVERTER(a.Text)
 def pre_expr_text(node: a.Text, ctx: ConverterContext):
-    if node.accept == VT.DOCUMENT:
+    if not node.is_array:
         return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.textContent;"
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(el => el.textContent);"
 
 
 @JS_CONVERTER(a.Raw)
 def pre_expr_raw(node: a.Raw, ctx: ConverterContext):
-    if node.accept == VT.DOCUMENT:
+    if not node.is_array:
         return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.outerHTML;"
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(el => el.outerHTML);"
 
@@ -892,7 +896,7 @@ def pre_expr_raw(node: a.Raw, ctx: ConverterContext):
 @JS_CONVERTER(a.Trim)
 def pre_expr_trim(node: a.Trim, ctx: ConverterContext):
     substr = node.substr
-    if node.accept == VT.STRING:
+    if not node.is_array:
         if not substr:
             return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.trim();"
         return [
@@ -914,7 +918,7 @@ def pre_expr_trim(node: a.Trim, ctx: ConverterContext):
 @JS_CONVERTER(a.Ltrim)
 def pre_expr_ltrim(node: a.Ltrim, ctx: ConverterContext):
     substr = node.substr
-    if node.accept == VT.STRING:
+    if not node.is_array:
         if not substr:
             return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.trimStart();"
         return [
@@ -935,7 +939,7 @@ def pre_expr_ltrim(node: a.Ltrim, ctx: ConverterContext):
 @JS_CONVERTER(a.Rtrim)
 def pre_expr_rtrim(node: a.Rtrim, ctx: ConverterContext):
     substr = node.substr
-    if node.accept == VT.STRING:
+    if not node.is_array:
         if not substr:
             return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.trimEnd();"
         return [
@@ -958,7 +962,7 @@ def pre_expr_rtrim(node: a.Rtrim, ctx: ConverterContext):
 @JS_CONVERTER(a.RmPrefix)
 def pre_expr_rm_prefix(node: a.RmPrefix, ctx: ConverterContext):
     v = repr(node.substr)
-    if node.accept == VT.STRING:
+    if not node.is_array:
         return f"{ctx.indent}let {ctx.nxt} = _rmPrefix({ctx.prv}, {v});"
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => _rmPrefix(s, {v}));"
 
@@ -966,7 +970,7 @@ def pre_expr_rm_prefix(node: a.RmPrefix, ctx: ConverterContext):
 @JS_CONVERTER(a.RmSuffix)
 def pre_expr_rm_suffix(node: a.RmSuffix, ctx: ConverterContext):
     v = repr(node.substr)
-    if node.accept == VT.STRING:
+    if not node.is_array:
         return f"{ctx.indent}let {ctx.nxt} = _rmSuffix({ctx.prv}, {v});"
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => _rmSuffix(s, {v}));"
 
@@ -974,7 +978,7 @@ def pre_expr_rm_suffix(node: a.RmSuffix, ctx: ConverterContext):
 @JS_CONVERTER(a.RmPrefixSuffix)
 def pre_expr_rm_prefix_suffix(node: a.RmPrefixSuffix, ctx: ConverterContext):
     v = repr(node.substr)
-    if node.accept == VT.STRING:
+    if not node.is_array:
         return f"{ctx.indent}let {ctx.nxt} = _rmSuffix(_rmPrefix({ctx.prv}, {v}), {v});"
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => _rmSuffix(_rmPrefix(s, {v}), {v}));"
 
@@ -983,7 +987,7 @@ def pre_expr_rm_prefix_suffix(node: a.RmPrefixSuffix, ctx: ConverterContext):
 def pre_expr_fmt(node: a.Fmt, ctx: ConverterContext):
     tmpl = node.template.replace("{{}}", "${_v}").replace("`", "\\`")
     js_tmpl = "`" + tmpl + "`"
-    if node.accept == VT.STRING:
+    if not node.is_array:
         return f"{ctx.indent}let {ctx.nxt} = ((_v) => {js_tmpl})({ctx.prv});"
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(_v => {js_tmpl});"
 
@@ -992,7 +996,7 @@ def pre_expr_fmt(node: a.Fmt, ctx: ConverterContext):
 def pre_expr_repl(node: a.Repl, ctx: ConverterContext):
     old = repr(node.old)
     new = repr(node.new)
-    if node.accept == VT.STRING:
+    if not node.is_array:
         return (
             f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.replaceAll({old}, {new});"
         )
@@ -1002,7 +1006,7 @@ def pre_expr_repl(node: a.Repl, ctx: ConverterContext):
 @JS_CONVERTER(a.ReplMap)
 def pre_expr_repl_map(node: a.ReplMap, ctx: ConverterContext):
     rmap = repr(dict(node.replacements))
-    if node.accept == VT.STRING:
+    if not node.is_array:
         return f"{ctx.indent}let {ctx.nxt} = _replMap({ctx.prv}, {rmap});"
     return (
         f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => _replMap(s, {rmap}));"
@@ -1011,14 +1015,14 @@ def pre_expr_repl_map(node: a.ReplMap, ctx: ConverterContext):
 
 @JS_CONVERTER(a.Lower)
 def pre_expr_lower(node: a.Lower, ctx: ConverterContext):
-    if node.accept == VT.STRING:
+    if not node.is_array:
         return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.toLowerCase();"
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => s.toLowerCase());"
 
 
 @JS_CONVERTER(a.Upper)
 def pre_expr_upper(node: a.Upper, ctx: ConverterContext):
-    if node.accept == VT.STRING:
+    if not node.is_array:
         return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.toUpperCase();"
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => s.toUpperCase());"
 
@@ -1037,14 +1041,14 @@ def pre_expr_join(node: a.Join, ctx: ConverterContext):
 
 @JS_CONVERTER(a.NormalizeSpace)
 def pre_expr_normalize(node: a.NormalizeSpace, ctx: ConverterContext):
-    if node.accept == VT.STRING:
+    if not node.is_array:
         return f"{ctx.indent}let {ctx.nxt} = _normalizeText({ctx.prv});"
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => _normalizeText(s));"
 
 
 @JS_CONVERTER(a.Unescape)
 def pre_expr_unescape(node: a.Unescape, ctx: ConverterContext):
-    if node.accept == VT.STRING:
+    if not node.is_array:
         return f"{ctx.indent}let {ctx.nxt} = _unescapeText({ctx.prv});"
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => _unescapeText(s));"
 
@@ -1057,7 +1061,7 @@ def pre_expr_unescape(node: a.Unescape, ctx: ConverterContext):
 @JS_CONVERTER(a.Re)
 def pre_expr_re(node: a.Re, ctx: ConverterContext):
     rx = _js_re_node(node)
-    if node.accept == VT.STRING:
+    if not node.is_array:
         return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.match({rx})[1];"
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => s.match({rx})[1]);"
 
@@ -1092,7 +1096,7 @@ def pre_expr_re_sub(node: a.ReSub, ctx: ConverterContext):
     escaped = pattern.replace("/", "\\/")
     rx_g = f"/{escaped}/{flags}"
     repl = repr(node.repl)
-    if node.accept == VT.STRING:
+    if not node.is_array:
         return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.replace({rx_g}, {repl});"
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => s.replace({rx_g}, {repl}));"
 
@@ -1136,14 +1140,14 @@ def pre_expr_unique(node: a.Unique, ctx: ConverterContext):
 
 @JS_CONVERTER(a.ToInt)
 def pre_expr_to_int(node: a.ToInt, ctx: ConverterContext):
-    if node.accept == VT.STRING:
+    if not node.is_array:
         return f"{ctx.indent}let {ctx.nxt} = parseInt({ctx.prv}, 10);"
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => parseInt(s, 10));"
 
 
 @JS_CONVERTER(a.ToFloat)
 def pre_expr_to_float(node: a.ToFloat, ctx: ConverterContext):
-    if node.accept == VT.STRING:
+    if not node.is_array:
         return f"{ctx.indent}let {ctx.nxt} = parseFloat({ctx.prv});"
     return f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => parseFloat(s));"
 

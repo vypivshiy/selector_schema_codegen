@@ -119,7 +119,11 @@ def handle_transform(
         return
     accept_type = _VAR_TYPE_MAP[accept_str]
     ret_type = _VAR_TYPE_MAP[ret_str]
-    transform_def = TransformDef(name=name, accept=accept_type, ret=ret_type)
+    # Detect list context from the original DSL type name strings
+    ret_is_array = ret_str.startswith("LIST_")
+    transform_def = TransformDef(
+        name=name, accept=accept_type, ret=ret_type, is_array=ret_is_array
+    )
     for lang_node in node.children:
         lang = lang_node.name
         imports: list[str] = []

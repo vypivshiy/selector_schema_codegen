@@ -5,7 +5,7 @@ AST nodes for the KDL Schema DSL.
 Import everything from here:
     from kdl_ast import Module, Field, CssSelect, ...
 """
-from .types import VariableType, StructType
+from .types import VariableType, StructType, TypeInfo, VT
 
 from .base import Node
 
@@ -136,7 +136,7 @@ from .transform import TransformDef, TransformTarget, TransformCall
 
 __all__ = [
     # types
-    "VariableType", "StructType",
+    "VariableType", "StructType", "TypeInfo", "VT",
     # base
     "Node",
     # module

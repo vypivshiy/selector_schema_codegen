@@ -33,7 +33,7 @@ class Fallback(Node):
       str        → STRING
       bool       → BOOL
       None       → NULL
-      list (empty []) → LIST_STRING
+      list (empty []) → STRING with is_array=True
     """
 
     value: Any = None
@@ -56,7 +56,8 @@ class Fallback(Node):
         elif isinstance(self.value, str):
             self.ret = VariableType.STRING
         elif isinstance(self.value, list):
-            self.ret = VariableType.LIST_STRING
+            self.ret = VariableType.STRING
+            self.is_array = True
 
 
 @dataclass

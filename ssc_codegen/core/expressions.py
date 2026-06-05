@@ -66,6 +66,7 @@ from ssc_codegen.ast import (
     Trim,
     TypeDef,
     TypeDefField,
+    TypeInfo,
     Unescape,
     Unique,
     Upper,
@@ -184,44 +185,54 @@ def _resolve_define_references(value: str, ctx: ParseContext) -> str:
 
 _VAR_TYPE_MAP: dict[str, VariableType] = {
     "STRING": VariableType.STRING,
-    "OPT_STRING": VariableType.OPT_STRING,
-    "LIST_STRING": VariableType.LIST_STRING,
     "INT": VariableType.INT,
-    "OPT_INT": VariableType.OPT_INT,
-    "LIST_INT": VariableType.LIST_INT,
     "FLOAT": VariableType.FLOAT,
-    "OPT_FLOAT": VariableType.OPT_FLOAT,
-    "LIST_FLOAT": VariableType.LIST_FLOAT,
     "BOOL": VariableType.BOOL,
     "NULL": VariableType.NULL,
     "DOCUMENT": VariableType.DOCUMENT,
-    "LIST_DOCUMENT": VariableType.LIST_DOCUMENT,
     "NESTED": VariableType.NESTED,
     "JSON": VariableType.JSON,
+    # Backward compat for transform DSL — map to base types
+    "LIST_STRING": VariableType.STRING,
+    "LIST_INT": VariableType.INT,
+    "LIST_FLOAT": VariableType.FLOAT,
+    "LIST_DOCUMENT": VariableType.DOCUMENT,
+    "LIST_AUTO": VariableType.AUTO,
+    "OPT_STRING": VariableType.STRING,
+    "OPT_INT": VariableType.INT,
+    "OPT_FLOAT": VariableType.FLOAT,
 }
 
 
 def resolve_index_types(
     parent: FieldLikeNode,
-) -> tuple[VariableType, VariableType]:
+) -> tuple[VariableType, VariableType, bool]:
+    """Return (accept_base, ret_base, is_array) for Index/First/Last ops.
+
+    These ops accept a list and return a scalar, so is_array is always False
+    for the return side.
+    """
     if parent.body:
-        prev_type = parent.body[-1].ret
-        accept = prev_type
-        ret = prev_type.scalar if prev_type.is_list else prev_type
-    else:
-        accept = VariableType.LIST_AUTO
-        ret = VariableType.AUTO
-    return accept, ret
+        prev = parent.body[-1]
+        accept = prev.ret
+        ret = prev.ret
+        return accept, ret, prev.is_array
+    return VariableType.AUTO, VariableType.AUTO, True
 
 
 def resolve_jsonify_type(
     json_def: JsonDef, path: str, ctx: ParseContext
 ) -> tuple[VariableType, bool]:
+    """Resolve the return type and is_array for a jsonify operation.
+
+    Returns (base_type, is_array).
+    """
+    ja = json_def.is_array
     if not path:
-        return VariableType.JSON, json_def.is_array
+        return VariableType.JSON, ja
     segments = path.split(".")
     current_def = json_def
-    current_is_array = json_def.is_array
+    current_is_array = ja
     for i, segment in enumerate(segments):
         if current_is_array and segment.isdigit():
             current_is_array = False
@@ -235,21 +246,43 @@ def resolve_jsonify_type(
                 break
         if field is None:
             return VariableType.JSON, False
+        ti = field.type_info
+        if ti is None:
+            return VariableType.JSON, False
         if i == len(segments) - 1:
-            return field.ret, field.is_array
-        if field.ret != VariableType.JSON:
+            return ti.base, ti.is_array
+        if ti.base != VariableType.JSON:
             return VariableType.JSON, False
-        if not field.ref_name:
+        if not ti.ref:
             return VariableType.JSON, False
-        nested_def = ctx.json_defs.get(field.ref_name)
+        nested_def = ctx.json_defs.get(ti.ref)
         if not nested_def:
             return VariableType.JSON, False
         current_def = nested_def
-        current_is_array = field.is_array
+        current_is_array = ti.is_array
     return VariableType.JSON, current_is_array
 
 
 # ── Typedef builder ──────────────────────────────────────────────────────────────
+
+
+def _compute_type_info(
+    ret: VariableType, body: list[AstNode]
+) -> TypeInfo | None:
+    """Compute TypeInfo from a pipeline node's ret type and body contents."""
+    ref: str | None = None
+    is_arr = False
+    if ret in (VariableType.NESTED, VariableType.JSON):
+        for child in body:
+            if isinstance(child, Nested):
+                ref = child.struct_name
+                is_arr = child.is_array
+                break
+            if isinstance(child, Jsonify):
+                ref = child.schema_name
+                is_arr = child.is_array
+                break
+    return TypeInfo(base=ret, is_array=is_arr, ref=ref)
 
 
 def typedef_from_struct(struct: Struct, parent: Module) -> TypeDef:
@@ -257,53 +290,20 @@ def typedef_from_struct(struct: Struct, parent: Module) -> TypeDef:
         parent=parent, name=struct.name, struct_type=struct._typedef_type
     )
     for item in struct.body:
-        if isinstance(item, Field):
-            nested_ref = ""
-            json_ref = ""
-            is_array = False
-            if item.ret == VariableType.NESTED:
-                nested_expr = [i for i in item.body if isinstance(i, Nested)][0]
-                nested_ref = nested_expr.struct_name
-                is_array = nested_expr.is_array
-            elif item.ret == VariableType.JSON:
-                jsonify_expr = [i for i in item.body if isinstance(i, Jsonify)][
-                    0
-                ]
-                json_ref = jsonify_expr.schema_name
-                is_array = jsonify_expr.is_array
-            typedef.body.append(
-                TypeDefField(
-                    parent=typedef,
-                    ret=item.ret,
-                    name=item.name,
-                    nested_ref=nested_ref,
-                    json_ref=json_ref,
-                    is_array=is_array,
-                )
+        if isinstance(item, (Field, Key, Value)):
+            field_name = (
+                item.name
+                if isinstance(item, Field)
+                else ("key" if isinstance(item, Key) else "value")
             )
-        elif isinstance(item, (Key, Value)):
-            field_name = "key" if isinstance(item, Key) else "value"
-            nested_ref = ""
-            json_ref = ""
-            is_array = False
-            if item.ret == VariableType.NESTED:
-                nested_expr = [i for i in item.body if isinstance(i, Nested)][0]
-                nested_ref = nested_expr.struct_name
-                is_array = nested_expr.is_array
-            elif item.ret == VariableType.JSON:
-                jsonify_expr = [i for i in item.body if isinstance(i, Jsonify)][
-                    0
-                ]
-                json_ref = jsonify_expr.schema_name
-                is_array = jsonify_expr.is_array
+            # Use the Field's own type_info (already correctly computed during
+            # pipeline parsing) instead of recomputing via _compute_type_info,
+            # which only propagates is_array for NESTED/JSON types.
             typedef.body.append(
                 TypeDefField(
                     parent=typedef,
-                    ret=item.ret,
                     name=field_name,
-                    nested_ref=nested_ref,
-                    json_ref=json_ref,
-                    is_array=is_array,
+                    type_info=item.type_info,
                 )
             )
     return typedef
@@ -353,7 +353,11 @@ def _build_expression(
             )
         prev_type = init_field.ret
         return Self(
-            parent=parent, accept=prev_type, ret=prev_type, name=field_name
+            parent=parent,
+            accept=prev_type,
+            ret=prev_type,
+            is_array=init_field.is_array,
+            name=field_name,
         )
 
     if name == "self":
@@ -423,7 +427,11 @@ def parse_expressions(
                 )
             prev_type = init_field.ret
             expr = Self(
-                parent=parent, accept=prev_type, ret=prev_type, name=field_name
+                parent=parent,
+                accept=prev_type,
+                ret=prev_type,
+                is_array=init_field.is_array,
+                name=field_name,
             )
             parent.body.append(expr)
             continue
@@ -458,6 +466,25 @@ def parse_expressions(
         last_ret = parent.body[-1].ret
         parent.body.append(Return(parent=parent, ret=last_ret, accept=last_ret))
         parent.ret = last_ret
+
+        # Populate type_info on Field/Value/InitField
+        if isinstance(parent, (Field, Value, InitField)):
+            is_arr = (
+                parent.body[-2].is_array if len(parent.body) >= 2 else False
+            )
+            ref: str | None = None
+            if last_ret in (VariableType.NESTED, VariableType.JSON):
+                for child in parent.body:
+                    if isinstance(child, Nested):
+                        ref = child.struct_name
+                        is_arr = child.is_array
+                        break
+                    if isinstance(child, Jsonify):
+                        ref = child.schema_name
+                        is_arr = child.is_array
+                        break
+            parent.is_array = is_arr
+            parent.type_info = TypeInfo(base=last_ret, is_array=is_arr, ref=ref)
 
     lint.walk_context = prev_ctx
 
@@ -562,42 +589,56 @@ def _expr_xpath_remove(
 def _expr_text(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    prev_type = parent.body[-1].ret if parent.body else VariableType.DOCUMENT
-    ret_type = (
-        VariableType.LIST_STRING
-        if prev_type == VariableType.LIST_DOCUMENT
-        else VariableType.STRING
+    if parent.body:
+        prev = parent.body[-1]
+        prev_type = prev.ret
+        is_arr = prev.is_array
+    else:
+        prev_type = VariableType.DOCUMENT
+        is_arr = False
+    return Text(
+        parent=parent,
+        accept=prev_type,
+        ret=VariableType.STRING,
+        is_array=is_arr,
     )
-    return Text(parent=parent, accept=prev_type, ret=ret_type)
 
 
 @_reg_expr("raw")
 def _expr_raw(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    prev_type = parent.body[-1].ret if parent.body else VariableType.DOCUMENT
-    ret_type = (
-        VariableType.LIST_STRING
-        if prev_type == VariableType.LIST_DOCUMENT
-        else VariableType.STRING
+    if parent.body:
+        prev = parent.body[-1]
+        prev_type = prev.ret
+        is_arr = prev.is_array
+    else:
+        prev_type = VariableType.DOCUMENT
+        is_arr = False
+    return Raw(
+        parent=parent,
+        accept=prev_type,
+        ret=VariableType.STRING,
+        is_array=is_arr,
     )
-    return Raw(parent=parent, accept=prev_type, ret=ret_type)
 
 
 @_reg_expr("attr")
 def _expr_attr(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    prev_type = parent.body[-1].ret if parent.body else VariableType.DOCUMENT
-    ret_type = (
-        VariableType.LIST_STRING
-        if prev_type == VariableType.LIST_DOCUMENT
-        else VariableType.STRING
-    )
+    if parent.body:
+        prev = parent.body[-1]
+        prev_type = prev.ret
+        is_arr = prev.is_array
+    else:
+        prev_type = VariableType.DOCUMENT
+        is_arr = False
     return Attr(
         parent=parent,
         accept=prev_type,
-        ret=ret_type,
+        ret=VariableType.STRING,
+        is_array=is_arr,
         keys=tuple(a.value for a in node.args),
     )
 
@@ -617,8 +658,14 @@ def _expr_trim(
         if node.args
         else ""
     )
-    prev_type = parent.body[-1].ret
-    return Trim(parent=parent, accept=prev_type, ret=prev_type, substr=substr)
+    prev = parent.body[-1]
+    return Trim(
+        parent=parent,
+        accept=prev.ret,
+        ret=prev.ret,
+        is_array=prev.is_array,
+        substr=substr,
+    )
 
 
 @_reg_expr("ltrim")
@@ -633,8 +680,14 @@ def _expr_ltrim(
         if node.args
         else ""
     )
-    prev_type = parent.body[-1].ret
-    return Ltrim(parent=parent, accept=prev_type, ret=prev_type, substr=substr)
+    prev = parent.body[-1]
+    return Ltrim(
+        parent=parent,
+        accept=prev.ret,
+        ret=prev.ret,
+        is_array=prev.is_array,
+        substr=substr,
+    )
 
 
 @_reg_expr("rtrim")
@@ -649,16 +702,24 @@ def _expr_rtrim(
         if node.args
         else ""
     )
-    prev_type = parent.body[-1].ret
-    return Rtrim(parent=parent, accept=prev_type, ret=prev_type, substr=substr)
+    prev = parent.body[-1]
+    return Rtrim(
+        parent=parent,
+        accept=prev.ret,
+        ret=prev.ret,
+        is_array=prev.is_array,
+        substr=substr,
+    )
 
 
 @_reg_expr("normalize-space")
 def _expr_norm_space(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    prev_type = parent.body[-1].ret
-    return NormalizeSpace(parent=parent, accept=prev_type, ret=prev_type)
+    prev = parent.body[-1]
+    return NormalizeSpace(
+        parent=parent, accept=prev.ret, ret=prev.ret, is_array=prev.is_array
+    )
 
 
 @_reg_expr("rm-prefix")
@@ -666,9 +727,13 @@ def _expr_rm_prefix(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
     substr = ctx.property_defines.get(node.args[0].value, node.args[0].value)
-    prev_type = parent.body[-1].ret
+    prev = parent.body[-1]
     return RmPrefix(
-        parent=parent, accept=prev_type, ret=prev_type, substr=cast(str, substr)
+        parent=parent,
+        accept=prev.ret,
+        ret=prev.ret,
+        is_array=prev.is_array,
+        substr=cast(str, substr),
     )
 
 
@@ -677,9 +742,13 @@ def _expr_rm_suffix(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
     substr = ctx.property_defines.get(node.args[0].value, node.args[0].value)
-    prev_type = parent.body[-1].ret
+    prev = parent.body[-1]
     return RmSuffix(
-        parent=parent, accept=prev_type, ret=prev_type, substr=cast(str, substr)
+        parent=parent,
+        accept=prev.ret,
+        ret=prev.ret,
+        is_array=prev.is_array,
+        substr=cast(str, substr),
     )
 
 
@@ -688,9 +757,13 @@ def _expr_rm_prefix_suffix(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
     substr = ctx.property_defines.get(node.args[0].value, node.args[0].value)
-    prev_type = parent.body[-1].ret
+    prev = parent.body[-1]
     return RmPrefixSuffix(
-        parent=parent, accept=prev_type, ret=prev_type, substr=cast(str, substr)
+        parent=parent,
+        accept=prev.ret,
+        ret=prev.ret,
+        is_array=prev.is_array,
+        substr=cast(str, substr),
     )
 
 
@@ -699,9 +772,13 @@ def _expr_fmt(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
     tmpl = ctx.property_defines.get(node.args[0].value, node.args[0].value)
-    prev_type = parent.body[-1].ret
+    prev = parent.body[-1]
     return Fmt(
-        parent=parent, accept=prev_type, ret=prev_type, template=cast(str, tmpl)
+        parent=parent,
+        accept=prev.ret,
+        ret=prev.ret,
+        is_array=prev.is_array,
+        template=cast(str, tmpl),
     )
 
 
@@ -709,13 +786,17 @@ def _expr_fmt(
 def _expr_repl(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    prev_type = parent.body[-1].ret
+    prev = parent.body[-1]
     if node.children:
         items = {
             str(child.name): str(child.args[0].value) for child in node.children
         }
         return ReplMap(
-            parent=parent, accept=prev_type, ret=prev_type, replacements=items
+            parent=parent,
+            accept=prev.ret,
+            ret=prev.ret,
+            is_array=prev.is_array,
+            replacements=items,
         )
     old = cast(
         str, ctx.property_defines.get(node.args[0].value, node.args[0].value)
@@ -724,7 +805,12 @@ def _expr_repl(
         str, ctx.property_defines.get(node.args[1].value, node.args[1].value)
     )
     return Repl(
-        parent=parent, accept=prev_type, ret=prev_type, old=old, new=new
+        parent=parent,
+        accept=prev.ret,
+        ret=prev.ret,
+        is_array=prev.is_array,
+        old=old,
+        new=new,
     )
 
 
@@ -732,16 +818,20 @@ def _expr_repl(
 def _expr_lower(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    prev_type = parent.body[-1].ret
-    return Lower(parent=parent, accept=prev_type, ret=prev_type)
+    prev = parent.body[-1]
+    return Lower(
+        parent=parent, accept=prev.ret, ret=prev.ret, is_array=prev.is_array
+    )
 
 
 @_reg_expr("upper")
 def _expr_upper(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    prev_type = parent.body[-1].ret
-    return Upper(parent=parent, accept=prev_type, ret=prev_type)
+    prev = parent.body[-1]
+    return Upper(
+        parent=parent, accept=prev.ret, ret=prev.ret, is_array=prev.is_array
+    )
 
 
 @_reg_expr("split")
@@ -768,8 +858,10 @@ def _expr_join(
 def _expr_unescape(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    prev_type = parent.body[-1].ret
-    return Unescape(parent=parent, accept=prev_type, ret=prev_type)
+    prev = parent.body[-1]
+    return Unescape(
+        parent=parent, accept=prev.ret, ret=prev.ret, is_array=prev.is_array
+    )
 
 
 # -- regex ----------------------------------------------------------------------
@@ -781,8 +873,14 @@ def _expr_re(
 ):
     raw = ctx.property_defines.get(node.args[0].value, node.args[0].value)
     pattern = normalize_regex_pattern(raw)
-    prev_type = parent.body[-1].ret
-    return Re(parent=parent, pattern=pattern, accept=prev_type, ret=prev_type)
+    prev = parent.body[-1]
+    return Re(
+        parent=parent,
+        pattern=pattern,
+        accept=prev.ret,
+        ret=prev.ret,
+        is_array=prev.is_array,
+    )
 
 
 @_reg_expr("re-all")
@@ -798,7 +896,7 @@ def _expr_re_all(
 def _expr_re_sub(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    prev_type = parent.body[-1].ret
+    prev = parent.body[-1]
     raw = ctx.property_defines.get(node.args[0].value, node.args[0].value)
     pattern = normalize_regex_pattern(raw)
     repl = cast(
@@ -806,8 +904,9 @@ def _expr_re_sub(
     )
     return ReSub(
         parent=parent,
-        accept=prev_type,
-        ret=prev_type,
+        accept=prev.ret,
+        ret=prev.ret,
+        is_array=prev.is_array,
         pattern=pattern,
         repl=repl,
     )
@@ -820,9 +919,13 @@ def _expr_re_sub(
 def _expr_index(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    accept, ret = resolve_index_types(parent)
+    accept, ret, _prev_is_array = resolve_index_types(parent)
     return Index(
-        parent=parent, i=int(node.args[0].value), accept=accept, ret=ret
+        parent=parent,
+        i=int(node.args[0].value),
+        accept=accept,
+        ret=ret,
+        is_array=False,
     )
 
 
@@ -830,16 +933,16 @@ def _expr_index(
 def _expr_first(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    accept, ret = resolve_index_types(parent)
-    return Index(parent=parent, i=0, accept=accept, ret=ret)
+    accept, ret, _prev_is_array = resolve_index_types(parent)
+    return Index(parent=parent, i=0, accept=accept, ret=ret, is_array=False)
 
 
 @_reg_expr("last")
 def _expr_last(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    accept, ret = resolve_index_types(parent)
-    return Index(parent=parent, i=-1, accept=accept, ret=ret)
+    accept, ret, _prev_is_array = resolve_index_types(parent)
+    return Index(parent=parent, i=-1, accept=accept, ret=ret, is_array=False)
 
 
 @_reg_expr("slice")
@@ -848,9 +951,14 @@ def _expr_slice(
 ):
     start, end = int(node.args[0].value), int(node.args[1].value)
     if parent.body:
-        prev_type = parent.body[-1].ret
+        prev = parent.body[-1]
         return Slice(
-            parent=parent, start=start, end=end, accept=prev_type, ret=prev_type
+            parent=parent,
+            start=start,
+            end=end,
+            accept=prev.ret,
+            ret=prev.ret,
+            is_array=prev.is_array,
         )
     return Slice(parent=parent, start=start, end=end)
 
@@ -877,26 +985,26 @@ def _expr_unique(
 def _expr_to_int(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    prev_type = parent.body[-1].ret
-    ret_type = (
-        VariableType.LIST_INT
-        if prev_type == VariableType.LIST_STRING
-        else VariableType.INT
+    prev = parent.body[-1]
+    return ToInt(
+        parent=parent,
+        accept=prev.ret,
+        ret=VariableType.INT,
+        is_array=prev.is_array,
     )
-    return ToInt(parent=parent, accept=prev_type, ret=ret_type)
 
 
 @_reg_expr("to-float")
 def _expr_to_float(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    prev_type = parent.body[-1].ret
-    ret_type = (
-        VariableType.LIST_FLOAT
-        if prev_type == VariableType.LIST_STRING
-        else VariableType.FLOAT
+    prev = parent.body[-1]
+    return ToFloat(
+        parent=parent,
+        accept=prev.ret,
+        ret=VariableType.FLOAT,
+        is_array=prev.is_array,
     )
-    return ToFloat(parent=parent, accept=prev_type, ret=ret_type)
 
 
 @_reg_expr("to-bool")
@@ -956,12 +1064,18 @@ def _expr_fallback(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
     value = [] if not node.args else node.args[0].value
-    prev_type = parent.body[-1].ret
-    if value is None:
-        prev_type = prev_type.optional
+    prev = parent.body[-1]
+    prev_type = prev.ret
+    # For fallback #null, we don't change the type — is_optional is set on
+    # the parent's type_info later in parse_expressions.  Here we just pass
+    # the current type through unchanged.
     start_default = FallbackStart(parent=parent, value=value)
     end_default = FallbackEnd(
-        parent=parent, value=value, accept=prev_type, ret=prev_type
+        parent=parent,
+        value=value,
+        accept=prev_type,
+        ret=prev_type,
+        is_array=prev.is_array,
     )
     parent.body.insert(0, start_default)
     parent.body.append(end_default)
@@ -977,9 +1091,12 @@ def _expr_filter(
             parent=parent,
             accept=VariableType.DOCUMENT,
             ret=VariableType.DOCUMENT,
+            is_array=True,
         )
-    prev_type = parent.body[-1].ret
-    return Filter(parent=parent, accept=prev_type, ret=prev_type)
+    prev = parent.body[-1]
+    return Filter(
+        parent=parent, accept=prev.ret, ret=prev.ret, is_array=prev.is_array
+    )
 
 
 @_reg_expr("assert")
@@ -1039,5 +1156,6 @@ def _expr_transform(
         name=name,
         accept=transform_def.accept,
         ret=transform_def.ret,
+        is_array=transform_def.is_array,
         transform_def=transform_def,
     )

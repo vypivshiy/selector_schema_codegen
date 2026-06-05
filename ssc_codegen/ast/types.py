@@ -1,74 +1,45 @@
 from __future__ import annotations
+from dataclasses import dataclass
 from enum import IntEnum, auto
 
 
 class VariableType(IntEnum):
     AUTO = auto()
-    LIST_AUTO = auto()
-
     DOCUMENT = auto()
-    LIST_DOCUMENT = auto()
-
     STRING = auto()
-    OPT_STRING = auto()
-    LIST_STRING = auto()
-
     INT = auto()
-    OPT_INT = auto()
-    LIST_INT = auto()
-
     FLOAT = auto()
-    OPT_FLOAT = auto()
-    LIST_FLOAT = auto()
-
     BOOL = auto()
     NULL = auto()
     NESTED = auto()
     JSON = auto()
 
-    @property
-    def optional(self) -> VariableType:
-        _map = {
-            VariableType.STRING: VariableType.OPT_STRING,
-            VariableType.INT: VariableType.OPT_INT,
-            VariableType.FLOAT: VariableType.OPT_FLOAT,
-        }
-        return _map.get(self, self)
 
-    # helpers
+VT = VariableType
+
+
+@dataclass(frozen=True)
+class TypeInfo:
+    """Unified type information container.
+
+    Stores base type + modifiers (array, optional) + ref name + JSON hints.
+    Target-language rendering (suffixes, wrappers) is done by converters, not here.
+    """
+
+    base: VariableType  # STRING, INT, FLOAT, BOOL, NULL, NESTED, JSON, DOCUMENT, AUTO
+    is_array: bool = False
+    is_optional: bool = False
+    ref: str | None = None  # raw struct/JsonDef name — converter adds suffix
+    omitempty: bool = False  # @omitempty — key may be absent from JSON
+    skip: bool = False  # @skip — field parsed but excluded from output
+
     @property
     def is_list(self) -> bool:
-        return self in (
-            VariableType.LIST_AUTO,
-            VariableType.LIST_DOCUMENT,
-            VariableType.LIST_STRING,
-            VariableType.LIST_INT,
-            VariableType.LIST_FLOAT,
-        )
+        return self.is_array
 
     @property
-    def scalar(self) -> VariableType:
-        """Return scalar counterpart for list types."""
-        _map = {
-            VariableType.LIST_DOCUMENT: VariableType.DOCUMENT,
-            VariableType.LIST_STRING: VariableType.STRING,
-            VariableType.LIST_INT: VariableType.INT,
-            VariableType.LIST_FLOAT: VariableType.FLOAT,
-            VariableType.LIST_AUTO: VariableType.AUTO,
-        }
-        return _map.get(self, self)
-
-    @property
-    def as_list(self) -> VariableType:
-        """Return list counterpart for scalar types."""
-        _map = {
-            VariableType.DOCUMENT: VariableType.LIST_DOCUMENT,
-            VariableType.STRING: VariableType.LIST_STRING,
-            VariableType.INT: VariableType.LIST_INT,
-            VariableType.FLOAT: VariableType.LIST_FLOAT,
-            VariableType.AUTO: VariableType.LIST_AUTO,
-        }
-        return _map.get(self, self)
+    def is_ref(self) -> bool:
+        return self.base in (VT.NESTED, VT.JSON) and self.ref is not None
 
 
 class StructType(IntEnum):

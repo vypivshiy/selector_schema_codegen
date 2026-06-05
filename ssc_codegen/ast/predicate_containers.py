@@ -10,11 +10,12 @@ class Filter(Node):
     """
     Filters a list, removing elements that do not match all predicates.
     Predicates in body are combined with AND by default.
-    accept/ret follow the cursor list type (LIST_STRING or LIST_DOCUMENT).
+    accept/ret follow the cursor list type (STRING or DOCUMENT with is_array=True).
     """
 
-    accept: VariableType = field(default=VariableType.LIST_STRING)
-    ret: VariableType = field(default=VariableType.LIST_STRING)
+    accept: VariableType = field(default=VariableType.STRING)
+    ret: VariableType = field(default=VariableType.STRING)
+    is_array: bool = True
 
 
 @dataclass

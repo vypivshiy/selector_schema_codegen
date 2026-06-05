@@ -4,7 +4,7 @@ using parsel.Selector/SelectorList API.
 """
 
 from ssc_codegen.converters.base import ConverterContext
-from ssc_codegen.converters.helpers import to_snake_case
+from ssc_codegen.converters.helpers import to_snake_case, to_pascal_case
 from ssc_codegen.converters.runtime import (
     module_is_rest_only,
     http_client_import,
@@ -22,7 +22,22 @@ from ssc_codegen.converters import py_bs4
 PY_PARSEL_CONVERTER = py_bs4.PY_BASE_CONVERTER.extend()
 PY_TYPES = py_bs4.PY_TYPES.copy()
 PY_TYPES[VT.DOCUMENT] = "Selector"
-PY_TYPES[VT.LIST_DOCUMENT] = "SelectorList"
+
+
+def _resolve_py_type(type_info: a.TypeInfo | None) -> str:
+    if type_info is None:
+        return "Any"
+    if type_info.base == VT.NESTED and type_info.ref:
+        type_ = f"{to_pascal_case(type_info.ref)}Type"
+    elif type_info.base == VT.JSON and type_info.ref:
+        type_ = f"{to_pascal_case(type_info.ref)}Json"
+    else:
+        type_ = PY_TYPES.get(type_info.base, "Any")
+    if type_info.is_array:
+        type_ = f"List[{type_}]"
+    if type_info.is_optional:
+        type_ = f"Optional[{type_}]"
+    return type_
 
 
 @PY_PARSEL_CONVERTER(a.Imports)
@@ -97,7 +112,7 @@ def pre_init(node: a.Init, ctx: ConverterContext):
 @PY_PARSEL_CONVERTER(a.InitField)
 def pre_init_field(node: a.InitField, ctx: ConverterContext):
     name = to_snake_case(node.name)
-    ret_type = py_bs4.PY_TYPES.get(node.ret, "Any")
+    ret_type = _resolve_py_type(node.type_info)
     return [
         f"    def _init_{name}(self, v: Union[Selector, SelectorList]) -> {ret_type}:"
     ]
@@ -106,19 +121,7 @@ def pre_init_field(node: a.InitField, ctx: ConverterContext):
 @PY_PARSEL_CONVERTER(a.Field)
 def pre_struct_field(node: a.Field, ctx: ConverterContext):
     name = to_snake_case(node.name)
-    ret_type = py_bs4.PY_TYPES.get(node.ret, "Any")
-
-    if node.ret == VT.JSON:
-        jsonify_node = [i for i in node.body if isinstance(i, a.Jsonify)][0]
-        ret_type = ret_type.format(jsonify_node.schema_name)
-        if jsonify_node.is_array:
-            ret_type = f"List[{ret_type}]"
-    elif node.ret == VT.NESTED:
-        nested_node = [i for i in node.body if isinstance(i, a.Nested)][0]
-        ret_type = ret_type.format(nested_node.struct_name)
-        if nested_node.is_array:
-            ret_type = f"List[{ret_type}]"
-
+    ret_type = _resolve_py_type(node.type_info)
     if node.accept == VT.STRING:
         return [
             f"    def _parse_{name}(self, v: Union[Selector, SelectorList]) -> Union[{ret_type}, _UnmatchedTableRow]:"
@@ -137,19 +140,7 @@ def pre_struct_key(node: a.Key, ctx: ConverterContext):
 
 @PY_PARSEL_CONVERTER(a.Value)
 def pre_struct_value(node: a.Value, ctx: ConverterContext):
-    ret_type = py_bs4.PY_TYPES.get(node.ret, "Any")
-
-    if node.ret == VT.JSON:
-        jsonify_node = [i for i in node.body if isinstance(i, a.Jsonify)][0]
-        ret_type = ret_type.format(jsonify_node.schema_name)
-        if jsonify_node.is_array:
-            ret_type = f"List[{ret_type}]"
-    elif node.ret == VT.NESTED:
-        nested_node = [i for i in node.body if isinstance(i, a.Nested)][0]
-        ret_type = ret_type.format(nested_node.struct_name)
-        if nested_node.is_array:
-            ret_type = f"List[{ret_type}]"
-
+    ret_type = _resolve_py_type(node.type_info)
     return [
         f"    def _parse_value(self, v: Union[Selector, SelectorList]) -> {ret_type}:"
     ]
@@ -285,14 +276,14 @@ def pre_expr_xpath_remove(node: a.XpathRemove, ctx: ConverterContext):
 
 @PY_PARSEL_CONVERTER(a.Text)
 def pre_expr_text(node: a.Text, ctx: ConverterContext):
-    if node.accept == VT.DOCUMENT:
+    if not node.is_array:
         return f"{ctx.indent}{ctx.nxt} = ' '.join({ctx.prv}.xpath('.//text()').getall())"
     return f"{ctx.indent}{ctx.nxt} = [' '.join(i.xpath('.//text()').getall()) for i in {ctx.prv}]"
 
 
 @PY_PARSEL_CONVERTER(a.Raw)
 def pre_expr_raw(node: a.Raw, ctx: ConverterContext):
-    if node.accept == VT.DOCUMENT:
+    if not node.is_array:
         return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.get()"
     return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.getall()"
 
@@ -300,7 +291,7 @@ def pre_expr_raw(node: a.Raw, ctx: ConverterContext):
 @PY_PARSEL_CONVERTER(a.Attr)
 def pre_expr_attr(node: a.Attr, ctx: ConverterContext):
     keys = node.keys
-    if node.accept == VT.DOCUMENT:
+    if not node.is_array:
         if len(keys) == 1:
             return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.attrib[{keys[0]!r}]"
         return f"{ctx.indent}{ctx.nxt} = [{ctx.prv}.attrib[k] for k in {keys} if {ctx.prv}.attrib.get(k)]"

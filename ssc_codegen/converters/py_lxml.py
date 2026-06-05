@@ -10,7 +10,7 @@ Key differences from bs4:
 """
 
 from ssc_codegen.converters.base import ConverterContext
-from ssc_codegen.converters.helpers import to_snake_case
+from ssc_codegen.converters.helpers import to_snake_case, to_pascal_case
 from ssc_codegen.converters.runtime import (
     _FALLBACK_HTML_LINES,
     _FALLBACK_HTML_EXPORT,
@@ -35,7 +35,23 @@ PY_LXML_CONVERTER = py_bs4.PY_BASE_CONVERTER.extend()
 # Override specific handlers for lxml
 PY_TYPES = py_bs4.PY_TYPES.copy()
 PY_TYPES[VT.DOCUMENT] = "HtmlElement"
-PY_TYPES[VT.LIST_DOCUMENT] = "List[HtmlElement]"
+
+
+def _resolve_py_type(type_info: a.TypeInfo | None) -> str:
+    """Render TypeInfo for lxml — delegates to base helper with lxml-specific PY_TYPES."""
+    if type_info is None:
+        return "Any"
+    if type_info.base == VT.NESTED and type_info.ref:
+        type_ = f"{to_pascal_case(type_info.ref)}Type"
+    elif type_info.base == VT.JSON and type_info.ref:
+        type_ = f"{to_pascal_case(type_info.ref)}Json"
+    else:
+        type_ = PY_TYPES.get(type_info.base, "Any")
+    if type_info.is_array:
+        type_ = f"List[{type_}]"
+    if type_info.is_optional:
+        type_ = f"Optional[{type_}]"
+    return type_
 
 
 @PY_LXML_CONVERTER(a.Imports)
@@ -130,26 +146,14 @@ def pre_init(node: a.Init, ctx: ConverterContext):
 @PY_LXML_CONVERTER(a.InitField)
 def pre_init_field(node: a.InitField, ctx: ConverterContext):
     name = to_snake_case(node.name)
-    ret_type = PY_TYPES.get(node.ret, "Any")
+    ret_type = _resolve_py_type(node.type_info)
     return [f"    def _init_{name}(self, v: HtmlElement) -> {ret_type}:"]
 
 
 @PY_LXML_CONVERTER(a.Field)
 def pre_struct_field(node: a.Field, ctx: ConverterContext):
     name = to_snake_case(node.name)
-    ret_type = PY_TYPES.get(node.ret, "Any")
-
-    if node.ret == VT.JSON:
-        jsonify_node = [i for i in node.body if isinstance(i, a.Jsonify)][0]
-        ret_type = ret_type.format(jsonify_node.schema_name)
-        if jsonify_node.is_array:
-            ret_type = f"List[{ret_type}]"
-    elif node.ret == VT.NESTED:
-        nested_node = [i for i in node.body if isinstance(i, a.Nested)][0]
-        ret_type = ret_type.format(nested_node.struct_name)
-        if nested_node.is_array:
-            ret_type = f"List[{ret_type}]"
-
+    ret_type = _resolve_py_type(node.type_info)
     if node.accept == VT.STRING:
         return [
             f"    def _parse_{name}(self, v: HtmlElement) -> Union[{ret_type}, _UnmatchedTableRow]:"
@@ -164,19 +168,7 @@ def pre_struct_key(node: a.Key, ctx: ConverterContext):
 
 @PY_LXML_CONVERTER(a.Value)
 def pre_struct_value(node: a.Value, ctx: ConverterContext):
-    ret_type = PY_TYPES.get(node.ret, "Any")
-
-    if node.ret == VT.JSON:
-        jsonify_node = [i for i in node.body if isinstance(i, a.Jsonify)][0]
-        ret_type = ret_type.format(jsonify_node.schema_name)
-        if jsonify_node.is_array:
-            ret_type = f"List[{ret_type}]"
-    elif node.ret == VT.NESTED:
-        nested_node = [i for i in node.body if isinstance(i, a.Nested)][0]
-        ret_type = ret_type.format(nested_node.struct_name)
-        if nested_node.is_array:
-            ret_type = f"List[{ret_type}]"
-
+    ret_type = _resolve_py_type(node.type_info)
     return [f"    def _parse_value(self, v: HtmlElement) -> {ret_type}:"]
 
 
@@ -323,7 +315,7 @@ def pre_expr_xpath_remove(node: a.XpathRemove, ctx: ConverterContext):
 
 @PY_LXML_CONVERTER(a.Text)
 def pre_expr_text(node: a.Text, ctx: ConverterContext):
-    if node.accept == VT.DOCUMENT:
+    if not node.is_array:
         return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.text_content()"
     # LIST_DOCUMENT
     return f"{ctx.indent}{ctx.nxt} = [i.text_content() for i in {ctx.prv}]"
@@ -331,7 +323,7 @@ def pre_expr_text(node: a.Text, ctx: ConverterContext):
 
 @PY_LXML_CONVERTER(a.Raw)
 def pre_expr_raw(node: a.Raw, ctx: ConverterContext):
-    if node.accept == VT.DOCUMENT:
+    if not node.is_array:
         return f"{ctx.indent}{ctx.nxt} = html.tostring({ctx.prv}, encoding='unicode')"
     # LIST_DOCUMENT
     return f"{ctx.indent}{ctx.nxt} = [html.tostring(i, encoding='unicode') for i in {ctx.prv}]"
@@ -340,7 +332,7 @@ def pre_expr_raw(node: a.Raw, ctx: ConverterContext):
 @PY_LXML_CONVERTER(a.Attr)
 def pre_expr_attr(node: a.Attr, ctx: ConverterContext):
     keys = node.keys
-    if node.accept == VT.DOCUMENT:
+    if not node.is_array:
         if len(keys) == 1:
             return f"{ctx.indent}{ctx.nxt} = {ctx.prv}.get({keys[0]!r}, '')"
         return f"{ctx.indent}{ctx.nxt} = [{ctx.prv}.get(k) for k in {keys} if {ctx.prv}.get(k)]"

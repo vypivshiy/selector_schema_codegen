@@ -27,6 +27,7 @@ from ssc_codegen.ast import (
     TableConfig,
     TableMatchKey,
     TableRow,
+    TypeInfo,
     Value,
     VariableType,
 )
@@ -237,19 +238,11 @@ def parse_json_fields(
         ref_name = ""
         match type_:
             case "str":
-                ret_type = (
-                    VariableType.LIST_STRING
-                    if is_array
-                    else VariableType.STRING
-                )
+                ret_type = VariableType.STRING
             case "int":
-                ret_type = (
-                    VariableType.LIST_INT if is_array else VariableType.INT
-                )
+                ret_type = VariableType.INT
             case "float":
-                ret_type = (
-                    VariableType.LIST_FLOAT if is_array else VariableType.FLOAT
-                )
+                ret_type = VariableType.FLOAT
             case "bool":
                 ret_type = VariableType.BOOL
             case "null" | "nil":
@@ -269,14 +262,16 @@ def parse_json_fields(
         parent.body.append(
             JsonDefField(
                 parent=parent,
-                ret=ret_type,
                 name=name,
-                is_optional=is_optional,
-                is_array=is_array,
-                ref_name=ref_name,
+                type_info=TypeInfo(
+                    base=ret_type,
+                    is_array=is_array,
+                    is_optional=is_optional,
+                    ref=ref_name or None,
+                    omitempty=may_miss,
+                    skip=skip,
+                ),
                 alias=alias,
-                skip=skip,
-                may_miss=may_miss,
                 doc=doc,
             )
         )

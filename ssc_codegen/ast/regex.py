@@ -32,14 +32,15 @@ class Re(Node):
 class ReAll(Node):
     """
     Returns all regex matches as a list.
-    Scalar input only: STRING → LIST_STRING.
+    Scalar input only: STRING → list of strings.
     pattern may be a define name — substituted at parse time.
     Pattern is always normalized to inline form with (?i) and (?s) flags if needed.
     """
 
     pattern: str = ""
     accept: VariableType = field(default=VariableType.STRING)
-    ret: VariableType = field(default=VariableType.LIST_STRING)
+    ret: VariableType = field(default=VariableType.STRING)
+    is_array: bool = True
 
 
 @dataclass
