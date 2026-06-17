@@ -1,4 +1,5 @@
-from abc import abstractmethod
+from abc import ABC, abstractmethod
+from dataclasses import replace
 
 from ssc_codegen.ast import (
     Node,
@@ -11,6 +12,7 @@ from ssc_codegen.ast import (
     JsonDefField,
     TypeDef,
     TypeDefField,
+    StructBase,
     StructItem,
     StructList,
     StructFlatList,
@@ -105,6 +107,7 @@ from ssc_codegen.ast import (
     PredCountGe,
     PredCountLe,
     PredCountRange,
+    PredRange,
     PredIn,
     PredGe,
     PredGt,
@@ -114,114 +117,356 @@ from ssc_codegen.ast import (
     PredReAll,
     PredReAny,
     CodeEndHook,
-    CodeStartHook
+    CodeStartHook,
 )
 from ssc_codegen.converters.base import ConverterContext
 
-# TODO:
-# Module - store dosctring
-# 1 Struct - unify
-# 1.1 Strcut - store docstring
+# Node categories — select the body-traversal mode (ported from base.py).
+# Container: depth+1, index=0, no advance between siblings.
+_CONTAINER_NODES = (JsonDef, TypeDef, StructBase, Init)
+
+# Pipeline: index advances after each node (delegated to _emit_pipeline).
+_PIPELINE_NODES = (
+    Field,
+    InitField,
+    PreValidate,
+    CheckMethod,
+    SplitDoc,
+    Key,
+    Value,
+    TableConfig,
+    TableMatchKey,
+    TableRow,
+)
+
+# Predicate: depth+1, index=0, advance between siblings.
+_PREDICATE_NODES = (Filter, Assert, Match, LogicNot, LogicAnd, LogicOr)
 
 
-class Visitor:
+class Visitor(ABC):
+    """Base transpiler visitor: walks the AST and dispatches nodes to visit_* methods.
+
+    CONTRACT for visit_* methods (generators):
+        - `yield "..."`   -> emit a line
+        - `yield` (None)  -> traverse node.body, then resume the method (pre/post hook)
+        - `yield [...]`   -> extend with a list of lines
+        - `yield from it` -> delegate to an iterable
+        - `return` / non-generator -> no-op
+
+    `""` is preserved as a blank line; `None` is reserved as the traverse-children signal.
+    """
+
     def __init__(self, var_name: str = "v", indent: str = " " * 4) -> None:
-        pass
+        self.var_name = var_name
+        self.indent = indent
 
     # === CORE ===
-    def visit(self, nodes: list[Node], ctx: ConverterContext):
-        """Универсальный базовый AST визитор. Обходит всё AST дерево и передаёт ноды в дочений код
+    def convert(self, module_ast: Module, **meta) -> str:
+        """Entry point: generate target code from the AST (main.py-compatible).
+
+        Creates a ConverterContext, emits the file header via visit_module,
+        then walks module_ast.body through visit(). `meta` is forwarded to ctx.meta.
         """
+        ctx = ConverterContext(
+            var_name=self.var_name, indent_char=self.indent, meta=dict(meta)
+        )
+        lines: list[str] = list(self.visit_module(module_ast, ctx))
+        for node in module_ast.body:
+            lines.extend(self.visit(node, ctx))
+        return "\n".join(lines)
 
-    def convert(self):
-        """Entrypoint генерации AST в конечный код"""
+    def visit(self, node: Node, ctx: ConverterContext) -> list[str]:
+        """Universal AST visitor: dispatches a node to visit_* and intercepts bare-yield.
 
-    # TODO: не хочется дублировать хуки pre_*, post_*
-    # может быть эмулировать эту фичу через yield?
+        Walks the whole AST tree and hands nodes off to the concrete handler code.
+        """
+        name = self._DISPATCH.get(type(node))
+        if name is None:
+            return []
+        gen = getattr(self, name)(node, ctx)
+        if gen is None:
+            return []
+        lines: list[str] = []
+        for item in gen:
+            if item is None:
+                lines.extend(self._emit_body(node, ctx))
+            elif isinstance(item, str):
+                lines.append(item)
+            else:
+                lines.extend(x for x in item if x)
+        return lines
+
+    def _emit_body(self, node: Node, ctx: ConverterContext) -> list[str]:
+        """Traverse a node's body. The mode is selected by category (_CONTAINER/_PREDICATE/_PIPELINE).
+
+        Ported from base.BaseConverter._emit_node (three modes + the InitField special case).
+        """
+        if isinstance(node, _PREDICATE_NODES):
+            pred_ctx = replace(ctx, depth=ctx.depth + 1, index=0)
+            lines: list[str] = []
+            for child in node.body:
+                lines.extend(self.visit(child, pred_ctx))
+                pred_ctx = pred_ctx.advance()
+            return lines
+        if isinstance(node, _CONTAINER_NODES):
+            inner_ctx = replace(ctx, depth=ctx.depth + 1, index=0)
+            lines = []
+            for child in node.body:
+                lines.extend(self.visit(child, inner_ctx))
+            return lines
+        if isinstance(node, _PIPELINE_NODES):
+            if isinstance(node, InitField):
+                return self._emit_pipeline(node.body, ctx)
+            return self._emit_pipeline(node.body, ctx.deeper())
+        return []
+
+    def _emit_pipeline(
+        self, nodes: list[Node], ctx: ConverterContext
+    ) -> list[str]:
+        """Traverse a pipeline body (Field.body, etc.): index advances after each node.
+
+        FallbackStart/FallbackEnd are handled specially: nodes between them are emitted
+        at depth+1 so the try-block is indented correctly.
+        Ported verbatim from base.BaseConverter._emit_pipeline.
+        """
+        lines: list[str] = []
+        in_fallback = False
+        fallback_ctx = ctx
+        for node in nodes:
+            if isinstance(node, FallbackStart):
+                in_fallback = True
+                lines.extend(self.visit(node, ctx))
+                fallback_ctx = replace(ctx, depth=ctx.depth + 1)
+                continue
+            elif isinstance(node, FallbackEnd):
+                in_fallback = False
+                ctx = replace(ctx, index=fallback_ctx.index, depth=ctx.depth)
+                lines.extend(self.visit(node, ctx))
+                continue
+            if in_fallback:
+                lines.extend(self.visit(node, fallback_ctx))
+                fallback_ctx = fallback_ctx.advance()
+                ctx = replace(ctx, index=fallback_ctx.index)
+            else:
+                lines.extend(self.visit(node, ctx))
+                ctx = ctx.advance()
+        return lines
+
+    # === DISPATCH TABLE ===
+    # Single source of truth: node -> visit_* method name.
+    # A concrete subclass must implement every method (otherwise the call raises TypeError).
+    _DISPATCH: dict[type[Node], str] = {
+        # module
+        Module: "visit_module",
+        Docstring: "visit_docstring",
+        Imports: "visit_imports",
+        ImportsRest: "visit_rest_imports",
+        Utilities: "visit_utilities",
+        CodeStartHook: "visit_code_start_hook",
+        CodeEndHook: "visit_code_end_hook",
+        # typedef / jsondef
+        JsonDef: "visit_jsondef",
+        JsonDefField: "visit_jsondef_field",
+        TypeDef: "visit_typedef",
+        TypeDefField: "visit_typedef_field",
+        # struct
+        StructItem: "visit_struct_item",
+        StructList: "visit_struct_list",
+        StructFlatList: "visit_struct_flat_list",
+        StructDict: "visit_struct_dict",
+        StructTable: "visit_struct_table",
+        StructRest: "visit_struct_rest",
+        StructDocstring: "visit_struct_docstring",
+        StartParse: "visit_start_parse",
+        Init: "visit_init",
+        InitField: "visit_init_field",
+        Field: "visit_field",
+        PreValidate: "visit_pre_validate",
+        CheckMethod: "visit_check_method",
+        SplitDoc: "visit_split_doc",
+        Key: "visit_key",
+        Value: "visit_value",
+        TableConfig: "visit_table_config",
+        TableMatchKey: "visit_table_match_key",
+        TableRow: "visit_table_row",
+        MethodFetch: "visit_method_fetch",
+        MethodRest: "visit_method_rest",
+        ErrorResponse: "visit_error_response",
+        # selectors
+        CssSelect: "visit_css_select",
+        CssSelectAll: "visit_css_select_all",
+        CssRemove: "visit_css_remove",
+        XpathSelect: "visit_xpath_select",
+        XpathSelectAll: "visit_xpath_select_all",
+        XpathRemove: "visit_xpath_remove",
+        Text: "visit_text",
+        Raw: "visit_raw",
+        Attr: "visit_attr",
+        # string
+        Trim: "visit_trim",
+        Ltrim: "visit_l_trim",
+        Rtrim: "visit_r_trim",
+        RmPrefix: "visit_rm_prefix",
+        RmSuffix: "visit_rm_suffix",
+        RmPrefixSuffix: "visit_rm_prefix_suffix",
+        Fmt: "visit_format",
+        Repl: "visit_repl",
+        ReplMap: "visit_repl_map",
+        Lower: "visit_lower",
+        Upper: "visit_upper",
+        Split: "visit_split",
+        Join: "visit_join",
+        NormalizeSpace: "visit_norm_space",
+        Unescape: "visit_unescape",
+        # regex
+        Re: "visit_re",
+        ReAll: "visit_re_all",
+        ReSub: "visit_re_sub",
+        # array
+        Index: "visit_index",
+        Slice: "visit_slice",
+        Len: "visit_len",
+        Unique: "visit_unique",
+        # cast
+        ToInt: "visit_to_int",
+        ToFloat: "visit_to_float",
+        ToBool: "visit_to_bool",
+        Jsonify: "visit_jsonify",
+        Nested: "visit_nested",
+        # control
+        Self: "visit_self",
+        TransformCall: "visit_transform_call",
+        Return: "visit_return",
+        FallbackStart: "visit_fallback_start",
+        FallbackEnd: "visit_fallback_end",
+        # predicate containers
+        Filter: "visit_filter",
+        Assert: "visit_assert",
+        Match: "visit_match",
+        # logic
+        LogicAnd: "visit_logic_and",
+        LogicOr: "visit_logic_or",
+        LogicNot: "visit_logic_not",
+        # predicates
+        PredCss: "visit_predicate_css",
+        PredXpath: "visit_predicate_xpath",
+        PredHasAttr: "visit_predicate_has_attr",
+        PredAttrContains: "visit_predicate_attr_contains",
+        PredAttrStarts: "visit_predicate_attr_starts",
+        PredAttrEnds: "visit_predicate_attr_ends",
+        PredAttrEq: "visit_predicate_attr_eq",
+        PredAttrNe: "visit_predicate_attr_ne",
+        PredAttrRe: "visit_predicate_attr_re",
+        PredTextContains: "visit_predicate_text_contains",
+        PredTextStarts: "visit_predicate_text_starts",
+        PredTextEnds: "visit_predicate_text_ends",
+        PredTextRe: "visit_predicate_text_re",
+        PredContains: "visit_predicate_contains",
+        PredEq: "visit_predicate_eq",
+        PredNe: "visit_predicate_ne",
+        PredStarts: "visit_predicate_starts",
+        PredEnds: "visit_predicate_ends",
+        PredCountEq: "visit_predicate_count_eq",
+        PredCountGt: "visit_predicate_count_gt",
+        PredCountLt: "visit_predicate_count_lt",
+        PredCountNe: "visit_predicate_count_ne",
+        PredCountGe: "visit_predicate_count_ge",
+        PredCountLe: "visit_predicate_count_le",
+        PredCountRange: "visit_pred_count_range",
+        PredRange: "visit_pred_range",
+        PredIn: "visit_predicate_in",
+        PredGe: "visit_predicate_ge",
+        PredGt: "visit_predicate_gt",
+        PredLe: "visit_predicate_le",
+        PredLt: "visit_predicate_lt",
+        PredRe: "visit_predicate_re",
+        PredReAll: "visit_predicate_re_all",
+        PredReAny: "visit_predicate_re_any",
+    }
 
     # NODE APIS. need override
     @abstractmethod
     def std_lib(self, name: str):
-        """Генерация стандартной библиотеки, чтобы упростить генерацию выражений.
-        
-        Код может распаковываться Inline в модуль
+        """Emit the standard library to simplify expression codegen.
 
-        Примечание: не реализовывать эквивалентный std код, если операция нативно 
-        в одну строку транслируется из AST
+        The code may be inlined into the module.
+
+        Note: do not implement an std equivalent when the operation translates
+        natively from the AST in a single line.
         """
 
     @abstractmethod
     def visit_module(self, node: Module, ctx: ConverterContext):
         """
-        автоматически генерирует AST 
-        
-        Корневая нода модуля-парсера
-        1. в начале файла добавить комментарий: "autogenerated by ssc-gen DO NOT EDIT"
-        2. если есть docstring - транспилировать
+        Auto-generated AST node (not user-authored).
+
+        Root node of the parser module.
+        1. Prepend a header comment: "autogenerated by ssc-gen DO NOT EDIT".
+        2. If a docstring is present, emit it.
         """
 
     @abstractmethod
     def visit_docstring(self, node: Docstring):
-        """TODO: DELETE THIS NODE - add to Module AST"""
+        """TODO: remove this node (fold it into the Module AST)."""
 
     @abstractmethod
     def visit_imports(self, node: Imports, ctx: ConverterContext):
         """
-        автоматически генерирует AST 
+        Auto-generated AST node (not user-authored).
 
-        Генерация базовых строк импортов
-        
-        1. при генерации std модуля - делать его import
-        2. если inline генерация std - добавлять его импорты
+        Emit the base import statements.
+
+        1. When generating a std module — import it.
+        2. When inlining std — emit its imports.
         """
 
     @abstractmethod
     def visit_rest_imports(self, node: ImportsRest, ctx: ConverterContext):
-        # TODO: move to single Imports node???
+        # TODO: fold into a single Imports node?
         """
-        автоматически генерирует AST 
+        Auto-generated AST node (not user-authored).
 
-        Генерация http rest specific строк импортов
+        Emit HTTP REST-specific import statements.
 
-        1. при генерации std модуля - делать его import
-        2. если inline генерация std - добавлять его импорты
+        1. When generating a std module — import it.
+        2. When inlining std — emit its imports.
         """
 
     @abstractmethod
     def visit_utilities(self, node: Utilities, ctx: ConverterContext):
         """
-        автоматически генерирует AST 
+        Auto-generated AST node (not user-authored).
 
-        Используется для генерации inline std кода если не генерируется отдельный модуль
+        Used to emit inlined std code when a separate runtime module is not generated.
         """
 
     @abstractmethod
     def visit_code_start_hook(self, node: CodeStartHook, ctx: ConverterContext):
         """
-        автоматически генерирует AST 
+        Auto-generated AST node (not user-authored).
 
-        Специальный AST-hook: после ноды Utilities можно вставить дополнительный код
+        Special AST hook: extra code can be inserted right after the Utilities node.
 
-        Если не нужно - возвращайте None
+        Return None when not needed.
         """
 
     @abstractmethod
     def visit_code_end_hook(self, node: CodeEndHook, ctx: ConverterContext):
         """
-        автоматически генерирует AST 
+        Auto-generated AST node (not user-authored).
 
-        Специальный AST-hook: в конце файла можно вставить дополнительный код
+        Special AST hook: extra code can be inserted at the end of the file.
 
-        Если не нужно - возвращайте None
+        Return None when not needed.
         """
 
     # === TYPES ===
     @abstractmethod
     def visit_jsondef(self, node: JsonDef, ctx: ConverterContext):
         """
-        KDL: `json <name> { ... }` 
+        KDL: `json <name> { ... }`
 
-        Генерация struct/type annotation для типизации json данных
+        Emit a struct/type annotation used to type JSON data.
         """
 
     @abstractmethod
@@ -229,127 +474,128 @@ class Visitor:
         """
         KDL: `json <name> { field... }`
 
-        Генерация поля с  типизацией для JsonDef структуры.
-        генерировать тип на основе информации из `node.ret`
+        Emit a typed field of a JsonDef struct.
+        Derive the type from `node.ret`.
         """
 
     @abstractmethod
     def visit_typedef(self, node: TypeDef, ctx: ConverterContext):
         """
-        автоматически генерирует AST на базе non-rest `struct` 
+        Auto-generated AST node (not user-authored); derived from a non-rest `struct`.
 
-        Генерация struct/type annotation для типизации данных для html parser структур
+        Emit a struct/type annotation used to type data for HTML-parser structs.
         """
 
     @abstractmethod
     def visit_typedef_field(self, node: TypeDefField, ctx: ConverterContext):
         """
-        автоматически генерирует AST на базе non-rest `struct` 
+        Auto-generated AST node (not user-authored); derived from a non-rest `struct`.
 
-        Генерация поля с  типизацией для TypeDef структуры.
-        генерировать тип на основе информации из `node.ret`
+        Emit a typed field of a TypeDef struct.
+        Derive the type from `node.ret`.
         """
 
     # === STRUCT ===
-    # TODO: unify to single struct node???
+    # TODO: unify into a single struct node?
     @abstractmethod
     def visit_struct_item(self, node: StructItem, ctx: ConverterContext):
         """
-        KDL: `struct <name> { ... }| (item)struct <name> { ... }| sturct <name> type=item { ... }`
+        KDL: `struct <name> { ... } | (item)struct <name> { ... } | struct <name> type=item { ... }`
 
-        Генерация header структуры/класса
+        Emit the struct/class header.
 
-        если есть документация - сегенерировать
+        If documented, emit the docstring.
         """
 
     @abstractmethod
     def visit_struct_list(self, node: StructList, ctx: ConverterContext):
         """
-        KDL: `struct <name> type=list { ... }| (list)struct <name> { ... }`
+        KDL: `struct <name> type=list { ... } | (list)struct <name> { ... }`
 
-        Генерация header структуры/класса
+        Emit the struct/class header.
 
-        если есть документация - сегенерировать
+        If documented, emit the docstring.
         """
-    
+
     @abstractmethod
     def visit_struct_flat_list(
         self, node: StructFlatList, ctx: ConverterContext
     ):
         """
-        KDL: `struct <name> type=flat { ... }| (flat)struct <name> { ... }`
+        KDL: `struct <name> type=flat { ... } | (flat)struct <name> { ... }`
 
-        Генерация header структуры/класса
+        Emit the struct/class header.
 
-        если есть документация - сегенерировать
+        If documented, emit the docstring.
         """
 
     @abstractmethod
     def visit_struct_dict(self, node: StructDict, cxt: ConverterContext):
         """
-        KDL: `struct <name> type=dict { ... }| (dict)struct <name> { ... }`
+        KDL: `struct <name> type=dict { ... } | (dict)struct <name> { ... }`
 
-        Генерация header структуры/класса
+        Emit the struct/class header.
 
-        если есть документация - сегенерировать
+        If documented, emit the docstring.
         """
-    
+
     @abstractmethod
     def visit_struct_table(self, node: StructTable, ctx: ConverterContext):
         """
-        KDL: `struct <name> type=table { ... }| (table)struct <name> { ... }`
+        KDL: `struct <name> type=table { ... } | (table)struct <name> { ... }`
 
-        Генерация header структуры/класса
-        
-        если есть документация - сегенерировать
+        Emit the struct/class header.
+
+        If documented, emit the docstring.
         """
-    
+
     @abstractmethod
     def visit_struct_rest(self, node: StructRest, ctx: ConverterContext):
         """
-        KDL: `struct <name> type=rest { ... }| (rest)struct <name> { ... }`
-        Генерация header структуры/класса для вызова REST методов
+        KDL: `struct <name> type=rest { ... } | (rest)struct <name> { ... }`
 
-        если есть документация - сегенерировать
+        Emit the struct/class header used to call REST methods.
+
+        If documented, emit the docstring.
         """
-    
+
     @abstractmethod
     def visit_struct_docstring(
         self, node: StructDocstring, ctx: ConverterContext
     ):
-        """DEPRECATE: move to Struct node as property
+        """Deprecated: move onto the Struct node as a property.
 
         rationale:
-            - python - docstring contains down
-            - js, go, etc - docstring contains upper
+            - python — docstring goes below the declaration
+            - js, go, etc. — docstring goes above the declaration
         """
         pass
 
     @abstractmethod
     def visit_init(self, node: Init, ctx: ConverterContext):
         """
-        KDL: 
+        KDL:
             ```
             // vvvvv
             @init {
-            
+
                 <name> {
                     ...
                     }
             }
             ```
-        
-        Генерация публичного конструктора для структуры/класса
-        
-        1. хранит DOM-like Document/Element переданного html 
-        2. если есть `InitField` - предварительно вызывать и положить в конструктор
+
+        Emit the public constructor of the struct/class.
+
+        1. Store the DOM-like Document/Element of the input HTML.
+        2. If `InitField` entries exist, invoke them up front and store the results on the instance.
         """
 
     @abstractmethod
     def visit_init_field(self, node: InitField, ctx: ConverterContext):
         """
-        
-        KDL: 
+
+        KDL:
             ```
             @init {
              // vvvvv
@@ -358,49 +604,49 @@ class Visitor:
                     }
             }
             ```
-        
-        Header приватного метода структуры, в котором предварительно извлекается значение
-        
+
+        Emit the header of a private struct method that pre-extracts a value.
         """
 
     @abstractmethod
     def visit_field(self, node: Field, ctx: ConverterContext):
         """
-        
+
         KDL: `struct Foo { <name> { ... }... }`
-        Header приватного  метода структуры, в котором при запуске StartParse вычисляется
+
+        Emit the header of a private struct method whose value is computed when StartParse runs.
         """
 
     @abstractmethod
     def visit_pre_validate(self, node: PreValidate, ctx: ConverterContext):
         """
-        
+
         KDL: `@pre-validate { ... }`
 
-        Header приватного метода структуры, в котором до запуска валидирует значение.
-        - Не модифицируется документ
-        - Предполагается, что это поле применяет `assert` блоки. 
-        - Если проверка не проходит - код возвращает ошибку
+        Emit the header of a private struct method that validates the value before parsing.
+        - The document is not modified.
+        - This field is expected to apply `assert` blocks.
+        - On a failed check the code raises/returns an error.
         """
 
     @abstractmethod
     def visit_check_method(self, node: CheckMethod, ctx: ConverterContext):
         """
-        
+
         KDL: `@check <name> { ... }`
 
-        Header публичного метода структуры, который можно вызывать для базовых проверок
-        - всегда возвращает boolean значение
+        Emit the header of a public struct method that can be called for basic checks.
+        - Always returns a boolean.
         """
 
     @abstractmethod
     def visit_split_doc(self, node: SplitDoc, ctx: ConverterContext):
         """
-        
+
         KDL: `@split-doc { ... }`
 
-        Header приватного метода структуры, который разделяет документ на части по селектору (на карточки, например)
-        - всегда возвращает TypeInfo(Document, is_array=True)
+        Emit the header of a private struct method that splits the document into parts by a selector (e.g. into cards).
+        - Always returns TypeInfo(Document, is_array=True).
         """
 
     @abstractmethod
@@ -408,7 +654,7 @@ class Visitor:
         """
         KDL: `@key { ... }`
 
-        Header приватного метода для StructDict, который применяет как ключ. Всегда возвращает STRING
+        Emit the header of a private method for StructDict that produces the key. Always returns STRING.
         """
 
     @abstractmethod
@@ -416,15 +662,15 @@ class Visitor:
         """
         KDL: `@value { ... }`
 
-        1. Header приватного метода для StructDict, который применяет как значение.
-        2. (ADHOC) Header приватного метода для StructTable, который извлекает значение из строки таблицы.
+        1. Emit the header of a private method for StructDict that produces the value.
+        2. (ADHOC) Emit the header of a private method for StructTable that extracts the value from a table row.
         """
 
     @abstractmethod
     def visit_table_config(self, node: TableConfig, ctx: ConverterContext):
         """
         KDL: `@table { ... }`
-        Header приватного метода для StructTable, который указывает селект на <table>-like элемент
+        Emit the header of a private method for StructTable that selects the <table>-like element.
         """
 
     @abstractmethod
@@ -432,8 +678,8 @@ class Visitor:
         """
         KDL: `@match { ... }`
 
-        Header приватного метода для StructTable - извлекает значение "ключ" из таблицы. Всегда возвращает STRING
-        Используется для сопоставления значений для html таблиц.
+        Emit the header of a private method for StructTable that extracts the "key" value from the table. Always returns STRING.
+        Used to match values in HTML tables.
         """
 
     @abstractmethod
@@ -441,7 +687,7 @@ class Visitor:
         """
         KDL: `@rows { ... }`
 
-        Header приватного метода для извлечения всех строк из таблицы. Всегда возвращает DOCUMENT (is_array=True)
+        Emit the header of a private method that extracts all rows from the table. Always returns DOCUMENT (is_array=True).
         """
 
     @abstractmethod
@@ -449,10 +695,10 @@ class Visitor:
         """
         KDL: `@request ...`
 
-        Для HTML parser структур. опциональный classmethod конструктор, который делает http запрос и инициализирует.
+        For HTML-parser structs: an optional classmethod constructor that performs the HTTP request and initialises the instance.
 
-        - не настраивает http client - он передаётся первым аргументом, нужно настраивать извне. 
-        сигнатура (HttpClient, *, params...)
+        - Does not configure the HTTP client — it is passed as the first argument and must be configured externally.
+        - Signature: (HttpClient, *, params...).
         """
 
     @abstractmethod
@@ -460,28 +706,29 @@ class Visitor:
         """
         KDL: `@request ...`
 
-        Для REST-API структур, добавляет метод отправки запроса, возвращает json
+        For REST-API structs: adds a method that sends the request and returns the JSON result.
 
-        - не настраивает http client - он передаётся первым аргументом, нужно настраивать извне. 
-        сигнатура (HttpClient, *, params...)
-        - TIP: для простоты реализации, применения и портируемости, рекомендуется возвращать и генерировать monad-like структуры
+        - Does not configure the HTTP client — it is passed as the first argument and must be configured externally.
+        - Signature: (HttpClient, *, params...).
+        - TIP: for simplicity, ergonomics and portability, prefer returning (and generating) monad-like result types.
         """
+
     @abstractmethod
     def visit_error_response(self, node: ErrorResponse, ctx: ConverterContext):
         """
-        Response Error????
+        TODO: define the error-response contract.
         """
 
     @abstractmethod
     def visit_start_parse(self, node: StartParse, ctx: ConverterContext):
         """
-        автоматически генерирует AST 
+        Auto-generated AST node (not user-authored).
 
-        Header публичного метода start_parse, startParse, который запускает парсер и возвращает структуру
+        Emit the header of the public method start_parse / startParse that runs the parser and returns the result.
 
-        Требуется генерировать header + код
+        Both the header and the body must be emitted.
 
-        Стратегии (pseudocode):
+        Strategies (pseudocode):
 
         StructItem:
             ```
@@ -544,7 +791,7 @@ class Visitor:
             }
             ```
         StructTable:
-            - TIP: null/None - применяется в проекте, для проверок используйте SENTINEL объект для проверок
+            - TIP: null/None is used in the project; use a SENTINEL object for the checks.
 
             ```
             NOT_VALID_ROW = Sentinel()
@@ -574,14 +821,13 @@ class Visitor:
             }
             ```
 
-        StructRest: not used this method and not generate AST node, skip
+        StructRest: this method is not used and no AST node is generated — skip it.
         """
         # TODO: research generate transform callers. rationale: simplify generate???
         # StartParseSetup
         # CallPreValidate
         # CallStartParse
         # Return???
-
 
     # === EXPRESSIONS ===
 
@@ -594,10 +840,10 @@ class Visitor:
         TYPES:
             - DOCUMENT -> DOCUMENT
 
-        - извлечь первый элемент по CSS селектору. 
-        - если передано несколько query, то возвращает элемент из первого найденного селектора
-        - не проверять на 3 или 4 стандарт - зависит от целевой библиотеки.
-        - null/None обрабатывать не нужно
+        - Extract the first element matching the CSS selector.
+        - If multiple queries are passed, return the element from the first selector that matches.
+        - Do not enforce CSS3/CSS4 — it depends on the target library.
+        - No need to handle null/None.
         """
 
     @abstractmethod
@@ -607,11 +853,11 @@ class Visitor:
 
         TYPES:
             - DOCUMENT -> DOCUMENT[]
-        
-        - извлечь все элементы по CSS селектору. 
-        - если передано несколько query, то возвращает элементы из первого найденного селектора
-        - не проверять на 3 или 4 стандарт - зависит от целевой библиотеки.
-        - null/None обрабатывать не нужно
+
+        - Extract all elements matching the CSS selector.
+        - If multiple queries are passed, return the elements from the first selector that matches.
+        - Do not enforce CSS3/CSS4 — it depends on the target library.
+        - No need to handle null/None.
         """
 
     @abstractmethod
@@ -622,10 +868,10 @@ class Visitor:
         TYPES:
             - DOCUMENT -> DOCUMENT
 
-        - удаляет из корневого документа элемент по CSS селектору
-        - даёт side effect
-        - в идеале, дочерние элементы удалять тоже (не проверено)
-        - эта операция обычно ничего не возвращает, не забудьте присвоить новую переменную
+        - Remove elements matching the CSS selector from the root document.
+        - Has side effects.
+        - Ideally descendants are removed too (unverified).
+        - This op usually returns nothing; remember to assign a new variable.
         """
 
     @abstractmethod
@@ -636,9 +882,9 @@ class Visitor:
         TYPES:
             - DOCUMENT -> DOCUMENT
 
-        - извлечь первый элемент по XPATH селектору. 
-        - если передано несколько query, то возвращает элемент из первого найденного селектора
-        - null/None обрабатывать не нужно
+        - Extract the first element matching the XPATH selector.
+        - If multiple queries are passed, return the element from the first selector that matches.
+        - No need to handle null/None.
         """
 
     @abstractmethod
@@ -651,9 +897,9 @@ class Visitor:
         TYPES:
             - DOCUMENT -> DOCUMENT[]
 
-        - извлечь все элементы по XPATH селектору. 
-        - если передано несколько query, то возвращает элементы из первого найденного селектора
-        - null/None обрабатывать не нужно
+        - Extract all elements matching the XPATH selector.
+        - If multiple queries are passed, return the elements from the first selector that matches.
+        - No need to handle null/None.
         """
 
     @abstractmethod
@@ -664,10 +910,10 @@ class Visitor:
         TYPES:
             - DOCUMENT -> DOCUMENT
 
-        - удаляет из корневого документа элемент по XPATH селектору
-        - даёт side effect
-        - в идеале, дочерние элементы удалять тоже (не проверено)
-        - эта операция обычно ничего не возвращает, не забудьте присвоить новую переменную
+        - Remove elements matching the XPATH selector from the root document.
+        - Has side effects.
+        - Ideally descendants are removed too (unverified).
+        - This op usually returns nothing; remember to assign a new variable.
         """
 
     @abstractmethod
@@ -679,9 +925,8 @@ class Visitor:
             - DOCUMENT -> STRING
             - DOCUMENT[] -> STRING[]
 
-        - извлечь текст из элемента
-        - DOCUMENT:
-        - если тип DOCUMENT(array=true) - излечь из каждого элемента и вернуть плоский список 
+        - Extract the element's text.
+        - If DOCUMENT(array=true), extract from each element and return a flat list.
         """
 
     @abstractmethod
@@ -693,8 +938,8 @@ class Visitor:
             - DOCUMENT -> STRING
             - DOCUMENT[] -> STRING[]
 
-        - извлечь сырой html из элемента (htmlOuter, дочерние элементы тоже)
-        - если тип DOCUMENT(array=true) - излечь из каждого элемента и вернуть плоский список 
+        - Extract the element's raw HTML (htmlOuter; descendants included).
+        - If DOCUMENT(array=true), extract from each element and return a flat list.
         """
 
     @abstractmethod
@@ -706,13 +951,13 @@ class Visitor:
             - DOCUMENT -> STRING
             - DOCUMENT[] -> STRING[]
 
-        - извлечь атрибут по ключу
+        - Extract the attribute by key.
         - DOCUMENT:
-            - если 1 ключ - брать на прямую, разрешено падение с ошибкой
-            - если >1 ключа - проверять наличие ключа, извлекать все атрибуты (STRING(array=true))
-        - DOCUMENT(array=true)
-            - если 1 ключ - проверять наличие ключа извлекать из всех элементов
-            - если >2 ключа - роверять наличие ключа. **все найденные атрибуты собирать в плоский список**
+            - If a single key, access it directly; raising on a missing key is acceptable.
+            - If >1 key, check key presence and collect all attributes (STRING(array=true)).
+        - DOCUMENT(array=true):
+            - If a single key, check presence and extract from every element.
+            - If >2 keys, check presence. **Collect all found attributes into a flat list.**
         """
 
     # === STRING ===
@@ -725,10 +970,10 @@ class Visitor:
             - STRING -> STRING
             - STRING[] -> STRING[]
 
-        - удалить символы СЛЕВА и СПРАВА
-        - если <chars> пустой - удалить все пробельный символы
+        - Strip characters from the LEFT and RIGHT.
+        - If <chars> is empty, strip all whitespace.
         """
-    
+
     @abstractmethod
     def visit_l_trim(self, node: Ltrim, ctx: ConverterContext):
         """
@@ -738,8 +983,8 @@ class Visitor:
             - STRING -> STRING
             - STRING[] -> STRING[]
 
-        - удалить символы СЛЕВА
-        - если <chars> пустой - удалить все пробельный символы
+        - Strip characters from the LEFT.
+        - If <chars> is empty, strip all whitespace.
         """
 
     @abstractmethod
@@ -751,9 +996,9 @@ class Visitor:
             - STRING -> STRING
             - STRING[] -> STRING[]
 
-        - удалить символы СПРАВА
-        - если <chars> пустой - удалить все пробельный символы
-        - STRING(array) - для всех элементов
+        - Strip characters from the RIGHT.
+        - If <chars> is empty, strip all whitespace.
+        - STRING(array) — applied to every element.
         """
 
     @abstractmethod
@@ -765,8 +1010,8 @@ class Visitor:
             - STRING -> STRING
             - STRING[] -> STRING[]
 
-        - удалить префикс по подстроке
-        - STRING(array) - для всех элементов
+        - Remove a prefix matching the substring.
+        - STRING(array) — applied to every element.
         """
 
     @abstractmethod
@@ -778,8 +1023,8 @@ class Visitor:
             - STRING -> STRING
             - STRING[] -> STRING[]
 
-        - удалить суффикс по подстроке
-        - STRING(array) - для всех элементов
+        - Remove a suffix matching the substring.
+        - STRING(array) — applied to every element.
         """
 
     @abstractmethod
@@ -793,7 +1038,7 @@ class Visitor:
             - STRING -> STRING
             - STRING[] -> STRING[]
 
-        - удалить префикс, потом суффикс по подстроке
+        - Remove the prefix, then the suffix matching the substring.
         """
 
     @abstractmethod
@@ -805,8 +1050,8 @@ class Visitor:
             - STRING -> STRING
             - STRING[] -> STRING[]
 
-        - подставляет предыдущее значение по шаблону
-        - маркер-шаблон "дырка" = `{{}}` - заменяйте на его эквивалент
+        - Substitute the previous value into the template.
+        - The template placeholder/hole is `{{}}` — translate it to the target equivalent.
         """
 
     @abstractmethod
@@ -818,9 +1063,9 @@ class Visitor:
             - STRING -> STRING
             - STRING[] -> STRING[]
 
-        - замена подстроки.
-        - заменяет все вхождения, нет лимита
-        - STRING(array) - для всех элементов
+        - Replace a substring.
+        - Replaces all occurrences; no limit.
+        - STRING(array) — applied to every element.
         """
 
     @abstractmethod
@@ -832,9 +1077,9 @@ class Visitor:
             - STRING -> STRING
             - STRING[] -> STRING[]
 
-        - замена набор подстрок.
-        - заменяет все вхождения, нет лимита
-        - STRING(array) - для всех элементов
+        - Replace a set of substrings.
+        - Replaces all occurrences; no limit.
+        - STRING(array) — applied to every element.
         """
 
     @abstractmethod
@@ -846,8 +1091,8 @@ class Visitor:
             - STRING -> STRING
             - STRING[] -> STRING[]
 
-        - перевод в нижний регистр
-        - STRING(array) - для всех элементов
+        - Convert to lowercase.
+        - STRING(array) — applied to every element.
         """
 
     @abstractmethod
@@ -859,8 +1104,8 @@ class Visitor:
             - STRING -> STRING
             - STRING[] -> STRING[]
 
-        - перевод в верхний регистр
-        - STRING(array) - для всех элементов
+        - Convert to uppercase.
+        - STRING(array) — applied to every element.
         """
 
     @abstractmethod
@@ -871,7 +1116,7 @@ class Visitor:
         TYPES:
             - STRING -> STRING[]
 
-        - разделение по подстроке
+        - Split by the substring.
         """
 
     @abstractmethod
@@ -882,7 +1127,7 @@ class Visitor:
         TYPES:
             - STRING[] -> STRING
 
-        - объединение в одну строку через символ `sep`
+        - Join into a single string using `sep` as the separator.
         """
 
     @abstractmethod
@@ -894,11 +1139,11 @@ class Visitor:
             - STRING[] -> STRING[]
             - STRING -> STRING
 
-        - нормализация пробелов. 
-            - Удаление всех пробелова СЛЕВА и СПРАВА.
-            - длинные пробелы заменяются на короткие
-        
-        псевдокод реализации std для вызова:
+        - Whitespace normalisation.
+            - Strip all whitespace from the LEFT and RIGHT.
+            - Collapse long runs of whitespace to a single space.
+
+        std implementation pseudocode to call:
 
         ```
          def normalize_text(text: str) -> str:
@@ -915,9 +1160,9 @@ class Visitor:
             - STRING[] -> STRING[]
             - STRING -> STRING
 
-        - универсальный unescape. ВСЁ делает unescape
-        
-        псевдокод std реализации для вызова:
+        - Universal unescape. Unescapes EVERYTHING.
+
+        std implementation pseudocode to call:
 
         ```
         import re
@@ -949,8 +1194,8 @@ class Visitor:
         TYPES:
             - STRING -> STRING
 
-        - захват **только одной группы**
-        - базовый синтаксис PCRE без сложных фичей как lookahead, lookbehind, named groups
+        - Capture **exactly one group**.
+        - Basic PCRE syntax without advanced features like lookahead, lookbehind, named groups.
         """
 
     @abstractmethod
@@ -961,8 +1206,8 @@ class Visitor:
         TYPES:
             - STRING -> STRING[]
 
-        - захват **только одной группы**
-        - базовый синтаксис PCRE без сложных фичей как lookahead, lookbehind, named groups
+        - Capture **exactly one group**.
+        - Basic PCRE syntax without advanced features like lookahead, lookbehind, named groups.
         """
 
     @abstractmethod
@@ -974,9 +1219,9 @@ class Visitor:
             - STRING[] -> STRING[]
             - STRING -> STRING
 
-        - не учитывает группы захвата
-        - базовый синтаксис PCRE без сложных фичей как lookahead, lookbehind, named groups
-        - limit нет - заменяет всё по выражению
+        - Capture groups are not honoured.
+        - Basic PCRE syntax without advanced features like lookahead, lookbehind, named groups.
+        - No limit — replaces every match.
         """
 
     # === ARRAY ===
@@ -991,8 +1236,8 @@ class Visitor:
         TYPES:
             - AUTO[] -> AUTO
 
-        - начинается индекс с 0
-        - поддерживает отрицательные индексы. Если target не поддерживает - транслируйте в `PRV[len(PRV) - N]`
+        - Indexing starts at 0.
+        - Supports negative indices. If the target does not, translate to `PRV[len(PRV) - N]`.
         """
 
     @abstractmethod
@@ -1003,7 +1248,7 @@ class Visitor:
         TYPES:
             - AUTO[] -> AUTO[]
 
-        TODO (мало тестов, почти не применяется на практике)
+        TODO (few tests, rarely used in practice).
         """
 
     @abstractmethod
@@ -1014,8 +1259,8 @@ class Visitor:
         TYPES:
             - AUTO[] -> INT
 
-        - получение длинны предыдущего элемента
-        - работает только с is_array=true, не берёт длину строк
+        - Get the length of the previous element.
+        - Works only with is_array=true; does not take the length of strings.
         """
 
     @abstractmethod
@@ -1026,8 +1271,8 @@ class Visitor:
         TYPES:
             - STRING[] -> STRING[]
 
-        - удаление дубликатов
-        - если keep_order=True - нужно использовать алгоритм, который гарантирует порядок элементов
+        - Remove duplicates.
+        - If keep_order=True, use an algorithm that preserves element order.
         """
 
     # === CASTS ===
@@ -1040,9 +1285,9 @@ class Visitor:
             - STRING[] -> INT[]
             - STRING -> INT
 
-        - cast в int64 (int32 для x86)
-        - не валидирует ввод, он на стороне пользователя
-        - STRING(array)
+        - Cast to int64 (int32 on x86).
+        - Does not validate input — that is the user's responsibility.
+        - STRING(array).
         """
 
     @abstractmethod
@@ -1054,9 +1299,9 @@ class Visitor:
             - STRING[] -> FLOAT[]
             - STRING -> FLOAT
 
-        - cast в float64 (float32 для x86)
-        - не валидирует ввод, он на стороне пользователя
-        - STRING(array)
+        - Cast to float64 (float32 on x86).
+        - Does not validate input — that is the user's responsibility.
+        - STRING(array).
         """
 
     @abstractmethod
@@ -1068,15 +1313,14 @@ class Visitor:
             - AUTO -> BOOL
             - AUTO[] -> BOOL
 
-        - cast в boolean
-        - возвращать false:
+        - Cast to boolean.
+        - Return false for:
             - null/None
-            - пустая строка
-            - пустой массив
+            - empty string
+            - empty array
             - int == 0
-        - в остальных случаях true
+        - Otherwise return true.
         """
-
 
     @abstractmethod
     def visit_jsonify(self, node: Jsonify, ctx: ConverterContext):
@@ -1086,10 +1330,10 @@ class Visitor:
         TYPES:
             - STRING -> JSON
 
-        - не валидирует ввод json-like строки
-        - если указан path: сначала из него извлечь json объект
-        - потом аннотировать/среиализовать как JsonStruct
-        - всегда последняя операция
+        - Does not validate the json-like input string.
+        - If a path is given, first extract the JSON object from it.
+        - Then annotate/serialise as the JsonStruct.
+        - Always the last operation.
         """
 
     @abstractmethod
@@ -1100,9 +1344,9 @@ class Visitor:
         TYPES:
             - DOCUMENT -> NESTED
 
-        - всегда первый вызов (тип DOCUMENT)
-        - другие expr не применяются
-        - вызывает конструктор вложенного парсера, потом возвращает его значение
+        - Always the first call (type DOCUMENT).
+        - No other expressions are applied.
+        - Calls the nested parser's constructor, then returns its value.
         """
 
     # === CONTROLS ===
@@ -1115,21 +1359,21 @@ class Visitor:
         TYPES:
             - DOCUMENT -> AUTO
 
-        - всегда первый
-        - копирует предвычисленное значение из этого поля (это тип данных - что вернул init-field)
+        - Always the first call.
+        - Copy the precomputed value from this field (its data type is whatever the init-field returned).
         """
 
     def visit_transform_call(self, node: TransformCall, ctx: ConverterContext):
-        # DEPRECATED: delete (difficult, unstable API for code parts injection)
+        """Deprecated: remove (awkward, unstable API for injecting code fragments)."""
         pass
-    
+
     @abstractmethod
     def visit_return(self, node: Return, ctx: ConverterContext):
         """
-        AST AUTO generated
+        Auto-generated AST node.
 
-        - последнее значение в поле возвращается, автоматически определяет тип
-        - для PreValidate оно всегда null/None (ничего не возвращает)
+        - The last value in a field is returned; the type is inferred automatically.
+        - For PreValidate it is always null/None (returns nothing).
         """
 
     @abstractmethod
@@ -1137,18 +1381,19 @@ class Visitor:
         """
         kdl: `fallback <value>|{}`
 
-        - в связке FallbackStart + FallbackEnd можно сделать try/catch
-        - если в target отсутствует такая конструкция - эмулировать 
-            - например, в golang через `defer func(){ rescue <value> }` + `panic`
+        - Combined, FallbackStart + FallbackEnd form a try/catch.
+        - If the target has no such construct, emulate it.
+            - e.g. in Go via `defer func(){ recover <value> }()` + `panic`.
         """
+
     @abstractmethod
     def visit_fallback_end(self, node: FallbackEnd, ctx: ConverterContext):
-         """
+        """
         kdl: `fallback <value>|{}`
 
-        - в связке FallbackStart + FallbackEnd можно сделать try/catch
-        - если в target отсутствует такая конструкция - эмулировать 
-            - например, в golang через `defer func(){ rescue <value> }` + `panic`
+        - Combined, FallbackStart + FallbackEnd form a try/catch.
+        - If the target has no such construct, emulate it.
+            - e.g. in Go via `defer func(){ recover <value> }()` + `panic`.
         """
 
     # === PREDICATE CALLS ===
@@ -1161,9 +1406,9 @@ class Visitor:
             - DOCUMENT[] -> DOCUMENT[]
             - STRING[] -> STRING[]
 
-        - принимает тип DOCUMENT(array=true) | STRING(array=true)
-        - фильтрует предикатами внутри, возвращает значения, которые дают true
-        - для нескольких предикатов по умолчанию устанавливает AND
+        - Accepts DOCUMENT(array=true) | STRING(array=true).
+        - Filter by the inner predicates; return the values that evaluate to true.
+        - Multiple predicates default to AND.
         """
 
     @abstractmethod
@@ -1174,9 +1419,9 @@ class Visitor:
         TYPES:
             - AUTO -> AUTO
 
-        - фильтрует предикатами внутри
-        - если значение false - вызывает ошибку
-        - для нескольких предикатов по умолчанию устанавливает AND
+        - Filter by the inner predicates.
+        - If the value is false, raise an error.
+        - Multiple predicates default to AND.
         """
 
     @abstractmethod
@@ -1187,10 +1432,10 @@ class Visitor:
         TYPES:
             - STRING -> STRING
 
-        - специальная конструкция для полей в StructTable
-        - тип STRING
-        - фильтрует предикатами внутри
-        - для нескольких предикатов по умолчанию устанавливает AND
+        - Special construct for fields in StructTable.
+        - Type is STRING.
+        - Filter by the inner predicates.
+        - Multiple predicates default to AND.
 
         """
 
@@ -1200,14 +1445,14 @@ class Visitor:
         """
         kdl: `and { ... }`
 
-        - in 'and' constuct - separate by logical AND 
+        - Inside an `and` construct, separate by logical AND.
 
-        example
+        example:
 
         ```
         and {a; b; c}
         ```
-        equal:
+        equivalent to:
 
         ```
         (a && b && c)
@@ -1219,14 +1464,14 @@ class Visitor:
         """
         kdl: `or { ... }`
 
-        - in 'or' constuct - separate by logical OR
+        - Inside an `or` construct, separate by logical OR.
 
         example:
 
         ```
         or {a; b; c }
         ```
-        equal:
+        equivalent to:
 
         ```
         (a || b || c)
@@ -1238,7 +1483,7 @@ class Visitor:
         """
         kdl: `not { ... }`
 
-        - invert predicate results inner
+        - Invert the result of the inner predicates.
 
         example:
 
@@ -1246,7 +1491,7 @@ class Visitor:
         not { a; b; c }
         not { or {a; b; c} }
         ```
-        equal
+        equivalent to:
         ```
         !(a && b && c) && !((a || b || c))
         ```
@@ -1261,7 +1506,7 @@ class Visitor:
         TYPES:
             - DOCUMENT
 
-        check by query
+        Check whether the query matches.
 
         example:
         ```
@@ -1277,7 +1522,7 @@ class Visitor:
         TYPES:
             - DOCUMENT
 
-        check by query
+        Check whether the query matches.
 
         example:
         ```
@@ -1295,8 +1540,8 @@ class Visitor:
         TYPES:
             - DOCUMENT
 
-        check by attr keys
-        - if passed keys>1 - converted to any(...)
+        Check by attribute keys.
+        - If more than one key is passed, convert to any(...).
 
         example:
         ```
@@ -1315,9 +1560,9 @@ class Visitor:
         TYPES:
             - DOCUMENT
 
-        check if attr key contains substring
-        - dont need check exists key 
-        - multiple substr converted to any()
+        Check whether the attribute value contains the substring.
+        - No need to check key presence.
+        - Multiple substrings convert to any().
         examples:
         ```
         attr-contains "class" "btn-"
@@ -1340,9 +1585,9 @@ class Visitor:
         TYPES:
             - DOCUMENT
 
-        check if attr key starts substring
-        - dont need check exists key 
-        - multiple substr converted to any()
+        Check whether the attribute value starts with the substring.
+        - No need to check key presence.
+        - Multiple substrings convert to any().
         examples:
         ```
         attr-starts "class" "btn-"
@@ -1365,17 +1610,17 @@ class Visitor:
         TYPES:
             - DOCUMENT
 
-        check if attr key ends substring
-        - dont need check exists key 
-        - multiple substr converted to any()
+        Check whether the attribute value ends with the substring.
+        - No need to check key presence.
+        - Multiple substrings convert to any().
         examples:
         ```
-        attr-starts "class" "btn-"
+        attr-ends "class" "btn-"
         // e["class"].endswith("btn-")
         ```
 
         ```
-        attr-starts "class" "btn-" "select-"
+        attr-ends "class" "btn-" "select-"
         // any(e["class"].endswith(v) for v in ["btn-", "select-"])
         ```
         """
@@ -1388,9 +1633,9 @@ class Visitor:
         TYPES:
             - DOCUMENT
 
-        check if attr key equal value
-        - dont need check exists key 
-        - multiple substr converted to any()
+        Check whether the attribute value equals the value.
+        - No need to check key presence.
+        - Multiple values convert to any().
         examples:
         ```
         attr-eq "class" "btn"
@@ -1400,8 +1645,6 @@ class Visitor:
         ```
         attr-eq "class" "btn" "select"
         // any(e["class"] == v for v in ["btn-", "select-"])
-        ```
-
         """
 
     @abstractmethod
@@ -1412,20 +1655,20 @@ class Visitor:
         TYPES:
             - DOCUMENT
 
-        check if attr key equal value
-        - dont need check exists key 
-        - multiple substr converted to all()
+        Check whether the attribute value differs from the value.
+        - No need to check key presence.
+        - Multiple values convert to all().
         examples:
         ```
-        attr-eq "class" "btn"
+        attr-ne "class" "btn"
         // e["class"] != "btn"
         ```
 
         ```
-        attr-eq "class" "btn" "select"
+        attr-ne "class" "btn" "select"
         // all(e["class"] != v for v in ["btn-", "select-"])
         """
-    
+
     @abstractmethod
     def visit_predicate_attr_re(self, node: PredAttrRe, ctx: ConverterContext):
         """
@@ -1434,8 +1677,8 @@ class Visitor:
         TYPES:
             - DOCUMENT
 
-        check if attr key match by regex
-        - dont need check exists key 
+        Check whether the attribute value matches the regex.
+        - No need to check key presence.
 
         example:
 
@@ -1455,8 +1698,8 @@ class Visitor:
         TYPES:
             - DOCUMENT
 
-        check if element text contains substr
-        - multiple substr converted to any()
+        Check whether the element text contains the substring.
+        - Multiple substrings convert to any().
 
         example:
 
@@ -1467,7 +1710,7 @@ class Visitor:
 
         ```
         text-contains "docs" "foo"
-        // any(v in e.text for v in ["docs", "foo"]) 
+        // any(v in e.text for v in ["docs", "foo"])
         ```
         """
 
@@ -1481,8 +1724,8 @@ class Visitor:
         TYPES:
             - DOCUMENT
 
-        check if element text starts substr
-        - multiple substr converted to any()
+        Check whether the element text starts with the substring.
+        - Multiple substrings convert to any().
 
         example:
 
@@ -1493,7 +1736,7 @@ class Visitor:
 
         ```
         text-starts "docs" "foo"
-        // any(e.text.startswith(v) for v in ["docs", "foo"]) 
+        // any(e.text.startswith(v) for v in ["docs", "foo"])
         ```
         """
 
@@ -1507,8 +1750,8 @@ class Visitor:
         TYPES:
             - DOCUMENT
 
-        check if element text ends substr
-        - multiple substr converted to any()
+        Check whether the element text ends with the substring.
+        - Multiple substrings convert to any().
 
         example:
 
@@ -1519,7 +1762,7 @@ class Visitor:
 
         ```
         text-ends "docs" "foo"
-        // any(e.text.endswith(v) for v in ["docs", "foo"]) 
+        // any(e.text.endswith(v) for v in ["docs", "foo"])
         ```
         """
 
@@ -1531,7 +1774,7 @@ class Visitor:
         TYPES:
             - DOCUMENT
 
-        check if element text match pattern
+        Check whether the element text matches the pattern.
 
         example:
 
@@ -1552,8 +1795,8 @@ class Visitor:
         TYPES:
             - STRING
 
-        check if string contains value(s)
-        - multiple substr converted to any()
+        Check whether the string contains the value(s).
+        - Multiple substrings convert to any().
 
         examples:
         ```
@@ -1575,9 +1818,9 @@ class Visitor:
         TYPES:
             - STRING
 
-        check if string equal value(s)
-        - if passed single integer - compare by len
-        - multiple substr converted to any()
+        Check whether the string equals the value(s).
+        - If a single integer is passed, compare by length.
+        - Multiple substrings convert to any().
 
         examples:
         ```
@@ -1604,9 +1847,9 @@ class Visitor:
         TYPES:
             - STRING
 
-        check if string contains value(s)
-        - if passed single integer - compare by len
-        - multiple substr converted to all()
+        Check whether the string differs from the value(s).
+        - If a single integer is passed, compare by length.
+        - Multiple values convert to all().
 
         examples:
         ```
@@ -1621,7 +1864,7 @@ class Visitor:
 
         ```
         ne "a" "b"
-        // all(v in e for v in ["a", "b"])
+        // all(e != v for v in ["a", "b"])
         ```
         """
 
@@ -1633,8 +1876,8 @@ class Visitor:
         TYPES:
             - STRING
 
-        check if string starts value(s)
-        - multiple values converted to any()
+        Check whether the string starts with the value(s).
+        - Multiple values convert to any().
 
         examples:
         ```
@@ -1653,8 +1896,8 @@ class Visitor:
         TYPES:
             - STRING
 
-        check if string ends value(s)
-        - multiple values converted to any()
+        Check whether the string ends with the value(s).
+        - Multiple values convert to any().
 
         examples:
         ```
@@ -1673,7 +1916,7 @@ class Visitor:
         TYPES:
             - STRING
 
-        check string pattern match
+        Check whether the string matches the pattern.
 
         example:
 
@@ -1688,7 +1931,7 @@ class Visitor:
         """
         kdl:`in <values...>`
         """
-        
+
     @abstractmethod
     def visit_predicate_ge(self, node: PredGe, ctx: ConverterContext):
         # TODO: remove, use len-ge
@@ -1705,7 +1948,7 @@ class Visitor:
         # TODO: remove, use len-gt
         """
         kdl:`gt`
-        
+
         - `>`
         - used in `assert` only expr
         - compare by len (string or array-like expr)
@@ -1733,7 +1976,7 @@ class Visitor:
         - compare by len (string or array-like expr)
         """
 
-    # === logic len ===
+    # === LOGIC LEN ===
     @abstractmethod
     def visit_predicate_re_all(self, node: PredReAll, ctx: ConverterContext):
         """
@@ -1742,8 +1985,8 @@ class Visitor:
         TYPES:
             - STRING[] -> STRING[]
 
-        - accept STRING(array=true)
-        - should be all strings matched by pattern
+        - Accepts STRING(array=true).
+        - All strings must match the pattern.
         """
 
     @abstractmethod
@@ -1754,8 +1997,8 @@ class Visitor:
         TYPES:
             - STRING[] -> STRING[]
 
-        - accept STRING(array=true)
-        - should be any string matched by pattern
+        - Accepts STRING(array=true).
+        - At least one string must match the pattern.
         """
 
     @abstractmethod
@@ -1854,4 +2097,17 @@ class Visitor:
             - STRING -> STRING
 
         - START > len > END
+        """
+
+    @abstractmethod
+    def visit_pred_range(self, node: PredRange, ctx: ConverterContext):
+        """
+        kdl:`range <start> <end>`
+
+        TYPES:
+            - STRING -> STRING
+
+        - assert-only expression.
+        - START < len < END (compared by string/array length).
+        - Shortcut for PredGt + PredLt.
         """
