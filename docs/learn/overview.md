@@ -14,6 +14,5 @@
 - [05. Проверка селекторов (`ssc-gen health`)](05-health.md)
 - [06. Рецепты](06-recipes.md)
 - [07. Define (переиспользование)](07-define.md)
-- [08. Transform и DSL](08-extensions.md)
-- [09. Imports](09-imports.md)
-- [10. @request — встроенный HTTP конструктор](10-request.md)
+- [08. Imports](09-imports.md)
+- [09. @request — встроенный HTTP конструктор](10-request.md)

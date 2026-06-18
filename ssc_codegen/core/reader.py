@@ -17,7 +17,6 @@ from ssc_codegen.core.module_handler import (
     handle_define,
     handle_json,
     handle_struct,
-    handle_transform,
     resolve_imports,
 )
 
@@ -58,12 +57,10 @@ def parse_module(
     diagnostics.extend(lint_cross_refs(top_nodes, str(source_path or "")))
 
     try:
-        # pass 4 — collect defines and transforms
+        # pass 4 — collect defines
         for node in top_nodes:
             if node.name == "define":
                 handle_define(node, ctx, lint)
-            elif node.name == "transform":
-                handle_transform(node, ctx, lint)
 
         # pass 5 — build module
         module = Module()
@@ -73,30 +70,21 @@ def parse_module(
         for node in top_nodes:
             lint.push(node.name)
             if node.name == "@doc":
-                module.docstring.value = str(node.args[0].value)
+                module.doc = str(node.args[0].value)
             elif node.name == "json":
                 handle_json(node, module, ctx, lint)
             elif node.name == "struct":
                 struct = handle_struct(node, module, ctx, lint)
                 typedefs.append(typedef_from_struct(struct, module))
                 structs.append(struct)
-            elif node.name in ("define", "transform", "import"):
+            elif node.name in ("define", "import"):
                 pass  # already handled
             else:
                 pass  # already reported by structural linter
             lint.pop()
 
-        # wire transforms
-        for td in ctx.transforms.values():
-            td.parent = module
-
         # wire module body
-        module.body.extend(
-            list(ctx.json_defs.values())
-            + list(ctx.transforms.values())
-            + typedefs
-            + structs
-        )
+        module.body.extend(list(ctx.json_defs.values()) + typedefs + structs)
 
         # merge lint diagnostics into walker diagnostics
         diagnostics.extend(lint.diagnostics)

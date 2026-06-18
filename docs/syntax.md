@@ -8,7 +8,7 @@ HTML/XML. Файл `.kdl` состоит из модульных объявле�
 
 ## Базовые понятия
 
-- **Module** — файл с объявлениями `import`, `define`, `json`, `transform`, `dsl`, `struct`.
+- **Module** — файл с объявлениями `import`, `define`, `json`, `struct`.
 - **Struct** — структура результата.
 - **Field** — поле структуры с pipeline операций.
 - **Pipeline** — цепочка операций преобразования.
@@ -35,7 +35,7 @@ import "./shared.kdl" { Book PriceTransform }
 - Путь разрешается относительно текущего файла.
 - Разрешены селективные импорты через блок `{ Name1 Name2 }`.
 - Конфликты имен запрещены.
-- Импортируются `define`, `transform`, `dsl`, `json`, `struct`.
+- Импортируются `define`, `json`, `struct`.
 - Импорт транзитивный: если `A` импортирует `B`, а `B` импортирует `C`, то `A` видит `C`.
 - Циклические импорты запрещены.
 - Импорт работает только при парсинге из файла (нужен путь для резолва).
@@ -114,14 +114,6 @@ price { text; re RE-PRICE; to-float }
 ### json
 
 Объявление JSON схем. См. [json.md](json.md).
-
-### transform
-
-Мультиязычные трансформации. См. [transforms.md](transforms.md).
-
-### dsl
-
-Именованные inline-блоки кода для одного языка. См. [transforms.md](transforms.md).
 
 ### struct
 

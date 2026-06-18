@@ -61,8 +61,6 @@ from ssc_codegen.ast import (
     ToBool,
     ToFloat,
     ToInt,
-    TransformCall,
-    TransformTarget,
     Trim,
     TypeDef,
     TypeDefField,
@@ -192,7 +190,7 @@ _VAR_TYPE_MAP: dict[str, VariableType] = {
     "DOCUMENT": VariableType.DOCUMENT,
     "NESTED": VariableType.NESTED,
     "JSON": VariableType.JSON,
-    # Backward compat for transform DSL — map to base types
+    # LIST_*/OPT_* aliases — map to base scalar types
     "LIST_STRING": VariableType.STRING,
     "LIST_INT": VariableType.INT,
     "LIST_FLOAT": VariableType.FLOAT,
@@ -1123,39 +1121,4 @@ def _expr_match(
 ):
     return Match(
         parent=parent, accept=VariableType.DOCUMENT, ret=VariableType.STRING
-    )
-
-
-@_reg_expr("transform")
-def _expr_transform(
-    node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
-):
-    name = str(node.args[0].value)
-    if name not in ctx.transforms:
-        raise BuildTimeError(f"transform '{name}' is not defined")
-    transform_def = ctx.transforms[name]
-    prev_type = parent.body[-1].ret
-    if prev_type != transform_def.accept:
-        raise BuildTimeError(
-            f"transform '{name}': pipeline type {prev_type.name!r} "
-            f"does not match accept type {transform_def.accept.name!r}"
-        )
-    current: AstNode | None = parent
-    while current and not isinstance(current, Module):
-        current = current.parent
-    if isinstance(current, Module):
-        for target in transform_def.body:
-            assert isinstance(target, TransformTarget)
-            if target.lang not in current.imports.transform_imports:
-                current.imports.transform_imports[target.lang] = set()
-            current.imports.transform_imports[target.lang].update(
-                target.imports
-            )
-    return TransformCall(
-        parent=parent,
-        name=name,
-        accept=transform_def.accept,
-        ret=transform_def.ret,
-        is_array=transform_def.is_array,
-        transform_def=transform_def,
     )

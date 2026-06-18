@@ -121,8 +121,7 @@ title {
 | `match { ... }` | выбор строки в `type=table` |
 | `fallback <value>|{}` | значение по умолчанию |
 | `@name` / `self name` | ссылка на `@init` значение |
-| `transform <Name>` | вызов transform |
-| `expr <Name>` | вызов `dsl` блока или блочного define |
+| `expr <Name>` | вызов блочного define |
 
 Ключевые правила:
 - `match` обязателен для полей `type=table` и должен быть первой операцией.

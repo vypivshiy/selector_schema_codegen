@@ -66,15 +66,6 @@ class DefineInfo:
     node: KdlNode
 
 
-@dataclass
-class TransformInfo:
-    name: str
-    accept: str
-    ret: str
-    langs: list[str]
-    node: KdlNode
-
-
 # ── Parse context ───────────────────────────────────────────────────────────────
 
 
@@ -84,7 +75,6 @@ class ParseContext:
         default_factory=dict
     )
     children_defines: dict[str, list[KdlNode]] = field(default_factory=dict)
-    transforms: dict[str, TransformDef] = field(default_factory=dict)
     structs: dict[str, Struct] = field(default_factory=dict)
     json_defs: dict[str, JsonDef] = field(default_factory=dict)
     source_path: Path | None = None
@@ -93,7 +83,6 @@ class ParseContext:
         return (
             set(self.property_defines)
             | set(self.children_defines)
-            | set(self.transforms)
             | set(self.structs)
             | set(self.json_defs)
         )
@@ -107,7 +96,6 @@ class LintContext:
     """Lint state for reader-side validation (type inference, per-op checks)."""
 
     defines: dict[str, DefineInfo] = field(default_factory=dict)
-    transforms: dict[str, TransformInfo] = field(default_factory=dict)
     init_fields: set[str] = field(default_factory=set)
     walk_context: WalkCtx = WalkCtx.MODULE
     _path_segments: list[str] = field(default_factory=list)
@@ -193,5 +181,4 @@ class LintContext:
 from ssc_codegen.ast import (  # noqa: E402
     JsonDef,
     Struct,
-    TransformDef,
 )

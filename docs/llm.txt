@@ -10,7 +10,7 @@ Pipeline: .kdl schema -> kdl parser -> AST -> linter -> converter -> output code
 
 A .kdl file contains module-level declarations and struct definitions.
 
-Module-level: import, define, json, transform, dsl, struct.
+Module-level: import, define, json, struct.
 
 ## import
 
@@ -181,8 +181,6 @@ Pattern-match rules:
 - fallback <value> — default value on error; fallback #null makes type optional
 - fallback {} — empty list fallback, LIST_* only
 - @name / self name — reference @init value (self is deprecated)
-- transform <Name> — call named transform
-- expr <Name> — call dsl block or block define
 
 ## Type system
 
@@ -293,38 +291,6 @@ json Pet {
     adopted bool
 }
 ```
-
-## transform
-
-Multi-language custom code:
-
-```kdl
-transform to-base64 accept=STRING return=STRING {
-    py {
-        import "from base64 import b64decode"
-        code "{{NXT}} = str(b64decode({{PRV}}))"
-    }
-    js {
-        code "const {{NXT}} = btoa({{PRV}});"
-    }
-}
-```
-
-accept and return are required. Cannot be AUTO or LIST_AUTO.
-Markers: {{PRV}} (input), {{NXT}} (output).
-
-## dsl
-
-Single-language inline code block:
-
-```kdl
-dsl upper-py lang=py {
-    code "{{NXT}} = {{PRV}}.upper()"
-}
-```
-
-lang is required. accept and return are optional.
-Called via: expr <Name>.
 
 ## @request
 

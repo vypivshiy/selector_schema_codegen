@@ -16,7 +16,7 @@ KDL schema -> AST -> converter -> generated source code
 - модули и импорты;
 - объявления типов и структур;
 - реализацию pipeline операций;
-- вызовы nested/jsonify/transform;
+- вызовы nested/jsonify;
 - интеграцию с runtime DOM API.
 
 Конвертер не отвечает за:

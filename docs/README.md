@@ -16,7 +16,6 @@
 - [Операции pipeline](operations.md)
 - [Предикаты и логика](predicates.md)
 - [JSON схемы и `jsonify`](json.md)
-- [Transforms и `dsl` блоки](transforms.md)
 - [@request — встроенный HTTP конструктор](learn/10-request.md)
 - [LLM-компактная справка](llm.txt) — полная спецификация DSL в одном файле для контекста LLM
 - Для мейнтейнеров: [Правила линтера](maintainers/linter.md)

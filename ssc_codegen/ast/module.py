@@ -1,5 +1,6 @@
 from __future__ import annotations
-from dataclasses import dataclass, field
+import warnings
+from dataclasses import dataclass
 
 from .base import Node
 
@@ -9,17 +10,23 @@ class Module(Node):
     """
     Root node.
     Build order of body:
-      CodeStartHook → Docstring, Imports, ImportsRest, Utilities
+      Utilities, CodeStartHook
       → JsonDef entries → TypeDef entries → Struct entries
       → CodeEndHook
+
+    The module-level docstring lives in the ``doc`` field and is always
+    emitted first by the converter (before any body traversal).
+
+    Import statements are no longer AST body nodes — the converter emits
+    them directly from the ``visit_module`` handler based on module shape
+    (REST present, REST-only, separate runtime) and build options.
     """
+
+    doc: str = ""
 
     def __post_init__(self):
         self.body.extend(
             [
-                Docstring(parent=self),
-                Imports(parent=self),
-                ImportsRest(parent=self),
                 Utilities(parent=self),
                 CodeStartHook(parent=self),
             ]
@@ -27,23 +34,29 @@ class Module(Node):
 
     @property
     def docstring(self) -> Docstring:
-        return self.body[0]  # type: ignore
+        warnings.warn(
+            "Module.docstring is deprecated; use the Module.doc field instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return Docstring(parent=self, value=self.doc)
 
-    @property
-    def imports(self) -> Imports:
-        return self.body[1]  # type: ignore
-
-    @property
-    def imports_rest(self) -> ImportsRest:
-        return self.body[2]  # type: ignore
+    @docstring.setter
+    def docstring(self, value: "Docstring | str") -> None:
+        warnings.warn(
+            "Module.docstring is deprecated; use the Module.doc field instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        self.doc = value.value if isinstance(value, Docstring) else str(value)
 
     @property
     def utilities(self) -> Utilities:
-        return self.body[3]  # type: ignore
+        return self.body[0]  # type: ignore
 
     @property
     def code_start(self) -> CodeStartHook:
-        return self.body[4]  # type: ignore
+        return self.body[1]  # type: ignore
 
 
 @dataclass
@@ -68,34 +81,22 @@ class CodeEndHook(Node):
 
 @dataclass
 class Docstring(Node):
-    """Module-level docstring. DSL: doc "text" """
+    """DEPRECATED: use the ``doc`` field on ``Module`` instead.
+
+    Module-level docstring. DSL: ``doc "text"``.
+    Retained only for backward-compatibility imports; the class emits a
+    DeprecationWarning on instantiation and is no longer added to
+    ``Module.body`` by ``Module.__post_init__``.
+    """
 
     value: str = ""
 
-
-@dataclass
-class Imports(Node):
-    """
-    Technical node — codegen inserts required import statements into body.
-    Not produced from DSL directly; populated during codegen phase.
-
-    transform_imports: Dict of imports by target language (e.g., {"py": {...}, "js": {...}})
-                       Collected during parsing when TransformCall nodes are created.
-    """
-
-    libs: list[str] = field(default_factory=list)
-    transform_imports: dict[str, set[str]] = field(default_factory=dict)
-
-
-@dataclass
-class ImportsRest(Node):
-    """
-    Technical node — REST-specific import statements.
-    Emitted only when the module contains at least one StructRest.
-    Populated during codegen phase.
-    """
-
-    libs: list[str] = field(default_factory=list)
+    def __post_init__(self) -> None:
+        warnings.warn(
+            "Docstring node is deprecated; use Module.doc instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
 
 @dataclass

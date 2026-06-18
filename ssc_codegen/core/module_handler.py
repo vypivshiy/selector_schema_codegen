@@ -1,4 +1,4 @@
-"""Module-level handlers — struct, json, define, transform, imports."""
+"""Module-level handlers — struct, json, define, imports."""
 
 from __future__ import annotations
 
@@ -14,8 +14,6 @@ from ssc_codegen.ast import (
     StructDict,
     StructTable,
     StructRest,
-    TransformDef,
-    TransformTarget,
 )
 from ssc_codegen.exceptions import BuildTimeError
 from kdlquery import KdlNode, parse as kdl_parse
@@ -26,12 +24,8 @@ from ssc_codegen.core.contexts import (
     DefineInfo,
     LintContext,
     ParseContext,
-    TransformInfo,
 )
-from ssc_codegen.core.expressions import (
-    _resolve_define_references,
-    _VAR_TYPE_MAP,
-)
+from ssc_codegen.core.expressions import _resolve_define_references
 from ssc_codegen.core.struct_parser import parse_json_fields, parse_struct
 
 _KDL_TEXT_ENCODING = "utf-8-sig"
@@ -95,61 +89,6 @@ def handle_define(node: KdlNode, ctx: ParseContext, lint: LintContext) -> None:
             lint.defines[k] = DefineInfo(
                 name=k, kind=DefineKind.SCALAR, value=str(value), node=node
             )
-
-
-def handle_transform(
-    node: KdlNode, ctx: ParseContext, lint: LintContext
-) -> None:
-    name = str(node.args[0].value) if node.args else ""
-    accept_str = node.get_prop("accept") or ""
-    ret_str = node.get_prop("return") or ""
-    if accept_str not in _VAR_TYPE_MAP:
-        lint.error(
-            node,
-            message=f"transform '{name}': invalid accept type '{accept_str}' (AUTO not allowed)",
-            code="E002",
-        )
-        return
-    if ret_str not in _VAR_TYPE_MAP:
-        lint.error(
-            node,
-            message=f"transform '{name}': invalid return type '{ret_str}' (AUTO not allowed)",
-            code="E002",
-        )
-        return
-    accept_type = _VAR_TYPE_MAP[accept_str]
-    ret_type = _VAR_TYPE_MAP[ret_str]
-    # Detect list context from the original DSL type name strings
-    ret_is_array = ret_str.startswith("LIST_")
-    transform_def = TransformDef(
-        name=name, accept=accept_type, ret=ret_type, is_array=ret_is_array
-    )
-    for lang_node in node.children:
-        lang = lang_node.name
-        imports: list[str] = []
-        code: list[str] = []
-        for item in lang_node.children:
-            if item.name == "import":
-                imports.extend(str(a.value) for a in item.args)
-            elif item.name == "code":
-                code.extend(str(a.value) for a in item.args)
-        transform_def.body.append(
-            TransformTarget(
-                parent=transform_def,
-                lang=lang,
-                imports=tuple(imports),
-                code=tuple(code),
-            )
-        )
-    ctx.transforms[name] = transform_def
-    lang_nodes = node.children
-    lint.transforms[name] = TransformInfo(
-        name=name,
-        accept=accept_str,
-        ret=ret_str,
-        langs=[n.name for n in lang_nodes],
-        node=node,
-    )
 
 
 def resolve_imports(
@@ -249,7 +188,7 @@ def resolve_imports(
         for n in imported_nodes:
             if n.name == "struct":
                 imported_names.add(str(n.args[0].value))
-            elif n.name in ("json", "define", "transform"):
+            elif n.name in ("json", "define"):
                 imported_names.add(str(n.args[0].value) if n.args else "")
         for n in result:
             if n.name == "struct" and str(n.args[0].value) in imported_names:

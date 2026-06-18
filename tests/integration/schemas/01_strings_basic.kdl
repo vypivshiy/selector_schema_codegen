@@ -9,15 +9,6 @@ define STRIP-URL {
     rm-suffix ".html"
 }
 
-transform wrap-string accept=STRING return=STRING {
-    py {
-        code "{{NXT}} = 'wrapped<' + {{PRV}} + '>'"
-    }
-    js {
-        code "let {{NXT}} = 'wrapped<' + {{PRV}} + '>';"
-    }
-}
-
 (list)struct StringsBasic {
     @pre-validate {
         assert {
@@ -42,7 +33,6 @@ transform wrap-string accept=STRING return=STRING {
         trim
         normalize-space
         repl "foo" "bar"
-        transform wrap-string
     }
 
     link {

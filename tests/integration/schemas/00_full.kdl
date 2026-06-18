@@ -46,33 +46,6 @@ define ONLY-VISIBLE-LINKS {
     }
 }
 
-transform wrap-string accept=STRING return=STRING {
-    py {
-        code "{{NXT}} = 'wrapped<' + {{PRV}} + '>'"
-    }
-    js {
-        code "let {{NXT}} = 'wrapped<' + {{PRV}} + '>';"
-    }
-}
-
-transform list-identity accept=LIST_STRING return=LIST_STRING {
-    py {
-        code "{{NXT}} = [i for i in {{PRV}}]"
-    }
-    js {
-        code "let {{NXT}} = {{PRV}}.map(i => i);"
-    }
-}
-
-transform plus-one accept=INT return=INT {
-    py {
-        code "{{NXT}} = {{PRV}} + 1"
-    }
-    js {
-        code "let {{NXT}} = {{PRV}} + 1;"
-    }
-}
-
 json JsonAuthor {
     name str
     slug str
@@ -104,7 +77,7 @@ struct TinyItem {
 }
 
 (list)struct CardList {
-    @doc "List coverage: selectors, extraction, string ops, array ops, filters, assertions, transforms."
+    @doc "List coverage: selectors, extraction, string ops, array ops, filters, assertions."
 
     @pre-validate {
         assert {
@@ -129,7 +102,6 @@ struct TinyItem {
         trim
         normalize-space
         repl "foo" "bar"
-        transform wrap-string
     }
 
     link {
@@ -166,7 +138,6 @@ struct TinyItem {
             re-all RE-WORD
             re-any RE-HAS-DIGIT
         }
-        transform list-identity
         fallback {}
     }
 
@@ -232,7 +203,6 @@ struct TinyItem {
         text
         re RE-DIGITS
         to-int
-        transform plus-one
         fallback 0
     }
 

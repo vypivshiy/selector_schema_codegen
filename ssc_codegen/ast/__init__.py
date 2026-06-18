@@ -14,8 +14,6 @@ from .module import (
     CodeStartHook,
     CodeEndHook,
     Docstring,
-    Imports,
-    ImportsRest,
     Utilities,
 )
 
@@ -132,8 +130,6 @@ from .predicate_ops import (
     LogicOr,
 )
 
-from .transform import TransformDef, TransformTarget, TransformCall
-
 __all__ = [
     # types
     "VariableType", "StructType", "TypeInfo", "VT",
@@ -141,7 +137,7 @@ __all__ = [
     "Node",
     # module
     "Module", "CodeStartHook", "CodeEndHook",
-    "Docstring", "Imports", "ImportsRest", "Utilities",
+    "Docstring", "Utilities",
     # typedef
     "TypeDef", "TypeDefField",
     # jsondef
@@ -188,6 +184,4 @@ __all__ = [
     "PredCountEq", "PredCountGt", "PredCountLt",
     "PredCountNe", "PredCountGe", "PredCountLe", "PredCountRange",
     "LogicNot", "LogicAnd", "LogicOr",
-    # transform
-    "TransformDef", "TransformTarget", "TransformCall",
 ]

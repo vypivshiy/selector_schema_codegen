@@ -5,7 +5,6 @@ from __future__ import annotations
 import difflib as _difflib
 import re as _re
 
-from ssc_codegen.ast import VariableType
 from ssc_codegen.ast.struct import PLACEHOLDER_RE, PLACEHOLDER_WIDE_RE
 from kdlquery import KdlDocument, KdlNode, ReadDiagnostic, Severity
 
@@ -97,21 +96,6 @@ _RESERVED_ALLOWED: dict[str, frozenset[str] | None] = {
 _VALID_JSON_MODIFIERS = frozenset({"@skip", "@omitempty"})
 _VALID_JSON_TYPES = frozenset({"str", "int", "float", "bool", "null", "nil"})
 
-_VALID_TRANSFORM_TYPES = frozenset(
-    {t.name for t in VariableType if t.name != "AUTO"}
-) | frozenset(
-    {
-        "LIST_STRING",
-        "LIST_INT",
-        "LIST_FLOAT",
-        "LIST_DOCUMENT",
-        "LIST_AUTO",
-        "OPT_STRING",
-        "OPT_INT",
-        "OPT_FLOAT",
-    }
-)
-
 _DEFINE_NAME_RE = _re.compile(r"^[A-Z_][A-Z0-9_-]*\Z")
 
 _NO_ARGS_OPS: frozenset[str] = frozenset(
@@ -142,7 +126,6 @@ _PREDICATE_BLOCKS: frozenset[str] = frozenset(
 
 _EXTRA_PIPELINE_OPS: frozenset[str] = frozenset(
     {
-        "transform",
         "filter",
         "assert",
         "match",
@@ -202,7 +185,6 @@ def lint_module(
     children_defines: dict[str, list[KdlNode]] = {}
     _lint_top_level(doc, source_path, diags)
     _lint_defines(doc, source_path, diags, children_defines)
-    _lint_transforms(doc, source_path, diags)
     _lint_json_defs(doc, source_path, diags, children_defines)
     _lint_structs(doc, source_path, diags, children_defines)
     return diags
@@ -213,9 +195,7 @@ def _lint_top_level(
     source_path: str,
     diags: list[ReadDiagnostic],
 ) -> None:
-    for node in doc.select(
-        ":root:not(@doc, json, struct, define, transform, import)"
-    ):
+    for node in doc.select(":root:not(@doc, json, struct, define, import)"):
         diags.append(
             _error(
                 node,
@@ -269,128 +249,6 @@ def _lint_defines(
                     code="E001",
                 )
             )
-
-
-def _lint_transforms(
-    doc: KdlDocument,
-    source_path: str,
-    diags: list[ReadDiagnostic],
-) -> None:
-    for node in doc.select("transform:root"):
-        accept_str = node.get_prop("accept")
-        ret_str = node.get_prop("return")
-        lang_nodes = list(node.children)
-        is_definition = bool(accept_str or ret_str or lang_nodes)
-        if not is_definition:
-            continue
-
-        args = _node_args(node)
-        if not args:
-            diags.append(
-                _error(
-                    node,
-                    "'transform' requires a name",
-                    source_path,
-                    code="E001",
-                )
-            )
-            continue
-        name = args[0]
-
-        if not accept_str:
-            diags.append(
-                _error(
-                    node,
-                    f"'transform {name}' missing required property 'accept'",
-                    source_path,
-                    code="E001",
-                )
-            )
-        elif accept_str not in _VALID_TRANSFORM_TYPES:
-            diags.append(
-                _error(
-                    node,
-                    f"'transform {name}': invalid accept type '{accept_str}' (AUTO not allowed)",
-                    source_path,
-                    code="E001",
-                )
-            )
-
-        if not ret_str:
-            diags.append(
-                _error(
-                    node,
-                    f"'transform {name}' missing required property 'return'",
-                    source_path,
-                    code="E001",
-                )
-            )
-        elif ret_str not in _VALID_TRANSFORM_TYPES:
-            diags.append(
-                _error(
-                    node,
-                    f"'transform {name}': invalid return type '{ret_str}' (AUTO not allowed)",
-                    source_path,
-                    code="E001",
-                )
-            )
-
-        if not lang_nodes:
-            diags.append(
-                _error(
-                    node,
-                    f"'transform {name}' has no language implementations",
-                    source_path,
-                    code="E001",
-                )
-            )
-            continue
-
-        for lang_node in lang_nodes:
-            lang = lang_node.name
-            if not lang:
-                continue
-            code_nodes = lang_node.select("code")
-            has_code = bool(code_nodes)
-            for code_node in code_nodes:
-                if not _node_args(code_node):
-                    diags.append(
-                        _error(
-                            code_node,
-                            f"'transform {name}' > '{lang}' > 'code' requires a string argument",
-                            source_path,
-                            code="E001",
-                        )
-                    )
-            for import_node in lang_node.select("import"):
-                if not _node_args(import_node):
-                    diags.append(
-                        _error(
-                            import_node,
-                            f"'transform {name}' > '{lang}' > 'import' requires a string argument",
-                            source_path,
-                            code="E001",
-                        )
-                    )
-            for impl_node in lang_node.select("*"):
-                if impl_node.name not in ("code", "import"):
-                    diags.append(
-                        _error(
-                            impl_node,
-                            f"'transform {name}' > '{lang}': unknown keyword '{impl_node.name}'",
-                            source_path,
-                            code="E200",
-                        )
-                    )
-            if not has_code:
-                diags.append(
-                    _error(
-                        lang_node,
-                        f"'transform {name}' > '{lang}' has no 'code' statement",
-                        source_path,
-                        code="E001",
-                    )
-                )
 
 
 def _lint_json_defs(
@@ -1475,7 +1333,6 @@ def lint_wildcard_op(
     candidates = sorted(
         _KNOWN_OPS
         | {k for k, v in lint.defines.items() if v.kind == DefineKind.BLOCK}
-        | set(lint.transforms)
     )
     suggestions = _difflib.get_close_matches(
         op_name, candidates, n=3, cutoff=0.6

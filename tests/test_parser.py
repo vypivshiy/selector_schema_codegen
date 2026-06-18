@@ -30,8 +30,6 @@ from ssc_codegen.ast import (
     TableMatchKey,
     TableRow,
     Text,
-    TransformCall,
-    TransformDef,
     TypeDef,
     Value,
 )
@@ -44,7 +42,6 @@ from kdlquery import KDL2CSTParser, KDLParseError, Severity
 EXAMPLES = [
     Path("examples/booksToScrape.kdl"),
     Path("examples/quotesToScrape.kdl"),
-    Path("examples/transformExample.kdl"),
     Path("examples/imdbcom.kdl"),
 ]
 
@@ -162,57 +159,6 @@ def test_parser_builds_expected_counts_for_quotes_example():
     assert len(json_defs) == 2
     assert len(typedefs) == 1
     assert structs[0].name == "Main"
-
-
-def test_parser_builds_transform_defs_and_transform_calls():
-    module = _parse_example("examples/transformExample.kdl")
-
-    transforms = _body_of_type(module.body, TransformDef)
-    assert [t.name for t in transforms] == [
-        "to-base64",
-        "to-list-base64",
-        "pow2",
-    ]
-    assert [t.accept for t in transforms] == [
-        VariableType.STRING,
-        VariableType.LIST_STRING,
-        VariableType.INT,
-    ]
-    assert [t.ret for t in transforms] == [
-        VariableType.STRING,
-        VariableType.LIST_STRING,
-        VariableType.INT,
-    ]
-
-    first_targets = transforms[0].body
-    assert [type(t).__name__ for t in first_targets] == [
-        "TransformTarget",
-        "TransformTarget",
-    ]
-    assert [t.lang for t in first_targets] == ["py", "js"]
-    assert first_targets[0].imports == ("from base64 import b64decode",)
-    assert first_targets[0].code == ("{{NXT}} = str(b64decode({{PRV}}))",)
-
-    main = _struct(module, "Main")
-    titleb64 = _field(main, "titleb64")
-    urlsb64 = _field(main, "urlsb64")
-    pow2_field = _field(main, "urls-len-pow2")
-
-    assert isinstance(titleb64.body[-2], TransformCall)
-    assert titleb64.body[-2].name == "to-base64"
-    assert titleb64.body[-2].transform_def is transforms[0]
-    assert titleb64.body[-2].accept == VariableType.STRING
-    assert titleb64.body[-2].ret == VariableType.STRING
-
-    assert isinstance(urlsb64.body[-2], TransformCall)
-    assert urlsb64.body[-2].name == "to-list-base64"
-    assert urlsb64.body[-2].accept == VariableType.LIST_STRING
-    assert urlsb64.body[-2].ret == VariableType.LIST_STRING
-
-    assert isinstance(pow2_field.body[-2], TransformCall)
-    assert pow2_field.body[-2].name == "pow2"
-    assert pow2_field.body[-2].accept == VariableType.INT
-    assert pow2_field.body[-2].ret == VariableType.INT
 
 
 def test_parser_resolves_jsonify_and_nested_nodes():

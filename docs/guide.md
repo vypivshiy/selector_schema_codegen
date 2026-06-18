@@ -72,6 +72,5 @@ LLM-агент (Claude, ChatGPT и др.) может генерировать и
 См. каталог `examples/` в репозитории:
 - `booksToScrape.kdl`
 - `quotesToScrape.kdl`
-- `transformExample.kdl`
 
 Они отражают актуальные возможности реализации.

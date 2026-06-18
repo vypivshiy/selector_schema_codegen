@@ -8,7 +8,6 @@ from ssc_codegen.ast import VariableType
 from kdlquery import KdlNode
 
 from ssc_codegen.core.contexts import DefineKind, LintContext, ParseContext
-from ssc_codegen.core.expressions import _VAR_TYPE_MAP
 
 
 # ── Op signature ─────────────────────────────────────────────────────────────
@@ -311,35 +310,6 @@ def check_pipeline_types(
                 continue
             current_base = fb_base
             current_is_array = fb_is_array
-            continue
-
-        if op_name == "transform":
-            args = [str(a.value) for a in node.args]
-            t_name = args[0] if args else None
-            if not t_name:
-                lint.error(
-                    node,
-                    message="'transform' call requires a name",
-                    code="E100",
-                )
-                current_base = VariableType.AUTO
-                continue
-            t_info = lint.transforms.get(t_name)
-            if t_info is None:
-                current_base = VariableType.AUTO
-                continue
-            t_accept = _VAR_TYPE_MAP.get(t_info.accept)
-            t_ret = _VAR_TYPE_MAP.get(t_info.ret)
-            if t_accept is not None and not _vt_compatible(
-                current_base, current_is_array, t_accept
-            ):
-                lint.error(
-                    node,
-                    message=f"'transform {t_name}' expects {t_accept.name}, got {current_base.name}",
-                    code="E100",
-                )
-            current_base = t_ret if t_ret is not None else VariableType.AUTO
-            current_is_array = t_info.ret.startswith("LIST_")
             continue
 
         if op_name == "filter":

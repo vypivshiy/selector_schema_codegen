@@ -82,12 +82,3 @@ price {
 ```
 
 `fallback {}` — сахар для пустого списка, разрешен только для LIST_*.
-
-## accept/return в transform и dsl
-
-`transform` требует `accept` и `return` из набора типов, кроме `AUTO` и `LIST_AUTO`.
-
-`dsl` допускает `accept` и `return` только из:
-
-`DOCUMENT`, `LIST_DOCUMENT`, `STRING`, `LIST_STRING`, `INT`, `LIST_INT`, `FLOAT`,
-`LIST_FLOAT`, `BOOL`, `NULL`, `OPT_STRING`, `OPT_INT`, `OPT_FLOAT`.

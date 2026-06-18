@@ -15,24 +15,6 @@ define REPL-STATE {
     }
 }
 
-transform list-identity accept=LIST_STRING return=LIST_STRING {
-    py {
-        code "{{NXT}} = [i for i in {{PRV}}]"
-    }
-    js {
-        code "let {{NXT}} = {{PRV}}.map(i => i);"
-    }
-}
-
-transform plus-one accept=INT return=INT {
-    py {
-        code "{{NXT}} = {{PRV}} + 1"
-    }
-    js {
-        code "let {{NXT}} = {{PRV}} + 1;"
-    }
-}
-
 (list)struct ArraysAndConversions {
     @split-doc {
         css-all CSS-CARD
@@ -58,7 +40,6 @@ transform plus-one accept=INT return=INT {
             re-all RE-WORD
             re-any RE-HAS-DIGIT
         }
-        transform list-identity
         fallback {}
     }
 
@@ -113,7 +94,6 @@ transform plus-one accept=INT return=INT {
         text
         re RE-DIGITS
         to-int
-        transform plus-one
         fallback 0
     }
 
