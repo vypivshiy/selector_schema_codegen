@@ -29,8 +29,8 @@ ssc_codegen/
 │   ├── __init__.py        # Re-exports all node types
 │   ├── base.py            # Node abstract base class
 │   ├── types.py           # VariableType, StructType enums
-│   ├── module.py          # Module, Docstring, Imports, Utilities, CodeStartHook, CodeEndHook
-│   ├── struct.py          # Struct, Field, Init, InitField, PreValidate, SplitDoc, Key, Value, TableConfig, TableRow, TableMatchKey, CheckMethod, StructDocstring, StartParse, RequestConfig, PlaceholderSpec, ErrorResponse
+│   ├── module.py          # Module, Docstring (deprecated), Imports, Utilities, CodeStartHook, CodeEndHook
+│   ├── struct.py          # StructBase (+ doc field), Field, Init, InitField, PreValidate, SplitDoc, Key, Value, TableConfig, TableRow, TableMatchKey, CheckMethod, StructDocstring (deprecated), StartParse, RequestConfig, PlaceholderSpec, ErrorResponse
 │   ├── selectors.py       # CssSelect, CssSelectAll, XpathSelect, XpathSelectAll, CssRemove, XpathRemove
 │   ├── extract.py         # Text, Raw, Attr
 │   ├── string.py          # Trim, Ltrim, Rtrim, NormalizeSpace, RmPrefix, RmSuffix, RmPrefixSuffix, Fmt, Repl, ReplMap, Lower, Upper, Split, Join, Unescape

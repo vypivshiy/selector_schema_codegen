@@ -1,5 +1,6 @@
 from __future__ import annotations
 import re as _re
+import warnings
 from dataclasses import dataclass, field
 from typing import Any
 from typing import cast
@@ -158,6 +159,7 @@ class StructBase(Node):
 
     name: str = ""
     keep_order: bool = False  # StructFlatList-specific
+    doc: str = ""
 
     @property
     def _typedef_type(self) -> StructType:
@@ -165,7 +167,23 @@ class StructBase(Node):
 
     @property
     def docstring(self) -> StructDocstring:
-        return self.body[0]  # type: ignore
+        warnings.warn(
+            "StructBase.docstring is deprecated; use the .doc field instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return StructDocstring(parent=self, value=self.doc)
+
+    @docstring.setter
+    def docstring(self, value: "StructDocstring | str") -> None:
+        warnings.warn(
+            "StructBase.docstring is deprecated; use the .doc field instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        self.doc = (
+            value.value if isinstance(value, StructDocstring) else str(value)
+        )
 
     @property
     def request_config(self) -> MethodBase | None:
@@ -200,10 +218,10 @@ class StructItem(StructBase):
 
     @property
     def init(self) -> Init:
-        return self.body[1]  # type: ignore
+        return self.body[0]  # type: ignore
 
     def __post_init__(self):
-        self.body.extend([StructDocstring(parent=self), Init(parent=self)])
+        self.body.append(Init(parent=self))
 
 
 @dataclass
@@ -216,10 +234,10 @@ class StructList(StructBase):
 
     @property
     def init(self) -> Init:
-        return self.body[1]  # type: ignore
+        return self.body[0]  # type: ignore
 
     def __post_init__(self):
-        self.body.extend([StructDocstring(parent=self), Init(parent=self)])
+        self.body.append(Init(parent=self))
 
 
 @dataclass
@@ -232,10 +250,10 @@ class StructFlatList(StructBase):
 
     @property
     def init(self) -> Init:
-        return self.body[1]  # type: ignore
+        return self.body[0]  # type: ignore
 
     def __post_init__(self):
-        self.body.extend([StructDocstring(parent=self), Init(parent=self)])
+        self.body.append(Init(parent=self))
 
 
 @dataclass
@@ -248,7 +266,7 @@ class StructDict(StructBase):
 
     @property
     def init(self) -> Init:
-        return self.body[1]  # type: ignore
+        return self.body[0]  # type: ignore
 
     @property
     def key(self) -> Key:
@@ -259,7 +277,7 @@ class StructDict(StructBase):
         return [n for n in self.body if isinstance(n, Value)][0]
 
     def __post_init__(self):
-        self.body.extend([StructDocstring(parent=self), Init(parent=self)])
+        self.body.append(Init(parent=self))
 
 
 @dataclass
@@ -272,7 +290,7 @@ class StructTable(StructBase):
 
     @property
     def init(self) -> Init:
-        return self.body[1]  # type: ignore
+        return self.body[0]  # type: ignore
 
     @property
     def table_config(self) -> TableConfig:
@@ -287,7 +305,7 @@ class StructTable(StructBase):
         return [n for n in self.body if isinstance(n, TableMatchKey)][0]
 
     def __post_init__(self):
-        self.body.extend([StructDocstring(parent=self), Init(parent=self)])
+        self.body.append(Init(parent=self))
 
 
 @dataclass
@@ -299,7 +317,7 @@ class StructRest(StructBase):
         return StructType.REST
 
     def __post_init__(self):
-        self.body.append(StructDocstring(parent=self))
+        pass
 
 
 # Backward-compatible alias
@@ -311,9 +329,22 @@ Struct = StructBase
 
 @dataclass
 class StructDocstring(Node):
-    """DSL: -doc "text" """
+    """DEPRECATED: use the ``doc`` field on ``StructBase`` instead.
+
+    DSL: ``-doc "text"`` (struct-level documentation).
+    Retained only for backward-compatibility imports; the class emits a
+    DeprecationWarning on instantiation and is no longer added to struct
+    bodies by ``Struct*.__post_init__``.
+    """
 
     value: str = ""
+
+    def __post_init__(self) -> None:
+        warnings.warn(
+            "StructDocstring node is deprecated; use StructBase.doc instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
 
 @dataclass

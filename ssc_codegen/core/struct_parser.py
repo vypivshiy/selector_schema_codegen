@@ -50,7 +50,7 @@ def parse_struct(
     expr: Node | CheckMethod | ErrorResponse
     for node in kdl_nodes:
         if node.name == "@doc":
-            parent.docstring.value = str(node.args[0].value)
+            parent.doc = str(node.args[0].value)
         elif node.name == "@init":
             init_expr = parent.init
             _parse_init_fields(node.children, init_expr, ctx, lint)

@@ -33,11 +33,12 @@ NESTED and JSON are terminal types — pipeline ends after nested/jsonify.
 All nodes inherit from `Node` base class (has `body` attribute).
 
 ### Module layer
-- `Module` → top-level container, holds all children
-- `Docstring`, `Imports`, `Utilities`, `CodeStartHook`, `CodeEndHook`
+- `Module` → top-level container, holds all children. Module-level docstring lives in the `doc` field (always emitted first by the converter).
+- `Docstring` (DEPRECATED, kept for backward-compat imports — was a body node; now `Module.doc`), `Imports`, `Utilities`, `CodeStartHook`, `CodeEndHook`
 
 ### Struct layer
-- `Struct(name, struct_type, keep_order)` → parser schema
+- `Struct(name, struct_type, keep_order, doc)` → parser schema; per-struct docstring lives in the `doc` field (position is converter-dependent: Python emits it below `class X:`, JS/Go emit it above).
+- `StructDocstring` (DEPRECATED, kept for backward-compat imports – was a body node; now `StructBase.doc`)
 - `Field(name)` → output field with pipeline of operations
 - `Init` → container for `InitField` cached values
 - `InitField(name)` → precomputed value, referenced as `@name` via `Self` node

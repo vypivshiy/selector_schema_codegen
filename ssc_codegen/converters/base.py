@@ -328,6 +328,9 @@ class BaseConverter:
             var_name=self.var_name, indent_char=self.indent, meta=dict(meta)
         )
         lines: list[str] = []
+        # Emit module header + docstring first (always at the top of the file).
+        if cb := self._pre_callbacks.get(type(module_ast)):
+            self._collect(cb(module_ast, ctx), lines)
         for node in module_ast.body:
             self._collect(self._emit_node(node, ctx), lines)
         return "\n".join(lines)
