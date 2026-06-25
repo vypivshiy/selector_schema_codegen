@@ -88,6 +88,11 @@ disallow_untyped_defs = false
 module = ["colorama", "lxml", "lxml.*"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+# VisitStream = Iterator[...] | None confuses mypy on generator overrides
+module = ["ssc_codegen.converters.visitor", "ssc_codegen.converters.py_base", "ssc_codegen.converters.py_bs4", "ssc_codegen.converters.py_lxml", "ssc_codegen.converters.py_parsel", "ssc_codegen.converters.py_slax", "ssc_codegen.converters.js_pure"]
+disable_error_code = ["return", "return-value", "safe-super"]
+
 
 [tool.coverage.report]
 exclude_also = [

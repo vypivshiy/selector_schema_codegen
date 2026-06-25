@@ -454,11 +454,10 @@ def _typed_rest_src(request_line: str) -> str:
 
 class TestTypedPlaceholdersAst:
     def test_legacy_plain_name_is_str_scalar_required(self):
-        from ssc_codegen.ast.struct import PLACEHOLDER_RE, parse_placeholder
+        from ssc_codegen.ast.struct import PlaceholderSpec
 
-        m = PLACEHOLDER_RE.fullmatch("{{name}}")
-        assert m is not None
-        ph = parse_placeholder(m)
+        ph = PlaceholderSpec.parse("{{name}}")
+        assert ph is not None
         assert ph.name == "name"
         assert ph.type_name == "str"
         assert ph.is_array is False
@@ -481,11 +480,10 @@ class TestTypedPlaceholdersAst:
         ],
     )
     def test_parse_variants(self, placeholder, expected):
-        from ssc_codegen.ast.struct import PLACEHOLDER_RE, parse_placeholder
+        from ssc_codegen.ast.struct import PlaceholderSpec
 
-        m = PLACEHOLDER_RE.fullmatch(placeholder)
-        assert m is not None, placeholder
-        ph = parse_placeholder(m)
+        ph = PlaceholderSpec.parse(placeholder)
+        assert ph is not None, placeholder
         assert (
             ph.name,
             ph.type_name,
@@ -506,9 +504,9 @@ class TestTypedPlaceholdersAst:
         ],
     )
     def test_invalid_placeholders_reject(self, placeholder):
-        from ssc_codegen.ast.struct import PLACEHOLDER_RE
+        from ssc_codegen.ast.struct import PlaceholderSpec
 
-        assert PLACEHOLDER_RE.fullmatch(placeholder) is None
+        assert PlaceholderSpec.parse(placeholder) is None
 
 
 class TestTypedPlaceholdersPyCodegen:
@@ -707,8 +705,8 @@ class TestRestOnlyImports:
         module = _parse(src)
         code = PY_BASE_CONVERTER.convert(module, http_client="httpx")
         assert "from bs4 import" in code
-        assert "_html_unescape" in code
-        assert "unescape_text" in code
+        assert "BS4_FEATURES" in code
+        assert "UNMATCHED_TABLE_ROW" in code
 
 
 # ---------------------------------------------------------------------------
@@ -717,16 +715,16 @@ class TestRestOnlyImports:
 
 
 def _get_all_converters():
-    import ssc_codegen.converters.py_bs4 as _bs4
-    import ssc_codegen.converters.py_lxml as _lxml
-    import ssc_codegen.converters.py_parsel as _parsel
-    import ssc_codegen.converters.py_slax as _slax
+    from ssc_codegen.converters.py_bs4 import PyBs4
+    from ssc_codegen.converters.py_lxml import PyLxml
+    from ssc_codegen.converters.py_parsel import PyParsel
+    from ssc_codegen.converters.py_slax import PySlax
 
     return {
-        "PY_BASE_CONVERTER": _bs4.PY_BASE_CONVERTER,
-        "PY_LXML_CONVERTER": _lxml.PY_LXML_CONVERTER,
-        "PY_PARSEL_CONVERTER": _parsel.PY_PARSEL_CONVERTER,
-        "PY_SLAX_CONVERTER": _slax.PY_SLAX_CONVERTER,
+        "PyBs4": PyBs4(),
+        "PyLxml": PyLxml(),
+        "PyParsel": PyParsel(),
+        "PySlax": PySlax(),
     }
 
 
@@ -831,7 +829,7 @@ class TestSeparateRuntime:
 
         non_rest_src = 'struct Item { field_name { css "div" } }'
         module = _parse(non_rest_src)
-        converter = _get_all_converters()["PY_BASE_CONVERTER"]
+        converter = _get_all_converters()["PyBs4"]
         register_runtime_file(converter, self.RUNTIME_NAME)
         converter.convert_all(module, runtime_module=self.RUNTIME_NAME)
 

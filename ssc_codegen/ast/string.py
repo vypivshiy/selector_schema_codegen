@@ -2,7 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .base import Node
-from .types import VariableType
+from .types import TypeInfo, VariableType
 
 # All string nodes (except Split and Join) support map semantics:
 # STRING → STRING, LIST_STRING → LIST_STRING.
@@ -13,8 +13,12 @@ from .types import VariableType
 class Trim(Node):
     """Strips leading and trailing whitespace."""
 
-    accept: VariableType = field(default=VariableType.STRING)
-    ret: VariableType = field(default=VariableType.STRING)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
     substr: str = ""
 
 
@@ -22,8 +26,12 @@ class Trim(Node):
 class Ltrim(Node):
     """Strips leading whitespace."""
 
-    accept: VariableType = field(default=VariableType.STRING)
-    ret: VariableType = field(default=VariableType.STRING)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
     substr: str = ""
 
 
@@ -31,8 +39,12 @@ class Ltrim(Node):
 class Rtrim(Node):
     """Strips trailing whitespace."""
 
-    accept: VariableType = field(default=VariableType.STRING)
-    ret: VariableType = field(default=VariableType.STRING)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
     substr: str = ""
 
 
@@ -40,8 +52,12 @@ class Rtrim(Node):
 class NormalizeSpace(Node):
     """Collapses inner whitespace to single space, then trims."""
 
-    accept: VariableType = field(default=VariableType.STRING)
-    ret: VariableType = field(default=VariableType.STRING)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
 
 
 @dataclass
@@ -49,8 +65,12 @@ class RmPrefix(Node):
     """Removes prefix substr if present."""
 
     substr: str = ""
-    accept: VariableType = field(default=VariableType.STRING)
-    ret: VariableType = field(default=VariableType.STRING)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
 
 
 @dataclass
@@ -58,8 +78,12 @@ class RmSuffix(Node):
     """Removes suffix substr if present."""
 
     substr: str = ""
-    accept: VariableType = field(default=VariableType.STRING)
-    ret: VariableType = field(default=VariableType.STRING)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
 
 
 @dataclass
@@ -67,8 +91,12 @@ class RmPrefixSuffix(Node):
     """Removes both prefix and suffix substr if present."""
 
     substr: str = ""
-    accept: VariableType = field(default=VariableType.STRING)
-    ret: VariableType = field(default=VariableType.STRING)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
 
 
 @dataclass
@@ -80,8 +108,12 @@ class Fmt(Node):
     """
 
     template: str = ""
-    accept: VariableType = field(default=VariableType.STRING)
-    ret: VariableType = field(default=VariableType.STRING)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
 
 
 @dataclass
@@ -90,8 +122,12 @@ class Repl(Node):
 
     old: str = ""
     new: str = ""
-    accept: VariableType = field(default=VariableType.STRING)
-    ret: VariableType = field(default=VariableType.STRING)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
 
 
 @dataclass
@@ -106,24 +142,36 @@ class ReplMap(Node):
     """
 
     replacements: dict[str, str] = field(default_factory=dict)
-    accept: VariableType = field(default=VariableType.STRING)
-    ret: VariableType = field(default=VariableType.STRING)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
 
 
 @dataclass
 class Lower(Node):
     """Converts to lowercase."""
 
-    accept: VariableType = field(default=VariableType.STRING)
-    ret: VariableType = field(default=VariableType.STRING)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
 
 
 @dataclass
 class Upper(Node):
     """Converts to uppercase."""
 
-    accept: VariableType = field(default=VariableType.STRING)
-    ret: VariableType = field(default=VariableType.STRING)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
 
 
 @dataclass
@@ -134,8 +182,14 @@ class Split(Node):
     """
 
     sep: str = ""
-    accept: VariableType = field(default=VariableType.STRING)
-    ret: VariableType = field(default=VariableType.STRING)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(
+            base=VariableType.STRING, is_array=True
+        )
+    )
     is_array: bool = True
 
 
@@ -147,13 +201,21 @@ class Join(Node):
     """
 
     sep: str = ""
-    accept: VariableType = field(default=VariableType.STRING)
-    ret: VariableType = field(default=VariableType.STRING)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
 
 
 @dataclass
 class Unescape(Node):
     """Unescapes HTML entities and unicode escapes."""
 
-    accept: VariableType = field(default=VariableType.STRING)
-    ret: VariableType = field(default=VariableType.STRING)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )

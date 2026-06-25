@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .base import Node
-from .types import VariableType
+from .types import TypeInfo, VariableType
 
 
 @dataclass
@@ -16,59 +16,66 @@ class Self(Node):
     """
 
     name: str = ""
-    accept: VariableType = field(default=VariableType.AUTO)
-    ret: VariableType = field(default=VariableType.AUTO)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.AUTO)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.AUTO)
+    )
 
 
 @dataclass
 class Fallback(Node):
-    """
-    Catches any error in the pipeline and returns a literal value instead.
-    Must be the last operation in a Field pipeline.
-    ret is derived from the literal type at construction time.
+    """Catches any error in the pipeline and returns a literal value instead.
+
+    Must be the last operation in a Field pipeline. All previously parsed ops
+    are moved into ``body`` — they form the try-block.
+
+    ``body`` ops are emitted inside the try/catch (or language equivalent).
+    The visitor intercepts ``yield TRAVERSE`` from ``visit_fallback`` to walk
+    ``body`` at ``depth+1`` with advancing pipeline index, then syncs the
+    outer index so subsequent nodes (e.g. Return) see the correct variable.
+
+    ret is derived from the literal type at construction time, unless
+    ``ret_type_info`` is set explicitly (parser sets it to prev_ti).
 
     Literal types and their ret:
-      int        → INT
-      float      → FLOAT
-      str        → STRING
-      bool       → BOOL
-      None       → NULL
-      list (empty []) → STRING with is_array=True
+      int        -> INT
+      float      -> FLOAT
+      str        -> STRING
+      bool       -> BOOL
+      None       -> NULL
+      list (empty []) -> STRING with is_array=True
     """
 
     value: Any = None
-    accept: VariableType = field(default=VariableType.AUTO)
-    ret: VariableType = field(default=VariableType.AUTO)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.AUTO)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.AUTO)
+    )
 
     def __post_init__(self) -> None:
-        if self.ret != VariableType.AUTO:
+        if self.ret_type_info.base != VariableType.AUTO:
             # already set explicitly, skip inference
             return
         if self.value is None:
-            self.ret = VariableType.NULL
+            self.ret_type_info = TypeInfo(base=VariableType.NULL)
         elif isinstance(self.value, bool):
             # bool before int — bool is subclass of int in Python
-            self.ret = VariableType.BOOL
+            self.ret_type_info = TypeInfo(base=VariableType.BOOL)
         elif isinstance(self.value, int):
-            self.ret = VariableType.INT
+            self.ret_type_info = TypeInfo(base=VariableType.INT)
         elif isinstance(self.value, float):
-            self.ret = VariableType.FLOAT
+            self.ret_type_info = TypeInfo(base=VariableType.FLOAT)
         elif isinstance(self.value, str):
-            self.ret = VariableType.STRING
+            self.ret_type_info = TypeInfo(base=VariableType.STRING)
         elif isinstance(self.value, list):
-            self.ret = VariableType.STRING
+            self.ret_type_info = TypeInfo(
+                base=VariableType.STRING, is_array=True
+            )
             self.is_array = True
-
-
-@dataclass
-class FallbackStart(Fallback):
-    accept: VariableType = field(default=VariableType.DOCUMENT)
-    ret: VariableType = field(default=VariableType.DOCUMENT)
-
-
-@dataclass
-class FallbackEnd(Fallback):
-    pass
 
 
 @dataclass
@@ -79,5 +86,9 @@ class Return(Node):
     Carries the final ret_type of the pipeline.
     """
 
-    accept: VariableType = field(default=VariableType.AUTO)
-    ret: VariableType = field(default=VariableType.AUTO)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.AUTO)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.AUTO)
+    )

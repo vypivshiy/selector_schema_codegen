@@ -8,12 +8,9 @@ from ssc_codegen.ast import (
     JsonDef,
     Module,
     StructBase,
-    StructItem,
-    StructList,
-    StructFlatList,
-    StructDict,
-    StructTable,
+    Struct,
     StructRest,
+    StructType,
 )
 from ssc_codegen.exceptions import BuildTimeError
 from kdlquery import KdlNode, parse as kdl_parse
@@ -38,22 +35,30 @@ def handle_struct(
     type_ = raw[1:-1] if raw else (node.get_prop("type") or "item")
     keep_order = node.get_prop("keep-order") or False
     name = str(node.args[0].value)
-    cls_map: dict[str, type[StructBase]] = {
-        "item": StructItem,
-        "list": StructList,
-        "flat": StructFlatList,
-        "dict": StructDict,
-        "table": StructTable,
-        "rest": StructRest,
+    struct_type_map: dict[str, StructType] = {
+        "item": StructType.ITEM,
+        "list": StructType.LIST,
+        "flat": StructType.FLAT,
+        "dict": StructType.DICT,
+        "table": StructType.TABLE,
+        "rest": StructType.REST,
     }
-    struct_cls = cls_map.get(type_)
-    if struct_cls is None:
+    st = struct_type_map.get(type_)
+    if st is None:
         raise BuildTimeError(f"Unknown struct type: {type_}")
-    struct = struct_cls(
-        parent=module,
-        name=name,
-        keep_order=keep_order,
-    )
+    if st is StructType.REST:
+        struct: StructBase = StructRest(
+            parent=module,
+            name=name,
+            keep_order=keep_order,
+        )
+    else:
+        struct = Struct(
+            parent=module,
+            name=name,
+            type=st,
+            keep_order=keep_order,
+        )
     ctx.structs[struct.name] = struct
     parse_struct(node.children, struct, ctx, lint)
     return struct

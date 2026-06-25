@@ -24,11 +24,12 @@ from ssc_codegen.ast import (
     SplitDoc,
     StartParse,
     Struct,
+    StructBase,
     StructRest,
-    StructTable,
+    StructType,
     TableConfig,
     TableMatchKey,
-    TableRow,
+    TableRows,
     Text,
     TypeDef,
     Value,
@@ -243,7 +244,6 @@ def test_parser_supports_css_pattern_match_block():
     title = _field(main, "title")
 
     assert isinstance(title.body[0], CssSelect)
-    assert title.body[0].query == ""
     assert title.body[0].queries == [".article h1", "h1"]
     assert isinstance(title.body[1], Text)
     assert isinstance(title.body[-1], Return)
@@ -267,7 +267,6 @@ def test_parser_supports_xpath_all_pattern_match_block():
     links = _field(main, "links")
 
     assert isinstance(links.body[0], XpathSelectAll)
-    assert links.body[0].query == ""
     assert links.body[0].queries == ["//a[@href]", "//area[@href]"]
     assert isinstance(links.body[1], Attr)
     assert isinstance(links.body[-1], Return)
@@ -378,7 +377,8 @@ def test_parser_supports_inline_filter_not_block():
         "PredContains"
     ]
     assert isinstance(filter_node.body[0].body[0], PredContains)
-    assert links.ret == VariableType.LIST_STRING
+    assert links.ret == VariableType.STRING
+    assert links.is_array
 
 
 def test_parser_resolves_json_definition_field_shapes():
@@ -390,31 +390,36 @@ def test_parser_resolves_json_definition_field_shapes():
     content_fields = {field.name: field for field in content.body}
 
     assert (
-        results_fields["titlePosterImageModel"].ref_name
+        results_fields["titlePosterImageModel"].ret_type_info.ref
         == "TitlePosterImageModel"
     )
-    assert results_fields["titlePosterImageModel"].is_array is False
-    assert results_fields["topCredits"].is_array is True
-    assert results_fields["topCredits"].ref_name == ""
-    assert results_fields["seriesId"].is_optional is True
-    assert results_fields["seriesSeasonText"].is_optional is True
+    assert (
+        results_fields["titlePosterImageModel"].ret_type_info.is_array is False
+    )
+    assert results_fields["topCredits"].ret_type_info.is_array is True
+    assert results_fields["topCredits"].ret_type_info.ref is None
+    assert results_fields["seriesId"].ret_type_info.is_optional is True
+    assert results_fields["seriesSeasonText"].ret_type_info.is_optional is True
 
-    assert content_fields["results"].is_array is True
-    assert content_fields["results"].ref_name == "Results"
-    assert content_fields["hasExactMatches"].is_optional is False
+    assert content_fields["results"].ret_type_info.is_array is True
+    assert content_fields["results"].ret_type_info.ref == "Results"
+    assert content_fields["hasExactMatches"].ret_type_info.is_optional is False
 
 
 def test_parser_handles_table_struct_special_nodes_and_field_types():
     module = _parse_example("examples/booksToScrape.kdl")
     product_info = _struct(module, "ProductInfo")
 
-    assert isinstance(product_info, StructTable)
+    assert (
+        isinstance(product_info, Struct)
+        and product_info.type == StructType.TABLE
+    )
 
     table_cfg = next(
         node for node in product_info.body if isinstance(node, TableConfig)
     )
     table_rows = next(
-        node for node in product_info.body if isinstance(node, TableRow)
+        node for node in product_info.body if isinstance(node, TableRows)
     )
     table_match = next(
         node for node in product_info.body if isinstance(node, TableMatchKey)
@@ -431,22 +436,18 @@ def test_parser_handles_table_struct_special_nodes_and_field_types():
     assert isinstance(start_parse, StartParse)
     assert start_parse.use_pre_validate is True
     assert start_parse.use_split_doc is False
-    assert isinstance(product_info, StructTable)
     assert (
-        product_info.table_config,
-        product_info.table_row,
-        product_info.table_match_key,
-    ) == (
-        table_cfg,
-        table_rows,
-        table_match,
+        isinstance(product_info, Struct)
+        and product_info.type == StructType.TABLE
     )
+    assert isinstance(table_cfg, TableConfig)
+    assert isinstance(table_rows, TableRows)
+    assert isinstance(table_match, TableMatchKey)
 
     assert value_node.ret == VariableType.STRING
     assert isinstance(pre_validate.body[0], Assert)
-    assert type(number_reviews.body[0]).__name__ == "FallbackStart"
-    assert isinstance(number_reviews.body[1], Match)
-    assert number_reviews.accept == VariableType.STRING
+    assert type(number_reviews.body[0]).__name__ == "Fallback"
+    assert isinstance(number_reviews.body[0].body[0], Match)
     assert isinstance(number_reviews.body[-1], Return)
     assert number_reviews.ret == VariableType.INT
 
@@ -800,7 +801,7 @@ def test_json_define_expansion_ref_in_define():
     tag_field = next(
         f for f in item.body if isinstance(f, JsonDefField) and f.name == "tag"
     )
-    assert tag_field.ref_name == "Tag"
+    assert tag_field.ret_type_info.ref == "Tag"
     assert tag_field.ret == VariableType.JSON
 
 
@@ -834,7 +835,7 @@ class TestJsonFieldTypes:
         f = _json_field(m, "F", "x")
         assert f.ret == VariableType.STRING
         assert f.is_array is False
-        assert f.is_optional is False
+        assert f.ret_type_info.is_optional is False
 
     def test_int_field(self):
         m = _parse(_load_fixture("json_types", "int.kdl"))
@@ -855,50 +856,50 @@ class TestJsonFieldTypes:
     def test_array_str(self):
         m = _parse(_load_fixture("json_types", "array_str.kdl"))
         f = _json_field(m, "F", "x")
-        assert f.ret == VariableType.LIST_STRING
-        assert f.is_array is True
+        assert f.ret == VariableType.STRING
+        assert f.ret_type_info.is_array is True
 
     def test_array_int(self):
         m = _parse(_load_fixture("json_types", "array_int.kdl"))
         f = _json_field(m, "F", "x")
-        assert f.ret == VariableType.LIST_INT
-        assert f.is_array is True
+        assert f.ret == VariableType.INT
+        assert f.ret_type_info.is_array is True
 
     def test_optional_suffix(self):
         m = _parse(_load_fixture("json_types", "optional.kdl"))
         f = _json_field(m, "F", "x")
-        assert f.is_optional is True
+        assert f.ret_type_info.is_optional is True
         assert f.ret == VariableType.STRING
 
     def test_ref_field(self):
         m = _parse(_load_fixture("json_types", "ref_field.kdl"))
         f = _json_field(m, "B", "ref")
-        assert f.ref_name == "A"
+        assert f.ret_type_info.ref == "A"
         assert f.ret == VariableType.JSON
 
     def test_array_ref(self):
         m = _parse(_load_fixture("json_types", "array_ref.kdl"))
         f = _json_field(m, "B", "items")
-        assert f.ref_name == "A"
-        assert f.is_array is True
+        assert f.ret_type_info.ref == "A"
+        assert f.ret_type_info.is_array is True
 
 
 class TestJsonFieldModifiers:
     def test_omitempty(self):
         m = _parse(_load_fixture("json_modifiers", "omitempty.kdl"))
         f = _json_field(m, "F", "x")
-        assert f.may_miss is True
-        assert f.skip is False
+        assert f.ret_type_info.omitempty is True
+        assert f.ret_type_info.skip is False
 
     def test_skip(self):
         m = _parse(_load_fixture("json_modifiers", "skip.kdl"))
         f = _json_field(m, "F", "x")
-        assert f.skip is True
+        assert f.ret_type_info.skip is True
 
     def test_skip_without_type_infers_str(self):
         m = _parse(_load_fixture("json_modifiers", "skip_no_type.kdl"))
         f = _json_field(m, "F", "x")
-        assert f.skip is True
+        assert f.ret_type_info.skip is True
         assert f.ret == VariableType.STRING
 
     def test_alias(self):
@@ -910,7 +911,7 @@ class TestJsonFieldModifiers:
         m = _parse(_load_fixture("json_modifiers", "alias_ref.kdl"))
         f = _json_field(m, "B", "x")
         assert f.alias == "orig-ref"
-        assert f.ref_name == "A"
+        assert f.ret_type_info.ref == "A"
 
     def test_unknown_modifier_errors(self):
         errs = _lint_errors(
@@ -974,12 +975,12 @@ class TestJsonifyAst:
 class TestRestStructForms:
     def test_prefix_form_creates_struct_rest(self):
         m = _parse(_load_fixture("rest_forms", "prefix.kdl"))
-        s = next(n for n in m.body if isinstance(n, Struct))
+        s = next(n for n in m.body if isinstance(n, StructBase))
         assert isinstance(s, StructRest)
 
     def test_property_form_creates_struct_rest(self):
         m = _parse(_load_fixture("rest_forms", "property.kdl"))
-        s = next(n for n in m.body if isinstance(n, Struct))
+        s = next(n for n in m.body if isinstance(n, StructBase))
         assert isinstance(s, StructRest)
 
     def test_both_forms_same_request_count(self):

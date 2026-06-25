@@ -44,25 +44,25 @@ _FILE_EXTENSIONS: dict[Target, str] = {
 
 def _get_converter(target: Target):
     if target == Target.PY_BS4:
-        from ssc_codegen.converters.py_bs4 import PY_BASE_CONVERTER
+        from ssc_codegen.converters.py_bs4 import PyBs4
 
-        return PY_BASE_CONVERTER
+        return PyBs4()
     if target == Target.PY_LXML:
-        from ssc_codegen.converters.py_lxml import PY_LXML_CONVERTER
+        from ssc_codegen.converters.py_lxml import PyLxml
 
-        return PY_LXML_CONVERTER
+        return PyLxml()
     if target == Target.PY_PARSEL:
-        from ssc_codegen.converters.py_parsel import PY_PARSEL_CONVERTER
+        from ssc_codegen.converters.py_parsel import PyParsel
 
-        return PY_PARSEL_CONVERTER
+        return PyParsel()
     if target == Target.PY_SLAX:
-        from ssc_codegen.converters.py_slax import PY_SLAX_CONVERTER
+        from ssc_codegen.converters.py_slax import PySlax
 
-        return PY_SLAX_CONVERTER
+        return PySlax()
     if target == Target.JS_PURE:
-        from ssc_codegen.converters.js_pure import JS_CONVERTER
+        from ssc_codegen.converters.js_pure import JsPure
 
-        return JS_CONVERTER
+        return JsPure()
     raise ValueError(f"Unknown target: {target}")
 
 
@@ -111,13 +111,6 @@ def generate(
         typer.Option(
             "--skip-lint",
             help="Skip linting before code generation.",
-        ),
-    ] = False,
-    css_to_xpath: Annotated[
-        bool,
-        typer.Option(
-            "--css-to-xpath",
-            help="Convert CSS selectors to XPath before code generation.",
         ),
     ] = False,
     package: Annotated[
@@ -469,13 +462,6 @@ def run(
             help="Print generated code to stderr and enable DEBUG logging.",
         ),
     ] = False,
-    css_to_xpath: Annotated[
-        bool,
-        typer.Option(
-            "--css-to-xpath",
-            help="Convert CSS selectors to XPath before execution.",
-        ),
-    ] = False,
     fmt: Annotated[
         FmtType,
         typer.Option(
@@ -496,7 +482,7 @@ def run(
     import json
     import sys
 
-    from ssc_codegen.ast import Struct
+    from ssc_codegen.ast import StructBase
     from ssc_codegen.converters.helpers import to_pascal_case
 
     if verbose:
@@ -535,7 +521,7 @@ def run(
         raise typer.Exit(code=1)
 
     # Verify struct exists
-    structs = [n for n in module_ast.body if isinstance(n, Struct)]
+    structs = [n for n in module_ast.body if isinstance(n, StructBase)]
     struct_names = [s.name for s in structs]
     if struct_name not in struct_names:
         typer.echo(
@@ -640,13 +626,6 @@ def health(
             help="Enable DEBUG logging.",
         ),
     ] = False,
-    css_to_xpath: Annotated[
-        bool,
-        typer.Option(
-            "--css-to-xpath",
-            help="Convert CSS selectors to XPath before checking.",
-        ),
-    ] = False,
 ) -> None:
     """Check that all selectors in a struct match elements in the given HTML.
 
@@ -659,7 +638,7 @@ def health(
     import sys
 
     from ssc_codegen import parse_module
-    from ssc_codegen.ast import Struct
+    from ssc_codegen.ast import StructBase
     from ssc_codegen.health import check_struct_health
 
     if verbose:
@@ -684,10 +663,6 @@ def health(
         module_ast, _ = parse_module(
             kdl_path.read_text(encoding="utf-8"), source_path=kdl_path
         )
-        if css_to_xpath:
-            from ssc_codegen.document_utils import convert_css_to_xpath_module
-
-            convert_css_to_xpath_module(module_ast)
     except Exception as exc:
         if verbose:
             typer.echo(traceback.format_exc(), err=True)
@@ -696,7 +671,7 @@ def health(
         raise typer.Exit(code=1)
 
     # Find struct
-    structs = [n for n in module_ast.body if isinstance(n, Struct)]
+    structs = [n for n in module_ast.body if isinstance(n, StructBase)]
     struct_names = [s.name for s in structs]
     if struct_name not in struct_names:
         typer.echo(

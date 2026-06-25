@@ -55,12 +55,12 @@ define RE-CODE=#"^code"#
         css ".code"
         text
         assert {
-            gt 3
-            ge 4
-            lt 20
-            le 20
+            len-gt 3
+            len-ge 4
+            len-lt 20
+            len-le 20
             ne "skip" "ignore"
-            in "code-4" "code-8"
+            eq "code-4" "code-8"
             re RE-CODE
         }
         fallback ""

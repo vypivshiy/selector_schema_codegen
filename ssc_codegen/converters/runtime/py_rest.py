@@ -1,13 +1,17 @@
 """REST runtime assembly and runtime file registration."""
 
-from collections.abc import Callable
+from __future__ import annotations
 
-from ssc_codegen.converters.base import BaseConverter
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import ssc_codegen.ast as a
 
 from ._helpers import _module_has_rest
 from .py_base import _BASE_UTILITY_LINES, _BASE_EXPORT_NAMES
+
+if TYPE_CHECKING:
+    from ssc_codegen.converters.visitor import Visitor
 
 
 def rest_imports(module: a.Module) -> list[str]:
@@ -98,7 +102,7 @@ def runtime_module_content(module: a.Module) -> str:
 
 
 def register_runtime_file(
-    converter: BaseConverter,
+    converter: Visitor,
     runtime_name: str = "sscgen_runtime",
     *,
     include_fallback: bool = False,

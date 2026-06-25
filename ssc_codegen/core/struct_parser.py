@@ -23,10 +23,11 @@ from ssc_codegen.ast import (
     StartParse,
     StructBase,
     StructRest,
-    StructTable,
+    Struct,
+    StructType,
     TableConfig,
     TableMatchKey,
-    TableRow,
+    TableRows,
     TypeInfo,
     Value,
     VariableType,
@@ -52,8 +53,8 @@ def parse_struct(
         if node.name == "@doc":
             parent.doc = str(node.args[0].value)
         elif node.name == "@init":
-            init_expr = parent.init
-            _parse_init_fields(node.children, init_expr, ctx, lint)
+            if isinstance(parent, Struct):
+                _parse_init_fields(node.children, parent.init, ctx, lint)
         elif node.name == "@pre-validate":
             expr = PreValidate(parent=parent)
             parse_expressions(node.children, expr, ctx, lint)
@@ -87,7 +88,7 @@ def parse_struct(
             parse_expressions(node.children, expr, ctx, lint)
             parent.body.append(expr)
         elif node.name == "@rows":
-            expr = TableRow(parent=parent)
+            expr = TableRows(parent=parent)
             parse_expressions(node.children, expr, ctx, lint)
             parent.body.append(expr)
         elif node.name == "@match":
@@ -185,9 +186,11 @@ def parse_struct(
             )
             parent.body.append(err)
         else:
-            if isinstance(parent, StructTable):
+            if isinstance(parent, Struct) and parent.type == StructType.TABLE:
                 expr = Field(
-                    parent=parent, name=node.name, accept=VariableType.STRING
+                    parent=parent,
+                    name=node.name,
+                    accept_type_info=TypeInfo(base=VariableType.STRING),
                 )
             else:
                 expr = Field(parent=parent, name=node.name)
@@ -263,7 +266,7 @@ def parse_json_fields(
             JsonDefField(
                 parent=parent,
                 name=name,
-                type_info=TypeInfo(
+                ret_type_info=TypeInfo(
                     base=ret_type,
                     is_array=is_array,
                     is_optional=is_optional,
@@ -291,7 +294,7 @@ def _parse_init_fields(
         expr = InitField(parent=parent, name=node.name)
         parse_expressions(node.children, expr, ctx, lint)
         if expr.body:
-            expr.ret = expr.body[-1].ret
+            expr.ret_type_info = expr.body[-1].ret_type_info
             ops = list(node.children)
             ret = check_pipeline_types(
                 ops, ctx, lint, start_type=VariableType.DOCUMENT

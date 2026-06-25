@@ -12,21 +12,9 @@ from dataclasses import dataclass, field
 from typing import Callable
 from urllib.parse import urlparse, urlunparse
 
-from ssc_codegen.ast.struct import PlaceholderSpec, parse_placeholder
+from ssc_codegen.ast.struct import PlaceholderSpec
 from ssc_codegen.parsers.curl import parse_curl_command
 from ssc_codegen.parsers.http import parse_http_request
-
-# Strict placeholder regex — kept in sync with ssc_codegen/ast/struct.py.
-# Groups: 1=NAME, 2=PRIM, 3="[]", 4="?", 5=STYLE.
-_PH = re.compile(
-    r"\{\{"
-    r"([a-z][a-z0-9_-]*)"
-    r"(?::(str|int|float|bool))?"
-    r"(\[\])?"
-    r"(\?)?"
-    r"(?:\|(repeat|csv|bracket|pipe|space))?"
-    r"\}\}"
-)
 
 # ── RequestSpec ───────────────────────────────────────────────────────────────
 
@@ -47,8 +35,7 @@ class RequestSpec:
         seen: set[str] = set()
         result: list[PlaceholderSpec] = []
         for text in _iter_strings(self):
-            for m in _PH.finditer(text):
-                spec = parse_placeholder(m)
+            for spec in PlaceholderSpec.find_all(text):
                 if spec.name not in seen:
                     seen.add(spec.name)
                     result.append(spec)
@@ -133,7 +120,7 @@ def parse_to_spec(payload: str) -> RequestSpec:
     ):
         body_kind = "json"
         raw_body = _extract_raw_body(payload, fmt)
-        _validate_json_body(raw_body)  # raises ValueError on genuinely bad JSON
+        validate_json_body(raw_body)
         body = raw_body  # kept as raw str; rendered as f-string
 
     elif "data" in kwargs:
@@ -218,7 +205,7 @@ def _http_raw_body(payload: str) -> str:
 _PH_SENTINEL = "0"
 
 
-def _validate_json_body(raw: str) -> None:
+def validate_json_body(raw: str) -> None:
     """
     Validate JSON body that may contain {{placeholders}}.
 
@@ -230,7 +217,7 @@ def _validate_json_body(raw: str) -> None:
     """
     if not raw:
         return
-    substituted = _PH.sub(_PH_SENTINEL, raw)
+    substituted = PlaceholderSpec.sub(raw, _PH_SENTINEL)
     try:
         json.loads(substituted)
     except json.JSONDecodeError as exc:
@@ -258,23 +245,7 @@ def normalize_placeholder_names(
         return spec
 
     def _sub(text: str) -> str:
-        def _replace(m: "re.Match[str]") -> str:
-            new_name = mapping.get(m.group(1), m.group(1))
-            type_part = f":{m.group(2)}" if m.group(2) else ""
-            array_part = m.group(3) or ""
-            optional_part = m.group(4) or ""
-            style_part = f"|{m.group(5)}" if m.group(5) else ""
-            return (
-                "{{"
-                + new_name
-                + type_part
-                + array_part
-                + optional_part
-                + style_part
-                + "}}"
-            )
-
-        return _PH.sub(_replace, text)
+        return PlaceholderSpec.rename(text, mapping)
 
     def _sub_dict(d: dict) -> dict:
         return {k: _sub(str(v)) for k, v in d.items()}

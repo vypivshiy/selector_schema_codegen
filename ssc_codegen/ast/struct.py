@@ -2,11 +2,11 @@ from __future__ import annotations
 import re as _re
 import warnings
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 from typing import cast
 
 from .base import Node
-from .types import VariableType, StructType
+from .types import TypeInfo, VariableType, StructType
 
 # Typed placeholder grammar:
 #   {{ NAME ( : PRIM )? ( [] )? ( ? )? ( | STYLE )? }}
@@ -31,13 +31,91 @@ PLACEHOLDER_WIDE_RE = _re.compile(r"\{\{([^{}]*)\}\}")
 
 @dataclass
 class PlaceholderSpec:
-    """Parsed `{{…}}` token from an @request payload."""
+    """Parsed `{{...}}` token from an @request payload.
+
+    All placeholder parsing goes through these methods so the regex stays
+    an internal implementation detail of this module.
+    """
 
     name: str = ""
     type_name: str = "str"  # "str" | "int" | "float" | "bool"
     is_array: bool = False
     is_optional: bool = False
     style: str | None = None  # None == default "repeat" when is_array
+
+    # ── parsing ──────────────────────────────────────────────────────────
+
+    @classmethod
+    def parse(cls, text: str) -> PlaceholderSpec | None:
+        """Parse *text* that is exactly one placeholder (``{{name:int[]?|csv}}``).
+
+        Returns ``None`` when *text* is not a valid placeholder.
+        """
+        m = PLACEHOLDER_RE.fullmatch(text)
+        return parse_placeholder(m) if m else None
+
+    @staticmethod
+    def find_all(text: str) -> list[PlaceholderSpec]:
+        """Return every placeholder found in *text*, in order of appearance."""
+        return [parse_placeholder(m) for m in PLACEHOLDER_RE.finditer(text)]
+
+    @staticmethod
+    def search(text: str) -> bool:
+        """True when *text* contains at least one placeholder."""
+        return PLACEHOLDER_RE.search(text) is not None
+
+    @staticmethod
+    def match_at(text: str, pos: int) -> tuple[int, PlaceholderSpec] | None:
+        """Try to match a placeholder at *pos*.
+
+        Returns ``(end_pos, spec)`` on success, ``None`` otherwise.
+        """
+        m = PLACEHOLDER_RE.match(text, pos)
+        if m is None:
+            return None
+        return m.end(), parse_placeholder(m)
+
+    # ── substitution ─────────────────────────────────────────────────────
+
+    @staticmethod
+    def sub(
+        text: str, replacement: "str | Callable[[PlaceholderSpec], str]"
+    ) -> str:
+        """Replace every placeholder in *text*.
+
+        *replacement* may be a literal string or a callable receiving the
+        parsed ``PlaceholderSpec`` and returning the replacement string.
+        """
+        if callable(replacement):
+            return PLACEHOLDER_RE.sub(
+                lambda m: replacement(parse_placeholder(m)), text
+            )
+        return PLACEHOLDER_RE.sub(replacement, text)
+
+    @staticmethod
+    def rename(text: str, mapping: dict[str, str]) -> str:
+        """Rename placeholder names per *mapping*, preserving all modifiers.
+
+        ``mapping`` maps old name → new name.  Unmapped names are left as-is.
+        """
+
+        def _repl(m: "_re.Match[str]") -> str:
+            new_name = mapping.get(m.group(1), m.group(1))
+            type_part = f":{m.group(2)}" if m.group(2) else ""
+            array_part = m.group(3) or ""
+            optional_part = m.group(4) or ""
+            style_part = f"|{m.group(5)}" if m.group(5) else ""
+            return (
+                "{{"
+                + new_name
+                + type_part
+                + array_part
+                + optional_part
+                + style_part
+                + "}}"
+            )
+
+        return PLACEHOLDER_RE.sub(_repl, text)
 
 
 def parse_placeholder(match: "_re.Match[str]") -> PlaceholderSpec:
@@ -99,8 +177,7 @@ class RequestHttp(Node):
         seen: set[str] = set()
         result: list[PlaceholderSpec] = []
         for text in _iter_http_strings(self):
-            for m in PLACEHOLDER_RE.finditer(text):
-                spec = parse_placeholder(m)
+            for spec in PlaceholderSpec.find_all(text):
                 if spec.name not in seen:
                     seen.add(spec.name)
                     result.append(spec)
@@ -157,13 +234,10 @@ class MethodRest(MethodBase):
 class StructBase(Node):
     """Base class for all struct AST nodes."""
 
+    type: StructType = StructType.ITEM
     name: str = ""
     keep_order: bool = False  # StructFlatList-specific
     doc: str = ""
-
-    @property
-    def _typedef_type(self) -> StructType:
-        raise NotImplementedError
 
     @property
     def docstring(self) -> StructDocstring:
@@ -204,105 +278,35 @@ class StructBase(Node):
     def errors(self) -> list[ErrorResponse]:
         return [n for n in self.body if isinstance(n, ErrorResponse)]
 
+    @property
+    def _typedef_type(self) -> StructType:
+        return self.type
+
 
 # ── Concrete struct types ────────────────────────────────────────────────────
 
 
 @dataclass
-class StructItem(StructBase):
-    """Single object → dict. DSL: struct Name { ... }"""
+class Struct(StructBase):
+    """HTML-parsing struct.
 
-    @property
-    def _typedef_type(self) -> StructType:
-        return StructType.ITEM
+    DSL: ``struct Name { ... }`` with ``type=item|list|flat|dict|table``.
 
-    @property
-    def init(self) -> Init:
-        return self.body[0]  # type: ignore
+    The ``type`` field (StructType) discriminates the parsing strategy:
+      ITEM  → single object/dict
+      LIST  → repeating elements → list[dict] (requires @split-doc)
+      FLAT  → deduplicated scalars → list[str]
+      DICT  → key-value map (requires @split-doc + @key + @value)
+      TABLE → HTML table (requires @table + @rows + @match + @value)
 
-    def __post_init__(self):
-        self.body.append(Init(parent=self))
+    body[0] is always an ``Init`` node (appended in __post_init__).
+    """
 
-
-@dataclass
-class StructList(StructBase):
-    """Repeating elements → list[dict]. Requires @split-doc."""
-
-    @property
-    def _typedef_type(self) -> StructType:
-        return StructType.LIST
+    type: StructType = StructType.ITEM  # overrided
 
     @property
     def init(self) -> Init:
         return self.body[0]  # type: ignore
-
-    def __post_init__(self):
-        self.body.append(Init(parent=self))
-
-
-@dataclass
-class StructFlatList(StructBase):
-    """Deduplicated scalars → list[str]."""
-
-    @property
-    def _typedef_type(self) -> StructType:
-        return StructType.FLAT
-
-    @property
-    def init(self) -> Init:
-        return self.body[0]  # type: ignore
-
-    def __post_init__(self):
-        self.body.append(Init(parent=self))
-
-
-@dataclass
-class StructDict(StructBase):
-    """Key-value map → dict[str, any]. Requires @split-doc + @key + @value."""
-
-    @property
-    def _typedef_type(self) -> StructType:
-        return StructType.DICT
-
-    @property
-    def init(self) -> Init:
-        return self.body[0]  # type: ignore
-
-    @property
-    def key(self) -> Key:
-        return [n for n in self.body if isinstance(n, Key)][0]
-
-    @property
-    def value(self) -> Value:
-        return [n for n in self.body if isinstance(n, Value)][0]
-
-    def __post_init__(self):
-        self.body.append(Init(parent=self))
-
-
-@dataclass
-class StructTable(StructBase):
-    """HTML table → dict. Requires @table + @rows + @match + @value."""
-
-    @property
-    def _typedef_type(self) -> StructType:
-        return StructType.TABLE
-
-    @property
-    def init(self) -> Init:
-        return self.body[0]  # type: ignore
-
-    @property
-    def table_config(self) -> TableConfig:
-        return [n for n in self.body if isinstance(n, TableConfig)][0]
-
-    @property
-    def table_row(self) -> TableRow:
-        return [n for n in self.body if isinstance(n, TableRow)][0]
-
-    @property
-    def table_match_key(self) -> TableMatchKey:
-        return [n for n in self.body if isinstance(n, TableMatchKey)][0]
 
     def __post_init__(self):
         self.body.append(Init(parent=self))
@@ -310,18 +314,15 @@ class StructTable(StructBase):
 
 @dataclass
 class StructRest(StructBase):
-    """REST API endpoint namespace. Stores @request methods, no HTML parsing."""
+    """REST API endpoint namespace. Stores @request methods, no HTML parsing.
 
-    @property
-    def _typedef_type(self) -> StructType:
-        return StructType.REST
+    Unlike ``Struct``, has no ``Init``/``StartParse`` nodes and no field pipelines.
+    """
+
+    type: StructType = StructType.REST
 
     def __post_init__(self):
         pass
-
-
-# Backward-compatible alias
-Struct = StructBase
 
 
 # ── Struct child nodes ───────────────────────────────────────────────────────
@@ -356,8 +357,12 @@ class PreValidate(Node):
     accept: DOCUMENT, ret: DOCUMENT (pass-through)
     """
 
-    accept: VariableType = field(default=VariableType.DOCUMENT)
-    ret: VariableType = field(default=VariableType.DOCUMENT)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.DOCUMENT)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.NULL)
+    )
 
 
 @dataclass
@@ -370,8 +375,12 @@ class CheckMethod(Node):
     """
 
     name: str = ""
-    accept: VariableType = field(default=VariableType.DOCUMENT)
-    ret: VariableType = field(default=VariableType.BOOL)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.DOCUMENT)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.BOOL)
+    )
 
 
 @dataclass
@@ -379,7 +388,7 @@ class Init(Node):
     """
     Pre-computed named values cached before field parsing.
     Execution order: after PreValidate, before SplitDoc and Fields.
-    DSL: -init { name { pipeline... } ... }
+    DSL: @init { name { pipeline... } ... }
     body: list[InitField]
     """
 
@@ -398,21 +407,31 @@ class InitField(Node):
     """
 
     name: str = ""
-    accept: VariableType = field(default=VariableType.DOCUMENT)
-    ret: VariableType = field(default=VariableType.AUTO)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.DOCUMENT)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.AUTO)
+    )
 
 
 @dataclass
 class SplitDoc(Node):
     """
     Splits document into items for list-type structs.
-    DSL: -split-doc { ... }
+    DSL: @split-doc { ... }
     accept: DOCUMENT, ret: DOCUMENT with is_array=True
     Only valid in struct type=list.
     """
 
-    accept: VariableType = field(default=VariableType.DOCUMENT)
-    ret: VariableType = field(default=VariableType.DOCUMENT)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.DOCUMENT)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(
+            base=VariableType.DOCUMENT, is_array=True
+        )
+    )
     is_array: bool = True
 
 
@@ -420,53 +439,71 @@ class SplitDoc(Node):
 class Key(Node):
     """
     Key extraction pipeline for dict-type structs.
-    DSL: -key { ... }
+    DSL: @key { ... }
     accept: DOCUMENT, ret: STRING
     Only valid in struct type=dict.
     """
 
-    accept: VariableType = field(default=VariableType.DOCUMENT)
-    ret: VariableType = field(default=VariableType.STRING)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.DOCUMENT)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
 
 
 @dataclass
 class Value(Node):
     """
     Value extraction pipeline for dict/table-type structs.
-    DSL: -value { ... }
+    DSL: @value { ... }
     dict:  ret can be any type.
     table: ret must be STRING.
     Only valid in struct type=dict or type=table.
     """
 
-    accept: VariableType = field(default=VariableType.DOCUMENT)
-    ret: VariableType = field(default=VariableType.AUTO)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.DOCUMENT)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.AUTO)
+    )
 
 
 @dataclass
 class TableConfig(Node):
     """
     Selects the table element.
-    DSL: -table { ... }
+    DSL: @table { ... }
     accept: DOCUMENT, ret: DOCUMENT
     Only valid in struct type=table.
     """
 
-    accept: VariableType = field(default=VariableType.DOCUMENT)
-    ret: VariableType = field(default=VariableType.DOCUMENT)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.DOCUMENT)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.DOCUMENT)
+    )
 
 
 @dataclass
-class TableRow(Node):
+class TableRows(Node):
     """
     Selects table rows.
-    DSL: -row { ... }
+    DSL: @row { ... }
     accept: DOCUMENT, ret: DOCUMENT with is_array=True
     Only valid in struct type=table.
     """
 
-    accept: VariableType = field(default=VariableType.DOCUMENT)
-    ret: VariableType = field(default=VariableType.DOCUMENT)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.DOCUMENT)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(
+            base=VariableType.DOCUMENT, is_array=True
+        )
+    )
     is_array: bool = True
 
 
@@ -474,13 +511,17 @@ class TableRow(Node):
 class TableMatchKey(Node):
     """
     Extracts key cell text from a row for match comparison.
-    DSL: -match { ... }
+    DSL: @match { ... }
     accept: DOCUMENT (row), ret: STRING
     Only valid in struct type=table.
     """
 
-    accept: VariableType = field(default=VariableType.DOCUMENT)
-    ret: VariableType = field(default=VariableType.STRING)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.DOCUMENT)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
 
 
 @dataclass
@@ -517,8 +558,16 @@ class Field(Node):
     """
 
     name: str = ""
-    accept: VariableType = field(default=VariableType.DOCUMENT)
-    ret: VariableType = field(default=VariableType.AUTO)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.DOCUMENT)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.AUTO)
+    )
+
+    @property
+    def struct(self) -> Struct:
+        return cast(Struct, self.parent)
 
 
 @dataclass
@@ -526,8 +575,8 @@ class StartParse(Node):
     """Endpoint where need run parser"""
 
     @property
-    def struct(self) -> StructBase:
-        return cast(StructBase, self.parent)
+    def struct(self) -> Struct:
+        return cast(Struct, self.parent)
 
     @property
     def use_split_doc(self) -> bool:

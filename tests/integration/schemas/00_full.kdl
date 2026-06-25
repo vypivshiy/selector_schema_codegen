@@ -131,7 +131,7 @@ struct TinyItem {
             contains "alpha" "beta"
             starts "tag-" "item-"
             ends "-x" "-y"
-            in "ref" "core"
+            eq "ref" "core"
             re RE-WORD
         }
         assert {
@@ -380,7 +380,7 @@ struct TinyItem {
 
     state {
         match {
-            in "state" "status"
+            eq "state" "status"
             ne "skip" "ignore"
         }
         lower
@@ -459,10 +459,10 @@ struct CoverageRoot {
         css ".code"
         text
         assert {
-            gt 3
-            ge 4
-            lt 20
-            le 20
+            len-gt 3
+            len-ge 4
+            len-lt 20
+            len-le 20
         }
         fallback ""
     }

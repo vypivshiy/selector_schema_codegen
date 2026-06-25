@@ -1,5 +1,7 @@
 from abc import ABC, abstractmethod
-from dataclasses import replace
+import inspect
+from dataclasses import dataclass, replace
+from typing import Any, Iterable, Iterator, TypeAlias
 
 from ssc_codegen.ast import (
     Node,
@@ -10,12 +12,8 @@ from ssc_codegen.ast import (
     JsonDefField,
     TypeDef,
     TypeDefField,
+    Struct,
     StructBase,
-    StructItem,
-    StructList,
-    StructFlatList,
-    StructDict,
-    StructTable,
     StructRest,
     StructDocstring,
     StartParse,
@@ -29,7 +27,7 @@ from ssc_codegen.ast import (
     Value,
     TableConfig,
     TableMatchKey,
-    TableRow,
+    TableRows,
     MethodRest,
     MethodFetch,
     ErrorResponse,
@@ -71,8 +69,7 @@ from ssc_codegen.ast import (
     Nested,
     Self,
     Return,
-    FallbackStart,
-    FallbackEnd,
+    Fallback,
     Filter,
     Assert,
     Match,
@@ -104,12 +101,6 @@ from ssc_codegen.ast import (
     PredCountGe,
     PredCountLe,
     PredCountRange,
-    PredRange,
-    PredIn,
-    PredGe,
-    PredGt,
-    PredLe,
-    PredLt,
     PredRe,
     PredReAll,
     PredReAny,
@@ -133,47 +124,259 @@ _PIPELINE_NODES = (
     Value,
     TableConfig,
     TableMatchKey,
-    TableRow,
+    TableRows,
 )
 
 # Predicate: depth+1, index=0, advance between siblings.
 _PREDICATE_NODES = (Filter, Assert, Match, LogicNot, LogicAnd, LogicOr)
 
 
+@dataclass(frozen=True)
+class StdDef:
+    """Signal: register a std-library helper, co-located with its caller.
+
+    Yield ``STD(name, code=..., imports=...)`` from a ``visit_*`` method
+    right next to the line that calls the helper — the definition is
+    self-contained (no external ``STD_LIBS`` registry to keep in sync).
+    Registration is idempotent by ``name``: the first emission for a name
+    wins; subsequent ones are no-ops (identical bodies are expected within
+    a single conversion, since a converter runs exactly one dialect).
+
+    ``imports`` are pulled into the std import pool automatically.
+    ``code`` is the helper body as a string in the target language;
+    ``inspect.cleandoc`` is applied at render time so authors can indent
+    freely.
+    """
+
+    name: str
+    imports: list[str]
+    code: str
+
+
+@dataclass(frozen=True)
+class ImportUse:
+    """Signal: register a main-module import line.
+
+    Use ``IMPORT(line)`` for imports required by the main generated code
+    (type annotations, direct library calls, etc.). Std-helper imports
+    are pulled automatically from the co-located ``STD()`` emissions and
+    go to the std pool.
+    """
+
+    line: str
+
+
+def STD(name: str, *, code: str, imports: list[str] | None = None) -> StdDef:
+    """Sugar for ``yield StdDef(name, imports, code)``.
+
+    ``code`` is the helper source (target-language string, required).
+    ``imports`` is optional (defaults to no extra imports).
+
+    Example::
+
+        def visit_attr(self, node, ctx):
+            yield STD(
+                "std_get_attr",
+                code="def std_get_attr(el, key): return ' '.join(el.get_attribute_list(key))",
+            )
+            yield f"{ctx.indent}{ctx.nxt} = std_get_attr({ctx.prv}, {key})"
+    """
+    return StdDef(name, list(imports) if imports else [], code)
+
+
+def IMPORT(line: str) -> ImportUse:
+    """Sugar for ``yield ImportUse(line)``."""
+    return ImportUse(line)
+
+
+VisitStream: TypeAlias = (
+    Iterator[str | None | Iterable[str] | StdDef | ImportUse] | None
+)
+
+# TODO: replace to sentinel object
+TRAVERSE = None
+
+
 class Visitor(ABC):
     """Base transpiler visitor: walks the AST and dispatches nodes to visit_* methods.
 
     CONTRACT for visit_* methods (generators):
-        - `yield "..."`   -> emit a line
-        - `yield` (None)  -> traverse node.body, then resume the method (pre/post hook)
-        - `yield [...]`   -> extend with a list of lines
-        - `yield from it` -> delegate to an iterable
+        - `yield "..."`       -> emit a line
+        - `yield TRAVERSE`    -> traverse node.body, then resume the method (pre/post hook)
+        - `yield [...]`       -> extend with a list of lines (signals allowed inside)
+        - `yield STD(...)`    -> register a co-located std helper (name + code + imports)
+        - `yield IMPORT(ln)`  -> register a main-module import line
+        - `yield from it`     -> delegate to an iterable
         - `return` / non-generator -> no-op
 
-    `""` is preserved as a blank line; `None` is reserved as the traverse-children signal.
+    `""` is preserved as a blank line; `TRAVERSE` (None) is the traverse-children signal.
+
+    CONTRACT for visit_* methods (reliability):
+        - MUST be deterministic: same (node, ctx) -> same yields.
+        - MUST NOT have side effects beyond yielding. The two-pass `convert_all`
+          runs every visit_* twice (collect + emit).
     """
+
+    # === CLASS-LEVEL CONFIG (override in subclasses) ===
+    STD_MODULE_NAME: str = "ssc_std"
 
     def __init__(self, var_name: str = "v", indent: str = " " * 4) -> None:
         self.var_name = var_name
         self.indent = indent
+        self._file_providers: dict[str, Any] = {}
+        self._reset_state()
 
-    # === CORE ===
-    def convert(self, module_ast: Module, **meta) -> str:
-        """Entry point: generate target code from the AST (main.py-compatible).
+    # === STATE ===
+    def _reset_state(self) -> None:
+        """Clear per-conversion state. Called at start of every convert_*."""
+        self._std_defs: dict[
+            str, tuple[list[str], str]
+        ] = {}  # name -> (imports, code)
+        self._main_imports: dict[
+            str, None
+        ] = {}  # ordered set, from IMPORT signals
+        self._std_imports: dict[
+            str, None
+        ] = {}  # ordered set, from STD() emissions
 
-        Creates a ConverterContext, emits the file header via visit_module,
-        then walks module_ast.body through visit(). `meta` is forwarded to ctx.meta.
+    # === FILE PROVIDERS ===
+    def file(self, filename: str):
+        """Register a support file provider.
+
+        The decorated function receives ``(module_ast, meta)`` and returns
+        the file content as a string.  *meta* is the dict of kwargs passed
+        to ``convert_all(**meta)``.
         """
-        ctx = ConverterContext(
-            var_name=self.var_name, indent_char=self.indent, meta=dict(meta)
+
+        def decorator(fn):
+            self._file_providers[filename] = fn
+            return fn
+
+        return decorator
+
+    # === PUBLIC API ===
+    def convert(self, module_ast: Module, **meta) -> str:
+        """Shortcut: single file in inline mode. Returns main content only.
+
+        Equivalent to ``convert_all(module_ast, inline_std=True, **meta)[""]``.
+        """
+        return self.convert_all(module_ast, inline_std=True, **meta)[""]
+
+    def convert_all(self, module_ast: Module, **meta) -> dict[str, str]:
+        """Convert a single module. Two-pass: collect signals, then emit.
+
+        meta:
+            inline_std (bool, default True): inline helpers/imports or split.
+            std_module_name (str): override STD_MODULE_NAME.
+
+        Returns:
+            ``{"": main_content}`` when inline_std=True.
+            ``{"": main_content, "<std_module_name>": std_content}`` when inline_std=False
+            and at least one std helper is used.
+            Additional files from ``@converter.file(name)`` providers are
+            included when registered.
+        """
+        self._reset_state()
+        ctx = self._make_ctx(meta)
+        lines = self._convert_two_pass(module_ast, ctx)
+        out: dict[str, str] = {"": "\n".join(lines)}
+        if not ctx.meta.get("inline_std", True) and self._std_defs:
+            name = ctx.meta.get("std_module_name", self.STD_MODULE_NAME)
+            out[name] = self._render_std_module(ctx)
+        for fname, provider in self._file_providers.items():
+            out[fname] = provider(module_ast, ctx.meta)
+        return out
+
+    def convert_batch(
+        self,
+        modules: list[tuple[str, Module]],
+        **meta,
+    ) -> dict[str, str]:
+        """Convert multiple modules with shared state.
+
+        inline_std=True (default):
+            Each file is self-contained (helpers inlined per file).
+        inline_std=False:
+            N main files + ONE shared std module containing the union of all
+            used helpers. Each main file imports only what it actually uses.
+
+        Args:
+            modules: list of ``(output_name, module_ast)`` tuples.
+            **meta: forwarded to ctx.meta. Common keys: ``inline_std``,
+                ``std_module_name``.
+
+        Returns:
+            ``{output_name: content}`` for each module, plus
+            ``{std_module_name: std_content}`` when inline_std=False and at
+            least one std helper is used.
+        """
+        inline = meta.get("inline_std", True)
+        ctx = self._make_ctx({**meta, "inline_std": inline})
+
+        if inline:
+            results: dict[str, str] = {}
+            for name, module_ast in modules:
+                self._reset_state()
+                results[name] = "\n".join(
+                    self._convert_two_pass(module_ast, ctx)
+                )
+            return results
+
+        # Separated mode: collect union of std usage across all files
+        shared_std_defs: dict[str, tuple[list[str], str]] = {}
+        shared_std_imports: dict[str, None] = {}
+        for _, module_ast in modules:
+            self._reset_state()
+            self._collect_signals(module_ast, ctx)
+            shared_std_defs.update(self._std_defs)
+            shared_std_imports.update(self._std_imports)
+
+        # Generate the single shared std module (if any helpers are used)
+        results = {}
+        std_module_name = ctx.meta.get("std_module_name", self.STD_MODULE_NAME)
+        if shared_std_defs:
+            self._reset_state()
+            self._std_defs = dict(shared_std_defs)
+            self._std_imports = dict(shared_std_imports)
+            results[std_module_name] = self._render_std_module(ctx)
+
+        # Generate each main module independently — visit_utilities reads
+        # this file's _std_defs (NOT the union) to emit a correct
+        # `from ssc_std import ...` line for THIS file.
+        for name, module_ast in modules:
+            self._reset_state()
+            results[name] = "\n".join(self._convert_two_pass(module_ast, ctx))
+
+        return results
+
+    # === CORE (single-module two-pass pipeline) ===
+    def _convert_two_pass(
+        self, module_ast: Module, ctx: ConverterContext
+    ) -> list[str]:
+        """Pass 1: collect signals (output discarded). Pass 2: emit."""
+        self._collect_signals(module_ast, ctx)
+        lines: list[str] = self._process_gen(
+            self.visit_module(module_ast, ctx), None, None
         )
-        lines: list[str] = list(self.visit_module(module_ast, ctx))
         for node in module_ast.body:
             lines.extend(self.visit(node, ctx))
-        return "\n".join(lines)
+        return lines
+
+    def _collect_signals(
+        self, module_ast: Module, ctx: ConverterContext
+    ) -> None:
+        """Pass 1: walk AST and populate signal pools. Output discarded.
+
+        ``visit()`` is called for every node; signal handling (StdDef/ImportUse)
+        accumulates into ``_std_defs`` / ``_main_imports`` / ``_std_imports``
+        via ``setdefault``. The returned line lists are thrown away.
+        """
+        self._process_gen(self.visit_module(module_ast, ctx), None, None)
+        for node in module_ast.body:
+            self.visit(node, ctx)
 
     def visit(self, node: Node, ctx: ConverterContext) -> list[str]:
-        """Universal AST visitor: dispatches a node to visit_* and intercepts bare-yield.
+        """Universal AST visitor: dispatches a node to visit_* and intercepts signals.
 
         Walks the whole AST tree and hands nodes off to the concrete handler code.
         """
@@ -181,17 +384,47 @@ class Visitor(ABC):
         if name is None:
             return []
         gen = getattr(self, name)(node, ctx)
+        return self._process_gen(gen, node, ctx)
+
+    def _process_gen(
+        self,
+        gen: VisitStream,
+        node: Node | None = None,
+        ctx: ConverterContext | None = None,
+    ) -> list[str]:
+        """Process a generator output: handle signals, collect lines.
+
+        ``node`` and ``ctx`` are required only when the generator may yield
+        ``TRAVERSE`` (None) — ``_emit_body`` is then called to walk
+        ``node.body``. Pass ``None`` for both when called on generators that
+        never traverse children (e.g. ``visit_module``).
+        """
         if gen is None:
             return []
         lines: list[str] = []
         for item in gen:
             if item is None:
-                lines.extend(self._emit_body(node, ctx))
-            elif isinstance(item, str):
-                lines.append(item)
+                if node is not None and ctx is not None:
+                    lines.extend(self._emit_body(node, ctx))
             else:
-                lines.extend(x for x in item if x)
+                self._handle_yield_item(item, lines)
         return lines
+
+    def _handle_yield_item(self, item: Any, lines: list[str]) -> None:
+        """Process a single non-None yield item (signal or line)."""
+        if isinstance(item, StdDef):
+            self._register_std(item.name, item.imports, item.code)
+        elif isinstance(item, ImportUse):
+            self._register_import_use(item.line)
+        elif isinstance(item, str):
+            lines.append(item)
+        elif isinstance(item, (list, tuple)):
+            for x in item:
+                if x is None:
+                    continue
+                self._handle_yield_item(x, lines)
+        else:
+            raise TypeError(f"unsupported yield value: {item!r}")
 
     def _emit_body(self, node: Node, ctx: ConverterContext) -> list[str]:
         """Traverse a node's body. The mode is selected by category (_CONTAINER/_PREDICATE/_PIPELINE).
@@ -222,32 +455,83 @@ class Visitor(ABC):
     ) -> list[str]:
         """Traverse a pipeline body (Field.body, etc.): index advances after each node.
 
-        FallbackStart/FallbackEnd are handled specially: nodes between them are emitted
-        at depth+1 so the try-block is indented correctly.
-        Ported verbatim from base.BaseConverter._emit_pipeline.
+        ``Fallback`` nodes are handled specially: the generator's ``yield TRAVERSE``
+        signal triggers body traversal at depth+1 with advancing index, then the
+        outer ctx is synced so subsequent nodes (e.g. Return) see the correct
+        variable.
         """
         lines: list[str] = []
-        in_fallback = False
-        fallback_ctx = ctx
         for node in nodes:
-            if isinstance(node, FallbackStart):
-                in_fallback = True
-                lines.extend(self.visit(node, ctx))
-                fallback_ctx = replace(ctx, depth=ctx.depth + 1)
+            if isinstance(node, Fallback):
+                inner_ctx = ctx.deeper()
+                gen = self.visit_fallback(node, ctx)
+                if gen is not None:
+                    for item in gen:
+                        if item is None:
+                            for child in node.body:
+                                lines.extend(self.visit(child, inner_ctx))
+                                inner_ctx = inner_ctx.advance()
+                        else:
+                            self._handle_yield_item(item, lines)
+                ctx = inner_ctx
                 continue
-            elif isinstance(node, FallbackEnd):
-                in_fallback = False
-                ctx = replace(ctx, index=fallback_ctx.index, depth=ctx.depth)
-                lines.extend(self.visit(node, ctx))
-                continue
-            if in_fallback:
-                lines.extend(self.visit(node, fallback_ctx))
-                fallback_ctx = fallback_ctx.advance()
-                ctx = replace(ctx, index=fallback_ctx.index)
-            else:
-                lines.extend(self.visit(node, ctx))
-                ctx = ctx.advance()
+            lines.extend(self.visit(node, ctx))
+            ctx = ctx.advance()
         return lines
+
+    # === STD / IMPORT POOLS ===
+    def _make_ctx(self, meta: dict) -> ConverterContext:
+        """Build a fresh ConverterContext from meta dict."""
+        return ConverterContext(
+            var_name=self.var_name, indent_char=self.indent, meta=dict(meta)
+        )
+
+    def _register_std(self, name: str, imports: list[str], code: str) -> None:
+        """Record a std helper definition (idempotent by name).
+
+        First emission for a name wins; imports always accumulate into the
+        std import pool (deduped).
+        """
+        self._std_defs.setdefault(name, (list(imports), code))
+        for imp in imports:
+            self._std_imports.setdefault(imp, None)
+
+    def _register_import_use(self, line: str) -> None:
+        """Record a main-module import line."""
+        self._main_imports.setdefault(line, None)
+
+    def _render_std_section(self, ctx: ConverterContext) -> list[str]:
+        """Render std section for the MAIN module.
+
+        - inline mode: merged imports + helper bodies.
+        - separated mode: main imports + ``from <std_module> import ...``.
+
+        Returns an empty list when no std helpers are used.
+        """
+        if not self._std_defs:
+            return []
+
+        if ctx.meta.get("inline_std", True):
+            body_lines: list[str] = []
+            for _imports, code in self._std_defs.values():
+                body_lines.extend(inspect.cleandoc(code).splitlines())
+                body_lines.append("")
+            # std-helper imports only; main-module imports are emitted by the
+            # converter's visit_utilities (they must appear regardless of
+            # whether any std helper is used).
+            return [*self._std_imports, "", *body_lines]
+
+        module_name = ctx.meta.get("std_module_name", self.STD_MODULE_NAME)
+        return [f"from {module_name} import {', '.join(self._std_defs)}"]
+
+    def _render_std_module(self, ctx: ConverterContext) -> str:
+        """Render the standalone std runtime module content (separated mode)."""
+        lines: list[str] = ["# autogenerated std runtime. DO NOT EDIT", ""]
+        lines.extend(self._std_imports)
+        for _imports, code in self._std_defs.values():
+            lines.append("")
+            lines.extend(inspect.cleandoc(code).splitlines())
+        return "\n".join(lines)
 
     # === DISPATCH TABLE ===
     # Single source of truth: node -> visit_* method name.
@@ -265,11 +549,7 @@ class Visitor(ABC):
         TypeDef: "visit_typedef",
         TypeDefField: "visit_typedef_field",
         # struct
-        StructItem: "visit_struct_item",
-        StructList: "visit_struct_list",
-        StructFlatList: "visit_struct_flat_list",
-        StructDict: "visit_struct_dict",
-        StructTable: "visit_struct_table",
+        Struct: "visit_struct",
         StructRest: "visit_struct_rest",
         StructDocstring: "visit_struct_docstring",
         StartParse: "visit_start_parse",
@@ -283,7 +563,7 @@ class Visitor(ABC):
         Value: "visit_value",
         TableConfig: "visit_table_config",
         TableMatchKey: "visit_table_match_key",
-        TableRow: "visit_table_row",
+        TableRows: "visit_table_rows",
         MethodFetch: "visit_method_fetch",
         MethodRest: "visit_method_rest",
         ErrorResponse: "visit_error_response",
@@ -331,8 +611,7 @@ class Visitor(ABC):
         # control
         Self: "visit_self",
         Return: "visit_return",
-        FallbackStart: "visit_fallback_start",
-        FallbackEnd: "visit_fallback_end",
+        Fallback: "visit_fallback",
         # predicate containers
         Filter: "visit_filter",
         Assert: "visit_assert",
@@ -367,12 +646,6 @@ class Visitor(ABC):
         PredCountGe: "visit_predicate_count_ge",
         PredCountLe: "visit_predicate_count_le",
         PredCountRange: "visit_pred_count_range",
-        PredRange: "visit_pred_range",
-        PredIn: "visit_predicate_in",
-        PredGe: "visit_predicate_ge",
-        PredGt: "visit_predicate_gt",
-        PredLe: "visit_predicate_le",
-        PredLt: "visit_predicate_lt",
         PredRe: "visit_predicate_re",
         PredReAll: "visit_predicate_re_all",
         PredReAny: "visit_predicate_re_any",
@@ -380,17 +653,7 @@ class Visitor(ABC):
 
     # NODE APIS. need override
     @abstractmethod
-    def std_lib(self, name: str):
-        """Emit the standard library to simplify expression codegen.
-
-        The code may be inlined into the module.
-
-        Note: do not implement an std equivalent when the operation translates
-        natively from the AST in a single line.
-        """
-
-    @abstractmethod
-    def visit_module(self, node: Module, ctx: ConverterContext):
+    def visit_module(self, node: Module, ctx: ConverterContext) -> VisitStream:
         """
         Auto-generated AST node (not user-authored).
 
@@ -406,26 +669,33 @@ class Visitor(ABC):
         per-struct docstrings via the ``StructBase.doc`` field — e.g. Python
         places the docstring below the class declaration, JS/Go place it
         above.
+
+        Prefer ``IMPORT(line)`` signals over hardcoded import strings so the
+        core can deduplicate across main code, std helpers, and other sources.
         """
 
-    @abstractmethod
-    def visit_docstring(self, node: Docstring):
-        """DEPRECATED: docstring is now a ``Module.doc`` field, emitted by
-        ``visit_module``. This handler is retained as a no-op for any
-        manually-constructed ``Docstring`` nodes; it will be removed once
-        the deprecated class is dropped.
-        """
-
-    @abstractmethod
-    def visit_utilities(self, node: Utilities, ctx: ConverterContext):
+    def visit_utilities(
+        self, node: Utilities, ctx: ConverterContext
+    ) -> VisitStream:
         """
         Auto-generated AST node (not user-authored).
 
-        Used to emit inlined std code when a separate runtime module is not generated.
+        Default implementation emits the std runtime section by reading
+        ``self._std_defs`` (populated during pass 1 of ``convert_all``).
+
+        - inline_std=True: merged imports + helper bodies, all in the main file.
+        - inline_std=False: main imports + ``from <std_module> import ...``.
+
+        Override only if a target language needs custom orchestration
+        (e.g. JS bundler-specific import statements). In that case you are
+        responsible for honoring ``ctx.meta.get("inline_std", True)``.
         """
+        return iter(self._render_std_section(ctx))
 
     @abstractmethod
-    def visit_code_start_hook(self, node: CodeStartHook, ctx: ConverterContext):
+    def visit_code_start_hook(
+        self, node: CodeStartHook, ctx: ConverterContext
+    ) -> VisitStream:
         """
         Auto-generated AST node (not user-authored).
 
@@ -435,7 +705,9 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_code_end_hook(self, node: CodeEndHook, ctx: ConverterContext):
+    def visit_code_end_hook(
+        self, node: CodeEndHook, ctx: ConverterContext
+    ) -> VisitStream:
         """
         Auto-generated AST node (not user-authored).
 
@@ -446,7 +718,9 @@ class Visitor(ABC):
 
     # === TYPES ===
     @abstractmethod
-    def visit_jsondef(self, node: JsonDef, ctx: ConverterContext):
+    def visit_jsondef(
+        self, node: JsonDef, ctx: ConverterContext
+    ) -> VisitStream:
         """
         KDL: `json <name> { ... }`
 
@@ -454,7 +728,9 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_jsondef_field(self, node: JsonDefField, ctx: ConverterContext):
+    def visit_jsondef_field(
+        self, node: JsonDefField, ctx: ConverterContext
+    ) -> VisitStream:
         """
         KDL: `json <name> { field... }`
 
@@ -463,7 +739,9 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_typedef(self, node: TypeDef, ctx: ConverterContext):
+    def visit_typedef(
+        self, node: TypeDef, ctx: ConverterContext
+    ) -> VisitStream:
         """
         Auto-generated AST node (not user-authored); derived from a non-rest `struct`.
 
@@ -471,7 +749,9 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_typedef_field(self, node: TypeDefField, ctx: ConverterContext):
+    def visit_typedef_field(
+        self, node: TypeDefField, ctx: ConverterContext
+    ) -> VisitStream:
         """
         Auto-generated AST node (not user-authored); derived from a non-rest `struct`.
 
@@ -482,59 +762,30 @@ class Visitor(ABC):
     # === STRUCT ===
     # TODO: unify into a single struct node?
     @abstractmethod
-    def visit_struct_item(self, node: StructItem, ctx: ConverterContext):
+    def visit_struct(self, node: Struct, ctx: ConverterContext) -> VisitStream:
         """
+
+        Emit the struct/class header.
+        If documented, emit the docstring.
+
+        ITEM:
         KDL: `struct <name> { ... } | (item)struct <name> { ... } | struct <name> type=item { ... }`
-
-        Emit the struct/class header.
-
-        If documented, emit the docstring.
-        """
-
-    @abstractmethod
-    def visit_struct_list(self, node: StructList, ctx: ConverterContext):
-        """
+        LIST:
         KDL: `struct <name> type=list { ... } | (list)struct <name> { ... }`
-
-        Emit the struct/class header.
-
-        If documented, emit the docstring.
-        """
-
-    @abstractmethod
-    def visit_struct_flat_list(
-        self, node: StructFlatList, ctx: ConverterContext
-    ):
-        """
+        FLAT:
         KDL: `struct <name> type=flat { ... } | (flat)struct <name> { ... }`
-
-        Emit the struct/class header.
-
-        If documented, emit the docstring.
-        """
-
-    @abstractmethod
-    def visit_struct_dict(self, node: StructDict, cxt: ConverterContext):
-        """
+        DICT:
         KDL: `struct <name> type=dict { ... } | (dict)struct <name> { ... }`
-
-        Emit the struct/class header.
-
-        If documented, emit the docstring.
-        """
-
-    @abstractmethod
-    def visit_struct_table(self, node: StructTable, ctx: ConverterContext):
-        """
+        TABLE:
         KDL: `struct <name> type=table { ... } | (table)struct <name> { ... }`
-
-        Emit the struct/class header.
-
-        If documented, emit the docstring.
+        REST:
+            SEPARATED IN `visit_struct_rest`
         """
 
     @abstractmethod
-    def visit_struct_rest(self, node: StructRest, ctx: ConverterContext):
+    def visit_struct_rest(
+        self, node: StructRest, ctx: ConverterContext
+    ) -> VisitStream:
         """
         KDL: `struct <name> type=rest { ... } | (rest)struct <name> { ... }`
 
@@ -544,19 +795,7 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_struct_docstring(
-        self, node: StructDocstring, ctx: ConverterContext
-    ):
-        """DEPRECATED: struct docstring is now a ``StructBase.doc`` field.
-
-        The converter picks the position (top/bottom of the class declaration)
-        per target language. This handler is retained as a no-op for any
-        manually-constructed ``StructDocstring`` nodes.
-        """
-        pass
-
-    @abstractmethod
-    def visit_init(self, node: Init, ctx: ConverterContext):
+    def visit_init(self, node: Init, ctx: ConverterContext) -> VisitStream:
         """
         KDL:
             ```
@@ -576,7 +815,9 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_init_field(self, node: InitField, ctx: ConverterContext):
+    def visit_init_field(
+        self, node: InitField, ctx: ConverterContext
+    ) -> VisitStream:
         """
 
         KDL:
@@ -593,7 +834,7 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_field(self, node: Field, ctx: ConverterContext):
+    def visit_field(self, node: Field, ctx: ConverterContext) -> VisitStream:
         """
 
         KDL: `struct Foo { <name> { ... }... }`
@@ -602,7 +843,9 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_pre_validate(self, node: PreValidate, ctx: ConverterContext):
+    def visit_pre_validate(
+        self, node: PreValidate, ctx: ConverterContext
+    ) -> VisitStream:
         """
 
         KDL: `@pre-validate { ... }`
@@ -614,7 +857,9 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_check_method(self, node: CheckMethod, ctx: ConverterContext):
+    def visit_check_method(
+        self, node: CheckMethod, ctx: ConverterContext
+    ) -> VisitStream:
         """
 
         KDL: `@check <name> { ... }`
@@ -624,7 +869,9 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_split_doc(self, node: SplitDoc, ctx: ConverterContext):
+    def visit_split_doc(
+        self, node: SplitDoc, ctx: ConverterContext
+    ) -> VisitStream:
         """
 
         KDL: `@split-doc { ... }`
@@ -634,7 +881,7 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_key(self, node: Key, ctx: ConverterContext):
+    def visit_key(self, node: Key, ctx: ConverterContext) -> VisitStream:
         """
         KDL: `@key { ... }`
 
@@ -642,7 +889,7 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_value(self, node: Value, ctx: ConverterContext):
+    def visit_value(self, node: Value, ctx: ConverterContext) -> VisitStream:
         """
         KDL: `@value { ... }`
 
@@ -651,14 +898,18 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_table_config(self, node: TableConfig, ctx: ConverterContext):
+    def visit_table_config(
+        self, node: TableConfig, ctx: ConverterContext
+    ) -> VisitStream:
         """
         KDL: `@table { ... }`
         Emit the header of a private method for StructTable that selects the <table>-like element.
         """
 
     @abstractmethod
-    def visit_table_match_key(self, node: TableMatchKey, ctx: ConverterContext):
+    def visit_table_match_key(
+        self, node: TableMatchKey, ctx: ConverterContext
+    ) -> VisitStream:
         """
         KDL: `@match { ... }`
 
@@ -667,7 +918,9 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_table_row(self, node: TableRow, ctx: ConverterContext):
+    def visit_table_rows(
+        self, node: TableRows, ctx: ConverterContext
+    ) -> VisitStream:
         """
         KDL: `@rows { ... }`
 
@@ -675,7 +928,9 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_method_fetch(self, node: MethodFetch, ctx: ConverterContext):
+    def visit_method_fetch(
+        self, node: MethodFetch, ctx: ConverterContext
+    ) -> VisitStream:
         """
         KDL: `@request ...`
 
@@ -686,7 +941,9 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_method_rest(self, node: MethodRest, ctx: ConverterContext):
+    def visit_method_rest(
+        self, node: MethodRest, ctx: ConverterContext
+    ) -> VisitStream:
         """
         KDL: `@request ...`
 
@@ -698,13 +955,17 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_error_response(self, node: ErrorResponse, ctx: ConverterContext):
+    def visit_error_response(
+        self, node: ErrorResponse, ctx: ConverterContext
+    ) -> VisitStream:
         """
         TODO: define the error-response contract.
         """
 
     @abstractmethod
-    def visit_start_parse(self, node: StartParse, ctx: ConverterContext):
+    def visit_start_parse(
+        self, node: StartParse, ctx: ConverterContext
+    ) -> VisitStream:
         """
         Auto-generated AST node (not user-authored).
 
@@ -817,7 +1078,9 @@ class Visitor(ABC):
 
     # === SELECTORS ===
     @abstractmethod
-    def visit_css_select(self, node: CssSelect, ctx: ConverterContext):
+    def visit_css_select(
+        self, node: CssSelect, ctx: ConverterContext
+    ) -> VisitStream:
         """
         kdl: `css query | css { query1; query2... }`
 
@@ -831,7 +1094,9 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_css_select_all(self, node: CssSelectAll, ctx: ConverterContext):
+    def visit_css_select_all(
+        self, node: CssSelectAll, ctx: ConverterContext
+    ) -> VisitStream:
         """
         kdl: `css-all query | css-all { query1; query2... }`
 
@@ -845,7 +1110,9 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_css_remove(self, node: CssRemove, ctx: ConverterContext):
+    def visit_css_remove(
+        self, node: CssRemove, ctx: ConverterContext
+    ) -> VisitStream:
         """
         kdl: `css-remove query`
 
@@ -859,7 +1126,9 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_xpath_select(self, node: XpathSelect, ctx: ConverterContext):
+    def visit_xpath_select(
+        self, node: XpathSelect, ctx: ConverterContext
+    ) -> VisitStream:
         """
         kdl: `xpath query | xpath { query1; query2... }`
 
@@ -874,7 +1143,7 @@ class Visitor(ABC):
     @abstractmethod
     def visit_xpath_select_all(
         self, node: XpathSelectAll, ctx: ConverterContext
-    ):
+    ) -> VisitStream:
         """
         kdl: `xpath-all query | xpath-all { query1; query2... }`
 
@@ -887,7 +1156,9 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_xpath_remove(self, node: XpathRemove, ctx: ConverterContext):
+    def visit_xpath_remove(
+        self, node: XpathRemove, ctx: ConverterContext
+    ) -> VisitStream:
         """
         kdl: `xpath-remove query`
 
@@ -901,7 +1172,7 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_text(self, node: Text, ctx: ConverterContext):
+    def visit_text(self, node: Text, ctx: ConverterContext) -> VisitStream:
         """
         kdl: `text`
 
@@ -914,7 +1185,7 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_raw(self, node: Raw, ctx: ConverterContext):
+    def visit_raw(self, node: Raw, ctx: ConverterContext) -> VisitStream:
         """
         kdl: `raw`
 
@@ -927,7 +1198,7 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_attr(self, node: Attr, ctx: ConverterContext):
+    def visit_attr(self, node: Attr, ctx: ConverterContext) -> VisitStream:
         """
         kdl: `attr <name>...`
 
@@ -946,7 +1217,7 @@ class Visitor(ABC):
 
     # === STRING ===
     @abstractmethod
-    def visit_trim(self, node: Trim, ctx: ConverterContext):
+    def visit_trim(self, node: Trim, ctx: ConverterContext) -> VisitStream:
         """
         kdl: `trim <chars>`
 
@@ -959,7 +1230,7 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_l_trim(self, node: Ltrim, ctx: ConverterContext):
+    def visit_l_trim(self, node: Ltrim, ctx: ConverterContext) -> VisitStream:
         """
         kdl: `ltrim <chars>`
 
@@ -972,7 +1243,7 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_r_trim(self, node: Rtrim, ctx: ConverterContext):
+    def visit_r_trim(self, node: Rtrim, ctx: ConverterContext) -> VisitStream:
         """
         kdl: `rtrim <chars>`
 
@@ -986,7 +1257,9 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_rm_prefix(self, node: RmPrefix, ctx: ConverterContext):
+    def visit_rm_prefix(
+        self, node: RmPrefix, ctx: ConverterContext
+    ) -> VisitStream:
         """
         kdl: `rm-prefix <substr>`
 
@@ -999,7 +1272,9 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_rm_suffix(self, node: RmSuffix, ctx: ConverterContext):
+    def visit_rm_suffix(
+        self, node: RmSuffix, ctx: ConverterContext
+    ) -> VisitStream:
         """
         kdl: `rm-suffix <substr>`
 
@@ -1014,7 +1289,7 @@ class Visitor(ABC):
     @abstractmethod
     def visit_rm_prefix_suffix(
         self, node: RmPrefixSuffix, ctx: ConverterContext
-    ):
+    ) -> VisitStream:
         """
         kdl: `rm-prefix-suffix <substr>`
 
@@ -1026,7 +1301,7 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_format(self, node: Fmt, ctx: ConverterContext):
+    def visit_format(self, node: Fmt, ctx: ConverterContext) -> VisitStream:
         """
         kdl: `fmt <template>`
 
@@ -1039,7 +1314,7 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_repl(self, node: Repl, ctx: ConverterContext):
+    def visit_repl(self, node: Repl, ctx: ConverterContext) -> VisitStream:
         """
         kdl: `repl <old> <new>`
 
@@ -1053,7 +1328,9 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_repl_map(self, node: ReplMap, ctx: ConverterContext):
+    def visit_repl_map(
+        self, node: ReplMap, ctx: ConverterContext
+    ) -> VisitStream:
         """
         kdl: `repl {<old1> <new1>; <old2> <new2>}`
 
@@ -1067,7 +1344,7 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_lower(self, node: Lower, ctx: ConverterContext):
+    def visit_lower(self, node: Lower, ctx: ConverterContext) -> VisitStream:
         """
         kdl: `lower`
 
@@ -1080,7 +1357,7 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_upper(self, node: Upper, ctx: ConverterContext):
+    def visit_upper(self, node: Upper, ctx: ConverterContext) -> VisitStream:
         """
         kdl: `upper`
 
@@ -1093,7 +1370,7 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_split(self, node: Split, ctx: ConverterContext):
+    def visit_split(self, node: Split, ctx: ConverterContext) -> VisitStream:
         """
         kdl: `split <sep>`
 
@@ -1104,7 +1381,7 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_join(self, node: Join, ctx: ConverterContext):
+    def visit_join(self, node: Join, ctx: ConverterContext) -> VisitStream:
         """
         kdl: `join <sep>`
 
@@ -1115,7 +1392,9 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_norm_space(self, node: NormalizeSpace, ctx: ConverterContext):
+    def visit_norm_space(
+        self, node: NormalizeSpace, ctx: ConverterContext
+    ) -> VisitStream:
         """
         kdl: `normalize-space`
 
@@ -1136,7 +1415,9 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_unescape(self, node: Unescape, ctx: ConverterContext):
+    def visit_unescape(
+        self, node: Unescape, ctx: ConverterContext
+    ) -> VisitStream:
         """
         kdl: `unescape`
 
@@ -1171,7 +1452,7 @@ class Visitor(ABC):
     # === REGEX ===
 
     @abstractmethod
-    def visit_re(self, node: Re, ctx: ConverterContext):
+    def visit_re(self, node: Re, ctx: ConverterContext) -> VisitStream:
         """
         kdl: `re <pattern>`
 
@@ -1183,7 +1464,7 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_re_all(self, node: ReAll, ctx: ConverterContext):
+    def visit_re_all(self, node: ReAll, ctx: ConverterContext) -> VisitStream:
         """
         kdl: `re-all <pattern>`
 
@@ -1195,7 +1476,7 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_re_sub(self, node: ReSub, ctx: ConverterContext):
+    def visit_re_sub(self, node: ReSub, ctx: ConverterContext) -> VisitStream:
         """
         kdl: `re-sub <pattern> <repl>`
 
@@ -1210,7 +1491,7 @@ class Visitor(ABC):
 
     # === ARRAY ===
     @abstractmethod
-    def visit_index(self, node: Index, ctx: ConverterContext):
+    def visit_index(self, node: Index, ctx: ConverterContext) -> VisitStream:
         """
         kdl: `index <N>`
         aliases:
@@ -1225,7 +1506,7 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_slice(self, node: Slice, ctx: ConverterContext):
+    def visit_slice(self, node: Slice, ctx: ConverterContext) -> VisitStream:
         """
         kdl: `slice <START> <END>`
 
@@ -1236,7 +1517,7 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_len(self, node: Len, ctx: ConverterContext):
+    def visit_len(self, node: Len, ctx: ConverterContext) -> VisitStream:
         """
         kdl: `len`
 
@@ -1248,7 +1529,7 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_unique(self, node: Unique, ctx: ConverterContext):
+    def visit_unique(self, node: Unique, ctx: ConverterContext) -> VisitStream:
         """
         kdl: `unique`
 
@@ -1261,7 +1542,7 @@ class Visitor(ABC):
 
     # === CASTS ===
     @abstractmethod
-    def visit_to_int(self, node: ToInt, ctx: ConverterContext):
+    def visit_to_int(self, node: ToInt, ctx: ConverterContext) -> VisitStream:
         """
         kdl: `to-int`
 
@@ -1275,7 +1556,9 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_to_float(self, node: ToFloat, ctx: ConverterContext):
+    def visit_to_float(
+        self, node: ToFloat, ctx: ConverterContext
+    ) -> VisitStream:
         """
         kdl: `to-float`
 
@@ -1289,7 +1572,7 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_to_bool(self, node: ToBool, ctx: ConverterContext):
+    def visit_to_bool(self, node: ToBool, ctx: ConverterContext) -> VisitStream:
         """
         kdl: `to-bool`
 
@@ -1307,7 +1590,9 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_jsonify(self, node: Jsonify, ctx: ConverterContext):
+    def visit_jsonify(
+        self, node: Jsonify, ctx: ConverterContext
+    ) -> VisitStream:
         """
         kdl: `jsonify <JsonStruct> <path?>`
 
@@ -1321,7 +1606,7 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_nested(self, node: Nested, ctx: ConverterContext):
+    def visit_nested(self, node: Nested, ctx: ConverterContext) -> VisitStream:
         """
         kdl: `nested <Struct>`
 
@@ -1335,7 +1620,7 @@ class Visitor(ABC):
 
     # === CONTROLS ===
     @abstractmethod
-    def visit_self(self, node: Self, ctx: ConverterContext):
+    def visit_self(self, node: Self, ctx: ConverterContext) -> VisitStream:
         """
         kdl: `self <init-field-name>` (deprecated)
         kdl: `@<init-field-name>`
@@ -1348,7 +1633,7 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_return(self, node: Return, ctx: ConverterContext):
+    def visit_return(self, node: Return, ctx: ConverterContext) -> VisitStream:
         """
         Auto-generated AST node.
 
@@ -1357,28 +1642,40 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_fallback_start(self, node: FallbackStart, ctx: ConverterContext):
-        """
-        kdl: `fallback <value>|{}`
+    def visit_fallback(
+        self, node: Fallback, ctx: ConverterContext
+    ) -> VisitStream:
+        """kdl: `fallback <value>|{}`
 
-        - Combined, FallbackStart + FallbackEnd form a try/catch.
-        - If the target has no such construct, emulate it.
-            - e.g. in Go via `defer func(){ recover <value> }()` + `panic`.
-        """
+        Error-recovery wrapper: catches any exception in the pipeline and
+        returns a literal value instead.
 
-    @abstractmethod
-    def visit_fallback_end(self, node: FallbackEnd, ctx: ConverterContext):
-        """
-        kdl: `fallback <value>|{}`
+        ``node.body`` contains all pipeline ops that form the try-block.
+        ``node.value`` is the fallback literal.
 
-        - Combined, FallbackStart + FallbackEnd form a try/catch.
-        - If the target has no such construct, emulate it.
-            - e.g. in Go via `defer func(){ recover <value> }()` + `panic`.
+        Use ``yield TRAVERSE`` to signal body traversal — the framework
+        walks ``node.body`` at ``depth+1`` with advancing pipeline index,
+        then syncs the outer index so subsequent nodes (e.g. Return) see
+        the correct variable.
+
+        Target-language strategies:
+
+        - Python/JS/etc (try/catch available):
+            ``yield f"{ctx.indent}try:"``
+            ``yield TRAVERSE``
+            ``yield f"{ctx.indent}except Exception:"``
+            ``yield f"{ctx.indent}    return {node.value!r}"``
+
+        - Go (no try/catch): use ``defer func() {{ recover() }}()`` or a
+          ``std_fallback`` helper via ``STD(...)``.
+
+        - Other languages without try/catch: emit a std helper that wraps
+          the body in a closure and catches errors internally.
         """
 
     # === PREDICATE CALLS ===
     @abstractmethod
-    def visit_filter(self, node: Filter, ctx: ConverterContext):
+    def visit_filter(self, node: Filter, ctx: ConverterContext) -> VisitStream:
         """
         kdl: `filter { ... }`
 
@@ -1392,7 +1689,7 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_assert(self, node: Assert, ctx: ConverterContext):
+    def visit_assert(self, node: Assert, ctx: ConverterContext) -> VisitStream:
         """
         kdl: `assert { ... }`
 
@@ -1405,7 +1702,7 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_match(self, node: Match, ctx: ConverterContext):
+    def visit_match(self, node: Match, ctx: ConverterContext) -> VisitStream:
         """
         kdl: `match { ... }`
 
@@ -1421,7 +1718,9 @@ class Visitor(ABC):
 
     # === LOGICAL ===
     @abstractmethod
-    def visit_logic_and(self, node: LogicAnd, ctx: ConverterContext):
+    def visit_logic_and(
+        self, node: LogicAnd, ctx: ConverterContext
+    ) -> VisitStream:
         """
         kdl: `and { ... }`
 
@@ -1440,7 +1739,9 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_logic_or(self, node: LogicOr, ctx: ConverterContext):
+    def visit_logic_or(
+        self, node: LogicOr, ctx: ConverterContext
+    ) -> VisitStream:
         """
         kdl: `or { ... }`
 
@@ -1459,7 +1760,9 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_logic_not(self, node: LogicNot, ctx: ConverterContext):
+    def visit_logic_not(
+        self, node: LogicNot, ctx: ConverterContext
+    ) -> VisitStream:
         """
         kdl: `not { ... }`
 
@@ -1479,7 +1782,9 @@ class Visitor(ABC):
 
     # === LOGIC SELECTORS ===
     @abstractmethod
-    def visit_predicate_css(self, node: PredCss, ctx: ConverterContext):
+    def visit_predicate_css(
+        self, node: PredCss, ctx: ConverterContext
+    ) -> VisitStream:
         """
         kdl: `css <query>`
 
@@ -1495,7 +1800,9 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_predicate_xpath(self, node: PredXpath, ctx: ConverterContext):
+    def visit_predicate_xpath(
+        self, node: PredXpath, ctx: ConverterContext
+    ) -> VisitStream:
         """
         kdl: `xpath <query>`
 
@@ -1513,7 +1820,7 @@ class Visitor(ABC):
     @abstractmethod
     def visit_predicate_has_attr(
         self, node: PredHasAttr, ctx: ConverterContext
-    ):
+    ) -> VisitStream:
         """
         kdl: `has-attr <attrs...>`
 
@@ -1533,7 +1840,7 @@ class Visitor(ABC):
     @abstractmethod
     def visit_predicate_attr_contains(
         self, node: PredAttrContains, ctx: ConverterContext
-    ):
+    ) -> VisitStream:
         """
         kdl: `attr-contains <key> <substr...>`
 
@@ -1558,7 +1865,7 @@ class Visitor(ABC):
     @abstractmethod
     def visit_predicate_attr_starts(
         self, node: PredAttrStarts, ctx: ConverterContext
-    ):
+    ) -> VisitStream:
         """
         kdl: `attr-starts <key> <substr...>`
 
@@ -1583,7 +1890,7 @@ class Visitor(ABC):
     @abstractmethod
     def visit_predicate_attr_ends(
         self, node: PredAttrEnds, ctx: ConverterContext
-    ):
+    ) -> VisitStream:
         """
         kdl: `attr-ends <key> <substr...>`
 
@@ -1606,7 +1913,9 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_predicate_attr_eq(self, node: PredAttrEq, ctx: ConverterContext):
+    def visit_predicate_attr_eq(
+        self, node: PredAttrEq, ctx: ConverterContext
+    ) -> VisitStream:
         """
         kdl:`attr-eq <key> <value...>`
 
@@ -1628,7 +1937,9 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_predicate_attr_ne(self, node: PredAttrNe, ctx: ConverterContext):
+    def visit_predicate_attr_ne(
+        self, node: PredAttrNe, ctx: ConverterContext
+    ) -> VisitStream:
         """
         kdl:`attr-ne <key> <value...>`
 
@@ -1650,7 +1961,9 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_predicate_attr_re(self, node: PredAttrRe, ctx: ConverterContext):
+    def visit_predicate_attr_re(
+        self, node: PredAttrRe, ctx: ConverterContext
+    ) -> VisitStream:
         """
         kdl:`attr-re <key> <pattern>`
 
@@ -1671,7 +1984,7 @@ class Visitor(ABC):
     @abstractmethod
     def visit_predicate_text_contains(
         self, node: PredTextContains, ctx: ConverterContext
-    ):
+    ) -> VisitStream:
         """
         kdl:`text-contains <value...>`
 
@@ -1697,7 +2010,7 @@ class Visitor(ABC):
     @abstractmethod
     def visit_predicate_text_starts(
         self, node: PredTextStarts, ctx: ConverterContext
-    ):
+    ) -> VisitStream:
         """
         kdl:`text-starts <value...>`
 
@@ -1723,7 +2036,7 @@ class Visitor(ABC):
     @abstractmethod
     def visit_predicate_text_ends(
         self, node: PredTextEnds, ctx: ConverterContext
-    ):
+    ) -> VisitStream:
         """
         kdl:`text-ends <value...>`
 
@@ -1747,7 +2060,9 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_predicate_text_re(self, node: PredTextRe, ctx: ConverterContext):
+    def visit_predicate_text_re(
+        self, node: PredTextRe, ctx: ConverterContext
+    ) -> VisitStream:
         """
         kdl:`text-re <pattern>`
 
@@ -1768,7 +2083,7 @@ class Visitor(ABC):
     @abstractmethod
     def visit_predicate_contains(
         self, node: PredContains, ctx: ConverterContext
-    ):
+    ) -> VisitStream:
         """
         kdl:`contains <value...>`
 
@@ -1791,7 +2106,9 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_predicate_eq(self, node: PredEq, ctx: ConverterContext):
+    def visit_predicate_eq(
+        self, node: PredEq, ctx: ConverterContext
+    ) -> VisitStream:
         """
         kdl:`eq <value...>`
 
@@ -1820,7 +2137,9 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_predicate_ne(self, node: PredNe, ctx: ConverterContext):
+    def visit_predicate_ne(
+        self, node: PredNe, ctx: ConverterContext
+    ) -> VisitStream:
         """
         kdl:`ne <value...>`
 
@@ -1849,7 +2168,9 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_predicate_starts(self, node: PredStarts, ctx: ConverterContext):
+    def visit_predicate_starts(
+        self, node: PredStarts, ctx: ConverterContext
+    ) -> VisitStream:
         """
         kdl:`starts <values...>`
 
@@ -1869,7 +2190,9 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_predicate_ends(self, node: PredEnds, ctx: ConverterContext):
+    def visit_predicate_ends(
+        self, node: PredEnds, ctx: ConverterContext
+    ) -> VisitStream:
         """
         kdl:`ends <values...>`
 
@@ -1889,7 +2212,9 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_predicate_re(self, node: PredRe, ctx: ConverterContext):
+    def visit_predicate_re(
+        self, node: PredRe, ctx: ConverterContext
+    ) -> VisitStream:
         """
         kdl:`re <pattern>`
 
@@ -1906,59 +2231,11 @@ class Visitor(ABC):
         ```
         """
 
-    # TODO: remove: dup expr with contains <values...>
-    def visit_predicate_in(self, node: PredIn, ctx: ConverterContext):
-        """
-        kdl:`in <values...>`
-        """
-
-    @abstractmethod
-    def visit_predicate_ge(self, node: PredGe, ctx: ConverterContext):
-        # TODO: remove, use len-ge
-        """
-        kdl:`ge`
-
-        - `>=`
-        - used in `assert` only expr
-        - compare by len (string or array-like expr)
-        """
-
-    @abstractmethod
-    def visit_predicate_gt(self, node: PredGt, ctx: ConverterContext):
-        # TODO: remove, use len-gt
-        """
-        kdl:`gt`
-
-        - `>`
-        - used in `assert` only expr
-        - compare by len (string or array-like expr)
-        """
-
-    @abstractmethod
-    def visit_predicate_le(self, node: PredLe, ctx: ConverterContext):
-        # TODO: remove, use len-le
-        """
-        kdl:`le`
-
-        - `<=`
-        - used in `assert` only expr
-        - compare by len (string or array-like expr)
-        """
-
-    @abstractmethod
-    def visit_predicate_lt(self, node: PredLt, ctx: ConverterContext):
-        # TODO: remove, use len-lt
-        """
-        kdl:`lt`
-
-        `<`
-        - used in `assert` only expr
-        - compare by len (string or array-like expr)
-        """
-
     # === LOGIC LEN ===
     @abstractmethod
-    def visit_predicate_re_all(self, node: PredReAll, ctx: ConverterContext):
+    def visit_predicate_re_all(
+        self, node: PredReAll, ctx: ConverterContext
+    ) -> VisitStream:
         """
         kdl:`re-all <pattern>`
 
@@ -1970,7 +2247,9 @@ class Visitor(ABC):
         """
 
     @abstractmethod
-    def visit_predicate_re_any(self, node: PredReAny, ctx: ConverterContext):
+    def visit_predicate_re_any(
+        self, node: PredReAny, ctx: ConverterContext
+    ) -> VisitStream:
         """
         kdl:`re-any <pattern>`
 
@@ -1984,7 +2263,7 @@ class Visitor(ABC):
     @abstractmethod
     def visit_predicate_count_eq(
         self, node: PredCountEq, ctx: ConverterContext
-    ):
+    ) -> VisitStream:
         """
         kdl:`len-eq <N>`
 
@@ -1998,7 +2277,7 @@ class Visitor(ABC):
     @abstractmethod
     def visit_predicate_count_ne(
         self, node: PredCountNe, ctx: ConverterContext
-    ):
+    ) -> VisitStream:
         """
         kdl:`len-ne`
 
@@ -2012,7 +2291,7 @@ class Visitor(ABC):
     @abstractmethod
     def visit_predicate_count_gt(
         self, node: PredCountGt, ctx: ConverterContext
-    ):
+    ) -> VisitStream:
         """
         kdl:`len-gt`
 
@@ -2026,7 +2305,7 @@ class Visitor(ABC):
     @abstractmethod
     def visit_predicate_count_lt(
         self, node: PredCountLt, ctx: ConverterContext
-    ):
+    ) -> VisitStream:
         """
         kdl:`len-lt <N>`
 
@@ -2040,7 +2319,7 @@ class Visitor(ABC):
     @abstractmethod
     def visit_predicate_count_ge(
         self, node: PredCountGe, ctx: ConverterContext
-    ):
+    ) -> VisitStream:
         """
         kdl:`len-ge`
 
@@ -2054,7 +2333,7 @@ class Visitor(ABC):
     @abstractmethod
     def visit_predicate_count_le(
         self, node: PredCountLe, ctx: ConverterContext
-    ):
+    ) -> VisitStream:
         """
         kdl:`len-le`
 
@@ -2068,7 +2347,7 @@ class Visitor(ABC):
     @abstractmethod
     def visit_pred_count_range(
         self, node: PredCountRange, ctx: ConverterContext
-    ):
+    ) -> VisitStream:
         """
         kdl:`len-range <start> <end>`
 
@@ -2077,17 +2356,4 @@ class Visitor(ABC):
             - STRING -> STRING
 
         - START > len > END
-        """
-
-    @abstractmethod
-    def visit_pred_range(self, node: PredRange, ctx: ConverterContext):
-        """
-        kdl:`range <start> <end>`
-
-        TYPES:
-            - STRING -> STRING
-
-        - assert-only expression.
-        - START < len < END (compared by string/array length).
-        - Shortcut for PredGt + PredLt.
         """

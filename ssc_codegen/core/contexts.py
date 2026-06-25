@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
 
-from ssc_codegen.ast import VariableType
+from ssc_codegen.ast import StructBase, VariableType
 from kdlquery import KdlNode, ReadDiagnostic, Severity
 from kdlquery.types import Span
 
@@ -75,7 +75,7 @@ class ParseContext:
         default_factory=dict
     )
     children_defines: dict[str, list[KdlNode]] = field(default_factory=dict)
-    structs: dict[str, Struct] = field(default_factory=dict)
+    structs: dict[str, StructBase] = field(default_factory=dict)
     json_defs: dict[str, JsonDef] = field(default_factory=dict)
     source_path: Path | None = None
 
@@ -180,5 +180,4 @@ class LintContext:
 # lazy imports for forward refs
 from ssc_codegen.ast import (  # noqa: E402
     JsonDef,
-    Struct,
 )

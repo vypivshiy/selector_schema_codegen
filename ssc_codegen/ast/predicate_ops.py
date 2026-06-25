@@ -31,42 +31,6 @@ class PredNe(Node):
     values: tuple[str | int, ...] = field(default_factory=tuple)
 
 
-@dataclass
-class PredGt(Node):
-    """len > value"""
-
-    value: int = 0
-
-
-@dataclass
-class PredLt(Node):
-    """len < value"""
-
-    value: int = 0
-
-
-@dataclass
-class PredGe(Node):
-    """len >= value"""
-
-    value: int = 0
-
-
-@dataclass
-class PredLe(Node):
-    """len <= value"""
-
-    value: int = 0
-
-
-@dataclass
-class PredRange(Node):
-    """start < len < end. Shortcut for PredGt + PredLt."""
-
-    start: int = 0
-    end: int = 0
-
-
 # =============================================================================
 # String predicates
 # =============================================================================
@@ -89,13 +53,6 @@ class PredEnds(Node):
 @dataclass
 class PredContains(Node):
     """any of values in str. Multiple values use OR."""
-
-    values: tuple[str, ...] = field(default_factory=tuple)
-
-
-@dataclass
-class PredIn(Node):
-    """str must equal one of values."""
 
     values: tuple[str, ...] = field(default_factory=tuple)
 

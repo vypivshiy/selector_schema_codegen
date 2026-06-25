@@ -5,7 +5,7 @@ from __future__ import annotations
 import difflib as _difflib
 import re as _re
 
-from ssc_codegen.ast.struct import PLACEHOLDER_RE, PLACEHOLDER_WIDE_RE
+from ssc_codegen.ast.struct import PLACEHOLDER_WIDE_RE, PlaceholderSpec
 from kdlquery import KdlDocument, KdlNode, ReadDiagnostic, Severity
 
 
@@ -144,7 +144,6 @@ _PREDICATE_OPS: frozenset[str] = frozenset(
         "starts",
         "ends",
         "contains",
-        "in",
         "len-eq",
         "len-ne",
         "len-gt",
@@ -164,10 +163,6 @@ _PREDICATE_OPS: frozenset[str] = frozenset(
         "text-ends",
         "text-contains",
         "re-any",
-        "gt",
-        "lt",
-        "ge",
-        "le",
     }
 )
 
@@ -584,8 +579,8 @@ def _lint_request_placeholders(
     raw_payload = str(node.args[0].value) if node.args else ""
     for m in PLACEHOLDER_WIDE_RE.finditer(raw_payload):
         token = m.group(0)
-        strict = PLACEHOLDER_RE.match(token)
-        if strict is None:
+        spec = PlaceholderSpec.parse(token)
+        if spec is None:
             diags.append(
                 _error(
                     node,
@@ -596,7 +591,7 @@ def _lint_request_placeholders(
                 )
             )
             continue
-        name = strict.group(1)
+        name = spec.name
         if name != name.lower():
             diags.append(
                 _error(
@@ -1169,7 +1164,7 @@ def lint_predicate_op(node: KdlNode, lint: LintContext) -> None:
             return
         lint_require_args(node, lint, min_count=1, example=f'{name} "value"')
 
-    elif name in ("starts", "ends", "contains", "in"):
+    elif name in ("starts", "ends", "contains"):
         if not lint_require_predicate_ctx(node, lint):
             return
         lint_require_args(node, lint, min_count=1, example=f'{name} "value"')
@@ -1261,11 +1256,6 @@ def lint_predicate_op(node: KdlNode, lint: LintContext) -> None:
         if args:
             lint_validate_regex(node, lint, args[0])
 
-    elif name in ("gt", "lt", "ge", "le"):
-        if not lint_require_assert_ctx(node, lint):
-            return
-        lint_require_args(node, lint, exact=1, example=f"{name} 42")
-
     elif name == "re":
         if not lint_require_predicate_ctx(node, lint):
             return
@@ -1286,13 +1276,6 @@ def lint_predicate_op(node: KdlNode, lint: LintContext) -> None:
         args = _node_args(node)
         if args:
             lint_validate_xpath(node, lint, args[0])
-
-    elif name == "range":
-        if not lint_require_predicate_ctx(node, lint):
-            return
-        args = lint_require_args(node, lint, exact=2, example="range 1 100")
-        if args:
-            lint_require_int_args(node, lint, args)
 
 
 def lint_wildcard_op(

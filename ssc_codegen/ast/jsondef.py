@@ -9,7 +9,7 @@ class JsonDefField(Node):
     """
     Single field in a JSON mapping definition.
 
-    Type metadata is in ``type_info`` (base, is_array, is_optional, ref, omitempty, skip).
+    Type metadata is in ``ret_type_info`` (base, is_array, is_optional, ref, omitempty, skip).
     """
 
     name: str = ""

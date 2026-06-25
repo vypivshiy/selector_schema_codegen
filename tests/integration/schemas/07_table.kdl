@@ -68,7 +68,7 @@ define RE-CODE=#"^code"#
 
     state {
         match {
-            in "state" "status"
+            eq "state" "status"
             ne "skip" "ignore"
         }
         lower

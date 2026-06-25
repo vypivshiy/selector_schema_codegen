@@ -22,9 +22,9 @@ from ssc_codegen.ast import (
     Key,
     Value,
     TableConfig,
-    TableRow,
+    TableRows,
     TableMatchKey,
-    Struct,
+    StructBase,
     Module,
 )
 from ssc_codegen.ast.base import Node as AstNode
@@ -221,7 +221,7 @@ def _collect_selectors(
             s, n = _collect_selectors(child, f"{path_prefix}.@table")
             selectors.extend(s)
             nested_refs.extend(n)
-        elif isinstance(child, TableRow):
+        elif isinstance(child, TableRows):
             s, n = _collect_selectors(child, f"{path_prefix}.@row")
             selectors.extend(s)
             nested_refs.extend(n)
@@ -270,15 +270,17 @@ def _check_xpath(html_tree, query: str) -> int:
 
 
 def check_struct_health(
-    struct: Struct, html: str, module: Module | None = None
+    struct: StructBase, html: str, module: Module | None = None
 ) -> HealthResult:
     """Check all selectors in a struct (and nested structs) against HTML."""
     from bs4 import BeautifulSoup
 
     # build struct lookup from module
-    struct_map: dict[str, Struct] = {}
+    struct_map: dict[str, StructBase] = {}
     if module is not None:
-        struct_map = {s.name: s for s in module.body if isinstance(s, Struct)}
+        struct_map = {
+            s.name: s for s in module.body if isinstance(s, StructBase)
+        }
 
     soup = BeautifulSoup(html, "lxml")
     result = HealthResult(struct_name=struct.name)
@@ -293,11 +295,11 @@ def check_struct_health(
 
 
 def _check_struct_recursive(
-    struct: Struct,
+    struct: StructBase,
     path_prefix: str,
     soup,
     html: str,
-    struct_map: dict[str, Struct],
+    struct_map: dict[str, StructBase],
     result: HealthResult,
     visited: set[str],
 ) -> None:

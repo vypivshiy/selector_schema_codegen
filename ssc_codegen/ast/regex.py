@@ -2,7 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .base import Node
-from .types import VariableType
+from .types import TypeInfo, VariableType
 
 # Re and ReSub support map semantics:
 # STRING → STRING, LIST_STRING → LIST_STRING.
@@ -24,8 +24,12 @@ class Re(Node):
     """
 
     pattern: str = ""
-    accept: VariableType = field(default=VariableType.STRING)
-    ret: VariableType = field(default=VariableType.STRING)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
 
 
 @dataclass
@@ -38,8 +42,14 @@ class ReAll(Node):
     """
 
     pattern: str = ""
-    accept: VariableType = field(default=VariableType.STRING)
-    ret: VariableType = field(default=VariableType.STRING)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(
+            base=VariableType.STRING, is_array=True
+        )
+    )
     is_array: bool = True
 
 
@@ -54,5 +64,9 @@ class ReSub(Node):
 
     pattern: str = ""
     repl: str = ""
-    accept: VariableType = field(default=VariableType.STRING)
-    ret: VariableType = field(default=VariableType.STRING)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )

@@ -2,7 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .base import Node
-from .types import VariableType
+from .types import TypeInfo, VariableType
 
 
 @dataclass
@@ -13,8 +13,12 @@ class Text(Node):
     accept/ret set by builder from cursor type.
     """
 
-    accept: VariableType = field(default=VariableType.DOCUMENT)
-    ret: VariableType = field(default=VariableType.STRING)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.DOCUMENT)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
 
 
 @dataclass
@@ -25,8 +29,12 @@ class Raw(Node):
     accept/ret set by builder from cursor type.
     """
 
-    accept: VariableType = field(default=VariableType.DOCUMENT)
-    ret: VariableType = field(default=VariableType.STRING)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.DOCUMENT)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
 
 
 @dataclass
@@ -47,5 +55,9 @@ class Attr(Node):
     """
 
     keys: tuple[str, ...] = field(default_factory=tuple)
-    accept: VariableType = field(default=VariableType.DOCUMENT)
-    ret: VariableType = field(default=VariableType.STRING)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.DOCUMENT)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )

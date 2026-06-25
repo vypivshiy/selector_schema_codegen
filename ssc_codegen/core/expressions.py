@@ -15,8 +15,6 @@ from ssc_codegen.ast import (
     CssSelect,
     CssSelectAll,
     Fallback,
-    FallbackEnd,
-    FallbackStart,
     Field,
     Filter,
     Fmt,
@@ -52,11 +50,11 @@ from ssc_codegen.ast import (
     Split,
     SplitDoc,
     Struct,
-    StructFlatList,
-    StructList,
+    StructBase,
+    StructType,
     TableConfig,
     TableMatchKey,
-    TableRow,
+    TableRows,
     Text,
     ToBool,
     ToFloat,
@@ -102,7 +100,7 @@ FieldLikeNode: TypeAlias = (
     PreValidate
     | SplitDoc
     | TableConfig
-    | TableRow
+    | TableRows
     | TableMatchKey
     | Key
     | Value
@@ -204,18 +202,18 @@ _VAR_TYPE_MAP: dict[str, VariableType] = {
 
 def resolve_index_types(
     parent: FieldLikeNode,
-) -> tuple[VariableType, VariableType, bool]:
-    """Return (accept_base, ret_base, is_array) for Index/First/Last ops.
+) -> tuple[TypeInfo, TypeInfo, bool]:
+    """Return (accept_type_info, ret_type_info, prev_is_array) for Index/First/Last ops.
 
-    These ops accept a list and return a scalar, so is_array is always False
-    for the return side.
+    These ops accept a list and return a scalar, so the return TypeInfo carries
+    the element base with is_array=False.
     """
     if parent.body:
         prev = parent.body[-1]
-        accept = prev.ret
-        ret = prev.ret
-        return accept, ret, prev.is_array
-    return VariableType.AUTO, VariableType.AUTO, True
+        ret_ti = TypeInfo(base=prev.ret_type_info.base)
+        return prev.ret_type_info, ret_ti, prev.is_array
+    auto = TypeInfo(base=VariableType.AUTO)
+    return auto, auto, True
 
 
 def resolve_jsonify_type(
@@ -283,7 +281,7 @@ def _compute_type_info(
     return TypeInfo(base=ret, is_array=is_arr, ref=ref)
 
 
-def typedef_from_struct(struct: Struct, parent: Module) -> TypeDef:
+def typedef_from_struct(struct: StructBase, parent: Module) -> TypeDef:
     typedef = TypeDef(
         parent=parent, name=struct.name, struct_type=struct._typedef_type
     )
@@ -301,7 +299,7 @@ def typedef_from_struct(struct: Struct, parent: Module) -> TypeDef:
                 TypeDefField(
                     parent=typedef,
                     name=field_name,
-                    type_info=item.type_info,
+                    ret_type_info=item.ret_type_info,
                 )
             )
     return typedef
@@ -349,11 +347,11 @@ def _build_expression(
             raise BuildTimeError(
                 f"Unknown @init reference '@{field_name}' in {type(parent).__name__}"
             )
-        prev_type = init_field.ret
+        prev_ti = init_field.ret_type_info
         return Self(
             parent=parent,
-            accept=prev_type,
-            ret=prev_type,
+            accept_type_info=prev_ti,
+            ret_type_info=prev_ti,
             is_array=init_field.is_array,
             name=field_name,
         )
@@ -423,11 +421,11 @@ def parse_expressions(
                 raise BuildTimeError(
                     f"Unknown @init reference '@{field_name}' in {type(parent).__name__}"
                 )
-            prev_type = init_field.ret
+            prev_ti = init_field.ret_type_info
             expr = Self(
                 parent=parent,
-                accept=prev_type,
-                ret=prev_type,
+                accept_type_info=prev_ti,
+                ret_type_info=prev_ti,
                 is_array=init_field.is_array,
                 name=field_name,
             )
@@ -461,12 +459,17 @@ def parse_expressions(
         lint.pop()
 
     if _add_return and parent.body:
-        last_ret = parent.body[-1].ret
-        parent.body.append(Return(parent=parent, ret=last_ret, accept=last_ret))
-        parent.ret = last_ret
+        last_ti = parent.body[-1].ret_type_info
+        parent.body.append(
+            Return(
+                parent=parent, ret_type_info=last_ti, accept_type_info=last_ti
+            )
+        )
+        parent.ret_type_info = last_ti
 
         # Populate type_info on Field/Value/InitField
         if isinstance(parent, (Field, Value, InitField)):
+            last_ret = last_ti.base
             is_arr = (
                 parent.body[-2].is_array if len(parent.body) >= 2 else False
             )
@@ -482,7 +485,9 @@ def parse_expressions(
                         is_arr = child.is_array
                         break
             parent.is_array = is_arr
-            parent.type_info = TypeInfo(base=last_ret, is_array=is_arr, ref=ref)
+            parent.ret_type_info = TypeInfo(
+                base=last_ret, is_array=is_arr, ref=ref
+            )
 
     lint.walk_context = prev_ctx
 
@@ -514,10 +519,12 @@ def _expr_css(
         queries = [
             resolve_selector_child_name(c.name, ctx) for c in node.children
         ]
+        for q in queries:
+            lint_validate_css(node, lint, q)
         return CssSelect(parent=parent, queries=queries)
     query = resolve_selector_arg(node.args[0].value, ctx)
     lint_validate_css(node, lint, query)
-    return CssSelect(parent=parent, query=query)
+    return CssSelect(parent=parent, queries=[query])
 
 
 @_reg_expr("css-all")
@@ -528,10 +535,12 @@ def _expr_css_all(
         queries = [
             resolve_selector_child_name(c.name, ctx) for c in node.children
         ]
+        for q in queries:
+            lint_validate_css(node, lint, q)
         return CssSelectAll(parent=parent, queries=queries)
     query = resolve_selector_arg(node.args[0].value, ctx)
     lint_validate_css(node, lint, query)
-    return CssSelectAll(parent=parent, query=query)
+    return CssSelectAll(parent=parent, queries=[query])
 
 
 @_reg_expr("xpath")
@@ -542,10 +551,12 @@ def _expr_xpath(
         queries = [
             resolve_selector_child_name(c.name, ctx) for c in node.children
         ]
+        for q in queries:
+            lint_validate_xpath(node, lint, q)
         return XpathSelect(parent=parent, queries=queries)
     query = resolve_selector_arg(node.args[0].value, ctx)
     lint_validate_xpath(node, lint, query)
-    return XpathSelect(parent=parent, query=query)
+    return XpathSelect(parent=parent, queries=[query])
 
 
 @_reg_expr("xpath-all")
@@ -556,10 +567,12 @@ def _expr_xpath_all(
         queries = [
             resolve_selector_child_name(c.name, ctx) for c in node.children
         ]
+        for q in queries:
+            lint_validate_xpath(node, lint, q)
         return XpathSelectAll(parent=parent, queries=queries)
     query = resolve_selector_arg(node.args[0].value, ctx)
     lint_validate_xpath(node, lint, query)
-    return XpathSelectAll(parent=parent, query=query)
+    return XpathSelectAll(parent=parent, queries=[query])
 
 
 @_reg_expr("css-remove")
@@ -589,15 +602,15 @@ def _expr_text(
 ):
     if parent.body:
         prev = parent.body[-1]
-        prev_type = prev.ret
+        accept_ti = prev.ret_type_info
         is_arr = prev.is_array
     else:
-        prev_type = VariableType.DOCUMENT
+        accept_ti = TypeInfo(base=VariableType.DOCUMENT)
         is_arr = False
     return Text(
         parent=parent,
-        accept=prev_type,
-        ret=VariableType.STRING,
+        accept_type_info=accept_ti,
+        ret_type_info=TypeInfo(base=VariableType.STRING, is_array=is_arr),
         is_array=is_arr,
     )
 
@@ -608,15 +621,15 @@ def _expr_raw(
 ):
     if parent.body:
         prev = parent.body[-1]
-        prev_type = prev.ret
+        accept_ti = prev.ret_type_info
         is_arr = prev.is_array
     else:
-        prev_type = VariableType.DOCUMENT
+        accept_ti = TypeInfo(base=VariableType.DOCUMENT)
         is_arr = False
     return Raw(
         parent=parent,
-        accept=prev_type,
-        ret=VariableType.STRING,
+        accept_type_info=accept_ti,
+        ret_type_info=TypeInfo(base=VariableType.STRING, is_array=is_arr),
         is_array=is_arr,
     )
 
@@ -627,15 +640,15 @@ def _expr_attr(
 ):
     if parent.body:
         prev = parent.body[-1]
-        prev_type = prev.ret
+        accept_ti = prev.ret_type_info
         is_arr = prev.is_array
     else:
-        prev_type = VariableType.DOCUMENT
+        accept_ti = TypeInfo(base=VariableType.DOCUMENT)
         is_arr = False
     return Attr(
         parent=parent,
-        accept=prev_type,
-        ret=VariableType.STRING,
+        accept_type_info=accept_ti,
+        ret_type_info=TypeInfo(base=VariableType.STRING, is_array=is_arr),
         is_array=is_arr,
         keys=tuple(a.value for a in node.args),
     )
@@ -659,8 +672,8 @@ def _expr_trim(
     prev = parent.body[-1]
     return Trim(
         parent=parent,
-        accept=prev.ret,
-        ret=prev.ret,
+        accept_type_info=prev.ret_type_info,
+        ret_type_info=prev.ret_type_info,
         is_array=prev.is_array,
         substr=substr,
     )
@@ -681,8 +694,8 @@ def _expr_ltrim(
     prev = parent.body[-1]
     return Ltrim(
         parent=parent,
-        accept=prev.ret,
-        ret=prev.ret,
+        accept_type_info=prev.ret_type_info,
+        ret_type_info=prev.ret_type_info,
         is_array=prev.is_array,
         substr=substr,
     )
@@ -703,8 +716,8 @@ def _expr_rtrim(
     prev = parent.body[-1]
     return Rtrim(
         parent=parent,
-        accept=prev.ret,
-        ret=prev.ret,
+        accept_type_info=prev.ret_type_info,
+        ret_type_info=prev.ret_type_info,
         is_array=prev.is_array,
         substr=substr,
     )
@@ -716,7 +729,10 @@ def _expr_norm_space(
 ):
     prev = parent.body[-1]
     return NormalizeSpace(
-        parent=parent, accept=prev.ret, ret=prev.ret, is_array=prev.is_array
+        parent=parent,
+        accept_type_info=prev.ret_type_info,
+        ret_type_info=prev.ret_type_info,
+        is_array=prev.is_array,
     )
 
 
@@ -728,8 +744,8 @@ def _expr_rm_prefix(
     prev = parent.body[-1]
     return RmPrefix(
         parent=parent,
-        accept=prev.ret,
-        ret=prev.ret,
+        accept_type_info=prev.ret_type_info,
+        ret_type_info=prev.ret_type_info,
         is_array=prev.is_array,
         substr=cast(str, substr),
     )
@@ -743,8 +759,8 @@ def _expr_rm_suffix(
     prev = parent.body[-1]
     return RmSuffix(
         parent=parent,
-        accept=prev.ret,
-        ret=prev.ret,
+        accept_type_info=prev.ret_type_info,
+        ret_type_info=prev.ret_type_info,
         is_array=prev.is_array,
         substr=cast(str, substr),
     )
@@ -758,8 +774,8 @@ def _expr_rm_prefix_suffix(
     prev = parent.body[-1]
     return RmPrefixSuffix(
         parent=parent,
-        accept=prev.ret,
-        ret=prev.ret,
+        accept_type_info=prev.ret_type_info,
+        ret_type_info=prev.ret_type_info,
         is_array=prev.is_array,
         substr=cast(str, substr),
     )
@@ -773,8 +789,8 @@ def _expr_fmt(
     prev = parent.body[-1]
     return Fmt(
         parent=parent,
-        accept=prev.ret,
-        ret=prev.ret,
+        accept_type_info=prev.ret_type_info,
+        ret_type_info=prev.ret_type_info,
         is_array=prev.is_array,
         template=cast(str, tmpl),
     )
@@ -791,8 +807,8 @@ def _expr_repl(
         }
         return ReplMap(
             parent=parent,
-            accept=prev.ret,
-            ret=prev.ret,
+            accept_type_info=prev.ret_type_info,
+            ret_type_info=prev.ret_type_info,
             is_array=prev.is_array,
             replacements=items,
         )
@@ -804,8 +820,8 @@ def _expr_repl(
     )
     return Repl(
         parent=parent,
-        accept=prev.ret,
-        ret=prev.ret,
+        accept_type_info=prev.ret_type_info,
+        ret_type_info=prev.ret_type_info,
         is_array=prev.is_array,
         old=old,
         new=new,
@@ -818,7 +834,10 @@ def _expr_lower(
 ):
     prev = parent.body[-1]
     return Lower(
-        parent=parent, accept=prev.ret, ret=prev.ret, is_array=prev.is_array
+        parent=parent,
+        accept_type_info=prev.ret_type_info,
+        ret_type_info=prev.ret_type_info,
+        is_array=prev.is_array,
     )
 
 
@@ -828,7 +847,10 @@ def _expr_upper(
 ):
     prev = parent.body[-1]
     return Upper(
-        parent=parent, accept=prev.ret, ret=prev.ret, is_array=prev.is_array
+        parent=parent,
+        accept_type_info=prev.ret_type_info,
+        ret_type_info=prev.ret_type_info,
+        is_array=prev.is_array,
     )
 
 
@@ -858,7 +880,10 @@ def _expr_unescape(
 ):
     prev = parent.body[-1]
     return Unescape(
-        parent=parent, accept=prev.ret, ret=prev.ret, is_array=prev.is_array
+        parent=parent,
+        accept_type_info=prev.ret_type_info,
+        ret_type_info=prev.ret_type_info,
+        is_array=prev.is_array,
     )
 
 
@@ -875,8 +900,8 @@ def _expr_re(
     return Re(
         parent=parent,
         pattern=pattern,
-        accept=prev.ret,
-        ret=prev.ret,
+        accept_type_info=prev.ret_type_info,
+        ret_type_info=prev.ret_type_info,
         is_array=prev.is_array,
     )
 
@@ -902,8 +927,8 @@ def _expr_re_sub(
     )
     return ReSub(
         parent=parent,
-        accept=prev.ret,
-        ret=prev.ret,
+        accept_type_info=prev.ret_type_info,
+        ret_type_info=prev.ret_type_info,
         is_array=prev.is_array,
         pattern=pattern,
         repl=repl,
@@ -917,12 +942,12 @@ def _expr_re_sub(
 def _expr_index(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    accept, ret, _prev_is_array = resolve_index_types(parent)
+    accept_ti, ret_ti, _prev_is_array = resolve_index_types(parent)
     return Index(
         parent=parent,
         i=int(node.args[0].value),
-        accept=accept,
-        ret=ret,
+        accept_type_info=accept_ti,
+        ret_type_info=ret_ti,
         is_array=False,
     )
 
@@ -931,16 +956,28 @@ def _expr_index(
 def _expr_first(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    accept, ret, _prev_is_array = resolve_index_types(parent)
-    return Index(parent=parent, i=0, accept=accept, ret=ret, is_array=False)
+    accept_ti, ret_ti, _prev_is_array = resolve_index_types(parent)
+    return Index(
+        parent=parent,
+        i=0,
+        accept_type_info=accept_ti,
+        ret_type_info=ret_ti,
+        is_array=False,
+    )
 
 
 @_reg_expr("last")
 def _expr_last(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    accept, ret, _prev_is_array = resolve_index_types(parent)
-    return Index(parent=parent, i=-1, accept=accept, ret=ret, is_array=False)
+    accept_ti, ret_ti, _prev_is_array = resolve_index_types(parent)
+    return Index(
+        parent=parent,
+        i=-1,
+        accept_type_info=accept_ti,
+        ret_type_info=ret_ti,
+        is_array=False,
+    )
 
 
 @_reg_expr("slice")
@@ -954,8 +991,8 @@ def _expr_slice(
             parent=parent,
             start=start,
             end=end,
-            accept=prev.ret,
-            ret=prev.ret,
+            accept_type_info=prev.ret_type_info,
+            ret_type_info=prev.ret_type_info,
             is_array=prev.is_array,
         )
     return Slice(parent=parent, start=start, end=end)
@@ -986,8 +1023,8 @@ def _expr_to_int(
     prev = parent.body[-1]
     return ToInt(
         parent=parent,
-        accept=prev.ret,
-        ret=VariableType.INT,
+        accept_type_info=prev.ret_type_info,
+        ret_type_info=TypeInfo(base=VariableType.INT, is_array=prev.is_array),
         is_array=prev.is_array,
     )
 
@@ -999,8 +1036,8 @@ def _expr_to_float(
     prev = parent.body[-1]
     return ToFloat(
         parent=parent,
-        accept=prev.ret,
-        ret=VariableType.FLOAT,
+        accept_type_info=prev.ret_type_info,
+        ret_type_info=TypeInfo(base=VariableType.FLOAT, is_array=prev.is_array),
         is_array=prev.is_array,
     )
 
@@ -1009,8 +1046,8 @@ def _expr_to_float(
 def _expr_to_bool(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    prev_type = parent.body[-1].ret
-    return ToBool(parent=parent, accept=prev_type)
+    prev = parent.body[-1]
+    return ToBool(parent=parent, accept_type_info=prev.ret_type_info)
 
 
 @_reg_expr("jsonify")
@@ -1032,7 +1069,7 @@ def _expr_jsonify(
         parent=parent,
         schema_name=schema_name,
         path=path,
-        ret=ret_type,
+        ret_type_info=TypeInfo(base=ret_type, is_array=is_array),
         is_array=is_array,
     )
 
@@ -1050,7 +1087,10 @@ def _expr_nested(
             code="E300",
         )
         return None
-    is_array = isinstance(struct, (StructFlatList, StructList))
+    is_array = isinstance(struct, Struct) and struct.type in (
+        StructType.FLAT,
+        StructType.LIST,
+    )
     return Nested(parent=parent, struct_name=struct_name, is_array=is_array)
 
 
@@ -1063,21 +1103,17 @@ def _expr_fallback(
 ):
     value = [] if not node.args else node.args[0].value
     prev = parent.body[-1]
-    prev_type = prev.ret
-    # For fallback #null, we don't change the type — is_optional is set on
-    # the parent's type_info later in parse_expressions.  Here we just pass
-    # the current type through unchanged.
-    start_default = FallbackStart(parent=parent, value=value)
-    end_default = FallbackEnd(
+    prev_ti = prev.ret_type_info
+    fb = Fallback(
         parent=parent,
         value=value,
-        accept=prev_type,
-        ret=prev_type,
+        body=list(parent.body),
+        accept_type_info=prev_ti,
+        ret_type_info=prev_ti,
         is_array=prev.is_array,
     )
-    parent.body.insert(0, start_default)
-    parent.body.append(end_default)
-    return Fallback(parent=parent, value=value)
+    parent.body = [fb]
+    return fb
 
 
 @_reg_expr("filter")
@@ -1087,13 +1123,16 @@ def _expr_filter(
     if not parent.body:
         return Filter(
             parent=parent,
-            accept=VariableType.DOCUMENT,
-            ret=VariableType.DOCUMENT,
+            accept_type_info=TypeInfo(base=VariableType.DOCUMENT),
+            ret_type_info=TypeInfo(base=VariableType.DOCUMENT, is_array=True),
             is_array=True,
         )
     prev = parent.body[-1]
     return Filter(
-        parent=parent, accept=prev.ret, ret=prev.ret, is_array=prev.is_array
+        parent=parent,
+        accept_type_info=prev.ret_type_info,
+        ret_type_info=prev.ret_type_info,
+        is_array=prev.is_array,
     )
 
 
@@ -1103,16 +1142,20 @@ def _expr_assert(
 ):
     if isinstance(parent, PreValidate) and not parent.body:
         return Assert(
-            parent=parent, accept=VariableType.DOCUMENT, ret=VariableType.NULL
+            parent=parent,
+            accept_type_info=TypeInfo(base=VariableType.DOCUMENT),
+            ret_type_info=TypeInfo(base=VariableType.NULL),
         )
     if not parent.body:
         return Assert(
             parent=parent,
-            accept=VariableType.DOCUMENT,
-            ret=VariableType.DOCUMENT,
+            accept_type_info=TypeInfo(base=VariableType.DOCUMENT),
+            ret_type_info=TypeInfo(base=VariableType.DOCUMENT),
         )
-    prev_type = parent.body[-1].ret
-    return Assert(parent=parent, accept=prev_type, ret=prev_type)
+    prev_ti = parent.body[-1].ret_type_info
+    return Assert(
+        parent=parent, accept_type_info=prev_ti, ret_type_info=prev_ti
+    )
 
 
 @_reg_expr("match")
@@ -1120,5 +1163,7 @@ def _expr_match(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
     return Match(
-        parent=parent, accept=VariableType.DOCUMENT, ret=VariableType.STRING
+        parent=parent,
+        accept_type_info=TypeInfo(base=VariableType.DOCUMENT),
+        ret_type_info=TypeInfo(base=VariableType.STRING),
     )

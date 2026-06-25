@@ -7,7 +7,7 @@ from .types import StructType
 
 @dataclass
 class TypeDefField(Node):
-    """Single field type annotation. Type info is in ``type_info``."""
+    """Single field type annotation. Type info is in ``ret_type_info``."""
 
     name: str = ""
 

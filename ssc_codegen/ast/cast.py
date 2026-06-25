@@ -2,7 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .base import Node
-from .types import VariableType
+from .types import TypeInfo, VariableType
 
 
 @dataclass
@@ -13,8 +13,12 @@ class ToInt(Node):
     accept/ret set by builder from cursor type.
     """
 
-    accept: VariableType = field(default=VariableType.STRING)
-    ret: VariableType = field(default=VariableType.INT)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.INT)
+    )
 
 
 @dataclass
@@ -25,8 +29,12 @@ class ToFloat(Node):
     accept/ret set by builder from cursor type.
     """
 
-    accept: VariableType = field(default=VariableType.STRING)
-    ret: VariableType = field(default=VariableType.FLOAT)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.FLOAT)
+    )
 
 
 @dataclass
@@ -36,8 +44,12 @@ class ToBool(Node):
     AUTO → BOOL.
     """
 
-    accept: VariableType = field(default=VariableType.AUTO)
-    ret: VariableType = field(default=VariableType.BOOL)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.AUTO)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.BOOL)
+    )
 
 
 @dataclass
@@ -53,8 +65,12 @@ class Jsonify(Node):
 
     schema_name: str = ""
     path: str | None = None
-    accept: VariableType = field(default=VariableType.STRING)
-    ret: VariableType = field(default=VariableType.JSON)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.STRING)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.JSON)
+    )
     is_array: bool = False
 
 
@@ -68,5 +84,9 @@ class Nested(Node):
 
     struct_name: str = ""
     is_array: bool = False
-    accept: VariableType = field(default=VariableType.DOCUMENT)
-    ret: VariableType = field(default=VariableType.NESTED)
+    accept_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.DOCUMENT)
+    )
+    ret_type_info: TypeInfo = field(
+        default_factory=lambda: TypeInfo(base=VariableType.NESTED)
+    )
