@@ -360,6 +360,38 @@ REST_UTILITIES = (
 )
 
 
+# Symbol names exported by the separate runtime file (``-R`` mode).
+# Mirrors ``_BASE_UTILITY_LINES`` / REST helpers emitted inline otherwise.
+_RUNTIME_BASE_EXPORT_NAMES: list[str] = [
+    "repl_map",
+    "normalize_text",
+    "_UnmatchedTableRow",
+    "unescape_text",
+    "rm_prefix",
+    "rm_suffix",
+    "UNMATCHED_TABLE_ROW",
+]
+
+_RUNTIME_REST_EXPORT_NAMES: list[str] = [
+    "Ok",
+    "Err",
+    "UnknownErr",
+    "TransportErr",
+    "ErrMatcher",
+    "ssc_dispatch_err",
+    "ssc_rest_call",
+    "ssc_rest_call_async",
+]
+
+
+def _runtime_export_names(module: Module) -> list[str]:
+    """Names the main module must import from the runtime file."""
+    names = list(_RUNTIME_BASE_EXPORT_NAMES)
+    if module_has_rest(module):
+        names.extend(_RUNTIME_REST_EXPORT_NAMES)
+    return names
+
+
 def err_value_type(err: ErrorResponse, struct: StructBase) -> str:
     schema = err.schema_name
     if not schema:
@@ -556,13 +588,9 @@ class PyHtmlBase(Visitor):
     ) -> VisitStream:
         runtime = ctx.meta.get("runtime_module")
         if runtime:
-            from ssc_codegen.converters.runtime.py_rest import (
-                runtime_export_names,
-            )
-
             mod = node.parent
             if isinstance(mod, Module):
-                names = runtime_export_names(mod)
+                names = _runtime_export_names(mod)
             else:
                 names = []
             yield f"from .{runtime} import " + ", ".join(names)

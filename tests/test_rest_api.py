@@ -739,7 +739,7 @@ class TestSeparateRuntime:
 
     @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
     def test_runtime_file_has_rest_helpers(self, converter_attr):
-        from ssc_codegen.converters.runtime import register_runtime_file
+        from ssc_codegen.converters.runtime_file import register_runtime_file
 
         converter = _get_all_converters()[converter_attr]
         src = _rest_src(errors="    @error 404 Err\n")
@@ -759,7 +759,7 @@ class TestSeparateRuntime:
 
     @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
     def test_main_imports_from_runtime(self, converter_attr):
-        from ssc_codegen.converters.runtime import register_runtime_file
+        from ssc_codegen.converters.runtime_file import register_runtime_file
 
         converter = _get_all_converters()[converter_attr]
         src = _rest_src(errors="    @error 404 Err\n")
@@ -776,7 +776,7 @@ class TestSeparateRuntime:
 
     @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
     def test_main_no_inline_rest_helpers(self, converter_attr):
-        from ssc_codegen.converters.runtime import register_runtime_file
+        from ssc_codegen.converters.runtime_file import register_runtime_file
 
         converter = _get_all_converters()[converter_attr]
         src = _rest_src(errors="    @error 404 Err\n")
@@ -795,7 +795,7 @@ class TestSeparateRuntime:
 
     @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
     def test_main_no_redundant_rest_imports(self, converter_attr):
-        from ssc_codegen.converters.runtime import register_runtime_file
+        from ssc_codegen.converters.runtime_file import register_runtime_file
 
         converter = _get_all_converters()[converter_attr]
         src = _rest_src(errors="    @error 404 Err\n")
@@ -813,7 +813,7 @@ class TestSeparateRuntime:
 
     @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
     def test_main_valid_python(self, converter_attr):
-        from ssc_codegen.converters.runtime import register_runtime_file
+        from ssc_codegen.converters.runtime_file import register_runtime_file
 
         converter = _get_all_converters()[converter_attr]
         src = _rest_src(errors="    @error 404 Err\n")
@@ -829,7 +829,7 @@ class TestSeparateRuntime:
 
     def test_ref_ast_picks_rest_module(self):
         """The ref_ast selection must not crash on modules with non-REST structs."""
-        from ssc_codegen.converters.runtime import register_runtime_file
+        from ssc_codegen.converters.runtime_file import register_runtime_file
 
         non_rest_src = 'struct Item { field_name { css "div" } }'
         module = _parse(non_rest_src)

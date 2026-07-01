@@ -125,15 +125,20 @@ Visitor (ABC, visitor.py)
 4. Use `STD(name, code=, imports=)` for multi-line helpers
 5. Register in `main.py` Target enum and converter mapping
 
-## Runtime templates (converters/runtime/)
+## Runtime file (converters/runtime_file.py)
 
-| Module | Contents |
-|--------|----------|
-| `_helpers.py` | `module_is_rest_only()`, `http_client_import()` — legacy shared AST utils (now also in visitor.py) |
-| `py_base.py` | `NOT_REQUIRED_IMPORT`, `_BASE_UTILITY_LINES`, `base_utility_lines()` — Python base runtime strings |
-| `py_rest.py` | `rest_imports()`, `rest_utilities()`, `runtime_export_names()`, `runtime_module_content()`, `register_runtime_file()` — REST assembly & `-R` support |
-| `py_lxml.py` | `_FALLBACK_HTML_LINES`, `_FALLBACK_HTML_EXPORT` — lxml-specific fallback HTML |
-| `js_base.py` | `JS_BASE_UTILITY_LINES`, `js_base_utility_lines()` — JS helper function strings |
+Flat module that assembles the separate runtime file emitted by `-R` /
+`--separate-runtime`.
+
+| Symbol | Role |
+|--------|------|
+| `_BASE_UTILITY_LINES` | Base text-helper source lines (repl_map, normalize_text, unescape_text, rm_prefix/suffix, UNMATCHED_TABLE_ROW) |
+| `_rest_utility_lines()` | REST runtime source lines (Ok/Err/UnknownErr/TransportErr/ErrMatcher/ssc_dispatch_err/ssc_rest_call[_async]) |
+| `runtime_module_content(module)` | Full runtime file source for one reference module |
+| `register_runtime_file(converter, runtime_name, *, include_fallback)` | Registers a `@converter.file(...)` provider and returns a `generate_runtime(modules) -> str` callable |
+
+The main module's `from .{runtime} import ...` line is emitted by
+`py_base.py:_runtime_export_names` (mirrors the same symbol set).
 
 ## RequestSpec pipeline (converters/request_spec.py)
 
@@ -168,4 +173,4 @@ Generated code (Python `httpx`):
 
 Extracts helper functions into a separate runtime module (default: `sscgen_runtime`).
 Generated parsers import from it instead of inlining.
-Runtime content assembled by `converters/runtime/py_rest.py` → `register_runtime_file()`.
+Runtime content assembled by `converters/runtime_file.py` → `register_runtime_file()`.
