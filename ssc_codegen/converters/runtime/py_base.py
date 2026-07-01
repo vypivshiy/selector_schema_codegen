@@ -1,13 +1,5 @@
 """Python base runtime constants and helpers."""
 
-NOT_REQUIRED_IMPORT: list[str] = [
-    "",
-    "if sys.version_info >= (3, 11):",
-    "    from typing import NotRequired",
-    "else:",
-    "    from typing_extensions import NotRequired",
-]
-
 _BASE_UTILITY_LINES: list[str] = [
     "_RE_HEX_ENTITY = re.compile(r'&#x([0-9a-fA-F]+);')",
     "_RE_UNICODE_ENTITY = re.compile(r'\\\\u([0-9a-fA-F]{4})')",
@@ -61,7 +53,3 @@ _BASE_EXPORT_NAMES: list[str] = [
     "rm_suffix",
     "UNMATCHED_TABLE_ROW",
 ]
-
-
-def base_utility_lines() -> list[str]:
-    return [*_BASE_UTILITY_LINES, ""]
