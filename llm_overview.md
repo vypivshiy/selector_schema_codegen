@@ -16,6 +16,7 @@ CLI entry point: `ssc-gen` (ssc_codegen.main:main)
 
 ```
 ssc_codegen/
+ssc_codegen/
 ├── __init__.py            # parse_module(src, path, css_to_xpath) → Module
 ├── main.py                # CLI (typer): generate, check, run, health
 ├── _logging.py            # ANSI color logging setup
@@ -29,20 +30,19 @@ ssc_codegen/
 │   ├── __init__.py        # Re-exports all node types
 │   ├── base.py            # Node abstract base class
 │   ├── types.py           # VariableType, StructType enums
-│   ├── module.py          # Module, Docstring (deprecated), Imports, Utilities, CodeStartHook, CodeEndHook
-│   ├── struct.py          # StructBase (+ doc field), Field, Init, InitField, PreValidate, SplitDoc, Key, Value, TableConfig, TableRow, TableMatchKey, CheckMethod, StructDocstring (deprecated), StartParse, RequestConfig, PlaceholderSpec, ErrorResponse
+│   ├── module.py          # Module, Docstring (deprecated), Utilities, CodeStartHook, CodeEndHook
+│   ├── struct.py          # StructBase, Struct, StructRest, Field, Init, InitFieldCall, InitField, PreValidate, SplitDoc, Key, Value, TableConfig, TableMatchKey, TableRows, CheckMethod, StartParse, MethodBase, MethodFetch, MethodRest, RequestHttp, PlaceholderSpec, ErrorResponse
 │   ├── selectors.py       # CssSelect, CssSelectAll, XpathSelect, XpathSelectAll, CssRemove, XpathRemove
 │   ├── extract.py         # Text, Raw, Attr
 │   ├── string.py          # Trim, Ltrim, Rtrim, NormalizeSpace, RmPrefix, RmSuffix, RmPrefixSuffix, Fmt, Repl, ReplMap, Lower, Upper, Split, Join, Unescape
 │   ├── regex.py           # Re, ReAll, ReSub
 │   ├── array.py           # Index, Slice, Len, Unique
 │   ├── cast.py            # ToInt, ToFloat, ToBool, Jsonify, Nested
-│   ├── control.py         # Fallback, FallbackStart, FallbackEnd, Self, Return
+│   ├── control.py         # Fallback, Self, Return
 │   ├── predicate_containers.py  # Filter, Assert, Match
 │   ├── predicate_ops.py   # PredEq/Ne/Gt/Lt/Ge/Le/Range, PredStarts/Ends/Contains/In/Re/ReAny/ReAll, PredCss/Xpath/HasAttr, PredAttr*, PredText*, PredCount*, LogicNot/And/Or
 │   ├── typedef.py         # TypeDef, TypeDefField
 │   ├── jsondef.py         # JsonDef, JsonDefField
-│   ├── transform.py       # TransformDef, TransformTarget, TransformCall
 │   └── helpers.py         # AST utilities
 ├── core/                  # Unified KDL → Module AST reader + integrated linting
 │   ├── __init__.py        # Exports: parse_module, SscReader, ReadDiagnostic
@@ -60,15 +60,16 @@ ssc_codegen/
 │   ├── curl.py            # parse_curl_command() — POSIX curl → kwargs
 │   └── http.py            # parse_http_request() — raw HTTP/1.1|2 → kwargs
 ├── converters/            # Code generators per target language
-│   ├── base.py            # BaseConverter, ConverterContext, callback registration
+│   ├── base.py            # ConverterContext (frozen dataclass: index, depth, prv/nxt, advance/deeper)
+│   ├── visitor.py         # Visitor ABC: AST walker, two-pass signals, shared concrete methods (_resolve_type, _pred_line, etc.)
 │   ├── helpers.py         # Naming helpers (to_snake_case, to_pascal_case, to_camel_case, jsonify_path_to_segments)
 │   ├── request_spec.py    # RequestSpec, parse_to_spec, normalize_placeholder_names
-│   ├── py_render.py       # Python code rendering helpers for RequestSpec (render_value, render_dict, render_body)
-│   ├── py_bs4.py          # Python BeautifulSoup4 (PY_BASE_CONVERTER)
-│   ├── py_lxml.py         # Python lxml
-│   ├── py_parsel.py       # Python parsel (Scrapy)
-│   ├── py_slax.py         # Python selectolax
-│   ├── js_pure.py         # JavaScript vanilla DOM
+│   ├── py_base.py         # PyHtmlBase(Visitor) — shared Python HTML codegen + REST rendering helpers
+│   ├── py_bs4.py          # PyBs4(PyHtmlBase) — BeautifulSoup4
+│   ├── py_lxml.py         # PyLxml(PyHtmlBase) — lxml.html
+│   ├── py_parsel.py       # PyParsel(PyHtmlBase) — parsel (Scrapy)
+│   ├── py_slax.py         # PySlax(PyHtmlBase) — selectolax
+│   ├── js_pure.py         # JsPure(Visitor) — JavaScript vanilla DOM
 │   └── runtime/           # Runtime template constants (shared across converters)
 │       ├── __init__.py    # Re-exports public API
 │       ├── _helpers.py    # _module_has_rest, module_is_rest_only, http_client_import
@@ -135,14 +136,16 @@ Targets: py-bs4, py-lxml, py-parsel, py-slax, js-pure
 
 ## Key Architectural Patterns
 
-1. **Visitor pattern**: converters register handlers per AST node type via decorators
-2. **Pipeline variable chain**: ConverterContext maintains v0→v1→v2... for each field
-3. **Integrated linting**: parsing and linting happen in one pass via `core/`
-4. **Extensible converters**: `.extend()` creates child converter inheriting all handlers
-5. **Type-tagged containers**: VariableType/StructType enums enforce strict typing at AST level
-6. **Recursive nesting**: `Nested` node resolves via struct_map with cycle detection
-7. **Transport layer**: `@request` stores raw payload in `RequestConfig`; `converters/request_spec.py` normalises curl/HTTP into `RequestSpec`; converters emit fetch methods per target HTTP client
-8. **Runtime separation**: `--separate-runtime` extracts helper functions into a standalone module; generated parsers import from it instead of inlining
+1. **Visitor pattern**: `Visitor` ABC (converters/visitor.py) — each AST node type maps to a `visit_*` generator method via a dispatch table. Subclasses override methods for target-language spelling.
+2. **Two-pass codegen**: `convert_all` runs every `visit_*` twice — pass 1 collects `STD()` / `IMPORT()` signals, pass 2 emits output. visit_* methods must be deterministic.
+3. **Pipeline variable chain**: ConverterContext maintains v0→v1→v2... for each field pipeline.
+4. **Class-attr dialect config**: Type resolution, predicate formatting, and document types are controlled by plain class attributes (TYPES, ARRAY_TYPE_FMT, AND_OP, etc.) — no spelling hooks or abstract methods for formatting.
+5. **Shared concrete methods**: `_resolve_type`, `_resolve_start_parse_t_ret`, `_pred_line` live in Visitor and are inherited by all dialects. Language-agnostic functions (`module_has_rest`, `err_subclass_name`, etc.) are module-level in visitor.py.
+6. **Integrated linting**: parsing and linting happen in one pass via `core/`.
+7. **Type-tagged containers**: VariableType/StructType enums enforce strict typing at AST level.
+8. **Recursive nesting**: `Nested` node resolves via struct_map with cycle detection.
+9. **Transport layer**: `@request` stores raw payload in `RequestHttp`; `converters/request_spec.py` normalises curl/HTTP into `RequestSpec`; converters emit fetch methods per target HTTP client.
+10. **Runtime separation**: `--separate-runtime` extracts helper functions into a standalone module; generated parsers import from it instead of inlining.
 
 ---
 

@@ -4,14 +4,32 @@
 
 ### VariableType enum (ast/types.py)
 
-Scalar: DOCUMENT, STRING, OPT_STRING, INT, OPT_INT, FLOAT, OPT_FLOAT, BOOL, NULL, NESTED, JSON
-List: LIST_DOCUMENT, LIST_STRING, LIST_INT, LIST_FLOAT
-Auto: AUTO, LIST_AUTO (internal, for type inference)
+Scalar base types only — optional/array modifiers live in `TypeInfo`, not in the enum:
 
-Methods: `.optional` (STRING→OPT_STRING), `.is_list`, `.scalar` (LIST_STRING→STRING), `.as_list` (STRING→LIST_STRING)
+```
+DOCUMENT, STRING, INT, FLOAT, BOOL, NULL, NESTED, JSON, AUTO
+```
 
-NESTED and JSON are terminal types — pipeline ends after nested/jsonify.
-`fallback #null` converts STRING→OPT_STRING, INT→OPT_INT, FLOAT→OPT_FLOAT.
+- `NESTED` and `JSON` are terminal types — pipeline ends after nested/jsonify.
+- `AUTO` is internal, used for type inference.
+- `fallback #null` sets `TypeInfo.is_optional = True`.
+
+### TypeInfo (ast/types.py)
+
+Frozen dataclass — unified type container with modifiers:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `base` | `VariableType` | STRING, INT, FLOAT, BOOL, NULL, NESTED, JSON, DOCUMENT, AUTO |
+| `is_array` | `bool` | List modifier (replaces old LIST_* enum values) |
+| `is_optional` | `bool` | Optional modifier (replaces old OPT_* enum values) |
+| `ref` | `str \| None` | Struct/JsonDef name for NESTED/JSON types |
+| `omitempty` | `bool` | `@omitempty` — key may be absent from JSON |
+| `skip` | `bool` | `@skip` — field parsed but excluded from output |
+
+Properties: `.is_list` (alias for is_array), `.is_ref` (NESTED/JSON + has ref).
+
+Target-language rendering is done by `Visitor._resolve_type()` via class attrs.
 
 ### StructType enum
 
@@ -24,7 +42,7 @@ NESTED and JSON are terminal types — pipeline ends after nested/jsonify.
 
 **Syntax**: struct types can be specified in KDL two ways:
 - **Recommended**: prefix form — `(list)struct Foo { ... }`, `(dict)struct Bar { ... }`, etc.
-- **Legacy** (still works): argument form — `struct Foo type="list" { ... }` (name as first argument, type as property)
+- **Legacy** (still works): argument form — `struct Foo type="list" { ... }`
 
 ---
 
@@ -33,24 +51,32 @@ NESTED and JSON are terminal types — pipeline ends after nested/jsonify.
 All nodes inherit from `Node` base class (has `body` attribute).
 
 ### Module layer
-- `Module` → top-level container, holds all children. Module-level docstring lives in the `doc` field (always emitted first by the converter).
-- `Docstring` (DEPRECATED, kept for backward-compat imports — was a body node; now `Module.doc`), `Imports`, `Utilities`, `CodeStartHook`, `CodeEndHook`
+- `Module` → top-level container, holds all children. Module-level docstring lives in the `doc` field.
+- `Docstring` (DEPRECATED, kept for backward-compat imports — was a body node; now `Module.doc`)
+- `Utilities`, `CodeStartHook`, `CodeEndHook`
 
 ### Struct layer
-- `Struct(name, struct_type, keep_order, doc)` → parser schema; per-struct docstring lives in the `doc` field (position is converter-dependent: Python emits it below `class X:`, JS/Go emit it above).
-- `StructDocstring` (DEPRECATED, kept for backward-compat imports – was a body node; now `StructBase.doc`)
+- `StructBase` → base for `Struct` (HTML parser) and `StructRest` (REST API). Per-struct docstring lives in the `doc` field (position is converter-dependent: Python emits it below `class X:`, JS emits it above).
+- `Struct(name, struct_type, keep_order, doc)` → HTML parser schema
+- `StructRest(name, errors, doc)` → REST API endpoint handler
 - `Field(name)` → output field with pipeline of operations
-- `Init` → container for `InitField` cached values
-- `InitField(name)` → precomputed value, referenced as `@name` via `Self` node
+- `Init` → container for `InitFieldCall` entries
+- `InitFieldCall(name)` → call-site inside constructor that invokes the corresponding `InitField` method
+- `InitField(name)` → precomputed value method, referenced as `@name` via `Self` node
 - `PreValidate` → assert-based validation before parsing
-- `CheckMethod(name)` → boolean check method. Unlike Field/PreValidate, has no `v` parameter; converter initializes `v = self._doc` in the method body. Pipeline must contain `to-bool`. DSL: `@check <name> { pipeline... }`
+- `CheckMethod(name)` → boolean check method. Unlike Field/PreValidate, has no `v` parameter; converter initializes `v = self._doc`. Pipeline must contain `to-bool`.
 - `SplitDoc` → split document into items (for LIST/DICT types)
 - `Key`, `Value` → dict key/value extraction
-- `TableConfig`, `TableRow`, `TableMatchKey` → table struct support
-- `RequestConfig(raw_payload, response_path, response_join, name, response_schema, doc)` → transport layer config; `placeholders` → `list[PlaceholderSpec]` (typed: `{{name[:type][[]][?][|style]}}`)
-- `PlaceholderSpec(name, type_name, is_array, is_optional, style)` → parsed `{{...}}` token
-- `ErrorResponse(status, schema_name, conditions)` → `@error` mapping inside `type=rest` struct
+- `TableConfig`, `TableRows`, `TableMatchKey` → table struct support
 - `StartParse` → marker node for parser entry
+
+### REST / transport layer
+- `MethodBase` → base for REST method nodes (holds `http_request: RequestHttp`)
+- `MethodFetch(name, response_path, response_join)` → HTML-parser fetch classmethod
+- `MethodRest(name, response_schema, doc)` → REST endpoint method
+- `RequestHttp(method, url, headers, cookies, params, body_kind, body)` → normalized HTTP config (child of MethodBase)
+- `PlaceholderSpec(name, type_name, is_array, is_optional, style)` → parsed `{{...}}` token
+- `ErrorResponse(status, schema_name, conditions, required_keys)` → `@error` mapping inside `type=rest` struct
 
 ### Pipeline nodes (operations within fields)
 Selectors: CssSelect, CssSelectAll, XpathSelect, XpathSelectAll, CssRemove, XpathRemove
@@ -59,14 +85,9 @@ String: Trim, Ltrim, Rtrim, NormalizeSpace, RmPrefix, RmSuffix, RmPrefixSuffix, 
 Regex: Re, ReAll, ReSub
 Array: Index, Slice, Len, Unique
 Cast: ToInt, ToFloat, ToBool, Jsonify, Nested
-Control: Fallback, FallbackStart, FallbackEnd, Self, Return
-Predicates: Filter, Assert, Match (containers) + PredEq/Ne/Gt/Lt/... + LogicNot/And/Or
+Control: Fallback, Self, Return
+Predicates: Filter, Assert, Match (containers) + PredEq/Ne/Gt/Lt/Ge/Le/Range + PredStarts/Ends/Contains/In/Re/ReAny/ReAll + PredCss/Xpath/HasAttr + PredAttr* + PredText* + PredCount* + LogicNot/And/Or
 
 ### Type definitions
 - `TypeDef`, `TypeDefField` → auto-generated type annotations for structs
 - `JsonDef`, `JsonDefField` → JSON schema definitions
-
-### Transforms
-- `TransformDef` → module-level reusable transform with per-language implementations
-- `TransformTarget` → single language implementation (imports + code template)
-- `TransformCall` → invoke transform in pipeline

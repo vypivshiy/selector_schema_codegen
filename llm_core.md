@@ -23,17 +23,15 @@ Handles struct body: fields, @init, @pre-validate, @split-doc, @request, @error,
 The reader loop calls `handle_json` / `handle_struct` but does **NOT** append their results to `module.body` directly. Instead:
 - `handle_json` stores results in `ctx.json_defs`
 - `handle_struct` stores results in local `typedefs` / `structs` lists
-- `handle_transform` stores results in `ctx.transforms`
 
 After the loop, a single `module.body.extend(...)` call assembles all definitions in order:
 ```
-json_defs → transforms → typedefs → structs
+json_defs → typedefs → structs
 ```
-**Do NOT append json/struct/transform nodes to `module.body` inside the loop** — they are added once via the final extend. Appending inside the loop causes duplicate output in generated code.
+**Do NOT append json/struct nodes to `module.body` inside the loop** — they are added once via the final extend. Appending inside the loop causes duplicate output in generated code.
 
 ### Module-level handlers (core/module_handler.py)
 - `handle_define` — process define declarations
 - `handle_json` — process json schema declarations; stores result in `ctx.json_defs` (not `module.body`)
 - `handle_struct` — process struct declarations; returns (struct, typedef) pair
-- `handle_transform` — process transform declarations; stores result in `ctx.transforms`
 - `resolve_imports` — resolve cross-file imports
