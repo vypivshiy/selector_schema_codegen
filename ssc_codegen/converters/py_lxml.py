@@ -104,8 +104,15 @@ class PyLxml(PyHtmlBase):
         self, node: CssRemove, ctx: ConverterContext
     ) -> VisitStream:
         q = repr(node.query)
-        yield f"{ctx.indent}[_el.getparent().remove(_el) for _el in {ctx.prv}.cssselect({q}) if _el.getparent() is not None]"
-        yield f"{ctx.indent}{ctx.nxt} = {ctx.prv}"
+        yield STD(
+            "std_select_remove",
+            code="""
+                def std_select_remove(tag, q):
+                    [_el.getparent().remove(_el) for _el in tag.cssselect(q) if _el.getparent() is not None]
+                    return tag
+                """,
+        )
+        yield f"{ctx.indent}{ctx.nxt} = std_select_remove({ctx.prv}, {q})"
 
     def visit_xpath_select(
         self, node: XpathSelect, ctx: ConverterContext
@@ -152,8 +159,15 @@ class PyLxml(PyHtmlBase):
         self, node: XpathRemove, ctx: ConverterContext
     ) -> VisitStream:
         q = repr(node.query)
-        yield f"{ctx.indent}[_el.getparent().remove(_el) for _el in {ctx.prv}.xpath({q}) if _el.getparent() is not None]"
-        yield f"{ctx.indent}{ctx.nxt} = {ctx.prv}"
+        yield STD(
+            "std_xpath_remove",
+            code="""
+                def std_xpath_remove(tag, q):
+                    [_el.getparent().remove(_el) for _el in tag.xpath(q) if _el.getparent() is not None]
+                    return tag
+                """,
+        )
+        yield f"{ctx.indent}{ctx.nxt} = std_xpath_remove({ctx.prv}, {q})"
 
     # === extract ===
 
@@ -190,7 +204,7 @@ class PyLxml(PyHtmlBase):
         if node.accept_type_info.is_array:
             yield f"{ctx.indent}{ctx.nxt} = len({ctx.prv}) > 0"
         else:
-            yield f"{ctx.indent}{ctx.nxt} = {ctx.prv} is not None"
+            yield f"{ctx.indent}{ctx.nxt} = {ctx.prv} is not None or {ctx.prv} != '' or {ctx.prv} != 0"
 
     # === document / attr / text predicates (lxml spellings) ===
 

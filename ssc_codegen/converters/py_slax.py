@@ -100,8 +100,16 @@ class PySlax(PyHtmlBase):
         self, node: CssRemove, ctx: ConverterContext
     ) -> VisitStream:
         q = repr(node.query)
-        yield f"{ctx.indent}[e.decompose() for e in {ctx.prv}.css({q})]"
-        yield f"{ctx.indent}{ctx.nxt} = {ctx.prv}"
+        yield STD(
+            "std_select_remove",
+            code="""
+                def std_select_remove(tag, q):
+                    [e.decompose() for e in tag.css(q)]
+                    return tag
+        """,
+        )
+        # yield f"{ctx.indent}[e.decompose() for e in {ctx.prv}.css({q})]"
+        yield f"{ctx.indent}{ctx.nxt} = std_select_remove({ctx.prv}, {q})"
 
     def visit_xpath_select(
         self, node: XpathSelect, ctx: ConverterContext

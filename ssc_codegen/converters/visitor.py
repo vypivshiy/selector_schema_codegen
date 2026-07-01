@@ -6,7 +6,6 @@ from typing import Any, Iterable, Iterator, TypeAlias
 from ssc_codegen.ast import (
     Node,
     Module,
-    Docstring,
     Utilities,
     JsonDef,
     JsonDefField,
@@ -15,10 +14,10 @@ from ssc_codegen.ast import (
     Struct,
     StructBase,
     StructRest,
-    StructDocstring,
     StartParse,
     Init,
     InitField,
+    InitFieldCall,
     Field,
     PreValidate,
     CheckMethod,
@@ -429,7 +428,7 @@ class Visitor(ABC):
     def _emit_body(self, node: Node, ctx: ConverterContext) -> list[str]:
         """Traverse a node's body. The mode is selected by category (_CONTAINER/_PREDICATE/_PIPELINE).
 
-        Ported from base.BaseConverter._emit_node (three modes + the InitField special case).
+        Ported from base.BaseConverter._emit_node (three modes).
         """
         if isinstance(node, _PREDICATE_NODES):
             pred_ctx = replace(ctx, depth=ctx.depth + 1, index=0)
@@ -445,8 +444,6 @@ class Visitor(ABC):
                 lines.extend(self.visit(child, inner_ctx))
             return lines
         if isinstance(node, _PIPELINE_NODES):
-            if isinstance(node, InitField):
-                return self._emit_pipeline(node.body, ctx)
             return self._emit_pipeline(node.body, ctx.deeper())
         return []
 
@@ -539,7 +536,6 @@ class Visitor(ABC):
     _DISPATCH: dict[type[Node], str] = {
         # module
         Module: "visit_module",
-        Docstring: "visit_docstring",
         Utilities: "visit_utilities",
         CodeStartHook: "visit_code_start_hook",
         CodeEndHook: "visit_code_end_hook",
@@ -551,9 +547,9 @@ class Visitor(ABC):
         # struct
         Struct: "visit_struct",
         StructRest: "visit_struct_rest",
-        StructDocstring: "visit_struct_docstring",
         StartParse: "visit_start_parse",
         Init: "visit_init",
+        InitFieldCall: "visit_init_field_call",
         InitField: "visit_init_field",
         Field: "visit_field",
         PreValidate: "visit_pre_validate",
@@ -831,6 +827,17 @@ class Visitor(ABC):
             ```
 
         Emit the header of a private struct method that pre-extracts a value.
+        """
+
+    @abstractmethod
+    def visit_init_field_call(
+        self, node: InitFieldCall, ctx: ConverterContext
+    ) -> VisitStream:
+        """
+        Auto-generated AST node (not user-authored).
+
+        The call-site inside the constructor that invokes the corresponding
+        ``InitField`` method and caches the result on the instance.
         """
 
     @abstractmethod

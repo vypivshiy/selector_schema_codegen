@@ -101,8 +101,15 @@ class PyBs4(PyHtmlBase):
         self, node: CssRemove, ctx: ConverterContext
     ) -> VisitStream:
         q = repr(node.query)
-        yield f"{ctx.indent}[_el.decompose() for _el in {ctx.prv}.select({q})]"
-        yield f"{ctx.indent}{ctx.nxt} = {ctx.prv}"
+        yield STD(
+            "std_select_remove",
+            code="""
+                def std_select_remove(tag, q):
+                    [_el.decompose() for _el in tag.select(q)]
+                    return tag
+        """,
+        )
+        yield f"{ctx.indent}{ctx.nxt} = std_select_remove({ctx.prv}, {q})"
 
     def visit_xpath_select(
         self, node: XpathSelect, ctx: ConverterContext

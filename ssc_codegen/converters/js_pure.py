@@ -27,6 +27,7 @@ from ssc_codegen.ast import (
     Fmt,
     Init,
     InitField,
+    InitFieldCall,
     Index,
     JsonDef,
     JsonDefField,
@@ -94,7 +95,6 @@ from ssc_codegen.ast import (
     StartParse,
     Struct,
     StructBase,
-    StructDocstring,
     StructRest,
     StructType as ST,
     TableConfig,
@@ -141,14 +141,6 @@ import re as _re
 # ===========================================================================
 # Helpers
 # ===========================================================================
-
-
-def _js_str(value: str) -> str:
-    return (
-        "`"
-        + value.replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${")
-        + "`"
-    )
 
 
 def _js_re(pattern: str) -> str:
@@ -431,14 +423,6 @@ def _emit_dispatch_err_js(node: StructRest, ctx: ConverterContext) -> list[str]:
 # StartParse helpers
 # ===========================================================================
 
-_JS_PARSE_RETURN_TYPE = {
-    Struct: "{}Type",
-    "list": "Array<{}Type>",
-    "flat": "Array<string>",
-    "dict": "{}Type",
-    "table": "{}Type",
-}
-
 
 def _js_method_name(field_name: str) -> str:
     n = to_camel_case(field_name)
@@ -658,8 +642,49 @@ def _js_ok_payload_type(node: MethodRest) -> str:
 class JsPure(Visitor):
     """Pure ES6 JS (DOM API) codegen."""
 
+    TYPES = {
+        VT.STRING: "string",
+        VT.BOOL: "boolean",
+        VT.INT: "number",
+        VT.FLOAT: "number",
+        VT.NULL: "null",
+        VT.JSON: "any",
+        VT.NESTED: "any",
+        VT.AUTO: "any",
+    }
+
+    START_PARSE_RETURN_TYPE = {
+        ST.ITEM: "{}Type",
+        ST.LIST: "Array<{}Type>",
+        ST.FLAT: "Array<string>",
+        ST.DICT: "{}Type",
+        ST.TABLE: "{}Type",
+    }
+
     def __init__(self, var_name: str = "v", indent: str = " " * 2) -> None:
         super().__init__(var_name=var_name, indent=indent)
+
+    def _resolve_start_parse_t_ret(self, struct: StructBase, name: str) -> str:
+        return self.START_PARSE_RETURN_TYPE[struct.type].format(name)
+
+    def _resolve_type(self, type_info: TypeInfo | None) -> str:
+        if type_info is None:
+            return "any"
+
+        if type_info.base == VT.NESTED and type_info.ref:
+            t = f"{to_pascal_case(type_info.ref)}Type"
+        elif type_info.base == VT.JSON and type_info.ref:
+            t = f"{to_pascal_case(type_info.ref)}Json"
+        elif type_info.base == VT.DOCUMENT:
+            t = "Array<Element>" if type_info.is_array else "Document|Element"
+        else:
+            t = self.TYPES.get(type_info.base, "any")
+        if type_info.is_array and type_info.base != VT.DOCUMENT:
+            t = f"{t}[]"
+        # dont know how to better handle missing fields
+        if type_info.is_optional or type_info.omitempty:
+            t = f"{t}|null"
+        return t
 
     # === module ===
 
@@ -696,11 +721,6 @@ class JsPure(Visitor):
     ) -> VisitStream:
         return
 
-    def visit_struct_docstring(
-        self, node: StructDocstring, ctx: ConverterContext
-    ) -> VisitStream:
-        return
-
     def visit_error_response(
         self, node: ErrorResponse, ctx: ConverterContext
     ) -> VisitStream:
@@ -721,13 +741,13 @@ class JsPure(Visitor):
     ) -> VisitStream:
         if node.type_info and node.type_info.skip:
             return
-        name = node.alias if node.alias else node.name
-        type_ = _resolve_js_type(node.type_info)
-        if node.type_info and (
-            node.type_info.is_optional or node.type_info.omitempty
-        ):
-            type_ = f"{type_}="
-        yield f" * @property {{{type_}}} {name}"
+        # node.alias not supported
+        name = node.name
+        type_ = self._resolve_type(node.type_info)
+        if node.type_info.omitempty:
+            yield f" * @property {{{type_}}} {name} (OMITEMPTY)"
+        else:
+            yield f" * @property {{{type_}}} {name}"
 
     def visit_typedef(
         self, node: TypeDef, ctx: ConverterContext
@@ -742,12 +762,12 @@ class JsPure(Visitor):
             value_field = next(
                 f for f in node.fields if to_camel_case(f.name) == "value"
             )
-            value_type = _resolve_js_type(value_field.type_info)
+            value_type = self._resolve_type(value_field.type_info)
             yield [
                 "/**",
                 f" * @typedef {{Object.<string, {value_type}>}} {name}Type",
             ]
-            yield TRAVERSE
+            # yield TRAVERSE
             yield " */"
             return
         yield ["/**", f" * @typedef {{Object}} {name}Type"]
@@ -762,7 +782,7 @@ class JsPure(Visitor):
         name = to_camel_case(node.name)
         if node.typedef.struct_type == ST.TABLE and name == "value":
             return
-        type_ = _resolve_js_type(node.type_info)
+        type_ = self._resolve_type(node.type_info)
         yield f" * @property {{{type_}}} {name}"
 
     # === struct ===
@@ -800,38 +820,31 @@ class JsPure(Visitor):
     def visit_init(self, node: Init, ctx: ConverterContext) -> VisitStream:
         if isinstance(node.parent, StructRest):
             return
-        init_names = [
-            to_camel_case(i.name) for i in node.body if isinstance(i, InitField)
-        ]
         i1, i2, i3 = ctx.indent, ctx.indent * 2, ctx.indent * 3
-        yield f"{i1}constructor(document) {{"
-        yield f"{i2}if (typeof document === 'string') {{"
-        yield f"{i3}const _p = new DOMParser();"
-        yield f"{i3}this._doc = _p.parseFromString(document, 'text/html');"
-        yield f"{i2}}} else {{"
-        yield f"{i3}this._doc = document;"
-        yield f"{i2}}}"
-        for name in init_names:
-            cap = name[0].upper() + name[1:]
-            yield f"{i2}this._{name} = this._init{cap}(this._doc);"
+        yield [
+            f"{i1}constructor(document) {{",
+            f"{i2}if (typeof document === 'string') {{",
+            f"{i3}this._doc = (new DOMParser()).parseFromString(document, 'text/html');",
+            f"{i2}}} else {{",
+            f"{i3}this._doc = document;",
+            f"{i2}}}",
+        ]
+        yield TRAVERSE
         yield f"{i1}}}"
-        # Emit the _init<Name> method definitions at class-body level.
-        # The framework's InitField special-case (_emit_pipeline at same depth)
-        # miscalculates indentation, so we emit header + body manually:
-        # header at class-body depth, pipeline body one level deeper.
-        for child in node.body:
-            if isinstance(child, InitField):
-                cname = to_camel_case(child.name)
-                cap = cname[0].upper() + cname[1:]
-                yield f"{i1}_init{cap}(v) {{"
-                yield self._emit_pipeline(child.body, ctx.deeper())
-                yield f"{i1}}}"
+
+    def visit_init_field_call(
+        self, node: InitFieldCall, ctx: ConverterContext
+    ) -> VisitStream:
+        name = to_camel_case(node.name)
+        cap = name[0].upper() + name[1:]
+        yield f"{ctx.indent}this._{name} = this._init{cap}(this._doc);"
 
     def visit_init_field(
         self, node: InitField, ctx: ConverterContext
     ) -> VisitStream:
         name = to_camel_case(node.name)
         cap = name[0].upper() + name[1:]
+
         yield f"{ctx.indent}_init{cap}(v) {{"
         yield TRAVERSE
         yield f"{ctx.indent}}}"

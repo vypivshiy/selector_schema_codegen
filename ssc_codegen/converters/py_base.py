@@ -1,4 +1,4 @@
-"""Dialect-agnostic Python HTML-parser codegen base (new Visitor API).
+"""Dialect-agnostic Python HTML-parser codegen base.
 
 ``PyHtmlBase`` holds all dialect-agnostic codegen logic (types, struct
 scaffolding, string/regex/array/cast/control ops, string-level predicates)
@@ -30,7 +30,6 @@ from ssc_codegen.ast.module import (
 )
 from ssc_codegen.ast import (
     ErrorResponse,
-    StructDocstring,
     TypeInfo,
     VariableType as VT,
     StructType as ST,
@@ -79,6 +78,7 @@ from ssc_codegen.ast.struct import (
     Field,
     Init,
     InitField,
+    InitFieldCall,
     Key,
     MethodBase,
     MethodFetch,
@@ -277,10 +277,7 @@ def render_body(spec: RequestSpec) -> tuple[str, str] | None:
     return ("data", render_value(str(spec.body)))
 
 
-# ===========================================================================
-# REST infrastructure (ported from runtime/, py_bs4.py)
-# ===========================================================================
-
+# REST
 PH_PY_TYPES = {"str": "str", "int": "int", "float": "float", "bool": "bool"}
 
 REST_UTILITIES = (
@@ -674,12 +671,6 @@ class PyHtmlBase(Visitor):
     ) -> VisitStream:
         return
 
-    # TODO: AST: REMOVE Docstring nodes
-    def visit_struct_docstring(
-        self, node: StructDocstring, ctx: ConverterContext
-    ) -> VisitStream:
-        return
-
     def visit_error_response(
         self, node: ErrorResponse, ctx: ConverterContext
     ) -> VisitStream:
@@ -803,23 +794,13 @@ class PyHtmlBase(Visitor):
         yield f"{i3}self._doc = {self.INIT_FROM_STR_EXPR}"
         yield f"{i2}else:"
         yield f"{i3}self._doc = document"
-        # init fields if defined
-        for field in node.body:
-            if not isinstance(field, InitField):
-                continue
-            name = to_snake_case(field.name)
-            yield f"{i2}self._{name} = self._init_{name}(self._doc)"
-        # Emit the _init_{name} method definitions at class-body level.
-        # The framework's InitField special-case miscalculates indentation,
-        # so we emit header + pipeline body manually.
-        for field in node.body:
-            if not isinstance(field, InitField):
-                continue
-            name = to_snake_case(field.name)
-            t_arg = self._resolve_py_type(field.accept_type_info)
-            t_ret = self._resolve_py_type(field.ret_type_info)
-            yield f"{i}def _init_{name}(self, v: {t_arg}) -> {t_ret}:"
-            yield self._emit_pipeline(field.body, ctx.deeper())
+        yield TRAVERSE
+
+    def visit_init_field_call(
+        self, node: InitFieldCall, ctx: ConverterContext
+    ) -> VisitStream:
+        name = to_snake_case(node.name)
+        yield f"{ctx.indent}self._{name} = self._init_{name}(self._doc)"
 
     def visit_init_field(
         self, node: InitField, ctx: ConverterContext
@@ -1103,9 +1084,9 @@ class PyHtmlBase(Visitor):
         ph_params = self._placeholder_params(spec)
 
         i1 = ctx.indent
-        i2 = i1 + ctx.indent_char
-        i3 = i2 + ctx.indent_char
-        i4 = i3 + ctx.indent_char
+        i2 = i1 * 2
+        i3 = i1 * 3
+        i4 = i1 * 4
 
         doc_line = f'{i2}"""{node.doc}"""' if node.doc else None
 

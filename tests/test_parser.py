@@ -485,7 +485,7 @@ def test_parser_inlines_define_blocks_and_resolves_init_references():
 
     init_field = next(
         node
-        for node in main.init.body
+        for node in main.body
         if isinstance(node, InitField) and node.name == "seed"
     )
     inline_define = _field(main, "inline-define")

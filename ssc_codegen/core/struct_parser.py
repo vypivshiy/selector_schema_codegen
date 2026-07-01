@@ -9,8 +9,8 @@ from ssc_codegen.ast import (
     CheckMethod,
     ErrorResponse,
     Field,
-    Init,
     InitField,
+    InitFieldCall,
     JsonDef,
     JsonDefField,
     Key,
@@ -54,7 +54,7 @@ def parse_struct(
             parent.doc = str(node.args[0].value)
         elif node.name == "@init":
             if isinstance(parent, Struct):
-                _parse_init_fields(node.children, parent.init, ctx, lint)
+                _parse_init_fields(node.children, parent, ctx, lint)
         elif node.name == "@pre-validate":
             expr = PreValidate(parent=parent)
             parse_expressions(node.children, expr, ctx, lint)
@@ -282,12 +282,13 @@ def parse_json_fields(
 
 def _parse_init_fields(
     kdl_nodes: Sequence[KdlNode],
-    parent: Init,
+    parent: Struct,
     ctx: ParseContext,
     lint: LintContext,
 ) -> None:
     prev_ctx = lint.walk_context
     lint.walk_context = WalkCtx.INIT_BLOCK
+    init = parent.init
     for node in kdl_nodes:
         lint.push(node.name)
         lint.init_fields.add(node.name)
@@ -301,5 +302,6 @@ def _parse_init_fields(
             )
             lint.inferred_define_types[node.name] = (VariableType.DOCUMENT, ret)
         parent.body.append(expr)
+        init.body.append(InitFieldCall(parent=init, name=node.name))
         lint.pop()
     lint.walk_context = prev_ctx

@@ -338,7 +338,7 @@ def _build_expression(
         init_field = next(
             (
                 i
-                for i in struct.init.body
+                for i in struct.body
                 if isinstance(i, InitField) and i.name == field_name
             ),
             None,
@@ -412,7 +412,7 @@ def parse_expressions(
             init_field = next(
                 (
                     i
-                    for i in struct.init.body
+                    for i in struct.body
                     if isinstance(i, InitField) and i.name == field_name
                 ),
                 None,

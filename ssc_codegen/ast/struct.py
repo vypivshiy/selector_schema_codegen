@@ -2,7 +2,7 @@ from __future__ import annotations
 import re as _re
 import warnings
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 from typing import cast
 
 from .base import Node
@@ -38,10 +38,12 @@ class PlaceholderSpec:
     """
 
     name: str = ""
-    type_name: str = "str"  # "str" | "int" | "float" | "bool"
+    type_name: Literal["str", "int", "float", "bool"] = "str"
     is_array: bool = False
     is_optional: bool = False
-    style: str | None = None  # None == default "repeat" when is_array
+    style: Literal["repeat", "csv", "bracket", "pipe", "space"] | None = (
+        None  # None == default "repeat" when is_array
+    )
 
     # ── parsing ──────────────────────────────────────────────────────────
 
@@ -389,16 +391,31 @@ class Init(Node):
     Pre-computed named values cached before field parsing.
     Execution order: after PreValidate, before SplitDoc and Fields.
     DSL: @init { name { pipeline... } ... }
-    body: list[InitField]
+    body: list[InitFieldCall]
     """
 
     pass
 
 
 @dataclass
+class InitFieldCall(Node):
+    """
+    Call-site marker inside ``Init`` — emits the constructor line that
+    invokes the corresponding ``InitField`` method and caches the result.
+
+    The ``InitField`` method definition lives in ``Struct.body`` (at
+    class-body level), emitted naturally like a regular ``Field``.
+    """
+
+    name: str = ""
+
+
+@dataclass
 class InitField(Node):
     """
-    Single named cached pipeline inside -init.
+    Single named cached pipeline, originally declared inside ``@init``.
+    Lives at ``Struct.body`` level (same as ``Field``) so converters emit
+    it as a standalone method at class-body depth.
     Referenced in Fields via Self(name=...).
     ret is resolved after pipeline is built.
 

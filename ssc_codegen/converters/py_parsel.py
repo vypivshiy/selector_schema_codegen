@@ -95,8 +95,15 @@ class PyParsel(PyHtmlBase):
         self, node: CssRemove, ctx: ConverterContext
     ) -> VisitStream:
         q = repr(node.query)
-        yield f"{ctx.indent}[_el.root.getparent().remove(_el.root) for _el in {ctx.prv}.css({q}) if _el.root.getparent() is not None]"
-        yield f"{ctx.indent}{ctx.nxt} = {ctx.prv}"
+        yield STD(
+            "std_select_remove",
+            code="""
+                def std_select_remove(tag, q):
+                    [e.root.getparent().remove(e.root) for e in tag.css(q) if e.root.getparent() is not None]
+                    return tag
+            """,
+        )
+        yield f"{ctx.indent}{ctx.nxt} = std_select_remove({ctx.prv}, {q})"
 
     def visit_xpath_select(
         self, node: XpathSelect, ctx: ConverterContext
@@ -143,8 +150,15 @@ class PyParsel(PyHtmlBase):
         self, node: XpathRemove, ctx: ConverterContext
     ) -> VisitStream:
         q = repr(node.query)
-        yield f"{ctx.indent}[_el.root.getparent().remove(_el.root) for _el in {ctx.prv}.xpath({q}) if _el.root.getparent() is not None]"
-        yield f"{ctx.indent}{ctx.nxt} = {ctx.prv}"
+        yield STD(
+            "std_xpath_remove",
+            code="""
+                def std_xpath_remove(tag, q):
+                    [e.root.getparent().remove(e.root) for e in tag.xpath(q) if e.root.getparent() is not None]
+                    return tag
+            """,
+        )
+        yield f"{ctx.indent}{ctx.nxt} = std_xpath_remove({ctx.prv}, {q})"
 
     # === extract ===
 
