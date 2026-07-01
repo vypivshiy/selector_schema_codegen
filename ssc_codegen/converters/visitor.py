@@ -105,8 +105,13 @@ from ssc_codegen.ast import (
     PredReAny,
     CodeEndHook,
     CodeStartHook,
+    TypeInfo,
+    VariableType as VT,
+    StructType as ST,
+    PlaceholderSpec,
 )
 from ssc_codegen.converters.base import ConverterContext
+from ssc_codegen.converters.helpers import to_pascal_case
 
 # Node categories — select the body-traversal mode (ported from base.py).
 # Container: depth+1, index=0, no advance between siblings.
@@ -196,6 +201,65 @@ VisitStream: TypeAlias = (
 TRAVERSE = None
 
 
+# ===========================================================================
+# Shared AST utilities (language-agnostic, used by all dialects)
+# ===========================================================================
+
+
+def module_has_rest(module: Module) -> bool:
+    """True if the module contains at least one REST struct."""
+    return any(isinstance(n, StructRest) for n in module.body)
+
+
+def module_is_rest_only(module: Module) -> bool:
+    """True if ALL structs in the module are REST structs (or there are none)."""
+    structs = [n for n in module.body if isinstance(n, StructBase)]
+    return len(structs) == 0 or all(isinstance(s, StructRest) for s in structs)
+
+
+def err_subclass_name(struct_name: str, err: "ErrorResponse") -> str:
+    """Deterministic error-subclass name from struct name + error spec.
+
+    Concatenates PascalCase(struct) + 'Err' + status + PascalCase(required_keys)
+    + PascalCase(condition_keys).  Identical across all languages.
+    """
+    base = f"{to_pascal_case(struct_name)}Err{err.status}"
+    for key in err.required_keys:
+        base += to_pascal_case(key.replace(".", "_").replace("-", "_"))
+    if err.conditions:
+        for key in err.conditions:
+            base += to_pascal_case(key.replace(".", "_").replace("-", "_"))
+    return base
+
+
+def dict_entry_placeholder(v: str) -> PlaceholderSpec | None:
+    """Return the PlaceholderSpec for a dict entry value, or None."""
+    return PlaceholderSpec.parse(str(v))
+
+
+def dict_needs_builder(d: dict[str, str]) -> bool:
+    """True if any dict entry has an optional or bracket-style array placeholder."""
+    for v in d.values():
+        ph = PlaceholderSpec.parse(str(v))
+        if ph is None:
+            continue
+        if ph.is_optional:
+            return True
+        if ph.is_array and ph.style == "bracket":
+            return True
+    return False
+
+
+def find_predicate_container(node: Node) -> Node | None:
+    """Walk the parent chain to find the enclosing Filter/Assert/Match/PreValidate."""
+    cur = node.parent
+    while cur:
+        if isinstance(cur, (Filter, Assert, Match, PreValidate)):
+            return cur
+        cur = cur.parent
+    return None
+
+
 class Visitor(ABC):
     """Base transpiler visitor: walks the AST and dispatches nodes to visit_* methods.
 
@@ -218,6 +282,18 @@ class Visitor(ABC):
 
     # === CLASS-LEVEL CONFIG (override in subclasses) ===
     STD_MODULE_NAME: str = "ssc_std"
+
+    # --- type resolution spelling (data, not behaviour) ---
+    DEFAULT_TYPE: str = "Any"
+    TYPES: dict[VT, str] = {}
+    ARRAY_TYPE_FMT: str = "List[{}]"
+    OPTIONAL_TYPE_FMT: str = "Optional[{}]"
+    OPTIONAL_ON_OMITEMPTY: bool = False
+    DOCUMENT_TYPE: str = "Any"
+    DOCUMENT_ARRAY_TYPE: str = "List[Any]"
+
+    # --- predicate formatting ---
+    AND_OP: str = "and"
 
     def __init__(self, var_name: str = "v", indent: str = " " * 4) -> None:
         self.var_name = var_name
@@ -529,6 +605,54 @@ class Visitor(ABC):
             lines.append("")
             lines.extend(inspect.cleandoc(code).splitlines())
         return "\n".join(lines)
+
+    # === SHARED TYPE RESOLUTION (concrete, data-driven by class attrs) ===
+    def _resolve_type(self, type_info: TypeInfo | None) -> str:
+        """Render a TypeInfo into a target-language type annotation string.
+
+        Spelling is controlled entirely by class attrs (TYPES,
+        ARRAY_TYPE_FMT, OPTIONAL_TYPE_FMT, DOCUMENT_TYPE, etc.) so the
+        algorithm is identical for every dialect.
+        """
+        if type_info is None:
+            return self.DEFAULT_TYPE
+        if type_info.base == VT.NESTED and type_info.ref:
+            t = f"{to_pascal_case(type_info.ref)}Type"
+        elif type_info.base == VT.JSON and type_info.ref:
+            t = f"{to_pascal_case(type_info.ref)}Json"
+        elif type_info.base == VT.DOCUMENT:
+            t = (
+                self.DOCUMENT_ARRAY_TYPE
+                if type_info.is_array
+                else self.DOCUMENT_TYPE
+            )
+        else:
+            t = self.TYPES.get(type_info.base, self.DEFAULT_TYPE)
+        if type_info.is_array and type_info.base != VT.DOCUMENT:
+            t = self.ARRAY_TYPE_FMT.format(t)
+        if type_info.is_optional or (
+            self.OPTIONAL_ON_OMITEMPTY and type_info.omitempty
+        ):
+            t = self.OPTIONAL_TYPE_FMT.format(t)
+        return t
+
+    def _resolve_start_parse_t_ret(self, struct: StructBase, name: str) -> str:
+        """Return-type annotation for the public parse() method.
+
+        Derived from class attrs — no separate lookup table needed.
+        """
+        match struct.type:
+            case ST.ITEM | ST.DICT | ST.TABLE:
+                return f"{name}Type"
+            case ST.LIST:
+                return self.ARRAY_TYPE_FMT.format(f"{name}Type")
+            case ST.FLAT:
+                return self.ARRAY_TYPE_FMT.format(self.TYPES[VT.STRING])
+
+    def _pred_line(self, ctx: ConverterContext, cond: str) -> str:
+        """Format one predicate condition; join siblings with AND_OP."""
+        prefix = "" if ctx.index == 0 else f"{self.AND_OP} "
+        return f"{ctx.indent}{prefix}{cond}"
 
     # === DISPATCH TABLE ===
     # Single source of truth: node -> visit_* method name.

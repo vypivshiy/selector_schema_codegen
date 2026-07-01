@@ -30,7 +30,6 @@ from ssc_codegen.ast.module import (
 )
 from ssc_codegen.ast import (
     ErrorResponse,
-    TypeInfo,
     VariableType as VT,
     StructType as ST,
 )
@@ -108,6 +107,11 @@ from ssc_codegen.converters.visitor import (
     TRAVERSE,
     VisitStream,
     Visitor,
+    dict_entry_placeholder,
+    dict_needs_builder,
+    err_subclass_name,
+    module_has_rest,
+    module_is_rest_only,
 )
 from ssc_codegen.request_spec import (
     RequestSpec,
@@ -166,29 +170,13 @@ def render_dict(d: dict[str, str], *, indent: str = "") -> str:
     return "{" + inner + "}"
 
 
-def _dict_entry_placeholder(v: str) -> PlaceholderSpec | None:
-    return PlaceholderSpec.parse(str(v))
-
-
-def dict_needs_builder(d: dict[str, str]) -> bool:
-    for v in d.values():
-        ph = _dict_entry_placeholder(str(v))
-        if ph is None:
-            continue
-        if ph.is_optional:
-            return True
-        if ph.is_array and ph.style == "bracket":
-            return True
-    return False
-
-
 def emit_dict_builder(
     varname: str, d: dict[str, str], indent: str
 ) -> list[str]:
     lines: list[str] = [f"{indent}{varname}: dict = {{}}"]
     for key, value in d.items():
         value = str(value)
-        ph = _dict_entry_placeholder(value)
+        ph = dict_entry_placeholder(value)
         if ph is None:
             lines.append(f"{indent}{varname}[{key!r}] = {render_value(value)}")
             continue
@@ -309,36 +297,67 @@ REST_UTILITIES = (
     "    value: None = None",
     "    headers: Mapping[str, str] = field(default_factory=dict)",
     "",
+    "@dataclass(frozen=True)",
+    "class ErrMatcher:",
+    "    status: int",
+    "    check: Callable[[dict], bool] | None = None",
+    "    factory: Callable[..., Err] = None  # type: ignore[assignment]",
     "",
-    "def ssc_parse_response(_resp):",
-    "    _status = _resp.status_code",
-    "    _headers = {k.lower(): v for k, v in _resp.headers.items()}",
+    "    def match(self, _s: int, _h, _b) -> Err | None:",
+    "        if _s != self.status:",
+    "            return None",
+    "        if self.check is not None:",
+    "            if not isinstance(_b, dict) or not self.check(_b):",
+    "                return None",
+    "        return self.factory(headers=_h, value=_b)",
+    "",
+    "",
+    "def ssc_dispatch_err(_matchers, _status: int, _headers, _body):",
+    "    for _m in _matchers:",
+    "        _err = _m.match(_status, _headers, _body)",
+    "        if _err is not None:",
+    "            return _err",
+    "    if 200 <= _status < 300:",
+    "        return None",
+    "    return UnknownErr(status=_status, headers=_headers, value=_body)",
+    "",
+    "",
+    "def ssc_rest_call(client, _matchers, method, url, _value_fn=None, **kw):",
     "    try:",
-    "        _body = _resp.json()",
-    "    except Exception:",
-    "        _body = None",
-    "    return _status, _headers, _body",
+    "        _resp = client.request(method, url, **kw)",
+    "        _status = _resp.status_code",
+    "        _headers = {k.lower(): v for k, v in _resp.headers.items()}",
+    "        try:",
+    "            _body = _resp.json()",
+    "        except Exception:",
+    "            _body = None",
+    "    except httpx.HTTPError as _exc:",
+    "        return TransportErr(cause=repr(_exc))",
+    "    _err = ssc_dispatch_err(_matchers, _status, _headers, _body)",
+    "    if _err is not None:",
+    "        return _err",
+    "    _value = _body if _value_fn is None else _value_fn(_body)",
+    "    return Ok(status=_status, headers=_headers, value=_value)",
+    "",
+    "",
+    "async def ssc_rest_call_async(client, _matchers, method, url, _value_fn=None, **kw):",
+    "    try:",
+    "        _resp = await client.request(method, url, **kw)",
+    "        _status = _resp.status_code",
+    "        _headers = {k.lower(): v for k, v in _resp.headers.items()}",
+    "        try:",
+    "            _body = _resp.json()",
+    "        except Exception:",
+    "            _body = None",
+    "    except httpx.HTTPError as _exc:",
+    "        return TransportErr(cause=repr(_exc))",
+    "    _err = ssc_dispatch_err(_matchers, _status, _headers, _body)",
+    "    if _err is not None:",
+    "        return _err",
+    "    _value = _body if _value_fn is None else _value_fn(_body)",
+    "    return Ok(status=_status, headers=_headers, value=_value)",
     "",
 )
-
-
-def module_has_rest(module: Module) -> bool:
-    return any(isinstance(n, StructRest) for n in module.body)
-
-
-def module_is_rest_only(module: Module) -> bool:
-    structs = [n for n in module.body if isinstance(n, StructBase)]
-    return len(structs) == 0 or all(isinstance(s, StructRest) for s in structs)
-
-
-def err_subclass_name(struct_name: str, err: ErrorResponse) -> str:
-    base = f"{to_pascal_case(struct_name)}Err{err.status}"
-    for key in err.required_keys:
-        base += to_pascal_case(key.replace(".", "_").replace("-", "_"))
-    if err.conditions:
-        for key in err.conditions:
-            base += to_pascal_case(key.replace(".", "_").replace("-", "_"))
-    return base
 
 
 def err_value_type(err: ErrorResponse, struct: StructBase) -> str:
@@ -365,10 +384,9 @@ def rest_err_union_type(struct: StructBase) -> str:
     return "Union[" + ", ".join([*variants, "UnknownErr", "None"]) + "]"
 
 
-def resolve_path_expr(body_var: str, path: str) -> str:
-    parts = path.split(".")
+def _py_path_expr(body_var: str, path: str) -> str:
     expr = body_var
-    for seg in parts:
+    for seg in path.split("."):
         if seg.isdigit():
             expr += f"[{seg}]"
         else:
@@ -376,21 +394,23 @@ def resolve_path_expr(body_var: str, path: str) -> str:
     return expr
 
 
-def condition_check_expr(err: ErrorResponse) -> str:
+def render_condition_lambda(err: ErrorResponse) -> str | None:
     parts: list[str] = []
     for key in err.required_keys:
-        parts.append(f"{key!r} in _body")
+        parts.append(f"{key!r} in _b")
     for path, value in err.conditions.items():
-        lhs = resolve_path_expr("_body", path)
+        lhs = _py_path_expr("_b", path)
         if isinstance(value, bool):
-            parts.append(f"{lhs} == {value}")
+            parts.append(f"{lhs} is {value}")
         elif value is None:
             parts.append(f"{lhs} is None")
         elif isinstance(value, (int, float)):
             parts.append(f"{lhs} == {value}")
         else:
             parts.append(f"{lhs} == {value!r}")
-    return " and ".join(parts)
+    if not parts:
+        return None
+    return f"lambda _b: {' and '.join(parts)}"
 
 
 def result_alias_name(raw_name: str) -> str:
@@ -448,64 +468,24 @@ def emit_result_aliases(struct: StructBase) -> list[str]:
     return lines
 
 
-def emit_dispatch_err(node: StructBase, ctx: ConverterContext) -> list[str]:
-    i1 = ctx.indent
-    i2 = i1 + ctx.indent_char
-    i3 = i2 + ctx.indent_char
-    i4 = i3 + ctx.indent_char
-
-    errors = node.errors
-    status_errors = [
-        e for e in errors if not e.conditions and not e.required_keys
-    ]
-    field_errors = [e for e in errors if e.conditions or e.required_keys]
-    union_type = rest_err_union_type(node)
-
-    lines: list[str] = [
-        f"{i1}@staticmethod",
-        f"{i1}def ssc_dispatch_err("
-        f"_status: int, _headers: Mapping[str, str], _body: Any"
-        f") -> {union_type}:",
-        f"{i2}if 200 <= _status < 300:",
-    ]
-
-    if field_errors:
-        lines.append(f"{i3}if isinstance(_body, dict):")
-        emitted_field_branch = False
-        for err in field_errors:
-            if 200 <= err.status < 300:
-                cls_name = err_subclass_name(node.name, err)
-                cond = condition_check_expr(err)
-                lines.append(f"{i4}if _status == {err.status} and {cond}:")
-                lines.append(
-                    f"{i4}{ctx.indent_char}return {cls_name}("
-                    f"headers=_headers, value=_body)"
-                )
-                emitted_field_branch = True
-        if not emitted_field_branch:
-            lines.pop()
-    lines.append(f"{i3}return None")
-
-    for err in status_errors:
-        cls_name = err_subclass_name(node.name, err)
-        lines.append(f"{i2}if _status == {err.status}:")
-        lines.append(f"{i3}return {cls_name}(headers=_headers, value=_body)")
-
-    for err in field_errors:
-        if not (200 <= err.status < 300):
-            cls_name = err_subclass_name(node.name, err)
-            cond = condition_check_expr(err)
-            lines.append(
-                f"{i2}if _status == {err.status} "
-                f"and isinstance(_body, dict) and {cond}:"
-            )
-            lines.append(
-                f"{i3}return {cls_name}(headers=_headers, value=_body)"
-            )
-
-    lines.append(
-        f"{i2}return UnknownErr(status=_status, headers=_headers, value=_body)"
-    )
+def emit_matchers(struct: StructBase) -> list[str]:
+    name = to_snake_case(struct.name)
+    var = f"_{name}_matchers"
+    seen: set[str] = set()
+    entries: list[str] = []
+    for err in struct.errors:
+        cls_name = err_subclass_name(struct.name, err)
+        if cls_name in seen:
+            continue
+        seen.add(cls_name)
+        check = render_condition_lambda(err)
+        check_arg = check if check else "None"
+        entries.append(
+            f"    ErrMatcher({err.status}, {check_arg}, {cls_name}),"
+        )
+    lines = [f"{var} = ["]
+    lines.extend(entries)
+    lines.append("]")
     return lines
 
 
@@ -532,7 +512,7 @@ class PyHtmlBase(Visitor):
     INIT_FROM_STR_EXPR: str = "document"
     EXTRA_UTILITIES: tuple[str, ...] = ()
 
-    PY_TYPES = {
+    TYPES = {
         VT.STRING: "str",
         VT.BOOL: "bool",
         VT.INT: "int",
@@ -542,50 +522,6 @@ class PyHtmlBase(Visitor):
         VT.NESTED: "Any",
         VT.AUTO: "Any",
     }
-    PARSE_RETURN_TYPE = {
-        ST.ITEM: "{}Type",
-        ST.LIST: "List[{}Type]",
-        ST.FLAT: "List[str]",
-        ST.DICT: "{}Type",
-        ST.TABLE: "{}Type",
-    }
-
-    def _resolve_py_start_parse_t_ret(
-        self, struct: StructBase, name: str
-    ) -> str:
-        return self.PARSE_RETURN_TYPE[struct.type].format(name)
-
-    def _resolve_py_type(self, type_info: TypeInfo | None) -> str:
-        """Render TypeInfo into a Python type annotation string.
-
-        VT.DOCUMENT is resolved from DOCUMENT_TYPE / DOCUMENT_ARRAY_TYPE
-        (dialect config), not from PY_TYPES — that is the single override
-        point for the parser-specific element type.
-        """
-        if type_info is None:
-            return "Any"
-        if type_info.base == VT.NESTED and type_info.ref:
-            t = f"{to_pascal_case(type_info.ref)}Type"
-        elif type_info.base == VT.JSON and type_info.ref:
-            t = f"{to_pascal_case(type_info.ref)}Json"
-        elif type_info.base == VT.DOCUMENT:
-            t = (
-                self.DOCUMENT_ARRAY_TYPE
-                if type_info.is_array
-                else self.DOCUMENT_TYPE
-            )
-        else:
-            t = self.PY_TYPES.get(type_info.base, "Any")
-        if type_info.is_array and type_info.base != VT.DOCUMENT:
-            t = f"List[{t}]"
-        if type_info.is_optional:
-            t = f"Optional[{t}]"
-        return t
-
-    def _pred_line(self, ctx: ConverterContext, cond: str) -> str:
-        """Format one predicate condition; join siblings with ``and``."""
-        prefix = "" if ctx.index == 0 else "and "
-        return f"{ctx.indent}{prefix}{cond}"
 
     # === module ===
 
@@ -611,7 +547,7 @@ class PyHtmlBase(Visitor):
             if not runtime:
                 yield IMPORT("from dataclasses import dataclass, field")
                 yield IMPORT(
-                    "from typing import Generic, Literal, Mapping, TypeVar"
+                    "from typing import Callable, Generic, Literal, Mapping, TypeVar"
                 )
             yield IMPORT("import httpx")
 
@@ -694,7 +630,7 @@ class PyHtmlBase(Visitor):
             return
         # TypedDict not allowed aliases — not use `node.alias`
         name = node.name
-        t = self._resolve_py_type(node.type_info)
+        t = self._resolve_type(node.type_info)
         if node.type_info and node.type_info.omitempty:
             t = f"NotRequired[{t}]"
         yield f"{name!r}: {t},"
@@ -735,7 +671,7 @@ class PyHtmlBase(Visitor):
         if node.typedef.struct_type == ST.FLAT:
             return
         name = to_snake_case(node.name)
-        t = self._resolve_py_type(node.type_info)
+        t = self._resolve_type(node.type_info)
         if node.typedef.struct_type == ST.DICT:
             # DICT is a plain type alias (Dict[str, value_type]), not a
             # TypedDict body — emit the alias once (for the value field) and
@@ -768,6 +704,11 @@ class PyHtmlBase(Visitor):
         yield aliases
         if aliases:
             yield ""
+        # error matchers (module-level, before class)
+        matchers = emit_matchers(node)
+        if matchers:
+            yield matchers
+            yield ""
         # class header
         name = to_pascal_case(node.name)
         yield f"class {name}:"
@@ -777,8 +718,6 @@ class PyHtmlBase(Visitor):
             yield f'{i}"""'
             yield [i + line for line in node.doc.splitlines()]
             yield f'{i}"""'
-        # dispatch_err staticmethod (first class member)
-        yield emit_dispatch_err(node, ctx.deeper())
         # children (MethodRest, MethodFetch, ErrorResponse)
         yield TRAVERSE
 
@@ -806,16 +745,16 @@ class PyHtmlBase(Visitor):
         self, node: InitField, ctx: ConverterContext
     ) -> VisitStream:
         name = to_snake_case(node.name)
-        t_arg = self._resolve_py_type(node.accept_type_info)
-        t_ret = self._resolve_py_type(node.ret_type_info)
+        t_arg = self._resolve_type(node.accept_type_info)
+        t_ret = self._resolve_type(node.ret_type_info)
 
         yield f"{ctx.indent}def _init_{name}(self, v: {t_arg}) -> {t_ret}:"
         yield TRAVERSE
 
     def visit_field(self, node: Field, ctx: ConverterContext) -> VisitStream:
         name = to_snake_case(node.name)
-        t_arg = self._resolve_py_type(node.accept_type_info)
-        t_ret = self._resolve_py_type(node.ret_type_info)
+        t_arg = self._resolve_type(node.accept_type_info)
+        t_ret = self._resolve_type(node.ret_type_info)
         # sentinel specific type
         if node.struct.type == ST.TABLE:
             t_ret = f"Union[{t_ret}, _UnmatchedTableRow]"
@@ -824,15 +763,15 @@ class PyHtmlBase(Visitor):
 
     def visit_key(self, node: Key, ctx: ConverterContext) -> VisitStream:
         name = "key"
-        t_arg = self._resolve_py_type(node.accept_type_info)
-        t_ret = self._resolve_py_type(node.ret_type_info)  # string expected
+        t_arg = self._resolve_type(node.accept_type_info)
+        t_ret = self._resolve_type(node.ret_type_info)  # string expected
         yield f"{ctx.indent}def _parse_{name}(self, v: {t_arg}) -> {t_ret}:"
         yield TRAVERSE
 
     def visit_value(self, node: Value, ctx: ConverterContext) -> VisitStream:
         name = "value"
-        t_arg = self._resolve_py_type(node.accept_type_info)
-        t_ret = self._resolve_py_type(node.ret_type_info)  # string expected
+        t_arg = self._resolve_type(node.accept_type_info)
+        t_ret = self._resolve_type(node.ret_type_info)  # string expected
         yield f"{ctx.indent}def _parse_{name}(self, v: {t_arg}) -> {t_ret}:"
         yield TRAVERSE
 
@@ -840,8 +779,8 @@ class PyHtmlBase(Visitor):
         self, node: TableConfig, ctx: ConverterContext
     ) -> VisitStream:
         name = "_table_config"
-        t_arg = self._resolve_py_type(node.accept_type_info)
-        t_ret = self._resolve_py_type(
+        t_arg = self._resolve_type(node.accept_type_info)
+        t_ret = self._resolve_type(
             node.ret_type_info
         )  # element or Union[element, parser] expected
         yield f"{ctx.indent}def {name}(self, v: {t_arg}) -> {t_ret}:"
@@ -851,8 +790,8 @@ class PyHtmlBase(Visitor):
         self, node: TableMatchKey, ctx: ConverterContext
     ) -> VisitStream:
         name = "_table_match_key"
-        t_arg = self._resolve_py_type(node.accept_type_info)
-        t_ret = self._resolve_py_type(node.ret_type_info)  # str expected
+        t_arg = self._resolve_type(node.accept_type_info)
+        t_ret = self._resolve_type(node.ret_type_info)  # str expected
         yield f"{ctx.indent}def {name}(self, v: {t_arg}) -> {t_ret}:"
         yield TRAVERSE
 
@@ -860,8 +799,8 @@ class PyHtmlBase(Visitor):
         self, node: TableRows, ctx: ConverterContext
     ) -> VisitStream:
         name = "_table_rows"
-        t_arg = self._resolve_py_type(node.accept_type_info)
-        t_ret = self._resolve_py_type(
+        t_arg = self._resolve_type(node.accept_type_info)
+        t_ret = self._resolve_type(
             node.ret_type_info
         )  # DOCUMENT_ARRAY_TYPE expected
         yield f"{ctx.indent}def {name}(self, v: {t_arg}) -> {t_ret}:"
@@ -871,8 +810,8 @@ class PyHtmlBase(Visitor):
         self, node: PreValidate, ctx: ConverterContext
     ) -> VisitStream:
         name = "_pre_validate"
-        t_arg = self._resolve_py_type(node.accept_type_info)
-        t_ret = self._resolve_py_type(node.ret_type_info)  # None expected
+        t_arg = self._resolve_type(node.accept_type_info)
+        t_ret = self._resolve_type(node.ret_type_info)  # None expected
         yield f"{ctx.indent}def {name}(self, v: {t_arg}) -> {t_ret}:"
         yield TRAVERSE
 
@@ -880,7 +819,7 @@ class PyHtmlBase(Visitor):
         self, node: CheckMethod, ctx: ConverterContext
     ) -> VisitStream:
         name = to_snake_case(node.name)
-        t_ret = self._resolve_py_type(node.ret_type_info)  # bool expected
+        t_ret = self._resolve_type(node.ret_type_info)  # bool expected
         yield f"{ctx.indent}def {name}(self) -> {t_ret}:"
         # API simplify: v = self._doc
         yield f"{ctx.indent * 2}{ctx.var_name} = self._doc"
@@ -890,8 +829,8 @@ class PyHtmlBase(Visitor):
         self, node: SplitDoc, ctx: ConverterContext
     ) -> VisitStream:
         name = "_split_doc"
-        t_arg = self._resolve_py_type(node.accept_type_info)
-        t_ret = self._resolve_py_type(
+        t_arg = self._resolve_type(node.accept_type_info)
+        t_ret = self._resolve_type(
             node.ret_type_info
         )  # DOCUMENT_ARRAY_TYPE expected
         yield f"{ctx.indent}def {name}(self, v: {t_arg}) -> {t_ret}:"
@@ -901,7 +840,7 @@ class PyHtmlBase(Visitor):
         self, node: StartParse, ctx: ConverterContext
     ) -> VisitStream:
         name = to_pascal_case(node.struct.name)
-        t = self._resolve_py_start_parse_t_ret(node.struct, name)
+        t = self._resolve_start_parse_t_ret(node.struct, name)
         # 1. header
         yield f"{ctx.indent}def parse(self) -> {t}:"
         # 2. body
@@ -1016,16 +955,22 @@ class PyHtmlBase(Visitor):
             f"{arg_indent}{spec.method!r},",
             f"{arg_indent}{render_value(spec.url)},",
         ]
+        lines.extend(self._request_kwargs(spec, arg_indent))
+        lines.append(f"{line_indent})")
+        return lines
+
+    def _request_kwargs(self, spec: RequestSpec, indent: str) -> list[str]:
+        """Render headers=..., params=..., cookies=..., body=... kwargs."""
+        lines: list[str] = []
         for attr, varname in self._DICT_KWARGS:
             d = getattr(spec, attr)
             if not d:
                 continue
             ref = varname if dict_needs_builder(d) else render_dict(d)
-            lines.append(f"{arg_indent}{attr}={ref},")
+            lines.append(f"{indent}{attr}={ref},")
         body_result = render_body(spec)
         if body_result:
-            lines.append(f"{arg_indent}{body_result[0]}={body_result[1]},")
-        lines.append(f"{line_indent})")
+            lines.append(f"{indent}{body_result[0]}={body_result[1]},")
         return lines
 
     # === REST / fetch: visitors ===
@@ -1078,48 +1023,48 @@ class PyHtmlBase(Visitor):
         self, node: MethodRest, ctx: ConverterContext
     ) -> VisitStream:
         spec = self._request_spec(node)
+        struct = node.parent
+        assert isinstance(struct, StructBase)
         method_name = to_snake_case(node.name) if node.name else "fetch"
         ret_type = result_alias_name(node.name)
-        ok_value = "_body" if node.response_schema else "None"
         ph_params = self._placeholder_params(spec)
+        matchers_var = f"_{to_snake_case(struct.name)}_matchers"
 
         i1 = ctx.indent
-        i2 = i1 * 2
-        i3 = i1 * 3
-        i4 = i1 * 4
+        i2 = i1 + ctx.indent_char
+        i3 = i2 + ctx.indent_char
 
         doc_line = f'{i2}"""{node.doc}"""' if node.doc else None
 
-        # post-request dispatch (shared by sync & async)
-        dispatch_lines = [
-            f"{i2}except httpx.HTTPError as _exc:",
-            f"{i3}return TransportErr(cause=repr(_exc))",
-            f"{i2}_status, _headers, _body = ssc_parse_response(_resp)",
-            f"{i2}_err = cls.ssc_dispatch_err(_status, _headers, _body)",
-            f"{i2}if _err is not None:",
-            f"{i3}return _err",
-            f"{i2}return Ok(status=_status, headers=_headers, value={ok_value})",
-        ]
+        # _value_fn for void responses (no response_schema → value=None)
+        void_kwarg: list[str] = []
+        if not node.response_schema:
+            void_kwarg = [f"{i3}_value_fn=lambda _: None,"]
+
+        def _rest_call(fn_name: str, await_kw: str) -> list[str]:
+            lines: list[str] = []
+            if doc_line:
+                lines.append(doc_line)
+            lines.extend(self._pre_lines(spec, i2))
+            lines.append(f"{i2}return {await_kw}{fn_name}(")
+            lines.append(
+                f"{i3}client, {matchers_var}, {spec.method!r},"
+                f" {render_value(spec.url)},"
+            )
+            lines.extend(void_kwarg)
+            lines.extend(self._request_kwargs(spec, i3))
+            lines.append(f"{i2})")
+            return lines
 
         # --- sync ---
         yield f"{i1}@classmethod"
         yield f"{i1}def {method_name}(cls, client: httpx.Client{ph_params}) -> {ret_type}:"
-        if doc_line:
-            yield doc_line
-        yield self._pre_lines(spec, i2)
-        yield f"{i2}try:"
-        yield self._request_call(spec, "", i3, i4)
-        yield dispatch_lines
+        yield _rest_call("ssc_rest_call", "")
         yield ""
         # --- async ---
         yield f"{i1}@classmethod"
         yield f"{i1}async def async_{method_name}(cls, client: httpx.AsyncClient{ph_params}) -> {ret_type}:"
-        if doc_line:
-            yield doc_line
-        yield self._pre_lines(spec, i2)
-        yield f"{i2}try:"
-        yield self._request_call(spec, "await ", i3, i4)
-        yield dispatch_lines
+        yield _rest_call("ssc_rest_call_async", "await ")
 
     # === string ===
 

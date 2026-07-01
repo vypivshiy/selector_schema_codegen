@@ -130,6 +130,11 @@ from ssc_codegen.converters.visitor import (
     TRAVERSE,
     VisitStream,
     Visitor,
+    dict_entry_placeholder,
+    dict_needs_builder,
+    err_subclass_name,
+    find_predicate_container,
+    module_has_rest,
 )
 from ssc_codegen.request_spec import (
     RequestSpec,
@@ -170,12 +175,6 @@ def _js_literal(value) -> str:
     return repr(value)
 
 
-def _and(cond: str, ctx: ConverterContext) -> str:
-    if ctx.index == 0:
-        return ctx.indent + cond
-    return ctx.indent + "&& " + cond
-
-
 def _logic_prefix(op: str, ctx: ConverterContext) -> str:
     if ctx.index == 0:
         return ctx.indent + "("
@@ -188,17 +187,8 @@ def _js_docblock(lines: list[str]) -> list[str]:
     return ["/**", *(f" * {line}" if line else " *" for line in lines), " */"]
 
 
-def _find_predicate_container(node):
-    cur = node.parent
-    while cur:
-        if isinstance(cur, (Filter, Assert, Match, PreValidate)):
-            return cur
-        cur = cur.parent
-    return None
-
-
 def _pred_target(node, ctx: ConverterContext) -> str:
-    container = _find_predicate_container(node)
+    container = find_predicate_container(node)
     if isinstance(container, Filter):
         return "i"
     if isinstance(container, (Match, Assert, PreValidate)):
@@ -208,7 +198,7 @@ def _pred_target(node, ctx: ConverterContext) -> str:
 
 def _pred_text_target(node, ctx: ConverterContext) -> str:
     target = _pred_target(node, ctx)
-    container = _find_predicate_container(node)
+    container = find_predicate_container(node)
     if target == "i" and isinstance(container, Filter):
         return "i.textContent"
     return target
@@ -252,20 +242,6 @@ def _resolve_js_type(type_info: TypeInfo | None) -> str:
 # ===========================================================================
 
 
-def module_has_rest(module: Module) -> bool:
-    return any(isinstance(n, StructRest) for n in module.body)
-
-
-def _js_err_subclass_name(struct_name: str, err: ErrorResponse) -> str:
-    base = f"{to_pascal_case(struct_name)}Err{err.status}"
-    for key in err.required_keys:
-        base += to_pascal_case(key.replace(".", "_").replace("-", "_"))
-    if err.conditions:
-        for key in err.conditions:
-            base += to_pascal_case(key.replace(".", "_").replace("-", "_"))
-    return base
-
-
 def _js_resolve_path_expr(body_var: str, path: str) -> str:
     expr = body_var
     for seg in path.split("."):
@@ -276,12 +252,12 @@ def _js_resolve_path_expr(body_var: str, path: str) -> str:
     return expr
 
 
-def _js_condition_check_expr(err: ErrorResponse) -> str:
+def _js_render_condition_lambda(err: ErrorResponse) -> str | None:
     parts: list[str] = []
     for key in err.required_keys:
-        parts.append(f"{key!r} in _body")
+        parts.append(f"{key!r} in _b")
     for path, value in err.conditions.items():
-        lhs = _js_resolve_path_expr("_body", path)
+        lhs = _js_resolve_path_expr("_b", path)
         if isinstance(value, bool):
             parts.append(f"{lhs} === {str(value).lower()}")
         elif value is None:
@@ -290,7 +266,9 @@ def _js_condition_check_expr(err: ErrorResponse) -> str:
             parts.append(f"{lhs} === {value}")
         else:
             parts.append(f"{lhs} === {value!r}")
-    return " && ".join(parts)
+    if not parts:
+        return None
+    return f"(_b) => {' && '.join(parts)}"
 
 
 def _js_err_value_type(err: ErrorResponse, struct: StructBase) -> str:
@@ -342,80 +320,87 @@ REST_TYPEDEFS: list[str] = [
     " * @property {string} cause",
     " */",
     "",
-    "async function sscParseResponse(_resp) {",
+    "/**",
+    " * @typedef {Object} ErrMatcher",
+    " * @property {number} status",
+    " * @property {function(Object): boolean|null} check",
+    " * @property {function(number, Object, *): Err} factory",
+    " */",
+    "",
+    "function sscDispatchErr(_matchers, _status, _headers, _body) {",
+    "    for (const _m of _matchers) {",
+    "        if (_m.status !== _status) continue;",
+    "        if (_m.check !== null) {",
+    "            if (!(_body instanceof Object) || !_m.check(_body)) continue;",
+    "        }",
+    "        return _m.factory(_status, _headers, _body);",
+    "    }",
+    "    if (_status >= 200 && _status < 300) return null;",
+    "    return { isOk: false, status: _status, headers: _headers, value: _body };",
+    "}",
+    "",
+    "async function sscRestCall(client, _matchers, method, url, _valueFn, _opts) {",
+    "    let _resp;",
+    "    try {",
+    "        _opts.method = method;",
+    "        _resp = await client(url, _opts);",
+    "    } catch (e) {",
+    "        return { isOk: false, status: 0, headers: {}, value: null, cause: String(e) };",
+    "    }",
     "    const _status = _resp.status;",
     "    const _headers = Object.fromEntries([..._resp.headers.entries()]);",
     "    let _body = null;",
     "    try { _body = await _resp.json(); } catch (e) {}",
-    "    return [_status, _headers, _body];",
+    "    const _err = sscDispatchErr(_matchers, _status, _headers, _body);",
+    "    if (_err !== null) return _err;",
+    "    const _value = _valueFn === null ? _body : _valueFn(_body);",
+    "    return { isOk: true, status: _status, headers: _headers, value: _value };",
     "}",
     "",
-    "function sscParseResponseAxios(_resp) {",
+    "async function sscRestCallAxios(client, _matchers, method, url, _valueFn, _opts) {",
+    "    let _resp;",
+    "    try {",
+    "        _opts.method = method;",
+    "        _opts.url = url;",
+    "        _opts.validateStatus = () => true;",
+    "        _resp = await client.request(_opts);",
+    "    } catch (e) {",
+    "        return { isOk: false, status: 0, headers: {}, value: null, cause: String(e) };",
+    "    }",
     "    const _status = _resp.status;",
     "    const _headers = {};",
     "    for (const [k, v] of Object.entries(_resp.headers || {})) "
     "{ _headers[String(k).toLowerCase()] = String(v); }",
-    "    return [_status, _headers, _resp.data];",
+    "    const _body = _resp.data;",
+    "    const _err = sscDispatchErr(_matchers, _status, _headers, _body);",
+    "    if (_err !== null) return _err;",
+    "    const _value = _valueFn === null ? _body : _valueFn(_body);",
+    "    return { isOk: true, status: _status, headers: _headers, value: _value };",
     "}",
     "",
 ]
 
 
-def _emit_dispatch_err_js(node: StructRest, ctx: ConverterContext) -> list[str]:
-    i1 = ctx.indent
-    i2 = i1 + ctx.indent_char
-    i3 = i2 + ctx.indent_char
-
-    errors = node.errors
-    status_errors = [
-        e for e in errors if not e.conditions and not e.required_keys
-    ]
-    field_errors = [e for e in errors if e.conditions or e.required_keys]
-
-    lines: list[str] = [
-        f"{i1}static sscDispatchErr(_status, _headers, _body) {{",
-        f"{i2}if (_status >= 200 && _status < 300) {{",
-    ]
-    for err in field_errors:
-        if 200 <= err.status < 300:
-            cond = _js_condition_check_expr(err)
-            lines.append(
-                f"{i3}if (_status === {err.status} && _body "
-                f"&& _body instanceof Object && {cond}) {{"
-            )
-            lines.append(
-                f"{i3}{ctx.indent_char}return {{ isOk: false, "
-                f"status: _status, headers: _headers, value: _body }};"
-            )
-            lines.append(f"{i3}}}")
-    lines.append(f"{i3}return null;")
-    lines.append(f"{i2}}}")
-
-    for err in status_errors:
-        lines.append(f"{i2}if (_status === {err.status}) {{")
-        lines.append(
-            f"{i3}return {{ isOk: false, status: _status, "
-            f"headers: _headers, value: _body }};"
+def _js_emit_matchers(node: StructRest) -> list[str]:
+    name = to_snake_case(node.name)
+    var = f"_{name}Matchers"
+    seen: set[str] = set()
+    entries: list[str] = []
+    for err in node.errors:
+        cls_name = err_subclass_name(node.name, err)
+        if cls_name in seen:
+            continue
+        seen.add(cls_name)
+        check = _js_render_condition_lambda(err)
+        check_arg = check if check else "null"
+        entries.append(
+            f"    {{ status: {err.status}, check: {check_arg}, "
+            f"factory: (_s, _h, _b) => ({{ isOk: false, status: _s, "
+            f"headers: _h, value: _b }}) }},"
         )
-        lines.append(f"{i2}}}")
-    for err in field_errors:
-        if not (200 <= err.status < 300):
-            cond = _js_condition_check_expr(err)
-            lines.append(
-                f"{i2}if (_status === {err.status} && _body "
-                f"&& _body instanceof Object && {cond}) {{"
-            )
-            lines.append(
-                f"{i3}return {{ isOk: false, status: _status, "
-                f"headers: _headers, value: _body }};"
-            )
-            lines.append(f"{i2}}}")
-
-    lines.append(
-        f"{i2}return {{ isOk: false, status: _status, "
-        f"headers: _headers, value: _body }};"
-    )
-    lines.append(f"{i1}}}")
+    lines = [f"const {var} = ["]
+    lines.extend(entries)
+    lines.append("];")
     return lines
 
 
@@ -473,27 +458,13 @@ def _js_render_obj(d: dict[str, str]) -> str:
     return "{" + inner + "}"
 
 
-def _js_dict_entry_placeholder(v: str) -> PlaceholderSpec | None:
-    return PlaceholderSpec.parse(str(v))
-
-
-def _js_dict_needs_builder(d: dict[str, str]) -> bool:
-    for v in d.values():
-        ph = _js_dict_entry_placeholder(str(v))
-        if ph is None:
-            continue
-        if ph.is_optional or ph.is_array:
-            return True
-    return False
-
-
 def _js_emit_obj_builder(
     varname: str, d: dict[str, str], indent: str
 ) -> list[str]:
     lines = [f"{indent}const {varname} = {{}};"]
     for key, value in d.items():
         value = str(value)
-        ph = _js_dict_entry_placeholder(value)
+        ph = dict_entry_placeholder(value)
         expr = _js_render_value(value)
         if ph is not None and ph.is_optional:
             lines.append(
@@ -511,7 +482,7 @@ def _js_emit_params_builder(
     lines = [f"{indent}const {varname} = new URLSearchParams();"]
     for key, value in d.items():
         value = str(value)
-        ph = _js_dict_entry_placeholder(value)
+        ph = dict_entry_placeholder(value)
         if ph is None:
             lines.append(
                 f"{indent}{varname}.set({key!r}, {_js_render_value(value)});"
@@ -591,7 +562,7 @@ def _js_build_request_args(node: MethodBase, ctx: ConverterContext):
     def _resolve(d, varname, builder_fn):
         if not d:
             return None
-        if _js_dict_needs_builder(d):
+        if dict_needs_builder(d):
             pre_lines.extend(builder_fn(varname, d, i3))
             return varname
         return _js_render_obj(d)
@@ -652,39 +623,16 @@ class JsPure(Visitor):
         VT.NESTED: "any",
         VT.AUTO: "any",
     }
-
-    START_PARSE_RETURN_TYPE = {
-        ST.ITEM: "{}Type",
-        ST.LIST: "Array<{}Type>",
-        ST.FLAT: "Array<string>",
-        ST.DICT: "{}Type",
-        ST.TABLE: "{}Type",
-    }
+    DEFAULT_TYPE = "any"
+    ARRAY_TYPE_FMT = "{}[]"
+    OPTIONAL_TYPE_FMT = "{}|null"
+    OPTIONAL_ON_OMITEMPTY = True
+    DOCUMENT_TYPE = "Document|Element"
+    DOCUMENT_ARRAY_TYPE = "Array<Element>"
+    AND_OP = "&&"
 
     def __init__(self, var_name: str = "v", indent: str = " " * 2) -> None:
         super().__init__(var_name=var_name, indent=indent)
-
-    def _resolve_start_parse_t_ret(self, struct: StructBase, name: str) -> str:
-        return self.START_PARSE_RETURN_TYPE[struct.type].format(name)
-
-    def _resolve_type(self, type_info: TypeInfo | None) -> str:
-        if type_info is None:
-            return "any"
-
-        if type_info.base == VT.NESTED and type_info.ref:
-            t = f"{to_pascal_case(type_info.ref)}Type"
-        elif type_info.base == VT.JSON and type_info.ref:
-            t = f"{to_pascal_case(type_info.ref)}Json"
-        elif type_info.base == VT.DOCUMENT:
-            t = "Array<Element>" if type_info.is_array else "Document|Element"
-        else:
-            t = self.TYPES.get(type_info.base, "any")
-        if type_info.is_array and type_info.base != VT.DOCUMENT:
-            t = f"{t}[]"
-        # dont know how to better handle missing fields
-        if type_info.is_optional or type_info.omitempty:
-            t = f"{t}|null"
-        return t
 
     # === module ===
 
@@ -797,7 +745,7 @@ class JsPure(Visitor):
     ) -> VisitStream:
         seen: set[str] = set()
         for err in node.errors:
-            cls_name = _js_err_subclass_name(node.name, err)
+            cls_name = err_subclass_name(node.name, err)
             if cls_name in seen:
                 continue
             seen.add(cls_name)
@@ -812,8 +760,11 @@ class JsPure(Visitor):
                 " */",
                 "",
             ]
+        matchers = _js_emit_matchers(node)
+        if matchers:
+            yield matchers
+            yield ""
         yield _js_struct_header(node)
-        yield _emit_dispatch_err_js(node, ctx.deeper())
         yield TRAVERSE
         yield "}"
 
@@ -1538,7 +1489,7 @@ class JsPure(Visitor):
     ) -> VisitStream:
         q = repr(node.query)
         target = _pred_target(node, ctx)
-        yield _and(f"{target}.querySelector({q}) !== null", ctx)
+        yield self._pred_line(ctx, f"{target}.querySelector({q}) !== null")
 
     def visit_predicate_xpath(
         self, node: PredXpath, ctx: ConverterContext
@@ -1555,7 +1506,7 @@ class JsPure(Visitor):
             if len(keys) == 1
             else f"{py_sequence_to_js_array(keys)}.some(k => {target}.hasAttribute(k))"
         )
-        yield _and(cond, ctx)
+        yield self._pred_line(ctx, cond)
 
     def visit_predicate_attr_eq(
         self, node: PredAttrEq, ctx: ConverterContext
@@ -1567,7 +1518,7 @@ class JsPure(Visitor):
             if len(values) == 1
             else f"{py_sequence_to_js_array(values)}.some(v => {target}.getAttribute({name!r}) === v)"
         )
-        yield _and(cond, ctx)
+        yield self._pred_line(ctx, cond)
 
     def visit_predicate_attr_ne(
         self, node: PredAttrNe, ctx: ConverterContext
@@ -1579,7 +1530,7 @@ class JsPure(Visitor):
             if len(values) == 1
             else f"{py_sequence_to_js_array(values)}.every(v => {target}.getAttribute({name!r}) !== v)"
         )
-        yield _and(cond, ctx)
+        yield self._pred_line(ctx, cond)
 
     def visit_predicate_attr_starts(
         self, node: PredAttrStarts, ctx: ConverterContext
@@ -1591,7 +1542,7 @@ class JsPure(Visitor):
             if len(values) == 1
             else f"{py_sequence_to_js_array(values)}.some(v => ({target}.getAttribute({name!r}) ?? '').startsWith(v))"
         )
-        yield _and(cond, ctx)
+        yield self._pred_line(ctx, cond)
 
     def visit_predicate_attr_ends(
         self, node: PredAttrEnds, ctx: ConverterContext
@@ -1603,7 +1554,7 @@ class JsPure(Visitor):
             if len(values) == 1
             else f"{py_sequence_to_js_array(values)}.some(v => ({target}.getAttribute({name!r}) ?? '').endsWith(v))"
         )
-        yield _and(cond, ctx)
+        yield self._pred_line(ctx, cond)
 
     def visit_predicate_attr_contains(
         self, node: PredAttrContains, ctx: ConverterContext
@@ -1615,15 +1566,15 @@ class JsPure(Visitor):
             if len(values) == 1
             else f"{py_sequence_to_js_array(values)}.some(v => ({target}.getAttribute({name!r}) ?? '').includes(v))"
         )
-        yield _and(cond, ctx)
+        yield self._pred_line(ctx, cond)
 
     def visit_predicate_attr_re(
         self, node: PredAttrRe, ctx: ConverterContext
     ) -> VisitStream:
         rx = _js_re_node(node)
         target = _pred_attr_target(node, ctx)
-        yield _and(
-            f"{rx}.test({target}.getAttribute({node.name!r}) ?? '')", ctx
+        yield self._pred_line(
+            ctx, f"{rx}.test({target}.getAttribute({node.name!r}) ?? '')"
         )
 
     def visit_predicate_text_contains(
@@ -1636,7 +1587,7 @@ class JsPure(Visitor):
             if len(values) == 1
             else f"{py_sequence_to_js_array(values)}.some(v => {target}.includes(v))"
         )
-        yield _and(cond, ctx)
+        yield self._pred_line(ctx, cond)
 
     def visit_predicate_text_starts(
         self, node: PredTextStarts, ctx: ConverterContext
@@ -1648,7 +1599,7 @@ class JsPure(Visitor):
             if len(values) == 1
             else f"{py_sequence_to_js_array(values)}.some(v => {target}.startsWith(v))"
         )
-        yield _and(cond, ctx)
+        yield self._pred_line(ctx, cond)
 
     def visit_predicate_text_ends(
         self, node: PredTextEnds, ctx: ConverterContext
@@ -1660,14 +1611,14 @@ class JsPure(Visitor):
             if len(values) == 1
             else f"{py_sequence_to_js_array(values)}.some(v => {target}.endsWith(v))"
         )
-        yield _and(cond, ctx)
+        yield self._pred_line(ctx, cond)
 
     def visit_predicate_text_re(
         self, node: PredTextRe, ctx: ConverterContext
     ) -> VisitStream:
         rx = _js_re_node(node)
         target = _pred_text_target(node, ctx)
-        yield _and(f"{rx}.test({target})", ctx)
+        yield self._pred_line(ctx, f"{rx}.test({target})")
 
     def visit_predicate_contains(
         self, node: PredContains, ctx: ConverterContext
@@ -1679,7 +1630,7 @@ class JsPure(Visitor):
             if len(values) == 1
             else f"{py_sequence_to_js_array(values)}.some(v => {target}.includes(v))"
         )
-        yield _and(cond, ctx)
+        yield self._pred_line(ctx, cond)
 
     def visit_predicate_eq(
         self, node: PredEq, ctx: ConverterContext
@@ -1694,7 +1645,7 @@ class JsPure(Visitor):
             cond = (
                 f"{py_sequence_to_js_array(values)}.some(v => {target} === v)"
             )
-        yield _and(cond, ctx)
+        yield self._pred_line(ctx, cond)
 
     def visit_predicate_ne(
         self, node: PredNe, ctx: ConverterContext
@@ -1709,7 +1660,7 @@ class JsPure(Visitor):
             cond = (
                 f"{py_sequence_to_js_array(values)}.every(v => {target} !== v)"
             )
-        yield _and(cond, ctx)
+        yield self._pred_line(ctx, cond)
 
     def visit_predicate_starts(
         self, node: PredStarts, ctx: ConverterContext
@@ -1721,7 +1672,7 @@ class JsPure(Visitor):
             if len(values) == 1
             else f"{py_sequence_to_js_array(values)}.some(v => {target}.startsWith(v))"
         )
-        yield _and(cond, ctx)
+        yield self._pred_line(ctx, cond)
 
     def visit_predicate_ends(
         self, node: PredEnds, ctx: ConverterContext
@@ -1733,51 +1684,51 @@ class JsPure(Visitor):
             if len(values) == 1
             else f"{py_sequence_to_js_array(values)}.some(v => {target}.endsWith(v))"
         )
-        yield _and(cond, ctx)
+        yield self._pred_line(ctx, cond)
 
     def visit_predicate_count_eq(
         self, node: PredCountEq, ctx: ConverterContext
     ) -> VisitStream:
         target = _pred_target(node, ctx)
-        yield _and(f"{target}.length === {node.value}", ctx)
+        yield self._pred_line(ctx, f"{target}.length === {node.value}")
 
     def visit_predicate_count_gt(
         self, node: PredCountGt, ctx: ConverterContext
     ) -> VisitStream:
         target = _pred_target(node, ctx)
-        yield _and(f"{target}.length > {node.value}", ctx)
+        yield self._pred_line(ctx, f"{target}.length > {node.value}")
 
     def visit_predicate_count_lt(
         self, node: PredCountLt, ctx: ConverterContext
     ) -> VisitStream:
         target = _pred_target(node, ctx)
-        yield _and(f"{target}.length < {node.value}", ctx)
+        yield self._pred_line(ctx, f"{target}.length < {node.value}")
 
     def visit_predicate_count_ne(
         self, node: PredCountNe, ctx: ConverterContext
     ) -> VisitStream:
         target = _pred_target(node, ctx)
-        yield _and(f"{target}.length !== {node.value}", ctx)
+        yield self._pred_line(ctx, f"{target}.length !== {node.value}")
 
     def visit_predicate_count_ge(
         self, node: PredCountGe, ctx: ConverterContext
     ) -> VisitStream:
         target = _pred_target(node, ctx)
-        yield _and(f"{target}.length >= {node.value}", ctx)
+        yield self._pred_line(ctx, f"{target}.length >= {node.value}")
 
     def visit_predicate_count_le(
         self, node: PredCountLe, ctx: ConverterContext
     ) -> VisitStream:
         target = _pred_target(node, ctx)
-        yield _and(f"{target}.length <= {node.value}", ctx)
+        yield self._pred_line(ctx, f"{target}.length <= {node.value}")
 
     def visit_pred_count_range(
         self, node: PredCountRange, ctx: ConverterContext
     ) -> VisitStream:
         target = _pred_target(node, ctx)
-        yield _and(
-            f"{node.start} < {target}.length && {target}.length < {node.end}",
+        yield self._pred_line(
             ctx,
+            f"{node.start} < {target}.length && {target}.length < {node.end}",
         )
 
     def visit_predicate_re(
@@ -1785,21 +1736,21 @@ class JsPure(Visitor):
     ) -> VisitStream:
         rx = _js_re_node(node)
         target = _pred_target(node, ctx)
-        yield _and(f"{rx}.test({target})", ctx)
+        yield self._pred_line(ctx, f"{rx}.test({target})")
 
     def visit_predicate_re_all(
         self, node: PredReAll, ctx: ConverterContext
     ) -> VisitStream:
         rx = _js_re_node(node)
         target = _pred_target(node, ctx)
-        yield _and(f"{target}.every(j => {rx}.test(j))", ctx)
+        yield self._pred_line(ctx, f"{target}.every(j => {rx}.test(j))")
 
     def visit_predicate_re_any(
         self, node: PredReAny, ctx: ConverterContext
     ) -> VisitStream:
         rx = _js_re_node(node)
         target = _pred_target(node, ctx)
-        yield _and(f"{target}.some(j => {rx}.test(j))", ctx)
+        yield self._pred_line(ctx, f"{target}.some(j => {rx}.test(j))")
 
     # === REST / fetch ===
 
@@ -1818,7 +1769,7 @@ class JsPure(Visitor):
             i1,
             i2,
             i3,
-            i4,
+            _i4,
         ) = _js_build_request_args(node, ctx)
 
         raw_name = node.name or "fetch"
@@ -1829,18 +1780,56 @@ class JsPure(Visitor):
         parent = node.parent
         errors = parent.errors if isinstance(parent, StructBase) else []
         struct_name = parent.name if isinstance(parent, StructBase) else ""
+        matchers_var = f"_{to_snake_case(struct_name)}Matchers"
 
         ok_payload = _js_ok_payload_type(node)
         err_variants: list[str] = []
         seen: set[str] = set()
         for err in errors:
-            cls_name = _js_err_subclass_name(struct_name, err)
+            cls_name = err_subclass_name(struct_name, err)
             if cls_name not in seen:
                 seen.add(cls_name)
                 err_variants.append(cls_name)
         return_union = " | ".join(
             [f"Ok<{ok_payload}>", *err_variants, "UnknownErr", "TransportErr"]
         )
+
+        fn_name = (
+            "sscRestCallAxios" if http_client == "axios" else "sscRestCall"
+        )
+        value_fn = "(_b) => null" if not node.response_schema else "null"
+
+        # build URL + opts object for the chosen HTTP client
+        if http_client == "axios":
+            url_expr = _js_render_value(spec.url)
+            opts_parts: list[str] = []
+            if params_expr:
+                opts_parts.append(f"params: {params_expr}")
+            if headers_expr:
+                opts_parts.append(f"headers: {headers_expr}")
+            if body_expr:
+                opts_parts.append(f"data: {body_expr}")
+        else:
+            if params_expr:
+                url_inner = PlaceholderSpec.sub(
+                    spec.url.replace("`", "\\`"),
+                    lambda ph: "${" + ph.name + "}",
+                )
+                if params_expr == "_params":
+                    url_expr = f"`{url_inner}?${{{params_expr}.toString()}}`"
+                else:
+                    url_expr = (
+                        f"`{url_inner}?${{new URLSearchParams({params_expr})}}`"
+                    )
+            else:
+                url_expr = _js_render_value(spec.url)
+            opts_parts = []
+            if headers_expr:
+                opts_parts.append(f"headers: {headers_expr}")
+            if body_expr:
+                opts_parts.append(f"body: {body_expr}")
+
+        opts_obj = "{" + ", ".join(opts_parts) + "}" if opts_parts else "{}"
 
         lines: list[str] = []
         if node.doc:
@@ -1860,70 +1849,10 @@ class JsPure(Visitor):
         lines.append(f"{i1} * @returns {{Promise<{return_union}>}}")
         lines.append(f"{i1} */")
         lines.append(f"{i1}static async {method_name}(client{ph_param}) {{")
-        lines.append(f"{i2}let _resp;")
-        lines.append(f"{i2}try {{")
         lines.extend(pre_lines)
-
-        if http_client == "axios":
-            req_props: list[str] = [
-                f"{i4}method: {spec.method!r},",
-                f"{i4}url: {_js_render_value(spec.url)},",
-                f"{i4}validateStatus: () => true,",
-            ]
-            if params_expr:
-                req_props.append(f"{i4}params: {params_expr},")
-            if headers_expr:
-                req_props.append(f"{i4}headers: {headers_expr},")
-            if body_expr:
-                req_props.append(f"{i4}data: {body_expr},")
-            lines.append(f"{i3}_resp = await client.request({{")
-            lines.extend(req_props)
-            lines.append(f"{i3}}});")
-        else:
-            if params_expr:
-                url_inner = PlaceholderSpec.sub(
-                    spec.url.replace("`", "\\`"),
-                    lambda ph: "${" + ph.name + "}",
-                )
-                if params_expr == "_params":
-                    url_expr = f"`{url_inner}?${{{params_expr}.toString()}}`"
-                else:
-                    url_expr = (
-                        f"`{url_inner}?${{new URLSearchParams({params_expr})}}`"
-                    )
-            else:
-                url_expr = _js_render_value(spec.url)
-            options: list[str] = [f"{i4}method: {spec.method!r},"]
-            if headers_expr:
-                options.append(f"{i4}headers: {headers_expr},")
-            if body_expr:
-                options.append(f"{i4}body: {body_expr},")
-            lines.append(f"{i3}_resp = await client({url_expr}, {{")
-            lines.extend(options)
-            lines.append(f"{i3}}});")
-
-        lines.append(f"{i2}}} catch (e) {{")
         lines.append(
-            f"{i3}return {{ isOk: false, status: 0, headers: {{}}, "
-            f"value: null, cause: String(e) }};"
-        )
-        lines.append(f"{i2}}}")
-        parser_fn = (
-            "sscParseResponseAxios"
-            if http_client == "axios"
-            else "sscParseResponse"
-        )
-        parse_prefix = "" if http_client == "axios" else "await "
-        lines.append(
-            f"{i2}const [_status, _headers, _body] = {parse_prefix}{parser_fn}(_resp);"
-        )
-        struct_pascal = to_pascal_case(struct_name) if struct_name else ""
-        lines.append(
-            f"{i2}const _err = {struct_pascal}.sscDispatchErr(_status, _headers, _body);"
-        )
-        lines.append(f"{i2}if (_err !== null) return _err;")
-        lines.append(
-            f"{i2}return {{ isOk: true, status: _status, headers: _headers, value: _body }};"
+            f"{i2}return {fn_name}(client, {matchers_var}, "
+            f"{spec.method!r}, {url_expr}, {value_fn}, {opts_obj});"
         )
         lines.append(f"{i1}}}")
         yield lines
