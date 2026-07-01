@@ -18,7 +18,7 @@ def rest_imports(module: a.Module) -> list[str]:
     if _module_has_rest(module):
         return [
             "from dataclasses import dataclass, field",
-            "from typing import Generic, Literal, Mapping, TypeVar",
+            "from typing import Callable, Generic, Literal, Mapping, TypeVar",
         ]
     return []
 
@@ -54,15 +54,63 @@ def rest_utilities(module: a.Module) -> list[str]:
         "    cause: str = ''",
         "    value: None = None",
         "    headers: Mapping[str, str] = field(default_factory=dict)",
+        "\n",
+        "@dataclass(frozen=True)",
+        "class ErrMatcher:",
+        "    status: int",
+        "    check: Callable[[dict], bool] | None = None",
+        "    factory: Callable[..., Err] = None  # type: ignore[assignment]",
+        "\n",
+        "    def match(self, _s: int, _h, _b) -> Err | None:",
+        "        if _s != self.status:",
+        "            return None",
+        "        if self.check is not None:",
+        "            if not isinstance(_b, dict) or not self.check(_b):",
+        "                return None",
+        "        return self.factory(headers=_h, value=_b)",
         "\n\n",
-        "def ssc_parse_response(_resp):",
-        "    _status = _resp.status_code",
-        "    _headers = {k.lower(): v for k, v in _resp.headers.items()}",
+        "def ssc_dispatch_err(_matchers, _status: int, _headers, _body):",
+        "    for _m in _matchers:",
+        "        _err = _m.match(_status, _headers, _body)",
+        "        if _err is not None:",
+        "            return _err",
+        "    if 200 <= _status < 300:",
+        "        return None",
+        "    return UnknownErr(status=_status, headers=_headers, value=_body)",
+        "\n\n",
+        "def ssc_rest_call(client, _matchers, method, url, _value_fn=None, **kw):",
         "    try:",
-        "        _body = _resp.json()",
-        "    except Exception:",
-        "        _body = None",
-        "    return _status, _headers, _body",
+        "        _resp = client.request(method, url, **kw)",
+        "        _status = _resp.status_code",
+        "        _headers = {k.lower(): v for k, v in _resp.headers.items()}",
+        "        try:",
+        "            _body = _resp.json()",
+        "        except Exception:",
+        "            _body = None",
+        "    except httpx.HTTPError as _exc:",
+        "        return TransportErr(cause=repr(_exc))",
+        "    _err = ssc_dispatch_err(_matchers, _status, _headers, _body)",
+        "    if _err is not None:",
+        "        return _err",
+        "    _value = _body if _value_fn is None else _value_fn(_body)",
+        "    return Ok(status=_status, headers=_headers, value=_value)",
+        "\n\n",
+        "async def ssc_rest_call_async(client, _matchers, method, url, _value_fn=None, **kw):",
+        "    try:",
+        "        _resp = await client.request(method, url, **kw)",
+        "        _status = _resp.status_code",
+        "        _headers = {k.lower(): v for k, v in _resp.headers.items()}",
+        "        try:",
+        "            _body = _resp.json()",
+        "        except Exception:",
+        "            _body = None",
+        "    except httpx.HTTPError as _exc:",
+        "        return TransportErr(cause=repr(_exc))",
+        "    _err = ssc_dispatch_err(_matchers, _status, _headers, _body)",
+        "    if _err is not None:",
+        "        return _err",
+        "    _value = _body if _value_fn is None else _value_fn(_body)",
+        "    return Ok(status=_status, headers=_headers, value=_value)",
         "\n\n",
     ]
 
@@ -71,7 +119,16 @@ def runtime_export_names(module: a.Module) -> list[str]:
     names = list(_BASE_EXPORT_NAMES)
     if _module_has_rest(module):
         names.extend(
-            ["Ok", "Err", "UnknownErr", "TransportErr", "ssc_parse_response"]
+            [
+                "Ok",
+                "Err",
+                "UnknownErr",
+                "TransportErr",
+                "ErrMatcher",
+                "ssc_dispatch_err",
+                "ssc_rest_call",
+                "ssc_rest_call_async",
+            ]
         )
     return names
 
@@ -89,7 +146,7 @@ def runtime_module_content(module: a.Module) -> str:
         lines.extend(
             [
                 "from dataclasses import dataclass, field",
-                "from typing import Any, Generic, Literal, Mapping, TypeVar",
+                "from typing import Any, Callable, Generic, Literal, Mapping, TypeVar",
             ]
         )
     lines.append("")

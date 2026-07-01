@@ -149,11 +149,10 @@ class TestRestPyConverter:
         src = _rest_src(errors="    @error 404 Err\n    @error 500 Err\n")
         module = _parse(src)
         code = CONVERTER.convert(module, http_client="httpx")
-        assert "_status == 404" in code
-        assert "_status == 500" in code
-        # routed into typed Err subclasses via ssc_dispatch_err (no raise)
-        assert "return APIErr404(headers=_headers, value=_body)" in code
-        assert "return APIErr500(headers=_headers, value=_body)" in code
+        # matchers list routes status codes to Err subclasses
+        assert "ErrMatcher(404, None, APIErr404)," in code
+        assert "ErrMatcher(500, None, APIErr500)," in code
+        # no raise in method bodies (errors are returned, not raised)
         assert "raise" not in _method_bodies(code)
 
     def test_py_bs4_method_return_type_union(self):
@@ -180,6 +179,7 @@ class TestRestPyConverter:
         src = _rest_src()
         module = _parse(src)
         code = CONVERTER.convert(module, http_client="httpx")
+        # httpx-specific exception handling inside ssc_rest_call
         assert "except httpx.HTTPError as _exc:" in code
         assert "return TransportErr(cause=repr(_exc))" in code
 
@@ -191,13 +191,11 @@ class TestRestPyConverter:
         src = _rest_src()
         module = _parse(src)
         code = CONVERTER.convert(module, http_client="httpx")
-        # Headers extraction centralized in ssc_parse_response
+        # Headers extraction centralized in ssc_rest_call
         assert (
             "_headers = {k.lower(): v for k, v in _resp.headers.items()}"
             in code
         )
-        # Each method passes _headers into Ok(...)
-        assert "Ok(status=_status, headers=_headers, value=_body)" in code
 
     def test_py_bs4_unknown_status_returns_unknown_err(self):
         from ssc_codegen.converters.py_bs4 import (
@@ -207,13 +205,13 @@ class TestRestPyConverter:
         src = _rest_src(errors="    @error 404 Err\n")
         module = _parse(src)
         code = CONVERTER.convert(module, http_client="httpx")
-        # UnknownErr now emitted as fallback inside ssc_dispatch_err
+        # UnknownErr fallback inside ssc_dispatch_err
         assert (
             "return UnknownErr("
             "status=_status, headers=_headers, value=_body)" in code
         )
 
-    def test_py_bs4_emitsssc_parse_response_helper(self):
+    def test_py_bs4_emits_ssc_rest_call_helpers(self):
         from ssc_codegen.converters.py_bs4 import (
             PY_BASE_CONVERTER as CONVERTER,
         )
@@ -221,11 +219,12 @@ class TestRestPyConverter:
         src = _rest_src()
         module = _parse(src)
         code = CONVERTER.convert(module, http_client="httpx")
-        assert "def ssc_parse_response(_resp):" in code
-        # Used from the method body
-        assert "_status, _headers, _body = ssc_parse_response(_resp)" in code
+        assert "def ssc_rest_call(" in code
+        assert "def ssc_rest_call_async(" in code
+        # Method body calls ssc_rest_call
+        assert "return ssc_rest_call(" in code
 
-    def test_py_bs4_emitsssc_dispatch_err_per_struct(self):
+    def test_py_bs4_emits_ssc_dispatch_err_module_level(self):
         from ssc_codegen.converters.py_bs4 import (
             PY_BASE_CONVERTER as CONVERTER,
         )
@@ -233,15 +232,11 @@ class TestRestPyConverter:
         src = _rest_src(errors="    @error 404 Err\n    @error 500 Err\n")
         module = _parse(src)
         code = CONVERTER.convert(module, http_client="httpx")
-        assert "@staticmethod" in code
-        assert (
-            "def ssc_dispatch_err(_status: int, "
-            "_headers: Mapping[str, str], _body: Any)" in code
-        )
-        # Method body delegates routing to ssc_dispatch_err
-        assert "cls.ssc_dispatch_err(_status, _headers, _body)" in code
-        # And no longer inlines `if _status == NNN` checks in @classmethods.
-        # (The ssc_dispatch_err @staticmethod itself still contains such checks.)
+        # ssc_dispatch_err is now a module-level function
+        assert "def ssc_dispatch_err(_matchers, _status" in code
+        # Method body delegates to ssc_rest_call (not cls.ssc_dispatch_err)
+        assert "cls.ssc_dispatch_err" not in code
+        # No inline `if _status == NNN` checks in @classmethods
         import re
 
         for match in re.finditer(r"@classmethod\s*\n(?:    [^\n]*\n)+", code):
@@ -291,8 +286,9 @@ class TestRestPyConverter:
         src = _rest_src(errors="    @error 404 Err error detail\n")
         module = _parse(src)
         code = CONVERTER.convert(module, http_client="httpx")
-        assert "'error' in _body" in code
-        assert "'detail' in _body" in code
+        # conditions are now lambdas in matchers list (body var is _b)
+        assert "'error' in _b" in code
+        assert "'detail' in _b" in code
         assert "class APIErr404ErrorDetail" in code
 
     def test_py_mixed_conditions_dispatch(self):
@@ -303,8 +299,8 @@ class TestRestPyConverter:
         src = _rest_src(errors='    @error 404 Err error detail="msg"\n')
         module = _parse(src)
         code = CONVERTER.convert(module, http_client="httpx")
-        assert "'error' in _body" in code
-        assert "_body.get('detail') == 'msg'" in code
+        assert "'error' in _b" in code
+        assert "_b.get('detail') == 'msg'" in code
         assert "class APIErr404ErrorDetail" in code
 
     def test_py_required_keys_routed_as_field_error(self):
@@ -315,8 +311,8 @@ class TestRestPyConverter:
         src = _rest_src(errors="    @error 404 Err error\n")
         module = _parse(src)
         code = CONVERTER.convert(module, http_client="httpx")
-        # required_keys errors go through isinstance(_body, dict) branch
-        assert "isinstance(_body, dict)" in code
+        # isinstance check now inside ErrMatcher.match (body var is _b)
+        assert "isinstance(_b, dict)" in code
 
 
 class TestRestJsConverter:
@@ -366,10 +362,10 @@ class TestRestJsConverter:
         src = _rest_src()
         module = _parse(src)
         code = JS_CONVERTER.convert(module, http_client="fetch")
-        # Header extraction centralized in sscParseResponse helper
+        # Header extraction centralized in sscRestCall helper
         assert "Object.fromEntries([..._resp.headers.entries()])" in code
-        # Method body passes _headers into Ok(...)
-        assert "headers: _headers, value: _body" in code
+        # Ok return carries _headers + _value
+        assert "headers: _headers, value: _value" in code
 
     def test_js_axios_variant(self):
         from ssc_codegen.converters.js_pure import JS_CONVERTER
@@ -378,27 +374,34 @@ class TestRestJsConverter:
         module = _parse(src)
         code = JS_CONVERTER.convert(module, http_client="axios")
         assert "client.request" in code
-        # Axios uses dedicated parser helper (headers are an object, not iterable)
-        assert "sscParseResponseAxios(_resp)" in code
+        # Axios uses dedicated sscRestCallAxios helper
+        assert "sscRestCallAxios" in code
 
-    def test_js_emitsssc_parse_response_helpers(self):
+    def test_js_emits_ssc_rest_call_helpers(self):
         from ssc_codegen.converters.js_pure import JS_CONVERTER
 
         src = _rest_src()
         module = _parse(src)
         code = JS_CONVERTER.convert(module, http_client="fetch")
-        assert "async function sscParseResponse(_resp)" in code
-        assert "function sscParseResponseAxios(_resp)" in code
-        assert "await sscParseResponse(_resp)" in code
+        assert "async function sscRestCall(" in code
+        assert "async function sscRestCallAxios(" in code
+        assert "function sscDispatchErr(" in code
+        # Method body delegates to sscRestCall
+        assert "return sscRestCall(" in code
 
-    def test_js_emitsssc_dispatch_err_static(self):
+    def test_js_emits_matchers_and_dispatch(self):
         from ssc_codegen.converters.js_pure import JS_CONVERTER
 
         src = _rest_src(errors="    @error 404 Err\n    @error 500 Err\n")
         module = _parse(src)
         code = JS_CONVERTER.convert(module, http_client="fetch")
-        assert "static sscDispatchErr(_status, _headers, _body)" in code
-        assert "API.sscDispatchErr(_status, _headers, _body)" in code
+        # Matchers list emitted at module level
+        assert "const _apiMatchers = [" in code
+        assert "status: 404" in code
+        assert "status: 500" in code
+        # sscDispatchErr is module-level (not a static method)
+        assert "function sscDispatchErr(_matchers" in code
+        assert "static sscDispatchErr" not in code
 
     def test_js_required_keys_dispatch(self):
         from ssc_codegen.converters.js_pure import JS_CONVERTER
@@ -406,8 +409,9 @@ class TestRestJsConverter:
         src = _rest_src(errors="    @error 404 Err error detail\n")
         module = _parse(src)
         code = JS_CONVERTER.convert(module, http_client="fetch")
-        assert "'error' in _body" in code
-        assert "'detail' in _body" in code
+        # Condition lambda uses _b (not _body)
+        assert "'error' in _b" in code
+        assert "'detail' in _b" in code
         assert "APIErr404ErrorDetail" in code
 
 
@@ -688,7 +692,7 @@ class TestRestOnlyImports:
         code = PY_BASE_CONVERTER.convert(module, http_client="httpx")
         assert "class Ok(Generic[_T]):" in code
         assert "class Err(Generic[_E]):" in code
-        assert "def ssc_parse_response(_resp):" in code
+        assert "def ssc_rest_call(" in code
 
     def test_rest_only_valid_python(self):
         from ssc_codegen.converters.py_bs4 import PY_BASE_CONVERTER
@@ -751,7 +755,7 @@ class TestSeparateRuntime:
         assert "class Err(Generic[_E]):" in runtime
         assert "class UnknownErr(Err[Any]):" in runtime
         assert "class TransportErr(Err[None]):" in runtime
-        assert "def ssc_parse_response(_resp):" in runtime
+        assert "def ssc_rest_call(" in runtime
 
     @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
     def test_main_imports_from_runtime(self, converter_attr):
@@ -787,7 +791,7 @@ class TestSeparateRuntime:
         # Ok/Err as class definitions should NOT be in the main module
         assert "class Ok(Generic[_T]):" not in code
         assert "class Err(Generic[_E]):" not in code
-        assert "def ssc_parse_response(_resp):" not in code
+        assert "def ssc_rest_call(" not in code
 
     @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
     def test_main_no_redundant_rest_imports(self, converter_attr):
