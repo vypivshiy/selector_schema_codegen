@@ -41,7 +41,6 @@ from ssc_codegen.ast import (
     Lower,
     Ltrim,
     Match,
-    MethodBase,
     MethodFetch,
     MethodRest,
     Module,
@@ -112,7 +111,6 @@ from ssc_codegen.ast import (
     Trim,
     TypeDef,
     TypeDefField,
-    TypeInfo,
     Unique,
     Unescape,
     Upper,
@@ -141,6 +139,8 @@ from ssc_codegen.converters.visitor import (
     module_has_rest,
 )
 
+import json
+
 import re as _re
 
 # ===========================================================================
@@ -148,23 +148,23 @@ import re as _re
 # ===========================================================================
 
 
-def _js_re(pattern: str) -> str:
-    flags = ""
+def _py_re_to_js_re(pattern: str, global_flag: bool = False) -> str:
+    """Convert a Python regex pattern to a JS regex literal.
+
+    Strips a leading ``(?ims)`` inline-flag group, transfers ``i``/``m``/``s``
+    to the JS flags, and optionally forces ``g`` for matchAll/replace.
+    """
+    flags = "g" if global_flag else ""
     m = _re.match(r"^\(\?([a-z]+)\)", pattern)
     if m:
-        flags = "".join(c for c in m.group(1) if c in "ims")
+        flags += "".join(c for c in m.group(1) if c in "ims")
         pattern = pattern[m.end() :]
     escaped = pattern.replace("/", "\\/")
     return f"/{escaped}/{flags}"
 
 
-def _js_re_node(node) -> str:
-    return _js_re(node.pattern)
-
-
 def py_sequence_to_js_array(values) -> str:
-    val_arr = str(tuple(values))
-    return "[" + val_arr[1:-1] + "]"
+    return json.dumps(list(values))
 
 
 def _js_literal(value) -> str:
@@ -206,35 +206,6 @@ def _pred_text_target(node, ctx: ConverterContext) -> str:
 
 def _pred_attr_target(node, ctx: ConverterContext) -> str:
     return _pred_target(node, ctx)
-
-
-JS_TYPES = {
-    VT.STRING: "string",
-    VT.BOOL: "boolean",
-    VT.INT: "number",
-    VT.FLOAT: "number",
-    VT.NULL: "null",
-    VT.DOCUMENT: "Element",
-    VT.JSON: "Any",
-    VT.NESTED: "Any",
-    VT.AUTO: "Any",
-}
-
-
-def _resolve_js_type(type_info: TypeInfo | None) -> str:
-    if type_info is None:
-        return "?"
-    if type_info.base == VT.NESTED and type_info.ref:
-        type_ = f"{to_pascal_case(type_info.ref)}Type"
-    elif type_info.base == VT.JSON and type_info.ref:
-        type_ = f"{to_pascal_case(type_info.ref)}Json"
-    else:
-        type_ = JS_TYPES.get(type_info.base, "?")
-    if type_info.is_array:
-        type_ = f"Array<{type_}>"
-    if type_info.is_optional:
-        type_ = f"({type_}|null)"
-    return type_
 
 
 # ===========================================================================
@@ -501,54 +472,6 @@ def _js_render_body(spec: RequestHttp) -> tuple[str, str] | None:
 
 def _js_name(name: str) -> str:
     return to_camel_case(to_snake_case(name))
-
-
-def _js_build_request_args(node: MethodBase, ctx: ConverterContext):
-    http = node.http_request
-    spec = http.with_renamed_placeholders(_js_name)
-    http_client = ctx.meta.get("http_client", "fetch")
-    ind = ctx.indent_char
-    i1, i2, i3, i4 = (ctx.indent + ind * n for n in range(4))
-
-    ph_param = ""
-    if spec.placeholders:
-        ordered = [
-            p.name
-            for p in sorted(spec.placeholders, key=lambda p: p.is_optional)
-        ]
-        ph_param = ", {" + ", ".join(ordered) + "}"
-
-    pre_lines: list[str] = []
-
-    def _resolve(d, varname, builder_fn):
-        if not d:
-            return None
-        if dict_needs_builder(d):
-            pre_lines.extend(builder_fn(varname, d, i3))
-            return varname
-        return _js_render_obj(d)
-
-    params_expr = _resolve(spec.params, "_params", _js_emit_params_builder)
-    headers_expr = _resolve(spec.headers, "_headers", _js_emit_obj_builder)
-    cookies_expr = _resolve(spec.cookies, "_cookies", _js_emit_obj_builder)
-
-    body_result = _js_render_body(spec)
-    body_expr = body_result[1] if body_result else None
-
-    return (
-        spec,
-        pre_lines,
-        ph_param,
-        http_client,
-        params_expr,
-        headers_expr,
-        cookies_expr,
-        body_expr,
-        i1,
-        i2,
-        i3,
-        i4,
-    )
 
 
 def _js_ok_payload_type(node: MethodRest) -> str:
@@ -1271,32 +1194,18 @@ class JsPure(Visitor):
     # === regex ===
 
     def visit_re(self, node: Re, ctx: ConverterContext) -> VisitStream:
-        rx = _js_re_node(node)
+        rx = _py_re_to_js_re(node.pattern)
         if not node.is_array:
             yield f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.match({rx})[1];"
         else:
             yield f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => s.match({rx})[1]);"
 
     def visit_re_all(self, node: ReAll, ctx: ConverterContext) -> VisitStream:
-        flags = "g"
-        pattern = node.pattern
-        m = _re.match(r"^\(\?([a-z]+)\)", pattern)
-        if m:
-            flags += "".join(c for c in m.group(1) if c in "ims")
-            pattern = pattern[m.end() :]
-        escaped = pattern.replace("/", "\\/")
-        rx_g = f"/{escaped}/{flags}"
+        rx_g = _py_re_to_js_re(node.pattern, global_flag=True)
         yield f"{ctx.indent}let {ctx.nxt} = Array.from({ctx.prv}.matchAll({rx_g}), m => m[1]);"
 
     def visit_re_sub(self, node: ReSub, ctx: ConverterContext) -> VisitStream:
-        flags = "g"
-        pattern = node.pattern
-        m = _re.match(r"^\(\?([a-z]+)\)", pattern)
-        if m:
-            flags += "".join(c for c in m.group(1) if c in "ims")
-            pattern = pattern[m.end() :]
-        escaped = pattern.replace("/", "\\/")
-        rx_g = f"/{escaped}/{flags}"
+        rx_g = _py_re_to_js_re(node.pattern, global_flag=True)
         repl = repr(node.repl)
         if not node.is_array:
             yield f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.replace({rx_g}, {repl});"
@@ -1555,7 +1464,7 @@ class JsPure(Visitor):
     def visit_predicate_attr_re(
         self, node: PredAttrRe, ctx: ConverterContext
     ) -> VisitStream:
-        rx = _js_re_node(node)
+        rx = _py_re_to_js_re(node.pattern)
         target = _pred_attr_target(node, ctx)
         yield self._pred_line(
             ctx, f"{rx}.test({target}.getAttribute({node.name!r}) ?? '')"
@@ -1600,7 +1509,7 @@ class JsPure(Visitor):
     def visit_predicate_text_re(
         self, node: PredTextRe, ctx: ConverterContext
     ) -> VisitStream:
-        rx = _js_re_node(node)
+        rx = _py_re_to_js_re(node.pattern)
         target = _pred_text_target(node, ctx)
         yield self._pred_line(ctx, f"{rx}.test({target})")
 
@@ -1718,21 +1627,21 @@ class JsPure(Visitor):
     def visit_predicate_re(
         self, node: PredRe, ctx: ConverterContext
     ) -> VisitStream:
-        rx = _js_re_node(node)
+        rx = _py_re_to_js_re(node.pattern)
         target = _pred_target(node, ctx)
         yield self._pred_line(ctx, f"{rx}.test({target})")
 
     def visit_predicate_re_all(
         self, node: PredReAll, ctx: ConverterContext
     ) -> VisitStream:
-        rx = _js_re_node(node)
+        rx = _py_re_to_js_re(node.pattern)
         target = _pred_target(node, ctx)
         yield self._pred_line(ctx, f"{target}.every(j => {rx}.test(j))")
 
     def visit_predicate_re_any(
         self, node: PredReAny, ctx: ConverterContext
     ) -> VisitStream:
-        rx = _js_re_node(node)
+        rx = _py_re_to_js_re(node.pattern)
         target = _pred_target(node, ctx)
         yield self._pred_line(ctx, f"{target}.some(j => {rx}.test(j))")
 
@@ -1741,20 +1650,41 @@ class JsPure(Visitor):
     def visit_method_rest(
         self, node: MethodRest, ctx: ConverterContext
     ) -> VisitStream:
-        (
-            spec,
-            pre_lines,
-            ph_param,
-            http_client,
-            params_expr,
-            headers_expr,
-            _cookies_expr,
-            body_expr,
-            i1,
-            i2,
-            i3,
-            _i4,
-        ) = _js_build_request_args(node, ctx)
+        spec = node.http_request.with_renamed_placeholders(_js_name)
+        http_client = ctx.meta.get("http_client", "fetch")
+        ind = ctx.indent_char
+        i1, i2, i3 = (ctx.indent + ind * n for n in range(3))
+
+        ph_param = ""
+        if spec.placeholders:
+            ordered = [
+                p.name
+                for p in sorted(spec.placeholders, key=lambda p: p.is_optional)
+            ]
+            ph_param = ", {" + ", ".join(ordered) + "}"
+
+        # dict builders + expressions
+        pre_lines: list[str] = []
+        params_expr = None
+        if spec.params:
+            if dict_needs_builder(spec.params):
+                pre_lines.extend(
+                    _js_emit_params_builder("_params", spec.params, i3)
+                )
+                params_expr = "_params"
+            else:
+                params_expr = _js_render_obj(spec.params)
+        headers_expr = None
+        if spec.headers:
+            if dict_needs_builder(spec.headers):
+                pre_lines.extend(
+                    _js_emit_obj_builder("_headers", spec.headers, i3)
+                )
+                headers_expr = "_headers"
+            else:
+                headers_expr = _js_render_obj(spec.headers)
+        body_result = _js_render_body(spec)
+        body_expr = body_result[1] if body_result else None
 
         raw_name = node.name or "fetch"
         method_name = to_camel_case(to_snake_case(raw_name))
@@ -1844,20 +1774,41 @@ class JsPure(Visitor):
     def visit_method_fetch(
         self, node: MethodFetch, ctx: ConverterContext
     ) -> VisitStream:
-        (
-            spec,
-            _pre_lines,
-            ph_param,
-            http_client,
-            params_expr,
-            headers_expr,
-            _cookies_expr,
-            body_expr,
-            i1,
-            i2,
-            i3,
-            _i4,
-        ) = _js_build_request_args(node, ctx)
+        spec = node.http_request.with_renamed_placeholders(_js_name)
+        http_client = ctx.meta.get("http_client", "fetch")
+        ind = ctx.indent_char
+        i1, i2, i3 = (ctx.indent + ind * n for n in range(3))
+
+        ph_param = ""
+        if spec.placeholders:
+            ordered = [
+                p.name
+                for p in sorted(spec.placeholders, key=lambda p: p.is_optional)
+            ]
+            ph_param = ", {" + ", ".join(ordered) + "}"
+
+        # dict builders + expressions
+        pre_lines: list[str] = []
+        params_expr = None
+        if spec.params:
+            if dict_needs_builder(spec.params):
+                pre_lines.extend(
+                    _js_emit_params_builder("_params", spec.params, i3)
+                )
+                params_expr = "_params"
+            else:
+                params_expr = _js_render_obj(spec.params)
+        headers_expr = None
+        if spec.headers:
+            if dict_needs_builder(spec.headers):
+                pre_lines.extend(
+                    _js_emit_obj_builder("_headers", spec.headers, i3)
+                )
+                headers_expr = "_headers"
+            else:
+                headers_expr = _js_render_obj(spec.headers)
+        body_result = _js_render_body(spec)
+        body_expr = body_result[1] if body_result else None
 
         struct_name = to_pascal_case(node.parent.name)  # type: ignore[union-attr]
         method_name = "fetch" + (to_pascal_case(node.name) if node.name else "")
@@ -1883,6 +1834,7 @@ class JsPure(Visitor):
         lines: list[str] = [
             f"{i1}static async {method_name}(client{ph_param}) {{"
         ]
+        lines.extend(pre_lines)
 
         if http_client == "fetch":
             if params_expr:
