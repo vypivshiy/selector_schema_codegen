@@ -30,6 +30,10 @@ from ssc_codegen.ast import (
     MethodRest,
     MethodFetch,
     ErrorResponse,
+    ResultVariantDef,
+    ResultAliasDef,
+    MatcherListDef,
+    Template,
     CssSelect,
     CssSelectAll,
     XpathSelect,
@@ -220,27 +224,25 @@ def module_is_rest_only(module: Module) -> bool:
 def err_subclass_name(struct_name: str, err: "ErrorResponse") -> str:
     """Deterministic error-subclass name from struct name + error spec.
 
-    Concatenates PascalCase(struct) + 'Err' + status + PascalCase(required_keys)
-    + PascalCase(condition_keys).  Identical across all languages.
+    Re-exported from ``core/rest_artifacts`` (the canonical home) for backwards
+    compatibility — existing converters import it from here.
     """
-    base = f"{to_pascal_case(struct_name)}Err{err.status}"
-    for key in err.required_keys:
-        base += to_pascal_case(key.replace(".", "_").replace("-", "_"))
-    if err.conditions:
-        for key in err.conditions:
-            base += to_pascal_case(key.replace(".", "_").replace("-", "_"))
-    return base
+    from ssc_codegen.core.rest_artifacts import (
+        err_subclass_name as _impl,
+    )
+
+    return _impl(struct_name, err)
 
 
-def dict_entry_placeholder(v: str) -> PlaceholderSpec | None:
+def dict_entry_placeholder(tmpl: Template) -> PlaceholderSpec | None:
     """Return the PlaceholderSpec for a dict entry value, or None."""
-    return PlaceholderSpec.parse(str(v))
+    return tmpl.single_placeholder()
 
 
-def dict_needs_builder(d: dict[str, str]) -> bool:
+def dict_needs_builder(d: dict[str, Template]) -> bool:
     """True if any dict entry has an optional or bracket-style array placeholder."""
-    for v in d.values():
-        ph = PlaceholderSpec.parse(str(v))
+    for tmpl in d.values():
+        ph = tmpl.single_placeholder()
         if ph is None:
             continue
         if ph.is_optional:
@@ -687,6 +689,10 @@ class Visitor(ABC):
         MethodFetch: "visit_method_fetch",
         MethodRest: "visit_method_rest",
         ErrorResponse: "visit_error_response",
+        # REST result artifacts (synthesized before StructRest)
+        ResultVariantDef: "visit_result_variant_def",
+        ResultAliasDef: "visit_result_alias_def",
+        MatcherListDef: "visit_matcher_list_def",
         # selectors
         CssSelect: "visit_css_select",
         CssSelectAll: "visit_css_select_all",
@@ -1091,6 +1097,42 @@ class Visitor(ABC):
     ) -> VisitStream:
         """
         TODO: define the error-response contract.
+        """
+
+    @abstractmethod
+    def visit_result_variant_def(
+        self, node: ResultVariantDef, ctx: ConverterContext
+    ) -> VisitStream:
+        """
+        Auto-generated AST node (synthesized from StructRest.errors).
+
+        Emit one error-subclass declaration (e.g. ``@dataclass class XErr(Err[T])``
+        in Python, ``@typedef`` in JS).  Sits at module level before the struct.
+        """
+
+    @abstractmethod
+    def visit_result_alias_def(
+        self, node: ResultAliasDef, ctx: ConverterContext
+    ) -> VisitStream:
+        """
+        Auto-generated AST node (synthesized from MethodRest).
+
+        Emit one result-union alias per method (e.g. ``GetUserResult = Union[...]``
+        in Python, JSDoc ``@typedef`` in JS).  Sits at module level before the struct.
+        """
+
+    @abstractmethod
+    def visit_matcher_list_def(
+        self, node: MatcherListDef, ctx: ConverterContext
+    ) -> VisitStream:
+        """
+        Auto-generated AST node (synthesized from StructRest.errors).
+
+        Emit the per-struct error-matcher list (e.g. ``_x_matchers = [ErrMatcher(...)]``
+        in Python, ``const _xMatchers = [...]`` in JS).  Carries RAW condition
+        data (required_keys + conditions); the visitor renders the check
+        expression in the target language spelling.  Sits at module level before
+        the struct.
         """
 
     @abstractmethod

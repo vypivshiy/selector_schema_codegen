@@ -1,7 +1,7 @@
 from __future__ import annotations
 import re as _re
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Literal
 from typing import cast
 
@@ -119,6 +119,19 @@ class PlaceholderSpec:
 
         return PLACEHOLDER_RE.sub(_repl, text)
 
+    def to_token(self) -> str:
+        """Reconstruct the ``{{name:type[]?|style}}`` source token."""
+        s = "{{" + self.name
+        if self.type_name != "str":
+            s += f":{self.type_name}"
+        if self.is_array:
+            s += "[]"
+        if self.is_optional:
+            s += "?"
+        if self.style:
+            s += f"|{self.style}"
+        return s + "}}"
+
 
 def parse_placeholder(match: "_re.Match[str]") -> PlaceholderSpec:
     return PlaceholderSpec(
@@ -130,60 +143,188 @@ def parse_placeholder(match: "_re.Match[str]") -> PlaceholderSpec:
     )
 
 
+# ── Template: tokenized string value ─────────────────────────────────────────
+
+
+@dataclass
+class Template:
+    """A string value tokenized into literal segments and placeholder specs.
+
+    Created once at parse time (``Template.parse``) from raw ``{{...}}`` text.
+    All codegen renderers walk ``parts`` instead of re-parsing strings with
+    regex.  Placeholder identity is structural (``PlaceholderSpec`` instances
+    inline), so renaming is a parts-walk — no string rewriting.
+    """
+
+    parts: list[str | PlaceholderSpec] = field(default_factory=list)
+
+    # ── construction ─────────────────────────────────────────────────────
+
+    @classmethod
+    def parse(cls, raw: str) -> "Template":
+        """Tokenize *raw* into literal / placeholder parts."""
+        parts: list[str | PlaceholderSpec] = []
+        buf: list[str] = []
+        i = 0
+        n = len(raw)
+        while i < n:
+            matched = PlaceholderSpec.match_at(raw, i)
+            if matched is not None:
+                end, ph = matched
+                if buf:
+                    parts.append("".join(buf))
+                    buf = []
+                parts.append(ph)
+                i = end
+            else:
+                buf.append(raw[i])
+                i += 1
+        if buf:
+            parts.append("".join(buf))
+        return cls(parts=parts)
+
+    @classmethod
+    def literal(cls, text: str) -> "Template":
+        """Wrap a placeholder-free string."""
+        return cls(parts=[text])
+
+    # ── queries ──────────────────────────────────────────────────────────
+
+    @property
+    def is_single_placeholder(self) -> bool:
+        """True when parts is exactly ``[PlaceholderSpec]`` (no literals)."""
+        return len(self.parts) == 1 and isinstance(
+            self.parts[0], PlaceholderSpec
+        )
+
+    def single_placeholder(self) -> PlaceholderSpec | None:
+        """The sole placeholder if ``is_single_placeholder``, else ``None``."""
+        if self.is_single_placeholder:
+            return self.parts[0]  # type: ignore[return-value]
+        return None
+
+    @property
+    def has_placeholders(self) -> bool:
+        return any(isinstance(p, PlaceholderSpec) for p in self.parts)
+
+    def placeholders(self) -> list[PlaceholderSpec]:
+        """All placeholder specs in this template, in order of appearance."""
+        return [p for p in self.parts if isinstance(p, PlaceholderSpec)]
+
+    def map(
+        self,
+        on_ph: "Callable[[PlaceholderSpec], str]",
+        on_literal: "Callable[[str], str] | None" = None,
+    ) -> str:
+        """Walk parts assembling a string.
+
+        ``on_ph`` renders each placeholder; ``on_literal`` (identity by
+        default) transforms each literal segment.
+        """
+        out: list[str] = []
+        for part in self.parts:
+            if isinstance(part, PlaceholderSpec):
+                out.append(on_ph(part))
+            elif on_literal is not None:
+                out.append(on_literal(part))
+            else:
+                out.append(part)
+        return "".join(out)
+
+    @property
+    def source(self) -> str:
+        """Reconstruct the original ``{{...}}`` source text from parts."""
+        return self.map(lambda ph: ph.to_token())
+
+    def renamed(self, mapping: dict[str, str]) -> "Template":
+        """Return a copy with placeholder names remapped via *mapping*."""
+        if not self.has_placeholders:
+            return self
+        new_parts: list[str | PlaceholderSpec] = []
+        for part in self.parts:
+            if isinstance(part, PlaceholderSpec):
+                new_parts.append(
+                    replace(part, name=mapping.get(part.name, part.name))
+                )
+            else:
+                new_parts.append(part)
+        return Template(parts=new_parts)
+
+
 # ── Request/Method nodes ──────────────────────────────────────────────────────
-
-
-def _iter_http_strings(http: RequestHttp):
-    """Yield every string value that may contain placeholders."""
-    yield http.url
-    yield from http.headers.values()
-    yield from http.cookies.values()
-    yield from http.params.values()
-    if isinstance(http.body, str) and http.body:
-        yield http.body
-    elif isinstance(http.body, dict):
-        yield from _iter_dict_strings(http.body)
-
-
-def _iter_dict_strings(d: dict):
-    for v in d.values():
-        if isinstance(v, str):
-            yield v
-        elif isinstance(v, dict):
-            yield from _iter_dict_strings(v)
-        elif isinstance(v, list):
-            for item in v:
-                if isinstance(item, str):
-                    yield item
 
 
 @dataclass
 class RequestHttp(Node):
     """Parsed HTTP request — child node of MethodBase.
 
-    Created once at parse time from ``parse_to_spec(raw_payload)``;
+    Created once at parse time from ``parse_to_http(raw_payload)``;
     converters read fields directly instead of re-parsing raw_payload.
+    String fields (url, headers, cookies, params, body) are ``Template``
+    instances: tokenized literal/placeholder parts.
     """
 
     method: str = "GET"
-    url: str = ""
-    headers: dict[str, str] = field(default_factory=dict)
-    cookies: dict[str, str] = field(default_factory=dict)
-    params: dict[str, str] = field(default_factory=dict)
+    url: Template = field(default_factory=Template)
+    headers: dict[str, Template] = field(default_factory=dict)
+    cookies: dict[str, Template] = field(default_factory=dict)
+    params: dict[str, Template] = field(default_factory=dict)
     body_kind: str = "empty"  # "empty" | "json" | "form" | "raw"
-    body: str | dict | None = None
+    body: Template | dict[str, Template] | None = None
 
     @property
     def placeholders(self) -> list[PlaceholderSpec]:
         """Unique placeholders across all string fields."""
         seen: set[str] = set()
         result: list[PlaceholderSpec] = []
-        for text in _iter_http_strings(self):
-            for spec in PlaceholderSpec.find_all(text):
-                if spec.name not in seen:
-                    seen.add(spec.name)
-                    result.append(spec)
+        for tmpl in self._all_templates():
+            for ph in tmpl.placeholders():
+                if ph.name not in seen:
+                    seen.add(ph.name)
+                    result.append(ph)
         return result
+
+    def _all_templates(self):
+        """Yield every Template in this request."""
+        yield self.url
+        for d in (self.headers, self.cookies, self.params):
+            yield from d.values()
+        if isinstance(self.body, Template):
+            yield self.body
+        elif isinstance(self.body, dict):
+            yield from self.body.values()
+
+    def with_renamed_placeholders(
+        self, transform: Callable[[str], str]
+    ) -> "RequestHttp":
+        """Return a copy with placeholder names passed through *transform*.
+
+        Only the ``PlaceholderSpec.name`` field changes — type/array/optional/
+        style modifiers are preserved.  Operates on structured parts, no string
+        rewriting.
+        """
+        mapping = {ph.name: transform(ph.name) for ph in self.placeholders}
+        if all(old == new for old, new in mapping.items()):
+            return self
+
+        def _rename_dict(d: dict[str, Template]) -> dict[str, Template]:
+            return {k: v.renamed(mapping) for k, v in d.items()}
+
+        new_body: Template | dict[str, Template] | None = self.body
+        if isinstance(self.body, Template):
+            new_body = self.body.renamed(mapping)
+        elif isinstance(self.body, dict):
+            new_body = _rename_dict(self.body)
+
+        return RequestHttp(
+            method=self.method,
+            url=self.url.renamed(mapping),
+            headers=_rename_dict(self.headers),
+            cookies=_rename_dict(self.cookies),
+            params=_rename_dict(self.params),
+            body_kind=self.body_kind,
+            body=new_body,
+        )
 
 
 @dataclass
@@ -227,6 +368,9 @@ class MethodRest(MethodBase):
 
     doc: str = ""  # per-method docstring
     response_schema: str = ""  # json schema name for typed 2xx response
+    # Set by ``core/rest_artifacts.py`` to the matching ``ResultAliasDef.name``
+    # so the visitor can reference the result union in the method signature.
+    result_alias_name: str = ""
 
 
 # ── Base struct ──────────────────────────────────────────────────────────────

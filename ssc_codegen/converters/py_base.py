@@ -30,6 +30,9 @@ from ssc_codegen.ast.module import (
 )
 from ssc_codegen.ast import (
     ErrorResponse,
+    MatcherListDef,
+    ResultAliasDef,
+    ResultVariantDef,
     VariableType as VT,
     StructType as ST,
 )
@@ -79,11 +82,11 @@ from ssc_codegen.ast.struct import (
     InitField,
     InitFieldCall,
     Key,
-    MethodBase,
     MethodFetch,
     MethodRest,
     PlaceholderSpec,
     PreValidate,
+    RequestHttp,
     SplitDoc,
     StartParse,
     Struct,
@@ -92,10 +95,12 @@ from ssc_codegen.ast.struct import (
     TableConfig,
     TableMatchKey,
     TableRows,
+    Template,
     Value,
 )
 from ssc_codegen.ast.typedef import TypeDef, TypeDefField
 from ssc_codegen.converters.base import ConverterContext
+from ssc_codegen.converters.runtime_file import rest_runtime_lines
 from ssc_codegen.converters.helpers import (
     jsonify_path_to_segments,
     to_pascal_case,
@@ -107,21 +112,15 @@ from ssc_codegen.converters.visitor import (
     TRAVERSE,
     VisitStream,
     Visitor,
-    dict_entry_placeholder,
     dict_needs_builder,
-    err_subclass_name,
     module_has_rest,
     module_is_rest_only,
 )
-from ssc_codegen.request_spec import (
-    RequestSpec,
-    normalize_placeholder_names,
-    validate_json_body,
-)
+from ssc_codegen.request_spec import validate_json_body
 
 
 # ===========================================================================
-# RequestSpec → Python code rendering (ported from py_render.py)
+# RequestHttp → Python code rendering (ported from py_render.py)
 # ===========================================================================
 
 _STYLE_SEPARATOR: dict[str, str] = {"csv": ",", "pipe": "|", "space": " "}
@@ -132,58 +131,49 @@ def _render_array_join(ph: PlaceholderSpec) -> str:
     return f"{sep!r}.join(str(_x) for _x in {ph.name})"
 
 
-def render_value(v: str) -> str:
-    """Convert a RequestSpec string value to a Python code fragment."""
-    if ph := PlaceholderSpec.parse(v):
+def render_value(tmpl: Template) -> str:
+    """Convert a Template to a Python code fragment."""
+    if ph := tmpl.single_placeholder():
         if ph.is_array and ph.style in ("csv", "pipe", "space"):
             return _render_array_join(ph)
         return ph.name
-    if PlaceholderSpec.search(v):
-        return f'f"{_escape_fstring(v)}"'
-    return repr(v)
+    if tmpl.has_placeholders:
+        return f'f"{_escape_fstring(tmpl)}"'
+    return repr(tmpl.source)
 
 
-def _escape_fstring(template: str) -> str:
+def _escape_fstring(tmpl: Template) -> str:
+    """Walk Template parts: placeholders → ``{name}``, literals → ``{{ }}`` doubled."""
     result: list[str] = []
-    i = 0
-    while i < len(template):
-        if template[i : i + 2] == "{{":
-            matched = PlaceholderSpec.match_at(template, i)
-            if matched is not None:
-                end, ph = matched
-                result.append("{" + ph.name + "}")
-                i = end
-                continue
-        elif template[i] in "{}":
-            result.append(template[i] * 2)
-            i += 1
+    for part in tmpl.parts:
+        if isinstance(part, PlaceholderSpec):
+            result.append("{" + part.name + "}")
         else:
-            result.append(template[i])
-            i += 1
+            for ch in part:
+                result.append(ch * 2 if ch in "{}" else ch)
     return "".join(result)
 
 
-def render_dict(d: dict[str, str], *, indent: str = "") -> str:
+def render_dict(d: dict[str, Template]) -> str:
     if not d:
         return "{}"
-    inner = ", ".join(f"{k!r}: {render_value(str(v))}" for k, v in d.items())
+    inner = ", ".join(f"{k!r}: {render_value(v)}" for k, v in d.items())
     return "{" + inner + "}"
 
 
 def emit_dict_builder(
-    varname: str, d: dict[str, str], indent: str
+    varname: str, d: dict[str, Template], indent: str
 ) -> list[str]:
     lines: list[str] = [f"{indent}{varname}: dict = {{}}"]
-    for key, value in d.items():
-        value = str(value)
-        ph = dict_entry_placeholder(value)
+    for key, tmpl in d.items():
+        ph = tmpl.single_placeholder()
         if ph is None:
-            lines.append(f"{indent}{varname}[{key!r}] = {render_value(value)}")
+            lines.append(f"{indent}{varname}[{key!r}] = {render_value(tmpl)}")
             continue
         effective_key = (
             f"{key}[]" if (ph.is_array and ph.style == "bracket") else key
         )
-        expr = render_value(value)
+        expr = render_value(tmpl)
         if ph.is_optional:
             lines.append(f"{indent}if {ph.name} is not None:")
             lines.append(f"{indent}    {varname}[{effective_key!r}] = {expr}")
@@ -192,33 +182,30 @@ def emit_dict_builder(
     return lines
 
 
-def render_json_body(raw: str) -> str:
-    validate_json_body(raw)
+def render_json_body(tmpl: Template) -> str:
+    validate_json_body(tmpl.source)
 
     sentinels: dict[str, str] = {}
     out: list[str] = []
-    i = 0
-    n = len(raw)
     in_string = False
-    while i < n:
-        if raw[i : i + 2] == "{{":
-            matched = PlaceholderSpec.match_at(raw, i)
-            if matched is not None:
-                end, ph = matched
-                key = f"__SSC_PH_{len(sentinels)}__"
-                sentinels[key] = ph.name
-                out.append(key if in_string else '"' + key + '"')
-                i = end
-                continue
-        ch = raw[i]
-        if ch == "\\" and i + 1 < n:
-            out.append(raw[i : i + 2])
-            i += 2
-            continue
-        if ch == '"':
-            in_string = not in_string
-        out.append(ch)
-        i += 1
+    for part in tmpl.parts:
+        if isinstance(part, PlaceholderSpec):
+            key = f"__SSC_PH_{len(sentinels)}__"
+            sentinels[key] = part.name
+            out.append(key if in_string else '"' + key + '"')
+        else:
+            i = 0
+            n = len(part)
+            while i < n:
+                ch = part[i]
+                if ch == "\\" and i + 1 < n:
+                    out.append(part[i : i + 2])
+                    i += 2
+                    continue
+                if ch == '"':
+                    in_string = not in_string
+                out.append(ch)
+                i += 1
     substituted = "".join(out)
     parsed = json.loads(substituted)
     sentinel_re = re.compile(r"__SSC_PH_\d+__")
@@ -254,110 +241,21 @@ def render_json_body(raw: str) -> str:
     return _emit(parsed)
 
 
-def render_body(spec: RequestSpec) -> tuple[str, str] | None:
+def render_body(spec: RequestHttp) -> tuple[str, str] | None:
     if spec.body_kind == "empty" or spec.body is None:
         return None
     if spec.body_kind == "json":
-        return ("json", render_json_body(str(spec.body)))
+        assert isinstance(spec.body, Template)
+        return ("json", render_json_body(spec.body))
     if spec.body_kind == "form":
         assert isinstance(spec.body, dict)
         return ("data", render_dict(spec.body))
-    return ("data", render_value(str(spec.body)))
+    assert isinstance(spec.body, Template)
+    return ("data", render_value(spec.body))
 
 
 # REST
 PH_PY_TYPES = {"str": "str", "int": "int", "float": "float", "bool": "bool"}
-
-REST_UTILITIES = (
-    "_T = TypeVar('_T')",
-    "_E = TypeVar('_E')",
-    "",
-    "@dataclass(frozen=True)",
-    "class Ok(Generic[_T]):",
-    "    status: int = 0",
-    "    headers: Mapping[str, str] = field(default_factory=dict)",
-    "    value: _T = None  # type: ignore[assignment]",
-    "    is_ok: Literal[True] = True",
-    "",
-    "@dataclass(frozen=True)",
-    "class Err(Generic[_E]):",
-    "    status: int = 0",
-    "    headers: Mapping[str, str] = field(default_factory=dict)",
-    "    value: _E = None  # type: ignore[assignment]",
-    "    is_ok: Literal[False] = False",
-    "",
-    "@dataclass(frozen=True)",
-    "class UnknownErr(Err[Any]):",
-    "    pass",
-    "",
-    "@dataclass(frozen=True)",
-    "class TransportErr(Err[None]):",
-    "    status: Literal[0] = 0",
-    "    cause: str = ''",
-    "    value: None = None",
-    "    headers: Mapping[str, str] = field(default_factory=dict)",
-    "",
-    "@dataclass(frozen=True)",
-    "class ErrMatcher:",
-    "    status: int",
-    "    check: Callable[[dict], bool] | None = None",
-    "    factory: Callable[..., Err] = None  # type: ignore[assignment]",
-    "",
-    "    def match(self, _s: int, _h, _b) -> Err | None:",
-    "        if _s != self.status:",
-    "            return None",
-    "        if self.check is not None:",
-    "            if not isinstance(_b, dict) or not self.check(_b):",
-    "                return None",
-    "        return self.factory(headers=_h, value=_b)",
-    "",
-    "",
-    "def ssc_dispatch_err(_matchers, _status: int, _headers, _body):",
-    "    for _m in _matchers:",
-    "        _err = _m.match(_status, _headers, _body)",
-    "        if _err is not None:",
-    "            return _err",
-    "    if 200 <= _status < 300:",
-    "        return None",
-    "    return UnknownErr(status=_status, headers=_headers, value=_body)",
-    "",
-    "",
-    "def ssc_rest_call(client, _matchers, method, url, _value_fn=None, **kw):",
-    "    try:",
-    "        _resp = client.request(method, url, **kw)",
-    "        _status = _resp.status_code",
-    "        _headers = {k.lower(): v for k, v in _resp.headers.items()}",
-    "        try:",
-    "            _body = _resp.json()",
-    "        except Exception:",
-    "            _body = None",
-    "    except httpx.HTTPError as _exc:",
-    "        return TransportErr(cause=repr(_exc))",
-    "    _err = ssc_dispatch_err(_matchers, _status, _headers, _body)",
-    "    if _err is not None:",
-    "        return _err",
-    "    _value = _body if _value_fn is None else _value_fn(_body)",
-    "    return Ok(status=_status, headers=_headers, value=_value)",
-    "",
-    "",
-    "async def ssc_rest_call_async(client, _matchers, method, url, _value_fn=None, **kw):",
-    "    try:",
-    "        _resp = await client.request(method, url, **kw)",
-    "        _status = _resp.status_code",
-    "        _headers = {k.lower(): v for k, v in _resp.headers.items()}",
-    "        try:",
-    "            _body = _resp.json()",
-    "        except Exception:",
-    "            _body = None",
-    "    except httpx.HTTPError as _exc:",
-    "        return TransportErr(cause=repr(_exc))",
-    "    _err = ssc_dispatch_err(_matchers, _status, _headers, _body)",
-    "    if _err is not None:",
-    "        return _err",
-    "    _value = _body if _value_fn is None else _value_fn(_body)",
-    "    return Ok(status=_status, headers=_headers, value=_value)",
-    "",
-)
 
 
 # Symbol names exported by the separate runtime file (``-R`` mode).
@@ -392,30 +290,6 @@ def _runtime_export_names(module: Module) -> list[str]:
     return names
 
 
-def err_value_type(err: ErrorResponse, struct: StructBase) -> str:
-    schema = err.schema_name
-    if not schema:
-        return "Any"
-    type_name = f"{to_pascal_case(schema)}Json"
-    mod = struct.parent
-    if mod is not None:
-        for n in mod.body:
-            if isinstance(n, JsonDef) and n.name == schema and n.is_array:
-                return f"List[{type_name}]"
-    return type_name
-
-
-def rest_err_union_type(struct: StructBase) -> str:
-    variants: list[str] = []
-    seen: set[str] = set()
-    for err in struct.errors:
-        cls_name = err_subclass_name(struct.name, err)
-        if cls_name not in seen:
-            seen.add(cls_name)
-            variants.append(cls_name)
-    return "Union[" + ", ".join([*variants, "UnknownErr", "None"]) + "]"
-
-
 def _py_path_expr(body_var: str, path: str) -> str:
     expr = body_var
     for seg in path.split("."):
@@ -426,11 +300,19 @@ def _py_path_expr(body_var: str, path: str) -> str:
     return expr
 
 
-def render_condition_lambda(err: ErrorResponse) -> str | None:
+def _render_py_condition_lambda(
+    required_keys: list[str], conditions: dict[str, object]
+) -> str | None:
+    """Render a Python ``lambda _b: ...`` check from raw condition data.
+
+    Consumed by ``visit_matcher_list_def`` — the synthesizer carries raw
+    required_keys/conditions on ``MatcherEntry`` so each language renders its
+    own check spelling.
+    """
     parts: list[str] = []
-    for key in err.required_keys:
+    for key in required_keys:
         parts.append(f"{key!r} in _b")
-    for path, value in err.conditions.items():
+    for path, value in conditions.items():
         lhs = _py_path_expr("_b", path)
         if isinstance(value, bool):
             parts.append(f"{lhs} is {value}")
@@ -443,82 +325,6 @@ def render_condition_lambda(err: ErrorResponse) -> str | None:
     if not parts:
         return None
     return f"lambda _b: {' and '.join(parts)}"
-
-
-def result_alias_name(raw_name: str) -> str:
-    return to_pascal_case(raw_name or "fetch") + "Result"
-
-
-def resolve_ok_payload_type(node: MethodRest) -> str:
-    if not node.response_schema:
-        return "None"
-    struct = node.parent
-    mod = struct.parent if struct is not None else None
-    schema_type = f"{to_pascal_case(node.response_schema)}Json"
-    if mod is not None:
-        for n in mod.body:
-            if isinstance(n, JsonDef) and n.name == node.response_schema:
-                if n.is_array:
-                    return f"List[{schema_type}]"
-                break
-    return schema_type
-
-
-def emit_rest_error_subclasses(node: StructBase) -> list[str]:
-    lines: list[str] = []
-    seen: set[str] = set()
-    for err in node.errors:
-        cls_name = err_subclass_name(node.name, err)
-        if cls_name in seen:
-            continue
-        seen.add(cls_name)
-        value_type = err_value_type(err, node)
-        lines.append("@dataclass(frozen=True)")
-        lines.append(f"class {cls_name}(Err[{value_type}]):")
-        lines.append(f"    status: Literal[{err.status}] = {err.status}")
-        lines.append("")
-    return lines
-
-
-def emit_result_aliases(struct: StructBase) -> list[str]:
-    lines: list[str] = []
-    for child in struct.body:
-        if not isinstance(child, MethodRest):
-            continue
-        raw_name = child.name or "fetch"
-        alias_name = result_alias_name(raw_name)
-        payload = resolve_ok_payload_type(child)
-        err_variants: list[str] = []
-        seen: set[str] = set()
-        for err in struct.errors:
-            cls_name = err_subclass_name(struct.name, err)
-            if cls_name not in seen:
-                seen.add(cls_name)
-                err_variants.append(cls_name)
-        parts = [f"Ok[{payload}]", *err_variants, "UnknownErr", "TransportErr"]
-        lines.append(f"{alias_name} = Union[" + ", ".join(parts) + "]")
-    return lines
-
-
-def emit_matchers(struct: StructBase) -> list[str]:
-    name = to_snake_case(struct.name)
-    var = f"_{name}_matchers"
-    seen: set[str] = set()
-    entries: list[str] = []
-    for err in struct.errors:
-        cls_name = err_subclass_name(struct.name, err)
-        if cls_name in seen:
-            continue
-        seen.add(cls_name)
-        check = render_condition_lambda(err)
-        check_arg = check if check else "None"
-        entries.append(
-            f"    ErrMatcher({err.status}, {check_arg}, {cls_name}),"
-        )
-    lines = [f"{var} = ["]
-    lines.extend(entries)
-    lines.append("]")
-    return lines
 
 
 class PyHtmlBase(Visitor):
@@ -618,8 +424,7 @@ class PyHtmlBase(Visitor):
                 yield line
         # REST runtime (Ok/Err/TransportErr/ssc_parse_response)
         if isinstance(mod, Module) and module_has_rest(mod):
-            for line in REST_UTILITIES:
-                yield line
+            yield from rest_runtime_lines()
         # std section (inline helpers or `from ssc_std import ...`)
         result = super().visit_utilities(node, ctx)
         if result is not None:
@@ -725,22 +530,11 @@ class PyHtmlBase(Visitor):
     def visit_struct_rest(
         self, node: StructRest, ctx: ConverterContext
     ) -> VisitStream:
-        # error subclasses (module-level, before class)
-        yield emit_rest_error_subclasses(node)
-        # result aliases (module-level, before class)
-        aliases = emit_result_aliases(node)
-        yield aliases
-        if aliases:
-            yield ""
-        # error matchers (module-level, before class)
-        matchers = emit_matchers(node)
-        if matchers:
-            yield matchers
-            yield ""
-        # class header
+        # Pure header emitter — error subclasses, result aliases and matcher
+        # lists are now synthesized as sibling nodes (ResultVariantDef,
+        # ResultAliasDef, MatcherListDef) emitted before this struct.
         name = to_pascal_case(node.name)
         yield f"class {name}:"
-        # class docstring
         if node.doc:
             i = ctx.deeper().indent
             yield f'{i}"""'
@@ -748,6 +542,49 @@ class PyHtmlBase(Visitor):
             yield f'{i}"""'
         # children (MethodRest, MethodFetch, ErrorResponse)
         yield TRAVERSE
+
+    def visit_result_variant_def(
+        self, node: ResultVariantDef, ctx: ConverterContext
+    ) -> VisitStream:
+        if node.schema_name:
+            base = f"{to_pascal_case(node.schema_name)}Json"
+            value_type = f"List[{base}]" if node.schema_is_array else base
+        else:
+            value_type = "Any"
+        yield [
+            "@dataclass(frozen=True)",
+            f"class {node.name}(Err[{value_type}]):",
+            f"    status: Literal[{node.status}] = {node.status}",
+            "",
+        ]
+
+    def visit_result_alias_def(
+        self, node: ResultAliasDef, ctx: ConverterContext
+    ) -> VisitStream:
+        if node.response_schema:
+            base = f"{to_pascal_case(node.response_schema)}Json"
+            ok_type = f"List[{base}]" if node.response_is_array else base
+        else:
+            ok_type = "None"
+        parts = [
+            f"Ok[{ok_type}]",
+            *node.err_variants,
+            "UnknownErr",
+            "TransportErr",
+        ]
+        yield f"{node.name} = Union[{', '.join(parts)}]"
+        yield ""
+
+    def visit_matcher_list_def(
+        self, node: MatcherListDef, ctx: ConverterContext
+    ) -> VisitStream:
+        var = f"_{to_snake_case(node.struct_name)}_matchers"
+        yield f"{var} = ["
+        for e in node.entries:
+            check = _render_py_condition_lambda(e.required_keys, e.conditions)
+            check_arg = check if check else "None"
+            yield f"    ErrMatcher({e.status}, {check_arg}, {e.factory_name}),"
+        yield "]"
 
     def visit_init(self, node: Init, ctx: ConverterContext) -> VisitStream:
         i, i2, i3 = (
@@ -929,28 +766,12 @@ class PyHtmlBase(Visitor):
         ("params", "_params"),
     )
 
-    def _request_spec(self, node: MethodBase) -> RequestSpec:
-        """Build and normalize the RequestSpec from a node's http_request."""
-        http = node.http_request
-        return normalize_placeholder_names(
-            RequestSpec(
-                method=http.method,
-                url=http.url,
-                headers=dict(http.headers),
-                cookies=dict(http.cookies),
-                params=dict(http.params),
-                body_kind=http.body_kind,
-                body=http.body,
-            ),
-            to_snake_case,
-        )
-
-    def _placeholder_params(self, spec: RequestSpec) -> str:
+    def _placeholder_params(self, http: RequestHttp) -> str:
         """Render the '', *, name: type, ...'' keyword-arg suffix."""
-        if not spec.placeholders:
+        if not http.placeholders:
             return ""
         parts: list[str] = []
-        for ph in sorted(spec.placeholders, key=lambda p: p.is_optional):
+        for ph in sorted(http.placeholders, key=lambda p: p.is_optional):
             t = PH_PY_TYPES[ph.type_name]
             if ph.is_array:
                 t = f"List[{t}]"
@@ -961,53 +782,13 @@ class PyHtmlBase(Visitor):
             )
         return ", *, " + ", ".join(parts)
 
-    def _pre_lines(self, spec: RequestSpec, indent: str) -> list[str]:
-        """Dict builders for headers/cookies/params emitted before the call."""
-        lines: list[str] = []
-        for attr, varname in self._DICT_KWARGS:
-            d = getattr(spec, attr)
-            if d and dict_needs_builder(d):
-                lines.extend(emit_dict_builder(varname, d, indent))
-        return lines
-
-    def _request_call(
-        self,
-        spec: RequestSpec,
-        await_kw: str,
-        line_indent: str,
-        arg_indent: str,
-    ) -> list[str]:
-        """Render the ``_resp = await client.request(...)`` block."""
-        lines = [
-            f"{line_indent}_resp = {await_kw}client.request(",
-            f"{arg_indent}{spec.method!r},",
-            f"{arg_indent}{render_value(spec.url)},",
-        ]
-        lines.extend(self._request_kwargs(spec, arg_indent))
-        lines.append(f"{line_indent})")
-        return lines
-
-    def _request_kwargs(self, spec: RequestSpec, indent: str) -> list[str]:
-        """Render headers=..., params=..., cookies=..., body=... kwargs."""
-        lines: list[str] = []
-        for attr, varname in self._DICT_KWARGS:
-            d = getattr(spec, attr)
-            if not d:
-                continue
-            ref = varname if dict_needs_builder(d) else render_dict(d)
-            lines.append(f"{indent}{attr}={ref},")
-        body_result = render_body(spec)
-        if body_result:
-            lines.append(f"{indent}{body_result[0]}={body_result[1]},")
-        return lines
-
     # === REST / fetch: visitors ===
 
     def visit_method_fetch(
         self, node: MethodFetch, ctx: ConverterContext
     ) -> VisitStream:
         assert node.parent is not None
-        spec = self._request_spec(node)
+        spec = node.http_request.with_renamed_placeholders(to_snake_case)
         struct_name = to_pascal_case(node.parent.name)  # type: ignore[attr-defined]
         suffix = ("_" + to_snake_case(node.name)) if node.name else ""
         ph_params = self._placeholder_params(spec)
@@ -1015,6 +796,25 @@ class PyHtmlBase(Visitor):
         i1 = ctx.indent
         i2 = i1 + ctx.indent_char
         i3 = i2 + ctx.indent_char
+
+        # dict builders + request kwargs (shared by sync & async)
+        pre_lines: list[str] = []
+        kwargs_lines: list[str] = [
+            f"{i3}{spec.method!r},",
+            f"{i3}{render_value(spec.url)},",
+        ]
+        for attr, varname in self._DICT_KWARGS:
+            d = getattr(spec, attr)
+            if not d:
+                continue
+            if dict_needs_builder(d):
+                pre_lines.extend(emit_dict_builder(varname, d, i2))
+                kwargs_lines.append(f"{i3}{attr}={varname},")
+            else:
+                kwargs_lines.append(f"{i3}{attr}={render_dict(d)},")
+        body_result = render_body(spec)
+        if body_result:
+            kwargs_lines.append(f"{i3}{body_result[0]}={body_result[1]},")
 
         # response-path post-processing (shared by sync & async)
         post_lines: list[str] = [f"{i2}_resp.raise_for_status()"]
@@ -1033,28 +833,29 @@ class PyHtmlBase(Visitor):
             post_lines.append(f"{i2}_body = _resp.text")
         post_lines.append(f"{i2}return cls(_body)")
 
-        # --- sync ---
+        # sync
         yield f"{i1}@classmethod"
         yield f'{i1}def fetch{suffix}(cls, client: httpx.Client{ph_params}) -> "{struct_name}":'
-        yield self._pre_lines(spec, i2)
-        yield self._request_call(spec, "", i2, i3)
+        yield pre_lines
+        yield [f"{i2}_resp = client.request(", *kwargs_lines, f"{i2})"]
         yield post_lines
         yield ""
-        # --- async ---
+
+        # async
         yield f"{i1}@classmethod"
         yield f'{i1}async def async_fetch{suffix}(cls, client: httpx.AsyncClient{ph_params}) -> "{struct_name}":'
-        yield self._pre_lines(spec, i2)
-        yield self._request_call(spec, "await ", i2, i3)
+        yield pre_lines
+        yield [f"{i2}_resp = await client.request(", *kwargs_lines, f"{i2})"]
         yield post_lines
 
     def visit_method_rest(
         self, node: MethodRest, ctx: ConverterContext
     ) -> VisitStream:
-        spec = self._request_spec(node)
+        spec = node.http_request.with_renamed_placeholders(to_snake_case)
         struct = node.parent
         assert isinstance(struct, StructBase)
         method_name = to_snake_case(node.name) if node.name else "fetch"
-        ret_type = result_alias_name(node.name)
+        ret_type = node.result_alias_name or "None"
         ph_params = self._placeholder_params(spec)
         matchers_var = f"_{to_snake_case(struct.name)}_matchers"
 
@@ -1064,35 +865,52 @@ class PyHtmlBase(Visitor):
 
         doc_line = f'{i2}"""{node.doc}"""' if node.doc else None
 
+        # dict builders + request kwargs (shared by sync & async)
+        pre_lines: list[str] = []
+        kwargs_lines: list[str] = []
+        for attr, varname in self._DICT_KWARGS:
+            d = getattr(spec, attr)
+            if not d:
+                continue
+            if dict_needs_builder(d):
+                pre_lines.extend(emit_dict_builder(varname, d, i2))
+                kwargs_lines.append(f"{i3}{attr}={varname},")
+            else:
+                kwargs_lines.append(f"{i3}{attr}={render_dict(d)},")
+        body_result = render_body(spec)
+        if body_result:
+            kwargs_lines.append(f"{i3}{body_result[0]}={body_result[1]},")
+
         # _value_fn for void responses (no response_schema → value=None)
         void_kwarg: list[str] = []
         if not node.response_schema:
             void_kwarg = [f"{i3}_value_fn=lambda _: None,"]
 
-        def _rest_call(fn_name: str, await_kw: str) -> list[str]:
+        def _body(fn_name: str, await_kw: str) -> list[str]:
             lines: list[str] = []
             if doc_line:
                 lines.append(doc_line)
-            lines.extend(self._pre_lines(spec, i2))
+            lines.extend(pre_lines)
             lines.append(f"{i2}return {await_kw}{fn_name}(")
             lines.append(
                 f"{i3}client, {matchers_var}, {spec.method!r},"
                 f" {render_value(spec.url)},"
             )
             lines.extend(void_kwarg)
-            lines.extend(self._request_kwargs(spec, i3))
+            lines.extend(kwargs_lines)
             lines.append(f"{i2})")
             return lines
 
-        # --- sync ---
+        # sync
         yield f"{i1}@classmethod"
         yield f"{i1}def {method_name}(cls, client: httpx.Client{ph_params}) -> {ret_type}:"
-        yield _rest_call("ssc_rest_call", "")
+        yield _body("ssc_rest_call", "")
         yield ""
-        # --- async ---
+
+        # async
         yield f"{i1}@classmethod"
         yield f"{i1}async def async_{method_name}(cls, client: httpx.AsyncClient{ph_params}) -> {ret_type}:"
-        yield _rest_call("ssc_rest_call_async", "await ")
+        yield _body("ssc_rest_call_async", "await ")
 
     # === string ===
 

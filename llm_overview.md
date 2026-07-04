@@ -25,13 +25,16 @@ ssc_codegen/
 ├── pseudo_selectors.py    # Parse CSS pseudo-selectors (::text, ::raw, ::attr)
 ├── regex_utils.py         # Regex flag handling, unverbosify
 ├── selector_utils.py      # css_to_xpath (cssselect wrapper)
+├── naming.py              # Pure case-conversion helpers (to_pascal_case/to_snake_case/to_camel_case) — no deps, shared by core/ and converters/
+├── request_spec.py        # parse_to_http (curl/raw HTTP → RequestHttp AST node), validate_json_body
 ├── health.py              # Selector health check against real HTML
 ├── ast/                   # AST node definitions
 │   ├── __init__.py        # Re-exports all node types
 │   ├── base.py            # Node abstract base class
 │   ├── types.py           # VariableType, StructType enums
 │   ├── module.py          # Module, Docstring (deprecated), Utilities, CodeStartHook, CodeEndHook
-│   ├── struct.py          # StructBase, Struct, StructRest, Field, Init, InitFieldCall, InitField, PreValidate, SplitDoc, Key, Value, TableConfig, TableMatchKey, TableRows, CheckMethod, StartParse, MethodBase, MethodFetch, MethodRest, RequestHttp, PlaceholderSpec, ErrorResponse
+│   ├── struct.py          # StructBase, Struct, StructRest, Field, Init, InitFieldCall, InitField, PreValidate, SplitDoc, Key, Value, TableConfig, TableMatchKey, TableRows, CheckMethod, StartParse, MethodBase, MethodFetch, MethodRest, RequestHttp, Template (tokenized literal/placeholder parts), PlaceholderSpec, ErrorResponse
+│   ├── rest.py            # ResultVariantDef, ResultAliasDef, MatcherEntry, MatcherListDef (synthesized REST result-artifact nodes)
 │   ├── selectors.py       # CssSelect, CssSelectAll, XpathSelect, XpathSelectAll, CssRemove, XpathRemove
 │   ├── extract.py         # Text, Raw, Attr
 │   ├── string.py          # Trim, Ltrim, Rtrim, NormalizeSpace, RmPrefix, RmSuffix, RmPrefixSuffix, Fmt, Repl, ReplMap, Lower, Upper, Split, Join, Unescape
@@ -50,6 +53,7 @@ ssc_codegen/
 │   ├── adapter.py         # NodeAdapter — KdlNode → handler protocol
 │   ├── contexts.py        # ParseContext, LintContext, ErrorCode, WalkCtx
 │   ├── expressions.py     # Pipeline expression parsing, typedef_from_struct
+│   ├── rest_artifacts.py  # rest_artifacts_from_struct — synthesizes ResultVariantDef/ResultAliasDef/MatcherListDef from StructRest (mirrors typedef_from_struct); owns err_subclass_name
 │   ├── predicates.py      # Predicate expression parsing
 │   ├── struct_parser.py   # Struct body parsing
 │   ├── module_handler.py  # handle_define, handle_json, handle_struct, handle_transform, resolve_imports
@@ -138,7 +142,7 @@ Targets: py-bs4, py-lxml, py-parsel, py-slax, js-pure
 6. **Integrated linting**: parsing and linting happen in one pass via `core/`.
 7. **Type-tagged containers**: VariableType/StructType enums enforce strict typing at AST level.
 8. **Recursive nesting**: `Nested` node resolves via struct_map with cycle detection.
-9. **Transport layer**: `@request` stores raw payload in `RequestHttp`; `converters/request_spec.py` normalises curl/HTTP into `RequestSpec`; converters emit fetch methods per target HTTP client.
+9. **Transport layer**: `@request` stores raw payload in `RequestHttp`; `request_spec.parse_to_http` normalises curl/HTTP into a `RequestHttp` AST node whose string fields (url, headers, cookies, params, body) are `Template` instances — tokenized into `list[str | PlaceholderSpec]` parts at parse time. Converters call `RequestHttp.with_renamed_placeholders(transform)` to adapt placeholder names per target language (walks structured parts, no string rewriting); renderers walk `Template.parts` instead of regex-parsing strings. REST result artifacts (error subclasses, result aliases, matcher lists) are synthesized as AST nodes (`ResultVariantDef`/`ResultAliasDef`/`MatcherListDef` in `ast/rest.py`) by `core/rest_artifacts.py`, inserted before the `StructRest` — mirroring how `TypeDef` is synthesized from `Struct`.
 10. **Runtime separation**: `--separate-runtime` extracts helper functions into a standalone module; generated parsers import from it instead of inlining.
 
 ---

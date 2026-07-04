@@ -140,24 +140,52 @@ Flat module that assembles the separate runtime file emitted by `-R` /
 The main module's `from .{runtime} import ...` line is emitted by
 `py_base.py:_runtime_export_names` (mirrors the same symbol set).
 
-## RequestSpec pipeline (converters/request_spec.py)
+## RequestHttp pipeline (request_spec.py + ast/struct.py)
 
-`parse_to_spec(raw_payload) → RequestSpec` — parses curl/raw HTTP into normalized form.
-`normalize_placeholder_names(spec, transform) → RequestSpec` — adapts placeholder names.
+`parse_to_http(raw_payload) → RequestHttp` — parses curl/raw HTTP into the
+`RequestHttp` AST node. String fields (url, headers, cookies, params, body) are
+`Template` instances: tokenized into `list[str | PlaceholderSpec]` parts at parse
+time via `Template.parse`. Placeholder identity is structural (PlaceholderSpec
+inline in parts), not text-embedded.
 
-Request rendering is currently per-dialect (not shared):
-- Python: `render_value`, `render_dict`, `emit_dict_builder`, `render_json_body`, `render_body` in py_base.py
-- JS: `_js_render_value`, `_js_render_obj`, `_js_emit_obj_builder`, `_js_render_json_body`, `_js_render_body` in js_pure.py
+`RequestHttp.with_renamed_placeholders(transform) → RequestHttp` — returns a
+copy with placeholder names passed through a target-language transform
+(`to_snake_case` for Python, `to_camel_case` for JS). Walks structured parts,
+replacing `PlaceholderSpec.name` — **no string rewriting, no regex**.
+
+Renderers walk `Template.parts` instead of regex-parsing strings:
+- Python: `render_value(Template)`, `render_dict`, `emit_dict_builder`, `render_json_body`, `render_body` in py_base.py
+- JS: `_js_render_value(Template)`, `_js_render_obj`, `_js_emit_*_builder`, `_js_render_json_body`, `_js_render_body` in js_pure.py
+- `Template.map(on_ph, on_literal)` assembles a string from parts (used by JS template-literal rendering)
+- `Template.single_placeholder()` / `is_single_placeholder` — queries for dict-entry / bare-name cases
+
+## REST result artifacts (ast/rest.py + core/rest_artifacts.py)
+
+REST result types are modeled as synthesizable AST nodes, mirroring
+`TypeDef`/`JsonDef`. `core/rest_artifacts.py:rest_artifacts_from_struct`
+builds them from a `StructRest` and they are inserted into `Module.body`
+before the struct by `core/reader.py` (same pattern as `typedef_from_struct`).
+
+| Node | Carries | Visitor emits |
+|------|---------|---------------|
+| `ResultVariantDef` | name, status, schema_name, schema_is_array (RAW) | per-error subclass decl (`@dataclass class XErr(Err[T])` / JSDoc `@typedef`) |
+| `ResultAliasDef` | name, response_schema, response_is_array, err_variants | per-method union alias (`XResult = Union[...]`); also stamps `result_alias_name` on the matching `MethodRest` |
+| `MatcherListDef` | struct_name, entries: list[MatcherEntry] | per-struct matchers list (`_x_matchers = [ErrMatcher(...)]`); visitor renders the var-name spelling + check expression per language |
+
+`MatcherEntry` carries RAW condition data (`required_keys` + `conditions`) —
+each language renders its own check spelling (`lambda _b: ...` in Python,
+`(_b) => ...` in JS). The synthesizer is language-agnostic; `err_subclass_name`
+lives in `core/rest_artifacts.py` (re-exported by `converters/visitor.py`).
+
+`visit_struct_rest` is now a pure header emitter — it no longer calls
+procedural `emit_*` functions.
 
 ---
 
 ## Transport layer (@request) — codegen behavior
 
 Optional struct-level directive that embeds a raw HTTP request or POSIX curl command.
-Parsed at codegen time via `converters/request_spec.py`.
-
-`RequestHttp` node (child of `MethodBase`) stores normalized HTTP config:
-`method`, `url`, `headers`, `cookies`, `params`, `body_kind`, `body`.
+Parsed at codegen time via `request_spec.py:parse_to_http` into a `RequestHttp` AST node.
 
 Two visitor nodes:
 - `MethodFetch` — for HTML-parser structs: emits `fetch()` / `async_fetch()` classmethods

@@ -1,77 +1,29 @@
 """
-RequestSpec — normalised intermediate form produced at codegen-time from a raw
-@request payload.  Converters consume RequestSpec to emit explicit fetch() code
-for a target HTTP library; no ssc_codegen import appears in generated code.
+@request payload parsing — curl / raw HTTP → ``RequestHttp`` AST node.
+
+``parse_to_http`` is the entry point consumed at parse time by
+``core/struct_parser.py``.  Converters read ``RequestHttp`` fields directly
+(or call ``RequestHttp.with_renamed_placeholders`` to adapt placeholder
+names to the target language) instead of going through an intermediate form.
 """
 
 from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
-from typing import Callable
 from urllib.parse import urlparse, urlunparse
 
-from ssc_codegen.ast.struct import PlaceholderSpec
+from ssc_codegen.ast.struct import PlaceholderSpec, RequestHttp, Template
 from ssc_codegen.parsers.curl import parse_curl_command
 from ssc_codegen.parsers.http import parse_http_request
 
-# ── RequestSpec ───────────────────────────────────────────────────────────────
+
+def _tmpl_dict(d: dict) -> dict[str, Template]:
+    """Wrap every dict value in a Template."""
+    return {k: Template.parse(str(v)) for k, v in d.items()}
 
 
-@dataclass
-class RequestSpec:
-    method: str  # "GET", "POST", …
-    url: str  # base URL, no query string
-    headers: dict[str, str] = field(default_factory=dict)
-    cookies: dict[str, str] = field(default_factory=dict)
-    params: dict[str, str] = field(default_factory=dict)
-    body_kind: str = "empty"  # "empty" | "json" | "form" | "raw"
-    body: str | dict | None = None  # raw template string or form dict
-
-    @property
-    def placeholders(self) -> list[PlaceholderSpec]:
-        """All unique placeholders in declaration order across every field."""
-        seen: set[str] = set()
-        result: list[PlaceholderSpec] = []
-        for text in _iter_strings(self):
-            for spec in PlaceholderSpec.find_all(text):
-                if spec.name not in seen:
-                    seen.add(spec.name)
-                    result.append(spec)
-        return result
-
-    @property
-    def placeholder_names(self) -> list[str]:
-        """Unique placeholder names in declaration order."""
-        return [p.name for p in self.placeholders]
-
-
-def _iter_strings(spec: RequestSpec):
-    """Yield every string value that may contain placeholders."""
-    yield spec.url
-    yield from spec.headers.values()
-    yield from spec.cookies.values()
-    yield from spec.params.values()
-    if isinstance(spec.body, str) and spec.body:
-        yield spec.body
-    elif isinstance(spec.body, dict):
-        yield from _iter_dict_strings(spec.body)
-
-
-def _iter_dict_strings(d: dict):
-    for v in d.values():
-        if isinstance(v, str):
-            yield v
-        elif isinstance(v, dict):
-            yield from _iter_dict_strings(v)
-        elif isinstance(v, list):
-            for item in v:
-                if isinstance(item, str):
-                    yield item
-
-
-# ── Parser → RequestSpec ─────────────────────────────────────────────────────
+# ── Parser → RequestHttp ──────────────────────────────────────────────────────
 
 
 def _strip_query(url: str) -> str:
@@ -91,11 +43,11 @@ def _detect_format(payload: str) -> str:
     )
 
 
-def parse_to_spec(payload: str) -> RequestSpec:
+def parse_to_http(payload: str) -> RequestHttp:
     """
-    Parse a raw @request payload (curl or raw HTTP, with {{placeholders}})
-    into a RequestSpec.  Placeholders are preserved as-is so the converter
-    can render them as named parameters.
+    Parse a raw @request payload (curl or raw HTTP, with ``{{placeholders}}``)
+    into a ``RequestHttp`` AST node.  Placeholders are preserved as-is so the
+    converter can render them as named parameters.
     """
     fmt = _detect_format(payload)
     if fmt == "curl":
@@ -112,7 +64,7 @@ def parse_to_spec(payload: str) -> RequestSpec:
 
     # ── body ─────────────────────────────────────────────────────────────────
     body_kind = "empty"
-    body: str | dict[str, str] | None = None
+    body: Template | dict[str, Template] | None = None
     content_type = headers.get("Content-Type", "").lower()
 
     if "json" in kwargs or (
@@ -121,28 +73,26 @@ def parse_to_spec(payload: str) -> RequestSpec:
         body_kind = "json"
         raw_body = _extract_raw_body(payload, fmt)
         validate_json_body(raw_body)
-        body = raw_body  # kept as raw str; rendered as f-string
+        body = Template.parse(raw_body)  # rendered as f-string
 
     elif "data" in kwargs:
         raw_body = _extract_raw_body(payload, fmt)
         if isinstance(kwargs["data"], dict):
             body_kind = "form"
-            body = kwargs[
-                "data"
-            ]  # dict with original values (may have placeholders)
+            body = _tmpl_dict(kwargs["data"])
         elif "application/x-www-form-urlencoded" in content_type:
             body_kind = "form"
-            body = _parse_urlencoded_body(raw_body)
+            body = _tmpl_dict(_parse_urlencoded_body(raw_body))
         else:
             body_kind = "raw"
-            body = raw_body
+            body = Template.parse(raw_body)
 
-    return RequestSpec(
+    return RequestHttp(
         method=method,
-        url=url,
-        headers=headers,
-        cookies=cookies,
-        params=params,
+        url=Template.parse(url),
+        headers=_tmpl_dict(headers),
+        cookies=_tmpl_dict(cookies),
+        params=_tmpl_dict(params),
         body_kind=body_kind,
         body=body,
     )
@@ -207,10 +157,10 @@ _PH_SENTINEL = "0"
 
 def validate_json_body(raw: str) -> None:
     """
-    Validate JSON body that may contain {{placeholders}}.
+    Validate JSON body that may contain ``{{placeholders}}``.
 
-    Strategy: replace every {{name}} with a valid JSON string sentinel, then
-    attempt json.loads().  If it still fails the JSON is genuinely malformed.
+    Strategy: replace every ``{{name}}`` with a valid JSON string sentinel, then
+    attempt ``json.loads()``.  If it still fails the JSON is genuinely malformed.
 
     Raises:
         ValueError: with a clear message pointing at the parse error.
@@ -226,42 +176,3 @@ def validate_json_body(raw: str) -> None:
             f"{exc.msg}\n"
             f"  body: {raw!r}"
         ) from exc
-
-
-# ── Placeholder name normalization ───────────────────────────────────────────
-
-
-def normalize_placeholder_names(
-    spec: RequestSpec, transform: Callable[[str], str]
-) -> RequestSpec:
-    """Return a copy of *spec* with every placeholder name passed through *transform*.
-
-    Call this before rendering so that ``{{page-num:int[]?|csv}}`` becomes e.g.
-    ``{{page_num:int[]?|csv}}`` (Python) or ``{{pageNum:int[]?|csv}}`` (JS).
-    Type/array/optional/style suffixes are preserved; only NAME changes.
-    """
-    mapping = {ph.name: transform(ph.name) for ph in spec.placeholders}
-    if all(old == new for old, new in mapping.items()):
-        return spec
-
-    def _sub(text: str) -> str:
-        return PlaceholderSpec.rename(text, mapping)
-
-    def _sub_dict(d: dict) -> dict:
-        return {k: _sub(str(v)) for k, v in d.items()}
-
-    new_body = spec.body
-    if isinstance(spec.body, str):
-        new_body = _sub(spec.body)
-    elif isinstance(spec.body, dict):
-        new_body = _sub_dict(spec.body)
-
-    return RequestSpec(
-        method=spec.method,
-        url=_sub(spec.url),
-        headers=_sub_dict(spec.headers),
-        cookies=_sub_dict(spec.cookies),
-        params=_sub_dict(spec.params),
-        body_kind=spec.body_kind,
-        body=new_body,
-    )

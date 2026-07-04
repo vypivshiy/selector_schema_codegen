@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ssc_codegen.ast import Module
+from ssc_codegen.ast import Module, StructRest
 from ssc_codegen.exceptions import BuildTimeError, ParseError
 from kdlquery import KDLParseError, parse as kdl_parse
 from kdlquery import ReadDiagnostic, Severity
@@ -13,6 +13,7 @@ from kdlquery.types import Position, Span
 from ssc_codegen.core.contexts import LintContext, ParseContext
 from ssc_codegen.core.linter import lint_cross_refs, lint_module
 from ssc_codegen.core.expressions import typedef_from_struct
+from ssc_codegen.core.rest_artifacts import rest_artifacts_from_struct
 from ssc_codegen.core.module_handler import (
     handle_define,
     handle_json,
@@ -83,8 +84,14 @@ def parse_module(
                 pass  # already reported by structural linter
             lint.pop()
 
-        # wire module body
-        module.body.extend(list(ctx.json_defs.values()) + typedefs + structs)
+        # wire module body — interleave each struct's typedef + REST artifacts
+        # before the struct itself (mirrors TypeDef-before-Struct ordering)
+        module.body.extend(ctx.json_defs.values())
+        for typedef, struct in zip(typedefs, structs):
+            module.body.append(typedef)
+            if isinstance(struct, StructRest):
+                module.body.extend(rest_artifacts_from_struct(struct, module))
+            module.body.append(struct)
 
         # merge lint diagnostics into walker diagnostics
         diagnostics.extend(lint.diagnostics)

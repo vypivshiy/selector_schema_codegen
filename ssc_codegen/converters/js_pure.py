@@ -83,8 +83,13 @@ from ssc_codegen.ast import (
     ReSub,
     Repl,
     ReplMap,
+    RequestHttp,
+    ResultAliasDef,
+    ResultVariantDef,
+    MatcherListDef,
     Return,
     RmPrefix,
+    Template,
     RmPrefixSuffix,
     RmSuffix,
     Rtrim,
@@ -130,15 +135,10 @@ from ssc_codegen.converters.visitor import (
     TRAVERSE,
     VisitStream,
     Visitor,
-    dict_entry_placeholder,
     dict_needs_builder,
     err_subclass_name,
     find_predicate_container,
     module_has_rest,
-)
-from ssc_codegen.request_spec import (
-    RequestSpec,
-    normalize_placeholder_names,
 )
 
 import re as _re
@@ -252,11 +252,17 @@ def _js_resolve_path_expr(body_var: str, path: str) -> str:
     return expr
 
 
-def _js_render_condition_lambda(err: ErrorResponse) -> str | None:
+def _render_js_condition_check(
+    required_keys: list[str], conditions: dict[str, object]
+) -> str | None:
+    """Render a JS ``(_b) => ...`` check from raw condition data.
+
+    Consumed by ``visit_matcher_list_def``.
+    """
     parts: list[str] = []
-    for key in err.required_keys:
+    for key in required_keys:
         parts.append(f"{key!r} in _b")
-    for path, value in err.conditions.items():
+    for path, value in conditions.items():
         lhs = _js_resolve_path_expr("_b", path)
         if isinstance(value, bool):
             parts.append(f"{lhs} === {str(value).lower()}")
@@ -269,19 +275,6 @@ def _js_render_condition_lambda(err: ErrorResponse) -> str | None:
     if not parts:
         return None
     return f"(_b) => {' && '.join(parts)}"
-
-
-def _js_err_value_type(err: ErrorResponse, struct: StructBase) -> str:
-    schema = err.schema_name
-    if not schema:
-        return "*"
-    type_name = f"{to_pascal_case(schema)}Json"
-    module = struct.parent
-    if module is not None:
-        for n in module.body:
-            if isinstance(n, JsonDef) and n.name == schema and n.is_array:
-                return f"Array<{type_name}>"
-    return type_name
 
 
 REST_TYPEDEFS: list[str] = [
@@ -381,29 +374,6 @@ REST_TYPEDEFS: list[str] = [
 ]
 
 
-def _js_emit_matchers(node: StructRest) -> list[str]:
-    name = to_snake_case(node.name)
-    var = f"_{name}Matchers"
-    seen: set[str] = set()
-    entries: list[str] = []
-    for err in node.errors:
-        cls_name = err_subclass_name(node.name, err)
-        if cls_name in seen:
-            continue
-        seen.add(cls_name)
-        check = _js_render_condition_lambda(err)
-        check_arg = check if check else "null"
-        entries.append(
-            f"    {{ status: {err.status}, check: {check_arg}, "
-            f"factory: (_s, _h, _b) => ({{ isOk: false, status: _s, "
-            f"headers: _h, value: _b }}) }},"
-        )
-    lines = [f"const {var} = ["]
-    lines.extend(entries)
-    lines.append("];")
-    return lines
-
-
 # ===========================================================================
 # StartParse helpers
 # ===========================================================================
@@ -437,35 +407,34 @@ def _js_array_join(ph: PlaceholderSpec) -> str:
     return f"{ph.name}.map(String).join({sep!r})"
 
 
-def _js_render_value(v: str) -> str:
-    if ph := PlaceholderSpec.parse(v):
+def _js_render_value(tmpl: Template) -> str:
+    if ph := tmpl.single_placeholder():
         if ph.is_array and ph.style in ("csv", "pipe", "space"):
             return _js_array_join(ph)
         return ph.name
-    if PlaceholderSpec.search(v):
-        inner = v.replace("\\", "\\\\").replace("`", "\\`")
-        inner = PlaceholderSpec.sub(inner, lambda ph: "${" + ph.name + "}")
+    if tmpl.has_placeholders:
+        inner = tmpl.map(
+            lambda ph: "${" + ph.name + "}",
+            lambda s: s.replace("\\", "\\\\").replace("`", "\\`"),
+        )
         return f"`{inner}`"
-    return repr(v)
+    return repr(tmpl.source)
 
 
-def _js_render_obj(d: dict[str, str]) -> str:
+def _js_render_obj(d: dict[str, Template]) -> str:
     if not d:
         return "{}"
-    inner = ", ".join(
-        f"{k!r}: {_js_render_value(str(v))}" for k, v in d.items()
-    )
+    inner = ", ".join(f"{k!r}: {_js_render_value(v)}" for k, v in d.items())
     return "{" + inner + "}"
 
 
 def _js_emit_obj_builder(
-    varname: str, d: dict[str, str], indent: str
+    varname: str, d: dict[str, Template], indent: str
 ) -> list[str]:
     lines = [f"{indent}const {varname} = {{}};"]
-    for key, value in d.items():
-        value = str(value)
-        ph = dict_entry_placeholder(value)
-        expr = _js_render_value(value)
+    for key, tmpl in d.items():
+        ph = tmpl.single_placeholder()
+        expr = _js_render_value(tmpl)
         if ph is not None and ph.is_optional:
             lines.append(
                 f"{indent}if ({ph.name} !== undefined && {ph.name} !== null) "
@@ -477,15 +446,14 @@ def _js_emit_obj_builder(
 
 
 def _js_emit_params_builder(
-    varname: str, d: dict[str, str], indent: str
+    varname: str, d: dict[str, Template], indent: str
 ) -> list[str]:
     lines = [f"{indent}const {varname} = new URLSearchParams();"]
-    for key, value in d.items():
-        value = str(value)
-        ph = dict_entry_placeholder(value)
+    for key, tmpl in d.items():
+        ph = tmpl.single_placeholder()
         if ph is None:
             lines.append(
-                f"{indent}{varname}.set({key!r}, {_js_render_value(value)});"
+                f"{indent}{varname}.set({key!r}, {_js_render_value(tmpl)});"
             )
             continue
         effective_key = (
@@ -510,21 +478,25 @@ def _js_emit_params_builder(
     return lines
 
 
-def _js_render_json_body(raw: str) -> str:
-    inner = raw.replace("\\", "\\\\").replace("`", "\\`")
-    inner = PlaceholderSpec.sub(inner, lambda ph: "${" + ph.name + "}")
+def _js_render_json_body(tmpl: Template) -> str:
+    inner = tmpl.map(
+        lambda ph: "${" + ph.name + "}",
+        lambda s: s.replace("\\", "\\\\").replace("`", "\\`"),
+    )
     return f"`{inner}`"
 
 
-def _js_render_body(spec: RequestSpec) -> tuple[str, str] | None:
+def _js_render_body(spec: RequestHttp) -> tuple[str, str] | None:
     if spec.body_kind == "empty" or spec.body is None:
         return None
     if spec.body_kind == "json":
-        return ("body", _js_render_json_body(str(spec.body)))
+        assert isinstance(spec.body, Template)
+        return ("body", _js_render_json_body(spec.body))
     if spec.body_kind == "form":
         assert isinstance(spec.body, dict)
         return ("body", f"new URLSearchParams({_js_render_obj(spec.body)})")
-    return ("body", _js_render_value(str(spec.body)))
+    assert isinstance(spec.body, Template)
+    return ("body", _js_render_value(spec.body))
 
 
 def _js_name(name: str) -> str:
@@ -533,18 +505,7 @@ def _js_name(name: str) -> str:
 
 def _js_build_request_args(node: MethodBase, ctx: ConverterContext):
     http = node.http_request
-    spec = normalize_placeholder_names(
-        RequestSpec(
-            method=http.method,
-            url=http.url,
-            headers=dict(http.headers),
-            cookies=dict(http.cookies),
-            params=dict(http.params),
-            body_kind=http.body_kind,
-            body=http.body,
-        ),
-        _js_name,
-    )
+    spec = http.with_renamed_placeholders(_js_name)
     http_client = ctx.meta.get("http_client", "fetch")
     ind = ctx.indent_char
     i1, i2, i3, i4 = (ctx.indent + ind * n for n in range(4))
@@ -743,30 +704,53 @@ class JsPure(Visitor):
     def visit_struct_rest(
         self, node: StructRest, ctx: ConverterContext
     ) -> VisitStream:
-        seen: set[str] = set()
-        for err in node.errors:
-            cls_name = err_subclass_name(node.name, err)
-            if cls_name in seen:
-                continue
-            seen.add(cls_name)
-            value_type = _js_err_value_type(err, node)
-            yield [
-                "/**",
-                f" * @typedef {{Object}} {cls_name}",
-                " * @property {false} isOk",
-                f" * @property {{{err.status}}} status",
-                " * @property {Object<string, string>} headers",
-                f" * @property {{{value_type}}} value",
-                " */",
-                "",
-            ]
-        matchers = _js_emit_matchers(node)
-        if matchers:
-            yield matchers
-            yield ""
+        # Pure header emitter — error JSDoc typedefs, result aliases and
+        # matcher lists are now synthesized sibling nodes emitted before this
+        # struct (visit_result_variant_def / visit_matcher_list_def).
         yield _js_struct_header(node)
         yield TRAVERSE
         yield "}"
+
+    def visit_result_variant_def(
+        self, node: ResultVariantDef, ctx: ConverterContext
+    ) -> VisitStream:
+        if node.schema_name:
+            base = f"{to_pascal_case(node.schema_name)}Json"
+            value_type = f"Array<{base}>" if node.schema_is_array else base
+        else:
+            value_type = "*"
+        yield [
+            "/**",
+            f" * @typedef {{Object}} {node.name}",
+            " * @property {false} isOk",
+            f" * @property {{{node.status}}} status",
+            " * @property {Object<string, string>} headers",
+            f" * @property {{{value_type}}} value",
+            " */",
+            "",
+        ]
+
+    def visit_result_alias_def(
+        self, node: ResultAliasDef, ctx: ConverterContext
+    ) -> VisitStream:
+        # JS has no named result aliases — unions are inlined in @returns JSDoc
+        # on each method (see visit_method_rest).
+        return
+
+    def visit_matcher_list_def(
+        self, node: MatcherListDef, ctx: ConverterContext
+    ) -> VisitStream:
+        var = f"_{to_snake_case(node.struct_name)}Matchers"
+        yield f"const {var} = ["
+        for e in node.entries:
+            check = _render_js_condition_check(e.required_keys, e.conditions)
+            check_arg = check if check else "null"
+            yield (
+                f"    {{ status: {e.status}, check: {check_arg}, "
+                f"factory: (_s, _h, _b) => ({{ isOk: false, status: _s, "
+                f"headers: _h, value: _b }}) }},"
+            )
+        yield "];"
 
     def visit_init(self, node: Init, ctx: ConverterContext) -> VisitStream:
         if isinstance(node.parent, StructRest):
@@ -1811,9 +1795,9 @@ class JsPure(Visitor):
                 opts_parts.append(f"data: {body_expr}")
         else:
             if params_expr:
-                url_inner = PlaceholderSpec.sub(
-                    spec.url.replace("`", "\\`"),
+                url_inner = spec.url.map(
                     lambda ph: "${" + ph.name + "}",
+                    lambda s: s.replace("`", "\\`"),
                 )
                 if params_expr == "_params":
                     url_expr = f"`{url_inner}?${{{params_expr}.toString()}}`"
@@ -1902,9 +1886,9 @@ class JsPure(Visitor):
 
         if http_client == "fetch":
             if params_expr:
-                url_inner = PlaceholderSpec.sub(
-                    spec.url.replace("`", "\\`"),
+                url_inner = spec.url.map(
                     lambda ph: "${" + ph.name + "}",
+                    lambda s: s.replace("`", "\\`"),
                 )
                 url_expr = (
                     f"`{url_inner}?${{new URLSearchParams({params_expr})}}`"
@@ -1916,7 +1900,7 @@ class JsPure(Visitor):
                 options.append(f"{i3}headers: {headers_expr},")
             if spec.cookies:
                 cookie_str = "; ".join(
-                    f"{k}={v}" for k, v in spec.cookies.items()
+                    f"{k}={v.source}" for k, v in spec.cookies.items()
                 )
                 options.append(
                     f"{i3}// cookies: {cookie_str!r}  /* set via headers or credentials */"

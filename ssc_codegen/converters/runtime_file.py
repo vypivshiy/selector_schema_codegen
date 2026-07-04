@@ -68,36 +68,46 @@ _BASE_UTILITY_LINES: list[str] = [
 # ---------------------------------------------------------------------------
 
 
-def _rest_utility_lines() -> list[str]:
+def rest_runtime_lines() -> list[str]:
+    """Canonical source for the REST runtime (Ok/Err/TransportErr/ErrMatcher
+    + ``ssc_dispatch_err`` / ``ssc_rest_call[_async]``).
+
+    Consumed by:
+      - ``py_base.visit_utilities`` (inline mode — yields each line)
+      - ``runtime_module_content`` (``-R`` separate-runtime mode — joins)
+
+    Blank lines are empty strings (``""``) so both consumers render them
+    identically (yield-as-line vs ``"\\n".join``).
+    """
     return [
         "_T = TypeVar('_T')",
         "_E = TypeVar('_E')",
-        "\n",
+        "",
         "@dataclass(frozen=True)",
         "class Ok(Generic[_T]):",
         "    status: int = 0",
         "    headers: Mapping[str, str] = field(default_factory=dict)",
         "    value: _T = None  # type: ignore[assignment]",
         "    is_ok: Literal[True] = True",
-        "\n",
+        "",
         "@dataclass(frozen=True)",
         "class Err(Generic[_E]):",
         "    status: int = 0",
         "    headers: Mapping[str, str] = field(default_factory=dict)",
         "    value: _E = None  # type: ignore[assignment]",
         "    is_ok: Literal[False] = False",
-        "\n",
+        "",
         "@dataclass(frozen=True)",
         "class UnknownErr(Err[Any]):",
         "    pass",
-        "\n",
+        "",
         "@dataclass(frozen=True)",
         "class TransportErr(Err[None]):",
         "    status: Literal[0] = 0",
         "    cause: str = ''",
         "    value: None = None",
         "    headers: Mapping[str, str] = field(default_factory=dict)",
-        "\n",
+        "",
         "@dataclass(frozen=True)",
         "class ErrMatcher:",
         "    status: int",
@@ -111,7 +121,8 @@ def _rest_utility_lines() -> list[str]:
         "            if not isinstance(_b, dict) or not self.check(_b):",
         "                return None",
         "        return self.factory(headers=_h, value=_b)",
-        "\n\n",
+        "",
+        "",
         "def ssc_dispatch_err(_matchers, _status: int, _headers, _body):",
         "    for _m in _matchers:",
         "        _err = _m.match(_status, _headers, _body)",
@@ -120,7 +131,8 @@ def _rest_utility_lines() -> list[str]:
         "    if 200 <= _status < 300:",
         "        return None",
         "    return UnknownErr(status=_status, headers=_headers, value=_body)",
-        "\n\n",
+        "",
+        "",
         "def ssc_rest_call(client, _matchers, method, url, _value_fn=None, **kw):",
         "    try:",
         "        _resp = client.request(method, url, **kw)",
@@ -137,7 +149,8 @@ def _rest_utility_lines() -> list[str]:
         "        return _err",
         "    _value = _body if _value_fn is None else _value_fn(_body)",
         "    return Ok(status=_status, headers=_headers, value=_value)",
-        "\n\n",
+        "",
+        "",
         "async def ssc_rest_call_async(client, _matchers, method, url, _value_fn=None, **kw):",
         "    try:",
         "        _resp = await client.request(method, url, **kw)",
@@ -154,7 +167,7 @@ def _rest_utility_lines() -> list[str]:
         "        return _err",
         "    _value = _body if _value_fn is None else _value_fn(_body)",
         "    return Ok(status=_status, headers=_headers, value=_value)",
-        "\n\n",
+        "",
     ]
 
 
@@ -180,7 +193,7 @@ def runtime_module_content(module: a.Module) -> str:
     lines.extend(_BASE_UTILITY_LINES)
     lines.append("")
     if has_rest:
-        lines.extend(_rest_utility_lines())
+        lines.extend(rest_runtime_lines())
     return "\n".join(lines)
 
 

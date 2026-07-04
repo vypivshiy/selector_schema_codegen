@@ -18,7 +18,6 @@ from ssc_codegen.ast import (
     MethodRest,
     Node,
     PreValidate,
-    RequestHttp,
     SplitDoc,
     StartParse,
     StructBase,
@@ -32,7 +31,7 @@ from ssc_codegen.ast import (
     Value,
     VariableType,
 )
-from ssc_codegen.request_spec import parse_to_spec
+from ssc_codegen.request_spec import parse_to_http
 from kdlquery import KdlNode
 
 from ssc_codegen.core.contexts import LintContext, ParseContext, WalkCtx
@@ -106,16 +105,7 @@ def parse_struct(
             raw_payload = str(
                 ctx.property_defines.get(node.args[0].value, node.args[0].value)
             )
-            spec = parse_to_spec(raw_payload)
-            http = RequestHttp(
-                method=spec.method,
-                url=spec.url,
-                headers=spec.headers,
-                cookies=spec.cookies,
-                params=spec.params,
-                body_kind=spec.body_kind,
-                body=spec.body,
-            )
+            http = parse_to_http(raw_payload)
             method_name = node.get_prop("name") or ""
             if isinstance(parent, StructRest):
                 rest_method = MethodRest(parent=parent, name=method_name)

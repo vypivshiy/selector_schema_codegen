@@ -22,6 +22,13 @@ from .typedef import TypeDef, TypeDefField
 
 from .jsondef import JsonDef, JsonDefField
 
+from .rest import (
+    ResultVariantDef,
+    ResultAliasDef,
+    MatcherEntry,
+    MatcherListDef,
+)
+
 from .struct import (
     StructBase,
     Struct,
@@ -44,6 +51,7 @@ from .struct import (
     MethodRest,
     ErrorResponse,
     PlaceholderSpec,
+    Template,
     Field,
     StartParse,
 )
@@ -163,8 +171,14 @@ __all__ = [
     "MethodRest",
     "ErrorResponse",
     "PlaceholderSpec",
+    "Template",
     "Field",
     "StartParse",
+    # REST result artifacts (synthesized)
+    "ResultVariantDef",
+    "ResultAliasDef",
+    "MatcherEntry",
+    "MatcherListDef",
     # selectors
     "CssSelect",
     "CssSelectAll",
