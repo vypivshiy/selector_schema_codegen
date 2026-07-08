@@ -52,8 +52,6 @@ from ssc_codegen.ast import (
     Module,
     Nested,
     NormalizeSpace,
-    PlaceholderSpec,
-    PlaceholderTemplate,
     PreValidate,
     PredAttrContains,
     PredAttrEnds,
@@ -89,7 +87,6 @@ from ssc_codegen.ast import (
     ReSub,
     Repl,
     ReplMap,
-    RequestHttp,
     ResultAliasDef,
     ResultVariantDef,
     MatcherListDef,
@@ -128,15 +125,14 @@ from ssc_codegen.ast import (
     XpathSelect,
     XpathSelectAll,
 )
-from ssc_codegen.naming import to_camel_case, to_pascal_case, to_snake_case
+from ssc_codegen.naming import to_camel_case, to_pascal_case
 from ssc_codegen.traversal.utils import (
-    dict_needs_builder,
-    err_subclass_name,
     find_predicate_container,
     jsonify_path_to_segments,
     module_has_rest,
 )
 from ssc_codegen.generation.builder import ModuleBuilder
+from ssc_codegen.targets.javascript import rest
 from ssc_codegen.targets.javascript.http_libs.axios import AxiosStrategy
 from ssc_codegen.targets.javascript.http_libs.base import JsHttpLibStrategy
 from ssc_codegen.targets.javascript.http_libs.fetch import FetchStrategy
@@ -210,104 +206,6 @@ def _pred_attr_target(node, ctx: WalkContext) -> str:
 
 
 # ===========================================================================
-# REST infrastructure
-# ===========================================================================
-
-
-def _js_resolve_path_expr(body_var: str, path: str) -> str:
-    expr = body_var
-    for seg in path.split("."):
-        if seg.isdigit():
-            expr += f"[{seg}]"
-        else:
-            expr += f"[{seg!r}]"
-    return expr
-
-
-def _render_js_condition_check(
-    required_keys: list[str], conditions: dict[str, object]
-) -> str | None:
-    """Render a JS ``(_b) => ...`` check from raw condition data.
-
-    Consumed by ``visit_matcher_list_def``.
-    """
-    parts: list[str] = []
-    for key in required_keys:
-        parts.append(f"{key!r} in _b")
-    for path, value in conditions.items():
-        lhs = _js_resolve_path_expr("_b", path)
-        if isinstance(value, bool):
-            parts.append(f"{lhs} === {str(value).lower()}")
-        elif value is None:
-            parts.append(f"{lhs} === null")
-        elif isinstance(value, (int, float)):
-            parts.append(f"{lhs} === {value}")
-        else:
-            parts.append(f"{lhs} === {value!r}")
-    if not parts:
-        return None
-    return f"(_b) => {' && '.join(parts)}"
-
-
-REST_SHARED: list[str] = [
-    "/**",
-    " * @template T",
-    " * @typedef {Object} Ok",
-    " * @property {true} isOk",
-    " * @property {number} status",
-    " * @property {Object<string, string>} headers",
-    " * @property {T} value",
-    " */",
-    "",
-    "/**",
-    " * @template E",
-    " * @typedef {Object} Err",
-    " * @property {false} isOk",
-    " * @property {number} status",
-    " * @property {Object<string, string>} headers",
-    " * @property {E} value",
-    " */",
-    "",
-    "/**",
-    " * @typedef {Object} UnknownErr",
-    " * @property {false} isOk",
-    " * @property {number} status",
-    " * @property {Object<string, string>} headers",
-    " * @property {*} value",
-    " */",
-    "",
-    "/**",
-    " * @typedef {Object} TransportErr",
-    " * @property {false} isOk",
-    " * @property {0} status",
-    " * @property {Object<string, string>} headers",
-    " * @property {null} value",
-    " * @property {string} cause",
-    " */",
-    "",
-    "/**",
-    " * @typedef {Object} ErrMatcher",
-    " * @property {number} status",
-    " * @property {function(Object): boolean|null} check",
-    " * @property {function(number, Object, *): Err} factory",
-    " */",
-    "",
-    "function sscDispatchErr(_matchers, _status, _headers, _body) {",
-    "    for (const _m of _matchers) {",
-    "        if (_m.status !== _status) continue;",
-    "        if (_m.check !== null) {",
-    "            if (!(_body instanceof Object) || !_m.check(_body)) continue;",
-    "        }",
-    "        return _m.factory(_status, _headers, _body);",
-    "    }",
-    "    if (_status >= 200 && _status < 300) return null;",
-    "    return { isOk: false, status: _status, headers: _headers, value: _body };",
-    "}",
-    "",
-]
-
-
-# ===========================================================================
 # StartParse helpers
 # ===========================================================================
 
@@ -320,135 +218,6 @@ def _js_method_name(field_name: str) -> str:
 def _js_struct_header(node: StructBase) -> list[str]:
     doc_lines = _js_docblock(node.doc.splitlines()) if node.doc else []
     return [*doc_lines, f"class {to_pascal_case(node.name)} {{"]
-
-
-# ===========================================================================
-# @request helpers
-# ===========================================================================
-
-_JS_STYLE_SEP = {"csv": ",", "pipe": "|", "space": " "}
-_JS_PRIM_JSDOC = {
-    "str": "string",
-    "int": "number",
-    "float": "number",
-    "bool": "boolean",
-}
-
-
-def _js_array_join(ph: PlaceholderSpec) -> str:
-    sep = _JS_STYLE_SEP[ph.style or "csv"]
-    return f"{ph.name}.map(String).join({sep!r})"
-
-
-def _js_render_value(tmpl: PlaceholderTemplate) -> str:
-    if ph := tmpl.single_placeholder():
-        if ph.is_array and ph.style in ("csv", "pipe", "space"):
-            return _js_array_join(ph)
-        return ph.name
-    if tmpl.has_placeholders:
-        inner = tmpl.map(
-            lambda ph: "${" + ph.name + "}",
-            lambda s: s.replace("\\", "\\\\").replace("`", "\\`"),
-        )
-        return f"`{inner}`"
-    return repr(tmpl.source)
-
-
-def _js_render_obj(d: dict[str, PlaceholderTemplate]) -> str:
-    if not d:
-        return "{}"
-    inner = ", ".join(f"{k!r}: {_js_render_value(v)}" for k, v in d.items())
-    return "{" + inner + "}"
-
-
-def _js_emit_obj_builder(
-    varname: str, d: dict[str, PlaceholderTemplate], indent: str
-) -> list[str]:
-    lines = [f"{indent}const {varname} = {{}};"]
-    for key, tmpl in d.items():
-        ph = tmpl.single_placeholder()
-        expr = _js_render_value(tmpl)
-        if ph is not None and ph.is_optional:
-            lines.append(
-                f"{indent}if ({ph.name} !== undefined && {ph.name} !== null) "
-                f"{varname}[{key!r}] = {expr};"
-            )
-        else:
-            lines.append(f"{indent}{varname}[{key!r}] = {expr};")
-    return lines
-
-
-def _js_emit_params_builder(
-    varname: str, d: dict[str, PlaceholderTemplate], indent: str
-) -> list[str]:
-    lines = [f"{indent}const {varname} = new URLSearchParams();"]
-    for key, tmpl in d.items():
-        ph = tmpl.single_placeholder()
-        if ph is None:
-            lines.append(
-                f"{indent}{varname}.set({key!r}, {_js_render_value(tmpl)});"
-            )
-            continue
-        effective_key = (
-            f"{key}[]" if (ph.is_array and ph.style == "bracket") else key
-        )
-        if ph.is_array and ph.style in (None, "repeat", "bracket"):
-            op = (
-                f"for (const _v of {ph.name}) "
-                f"{varname}.append({effective_key!r}, String(_v));"
-            )
-        elif ph.is_array:
-            op = f"{varname}.set({effective_key!r}, {_js_array_join(ph)});"
-        else:
-            scalar = ph.name if ph.type_name == "str" else f"String({ph.name})"
-            op = f"{varname}.set({effective_key!r}, {scalar});"
-        if ph.is_optional:
-            lines.append(
-                f"{indent}if ({ph.name} !== undefined && {ph.name} !== null) {op}"
-            )
-        else:
-            lines.append(f"{indent}{op}")
-    return lines
-
-
-def _js_render_json_body(tmpl: PlaceholderTemplate) -> str:
-    inner = tmpl.map(
-        lambda ph: "${" + ph.name + "}",
-        lambda s: s.replace("\\", "\\\\").replace("`", "\\`"),
-    )
-    return f"`{inner}`"
-
-
-def _js_render_body(spec: RequestHttp) -> tuple[str, str] | None:
-    if spec.body_kind == "empty" or spec.body is None:
-        return None
-    if spec.body_kind == "json":
-        assert isinstance(spec.body, PlaceholderTemplate)
-        return ("body", _js_render_json_body(spec.body))
-    if spec.body_kind == "form":
-        assert isinstance(spec.body, dict)
-        return ("body", f"new URLSearchParams({_js_render_obj(spec.body)})")
-    assert isinstance(spec.body, PlaceholderTemplate)
-    return ("body", _js_render_value(spec.body))
-
-
-def _js_name(name: str) -> str:
-    return to_camel_case(to_snake_case(name))
-
-
-def _js_ok_payload_type(node: MethodRest) -> str:
-    if not node.response_schema:
-        return "null"
-    struct = node.parent
-    module = struct.parent if struct is not None else None
-    schema_type = f"{to_pascal_case(node.response_schema)}Json"
-    if module is not None:
-        for n in module.body:
-            if isinstance(n, JsonDef) and n.name == node.response_schema:
-                if n.is_array:
-                    return f"Array<{schema_type}>"
-                break
-    return schema_type
 
 
 # ===========================================================================
@@ -478,7 +247,6 @@ class JsVisitor(BaseWalker):
     OPTIONAL_ON_OMITEMPTY = True
     DOCUMENT_TYPE = "Document|Element"
     DOCUMENT_ARRAY_TYPE = "Array<Element>"
-    AND_OP = "&&"
     STD_MODULE_NAME = "sscgen_runtime"
 
     _HTTP_STRATEGIES: dict[str, type[JsHttpLibStrategy]] = {
@@ -588,10 +356,6 @@ class JsVisitor(BaseWalker):
             t = self.OPTIONAL_TYPE_FMT.format(t)
         return t
 
-    def _pred_line(self, ctx: WalkContext, cond: str) -> str:
-        prefix = "" if ctx.index == 0 else f"{self.AND_OP} "
-        return f"{ctx.indent}{prefix}{cond}"
-
     # === MODULE ===
 
     def visit_module(self, node: Module, ctx: WalkContext) -> list[str]:
@@ -609,7 +373,7 @@ class JsVisitor(BaseWalker):
         ]
         mod = node.parent
         if isinstance(mod, Module) and module_has_rest(mod):
-            lines.extend(REST_SHARED)
+            lines.extend(rest.REST_SHARED)
             lines.extend(FetchStrategy().rest_call_lines())
             lines.extend(AxiosStrategy().rest_call_lines())
         lines.extend(self._render_std_section(ctx))
@@ -701,42 +465,17 @@ class JsVisitor(BaseWalker):
     def visit_result_variant_def(
         self, node: ResultVariantDef, ctx: WalkContext
     ) -> list[str]:
-        if node.schema_name:
-            base = f"{to_pascal_case(node.schema_name)}Json"
-            value_type = f"Array<{base}>" if node.schema_is_array else base
-        else:
-            value_type = "*"
-        return [
-            "/**",
-            f" * @typedef {{Object}} {node.name}",
-            " * @property {false} isOk",
-            f" * @property {{{node.status}}} status",
-            " * @property {Object<string, string>} headers",
-            f" * @property {{{value_type}}} value",
-            " */",
-            "",
-        ]
+        return rest.emit_result_variant_def(node)
 
     def visit_result_alias_def(
         self, node: ResultAliasDef, ctx: WalkContext
     ) -> list[str]:
-        return []
+        return rest.emit_result_alias_def(node)
 
     def visit_matcher_list_def(
         self, node: MatcherListDef, ctx: WalkContext
     ) -> list[str]:
-        var = f"_{to_snake_case(node.struct_name)}Matchers"
-        lines = [f"const {var} = ["]
-        for e in node.entries:
-            check = _render_js_condition_check(e.required_keys, e.conditions)
-            check_arg = check if check else "null"
-            lines.append(
-                f"    {{ status: {e.status}, check: {check_arg}, "
-                f"factory: (_s, _h, _b) => ({{ isOk: false, status: _s, "
-                f"headers: _h, value: _b }}) }},"
-            )
-        lines.append("];")
-        return lines
+        return rest.emit_matcher_list_def(node)
 
     def visit_init(self, node: Init, ctx: WalkContext) -> list[str]:
         if isinstance(node.parent, StructRest):
@@ -1478,7 +1217,9 @@ class JsVisitor(BaseWalker):
     def visit_predicate_css(self, node: PredCss, ctx: WalkContext) -> list[str]:
         q = repr(node.query)
         target = _pred_target(node, ctx)
-        return [self._pred_line(ctx, f"{target}.querySelector({q}) !== null")]
+        cond = f"{target}.querySelector({q}) !== null"
+        prefix = "" if ctx.index == 0 else "&& "
+        return [f"{ctx.indent}{prefix}{cond}"]
 
     def visit_predicate_xpath(
         self, node: PredXpath, ctx: WalkContext
@@ -1494,7 +1235,8 @@ class JsVisitor(BaseWalker):
             cond = f"{target}.hasAttribute({keys[0]!r})"
         else:
             cond = f"{py_sequence_to_js_array(keys)}.some(k => {target}.hasAttribute(k))"
-        return [self._pred_line(ctx, cond)]
+        prefix = "" if ctx.index == 0 else "&& "
+        return [f"{ctx.indent}{prefix}{cond}"]
 
     def visit_predicate_attr_eq(
         self, node: PredAttrEq, ctx: WalkContext
@@ -1505,7 +1247,8 @@ class JsVisitor(BaseWalker):
             cond = f"{target}.getAttribute({name!r}) === {values[0]!r}"
         else:
             cond = f"{py_sequence_to_js_array(values)}.some(v => {target}.getAttribute({name!r}) === v)"
-        return [self._pred_line(ctx, cond)]
+        prefix = "" if ctx.index == 0 else "&& "
+        return [f"{ctx.indent}{prefix}{cond}"]
 
     def visit_predicate_attr_ne(
         self, node: PredAttrNe, ctx: WalkContext
@@ -1516,7 +1259,8 @@ class JsVisitor(BaseWalker):
             cond = f"{target}.getAttribute({name!r}) !== {values[0]!r}"
         else:
             cond = f"{py_sequence_to_js_array(values)}.every(v => {target}.getAttribute({name!r}) !== v)"
-        return [self._pred_line(ctx, cond)]
+        prefix = "" if ctx.index == 0 else "&& "
+        return [f"{ctx.indent}{prefix}{cond}"]
 
     def visit_predicate_attr_starts(
         self, node: PredAttrStarts, ctx: WalkContext
@@ -1527,7 +1271,8 @@ class JsVisitor(BaseWalker):
             cond = f"({target}.getAttribute({name!r}) ?? '').startsWith({values[0]!r})"
         else:
             cond = f"{py_sequence_to_js_array(values)}.some(v => ({target}.getAttribute({name!r}) ?? '').startsWith(v))"
-        return [self._pred_line(ctx, cond)]
+        prefix = "" if ctx.index == 0 else "&& "
+        return [f"{ctx.indent}{prefix}{cond}"]
 
     def visit_predicate_attr_ends(
         self, node: PredAttrEnds, ctx: WalkContext
@@ -1538,7 +1283,8 @@ class JsVisitor(BaseWalker):
             cond = f"({target}.getAttribute({name!r}) ?? '').endsWith({values[0]!r})"
         else:
             cond = f"{py_sequence_to_js_array(values)}.some(v => ({target}.getAttribute({name!r}) ?? '').endsWith(v))"
-        return [self._pred_line(ctx, cond)]
+        prefix = "" if ctx.index == 0 else "&& "
+        return [f"{ctx.indent}{prefix}{cond}"]
 
     def visit_predicate_attr_contains(
         self, node: PredAttrContains, ctx: WalkContext
@@ -1549,18 +1295,17 @@ class JsVisitor(BaseWalker):
             cond = f"({target}.getAttribute({name!r}) ?? '').includes({values[0]!r})"
         else:
             cond = f"{py_sequence_to_js_array(values)}.some(v => ({target}.getAttribute({name!r}) ?? '').includes(v))"
-        return [self._pred_line(ctx, cond)]
+        prefix = "" if ctx.index == 0 else "&& "
+        return [f"{ctx.indent}{prefix}{cond}"]
 
     def visit_predicate_attr_re(
         self, node: PredAttrRe, ctx: WalkContext
     ) -> list[str]:
         rx = _py_re_to_js_re(node.pattern)
         target = _pred_attr_target(node, ctx)
-        return [
-            self._pred_line(
-                ctx, f"{rx}.test({target}.getAttribute({node.name!r}) ?? '')"
-            )
-        ]
+        cond = f"{rx}.test({target}.getAttribute({node.name!r}) ?? '')"
+        prefix = "" if ctx.index == 0 else "&& "
+        return [f"{ctx.indent}{prefix}{cond}"]
 
     def visit_predicate_text_contains(
         self, node: PredTextContains, ctx: WalkContext
@@ -1571,7 +1316,8 @@ class JsVisitor(BaseWalker):
             cond = f"{target}.includes({values[0]!r})"
         else:
             cond = f"{py_sequence_to_js_array(values)}.some(v => {target}.includes(v))"
-        return [self._pred_line(ctx, cond)]
+        prefix = "" if ctx.index == 0 else "&& "
+        return [f"{ctx.indent}{prefix}{cond}"]
 
     def visit_predicate_text_starts(
         self, node: PredTextStarts, ctx: WalkContext
@@ -1582,7 +1328,8 @@ class JsVisitor(BaseWalker):
             cond = f"{target}.startsWith({values[0]!r})"
         else:
             cond = f"{py_sequence_to_js_array(values)}.some(v => {target}.startsWith(v))"
-        return [self._pred_line(ctx, cond)]
+        prefix = "" if ctx.index == 0 else "&& "
+        return [f"{ctx.indent}{prefix}{cond}"]
 
     def visit_predicate_text_ends(
         self, node: PredTextEnds, ctx: WalkContext
@@ -1593,14 +1340,17 @@ class JsVisitor(BaseWalker):
             cond = f"{target}.endsWith({values[0]!r})"
         else:
             cond = f"{py_sequence_to_js_array(values)}.some(v => {target}.endsWith(v))"
-        return [self._pred_line(ctx, cond)]
+        prefix = "" if ctx.index == 0 else "&& "
+        return [f"{ctx.indent}{prefix}{cond}"]
 
     def visit_predicate_text_re(
         self, node: PredTextRe, ctx: WalkContext
     ) -> list[str]:
         rx = _py_re_to_js_re(node.pattern)
         target = _pred_text_target(node, ctx)
-        return [self._pred_line(ctx, f"{rx}.test({target})")]
+        cond = f"{rx}.test({target})"
+        prefix = "" if ctx.index == 0 else "&& "
+        return [f"{ctx.indent}{prefix}{cond}"]
 
     def visit_predicate_contains(
         self, node: PredContains, ctx: WalkContext
@@ -1611,7 +1361,8 @@ class JsVisitor(BaseWalker):
             cond = f"{target}.includes({values[0]!r})"
         else:
             cond = f"{py_sequence_to_js_array(values)}.some(v => {target}.includes(v))"
-        return [self._pred_line(ctx, cond)]
+        prefix = "" if ctx.index == 0 else "&& "
+        return [f"{ctx.indent}{prefix}{cond}"]
 
     def visit_predicate_eq(self, node: PredEq, ctx: WalkContext) -> list[str]:
         values = node.values
@@ -1624,7 +1375,8 @@ class JsVisitor(BaseWalker):
             cond = (
                 f"{py_sequence_to_js_array(values)}.some(v => {target} === v)"
             )
-        return [self._pred_line(ctx, cond)]
+        prefix = "" if ctx.index == 0 else "&& "
+        return [f"{ctx.indent}{prefix}{cond}"]
 
     def visit_predicate_ne(self, node: PredNe, ctx: WalkContext) -> list[str]:
         values = node.values
@@ -1637,7 +1389,8 @@ class JsVisitor(BaseWalker):
             cond = (
                 f"{py_sequence_to_js_array(values)}.every(v => {target} !== v)"
             )
-        return [self._pred_line(ctx, cond)]
+        prefix = "" if ctx.index == 0 else "&& "
+        return [f"{ctx.indent}{prefix}{cond}"]
 
     def visit_predicate_starts(
         self, node: PredStarts, ctx: WalkContext
@@ -1648,7 +1401,8 @@ class JsVisitor(BaseWalker):
             cond = f"{target}.startsWith({values[0]!r})"
         else:
             cond = f"{py_sequence_to_js_array(values)}.some(v => {target}.startsWith(v))"
-        return [self._pred_line(ctx, cond)]
+        prefix = "" if ctx.index == 0 else "&& "
+        return [f"{ctx.indent}{prefix}{cond}"]
 
     def visit_predicate_ends(
         self, node: PredEnds, ctx: WalkContext
@@ -1659,312 +1413,98 @@ class JsVisitor(BaseWalker):
             cond = f"{target}.endsWith({values[0]!r})"
         else:
             cond = f"{py_sequence_to_js_array(values)}.some(v => {target}.endsWith(v))"
-        return [self._pred_line(ctx, cond)]
+        prefix = "" if ctx.index == 0 else "&& "
+        return [f"{ctx.indent}{prefix}{cond}"]
 
     def visit_predicate_count_eq(
         self, node: PredCountEq, ctx: WalkContext
     ) -> list[str]:
         target = _pred_target(node, ctx)
-        return [self._pred_line(ctx, f"{target}.length === {node.value}")]
+        cond = f"{target}.length === {node.value}"
+        prefix = "" if ctx.index == 0 else "&& "
+        return [f"{ctx.indent}{prefix}{cond}"]
 
     def visit_predicate_count_gt(
         self, node: PredCountGt, ctx: WalkContext
     ) -> list[str]:
         target = _pred_target(node, ctx)
-        return [self._pred_line(ctx, f"{target}.length > {node.value}")]
+        cond = f"{target}.length > {node.value}"
+        prefix = "" if ctx.index == 0 else "&& "
+        return [f"{ctx.indent}{prefix}{cond}"]
 
     def visit_predicate_count_lt(
         self, node: PredCountLt, ctx: WalkContext
     ) -> list[str]:
         target = _pred_target(node, ctx)
-        return [self._pred_line(ctx, f"{target}.length < {node.value}")]
+        cond = f"{target}.length < {node.value}"
+        prefix = "" if ctx.index == 0 else "&& "
+        return [f"{ctx.indent}{prefix}{cond}"]
 
     def visit_predicate_count_ne(
         self, node: PredCountNe, ctx: WalkContext
     ) -> list[str]:
         target = _pred_target(node, ctx)
-        return [self._pred_line(ctx, f"{target}.length !== {node.value}")]
+        cond = f"{target}.length !== {node.value}"
+        prefix = "" if ctx.index == 0 else "&& "
+        return [f"{ctx.indent}{prefix}{cond}"]
 
     def visit_predicate_count_ge(
         self, node: PredCountGe, ctx: WalkContext
     ) -> list[str]:
         target = _pred_target(node, ctx)
-        return [self._pred_line(ctx, f"{target}.length >= {node.value}")]
+        cond = f"{target}.length >= {node.value}"
+        prefix = "" if ctx.index == 0 else "&& "
+        return [f"{ctx.indent}{prefix}{cond}"]
 
     def visit_predicate_count_le(
         self, node: PredCountLe, ctx: WalkContext
     ) -> list[str]:
         target = _pred_target(node, ctx)
-        return [self._pred_line(ctx, f"{target}.length <= {node.value}")]
+        cond = f"{target}.length <= {node.value}"
+        prefix = "" if ctx.index == 0 else "&& "
+        return [f"{ctx.indent}{prefix}{cond}"]
 
     def visit_pred_count_range(
         self, node: PredCountRange, ctx: WalkContext
     ) -> list[str]:
         target = _pred_target(node, ctx)
-        return [
-            self._pred_line(
-                ctx,
-                f"{node.start} < {target}.length && {target}.length < {node.end}",
-            )
-        ]
+        cond = f"{node.start} < {target}.length && {target}.length < {node.end}"
+        prefix = "" if ctx.index == 0 else "&& "
+        return [f"{ctx.indent}{prefix}{cond}"]
 
     def visit_predicate_re(self, node: PredRe, ctx: WalkContext) -> list[str]:
         rx = _py_re_to_js_re(node.pattern)
         target = _pred_target(node, ctx)
-        return [self._pred_line(ctx, f"{rx}.test({target})")]
+        cond = f"{rx}.test({target})"
+        prefix = "" if ctx.index == 0 else "&& "
+        return [f"{ctx.indent}{prefix}{cond}"]
 
     def visit_predicate_re_all(
         self, node: PredReAll, ctx: WalkContext
     ) -> list[str]:
         rx = _py_re_to_js_re(node.pattern)
         target = _pred_target(node, ctx)
-        return [self._pred_line(ctx, f"{target}.every(j => {rx}.test(j))")]
+        cond = f"{target}.every(j => {rx}.test(j))"
+        prefix = "" if ctx.index == 0 else "&& "
+        return [f"{ctx.indent}{prefix}{cond}"]
 
     def visit_predicate_re_any(
         self, node: PredReAny, ctx: WalkContext
     ) -> list[str]:
         rx = _py_re_to_js_re(node.pattern)
         target = _pred_target(node, ctx)
-        return [self._pred_line(ctx, f"{target}.some(j => {rx}.test(j))")]
+        cond = f"{target}.some(j => {rx}.test(j))"
+        prefix = "" if ctx.index == 0 else "&& "
+        return [f"{ctx.indent}{prefix}{cond}"]
 
     # === REST / FETCH ===
 
     def visit_method_rest(
         self, node: MethodRest, ctx: WalkContext
     ) -> list[str]:
-        spec = node.http_request.with_renamed_placeholders(_js_name)
-        http_client = ctx.meta.get("http_client", "fetch")
-        ind = ctx.indent_char
-        i1, i2, i3 = (ctx.indent + ind * n for n in range(3))
-
-        ph_param = ""
-        if spec.placeholders:
-            ordered = [
-                p.name
-                for p in sorted(spec.placeholders, key=lambda p: p.is_optional)
-            ]
-            ph_param = ", {" + ", ".join(ordered) + "}"
-
-        pre_lines: list[str] = []
-        params_expr = None
-        if spec.params:
-            if dict_needs_builder(spec.params):
-                pre_lines.extend(
-                    _js_emit_params_builder("_params", spec.params, i3)
-                )
-                params_expr = "_params"
-            else:
-                params_expr = _js_render_obj(spec.params)
-        headers_expr = None
-        if spec.headers:
-            if dict_needs_builder(spec.headers):
-                pre_lines.extend(
-                    _js_emit_obj_builder("_headers", spec.headers, i3)
-                )
-                headers_expr = "_headers"
-            else:
-                headers_expr = _js_render_obj(spec.headers)
-        body_result = _js_render_body(spec)
-        body_expr = body_result[1] if body_result else None
-
-        raw_name = node.name or "fetch"
-        method_name = to_camel_case(to_snake_case(raw_name))
-        if raw_name == "fetch":
-            method_name = "fetch"
-
-        parent = node.parent
-        errors = parent.errors if isinstance(parent, StructBase) else []
-        struct_name = parent.name if isinstance(parent, StructBase) else ""
-        matchers_var = f"_{to_snake_case(struct_name)}Matchers"
-
-        ok_payload = _js_ok_payload_type(node)
-        err_variants: list[str] = []
-        seen: set[str] = set()
-        for err in errors:
-            cls_name = err_subclass_name(struct_name, err)
-            if cls_name not in seen:
-                seen.add(cls_name)
-                err_variants.append(cls_name)
-        return_union = " | ".join(
-            [f"Ok<{ok_payload}>", *err_variants, "UnknownErr", "TransportErr"]
-        )
-
-        fn_name = self._http.fn_name
-        value_fn = "(_b) => null" if not node.response_schema else "null"
-
-        if http_client == "axios":
-            url_expr = _js_render_value(spec.url)
-            opts_parts: list[str] = []
-            if params_expr:
-                opts_parts.append(f"params: {params_expr}")
-            if headers_expr:
-                opts_parts.append(f"headers: {headers_expr}")
-            if body_expr:
-                opts_parts.append(f"data: {body_expr}")
-        else:
-            if params_expr:
-                url_inner = spec.url.map(
-                    lambda ph: "${" + ph.name + "}",
-                    lambda s: s.replace("`", "\\`"),
-                )
-                if params_expr == "_params":
-                    url_expr = f"`{url_inner}?${{{params_expr}.toString()}}`"
-                else:
-                    url_expr = (
-                        f"`{url_inner}?${{new URLSearchParams({params_expr})}}`"
-                    )
-            else:
-                url_expr = _js_render_value(spec.url)
-            opts_parts = []
-            if headers_expr:
-                opts_parts.append(f"headers: {headers_expr}")
-            if body_expr:
-                opts_parts.append(f"body: {body_expr}")
-
-        opts_obj = "{" + ", ".join(opts_parts) + "}" if opts_parts else "{}"
-
-        lines: list[str] = []
-        if node.doc:
-            lines.append(f"{i1}/**")
-            for doc_line in node.doc.splitlines():
-                lines.append(f"{i1} * {doc_line}")
-            lines.append(f"{i1} */")
-        lines.append(f"{i1}/**")
-        for p in sorted(spec.placeholders, key=lambda p: p.is_optional):
-            t = _JS_PRIM_JSDOC[p.type_name]
-            if p.is_array:
-                t = f"{t}[]"
-            bracket = (
-                f"[params.{p.name}]" if p.is_optional else f"params.{p.name}"
-            )
-            lines.append(f"{i1} * @param {{{t}}} {bracket}")
-        lines.append(f"{i1} * @returns {{Promise<{return_union}>}}")
-        lines.append(f"{i1} */")
-        lines.append(f"{i1}static async {method_name}(client{ph_param}) {{")
-        lines.extend(pre_lines)
-        lines.append(
-            f"{i2}return {fn_name}(client, {matchers_var}, "
-            f"{spec.method!r}, {url_expr}, {value_fn}, {opts_obj});"
-        )
-        lines.append(f"{i1}}}")
-        return lines
+        return rest.emit_method_rest(node, ctx, self._http)
 
     def visit_method_fetch(
         self, node: MethodFetch, ctx: WalkContext
     ) -> list[str]:
-        spec = node.http_request.with_renamed_placeholders(_js_name)
-        http_client = ctx.meta.get("http_client", "fetch")
-        ind = ctx.indent_char
-        i1, i2, i3 = (ctx.indent + ind * n for n in range(3))
-
-        ph_param = ""
-        if spec.placeholders:
-            ordered = [
-                p.name
-                for p in sorted(spec.placeholders, key=lambda p: p.is_optional)
-            ]
-            ph_param = ", {" + ", ".join(ordered) + "}"
-
-        pre_lines: list[str] = []
-        params_expr = None
-        if spec.params:
-            if dict_needs_builder(spec.params):
-                pre_lines.extend(
-                    _js_emit_params_builder("_params", spec.params, i3)
-                )
-                params_expr = "_params"
-            else:
-                params_expr = _js_render_obj(spec.params)
-        headers_expr = None
-        if spec.headers:
-            if dict_needs_builder(spec.headers):
-                pre_lines.extend(
-                    _js_emit_obj_builder("_headers", spec.headers, i3)
-                )
-                headers_expr = "_headers"
-            else:
-                headers_expr = _js_render_obj(spec.headers)
-        body_result = _js_render_body(spec)
-        body_expr = body_result[1] if body_result else None
-
-        struct_name = to_pascal_case(node.parent.name)  # type: ignore[union-attr]
-        method_name = "fetch" + (to_pascal_case(node.name) if node.name else "")
-
-        def _response_lines(data_expr: str) -> list[str]:
-            rl: list[str] = []
-            if node.response_path:
-                accessor = "".join(
-                    f"[{p!r}]" for p in node.response_path.split(".")
-                )
-                rl.append(f"{i2}const _data = {data_expr};")
-                if node.response_join:
-                    rl.append(
-                        f"{i2}const _body = _data{accessor}.join({node.response_join!r});"
-                    )
-                else:
-                    rl.append(f"{i2}const _body = _data{accessor};")
-            else:
-                rl.append(f"{i2}const _body = {data_expr};")
-            rl.append(f"{i2}return new {struct_name}(_body);")
-            return rl
-
-        lines: list[str] = [
-            f"{i1}static async {method_name}(client{ph_param}) {{"
-        ]
-        lines.extend(pre_lines)
-
-        if http_client == "fetch":
-            if params_expr:
-                url_inner = spec.url.map(
-                    lambda ph: "${" + ph.name + "}",
-                    lambda s: s.replace("`", "\\`"),
-                )
-                url_expr = (
-                    f"`{url_inner}?${{new URLSearchParams({params_expr})}}`"
-                )
-            else:
-                url_expr = _js_render_value(spec.url)
-            options: list[str] = [f"{i3}method: {spec.method!r},"]
-            if headers_expr:
-                options.append(f"{i3}headers: {headers_expr},")
-            if spec.cookies:
-                cookie_str = "; ".join(
-                    f"{k}={v.source}" for k, v in spec.cookies.items()
-                )
-                options.append(
-                    f"{i3}// cookies: {cookie_str!r}  /* set via headers or credentials */"
-                )
-            if body_expr:
-                options.append(f"{i3}body: {body_expr},")
-            lines.append(f"{i2}const _resp = await client({url_expr}, {{")
-            lines.extend(options)
-            lines.append(f"{i2}}});")
-            lines.append(
-                f"{i2}if (!_resp.ok) throw new Error(`HTTP ${{_resp.status}}`);"
-            )
-            if node.response_path:
-                lines.extend(_response_lines("await _resp.json()"))
-            else:
-                lines.extend(_response_lines("await _resp.text()"))
-        else:
-            req_props: list[str] = [
-                f"{i3}method: {spec.method!r},",
-                f"{i3}url: {_js_render_value(spec.url)},",
-            ]
-            if params_expr:
-                req_props.append(f"{i3}params: {params_expr},")
-            if headers_expr:
-                req_props.append(f"{i3}headers: {headers_expr},")
-            if spec.cookies:
-                req_props.append(
-                    f"{i3}// cookies: {_js_render_obj(spec.cookies)},",
-                )
-            if body_expr:
-                req_props.append(f"{i3}data: {body_expr},")
-            lines.append(f"{i2}const _resp = await client.request({{")
-            lines.extend(req_props)
-            lines.append(f"{i2}}});")
-            lines.extend(_response_lines("_resp.data"))
-
-        lines.append(f"{i1}}}")
-        return lines
+        return rest.emit_method_fetch(node, ctx, self._http)

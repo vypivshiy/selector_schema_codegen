@@ -4,14 +4,14 @@ Ports all dialect-agnostic Python codegen from ``PyHtmlBase`` to the new
 ``BaseWalker`` traversal core.  Handlers return ``list[str]`` (no generators,
 no signal protocol).  DOM-specific spelling is delegated to a ``DomSpelling``
 strategy set by the concrete dialect subclass.
+
+REST/fetch method generation is delegated to ``rest.py``.
 """
 
 from __future__ import annotations
 
 import inspect
-import json
-import re
-from typing import Any, cast
+from typing import Any
 
 from ssc_codegen.ast import (
     Module,
@@ -117,13 +117,10 @@ from ssc_codegen.ast import (
     PredReAny,
     CodeEndHook,
     CodeStartHook,
-    PlaceholderSpec,
-    PlaceholderTemplate,
     TypeInfo,
     VariableType as VT,
     StructType as ST,
 )
-from ssc_codegen.ast.struct import RequestHttp
 from ssc_codegen.naming import to_pascal_case, to_snake_case
 from ssc_codegen.traversal.utils import (
     jsonify_path_to_segments,
@@ -131,207 +128,13 @@ from ssc_codegen.traversal.utils import (
     module_is_rest_only,
 )
 from ssc_codegen.generation.builder import ModuleBuilder
-from ssc_codegen.request_spec import validate_json_body
+from ssc_codegen.targets.python import rest
 from ssc_codegen.targets.python.http_libs.aiohttp import AioHttpStrategy
 from ssc_codegen.targets.python.http_libs.base import HttpLibStrategy
 from ssc_codegen.targets.python.http_libs.httpx import HttpxStrategy
 from ssc_codegen.targets.python.http_libs.requests import RequestsStrategy
 from ssc_codegen.traversal.context import WalkContext
 from ssc_codegen.traversal.walker import BaseWalker
-
-
-# ===========================================================================
-# RequestHttp → Python code rendering helpers (pure functions)
-# ===========================================================================
-
-_STYLE_SEPARATOR: dict[str, str] = {"csv": ",", "pipe": "|", "space": " "}
-
-PH_PY_TYPES = {"str": "str", "int": "int", "float": "float", "bool": "bool"}
-
-_RUNTIME_BASE_EXPORT_NAMES: list[str] = [
-    "repl_map",
-    "normalize_text",
-    "_UnmatchedTableRow",
-    "unescape_text",
-    "rm_prefix",
-    "rm_suffix",
-    "UNMATCHED_TABLE_ROW",
-]
-
-_RUNTIME_REST_EXPORT_NAMES: list[str] = [
-    "Ok",
-    "Err",
-    "UnknownErr",
-    "TransportErr",
-    "ErrMatcher",
-    "ssc_dispatch_err",
-    "ssc_rest_call",
-    "ssc_rest_call_async",
-]
-
-
-def _runtime_export_names(module: Module) -> list[str]:
-    names = list(_RUNTIME_BASE_EXPORT_NAMES)
-    if module_has_rest(module):
-        names.extend(_RUNTIME_REST_EXPORT_NAMES)
-    return names
-
-
-def _escape_fstring(tmpl: PlaceholderTemplate) -> str:
-    result: list[str] = []
-    for part in tmpl.parts:
-        if isinstance(part, PlaceholderSpec):
-            result.append("{" + part.name + "}")
-        else:
-            for ch in part:
-                result.append(ch * 2 if ch in "{}" else ch)
-    return "".join(result)
-
-
-def render_value(tmpl: PlaceholderTemplate) -> str:
-    if ph := tmpl.single_placeholder():
-        if ph.is_array and ph.style in ("csv", "pipe", "space"):
-            sep = _STYLE_SEPARATOR[ph.style or "csv"]
-            return f"{sep!r}.join(str(_x) for _x in {ph.name})"
-        return ph.name
-    if tmpl.has_placeholders:
-        return f'f"{_escape_fstring(tmpl)}"'
-    return repr(tmpl.source)
-
-
-def render_dict(d: dict[str, PlaceholderTemplate]) -> str:
-    if not d:
-        return "{}"
-    inner = ", ".join(f"{k!r}: {render_value(v)}" for k, v in d.items())
-    return "{" + inner + "}"
-
-
-def emit_dict_builder(
-    varname: str, d: dict[str, PlaceholderTemplate], indent: str
-) -> list[str]:
-    lines: list[str] = [f"{indent}{varname}: dict = {{}}"]
-    for key, tmpl in d.items():
-        ph = tmpl.single_placeholder()
-        if ph is None:
-            lines.append(f"{indent}{varname}[{key!r}] = {render_value(tmpl)}")
-            continue
-        effective_key = (
-            f"{key}[]" if (ph.is_array and ph.style == "bracket") else key
-        )
-        expr = render_value(tmpl)
-        if ph.is_optional:
-            lines.append(f"{indent}if {ph.name} is not None:")
-            lines.append(f"{indent}    {varname}[{effective_key!r}] = {expr}")
-        else:
-            lines.append(f"{indent}{varname}[{effective_key!r}] = {expr}")
-    return lines
-
-
-def render_json_body(tmpl: PlaceholderTemplate) -> str:
-    validate_json_body(tmpl.source)
-    sentinels: dict[str, str] = {}
-    out: list[str] = []
-    in_string = False
-    for part in tmpl.parts:
-        if isinstance(part, PlaceholderSpec):
-            key = f"__SSC_PH_{len(sentinels)}__"
-            sentinels[key] = part.name
-            out.append(key if in_string else '"' + key + '"')
-        else:
-            i = 0
-            n = len(part)
-            while i < n:
-                ch = part[i]
-                if ch == "\\" and i + 1 < n:
-                    out.append(part[i : i + 2])
-                    i += 2
-                    continue
-                if ch == '"':
-                    in_string = not in_string
-                out.append(ch)
-                i += 1
-    substituted = "".join(out)
-    parsed = json.loads(substituted)
-    sentinel_re = re.compile(r"__SSC_PH_\d+__")
-
-    def _emit(v: object) -> str:
-        if v is None:
-            return "None"
-        if isinstance(v, bool):
-            return "True" if v else "False"
-        if isinstance(v, (int, float)):
-            return repr(v)
-        if isinstance(v, str):
-            if v in sentinels:
-                return sentinels[v]
-            if sentinel_re.search(v):
-
-                def _fmt(m: re.Match) -> str:
-                    return "{" + sentinels[m.group(0)] + "}"
-
-                escaped = v.replace("\\", "\\\\").replace("'", "\\'")
-                escaped = escaped.replace("{", "{{").replace("}", "}}")
-                body = sentinel_re.sub(_fmt, escaped)
-                return "f'" + body + "'"
-            return repr(v)
-        if isinstance(v, dict):
-            items = ", ".join(f"{k!r}: {_emit(val)}" for k, val in v.items())
-            return "{" + items + "}"
-        if isinstance(v, list):
-            items = ", ".join(_emit(x) for x in v)
-            return "[" + items + "]"
-        raise TypeError(f"unsupported JSON body element: {type(v).__name__}")
-
-    return _emit(parsed)
-
-
-def render_body(spec: RequestHttp) -> tuple[str, str] | None:
-    if spec.body_kind == "empty" or spec.body is None:
-        return None
-    if spec.body_kind == "json":
-        assert isinstance(spec.body, PlaceholderTemplate)
-        return ("json", render_json_body(spec.body))
-    if spec.body_kind == "form":
-        assert isinstance(spec.body, dict)
-        return ("data", render_dict(spec.body))
-    assert isinstance(spec.body, PlaceholderTemplate)
-    return ("data", render_value(spec.body))
-
-
-def _py_path_expr(body_var: str, path: str) -> str:
-    expr = body_var
-    for seg in path.split("."):
-        if seg.isdigit():
-            expr += f"[{seg}]"
-        else:
-            expr += f".get({seg!r})"
-    return expr
-
-
-def _render_py_condition_lambda(
-    required_keys: list[str], conditions: dict[str, object]
-) -> str | None:
-    parts: list[str] = []
-    for key in required_keys:
-        parts.append(f"{key!r} in _b")
-    for path, value in conditions.items():
-        lhs = _py_path_expr("_b", path)
-        if isinstance(value, bool):
-            parts.append(f"{lhs} is {value}")
-        elif value is None:
-            parts.append(f"{lhs} is None")
-        elif isinstance(value, (int, float)):
-            parts.append(f"{lhs} == {value}")
-        else:
-            parts.append(f"{lhs} == {value!r}")
-    if not parts:
-        return None
-    return f"lambda _b: {' and '.join(parts)}"
-
-
-# ===========================================================================
-# PythonVisitor
-# ===========================================================================
 
 
 class PythonVisitor(BaseWalker):
@@ -359,12 +162,6 @@ class PythonVisitor(BaseWalker):
     ARRAY_TYPE_FMT: str = "List[{}]"
     OPTIONAL_TYPE_FMT: str = "Optional[{}]"
     OPTIONAL_ON_OMITEMPTY: bool = False
-
-    # --- predicate formatting ---
-    AND_OP: str = "and"
-
-    # --- REST config ---
-    REST_SEPARATORS: dict[str, str] = {"csv": ",", "pipe": "|", "space": " "}
 
     _HTTP_STRATEGIES: dict[str, type[HttpLibStrategy]] = {
         "httpx": HttpxStrategy,
@@ -535,20 +332,6 @@ class PythonVisitor(BaseWalker):
             case _:
                 return self.TYPES[VT.STRING]
 
-    def _pred_line(self, ctx: WalkContext, cond: str) -> str:
-        prefix = "" if ctx.index == 0 else f"{self.AND_OP} "
-        return f"{ctx.indent}{prefix}{cond}"
-
-    def _resolve_ph_value(self, tmpl: PlaceholderTemplate) -> str:
-        if ph := tmpl.single_placeholder():
-            if ph.is_array and ph.style in ("csv", "pipe", "space"):
-                sep = self.REST_SEPARATORS[ph.style or "csv"]
-                return f"{sep!r}.join(str(_x) for _x in {ph.name})"
-            return ph.name
-        if tmpl.has_placeholders:
-            return f'f"{_escape_fstring(tmpl)}"'
-        return repr(tmpl.source)
-
     # === MODULE ===
 
     def visit_module(self, node: Module, ctx: WalkContext) -> list[str]:
@@ -586,7 +369,7 @@ class PythonVisitor(BaseWalker):
         if runtime:
             mod = node.parent
             if isinstance(mod, Module):
-                names = _runtime_export_names(mod)
+                names = rest.runtime_export_names(mod)
             else:
                 names = []
             lines.append(f"from .{runtime} import " + ", ".join(names))
@@ -711,47 +494,17 @@ class PythonVisitor(BaseWalker):
     def visit_result_variant_def(
         self, node: ResultVariantDef, ctx: WalkContext
     ) -> list[str]:
-        if node.schema_name:
-            base = f"{to_pascal_case(node.schema_name)}Json"
-            value_type = f"List[{base}]" if node.schema_is_array else base
-        else:
-            value_type = "Any"
-        return [
-            "@dataclass(frozen=True)",
-            f"class {node.name}(Err[{value_type}]):",
-            f"    status: Literal[{node.status}] = {node.status}",
-            "",
-        ]
+        return rest.emit_result_variant_def(node)
 
     def visit_result_alias_def(
         self, node: ResultAliasDef, ctx: WalkContext
     ) -> list[str]:
-        if node.response_schema:
-            base = f"{to_pascal_case(node.response_schema)}Json"
-            ok_type = f"List[{base}]" if node.response_is_array else base
-        else:
-            ok_type = "None"
-        parts = [
-            f"Ok[{ok_type}]",
-            *node.err_variants,
-            "UnknownErr",
-            "TransportErr",
-        ]
-        return [f"{node.name} = Union[{', '.join(parts)}]", ""]
+        return rest.emit_result_alias_def(node)
 
     def visit_matcher_list_def(
         self, node: MatcherListDef, ctx: WalkContext
     ) -> list[str]:
-        var = f"_{to_snake_case(node.struct_name)}_matchers"
-        lines = [f"{var} = ["]
-        for e in node.entries:
-            check = _render_py_condition_lambda(e.required_keys, e.conditions)
-            check_arg = check if check else "None"
-            lines.append(
-                f"    ErrMatcher({e.status}, {check_arg}, {e.factory_name}),"
-            )
-        lines.append("]")
-        return lines
+        return rest.emit_matcher_list_def(node)
 
     def visit_init(self, node: Init, ctx: WalkContext) -> list[str]:
         i, i2, i3 = (
@@ -922,166 +675,17 @@ class PythonVisitor(BaseWalker):
                 lines.append(f"{i2}return _result")
         return lines
 
-    # === REST / FETCH ===
-
-    _DICT_KWARGS = (
-        ("headers", "_headers"),
-        ("cookies", "_cookies"),
-        ("params", "_params"),
-    )
-
-    def _placeholder_params(self, http: RequestHttp) -> str:
-        if not http.placeholders:
-            return ""
-        parts: list[str] = []
-        for ph in sorted(http.placeholders, key=lambda p: p.is_optional):
-            t = PH_PY_TYPES[ph.type_name]
-            if ph.is_array:
-                t = f"List[{t}]"
-            parts.append(
-                f"{ph.name}: Optional[{t}] = None"
-                if ph.is_optional
-                else f"{ph.name}: {t}"
-            )
-        return ", *, " + ", ".join(parts)
+    # === REST / FETCH (delegate to rest.py) ===
 
     def visit_method_fetch(
         self, node: MethodFetch, ctx: WalkContext
     ) -> list[str]:
-        assert node.parent is not None
-        spec = node.http_request.with_renamed_placeholders(to_snake_case)
-        struct_name = to_pascal_case(cast(StructBase, node.parent).name)
-        suffix = ("_" + to_snake_case(node.name)) if node.name else ""
-        ph_params = self._placeholder_params(spec)
-
-        i1 = ctx.indent
-        i2 = i1 + ctx.indent_char
-        i3 = i2 + ctx.indent_char
-
-        pre_lines: list[str] = []
-        kwargs_lines: list[str] = [
-            f"{i3}{spec.method!r},",
-            f"{i3}{self._resolve_ph_value(spec.url)},",
-        ]
-        for attr, varname in self._DICT_KWARGS:
-            d = getattr(spec, attr)
-            if not d:
-                continue
-            from ssc_codegen.traversal.utils import dict_needs_builder
-
-            if dict_needs_builder(d):
-                pre_lines.extend(emit_dict_builder(varname, d, i2))
-                kwargs_lines.append(f"{i3}{attr}={varname},")
-            else:
-                kwargs_lines.append(f"{i3}{attr}={render_dict(d)},")
-        body_result = render_body(spec)
-        if body_result:
-            kwargs_lines.append(f"{i3}{body_result[0]}={body_result[1]},")
-
-        post_lines: list[str] = [f"{i2}_resp.raise_for_status()"]
-        if node.response_path:
-            accessor = "".join(
-                f"[{p!r}]" for p in node.response_path.split(".")
-            )
-            post_lines.append(f"{i2}_data = _resp.json()")
-            if node.response_join:
-                post_lines.append(
-                    f"{i2}_body = {node.response_join!r}.join(_data{accessor})"
-                )
-            else:
-                post_lines.append(f"{i2}_body = _data{accessor}")
-        else:
-            post_lines.append(f"{i2}_body = _resp.text")
-        post_lines.append(f"{i2}return cls(_body)")
-
-        lines: list[str] = []
-        lines.append(f"{i1}@classmethod")
-        lines.append(
-            f'{i1}def fetch{suffix}(cls, client: {self._http.sync_client_type}{ph_params}) -> "{struct_name}":'
-        )
-        lines.extend(pre_lines)
-        lines.extend([f"{i2}_resp = client.request(", *kwargs_lines, f"{i2})"])
-        lines.extend(post_lines)
-        lines.append("")
-
-        lines.append(f"{i1}@classmethod")
-        lines.append(
-            f'{i1}async def async_fetch{suffix}(cls, client: {self._http.async_client_type}{ph_params}) -> "{struct_name}":'
-        )
-        lines.extend(pre_lines)
-        lines.extend(
-            [f"{i2}_resp = await client.request(", *kwargs_lines, f"{i2})"]
-        )
-        lines.extend(post_lines)
-        return lines
+        return rest.emit_method_fetch(node, ctx, self._http)
 
     def visit_method_rest(
         self, node: MethodRest, ctx: WalkContext
     ) -> list[str]:
-        spec = node.http_request.with_renamed_placeholders(to_snake_case)
-        struct = node.parent
-        assert isinstance(struct, StructBase)
-        method_name = to_snake_case(node.name) if node.name else "fetch"
-        ret_type = node.result_alias_name or "None"
-        ph_params = self._placeholder_params(spec)
-        matchers_var = f"_{to_snake_case(struct.name)}_matchers"
-
-        i1 = ctx.indent
-        i2 = i1 + ctx.indent_char
-        i3 = i2 + ctx.indent_char
-
-        doc_line = f'{i2}"""{node.doc}"""' if node.doc else None
-
-        pre_lines: list[str] = []
-        kwargs_lines: list[str] = []
-        for attr, varname in self._DICT_KWARGS:
-            d = getattr(spec, attr)
-            if not d:
-                continue
-            from ssc_codegen.traversal.utils import dict_needs_builder
-
-            if dict_needs_builder(d):
-                pre_lines.extend(emit_dict_builder(varname, d, i2))
-                kwargs_lines.append(f"{i3}{attr}={varname},")
-            else:
-                kwargs_lines.append(f"{i3}{attr}={render_dict(d)},")
-        body_result = render_body(spec)
-        if body_result:
-            kwargs_lines.append(f"{i3}{body_result[0]}={body_result[1]},")
-
-        void_kwarg: list[str] = []
-        if not node.response_schema:
-            void_kwarg = [f"{i3}_value_fn=lambda _: None,"]
-
-        def _body(fn_name: str, await_kw: str) -> list[str]:
-            body: list[str] = []
-            if doc_line:
-                body.append(doc_line)
-            body.extend(pre_lines)
-            body.append(f"{i2}return {await_kw}{fn_name}(")
-            body.append(
-                f"{i3}client, {matchers_var}, {spec.method!r},"
-                f" {render_value(spec.url)},"
-            )
-            body.extend(void_kwarg)
-            body.extend(kwargs_lines)
-            body.append(f"{i2})")
-            return body
-
-        lines: list[str] = []
-        lines.append(f"{i1}@classmethod")
-        lines.append(
-            f"{i1}def {method_name}(cls, client: {self._http.sync_client_type}{ph_params}) -> {ret_type}:"
-        )
-        lines.extend(_body("ssc_rest_call", ""))
-        lines.append("")
-
-        lines.append(f"{i1}@classmethod")
-        lines.append(
-            f"{i1}async def async_{method_name}(cls, client: {self._http.async_client_type}{ph_params}) -> {ret_type}:"
-        )
-        lines.extend(_body("ssc_rest_call_async", "await "))
-        return lines
+        return rest.emit_method_rest(node, ctx, self._http)
 
     # === DOM (delegate to spelling) ===
 
@@ -1123,68 +727,83 @@ class PythonVisitor(BaseWalker):
     def visit_to_bool(self, node: ToBool, ctx: WalkContext) -> list[str]:
         return self._dom.to_bool(ctx, node)
 
+    # === DOM PREDICATES (inline predicate formatting, no _pred_line) ===
+
     def visit_predicate_css(self, node: PredCss, ctx: WalkContext) -> list[str]:
-        return [self._pred_line(ctx, self._dom.pred_css(node))]
+        prefix = "" if ctx.index == 0 else "and "
+        return [f"{ctx.indent}{prefix}{self._dom.pred_css(node)}"]
 
     def visit_predicate_xpath(
         self, node: PredXpath, ctx: WalkContext
     ) -> list[str]:
-        return [self._pred_line(ctx, self._dom.pred_xpath(node))]
+        prefix = "" if ctx.index == 0 else "and "
+        return [f"{ctx.indent}{prefix}{self._dom.pred_xpath(node)}"]
 
     def visit_predicate_has_attr(
         self, node: PredHasAttr, ctx: WalkContext
     ) -> list[str]:
-        return [self._pred_line(ctx, self._dom.pred_has_attr(node))]
+        prefix = "" if ctx.index == 0 else "and "
+        return [f"{ctx.indent}{prefix}{self._dom.pred_has_attr(node)}"]
 
     def visit_predicate_attr_contains(
         self, node: PredAttrContains, ctx: WalkContext
     ) -> list[str]:
-        return [self._pred_line(ctx, self._dom.pred_attr_contains(node))]
+        prefix = "" if ctx.index == 0 else "and "
+        return [f"{ctx.indent}{prefix}{self._dom.pred_attr_contains(node)}"]
 
     def visit_predicate_attr_starts(
         self, node: PredAttrStarts, ctx: WalkContext
     ) -> list[str]:
-        return [self._pred_line(ctx, self._dom.pred_attr_starts(node))]
+        prefix = "" if ctx.index == 0 else "and "
+        return [f"{ctx.indent}{prefix}{self._dom.pred_attr_starts(node)}"]
 
     def visit_predicate_attr_ends(
         self, node: PredAttrEnds, ctx: WalkContext
     ) -> list[str]:
-        return [self._pred_line(ctx, self._dom.pred_attr_ends(node))]
+        prefix = "" if ctx.index == 0 else "and "
+        return [f"{ctx.indent}{prefix}{self._dom.pred_attr_ends(node)}"]
 
     def visit_predicate_attr_eq(
         self, node: PredAttrEq, ctx: WalkContext
     ) -> list[str]:
-        return [self._pred_line(ctx, self._dom.pred_attr_eq(node))]
+        prefix = "" if ctx.index == 0 else "and "
+        return [f"{ctx.indent}{prefix}{self._dom.pred_attr_eq(node)}"]
 
     def visit_predicate_attr_ne(
         self, node: PredAttrNe, ctx: WalkContext
     ) -> list[str]:
-        return [self._pred_line(ctx, self._dom.pred_attr_ne(node))]
+        prefix = "" if ctx.index == 0 else "and "
+        return [f"{ctx.indent}{prefix}{self._dom.pred_attr_ne(node)}"]
 
     def visit_predicate_attr_re(
         self, node: PredAttrRe, ctx: WalkContext
     ) -> list[str]:
-        return [self._pred_line(ctx, self._dom.pred_attr_re(node))]
+        prefix = "" if ctx.index == 0 else "and "
+        return [f"{ctx.indent}{prefix}{self._dom.pred_attr_re(node)}"]
 
     def visit_predicate_text_contains(
         self, node: PredTextContains, ctx: WalkContext
     ) -> list[str]:
-        return [self._pred_line(ctx, self._dom.pred_text_contains(node))]
+        prefix = "" if ctx.index == 0 else "and "
+        return [f"{ctx.indent}{prefix}{self._dom.pred_text_contains(node)}"]
 
     def visit_predicate_text_starts(
         self, node: PredTextStarts, ctx: WalkContext
     ) -> list[str]:
-        return [self._pred_line(ctx, self._dom.pred_text_starts(node))]
+        prefix = "" if ctx.index == 0 else "and "
+        return [f"{ctx.indent}{prefix}{self._dom.pred_text_starts(node)}"]
 
     def visit_predicate_text_ends(
         self, node: PredTextEnds, ctx: WalkContext
     ) -> list[str]:
-        return [self._pred_line(ctx, self._dom.pred_text_ends(node))]
+        prefix = "" if ctx.index == 0 else "and "
+        return [f"{ctx.indent}{prefix}{self._dom.pred_text_ends(node)}"]
 
     def visit_predicate_text_re(
         self, node: PredTextRe, ctx: WalkContext
     ) -> list[str]:
-        return [self._pred_line(ctx, self._dom.pred_text_re(node))]
+        prefix = "" if ctx.index == 0 else "and "
+        return [f"{ctx.indent}{prefix}{self._dom.pred_text_re(node)}"]
 
     # === STRING ===
 
@@ -1495,13 +1114,14 @@ class PythonVisitor(BaseWalker):
         lines.append(f"{ctx.indent})")
         return lines
 
-    # === STRING-LEVEL / COUNT / REGEX PREDICATES ===
+    # === STRING-LEVEL / COUNT / REGEX PREDICATES (inline formatting) ===
 
     def visit_predicate_contains(
         self, node: PredContains, ctx: WalkContext
     ) -> list[str]:
         vals = repr(node.values)
-        return [self._pred_line(ctx, f"any(v in i for v in {vals})")]
+        prefix = "" if ctx.index == 0 else "and "
+        return [f"{ctx.indent}{prefix}any(v in i for v in {vals})"]
 
     def visit_predicate_eq(self, node: PredEq, ctx: WalkContext) -> list[str]:
         values = node.values
@@ -1509,7 +1129,8 @@ class PythonVisitor(BaseWalker):
             cond = f"len(i) == {values[0]}"
         else:
             cond = f"any(i == v for v in {values!r})"
-        return [self._pred_line(ctx, cond)]
+        prefix = "" if ctx.index == 0 else "and "
+        return [f"{ctx.indent}{prefix}{cond}"]
 
     def visit_predicate_ne(self, node: PredNe, ctx: WalkContext) -> list[str]:
         values = node.values
@@ -1517,71 +1138,84 @@ class PythonVisitor(BaseWalker):
             cond = f"len(i) != {values[0]}"
         else:
             cond = f"all(i != v for v in {values!r})"
-        return [self._pred_line(ctx, cond)]
+        prefix = "" if ctx.index == 0 else "and "
+        return [f"{ctx.indent}{prefix}{cond}"]
 
     def visit_predicate_starts(
         self, node: PredStarts, ctx: WalkContext
     ) -> list[str]:
         vals = repr(node.values)
-        return [self._pred_line(ctx, f"i.startswith({vals})")]
+        prefix = "" if ctx.index == 0 else "and "
+        return [f"{ctx.indent}{prefix}i.startswith({vals})"]
 
     def visit_predicate_ends(
         self, node: PredEnds, ctx: WalkContext
     ) -> list[str]:
         vals = repr(node.values)
-        return [self._pred_line(ctx, f"i.endswith({vals})")]
+        prefix = "" if ctx.index == 0 else "and "
+        return [f"{ctx.indent}{prefix}i.endswith({vals})"]
 
     def visit_pred_count_range(
         self, node: PredCountRange, ctx: WalkContext
     ) -> list[str]:
-        return [self._pred_line(ctx, f"{node.start} < len(i) < {node.end}")]
+        prefix = "" if ctx.index == 0 else "and "
+        return [f"{ctx.indent}{prefix}{node.start} < len(i) < {node.end}"]
 
     def visit_predicate_count_eq(
         self, node: PredCountEq, ctx: WalkContext
     ) -> list[str]:
-        return [self._pred_line(ctx, f"len(i) == {node.value}")]
+        prefix = "" if ctx.index == 0 else "and "
+        return [f"{ctx.indent}{prefix}len(i) == {node.value}"]
 
     def visit_predicate_count_ge(
         self, node: PredCountGe, ctx: WalkContext
     ) -> list[str]:
-        return [self._pred_line(ctx, f"len(i) >= {node.value}")]
+        prefix = "" if ctx.index == 0 else "and "
+        return [f"{ctx.indent}{prefix}len(i) >= {node.value}"]
 
     def visit_predicate_count_gt(
         self, node: PredCountGt, ctx: WalkContext
     ) -> list[str]:
-        return [self._pred_line(ctx, f"len(i) > {node.value}")]
+        prefix = "" if ctx.index == 0 else "and "
+        return [f"{ctx.indent}{prefix}len(i) > {node.value}"]
 
     def visit_predicate_count_le(
         self, node: PredCountLe, ctx: WalkContext
     ) -> list[str]:
-        return [self._pred_line(ctx, f"len(i) <= {node.value}")]
+        prefix = "" if ctx.index == 0 else "and "
+        return [f"{ctx.indent}{prefix}len(i) <= {node.value}"]
 
     def visit_predicate_count_lt(
         self, node: PredCountLt, ctx: WalkContext
     ) -> list[str]:
-        return [self._pred_line(ctx, f"len(i) < {node.value}")]
+        prefix = "" if ctx.index == 0 else "and "
+        return [f"{ctx.indent}{prefix}len(i) < {node.value}"]
 
     def visit_predicate_count_ne(
         self, node: PredCountNe, ctx: WalkContext
     ) -> list[str]:
-        return [self._pred_line(ctx, f"len(i) != {node.value}")]
+        prefix = "" if ctx.index == 0 else "and "
+        return [f"{ctx.indent}{prefix}len(i) != {node.value}"]
 
     def visit_predicate_re(self, node: PredRe, ctx: WalkContext) -> list[str]:
         pat = repr(node.pattern)
-        return [self._pred_line(ctx, f"bool(re.search({pat}, i))")]
+        prefix = "" if ctx.index == 0 else "and "
+        return [f"{ctx.indent}{prefix}bool(re.search({pat}, i))"]
 
     def visit_predicate_re_any(
         self, node: PredReAny, ctx: WalkContext
     ) -> list[str]:
         pat = repr(node.pattern)
+        prefix = "" if ctx.index == 0 else "and "
         return [
-            self._pred_line(ctx, f"any(bool(re.search({pat}, j)) for j in i)")
+            f"{ctx.indent}{prefix}any(bool(re.search({pat}, j)) for j in i)"
         ]
 
     def visit_predicate_re_all(
         self, node: PredReAll, ctx: WalkContext
     ) -> list[str]:
         pat = repr(node.pattern)
+        prefix = "" if ctx.index == 0 else "and "
         return [
-            self._pred_line(ctx, f"all(bool(re.search({pat}, j)) for j in i)")
+            f"{ctx.indent}{prefix}all(bool(re.search({pat}, j)) for j in i)"
         ]

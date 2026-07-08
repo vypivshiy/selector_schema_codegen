@@ -79,7 +79,7 @@ Holds a `ModuleBuilder` reference for registering std helpers and imports.
 
 **Contract:**
 - Expression methods return `list[str]` (complete codegen lines)
-- Predicate methods return `str` (condition fragment; visitor wraps with `_pred_line`)
+- Predicate methods return `str` (condition fragment; visitor inlines with `prefix = "" if ctx.index == 0 else "and "`)
 
 ### Data attributes (override in subclasses)
 
@@ -139,9 +139,10 @@ class PythonVisitor(BaseWalker):
 
 - Creates `self._dom` from spelling class in `_reset_state()`
 - 23 DOM delegation methods (`visit_css_select` → `self._dom.css_select`, etc.)
-- Class-level type resolution attrs: `TYPES`, `ARRAY_TYPE_FMT`, `OPTIONAL_TYPE_FMT`, `AND_OP`, `DEFAULT_TYPE`, `OPTIONAL_ON_OMITEMPTY`, `STD_MODULE_NAME`
+- Class-level type resolution attrs: `TYPES`, `ARRAY_TYPE_FMT`, `OPTIONAL_TYPE_FMT`, `DEFAULT_TYPE`, `OPTIONAL_ON_OMITEMPTY`, `STD_MODULE_NAME`
 - `_HTTP_STRATEGIES` dict maps `"httpx"` → `HttpxStrategy()`, `"aiohttp"` → `AioHttpStrategy()`, `"requests"` → `RequestsStrategy()`
-- REST rendering: `MethodFetch`, `MethodRest`, `ErrorResponse` visitors
+- REST rendering delegated to `rest.py`: `rest.emit_method_fetch`, `rest.emit_method_rest`, `rest.emit_result_variant_def`, `rest.emit_result_alias_def`, `rest.emit_matcher_list_def`
+- Predicate formatting inlined: `prefix = "" if ctx.index == 0 else "and "` then `f"{ctx.indent}{prefix}{cond}"`
 
 ### Pre-built instances (targets/python/__init__.py)
 
@@ -157,9 +158,10 @@ PY_SLAX_CONVERTER = PythonVisitor(dom_spelling_cls=SlaxDomSpelling)
 Self-contained `BaseWalker` subclass — vanilla DOM API. All codegen logic
 inline (no DomSpelling pattern — JS has one DOM API).
 
-- Class-level type resolution attrs: `TYPES` (JS types), `ARRAY_TYPE_FMT="{}[]"`, `OPTIONAL_TYPE_FMT="{}|null"`, `OPTIONAL_ON_OMITEMPTY=True`, `AND_OP="&&"`, `DEFAULT_TYPE="any"`
+- Class-level type resolution attrs: `TYPES` (JS types), `ARRAY_TYPE_FMT="{}[]"`, `OPTIONAL_TYPE_FMT="{}|null"`, `OPTIONAL_ON_OMITEMPTY=True`, `DEFAULT_TYPE="any"`
 - `_HTTP_STRATEGIES` dict maps `"fetch"` → `FetchStrategy()`, `"axios"` → `AxiosStrategy()`
-- REST rendering: same `MethodFetch` / `MethodRest` pattern but JS-specific
+- REST rendering delegated to `rest.py`: `rest.emit_method_fetch`, `rest.emit_method_rest`, `rest.emit_result_variant_def`, `rest.emit_result_alias_def`, `rest.emit_matcher_list_def`
+- Predicate formatting inlined: `prefix = "" if ctx.index == 0 else "&& "` then `f"{ctx.indent}{prefix}{cond}"`
 
 Pre-built instance: `JS_CONVERTER = JsVisitor()` (targets/javascript/__init__.py)
 
@@ -242,8 +244,8 @@ copy with placeholder names passed through a target-language transform
 replacing `PlaceholderSpec.name` — **no string rewriting, no regex**.
 
 Renderers walk `Template.parts` instead of regex-parsing strings:
-- Python: `render_value(Template)`, `render_dict`, `emit_dict_builder`, `render_json_body`, `render_body` in visitor.py
-- JS: `_js_render_value(Template)`, `_js_render_obj`, `_js_emit_*_builder`, `_js_render_json_body`, `_js_render_body` in visitor.py
+- Python: `rest.render_value(Template)`, `rest.render_dict`, `rest.emit_dict_builder`, `rest.render_json_body`, `rest.render_body` in `targets/python/rest.py`
+- JS: `rest.render_value(Template)`, `rest.render_obj`, `rest.emit_obj_builder`, `rest.emit_params_builder`, `rest.render_json_body`, `rest.render_body` in `targets/javascript/rest.py`
 - `Template.map(on_ph, on_literal)` assembles a string from parts (used by JS template-literal rendering)
 - `Template.single_placeholder()` / `is_single_placeholder` — queries for dict-entry / bare-name cases
 
@@ -263,6 +265,20 @@ before the struct by `core/reader.py` (same pattern as `typedef_from_struct`).
 `MatcherEntry` carries RAW condition data (`required_keys` + `conditions`) —
 each language renders its own check spelling (`lambda _b: ...` in Python,
 `(_b) => ...` in JS). The synthesizer is language-agnostic.
+
+## REST codegen — rest.py per backend
+
+Each backend has a `rest.py` module containing pure functions for REST/fetch
+codegen. Visitors delegate to these via thin `visit_*` wrappers.
+
+| File | Key functions |
+|------|---------------|
+| `targets/python/rest.py` | `render_value`, `render_dict`, `emit_dict_builder`, `render_json_body`, `render_body`, `placeholder_params`, `emit_method_rest`, `emit_method_fetch`, `emit_result_variant_def`, `emit_result_alias_def`, `emit_matcher_list_def`, `runtime_export_names` |
+| `targets/javascript/rest.py` | `render_value`, `render_obj`, `emit_obj_builder`, `emit_params_builder`, `render_json_body`, `render_body`, `emit_method_rest`, `emit_method_fetch`, `emit_result_variant_def`, `emit_result_alias_def`, `emit_matcher_list_def`, `REST_SHARED` |
+
+All `emit_*` functions accept `(node, ctx, http)` where `http` is the
+backend's `HttpLibStrategy`. Result artifact functions (`emit_result_*`,
+`emit_matcher_list_def`) only take `(node)` / `(node, ...)`.
 
 ---
 
