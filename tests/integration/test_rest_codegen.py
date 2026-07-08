@@ -36,7 +36,7 @@ def _parse(src: str):
 
 def _generate(src: str, *, http_client: str = "httpx") -> dict:
     """Parse KDL REST schema, generate py-bs4 code, exec, return namespace."""
-    from ssc_codegen.converters.py_bs4 import PY_BASE_CONVERTER
+    from ssc_codegen.targets.python import PY_BS4_CONVERTER as PY_BASE_CONVERTER
 
     module = _parse(src)
     code = PY_BASE_CONVERTER.convert(module, http_client=http_client)

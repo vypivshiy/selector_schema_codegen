@@ -15,8 +15,8 @@ import pytest
 
 from ssc_codegen.core import parse_module
 from kdlquery import Severity
-from ssc_codegen.converters.js_pure import JS_CONVERTER
-from ssc_codegen.converters.helpers import to_pascal_case
+from ssc_codegen.targets.javascript import JS_CONVERTER
+from ssc_codegen.naming import to_pascal_case
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 SCHEMAS_DIR = ROOT / "tests" / "integration" / "schemas"

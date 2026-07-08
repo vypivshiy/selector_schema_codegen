@@ -11,7 +11,7 @@ import pytest
 
 from ssc_codegen.core import parse_module
 from kdlquery import Severity
-from ssc_codegen.converters.helpers import to_pascal_case
+from ssc_codegen.naming import to_pascal_case
 
 SCHEMAS_DIR = Path(__file__).parent / "schemas"
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -19,10 +19,10 @@ HTML_FIXTURE = FIXTURES_DIR / "dsl_coverage.html"
 
 # Python targets and their converter imports
 _PY_TARGETS = {
-    "py-bs4": "ssc_codegen.converters.py_bs4:PY_BASE_CONVERTER",
-    "py-lxml": "ssc_codegen.converters.py_lxml:PY_LXML_CONVERTER",
-    "py-parsel": "ssc_codegen.converters.py_parsel:PY_PARSEL_CONVERTER",
-    "py-slax": "ssc_codegen.converters.py_slax:PY_SLAX_CONVERTER",
+    "py-bs4": "ssc_codegen.targets.python:PY_BS4_CONVERTER",
+    "py-lxml": "ssc_codegen.targets.python:PY_LXML_CONVERTER",
+    "py-parsel": "ssc_codegen.targets.python:PY_PARSEL_CONVERTER",
+    "py-slax": "ssc_codegen.targets.python:PY_SLAX_CONVERTER",
 }
 
 

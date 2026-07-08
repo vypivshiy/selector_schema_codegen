@@ -1,9 +1,8 @@
 """Pure naming helpers (case conversions) — no dependencies.
 
-Lives at top level so both ``core/`` and ``converters/`` can import it
+Lives at top level so both ``core/`` and ``targets/`` can import it
 without creating a layering dependency (``core`` must not import from
-``converters``).  ``converters/helpers.py`` re-exports these for backwards
-compatibility.
+``targets``).
 """
 
 from __future__ import annotations

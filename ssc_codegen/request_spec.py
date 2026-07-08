@@ -13,14 +13,18 @@ import json
 import re
 from urllib.parse import urlparse, urlunparse
 
-from ssc_codegen.ast.struct import PlaceholderSpec, RequestHttp, Template
+from ssc_codegen.ast.struct import (
+    PlaceholderSpec,
+    RequestHttp,
+    PlaceholderTemplate,
+)
 from ssc_codegen.parsers.curl import parse_curl_command
 from ssc_codegen.parsers.http import parse_http_request
 
 
-def _tmpl_dict(d: dict) -> dict[str, Template]:
+def _tmpl_dict(d: dict) -> dict[str, PlaceholderTemplate]:
     """Wrap every dict value in a Template."""
-    return {k: Template.parse(str(v)) for k, v in d.items()}
+    return {k: PlaceholderTemplate.parse(str(v)) for k, v in d.items()}
 
 
 # ── Parser → RequestHttp ──────────────────────────────────────────────────────
@@ -64,7 +68,7 @@ def parse_to_http(payload: str) -> RequestHttp:
 
     # ── body ─────────────────────────────────────────────────────────────────
     body_kind = "empty"
-    body: Template | dict[str, Template] | None = None
+    body: PlaceholderTemplate | dict[str, PlaceholderTemplate] | None = None
     content_type = headers.get("Content-Type", "").lower()
 
     if "json" in kwargs or (
@@ -73,7 +77,7 @@ def parse_to_http(payload: str) -> RequestHttp:
         body_kind = "json"
         raw_body = _extract_raw_body(payload, fmt)
         validate_json_body(raw_body)
-        body = Template.parse(raw_body)  # rendered as f-string
+        body = PlaceholderTemplate.parse(raw_body)  # rendered as f-string
 
     elif "data" in kwargs:
         raw_body = _extract_raw_body(payload, fmt)
@@ -85,11 +89,11 @@ def parse_to_http(payload: str) -> RequestHttp:
             body = _tmpl_dict(_parse_urlencoded_body(raw_body))
         else:
             body_kind = "raw"
-            body = Template.parse(raw_body)
+            body = PlaceholderTemplate.parse(raw_body)
 
     return RequestHttp(
         method=method,
-        url=Template.parse(url),
+        url=PlaceholderTemplate.parse(url),
         headers=_tmpl_dict(headers),
         cookies=_tmpl_dict(cookies),
         params=_tmpl_dict(params),

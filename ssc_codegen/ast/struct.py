@@ -147,7 +147,7 @@ def parse_placeholder(match: "_re.Match[str]") -> PlaceholderSpec:
 
 
 @dataclass
-class Template:
+class PlaceholderTemplate:
     """A string value tokenized into literal segments and placeholder specs.
 
     Created once at parse time (``Template.parse``) from raw ``{{...}}`` text.
@@ -161,7 +161,7 @@ class Template:
     # ── construction ─────────────────────────────────────────────────────
 
     @classmethod
-    def parse(cls, raw: str) -> "Template":
+    def parse(cls, raw: str) -> "PlaceholderTemplate":
         """Tokenize *raw* into literal / placeholder parts."""
         parts: list[str | PlaceholderSpec] = []
         buf: list[str] = []
@@ -184,7 +184,7 @@ class Template:
         return cls(parts=parts)
 
     @classmethod
-    def literal(cls, text: str) -> "Template":
+    def literal(cls, text: str) -> "PlaceholderTemplate":
         """Wrap a placeholder-free string."""
         return cls(parts=[text])
 
@@ -236,7 +236,7 @@ class Template:
         """Reconstruct the original ``{{...}}`` source text from parts."""
         return self.map(lambda ph: ph.to_token())
 
-    def renamed(self, mapping: dict[str, str]) -> "Template":
+    def renamed(self, mapping: dict[str, str]) -> "PlaceholderTemplate":
         """Return a copy with placeholder names remapped via *mapping*."""
         if not self.has_placeholders:
             return self
@@ -248,7 +248,7 @@ class Template:
                 )
             else:
                 new_parts.append(part)
-        return Template(parts=new_parts)
+        return PlaceholderTemplate(parts=new_parts)
 
 
 # ── Request/Method nodes ──────────────────────────────────────────────────────
@@ -265,12 +265,12 @@ class RequestHttp(Node):
     """
 
     method: str = "GET"
-    url: Template = field(default_factory=Template)
-    headers: dict[str, Template] = field(default_factory=dict)
-    cookies: dict[str, Template] = field(default_factory=dict)
-    params: dict[str, Template] = field(default_factory=dict)
+    url: PlaceholderTemplate = field(default_factory=PlaceholderTemplate)
+    headers: dict[str, PlaceholderTemplate] = field(default_factory=dict)
+    cookies: dict[str, PlaceholderTemplate] = field(default_factory=dict)
+    params: dict[str, PlaceholderTemplate] = field(default_factory=dict)
     body_kind: str = "empty"  # "empty" | "json" | "form" | "raw"
-    body: Template | dict[str, Template] | None = None
+    body: PlaceholderTemplate | dict[str, PlaceholderTemplate] | None = None
 
     @property
     def placeholders(self) -> list[PlaceholderSpec]:
@@ -289,7 +289,7 @@ class RequestHttp(Node):
         yield self.url
         for d in (self.headers, self.cookies, self.params):
             yield from d.values()
-        if isinstance(self.body, Template):
+        if isinstance(self.body, PlaceholderTemplate):
             yield self.body
         elif isinstance(self.body, dict):
             yield from self.body.values()
@@ -307,11 +307,15 @@ class RequestHttp(Node):
         if all(old == new for old, new in mapping.items()):
             return self
 
-        def _rename_dict(d: dict[str, Template]) -> dict[str, Template]:
+        def _rename_dict(
+            d: dict[str, PlaceholderTemplate],
+        ) -> dict[str, PlaceholderTemplate]:
             return {k: v.renamed(mapping) for k, v in d.items()}
 
-        new_body: Template | dict[str, Template] | None = self.body
-        if isinstance(self.body, Template):
+        new_body: (
+            PlaceholderTemplate | dict[str, PlaceholderTemplate] | None
+        ) = self.body
+        if isinstance(self.body, PlaceholderTemplate):
             new_body = self.body.renamed(mapping)
         elif isinstance(self.body, dict):
             new_body = _rename_dict(self.body)

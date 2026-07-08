@@ -1,22 +1,13 @@
-"""Assembly of the separate runtime module file (``--separate-runtime`` / ``-R``).
-
-Produces a single ``sscgen_runtime.py`` (name configurable via
-``--runtime-name``) containing the base text helpers plus the REST runtime
-classes/functions, when any REST struct is present in the reference module.
-"""
+"""Assembly of the separate runtime module file (``--separate-runtime`` / ``-R``)."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Any
 
 import ssc_codegen.ast as a
 
-from ssc_codegen.converters.visitor import Visitor, module_has_rest
-
-
-# ---------------------------------------------------------------------------
-# Base runtime source lines (shared by HTML-parser and REST dialects).
-# ---------------------------------------------------------------------------
+from ssc_codegen.traversal.utils import module_has_rest
 
 _BASE_UTILITY_LINES: list[str] = [
     "_RE_HEX_ENTITY = re.compile(r'&#x([0-9a-fA-F]+);')",
@@ -63,22 +54,8 @@ _BASE_UTILITY_LINES: list[str] = [
 ]
 
 
-# ---------------------------------------------------------------------------
-# REST runtime source lines.
-# ---------------------------------------------------------------------------
-
-
 def rest_runtime_lines() -> list[str]:
-    """Canonical source for the REST runtime (Ok/Err/TransportErr/ErrMatcher
-    + ``ssc_dispatch_err`` / ``ssc_rest_call[_async]``).
-
-    Consumed by:
-      - ``py_base.visit_utilities`` (inline mode — yields each line)
-      - ``runtime_module_content`` (``-R`` separate-runtime mode — joins)
-
-    Blank lines are empty strings (``""``) so both consumers render them
-    identically (yield-as-line vs ``"\\n".join``).
-    """
+    """Canonical source for the REST runtime."""
     return [
         "_T = TypeVar('_T')",
         "_E = TypeVar('_E')",
@@ -198,17 +175,12 @@ def runtime_module_content(module: a.Module) -> str:
 
 
 def register_runtime_file(
-    converter: Visitor,
+    converter: Any,
     runtime_name: str = "sscgen_runtime",
     *,
     include_fallback: bool = False,
 ) -> Callable[[list[a.Module]], str]:
-    """Register a runtime module file provider on the converter.
-
-    Returns a callable ``generate_runtime(modules) -> str`` that produces
-    the runtime file content for a list of parsed modules, picking the one
-    with REST structs as the reference AST automatically.
-    """
+    """Register a runtime module file provider on the converter."""
 
     def _apply_fallback(content: str) -> str:
         if not include_fallback:

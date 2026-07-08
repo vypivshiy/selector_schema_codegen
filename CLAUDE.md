@@ -11,7 +11,7 @@
 |------|-------------|
 | `llm_types_ast.md` | работа с AST-нодами, VariableType, StructType, добавление новых операций |
 | `llm_core.md` | парсер KDL→AST, линтинг, type checking, добавление нового синтаксиса |
-| `llm_converters.md` | кодогенерация, BaseConverter, новый target language, @request транспорт |
+| `llm_converters.md` | кодогенерация, BaseWalker, DomSpelling, HttpLibStrategy, новый target language, @request транспорт |
 | `llm_howto.md` | пошаговые инструкции: новая операция / директива / конвертер |
 
 Не запускай Explore агентов и не осматривай файлы самостоятельно — действуй по чеклистам из нужных файлов.

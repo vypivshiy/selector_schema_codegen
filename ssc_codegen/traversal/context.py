@@ -4,7 +4,16 @@ from dataclasses import dataclass, field, replace
 
 
 @dataclass
-class ConverterContext:
+class WalkContext:
+    """Immutable traversal context passed through every ``walk_*`` call.
+
+    Tracks variable naming (index-based), indentation depth, and build options.
+
+    - ``prv`` / ``nxt`` compute variable names from ``index``.
+    - ``advance()`` returns a new context with index+1 (pipeline step).
+    - ``deeper()`` returns a new context with depth+1 (nesting level).
+    """
+
     index: int = 0
     depth: int = 0
     var_name: str = "v"
@@ -25,8 +34,14 @@ class ConverterContext:
     def indent(self) -> str:
         return self.indent_char * self.depth
 
-    def advance(self) -> "ConverterContext":
+    def advance(self) -> WalkContext:
         return replace(self, index=self.index + 1)
 
-    def deeper(self) -> "ConverterContext":
+    def advance_n(self, n: int) -> WalkContext:
+        return replace(self, index=self.index + n)
+
+    def deeper(self) -> WalkContext:
         return replace(self, depth=self.depth + 1)
+
+    def reset_index(self) -> WalkContext:
+        return replace(self, index=0)

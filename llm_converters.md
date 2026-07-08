@@ -1,36 +1,27 @@
-# Converter Architecture (converters/)
+# Codegen Architecture (targets/ + traversal/ + generation/)
 
-## Visitor (converters/visitor.py)
+Replaces the old `converters/` package entirely.
 
-Abstract base class — the single codegen abstraction. Walks the AST via a
-dispatch table, two-pass signal collection, and concrete shared methods.
+## BaseWalker (traversal/walker.py)
+
+Abstract traversal core — dispatches AST nodes to `visit_*` handlers via a
+class-level `_DISPATCH` table. No codegen logic; just dispatch + body traversal.
 
 ```python
-class PyBs4(PyHtmlBase):  # PyHtmlBase(Visitor)
-    TYPES = {VT.STRING: "str", ...}        # override class attrs
-    def visit_css_select(self, node, ctx): # override visit_* methods
-        yield f"{ctx.indent}{ctx.nxt} = ..."
+class PythonVisitor(BaseWalker):
+    def visit_css_select(self, node, ctx) -> list[str]:
+        return self._dom.css_select(ctx, node)
 ```
 
-### CONTRACT for visit_* methods (generators)
+### Handler contract
 
 ```
-yield "..."       -> emit a line
-yield TRAVERSE    -> traverse node.body, then resume the method (pre/post hook)
-yield [...]       -> extend with a list of lines (signals allowed inside)
-yield STD(...)    -> register a co-located std helper (name + code + imports)
-yield IMPORT(ln)  -> register a main-module import line
-yield from it     -> delegate to an iterable
-return            -> no-op
+visit_*(node, ctx) -> list[str]    # complete codegen lines
+visit_*(node, ctx) -> str          # single line (auto-wrapped to [str])
+visit_*(node, ctx) -> None         # no output
 ```
 
-`""` is preserved as a blank line; `TRAVERSE` (None) is the traverse-children signal.
-
-### Two-pass reliability
-
-`convert_all` runs every `visit_*` **twice**: pass 1 collects `STD()` / `IMPORT()`
-signals (output discarded); pass 2 emits. visit_* methods MUST be deterministic
-and side-effect-free (same node+ctx → same yields).
+`""` is preserved as a blank line.
 
 ### Node categories (body traversal mode)
 
@@ -40,11 +31,11 @@ and side-effect-free (same node+ctx → same yields).
 | Pipeline | index advances after each node | Field, InitField, PreValidate, CheckMethod, SplitDoc, Key, Value, Table* |
 | Predicate | depth+1, index=0, advance between siblings | Filter, Assert, Match, LogicNot/And/Or |
 
-`Fallback` is handled specially in `_emit_pipeline` (try/catch block).
+`Fallback` is handled specially in `walk_pipeline` (try/catch block).
 
-## ConverterContext (converters/base.py)
+## WalkContext (traversal/context.py)
 
-Frozen dataclass — tracks conversion state:
+Immutable dataclass (frozen via `replace()`) — tracks traversal state:
 
 | Field/property | Meaning |
 |---|---|
@@ -57,75 +48,161 @@ Frozen dataclass — tracks conversion state:
 | `.nxt` | Next variable name (output) |
 | `.indent` | Current indentation string |
 | `.advance()` | New ctx with index+1 |
+| `.advance_n(n)` | New ctx with index+n |
 | `.deeper()` | New ctx with depth+1 |
+| `.reset_index()` | New ctx with index=0 |
 
-## Class-level config (override in subclasses)
+## ModuleBuilder (generation/builder.py)
 
-### Type resolution spelling (data, not behaviour)
+Pure data accumulator — replaces old hidden signal pools (`STD()` / `IMPORT()` yields).
 
-```python
-DEFAULT_TYPE: str = "Any"              # js: "any"
-TYPES: dict[VT, str] = {}              # {VT.STRING: "str", ...}
-ARRAY_TYPE_FMT: str = "List[{}]"       # js: "{}[]"
-OPTIONAL_TYPE_FMT: str = "Optional[{}]"# js: "{}|null"
-OPTIONAL_ON_OMITEMPTY: bool = False    # js: True
-DOCUMENT_TYPE: str = "Any"             # bs4: "Union[Tag, BeautifulSoup]"
-DOCUMENT_ARRAY_TYPE: str = "List[Any]" # js: "Array<Element>"
-```
-
-### Predicate formatting
-
-```python
-AND_OP: str = "and"                    # js: "&&"
-```
-
-## Shared concrete methods (inherited, not overridden)
-
-| Method | Purpose |
+| Method/property | Purpose |
 |---|---|
-| `_resolve_type(type_info) -> str` | TypeInfo → target-language annotation (driven by class attrs) |
-| `_resolve_start_parse_t_ret(struct, name) -> str` | Return type for parse() (derived from ARRAY_TYPE_FMT + TYPES) |
-| `_pred_line(ctx, cond) -> str` | Format one predicate condition, join siblings with AND_OP |
+| `require_import(line)` | Register an import line (idempotent, order-preserving) |
+| `require_std(name, code=, imports=)` | Register a std-helper definition (idempotent by name) |
+| `reset()` | Clear all accumulated state |
+| `.imports` | List of registered import lines |
+| `.std_names` | List of registered std-helper names |
+| `.std_defs` | Dict of name → (imports, code) |
+| `.std_imports` | List of std-scoped import lines |
+| `.has_std` | True if any std helpers registered |
 
-## Shared module-level functions (language-agnostic)
+Target visitors access the builder via `self._builder` (PythonVisitor) or
+`self._builder` (JsVisitor). DomSpelling instances receive the builder in
+their constructor and use `self._builder.require_std(...)` / `.require_import(...)`.
+
+## DomSpelling (targets/python/html_libs/base.py)
+
+ABC — dialect-specific HTML extraction spelling (data + behavior).
+
+Holds a `ModuleBuilder` reference for registering std helpers and imports.
+
+**Contract:**
+- Expression methods return `list[str]` (complete codegen lines)
+- Predicate methods return `str` (condition fragment; visitor wraps with `_pred_line`)
+
+### Data attributes (override in subclasses)
+
+```python
+parser_imports: tuple[str, ...] = ()
+document_type: str = "Any"
+document_array_type: str = "List[Any]"
+init_arg_type: str = "Any"
+init_from_str_expr: str = "document"
+extra_utilities: tuple[str, ...] = ()
+supports_xpath: bool = False
+```
+
+### Expression methods (return list[str])
+
+| Method | Node |
+|---|---|
+| `css_select(ctx, node)` | CssSelect |
+| `css_select_all(ctx, node)` | CssSelectAll |
+| `css_remove(ctx, node)` | CssRemove |
+| `xpath_select(ctx, node)` | XpathSelect |
+| `xpath_select_all(ctx, node)` | XpathSelectAll |
+| `xpath_remove(ctx, node)` | XpathRemove |
+| `text(ctx, node)` | Text |
+| `raw(ctx, node)` | Raw |
+| `attr(ctx, node)` | Attr |
+| `to_bool(ctx, node)` | ToBool |
+
+### Predicate methods (return str)
+
+| Method | Node |
+|---|---|
+| `pred_css(node)` | PredCss |
+| `pred_xpath(node)` | PredXpath |
+| `pred_has_attr(node)` | PredHasAttr |
+| `pred_attr_contains(node)` | PredAttrContains |
+| `pred_attr_starts(node)` | PredAttrStarts |
+| `pred_attr_ends(node)` | PredAttrEnds |
+| `pred_attr_eq(node)` | PredAttrEq |
+| `pred_attr_ne(node)` | PredAttrNe |
+| `pred_attr_re(node)` | PredAttrRe |
+| `pred_text_contains(node)` | PredTextContains |
+| `pred_text_starts(node)` | PredTextStarts |
+| `pred_text_ends(node)` | PredTextEnds |
+| `pred_text_re(node)` | PredTextRe |
+
+## PythonVisitor (targets/python/visitor.py)
+
+Self-contained `BaseWalker` subclass. No subclasses needed — configured via
+`dom_spelling_cls` constructor parameter.
+
+```python
+class PythonVisitor(BaseWalker):
+    def __init__(self, var_name="v", indent="    ", dom_spelling_cls=None):
+        ...
+```
+
+- Creates `self._dom` from spelling class in `_reset_state()`
+- 23 DOM delegation methods (`visit_css_select` → `self._dom.css_select`, etc.)
+- Class-level type resolution attrs: `TYPES`, `ARRAY_TYPE_FMT`, `OPTIONAL_TYPE_FMT`, `AND_OP`, `DEFAULT_TYPE`, `OPTIONAL_ON_OMITEMPTY`, `STD_MODULE_NAME`
+- `_HTTP_STRATEGIES` dict maps `"httpx"` → `HttpxStrategy()`, `"aiohttp"` → `AioHttpStrategy()`, `"requests"` → `RequestsStrategy()`
+- REST rendering: `MethodFetch`, `MethodRest`, `ErrorResponse` visitors
+
+### Pre-built instances (targets/python/__init__.py)
+
+```python
+PY_BS4_CONVERTER = PythonVisitor(dom_spelling_cls=Bs4DomSpelling)
+PY_LXML_CONVERTER = PythonVisitor(dom_spelling_cls=LxmlDomSpelling)
+PY_PARSEL_CONVERTER = PythonVisitor(dom_spelling_cls=ParselDomSpelling)
+PY_SLAX_CONVERTER = PythonVisitor(dom_spelling_cls=SlaxDomSpelling)
+```
+
+## JsVisitor (targets/javascript/visitor.py)
+
+Self-contained `BaseWalker` subclass — vanilla DOM API. All codegen logic
+inline (no DomSpelling pattern — JS has one DOM API).
+
+- Class-level type resolution attrs: `TYPES` (JS types), `ARRAY_TYPE_FMT="{}[]"`, `OPTIONAL_TYPE_FMT="{}|null"`, `OPTIONAL_ON_OMITEMPTY=True`, `AND_OP="&&"`, `DEFAULT_TYPE="any"`
+- `_HTTP_STRATEGIES` dict maps `"fetch"` → `FetchStrategy()`, `"axios"` → `AxiosStrategy()`
+- REST rendering: same `MethodFetch` / `MethodRest` pattern but JS-specific
+
+Pre-built instance: `JS_CONVERTER = JsVisitor()` (targets/javascript/__init__.py)
+
+## HttpLibStrategy (targets/python/http_libs/base.py)
+
+ABC — HTTP client library strategy for REST codegen.
+
+**Python strategies:**
+
+| Strategy | Class attrs | Behavior |
+|---|---|---|
+| `HttpxStrategy` | `import_line`, `sync_client_type`, `async_client_type`, `transport_exception` | sync + async native |
+| `AioHttpStrategy` | same pattern | async-only; sync via `asyncio.run()` + `ThreadPoolExecutor` fallback for running-loop |
+| `RequestsStrategy` | same pattern | sync-only; async via `run_in_executor` |
+
+Each owns `rest_runtime_lines() -> list[str]` — REST runtime source with
+library-specific `except` clause.
+
+**JS strategies** (`JsHttpLibStrategy`):
+
+| Strategy | `fn_name` |
+|---|---|
+| `FetchStrategy` | `"sscRestCall"` |
+| `AxiosStrategy` | `"sscRestCallAxios"` |
+
+JS emits both fetch and axios runtime helpers regardless of selection.
+Strategy only determines which helper name generated methods delegate to.
+
+## Shared utility functions (traversal/utils.py)
+
+Language-agnostic functions used by both backends:
 
 ```python
 module_has_rest(module) -> bool
 module_is_rest_only(module) -> bool
 err_subclass_name(struct_name, err) -> str
-dict_entry_placeholder(v) -> PlaceholderSpec | None
+dict_entry_placeholder(tmpl) -> PlaceholderSpec | None
 dict_needs_builder(d) -> bool
 find_predicate_container(node) -> Node | None
+jsonify_path_to_segments(path) -> list[str | tuple[str, bool]]
 ```
 
-## Converter hierarchy
-
-```
-Visitor (ABC, visitor.py)
-├── PyHtmlBase (py_base.py) — shared Python HTML codegen
-│   ├── PyBs4   (py_bs4.py)   — BeautifulSoup4
-│   ├── PyLxml  (py_lxml.py)   — lxml.html
-│   ├── PyParsel(py_parsel.py) — parsel (Scrapy)
-│   └── PySlax  (py_slax.py)   — selectolax
-└── JsPure (js_pure.py) — vanilla DOM API
-```
-
-- `PY_BASE_CONVERTER = PyBs4()` — module-level instance
-- `JS_CONVERTER = JsPure()` — module-level instance
-- Adding a dialect: subclass `PyHtmlBase`, set config attrs, override the
-  expression methods whose spelling differs (selectors, text/raw/attr, to_bool,
-  predicates). All shared logic is inherited.
-
-## Adding a new target language
-
-1. Subclass `Visitor` directly (or `PyHtmlBase` if it's a Python parser dialect)
-2. Set class attrs: `TYPES`, `ARRAY_TYPE_FMT`, `OPTIONAL_TYPE_FMT`,
-   `DOCUMENT_TYPE`, `DOCUMENT_ARRAY_TYPE`, `AND_OP`, etc.
-3. Implement ALL `visit_*` methods (the ABC enforces completeness)
-4. Use `STD(name, code=, imports=)` for multi-line helpers
-5. Register in `main.py` Target enum and converter mapping
-
-## Runtime file (converters/runtime_file.py)
+## Runtime file (generation/runtime.py)
 
 Flat module that assembles the separate runtime file emitted by `-R` /
 `--separate-runtime`.
@@ -133,12 +210,23 @@ Flat module that assembles the separate runtime file emitted by `-R` /
 | Symbol | Role |
 |--------|------|
 | `_BASE_UTILITY_LINES` | Base text-helper source lines (repl_map, normalize_text, unescape_text, rm_prefix/suffix, UNMATCHED_TABLE_ROW) |
-| `_rest_utility_lines()` | REST runtime source lines (Ok/Err/UnknownErr/TransportErr/ErrMatcher/ssc_dispatch_err/ssc_rest_call[_async]) |
+| `rest_runtime_lines()` | REST runtime source lines (Ok/Err/UnknownErr/TransportErr/ErrMatcher/ssc_dispatch_err/ssc_rest_call[_async]) |
 | `runtime_module_content(module)` | Full runtime file source for one reference module |
 | `register_runtime_file(converter, runtime_name, *, include_fallback)` | Registers a `@converter.file(...)` provider and returns a `generate_runtime(modules) -> str` callable |
 
-The main module's `from .{runtime} import ...` line is emitted by
-`py_base.py:_runtime_export_names` (mirrors the same symbol set).
+## Target resolution (targets/)
+
+```
+TargetSpec (raw user input)
+    → resolve(spec) → TargetProfile (validated capabilities + factory)
+        → profile.create_converter() → PythonVisitor | JsVisitor
+```
+
+| Component | File | Role |
+|---|---|---|
+| `TargetSpec` | `spec.py` | Raw user input: `lang`, `lib`, `http_client`, `separate_runtime` |
+| `TargetProfile` | `profile.py` | Frozen dataclass: `language`, `file_extension`, `create_converter: Callable`, `http_clients`, `supports_separate_runtime`, `runtime_include_fallback` |
+| `resolve(spec)` | `resolver.py` | Validates input, returns `TargetProfile` with factory. Raises `ResolutionError` on invalid combos. |
 
 ## RequestHttp pipeline (request_spec.py + ast/struct.py)
 
@@ -154,8 +242,8 @@ copy with placeholder names passed through a target-language transform
 replacing `PlaceholderSpec.name` — **no string rewriting, no regex**.
 
 Renderers walk `Template.parts` instead of regex-parsing strings:
-- Python: `render_value(Template)`, `render_dict`, `emit_dict_builder`, `render_json_body`, `render_body` in py_base.py
-- JS: `_js_render_value(Template)`, `_js_render_obj`, `_js_emit_*_builder`, `_js_render_json_body`, `_js_render_body` in js_pure.py
+- Python: `render_value(Template)`, `render_dict`, `emit_dict_builder`, `render_json_body`, `render_body` in visitor.py
+- JS: `_js_render_value(Template)`, `_js_render_obj`, `_js_emit_*_builder`, `_js_render_json_body`, `_js_render_body` in visitor.py
 - `Template.map(on_ph, on_literal)` assembles a string from parts (used by JS template-literal rendering)
 - `Template.single_placeholder()` / `is_single_placeholder` — queries for dict-entry / bare-name cases
 
@@ -174,11 +262,7 @@ before the struct by `core/reader.py` (same pattern as `typedef_from_struct`).
 
 `MatcherEntry` carries RAW condition data (`required_keys` + `conditions`) —
 each language renders its own check spelling (`lambda _b: ...` in Python,
-`(_b) => ...` in JS). The synthesizer is language-agnostic; `err_subclass_name`
-lives in `core/rest_artifacts.py` (re-exported by `converters/visitor.py`).
-
-`visit_struct_rest` is now a pure header emitter — it no longer calls
-procedural `emit_*` functions.
+`(_b) => ...` in JS). The synthesizer is language-agnostic.
 
 ---
 
@@ -201,4 +285,4 @@ Generated code (Python `httpx`):
 
 Extracts helper functions into a separate runtime module (default: `sscgen_runtime`).
 Generated parsers import from it instead of inlining.
-Runtime content assembled by `converters/runtime_file.py` → `register_runtime_file()`.
+Runtime content assembled by `generation/runtime.py` → `register_runtime_file()`.

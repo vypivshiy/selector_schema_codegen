@@ -89,9 +89,9 @@ module = ["colorama", "lxml", "lxml.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-# VisitStream = Iterator[...] | None confuses mypy on generator overrides
-module = ["ssc_codegen.converters.visitor", "ssc_codegen.converters.py_base", "ssc_codegen.converters.py_bs4", "ssc_codegen.converters.py_lxml", "ssc_codegen.converters.py_parsel", "ssc_codegen.converters.py_slax", "ssc_codegen.converters.js_pure"]
-disable_error_code = ["return", "return-value", "safe-super"]
+# Large visitor classes with match statements may need relaxed return checks
+module = ["ssc_codegen.targets.python.visitor", "ssc_codegen.targets.javascript.visitor"]
+disable_error_code = ["return", "return-value"]
 
 
 [tool.coverage.report]

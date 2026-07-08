@@ -170,7 +170,7 @@ def test_codegen_with_imports():
     """Code generation works with imported structs and defines."""
     m, _ = _parse_file(FIXTURES / "main_schema.kdl")
 
-    from ssc_codegen.converters.py_bs4 import PY_BASE_CONVERTER
+    from ssc_codegen.targets.python import PY_BS4_CONVERTER as PY_BASE_CONVERTER
 
     code = PY_BASE_CONVERTER.convert(m)
 

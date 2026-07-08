@@ -29,7 +29,7 @@ Frozen dataclass — unified type container with modifiers:
 
 Properties: `.is_list` (alias for is_array), `.is_ref` (NESTED/JSON + has ref).
 
-Target-language rendering is done by `Visitor._resolve_type()` via class attrs.
+Target-language rendering is done by `PythonVisitor._resolve_type()` / `JsVisitor` class attrs.
 
 ### StructType enum
 
@@ -56,7 +56,7 @@ All nodes inherit from `Node` base class (has `body` attribute).
 - `Utilities`, `CodeStartHook`, `CodeEndHook`
 
 ### Struct layer
-- `StructBase` → base for `Struct` (HTML parser) and `StructRest` (REST API). Per-struct docstring lives in the `doc` field (position is converter-dependent: Python emits it below `class X:`, JS emits it above).
+- `StructBase` → base for `Struct` (HTML parser) and `StructRest` (REST API). Per-struct docstring lives in the `doc` field (position is visitor-dependent: Python emits it below `class X:`, JS emits it above).
 - `Struct(name, struct_type, keep_order, doc)` → HTML parser schema
 - `StructRest(name, errors, doc)` → REST API endpoint handler
 - `Field(name)` → output field with pipeline of operations
@@ -64,7 +64,7 @@ All nodes inherit from `Node` base class (has `body` attribute).
 - `InitFieldCall(name)` → call-site inside constructor that invokes the corresponding `InitField` method
 - `InitField(name)` → precomputed value method, referenced as `@name` via `Self` node
 - `PreValidate` → assert-based validation before parsing
-- `CheckMethod(name)` → boolean check method. Unlike Field/PreValidate, has no `v` parameter; converter initializes `v = self._doc`. Pipeline must contain `to-bool`.
+- `CheckMethod(name)` → boolean check method. Unlike Field/PreValidate, has no `v` parameter; visitor initializes `v = self._doc`. Pipeline must contain `to-bool`.
 - `SplitDoc` → split document into items (for LIST/DICT types)
 - `Key`, `Value` → dict key/value extraction
 - `TableConfig`, `TableRows`, `TableMatchKey` → table struct support

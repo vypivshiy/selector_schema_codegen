@@ -11,6 +11,8 @@ import typer
 
 from ssc_codegen._logging import logger, setup_debug_logging
 from ssc_codegen.core import parse_module, format_diagnostics, ReadDiagnostic
+from ssc_codegen.targets.resolver import ResolutionError, resolve
+from ssc_codegen.targets.spec import TargetSpec
 
 
 app = typer.Typer(
@@ -20,50 +22,21 @@ app = typer.Typer(
 )
 
 
-class Target(str, enum.Enum):
-    PY_BS4 = "py-bs4"
-    PY_LXML = "py-lxml"
-    PY_PARSEL = "py-parsel"
-    PY_SLAX = "py-slax"
-    JS_PURE = "js-pure"
+class Lang(str, enum.Enum):
+    PYTHON = "python"
+    JS = "js"
+
+
+class HtmlLib(str, enum.Enum):
+    BS4 = "bs4"
+    LXML = "lxml"
+    PARSEL = "parsel"
+    SLAX = "slax"
 
 
 class FmtType(str, enum.Enum):
     TEXT = "text"
     JSON = "json"
-
-
-_FILE_EXTENSIONS: dict[Target, str] = {
-    Target.PY_BS4: ".py",
-    Target.PY_LXML: ".py",
-    Target.PY_PARSEL: ".py",
-    Target.PY_SLAX: ".py",
-    Target.JS_PURE: ".js",
-}
-
-
-def _get_converter(target: Target):
-    if target == Target.PY_BS4:
-        from ssc_codegen.converters.py_bs4 import PyBs4
-
-        return PyBs4()
-    if target == Target.PY_LXML:
-        from ssc_codegen.converters.py_lxml import PyLxml
-
-        return PyLxml()
-    if target == Target.PY_PARSEL:
-        from ssc_codegen.converters.py_parsel import PyParsel
-
-        return PyParsel()
-    if target == Target.PY_SLAX:
-        from ssc_codegen.converters.py_slax import PySlax
-
-        return PySlax()
-    if target == Target.JS_PURE:
-        from ssc_codegen.converters.js_pure import JsPure
-
-        return JsPure()
-    raise ValueError(f"Unknown target: {target}")
 
 
 @app.command()
@@ -78,12 +51,12 @@ def generate(
             readable=True,
         ),
     ],
-    target: Annotated[
-        Target,
+    lang: Annotated[
+        Lang,
         typer.Option(
-            "--target",
-            "-t",
-            help="Target language / library.",
+            "--lang",
+            "-l",
+            help="Target language backend.",
             case_sensitive=False,
         ),
     ],
@@ -98,6 +71,14 @@ def generate(
             writable=True,
         ),
     ] = Path("."),
+    lib: Annotated[
+        Optional[HtmlLib],
+        typer.Option(
+            "--lib",
+            "-L",
+            help="HTML parsing library (Python only). Default: bs4.",
+        ),
+    ] = None,
     verbose: Annotated[
         bool,
         typer.Option(
@@ -126,8 +107,8 @@ def generate(
             "--http-client",
             help=(
                 "HTTP client for @request codegen. "
-                "Python targets: httpx (emits both fetch()/async_fetch()). "
-                "JS targets: fetch (default) | axios."
+                "Python: httpx (default) | aiohttp | requests. "
+                "JS: fetch (default) | axios."
             ),
         ),
     ] = None,
@@ -161,58 +142,31 @@ def generate(
     if verbose:
         setup_debug_logging()
 
-    _PY_TARGETS = {
-        Target.PY_BS4,
-        Target.PY_LXML,
-        Target.PY_PARSEL,
-        Target.PY_SLAX,
-    }
-    _JS_TARGETS = {Target.JS_PURE}
-    _PY_HTTP_CLIENTS = {"httpx"}
-    _JS_HTTP_CLIENTS = {"fetch", "axios"}
-
-    if http_client is not None:
-        if target in _PY_TARGETS and http_client not in _PY_HTTP_CLIENTS:
-            typer.echo(
-                f"ERROR: Python targets accept --http-client: "
-                f"{', '.join(sorted(_PY_HTTP_CLIENTS))}. Got '{http_client}'.",
-                err=True,
+    try:
+        profile = resolve(
+            TargetSpec(
+                lang=lang.value,
+                lib=lib.value if lib else None,
+                http_client=http_client,
+                separate_runtime=separate_runtime,
             )
-            raise typer.Exit(code=1)
-        if target in _JS_TARGETS and http_client not in _JS_HTTP_CLIENTS:
-            typer.echo(
-                f"ERROR: JS targets accept --http-client: "
-                f"{', '.join(sorted(_JS_HTTP_CLIENTS))}. Got '{http_client}'.",
-                err=True,
-            )
-            raise typer.Exit(code=1)
-        if target not in _PY_TARGETS and target not in _JS_TARGETS:
-            typer.echo(
-                f"ERROR: --http-client is not applicable for target '{target.value}'.",
-                err=True,
-            )
-            raise typer.Exit(code=1)
-
-    if separate_runtime and target in _JS_TARGETS:
-        typer.echo(
-            "ERROR: --separate-runtime is not applicable for JS targets.",
-            err=True,
         )
+    except ResolutionError as exc:
+        typer.echo(f"ERROR: {exc}", err=True)
         raise typer.Exit(code=1)
 
     logger.debug(
-        "generate() started: target=%s, output=%s, files=%s, skip_lint=%s",
-        target,
+        "generate() started: lang=%s, lib=%s, output=%s, files=%s, skip_lint=%s",
+        lang,
+        lib,
         output,
         [str(f) for f in files],
         skip_lint,
     )
 
-    # Collect all .kdl files from arguments (expand directories)
     kdl_files: list[Path] = []
     for path in files:
         if path.is_dir():
-            # Recursively find all .kdl files in directory
             found = sorted(path.rglob("*.kdl"))
             logger.debug(
                 "  directory %s: found %d .kdl file(s)", path, len(found)
@@ -235,8 +189,8 @@ def generate(
     if isinstance(output, str):
         output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
-    ext = _FILE_EXTENSIONS[target]
-    converter = _get_converter(target)
+    ext = profile.file_extension
+    converter = profile.create_converter()
 
     errors: list[str] = []
 
@@ -245,17 +199,16 @@ def generate(
         meta["http_client"] = http_client
 
     if separate_runtime:
-        from ssc_codegen.converters.runtime_file import register_runtime_file
+        from ssc_codegen.generation.runtime import register_runtime_file
 
         _runtime_name = runtime_name or "sscgen_runtime"
         meta["runtime_module"] = _runtime_name
         generate_runtime = register_runtime_file(
             converter,
             _runtime_name,
-            include_fallback=(target == Target.PY_LXML),
+            include_fallback=profile.runtime_include_fallback,
         )
 
-    # Phase 1: parse all KDL files
     from ssc_codegen.ast import Module
 
     parsed: list[tuple[Path, Module]] = []
@@ -282,7 +235,6 @@ def generate(
                 typer.echo(f"  ERROR {kdl_file}: {exc}", err=True)
             errors.append(str(kdl_file))
 
-    # Phase 2: write runtime file once (if -R is used)
     if separate_runtime and parsed:
         runtime_path = output / f"{_runtime_name}.py"
         runtime_path.write_text(
@@ -291,14 +243,12 @@ def generate(
         )
         typer.echo(f"  -> {runtime_path}")
 
-    # Phase 3: generate and write each main module
     for kdl_file, ast in parsed:
         out_file = output / kdl_file.with_suffix(ext).name
         logger.debug("processing: %s -> %s", kdl_file, out_file)
         try:
             code = converter.convert(ast, **meta)
             out_file.write_text(code, encoding="utf-8")
-
             logger.debug(
                 "code generated for %s (%d chars)", kdl_file, len(code)
             )
@@ -353,7 +303,6 @@ def check(
         "check() started: files=%s, format=%s", [str(f) for f in files], fmt
     )
 
-    # Collect all .kdl files from arguments (expand directories)
     kdl_files: list[Path] = []
     for path in files:
         if path.is_dir():
@@ -376,7 +325,6 @@ def check(
 
     logger.debug("total %d .kdl file(s) to check", len(kdl_files))
 
-    # Check all files
     all_results: list[ReadDiagnostic] = []
     total_errors = 0
 
@@ -408,21 +356,10 @@ def check(
                 err=True,
             )
         raise typer.Exit(code=1)
-    # Success
     if fmt == FmtType.TEXT:
         typer.echo(f"All {len(kdl_files)} file(s) passed linting.")
     else:
-        # JSON: empty array means no errors
         typer.echo("[]")
-
-
-class _PyTarget(str, enum.Enum):
-    """Python-only targets for the run command."""
-
-    PY_BS4 = "py-bs4"
-    PY_LXML = "py-lxml"
-    PY_PARSEL = "py-parsel"
-    PY_SLAX = "py-slax"
 
 
 @app.command()
@@ -433,15 +370,23 @@ def run(
             help="Schema target in format 'path/to/schema.kdl:StructName'.",
         ),
     ],
-    target: Annotated[
-        _PyTarget,
+    lang: Annotated[
+        Lang,
         typer.Option(
-            "--target",
-            "-t",
-            help="Target library for execution.",
+            "--lang",
+            "-l",
+            help="Target language.",
             case_sensitive=False,
         ),
-    ] = _PyTarget.PY_BS4,
+    ] = Lang.PYTHON,
+    lib: Annotated[
+        Optional[HtmlLib],
+        typer.Option(
+            "--lib",
+            "-L",
+            help="HTML parsing library (Python only). Default: bs4.",
+        ),
+    ] = None,
     input_file: Annotated[
         Path | None,
         typer.Option(
@@ -475,20 +420,19 @@ def run(
 
     \b
     Examples:
-        cat page.html | ssc-kdl run examples/booksToScrape.kdl:MainCatalogue
-        ssc-kdl run schema.kdl:Product -i page.html
-        ssc-kdl run schema.kdl:Product -t py-lxml < page.html
+        cat page.html | ssc-gen run examples/booksToScrape.kdl:MainCatalogue
+        ssc-gen run schema.kdl:Product -i page.html
+        ssc-gen run schema.kdl:Product -l python -L lxml < page.html
     """
     import json
     import sys
 
     from ssc_codegen.ast import StructBase
-    from ssc_codegen.converters.helpers import to_pascal_case
+    from ssc_codegen.naming import to_pascal_case
 
     if verbose:
         setup_debug_logging()
 
-    # Parse schema:StructName
     if ":" not in schema:
         typer.echo(
             "ERROR: schema argument must be in format 'path/to/schema.kdl:StructName'",
@@ -502,7 +446,6 @@ def run(
         typer.echo(f"ERROR: file not found: {kdl_path}", err=True)
         raise typer.Exit(code=1)
 
-    # Build AST
     try:
         module_ast, errs = parse_module(
             kdl_path.read_text(encoding="utf-8"), source_path=kdl_path
@@ -520,7 +463,6 @@ def run(
             typer.echo(f"ERROR: failed to parse {kdl_path}: {exc}", err=True)
         raise typer.Exit(code=1)
 
-    # Verify struct exists
     structs = [n for n in module_ast.body if isinstance(n, StructBase)]
     struct_names = [s.name for s in structs]
     if struct_name not in struct_names:
@@ -533,8 +475,18 @@ def run(
 
     class_name = to_pascal_case(struct_name)
 
-    # Generate code
-    converter = _get_converter(Target(target.value))
+    try:
+        profile = resolve(
+            TargetSpec(
+                lang=lang.value,
+                lib=lib.value if lib else None,
+            )
+        )
+    except ResolutionError as exc:
+        typer.echo(f"ERROR: {exc}", err=True)
+        raise typer.Exit(code=1)
+
+    converter = profile.create_converter()
     code = converter.convert(module_ast)
 
     if verbose:
@@ -542,7 +494,6 @@ def run(
         typer.echo(code, err=True)
         typer.echo("--- end generated code ---", err=True)
 
-    # Read HTML
     if input_file is not None:
         html = input_file.read_text(encoding="utf-8")
     else:
@@ -557,7 +508,6 @@ def run(
         typer.echo("ERROR: empty HTML input", err=True)
         raise typer.Exit(code=1)
 
-    # Execute generated code
     namespace: dict = {}
     try:
         exec(code, namespace)  # noqa: S102
@@ -631,9 +581,9 @@ def health(
 
     \b
     Examples:
-        cat page.html | ssc-kdl health examples/booksToScrape.kdl:MainCatalogue
-        ssc-kdl health schema.kdl:Product -i page.html
-        ssc-kdl health schema.kdl:Product -f json < page.html
+        cat page.html | ssc-gen health examples/booksToScrape.kdl:MainCatalogue
+        ssc-gen health schema.kdl:Product -i page.html
+        ssc-gen health schema.kdl:Product -f json < page.html
     """
     import sys
 
@@ -644,7 +594,6 @@ def health(
     if verbose:
         setup_debug_logging()
 
-    # Parse schema:StructName
     if ":" not in schema:
         typer.echo(
             "ERROR: schema argument must be in format 'path/to/schema.kdl:StructName'",
@@ -658,7 +607,6 @@ def health(
         typer.echo(f"ERROR: file not found: {kdl_path}", err=True)
         raise typer.Exit(code=1)
 
-    # Build AST
     try:
         module_ast, _ = parse_module(
             kdl_path.read_text(encoding="utf-8"), source_path=kdl_path
@@ -670,7 +618,6 @@ def health(
             typer.echo(f"ERROR: failed to parse {kdl_path}: {exc}", err=True)
         raise typer.Exit(code=1)
 
-    # Find struct
     structs = [n for n in module_ast.body if isinstance(n, StructBase)]
     struct_names = [s.name for s in structs]
     if struct_name not in struct_names:
@@ -683,7 +630,6 @@ def health(
 
     target_struct = next(s for s in structs if s.name == struct_name)
 
-    # Read HTML
     if input_file is not None:
         html = input_file.read_text(encoding="utf-8")
     else:
@@ -698,7 +644,6 @@ def health(
         typer.echo("ERROR: empty HTML input", err=True)
         raise typer.Exit(code=1)
 
-    # Run health check
     result = check_struct_health(target_struct, html, module=module_ast)
     typer.echo(result.format(fmt=fmt))
 

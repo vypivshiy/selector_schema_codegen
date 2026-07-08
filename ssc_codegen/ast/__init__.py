@@ -51,7 +51,7 @@ from .struct import (
     MethodRest,
     ErrorResponse,
     PlaceholderSpec,
-    Template,
+    PlaceholderTemplate,
     Field,
     StartParse,
 )
@@ -171,7 +171,7 @@ __all__ = [
     "MethodRest",
     "ErrorResponse",
     "PlaceholderSpec",
-    "Template",
+    "PlaceholderTemplate",
     "Field",
     "StartParse",
     # REST result artifacts (synthesized)

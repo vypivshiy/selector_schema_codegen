@@ -4,7 +4,7 @@ ssc_codegen is a code generator for web scraping parsers.
 Input: .kdl schema files describing HTML extraction rules.
 Output: parser code for Python (bs4, lxml, parsel, selectolax), JavaScript (DOM API).
 
-Pipeline: .kdl schema → KDL parser (custom KDL 2.0: KDLLexer + KDL2CSTParser) → core (AST + lint) → converter → output code
+Pipeline: .kdl schema → KDL parser (custom KDL 2.0: KDLLexer + KDL2CSTParser) → core (AST + lint) → visitor → output code
 
 Version: 0.29.4
 Python: >=3.10
@@ -16,16 +16,15 @@ CLI entry point: `ssc-gen` (ssc_codegen.main:main)
 
 ```
 ssc_codegen/
-ssc_codegen/
 ├── __init__.py            # parse_module(src, path, css_to_xpath) → Module
-├── main.py                # CLI (typer): generate, check, run, health
+├── main.py                # CLI (typer): generate, check, run, health — uses Lang/HtmlLib enums + resolve()
 ├── _logging.py            # ANSI color logging setup
 ├── exceptions.py          # ParseError, UnknownNodeError, BuildTimeError
 ├── document_utils.py      # CSS→XPath conversion for AST nodes
 ├── pseudo_selectors.py    # Parse CSS pseudo-selectors (::text, ::raw, ::attr)
 ├── regex_utils.py         # Regex flag handling, unverbosify
 ├── selector_utils.py      # css_to_xpath (cssselect wrapper)
-├── naming.py              # Pure case-conversion helpers (to_pascal_case/to_snake_case/to_camel_case) — no deps, shared by core/ and converters/
+├── naming.py              # Pure case-conversion helpers (to_pascal_case/to_snake_case/to_camel_case)
 ├── request_spec.py        # parse_to_http (curl/raw HTTP → RequestHttp AST node), validate_json_body
 ├── health.py              # Selector health check against real HTML
 ├── ast/                   # AST node definitions
@@ -60,21 +59,43 @@ ssc_codegen/
 │   ├── linting.py         # Argument validation, CSS/XPath/regex linting
 │   ├── type_checking.py   # Pipeline type inference and mismatch detection
 │   └── format.py          # Diagnostic formatting (text + JSON)
-├── parsers/               # HTTP transport parsing (consumed by converters)
+├── traversal/             # Shared AST traversal core (language-agnostic)
+│   ├── context.py         # WalkContext — immutable context (index, depth, prv/nxt, advance/deeper/reset_index)
+│   ├── walker.py          # BaseWalker — dispatch table + walk/walk_children/walk_pipeline (no codegen logic)
+│   └── utils.py           # module_has_rest, module_is_rest_only, err_subclass_name, dict_needs_builder, find_predicate_container, dict_entry_placeholder, jsonify_path_to_segments
+├── generation/            # Codegen data accumulator + runtime assembly
+│   ├── builder.py         # ModuleBuilder — pure data accumulator (imports, std defs). No rendering.
+│   └── runtime.py         # register_runtime_file, runtime_module_content, rest_runtime_lines, _BASE_UTILITY_LINES — `-R` support
+├── targets/               # Backend-specific code generators
+│   ├── __init__.py
+│   ├── spec.py            # TargetSpec — raw user input (lang, lib, http_client, separate_runtime)
+│   ├── profile.py         # TargetProfile — resolved capabilities + create_converter factory
+│   ├── resolver.py        # resolve(TargetSpec) → TargetProfile. Validation + factory dispatch.
+│   ├── python/            # Python backend
+│   │   ├── __init__.py    # PY_BS4_CONVERTER, PY_LXML_CONVERTER, PY_PARSEL_CONVERTER, PY_SLAX_CONVERTER (pre-built instances)
+│   │   ├── visitor.py     # PythonVisitor(BaseWalker) — self-contained, accepts dom_spelling_cls in ctor
+│   │   ├── runtime.py     # Python-specific runtime helpers
+│   │   ├── html_libs/     # DomSpelling implementations (data + behavior per HTML library)
+│   │   │   ├── base.py    # DomSpelling(ABC) — expression methods return list[str], predicate methods return str
+│   │   │   ├── bs4.py     # Bs4DomSpelling — BeautifulSoup4
+│   │   │   ├── lxml.py    # LxmlDomSpelling — lxml.html
+│   │   │   ├── parsel.py  # ParselDomSpelling — parsel (Scrapy)
+│   │   │   └── slax.py    # SlaxDomSpelling — selectolax
+│   │   └── http_libs/     # HTTP client strategies for REST codegen
+│   │       ├── base.py    # HttpLibStrategy(ABC) — import_line, sync/async_client_type, transport_exception, rest_runtime_lines()
+│   │       ├── httpx.py   # HttpxStrategy — httpx (sync + async native)
+│   │       ├── aiohttp.py # AioHttpStrategy — aiohttp (async-only, sync via asyncio.run + ThreadPoolExecutor fallback)
+│   │       └── requests.py# RequestsStrategy — requests (sync-only, async via run_in_executor)
+│   └── javascript/        # JavaScript backend
+│       ├── __init__.py    # JS_CONVERTER = JsVisitor() (pre-built instance)
+│       ├── visitor.py     # JsVisitor(BaseWalker) — vanilla DOM API, self-contained
+│       └── http_libs/     # HTTP client strategies for JS
+│           ├── base.py    # JsHttpLibStrategy(ABC) — fn_name, rest_call_lines()
+│           ├── fetch.py   # FetchStrategy — fetch API
+│           └── axios.py   # AxiosStrategy — axios
+├── parsers/               # HTTP transport parsing (consumed by visitors)
 │   ├── curl.py            # parse_curl_command() — POSIX curl → kwargs
 │   └── http.py            # parse_http_request() — raw HTTP/1.1|2 → kwargs
-├── converters/            # Code generators per target language
-│   ├── base.py            # ConverterContext (frozen dataclass: index, depth, prv/nxt, advance/deeper)
-│   ├── visitor.py         # Visitor ABC: AST walker, two-pass signals, shared concrete methods (_resolve_type, _pred_line, etc.)
-│   ├── helpers.py         # Naming helpers (to_snake_case, to_pascal_case, to_camel_case, jsonify_path_to_segments)
-│   ├── request_spec.py    # RequestSpec, parse_to_spec, normalize_placeholder_names
-│   ├── py_base.py         # PyHtmlBase(Visitor) — shared Python HTML codegen + REST rendering helpers
-│   ├── py_bs4.py          # PyBs4(PyHtmlBase) — BeautifulSoup4
-│   ├── py_lxml.py         # PyLxml(PyHtmlBase) — lxml.html
-│   ├── py_parsel.py       # PyParsel(PyHtmlBase) — parsel (Scrapy)
-│   ├── py_slax.py         # PySlax(PyHtmlBase) — selectolax
-│   ├── js_pure.py         # JsPure(Visitor) — JavaScript vanilla DOM
-│   └── runtime_file.py    # register_runtime_file, runtime_module_content — `-R` support
 ├── kdl/                   # Custom KDL 2.0 parser (NOT tree-sitter)
 │   ├── __init__.py        # Re-exports all CST, Reader, and DictReader types
 │   ├── parser.py          # KDLLexer, KDL2CSTParser, Token/TokenType, CST node types
@@ -106,44 +127,50 @@ docs/
 ## CLI Commands
 
 ```bash
-ssc-gen generate schema.kdl -t py-bs4 -o out/                     # generate parser code
-ssc-gen generate schema.kdl -t py-bs4 -o out/ --http-client httpx # with @request support
-ssc-gen generate schema.kdl -t py-bs4 -o out/ -R                  # separate runtime module
-ssc-gen generate schema.kdl -t py-bs4 -o out/ -R -rn my_runtime   # custom runtime name
-ssc-gen generate schema.kdl -t py-bs4 -o out/ --css-to-xpath      # CSS→XPath preprocessing
-ssc-gen generate schema.kdl -t py-bs4 -o out/ --skip-lint         # skip linting
-ssc-gen generate schema.kdl -t py-bs4 -o out/ --package mymod     # package name for generated code
-ssc-gen generate schema.kdl -t py-bs4 -o out/ -f json             # JSON output format
-ssc-gen check schema.kdl                                            # lint only (text output)
-ssc-gen check schema.kdl -f json                                    # lint only (JSON for automation)
-ssc-gen run schema.kdl:StructName -i page.html                     # generate + execute + output JSON
-ssc-gen run schema.kdl:StructName -i page.html --css-to-xpath      # with CSS→XPath
-ssc-gen health schema.kdl:StructName -i page.html                  # check selectors against HTML
-ssc-gen health schema.kdl:StructName -i page.html --css-to-xpath   # with CSS→XPath
+ssc-gen generate schema.kdl -l python -L bs4 -o out/                     # generate Python+bs4 parser
+ssc-gen generate schema.kdl -l python -L lxml -o out/                    # Python + lxml
+ssc-gen generate schema.kdl -l python -L parsel -o out/                  # Python + parsel
+ssc-gen generate schema.kdl -l python -L slax -o out/                    # Python + selectolax
+ssc-gen generate schema.kdl -l js -o out/                                # JavaScript (vanilla DOM)
+ssc-gen generate schema.kdl -l python -L bs4 -o out/ --http-client httpx # with @request support
+ssc-gen generate schema.kdl -l python -L bs4 -o out/ -R                  # separate runtime module
+ssc-gen generate schema.kdl -l python -L bs4 -o out/ -R -rn my_runtime   # custom runtime name
+ssc-gen generate schema.kdl -l python -L bs4 -o out/ --css-to-xpath      # CSS→XPath preprocessing
+ssc-gen generate schema.kdl -l python -L bs4 -o out/ --skip-lint         # skip linting
+ssc-gen generate schema.kdl -l python -L bs4 -o out/ --package mymod     # package name for generated code
+ssc-gen generate schema.kdl -l python -L bs4 -o out/ -f json             # JSON output format
+ssc-gen check schema.kdl                                                # lint only (text output)
+ssc-gen check schema.kdl -f json                                        # lint only (JSON for automation)
+ssc-gen run schema.kdl:StructName -i page.html -l python -L bs4          # generate + execute + output JSON
+ssc-gen health schema.kdl:StructName -i page.html -l python -L bs4       # check selectors against HTML
 ```
 
-Targets: py-bs4, py-lxml, py-parsel, py-slax, js-pure
-
-`--http-client` option (only for targets that support `@request`):
-- Python targets: `httpx` (emits both `fetch()` and `async_fetch()`)
-- JS target: `fetch` (default) | `axios`
-
-`--separate-runtime / -R` option: extract helper functions into a separate runtime module (default: `sscgen_runtime`). Use `--runtime-name / -rn` to customize the module name.
+**Flags:**
+- `--lang / -l`: Target language — `python` | `js`
+- `--lib / -L`: HTML library (Python only) — `bs4` (default) | `lxml` | `parsel` | `slax`
+- `--http-client`: HTTP client for `@request` codegen — Python: `httpx` (default) | `aiohttp` | `requests`; JS: `fetch` (default) | `axios`
+- `--separate-runtime / -R`: Extract helpers into separate module (default: `sscgen_runtime`)
+- `--runtime-name / -rn`: Custom runtime module name
+- `--css-to-xpath`: Convert CSS selectors to XPath before codegen
+- `--skip-lint`: Skip linting pass
+- `--package`: Package/module name for generated code
+- `--format / -f`: Output format — `text` | `json`
 
 ---
 
 ## Key Architectural Patterns
 
-1. **Visitor pattern**: `Visitor` ABC (converters/visitor.py) — each AST node type maps to a `visit_*` generator method via a dispatch table. Subclasses override methods for target-language spelling.
-2. **Two-pass codegen**: `convert_all` runs every `visit_*` twice — pass 1 collects `STD()` / `IMPORT()` signals, pass 2 emits output. visit_* methods must be deterministic.
-3. **Pipeline variable chain**: ConverterContext maintains v0→v1→v2... for each field pipeline.
-4. **Class-attr dialect config**: Type resolution, predicate formatting, and document types are controlled by plain class attributes (TYPES, ARRAY_TYPE_FMT, AND_OP, etc.) — no spelling hooks or abstract methods for formatting.
-5. **Shared concrete methods**: `_resolve_type`, `_resolve_start_parse_t_ret`, `_pred_line` live in Visitor and are inherited by all dialects. Language-agnostic functions (`module_has_rest`, `err_subclass_name`, etc.) are module-level in visitor.py.
-6. **Integrated linting**: parsing and linting happen in one pass via `core/`.
-7. **Type-tagged containers**: VariableType/StructType enums enforce strict typing at AST level.
-8. **Recursive nesting**: `Nested` node resolves via struct_map with cycle detection.
-9. **Transport layer**: `@request` stores raw payload in `RequestHttp`; `request_spec.parse_to_http` normalises curl/HTTP into a `RequestHttp` AST node whose string fields (url, headers, cookies, params, body) are `Template` instances — tokenized into `list[str | PlaceholderSpec]` parts at parse time. Converters call `RequestHttp.with_renamed_placeholders(transform)` to adapt placeholder names per target language (walks structured parts, no string rewriting); renderers walk `Template.parts` instead of regex-parsing strings. REST result artifacts (error subclasses, result aliases, matcher lists) are synthesized as AST nodes (`ResultVariantDef`/`ResultAliasDef`/`MatcherListDef` in `ast/rest.py`) by `core/rest_artifacts.py`, inserted before the `StructRest` — mirroring how `TypeDef` is synthesized from `Struct`.
-10. **Runtime separation**: `--separate-runtime` extracts helper functions into a standalone module; generated parsers import from it instead of inlining.
+1. **BaseWalker + composition**: `BaseWalker` (traversal/walker.py) — dispatch table maps AST node types to `visit_*` methods via `walk()`. Body traversal split into three modes (container/pipeline/predicate). No codegen logic in BaseWalker.
+2. **DomSpelling composition**: `PythonVisitor` accepts `dom_spelling_cls` in constructor. Each DomSpelling subclass (bs4/lxml/parsel/slax) provides HTML-specific expression codegen (returns `list[str]`) and predicate formatting (returns `str`). No subclassing of the visitor needed.
+3. **ModuleBuilder**: Pure data accumulator (generation/builder.py) — replaces old hidden signal pools. Stores imports + std-helper definitions. Registration is idempotent. Target-specific code decides rendering format.
+4. **Two-pass codegen**: `convert_all` runs `_walk_module` twice — pass 1 collects std/import registrations, pass 2 emits output.
+5. **HttpLibStrategy**: REST transport is pluggable per HTTP library. Python: httpx/aiohttp/requests. JS: fetch/axios. Each owns its import line, client types, transport exception, and REST runtime source.
+6. **Dynamic resolver**: `resolve(TargetSpec)` → `TargetProfile`. Validates user input, returns capabilities + `create_converter` factory. No static enum mappings in main.py.
+7. **Integrated linting**: parsing and linting happen in one pass via `core/`.
+8. **Type-tagged containers**: VariableType/StructType enums enforce strict typing at AST level.
+9. **Recursive nesting**: `Nested` node resolves via struct_map with cycle detection.
+10. **Transport layer**: `@request` stores raw payload in `RequestHttp`; `request_spec.parse_to_http` normalises curl/HTTP into a `RequestHttp` AST node whose string fields are `Template` instances — tokenized into `list[str | PlaceholderSpec]` parts at parse time. Visitors call `RequestHttp.with_renamed_placeholders(transform)` to adapt placeholder names per target language. REST result artifacts are synthesized as AST nodes by `core/rest_artifacts.py`.
+11. **Runtime separation**: `--separate-runtime` extracts helper functions into a standalone module; generated parsers import from it instead of inlining.
 
 ---
 

@@ -111,8 +111,8 @@ class TestRestParser:
 
 class TestRestPyConverter:
     def test_py_bs4_generates_valid_python(self):
-        from ssc_codegen.converters.py_bs4 import (
-            PY_BASE_CONVERTER as CONVERTER,
+        from ssc_codegen.targets.python import (
+            PY_BS4_CONVERTER as CONVERTER,
         )
 
         src = _rest_src(errors="    @error 404 Err\n")
@@ -131,8 +131,8 @@ class TestRestPyConverter:
         assert "import httpx" in code
 
     def test_py_bs4_no_typeddict_for_rest(self):
-        from ssc_codegen.converters.py_bs4 import (
-            PY_BASE_CONVERTER as CONVERTER,
+        from ssc_codegen.targets.python import (
+            PY_BS4_CONVERTER as CONVERTER,
         )
 
         src = _rest_src()
@@ -142,8 +142,8 @@ class TestRestPyConverter:
         assert "APIType" not in code
 
     def test_py_bs4_status_error_routing(self):
-        from ssc_codegen.converters.py_bs4 import (
-            PY_BASE_CONVERTER as CONVERTER,
+        from ssc_codegen.targets.python import (
+            PY_BS4_CONVERTER as CONVERTER,
         )
 
         src = _rest_src(errors="    @error 404 Err\n    @error 500 Err\n")
@@ -156,8 +156,8 @@ class TestRestPyConverter:
         assert "raise" not in _method_bodies(code)
 
     def test_py_bs4_method_return_type_union(self):
-        from ssc_codegen.converters.py_bs4 import (
-            PY_BASE_CONVERTER as CONVERTER,
+        from ssc_codegen.targets.python import (
+            PY_BS4_CONVERTER as CONVERTER,
         )
 
         src = _rest_src(errors="    @error 404 Err\n")
@@ -172,8 +172,8 @@ class TestRestPyConverter:
         assert "-> GetUserResult:" in code
 
     def test_py_bs4_transport_error_wrapped(self):
-        from ssc_codegen.converters.py_bs4 import (
-            PY_BASE_CONVERTER as CONVERTER,
+        from ssc_codegen.targets.python import (
+            PY_BS4_CONVERTER as CONVERTER,
         )
 
         src = _rest_src()
@@ -184,8 +184,8 @@ class TestRestPyConverter:
         assert "return TransportErr(cause=repr(_exc))" in code
 
     def test_py_bs4_headers_captured(self):
-        from ssc_codegen.converters.py_bs4 import (
-            PY_BASE_CONVERTER as CONVERTER,
+        from ssc_codegen.targets.python import (
+            PY_BS4_CONVERTER as CONVERTER,
         )
 
         src = _rest_src()
@@ -198,8 +198,8 @@ class TestRestPyConverter:
         )
 
     def test_py_bs4_unknown_status_returns_unknown_err(self):
-        from ssc_codegen.converters.py_bs4 import (
-            PY_BASE_CONVERTER as CONVERTER,
+        from ssc_codegen.targets.python import (
+            PY_BS4_CONVERTER as CONVERTER,
         )
 
         src = _rest_src(errors="    @error 404 Err\n")
@@ -212,8 +212,8 @@ class TestRestPyConverter:
         )
 
     def test_py_bs4_emits_ssc_rest_call_helpers(self):
-        from ssc_codegen.converters.py_bs4 import (
-            PY_BASE_CONVERTER as CONVERTER,
+        from ssc_codegen.targets.python import (
+            PY_BS4_CONVERTER as CONVERTER,
         )
 
         src = _rest_src()
@@ -225,8 +225,8 @@ class TestRestPyConverter:
         assert "return ssc_rest_call(" in code
 
     def test_py_bs4_emits_ssc_dispatch_err_module_level(self):
-        from ssc_codegen.converters.py_bs4 import (
-            PY_BASE_CONVERTER as CONVERTER,
+        from ssc_codegen.targets.python import (
+            PY_BS4_CONVERTER as CONVERTER,
         )
 
         src = _rest_src(errors="    @error 404 Err\n    @error 500 Err\n")
@@ -243,8 +243,8 @@ class TestRestPyConverter:
             assert "if _status ==" not in match.group(0)
 
     def test_py_bs4_httpx_transport_exception(self):
-        from ssc_codegen.converters.py_bs4 import (
-            PY_BASE_CONVERTER as CONVERTER,
+        from ssc_codegen.targets.python import (
+            PY_BS4_CONVERTER as CONVERTER,
         )
 
         src = _rest_src()
@@ -255,8 +255,8 @@ class TestRestPyConverter:
     def test_py_bs4_post_body_is_dict_not_fstring(self):
         """Regression: POST json body used to emit `json=f'{...}'` which
         double-encoded the body. Must now emit a native dict literal."""
-        from ssc_codegen.converters.py_bs4 import (
-            PY_BASE_CONVERTER as CONVERTER,
+        from ssc_codegen.targets.python import (
+            PY_BS4_CONVERTER as CONVERTER,
         )
 
         src = (
@@ -279,8 +279,8 @@ class TestRestPyConverter:
         assert "json=f'" not in code
 
     def test_py_required_keys_dispatch(self):
-        from ssc_codegen.converters.py_bs4 import (
-            PY_BASE_CONVERTER as CONVERTER,
+        from ssc_codegen.targets.python import (
+            PY_BS4_CONVERTER as CONVERTER,
         )
 
         src = _rest_src(errors="    @error 404 Err error detail\n")
@@ -292,8 +292,8 @@ class TestRestPyConverter:
         assert "class APIErr404ErrorDetail" in code
 
     def test_py_mixed_conditions_dispatch(self):
-        from ssc_codegen.converters.py_bs4 import (
-            PY_BASE_CONVERTER as CONVERTER,
+        from ssc_codegen.targets.python import (
+            PY_BS4_CONVERTER as CONVERTER,
         )
 
         src = _rest_src(errors='    @error 404 Err error detail="msg"\n')
@@ -304,8 +304,8 @@ class TestRestPyConverter:
         assert "class APIErr404ErrorDetail" in code
 
     def test_py_required_keys_routed_as_field_error(self):
-        from ssc_codegen.converters.py_bs4 import (
-            PY_BASE_CONVERTER as CONVERTER,
+        from ssc_codegen.targets.python import (
+            PY_BS4_CONVERTER as CONVERTER,
         )
 
         src = _rest_src(errors="    @error 404 Err error\n")
@@ -317,7 +317,7 @@ class TestRestPyConverter:
 
 class TestRestJsConverter:
     def test_js_generates_class(self):
-        from ssc_codegen.converters.js_pure import JS_CONVERTER
+        from ssc_codegen.targets.javascript import JS_CONVERTER
 
         src = _rest_src(errors="    @error 404 Err\n")
         module = _parse(src)
@@ -334,7 +334,7 @@ class TestRestJsConverter:
         assert "RestApiError" not in code
 
     def test_js_method_return_type_jsdoc(self):
-        from ssc_codegen.converters.js_pure import JS_CONVERTER
+        from ssc_codegen.targets.javascript import JS_CONVERTER
 
         src = _rest_src(errors="    @error 404 Err\n")
         module = _parse(src)
@@ -345,7 +345,7 @@ class TestRestJsConverter:
         )
 
     def test_js_transport_error_wrapped(self):
-        from ssc_codegen.converters.js_pure import JS_CONVERTER
+        from ssc_codegen.targets.javascript import JS_CONVERTER
 
         src = _rest_src()
         module = _parse(src)
@@ -357,7 +357,7 @@ class TestRestJsConverter:
         )
 
     def test_js_headers_captured(self):
-        from ssc_codegen.converters.js_pure import JS_CONVERTER
+        from ssc_codegen.targets.javascript import JS_CONVERTER
 
         src = _rest_src()
         module = _parse(src)
@@ -368,7 +368,7 @@ class TestRestJsConverter:
         assert "headers: _headers, value: _value" in code
 
     def test_js_axios_variant(self):
-        from ssc_codegen.converters.js_pure import JS_CONVERTER
+        from ssc_codegen.targets.javascript import JS_CONVERTER
 
         src = _rest_src()
         module = _parse(src)
@@ -378,7 +378,7 @@ class TestRestJsConverter:
         assert "sscRestCallAxios" in code
 
     def test_js_emits_ssc_rest_call_helpers(self):
-        from ssc_codegen.converters.js_pure import JS_CONVERTER
+        from ssc_codegen.targets.javascript import JS_CONVERTER
 
         src = _rest_src()
         module = _parse(src)
@@ -390,7 +390,7 @@ class TestRestJsConverter:
         assert "return sscRestCall(" in code
 
     def test_js_emits_matchers_and_dispatch(self):
-        from ssc_codegen.converters.js_pure import JS_CONVERTER
+        from ssc_codegen.targets.javascript import JS_CONVERTER
 
         src = _rest_src(errors="    @error 404 Err\n    @error 500 Err\n")
         module = _parse(src)
@@ -404,7 +404,7 @@ class TestRestJsConverter:
         assert "static sscDispatchErr" not in code
 
     def test_js_required_keys_dispatch(self):
-        from ssc_codegen.converters.js_pure import JS_CONVERTER
+        from ssc_codegen.targets.javascript import JS_CONVERTER
 
         src = _rest_src(errors="    @error 404 Err error detail\n")
         module = _parse(src)
@@ -515,7 +515,9 @@ class TestTypedPlaceholdersAst:
 
 class TestTypedPlaceholdersPyCodegen:
     def _gen(self, request_line: str) -> str:
-        from ssc_codegen.converters.py_bs4 import PY_BASE_CONVERTER
+        from ssc_codegen.targets.python import (
+            PY_BS4_CONVERTER as PY_BASE_CONVERTER,
+        )
 
         module = _parse(_typed_rest_src(request_line))
         return PY_BASE_CONVERTER.convert(module, http_client="httpx")
@@ -573,7 +575,7 @@ class TestTypedPlaceholdersPyCodegen:
 
 class TestTypedPlaceholdersJsCodegen:
     def _gen(self, request_line: str, http_client: str = "fetch") -> str:
-        from ssc_codegen.converters.js_pure import JS_CONVERTER
+        from ssc_codegen.targets.javascript import JS_CONVERTER
 
         module = _parse(_typed_rest_src(request_line))
         return JS_CONVERTER.convert(module, http_client=http_client)
@@ -646,16 +648,18 @@ class TestRestOnlyImports:
         ],
     )
     def test_rest_only_no_html_import(self, converter_attr, html_import):
-        import ssc_codegen.converters.py_bs4 as _bs4
-        import ssc_codegen.converters.py_lxml as _lxml
-        import ssc_codegen.converters.py_parsel as _parsel
-        import ssc_codegen.converters.py_slax as _slax
+        from ssc_codegen.targets.python import (
+            PY_BS4_CONVERTER,
+            PY_LXML_CONVERTER,
+            PY_PARSEL_CONVERTER,
+            PY_SLAX_CONVERTER,
+        )
 
         converters = {
-            "PY_BASE_CONVERTER": _bs4.PY_BASE_CONVERTER,
-            "PY_LXML_CONVERTER": _lxml.PY_LXML_CONVERTER,
-            "PY_PARSEL_CONVERTER": _parsel.PY_PARSEL_CONVERTER,
-            "PY_SLAX_CONVERTER": _slax.PY_SLAX_CONVERTER,
+            "PY_BASE_CONVERTER": PY_BS4_CONVERTER,
+            "PY_LXML_CONVERTER": PY_LXML_CONVERTER,
+            "PY_PARSEL_CONVERTER": PY_PARSEL_CONVERTER,
+            "PY_SLAX_CONVERTER": PY_SLAX_CONVERTER,
         }
         converter = converters[converter_attr]
         src = _rest_src(errors="    @error 404 Err\n")
@@ -664,7 +668,9 @@ class TestRestOnlyImports:
         assert html_import not in code
 
     def test_rest_only_no_html_unescape(self):
-        from ssc_codegen.converters.py_bs4 import PY_BASE_CONVERTER
+        from ssc_codegen.targets.python import (
+            PY_BS4_CONVERTER as PY_BASE_CONVERTER,
+        )
 
         src = _rest_src()
         module = _parse(src)
@@ -672,7 +678,9 @@ class TestRestOnlyImports:
         assert "_html_unescape" not in code
 
     def test_rest_only_no_html_utilities(self):
-        from ssc_codegen.converters.py_bs4 import PY_BASE_CONVERTER
+        from ssc_codegen.targets.python import (
+            PY_BS4_CONVERTER as PY_BASE_CONVERTER,
+        )
 
         src = _rest_src()
         module = _parse(src)
@@ -685,7 +693,9 @@ class TestRestOnlyImports:
         assert "_RE_HEX_ENTITY" not in code
 
     def test_rest_only_has_rest_utilities(self):
-        from ssc_codegen.converters.py_bs4 import PY_BASE_CONVERTER
+        from ssc_codegen.targets.python import (
+            PY_BS4_CONVERTER as PY_BASE_CONVERTER,
+        )
 
         src = _rest_src(errors="    @error 404 Err\n")
         module = _parse(src)
@@ -695,7 +705,9 @@ class TestRestOnlyImports:
         assert "def ssc_rest_call(" in code
 
     def test_rest_only_valid_python(self):
-        from ssc_codegen.converters.py_bs4 import PY_BASE_CONVERTER
+        from ssc_codegen.targets.python import (
+            PY_BS4_CONVERTER as PY_BASE_CONVERTER,
+        )
 
         src = _rest_src(errors="    @error 404 Err\n")
         module = _parse(src)
@@ -703,7 +715,9 @@ class TestRestOnlyImports:
         pyast.parse(code)
 
     def test_mixed_module_keeps_html_imports(self):
-        from ssc_codegen.converters.py_bs4 import PY_BASE_CONVERTER
+        from ssc_codegen.targets.python import (
+            PY_BS4_CONVERTER as PY_BASE_CONVERTER,
+        )
 
         src = _mixed_src()
         module = _parse(src)
@@ -719,16 +733,18 @@ class TestRestOnlyImports:
 
 
 def _get_all_converters():
-    from ssc_codegen.converters.py_bs4 import PyBs4
-    from ssc_codegen.converters.py_lxml import PyLxml
-    from ssc_codegen.converters.py_parsel import PyParsel
-    from ssc_codegen.converters.py_slax import PySlax
+    from ssc_codegen.targets.python import (
+        PY_BS4_CONVERTER,
+        PY_LXML_CONVERTER,
+        PY_PARSEL_CONVERTER,
+        PY_SLAX_CONVERTER,
+    )
 
     return {
-        "PyBs4": PyBs4(),
-        "PyLxml": PyLxml(),
-        "PyParsel": PyParsel(),
-        "PySlax": PySlax(),
+        "PyBs4": PY_BS4_CONVERTER,
+        "PyLxml": PY_LXML_CONVERTER,
+        "PyParsel": PY_PARSEL_CONVERTER,
+        "PySlax": PY_SLAX_CONVERTER,
     }
 
 
@@ -739,7 +755,7 @@ class TestSeparateRuntime:
 
     @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
     def test_runtime_file_has_rest_helpers(self, converter_attr):
-        from ssc_codegen.converters.runtime_file import register_runtime_file
+        from ssc_codegen.generation.runtime import register_runtime_file
 
         converter = _get_all_converters()[converter_attr]
         src = _rest_src(errors="    @error 404 Err\n")
@@ -759,7 +775,7 @@ class TestSeparateRuntime:
 
     @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
     def test_main_imports_from_runtime(self, converter_attr):
-        from ssc_codegen.converters.runtime_file import register_runtime_file
+        from ssc_codegen.generation.runtime import register_runtime_file
 
         converter = _get_all_converters()[converter_attr]
         src = _rest_src(errors="    @error 404 Err\n")
@@ -776,7 +792,7 @@ class TestSeparateRuntime:
 
     @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
     def test_main_no_inline_rest_helpers(self, converter_attr):
-        from ssc_codegen.converters.runtime_file import register_runtime_file
+        from ssc_codegen.generation.runtime import register_runtime_file
 
         converter = _get_all_converters()[converter_attr]
         src = _rest_src(errors="    @error 404 Err\n")
@@ -795,7 +811,7 @@ class TestSeparateRuntime:
 
     @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
     def test_main_no_redundant_rest_imports(self, converter_attr):
-        from ssc_codegen.converters.runtime_file import register_runtime_file
+        from ssc_codegen.generation.runtime import register_runtime_file
 
         converter = _get_all_converters()[converter_attr]
         src = _rest_src(errors="    @error 404 Err\n")
@@ -813,7 +829,7 @@ class TestSeparateRuntime:
 
     @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
     def test_main_valid_python(self, converter_attr):
-        from ssc_codegen.converters.runtime_file import register_runtime_file
+        from ssc_codegen.generation.runtime import register_runtime_file
 
         converter = _get_all_converters()[converter_attr]
         src = _rest_src(errors="    @error 404 Err\n")
@@ -829,7 +845,7 @@ class TestSeparateRuntime:
 
     def test_ref_ast_picks_rest_module(self):
         """The ref_ast selection must not crash on modules with non-REST structs."""
-        from ssc_codegen.converters.runtime_file import register_runtime_file
+        from ssc_codegen.generation.runtime import register_runtime_file
 
         non_rest_src = 'struct Item { field_name { css "div" } }'
         module = _parse(non_rest_src)
