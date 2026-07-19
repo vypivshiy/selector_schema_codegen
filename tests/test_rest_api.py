@@ -48,6 +48,47 @@ def _rest_src(*, extra_requests: str = "", errors: str = "") -> str:
     )
 
 
+def _exec_with_runtime(parser_src: str, runtime_src: str) -> dict:
+    """Exec the generated parser file with its sibling runtime module.
+
+    The parser file uses a relative import (``from .sscgen_runtime import
+    ...``); we satisfy it by registering a synthetic parent package in
+    ``sys.modules`` so Python's import machinery can resolve the relative
+    name. Returns the parser module's namespace dict.
+    """
+    import sys
+    import types
+
+    pkg_name = "_ssc_test_pkg"
+    rt_dotted = f"{pkg_name}.sscgen_runtime"
+    parser_dotted = f"{pkg_name}.parser"
+    # Clear stale registrations from previous parametrize iterations.
+    sys.modules.pop(pkg_name, None)
+    sys.modules.pop(rt_dotted, None)
+    sys.modules.pop(parser_dotted, None)
+
+    rt_ns: dict = {}
+    exec(compile(runtime_src, "<rt>", "exec"), rt_ns)
+    rt_mod = types.ModuleType(rt_dotted)
+    for k, v in rt_ns.items():
+        setattr(rt_mod, k, v)
+    rt_mod.__package__ = pkg_name
+    pkg_mod = types.ModuleType(pkg_name)
+    pkg_mod.__path__ = []  # mark as package
+    pkg_mod.sscgen_runtime = rt_mod
+    sys.modules[pkg_name] = pkg_mod
+    sys.modules[rt_dotted] = rt_mod
+
+    parser_mod = types.ModuleType(parser_dotted)
+    parser_mod.__package__ = pkg_name
+    parser_ns = parser_mod.__dict__
+    # Register the parser module BEFORE exec so dataclasses on Python 3.10
+    # can resolve ``cls.__module__`` for the Literal[...] field annotation.
+    sys.modules[parser_dotted] = parser_mod
+    exec(compile(parser_src, "<parser>", "exec"), parser_ns)
+    return parser_ns
+
+
 # ---------------------------------------------------------------------------
 # Parser tests
 # ---------------------------------------------------------------------------
@@ -180,8 +221,8 @@ class TestRestPyConverter:
         module = _parse(src)
         code = CONVERTER.convert(module, http_client="httpx")
         # httpx-specific exception handling inside ssc_rest_call
-        assert "except httpx.HTTPError as _exc:" in code
-        assert "return TransportErr(cause=repr(_exc))" in code
+        assert "except httpx.HTTPError as exc:" in code
+        assert "return TransportErr(cause=repr(exc))" in code
 
     def test_py_bs4_headers_captured(self):
         from ssc_codegen.targets.python import (
@@ -193,7 +234,7 @@ class TestRestPyConverter:
         code = CONVERTER.convert(module, http_client="httpx")
         # Headers extraction centralized in ssc_rest_call
         assert (
-            "_headers = {k.lower(): v for k, v in _resp.headers.items()}"
+            "headers = {k.lower(): v for k, v in resp.headers.items()}"
             in code
         )
 
@@ -208,7 +249,7 @@ class TestRestPyConverter:
         # UnknownErr fallback inside ssc_dispatch_err
         assert (
             "return UnknownErr("
-            "status=_status, headers=_headers, value=_body)" in code
+            "status=status, headers=headers, value=body)" in code
         )
 
     def test_py_bs4_emits_ssc_rest_call_helpers(self):
@@ -221,8 +262,9 @@ class TestRestPyConverter:
         code = CONVERTER.convert(module, http_client="httpx")
         assert "def ssc_rest_call(" in code
         assert "def ssc_rest_call_async(" in code
-        # Method body calls ssc_rest_call
-        assert "return ssc_rest_call(" in code
+        # Method body calls ssc_rest_call (wrapped in cast())
+        assert "return cast(" in code
+        assert "ssc_rest_call(" in code
 
     def test_py_bs4_emits_ssc_dispatch_err_module_level(self):
         from ssc_codegen.targets.python import (
@@ -233,14 +275,14 @@ class TestRestPyConverter:
         module = _parse(src)
         code = CONVERTER.convert(module, http_client="httpx")
         # ssc_dispatch_err is now a module-level function
-        assert "def ssc_dispatch_err(_matchers, _status" in code
+        assert "def ssc_dispatch_err(" in code
         # Method body delegates to ssc_rest_call (not cls.ssc_dispatch_err)
         assert "cls.ssc_dispatch_err" not in code
-        # No inline `if _status == NNN` checks in @classmethods
+        # No inline `if status == NNN` checks in @classmethods
         import re
 
         for match in re.finditer(r"@classmethod\s*\n(?:    [^\n]*\n)+", code):
-            assert "if _status ==" not in match.group(0)
+            assert "if status ==" not in match.group(0)
 
     def test_py_bs4_httpx_transport_exception(self):
         from ssc_codegen.targets.python import (
@@ -250,7 +292,7 @@ class TestRestPyConverter:
         src = _rest_src()
         module = _parse(src)
         code = CONVERTER.convert(module, http_client="httpx")
-        assert "except httpx.HTTPError as _exc:" in code
+        assert "except httpx.HTTPError as exc:" in code
 
     def test_py_bs4_post_body_is_dict_not_fstring(self):
         """Regression: POST json body used to emit `json=f'{...}'` which
@@ -311,8 +353,8 @@ class TestRestPyConverter:
         src = _rest_src(errors="    @error 404 Err error\n")
         module = _parse(src)
         code = CONVERTER.convert(module, http_client="httpx")
-        # isinstance check now inside ErrMatcher.match (body var is _b)
-        assert "isinstance(_b, dict)" in code
+        # isinstance check now inside ErrMatcher.match (body var is body)
+        assert "isinstance(body, dict)" in code
 
 
 class TestRestJsConverter:
@@ -688,7 +730,7 @@ class TestRestOnlyImports:
         assert "unescape_text" not in code
         assert "normalize_text" not in code
         assert "repl_map" not in code
-        assert "_UnmatchedTableRow" not in code
+        assert "UnmatchedTableRow" not in code
         assert "UNMATCHED_TABLE_ROW" not in code
         assert "_RE_HEX_ENTITY" not in code
 
@@ -823,9 +865,17 @@ class TestSeparateRuntime:
             runtime_module=self.RUNTIME_NAME,
         )
         code = generated[""]
-        assert (
-            "from typing import Generic, Literal, Mapping, TypeVar" not in code
-        )
+        # Runtime-internal helpers (Ok/Err/ErrMatcher factory definitions)
+        # must NOT be inlined into the parser file under -R. The parser file
+        # only declares @dataclass Err subclasses consuming those types.
+        assert "class Ok(Generic[_T]):" not in code
+        assert "class Err(Generic[_E]):" not in code
+        assert "def ssc_rest_call(" not in code
+        assert "def ssc_dispatch_err(" not in code
+        # Imports only needed by the runtime's internal generic/dataclass
+        # machinery must not leak into the parser file.
+        for runtime_only in ("Generic", "TypeVar", "Mapping", "Callable"):
+            assert runtime_only not in code
 
     @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
     def test_main_valid_python(self, converter_attr):
@@ -840,8 +890,386 @@ class TestSeparateRuntime:
             http_client="httpx",
             runtime_module=self.RUNTIME_NAME,
         )
+        # pyast.parse checks syntax only — does not catch NameError caused
+        # by dropped imports. exec(compile(...)) actually resolves names.
         pyast.parse(generated[""])
         pyast.parse(generated[f"{self.RUNTIME_NAME}.py"])
+        _exec_with_runtime(generated[""], generated[f"{self.RUNTIME_NAME}.py"])
+
+    @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
+    def test_main_imports_present_under_runtime(self, converter_attr):
+        """Regression: -R mode must not drop typing/dataclass/httpx imports.
+
+        Pre-fix the parser file lost every non-runtime import under -R,
+        producing code that referenced ``TypedDict``, ``Optional``,
+        ``@dataclass``, ``Literal[404]``, ``httpx.Client`` etc. with none of
+        them bound. This test pins the required import surface.
+        """
+        from ssc_codegen.generation.runtime import register_runtime_file
+
+        converter = _get_all_converters()[converter_attr]
+        src = _rest_src(errors="    @error 404 Err\n")
+        module = _parse(src)
+        register_runtime_file(converter, self.RUNTIME_NAME)
+        generated = converter.convert_all(
+            module,
+            http_client="httpx",
+            runtime_module=self.RUNTIME_NAME,
+        )
+        code = generated[""]
+        assert "from typing import" in code
+        assert "TypedDict" in code
+        assert "from dataclasses import dataclass" in code
+        assert "from typing import Literal" in code
+        assert "import httpx" in code
+        # Err subclasses need Literal for status field; should NOT be dropped
+        # just because runtime mode is on.
+        assert "Literal[404]" in code
+
+    @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
+    def test_runtime_file_imports_httpx_when_rest(self, converter_attr):
+        """Regression: runtime file references ``httpx.HTTPError`` in
+        ``ssc_rest_call``/``ssc_rest_call_async`` but pre-fix did not import
+        httpx, causing NameError at the first transport exception.
+        """
+        from ssc_codegen.generation.runtime import register_runtime_file
+
+        converter = _get_all_converters()[converter_attr]
+        src = _rest_src(errors="    @error 404 Err\n")
+        module = _parse(src)
+        # http_strategy is normally resolved by main.py via
+        # PythonVisitor.http_strategy_for(http_client); here we emulate
+        # the httpx case.
+        from ssc_codegen.targets.python.http_libs.httpx import HttpxStrategy
+
+        register_runtime_file(
+            converter,
+            self.RUNTIME_NAME,
+            http_strategy=HttpxStrategy(),
+        )
+        generated = converter.convert_all(
+            module,
+            http_client="httpx",
+            runtime_module=self.RUNTIME_NAME,
+        )
+        runtime = generated[f"{self.RUNTIME_NAME}.py"]
+        assert "import httpx" in runtime
+        # And the generated runtime must be valid + executable in isolation.
+        exec(compile(runtime, "<rt>", "exec"), {})
+
+    def test_combined_rest_and_html_module_under_runtime(self):
+        """Regression for the cdnvideohub / kodik / aniboom anicli-api case:
+        a single .kdl file with both a ``type=rest`` struct and an HTML
+        struct. Under -R the parser file must keep lxml imports, the
+        FALLBACK_HTML_STR import from runtime, AND httpx/typing/dataclass
+        imports for the REST struct.
+        """
+        from ssc_codegen.generation.runtime import register_runtime_file
+        from ssc_codegen.targets.python import PY_LXML_CONVERTER
+
+        src = (
+            "json Err { detail str }\n"
+            "json Resp { id str }\n"
+            "struct Page type=rest {\n"
+            '    @request response=Resp """\n'
+            "    GET /api/{{id}} HTTP/1.1\n"
+            "    Host: api.example.com\n"
+            '    """\n'
+            "    @error 404 Err\n"
+            "}\n"
+            'struct Body { title { css "h1"; text } }\n'
+        )
+        module = _parse(src)
+        from ssc_codegen.targets.python.http_libs.httpx import HttpxStrategy
+
+        register_runtime_file(
+            PY_LXML_CONVERTER,
+            self.RUNTIME_NAME,
+            include_fallback=True,
+            http_strategy=HttpxStrategy(),
+        )
+        generated = PY_LXML_CONVERTER.convert_all(
+            module,
+            http_client="httpx",
+            runtime_module=self.RUNTIME_NAME,
+        )
+        code = generated[""]
+        runtime = generated[f"{self.RUNTIME_NAME}.py"]
+        # All import surfaces covered.
+        assert "from lxml import html" in code
+        assert "from lxml.html import HtmlElement" in code
+        assert "from dataclasses import dataclass" in code
+        assert "from typing import Literal" in code
+        assert "import httpx" in code
+        assert f"from .{self.RUNTIME_NAME} import" in code
+        assert "FALLBACK_HTML_STR" in code  # in the runtime import list
+        # Round-trip exec: runtime first, then parser with runtime injected.
+        _exec_with_runtime(code, runtime)
+
+    @pytest.mark.parametrize(
+        "http_client, expected_strategy, expected_import",
+        [
+            (None, "HttpxStrategy", "import httpx"),
+            ("httpx", "HttpxStrategy", "import httpx"),
+            ("aiohttp", "AioHttpStrategy", "import aiohttp"),
+            ("requests", "RequestsStrategy", "import requests"),
+            ("<bogus>", "HttpxStrategy", "import httpx"),  # fallback to default
+        ],
+    )
+    def test_http_strategy_for_returns_correct_default(
+        self, http_client, expected_strategy, expected_import
+    ):
+        """``PythonVisitor.http_strategy_for`` is the single resolver for
+        which HTTP strategy applies given user input. Default is httpx;
+        unknown values fall back to httpx instead of crashing.
+        """
+        from ssc_codegen.targets.python.http_libs.aiohttp import AioHttpStrategy
+        from ssc_codegen.targets.python.http_libs.base import HttpLibStrategy
+        from ssc_codegen.targets.python.http_libs.httpx import HttpxStrategy
+        from ssc_codegen.targets.python.http_libs.requests import (
+            RequestsStrategy,
+        )
+        from ssc_codegen.targets.python.visitor import PythonVisitor
+
+        strategy = PythonVisitor.http_strategy_for(http_client)
+        type_map = {
+            "HttpxStrategy": HttpxStrategy,
+            "AioHttpStrategy": AioHttpStrategy,
+            "RequestsStrategy": RequestsStrategy,
+        }
+        assert isinstance(strategy, type_map[expected_strategy])
+        assert isinstance(strategy, HttpLibStrategy)
+        assert strategy.import_line == expected_import
+
+    @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
+    def test_runtime_file_imports_httpx_when_http_client_is_none(
+        self, converter_attr
+    ):
+        """Regression for the main.py integration bug: when user runs
+        ``ssc-gen generate ... -R`` WITHOUT ``--http-client``, ``http_client``
+        is ``None``. Pre-fix main.py gated strategy resolution behind
+        ``if http_client:`` so ``transport_import_line`` stayed ``None`` and
+        the runtime file (which references ``httpx.HTTPError`` in
+        ``ssc_rest_call``) lacked ``import httpx`` entirely → NameError at
+        the first transport exception.
+
+        The parser file already received ``import httpx`` via the visitor's
+        default ``HttpxStrategy()``; the runtime file did not. This test
+        pins that both paths now go through ``http_strategy_for`` and
+        produce consistent output.
+        """
+        from ssc_codegen.generation.runtime import register_runtime_file
+        from ssc_codegen.targets.python.visitor import PythonVisitor
+
+        converter = _get_all_converters()[converter_attr]
+        src = _rest_src(errors="    @error 404 Err\n")
+        module = _parse(src)
+        # Emulate main.py: resolve HTTP strategy via the shared resolver
+        # without explicitly passing http_client.
+        strategy = PythonVisitor.http_strategy_for(None)
+        register_runtime_file(
+            converter,
+            self.RUNTIME_NAME,
+            http_strategy=strategy,
+        )
+        # Also do not pass http_client to convert_all — emulates the user
+        # not passing --http-client on the CLI.
+        generated = converter.convert_all(
+            module,
+            runtime_module=self.RUNTIME_NAME,
+        )
+        runtime = generated[f"{self.RUNTIME_NAME}.py"]
+        parser = generated[""]
+        # Both files must reference httpx consistently.
+        assert "import httpx" in runtime, (
+            "runtime file missing import httpx — main.py integration bug"
+        )
+        assert "import httpx" in parser
+        # Runtime must be executable in isolation.
+        exec(compile(runtime, "<rt>", "exec"), {})
+
+    @pytest.mark.parametrize(
+        "http_client, expected_import",
+        [
+            ("httpx", "import httpx"),
+            ("aiohttp", "import aiohttp"),
+            ("requests", "import requests"),
+        ],
+    )
+    def test_runtime_file_strategy_matches_http_client_override(
+        self, http_client, expected_import
+    ):
+        """``main.py`` resolves the HTTP strategy via
+        ``PythonVisitor.http_strategy_for(http_client)`` and passes the whole
+        strategy to ``register_runtime_file``. The strategy owns both the
+        transport import line and the REST runtime source — single source
+        of truth, no drift between parser and runtime.
+        """
+        from ssc_codegen.generation.runtime import register_runtime_file
+        from ssc_codegen.targets.python import PY_LXML_CONVERTER
+        from ssc_codegen.targets.python.visitor import PythonVisitor
+
+        src = _rest_src(errors="    @error 404 Err\n")
+        module = _parse(src)
+        strategy = PythonVisitor.http_strategy_for(http_client)
+        register_runtime_file(
+            PY_LXML_CONVERTER,
+            self.RUNTIME_NAME,
+            http_strategy=strategy,
+        )
+        generated = PY_LXML_CONVERTER.convert_all(
+            module,
+            http_client=http_client,
+            runtime_module=self.RUNTIME_NAME,
+        )
+        runtime = generated[f"{self.RUNTIME_NAME}.py"]
+        parser = generated[""]
+        assert expected_import in runtime
+        assert expected_import in parser
+
+    @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
+    def test_html_only_module_with_fetch_imports_httpx(self, converter_attr):
+        """Regression: HTML-only module with a ``fetch`` shortcut method
+        emits ``def fetch(cls, client: httpx.Client, ...)`` in the parser
+        file. Pre-fix the visitor gated ``import httpx`` behind
+        ``module_has_rest`` which is False for HTML structs, causing
+        ``NameError: name 'httpx' is not defined`` at class definition
+        time on the consumer side.
+
+        ``module_uses_http`` is the broader gate that covers both REST
+        structs and any struct with a MethodFetch / MethodRest in its body.
+        """
+        converter = _get_all_converters()[converter_attr]
+        src = (
+            "struct Page {\n"
+            '    title { css "h1"; text }\n'
+            '    @request """\n'
+            "    GET / HTTP/1.1\n"
+            "    Host: example.com\n"
+            '    """\n'
+            "}\n"
+        )
+        module = _parse(src)
+        generated = converter.convert_all(module)
+        code = generated[""]
+        assert "def fetch" in code
+        assert "client: httpx.Client" in code
+        assert "import httpx" in code
+
+    @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
+    def test_runtime_functions_have_typed_signatures(self, converter_attr):
+        """Pin the typed signatures on runtime functions: parameters and
+        return types must be annotated, and the historical ``_`` prefix on
+        public-ish parameters (matchers, status, headers, body, value_fn)
+        must be gone.
+
+        Pre-fix the runtime was untyped and used ``_matchers``, ``_status``,
+        ``_value_fn`` etc. which obscured intent and made consumer-side
+        typing weak.
+        """
+        from ssc_codegen.generation.runtime import register_runtime_file
+        from ssc_codegen.targets.python.http_libs.httpx import HttpxStrategy
+
+        converter = _get_all_converters()[converter_attr]
+        src = _rest_src(errors="    @error 404 Err\n")
+        module = _parse(src)
+        register_runtime_file(
+            converter,
+            self.RUNTIME_NAME,
+            http_strategy=HttpxStrategy(),
+        )
+        generated = converter.convert_all(
+            module,
+            http_client="httpx",
+            runtime_module=self.RUNTIME_NAME,
+        )
+        runtime = generated[f"{self.RUNTIME_NAME}.py"]
+        # Typed signature: ssc_dispatch_err
+        assert "def ssc_dispatch_err(" in runtime
+        assert "matchers: List[ErrMatcher]" in runtime
+        assert "status: int" in runtime
+        assert "headers: Dict[str, str]" in runtime
+        assert "body: Any" in runtime
+        assert ") -> Optional[Err]:" in runtime
+        # Typed signature: ssc_rest_call
+        assert "def ssc_rest_call(" in runtime
+        assert "client: httpx.Client" in runtime
+        assert (
+            "value_fn: Optional[Callable[[Any], _T]] = None" in runtime
+        )
+        assert "**kw: Any" in runtime
+        # Return type is Union[Ok[_T], Err] — stable monad annotation.
+        # The exact Err subclass is determined by runtime dispatch over
+        # the matchers list (heterogeneous — each matcher may produce a
+        # different Err subclass). Parser-side call sites wrap the call
+        # in ``cast(<ResultAlias>, ...)`` to narrow to the precise union
+        # (Err400 | UnknownErr | TransportErr | ...) declared by the
+        # parser's own type alias.
+        assert ") -> Union[Ok[_T], Err]:" in runtime
+        # Async variant
+        assert "async def ssc_rest_call_async(" in runtime
+        assert "client: httpx.AsyncClient" in runtime
+        # ErrMatcher.match typed
+        assert "def match(" in runtime
+        # No underscore-prefixed parameters in the public runtime API.
+        assert "_matchers" not in runtime
+        assert "_status:" not in runtime
+        assert "_headers:" not in runtime
+        assert "_body:" not in runtime
+        assert "_value_fn" not in runtime
+        # Mapping replaced with Dict in dataclass fields.
+        assert "Mapping[str, str]" not in runtime
+        assert "Dict[str, str]" in runtime
+
+    def test_matcher_list_has_type_annotation(self):
+        """Empty matcher list must carry an explicit type annotation,
+        otherwise mypy raises ``var-annotated`` on the consumer side.
+        """
+        from ssc_codegen.targets.python import PY_LXML_CONVERTER
+
+        # Struct with @error but no required_keys → ErrMatcher with empty
+        # check; struct without @error → empty matchers list.
+        src = (
+            "json Err { detail str }\n"
+            "json Resp { id str }\n"
+            "struct Page type=rest {\n"
+            '    @request response=Resp """\n'
+            "    GET /api HTTP/1.1\n"
+            "    Host: api.example.com\n"
+            '    """\n'
+            "}\n"
+        )
+        module = _parse(src)
+        code = PY_LXML_CONVERTER.convert(module, http_client="httpx")
+        assert ": list[ErrMatcher] = [" in code
+
+    @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
+    def test_parser_wraps_rest_call_in_cast(self, converter_attr):
+        """Parser ``fetch``/``async_fetch``/``<method>`` return values
+        are wrapped in ``cast(<ResultAlias>, ssc_rest_call(...))``.
+
+        ssc_rest_call returns ``Union[Ok[_T], Err]`` (Err base) — honest
+        about runtime dispatch but mypy-incompatible with the parser's
+        specific result union (Err400 | UnknownErr | ...). cast()
+        documents the intent at the call site without suppressing mypy
+        via ``# type: ignore``; consumer code sees the stable monad
+        annotation declared on the wrapping method.
+        """
+        converter = _get_all_converters()[converter_attr]
+        src = _rest_src(errors="    @error 404 Err\n")
+        module = _parse(src)
+        code = converter.convert(module, http_client="httpx")
+        # ``from typing import cast`` added to imports when has_rest.
+        assert "from typing import cast" in code
+        # Every rest method body uses cast() wrapping.
+        assert "return cast(" in code
+        # The cast target is the parser's result alias (monad union).
+        # _rest_src produces struct "API" with method "get_user", so the
+        # alias is GetUserResult. The cast spans multiple lines:
+        #     return cast(
+        #         GetUserResult,
+        #     ssc_rest_call(...
+        assert "GetUserResult," in code
 
     def test_ref_ast_picks_rest_module(self):
         """The ref_ast selection must not crash on modules with non-REST structs."""

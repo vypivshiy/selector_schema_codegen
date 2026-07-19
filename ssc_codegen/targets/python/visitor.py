@@ -126,6 +126,7 @@ from ssc_codegen.traversal.utils import (
     jsonify_path_to_segments,
     module_has_rest,
     module_is_rest_only,
+    module_uses_http,
 )
 from ssc_codegen.generation.builder import ModuleBuilder
 from ssc_codegen.targets.python import rest
@@ -169,6 +170,20 @@ class PythonVisitor(BaseWalker):
         "requests": RequestsStrategy,
     }
 
+    @classmethod
+    def http_strategy_for(cls, http_client: str | None) -> HttpLibStrategy:
+        """Return the HTTP strategy that will be used for code generation.
+
+        Single source of truth for "which strategy given user input":
+        ``convert_all`` uses it for parser-file imports, ``main.py`` uses
+        it to thread ``transport_import_line`` into ``register_runtime_file``
+        so the runtime file's ``except <lib>.<Exc>`` clause is consistent
+        with the parser file's transport imports.
+        """
+        if http_client and http_client in cls._HTTP_STRATEGIES:
+            return cls._HTTP_STRATEGIES[http_client]()
+        return HttpxStrategy()
+
     def __init__(
         self,
         var_name: str = "v",
@@ -210,9 +225,7 @@ class PythonVisitor(BaseWalker):
 
     def convert_all(self, module_ast: Module, **meta) -> dict[str, str]:
         self._reset_state()
-        client = meta.get("http_client")
-        if client and client in self._HTTP_STRATEGIES:
-            self._http = self._HTTP_STRATEGIES[client]()
+        self._http = self.http_strategy_for(meta.get("http_client"))
         ctx = self._make_ctx(meta)
         self._walk_module(module_ast, ctx)
         lines = self._walk_module(module_ast, ctx)
@@ -340,6 +353,7 @@ class PythonVisitor(BaseWalker):
             lines.extend(['"""', node.doc, '"""'])
         has_rest = module_has_rest(node)
         is_rest_only = module_is_rest_only(node)
+        uses_http = module_uses_http(node)
         runtime = ctx.meta.get("runtime_module")
         if not is_rest_only:
             for line in self._dom.parser_imports:
@@ -353,13 +367,30 @@ class PythonVisitor(BaseWalker):
         self._builder.require_import("import re")
         self._builder.require_import("import json")
         if has_rest:
+            # Err subclasses are declared in the parser file regardless of
+            # whether runtime separation is enabled — they need @dataclass and
+            # Literal[<status>] annotations always.
+            self._builder.require_import("from dataclasses import dataclass")
+            self._builder.require_import("from typing import Literal")
+            # cast() wraps ssc_rest_call return value to narrow
+            # Union[Ok[_T], Err] (runtime return type) to the parser's
+            # specific Result alias (Union[Ok[_T], Err400, ...]). Without
+            # cast, mypy flags the broader Err base as incompatible with
+            # the parser's declared union of specific subclasses.
+            self._builder.require_import("from typing import cast")
             if not runtime:
+                # Runtime-internal helpers (Ok/Err/ErrMatcher factories) are
+                # inlined into the parser file only without -R; their imports
+                # are runtime-only otherwise.
+                self._builder.require_import("from dataclasses import field")
                 self._builder.require_import(
-                    "from dataclasses import dataclass, field"
+                    "from typing import Callable, Generic, Mapping, TypeVar"
                 )
-                self._builder.require_import(
-                    "from typing import Callable, Generic, Literal, Mapping, TypeVar"
-                )
+        if uses_http:
+            # Any fetch/rest method emits signatures like
+            # ``client: httpx.Client``; the transport import is needed even
+            # when the module is HTML-only with a single fetch shortcut and
+            # even under -R (signature lives in the parser file).
             self._builder.require_import(self._http.import_line)
         return lines
 
@@ -367,9 +398,20 @@ class PythonVisitor(BaseWalker):
         lines: list[str] = []
         runtime = ctx.meta.get("runtime_module")
         if runtime:
+            # Even under -R, the parser file still declares TypedDict schemas,
+            # @dataclass Err subclasses (Literal[<status>]), uses httpx type
+            # hints, lxml types, json/re for jsonify/regex ops, etc.
+            # All non-runtime imports must be emitted into the parser file.
+            lines.extend(self._builder.imports)
             mod = node.parent
             if isinstance(mod, Module):
-                names = rest.runtime_export_names(mod)
+                need_fallback = any(
+                    "FALLBACK_HTML_STR" in line
+                    for line in self._dom.extra_utilities
+                )
+                names = rest.runtime_export_names(
+                    mod, need_fallback=need_fallback
+                )
             else:
                 names = []
             lines.append(f"from .{runtime} import " + ", ".join(names))
@@ -383,10 +425,10 @@ class PythonVisitor(BaseWalker):
         if not is_rest_only:
             lines.extend(
                 [
-                    "class _UnmatchedTableRow:",
+                    "class UnmatchedTableRow:",
                     "    pass",
                     "",
-                    "UNMATCHED_TABLE_ROW = _UnmatchedTableRow()",
+                    "UNMATCHED_TABLE_ROW = UnmatchedTableRow()",
                     "",
                 ]
             )
@@ -541,7 +583,7 @@ class PythonVisitor(BaseWalker):
         t_arg = self._resolve_type(node.accept_type_info)
         t_ret = self._resolve_type(node.ret_type_info)
         if node.struct.type == ST.TABLE:
-            t_ret = f"Union[{t_ret}, _UnmatchedTableRow]"
+            t_ret = f"Union[{t_ret}, UnmatchedTableRow]"
         lines = [f"{ctx.indent}def _parse_{name}(self, v: {t_arg}) -> {t_ret}:"]
         lines.extend(self.walk_children(node, ctx))
         return lines

@@ -30,6 +30,7 @@ from ssc_codegen.traversal.context import WalkContext
 from ssc_codegen.traversal.utils import (
     dict_needs_builder,
     module_has_rest,
+    module_is_rest_only,
 )
 
 
@@ -203,14 +204,9 @@ def render_py_condition_lambda(
 # Runtime export names
 # ===========================================================================
 
-_RUNTIME_BASE_EXPORT_NAMES: list[str] = [
-    "repl_map",
-    "normalize_text",
-    "_UnmatchedTableRow",
-    "unescape_text",
-    "rm_prefix",
-    "rm_suffix",
+_RUNTIME_HTML_EXPORT_NAMES: list[str] = [
     "UNMATCHED_TABLE_ROW",
+    "UnmatchedTableRow",
 ]
 
 _RUNTIME_REST_EXPORT_NAMES: list[str] = [
@@ -219,14 +215,30 @@ _RUNTIME_REST_EXPORT_NAMES: list[str] = [
     "UnknownErr",
     "TransportErr",
     "ErrMatcher",
-    "ssc_dispatch_err",
     "ssc_rest_call",
     "ssc_rest_call_async",
 ]
 
 
-def runtime_export_names(module: Module) -> list[str]:
-    names = list(_RUNTIME_BASE_EXPORT_NAMES)
+def runtime_export_names(
+    module: Module, *, need_fallback: bool = False
+) -> list[str]:
+    """Compute the list of names the parser file must import from the runtime.
+
+    Selection rules:
+    - REST-only module: just REST names (``ssc_dispatch_err`` is internal to
+      ``ssc_rest_call`` — never imported by the parser).
+    - HTML module (has any non-rest struct): table markers are always
+      imported (cheap, may be referenced by visit_field/visit_match).
+    - HTML module whose DomSpelling declares ``FALLBACK_HTML_STR`` in
+      ``extra_utilities``: also import that constant.
+    - Module with REST structs: also import REST names.
+    """
+    names: list[str] = []
+    if not module_is_rest_only(module):
+        names.extend(_RUNTIME_HTML_EXPORT_NAMES)
+        if need_fallback:
+            names.append("FALLBACK_HTML_STR")
     if module_has_rest(module):
         names.extend(_RUNTIME_REST_EXPORT_NAMES)
     return names
@@ -373,21 +385,29 @@ def emit_method_rest(
 
     void_kwarg: list[str] = []
     if not node.response_schema:
-        void_kwarg = [f"{i3}_value_fn=lambda _: None,"]
+        void_kwarg = [f"{i3}value_fn=lambda _: None,"]
 
     def _body(fn_name: str, await_kw: str) -> list[str]:
         body: list[str] = []
         if doc_line:
             body.append(doc_line)
         body.extend(pre_lines)
-        body.append(f"{i2}return {await_kw}{fn_name}(")
+        # Wrap in cast(): ssc_rest_call returns Union[Ok[_T], Err] (Err
+        # base — it cannot know the specific Err subclasses that the
+        # heterogeneous matchers list will produce at runtime). The
+        # parser-declared Result alias narrows to the precise union
+        # (Err400 | UnknownErr | TransportErr | ...). cast() documents
+        # this intent at the call site without suppressing mypy via
+        # ``# type: ignore``; the wrapping method's return type is the
+        # stable monad consumers see.
+        body.append(f"{i2}return cast({ret_type}, {await_kw}{fn_name}(")
         body.append(
             f"{i3}client, {matchers_var}, {spec.method!r},"
             f" {render_value(spec.url)},"
         )
         body.extend(void_kwarg)
         body.extend(kwargs_lines)
-        body.append(f"{i2})")
+        body.append(f"{i2}))")
         return body
 
     lines: list[str] = []
@@ -437,7 +457,7 @@ def emit_result_alias_def(node: ResultAliasDef) -> list[str]:
 
 def emit_matcher_list_def(node: MatcherListDef) -> list[str]:
     var = f"_{to_snake_case(node.struct_name)}_matchers"
-    lines = [f"{var} = ["]
+    lines = [f"{var}: list[ErrMatcher] = ["]
     for e in node.entries:
         check = render_py_condition_lambda(e.required_keys, e.conditions)
         check_arg = check if check else "None"

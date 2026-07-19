@@ -200,13 +200,25 @@ def generate(
 
     if separate_runtime:
         from ssc_codegen.generation.runtime import register_runtime_file
+        from ssc_codegen.targets.python.visitor import PythonVisitor
 
         _runtime_name = runtime_name or "sscgen_runtime"
         meta["runtime_module"] = _runtime_name
+        # Resolve HTTP strategy for the runtime file. The runtime's
+        # ssc_rest_call references the HTTP transport exception (e.g.
+        # httpx.HTTPError) in its `except` clause and must import the
+        # matching library. Passing the strategy as a whole keeps the
+        # runtime's REST source (Ok/Err/ssc_rest_call/etc.) consistent
+        # with the parser file's transport imports — single source of
+        # truth via PythonVisitor.http_strategy_for.
+        http_strategy = None
+        if isinstance(converter, PythonVisitor):
+            http_strategy = PythonVisitor.http_strategy_for(http_client)
         generate_runtime = register_runtime_file(
             converter,
             _runtime_name,
             include_fallback=profile.runtime_include_fallback,
+            http_strategy=http_strategy,
         )
 
     from ssc_codegen.ast import Module

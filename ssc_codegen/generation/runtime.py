@@ -7,13 +7,15 @@ from typing import Any
 
 import ssc_codegen.ast as a
 
+from ssc_codegen.targets.python.http_libs.base import HttpLibStrategy
+from ssc_codegen.targets.python.http_libs.httpx import HttpxStrategy
 from ssc_codegen.traversal.utils import module_has_rest
 
 _BASE_UTILITY_LINES: list[str] = [
     "_RE_HEX_ENTITY = re.compile(r'&#x([0-9a-fA-F]+);')",
     "_RE_UNICODE_ENTITY = re.compile(r'\\\\u([0-9a-fA-F]{4})')",
     "_RE_BYTES_ENTITY = re.compile(r'\\\\x([0-9a-fA-F]{2})')",
-    "_RE_CHARS_MAP = {'\\b': '\\b', '\\f': '\\f', '\\n': '\\n', '\\r': '\\r', '\\t': '\\t'}",
+    "_RE_CHARS_MAP = {'\\\\b': '\\b', '\\\\f': '\\f', '\\\\n': '\\n', '\\\\r': '\\r', '\\\\t': '\\t'}",
     "",
     "def repl_map(s: str, rmap: Dict[str, str]) -> str:",
     "    for k, v in rmap.items():",
@@ -23,7 +25,7 @@ _BASE_UTILITY_LINES: list[str] = [
     "def normalize_text(text: str) -> str:",
     "    return ' '.join(text.split()) if text else \"\"",
     "",
-    "class _UnmatchedTableRow:",
+    "class UnmatchedTableRow:",
     "    pass",
     "",
     "def unescape_text(text: str) -> str:",
@@ -50,111 +52,32 @@ _BASE_UTILITY_LINES: list[str] = [
     "        return s[:-(len(p))] if s.endswith(p) else s",
     "",
     "",
-    "UNMATCHED_TABLE_ROW = _UnmatchedTableRow()",
+    "UNMATCHED_TABLE_ROW = UnmatchedTableRow()",
 ]
 
 
-def rest_runtime_lines() -> list[str]:
-    """Canonical source for the REST runtime."""
-    return [
-        "_T = TypeVar('_T')",
-        "_E = TypeVar('_E')",
-        "",
-        "@dataclass(frozen=True)",
-        "class Ok(Generic[_T]):",
-        "    status: int = 0",
-        "    headers: Mapping[str, str] = field(default_factory=dict)",
-        "    value: _T = None  # type: ignore[assignment]",
-        "    is_ok: Literal[True] = True",
-        "",
-        "@dataclass(frozen=True)",
-        "class Err(Generic[_E]):",
-        "    status: int = 0",
-        "    headers: Mapping[str, str] = field(default_factory=dict)",
-        "    value: _E = None  # type: ignore[assignment]",
-        "    is_ok: Literal[False] = False",
-        "",
-        "@dataclass(frozen=True)",
-        "class UnknownErr(Err[Any]):",
-        "    pass",
-        "",
-        "@dataclass(frozen=True)",
-        "class TransportErr(Err[None]):",
-        "    status: Literal[0] = 0",
-        "    cause: str = ''",
-        "    value: None = None",
-        "    headers: Mapping[str, str] = field(default_factory=dict)",
-        "",
-        "@dataclass(frozen=True)",
-        "class ErrMatcher:",
-        "    status: int",
-        "    check: Callable[[dict], bool] | None = None",
-        "    factory: Callable[..., Err] = None  # type: ignore[assignment]",
-        "",
-        "    def match(self, _s: int, _h, _b) -> Err | None:",
-        "        if _s != self.status:",
-        "            return None",
-        "        if self.check is not None:",
-        "            if not isinstance(_b, dict) or not self.check(_b):",
-        "                return None",
-        "        return self.factory(headers=_h, value=_b)",
-        "",
-        "",
-        "def ssc_dispatch_err(_matchers, _status: int, _headers, _body):",
-        "    for _m in _matchers:",
-        "        _err = _m.match(_status, _headers, _body)",
-        "        if _err is not None:",
-        "            return _err",
-        "    if 200 <= _status < 300:",
-        "        return None",
-        "    return UnknownErr(status=_status, headers=_headers, value=_body)",
-        "",
-        "",
-        "def ssc_rest_call(client, _matchers, method, url, _value_fn=None, **kw):",
-        "    try:",
-        "        _resp = client.request(method, url, **kw)",
-        "        _status = _resp.status_code",
-        "        _headers = {k.lower(): v for k, v in _resp.headers.items()}",
-        "        try:",
-        "            _body = _resp.json()",
-        "        except Exception:",
-        "            _body = None",
-        "    except httpx.HTTPError as _exc:",
-        "        return TransportErr(cause=repr(_exc))",
-        "    _err = ssc_dispatch_err(_matchers, _status, _headers, _body)",
-        "    if _err is not None:",
-        "        return _err",
-        "    _value = _body if _value_fn is None else _value_fn(_body)",
-        "    return Ok(status=_status, headers=_headers, value=_value)",
-        "",
-        "",
-        "async def ssc_rest_call_async(client, _matchers, method, url, _value_fn=None, **kw):",
-        "    try:",
-        "        _resp = await client.request(method, url, **kw)",
-        "        _status = _resp.status_code",
-        "        _headers = {k.lower(): v for k, v in _resp.headers.items()}",
-        "        try:",
-        "            _body = _resp.json()",
-        "        except Exception:",
-        "            _body = None",
-        "    except httpx.HTTPError as _exc:",
-        "        return TransportErr(cause=repr(_exc))",
-        "    _err = ssc_dispatch_err(_matchers, _status, _headers, _body)",
-        "    if _err is not None:",
-        "        return _err",
-        "    _value = _body if _value_fn is None else _value_fn(_body)",
-        "    return Ok(status=_status, headers=_headers, value=_value)",
-        "",
-    ]
+def runtime_module_content(
+    module: a.Module,
+    *,
+    http_strategy: HttpLibStrategy | None = None,
+) -> str:
+    """Return the full source text of the separate runtime module file.
 
-
-def runtime_module_content(module: a.Module) -> str:
-    """Return the full source text of the separate runtime module file."""
+    ``http_strategy`` is the HTTP library strategy (e.g. ``HttpxStrategy()``)
+    chosen by the user. The runtime's ``ssc_rest_call`` references the
+    transport exception class (e.g. ``httpx.HTTPError``) in its ``except``
+    clause, so it must import the matching HTTP library. The strategy owns
+    both the import line and the REST runtime source (Ok/Err/ssc_rest_call
+    etc.) — single source of truth, no drift between parser and runtime.
+    Defaults to ``HttpxStrategy`` when not provided.
+    """
+    strategy = http_strategy or HttpxStrategy()
     lines: list[str] = [
         "# autogenerated runtime helpers — do not edit",
+        "from __future__ import annotations",
         "import re",
         "import sys",
-        "from typing import Dict",
+        "from typing import Any, Callable, Dict, Generic, List, Literal, Mapping, Optional, TypeVar, Union",
         "from html import unescape as ssc_html_unescape",
     ]
     has_rest = module_has_rest(module)
@@ -162,7 +85,7 @@ def runtime_module_content(module: a.Module) -> str:
         lines.extend(
             [
                 "from dataclasses import dataclass, field",
-                "from typing import Any, Callable, Generic, Literal, Mapping, TypeVar",
+                strategy.import_line,
             ]
         )
     lines.append("")
@@ -170,7 +93,7 @@ def runtime_module_content(module: a.Module) -> str:
     lines.extend(_BASE_UTILITY_LINES)
     lines.append("")
     if has_rest:
-        lines.extend(rest_runtime_lines())
+        lines.extend(strategy.rest_runtime_lines())
     return "\n".join(lines)
 
 
@@ -179,8 +102,24 @@ def register_runtime_file(
     runtime_name: str = "sscgen_runtime",
     *,
     include_fallback: bool = False,
+    http_strategy: HttpLibStrategy | None = None,
+    transport_import_line: str | None = None,
 ) -> Callable[[list[a.Module]], str]:
-    """Register a runtime module file provider on the converter."""
+    """Register a runtime module file provider on the converter.
+
+    ``http_strategy`` is the canonical source for both the transport import
+    line and the REST runtime source. It should match the HttpLibStrategy
+    that will be applied to the parser codegen (see main.py).
+
+    ``transport_import_line`` is a legacy fallback: when ``http_strategy``
+    is not provided, the import line is taken from this argument and the
+    REST runtime source defaults to ``HttpxStrategy``. Prefer passing
+    ``http_strategy`` — single source of truth.
+    """
+
+    # Normalize legacy callers that pass only transport_import_line.
+    if http_strategy is None:
+        http_strategy = HttpxStrategy()
 
     def _apply_fallback(content: str) -> str:
         if not include_fallback:
@@ -193,13 +132,22 @@ def register_runtime_file(
 
     @converter.file(f"{runtime_name}.py")
     def _runtime_provider(module_ast: a.Module, meta):
-        return _apply_fallback(runtime_module_content(module_ast))
+        return _apply_fallback(
+            runtime_module_content(
+                module_ast,
+                http_strategy=http_strategy,
+            )
+        )
 
     def _generate_runtime(modules: list[a.Module]) -> str:
         ref = next(
             (m for m in modules if module_has_rest(m)),
             modules[0],
         )
-        return _apply_fallback(runtime_module_content(ref))
+        return _apply_fallback(
+            runtime_module_content(
+                ref, http_strategy=http_strategy
+            )
+        )
 
     return _generate_runtime

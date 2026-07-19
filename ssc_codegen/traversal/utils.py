@@ -7,6 +7,7 @@ from ssc_codegen.ast import (
     ErrorResponse,
     Filter,
     Match,
+    MethodBase,
     Module,
     Node,
     PlaceholderSpec,
@@ -20,6 +21,23 @@ from ssc_codegen.ast import (
 def module_has_rest(module: Module) -> bool:
     """True if the module contains at least one REST struct."""
     return any(isinstance(n, StructRest) for n in module.body)
+
+
+def module_uses_http(module: Module) -> bool:
+    """True if the module contains any fetch/rest method.
+
+    Covers both ``StructRest`` (REST APIs) and HTML structs with a
+    ``fetch`` method — both produce signatures like
+    ``client: httpx.Client`` and therefore need ``import httpx``.
+    """
+    for node in module.body:
+        if isinstance(node, StructRest):
+            return True
+        if isinstance(node, StructBase):
+            for child in node.body:
+                if isinstance(child, MethodBase):
+                    return True
+    return False
 
 
 def module_is_rest_only(module: Module) -> bool:

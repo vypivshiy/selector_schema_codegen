@@ -301,4 +301,81 @@ Generated code (Python `httpx`):
 
 Extracts helper functions into a separate runtime module (default: `sscgen_runtime`).
 Generated parsers import from it instead of inlining.
-Runtime content assembled by `generation/runtime.py` → `register_runtime_file()`.
+
+### What moves to the runtime file
+
+| Symbol | Source | Notes |
+|--------|--------|-------|
+| Text helpers | `_BASE_UTILITY_LINES` in `generation/runtime.py` | `repl_map`, `normalize_text`, `unescape_text`, `rm_prefix/suffix`, `UNMATCHED_TABLE_ROW` |
+| REST runtime | `rest_runtime_lines()` in `generation/runtime.py` | `Ok`/`Err`/`UnknownErr`/`TransportErr` dataclasses, `ErrMatcher`, `ssc_dispatch_err`, `ssc_rest_call`, `ssc_rest_call_async` |
+| Optional HTML fallback | `include_fallback=True` (resolver: `lib == "lxml"`) | Prepends `FALLBACK_HTML_STR = "<html><body></body></html>"` to the runtime |
+| Transport import | `transport_import_line` parameter | `import httpx` / `import aiohttp` / `import requests` — resolved in `main.py` from the chosen HTTP client and threaded through `register_runtime_file` → `runtime_module_content`. **Required when `has_rest`**: `ssc_rest_call` references the transport exception (`httpx.HTTPError` etc.) in its `except` clause. |
+
+### What stays in the parser file
+
+The parser file still needs the bulk of its imports under `-R`, because it
+declares the schema `TypedDict`s, the `@dataclass class XErr(Err[T])`
+subclasses with `Literal[<status>]` status fields, the HTML struct bodies,
+and the method signatures (`client: httpx.Client`). Concretely:
+
+| Import surface | Under `-R` | Without `-R` | Reason |
+|----------------|------------|--------------|--------|
+| `from typing import Any, Dict, List, Optional, TypedDict, Union` | always | always | TypedDict schema declarations |
+| `from typing_extensions import NotRequired` | always | always | Optional JSON fields |
+| `import re`, `import json` | always | always | Regex/jsonify ops |
+| `from typing import Literal` | always | always | Err subclass `status: Literal[<code>]` |
+| `from dataclasses import dataclass` | always | always | `@dataclass` on Err subclasses |
+| `import httpx` (or chosen lib) | always when `has_rest` | always when `has_rest` | Method signatures `client: httpx.Client` |
+| `from lxml import html` / `from lxml.html import HtmlElement` etc. | always when HTML struct | always when HTML struct | HTML extraction |
+| `from dataclasses import field` | **not needed** | always when `has_rest` | `field(default_factory=dict)` in inlined Ok/Err/ErrMatcher defs |
+| `from typing import Callable, Generic, Mapping, TypeVar` | **not needed** | always when `has_rest` | Runtime-internal generic/dataclass machinery |
+
+The split is implemented in `PythonVisitor.visit_module` — see
+`_builder.require_import(...)` calls gated on `if not runtime:` for the
+runtime-internal subset only.
+
+### `runtime_export_names(module, *, need_fallback=False)` (rest.py)
+
+Returns the exact list of names the parser file imports from the runtime.
+Conditional selection:
+
+- **REST-only module** (`module_is_rest_only == True`): REST names only.
+  `ssc_dispatch_err` is omitted — it is internal to `ssc_rest_call`.
+- **Module with HTML structs** (`module_is_rest_only == False`): table
+  markers (`UNMATCHED_TABLE_ROW`, `_UnmatchedTableRow`) are always
+  imported; `FALLBACK_HTML_STR` is added when `need_fallback=True`
+  (caller passes `any("FALLBACK_HTML_STR" in l for l in self._dom.extra_utilities)`).
+- **Module with REST structs** (`module_has_rest == True`): REST names
+  appended on top.
+
+This replaces the previous greedy export list that pulled every HTML
+helper even into REST-only modules.
+
+### End-to-end verification
+
+`tests/test_rest_api.py::TestSeparateRuntime` exercises:
+
+- `test_main_imports_present_under_runtime` — pins the required import
+  surface (TypedDict/Literal/dataclass/httpx) under `-R`.
+- `test_runtime_file_imports_httpx_when_rest` — runtime file contains
+  `import httpx` and is itself executable.
+- `test_combined_rest_and_html_module_under_runtime` — mixed module
+  (REST struct + HTML struct in one `.kdl`) keeps lxml imports, the
+  `FALLBACK_HTML_STR` import from runtime, AND REST-side imports. This
+  is the cdnvideohub/kodik/aniboom regression from `anicli-api`.
+- `test_main_valid_python` — exec'd via `_exec_with_runtime`, not
+  `pyast.parse`. `pyast.parse` only checks syntax and silently passes
+  code with unresolved `NameError`s; `exec(compile(...))` actually
+  resolves names.
+
+### Known follow-ups (out of scope)
+
+- `convert_batch` (`visitor.py`) does not propagate `runtime_module` /
+  `http_client` meta between modules in batch mode. Unused by `main.py`
+  (which calls `converter.convert(ast)` per file).
+- `_imports` and `_std_imports` pools in `ModuleBuilder` are separate
+  dicts without cross-dedup. Pre-existing duplicates (`import re` may
+  appear in both sections of the output). Legal Python, cosmetic only.
+- std helpers (`std_repl_map`, `std_unescape_text`) are inlined into
+  every parser file under `-R` (N copies for N files). Could be moved
+  to the runtime file — separate refactor.
