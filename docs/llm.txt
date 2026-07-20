@@ -176,11 +176,14 @@ Pattern-match rules:
 ### Control
 
 - filter { predicates... } — filter lists by predicates, LIST_* only
-- assert { predicates... } — validate without changing value
+- assert { predicates... } — validate without changing value; raises SscAssertionError on failure (caught by fallback if present)
+- assert "message" { predicates... } — assert with custom error message; default message is `<file.kdl>:<line>:<col> assertion failed at <Struct>.<field>` (or `<Struct>.@pre-validate` inside `@pre-validate`)
 - match { predicates... } — select table row, must be first op in table fields
 - fallback <value> — default value on error; fallback #null makes type optional
 - fallback {} — empty list fallback, LIST_* only
 - @name / self name — reference @init value (self is deprecated)
+
+Note: `assert` emits a runtime helper (`std_assert` in Python, `_stdAssert` in JS) raising `SscAssertionError`. Unlike Python's `assert` keyword, this is **not** stripped by `python -O`. Consumer code can catch via `except SscAssertionError` (Python) or `try { ... } catch (e) { if (e instanceof SscAssertionError) ... }` (JS).
 
 ## Type system
 

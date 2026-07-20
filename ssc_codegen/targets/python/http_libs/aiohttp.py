@@ -46,7 +46,7 @@ class AioHttpStrategy(HttpLibStrategy):
             "class ErrMatcher:",
             "    status: int",
             "    check: Optional[Callable[[dict], bool]] = None",
-            "    factory: Optional[Callable[..., Err]] = None,",
+            "    factory: Optional[Callable[..., Err]] = None",
             "",
             "    def match(",
             "        self,",

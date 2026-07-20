@@ -1140,21 +1140,54 @@ def _expr_filter(
 def _expr_assert(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
+    # Optional message: assert "msg" { ... }. Validate type.
+    message = ""
+    if len(node.args) > 1:
+        raise BuildTimeError(
+            f"assert: expected 0 or 1 string argument, got {len(node.args)}"
+        )
+    if node.args:
+        arg_val = node.args[0].value
+        if not isinstance(arg_val, str):
+            raise BuildTimeError(
+                f"assert: message argument must be a string, got {type(arg_val).__name__}"
+            )
+        message = arg_val
+
+    # Source location (language-agnostic, used in default error message).
+    source_file = ctx.source_path.name if ctx.source_path else ""
+    source_line = node.span.start.line if node.span else 0
+    source_col = node.span.start.column if node.span else 0
+
     if isinstance(parent, PreValidate) and not parent.body:
         return Assert(
             parent=parent,
+            message=message,
+            source_file=source_file,
+            source_line=source_line,
+            source_col=source_col,
             accept_type_info=TypeInfo(base=VariableType.DOCUMENT),
             ret_type_info=TypeInfo(base=VariableType.NULL),
         )
     if not parent.body:
         return Assert(
             parent=parent,
+            message=message,
+            source_file=source_file,
+            source_line=source_line,
+            source_col=source_col,
             accept_type_info=TypeInfo(base=VariableType.DOCUMENT),
             ret_type_info=TypeInfo(base=VariableType.DOCUMENT),
         )
     prev_ti = parent.body[-1].ret_type_info
     return Assert(
-        parent=parent, accept_type_info=prev_ti, ret_type_info=prev_ti
+        parent=parent,
+        message=message,
+        source_file=source_file,
+        source_line=source_line,
+        source_col=source_col,
+        accept_type_info=prev_ti,
+        ret_type_info=prev_ti,
     )
 
 

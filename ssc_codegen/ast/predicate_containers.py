@@ -31,8 +31,17 @@ class Assert(Node):
     Raises error if any predicate fails (caught by Fallback if present).
     Pass-through: accept == ret == cursor type.
     Can appear multiple times in a pipeline.
+
+    Source location fields (source_file/source_line/source_col) are
+    populated by the parser from KdlNode.span and ctx.source_path and
+    are language-agnostic — used verbatim in the default assertion
+    message so consumers can find the offending .kdl line.
     """
 
+    message: str = ""
+    source_file: str = ""
+    source_line: int = 0
+    source_col: int = 0
     accept_type_info: TypeInfo = field(
         default_factory=lambda: TypeInfo(base=VariableType.AUTO)
     )

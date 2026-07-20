@@ -1143,33 +1143,77 @@ class JsVisitor(BaseWalker):
         lines.append(f"{ctx.deeper().indent}));")
         return lines
 
+    def _resolve_assert_location(self, node: Assert) -> str:
+        """Walk parent chain for language-agnostic ``{Struct}.{field}``.
+
+        Mirrors the Python visitor's resolver: returns ``@pre-validate``
+        marker when the assert is inside ``pre-validate { ... }``.
+        Uses raw KDL names — message format is intentionally
+        language-agnostic so consumers can map errors back to source
+        ``.kdl`` files.
+        """
+        struct_name = ""
+        field_part = ""
+        current = node.parent
+        while current is not None:
+            if isinstance(current, PreValidate) and not field_part:
+                field_part = "@pre-validate"
+            elif isinstance(current, (Field, Key, Value)) and not field_part:
+                field_part = getattr(current, "name", "") or (
+                    "value" if isinstance(current, Value) else "key"
+                )
+            if isinstance(current, StructBase):
+                struct_name = to_pascal_case(current.name)
+                break
+            current = current.parent
+        if field_part:
+            return f"{struct_name}.{field_part}" if struct_name else field_part
+        return struct_name
+
     def visit_assert(self, node: Assert, ctx: WalkContext) -> list[str]:
-        ob, cb = "{", "}"
+        location = self._resolve_assert_location(node)
+        if node.message:
+            msg = node.message
+        else:
+            loc_str = f" at {location}" if location else ""
+            msg = (
+                f"{node.source_file}:{node.source_line}:{node.source_col} "
+                f"assertion failed{loc_str}"
+            )
+        self._builder.require_std(
+            "_stdAssert",
+            code=(
+                "class SscAssertionError extends Error {}\n"
+                "function _stdAssert(cond, msg = '') {\n"
+                "    if (!cond) throw new SscAssertionError(msg || 'ssc-gen assertion failed');\n"
+                "}"
+            ),
+        )
+        msg_literal = _js_literal(msg)
         lines: list[str] = []
         if isinstance(node.parent, PreValidate):
+            # pre-validate asserts operate on the incoming document (v);
+            # no local var binding.
             setattr(node, "_local_name", "v")
-            lines.append(f"{ctx.indent}if (!(")
+            lines.append(f"{ctx.indent}_stdAssert(")
         else:
             local = f"i{ctx.prv}"
             setattr(node, "_local_name", local)
             lines.extend(
                 [
                     f"{ctx.indent}let {local} = {ctx.prv};",
-                    f"{ctx.indent}if (!(",
+                    f"{ctx.indent}_stdAssert(",
                 ]
             )
+        # condition expression — wrapped in parens to disambiguate from
+        # the trailing msg argument.
+        lines.append(f"{ctx.deeper().indent}(")
         lines.extend(self.walk_children(node, ctx))
-        if isinstance(node.parent, PreValidate):
-            lines.append(
-                f"{ctx.indent})) {ob} throw new Error('Assertion failed'); {cb}"
-            )
-        else:
-            lines.extend(
-                [
-                    f"{ctx.indent})) {ob} throw new Error('Assertion failed'); {cb}",
-                    f"{ctx.indent}let {ctx.nxt} = {ctx.prv};",
-                ]
-            )
+        lines.append(f"{ctx.deeper().indent}),")
+        lines.append(f"{ctx.deeper().indent}{msg_literal},")
+        lines.append(f"{ctx.indent});")
+        if not isinstance(node.parent, PreValidate):
+            lines.append(f"{ctx.indent}let {ctx.nxt} = {ctx.prv};")
         return lines
 
     def visit_match(self, node: Match, ctx: WalkContext) -> list[str]:

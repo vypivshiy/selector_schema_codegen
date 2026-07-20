@@ -148,6 +148,17 @@ class PythonVisitor(BaseWalker):
 
     STD_MODULE_NAME: str = "ssc_std"
 
+    # Std helpers that exist in the runtime module under the same name.
+    # Under -R, import directly instead of inlining their definitions.
+    # Library-specific helpers (std_select_first, std_xpath_remove, etc.)
+    # are NOT here — they depend on the chosen HTML library and must stay
+    # inlined in the parser file.
+    _RUNTIME_HELPERS: set[str] = {
+        "std_repl_map",
+        "std_unescape_text",
+        "std_assert",
+    }
+
     # --- type resolution spelling ---
     DEFAULT_TYPE: str = "Any"
     TYPES: dict[VT, str] = {
@@ -290,6 +301,35 @@ class PythonVisitor(BaseWalker):
     def _render_std_section(self, ctx: WalkContext) -> list[str]:
         if not self._builder.has_std:
             return []
+        runtime = ctx.meta.get("runtime_module")
+        if runtime:
+            # Under -R: helpers that exist in the runtime module are
+            # imported directly (same name on both sides — no aliasing).
+            # Library-specific helpers (std_select_first, std_xpath_remove,
+            # ...) are still inlined because they depend on the chosen
+            # HTML library.
+            imported: list[str] = []
+            inlined_defs: list[tuple[list[str], str]] = []
+            inlined_imports: list[str] = []
+            for name, (imps, code) in self._builder.std_defs.items():
+                if name in self._RUNTIME_HELPERS:
+                    imported.append(name)
+                else:
+                    inlined_defs.append((imps, code))
+                    inlined_imports.extend(imps)
+            lines: list[str] = []
+            if imported:
+                lines.append(
+                    f"from .{runtime} import " + ", ".join(imported)
+                )
+                lines.append("")
+            if inlined_defs:
+                lines.extend(inlined_imports)
+                lines.append("")
+                for _imps, code in inlined_defs:
+                    lines.extend(inspect.cleandoc(code).splitlines())
+                    lines.append("")
+            return lines
         if ctx.meta.get("inline_std", True):
             body: list[str] = []
             for _imps, code in self._builder.std_defs.values():
@@ -997,7 +1037,8 @@ class PythonVisitor(BaseWalker):
 
     def visit_re(self, node: Re, ctx: WalkContext) -> list[str]:
         pattern = repr(node.pattern)
-        return [f"{ctx.indent}{ctx.nxt} = re.search({pattern}, {ctx.prv})[1]"]
+        # Intentional behavior: if the regex doesn't match, the code crashes immediately.
+        return [f"{ctx.indent}{ctx.nxt} = re.search({pattern}, {ctx.prv})[1]  # type: ignore[index]"]
 
     def visit_re_all(self, node: ReAll, ctx: WalkContext) -> list[str]:
         pattern = repr(node.pattern)
@@ -1015,7 +1056,8 @@ class PythonVisitor(BaseWalker):
     # === ARRAY ===
 
     def visit_index(self, node: Index, ctx: WalkContext) -> list[str]:
-        return [f"{ctx.indent}{ctx.nxt} = {ctx.prv}[{node.i}]"]
+        # Intentional behavior: if the index doesn't match, the code crashes immediately.
+        return [f"{ctx.indent}{ctx.nxt} = {ctx.prv}[{node.i}]  # type: ignore[index]"]
 
     def visit_slice(self, node: Slice, ctx: WalkContext) -> list[str]:
         return [f"{ctx.indent}{ctx.nxt} = {ctx.prv}[{node.start}:{node.end}]"]
@@ -1098,14 +1140,73 @@ class PythonVisitor(BaseWalker):
         lines.append(f"{ctx.indent}]")
         return lines
 
+    def _resolve_assert_location(self, node: Assert) -> str:
+        """Walk parent chain to find ``{StructName}.{field_or_marker}``.
+
+        Returns a language-agnostic location string used in the default
+        assertion message. Reads raw KDL names (snake_case for fields,
+        pascal-case for struct class). For ``@pre-validate`` ancestors the
+        marker ``@pre-validate`` is used verbatim — matches the DSL syntax
+        and is stable across target languages.
+        """
+        from ssc_codegen.naming import to_pascal_case
+
+        struct_name = ""
+        field_part = ""
+        current = node.parent
+        # First pass: find immediate field-like ancestor (Field/Key/Value
+        # or PreValidate). Stop at first StructBase for struct name.
+        while current is not None:
+            if isinstance(current, PreValidate) and not field_part:
+                field_part = "@pre-validate"
+            elif isinstance(current, (Field, Key, Value)) and not field_part:
+                field_part = getattr(current, "name", "") or (
+                    "value" if isinstance(current, Value) else "key"
+                )
+            if isinstance(current, StructBase):
+                struct_name = to_pascal_case(current.name)
+                break
+            current = current.parent
+        if field_part:
+            return f"{struct_name}.{field_part}" if struct_name else field_part
+        return struct_name
+
     def visit_assert(self, node: Assert, ctx: WalkContext) -> list[str]:
+        location = self._resolve_assert_location(node)
+        if node.message:
+            msg = node.message
+        else:
+            loc_str = f" at {location}" if location else ""
+            msg = (
+                f"{node.source_file}:{node.source_line}:{node.source_col} "
+                f"assertion failed{loc_str}"
+            )
+        self._builder.require_std(
+            "std_assert",
+            code="""
+                class SscAssertionError(Exception):
+                    pass
+
+                def std_assert(cond, msg=''):
+                    if not cond:
+                        raise SscAssertionError(msg or 'ssc-gen assertion failed')
+            """,
+        )
+        i1 = ctx.indent
+        i2 = ctx.deeper().indent
         lines = [
-            f"{ctx.indent}i = {ctx.prv}",
-            f"{ctx.indent}assert (",
+            f"{i1}i = {ctx.prv}",
+            f"{i1}std_assert(",
+            f"{i2}(",
         ]
         lines.extend(self.walk_children(node, ctx))
         lines.extend(
-            [ctx.deeper().indent + ")", f"{ctx.indent}{ctx.nxt} = {ctx.prv}"]
+            [
+                f"{i2}),",
+                f"{i2}{msg!r},",
+                f"{i1})",
+                f"{i1}{ctx.nxt} = {ctx.prv}",
+            ]
         )
         return lines
 

@@ -1102,7 +1102,27 @@ def lint_pipeline_op(node: KdlNode, lint: LintContext) -> None:
             )
 
     elif name in ("filter", "assert", "match"):
-        if node.args:
+        if name == "assert":
+            # assert accepts an optional string message arg:
+            # assert { ... }                  # default
+            # assert "expected non-empty" { ... }
+            if len(node.args) > 1:
+                lint.error(
+                    node,
+                    message="'assert' accepts at most one argument",
+                    code="E001",
+                    hint='example: assert "msg" { ... }  or  assert { ... }',
+                )
+            elif node.args:
+                arg_val = node.args[0].value
+                if not isinstance(arg_val, str):
+                    lint.error(
+                        node,
+                        message="'assert' message argument must be a string",
+                        code="E001",
+                        hint='example: assert "expected non-empty" { ... }',
+                    )
+        elif node.args:
             lint.error(
                 node,
                 message=f"'{name}' does not accept arguments",

@@ -219,6 +219,14 @@ _RUNTIME_REST_EXPORT_NAMES: list[str] = [
     "ssc_rest_call_async",
 ]
 
+# Always exported regardless of module type so consumer code can
+# ``except SscAssertionError`` unconditionally — even if the current
+# module has no ``assert {}`` blocks. Matches the always-export strategy
+# for runtime helpers (catch stability over minimal-imports).
+_RUNTIME_ALWAYS_EXPORT_NAMES: list[str] = [
+    "SscAssertionError",
+]
+
 
 def runtime_export_names(
     module: Module, *, need_fallback: bool = False
@@ -234,7 +242,7 @@ def runtime_export_names(
       ``extra_utilities``: also import that constant.
     - Module with REST structs: also import REST names.
     """
-    names: list[str] = []
+    names: list[str] = list(_RUNTIME_ALWAYS_EXPORT_NAMES)
     if not module_is_rest_only(module):
         names.extend(_RUNTIME_HTML_EXPORT_NAMES)
         if need_fallback:

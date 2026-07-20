@@ -727,9 +727,9 @@ class TestRestOnlyImports:
         src = _rest_src()
         module = _parse(src)
         code = PY_BASE_CONVERTER.convert(module, http_client="httpx")
-        assert "unescape_text" not in code
-        assert "normalize_text" not in code
-        assert "repl_map" not in code
+        assert "std_unescape_text" not in code
+        assert "std_normalize_text" not in code
+        assert "std_repl_map" not in code
         assert "UnmatchedTableRow" not in code
         assert "UNMATCHED_TABLE_ROW" not in code
         assert "_RE_HEX_ENTITY" not in code
