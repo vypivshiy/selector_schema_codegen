@@ -84,11 +84,13 @@ def parse_module(
                 pass  # already reported by structural linter
             lint.pop()
 
-        # wire module body — interleave each struct's typedef + REST artifacts
-        # before the struct itself (mirrors TypeDef-before-Struct ordering)
+        # wire module body — emit all TypeDefs first, then all structs
+        # (with REST artifacts attached before each StructRest).
+        # Grouping all annotations at the top keeps generated source readable:
+        # TypedDicts / aliases up front, API classes after.
         module.body.extend(ctx.json_defs.values())
-        for typedef, struct in zip(typedefs, structs):
-            module.body.append(typedef)
+        module.body.extend(typedefs)
+        for struct in structs:
             if isinstance(struct, StructRest):
                 module.body.extend(rest_artifacts_from_struct(struct, module))
             module.body.append(struct)

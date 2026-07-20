@@ -371,7 +371,7 @@ def emit_method_rest(
     method_name = to_snake_case(node.name) if node.name else "fetch"
     ret_type = node.result_alias_name or "None"
     ph_params = placeholder_params(spec)
-    matchers_var = f"_{to_snake_case(struct.name)}_matchers"
+    matchers_var = f"{to_snake_case(struct.name).upper()}_MATCHERS"
 
     i1 = ctx.indent
     i2 = i1 + ctx.indent_char
@@ -456,8 +456,8 @@ def emit_result_alias_def(node: ResultAliasDef) -> list[str]:
 
 
 def emit_matcher_list_def(node: MatcherListDef) -> list[str]:
-    var = f"_{to_snake_case(node.struct_name)}_matchers"
-    lines = [f"{var}: list[ErrMatcher] = ["]
+    var = f"{to_snake_case(node.struct_name).upper()}_MATCHERS"
+    lines = [f"{var}: List[ErrMatcher] = ["]
     for e in node.entries:
         check = render_py_condition_lambda(e.required_keys, e.conditions)
         check_arg = check if check else "None"

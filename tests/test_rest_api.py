@@ -1241,7 +1241,7 @@ class TestSeparateRuntime:
         )
         module = _parse(src)
         code = PY_LXML_CONVERTER.convert(module, http_client="httpx")
-        assert ": list[ErrMatcher] = [" in code
+        assert ": List[ErrMatcher] = [" in code
 
     @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
     def test_parser_wraps_rest_call_in_cast(self, converter_attr):
