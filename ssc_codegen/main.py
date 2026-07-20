@@ -663,6 +663,24 @@ def health(
         raise typer.Exit(code=1)
 
 
+@app.command()
+def version() -> None:
+    """Print the ssc-gen version and exit."""
+    try:
+        from importlib.metadata import (
+            PackageNotFoundError,
+            version as pkg_version,
+        )
+
+        try:
+            ver = pkg_version("ssc_codegen")
+        except PackageNotFoundError:
+            ver = "unknown (not installed)"
+    except ImportError:
+        ver = "unknown"
+    typer.echo(ver)
+
+
 def main() -> None:
     app()
 
