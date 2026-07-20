@@ -664,6 +664,229 @@ def health(
 
 
 @app.command()
+def scout(
+    input_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--input",
+            "-i",
+            help="HTML input file. If omitted, reads from stdin.",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+        ),
+    ] = None,
+    text: Annotated[
+        Optional[str],
+        typer.Option(
+            "--text",
+            help="Regex matched against descendant text content of each tag.",
+        ),
+    ] = None,
+    attr: Annotated[
+        Optional[List[str]],
+        typer.Option(
+            "--attr",
+            help=(
+                "Attribute filter. Forms: 'NAME' (presence), 'NAME=VAL' "
+                "(exact), 'NAME=~REGEX' (regex on value). Repeatable."
+            ),
+        ),
+    ] = None,
+    tag: Annotated[
+        Optional[str],
+        typer.Option(
+            "--tag",
+            help="Filter by tag name (e.g. 'a', 'div').",
+        ),
+    ] = None,
+    css: Annotated[
+        Optional[str],
+        typer.Option(
+            "--css",
+            help="CSS selector used as initial candidate set (intersect with other filters).",
+        ),
+    ] = None,
+    invert: Annotated[
+        bool,
+        typer.Option(
+            "--invert",
+            "-v",
+            help="Invert match (return tags NOT matching filters).",
+        ),
+    ] = False,
+    ignore_case: Annotated[
+        bool,
+        typer.Option(
+            "--ignore-case",
+            "-I",
+            help="Case-insensitive regex matching.",
+        ),
+    ] = False,
+    fixed: Annotated[
+        bool,
+        typer.Option(
+            "--fixed",
+            "-F",
+            help="Treat text/attr patterns as literal strings (escape regex).",
+        ),
+    ] = False,
+    up: Annotated[
+        int,
+        typer.Option("--up", help="Climb N parent levels after match."),
+    ] = 0,
+    down: Annotated[
+        int,
+        typer.Option(
+            "--down", help="Descend N first-child levels after match."
+        ),
+    ] = 0,
+    next_: Annotated[
+        int,
+        typer.Option(
+            "--next",
+            help="Move N siblings forward after up/down/prev steps.",
+        ),
+    ] = 0,
+    prev: Annotated[
+        int,
+        typer.Option(
+            "--prev", help="Move N siblings backward after up/down/next."
+        ),
+    ] = 0,
+    fields: Annotated[
+        Optional[str],
+        typer.Option(
+            "--fields",
+            help=(
+                "Comma-separated fields to extract. Available: "
+                "path, tag, text, html, attrs, classes, index, line, attr.NAME. "
+                "Default: 'path,tag,text'."
+            ),
+        ),
+    ] = None,
+    count: Annotated[
+        bool,
+        typer.Option(
+            "--count",
+            "-c",
+            help="Print only match count.",
+        ),
+    ] = False,
+    limit: Annotated[
+        int,
+        typer.Option("--limit", help="Max results to return (default 50)."),
+    ] = 50,
+    offset: Annotated[
+        int,
+        typer.Option("--offset", help="Skip first N matches (pagination)."),
+    ] = 0,
+    snippet: Annotated[
+        int,
+        typer.Option(
+            "--snippet",
+            help="Truncate text/html fields to N chars (default 200).",
+        ),
+    ] = 200,
+    fmt: Annotated[
+        FmtType,
+        typer.Option(
+            "--format",
+            "-f",
+            help="Output format: 'text' (tabular) or 'json'.",
+        ),
+    ] = FmtType.TEXT,
+) -> None:
+    """Probe raw HTML with regex on text/attributes to discover selectors.
+
+    Auxiliary tool for HTML reconnaissance before writing a .kdl schema.
+    Supports regex on text/attribute values (which CSS selectors cannot
+    express) and relative navigation (parent/child/sibling). Output JSON
+    is designed to feed the sscgen-dsl skill pipeline.
+
+    \b
+    Examples:
+        # discover selectors via regex
+        ssc-gen scout -i page.html --text '\\$\\d+\\.\\d{2}' --fields path -f json
+
+        # find hrefs matching a pattern
+        ssc-gen scout -i page.html --attr 'href=~^/product/\\d+' -f json
+
+        # CSS + text regex intersect, climb to parent container
+        ssc-gen scout -i page.html --css ".price" --up 2 --fields path -f json
+
+        # one-off extraction (no .kdl needed)
+        ssc-gen scout -i page.html --css ".product-card" --fields attr.data-id,text -f json
+
+        # pipe HTML via stdin
+        curl -s https://example.com | ssc-gen scout --attr 'class=~\\bbtn\\b' -f json
+    """
+    import sys
+
+    from ssc_codegen.explore import (
+        DEFAULT_FIELDS,
+        FilterError,
+        NavSpec,
+        compile_filters,
+        run_scout,
+    )
+
+    if input_file is not None:
+        html = input_file.read_text(encoding="utf-8")
+    else:
+        if sys.stdin.isatty():
+            typer.echo(
+                "Reading HTML from stdin (Ctrl+D to end, or use -i <file>)...",
+                err=True,
+            )
+        html = sys.stdin.read()
+
+    if not html.strip():
+        typer.echo("ERROR: empty HTML input", err=True)
+        raise typer.Exit(code=2)
+
+    field_list = (
+        [f.strip() for f in fields.split(",") if f.strip()]
+        if fields
+        else list(DEFAULT_FIELDS)
+    )
+
+    try:
+        filters = compile_filters(
+            text=text,
+            attrs=attr or [],
+            tag=tag,
+            css=css,
+            ignore_case=ignore_case,
+            fixed=fixed,
+        )
+        result = run_scout(
+            html,
+            filters,
+            NavSpec(up=up, down=down, next=next_, prev=prev),
+            field_list,
+            invert=invert,
+            limit=limit,
+            offset=offset,
+            snippet=snippet,
+        )
+    except FilterError as exc:
+        typer.echo(f"ERROR: {exc}", err=True)
+        raise typer.Exit(code=2)
+
+    if count:
+        typer.echo(result.matched)
+    elif fmt == FmtType.JSON:
+        typer.echo(result.to_json())
+    else:
+        typer.echo(result.to_text())
+
+    if result.matched == 0:
+        raise typer.Exit(code=1)
+
+
+@app.command()
 def version() -> None:
     """Print the ssc-gen version and exit."""
     try:

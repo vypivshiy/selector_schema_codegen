@@ -27,6 +27,7 @@ ssc_codegen/
 ├── naming.py              # Pure case-conversion helpers (to_pascal_case/to_snake_case/to_camel_case)
 ├── request_spec.py        # parse_to_http (curl/raw HTTP → RequestHttp AST node), validate_json_body
 ├── health.py              # Selector health check against real HTML
+├── explore.py             # HTML reconnaissance (regex on text/attrs, navigation) — backs `ssc-gen scout`
 ├── ast/                   # AST node definitions
 │   ├── __init__.py        # Re-exports all node types
 │   ├── base.py            # Node abstract base class
@@ -143,6 +144,7 @@ ssc-gen check schema.kdl                                                # lint o
 ssc-gen check schema.kdl -f json                                        # lint only (JSON for automation)
 ssc-gen run schema.kdl:StructName -i page.html -l python -L bs4          # generate + execute + output JSON
 ssc-gen health schema.kdl:StructName -i page.html -l python -L bs4       # check selectors against HTML
+ssc-gen scout -i page.html --text '\$\d+\.\d{2}' -f json                 # HTML recon: regex on text/attrs
 ```
 
 **Flags:**
@@ -186,3 +188,25 @@ Verifies selectors match elements in real HTML without code generation.
 - Remove selectors: warn if 0 matches
 - Fallback downgrades fail → warn
 - Recurses into nested structs (with cycle detection)
+
+---
+
+## Scout (explore.py)
+
+```python
+run_scout(html, filters, nav, fields, *, invert, limit, offset, snippet) → ScoutResult
+```
+
+HTML reconnaissance — regex on text/attribute values (CSS cannot express
+this) plus optional CSS intersect and relative navigation (parent/child/
+sibling). Auxiliary tool for picking selectors before writing `.kdl`,
+or for one-off data extraction. Pure functions, no AST/codegen coupling.
+
+- **Filters** (AND-combine): `--text REGEX`, `--attr NAME[=VAL|=~REGEX]`, `--tag NAME`, `--css SEL`
+- **Modifiers**: `-I` ignore-case, `-F` fixed (escape regex), `-v` invert
+- **Navigation**: `--up/down/next/prev N` (post-filter, pre-output, deduped by `id(tag)`)
+- **Output fields**: `path,tag,text,html,attrs,classes,index,line,attr.NAME` (default `path,tag,text`)
+- **Exit codes**: 0 on match, 1 on no match, 2 on error
+
+Reuses bs4+lxml from health.py. `path` field returns copy-pasteable CSS
+selector for direct use in `.kdl` schemas.
