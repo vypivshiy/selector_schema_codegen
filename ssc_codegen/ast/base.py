@@ -1,6 +1,8 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 
+from kdlquery.parser import Span
+
 from .types import TypeInfo, VariableType
 
 
@@ -16,6 +18,10 @@ class Node:
                          (kept in sync with ret_type_info.is_array by the builder).
     parent             — back-reference, excluded from repr to avoid cycles.
     body               — child nodes (pipeline body, struct body, etc.).
+    span               — optional source location carried from KdlNode.span.
+                         Populated lazily by parsers that need position info
+                         in codegen (Assert, Re). None for nodes that never
+                         use source location.
 
     The scalar ``accept`` / ``ret`` views and the legacy ``type_info`` name are
     exposed as read-only backport properties derived from the TypeInfo fields.
@@ -30,6 +36,7 @@ class Node:
     is_array: bool = False
     parent: Node | None = field(default=None, repr=False)
     body: list[Node] = field(default_factory=list)
+    span: Span | None = field(default=None, repr=False, compare=False)
 
     # ── backport properties (deprecated: prefer the TypeInfo fields) ───────────
     @property

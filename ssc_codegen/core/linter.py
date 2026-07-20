@@ -1049,11 +1049,36 @@ def lint_pipeline_op(node: KdlNode, lint: LintContext) -> None:
     elif name == "re-all":
         if lint.in_predicate and not lint_require_assert_ctx(node, lint):
             return
+        raw_args = node.args
         args = lint_require_args(  # type: ignore[assignment]
             node, lint, exact=1, example='re-all #"(\\d+)"#'
         )
         if args:
-            lint_validate_regex(node, lint, args[0])
+            pattern = args[0]
+            if raw_args and _DEFINE_NAME_RE.match(str(raw_args[0].value)):
+                resolved = lint.resolve_scalar_arg(pattern)
+                if resolved is not None:
+                    pattern = resolved
+            normalized = pattern.lstrip()
+            if (
+                lint_validate_regex(node, lint, normalized)
+                and not lint.in_predicate
+            ):
+                groups = _re.compile(normalized).groups
+                if groups == 0:
+                    lint.error(
+                        node,
+                        message=f"'{name}' pattern must have exactly one capture group",
+                        code="E001",
+                        hint=f'wrap the match in a group: {name} #"({pattern})"#',
+                    )
+                elif groups > 1:
+                    lint.error(
+                        node,
+                        message=f"'{name}' pattern must have exactly one capture group, got {groups}",
+                        code="E001",
+                        hint="use a non-capturing group (?:...) for grouping without capturing",
+                    )
 
     elif name == "re-sub":
         args = lint_require_args(  # type: ignore[assignment]

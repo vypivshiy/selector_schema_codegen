@@ -1017,11 +1017,35 @@ class JsVisitor(BaseWalker):
     # === REGEX ===
 
     def visit_re(self, node: Re, ctx: WalkContext) -> list[str]:
+        location = self._resolve_location(node)
+        src_file = self._resolve_source_file(node)
+        span = node.span
+        src_line = span.start.line if span else 0
+        src_col = span.start.column if span else 0
+        loc_str = f" at {location}" if location else ""
+        msg = (
+            f"{src_file}:{src_line}:{src_col} "
+            f"re-match failed{loc_str} pattern={node.pattern}"
+        )
+        self._builder.require_std(
+            "_stdReSearch",
+            code=(
+                "class SscRegexError extends Error {}\n"
+                "function _stdReSearch(pattern, value, msg = '') {\n"
+                "    const m = value.match(pattern);\n"
+                "    if (m === null) throw new SscRegexError(msg || 'ssc-gen re-match failed');\n"
+                "    return m[1];\n"
+                "}"
+            ),
+        )
         rx = _py_re_to_js_re(node.pattern)
+        msg_literal = _js_literal(msg)
         if not node.is_array:
-            return [f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.match({rx})[1];"]
+            return [
+                f"{ctx.indent}let {ctx.nxt} = _stdReSearch({rx}, {ctx.prv}, {msg_literal});"
+            ]
         return [
-            f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => s.match({rx})[1]);"
+            f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => _stdReSearch({rx}, s, {msg_literal}));"
         ]
 
     def visit_re_all(self, node: ReAll, ctx: WalkContext) -> list[str]:
@@ -1143,7 +1167,7 @@ class JsVisitor(BaseWalker):
         lines.append(f"{ctx.deeper().indent}));")
         return lines
 
-    def _resolve_assert_location(self, node: Assert) -> str:
+    def _resolve_location(self, node) -> str:
         """Walk parent chain for language-agnostic ``{Struct}.{field}``.
 
         Mirrors the Python visitor's resolver: returns ``@pre-validate``
@@ -1170,16 +1194,30 @@ class JsVisitor(BaseWalker):
             return f"{struct_name}.{field_part}" if struct_name else field_part
         return struct_name
 
+    def _resolve_assert_location(self, node: Assert) -> str:
+        """Back-compat shim; delegates to :meth:`_resolve_location`."""
+        return self._resolve_location(node)
+
+    def _resolve_source_file(self, node) -> str:
+        """Walk parent chain to Module; return ``Module.source_file`` basename."""
+        current = node
+        while current is not None:
+            if isinstance(current, Module):
+                return current.source_file
+            current = current.parent
+        return ""
+
     def visit_assert(self, node: Assert, ctx: WalkContext) -> list[str]:
-        location = self._resolve_assert_location(node)
+        location = self._resolve_location(node)
         if node.message:
             msg = node.message
         else:
             loc_str = f" at {location}" if location else ""
-            msg = (
-                f"{node.source_file}:{node.source_line}:{node.source_col} "
-                f"assertion failed{loc_str}"
-            )
+            src_file = self._resolve_source_file(node)
+            span = node.span
+            src_line = span.start.line if span else 0
+            src_col = span.start.column if span else 0
+            msg = f"{src_file}:{src_line}:{src_col} assertion failed{loc_str}"
         self._builder.require_std(
             "_stdAssert",
             code=(

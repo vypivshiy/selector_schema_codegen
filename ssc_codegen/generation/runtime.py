@@ -20,9 +20,18 @@ _BASE_UTILITY_LINES: list[str] = [
     "class SscAssertionError(Exception):",
     "    pass",
     "",
+    "class SscRegexError(Exception):",
+    "    pass",
+    "",
     "def std_assert(cond: bool, msg: str = '') -> None:",
     "    if not cond:",
     "        raise SscAssertionError(msg or 'ssc-gen assertion failed')",
+    "",
+    "def std_re_search(pattern: str, value: str, msg: str = '') -> str:",
+    "    m = re.search(pattern, value)",
+    "    if m is None:",
+    "        raise SscRegexError(msg or 'ssc-gen re-match failed')",
+    "    return m[1]",
     "",
     "def std_repl_map(s: str, rmap: Dict[str, str]) -> str:",
     "    for k, v in rmap.items():",
@@ -152,9 +161,7 @@ def register_runtime_file(
             modules[0],
         )
         return _apply_fallback(
-            runtime_module_content(
-                ref, http_strategy=http_strategy
-            )
+            runtime_module_content(ref, http_strategy=http_strategy)
         )
 
     return _generate_runtime

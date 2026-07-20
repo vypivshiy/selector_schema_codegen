@@ -1,7 +1,7 @@
 """Tests for assert container codegen.
 
 Covers:
-- AST: Assert carries message + source_file + source_line + source_col
+- AST: Assert carries message + span (source location via kdl Span)
 - Parser: optional message arg parsing & lint
 - Python codegen: std_assert() emission, message construction, location
 - JS codegen: _stdAssert() emission
@@ -74,10 +74,12 @@ class TestAssertAst:
             '    Field { css ".x"; assert { len-gt 0 } }\n'
             "}\n"
         )
-        node = _find_assert(_parse(src, source_name="my_schema.kdl"))
-        assert node.source_file == "my_schema.kdl"
-        assert node.source_line > 0
-        assert node.source_col > 0
+        module = _parse(src, source_name="my_schema.kdl")
+        node = _find_assert(module)
+        assert module.source_file == "my_schema.kdl"
+        assert node.span is not None
+        assert node.span.start.line > 0
+        assert node.span.start.column > 0
 
     def test_assert_source_file_is_basename_not_absolute(self):
         src = (
@@ -85,13 +87,11 @@ class TestAssertAst:
             '    Field { css ".x"; assert { len-gt 0 } }\n'
             "}\n"
         )
-        node = _find_assert(
-            _parse(src, source_name="C:/dev/project/deep/my_schema.kdl")
-        )
+        module = _parse(src, source_name="C:/dev/project/deep/my_schema.kdl")
         # Must be basename only — no absolute path leaks into generated code.
-        assert "/" not in node.source_file
-        assert "\\" not in node.source_file
-        assert node.source_file == "my_schema.kdl"
+        assert "/" not in module.source_file
+        assert "\\" not in module.source_file
+        assert module.source_file == "my_schema.kdl"
 
     def test_assert_too_many_args_lints(self):
         src = (
@@ -204,6 +204,7 @@ class TestRuntimeExports:
         mod = Module()
         names = runtime_export_names(mod)
         assert "SscAssertionError" in names
+        assert "SscRegexError" in names
 
     def test_runtime_module_content_has_ssc_assertion_error(self):
         from ssc_codegen.ast import Module
@@ -211,7 +212,9 @@ class TestRuntimeExports:
 
         content = runtime_module_content(Module())
         assert "class SscAssertionError(Exception)" in content
+        assert "class SscRegexError(Exception)" in content
         assert "def std_assert(" in content
+        assert "def std_re_search(" in content
 
     def test_runtime_file_py_exec_valid(self):
         """Runtime module file must be syntactically valid + importable."""
@@ -224,11 +227,17 @@ class TestRuntimeExports:
         ns: dict = {}
         exec(compile(content, "<runtime>", "exec"), ns)
         assert issubclass(ns["SscAssertionError"], Exception)
+        assert issubclass(ns["SscRegexError"], Exception)
         # Smoke: std_assert(False) raises SscAssertionError.
         with pytest.raises(ns["SscAssertionError"]):
             ns["std_assert"](False, "test")
         # Smoke: std_assert(True) is a no-op.
         ns["std_assert"](True, "should not raise")
+        # Smoke: std_re_search with no match raises SscRegexError.
+        with pytest.raises(ns["SscRegexError"]):
+            ns["std_re_search"](r"(x)", "abc", "no match")
+        # Smoke: std_re_search with match returns capture group.
+        assert ns["std_re_search"](r"(\d+)", "abc123", "") == "123"
 
 
 # ---------------------------------------------------------------------------

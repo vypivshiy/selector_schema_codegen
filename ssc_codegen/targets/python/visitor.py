@@ -80,6 +80,7 @@ from ssc_codegen.ast import (
     Nested,
     Self,
     Return,
+    Node,
     Fallback,
     Filter,
     Assert,
@@ -157,6 +158,7 @@ class PythonVisitor(BaseWalker):
         "std_repl_map",
         "std_unescape_text",
         "std_assert",
+        "std_re_search",
     }
 
     # --- type resolution spelling ---
@@ -319,9 +321,7 @@ class PythonVisitor(BaseWalker):
                     inlined_imports.extend(imps)
             lines: list[str] = []
             if imported:
-                lines.append(
-                    f"from .{runtime} import " + ", ".join(imported)
-                )
+                lines.append(f"from .{runtime} import " + ", ".join(imported))
                 lines.append("")
             if inlined_defs:
                 lines.extend(inlined_imports)
@@ -1036,9 +1036,37 @@ class PythonVisitor(BaseWalker):
     # === REGEX ===
 
     def visit_re(self, node: Re, ctx: WalkContext) -> list[str]:
+        location = self._resolve_location(node)
+        src_file = self._resolve_source_file(node)
+        span = node.span
+        src_line = span.start.line if span else 0
+        src_col = span.start.column if span else 0
+        loc_str = f" at {location}" if location else ""
+        msg = (
+            f"{src_file}:{src_line}:{src_col} "
+            f"re-match failed{loc_str} pattern={node.pattern}"
+        )
+        self._builder.require_std(
+            "std_re_search",
+            code="""
+                class SscRegexError(Exception):
+                    pass
+
+                def std_re_search(pattern, value, msg=''):
+                    m = re.search(pattern, value)
+                    if m is None:
+                        raise SscRegexError(msg or 'ssc-gen re-match failed')
+                    return m[1]
+            """,
+        )
         pattern = repr(node.pattern)
-        # Intentional behavior: if the regex doesn't match, the code crashes immediately.
-        return [f"{ctx.indent}{ctx.nxt} = re.search({pattern}, {ctx.prv})[1]  # type: ignore[index]"]
+        if node.is_array:
+            return [
+                f"{ctx.indent}{ctx.nxt} = [std_re_search({pattern}, i, {msg!r}) for i in {ctx.prv}]"
+            ]
+        return [
+            f"{ctx.indent}{ctx.nxt} = std_re_search({pattern}, {ctx.prv}, {msg!r})"
+        ]
 
     def visit_re_all(self, node: ReAll, ctx: WalkContext) -> list[str]:
         pattern = repr(node.pattern)
@@ -1057,7 +1085,9 @@ class PythonVisitor(BaseWalker):
 
     def visit_index(self, node: Index, ctx: WalkContext) -> list[str]:
         # Intentional behavior: if the index doesn't match, the code crashes immediately.
-        return [f"{ctx.indent}{ctx.nxt} = {ctx.prv}[{node.i}]  # type: ignore[index]"]
+        return [
+            f"{ctx.indent}{ctx.nxt} = {ctx.prv}[{node.i}]  # type: ignore[index]"
+        ]
 
     def visit_slice(self, node: Slice, ctx: WalkContext) -> list[str]:
         return [f"{ctx.indent}{ctx.nxt} = {ctx.prv}[{node.start}:{node.end}]"]
@@ -1140,11 +1170,11 @@ class PythonVisitor(BaseWalker):
         lines.append(f"{ctx.indent}]")
         return lines
 
-    def _resolve_assert_location(self, node: Assert) -> str:
+    def _resolve_location(self, node: Node) -> str:
         """Walk parent chain to find ``{StructName}.{field_or_marker}``.
 
-        Returns a language-agnostic location string used in the default
-        assertion message. Reads raw KDL names (snake_case for fields,
+        Returns a language-agnostic location string used in default error
+        messages (Assert / Re). Reads raw KDL names (snake_case for fields,
         pascal-case for struct class). For ``@pre-validate`` ancestors the
         marker ``@pre-validate`` is used verbatim — matches the DSL syntax
         and is stable across target languages.
@@ -1171,16 +1201,30 @@ class PythonVisitor(BaseWalker):
             return f"{struct_name}.{field_part}" if struct_name else field_part
         return struct_name
 
+    def _resolve_source_file(self, node: Node) -> str:
+        """Walk parent chain to Module; return ``Module.source_file`` basename."""
+        current: Node | None = node
+        while current is not None:
+            if isinstance(current, Module):
+                return current.source_file
+            current = current.parent
+        return ""
+
+    def _resolve_assert_location(self, node: Assert) -> str:
+        """Back-compat shim; delegates to :meth:`_resolve_location`."""
+        return self._resolve_location(node)
+
     def visit_assert(self, node: Assert, ctx: WalkContext) -> list[str]:
-        location = self._resolve_assert_location(node)
+        location = self._resolve_location(node)
         if node.message:
             msg = node.message
         else:
             loc_str = f" at {location}" if location else ""
-            msg = (
-                f"{node.source_file}:{node.source_line}:{node.source_col} "
-                f"assertion failed{loc_str}"
-            )
+            src_file = self._resolve_source_file(node)
+            span = node.span
+            src_line = span.start.line if span else 0
+            src_col = span.start.column if span else 0
+            msg = f"{src_file}:{src_line}:{src_col} assertion failed{loc_str}"
         self._builder.require_std(
             "std_assert",
             code="""

@@ -150,8 +150,10 @@ Pattern-match rules:
 ### Regex
 
 - re <pattern>: STRING -> STRING (requires exactly one capturing group)
-- re-all <pattern>: STRING -> LIST_STRING
+- re-all <pattern>: STRING -> LIST_STRING (requires exactly one capturing group)
 - re-sub <pattern> <repl>: STRING -> STRING
+
+Note: `re` emits a runtime helper (`std_re_search` in Python, `_stdReSearch` in JS) raising `SscRegexError` on no-match, with a default message of `<file.kdl>:<line>:<col> re-match failed at <Struct>.<field> pattern=<pattern>`. Consumer code can catch via `except SscRegexError` (Python) or `try { ... } catch (e) { if (e instanceof SscRegexError) ... }` (JS). Caught by `fallback` when present.
 
 ### Array
 

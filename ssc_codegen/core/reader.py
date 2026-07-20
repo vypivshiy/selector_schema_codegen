@@ -65,6 +65,7 @@ def parse_module(
 
         # pass 5 — build module
         module = Module()
+        module.source_file = source_path.name if source_path else ""
         structs: list = []
         typedefs: list = []
 

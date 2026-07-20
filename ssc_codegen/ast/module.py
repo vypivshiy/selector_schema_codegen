@@ -20,9 +20,14 @@ class Module(Node):
     Import statements are no longer AST body nodes — the converter emits
     them directly from the ``visit_module`` handler based on module shape
     (REST present, REST-only, separate runtime) and build options.
+
+    ``source_file`` is the basename of the originating .kdl file; populated
+    by the parser from ParseContext.source_path. Used by codegen to format
+    source-location messages for Assert/Re/etc.
     """
 
     doc: str = ""
+    source_file: str = ""
 
     def __post_init__(self):
         self.body.extend(

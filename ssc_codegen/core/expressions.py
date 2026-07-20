@@ -903,6 +903,7 @@ def _expr_re(
         accept_type_info=prev.ret_type_info,
         ret_type_info=prev.ret_type_info,
         is_array=prev.is_array,
+        span=node.span,
     )
 
 
@@ -1154,18 +1155,14 @@ def _expr_assert(
             )
         message = arg_val
 
-    # Source location (language-agnostic, used in default error message).
-    source_file = ctx.source_path.name if ctx.source_path else ""
-    source_line = node.span.start.line if node.span else 0
-    source_col = node.span.start.column if node.span else 0
+    # Source location is carried in the inherited span field; filename is
+    # resolved at codegen time via Module.source_file parent-walk.
 
     if isinstance(parent, PreValidate) and not parent.body:
         return Assert(
             parent=parent,
             message=message,
-            source_file=source_file,
-            source_line=source_line,
-            source_col=source_col,
+            span=node.span,
             accept_type_info=TypeInfo(base=VariableType.DOCUMENT),
             ret_type_info=TypeInfo(base=VariableType.NULL),
         )
@@ -1173,9 +1170,7 @@ def _expr_assert(
         return Assert(
             parent=parent,
             message=message,
-            source_file=source_file,
-            source_line=source_line,
-            source_col=source_col,
+            span=node.span,
             accept_type_info=TypeInfo(base=VariableType.DOCUMENT),
             ret_type_info=TypeInfo(base=VariableType.DOCUMENT),
         )
@@ -1183,9 +1178,7 @@ def _expr_assert(
     return Assert(
         parent=parent,
         message=message,
-        source_file=source_file,
-        source_line=source_line,
-        source_col=source_col,
+        span=node.span,
         accept_type_info=prev_ti,
         ret_type_info=prev_ti,
     )

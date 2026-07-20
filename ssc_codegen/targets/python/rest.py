@@ -220,11 +220,13 @@ _RUNTIME_REST_EXPORT_NAMES: list[str] = [
 ]
 
 # Always exported regardless of module type so consumer code can
-# ``except SscAssertionError`` unconditionally — even if the current
-# module has no ``assert {}`` blocks. Matches the always-export strategy
-# for runtime helpers (catch stability over minimal-imports).
+# ``except SscAssertionError`` / ``except SscRegexError`` unconditionally —
+# even if the current module has no ``assert {}`` / ``re`` blocks.
+# Matches the always-export strategy for runtime helpers (catch stability
+# over minimal-imports).
 _RUNTIME_ALWAYS_EXPORT_NAMES: list[str] = [
     "SscAssertionError",
+    "SscRegexError",
 ]
 
 

@@ -234,8 +234,7 @@ class TestRestPyConverter:
         code = CONVERTER.convert(module, http_client="httpx")
         # Headers extraction centralized in ssc_rest_call
         assert (
-            "headers = {k.lower(): v for k, v in resp.headers.items()}"
-            in code
+            "headers = {k.lower(): v for k, v in resp.headers.items()}" in code
         )
 
     def test_py_bs4_unknown_status_returns_unknown_err(self):
@@ -1194,9 +1193,7 @@ class TestSeparateRuntime:
         # Typed signature: ssc_rest_call
         assert "def ssc_rest_call(" in runtime
         assert "client: httpx.Client" in runtime
-        assert (
-            "value_fn: Optional[Callable[[Any], _T]] = None" in runtime
-        )
+        assert "value_fn: Optional[Callable[[Any], _T]] = None" in runtime
         assert "**kw: Any" in runtime
         # Return type is Union[Ok[_T], Err] — stable monad annotation.
         # The exact Err subclass is determined by runtime dispatch over

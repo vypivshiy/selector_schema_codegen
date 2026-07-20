@@ -8,6 +8,8 @@ Import everything from here:
 
 from .types import VariableType, StructType, TypeInfo, VT
 
+from kdlquery.parser import Span
+
 from .base import Node
 
 from .module import (
@@ -135,6 +137,8 @@ __all__ = [
     "StructType",
     "TypeInfo",
     "VT",
+    # source location
+    "Span",
     # base
     "Node",
     # module
