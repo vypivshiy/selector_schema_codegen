@@ -61,6 +61,45 @@ Inputs: existing `.kdl` + new requirements or HTML changes
 
 ## Generation Workflow
 
+### Step 0 — Recon & Extract via scout (recommended)
+
+Probe HTML with `ssc-gen scout` before writing KDL. Especially useful when
+patterns involve regex (prices, dates, IDs) or when you need to extract
+ad-hoc data without committing to a full schema.
+
+**Recon mode — discover selectors:**
+
+```bash
+ssc-gen scout -i page.html --text '\$\d+\.\d{2}' --fields path -f json
+ssc-gen scout -i page.html --attr 'href=~^/product/\d+' --fields path -f json
+ssc-gen scout -i page.html --css ".price" --up 2 --fields path -f json
+```
+
+Output JSON gives computed CSS paths — reuse them directly in `.kdl` selectors.
+
+**Extract mode — pull data without writing .kdl:**
+
+```bash
+ssc-gen scout -i page.html --css ".product-card" \
+    --fields attr.data-id,text -f json
+ssc-gen scout -i page.html --css "a[href]" --fields attr.href,text -f json
+```
+
+Useful for one-off extraction, content audit, or feeding sample data back
+into LLM context for schema design.
+
+**Navigation — find anchor → climb to container:**
+
+```bash
+ssc-gen scout -i page.html --css ".price" --up 2 --fields path,attr.data-id -f json
+ssc-gen scout -i page.html --css ".thumb" --up 1 --fields attr.href -f json
+```
+
+Filters (AND-combine): `--text REGEX`, `--attr NAME[=VAL|=~REGEX]`, `--tag NAME`, `--css SEL`.
+Modifiers: `-I` ignore-case, `-F` fixed strings, `-v` invert.
+Pagination: `--limit N` (default 50), `--offset N`, `--snippet LEN` (default 200).
+Exit codes: 0 on match, 1 on no match, 2 on error.
+
 ### Step 1 — Analyse the HTML
 
 Before writing any KDL:
