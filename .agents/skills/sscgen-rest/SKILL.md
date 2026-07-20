@@ -1,5 +1,6 @@
 ---
 name: sscgen-rest
+version: "2.1"
 description: >
   Generate KDL Schema DSL configs for REST/JSON HTTP APIs ((rest)struct).
   Use this skill whenever the user wants to: design a `.kdl` schema for an HTTP/JSON
@@ -185,12 +186,20 @@ typed placeholders in `references/10-request.md`.
 Method naming: `name=get-post` → `get_post()` (Py) / `getPost()` (JS).
 Single unnamed `@request` → `fetch()`.
 
-`@request` properties: `name=`, `response=`, `doc=`, `response-path=`, `response-join=`.
+`@request` properties:
+
+| Property | Required | Purpose |
+|----------|----------|---------|
+| `name=<kebab-id>` | required when multiple `@request` blocks exist; otherwise optional | Method name. `name=get-post` → `get_post()` (Py) / `getPost()` (JS). Single unnamed `@request` → `fetch()`. |
+| `response=<Schema>` | optional | JSON schema for 2xx response body. Omit → method returns void. |
+| `doc="<text>"` | optional | Per-method docstring shown in generated code. Brief semantic description, not signature duplication. |
+| `response-path="<dotted>"` | optional | Dot-path into JSON body to extract response (e.g. `"data.items"`). |
+| `response-join="<sep>"` | optional | When `response-path` resolves to `list[str]`, join with this separator. |
 
 ### Step 4 — Lint until clean
 
 ```bash
-uv run ssc-gen check schema.kdl -f json
+ssc-gen check schema.kdl -f json
 ```
 
 Loop until exit 0. Cap 5 iterations on same line; then explain conflict.
@@ -198,10 +207,18 @@ Loop until exit 0. Cap 5 iterations on same line; then explain conflict.
 ### Step 5 — Generate code (optional)
 
 ```bash
-uv run ssc-gen generate schema.kdl -t py-bs4 --http-client httpx    -o out/  # sync + async
-uv run ssc-gen generate schema.kdl -t js-pure --http-client fetch    -o out/
-uv run ssc-gen generate schema.kdl -t js-pure --http-client axios    -o out/
+# Python — sync + async (httpx default)
+ssc-gen generate schema.kdl -l python -L bs4 --http-client httpx -o out/
+ssc-gen generate schema.kdl -l python -L lxml --http-client requests -o out/   # sync only
+ssc-gen generate schema.kdl -l python -L lxml --http-client aiohttp -o out/    # async only
+
+# JavaScript
+ssc-gen generate schema.kdl -l js --http-client fetch -o out/
+ssc-gen generate schema.kdl -l js --http-client axios -o out/
 ```
+
+> Python libs (`-L`): `bs4` (default) | `lxml` | `parsel` | `slax`
+> HTTP clients: Python — `httpx` (default, sync+async) | `aiohttp` (async only) | `requests` (sync only); JS — `fetch` (default) | `axios`
 
 Without `--http-client`, `@request` is silently ignored.
 
@@ -231,6 +248,13 @@ spot-check field names and types against it.
 - **HTML scraping** (css/text/attr, `(item)/(list)/(table)/(flat)/(dict)struct`) → `sscgen-dsl`
 - **Fetch page + parse HTML** → also `sscgen-dsl`
 - **Binary / non-JSON HTTP API** → `(rest)struct` requires `json` response schema; ask user
+
+---
+
+## See also
+
+- **`sscgen-dsl`** — for HTML scraping (`(item)/(list)/(table)/(flat)/(dict)struct`, css/text/attr pipelines).
+- **`sscgen-openapi`** — when an OpenAPI/Swagger spec is available; deterministic spec → `.kdl` conversion.
 
 ---
 

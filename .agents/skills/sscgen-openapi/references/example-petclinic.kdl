@@ -10,7 +10,7 @@ Demonstrates:
   - Error handling with @error
   - Shared response schemas across endpoints
 
-Lint-clean: uv run ssc-gen check example-petclinic.kdl
+Lint-clean: ssc-gen check example-petclinic.kdl
 """
 
 // ── JSON schemas (leaves first) ──────────────────────────────────────────────

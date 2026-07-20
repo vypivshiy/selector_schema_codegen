@@ -9,7 +9,7 @@ Demonstrates:
   - POST with JSON body + typed body placeholders.
   - Error mapping with @error 404.
 
-Lint-clean: `uv run ssc-gen check example-dummyjson.kdl`
+Lint-clean: `ssc-gen check example-dummyjson.kdl`
 """
 
 // ── JSON schemas ──────────────────────────────────────────────────────────────

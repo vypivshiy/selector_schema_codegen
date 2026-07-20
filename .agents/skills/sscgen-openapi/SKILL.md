@@ -1,5 +1,6 @@
 ---
 name: sscgen-openapi
+version: "2.1"
 description: >
   Convert OpenAPI 3.x / Swagger 2.x specifications (YAML or JSON) into valid
   KDL Schema DSL files (`(rest)struct` + `json` schemas).
@@ -34,7 +35,7 @@ same OpenAPI spec, the output should be identical every time.
 5. **Group endpoints** sharing the same `servers` URL into one `(rest)struct`.
 6. **Strict spec compliance**: if a schema has no `required` array, ALL fields
    are optional (`Type?`). No heuristics.
-7. **Lint must pass** (`uv run ssc-gen check <file> -f json`) before delivery.
+7. **Lint must pass** (`ssc-gen check <file> -f json`) before delivery.
 8. **Every `json` schema must be declared above** the `struct` that references it.
 
 ---
@@ -91,6 +92,45 @@ Modifiers:
 
 Order: leaves first (no sub-references), then composites, then envelopes.
 
+#### Deduplicating with `define`
+
+When many `json` schemas share the same set of base fields (common in
+OpenAPI specs that expose `Pet`, `PetSummary`, `PetDetail`, etc.), extract the
+shared fields into a **block define** and reference it as a bare name:
+
+```kdl
+define PET-CORE {
+    id int
+    name str
+    species str
+    breed str?
+    vaccinated bool
+}
+
+json PetSummary {
+    PET-CORE
+    photo_url str?
+}
+
+json PetDetail {
+    PET-CORE
+    photo_url str?
+    owner Owner?
+    vet_records (array)VetRecord
+}
+```
+
+Rules:
+- A bare child node (no args) whose name matches a block define → expanded inline.
+- Normal fields always have a type arg (`name str`), so there is no ambiguity.
+- Expansion is recursive: a define can reference another define.
+
+**When to use**: ≥3 schemas share ≥4 identical fields. Do NOT use for 1–2 shared
+fields or 2 schemas — the define overhead is not justified.
+
+**Max define body size**: 30 fields. Larger defines become hard to scan; split
+into multiple focused defines (e.g. `TIMESTAMPS-CORE`, `OWNERSHIP-CORE`).
+
 ### Step 3 — Generate `@request` blocks
 
 For each path + method:
@@ -138,7 +178,7 @@ Method names: `name=<verb>-<resource>` (e.g. `list-pets`, `get-pet`, `create-pet
 
 ### Step 4 — Map error responses
 
-For each non-2xx response with a schema:
+For each non-2xx response with a schema, emit a basic `@error` mapping:
 ```kdl
 @error 404 ErrorSchema
 ```
@@ -146,10 +186,43 @@ For each non-2xx response with a schema:
 Non-2xx without schema → omit (universal `UnknownErr` handles it).
 Multiple endpoints sharing the same error status + schema → one `@error` entry.
 
+#### Full `@error` syntax
+
+`@error <status> <Schema> [key1 key2 ...] [key1="val1" key2="val2" ...]`
+
+| Position | Arg | Purpose |
+|----------|-----|---------|
+| 1 | `<status>` | HTTP status code [100..599] |
+| 2 | `<SchemaName>` | JSON schema for deserialized error body |
+| 3+ | positional keys | Key-presence checks — triggers when ALL listed keys present in body |
+| any | `key="value"` | Value-equality conditions — dot-path key, exact value match |
+
+All conditions AND together. A key must not appear in both positional args and properties (lint error).
+
+#### Value-conditions for 2xx disambiguation
+
+Some APIs return HTTP 200 for both success AND error responses. Use value-conditions
+to distinguish:
+
+```kdl
+@error 200 ActionResponse success=#false         // 200 + success=false → error
+@error 200 ApiError error detail="specific_msg"   // 200 + error+detail keys + matching detail value
+```
+
+#### OpenAPI mapping cheatsheet
+
+| OpenAPI pattern | KDL `@error` |
+|----------------|--------------|
+| `404` with `ErrorBody` schema | `@error 404 ErrorBody` |
+| `422` with validation error listing missing fields | `@error 422 ValidationError errors` (positional key check) |
+| `200` success envelope where `success: false` means error | `@error 200 ErrorResponse success=#false` |
+| Same status, multiple error shapes | Combine positional + property conditions |
+| Status without schema | Omit — `UnknownErr` handles it |
+
 ### Step 5 — Lint until clean
 
 ```bash
-uv run ssc-gen check <file> -f json
+ssc-gen check <file> -f json
 ```
 
 Loop until exit 0. Cap at 5 iterations per line. Never deliver with lint errors.
@@ -193,7 +266,7 @@ Handle both. The conversion logic is the same after $ref resolution.
 
 ```
 1. Write the .kdl file
-2. Run: uv run ssc-gen check <file> -f json
+2. Run: ssc-gen check <file> -f json
 3. If empty / exit 0 → DONE
 4. Parse JSON, filter level=error, sort by line, fix top-to-bottom
 5. Goto 2. Cap at 5 iterations on the same line.
@@ -230,6 +303,13 @@ If fixing errors, emit the **full corrected file**, not just changed lines.
 - User describes an API in prose (no formal spec) → use `sscgen-rest`.
 - User wants to scrape HTML → use `sscgen-dsl`.
 - User has Postman collection, GraphQL schema, gRPC proto → not supported.
+
+---
+
+## See also
+
+- **`sscgen-rest`** — for ad-hoc REST schema design from prose descriptions or by inspecting real API responses. Same DSL target (`(rest)struct` + `json`), different input format.
+- **`sscgen-dsl`** — for HTML scraping (`(item)/(list)/(table)/(flat)/(dict)struct`, css/text/attr pipelines).
 
 ---
 

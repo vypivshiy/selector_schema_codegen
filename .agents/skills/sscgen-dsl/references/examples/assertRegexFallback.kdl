@@ -1,0 +1,65 @@
+@doc """
+Demonstration of assert + re + fallback interaction.
+
+Shows:
+- assert {} basic form
+- assert "msg" {} custom message form
+- re no-match caught by fallback (SscRegexError suppressed)
+- re-all with exactly 1 capture group (single-group extraction)
+- pre-validate pattern: assert before any selector runs
+"""
+
+define RE-YEAR=#"(\d{4})"#
+define RE-VIEWS=#"(\d+(?:,\d{3})*)"#
+
+
+struct ProductPage {
+    // Pre-validate: assert that the document has the expected root
+    // before any field pipeline runs. Raises SscAssertionError if missing.
+    @pre-validate {
+        assert "page must contain .product-root" { css ".product-root" }
+    }
+
+    title {
+        css ".title"
+        text
+        trim
+        assert { len-gt 0 }            // basic assert — default message
+        fallback "(unknown title)"     // SscAssertionError suppressed
+    }
+
+    year {
+        css ".meta"
+        text
+        re RE-YEAR                     // use shared regex define
+        to-int
+        fallback 0                     // SscRegexError suppressed if no year in text
+    }
+
+    views {
+        css ".stats"
+        text
+        re RE-VIEWS                    // matches "1,234,567"
+        re-sub #","# ""               // strip thousands separators
+        to-int
+        fallback 0
+    }
+
+    // Demonstrates re-all pipeline op (single capture group required).
+    // Extracts every 4-digit year mentioned in the description text.
+    mentioned-years {
+        css ".description"
+        text
+        re-all #"(\d{4})"#             // 1 capture group — required by linter
+    }
+
+    // Demonstrates assert with custom message inside field pipeline.
+    price {
+        css ".price"
+        text
+        assert "price must contain currency symbol" { contains "$" }
+        re #"(\d+\.\d{2})"#
+        to-float
+        fallback 0.0
+    }
+}

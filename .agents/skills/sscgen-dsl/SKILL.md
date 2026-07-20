@@ -1,5 +1,6 @@
 ---
 name: sscgen-dsl
+version: "2.1"
 description: >
   Generate KDL Schema DSL (v2.1) scraper configs for **HTML scraping** from HTML
   pages and skill instructions. Covers struct types (item) / (list) / (flat) / (table) /
@@ -34,7 +35,7 @@ Generate valid **KDL Schema DSL v2.1** configs for HTML scraping from:
 
 - **CSS selectors only** — never use `xpath`, `xpath-all`, `xpath-remove`
 - **No removal operations** — never use `css-remove`, `xpath-remove`. Also `css-remove`/`xpath-remove` do not support the block pattern-match form
-- **No advanced operations** — never use `transform`, `dsl`, `json`/`jsonify`, `re-all` unless the user explicitly requests them
+- **No advanced operations** — never use `transform`, `dsl`, `json`/`jsonify` unless the user explicitly requests them
 - **No `(rest)struct`** — that's `sscgen-rest` territory. If the user describes an HTTP/JSON API (endpoints, response schemas, error codes), switch skills.
 - **CSS3+ selectors preferred** — use the full set supported by the parser (see CSS Selector Tips below); prefer attribute selectors, pseudo-classes and combinators over writing extra pipeline logic
 - Prefer simple, readable pipelines
@@ -281,9 +282,38 @@ All string ops support **map semantics**: STRING -> STRING and LIST_STRING -> LI
 `fmt DEFINE-NAME` . `re-sub #"pat"# "repl"` . `repl "from" "to"` . `repl { "from1" "to1"; "from2" "to2" }` . `split "delim"` . `join "delim"` . `unescape`
 
 ### Regex
-`re #"(group)"#` -> STR->STR (first capture group)
-`re-all #"pat"#` -> STR->LIST_STR
-`re-sub #"pat"# "repl"` -> STR->STR
+
+| Op | Signature | Notes |
+|----|-----------|-------|
+| `re #"(group)"#` | STRING → STRING | First capture group; **requires exactly 1 capturing group** |
+| `re #"(group)"#` | LIST_STRING → LIST_STRING | Map semantics — per element |
+| `re-all #"(group)"#` | STRING → LIST_STRING | All matches; **requires exactly 1 capturing group** |
+| `re-sub #"pat"# "repl"` | STRING → STRING | Replace all matches; no group requirement |
+| `re-sub #"pat"# "r"` | LIST_STRING → LIST_STRING | Map semantics |
+
+**Capture group requirement**: `re` and `re-all` require exactly one `(...)` capturing group. Non-capturing `(?:...)` is allowed for grouping. The linter rejects patterns with 0 or 2+ groups.
+
+**No-match behaviour**: `re` raises `SscRegexError` if the pattern doesn't match. The default message is language-agnostic and includes source location for debugging:
+```
+<file.kdl>:<line>:<col> re-match failed at <Struct>.<field> pattern=<pat>
+```
+
+Caught by `fallback` — common pattern for "regex may not match":
+```kdl
+struct Page type=item {
+    year {
+        css ".title"
+        text
+        re #"\((\d{4})\)"#   // extract 4-digit year from "(2024)"
+        fallback ""          // SscRegexError suppressed if no year in title
+    }
+}
+```
+
+> **Predicate vs pipeline op**: `re #"pat"#` and `re-all #"pat"#` have dual meaning.
+> Inside `assert {}`/`filter {}`/`match {}` they are **predicates** returning `bool`.
+> At the top level of a field pipeline they are **ops** transforming values.
+> See `references/predicate-vs-op.md` for full disambiguation.
 
 ### Type conversions
 `to-int` . `to-float` . `to-bool`
@@ -296,9 +326,58 @@ All string ops support **map semantics**: STRING -> STRING and LIST_STRING -> LI
 ### Control
 `fallback <val>` — `#null` / `#true` / `#false` / `0` / `"str"` / `{}` (empty list)
 `filter { <predicate> }` — filter LIST in place
-`assert { <predicate> }` — raise if false
+`assert { <predicate> }` — validate without changing value; raises `SscAssertionError` on failure (caught by `fallback` if present)
+`assert "message" { <predicate> }` — assert with custom error message; default message is `<file.kdl>:<line>:<col> assertion failed at <Struct>.<field>` (or `<Struct>.@pre-validate` inside `@pre-validate`)
 `nested StructName` — call another struct (DOCUMENT -> NESTED, terminal)
 `jsonify SchemaName [path="dotted.path"]` — deserialize JSON string (STRING -> JSON, terminal)
+
+> **assert implementation**: emitted as `std_assert(cond, msg)` helper in Python, `_stdAssert(cond, msg)` in JS. Raises `SscAssertionError` — **not** the Python `assert` keyword, so it survives `python -O`. Caught by `fallback` when present. Multiple `assert` blocks can appear anywhere in a pipeline.
+
+**Example: assert + fallback for robustness:**
+```kdl
+struct Product {
+    price {
+        css ".price"
+        text
+        assert { contains "$" }       // verify currency symbol present
+        re #"(\d+\.\d+)"#
+        to-float
+        fallback 0.0                  // SscAssertionError or SscRegexError suppressed
+    }
+}
+```
+
+---
+
+## @init — precompute shared values
+
+`@init` caches values once per struct that can be referenced by multiple fields
+via `@<name>` (preferred) or `self.<name>` (deprecated). Useful when several
+fields need the same expensive selector or raw HTML.
+
+```kdl
+struct Page {
+    @init {
+        // precompute raw HTML of the main content
+        content-html { css ".main"; raw }
+    }
+
+    // multiple fields reference the same @init value
+    word-count {
+        @content-html
+        re #"<p>(.*?)</p>"#        // first paragraph
+    }
+
+    full-text {
+        @content-html
+        re-sub #"<[^>]+>"# " "     // strip tags
+        normalize-space
+    }
+}
+```
+
+`@init` fields are computed once and cached. Each `@<name>` reference reuses
+the cached value — no selector re-evaluation.
 
 ---
 
@@ -411,11 +490,12 @@ ssc-gen check -f json schemas/
 ### Validation CLI (test against real HTML)
 
 ```bash
-# test schema against HTML file
-ssc-gen run schema.kdl:StructName -t py-bs4 -i page.html
+# test schema against HTML file (Python targets)
+ssc-gen run schema.kdl:StructName -l python -L bs4 -i page.html
+ssc-gen run schema.kdl:StructName -l python -L lxml -i page.html
 
 # test from stdin (pipe HTML)
-curl https://example.com | ssc-gen run schema.kdl:StructName -t py-bs4
+curl https://example.com | ssc-gen run schema.kdl:StructName -l python -L bs4
 
 # health check — verify selectors match elements
 ssc-gen health schema.kdl:StructName -i page.html
@@ -423,6 +503,9 @@ ssc-gen health schema.kdl:StructName -i page.html
 # health check from stdin
 curl https://example.com | ssc-gen health schema.kdl:StructName
 ```
+
+> Languages: `-l python` (default) | `-l js`
+> Python libs (`-L`): `bs4` (default) | `lxml` | `parsel` | `slax`
 
 ### Loop algorithm
 
@@ -441,7 +524,7 @@ If after 5 iterations errors persist in the same location, explain the issue to 
 
 After linting passes, if an HTML file is available:
 ```
-6. Run: ssc-gen run schema.kdl:StructName -t py-bs4 -i page.html
+6. Run: ssc-gen run schema.kdl:StructName -l python -L bs4 -i page.html
 7. Inspect output — verify fields are extracted correctly
 8. If selectors miss elements: ssc-gen health schema.kdl:StructName -i page.html
 ```
@@ -466,24 +549,7 @@ Warning at line 8: unused define 'BASE-URL'
 ```
 -> Filter `"level": "error"`, sort by line ascending, fix top-to-bottom (avoids line-number drift).
 
----
-
-### Common linter errors and fixes
-
-| Error message | Cause | Fix |
-|---------------|-------|-----|
-| `type mismatch: expected STRING, got LIST_STRING` | `css-all` feeds into op that needs single value | Switch to `css "selector:nth-of-type(N)"`, or use `first` / `last` after selector |
-| `type mismatch: expected DOCUMENT, got STRING` | Selector used after `text`/`attr` | Reorder — selector must come before extract ops |
-| `type mismatch: expected STRING, got INT` | e.g. `re` after `to-int` | Apply `re` before `to-int` |
-| `unknown operation '...'` | Unknown op name or typo | Check spelling against operations list |
-| `missing @split-doc` | `(list)struct` or `(dict)struct` without split (`(flat)struct` does NOT need it) | Add `@split-doc { css-all "..." }` |
-| `missing match{}` | `(table)struct` field has no predicate | Add `match { eq "key" }` as first statement in field |
-| `fallback value type mismatch` | `to-int` then `fallback "x"` | Use typed fallback: INT->`0`, FLOAT->`0.0`, BOOL->`#false`, any->`#null` |
-| `define not found: NAME` | Typo or define declared after use | Check spelling; move define above the struct |
-| `filter requires list type` | `filter` used on scalar | Use `assert` instead, or ensure pipeline produces LIST_* |
-| `match must be first operation` | `match {}` not at start of table field | Move `match { ... }` to first position |
-| `'re' must have exactly 1 capture group` | Regex has 0 or 2+ groups | Ensure pattern has exactly one `(...)` group |
-| `'fmt' template missing '{{}}' placeholder` | fmt value lacks `{{}}` | Add `{{}}` where the value should be inserted |
+> Full error-to-fix table: see `references/linter-errors.md`.
 
 ---
 
@@ -544,10 +610,28 @@ If fixing linter errors: emit the **full corrected file**, not just changed line
 
 ---
 
+## See also
+
+- **`sscgen-rest`** — for REST/JSON HTTP API clients (`(rest)struct`, `@request`, `@error`, typed placeholders). Share the same DSL surface but a different problem domain.
+- **`sscgen-openapi`** — for converting OpenAPI/Swagger specs to `.kdl` REST clients deterministically.
+
+---
+
 ## Reference Files
 
 For detailed operation signatures and type compatibility tables:
 -> See `references/ops-quick-ref.md`
 
-For full KDL examples (HackerNews, Books, Quotes, IMDB):
+For disambiguation between pipeline ops and predicates (`re`, `re-all`, `css`):
+-> See `references/predicate-vs-op.md`
+
+For the canonical linter error → fix mapping:
+-> See `references/linter-errors.md`
+
+For full KDL examples:
 -> See `references/examples/`
+- `booksToScrape.kdl` — `(list)struct` with price regex extraction, `fallback`, URL normalization via `fmt`
+- `hackernews.kdl` — `(list)struct` with `@doc` HTML signature, multi-struct composition, `fmt` URL building
+- `imdbcom.kdl` — search results page, `nested` struct composition, `(flat)struct` for genres
+- `quotesToScrape.kdl` — `json` schema + `jsonify`, `@init` precompute, verbose-flag regex define, `path="0"` accessor
+- `assertRegexFallback.kdl` — `assert` (basic + custom msg), `re` no-match + `fallback` recovery, `re-all` single-group extraction

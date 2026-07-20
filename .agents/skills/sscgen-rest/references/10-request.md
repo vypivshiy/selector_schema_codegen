@@ -96,13 +96,13 @@ STYLE  = repeat | csv | bracket | pipe | space   только при []; default
 
 ```bash
 # Python: httpx (sync + async)
-ssc-gen generate schema.kdl -t py-bs4 -o out/ --http-client httpx
+ssc-gen generate schema.kdl -l python -L bs4 -o out/ --http-client httpx
 
 # JS: fetch (по умолчанию)
-ssc-gen generate schema.kdl -t js-pure -o out/
+ssc-gen generate schema.kdl -l js -o out/
 
 # JS: axios
-ssc-gen generate schema.kdl -t js-pure -o out/ --http-client axios
+ssc-gen generate schema.kdl -l js -o out/ --http-client axios
 ```
 
 При `--http-client httpx` генерируются два метода: `fetch()` и `async_fetch()`.

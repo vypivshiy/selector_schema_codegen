@@ -186,16 +186,17 @@ else                       console.log('unknown', r.status, r.value);
 
 ```bash
 # lint (always run after every edit)
-uv run ssc-gen check schema.kdl                  # text output
-uv run ssc-gen check schema.kdl -f json          # JSON for automated fixing
+ssc-gen check schema.kdl                  # text output
+ssc-gen check schema.kdl -f json          # JSON for automated fixing
 
 # generate code (REST struct requires --http-client)
-uv run ssc-gen generate schema.kdl -t py-bs4  --http-client httpx    -o out/  # sync + async_fetch
-uv run ssc-gen generate schema.kdl -t js-pure --http-client fetch    -o out/
-uv run ssc-gen generate schema.kdl -t js-pure --http-client axios    -o out/
+ssc-gen generate schema.kdl -l python -L bs4 --http-client httpx -o out/  # sync + async_fetch
+ssc-gen generate schema.kdl -l js         --http-client fetch -o out/
+ssc-gen generate schema.kdl -l js         --http-client axios -o out/
 ```
 
-Targets: `py-bs4`, `py-lxml`, `py-parsel`, `py-slax`, `js-pure`.
+Languages: `python`, `js`. Python libs (`-L`): `bs4` (default) | `lxml` | `parsel` | `slax`.
+HTTP clients: Python — `httpx` (default, sync+async) | `aiohttp` (async only) | `requests` (sync only); JS — `fetch` (default) | `axios`.
 
 Without `--http-client` the generator silently ignores `@request` — the resulting
 file will not contain any HTTP methods.
