@@ -6,7 +6,7 @@ Output: parser code for Python (bs4, lxml, parsel, selectolax), JavaScript (DOM 
 
 Pipeline: .kdl schema → KDL parser (custom KDL 2.0: KDLLexer + KDL2CSTParser) → core (AST + lint) → visitor → output code
 
-Version: 0.29.4
+Version: 0.31.0
 Python: >=3.10
 CLI entry point: `ssc-gen` (ssc_codegen.main:main)
 
@@ -195,6 +195,7 @@ Verifies selectors match elements in real HTML without code generation.
 
 ```python
 run_scout(html, filters, nav, fields, *, invert, limit, offset, snippet) → ScoutResult
+run_discover(html) → DiscoverResult
 ```
 
 HTML reconnaissance — regex on text/attribute values (CSS cannot express
@@ -210,3 +211,16 @@ or for one-off data extraction. Pure functions, no AST/codegen coupling.
 
 Reuses bs4+lxml from health.py. `path` field returns copy-pasteable CSS
 selector for direct use in `.kdl` schemas.
+
+`run_discover` (v2) — single-call page overview for LLM selector design.
+Returns `DiscoverResult` with: `tag_stats`, `class_stats`, `id_stats`,
+`data_attrs`, `repeat_containers` (each with `item_selector` anchored
+on rare `#id`/class ≤5 occurrences, ≤3 hops; 3 boolean flags
+`single_link_item`/`has_th_row`/`single_label_child`; `common_descendants`
+with `sample`/`sample_tail` lists), `table_candidates` (`<table>` +
+row keys from `<th>` or first `<td>`), `json_signals` (with
+`top_level_keys` when body parses as JSON), `page_summary`
+(`has_table`, `has_embedded_json`, `container_count_estimate`),
+`sample_normalized` global flag (always `true` — samples are
+whitespace-collapsed). `selector_stability: "fragile"` emitted only
+when item_selector path is unreliable.

@@ -789,6 +789,19 @@ def scout(
             help="Truncate text/html fields to N chars (default 200).",
         ),
     ] = 200,
+    discover: Annotated[
+        bool,
+        typer.Option(
+            "--discover",
+            help=(
+                "Overview mode: return tag/class/id stats, data-* attrs, "
+                "and repeating containers (list-struct candidates with "
+                "common_descendants field hints). Ignores all filters "
+                "and navigation. Single-call replacement for blind "
+                "selector probing."
+            ),
+        ),
+    ] = False,
     fmt: Annotated[
         FmtType,
         typer.Option(
@@ -802,11 +815,14 @@ def scout(
 
     Auxiliary tool for HTML reconnaissance before writing a .kdl schema.
     Supports regex on text/attribute values (which CSS selectors cannot
-    express) and relative navigation (parent/child/sibling). Output JSON
-    is designed to feed the sscgen-dsl skill pipeline.
+    express), optional CSS selector scoping, relative navigation
+    (parent/child/sibling), and a `--discover` overview mode.
 
     \b
     Examples:
+        # FIRST CALL — page overview (replaces blind selector guessing)
+        ssc-gen scout -i page.html --discover -f json
+
         # discover selectors via regex
         ssc-gen scout -i page.html --text '\\$\\d+\\.\\d{2}' --fields path -f json
 
@@ -829,6 +845,7 @@ def scout(
         FilterError,
         NavSpec,
         compile_filters,
+        run_discover,
         run_scout,
     )
 
@@ -845,6 +862,14 @@ def scout(
     if not html.strip():
         typer.echo("ERROR: empty HTML input", err=True)
         raise typer.Exit(code=2)
+
+    if discover:
+        discover_result = run_discover(html)
+        if fmt == FmtType.JSON:
+            typer.echo(discover_result.to_json())
+        else:
+            typer.echo(discover_result.to_text())
+        return
 
     field_list = (
         [f.strip() for f in fields.split(",") if f.strip()]
