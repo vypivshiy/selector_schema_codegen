@@ -182,6 +182,7 @@ def lint_module(
     _lint_defines(doc, source_path, diags, children_defines)
     _lint_json_defs(doc, source_path, diags, children_defines)
     _lint_structs(doc, source_path, diags, children_defines)
+    _lint_nested_topdown(doc, source_path, diags)
     return diags
 
 
@@ -388,6 +389,57 @@ def _lint_structs(
 ) -> None:
     for node in doc.select("struct:root"):
         _lint_single_struct(node, source_path, diags, children_defines)
+
+
+def _lint_nested_topdown(
+    doc: KdlDocument,
+    source_path: str,
+    diags: list[ReadDiagnostic],
+) -> None:
+    """Enforce top-down declaration order for `nested` refs (current file only).
+
+    Emits:
+      E300 — ``nested X`` references a struct ``X`` that is not declared at all
+      E302 — ``nested X`` references a struct ``X`` declared BELOW the caller
+             (top-down ordering is required: helpers first, entrypoint last)
+    """
+    structs = list(doc.select("struct:root"))
+    # Pre-compute declaration order — O(1) position comparison later.
+    order: dict[str, int] = {}
+    for idx, s in enumerate(structs):
+        name = _node_arg(s, 0)
+        if name:
+            order[name] = idx
+
+    # Only inspect structs that actually use `nested`.
+    for caller in doc.select("struct:root:has(nested)"):
+        caller_name = _node_arg(caller, 0) or "<unnamed>"
+        caller_idx = order.get(caller_name, -1)
+        for nested_op in caller.select("nested"):
+            target = _node_arg(nested_op, 0)
+            if not target:
+                continue  # arg-count error already emitted inline
+            if target not in order:
+                diags.append(
+                    _error(
+                        nested_op,
+                        f"'nested {target}' references undefined struct '{target}'",
+                        source_path,
+                        code="E300",
+                        hint=f"declare 'struct {target} {{ ... }}' at top level",
+                    )
+                )
+                continue
+            if order[target] > caller_idx:
+                diags.append(
+                    _error(
+                        nested_op,
+                        f"'nested {target}': struct '{target}' must be declared BEFORE use (top-down order)",
+                        source_path,
+                        code="E302",
+                        hint=f"move 'struct {target} {{ ... }}' above 'struct {caller_name}'",
+                    ),
+                )
 
 
 def _lint_single_struct(
