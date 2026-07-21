@@ -186,6 +186,38 @@ typed placeholders in `references/10-request.md`.
 Method naming: `name=get-post` → `get_post()` (Py) / `getPost()` (JS).
 Single unnamed `@request` → `fetch()`.
 
+### Codegen contract for `@request`
+
+Each `@request` block generates a **classmethod-like constructor** on the
+parent struct. Caller passes an HTTP client + method parameters, gets back
+the typed response (or `@error`-mapped error). The schema is the single
+source of truth — no need to remember URLs, headers, or query-string formats
+at call sites.
+
+**Generated signatures:**
+
+| Backend | Signature |
+|---------|-----------|
+| Python (`httpx`, default) | `@classmethod def fetch(cls, client: httpx.Client, **params) -> Result[Response, Error]` + `async_fetch(client, **params)` |
+| Python (`requests`, sync only) | `@classmethod def fetch(cls, client: requests.Session, **params) -> Result[...]` |
+| Python (`aiohttp`, async only) | `@classmethod async def fetch(cls, client: aiohttp.ClientSession, **params) -> Result[...]` |
+| JS (`fetch` or `axios`) | `static async fetch(client, params) -> Result<Response, Error>` |
+
+`**params` come from `{{name:type}}` placeholders in the `@request` body.
+Example: `{{id:int}}` → `id: int` kwarg (Py) / `id: number` field (JS).
+
+Call site:
+```python
+client = httpx.Client(headers={"Authorization": "Bearer ..."})
+result = ApiName.get_post(client, id=42)
+if isinstance(result, Ok):
+    post = result.value
+```
+```js
+const client = axios.create({ headers: { Authorization: "Bearer ..." } });
+const result = await ApiName.getPost(client, { id: 42 });
+```
+
 `@request` properties:
 
 | Property | Required | Purpose |

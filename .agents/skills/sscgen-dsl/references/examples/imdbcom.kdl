@@ -9,10 +9,6 @@ Include:
 """
 
 
-
-define FMT-URL="https://www.imdb.com{{}}"
-
-
 (list)struct FindPageResults {
     @split-doc {
         css-all "ul.ipc-metadata-list > li.ipc-metadata-list-summary-item"
@@ -36,7 +32,7 @@ define FMT-URL="https://www.imdb.com{{}}"
     url {
         css "a.ipc-metadata-list-summary-item__t[href]"
         attr href
-        fmt FMT-URL
+        fmt "https://www.imdb.com{{}}"
     }
     // naive assumption: first element contains year
     // maybe has collisions, false-positive selects

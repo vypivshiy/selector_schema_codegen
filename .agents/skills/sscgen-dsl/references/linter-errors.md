@@ -8,7 +8,7 @@ The linter runs automatically before `generate`; `check` runs it standalone.
 ### Text format
 ```
 Error at line 12: type mismatch: expected STRING, got LIST_STRING
-Warning at line 8: unused define 'BASE-URL'
+Warning at line 8: 'fmt' template is missing the '{{}}' placeholder
 ```
 → Map line numbers to the current file, fix errors (warnings are optional).
 
@@ -16,7 +16,7 @@ Warning at line 8: unused define 'BASE-URL'
 ```json
 [
   { "line": 12, "col": 4, "level": "error", "message": "type mismatch: expected STRING, got LIST_STRING" },
-  { "line": 8,  "col": 1, "level": "warning", "message": "unused define 'BASE-URL'" }
+  { "line": 8,  "col": 1, "level": "warning", "message": "'fmt' template is missing the '{{}}' placeholder" }
 ]
 ```
 → Filter `"level": "error"`, sort by line ascending, fix top-to-bottom (avoids line-number drift).
@@ -29,10 +29,9 @@ Warning at line 8: unused define 'BASE-URL'
 | `type mismatch: expected DOCUMENT, got STRING` | Selector used after `text`/`attr` | Reorder — selector must come before extract ops |
 | `type mismatch: expected STRING, got INT` | e.g. `re` after `to-int` | Apply `re` before `to-int` |
 | `unknown operation '...'` | Unknown op name or typo | Check spelling against operations list |
-| `missing @split-doc` | `(list)struct` or `(dict)struct` without split (`(flat)struct` does NOT need it) | Add `@split-doc { css-all "..." }` |
+| `missing @split-doc` | `(list)struct` or `(dict)struct` without split | Add `@split-doc { css-all "..." }` |
 | `missing match{}` | `(table)struct` field has no predicate | Add `match { eq "key" }` as first statement in field |
 | `fallback value type mismatch` | `to-int` then `fallback "x"` | Use typed fallback: INT→`0`, FLOAT→`0.0`, BOOL→`#false`, any→`#null` |
-| `define not found: NAME` | Typo or define declared after use | Check spelling; move define above the struct |
 | `filter requires list type` | `filter` used on scalar | Use `assert` instead, or ensure pipeline produces LIST_* |
 | `match must be first operation` | `match {}` not at start of table field | Move `match { ... }` to first position |
 | `'re' must have exactly 1 capture group` | Regex has 0 or 2+ groups | Ensure pattern has exactly one `(...)` group |

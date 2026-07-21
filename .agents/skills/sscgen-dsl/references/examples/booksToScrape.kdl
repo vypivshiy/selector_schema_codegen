@@ -69,22 +69,7 @@ example implementation for books.toscrape.com fictive shop
 // ====
 // https://books.toscrape.com | https://books.toscrape.com/catalogue/page-*
 // ====
-// macros feature (works similar as in C language)
-define FMT-URL="https://books.toscrape.com/catalogue/{{}}"
-define FMT-URL-CURRENT="https://books.toscrape.com/catalogue/page-{{}}.html"
-
-// BOOK defines
-define FMT-BASE="https://books.toscrape.com/{{}}"
-define RE-BOOK-PRICE=#"(\d+(?:\.\d+)?)"#
-define REPL-RATING {
-    repl {
-            One "1"
-            Two "2"
-            Three "3"
-            Four "4"
-            Five "5"
-        }
-}
+// No define/import — all constants inlined directly into ops.
 
 (list)struct Book {
     @doc """
@@ -112,19 +97,19 @@ define REPL-RATING {
         attr "src"
         rm-prefix ".."
         ltrim "."
-        fmt FMT-BASE 
+        fmt "https://books.toscrape.com/{{}}"
         }
     rating {
         css ".star-rating"
         attr "class"
         rm-prefix "star-rating "
-        REPL-RATING
+        repl { One "1"; Two "2"; Three "3"; Four "4"; Five "5" }
         to-int
     }
     price {
         css ".price_color"
         text
-        re RE-BOOK-PRICE
+        re #"(\d+(?:\.\d+)?)"#
         to-float
     }
 
@@ -154,21 +139,21 @@ struct MainCatalogue {
         css ".previous a"
         attr "href"
         rm-prefix "catalogue/"
-        fmt FMT-URL
+        fmt "https://books.toscrape.com/catalogue/{{}}"
         fallback #null
     }
     next-page {
         css ".next a"
         attr "href"
         rm-prefix "catalogue/"
-        fmt FMT-URL
+        fmt "https://books.toscrape.com/catalogue/{{}}"
         fallback #null
     }
     curr-page {
         css ".current"
         text
         re #"Page\s(\d+)"#
-        fmt FMT-URL-CURRENT
+        fmt "https://books.toscrape.com/catalogue/page-{{}}.html"
     }
     books { nested Book }
 }

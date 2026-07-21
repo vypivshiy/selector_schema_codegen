@@ -37,7 +37,7 @@ select signature
 
 """
 
-define FMT-URL="https://news.ycombinator.com/{{}}"
+// No define/import — URL template inlined into each `fmt` op.
 
 // see first dostring tags examples about selector implementatsions
 (list)struct News {
@@ -62,7 +62,7 @@ define FMT-URL="https://news.ycombinator.com/{{}}"
     }
     votelink {
         css ".votelinks a[href]"; attr href
-        fmt FMT-URL
+        fmt "https://news.ycombinator.com/{{}}"
         fallback #null
     }
     url {
@@ -84,12 +84,12 @@ define FMT-URL="https://news.ycombinator.com/{{}}"
     author {
         css "a.hnuser[href]"
         attr href
-        fmt FMT-URL
+        fmt "https://news.ycombinator.com/{{}}"
         fallback #null
     }
     date { css "span.age[title]"; attr title; fallback #null }
     date-text { css "span.age[title]"; text; fallback #null }
-    url { css "a[href^='item?']"; attr href; fmt FMT-URL }
+    url { css "a[href^='item?']"; attr href; fmt "https://news.ycombinator.com/{{}}" }
     // url selector selects comments tag
     // <a href="item?id=123">55&nbsp;comments</a>
     comments {
@@ -133,7 +133,7 @@ struct MainPage {
     date-text { css ".comhead .age[title] >a[href^='item?']"; text; fallback #null }
     // NOTE: not uncluded unwrap features, inner urls returns "as it"
     text { css ".default > .comment > .commtext"; text }
-    reply { css ".reply a[href]"; attr href; fmt FMT-URL; fallback #null }
+    reply { css ".reply a[href]"; attr href; fmt "https://news.ycombinator.com/{{}}"; fallback #null }
 }
 
 struct MainDiscussionPage {
@@ -156,7 +156,7 @@ struct MainDiscussionPage {
     url { css ".titleline > a[href]"; attr href }
     score { css ".subline > .score"; text; re-sub #"\D"# ""; to-int; fallback 0 }
     user { css ".subline .hnuser"; text }
-    user-url { css ".subline .hnuser[href]"; attr href; fmt FMT-URL }
+    user-url { css ".subline .hnuser[href]"; attr href; fmt "https://news.ycombinator.com/{{}}" }
     date { css ".subline .age[title]"; attr title }
     date-text { css ".subline .age[title] > a[href^='item?']"; text }
     comments-count { 

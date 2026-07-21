@@ -1,19 +1,6 @@
 @doc """
-demo parser for https://quotes.toscrape.com/js/ 
+demo parser for https://quotes.toscrape.com/js/
 """
-
-// TIP: allowed use VERBOSE FLAGS for simplify and document patterns
-// it automatically converts to inline
-define JSON-PATTERN=#"""
-(?xs)
-    var\s+data\s*=\s*     # START ANCHOR var data =
-    (
-        \[                # START ARRAY
-        .*                # JSON DATA
-        \]                # END ARRAY
-    )
-    ;\s+for              # END ANCHOR
-"""#
 
 // json mapping
 json Author {
@@ -34,29 +21,51 @@ json Author {
 
 
 struct Main {
-    // allow precompute values for reuse
-    @init {
-        raw-json {
-            raw
-            re JSON-PATTERN
-        }
-    }
+    // raw HTML -> extract embedded JSON array via multiline verbose regex
+    // (?xs): x = extended (whitespace + # comments ignored), s = dotall (. matches \n)
+    // duplication across fields is intentional — @init removed for mental-model simplicity
     data {
-        // use computed value. should be a firts
-        @raw-json
+        raw
+        re #"""
+            (?xs)
+            var\s+data\s*=\s*     # START ANCHOR: var data =
+            (
+                \[                # START_ARRAY
+                .*                # JSON DATA
+                \]                # END_ARRAY
+            )
+            ;\s+for               # END ANCHOR: ; for
+            """#
         jsonify Quote
     }
-    // patches example
     first-quote {
-        @raw-json
+        raw
+        re #"""
+            (?xs)
+            var\s+data\s*=\s*
+            ( \[ .* \] )
+            ;\s+for
+            """#
         jsonify Quote path="0"
     }
     second-quote {
-        @raw-json
+        raw
+        re #"""
+            (?xs)
+            var\s+data\s*=\s*
+            ( \[ .* \] )
+            ;\s+for
+            """#
         jsonify Quote path="1"
     }
     third-slug {
-        @raw-json
+        raw
+        re #"""
+            (?xs)
+            var\s+data\s*=\s*
+            ( \[ .* \] )
+            ;\s+for
+            """#
         jsonify Quote path="2.author.slug"
     }
 }
