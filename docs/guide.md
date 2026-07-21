@@ -1,7 +1,7 @@
 # Быстрый старт
 
 **Версия DSL:** 2.1  
-**Последнее обновление:** 2026-04-07
+**Последнее обновление:** 2026-07-21
 
 Этот документ показывает минимальный рабочий путь от `.kdl` файла до
 сгенерированного парсера.
@@ -9,7 +9,13 @@
 ## Установка
 
 ```bash
-uv tool install git+https://github.com/vypivshiy/selector_schema_codegen@features-kdl
+uv tool install ssc_codegen
+```
+
+Или из git (для разработки):
+
+```bash
+uv tool install git+https://github.com/vypivshiy/selector_schema_codegen
 ```
 
 ## Минимальный пример
@@ -25,7 +31,7 @@ struct Simple {
 Генерация:
 
 ```bash
-ssc-gen generate simple.kdl -t py-bs4
+ssc-gen generate simple.kdl -l python -L bs4
 ```
 
 Проверка (линтер):
@@ -49,7 +55,7 @@ ssc-gen check simple.kdl
 LLM-агент (Claude, ChatGPT и др.) может генерировать и отлаживать `.kdl` схемы
 автоматически. Для этого:
 
-1. **Скормите LLM системный промпт** из `SYSTEM_PROMPT.md` (или `docs2/llm.txt`
+1. **Скормите LLM системный промпт** из `SYSTEM_PROMPT.md` (или `docs/llm.txt`
    как компактную альтернативу).
 2. **Передайте HTML-страницу** и опишите, какие данные нужно извлечь.
 3. LLM сгенерирует `.kdl` файл.
@@ -61,11 +67,13 @@ LLM-агент (Claude, ChatGPT и др.) может генерировать и
 6. Повторяйте до чистого прохода линтера.
 7. **Сгенерируйте код** парсера:
    ```bash
-   ssc-gen generate schema.kdl -t py-bs4
+   ssc-gen generate schema.kdl -l python -L bs4
    ```
 
-В IDE с поддержкой агентов (Claude Code, Cursor и т.д.) этот цикл может быть
-полностью автоматизирован через skill `.agents/skills/kdl-schema-dsl`.
+В IDE с поддержкой агентов (Claude Code, Cursor, opencode и т.д.) этот цикл
+может быть полностью автоматизирован через skills из `.agents/skills/`:
+`sscgen-dsl` (HTML scraping), `sscgen-rest` (REST API), `sscgen-openapi`
+(OpenAPI → `.kdl`).
 
 ## Где смотреть живые примеры
 

@@ -11,6 +11,19 @@ Entry point: `parse_module(source, path) → Module`
 - Type checking happens inline via `core/type_checking.py`
 - Error output: `format_diagnostics(diagnostics) → str`
 
+### kdlquery — внешняя зависимость
+
+KDL-парсер `kdlquery>=1.1.2` (отдельный репозиторий). Даёт:
+- `parse(src) → KdlDocument`, `KdlNode` — мутабельное дерево CST с parent-ссылками.
+- CSS3-подобные селекторы: `doc.select("struct:root:has(nested)")`,
+  `node.select_one("@request")` — основа для правил линтера в `core/linter.py`.
+- `ReadDiagnostic` / `Severity` / `Span` / `Position` — типы для диагностики.
+
+Полная справка по селекторам и паттернам —
+[docs/maintainers/kdlquery.md](docs/maintainers/kdlquery.md).
+В `core/linter.py` активно используются `:root`, `:has(...)`, `:not(...)`,
+scoped `node.select(...)` для структурных проверок.
+
 ### Expression parsing (core/expressions.py)
 Handles all pipeline expression nodes: selectors, string ops, regex, cast, control, predicates.
 Uses `_OP_TYPES` table for type inference.

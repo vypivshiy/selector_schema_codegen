@@ -62,6 +62,7 @@ The old property syntax `struct Name type=list { ... }` still works but prefer t
 - dict -> dict[str, any]. Requires: @split-doc, @key, @value.
 - table -> dict. Requires: @table, @rows, @match, @value.
 - flat -> list[str]. No required special fields. Optional: keep-order=#true.
+- rest -> typed REST client class. Body allows ONLY @doc, @request, @error. Requires: at least one @request with name= and response=.
 
 ### Special fields
 
@@ -299,9 +300,15 @@ json Pet {
 
 ## @request
 
-Optional struct-level directive. Embeds a raw HTTP request or POSIX curl command.
-At codegen time the converter parses it and emits a `fetch()` classmethod.
-The parser module itself remains transport-agnostic — it still accepts one HTML page.
+Optional struct-level directive. Two modes:
+
+1. **HTML-scraping struct** — single `@request` (no `name=`), parser takes the fetched HTML.
+2. **`(rest)struct`** — typed REST client with multiple methods. Each `@request` requires `name=<kebab-id>` and `response=<SchemaName>`. Returns Result values, never throws.
+
+Embeds a raw HTTP request or POSIX curl command. At codegen time the
+converter parses it and emits a `fetch()` classmethod. The parser module
+itself remains transport-agnostic — for HTML structs it still accepts one
+HTML page.
 
 ### Formats
 
@@ -338,6 +345,9 @@ No placeholders → static request, `fetch(cls, client)` only.
 
 ### Optional properties
 
+- `name=<kebab-id>` — method name; required for `(rest)struct`, optional for HTML struct (only if multiple).
+- `response=<SchemaName>` — JSON schema for 2xx body; required for `(rest)struct`.
+- `doc="..."` — method docstring.
 - `response-path="a.b.c"` — dot-notation path into JSON response body to extract HTML string
 - `response-join="\n"` — join separator when response-path resolves to list[str]
 
@@ -370,9 +380,8 @@ Case convention separates define references from request parameters:
 ### CLI flag
 
 `--http-client` selects the generated HTTP client:
-- Python targets: `requests` (default, sync only) | `httpx` (emits both `fetch()` and `async_fetch()`)
-- JS target (js-pure): `fetch` (default) | `axios`
-- Go target: not supported
+- Python targets: `httpx` (default; emits both `fetch()` and `async_fetch()`) | `aiohttp` (async-only) | `requests` (sync-only)
+- JS target: `fetch` (default) | `axios`
 
 Without `--http-client`, `@request` is ignored and no `fetch` method is generated.
 
@@ -427,8 +436,78 @@ A key must not appear in both positional args and properties (lint error).
 ## CLI
 
 ```bash
-ssc-gen generate schema.kdl -t py-bs4    # generate parser code
-ssc-gen check schema.kdl                 # lint/validate schema
+# generate parser code
+ssc-gen generate schema.kdl -l python -L bs4 -o out/
+ssc-gen generate schema.kdl -l python -L lxml -o out/
+ssc-gen generate schema.kdl -l python -L parsel -o out/
+ssc-gen generate schema.kdl -l python -L slax -o out/
+ssc-gen generate schema.kdl -l js -o out/
+
+# with @request support (REST/HTTP codegen)
+ssc-gen generate schema.kdl -l python -L bs4 -o out/ --http-client httpx
+
+# extract helpers into separate runtime module (-R), custom name (-rn)
+ssc-gen generate schema.kdl -l python -L bs4 -o out/ -R -rn my_runtime
+
+# lint/validate schema (text or JSON for LLM pipelines)
+ssc-gen check schema.kdl
+ssc-gen check schema.kdl -f json
+
+# run struct against HTML and print JSON
+ssc-gen run schema.kdl:StructName -i page.html -l python -L bs4
+
+# verify selectors match elements
+ssc-gen health schema.kdl:StructName -i page.html
+
+# HTML reconnaissance (regex on text/attrs, CSS intersect, navigation, --discover)
+ssc-gen scout -i page.html --text '\$\d+\.\d{2}' -f json
+ssc-gen scout -i page.html --discover -f json
+
+# print version
+ssc-gen version
 ```
 
-Targets: py-bs4, py-lxml, py-parsel, py-slax, js-pure.
+Languages (`--lang / -l`): `python`, `js`.
+HTML libraries (`--lib / -L`, Python only): `bs4` (default), `lxml`, `parsel`, `slax`.
+HTTP clients (`--http-client`): Python — `httpx` (default) | `aiohttp` | `requests`; JS — `fetch` (default) | `axios`.
+
+### `scout` — HTML reconnaissance
+
+Probe raw HTML with regex on text/attribute values (CSS alone cannot
+express this). Useful for picking selectors before writing a `.kdl` schema
+or for one-off extraction.
+
+```bash
+# regex on text — find prices
+ssc-gen scout -i page.html --text '\$\d+\.\d{2}' --fields path -f json
+
+# regex on attribute value — find product hrefs
+ssc-gen scout -i page.html --attr 'href=~^/product/\d+' -f json
+
+# CSS intersect + climb to parent container
+ssc-gen scout -i page.html --css ".price" --up 2 --fields path -f json
+
+# one-off extraction (no .kdl needed)
+ssc-gen scout -i page.html --css ".product-card" --fields attr.data-id,text -f json
+
+# pipe via stdin
+curl -s https://example.com | ssc-gen scout --attr 'class=~\bbtn\b' -f json
+
+# count only (exit 0 on match, 1 on no match, 2 on error)
+ssc-gen scout -i page.html --tag img --attr alt -v -c
+```
+
+Filters (AND-combine): `--text REGEX`, `--attr NAME[=VAL|=~REGEX]`, `--tag NAME`, `--css SEL`.
+Modifiers: `-I` ignore-case, `-F` fixed strings, `-v` invert.
+Navigation: `--up N`, `--down N`, `--next N`, `--prev N` (applied in order, deduped by tag identity).
+Output: `--fields path,tag,text,html,attrs,classes,index,line,attr.NAME` (default `path,tag,text`).
+Pagination: `--limit N` (default 50), `--offset N`, `--snippet LEN` (default 200).
+
+`--discover` — overview mode: returns tag/class/id stats, data-* attrs, and
+repeating containers (list-struct candidates with common_descendants field
+hints). Ignores all filters and navigation. Single-call replacement for
+blind selector probing.
+
+```bash
+ssc-gen scout -i page.html --discover -f json
+```

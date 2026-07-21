@@ -37,7 +37,7 @@ uv tool install ssc_codegen
 Generate Python parser:
 
 ```bash
-ssc-gen generate books.kdl -t py-bs4 -o ./output
+ssc-gen generate books.kdl -l python -L bs4 -o ./output
 ```
 
 ## Usage
@@ -45,17 +45,24 @@ ssc-gen generate books.kdl -t py-bs4 -o ./output
 ### Generate code
 
 ```bash
-# single file
-ssc-gen generate schema.kdl -t py-bs4 -o ./output
+# single file (Python + bs4)
+ssc-gen generate schema.kdl -l python -L bs4 -o ./output
 
-# all .kdl files in a directory
-ssc-gen generate examples/ -t js-pure -o ./output
+# all .kdl files in a directory (JavaScript)
+ssc-gen generate examples/ -l js -o ./output
 
 # with custom package name
-ssc-gen generate schema.kdl -t py-bs4 -o ./parsers --package scraper
+ssc-gen generate schema.kdl -l python -L bs4 -o ./parsers --package scraper
+
+# with @request support (REST/HTTP codegen)
+ssc-gen generate schema.kdl -l python -L bs4 -o ./out --http-client httpx
+
+# extract helper functions into a separate runtime module
+ssc-gen generate schema.kdl -l python -L bs4 -o ./out -R
 ```
 
-Targets: `py-bs4`, `py-lxml`, `py-parsel`, `py-slax`, `js-pure`
+Languages (`--lang / -l`): `python`, `js`.
+HTML libraries (`--lib / -L`, Python only): `bs4` (default), `lxml`, `parsel`, `slax`.
 
 ### Lint schemas
 
@@ -74,10 +81,10 @@ ssc-gen check examples/
 
 ```bash
 # from file
-ssc-gen run examples/booksToScrape.kdl:MainCatalogue -t py-bs4 -i page.html
+ssc-gen run examples/booksToScrape.kdl:MainCatalogue -l python -L bs4 -i page.html
 
 # from stdin
-curl https://books.toscrape.com/ | ssc-gen run examples/booksToScrape.kdl:MainCatalogue -t py-bs4
+curl https://books.toscrape.com/ | ssc-gen run examples/booksToScrape.kdl:MainCatalogue -l python -L bs4
 ```
 
 ### Health check (verify selectors match elements)
@@ -92,27 +99,35 @@ curl https://books.toscrape.com/ | ssc-gen health examples/booksToScrape.kdl:Mai
 
 ## Documentation
 
-- [Quick start](docs2/guide.md)
-- [Syntax and file structure](docs2/syntax.md)
-- [Type system](docs2/types.md)
-- [Pipeline operations](docs2/operations.md)
-- [Predicates and logic](docs2/predicates.md)
-- [JSON schemas and jsonify](docs2/json.md)
-- [Transforms and dsl blocks](docs2/transforms.md)
-- [LLM-compact reference](docs2/llm.txt) -- full DSL spec in one file for LLM context
+- [Quick start](docs/guide.md)
+- [Syntax and file structure](docs/syntax.md)
+- [Type system](docs/types.md)
+- [Pipeline operations](docs/operations.md)
+- [Predicates and logic](docs/predicates.md)
+- [JSON schemas and jsonify](docs/json.md)
+- [@request — HTTP constructor + REST clients](docs/learn/10-request.md)
+- [LLM-compact reference](docs/llm.txt) -- full DSL spec in one file for LLM context
 - [Examples](examples/)
 
 ## LLM integration
 
-LLM agents can generate and validate `.kdl` schemas automatically using the linter feedback loop.
+LLM agents can generate and validate `.kdl` schemas automatically using the
+linter feedback loop.
 
 ### In chats (ChatGPT, Claude, etc.)
 
-Use [SYSTEM_PROMPT.md](SYSTEM_PROMPT.md) as system prompt. After generation, run `ssc-gen check -f json` and send errors back to the LLM for correction.
+Use [SYSTEM_PROMPT.md](SYSTEM_PROMPT.md) as system prompt. After generation,
+run `ssc-gen check -f json` and send errors back to the LLM for correction.
 
-### In AI-powered IDEs (Claude Code, Cursor, etc.)
+### In AI-powered IDEs (Claude Code, Cursor, opencode, etc.)
 
-Use the [kdl-schema-dsl](.agents/skills/kdl-schema-dsl) skill for automatic generation, validation, and iteration.
+Use the skills under [.agents/skills/](.agents/skills/):
+
+- **`sscgen-dsl`** — HTML scraping schemas (`css`, `text`, `(item)struct`,
+  `(list)struct`, `(table)struct`, predicates, `jsonify`).
+- **`sscgen-rest`** — REST/JSON API clients (`(rest)struct`, `@request`,
+  `@error`, typed placeholders).
+- **`sscgen-openapi`** — convert OpenAPI/Swagger specs into `.kdl`.
 
 ## Development
 

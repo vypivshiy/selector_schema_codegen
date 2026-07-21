@@ -1,7 +1,7 @@
 # 01. Генерация модулей: зачем и как
 
 **Версия DSL:** 2.1  
-**Последнее обновление:** 2026-04-07
+**Последнее обновление:** 2026-07-21
 
 Цель генерации — превратить `.kdl` схему в готовый модуль парсинга.
 
@@ -43,7 +43,7 @@ struct Product {
 ## Команда генерации
 
 ```bash
-ssc-gen generate schema.kdl -t py-bs4
+ssc-gen generate schema.kdl -l python -L bs4
 ```
 
 ```mermaid
@@ -53,8 +53,15 @@ flowchart LR
 ```
 
 Ключевые параметры:
-- `-t` — целевой backend (например `py-bs4`, `js-pure`).
-- `-o` — куда записать результат (если не указано, пишет рядом).
+- `-l` / `--lang` — целевой язык: `python` или `js`.
+- `-L` / `--lib` — HTML-библиотека (только Python): `bs4` (по умолчанию),
+  `lxml`, `parsel`, `slax`.
+- `-o` — куда записать результат (если не указано, пишет в текущую директорию).
+- `--http-client` — клиент для `@request` codegen
+  (Python: `httpx` по умолчанию | `aiohttp` | `requests`; JS: `fetch` | `axios`).
+- `-R` / `--separate-runtime` — вынести helper-функции в отдельный модуль
+  (по умолчанию `sscgen_runtime`, имя меняется через `-rn`/`--runtime-name`).
+- `--package` — имя пакета/модуля для генерируемого кода.
 
 ## Что генерируется
 
@@ -97,3 +104,15 @@ curl "https://books.toscrape.com" | ssc-gen run examples/booksToScrape.kdl:MainC
 ```bash
 curl "https://books.toscrape.com" | ssc-gen health examples/booksToScrape.kdl:MainCatalogue
 ```
+
+## Прочие полезные команды
+
+```bash
+# версия пакета
+ssc-gen version
+
+# разведка HTML перед написанием схемы
+ssc-gen scout -i page.html --discover -f json
+```
+
+См. также главу [08-scout.md](08-scout.md).

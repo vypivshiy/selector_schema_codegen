@@ -1,7 +1,7 @@
 # 12. Assert (валидация)
 
 **Версия DSL:** 2.1
-**Последнее обновление:** 2026-05-10
+**Последнее обновление:** 2026-07-21
 
 `assert { ... }` — операция pipeline, которая **проверяет** текущее значение
 без его изменения. Если предикат не выполняется — бросается ошибка.
@@ -17,6 +17,9 @@ price { css ".price"; text; to-float; assert { gt 0 } }
 # в pipeline поля
 field { ...; assert { предикаты }; ... }
 
+# с пользовательским сообщением
+field { ...; assert "ожидается положительное число" { gt 0 } }
+
 # в @pre-validate (проверка документа перед парсингом)
 struct Foo {
     @pre-validate {
@@ -28,6 +31,28 @@ struct Foo {
 Предикаты внутри assert пишутся через `;` (точку с запятой) — это **И**
 (все должны выполняться). Для комбинирования используйте логические
 операторы `not`, `and`, `or`.
+
+## Runtime: SscAssertionError
+
+`assert` эмбит runtime helper: `std_assert` в Python, `_stdAssert` в JS.
+При неудаче бросается `SscAssertionError` (не Python `AssertionError` —
+этот helper **не** вырезается флагом `python -O`).
+
+Сообщение по умолчанию: `<file.kdl>:<line>:<col> assertion failed at
+<Struct>.<field>` (внутри `@pre-validate` — `<Struct>.@pre-validate`).
+Переданное явно `assert "msg" { ... }` переопределяет.
+
+```python
+try:
+    result = Parser(html).parse()
+except SscAssertionError as e:
+    print("schema mismatch:", e)
+```
+
+`fallback` перехватывает `SscAssertionError`:
+```kdl
+price { css ".price"; text; to-float; assert { gt 0 }; fallback 0.0 }
+```
 
 ## Предикаты
 
@@ -191,6 +216,21 @@ codes { css-all ".code"; text; assert { re-all #"^[A-Z]{2}\d{4}$" } }
 
 ```kdl
 items { css-all ".item"; assert { len-gt 0; len-lt 50 } }
+```
+
+## Соседний runtime helper: SscRegexError
+
+Операция `re` в pipeline (не предикат) бросает `SscRegexError` при отсутствии
+матча. Помощник `std_re_search` / `_stdReSearch`. Похожий контракт:
+
+- Default message: `<file.kdl>:<line>:<col> re-match failed at
+  <Struct>.<field> pattern=<pattern>`.
+- Ловится `fallback`.
+- Потребительский код: `except SscRegexError` (Python) /
+  `try { ... } catch (e) { if (e instanceof SscRegexError) ... }` (JS).
+
+```kdl
+price { css ".price"; text; re #"(\d+\.\d+)"#; to-float; fallback 0.0 }
 ```
 
 ## Assert vs filter

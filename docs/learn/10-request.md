@@ -1,7 +1,7 @@
 # 10. @request — встроенный HTTP конструктор
 
 **Версия DSL:** 2.1  
-**Последнее обновление:** 2026-04-17
+**Последнее обновление:** 2026-07-21
 
 `@request` — необязательная директива внутри `struct`. Описывает HTTP-запрос,
 который нужно выполнить, чтобы получить HTML для этого парсера. Генератор
@@ -96,20 +96,27 @@ STYLE  = repeat | csv | bracket | pipe | space   только при []; default
 Флаг `--http-client` при генерации:
 
 ```bash
-# Python: requests (по умолчанию)
-ssc-gen generate schema.kdl -t py-bs4 -o out/
+# Python: httpx (по умолчанию, sync + async)
+ssc-gen generate schema.kdl -l python -L bs4 -o out/
 
-# Python: httpx (sync + async)
-ssc-gen generate schema.kdl -t py-bs4 -o out/ --http-client httpx
+# Python: httpx (явно)
+ssc-gen generate schema.kdl -l python -L bs4 -o out/ --http-client httpx
+
+# Python: aiohttp (async-only)
+ssc-gen generate schema.kdl -l python -L bs4 -o out/ --http-client aiohttp
+
+# Python: requests (sync-only)
+ssc-gen generate schema.kdl -l python -L bs4 -o out/ --http-client requests
 
 # JS: fetch (по умолчанию)
-ssc-gen generate schema.kdl -t js-pure -o out/
+ssc-gen generate schema.kdl -l js -o out/
 
 # JS: axios
-ssc-gen generate schema.kdl -t js-pure -o out/ --http-client axios
+ssc-gen generate schema.kdl -l js -o out/ --http-client axios
 ```
 
-При `--http-client httpx` генерируются два метода: `fetch()` и `async_fetch()`.
+При `--http-client httpx` (и по умолчанию для Python) генерируются два
+метода: `fetch()` и `async_fetch()`.
 
 Без `--http-client` методы `fetch` не генерируются, `@request` игнорируется.
 
@@ -189,7 +196,82 @@ struct ListPage {
 `BookCard` не имеет `@request` — он получает HTML через `nested` из `ListPage`,
 а не по отдельному запросу.
 
-## Тип возврата для `struct type=rest`
+## `(rest)struct` — типизированный REST-клиент
+
+`@request` работает в двух контекстах:
+
+1. **HTML-scraping struct** (по умолчанию) — один запрос, ответ = HTML-страница,
+   парсер принимает её в конструктор. Один `@request` на struct (без `name=`).
+2. **`(rest)struct`** — типизированный REST-клиент: несколько методов на класс,
+   каждый возвращает `Result[<Schema>Json | <Err>Json]` вместо бросания исключения.
+   Каждый `@request` обязан иметь `name=<kebab-id>` и `response=<SchemaName>`.
+
+```kdl
+json Product {
+    id int
+    title str
+    price float
+}
+
+(array)json ProductList {
+    products Product
+    total int
+    skip int
+    limit int
+}
+
+json ApiError {
+    message str
+}
+
+(rest)struct DummyJsonApi {
+    @doc """
+    DummyJSON Products API.
+    No auth required. Rate limits: none.
+    """
+
+    @request name=get-product \
+        doc="Fetch one product by id." \
+        response=Product \
+        """
+    GET /products/{{id:int}} HTTP/1.1
+    Host: dummyjson.com
+    Accept: application/json
+    """
+
+    @request name=list-products \
+        doc="Paginated product list. All params optional." \
+        response=ProductList \
+        """
+    GET /products?limit={{limit:int?}}&skip={{skip:int?}} HTTP/1.1
+    Host: dummyjson.com
+    Accept: application/json
+    """
+
+    @error 404 ApiError
+}
+```
+
+### Свойства `@request` для REST
+
+| Свойство | Назначение |
+|---|---|
+| `name=<kebab-id>` | Имя метода (`get-product` → `get_product()` / `getProduct()`). Обязательно для `(rest)struct`; для HTML-struct разрешён только при единственном `@request`. |
+| `response=<SchemaName>` | JSON-схема ответа 2xx. Обязательно для `(rest)struct`. |
+| `doc="..."` | Документация метода (попадает в docstring/JSDoc). |
+| `response-path="a.b.c"` | Точка в JSON-теле, откуда читать ответ (если API оборачивает данные). |
+| `response-join="\n"` | Join-разделитель, если `response-path` разрешается в `list[str]`. |
+
+### Линтер для `(rest)struct`
+
+- В теле разрешены **только** `@doc`, `@request`, `@error`. Никаких обычных полей,
+  `@init`, `nested`, селекторов.
+- Минимум один `@request` на struct.
+- При нескольких `@request` каждый обязан иметь `name=`.
+- `name=` уникально в пределах struct.
+- `response=` ссылается на существующую `json` схему.
+
+### Тип возврата: Result-значение
 
 >[!note] О swagger openapi
 > OpenAPI отличный стандарт, когда **автор API сам документирует свой
@@ -274,32 +356,43 @@ IDE narrow'ит через literal-поля `isOk: true/false` и `status: 404`.
 - `@error 404 ApiError` в struct `DummyJsonApi` → `DummyJsonApiErr404`
 - `@error 200 ApiError error_code=#true` → `DummyJsonApiErr200ErrorCode`
 
-### Field-conditions
+### `@error` — маппинг ошибочных ответов
 
-`@error` поддерживает два режима проверки тела ответа:
+`@error` работает только в `(rest)struct`. Синтаксис:
+
+```kdl
+@error <status> <SchemaName> [key1 key2 ...] [key1=val1 key2=val2 ...]
+```
+
+Аргументы:
+- `<status>` — HTTP status code `[100..599]`.
+- `<SchemaName>` — ссылка на `json` схему для десериализации тела ошибки.
+
+Два режима проверки тела (можно комбинировать):
 
 1. **Наличие ключа** (позиционные аргументы после SchemaName):
-```kdl
-@error 404 ApiError error detail
-```
-Сработает при status=404 И `_body` содержит ключи `error` и `detail`.
+   ```kdl
+   @error 404 ApiError error detail
+   ```
+   Сработает при `status=404` И `_body` содержит ключи `error` и `detail`.
 
-2. **Равенство значения** (KDL-свойства):
-```kdl
-@error 200 ActionResponse success=#false
-```
-Сработает при status=200 И `_body.success == False`.
+2. **Равенство значения** (KDL-свойства `key=value`):
+   ```kdl
+   @error 200 ActionResponse success=#false
+   ```
+   Сработает при `status=200` И `_body.success == False`.
+   Ключи — dot-пути (`response.success`, `data.0.type`).
 
-3. **Комбинация** обоих режимов:
-```kdl
-@error 404 ApiError error detail="msg"
-```
-Сработает при status=404 И `'error' in _body` И `_body.detail == "msg"`.
+3. **Комбинация**:
+   ```kdl
+   @error 404 ApiError error detail="msg"
+   ```
+   Сработает при `status=404` И `'error' in _body` И `_body.detail == "msg"`.
 
 Один и тот же ключ нельзя указать одновременно как позиционный аргумент
 и как свойство — линтер выдаст ошибку.
 
-Пример corner case: API возвращает 200 для успеха и ошибки:
+Corner case: API возвращает 200 для успеха и ошибки:
 ```kdl
 json ActionResponse {
     success bool
@@ -307,26 +400,13 @@ json ActionResponse {
 }
 
 (rest)struct Api {
-    @request response=Product """
+    @request name=get-item response=Item """
     GET /items/{{id:int}} HTTP/1.1
     Host: api.example.com
     """
-
     // 200 с success=#false — ошибка
     @error 200 ActionResponse success=#false
 }
-```
-
-Генерируемый dispatch:
-```python
-@staticmethod
-def _dispatch_err(_status, _headers, _body):
-    if 200 <= _status < 300:
-        if isinstance(_body, dict):
-            if _status == 200 and _body.get('success') == False:
-                return ApiErr200Success(headers=_headers, value=_body)
-        return None
-    ...
 ```
 
 ### Внутренняя структура модуля
@@ -339,7 +419,7 @@ helper'а:
   `_parseResponse` для `fetch` и `_parseResponseAxios` для axios (axios
   заранее парсит JSON и возвращает `headers` объектом).
 - **`_dispatch_err(status, headers, body)`** (static-метод каждого
-  `struct type=rest`) — маршрутизация по объявленным `@error` в нужный
+  `(rest)struct`) — маршрутизация по объявленным `@error` в нужный
   Err-подкласс плюс `UnknownErr` для нераспознанных статусов. Возвращает
   `None` для 2xx (или типизированный Err при сработавшем field-discriminator).
 

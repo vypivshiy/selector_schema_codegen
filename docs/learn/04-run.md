@@ -1,14 +1,14 @@
 # 04. Запуск на локальном HTML (`ssc-gen run`)
 
 **Версия DSL:** 2.1  
-**Последнее обновление:** 2026-04-07
+**Последнее обновление:** 2026-07-21
 
 `ssc-gen run` позволяет прогнать схему сразу на HTML и получить результат.
 
 ## Пример с файлом
 
 ```bash
-ssc-gen run examples/booksToScrape.kdl:MainCatalogue -t py-bs4 -i page.html
+ssc-gen run examples/booksToScrape.kdl:MainCatalogue -l python -L bs4 -i page.html
 ```
 
 Где:

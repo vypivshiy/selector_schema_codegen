@@ -431,7 +431,7 @@ ssc-gen check schema.kdl -f json
 ssc-gen check schemas/
 
 # test schema against HTML
-ssc-gen run schema.kdl:StructName -t py-bs4 -i page.html
+ssc-gen run schema.kdl:StructName -l python -L bs4 -i page.html
 
 # health check selectors
 ssc-gen health schema.kdl:StructName -i page.html
