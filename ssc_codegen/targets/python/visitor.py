@@ -250,48 +250,6 @@ class PythonVisitor(BaseWalker):
             out[fname] = provider(module_ast, ctx.meta)
         return out
 
-    def convert_batch(
-        self,
-        modules: list[tuple[str, Module]],
-        **meta,
-    ) -> dict[str, str]:
-        inline = meta.get("inline_std", True)
-        ctx = self._make_ctx({**meta, "inline_std": inline})
-
-        if inline:
-            results: dict[str, str] = {}
-            for name, module_ast in modules:
-                self._reset_state()
-                results[name] = "\n".join(self._walk_module(module_ast, ctx))
-            return results
-
-        shared_std_defs: dict[str, tuple[list[str], str]] = {}
-        shared_std_imports: dict[str, None] = {}
-        for _, module_ast in modules:
-            self._reset_state()
-            self._walk_module(module_ast, ctx)
-            shared_std_defs.update(self._builder.std_defs)
-            shared_std_imports.update(self._builder._std_imports)
-
-        results = {}
-        std_module_name = ctx.meta.get("std_module_name", self.STD_MODULE_NAME)
-        if shared_std_defs:
-            self._reset_state()
-            self._builder._std_defs = dict(shared_std_defs)
-            self._builder._std_imports = dict(shared_std_imports)
-            results[std_module_name] = self._render_std_module()
-
-        for name, module_ast in modules:
-            self._reset_state()
-            self._builder._std_defs = dict(shared_std_defs)
-            self._builder._std_imports = dict(shared_std_imports)
-            self._walk_module(module_ast, ctx)
-            self._builder._std_defs = dict(shared_std_defs)
-            self._builder._std_imports = dict(shared_std_imports)
-            results[name] = "\n".join(self._walk_module(module_ast, ctx))
-
-        return results
-
     def _walk_module(self, module_ast: Module, ctx: WalkContext) -> list[str]:
         lines: list[str] = list(self.visit_module(module_ast, ctx))
         for node in module_ast.body:

@@ -119,21 +119,15 @@ def register_runtime_file(
     *,
     include_fallback: bool = False,
     http_strategy: HttpLibStrategy | None = None,
-    transport_import_line: str | None = None,
 ) -> Callable[[list[a.Module]], str]:
     """Register a runtime module file provider on the converter.
 
     ``http_strategy`` is the canonical source for both the transport import
     line and the REST runtime source. It should match the HttpLibStrategy
     that will be applied to the parser codegen (see main.py).
-
-    ``transport_import_line`` is a legacy fallback: when ``http_strategy``
-    is not provided, the import line is taken from this argument and the
-    REST runtime source defaults to ``HttpxStrategy``. Prefer passing
-    ``http_strategy`` — single source of truth.
     """
 
-    # Normalize legacy callers that pass only transport_import_line.
+    # Normalize callers that don't pass http_strategy.
     if http_strategy is None:
         http_strategy = HttpxStrategy()
 

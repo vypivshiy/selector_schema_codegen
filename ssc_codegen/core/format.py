@@ -97,17 +97,6 @@ def diagnostic_to_dict(d: ReadDiagnostic) -> dict[str, Any]:
     }
 
 
-def diagnostics_to_dict(diagnostics: list[ReadDiagnostic]) -> dict[str, Any]:
-    """Serialize diagnostics + summary counts to a JSON-friendly dict."""
-    n_errors = _count(diagnostics, Severity.ERROR)
-    n_warnings = _count(diagnostics, Severity.WARNING)
-    return {
-        "errors": [diagnostic_to_dict(d) for d in diagnostics],
-        "error_count": n_errors,
-        "warning_count": n_warnings,
-    }
-
-
 # ── Renderer ──────────────────────────────────────────────────────────────────
 
 

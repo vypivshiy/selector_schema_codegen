@@ -298,22 +298,6 @@ class JsVisitor(BaseWalker):
             out[fname] = provider(module_ast, ctx.meta)
         return out
 
-    def convert_batch(
-        self,
-        modules: list[tuple[str, Module]],
-        **meta,
-    ) -> dict[str, str]:
-        ctx = self._make_ctx(meta)
-        results: dict[str, str] = {}
-        for name, module_ast in modules:
-            self._reset_state()
-            client = meta.get("http_client")
-            if client and client in self._HTTP_STRATEGIES:
-                self._http = self._HTTP_STRATEGIES[client]()
-            self._walk_module(module_ast, ctx)
-            results[name] = "\n".join(self._walk_module(module_ast, ctx))
-        return results
-
     def _walk_module(self, module_ast: Module, ctx: WalkContext) -> list[str]:
         lines: list[str] = list(self.visit_module(module_ast, ctx))
         for node in module_ast.body:

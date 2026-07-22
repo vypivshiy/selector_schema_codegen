@@ -22,7 +22,7 @@ from ssc_codegen.core.contexts import (
     LintContext,
     ParseContext,
 )
-from ssc_codegen.core.expressions import _resolve_define_references
+from ssc_codegen.core.expressions import resolve_define_references
 from ssc_codegen.core.struct_parser import parse_json_fields, parse_struct
 
 _KDL_TEXT_ENCODING = "utf-8-sig"
@@ -89,7 +89,7 @@ def handle_define(node: KdlNode, ctx: ParseContext, lint: LintContext) -> None:
         for k, v in node.properties.items():
             value = v.value
             if isinstance(value, str):
-                value = _resolve_define_references(value, ctx)
+                value = resolve_define_references(value, ctx)
             ctx.property_defines[k] = value
             lint.defines[k] = DefineInfo(
                 name=k, kind=DefineKind.SCALAR, value=str(value), node=node

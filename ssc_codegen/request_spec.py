@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import json
 import re
-from urllib.parse import urlparse, urlunparse
+import shlex
+from urllib.parse import urlparse, unquote_plus, urlunparse
 
 from ssc_codegen.ast.struct import (
     PlaceholderSpec,
@@ -110,8 +111,6 @@ def _extract_raw_body(payload: str, fmt: str) -> str:
 
 
 def _curl_raw_body(payload: str) -> str:
-    import shlex
-
     parts = shlex.split(payload.strip())[1:]  # drop "curl"
     i = 0
     while i < len(parts):
@@ -129,8 +128,6 @@ def _parse_urlencoded_body(raw: str) -> dict[str, str]:
     Preserves ``{{placeholders}}`` intact; URL-decodes everything else so the
     target HTTP client can re-encode without double-encoding.
     """
-    from urllib.parse import unquote_plus
-
     out: dict[str, str] = {}
     if not raw:
         return out

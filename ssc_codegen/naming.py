@@ -22,13 +22,6 @@ def to_snake_case(s: str) -> str:
     return s.lower()
 
 
-def to_upper_snake_case(s: str) -> str:
-    """
-    'myFieldName'  -> 'MY_FIELD_NAME'
-    """
-    return to_snake_case(s).upper()
-
-
 def to_pascal_case(s: str) -> str:
     """
     'my_field_name' -> 'MyFieldName'

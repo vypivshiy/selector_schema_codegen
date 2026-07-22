@@ -32,24 +32,6 @@ def _error(
     )
 
 
-def _warning(
-    node: KdlNode,
-    message: str,
-    source_path: str,
-    *,
-    code: str = "",
-    hint: str = "",
-) -> ReadDiagnostic:
-    return ReadDiagnostic(
-        message=message,
-        severity=Severity.WARNING,
-        span=node.span,
-        path=source_path,
-        code=code,
-        hint=hint,
-    )
-
-
 def _node_arg(node: KdlNode, index: int) -> str | None:
     if index < len(node.args):
         return str(node.args[index].value)

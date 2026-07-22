@@ -92,9 +92,6 @@ from ssc_codegen.core.predicates import (
 
 # ── Registration tables ─────────────────────────────────────────────────────────
 
-CallbackReg = Callable[
-    [KdlNode, "FieldLikeNode", ParseContext, LintContext], AstNode
-]
 
 FieldLikeNode: TypeAlias = (
     PreValidate
@@ -168,7 +165,7 @@ _FLOAT_RE = _re.compile(
 _DEFINE_REF_RE = _re.compile(r"\{\{([A-Z_][A-Z0-9_-]*)\}\}")
 
 
-def _resolve_define_references(value: str, ctx: ParseContext) -> str:
+def resolve_define_references(value: str, ctx: ParseContext) -> str:
     def _replacer(m: _re.Match) -> str:
         name = m.group(1)
         resolved = ctx.property_defines.get(name)
@@ -260,25 +257,6 @@ def resolve_jsonify_type(
 
 
 # ── Typedef builder ──────────────────────────────────────────────────────────────
-
-
-def _compute_type_info(
-    ret: VariableType, body: list[AstNode]
-) -> TypeInfo | None:
-    """Compute TypeInfo from a pipeline node's ret type and body contents."""
-    ref: str | None = None
-    is_arr = False
-    if ret in (VariableType.NESTED, VariableType.JSON):
-        for child in body:
-            if isinstance(child, Nested):
-                ref = child.struct_name
-                is_arr = child.is_array
-                break
-            if isinstance(child, Jsonify):
-                ref = child.schema_name
-                is_arr = child.is_array
-                break
-    return TypeInfo(base=ret, is_array=is_arr, ref=ref)
 
 
 def typedef_from_struct(struct: StructBase, parent: Module) -> TypeDef:

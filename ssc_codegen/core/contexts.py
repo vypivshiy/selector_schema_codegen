@@ -8,7 +8,6 @@ from pathlib import Path
 
 from ssc_codegen.ast import StructBase, VariableType
 from kdlquery import KdlNode, ReadDiagnostic, Severity
-from kdlquery.types import Span
 
 
 # ── Walk context enum ──────────────────────────────────────────────────────────
@@ -26,36 +25,9 @@ class WalkCtx(Enum):
 # ── Error codes ────────────────────────────────────────────────────────────────
 
 
-class ErrorCode(Enum):
-    INVALID_SYNTAX = "E000"
-    MISSING_ARGUMENT = "E001"
-    INVALID_ARGUMENT = "E002"
-    EMPTY_BLOCK = "E003"
-    UNEXPECTED_CHILDREN = "E004"
-    TYPE_MISMATCH = "E100"
-    INCOMPATIBLE_OPERATION = "E101"
-    UNKNOWN_OPERATION = "E200"
-    UNKNOWN_FIELD = "E201"
-    MISSING_REQUIRED_FIELD = "E202"
-    INVALID_FIELD_FOR_TYPE = "E203"
-    UNDEFINED_REFERENCE = "E300"
-    INIT_FIELD_NOT_FOUND = "E301"
-    DEFINE_NOT_FOUND = "E302"
-    INVALID_STRUCT_TYPE = "E400"
-    MISSING_SPECIAL_FIELD = "E401"
-    DEPRECATED_SYNTAX = "W001"
-    UNUSED_FIELD = "W002"
-
-
 class DefineKind(Enum):
     SCALAR = auto()
     BLOCK = auto()
-
-
-@dataclass
-class RawArg:
-    value: str
-    span: Span
 
 
 @dataclass

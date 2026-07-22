@@ -345,10 +345,6 @@ class MethodBase(Node):
     def placeholders(self) -> list[PlaceholderSpec]:
         return self.http_request.placeholders
 
-    @property
-    def placeholder_names(self) -> list[str]:
-        return [p.name for p in self.placeholders]
-
 
 @dataclass
 class MethodFetch(MethodBase):
