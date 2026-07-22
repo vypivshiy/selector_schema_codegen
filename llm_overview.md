@@ -112,7 +112,6 @@ tests/
 ├── js/
 │   └── test_js_codegen.py      # JS codegen tests (Node.js + jsdom)
 ├── test_parser.py              # KDL parser tests
-├── test_kdl_parser.py          # KDL parser edge cases
 ├── test_imports.py             # Import/include tests
 ├── test_css_to_xpath.py        # CSS→XPath conversion tests
 └── test_rest_api.py            # REST/transport layer tests

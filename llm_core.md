@@ -26,7 +26,7 @@ scoped `node.select(...)` для структурных проверок.
 
 ### Expression parsing (core/expressions.py)
 Handles all pipeline expression nodes: selectors, string ops, regex, cast, control, predicates.
-Uses `_OP_TYPES` table for type inference.
+Uses `OP_TYPES` table for type inference.
 
 ### Struct parsing (core/struct_parser.py)
 Handles struct body: fields, @init, @pre-validate, @split-doc, @request, @error, @check.

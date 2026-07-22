@@ -442,6 +442,32 @@ def parse_expressions(
             raise BuildTimeError(f"Unknown expression: {node.name}")
         lint.push(node.name)
         lint_pipeline_op(node, lint)
+        # Guard: ops in _REQUIRES_PREV access parent.body[-1] unconditionally
+        # in their handlers. Emit a diagnostic and skip the handler when the
+        # pipeline is empty so far, instead of crashing with IndexError.
+        if not parent.body and node.name in _REQUIRES_PREV:
+            lint.error(
+                node,
+                message=(f"'{node.name}' requires a preceding operation"),
+                code="E100",
+                hint="add a producer first, e.g. `css '.x'; text`",
+            )
+            lint.pop()
+            continue
+        # Guard: handlers reading node.args[i] without a bounds check would
+        # crash with `tuple index out of range` when the user omits args.
+        required_args = _MIN_ARGS.get(node.name)
+        if required_args and len(node.args) < required_args:
+            lint.error(
+                node,
+                message=(
+                    f"'{node.name}' requires {required_args} argument(s), "
+                    f"got {len(node.args)}"
+                ),
+                code="E001",
+            )
+            lint.pop()
+            continue
         expr = handler(node, parent, ctx, lint)  # type: ignore[assignment,arg-type]
         if expr is None:
             lint.pop()
@@ -498,6 +524,60 @@ _ExpressionHandler = Callable[
     [KdlNode, FieldLikeNode, ParseContext, LintContext], AstNode
 ]
 _EXPRESSION_HANDLERS: dict[str, _ExpressionHandler] = {}
+
+
+# Ops whose handlers access ``parent.body[-1]`` unconditionally and therefore
+# require a preceding node. Used by ``parse_expressions`` to emit a clean
+# E100 diagnostic instead of crashing with IndexError on an empty pipeline.
+_REQUIRES_PREV: frozenset[str] = frozenset(
+    {
+        "trim",
+        "ltrim",
+        "rtrim",
+        "normalize-space",
+        "fmt",
+        "repl",
+        "lower",
+        "upper",
+        "rm-prefix",
+        "rm-suffix",
+        "rm-prefix-suffix",
+        "unescape",
+        "re",
+        "re-sub",
+        "re-all",
+        "to-bool",
+        "to-int",
+        "to-float",
+        "split",
+        "join",
+        "fallback",
+    }
+)
+
+# Minimum positional args each handler reads without checking. Used to emit
+# an E001 diagnostic instead of crashing with `tuple index out of range`
+# when the user forgets a required argument. Block-form selectors
+# (css/css-all/xpath/xpath-all) and `repl` (map form) are omitted — they
+# accept either args OR a children block, validated inside their handlers.
+_MIN_ARGS: dict[str, int] = {
+    "css-remove": 1,
+    "xpath-remove": 1,
+    "attr": 1,
+    "fmt": 1,
+    "rm-prefix": 1,
+    "rm-suffix": 1,
+    "rm-prefix-suffix": 1,
+    "split": 1,
+    "join": 1,
+    "re": 1,
+    "re-all": 1,
+    "re-sub": 2,
+    "index": 1,
+    "slice": 2,
+    "jsonify": 1,
+    "nested": 1,
+}
 
 
 def _reg_expr(name: str):
@@ -1047,6 +1127,9 @@ def _expr_to_float(
 def _expr_to_bool(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
+    # Guard against empty parent.body is enforced centrally in
+    # parse_expressions via _REQUIRES_PREV — handler is reached only when a
+    # preceding node exists.
     prev = parent.body[-1]
     return ToBool(parent=parent, accept_type_info=prev.ret_type_info)
 

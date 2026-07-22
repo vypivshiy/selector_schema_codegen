@@ -176,6 +176,28 @@ Note: `re` emits a runtime helper (`std_re_search` in Python, `_stdReSearch` in 
 - nested <StructName>: DOCUMENT -> NESTED (terminal type)
 - jsonify <SchemaName> [path="..."]: STRING -> JSON (terminal type)
 
+### Parser contract (pipeline ops)
+
+Pipeline operations emit ERROR diagnostics instead of raising exceptions when
+misused. Two guard classes are enforced centrally in `core/expressions.py`
+before the per-op handler runs:
+
+- **E100 "requires a preceding operation"** — when an op that reads
+  `parent.body[-1]` is used at the start of an empty pipeline. Covers:
+  `trim`, `ltrim`, `rtrim`, `normalize-space`, `fmt`, `repl`, `lower`,
+  `upper`, `rm-prefix`, `rm-suffix`, `rm-prefix-suffix`, `unescape`, `re`,
+  `re-sub`, `re-all`, `to-bool`, `to-int`, `to-float`, `split`, `join`,
+  `fallback`.
+- **E001 "requires N argument(s), got M"** — when an op is invoked with
+  fewer positional args than its handler reads without bounds-checking.
+  Covers: `css-remove`, `xpath-remove`, `attr`, `fmt`, `rm-prefix`,
+  `rm-suffix`, `rm-prefix-suffix`, `split`, `join`, `re`, `re-all`,
+  `re-sub`, `index`, `slice`, `jsonify`, `nested`.
+
+Block-form selectors (`css`, `css-all`, `xpath`, `xpath-all`) and the
+`repl` map form accept either a single arg OR a children block — the
+argument-count guard does not apply to them.
+
 ### Control
 
 - filter { predicates... } — filter lists by predicates, LIST_* only
@@ -233,7 +255,7 @@ Logic containers: not, and, or.
 ### Document predicates (filter, assert; not match)
 
 - css <selector> — child element exists
-- xpath <selector> — child element exists
+- xpath <selector> — child element exists (all backends; JS uses `document.evaluate`)
 
 ### Length predicates (assert-only)
 

@@ -5,7 +5,7 @@
 1. **AST node** — define in `ast/<category>.py` (inherit `Node`), set `accept`/`ret` VariableType defaults
 2. **Export** — re-export from `ast/__init__.py`
 3. **Core parser** — add handler in `core/expressions.py` for the new keyword
-4. **Core type rule** — add accept→return mapping in `core/type_checking.py` `_OP_TYPES` dict
+4. **Core type rule** — add accept→return mapping in `core/type_checking.py` `OP_TYPES` dict
 5. **BaseWalker dispatch** — add entry in `_DISPATCH` dict (`traversal/walker.py`): `NodeClass: "visit_node_name"`
 6. **Visitor methods** — implement `visit_<node_name>(self, node, ctx) -> list[str]` in:
    - `targets/python/visitor.py` (PythonVisitor)

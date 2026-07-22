@@ -1306,7 +1306,15 @@ class JsVisitor(BaseWalker):
     def visit_predicate_xpath(
         self, node: PredXpath, ctx: WalkContext
     ) -> list[str]:
-        raise NotImplementedError("XPath predicates not supported in pure JS")
+        q = repr(node.query)
+        target = _pred_target(node, ctx)
+        cond = (
+            f"document.evaluate({q}, {target}, null, "
+            f"XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue "
+            f"!== null"
+        )
+        prefix = "" if ctx.index == 0 else "&& "
+        return [f"{ctx.indent}{prefix}{cond}"]
 
     def visit_predicate_has_attr(
         self, node: PredHasAttr, ctx: WalkContext

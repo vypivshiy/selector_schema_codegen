@@ -1379,7 +1379,7 @@ def lint_wildcard_op(
     node: KdlNode, ctx: ParseContext, lint: LintContext
 ) -> None:
     """Validate unknown ops in pipeline context."""
-    from ssc_codegen.core.type_checking import _OP_TYPES
+    from ssc_codegen.core.type_checking import OP_TYPES
 
     op_name = node.name
     if not op_name:
@@ -1408,7 +1408,7 @@ def lint_wildcard_op(
         return
 
     _KNOWN_OPS: frozenset[str] = (
-        frozenset(_OP_TYPES.keys()) | _EXTRA_PIPELINE_OPS | _PREDICATE_OPS
+        frozenset(OP_TYPES.keys()) | _EXTRA_PIPELINE_OPS | _PREDICATE_OPS
     )
     candidates = sorted(
         _KNOWN_OPS

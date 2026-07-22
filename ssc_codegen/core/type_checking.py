@@ -21,7 +21,7 @@ class OpSig(NamedTuple):
     force_scalar: bool = False  # output always scalar
 
 
-_OP_TYPES: dict[str, OpSig] = {
+OP_TYPES: dict[str, OpSig] = {
     "css": OpSig(VariableType.DOCUMENT, VariableType.DOCUMENT),
     "css-all": OpSig(
         VariableType.DOCUMENT, VariableType.DOCUMENT, force_list=True
@@ -126,7 +126,7 @@ def _resolve_op_ret(
     op_name: str, current_base: VariableType, current_is_array: bool
 ) -> tuple[VariableType, bool]:
     """Return (new_base, new_is_array) after applying op."""
-    sig = _OP_TYPES.get(op_name)
+    sig = OP_TYPES.get(op_name)
     if sig is None:
         return current_base, current_is_array
 
@@ -188,7 +188,7 @@ def _type_mismatch_hint(
         return "'len' counts elements of any list — produce a list first"
     if op_name == "split" and got_base != VariableType.STRING:
         return f"'split' requires STRING, got {got_base.name}"
-    sig = _OP_TYPES.get(op_name)
+    sig = OP_TYPES.get(op_name)
     if sig and sig.accept is not None:
         return f"'{op_name}' accepts: {sig.accept.name}"
     return f"unexpected type {got_base.name} for '{op_name}'"
@@ -356,7 +356,7 @@ def check_pipeline_types(
             continue
 
         # regular op
-        sig = _OP_TYPES.get(op_name)
+        sig = OP_TYPES.get(op_name)
         if sig is None:
             current_base = VariableType.AUTO
             continue
