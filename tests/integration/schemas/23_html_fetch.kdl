@@ -1,0 +1,13 @@
+@doc "MethodFetch smoke: HTML struct with @request."
+
+struct SimplePage {
+    @request """
+    GET /posts/{{id}} HTTP/1.1
+    Host: example.com
+    """
+
+    title {
+        css "h1"
+        text
+    }
+}
