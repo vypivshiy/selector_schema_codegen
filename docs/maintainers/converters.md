@@ -4,8 +4,7 @@
 **Последнее обновление:** 2026-07-21
 
 Конвертер принимает `Module` AST (`ssc_codegen.ast`) и генерирует исходный
-код для целевого runtime. Старый каталог `ssc_codegen/kdl/converters/`
-удалён — текущая архитектура:
+код для целевого runtime. Текущая архитектура:
 
 ```
 traversal/    — language-agnostic обход AST (BaseWalker)

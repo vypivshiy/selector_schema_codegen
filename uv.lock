@@ -325,11 +325,11 @@ wheels = [
 
 [[package]]
 name = "kdlquery"
-version = "1.1.2"
+version = "1.3.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/68/3d/fd9fe58fd36aa1b351c5cadf0d72196b28020c9ed670210f4ede7cb8677c/kdlquery-1.1.2.tar.gz", hash = "sha256:c9fa50806ca21ab99fd60dad4c362b1cc4c5ff15b3b154c679121387175747c0", size = 91775, upload-time = "2026-05-27T22:12:59.762Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/50/2c/bf0b77445f1714c83ef8a8443be6cc84a869f6c9b2f5c8c9e9d53d957c7b/kdlquery-1.3.0.tar.gz", hash = "sha256:eb9f0959b181ce6a6b872b22763a2c3db52093a047c84993065d74edea2f5379", size = 99077, upload-time = "2026-07-22T09:13:40.771Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ef/7b/d5a2dfd54135f0e59c36efd109c7a92f1492f9c27f9c84c228241bf5db6c/kdlquery-1.1.2-py3-none-any.whl", hash = "sha256:b39c2026fec45952f1ecb8fb5c6d831a20717070207cf4c311c50769128a82b9", size = 28253, upload-time = "2026-05-27T22:13:00.973Z" },
+    { url = "https://files.pythonhosted.org/packages/8a/a9/766b71a72a589dce5b404956d6700ae90f1b9d17347f2f82bb95608eaa92/kdlquery-1.3.0-py3-none-any.whl", hash = "sha256:a7f03287a3dbc2b0047037a6487d0413a4ee68ac6ec8b3a72770c9ed0137200b", size = 31489, upload-time = "2026-07-22T09:13:42.566Z" },
 ]
 
 [[package]]
@@ -935,7 +935,7 @@ requires-dist = [
     { name = "colorama", marker = "sys_platform == 'win32'", specifier = ">=0.4.6" },
     { name = "cssselect", specifier = ">=1.2.0" },
     { name = "httpx", specifier = ">=0.28.1" },
-    { name = "kdlquery", specifier = ">=1.1.2" },
+    { name = "kdlquery", specifier = ">=1.3.0" },
     { name = "lxml", specifier = ">=5.3.0" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "soupsieve", specifier = ">=2.6" },
