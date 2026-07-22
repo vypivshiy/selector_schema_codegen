@@ -190,12 +190,12 @@ ssc-gen check schema.kdl                  # text output
 ssc-gen check schema.kdl -f json          # JSON for automated fixing
 
 # generate code (REST struct requires --http-client)
-ssc-gen generate schema.kdl -l python -L bs4 --http-client httpx -o out/  # sync + async_fetch
-ssc-gen generate schema.kdl -l js         --http-client fetch -o out/
-ssc-gen generate schema.kdl -l js         --http-client axios -o out/
+ssc-gen generate python schema.kdl -L bs4 --http-client httpx -o out/  # sync + async_fetch
+ssc-gen generate js schema.kdl         --http-client fetch -o out/
+ssc-gen generate js schema.kdl         --http-client axios -o out/
 ```
 
-Languages: `python`, `js`. Python libs (`-L`): `bs4` (default) | `lxml` | `parsel` | `slax`.
+Languages: `python`, `js`. Python libs (`-L`): `bs4` (default) | `lxml` | `parsel` | `slax`. JS has no `--lib` (native DOMParser).
 HTTP clients: Python — `httpx` (default, sync+async) | `aiohttp` (async only) | `requests` (sync only); JS — `fetch` (default) | `axios`.
 
 Without `--http-client` the generator silently ignores `@request` — the resulting

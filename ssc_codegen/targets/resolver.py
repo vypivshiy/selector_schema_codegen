@@ -16,8 +16,10 @@ def resolve(spec: TargetSpec) -> TargetProfile:
         return _resolve_python(spec)
     if spec.lang in ("javascript", "js"):
         return _resolve_js(spec)
+    if spec.lang == "go":
+        return _resolve_go(spec)
     raise ResolutionError(
-        f"Unknown language '{spec.lang}'. Use 'python' or 'js'."
+        f"Unknown language '{spec.lang}'. Use 'python', 'js', or 'go'."
     )
 
 
@@ -92,4 +94,28 @@ def _resolve_js(spec: TargetSpec) -> TargetProfile:
         file_extension=".js",
         create_converter=lambda: JsVisitor(),
         http_clients=("fetch", "axios"),
+    )
+
+
+def _resolve_go(spec: TargetSpec) -> TargetProfile:
+    from ssc_codegen.targets.golang.visitor import GoVisitor
+
+    if spec.lib is not None:
+        raise ResolutionError("--lib is not applicable for Go.")
+    if spec.http_client is not None:
+        raise ResolutionError(
+            "Go uses net/http exclusively. --http-client is not applicable."
+        )
+    if spec.separate_runtime:
+        raise ResolutionError(
+            "--separate-runtime is not applicable for Go. "
+            "Go always emits helpers to sscgen_runtime.go "
+            "(same package, required for namespace safety)."
+        )
+
+    return TargetProfile(
+        language="go",
+        file_extension=".go",
+        create_converter=lambda: GoVisitor(),
+        http_clients=(),
     )

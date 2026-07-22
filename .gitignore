@@ -150,5 +150,10 @@ test_schemas/
 node_modules/
 package-lock.json
 
+# Go (test/research scratch)
+go.work
+go.work.sum
+/tests/go/scratch/
+
 # slopmachines
 .claude/*

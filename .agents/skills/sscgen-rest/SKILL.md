@@ -17,7 +17,7 @@ description: >
 # sscgen-rest — Skill (REST/JSON API clients)
 
 Generate `(rest)struct` schemas that become typed HTTP clients when run through
-`ssc-gen generate ... --http-client httpx|fetch|axios`.
+`ssc-gen generate python|js ... --http-client httpx|fetch|axios`.
 
 > **REST only.** This skill handles `json` schemas + `@request` + `@error`.
 > For HTML scraping (`css`, `text`, `attr`, `nested`, `(item)struct / (list)struct / …`) → `sscgen-dsl`.
@@ -240,16 +240,16 @@ Loop until exit 0. Cap 5 iterations on same line; then explain conflict.
 
 ```bash
 # Python — sync + async (httpx default)
-ssc-gen generate schema.kdl -l python -L bs4 --http-client httpx -o out/
-ssc-gen generate schema.kdl -l python -L lxml --http-client requests -o out/   # sync only
-ssc-gen generate schema.kdl -l python -L lxml --http-client aiohttp -o out/    # async only
+ssc-gen generate python schema.kdl -L bs4 --http-client httpx -o out/
+ssc-gen generate python schema.kdl -L lxml --http-client requests -o out/   # sync only
+ssc-gen generate python schema.kdl -L lxml --http-client aiohttp -o out/    # async only
 
 # JavaScript
-ssc-gen generate schema.kdl -l js --http-client fetch -o out/
-ssc-gen generate schema.kdl -l js --http-client axios -o out/
+ssc-gen generate js schema.kdl --http-client fetch -o out/
+ssc-gen generate js schema.kdl --http-client axios -o out/
 ```
 
-> Python libs (`-L`): `bs4` (default) | `lxml` | `parsel` | `slax`
+> Python libs (`-L`): `bs4` (default) | `lxml` | `parsel` | `slax`. JS has no `--lib` flag (uses native DOMParser).
 > HTTP clients: Python — `httpx` (default, sync+async) | `aiohttp` (async only) | `requests` (sync only); JS — `fetch` (default) | `axios`
 
 Without `--http-client`, `@request` is silently ignored.

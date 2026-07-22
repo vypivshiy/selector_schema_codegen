@@ -282,7 +282,7 @@ fallback {}       // empty list (for LIST_* types)
 
 ## CSS Selector Syntax Reference
 
-Default target: **CSS3** (universal across bs4 / lxml / parsel / cheerio).
+Default target: **CSS3** (universal across bs4 / lxml / parsel / slax / native JS DOMParser).
 Prefer a more precise selector over adding pipeline operations —
 `[attr^=...]` at selection stage beats `re-sub` later in the pipeline.
 
@@ -336,13 +336,13 @@ Quote values when they contain whitespace or special chars:
 
 ### CSS4 pseudo-classes (opt-in, backend-dependent)
 
-| Pseudo-class | bs4 | lxml | parsel | cheerio | selectolax |
-|--------------|:---:|:----:|:------:|:-------:|:----------:|
-| `:not(simple)` | ✓ | ✓ | ✓ | ✓ | ✓ (simple only) |
-| `:not(complex)` | ✓ | ✓ | ✓ | partial | ✗ |
-| `:is(...)` / `:where(...)` | ✓ | ✓ | ✓ | partial | ✗ |
-| `:has(> child)` | ✓ | ✓ | ✓ | ✓ | ✗ |
-| `:has(descendant)` | ✓ | ✓ | ✓ | ✓ | ✗ |
+| Pseudo-class | bs4 | lxml | parsel | slax | JS DOMParser |
+|--------------|:---:|:----:|:------:|:----:|:------------:|
+| `:not(simple)` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `:not(complex)` | ✓ | ✓ | ✓ | ✓ | partial |
+| `:is(...)` / `:where(...)` | ✓ | ✓ | ✓ | ✓ | partial |
+| `:has(> child)` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `:has(descendant)` | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 **When in doubt under CSS4**: use `[attr^=...]` filters, `filter {}` predicate,
 or split into multiple `css { ... }` pattern-match selectors — all CSS3-only.

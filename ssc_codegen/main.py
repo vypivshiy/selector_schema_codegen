@@ -13,6 +13,7 @@ from ssc_codegen._logging import logger, setup_debug_logging
 from ssc_codegen.core import parse_module, format_diagnostics, ReadDiagnostic
 from ssc_codegen.targets.resolver import ResolutionError, resolve
 from ssc_codegen.targets.spec import TargetSpec
+from ssc_codegen.targets.profile import TargetProfile
 
 
 app = typer.Typer(
@@ -21,10 +22,11 @@ app = typer.Typer(
     help="KDL schema codegen — generate parsers from .kdl schema files.",
 )
 
-
-class Lang(str, enum.Enum):
-    PYTHON = "python"
-    JS = "js"
+gen_app = typer.Typer(
+    no_args_is_help=True,
+    help="Generate parser code from KDL schemas.",
+)
+app.add_typer(gen_app, name="generate")
 
 
 class HtmlLib(str, enum.Enum):
@@ -39,131 +41,20 @@ class FmtType(str, enum.Enum):
     JSON = "json"
 
 
-@app.command()
-def generate(
-    files: Annotated[
-        List[Path],
-        typer.Argument(
-            help="One or more .kdl schema files or directories containing .kdl files to compile.",
-            exists=True,
-            file_okay=True,
-            dir_okay=True,
-            readable=True,
-        ),
-    ],
-    lang: Annotated[
-        Lang,
-        typer.Option(
-            "--lang",
-            "-l",
-            help="Target language backend.",
-            case_sensitive=False,
-        ),
-    ],
-    output: Annotated[
-        Path,
-        typer.Option(
-            "--output",
-            "-o",
-            help="Output directory. Created automatically if it does not exist.",
-            file_okay=False,
-            dir_okay=True,
-            writable=True,
-        ),
-    ] = Path("."),
-    lib: Annotated[
-        Optional[HtmlLib],
-        typer.Option(
-            "--lib",
-            "-L",
-            help="HTML parsing library (Python only). Default: bs4.",
-        ),
-    ] = None,
-    verbose: Annotated[
-        bool,
-        typer.Option(
-            "--verbose",
-            "-v",
-            help="Print full tracebacks on errors and enable DEBUG logging.",
-        ),
-    ] = False,
-    skip_lint: Annotated[
-        bool,
-        typer.Option(
-            "--skip-lint",
-            help="Skip linting before code generation.",
-        ),
-    ] = False,
-    package: Annotated[
-        Optional[str],
-        typer.Option(
-            "--package",
-            help="Package/module name for generated code. Default: output directory name.",
-        ),
-    ] = None,
-    http_client: Annotated[
-        Optional[str],
-        typer.Option(
-            "--http-client",
-            help=(
-                "HTTP client for @request codegen. "
-                "Python: httpx (default) | aiohttp | requests. "
-                "JS: fetch (default) | axios."
-            ),
-        ),
-    ] = None,
-    separate_runtime: Annotated[
-        bool,
-        typer.Option(
-            "--separate-runtime",
-            "-R",
-            help="Extract helper functions into a separate runtime module.",
-        ),
-    ] = False,
-    runtime_name: Annotated[
-        Optional[str],
-        typer.Option(
-            "--runtime-name",
-            "-rn",
-            help="Runtime module name (default: sscgen_runtime).",
-        ),
-    ] = None,
-    fmt: Annotated[
-        FmtType,
-        typer.Option(
-            "--format",
-            "-f",
-            help="Output format: 'text' (human-readable) or 'json' (for LLM pipelines).",
-        ),
-    ] = FmtType.TEXT,
+def _run_generate(
+    profile: TargetProfile,
+    files: List[Path],
+    output: Path,
+    *,
+    package: Optional[str] = None,
+    http_client: Optional[str] = None,
+    separate_runtime: bool = False,
+    runtime_name: Optional[str] = None,
+    skip_lint: bool = False,
+    verbose: bool = False,
+    fmt: FmtType = FmtType.TEXT,
 ) -> None:
-    """Compile KDL schema files into parser code for the chosen target."""
-
-    if verbose:
-        setup_debug_logging()
-
-    try:
-        profile = resolve(
-            TargetSpec(
-                lang=lang.value,
-                lib=lib.value if lib else None,
-                http_client=http_client,
-                separate_runtime=separate_runtime,
-            )
-        )
-    except ResolutionError as exc:
-        typer.echo(f"ERROR: {exc}", err=True)
-        raise typer.Exit(code=1)
-
-    logger.debug(
-        "generate() started: lang=%s, lib=%s, output=%s, files=%s, skip_lint=%s",
-        lang,
-        lib,
-        output,
-        [str(f) for f in files],
-        skip_lint,
-    )
-
+    """Shared generation loop for all language subcommands."""
     kdl_files: list[Path] = []
     for path in files:
         if path.is_dir():
@@ -186,8 +77,6 @@ def generate(
 
     logger.debug("total %d .kdl file(s) to process", len(kdl_files))
 
-    if isinstance(output, str):
-        output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
     ext = profile.file_extension
     converter = profile.create_converter()
@@ -204,13 +93,6 @@ def generate(
 
         _runtime_name = runtime_name or "sscgen_runtime"
         meta["runtime_module"] = _runtime_name
-        # Resolve HTTP strategy for the runtime file. The runtime's
-        # ssc_rest_call references the HTTP transport exception (e.g.
-        # httpx.HTTPError) in its `except` clause and must import the
-        # matching library. Passing the strategy as a whole keeps the
-        # runtime's REST source (Ok/Err/ssc_rest_call/etc.) consistent
-        # with the parser file's transport imports — single source of
-        # truth via PythonVisitor.http_strategy_for.
         http_strategy = None
         if isinstance(converter, PythonVisitor):
             http_strategy = PythonVisitor.http_strategy_for(http_client)
@@ -260,7 +142,11 @@ def generate(
         logger.debug("processing: %s -> %s", kdl_file, out_file)
         try:
             code = converter.convert(ast, **meta)
-            out_file.write_text(code, encoding="utf-8")
+            if profile.language == "go":
+                # gofmt rejects CRLF — force LF line endings on Windows.
+                out_file.write_bytes(code.encode("utf-8"))
+            else:
+                out_file.write_text(code, encoding="utf-8")
             logger.debug(
                 "code generated for %s (%d chars)", kdl_file, len(code)
             )
@@ -273,8 +159,301 @@ def generate(
                 typer.echo(f"  ERROR {kdl_file}: {exc}", err=True)
             errors.append(str(kdl_file))
 
+    # Go: emit shared runtime file (helpers, same package, no import needed).
+    if profile.language == "go":
+        from ssc_codegen.targets.golang.visitor import GoVisitor
+
+        if isinstance(converter, GoVisitor):
+            runtime_path = output / "sscgen_runtime.go"
+            # gofmt rejects CRLF — force LF.
+            runtime_path.write_bytes(
+                converter.emit_runtime(meta["package"]).encode("utf-8")
+            )
+            typer.echo(f"  -> {runtime_path}")
+
     if errors:
         raise typer.Exit(code=1)
+
+
+@gen_app.command("python")
+def generate_python(
+    files: Annotated[
+        List[Path],
+        typer.Argument(
+            help="One or more .kdl schema files or directories containing .kdl files to compile.",
+            exists=True,
+            file_okay=True,
+            dir_okay=True,
+            readable=True,
+        ),
+    ],
+    output: Annotated[
+        Path,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Output directory. Created automatically if it does not exist.",
+            file_okay=False,
+            dir_okay=True,
+            writable=True,
+        ),
+    ] = Path("."),
+    lib: Annotated[
+        Optional[HtmlLib],
+        typer.Option(
+            "--lib",
+            "-L",
+            help="HTML parsing library. Default: bs4.",
+        ),
+    ] = None,
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            "-v",
+            help="Print full tracebacks on errors and enable DEBUG logging.",
+        ),
+    ] = False,
+    skip_lint: Annotated[
+        bool,
+        typer.Option(
+            "--skip-lint",
+            help="Skip linting before code generation.",
+        ),
+    ] = False,
+    package: Annotated[
+        Optional[str],
+        typer.Option(
+            "--package",
+            help="Package/module name for generated code. Default: output directory name.",
+        ),
+    ] = None,
+    http_client: Annotated[
+        Optional[str],
+        typer.Option(
+            "--http-client",
+            help=(
+                "HTTP client for @request codegen: "
+                "httpx (default) | aiohttp | requests."
+            ),
+        ),
+    ] = None,
+    separate_runtime: Annotated[
+        bool,
+        typer.Option(
+            "--separate-runtime",
+            "-R",
+            help="Extract helper functions into a separate runtime module.",
+        ),
+    ] = False,
+    runtime_name: Annotated[
+        Optional[str],
+        typer.Option(
+            "--runtime-name",
+            "-rn",
+            help="Runtime module name (default: sscgen_runtime).",
+        ),
+    ] = None,
+    fmt: Annotated[
+        FmtType,
+        typer.Option(
+            "--format",
+            "-f",
+            help="Output format: 'text' (human-readable) or 'json' (for LLM pipelines).",
+        ),
+    ] = FmtType.TEXT,
+) -> None:
+    """Compile KDL schema files into Python parser code."""
+    if verbose:
+        setup_debug_logging()
+    try:
+        profile = resolve(
+            TargetSpec(
+                lang="python",
+                lib=lib.value if lib else None,
+                http_client=http_client,
+                separate_runtime=separate_runtime,
+            )
+        )
+    except ResolutionError as exc:
+        typer.echo(f"ERROR: {exc}", err=True)
+        raise typer.Exit(code=1)
+    logger.debug(
+        "generate python: lib=%s, output=%s, files=%s",
+        lib,
+        output,
+        [str(f) for f in files],
+    )
+    _run_generate(
+        profile,
+        files,
+        output,
+        package=package,
+        http_client=http_client,
+        separate_runtime=separate_runtime,
+        runtime_name=runtime_name,
+        skip_lint=skip_lint,
+        verbose=verbose,
+        fmt=fmt,
+    )
+
+
+@gen_app.command("js")
+def generate_js(
+    files: Annotated[
+        List[Path],
+        typer.Argument(
+            help="One or more .kdl schema files or directories containing .kdl files to compile.",
+            exists=True,
+            file_okay=True,
+            dir_okay=True,
+            readable=True,
+        ),
+    ],
+    output: Annotated[
+        Path,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Output directory. Created automatically if it does not exist.",
+            file_okay=False,
+            dir_okay=True,
+            writable=True,
+        ),
+    ] = Path("."),
+    http_client: Annotated[
+        Optional[str],
+        typer.Option(
+            "--http-client",
+            help="HTTP client for @request codegen: fetch (default) | axios.",
+        ),
+    ] = None,
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            "-v",
+            help="Print full tracebacks on errors and enable DEBUG logging.",
+        ),
+    ] = False,
+    skip_lint: Annotated[
+        bool,
+        typer.Option(
+            "--skip-lint", help="Skip linting before code generation."
+        ),
+    ] = False,
+    package: Annotated[
+        Optional[str],
+        typer.Option(
+            "--package",
+            help="Module name for generated code. Default: output directory name.",
+        ),
+    ] = None,
+    fmt: Annotated[
+        FmtType,
+        typer.Option(
+            "--format",
+            "-f",
+            help="Output format: 'text' (human-readable) or 'json' (for LLM pipelines).",
+        ),
+    ] = FmtType.TEXT,
+) -> None:
+    """Compile KDL schema files into JavaScript parser code."""
+    if verbose:
+        setup_debug_logging()
+    try:
+        profile = resolve(TargetSpec(lang="js", http_client=http_client))
+    except ResolutionError as exc:
+        typer.echo(f"ERROR: {exc}", err=True)
+        raise typer.Exit(code=1)
+    logger.debug(
+        "generate js: output=%s, files=%s", output, [str(f) for f in files]
+    )
+    _run_generate(
+        profile,
+        files,
+        output,
+        package=package,
+        http_client=http_client,
+        skip_lint=skip_lint,
+        verbose=verbose,
+        fmt=fmt,
+    )
+
+
+@gen_app.command("go")
+def generate_go(
+    files: Annotated[
+        List[Path],
+        typer.Argument(
+            help="One or more .kdl schema files or directories containing .kdl files to compile.",
+            exists=True,
+            file_okay=True,
+            dir_okay=True,
+            readable=True,
+        ),
+    ],
+    output: Annotated[
+        Path,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Output directory. Created automatically if it does not exist.",
+            file_okay=False,
+            dir_okay=True,
+            writable=True,
+        ),
+    ] = Path("."),
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            "-v",
+            help="Print full tracebacks on errors and enable DEBUG logging.",
+        ),
+    ] = False,
+    skip_lint: Annotated[
+        bool,
+        typer.Option(
+            "--skip-lint", help="Skip linting before code generation."
+        ),
+    ] = False,
+    package: Annotated[
+        Optional[str],
+        typer.Option(
+            "--package",
+            help="Go package name for generated code. Default: output directory name.",
+        ),
+    ] = None,
+    fmt: Annotated[
+        FmtType,
+        typer.Option(
+            "--format",
+            "-f",
+            help="Output format: 'text' (human-readable) or 'json' (for LLM pipelines).",
+        ),
+    ] = FmtType.TEXT,
+) -> None:
+    """Compile KDL schema files into Go parser code (goquery + net/http)."""
+    if verbose:
+        setup_debug_logging()
+    try:
+        profile = resolve(TargetSpec(lang="go"))
+    except ResolutionError as exc:
+        typer.echo(f"ERROR: {exc}", err=True)
+        raise typer.Exit(code=1)
+    logger.debug(
+        "generate go: output=%s, files=%s", output, [str(f) for f in files]
+    )
+    _run_generate(
+        profile,
+        files,
+        output,
+        package=package,
+        skip_lint=skip_lint,
+        verbose=verbose,
+        fmt=fmt,
+    )
 
 
 @app.command()
@@ -382,21 +561,12 @@ def run(
             help="Schema target in format 'path/to/schema.kdl:StructName'.",
         ),
     ],
-    lang: Annotated[
-        Lang,
-        typer.Option(
-            "--lang",
-            "-l",
-            help="Target language.",
-            case_sensitive=False,
-        ),
-    ] = Lang.PYTHON,
     lib: Annotated[
         Optional[HtmlLib],
         typer.Option(
             "--lib",
             "-L",
-            help="HTML parsing library (Python only). Default: bs4.",
+            help="HTML parsing library. Default: bs4.",
         ),
     ] = None,
     input_file: Annotated[
@@ -430,11 +600,14 @@ def run(
 ) -> None:
     """Run a KDL schema struct against HTML input and output JSON.
 
+    Python dev/test tool: generates Python code, executes it in-process,
+    and prints the parse result as JSON.
+
     \b
     Examples:
         cat page.html | ssc-gen run examples/booksToScrape.kdl:MainCatalogue
         ssc-gen run schema.kdl:Product -i page.html
-        ssc-gen run schema.kdl:Product -l python -L lxml < page.html
+        ssc-gen run schema.kdl:Product -L lxml < page.html
     """
     import json
     import sys
@@ -490,7 +663,7 @@ def run(
     try:
         profile = resolve(
             TargetSpec(
-                lang=lang.value,
+                lang="python",
                 lib=lib.value if lib else None,
             )
         )

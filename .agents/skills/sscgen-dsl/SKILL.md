@@ -58,7 +58,7 @@ Generate valid **KDL Schema DSL v2.0** configs for HTML scraping from:
 - **No `define`** — inline all values directly into ops: `fmt "https://site/{{}}"`, `re #"pat"#`, `repl { One "1"; ... }`, `@request """..."""`
 - **No `(rest)struct`**, no `@error` — if the response is JSON, switch to `sscgen-rest` (see **Scope boundary** below for detection signals)
 - **`css-all "..." ; index N` is unreliable for N > 0** — the `index` operator has a known ssc-gen bug where values beyond index 0 may silently fall back to the first element. Use `css "selector:nth-of-type(N)"` instead (see Array ops section)
-- **CSS3 selectors by default** — attribute selectors, structural pseudo-classes (`:nth-child`, `:first-child`, `:nth-of-type`, combinators). **CSS4 pseudo-selectors (`:not()`, `:is()`, `:where()`, `:has()`) ONLY when the user's prompt explicitly says "CSS4 allowed"** — backend support varies (bs4 OK, cheerio/selectolax flaky). Prefer a smarter `[attr^=...]` filter or pipeline `filter {}` over CSS4 when in doubt.
+- **CSS3 selectors by default** — attribute selectors, structural pseudo-classes (`:nth-child`, `:first-child`, `:nth-of-type`, combinators). **CSS4 pseudo-selectors (`:not()`, `:is()`, `:where()`, `:has()`) ONLY when the user's prompt explicitly says "CSS4 allowed"** — backend support varies (bs4/lxml OK, JS DOMParser/slax partial). Prefer a smarter `[attr^=...]` filter or pipeline `filter {}` over CSS4 when in doubt.
 - Prefer simple, readable pipelines
 - If extraction can be done with a smarter CSS selector, do that instead of adding ops to the pipeline
 
@@ -656,7 +656,7 @@ const page = await MainPage.fetch(client, { page_num: 2 });
 
 Lowercase `{{name}}` placeholders resolve at runtime from method params.
 
-> Requires `--http-client httpx|requests|aiohttp` (Python) or `--http-client fetch|axios` (JS) at `ssc-gen generate`. Without it, `@request` is silently ignored.
+> Requires `--http-client httpx|requests|aiohttp` (Python) or `--http-client fetch|axios` (JS) at `ssc-gen generate python|js`. Without it, `@request` is silently ignored.
 
 ---
 
@@ -680,12 +680,12 @@ ssc-gen check -f json schemas/
 ### Validation CLI (test against real HTML)
 
 ```bash
-# test schema against HTML file (Python targets)
-ssc-gen run schema.kdl:StructName -l python -L bs4 -i page.html
-ssc-gen run schema.kdl:StructName -l python -L lxml -i page.html
+# test schema against HTML file (Python only; run always uses Python)
+ssc-gen run schema.kdl:StructName -L bs4 -i page.html
+ssc-gen run schema.kdl:StructName -L lxml -i page.html
 
 # test from stdin (pipe HTML)
-curl https://example.com | ssc-gen run schema.kdl:StructName -l python -L bs4
+curl https://example.com | ssc-gen run schema.kdl:StructName -L bs4
 
 # health check — verify selectors match elements
 ssc-gen health schema.kdl:StructName -i page.html
@@ -696,19 +696,21 @@ curl https://example.com | ssc-gen health schema.kdl:StructName
 
 ## Codegen Targets
 
-`ssc-gen run` / `ssc-gen code` / `ssc-gen generate` support multiple language targets:
+`ssc-gen run` and `ssc-gen generate <lang>` support multiple language targets:
 
-| Target | Flag | Default lib | Alt libs | Output style |
-|--------|------|-------------|----------|--------------|
-| Python | `-l python` (default) | `bs4` | `lxml`, `parsel`, `slax` | dataclass-like, `from_html(html) -> Self` classmethod |
-| JavaScript | `-l js` | `cheerio` | `htmlparser2` | ES6 class with `static fromHtml(html)` |
+| Target | Command | Default lib | Alt libs | Output style |
+|--------|---------|-------------|----------|--------------|
+| Python | `ssc-gen generate python` (default for `run`) | `bs4` | `lxml`, `parsel`, `slax` | dataclass-like, `from_html(html) -> Self` classmethod |
+| JavaScript | `ssc-gen generate js` | native DOMParser | (none; `--lib` rejected) | ES6 class with `static fromHtml(html)` |
+| Go | `ssc-gen generate go` | goquery + net/http | (none; `--lib` rejected) | struct + `FromHTML(html string) (T, error)` |
 
 ```bash
-ssc-gen code schema.kdl:MainPage -l python -L bs4      # -> mainpage.py
-ssc-gen code schema.kdl:MainPage -l js    -L cheerio   # -> mainpage.js
+ssc-gen generate python schema.kdl -L bs4 -o out/   # -> schema.py
+ssc-gen generate js     schema.kdl        -o out/   # -> schema.js
+ssc-gen generate go     schema.kdl        -o out/   # -> schema.go + sscgen_runtime.go
 ```
 
-Both targets share the same `.kdl` schema — only codegen differs. For `@request`-bearing structs, pass `--http-client httpx` (Python) or `--http-client axios|fetch` (JS).
+All targets share the same `.kdl` schema — only codegen differs. For `@request`-bearing structs, pass `--http-client httpx|aiohttp|requests` (Python) or `--http-client axios|fetch` (JS). Go uses net/http exclusively (no `--http-client`).
 
 ### Loop algorithm
 
@@ -727,7 +729,7 @@ If after 5 iterations errors persist in the same location, explain the issue to 
 
 After linting passes, if an HTML file is available:
 ```
-6. Run: ssc-gen run schema.kdl:StructName -l python -L bs4 -i page.html
+6. Run: ssc-gen run schema.kdl:StructName -L bs4 -i page.html
 7. Inspect output — verify fields are extracted correctly
 8. If selectors miss elements: ssc-gen health schema.kdl:StructName -i page.html
 ```
@@ -758,7 +760,7 @@ Warning at line 8: 'fmt' template is missing the '{{}}' placeholder
 
 ## CSS Selector Tips
 
-Default target: CSS3 (universal across bs4 / lxml / parsel / cheerio). Prefer a
+Default target: CSS3 (universal across bs4 / lxml / parsel / native JS DOMParser). Prefer a
 more precise selector over adding pipeline operations. Full selector syntax
 (attribute selectors, combinators, pseudo-classes) → `references/ops-quick-ref.md`.
 
@@ -767,9 +769,9 @@ prefix/suffix from an attribute value, check first if a smarter `[attr^=...]`
 or `[attr$=...]` selector can filter at the selection stage instead.
 
 **CSS4** (`:not()`, `:is()`, `:where()`, `:has()`) — opt-in only, when the
-user's prompt explicitly says "CSS4 allowed". bs4/lxml: OK. cheerio: `:has`
-OK, `:is`/`:where` partial. selectolax: `:not` simple-selector only, rest
-unsupported. When in doubt, use `[attr^=...]` or `filter {}` instead.
+user's prompt explicitly says "CSS4 allowed". bs4/lxml/parsel: OK. JS
+DOMParser: `:has` OK, `:is`/`:where` partial. slax: `:not` simple-selector
+only, rest unsupported. When in doubt, use `[attr^=...]` or `filter {}` instead.
 
 ---
 
