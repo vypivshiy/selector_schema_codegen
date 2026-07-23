@@ -1363,3 +1363,232 @@ class TestRequestPlaceholderLint:
         )
         errors = self._lint(src)
         assert not errors
+
+
+# ---------------------------------------------------------------------------
+# response-path / response-join linting on @request (Patch B)
+# ---------------------------------------------------------------------------
+
+
+class TestResponsePathLint:
+    """Verify lint catches malformed response-path and response-join misuse.
+
+    Patch B invariants:
+    - response-path format: dot-notation, non-empty ASCII identifier segments
+    - response-join forbidden on type=rest (Ok.value is extracted object)
+    - response-join without response-path is meaningless
+    """
+
+    @staticmethod
+    def _lint(src: str):
+        _, diagnostics = parse_module(src)
+        return [d for d in diagnostics if d.severity == Severity.ERROR]
+
+    def test_valid_path_no_error_rest(self):
+        src = (
+            "json User { id int }\n"
+            "struct API type=rest {\n"
+            '    @request response=User response-path="data.user" """\n'
+            "    GET /me HTTP/1.1\n"
+            "    Host: api.example.com\n"
+            '    """\n'
+            "}\n"
+        )
+        assert not self._lint(src)
+
+    def test_valid_path_no_error_fetch(self):
+        src = (
+            "struct Page {\n"
+            '    @request response-path="payload.html" """\n'
+            "    GET /page HTTP/1.1\n"
+            "    Host: example.com\n"
+            '    """\n'
+            '    title { css "h1"; text }\n'
+            "}\n"
+        )
+        assert not self._lint(src)
+
+    @pytest.mark.parametrize(
+        "bad_path",
+        [
+            "data..user",  # empty segment
+            ".data",  # leading dot
+            "data.",  # trailing dot
+            "data user",  # space (non-identifier)
+        ],
+    )
+    def test_malformed_path_e001(self, bad_path):
+        src = (
+            "json User { id int }\n"
+            "struct API type=rest {\n"
+            f'    @request response=User response-path="{bad_path}" """\n'
+            "    GET /me HTTP/1.1\n"
+            "    Host: api.example.com\n"
+            '    """\n'
+            "}\n"
+        )
+        errors = self._lint(src)
+        assert len(errors) == 1
+        assert errors[0].code == "E001"
+        assert "response-path" in errors[0].message
+
+    def test_response_join_forbidden_on_rest(self):
+        src = (
+            "json Log { line str }\n"
+            "struct API type=rest {\n"
+            '    @request response=Log response-path="lines" '
+            'response-join="\\n" """\n'
+            "    GET /log HTTP/1.1\n"
+            "    Host: api.example.com\n"
+            '    """\n'
+            "}\n"
+        )
+        errors = self._lint(src)
+        join_errs = [e for e in errors if "response-join" in e.message]
+        assert len(join_errs) == 1
+        assert "forbidden" in join_errs[0].message
+
+    def test_response_join_allowed_on_fetch(self):
+        src = (
+            "struct Page {\n"
+            '    @request response-path="lines" response-join="\\n" """\n'
+            "    GET /page HTTP/1.1\n"
+            "    Host: example.com\n"
+            '    """\n'
+            '    title { css "h1"; text }\n'
+            "}\n"
+        )
+        assert not self._lint(src)
+
+    def test_response_join_without_path_e001(self):
+        src = (
+            "struct Page {\n"
+            '    @request response-join="\\n" """\n'
+            "    GET /page HTTP/1.1\n"
+            "    Host: example.com\n"
+            '    """\n'
+            '    title { css "h1"; text }\n'
+            "}\n"
+        )
+        errors = self._lint(src)
+        join_errs = [e for e in errors if "response-join" in e.message]
+        assert len(join_errs) == 1
+        assert "requires response-path" in join_errs[0].message
+
+
+class TestResponsePathCodegen:
+    """Converter-level asserts: response-path emits value_fn/accessor that
+    extracts the sub-object before Ok.value is constructed.
+
+    Priority rule: when both response-path AND response-schema are set on
+    a (rest)struct, path wins — the schema type-checks the *extracted*
+    sub-object, not the whole envelope.
+    """
+
+    @staticmethod
+    def _rest_path_src(path: str = "data.user") -> str:
+        return (
+            "json User { id int; name str }\n"
+            "struct API type=rest {\n"
+            f'    @request response=User response-path="{path}" """\n'
+            "    GET /me HTTP/1.1\n"
+            "    Host: api.example.com\n"
+            '    """\n'
+            "}\n"
+        )
+
+    def test_py_emits_value_fn_accessor(self):
+        from ssc_codegen.targets.python import (
+            PY_BS4_CONVERTER as CONVERTER,
+        )
+
+        module = _parse(self._rest_path_src())
+        code = CONVERTER.convert(module, http_client="httpx")
+        # value_fn extracts via dict access chain using path segments
+        assert "value_fn=lambda _b: _b['data']['user']," in code
+
+    def test_py_path_dominates_over_void_when_no_schema(self):
+        """response-path with no response-schema still emits value_fn
+        (path wins over the old `void → lambda _: None` branch)."""
+        from ssc_codegen.targets.python import (
+            PY_BS4_CONVERTER as CONVERTER,
+        )
+
+        src = (
+            "struct API type=rest {\n"
+            '    @request response-path="status" """\n'
+            "    GET /ping HTTP/1.1\n"
+            "    Host: api.example.com\n"
+            '    """\n'
+            "}\n"
+        )
+        module = _parse(src)
+        code = CONVERTER.convert(module, http_client="httpx")
+        assert "value_fn=lambda _b: _b['status']," in code
+        # Old void path must NOT fire when response_path is set.
+        assert "value_fn=lambda _: None," not in code
+
+    def test_py_void_without_path_emits_none(self):
+        from ssc_codegen.targets.python import (
+            PY_BS4_CONVERTER as CONVERTER,
+        )
+
+        src = (
+            "struct API type=rest {\n"
+            '    @request """\n'
+            "    GET /ping HTTP/1.1\n"
+            "    Host: api.example.com\n"
+            '    """\n'
+            "}\n"
+        )
+        module = _parse(src)
+        code = CONVERTER.convert(module, http_client="httpx")
+        assert "value_fn=lambda _: None," in code
+
+    def test_js_emits_value_fn_accessor(self):
+        from ssc_codegen.targets.javascript import JS_CONVERTER
+
+        module = _parse(self._rest_path_src())
+        code = JS_CONVERTER.convert(module, http_client="fetch")
+        # JS uses double-quoted JSON-style keys (json.dumps output)
+        assert '(_b) => _b["data"]["user"]' in code
+
+    def test_js_void_without_path_emits_null(self):
+        from ssc_codegen.targets.javascript import JS_CONVERTER
+
+        src = (
+            "struct API type=rest {\n"
+            '    @request """\n'
+            "    GET /ping HTTP/1.1\n"
+            "    Host: api.example.com\n"
+            '    """\n'
+            "}\n"
+        )
+        module = _parse(src)
+        code = JS_CONVERTER.convert(module, http_client="fetch")
+        assert "(_b) => null" in code
+
+    def test_go_emits_gjson_extraction(self):
+        from ssc_codegen.targets.golang import GO_CONVERTER
+
+        module = _parse(self._rest_path_src())
+        code = GO_CONVERTER.convert(module)
+        # gjson.GetBytes(body, "data.user").Raw narrows body before Unmarshal
+        assert 'gjson.GetBytes(body, "data.user").Raw' in code
+
+    def test_go_renamed_body_var_no_underscore_prefix(self):
+        """Patch B also renamed Go locals: _body → body, _err → err,
+        _val → val, _perr → perr inside emit_method_rest."""
+        from ssc_codegen.targets.golang import GO_CONVERTER
+
+        module = _parse(self._rest_path_src())
+        code = GO_CONVERTER.convert(module)
+        assert "var val " in code  # was: var _val
+        assert "if perr := json.Unmarshal(body, &val)" in code
+        assert "if err != nil" in code
+        # Old underscore-prefixed names must be gone from rest methods.
+        rest_section = code[code.find("func Fetch") :]
+        assert "_body" not in rest_section
+        assert "_val" not in rest_section
+        assert "_err" not in rest_section
+        assert "_perr" not in rest_section

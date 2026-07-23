@@ -107,8 +107,54 @@ def parse_struct(
             )
             http = parse_to_http(raw_payload)
             method_name = node.get_prop("name") or ""
-            if isinstance(parent, StructRest):
+            response_path_val = node.get_prop("response-path") or ""
+            response_join_val = node.get_prop("response-join") or ""
+
+            is_rest = isinstance(parent, StructRest)
+
+            # Lint: response-path format (dot-notation, non-empty segments).
+            if response_path_val:
+                segments = response_path_val.split(".")
+                bad = any(not seg for seg in segments) or any(
+                    not seg.replace("-", "_").isidentifier() for seg in segments
+                )
+                if bad:
+                    lint.error(
+                        node,
+                        message=(
+                            "response-path must be dot-notation with "
+                            "non-empty ASCII identifier segments "
+                            '(e.g. "data.user"); got '
+                            f"{response_path_val!r}"
+                        ),
+                        code="E001",
+                    )
+
+            # Lint: response-join only on fetch-track.
+            if response_join_val and is_rest:
+                lint.error(
+                    node,
+                    message=(
+                        "response-join is forbidden on type=rest structs "
+                        "(use response-path alone; Ok.value is the "
+                        "extracted object)"
+                    ),
+                    code="E001",
+                )
+
+            # Lint: response-join without response-path is meaningless.
+            if response_join_val and not response_path_val:
+                lint.error(
+                    node,
+                    message=(
+                        "response-join requires response-path (nothing to join)"
+                    ),
+                    code="E001",
+                )
+
+            if is_rest:
                 rest_method = MethodRest(parent=parent, name=method_name)
+                rest_method.response_path = response_path_val
                 response_schema_val = node.get_prop("response") or ""
                 rest_method.response_schema = str(
                     ctx.property_defines.get(
@@ -124,12 +170,8 @@ def parse_struct(
                 parent.body.append(rest_method)
             else:
                 fetch_method = MethodFetch(parent=parent, name=method_name)
-                fetch_method.response_path = (
-                    node.get_prop("response-path") or ""
-                )
-                fetch_method.response_join = (
-                    node.get_prop("response-join") or ""
-                )
+                fetch_method.response_path = response_path_val
+                fetch_method.response_join = response_join_val
                 http.parent = fetch_method
                 fetch_method.body.append(http)
                 parent.body.append(fetch_method)

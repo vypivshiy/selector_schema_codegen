@@ -420,9 +420,12 @@ def emit_method_rest(
         spec, i2, i3, include_method_url=False
     )
 
-    void_kwarg: list[str] = []
-    if not node.response_schema:
-        void_kwarg = [f"{i3}value_fn=lambda _: None,"]
+    value_kwarg: list[str] = []
+    if node.response_path:
+        accessor = "".join(f"[{p!r}]" for p in node.response_path.split("."))
+        value_kwarg = [f"{i3}value_fn=lambda _b: _b{accessor},"]
+    elif not node.response_schema:
+        value_kwarg = [f"{i3}value_fn=lambda _: None,"]
 
     def _body(fn_name: str, await_kw: str) -> list[str]:
         body: list[str] = []
@@ -442,7 +445,7 @@ def emit_method_rest(
             f"{i3}client, {matchers_var}, {spec.method!r},"
             f" {render_value(spec.url)},"
         )
-        body.extend(void_kwarg)
+        body.extend(value_kwarg)
         body.extend(kwargs_lines)
         body.append(f"{i2}))")
         return body

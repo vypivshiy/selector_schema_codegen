@@ -337,6 +337,19 @@ class MethodBase(Node):
 
     name: str = ""  # method name suffix; "" = default fetch()
 
+    #: Dot-notation JSON path extracted from the 2xx response body before it
+    #: becomes ``Ok.value`` (REST) or the parser input (fetch). Example:
+    #: ``"data.user"`` resolves ``{"data": {"user": ...}}`` to the inner
+    #: object. When set together with ``response_schema`` (REST), the path
+    #: wins: the schema type-checks the *extracted* sub-object, not the
+    #: whole envelope. ``@error`` matchers always run against the full body.
+    response_path: str = ""
+
+    #: Join separator applied when ``response_path`` resolves to a
+    #: ``list[str]`` (fetch-only). Forbidden on ``MethodRest``; the linter
+    #: rejects ``response-join`` on ``type=rest`` structs.
+    response_join: str = ""
+
     @property
     def http_request(self) -> RequestHttp:
         return [n for n in self.body if isinstance(n, RequestHttp)][0]
@@ -352,11 +365,6 @@ class MethodFetch(MethodBase):
 
     ``fetch()`` returns a parser instance constructed from the HTTP response body.
     """
-
-    response_path: str = ""  # dot-notation JSON path, e.g. "payload.html"
-    response_join: str = (
-        ""  # join separator when response-path resolves to list[str]
-    )
 
 
 @dataclass

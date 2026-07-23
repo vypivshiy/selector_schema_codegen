@@ -1812,6 +1812,8 @@ class GoVisitor(BaseWalker):
         self._builder.require_import('"fmt"')
         if node.response_schema:
             self._builder.require_import('"encoding/json"')
+        if node.response_path:
+            self._builder.require_import('"github.com/tidwall/gjson"')
         spec = node.http_request
         if spec.body_kind == "form" and isinstance(spec.body, dict):
             self._builder.require_import('"net/url"')

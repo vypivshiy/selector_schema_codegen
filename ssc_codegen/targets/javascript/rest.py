@@ -7,6 +7,8 @@ Called by JsVisitor via thin delegate methods.  The HTTP library strategy
 
 from __future__ import annotations
 
+import json
+
 from ssc_codegen.ast import (
     JsonDef,
     MatcherListDef,
@@ -334,7 +336,15 @@ def emit_method_rest(
     )
 
     fn_name = http.fn_name
-    value_fn = "(_b) => null" if not node.response_schema else "null"
+    if node.response_path:
+        accessor = "".join(
+            f"[{json.dumps(p)}]" for p in node.response_path.split(".")
+        )
+        value_fn = f"(_b) => _b{accessor}"
+    elif not node.response_schema:
+        value_fn = "(_b) => null"
+    else:
+        value_fn = "null"
 
     if http_client == "axios":
         url_expr = render_value(spec.url)

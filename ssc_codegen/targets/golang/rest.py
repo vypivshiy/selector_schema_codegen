@@ -333,15 +333,15 @@ def emit_method_rest(
 
     # Call sscRestCall — inline if nil, multi-line if struct literal.
     # For void responses, use `_` since the body is discarded.
-    body_var = "_" if not node.response_schema else "_body"
+    body_var = "_" if not node.response_schema else "body"
     if len(opts_lines) == 1:
         lines.append(
-            f"{i2}{body_var}, _err := sscRestCall(client, {matchers_var}, "
+            f"{i2}{body_var}, err := sscRestCall(client, {matchers_var}, "
             f"{_go_str(spec.method)}, {url_expr}, {opts_lines[0].strip()})"
         )
     else:
         lines.append(
-            f"{i2}{body_var}, _err := sscRestCall(client, {matchers_var}, "
+            f"{i2}{body_var}, err := sscRestCall(client, {matchers_var}, "
             f"{_go_str(spec.method)}, {url_expr},"
         )
         lines.append(f"{opts_lines[0].strip()}")
@@ -350,28 +350,35 @@ def emit_method_rest(
         lines.append(f"{opts_lines[-1].strip()})")
 
     # Error propagation.
-    lines.append(f"{i2}if _err != nil {{")
-    lines.append(f"{i2}\treturn {zero}, _err")
+    lines.append(f"{i2}if err != nil {{")
+    lines.append(f"{i2}\treturn {zero}, err")
     lines.append(f"{i2}}}")
 
     # Parse response body (when typed) or return void.
     if node.response_schema:
         schema_go = f"{to_pascal_case(node.response_schema)}Json"
+        # response_path extraction: narrow body to the sub-object before
+        # Unmarshal. gjson `.Raw` preserves JSON structure (works for both
+        # scalar-object and array paths). Path wins over schema: the
+        # schema type-checks the *extracted* value, not the envelope.
+        if node.response_path:
+            path = _go_str(node.response_path)
+            lines.append(f"{i2}body = []byte(gjson.GetBytes(body, {path}).Raw)")
         if getattr(node, "response_is_array", False):
-            lines.append(f"{i2}var _val []{schema_go}")
+            lines.append(f"{i2}var val []{schema_go}")
         else:
-            lines.append(f"{i2}var _val {schema_go}")
+            lines.append(f"{i2}var val {schema_go}")
         lines.append(
-            f"{i2}if _perr := json.Unmarshal(_body, &_val); _perr != nil {{"
+            f"{i2}if perr := json.Unmarshal(body, &val); perr != nil {{"
         )
         lines.append(
-            f'{i2}\treturn {zero}, fmt.Errorf("ssc-gen: parse {schema_go}: %w", _perr)'
+            f'{i2}\treturn {zero}, fmt.Errorf("ssc-gen: parse {schema_go}: %w", perr)'
         )
         lines.append(f"{i2}}}")
         if getattr(node, "response_is_array", False):
-            lines.append(f"{i2}return _val, nil")
+            lines.append(f"{i2}return val, nil")
         else:
-            lines.append(f"{i2}return &_val, nil")
+            lines.append(f"{i2}return &val, nil")
     else:
         lines.append(f"{i2}return {zero}, nil")
 

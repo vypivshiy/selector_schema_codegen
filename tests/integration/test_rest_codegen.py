@@ -546,12 +546,14 @@ class TestRestMultiMethod:
 
 
 class TestRestResponsePath:
-    def test_ok_returns_full_body(self, response_path_ns):
+    def test_ok_returns_extracted_sub_object(self, response_path_ns):
+        """response-path="data.user" → Ok.value is the inner user object,
+        not the full ``{"data": {"user": ...}}`` envelope."""
         API = response_path_ns["API"]
 
         with respx.mock:
             respx.get("https://api.example.com/me").respond(
-                json={"id": 1, "name": "TestUser"},
+                json={"data": {"user": {"id": 1, "name": "TestUser"}}},
                 status_code=200,
             )
             client = httpx.Client()
@@ -559,3 +561,44 @@ class TestRestResponsePath:
 
         assert result.is_ok is True
         assert result.value == {"id": 1, "name": "TestUser"}
+
+    def test_async_ok_returns_extracted_sub_object(self, response_path_ns):
+        API = response_path_ns["API"]
+
+        with respx.mock:
+
+            async def _run():
+                respx.get("https://api.example.com/me").respond(
+                    json={"data": {"user": {"id": 2, "name": "AsyncUser"}}},
+                    status_code=200,
+                )
+                async with httpx.AsyncClient() as client:
+                    return await API.async_fetch(client)
+
+            result = asyncio.run(_run())
+
+        assert result.is_ok is True
+        assert result.value == {"id": 2, "name": "AsyncUser"}
+
+    def test_error_matcher_runs_against_full_envelope(self, response_path_ns):
+        """@error matchers must see the *full* body, not the extracted
+        sub-object. Patch B invariant: extraction only narrows Ok.value.
+
+        Fixture 22 has no @error, so unmatched 404 falls through to
+        UnknownErr — its ``value`` must be the raw envelope, proving
+        matchers saw the full body."""
+        API = response_path_ns["API"]
+
+        with respx.mock:
+            respx.get("https://api.example.com/me").respond(
+                json={"data": {"user": {"id": 9}}, "code": 404},
+                status_code=404,
+            )
+            client = httpx.Client()
+            result = API.fetch(client)
+
+        assert result.is_ok is False
+        assert result.status == 404
+        assert isinstance(result, response_path_ns["UnknownErr"])
+        # UnknownErr.value is the full body, NOT the extracted sub-object.
+        assert result.value == {"data": {"user": {"id": 9}}, "code": 404}
