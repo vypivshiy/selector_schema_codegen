@@ -602,3 +602,138 @@ class TestRestResponsePath:
         assert isinstance(result, response_path_ns["UnknownErr"])
         # UnknownErr.value is the full body, NOT the extracted sub-object.
         assert result.value == {"data": {"user": {"id": 9}}, "code": 404}
+
+
+# ---------------------------------------------------------------------------
+# 8. aiohttp non-JSON Content-Type (mixcloud-style text/javascript)
+# ---------------------------------------------------------------------------
+
+
+class TestRestAiohttpNonJsonContentType:
+    """aiohttp ``resp.json()`` raises ``ContentTypeError`` when the server
+    returns JSON under a non-``application/json`` Content-Type. Codegen
+    must emit ``content_type=None`` so JSON parsing succeeds regardless
+    of the Content-Type header.
+
+    Uses ``aioresponses`` (aiohttp-native mock) — respx is httpx-only.
+    Body is passed as raw bytes so the mock honours the explicit
+    ``Content-Type: text/javascript`` header (``payload=`` would force
+    ``application/json``).
+    """
+
+    @staticmethod
+    def _gen(src: str) -> dict:
+        from ssc_codegen.targets.python import (
+            PY_BS4_CONVERTER as PY_BASE_CONVERTER,
+        )
+
+        module = _parse(src)
+        code = PY_BASE_CONVERTER.convert(module, http_client="aiohttp")
+        namespace: dict = {}
+        exec(code, namespace)  # noqa: S102
+        return namespace
+
+    def test_ok_parses_json_with_text_javascript_ct(self):
+        """mixcloud-style: JSON body under text/javascript Content-Type.
+        Pre-fix: silent Ok with value=None (caught in REST runtime's
+        try/except → body=None). Post-fix: parsed body reaches Ok.value."""
+        aiohttp = pytest.importorskip("aiohttp")
+        aioresponses = pytest.importorskip("aioresponses")
+
+        src = (
+            "json User { id int; name str }\n"
+            "struct API type=rest {\n"
+            '    @request response=User """\n'
+            "    GET /me HTTP/1.1\n"
+            "    Host: api.example.com\n"
+            '    """\n'
+            "}\n"
+        )
+        ns = self._gen(src)
+        API = ns["API"]
+
+        async def _run():
+            with aioresponses.aioresponses() as mocked:
+                mocked.get(
+                    "https://api.example.com/me",
+                    status=200,
+                    body=b'{"id": 7, "name": "Mix"}',
+                    headers={"Content-Type": "text/javascript"},
+                )
+                async with aiohttp.ClientSession() as session:
+                    return await API.async_fetch(session)
+
+        result = asyncio.run(_run())
+        assert result.is_ok is True
+        assert result.value == {"id": 7, "name": "Mix"}
+
+    def test_response_path_extracts_under_non_json_ct(self):
+        """Patch B + CT fix combo: response-path extraction must work even
+        when the server returns JSON under a non-standard Content-Type."""
+        aiohttp = pytest.importorskip("aiohttp")
+        aioresponses = pytest.importorskip("aioresponses")
+
+        src = (
+            "json User { id int; name str }\n"
+            "struct API type=rest {\n"
+            '    @request response=User response-path="data.user" """\n'
+            "    GET /me HTTP/1.1\n"
+            "    Host: api.example.com\n"
+            '    """\n'
+            "}\n"
+        )
+        ns = self._gen(src)
+        API = ns["API"]
+
+        async def _run():
+            with aioresponses.aioresponses() as mocked:
+                mocked.get(
+                    "https://api.example.com/me",
+                    status=200,
+                    body=b'{"data": {"user": {"id": 1, "name": "X"}}}',
+                    headers={"Content-Type": "application/octet-stream"},
+                )
+                async with aiohttp.ClientSession() as session:
+                    return await API.async_fetch(session)
+
+        result = asyncio.run(_run())
+        assert result.is_ok is True
+        # Extracted sub-object, not the full envelope.
+        assert result.value == {"id": 1, "name": "X"}
+
+    def test_unknown_err_carries_body_under_non_json_ct(self):
+        """@error matcher invariant under non-JSON CT: UnknownErr.value
+        still carries the parsed body (matcher saw full envelope)."""
+        aiohttp = pytest.importorskip("aiohttp")
+        aioresponses = pytest.importorskip("aioresponses")
+
+        src = (
+            "json User { id int }\n"
+            "struct API type=rest {\n"
+            '    @request response=User response-path="data" """\n'
+            "    GET /me HTTP/1.1\n"
+            "    Host: api.example.com\n"
+            '    """\n'
+            "}\n"
+        )
+        ns = self._gen(src)
+        API = ns["API"]
+
+        async def _run():
+            with aioresponses.aioresponses() as mocked:
+                mocked.get(
+                    "https://api.example.com/me",
+                    status=404,
+                    body=b'{"data": {"x": 1}, "code": 404}',
+                    headers={"Content-Type": "text/javascript"},
+                )
+                async with aiohttp.ClientSession() as session:
+                    return await API.async_fetch(session)
+
+        result = asyncio.run(_run())
+        assert result.is_ok is False
+        assert result.status == 404
+        assert isinstance(result, ns["UnknownErr"])
+        # Full envelope preserved on the error path (response-path only
+        # narrows Ok.value, never the matcher-visible body).
+        assert result.value == {"data": {"x": 1}, "code": 404}

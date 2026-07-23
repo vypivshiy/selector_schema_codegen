@@ -41,7 +41,7 @@ class AioHttpStrategy(HttpLibStrategy):
         lines.append(f"{i3}_resp.raise_for_status()")
         if response_path:
             accessor = "".join(f"[{p!r}]" for p in response_path.split("."))
-            lines.append(f"{i3}_data = await _resp.json()")
+            lines.append(f"{i3}_data = await _resp.json(content_type=None)")
             if response_join:
                 lines.append(
                     f"{i3}_body = {response_join!r}.join(_data{accessor})"
@@ -133,7 +133,7 @@ class AioHttpStrategy(HttpLibStrategy):
             "                status = resp.status",
             "                headers = {k.lower(): v for k, v in resp.headers.items()}",
             "                try:",
-            "                    body = await resp.json()",
+            "                    body = await resp.json(content_type=None)",
             "                except Exception:",
             "                    body = None",
             f"        except {exc} as exc:",
@@ -165,7 +165,7 @@ class AioHttpStrategy(HttpLibStrategy):
             "            status = resp.status",
             "            headers = {k.lower(): v for k, v in resp.headers.items()}",
             "            try:",
-            "                body = await resp.json()",
+            "                body = await resp.json(content_type=None)",
             "            except Exception:",
             "                body = None",
             f"    except {exc} as exc:",

@@ -1592,3 +1592,91 @@ class TestResponsePathCodegen:
         assert "_val" not in rest_section
         assert "_err" not in rest_section
         assert "_perr" not in rest_section
+
+
+# ---------------------------------------------------------------------------
+# aiohttp content_type=None — non-JSON Content-Type bug (TASK_MIGRATION §2.1)
+# ---------------------------------------------------------------------------
+
+
+class TestAiohttpContentTypeBypass:
+    """aiohttp ``resp.json()`` raises ``ContentTypeError`` when the server
+    returns JSON under a non-``application/json`` Content-Type (mixcloud
+    sends ``text/javascript``). Codegen must emit ``content_type=None`` to
+    disable the check on every aiohttp JSON path.
+
+    Affects:
+    - ``fetch_body_lines`` (MethodFetch with response-path)
+    - ``ssc_rest_call`` and ``ssc_rest_call_async`` (REST runtime)
+
+    httpx/requests are unaffected — their ``.json()`` ignores Content-Type.
+    """
+
+    @staticmethod
+    def _fetch_with_path_src() -> str:
+        return (
+            "struct Page {\n"
+            '    @request response-path="data" """\n'
+            "    GET /p HTTP/1.1\n"
+            "    Host: api.example.com\n"
+            '    """\n'
+            '    title { css "h1"; text }\n'
+            "}\n"
+        )
+
+    def test_aiohttp_fetch_body_lines_bypass_content_type(self):
+        """fetch path with response-path must pass content_type=None."""
+        from ssc_codegen.targets.python.http_libs.aiohttp import (
+            AioHttpStrategy,
+        )
+
+        strategy = AioHttpStrategy()
+        lines = strategy.fetch_body_lines(
+            is_async=True,
+            request_call="async with client.request(",
+            kwargs_lines=[],
+            response_path="data",
+            response_join="",
+            i2="    ",
+            i3="        ",
+        )
+        joined = "\n".join(lines)
+        assert "await _resp.json(content_type=None)" in joined
+
+    def test_aiohttp_rest_runtime_call_has_content_type_none(self):
+        from ssc_codegen.targets.python.http_libs.aiohttp import (
+            AioHttpStrategy,
+        )
+
+        runtime = "\n".join(AioHttpStrategy().rest_runtime_lines())
+        # Both ssc_rest_call and ssc_rest_call_async must bypass CT check.
+        assert runtime.count("await resp.json(content_type=None)") == 2
+
+    def test_aiohttp_runtime_does_not_use_bare_json(self):
+        """No ``await resp.json()`` (without content_type) must remain in
+        the aiohttp runtime — bare call would re-introduce the CT bug."""
+        from ssc_codegen.targets.python.http_libs.aiohttp import (
+            AioHttpStrategy,
+        )
+
+        runtime = "\n".join(AioHttpStrategy().rest_runtime_lines())
+        assert "await resp.json()" not in runtime
+        assert "await _resp.json()" not in runtime
+
+    def test_httpx_runtime_does_not_have_content_type_kwarg(self):
+        """httpx is not affected — must NOT carry the aiohttp-specific
+        kwarg (regression guard against copy-paste across strategies)."""
+        from ssc_codegen.targets.python.http_libs.httpx import HttpxStrategy
+
+        runtime = "\n".join(HttpxStrategy().rest_runtime_lines())
+        assert "content_type=None" not in runtime
+        assert "resp.json()" in runtime  # bare call is safe on httpx
+
+    def test_requests_runtime_does_not_have_content_type_kwarg(self):
+        from ssc_codegen.targets.python.http_libs.requests import (
+            RequestsStrategy,
+        )
+
+        runtime = "\n".join(RequestsStrategy().rest_runtime_lines())
+        assert "content_type=None" not in runtime
+        assert "resp.json()" in runtime
