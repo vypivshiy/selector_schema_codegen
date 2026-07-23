@@ -281,6 +281,16 @@ def placeholder_params(http: RequestHttp) -> str:
     return ", *, " + ", ".join(parts)
 
 
+def placeholder_args(http: RequestHttp) -> str:
+    """Keyword-forwarding string for delegating between fetch variants.
+
+    Produces ``"id=id, tags=tags"`` so a caller can forward its own keyword
+    params (``fetch`` declares them keyword-only via ``*``). Used by
+    ``async_fetch`` executor wrappers (requests strategy).
+    """
+    return ", ".join(f"{ph.name}={ph.name}" for ph in http.placeholders)
+
+
 # ===========================================================================
 # Shared kwargs builder
 # ===========================================================================
@@ -327,6 +337,7 @@ def emit_method_fetch(
     struct_name = to_pascal_case(cast(StructBase, node.parent).name)
     suffix = ("_" + to_snake_case(node.name)) if node.name else ""
     ph_params = placeholder_params(spec)
+    ph_kwargs = placeholder_args(spec)
 
     i1 = ctx.indent
     i2 = i1 + ctx.indent_char
@@ -336,39 +347,55 @@ def emit_method_fetch(
         spec, i2, i3, include_method_url=True
     )
 
-    post_lines: list[str] = [f"{i2}_resp.raise_for_status()"]
-    if node.response_path:
-        accessor = "".join(f"[{p!r}]" for p in node.response_path.split("."))
-        post_lines.append(f"{i2}_data = _resp.json()")
-        if node.response_join:
-            post_lines.append(
-                f"{i2}_body = {node.response_join!r}.join(_data{accessor})"
-            )
-        else:
-            post_lines.append(f"{i2}_body = _data{accessor}")
-    else:
-        post_lines.append(f"{i2}_body = _resp.text")
-    post_lines.append(f"{i2}return cls(_body)")
-
     lines: list[str] = []
-    lines.append(f"{i1}@classmethod")
-    lines.append(
-        f'{i1}def fetch{suffix}(cls, client: {http.sync_client_type}{ph_params}) -> "{struct_name}":'
-    )
-    lines.extend(pre_lines)
-    lines.extend([f"{i2}_resp = client.request(", *kwargs_lines, f"{i2})"])
-    lines.extend(post_lines)
-    lines.append("")
 
+    # --- sync fetch (httpx, requests) -------------------------------------
+    if http.supports_sync_fetch:
+        lines.append(f"{i1}@classmethod")
+        lines.append(
+            f'{i1}def fetch{suffix}(cls, client: {http.sync_client_type}{ph_params}) -> "{struct_name}":'
+        )
+        lines.extend(pre_lines)
+        lines.extend(
+            http.fetch_body_lines(
+                is_async=False,
+                request_call=f"{i2}_resp = client.request(",
+                kwargs_lines=kwargs_lines,
+                response_path=node.response_path,
+                response_join=node.response_join,
+                i2=i2,
+                i3=i3,
+            )
+        )
+        lines.append("")
+
+    # --- async_fetch ------------------------------------------------------
     lines.append(f"{i1}@classmethod")
     lines.append(
         f'{i1}async def async_fetch{suffix}(cls, client: {http.async_client_type}{ph_params}) -> "{struct_name}":'
     )
-    lines.extend(pre_lines)
-    lines.extend(
-        [f"{i2}_resp = await client.request(", *kwargs_lines, f"{i2})"]
-    )
-    lines.extend(post_lines)
+    if http.async_fetch_delegates_to_sync:
+        # requests: no native async — run the sync fetch in a worker thread
+        # via asyncio.to_thread (non-blocking, yields control to the loop).
+        to_thread_args = f"client, {ph_kwargs}" if ph_kwargs else "client"
+        lines.append(f"{i2}import asyncio")
+        lines.append(
+            f"{i2}return await asyncio.to_thread("
+            f"cls.fetch{suffix}, {to_thread_args})"
+        )
+    else:
+        lines.extend(pre_lines)
+        lines.extend(
+            http.fetch_body_lines(
+                is_async=True,
+                request_call=f"{i2}_resp = await client.request(",
+                kwargs_lines=kwargs_lines,
+                response_path=node.response_path,
+                response_join=node.response_join,
+                i2=i2,
+                i3=i3,
+            )
+        )
     return lines
 
 

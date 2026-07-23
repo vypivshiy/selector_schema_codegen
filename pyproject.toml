@@ -55,6 +55,8 @@ packages = ["ssc_codegen"]
 
 [dependency-groups]
 dev = [
+    "aiohttp>=3.9,<3.12",  # aioresponses 0.7.x breaks on 3.12+ (stream_writer)
+    "aioresponses>=0.7",
     "bs4>=0.0.2",
     "coverage>=7.6.12",
     "httpx>=0.28.1",
@@ -64,6 +66,7 @@ dev = [
     "parsel>=1.9.1",
     "pytest>=8.3.4",
     "respx>=0.23.1",
+    "responses>=0.25",
     "ruff>=0.9.3",
     "selectolax>=0.3.27",
 ]

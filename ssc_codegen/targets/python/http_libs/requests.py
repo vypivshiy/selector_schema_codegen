@@ -15,6 +15,10 @@ class RequestsStrategy(HttpLibStrategy):
     async_client_type = "requests.Session"
     transport_exception = "requests.RequestException"
 
+    # requests has no native async API: async_fetch wraps the sync fetch via
+    # asyncio.to_thread (worker thread, non-blocking). See emit_method_fetch.
+    async_fetch_delegates_to_sync = True
+
     def rest_runtime_lines(self) -> list[str]:
         exc = self.transport_exception
         return [
