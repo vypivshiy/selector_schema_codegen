@@ -658,6 +658,53 @@ def test_json_lint_omitempty_modifier_ok():
     assert len(errs) == 0
 
 
+# ── JSON top-down ref order (E302, analogous to nested) ────────────────────────
+
+
+def _lint_codes(src: str) -> list[str]:
+    _, diagnostics = parse_module(src)
+    return [d.code for d in diagnostics if d.severity == Severity.ERROR]
+
+
+def test_json_lint_topdown_forward_ref_error():
+    """json field referencing a json def declared BELOW → E302."""
+    errs = _lint_errors("json A { x B }\njson B { y str }")
+    assert any(
+        "must be declared BEFORE use (top-down order)" in e for e in errs
+    )
+    assert any("'B'" in e for e in errs)
+    assert "E302" in _lint_codes("json A { x B }\njson B { y str }")
+
+
+def test_json_lint_topdown_correct_order_ok():
+    """json field referencing an already-declared json def → no E302."""
+    errs = _lint_errors("json B { y str }\njson A { x B }")
+    assert not any("top-down order" in e for e in errs)
+
+
+def test_json_lint_topdown_array_optional_forward_ref():
+    """(array)/? modifiers stripped before the top-down check."""
+    errs = _lint_errors("json A { x (array)B? }\njson B { y str }")
+    assert any("must be declared BEFORE use" in e for e in errs)
+
+
+def test_json_lint_topdown_block_define_forward_ref():
+    """Forward ref inside an expanded block define is still caught."""
+    errs = _lint_errors(
+        "define COMMON { author JsonAuthor }\n"
+        "json Quote { COMMON }\n"
+        "json JsonAuthor { name str }\n"
+    )
+    assert any("must be declared BEFORE use" in e for e in errs)
+
+
+def test_json_lint_topdown_undefined_not_double_reported():
+    """Undefined ref → E300 only (cross-refs), no spurious E302."""
+    codes = _lint_codes("json A { x NoExist }")
+    assert "E300" in codes
+    assert "E302" not in codes
+
+
 # ── REST cross-ref linter tests ───────────────────────────────────────────────
 
 

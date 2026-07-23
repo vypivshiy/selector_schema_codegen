@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import difflib as _difflib
 import re as _re
+from typing import Iterator
 
 from ssc_codegen.ast.struct import PLACEHOLDER_WIDE_RE, PlaceholderSpec
 from kdlquery import KdlDocument, KdlNode, ReadDiagnostic, Severity
@@ -165,6 +166,7 @@ def lint_module(
     _lint_json_defs(doc, source_path, diags, children_defines)
     _lint_structs(doc, source_path, diags, children_defines)
     _lint_nested_topdown(doc, source_path, diags)
+    _lint_json_refs_topdown(doc, source_path, diags, children_defines)
     return diags
 
 
@@ -420,8 +422,89 @@ def _lint_nested_topdown(
                         source_path,
                         code="E302",
                         hint=f"move 'struct {target} {{ ... }}' above 'struct {caller_name}'",
-                    ),
+                    )
                 )
+
+
+def _lint_json_refs_topdown(
+    doc: KdlDocument,
+    source_path: str,
+    diags: list[ReadDiagnostic],
+    children_defines: dict[str, list[KdlNode]],
+) -> None:
+    """Enforce top-down declaration order for json field type refs.
+
+    A json field whose type is not a primitive (str/int/float/bool/null/nil)
+    references another ``json`` definition. That target must be declared in
+    the same file, BEFORE the referencing json def (helpers first,
+    entrypoint last) — mirrors the ``nested`` top-down rule.
+
+    Emits:
+      E302 — json field references a json def declared BELOW the caller
+
+    Refs not in the local order map are skipped: imported defs are resolved
+    cross-file, and genuinely undefined refs are reported (E300) by
+    :func:`lint_cross_refs`.
+    """
+    json_nodes = list(doc.select("json:root"))
+    order: dict[str, int] = {}
+    for idx, j in enumerate(json_nodes):
+        name = _node_arg(j, 0)
+        if name:
+            order[name] = idx
+
+    for caller in json_nodes:
+        caller_name = _node_arg(caller, 0)
+        if not caller_name:
+            continue
+        caller_idx = order.get(caller_name, -1)
+        for field_node, ref_name in _iter_json_field_type_refs(
+            caller, children_defines
+        ):
+            if ref_name not in order:
+                continue  # imported or undefined — handled by lint_cross_refs
+            if order[ref_name] > caller_idx:
+                diags.append(
+                    _error(
+                        field_node,
+                        f"json field '{field_node.name}': json type '{ref_name}' must be declared BEFORE use (top-down order)",
+                        source_path,
+                        code="E302",
+                        hint=f"move 'json {ref_name} {{ ... }}' above 'json {caller_name}'",
+                    )
+                )
+
+
+def _iter_json_field_type_refs(
+    json_node: KdlNode,
+    children_defines: dict[str, list[KdlNode]],
+) -> Iterator[tuple[KdlNode, str]]:
+    """Yield ``(field_node, ref_name)`` for each non-primitive json field type.
+
+    Expands block defines (bare field name → recursive field list) to match
+    ``parse_json_fields`` semantics.
+    """
+    queue: list[KdlNode] = list(json_node.children)
+    while queue:
+        field_node = queue.pop(0)
+        args = _node_args(field_node)
+        if not args and field_node.name in children_defines:
+            queue = list(children_defines[field_node.name]) + queue
+            continue
+        type_ = ""
+        for a in args:
+            if a.startswith("@"):
+                continue
+            type_ = a
+            break
+        if not type_:
+            continue
+        if type_.startswith("(array)"):
+            type_ = type_[len("(array)") :]
+        if type_.endswith("?"):
+            type_ = type_[:-1]
+        if type_ and type_ not in _VALID_JSON_TYPES:
+            yield field_node, type_
 
 
 def _lint_single_struct(
