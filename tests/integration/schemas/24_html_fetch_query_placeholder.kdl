@@ -1,0 +1,16 @@
+@doc "MethodFetch: placeholder in bare-value query string."
+
+struct ForumPage {
+    @request """
+    GET /?32-{{username}} HTTP/1.1
+    Host: example.com
+    User-Agent: Mozilla/5.0
+    Accept: text/html
+    """
+
+    @check exists {
+        css "img"
+        to-bool
+        fallback #false
+    }
+}

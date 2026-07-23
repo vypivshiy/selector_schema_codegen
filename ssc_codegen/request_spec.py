@@ -62,10 +62,21 @@ def parse_to_http(payload: str) -> RequestHttp:
 
     method: str = kwargs.get("method", "GET").upper()
     full_url: str = kwargs.get("url", "")
-    url = _strip_query(full_url)
+    raw_params: dict = kwargs.get("params", {})
+    # Bare-value query form like ``?32-{{username}}`` (no ``=``) makes
+    # parse_qs classify the whole token as a dict KEY with empty value.
+    # Dict keys are never tokenized downstream, so the placeholder would be
+    # lost from both the URL and the signature. When that happens, keep the
+    # full URL so PlaceholderTemplate.parse(url) can tokenize it and skip the
+    # params dict. Proper ``key=...`` form yields clean keys → params path.
+    if any(PlaceholderSpec.search(k) for k in raw_params):
+        url = full_url
+        params: dict = {}
+    else:
+        url = _strip_query(full_url)
+        params = raw_params
     headers: dict = kwargs.get("headers", {})
     cookies: dict = kwargs.get("cookies", {})
-    params: dict = kwargs.get("params", {})
 
     # ── body ─────────────────────────────────────────────────────────────────
     body_kind = "empty"

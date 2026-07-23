@@ -33,6 +33,9 @@ SCHEMAS_DIR = Path(__file__).parent / "schemas"
 HTML_BODY = "<html><body><h1>Hello World</h1></body></html>"
 URL = "https://example.com/posts/1"
 
+QUERY_PH_BODY = "<html><body><img src='x'></body></html>"
+QUERY_PH_URL = "https://example.com/?32-alice"
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -62,6 +65,11 @@ def _exec(src: str, *, http_client: str) -> dict:
 @pytest.fixture(scope="module")
 def schema_src() -> str:
     return (SCHEMAS_DIR / "23_html_fetch.kdl").read_text()
+
+
+@pytest.fixture(scope="module")
+def query_ph_src() -> str:
+    return (SCHEMAS_DIR / "24_html_fetch_query_placeholder.kdl").read_text()
 
 
 # ---------------------------------------------------------------------------
@@ -271,3 +279,61 @@ class TestRequestsRuntime:
             with requests.Session() as session:
                 with pytest.raises(requests.HTTPError):
                     SimplePage.fetch(session, id="1")
+
+
+# ---------------------------------------------------------------------------
+# 7. Query-string placeholder (bare-value form: ?32-{{username}})
+# ---------------------------------------------------------------------------
+
+
+class TestQueryPlaceholderCodegen:
+    """Regression: placeholder inside a bare-value query string was lost.
+
+    ``parse_qs("32-{{username}}")`` classified the token as a dict key with
+    empty value; dict keys are never tokenized → no signature param and a
+    literal ``params={'32-{{username}}': ''}`` in the body. Fixed by keeping
+    the full URL when the query contains a placeholder.
+    """
+
+    def test_signature_has_username_kwarg_httpx(self, query_ph_src: str):
+        code = _generate_code(query_ph_src, http_client="httpx")
+        assert "def fetch(cls, client: httpx.Client, *, username: str)" in code
+        assert (
+            "async def async_fetch(cls, client: httpx.AsyncClient, *, username: str)"
+            in code
+        )
+
+    def test_signature_has_username_kwarg_aiohttp(self, query_ph_src: str):
+        code = _generate_code(query_ph_src, http_client="aiohttp")
+        assert (
+            "async def async_fetch(cls, client: aiohttp.ClientSession, *, username: str)"
+            in code
+        )
+
+    def test_url_fstring_renders_placeholder(self, query_ph_src: str):
+        code = _generate_code(query_ph_src, http_client="httpx")
+        assert 'f"https://example.com/?32-{username}"' in code
+
+    def test_no_literal_placeholder_in_params(self, query_ph_src: str):
+        code = _generate_code(query_ph_src, http_client="httpx")
+        assert "{{username}}" not in code
+        assert "params=" not in code
+
+
+class TestQueryPlaceholderRuntime:
+    def test_async_fetch_hits_templated_url(self, query_ph_src: str):
+        httpx = pytest.importorskip("httpx")
+        respx = pytest.importorskip("respx")
+
+        ns = _exec(query_ph_src, http_client="httpx")
+        ForumPage = ns["ForumPage"]
+
+        with respx.mock:
+            route = respx.get(QUERY_PH_URL).respond(
+                status_code=200, text=QUERY_PH_BODY
+            )
+            with httpx.Client() as client:
+                page = ForumPage.fetch(client, username="alice")
+
+        assert route.called
+        assert page.exists() is True
