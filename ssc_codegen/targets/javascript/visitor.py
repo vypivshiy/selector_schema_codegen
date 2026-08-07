@@ -465,14 +465,22 @@ class JsVisitor(BaseWalker):
         if isinstance(node.parent, StructRest):
             return []
         i1, i2, i3 = ctx.indent, ctx.indent * 2, ctx.indent * 3
-        lines = [
-            f"{i1}constructor(document) {{",
-            f"{i2}if (typeof document === 'string') {{",
-            f"{i3}this._doc = (new DOMParser()).parseFromString(document, 'text/html');",
-            f"{i2}}} else {{",
-            f"{i3}this._doc = document;",
-            f"{i2}}}",
-        ]
+        struct = node.parent
+        is_raw = isinstance(struct, Struct) and struct.type == ST.RAW
+        if is_raw:
+            lines = [
+                f"{i1}constructor(document) {{",
+                f"{i2}this._doc = document;",
+            ]
+        else:
+            lines = [
+                f"{i1}constructor(document) {{",
+                f"{i2}if (typeof document === 'string') {{",
+                f"{i3}this._doc = (new DOMParser()).parseFromString(document, 'text/html');",
+                f"{i2}}} else {{",
+                f"{i3}this._doc = document;",
+                f"{i2}}}",
+            ]
         lines.extend(self.walk_children(node, ctx))
         lines.append(f"{i1}}}")
         return lines
@@ -574,6 +582,9 @@ class JsVisitor(BaseWalker):
             ret_type = f"Array<{name}Type>"
         elif st == ST.FLAT:
             ret_type = "Array<string>"
+        elif st == ST.RAW:
+            has_split = any(isinstance(n, SplitDoc) for n in struct.body)
+            ret_type = f"Array<{name}Type>" if has_split else f"{name}Type"
         else:
             ret_type = f"{name}Type"
         i1, i2, i3 = ctx.indent, ctx.indent * 2, ctx.indent * 3
@@ -642,6 +653,24 @@ class JsVisitor(BaseWalker):
                 )
             lines.append(f"{i2}}}")
             lines.append(f"{i2}return _result;")
+        elif st == ST.RAW:
+            has_split = node.use_split_doc
+            if has_split:
+                lines.append(
+                    f"{i2}return Array.from(this._splitDoc(this._doc)).map(i => ({{"
+                )
+                for f in node.fields:
+                    n = to_camel_case(f.name)
+                    lines.append(f"{i3}{n}: this.{_js_method_name(f.name)}(i),")
+                lines.append(f"{i2}}}));")
+            else:
+                lines.append(f"{i2}return {{")
+                for f in node.fields:
+                    n = to_camel_case(f.name)
+                    lines.append(
+                        f"{i3}{n}: this.{_js_method_name(f.name)}(this._doc),"
+                    )
+                lines.append(f"{i2}}};")
         lines.append(f"{i1}}}")
         return lines
 

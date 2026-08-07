@@ -29,8 +29,8 @@ from ssc_codegen.targets.python.http_libs.base import HttpLibStrategy
 from ssc_codegen.traversal.context import WalkContext
 from ssc_codegen.traversal.utils import (
     dict_needs_builder,
+    module_has_html_struct,
     module_has_rest,
-    module_is_rest_only,
 )
 
 
@@ -245,7 +245,7 @@ def runtime_export_names(
     - Module with REST structs: also import REST names.
     """
     names: list[str] = list(_RUNTIME_ALWAYS_EXPORT_NAMES)
-    if not module_is_rest_only(module):
+    if module_has_html_struct(module):
         names.extend(_RUNTIME_HTML_EXPORT_NAMES)
         if need_fallback:
             names.append("FALLBACK_HTML_STR")

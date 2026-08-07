@@ -125,8 +125,8 @@ from ssc_codegen.ast import (
 from ssc_codegen.naming import to_pascal_case, to_snake_case
 from ssc_codegen.traversal.utils import (
     jsonify_path_to_segments,
+    module_has_html_struct,
     module_has_rest,
-    module_is_rest_only,
     module_uses_http,
 )
 from ssc_codegen.generation.builder import ModuleBuilder
@@ -340,6 +340,11 @@ class PythonVisitor(BaseWalker):
                 return self.ARRAY_TYPE_FMT.format(f"{name}Type")
             case ST.FLAT:
                 return self.ARRAY_TYPE_FMT.format(self.TYPES[VT.STRING])
+            case ST.RAW:
+                has_split = any(isinstance(n, SplitDoc) for n in struct.body)
+                if has_split:
+                    return self.ARRAY_TYPE_FMT.format(f"{name}Type")
+                return f"{name}Type"
             case _:
                 return self.TYPES[VT.STRING]
 
@@ -350,10 +355,10 @@ class PythonVisitor(BaseWalker):
         if node.doc:
             lines.extend(['"""', node.doc, '"""'])
         has_rest = module_has_rest(node)
-        is_rest_only = module_is_rest_only(node)
         uses_http = module_uses_http(node)
+        has_html = module_has_html_struct(node)
         runtime = ctx.meta.get("runtime_module")
-        if not is_rest_only:
+        if has_html:
             for line in self._dom.parser_imports:
                 self._builder.require_import(line)
         self._builder.require_import(
@@ -419,8 +424,8 @@ class PythonVisitor(BaseWalker):
         lines.extend(self._builder.imports)
         lines.append("")
         mod = node.parent
-        is_rest_only = isinstance(mod, Module) and module_is_rest_only(mod)
-        if not is_rest_only:
+        has_html = isinstance(mod, Module) and module_has_html_struct(mod)
+        if has_html:
             lines.extend(
                 [
                     "class UnmatchedTableRow:",
@@ -481,7 +486,7 @@ class PythonVisitor(BaseWalker):
                 return self.walk_children(node, ctx)
             case ST.FLAT:
                 return [f"{name}Type = List[str]"]
-            case ST.ITEM | ST.LIST | ST.TABLE:
+            case ST.ITEM | ST.LIST | ST.TABLE | ST.RAW:
                 lines = [f'{name}Type = TypedDict("{name}Type", {{']
                 lines.extend(self.walk_children(node, ctx))
                 lines.append("})")
@@ -552,13 +557,21 @@ class PythonVisitor(BaseWalker):
             ctx.deeper().indent,
             ctx.deeper().deeper().indent,
         )
-        lines = [
-            f"{i}def __init__(self, document: {self._dom.init_arg_type}):",
-            f"{i2}if isinstance(document, str):",
-            f"{i3}self._doc = {self._dom.init_from_str_expr}",
-            f"{i2}else:",
-            f"{i3}self._doc = document",
-        ]
+        struct = node.parent
+        is_raw = isinstance(struct, Struct) and struct.type == ST.RAW
+        if is_raw:
+            lines = [
+                f"{i}def __init__(self, document: str):",
+                f"{i2}self._doc = document",
+            ]
+        else:
+            lines = [
+                f"{i}def __init__(self, document: {self._dom.init_arg_type}):",
+                f"{i2}if isinstance(document, str):",
+                f"{i3}self._doc = {self._dom.init_from_str_expr}",
+                f"{i2}else:",
+                f"{i3}self._doc = document",
+            ]
         lines.extend(self.walk_children(node, ctx))
         return lines
 
@@ -713,6 +726,21 @@ class PythonVisitor(BaseWalker):
                     lines.append(f"{i4}_result[{fn!r}] = _{fn}")
                     lines.append(f"{i4}continue")
                 lines.append(f"{i2}return _result")
+            case ST.RAW:
+                if node.use_split_doc:
+                    lines.append(f"{i2}return [{{")
+                    for field in node.fields:
+                        fn = to_snake_case(field.name)
+                        lines.append(f"{i2}{fn!r}: self._parse_{fn}(i),")
+                    lines.append(f"{i3}}} for i in self._split_doc(self._doc)]")
+                else:
+                    lines.append(f"{i2}return {{")
+                    for field in node.fields:
+                        fn = to_snake_case(field.name)
+                        lines.append(
+                            f"{i3}{fn!r}: self._parse_{fn}(self._doc),"
+                        )
+                    lines.append(f"{i3}}}")
         return lines
 
     # === REST / FETCH (delegate to rest.py) ===

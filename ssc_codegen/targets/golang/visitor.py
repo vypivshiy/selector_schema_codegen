@@ -418,6 +418,9 @@ class GoVisitor(BaseWalker):
                 return f"[]{name}Type"
             case ST.FLAT:
                 return "[]string"
+            case ST.RAW:
+                has_split = any(isinstance(n, SplitDoc) for n in struct.body)
+                return f"[]{name}Type" if has_split else f"{name}Type"
             case _:
                 return "any"
 
@@ -516,7 +519,7 @@ class GoVisitor(BaseWalker):
                 return [f"type {name}Type = map[string]{vt}", ""]
             case ST.TABLE:
                 return [f"type {name}Type = map[string]any", ""]
-            case ST.ITEM | ST.LIST:
+            case ST.ITEM | ST.LIST | ST.RAW:
                 lines = [f"type {name}Type struct {{"]
                 lines.extend(self.walk_children(node, ctx))
                 lines.append("}")
@@ -611,7 +614,9 @@ class GoVisitor(BaseWalker):
                     else f"{ctx.indent}//"
                 )
         lines.append(f"type {name} struct {{")
-        lines.append("\tsel *goquery.Selection")
+        is_raw = isinstance(node, Struct) and node.type == ST.RAW
+        sel_type = "string" if is_raw else "*goquery.Selection"
+        lines.append(f"\tsel {sel_type}")
         init_fields = self._collect_init_fields(node)
         for cn, gt, _ in init_fields:
             lines.append(f"\t{cn} {gt}")
@@ -633,18 +638,28 @@ class GoVisitor(BaseWalker):
     ) -> list[str]:
         i = ctx.indent
         i2 = ctx.deeper().indent
-        lines: list[str] = [
-            f"func New{name}(input string) (*{name}, error) {{",
-            f"{i2}doc, err := goquery.NewDocumentFromReader(strings.NewReader(input))",
-            f"{i2}if err != nil {{",
-            f"{i2}\treturn nil, err",
-            f"{i2}}}",
-            f"{i2}{rcv} := &{name}{{sel: doc.Selection}}",
-        ]
+        is_raw = isinstance(node, Struct) and node.type == ST.RAW
+        if is_raw:
+            lines: list[str] = [
+                f"func New{name}(input string) *{name} {{",
+                f"{i2}{rcv} := &{name}{{sel: input}}",
+            ]
+        else:
+            lines = [
+                f"func New{name}(input string) (*{name}, error) {{",
+                f"{i2}doc, err := goquery.NewDocumentFromReader(strings.NewReader(input))",
+                f"{i2}if err != nil {{",
+                f"{i2}\treturn nil, err",
+                f"{i2}}}",
+                f"{i2}{rcv} := &{name}{{sel: doc.Selection}}",
+            ]
         init_fields = self._collect_init_fields(node)
         if init_fields:
             lines.append(f"{i2}{rcv}.init()")
-        lines.append(f"{i2}return {rcv}, nil")
+        if is_raw:
+            lines.append(f"{i2}return {rcv}")
+        else:
+            lines.append(f"{i2}return {rcv}, nil")
         lines.append(f"{i}}}")
         lines.append("")
         return lines
@@ -935,6 +950,31 @@ class GoVisitor(BaseWalker):
                     lines.append(f"{i2}}}")
                 else:
                     lines.append(f"{i2}return {name}Type{{}}")
+            case ST.RAW:
+                if node.use_split_doc:
+                    lines.append(f"{i2}rows := {rcv}.splitDoc({rcv}.sel)")
+                    lines.append(
+                        f"{i2}result := make([]{name}Type, 0, len(rows))"
+                    )
+                    lines.append(f"{i2}for _, item := range rows {{")
+                    lines.append(f"{i3}result = append(result, {name}Type{{")
+                    for f in node.fields:
+                        fn = _go_field_name(f.name)
+                        mn = _go_method_name(f.name)
+                        lines.append(f"{i4}{fn}: {rcv}.{mn}(item),")
+                    lines.append(f"{i3}}})")
+                    lines.append(f"{i2}}}")
+                    lines.append(f"{i2}return result")
+                else:
+                    if node.fields:
+                        lines.append(f"{i2}return {name}Type{{")
+                        for f in node.fields:
+                            fn = _go_field_name(f.name)
+                            mn = _go_method_name(f.name)
+                            lines.append(f"{i3}{fn}: {rcv}.{mn}({rcv}.sel),")
+                        lines.append(f"{i2}}}")
+                    else:
+                        lines.append(f"{i2}return {name}Type{{}}")
             case ST.LIST:
                 lines.append(f"{i2}rows := {rcv}.splitDoc({rcv}.sel)")
                 lines.append(
