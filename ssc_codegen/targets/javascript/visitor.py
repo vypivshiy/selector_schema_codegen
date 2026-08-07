@@ -31,6 +31,7 @@ from ssc_codegen.ast import (
     Field,
     Filter,
     Fmt,
+    FunctionDef,
     Init,
     InitField,
     InitFieldCall,
@@ -526,6 +527,31 @@ class JsVisitor(BaseWalker):
         ]
         lines.extend(self.walk_children(node, ctx))
         lines.append("}")
+        return lines
+
+    def visit_function_def(
+        self, node: FunctionDef, ctx: WalkContext
+    ) -> list[str]:
+        name = to_camel_case(node.name)
+        inner = ctx.deeper()
+        lines: list[str] = []
+        if node.doc:
+            lines.extend(_js_docblock(node.doc.splitlines()))
+        lines.append(f"function {name}(document) {{")
+        if node.is_raw:
+            lines.append(f"{inner.indent}let {inner.var_name} = document;")
+        else:
+            lines.append(f"{inner.indent}let {inner.var_name};")
+            lines.append(f"{inner.indent}if (typeof document === 'string') {{")
+            lines.append(
+                f"{inner.deeper().indent}{inner.var_name} = (new DOMParser()).parseFromString(document, 'text/html');"
+            )
+            lines.append(f"{inner.indent}}} else {{")
+            lines.append(f"{inner.deeper().indent}{inner.var_name} = document;")
+            lines.append(f"{inner.indent}}}")
+        lines.extend(self.walk_children(node, ctx))
+        lines.append("}")
+        lines.append("")
         return lines
 
     def visit_split_doc(self, node: SplitDoc, ctx: WalkContext) -> list[str]:

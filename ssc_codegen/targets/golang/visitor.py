@@ -35,6 +35,7 @@ from ssc_codegen.ast import (
     Field,
     Filter,
     Fmt,
+    FunctionDef,
     Init,
     InitField,
     InitFieldCall,
@@ -136,8 +137,8 @@ from ssc_codegen.naming import (
 )
 from ssc_codegen.traversal.utils import (
     find_predicate_container,
+    module_has_html_struct,
     module_has_rest,
-    module_is_rest_only,
     module_uses_http,
 )
 from ssc_codegen.generation.builder import ModuleBuilder
@@ -439,10 +440,9 @@ class GoVisitor(BaseWalker):
                 lines.append(f"// {doc_line}" if doc_line else "//")
             lines.append("")
 
-        is_rest_only = module_is_rest_only(node)
         uses_http = module_uses_http(node)
 
-        if not is_rest_only:
+        if module_has_html_struct(node):
             self._builder.require_import('"github.com/PuerkitoBio/goquery"')
             self._builder.require_import('"strings"')
         if uses_http:
@@ -839,6 +839,33 @@ class GoVisitor(BaseWalker):
         ]
         lines.extend(self.walk_children(node, ctx))
         lines.append(f"{ctx.indent}}}")
+        lines.append("")
+        return lines
+
+    def visit_function_def(
+        self, node: FunctionDef, ctx: WalkContext
+    ) -> list[str]:
+        name = to_pascal_case(node.name)
+        t_ret = self._resolve_type(node.ret_type_info)
+        inner = ctx.deeper()
+        lines: list[str] = []
+        if node.doc:
+            for doc_line in node.doc.splitlines():
+                lines.append(f"// {doc_line}")
+        lines.append(f"func {name}(document string) {t_ret} {{")
+        if node.is_raw:
+            lines.append(f"{inner.indent}{inner.var_name} := document")
+        else:
+            self._builder.require_import('"strings"')
+            lines.append(
+                f"{inner.indent}doc, err := goquery.NewDocumentFromReader(strings.NewReader(document))"
+            )
+            lines.append(f"{inner.indent}if err != nil {{")
+            lines.append(f"{inner.indent}\tpanic(err)")
+            lines.append(f"{inner.indent}}}")
+            lines.append(f"{inner.indent}{inner.var_name} := doc.Selection")
+        lines.extend(self.walk_children(node, ctx))
+        lines.append("}")
         lines.append("")
         return lines
 

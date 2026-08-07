@@ -6,6 +6,7 @@ from ssc_codegen.ast import (
     Assert,
     ErrorResponse,
     Filter,
+    FunctionDef,
     Match,
     MethodBase,
     Module,
@@ -49,12 +50,19 @@ def module_is_rest_only(module: Module) -> bool:
 
 
 def module_has_html_struct(module: Module) -> bool:
-    """True if the module has at least one HTML-parsing struct (not REST, not RAW)."""
+    """True if the module has at least one HTML-parsing struct or function.
+
+    RAW structs, (raw)fn, and REST structs are excluded — they don't need
+    an HTML parser backend (bs4/lxml/goquery/DOMParser).
+    """
     for n in module.body:
         if isinstance(n, StructRest):
             continue
         if isinstance(n, Struct):
             if n.type != StructType.RAW:
+                return True
+        if isinstance(n, FunctionDef):
+            if not n.is_raw:
                 return True
     return False
 

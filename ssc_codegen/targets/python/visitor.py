@@ -28,6 +28,7 @@ from ssc_codegen.ast import (
     InitFieldCall,
     InitField,
     Field,
+    FunctionDef,
     PreValidate,
     CheckMethod,
     SplitDoc,
@@ -659,6 +660,31 @@ class PythonVisitor(BaseWalker):
             f"{ctx.indent * 2}{ctx.var_name} = self._doc",
         ]
         lines.extend(self.walk_children(node, ctx))
+        return lines
+
+    def visit_function_def(
+        self, node: FunctionDef, ctx: WalkContext
+    ) -> list[str]:
+        name = to_snake_case(node.name)
+        t_ret = self._resolve_type(node.ret_type_info)
+        inner = ctx.deeper()
+        lines = [f"{ctx.indent}def {name}(document: str) -> {t_ret}:"]
+        if node.doc:
+            lines.append(f'{inner.indent}"""')
+            for doc_line in node.doc.splitlines():
+                lines.append(inner.indent + doc_line)
+            lines.append(f'{inner.indent}"""')
+        if node.is_raw:
+            lines.append(f"{inner.indent}{inner.var_name} = document")
+        else:
+            lines.append(f"{inner.indent}if isinstance(document, str):")
+            lines.append(
+                f"{inner.deeper().indent}{inner.var_name} = {self._dom.init_from_str_expr}"
+            )
+            lines.append(f"{inner.indent}else:")
+            lines.append(f"{inner.deeper().indent}{inner.var_name} = document")
+        lines.extend(self.walk_children(node, ctx))
+        lines.append("")
         return lines
 
     def visit_split_doc(self, node: SplitDoc, ctx: WalkContext) -> list[str]:
