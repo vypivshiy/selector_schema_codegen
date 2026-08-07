@@ -31,7 +31,7 @@ struct Simple {
 Генерация:
 
 ```bash
-ssc-gen generate simple.kdl -l python -L bs4
+ssc-gen generate python simple.kdl -L bs4
 ```
 
 Проверка (линтер):
@@ -50,6 +50,18 @@ ssc-gen check simple.kdl
 }
 ```
 
+## Пример: парсинг простого текста (raw)
+
+Для документов без HTML (JS-файлы, URL, текстовые данные):
+
+```kdl
+(raw)struct PlayerScript {
+    playlist_url { re #"file:\s*[\"']([^\"']+)[\"']"#
+}
+```
+
+Документ — строка, HTML-операции запрещены. См. [syntax.md](syntax.md#rawstruct--парсинг-простого-текста).
+
 ## Генерация с помощью LLM
 
 LLM-агент (Claude, ChatGPT и др.) может генерировать и отлаживать `.kdl` схемы
@@ -67,7 +79,7 @@ LLM-агент (Claude, ChatGPT и др.) может генерировать и
 6. Повторяйте до чистого прохода линтера.
 7. **Сгенерируйте код** парсера:
    ```bash
-   ssc-gen generate schema.kdl -l python -L bs4
+   ssc-gen generate python schema.kdl -L bs4
    ```
 
 В IDE с поддержкой агентов (Claude Code, Cursor, opencode и т.д.) этот цикл
@@ -78,7 +90,9 @@ LLM-агент (Claude, ChatGPT и др.) может генерировать и
 ## Где смотреть живые примеры
 
 См. каталог `examples/` в репозитории:
-- `booksToScrape.kdl`
-- `quotesToScrape.kdl`
+- `booksToScrape.kdl` — HTML-скрапинг (list)
+- `quotesToScrape.kdl` — HTML-скрапинг (flat)
+- `rawParser.kdl` — парсинг простого текста (raw struct)
+- `restApiLike.kdl` — REST API клиент
 
 Они отражают актуальные возможности реализации.

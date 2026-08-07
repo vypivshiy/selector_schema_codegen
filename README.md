@@ -37,7 +37,7 @@ uv tool install ssc_codegen
 Generate Python parser:
 
 ```bash
-ssc-gen generate books.kdl -l python -L bs4 -o ./output
+ssc-gen generate python books.kdl -L bs4 -o ./output
 ```
 
 ## Usage
@@ -46,22 +46,25 @@ ssc-gen generate books.kdl -l python -L bs4 -o ./output
 
 ```bash
 # single file (Python + bs4)
-ssc-gen generate schema.kdl -l python -L bs4 -o ./output
+ssc-gen generate python schema.kdl -L bs4 -o ./output
 
 # all .kdl files in a directory (JavaScript)
-ssc-gen generate examples/ -l js -o ./output
+ssc-gen generate js examples/ -o ./output
+
+# Go (goquery + net/http)
+ssc-gen generate go schema.kdl -o ./output
 
 # with custom package name
-ssc-gen generate schema.kdl -l python -L bs4 -o ./parsers --package scraper
+ssc-gen generate python schema.kdl -L bs4 -o ./parsers --package scraper
 
 # with @request support (REST/HTTP codegen)
-ssc-gen generate schema.kdl -l python -L bs4 -o ./out --http-client httpx
+ssc-gen generate python schema.kdl -L bs4 -o ./out --http-client httpx
 
 # extract helper functions into a separate runtime module
-ssc-gen generate schema.kdl -l python -L bs4 -o ./out -R
+ssc-gen generate python schema.kdl -L bs4 -o ./out -R
 ```
 
-Languages (`--lang / -l`): `python`, `js`.
+Languages: `generate python`, `generate js`, `generate go`.
 HTML libraries (`--lib / -L`, Python only): `bs4` (default), `lxml`, `parsel`, `slax`.
 
 ### Lint schemas

@@ -138,11 +138,17 @@ struct Main {
 | `dict` | `dict[str, any]` | `@split-doc`, `@key`, `@value` |
 | `table` | `dict` | `@table`, `@rows`, `@match`, `@value` |
 | `flat` | `list[str]` | - |
+| `raw` | `dict` или `list[dict]` | - |
 
 Примечания:
 - `flat` собирает строки из полей структуры и удаляет дубли.  
   С `keep-order=#true` порядок первых вхождений сохраняется.
 - `dict` использует `@split-doc` для набора элементов, затем `@key`/`@value`.
+- `raw` — парсер простого текста без HTML-бэкенда. Документ — строка `str`,
+  поля принимают `STRING` напрямую. ITEM/LIST определяется автоматически:
+  `@split-doc` есть → LIST, нет → ITEM. HTML-операции (`css`, `xpath`, `text`,
+  `attr`, `raw`) запрещены. Поддерживаются `@request`/`fetch()`, `@init`,
+  `@pre-validate`, `@check`.
 
 ## Специальные поля
 
@@ -152,7 +158,7 @@ struct Main {
 | `@request` | Встроенный HTTP конструктор (необязательный) |
 | `@pre-validate` | Предварительная валидация документа |
 | `@init` | Предвычисление значений (кешируются) |
-| `@split-doc` | Разбиение на элементы (`list`, `dict`) |
+| `@split-doc` | Разбиение на элементы (`list`, `dict`, `raw` auto-LIST) |
 | `@key` | Ключ для `dict` |
 | `@value` | Значение для `dict` и `table` |
 | `@table` | Селектор таблицы |
@@ -247,3 +253,83 @@ title {
 
 Полный список операций см. в [operations.md](operations.md).
 Предикаты см. в [predicates.md](predicates.md).
+
+## (raw)struct — парсинг простого текста
+
+`(raw)struct` предназначен для документов, которые **не являются HTML**:
+JavaScript-файлы, URL-строки, текстовые данные, плейлисты, CSV.
+
+### Ключевые отличия от обычного `struct`
+
+| Аспект | `struct` (HTML) | `(raw)struct` |
+|---|---|---|
+| Тип документа | `DOCUMENT` (DOM) | `STRING` (текст) |
+| HTML-парсер | bs4 / lxml / parsel / slax | не используется |
+| Первая операция | `css` / `xpath` / `text` / `attr` | `re` / `split` / `fmt` / ... |
+| HTML-операции | разрешены | **запрещены** (lint error) |
+| `@split-doc` | `DOCUMENT → LIST_DOCUMENT` | `STRING → LIST_STRING` |
+| `@request` / `fetch()` | response → HTML | response → raw text |
+
+### Автоопределение ITEM / LIST
+
+- `@split-doc` **отсутствует** → ITEM (один объект `dict`).
+- `@split-doc` **присутствует** → LIST (список объектов `list[dict]`).
+
+Явный `type=list` **не нужен**.
+
+### Пример: извлечение из JS
+
+```kdl
+(raw)struct PlayerScript {
+    @doc "Извлечь URL плейлиста из inline <script>."
+
+    playlist_url {
+        re #"Playerjs\([^)]*file:\s*[\"']([^\"']+)[\"']"#
+    }
+}
+```
+
+### Пример: URL query-params
+
+```kdl
+(raw)struct AnimeParams {
+    dubbing_code {
+        split "?"
+        index 1
+        split "&"
+        filter { starts "dubbing_code=" }
+        index 0
+        rm-prefix "dubbing_code="
+    }
+}
+```
+
+### Пример: текст в строки (auto-LIST)
+
+```kdl
+(raw)struct PlaylistLines {
+    @split-doc { split "\n" }
+    quality { re #"\[(\d+p)\]"# }
+    url { re #"\](.+)"# }
+}
+```
+
+### Пример: fetch удалённого файла
+
+```kdl
+(raw)struct RemoteScript {
+    @request "curl {{script_url}}"
+    file_path { re #"file:\s*[\"']([^\"']+)[\"']"#
+}
+```
+
+`fetch()` / `async_fetch()` конструируют парсер из тела ответа как raw text.
+
+### Запрещённые операции
+
+В полях `(raw)struct` следующие операции вызовут lint-ошибку:
+
+`css`, `css-all`, `css-remove`, `xpath`, `xpath-all`, `xpath-remove`, `text`,
+`attr`, `raw`.
+
+Документ — это строка, не DOM; эти операции не имеют смысла.

@@ -43,7 +43,7 @@ struct Product {
 ## Команда генерации
 
 ```bash
-ssc-gen generate schema.kdl -l python -L bs4
+ssc-gen generate python schema.kdl -L bs4
 ```
 
 ```mermaid

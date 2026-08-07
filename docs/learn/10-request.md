@@ -97,22 +97,22 @@ STYLE  = repeat | csv | bracket | pipe | space   только при []; default
 
 ```bash
 # Python: httpx (по умолчанию, sync + async)
-ssc-gen generate schema.kdl -l python -L bs4 -o out/
+ssc-gen generate python schema.kdl -L bs4 -o out/
 
 # Python: httpx (явно)
-ssc-gen generate schema.kdl -l python -L bs4 -o out/ --http-client httpx
+ssc-gen generate python schema.kdl -L bs4 -o out/ --http-client httpx
 
 # Python: aiohttp (async-only)
-ssc-gen generate schema.kdl -l python -L bs4 -o out/ --http-client aiohttp
+ssc-gen generate python schema.kdl -L bs4 -o out/ --http-client aiohttp
 
 # Python: requests (sync-only)
-ssc-gen generate schema.kdl -l python -L bs4 -o out/ --http-client requests
+ssc-gen generate python schema.kdl -L bs4 -o out/ --http-client requests
 
 # JS: fetch (по умолчанию)
-ssc-gen generate schema.kdl -l js -o out/
+ssc-gen generate js schema.kdl -o out/
 
 # JS: axios
-ssc-gen generate schema.kdl -l js -o out/ --http-client axios
+ssc-gen generate js schema.kdl -o out/ --http-client axios
 ```
 
 При `--http-client httpx` (и по умолчанию для Python) генерируются два

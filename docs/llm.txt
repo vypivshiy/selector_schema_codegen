@@ -51,6 +51,7 @@ struct Name { ... }                    # item (default)
 (table)struct Name { ... }             # table
 (flat)struct Name { ... }              # flat
 (rest)struct Name { ... }              # rest (API client)
+(raw)struct Name { ... }               # raw (plain-text, no HTML parser)
 ```
 
 The old property syntax `struct Name type=list { ... }` still works but prefer the prefix form.
@@ -63,6 +64,7 @@ The old property syntax `struct Name type=list { ... }` still works but prefer t
 - table -> dict. Requires: @table, @rows, @match, @value.
 - flat -> list[str]. No required special fields. Optional: keep-order=#true.
 - rest -> typed REST client class. Body allows ONLY @doc, @request, @error. Requires: at least one @request with name= and response=.
+- raw -> plain-text parser. No HTML backend. The document is a plain `str`; fields accept STRING directly. HTML operations (css, xpath, text, attr, raw) are forbidden. Auto-detects ITEM vs LIST from `@split-doc` presence. Supports `@request`/`fetch()`, `@init`, `@pre-validate`, `@check`.
 
 ### Special fields
 
@@ -70,7 +72,7 @@ The old property syntax `struct Name type=list { ... }` still works but prefer t
 - @request — optional HTTP constructor (see section below)
 - @pre-validate — validate document before parsing; raises error on failure
 - @init — pre-compute and cache values; referenced via @name in fields
-- @split-doc — split document into items (list, dict)
+- @split-doc — split document into items (list, dict, raw with auto-LIST)
 - @key — key extraction for dict
 - @value — value extraction for dict and table
 - @table — table element selector
@@ -97,9 +99,55 @@ link { css "a"; attr "href" }
 books { nested Book }
 ```
 
+### (raw)struct — plain-text parsing
+
+For documents that are NOT HTML (JS files, URL strings, text data).
+No HTML parser backend — the document is a plain `str`.
+
+```kdl
+// Extract URL from a <script> tag's JS content
+(raw)struct PlayerScript {
+    playlist_url {
+        re #"file:\s*[\"']([^\"']+)[\"']"#
+    }
+}
+
+// Parse URL query params via composed string ops
+(raw)struct AnimeParams {
+    dubbing_code {
+        split "?"
+        index 1
+        split "&"
+        filter { starts "dubbing_code=" }
+        index 0
+        rm-prefix "dubbing_code="
+    }
+}
+
+// Split text into lines (auto-LIST via @split-doc)
+(raw)struct PlaylistLines {
+    @split-doc { split "\n" }
+    url { trim }
+}
+
+// Fetch a JS file, parse as raw text
+(raw)struct RemoteScript {
+    @request "curl {{script_url}}"
+    file_path {
+        re #"file:\s*[\"']([^\"']+)[\"']"#
+    }
+}
+```
+
+Rules:
+- Fields accept STRING directly (document is already a string).
+- HTML operations (css, css-all, xpath, xpath-remove, text, attr, raw) are **forbidden** — lint error.
+- ITEM/LIST auto-detected: `@split-doc` present → LIST, absent → ITEM.
+- String ops (`re`, `re-all`, `split`, `fmt`, `trim`, `filter`, etc.) work as first operation.
+
 ## Pipeline operations
 
-Pipeline is a chain of operations. Initial type is DOCUMENT (or @init value type).
+Pipeline is a chain of operations. Initial type is DOCUMENT (or STRING for raw structs, or @init value type).
 
 ### Selectors
 
@@ -459,24 +507,25 @@ A key must not appear in both positional args and properties (lint error).
 
 ```bash
 # generate parser code
-ssc-gen generate schema.kdl -l python -L bs4 -o out/
-ssc-gen generate schema.kdl -l python -L lxml -o out/
-ssc-gen generate schema.kdl -l python -L parsel -o out/
-ssc-gen generate schema.kdl -l python -L slax -o out/
-ssc-gen generate schema.kdl -l js -o out/
+ssc-gen generate python schema.kdl -L bs4 -o out/
+ssc-gen generate python schema.kdl -L lxml -o out/
+ssc-gen generate python schema.kdl -L parsel -o out/
+ssc-gen generate python schema.kdl -L slax -o out/
+ssc-gen generate js schema.kdl -o out/
+ssc-gen generate go schema.kdl -o out/
 
 # with @request support (REST/HTTP codegen)
-ssc-gen generate schema.kdl -l python -L bs4 -o out/ --http-client httpx
+ssc-gen generate python schema.kdl -L bs4 -o out/ --http-client httpx
 
 # extract helpers into separate runtime module (-R), custom name (-rn)
-ssc-gen generate schema.kdl -l python -L bs4 -o out/ -R -rn my_runtime
+ssc-gen generate python schema.kdl -L bs4 -o out/ -R -rn my_runtime
 
 # lint/validate schema (text or JSON for LLM pipelines)
 ssc-gen check schema.kdl
 ssc-gen check schema.kdl -f json
 
 # run struct against HTML and print JSON
-ssc-gen run schema.kdl:StructName -i page.html -l python -L bs4
+ssc-gen run schema.kdl:StructName -i page.html -L bs4
 
 # verify selectors match elements
 ssc-gen health schema.kdl:StructName -i page.html
@@ -489,7 +538,7 @@ ssc-gen scout -i page.html --discover -f json
 ssc-gen version
 ```
 
-Languages (`--lang / -l`): `python`, `js`.
+Languages: `generate python`, `generate js`, `generate go`.
 HTML libraries (`--lib / -L`, Python only): `bs4` (default), `lxml`, `parsel`, `slax`.
 HTTP clients (`--http-client`): Python — `httpx` (default) | `aiohttp` | `requests`; JS — `fetch` (default) | `axios`.
 

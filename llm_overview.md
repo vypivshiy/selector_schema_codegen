@@ -127,32 +127,35 @@ docs/
 ## CLI Commands
 
 ```bash
-ssc-gen generate schema.kdl -l python -L bs4 -o out/                     # generate Python+bs4 parser
-ssc-gen generate schema.kdl -l python -L lxml -o out/                    # Python + lxml
-ssc-gen generate schema.kdl -l python -L parsel -o out/                  # Python + parsel
-ssc-gen generate schema.kdl -l python -L slax -o out/                    # Python + selectolax
-ssc-gen generate schema.kdl -l js -o out/                                # JavaScript (vanilla DOM)
-ssc-gen generate schema.kdl -l python -L bs4 -o out/ --http-client httpx # with @request support
-ssc-gen generate schema.kdl -l python -L bs4 -o out/ -R                  # separate runtime module
-ssc-gen generate schema.kdl -l python -L bs4 -o out/ -R -rn my_runtime   # custom runtime name
-ssc-gen generate schema.kdl -l python -L bs4 -o out/ --css-to-xpath      # CSS→XPath preprocessing
-ssc-gen generate schema.kdl -l python -L bs4 -o out/ --skip-lint         # skip linting
-ssc-gen generate schema.kdl -l python -L bs4 -o out/ --package mymod     # package name for generated code
-ssc-gen generate schema.kdl -l python -L bs4 -o out/ -f json             # JSON output format
-ssc-gen check schema.kdl                                                # lint only (text output)
-ssc-gen check schema.kdl -f json                                        # lint only (JSON for automation)
-ssc-gen run schema.kdl:StructName -i page.html -l python -L bs4          # generate + execute + output JSON
-ssc-gen health schema.kdl:StructName -i page.html -l python -L bs4       # check selectors against HTML
-ssc-gen scout -i page.html --text '\$\d+\.\d{2}' -f json                 # HTML recon: regex on text/attrs
+ssc-gen generate python schema.kdl -L bs4 -o out/                     # generate Python+bs4 parser
+ssc-gen generate python schema.kdl -L lxml -o out/                    # Python + lxml
+ssc-gen generate python schema.kdl -L parsel -o out/                  # Python + parsel
+ssc-gen generate python schema.kdl -L slax -o out/                    # Python + selectolax
+ssc-gen generate js schema.kdl -o out/                                # JavaScript (vanilla DOM)
+ssc-gen generate go schema.kdl -o out/                                # Go (goquery + net/http)
+ssc-gen generate python schema.kdl -L bs4 -o out/ --http-client httpx # with @request support
+ssc-gen generate python schema.kdl -L bs4 -o out/ -R                  # separate runtime module
+ssc-gen generate python schema.kdl -L bs4 -o out/ -R -rn my_runtime   # custom runtime name
+ssc-gen generate python schema.kdl -L bs4 -o out/ --skip-lint         # skip linting
+ssc-gen generate python schema.kdl -L bs4 -o out/ --package mymod     # package name for generated code
+ssc-gen generate python schema.kdl -L bs4 -o out/ -f json             # JSON output format
+ssc-gen check schema.kdl                                              # lint only (text output)
+ssc-gen check schema.kdl -f json                                      # lint only (JSON for automation)
+ssc-gen run schema.kdl:StructName -i page.html -L bs4                 # generate + execute + output JSON
+ssc-gen health schema.kdl:StructName -i page.html -L bs4              # check selectors against HTML
+ssc-gen scout -i page.html --text '\$\d+\.\d{2}' -f json              # HTML recon: regex on text/attrs
 ```
 
+**Commands:**
+- `generate python <files>`: Generate Python parser code
+- `generate js <files>`: Generate JavaScript parser code
+- `generate go <files>`: Generate Go parser code (goquery + net/http)
+
 **Flags:**
-- `--lang / -l`: Target language — `python` | `js`
 - `--lib / -L`: HTML library (Python only) — `bs4` (default) | `lxml` | `parsel` | `slax`
 - `--http-client`: HTTP client for `@request` codegen — Python: `httpx` (default) | `aiohttp` | `requests`; JS: `fetch` (default) | `axios`
 - `--separate-runtime / -R`: Extract helpers into separate module (default: `sscgen_runtime`)
 - `--runtime-name / -rn`: Custom runtime module name
-- `--css-to-xpath`: Convert CSS selectors to XPath before codegen
 - `--skip-lint`: Skip linting pass
 - `--package`: Package/module name for generated code
 - `--format / -f`: Output format — `text` | `json`
