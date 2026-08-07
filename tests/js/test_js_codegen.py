@@ -41,18 +41,36 @@ def _parse_kdl(schema_path: Path):
     return module_ast
 
 
-def _run_js_schema(schema_path: Path, struct_name: str) -> dict | list:
+def _run_js_schema(
+    schema_path: Path, struct_name: str, input_text: str | None = None
+) -> dict | list:
     module_ast = _parse_kdl(schema_path)
     class_name = to_pascal_case(struct_name)
     code = JS_CONVERTER.convert(module_ast)
 
-    proc = subprocess.run(
-        ["node", str(JS_RUNNER), str(HTML_FIXTURE), class_name],
-        input=code,
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
+    if input_text is not None:
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".txt", delete=False, encoding="utf-8"
+        ) as f:
+            f.write(input_text)
+            input_file = Path(f.name)
+    else:
+        input_file = HTML_FIXTURE
+
+    try:
+        proc = subprocess.run(
+            ["node", str(JS_RUNNER), str(input_file), class_name],
+            input=code,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    finally:
+        if input_text is not None:
+            input_file.unlink(missing_ok=True)
+
     if proc.returncode != 0:
         raise RuntimeError(
             f"JS runtime error for {schema_path.name}:{struct_name}:\n{proc.stderr}"
@@ -169,3 +187,55 @@ class TestJsJsonBasic:
         r = _run_js_schema(SCHEMAS_DIR / "18_json_basic.kdl", "JsonBasic")
         assert r["firstAuthorName"] == "Author One"
         assert r["firstTags"] == ["alpha", "beta"]
+
+
+# ── RAW struct ────────────────────────────────────────────────────────────────
+
+_JS_TEXT = '<script>var player = new Playerjs({id:"player",file:"/v/list/abc.txt"});</script>'
+_URL_TEXT = "https://ru.yummyani.me/iframeCVH.html?dubbing_code=Sanae&anime_id=339&episode=1"
+_PLAYLIST_TEXT = "[480p]/v/anime/01_480p.m3u8\n[720p]/v/anime/01_720p.m3u8\n[1080p]/v/anime/01_1080p.m3u8"
+_PLAIN_TEXT = "hello world"
+
+
+class TestJsRawStructItem:
+    def test_player_script_extraction(self):
+        r = _run_js_schema(
+            SCHEMAS_DIR / "23_raw_struct.kdl",
+            "RawPlayerScript",
+            input_text=_JS_TEXT,
+        )
+        assert r["playlistUrl"] == "/v/list/abc.txt"
+        assert r["playerId"] == "player"
+
+    def test_url_params_extraction(self):
+        r = _run_js_schema(
+            SCHEMAS_DIR / "23_raw_struct.kdl",
+            "RawUrlParams",
+            input_text=_URL_TEXT,
+        )
+        assert r["dubbingCode"] == "Sanae"
+        assert r["animeId"] == 339
+
+    def test_text_transform(self):
+        r = _run_js_schema(
+            SCHEMAS_DIR / "23_raw_struct.kdl",
+            "RawTextTransform",
+            input_text=_PLAIN_TEXT,
+        )
+        assert r["upperText"] == "HELLO WORLD"
+        assert r["length"] == 11
+        assert r["firstWord"] == "hello"
+
+
+class TestJsRawStructList:
+    def test_line_items(self):
+        r = _run_js_schema(
+            SCHEMAS_DIR / "23_raw_struct.kdl",
+            "RawLineItems",
+            input_text=_PLAYLIST_TEXT,
+        )
+        assert isinstance(r, list)
+        assert len(r) == 3
+        assert r[0]["quality"] == "480p"
+        assert r[0]["url"] == "/v/anime/01_480p.m3u8"
+        assert r[2]["quality"] == "1080p"

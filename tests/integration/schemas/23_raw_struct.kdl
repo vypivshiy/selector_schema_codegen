@@ -1,0 +1,64 @@
+@doc "RAW struct tests: plain-text parsing without HTML backend."
+
+// ── ITEM: regex extraction from JS-like text ──
+
+(raw)struct RawPlayerScript {
+    playlist_url {
+        re #"file:\s*[\"']([^\"']+)[\"']"#
+    }
+    player_id {
+        re #"id:\s*[\"']([^\"']+)[\"']"#
+    }
+}
+
+// ── ITEM: URL query params via composed string ops ──
+
+(raw)struct RawUrlParams {
+    dubbing_code {
+        split "?"
+        index 1
+        split "&"
+        filter { starts "dubbing_code=" }
+        index 0
+        rm-prefix "dubbing_code="
+    }
+    anime_id {
+        split "?"
+        index 1
+        split "&"
+        filter { starts "anime_id=" }
+        index 0
+        rm-prefix "anime_id="
+        to-int
+    }
+}
+
+// ── LIST: split text into lines, parse each ──
+
+(raw)struct RawLineItems {
+    @split-doc {
+        split "\n"
+    }
+
+    quality {
+        re #"\[(\d+p)\]"#
+    }
+    url {
+        re #"\](.+)"#
+    }
+}
+
+// ── ITEM: simple string transforms ──
+
+(raw)struct RawTextTransform {
+    upper_text {
+        upper
+    }
+    length {
+        len
+    }
+    first_word {
+        split " "
+        index 0
+    }
+}

@@ -377,3 +377,67 @@ class TestJsonMixed:
         )
         assert isinstance(result["nested_item"], dict)
         assert result["nested_item"]["title"] == "Single Item Title"
+
+
+# ── RAW struct tests ──────────────────────────────────────────────────────────
+
+_JS_TEXT = '<script>var player = new Playerjs({id:"player",file:"/v/list/abc.txt"});</script>'
+_URL_TEXT = "https://ru.yummyani.me/iframeCVH.html?dubbing_code=Sanae&anime_id=339&episode=1"
+_PLAYLIST_TEXT = "[480p]/v/anime/01_480p.m3u8\n[720p]/v/anime/01_720p.m3u8\n[1080p]/v/anime/01_1080p.m3u8"
+_PLAIN_TEXT = "hello world"
+
+
+class TestRawStructItem:
+    """RAW struct ITEM mode: plain-text regex extraction."""
+
+    @pytest.mark.parametrize("target", _TARGETS)
+    def test_player_script_extraction(self, target):
+        result = _run_schema(
+            SCHEMAS_DIR / "23_raw_struct.kdl",
+            "RawPlayerScript",
+            _JS_TEXT,
+            target,
+        )
+        assert result["playlist_url"] == "/v/list/abc.txt"
+        assert result["player_id"] == "player"
+
+    @pytest.mark.parametrize("target", _TARGETS)
+    def test_url_params_extraction(self, target):
+        result = _run_schema(
+            SCHEMAS_DIR / "23_raw_struct.kdl",
+            "RawUrlParams",
+            _URL_TEXT,
+            target,
+        )
+        assert result["dubbing_code"] == "Sanae"
+        assert result["anime_id"] == 339
+
+    @pytest.mark.parametrize("target", _TARGETS)
+    def test_text_transform(self, target):
+        result = _run_schema(
+            SCHEMAS_DIR / "23_raw_struct.kdl",
+            "RawTextTransform",
+            _PLAIN_TEXT,
+            target,
+        )
+        assert result["upper_text"] == "HELLO WORLD"
+        assert result["length"] == 11
+        assert result["first_word"] == "hello"
+
+
+class TestRawStructList:
+    """RAW struct LIST mode: split-doc into items."""
+
+    @pytest.mark.parametrize("target", _TARGETS)
+    def test_line_items(self, target):
+        result = _run_schema(
+            SCHEMAS_DIR / "23_raw_struct.kdl",
+            "RawLineItems",
+            _PLAYLIST_TEXT,
+            target,
+        )
+        assert isinstance(result, list)
+        assert len(result) == 3
+        assert result[0]["quality"] == "480p"
+        assert result[0]["url"] == "/v/anime/01_480p.m3u8"
+        assert result[2]["quality"] == "1080p"
