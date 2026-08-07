@@ -145,6 +145,33 @@ Rules:
 - ITEM/LIST auto-detected: `@split-doc` present → LIST, absent → ITEM.
 - String ops (`re`, `re-all`, `split`, `fmt`, `trim`, `filter`, etc.) work as first operation.
 
+### fn / (raw)fn — module-level single-value extraction
+
+Standalone function instead of a class. Generates `fn_name(document) -> <inferred type>`.
+
+```kdl
+// HTML document → extract title
+fn page_title {
+    @doc "Extract the <h1> text"
+    css "h1"
+    text
+}
+
+// Raw text → extract version string
+(raw)fn extract_version {
+    re { #"version=([0-9.]+)"# }
+}
+```
+
+Rules:
+- Body is a pipeline (same ops as a struct field).
+- `@doc` supported — generates docstring/comment.
+- Struct-level directives (@init, @check, @pre-validate, @split-doc, @request, @error) are **forbidden**.
+- `(raw)fn` — document is a plain string, HTML operations forbidden.
+- Return type inferred from pipeline.
+- Unlimited fns per module.
+- Name converted per language convention: Python `snake_case`, JS `camelCase`, Go `PascalCase`.
+
 ## Pipeline operations
 
 Pipeline is a chain of operations. Initial type is DOCUMENT (or STRING for raw structs, or @init value type).

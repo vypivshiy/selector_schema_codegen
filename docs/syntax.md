@@ -150,6 +150,34 @@ struct Main {
   `attr`, `raw`) запрещены. Поддерживаются `@request`/`fetch()`, `@init`,
   `@pre-validate`, `@check`.
 
+### fn / (raw)fn
+
+Module-level функция для извлечения одного значения. Генерирует standalone
+функцию вместо класса.
+
+```kdl
+fn page_title {
+    @doc "Extract page title"
+    css "h1"
+    text
+}
+
+(raw)fn csrf_token {
+    re { #"name="csrf" value="([^"]+)""# }
+}
+```
+
+Правила:
+- Тело — pipeline операций (как поле `struct`).
+- `@doc` поддерживается — генерирует docstring/комментарий.
+- Struct-level директивы (`@init`, `@check`, `@pre-validate`, `@split-doc`,
+  `@request`, `@error`) **запрещены** — используйте `struct`.
+- `(raw)fn` — документ-строка, HTML-операции запрещены (как `(raw)struct`).
+- Количество `fn` на модуль — неограничено.
+- Возвращаемый тип выводится из pipeline.
+- Имя функции конвертируется по конвенции языка:
+  Python `snake_case`, JS `camelCase`, Go `PascalCase`.
+
 ## Специальные поля
 
 | Поле | Назначение |

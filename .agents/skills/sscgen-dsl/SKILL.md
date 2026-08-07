@@ -1,6 +1,6 @@
 ---
 name: sscgen-dsl
-version: "2.3"
+version: "2.4"
 dsl_version: "2.0"
 description: >
   Generate KDL Schema DSL (v2.0) scraper configs for **HTML scraping** and
@@ -253,6 +253,44 @@ Common lint errors:
 | `HTML operation 'CssSelect' is forbidden in (raw)struct` | Used `css` in RAW field | Switch to `re`/`split`/`fmt` |
 | `'re' requires a preceding operation` | Used STRING op as first node in non-RAW struct | Add `text` or `attr` first (HTML structs only) |
 | `re pattern must have exactly one capture group` | Regex without `(...)` | Add capture group: `re #"prefix(.+)"#` |
+
+---
+
+## fn / (raw)fn — Module-level single-value extraction
+
+`fn` generates a **standalone function** instead of a class. Use when you need
+a single value, not a full struct with multiple fields.
+
+```kdl
+// HTML → extract page title
+fn page_title {
+    @doc "Extract <h1> text"
+    css "h1"
+    text
+}
+
+// Raw text → extract version
+(raw)fn version {
+    re #"version=([0-9.]+)"#
+}
+```
+
+### When to use fn vs struct
+
+| Scenario | Use | Why |
+|---|---|---|
+| Single value (title, price, token) | `fn` | No wrapper class needed |
+| Multiple fields from one page | `struct` | Struct collects into dict |
+
+### Rules
+
+- Body is a **pipeline** (same ops as a struct field).
+- `@doc` supported — generates docstring/comment.
+- Struct-level directives (`@init`, `@check`, `@pre-validate`, `@split-doc`, `@request`, `@error`) are **forbidden** — use `struct`.
+- `(raw)fn` — plain string input, HTML ops forbidden (like `(raw)struct`).
+- Return type **inferred from pipeline**.
+- **Unlimited** fns per module.
+- Name convention: Python `snake_case`, JS `camelCase`, Go `PascalCase`.
 
 ---
 
