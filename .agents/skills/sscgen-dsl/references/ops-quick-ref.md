@@ -1,10 +1,14 @@
 # KDL Operations — Quick Reference
 
-> Scoped to the **sscgen-dsl** skill (HTML scraping). Operations banned by
+> Scoped to the **sscgen-dsl** skill (HTML scraping + raw text). Operations banned by
 > skill constraints (`transform`, `css-remove`, `xpath`, `xpath-all`,
 > `xpath-remove`) are intentionally omitted. For critical inline rules
 > (regex capture-group requirement, predicate context matrix, `index` bug,
 > CSS4 opt-in rule) → see `../SKILL.md`.
+
+> **Pipeline start type:** HTML structs start with `DOCUMENT` (DOM element).
+> `(raw)struct` starts with `STRING` — the document is already a string, so
+> any STRING op (`re`, `split`, `fmt`, etc.) can be the first operation.
 
 ## Type System
 

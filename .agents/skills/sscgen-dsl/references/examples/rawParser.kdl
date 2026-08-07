@@ -1,0 +1,111 @@
+@doc """
+(raw)struct examples — plain-text parsing without HTML backend.
+
+Input is raw text (JS source, URL string, m3u8 playlist, CSV).
+No HTML parser — document is a plain string.
+"""
+
+// ── ITEM: regex extraction from JS ──
+
+(raw)struct PlayerScript {
+    @doc "Extract Playerjs config from inline <script>."
+
+    playlist_url {
+        re #"Playerjs\([^)]*file:\s*[\"']([^\"']+)[\"']"#
+    }
+
+    player_id {
+        re #"Playerjs\([^)]*id:\s*[\"']([^\"']+)[\"']"#
+    }
+}
+
+// ── ITEM: URL query params via composed ops ──
+
+(raw)struct AnimeParams {
+    @doc "Parse ?dubbing_code=Sanae&anime_id=339&episode=1"
+
+    dubbing_code {
+        split "?"
+        index 1
+        split "&"
+        filter { starts "dubbing_code=" }
+        index 0
+        rm-prefix "dubbing_code="
+    }
+
+    anime_id {
+        split "?"
+        index 1
+        split "&"
+        filter { starts "anime_id=" }
+        index 0
+        rm-prefix "anime_id="
+        to-int
+    }
+
+    episode {
+        split "?"
+        index 1
+        split "&"
+        filter { starts "episode=" }
+        index 0
+        rm-prefix "episode="
+        to-int
+    }
+}
+
+// ── LIST: m3u8 playlist lines ──
+
+(raw)struct M3u8Playlist {
+    @doc "Parse m3u8-style playlist: [480p]/path/01_480p.m3u8"
+
+    @split-doc {
+        split "\n"
+    }
+
+    quality {
+        re #"\[(\d+p)\]"#
+    }
+
+    url {
+        re #"\](.+)"#
+    }
+}
+
+// ── LIST: CSV with @init caching ──
+
+(raw)struct CsvLines {
+    @split-doc {
+        split "\n"
+    }
+
+    @init {
+        parts {
+            split ","
+        }
+    }
+
+    col_0 {
+        @parts
+        index 0
+    }
+
+    col_1 {
+        @parts
+        index 1
+    }
+}
+
+// ── ITEM: fetch remote text file ──
+
+(raw)struct RemotePlaylist {
+    @doc "Fetch a .txt playlist file and extract the first stream URL."
+
+    @request """
+    curl {{playlist_url}}
+    """
+
+    stream_url {
+        re #"^(https?://[^\s]+)"#
+    }
+}

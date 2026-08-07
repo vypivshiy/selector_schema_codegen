@@ -1,40 +1,44 @@
 ---
 name: sscgen-dsl
-version: "2.2"
+version: "2.3"
 dsl_version: "2.0"
 description: >
-  Generate KDL Schema DSL (v2.0) scraper configs for **HTML scraping** from HTML
-  pages and skill instructions. Covers struct types (item) / (list) / (table) /
-  (dict), css selectors, extract / string / regex / array / cast pipelines,
+  Generate KDL Schema DSL (v2.0) scraper configs for **HTML scraping** and
+  **plain-text parsing** from HTML pages, JS files, URLs, and skill
+  instructions. Covers struct types (item) / (list) / (table) / (dict) /
+  (raw), css selectors, extract / string / regex / array / cast pipelines,
   inline constants, transforms, jsonify, and the iterative linter loop.
   Use this skill whenever the user wants to: generate a .kdl schema file for HTML
-  scraping, write KDL DSL for data extraction from HTML, work with css/css-all/
-  text/attr/raw pipelines, fix linter errors in an HTML-scraping .kdl, or iterate
+  scraping, write KDL DSL for data extraction from HTML or plain text, work
+  with css/css-all/text/attr/raw pipelines, parse JS files / URLs / playlists /
+  text data via (raw)struct, fix linter errors in an HTML-scraping .kdl, or iterate
   on a KDL schema based on linter feedback.
   Trigger on mentions of "kdl", "KDL schema", "scraper schema", "DSL для скрапинга",
-  "распарсить страницу", "вытащить из HTML", or whenever the user provides an HTML
-  page + extraction task.
+  "распарсить страницу", "вытащить из HTML", "распарсить JS", "вытащить из текста",
+  "URL параметры", "плейлист", or whenever the user provides an HTML page or text
+  data + extraction task.
   **Do NOT use this skill for REST/JSON HTTP API clients (`(rest)struct`,
   `@request`, `@error`, typed placeholders for HTTP) — use the sibling skill
-  `sscgen-rest` instead.** The two skills share the same DSL surface but solve
-  different problems and should not be mixed.
+  `sscgen-rest` instead.**
 ---
 
-# sscgen-dsl — Skill (HTML scraping)
+# sscgen-dsl — Skill (HTML scraping + plain-text parsing)
 
 > `version` above is this skill file's own version. `dsl_version` is the KDL
 > Schema DSL syntax version this skill targets. Bump them independently —
 > editing skill instructions does not imply a DSL syntax change, and vice versa.
 
-Generate valid **KDL Schema DSL v2.0** configs for HTML scraping from:
+Generate valid **KDL Schema DSL v2.0** configs for data extraction from:
+- **HTML pages** — CSS-selector pipelines (`(item)/(list)/(table)/(dict)struct`)
+- **Plain text** — JS files, URL strings, playlists, CSV (`(raw)struct`)
 - A **skill instruction** (what to extract and how)
-- An **HTML page** (structure to inspect)
 - Optionally: **linter output** (text or JSON) to fix errors
 
-> **Scope: HTML only.** This skill covers `(item)struct / (list)struct / (table)struct / (dict)struct`
-> with CSS-selector pipelines. For REST/JSON HTTP APIs (`(rest)struct`,
+> **Scope: HTML + raw text.** This skill covers `(item)struct / (list)struct /
+> (table)struct / (dict)struct` with CSS-selector pipelines, and `(raw)struct`
+> for plain-text parsing. For REST/JSON HTTP APIs (`(rest)struct`,
 > `@request`/`@error`, typed `{{id:int}}` placeholders) → use the **`sscgen-rest`**
-> skill, not this one. Don't mix REST endpoints into HTML schemas.
+> skill, not this one.
 
 > ⚠️ **SKILL ACTIVATION CONTRACT — read before any tool call**
 >
@@ -64,7 +68,7 @@ Generate valid **KDL Schema DSL v2.0** configs for HTML scraping from:
 
 ---
 
-## Scope boundary: HTML vs JSON endpoint
+## Scope boundary: HTML vs RAW text vs JSON endpoint
 
 **Stay in `sscgen-dsl`** (this skill) when ANY is true:
 - Response body is HTML (root is `<!DOCTYPE>`, `<html>`, `<body>`, etc.)
@@ -73,6 +77,10 @@ Generate valid **KDL Schema DSL v2.0** configs for HTML scraping from:
 - JSON appears **embedded** inside HTML: `<script type="application/ld+json">`,
   `<script type="application/json">`, `data-json="..."` attributes →
   use `jsonify` to deserialize after `css` + `raw`/`attr`
+- **Source is plain text** (not HTML): JS files, URL strings, m3u8 playlists,
+  CSV, custom text formats → use **`(raw)struct`** (see section below)
+- Target data lives inside inline `<script>` JS code, URL query parameters,
+  or text-based data formats
 
 **Switch to `sscgen-rest` skill** when ANY is true:
 - Response `Content-Type` is `application/json` (or body root is `{`/`[`, not `<!DOCTYPE`)
@@ -96,6 +104,155 @@ Typical ambiguous cases:
   if the JSON is the real data source, `sscgen-dsl` + `jsonify` if scraping SEO metadata
 - Site exposes both HTML and JSON for the same resource → prefer `sscgen-rest`
   (cleaner, typed, less brittle) but confirm with the user first
+
+---
+
+## (raw)struct — Plain-text parsing
+
+`(raw)struct` parses documents that are **NOT HTML**: JS files, URL strings,
+playlists, CSV, custom text formats. No HTML parser backend — the document is
+a plain `str` and fields accept `STRING` directly.
+
+### When to use (raw)struct vs regular struct
+
+| Input | Struct type | First op |
+|---|---|---|
+| HTML page | `struct` / `(list)struct` | `css` / `css-all` / `text` / `attr` |
+| Inline `<script>` JS code | `(raw)struct` | `re` / `split` / `fmt` |
+| URL string (query params) | `(raw)struct` | `split` / `re` / `filter` |
+| m3u8 / CSV / playlist text | `(raw)struct` | `split` / `re` / `re-all` |
+| Any non-HTML text data | `(raw)struct` | any STRING op |
+
+### Syntax
+
+```kdl
+(raw)struct Name {
+    field_name {
+        re #"pattern(capture)"#
+    }
+}
+```
+
+### Key rules
+
+1. **HTML operations are FORBIDDEN** — `css`, `css-all`, `css-remove`, `xpath`,
+   `xpath-all`, `xpath-remove`, `text`, `attr`, `raw`. The linter rejects them
+   with E001.
+
+2. **Pipeline starts with STRING** — the document is already a string. First
+   operation can be any STRING op: `re`, `re-all`, `split`, `fmt`, `trim`,
+   `upper`, `lower`, `repl`, `filter`, etc.
+
+3. **ITEM / LIST auto-detected** from `@split-doc` presence:
+   - No `@split-doc` → **ITEM** (single `dict` result)
+   - `@split-doc` present → **LIST** (`list[dict]` result)
+   - No explicit `type=list` needed.
+
+4. **`@split-doc` accepts STRING** — in RAW structs, `@split-doc` body starts
+   with STRING (not DOCUMENT). Use `split`, `re-all`, or other STRING→LIST ops.
+
+5. **Supported directives**: `@doc`, `@init`, `@pre-validate`, `@check`,
+   `@split-doc`, `@request`.
+
+6. **`@request` / `fetch()`** — response body is used as raw text (no HTML
+   parse step). Works for fetching JS files, text endpoints, etc.
+
+### Pattern: regex extraction from JS
+
+```kdl
+(raw)struct PlayerScript {
+    playlist_url {
+        re #"Playerjs\([^)]*file:\s*[\"']([^\"']+)[\"']"#
+    }
+}
+```
+
+### Pattern: URL query params via composed ops
+
+```kdl
+(raw)struct AnimeParams {
+    dubbing_code {
+        split "?"
+        index 1
+        split "&"
+        filter { starts "dubbing_code=" }
+        index 0
+        rm-prefix "dubbing_code="
+    }
+}
+```
+
+### Pattern: text split into lines (auto-LIST)
+
+```kdl
+(raw)struct M3u8Playlist {
+    @split-doc { split "\n" }
+
+    quality { re #"\[(\d+p)\]"# }
+    url { re #"\](.+)"# }
+}
+```
+
+### Pattern: fetch remote text file
+
+```kdl
+(raw)struct RemoteScript {
+    @request """
+    curl {{script_url}}
+    """
+
+    file_path {
+        re #"file:\s*[\"']([^\"']+)[\"']"#
+    }
+}
+```
+
+### Pattern: @init caching for repeated sub-parsing
+
+```kdl
+(raw)struct CsvLine {
+    @split-doc { split "\n" }
+
+    @init {
+        parts { split "," }
+    }
+
+    col_0 { @parts; index 0 }
+    col_1 { @parts; index 1 }
+}
+```
+
+### RAW + HTML in one file
+
+RAW structs can coexist with HTML structs in the same `.kdl`. Typical flow:
+HTML struct scrapes a page → extracts a `<script>` URL → RAW struct fetches
+and parses the JS file.
+
+```kdl
+// HTML struct: extract player URL from page
+(list)struct AnimePage {
+    @split-doc { css-all ".episode" }
+    player_url { css ".player"; attr "data-src" }
+}
+
+// RAW struct: parse JS file at player_url
+(raw)struct PlayerScript {
+    @request """
+    curl {{player_url}}
+    """
+    stream_url { re #"file:\s*[\"']([^\"']+)[\"']"#
+}
+```
+
+### Linting RAW structs
+
+Common lint errors:
+
+| Error | Cause | Fix |
+|---|---|---|
+| `HTML operation 'CssSelect' is forbidden in (raw)struct` | Used `css` in RAW field | Switch to `re`/`split`/`fmt` |
+| `'re' requires a preceding operation` | Used STRING op as first node in non-RAW struct | Add `text` or `attr` first (HTML structs only) |
+| `re pattern must have exactly one capture group` | Regex without `(...)` | Add capture group: `re #"prefix(.+)"#` |
 
 ---
 
@@ -814,3 +971,4 @@ For full KDL examples:
 - `imdbcom.kdl` — search results page, `nested` struct composition, `css-all` field for genres
 - `quotesToScrape.kdl` — `json` schema + `jsonify`, inline multiline regex with `(?xs)` flags, `path="0"` accessor
 - `regexFallback.kdl` — `re` no-match + `fallback` recovery, `re-all` single-group extraction, `@pre-validate`
+- `rawParser.kdl` — `(raw)struct` plain-text parsing: JS regex extraction, URL query params, m3u8 playlist split, CSV with `@init`, fetch remote text

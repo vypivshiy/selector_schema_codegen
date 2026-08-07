@@ -1,0 +1,155 @@
+@doc """
+(raw)struct examples — plain-text parsing without HTML backend.
+
+Covers:
+  1. Regex extraction from JS/HTML source text
+  2. URL query-param parsing via composed string ops
+  3. Text split into lines (auto-LIST via @split-doc)
+  4. @request / fetch() for remote text files
+"""
+
+// 1. Extract data from a <script> tag's JS content
+//
+// Input is the raw HTML source (not parsed as DOM). Useful when you need
+// to pull structured data out of inline JavaScript.
+(raw)struct PlayerScript {
+    @doc "Extract Playerjs config from inline <script>."
+
+    playlist_url {
+        re #"Playerjs\([^)]*file:\s*[\"']([^\"']+)[\"']"#
+    }
+
+    player_id {
+        re #"Playerjs\([^)]*id:\s*[\"']([^\"']+)[\"']"#
+    }
+}
+
+// 2. URL query-parameter parsing
+//
+// The document is a URL string. Use split / index / filter to navigate
+// the query string structure without any URL-specific DSL.
+
+define QUERY-DUBBING = "dubbing_code="
+define QUERY-ANIME-ID = "anime_id="
+define QUERY-EPISODE = "episode="
+
+(raw)struct AnimeParams {
+    @doc "Parse ?dubbing_code=Sanae&anime_id=339&episode=1 from a URL."
+
+    dubbing_code {
+        split "?"
+        index 1
+        split "&"
+        filter { starts QUERY-DUBBING }
+        index 0
+        rm-prefix QUERY-DUBBING
+    }
+
+    anime_id {
+        split "?"
+        index 1
+        split "&"
+        filter { starts QUERY-ANIME-ID }
+        index 0
+        rm-prefix QUERY-ANIME-ID
+        to-int
+    }
+
+    episode {
+        split "?"
+        index 1
+        split "&"
+        filter { starts QUERY-EPISODE }
+        index 0
+        rm-prefix QUERY-EPISODE
+        to-int
+    }
+}
+
+// 3. Split text into lines — auto-LIST
+//
+// @split-doc present => struct behaves as LIST.
+// Each field operates on one line (STRING).
+
+(raw)struct M3u8Playlist {
+    @doc "Parse m3u8-style playlist lines: [480p]/path/01_480p.m3u8"
+
+    @split-doc {
+        split "\n"
+    }
+
+    quality {
+        re #"\[(\d+p)\]"#
+    }
+
+    url {
+        re #"\](.+)"#
+    }
+}
+
+// 4. CSV-like parsing with @init caching
+//
+// Parse "quality,path,duration" comma-separated lines.
+// @init splits once; fields reference via @parts.
+
+(raw)struct CsvLine {
+    @split-doc {
+        split "\n"
+    }
+
+    @init {
+        parts {
+            split ","
+        }
+    }
+
+    col_0 {
+        @parts
+        index 0
+    }
+
+    col_1 {
+        @parts
+        index 1
+    }
+
+    col_2 {
+        @parts
+        index 2
+    }
+}
+
+// 5. Fetch remote text file + parse
+//
+// @request downloads the file; fetch() constructs the parser from the
+// raw response body (no HTML parse step).
+
+(raw)struct RemotePlaylist {
+    @doc "Fetch a .txt playlist file and extract the first stream URL."
+
+    @request """
+    curl {{playlist_url}}
+    """
+
+    stream_url {
+        re #"^(https?://[^\s]+)"#
+    }
+}
+
+// 6. JSON-in-text extraction
+//
+// Extract a JSON blob embedded in JS source, then jsonify it.
+
+// json Config {
+//     title "str"
+//     version "str"
+// }
+
+// (raw)struct EmbeddedJson {
+//     @doc "Extract window.__CONFIG__ = {...} from a page's <script>."
+//
+//     config {
+//         re #"window\.__CONFIG__\s*=\s*(\{.+?\})\s*;?"#
+//         jsonify Config
+//     }
+// }
