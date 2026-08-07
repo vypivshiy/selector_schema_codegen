@@ -1,0 +1,22 @@
+@doc "fn directive tests: module-level single-value extraction functions."
+
+fn page_title {
+    @doc "Extract the <h1> text from an HTML document."
+    css "h1"
+    text
+}
+
+fn all_links {
+    css-all "a"
+    attr "href"
+}
+
+(raw)fn first_line {
+    @doc "Return the first line of a raw text document."
+    split "\n"
+    index 0
+}
+
+(raw)fn extract_version {
+    re #"version=([0-9]+\.[0-9]+\.[0-9]+)"#
+}

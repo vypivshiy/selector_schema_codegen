@@ -441,3 +441,79 @@ class TestRawStructList:
         assert result[0]["quality"] == "480p"
         assert result[0]["url"] == "/v/anime/01_480p.m3u8"
         assert result[2]["quality"] == "1080p"
+
+
+# ── fn directive tests ────────────────────────────────────────────────────────
+
+
+def _run_fn(
+    schema_path: str | Path,
+    fn_name: str,
+    input_text: str,
+    target: str = "py-bs4",
+):
+    """Parse KDL, generate code, exec, call fn(input_text), return result."""
+    p = Path(schema_path)
+    module_ast = _parse_kdl(p)
+    from ssc_codegen.naming import to_snake_case
+
+    snake_name = to_snake_case(fn_name)
+    converter = _get_converter(target)
+    code = converter.convert(module_ast)
+    namespace: dict = {}
+    exec(code, namespace)  # noqa: S102
+    fn = namespace[snake_name]
+    return fn(input_text)
+
+
+_FN_HTML = "<html><body><h1>Hello World</h1><a href='/a'>A</a><a href='/b'>B</a></body></html>"
+_FN_RAW = "first line\nsecond line\nthird line"
+_FN_VERSION = "app version=1.2.3 released"
+
+
+class TestFnHtml:
+    """fn directive: HTML document single-value extraction."""
+
+    @pytest.mark.parametrize("target", _TARGETS)
+    def test_page_title(self, target):
+        result = _run_fn(
+            SCHEMAS_DIR / "25_fn.kdl",
+            "page_title",
+            _FN_HTML,
+            target,
+        )
+        assert result == "Hello World"
+
+    @pytest.mark.parametrize("target", _TARGETS)
+    def test_all_links(self, target):
+        result = _run_fn(
+            SCHEMAS_DIR / "25_fn.kdl",
+            "all_links",
+            _FN_HTML,
+            target,
+        )
+        assert result == ["/a", "/b"]
+
+
+class TestFnRaw:
+    """(raw)fn directive: plain-text single-value extraction."""
+
+    @pytest.mark.parametrize("target", _TARGETS)
+    def test_first_line(self, target):
+        result = _run_fn(
+            SCHEMAS_DIR / "25_fn.kdl",
+            "first_line",
+            _FN_RAW,
+            target,
+        )
+        assert result == "first line"
+
+    @pytest.mark.parametrize("target", _TARGETS)
+    def test_extract_version(self, target):
+        result = _run_fn(
+            SCHEMAS_DIR / "25_fn.kdl",
+            "extract_version",
+            _FN_VERSION,
+            target,
+        )
+        assert result == "1.2.3"
