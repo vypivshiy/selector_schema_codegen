@@ -20,6 +20,8 @@ from .module import (
     Utilities,
 )
 
+from .function import FunctionDef
+
 from .typedef import TypeDef, TypeDefField
 
 from .jsondef import JsonDef, JsonDefField
@@ -147,6 +149,8 @@ __all__ = [
     "CodeEndHook",
     "Docstring",
     "Utilities",
+    # function
+    "FunctionDef",
     # typedef
     "TypeDef",
     "TypeDefField",

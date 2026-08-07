@@ -5,12 +5,15 @@ from __future__ import annotations
 from pathlib import Path
 
 from ssc_codegen.ast import (
+    FunctionDef,
     JsonDef,
     Module,
     StructBase,
     Struct,
     StructRest,
     StructType,
+    VariableType,
+    TypeInfo,
 )
 from ssc_codegen.exceptions import BuildTimeError
 from kdlquery import KdlNode, parse as kdl_parse
@@ -23,7 +26,11 @@ from ssc_codegen.core.contexts import (
     ParseContext,
 )
 from ssc_codegen.core.expressions import resolve_define_references
-from ssc_codegen.core.struct_parser import parse_json_fields, parse_struct
+from ssc_codegen.core.struct_parser import (
+    parse_function,
+    parse_json_fields,
+    parse_struct,
+)
 
 _KDL_TEXT_ENCODING = "utf-8-sig"
 
@@ -63,6 +70,28 @@ def handle_struct(
     ctx.structs[struct.name] = struct
     parse_struct(node.children, struct, ctx, lint)
     return struct
+
+
+def handle_function(
+    node: KdlNode, module: Module, ctx: ParseContext, lint: LintContext
+) -> FunctionDef:
+    raw_annotation = node.type_annotation
+    is_raw = raw_annotation == "(raw)"
+    if not node.args:
+        raise BuildTimeError("'fn' requires a name")
+    name = str(node.args[0].value)
+    fn = FunctionDef(
+        parent=module,
+        name=name,
+        is_raw=is_raw,
+        accept_type_info=(
+            TypeInfo(base=VariableType.STRING)
+            if is_raw
+            else TypeInfo(base=VariableType.DOCUMENT)
+        ),
+    )
+    parse_function(node.children, fn, ctx, lint)
+    return fn
 
 
 def handle_json(

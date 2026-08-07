@@ -16,6 +16,7 @@ from ssc_codegen.ast import (
     InitFieldCall,
     InitField,
     Field,
+    FunctionDef,
     PreValidate,
     CheckMethod,
     SplitDoc,
@@ -115,6 +116,7 @@ _CONTAINER_NODES = (JsonDef, TypeDef, StructBase, Init)
 # Pipeline: index advances after each node (delegated to walk_pipeline).
 _PIPELINE_NODES = (
     Field,
+    FunctionDef,
     InitField,
     PreValidate,
     CheckMethod,
@@ -179,6 +181,8 @@ class BaseWalker:
         MethodFetch: "visit_method_fetch",
         MethodRest: "visit_method_rest",
         ErrorResponse: "visit_error_response",
+        # function
+        FunctionDef: "visit_function_def",
         # REST result artifacts
         ResultVariantDef: "visit_result_variant_def",
         ResultAliasDef: "visit_result_alias_def",

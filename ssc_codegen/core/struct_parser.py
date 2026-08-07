@@ -13,6 +13,7 @@ from ssc_codegen.ast import (
     CssSelectAll,
     ErrorResponse,
     Field,
+    FunctionDef,
     InitField,
     InitFieldCall,
     JsonDef,
@@ -310,6 +311,47 @@ def parse_struct(
 
     if not isinstance(parent, StructRest):
         parent.body.append(StartParse(parent=parent))
+    lint.walk_context = prev_ctx
+
+
+def parse_function(
+    kdl_nodes: Sequence[KdlNode],
+    fn: FunctionDef,
+    ctx: ParseContext,
+    lint: LintContext,
+) -> None:
+    """Parse the body of a ``fn`` / ``(raw)fn`` directive.
+
+    The body is a flat pipeline (same ops as a Field), optionally preceded
+    by ``@doc``. No struct-level directives (@init, @check, @split-doc, etc.)
+    are accepted — those are reported by the structural linter.
+    """
+    prev_ctx = lint.walk_context
+    lint.walk_context = WalkCtx.PIPELINE
+
+    pipeline_nodes: list[KdlNode] = []
+    for node in kdl_nodes:
+        if node.name == "@doc":
+            fn.doc = str(node.args[0].value)
+        elif node.name.startswith("@"):
+            continue  # structural linter already reported E203
+        else:
+            pipeline_nodes.append(node)
+
+    ops = pipeline_nodes
+    parse_expressions(ops, fn, ctx, lint)
+    if ops:
+        check_pipeline_types(
+            ops,
+            ctx,
+            lint,
+            start_type=VariableType.STRING
+            if fn.is_raw
+            else VariableType.DOCUMENT,
+        )
+    if fn.is_raw:
+        _lint_raw_forbidden_ops(fn, lint)
+
     lint.walk_context = prev_ctx
 
 

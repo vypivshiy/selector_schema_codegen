@@ -19,6 +19,7 @@ from ssc_codegen.ast import (
     Field,
     Filter,
     Fmt,
+    FunctionDef,
     Index,
     InitField,
     JsonDef,
@@ -104,6 +105,7 @@ FieldLikeNode: TypeAlias = (
     | Value
     | Field
     | InitField
+    | FunctionDef
 )
 
 
@@ -480,8 +482,8 @@ def parse_expressions(
         )
         parent.ret_type_info = last_ti
 
-        # Populate type_info on Field/Value/InitField
-        if isinstance(parent, (Field, Value, InitField)):
+        # Populate type_info on Field/Value/InitField/FunctionDef
+        if isinstance(parent, (Field, Value, InitField, FunctionDef)):
             last_ret = last_ti.base
             is_arr = (
                 parent.body[-2].is_array if len(parent.body) >= 2 else False

@@ -168,6 +168,7 @@ def lint_module(
     _lint_defines(doc, source_path, diags, children_defines)
     _lint_json_defs(doc, source_path, diags, children_defines)
     _lint_structs(doc, source_path, diags, children_defines)
+    _lint_fns(doc, source_path, diags)
     _lint_nested_topdown(doc, source_path, diags)
     _lint_json_refs_topdown(doc, source_path, diags, children_defines)
     return diags
@@ -178,7 +179,7 @@ def _lint_top_level(
     source_path: str,
     diags: list[ReadDiagnostic],
 ) -> None:
-    for node in doc.select(":root:not(@doc, json, struct, define, import)"):
+    for node in doc.select(":root:not(@doc, json, struct, fn, define, import)"):
         diags.append(
             _error(
                 node,
@@ -376,6 +377,69 @@ def _lint_structs(
 ) -> None:
     for node in doc.select("struct:root"):
         _lint_single_struct(node, source_path, diags, children_defines)
+
+
+# Directives allowed inside ``fn`` / ``(raw)fn`` body.
+_FN_ALLOWED_RESERVED: frozenset[str] = frozenset({"@doc"})
+
+
+def _lint_fns(
+    doc: KdlDocument,
+    source_path: str,
+    diags: list[ReadDiagnostic],
+) -> None:
+    """Structural lint for ``fn`` / ``(raw)fn`` directives."""
+    for node in doc.select("fn:root"):
+        name = _node_arg(node, 0)
+        if not name:
+            diags.append(
+                _error(
+                    node,
+                    "'fn' requires a name",
+                    source_path,
+                    code="E001",
+                    hint='example: fn page_title { css "h1" { text } }',
+                )
+            )
+            continue
+
+        annotation = node.type_annotation
+        if annotation and annotation != "(raw)":
+            diags.append(
+                _error(
+                    node,
+                    f"unsupported fn annotation '{annotation}' — only '(raw)' is recognized",
+                    source_path,
+                    code="E400",
+                    hint="use 'fn { ... }' (HTML) or '(raw)fn { ... }' (plain text)",
+                )
+            )
+
+        ops = list(node.children)
+        if not ops:
+            diags.append(
+                _error(
+                    node,
+                    f"fn '{name}' must contain at least one pipeline operation",
+                    source_path,
+                    code="E001",
+                    hint='example: fn title { css "h1" { text } }',
+                )
+            )
+
+        for child in ops:
+            if (
+                child.name.startswith("@")
+                and child.name not in _FN_ALLOWED_RESERVED
+            ):
+                diags.append(
+                    _error(
+                        child,
+                        f"'{child.name}' is not allowed inside fn — use a struct for init/check/request/etc.",
+                        source_path,
+                        code="E203",
+                    )
+                )
 
 
 def _lint_nested_topdown(

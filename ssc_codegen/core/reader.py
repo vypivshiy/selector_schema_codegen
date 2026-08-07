@@ -16,6 +16,7 @@ from ssc_codegen.core.expressions import typedef_from_struct
 from ssc_codegen.core.rest_artifacts import rest_artifacts_from_struct
 from ssc_codegen.core.module_handler import (
     handle_define,
+    handle_function,
     handle_json,
     handle_struct,
     resolve_imports,
@@ -68,6 +69,7 @@ def parse_module(
         module.source_file = source_path.name if source_path else ""
         structs: list = []
         typedefs: list = []
+        functions: list = []
 
         for node in top_nodes:
             lint.push(node.name)
@@ -79,6 +81,9 @@ def parse_module(
                 struct = handle_struct(node, module, ctx, lint)
                 typedefs.append(typedef_from_struct(struct, module))
                 structs.append(struct)
+            elif node.name == "fn":
+                fn = handle_function(node, module, ctx, lint)
+                functions.append(fn)
             elif node.name in ("define", "import"):
                 pass  # already handled
             else:
@@ -95,6 +100,7 @@ def parse_module(
             if isinstance(struct, StructRest):
                 module.body.extend(rest_artifacts_from_struct(struct, module))
             module.body.append(struct)
+        module.body.extend(functions)
 
         # merge lint diagnostics into walker diagnostics
         diagnostics.extend(lint.diagnostics)
