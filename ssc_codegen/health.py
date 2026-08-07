@@ -25,6 +25,8 @@ from ssc_codegen.ast import (
     TableRows,
     TableMatchKey,
     StructBase,
+    Struct,
+    StructType,
     Module,
 )
 from ssc_codegen.ast.base import Node as AstNode
@@ -284,6 +286,20 @@ def check_struct_health(
 
     soup = BeautifulSoup(html, "lxml")
     result = HealthResult(struct_name=struct.name)
+
+    # RAW structs have no HTML selectors — skip health-check entirely.
+    if isinstance(struct, Struct) and struct.type == StructType.RAW:
+        result.checks.append(
+            SelectorCheck(
+                path=struct.name,
+                selector_type="raw",
+                query="",
+                matches=0,
+                status="warn",
+                message="(raw)struct has no HTML selectors to check",
+            )
+        )
+        return result
 
     # collect selectors + nested refs, then recurse into nested structs
     visited: set[str] = set()

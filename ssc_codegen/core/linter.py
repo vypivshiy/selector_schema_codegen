@@ -49,7 +49,7 @@ def _node_args(node: KdlNode) -> list[str]:
 
 
 _VALID_STRUCT_TYPES = frozenset(
-    {"item", "list", "dict", "table", "flat", "rest"}
+    {"item", "list", "dict", "table", "flat", "rest", "raw"}
 )
 
 _REQUIRED_RESERVED: dict[str, frozenset[str]] = {
@@ -59,15 +59,18 @@ _REQUIRED_RESERVED: dict[str, frozenset[str]] = {
     "table": frozenset({"@table", "@rows", "@match", "@value"}),
     "flat": frozenset(),
     "rest": frozenset({"@request"}),
+    "raw": frozenset(),
 }
 
 _RESERVED_ALLOWED: dict[str, frozenset[str] | None] = {
     "@request": None,
     "@doc": None,
-    "@pre-validate": frozenset({"item", "list", "dict", "table", "flat"}),
-    "@check": frozenset({"item", "list", "dict", "table", "flat"}),
-    "@init": frozenset({"item", "list", "dict", "table", "flat"}),
-    "@split-doc": frozenset({"list", "dict"}),
+    "@pre-validate": frozenset(
+        {"item", "list", "dict", "table", "flat", "raw"}
+    ),
+    "@check": frozenset({"item", "list", "dict", "table", "flat", "raw"}),
+    "@init": frozenset({"item", "list", "dict", "table", "flat", "raw"}),
+    "@split-doc": frozenset({"list", "dict", "raw"}),
     "@key": frozenset({"dict"}),
     "@value": frozenset({"dict", "table"}),
     "@table": frozenset({"table"}),

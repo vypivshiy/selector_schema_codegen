@@ -42,6 +42,7 @@ def handle_struct(
         "dict": StructType.DICT,
         "table": StructType.TABLE,
         "rest": StructType.REST,
+        "raw": StructType.RAW,
     }
     st = struct_type_map.get(type_)
     if st is None:

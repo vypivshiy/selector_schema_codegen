@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast as _py_ast
 import re as _re
 from collections.abc import Sequence
+from types import SimpleNamespace
 from typing import Any, Callable, TypeAlias
 
 from ssc_codegen.ast import (
@@ -206,7 +207,7 @@ def resolve_index_types(
     the element base with is_array=False.
     """
     if parent.body:
-        prev = parent.body[-1]
+        prev = _prev_type_info(parent)
         ret_ti = TypeInfo(base=prev.ret_type_info.base)
         return prev.ret_type_info, ret_ti, prev.is_array
     auto = TypeInfo(base=VariableType.AUTO)
@@ -420,18 +421,26 @@ def parse_expressions(
             raise BuildTimeError(f"Unknown expression: {node.name}")
         lint.push(node.name)
         lint_pipeline_op(node, lint)
-        # Guard: ops in _REQUIRES_PREV access parent.body[-1] unconditionally
-        # in their handlers. Emit a diagnostic and skip the handler when the
-        # pipeline is empty so far, instead of crashing with IndexError.
+        # Guard: ops in _REQUIRES_PREV access parent.body[-1] in their
+        # handlers. Emit a diagnostic and skip when the pipeline is empty —
+        # UNLESS the parent starts with STRING (RAW struct fields), where
+        # string ops are valid as the first operation.
         if not parent.body and node.name in _REQUIRES_PREV:
-            lint.error(
-                node,
-                message=(f"'{node.name}' requires a preceding operation"),
-                code="E100",
-                hint="add a producer first, e.g. `css '.x'; text`",
-            )
-            lint.pop()
-            continue
+            parent_accept = getattr(parent, "accept_type_info", None)
+            if (
+                parent_accept is not None
+                and parent_accept.base == VariableType.STRING
+            ):
+                pass  # RAW struct field — string ops OK as first node
+            else:
+                lint.error(
+                    node,
+                    message=(f"'{node.name}' requires a preceding operation"),
+                    code="E100",
+                    hint="add a producer first, e.g. `css '.x'; text`",
+                )
+                lint.pop()
+                continue
         # Guard: handlers reading node.args[i] without a bounds check would
         # crash with `tuple index out of range` when the user omits args.
         required_args = _MIN_ARGS.get(node.name)
@@ -502,6 +511,28 @@ _ExpressionHandler = Callable[
     [KdlNode, FieldLikeNode, ParseContext, LintContext], AstNode
 ]
 _EXPRESSION_HANDLERS: dict[str, _ExpressionHandler] = {}
+
+
+def _prev_type_info(
+    parent: FieldLikeNode,
+) -> SimpleNamespace:
+    """Return a namespace with ``ret_type_info`` and ``is_array`` for the
+    pipeline cursor.
+
+    When the pipeline is non-empty, uses the last node's ret type.
+    When empty (first op), falls back to the parent's accept type —
+    this lets RAW struct fields start directly with string ops
+    (re/split/fmt/etc.) since their document is already a STRING.
+    """
+    if parent.body:
+        prev = parent.body[-1]
+        return SimpleNamespace(
+            ret_type_info=prev.ret_type_info, is_array=prev.is_array
+        )
+    return SimpleNamespace(
+        ret_type_info=parent.accept_type_info,
+        is_array=parent.accept_type_info.is_array,
+    )
 
 
 # Ops whose handlers access ``parent.body[-1]`` unconditionally and therefore
@@ -659,7 +690,7 @@ def _expr_text(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
     if parent.body:
-        prev = parent.body[-1]
+        prev = _prev_type_info(parent)
         accept_ti = prev.ret_type_info
         is_arr = prev.is_array
     else:
@@ -678,7 +709,7 @@ def _expr_raw(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
     if parent.body:
-        prev = parent.body[-1]
+        prev = _prev_type_info(parent)
         accept_ti = prev.ret_type_info
         is_arr = prev.is_array
     else:
@@ -697,7 +728,7 @@ def _expr_attr(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
     if parent.body:
-        prev = parent.body[-1]
+        prev = _prev_type_info(parent)
         accept_ti = prev.ret_type_info
         is_arr = prev.is_array
     else:
@@ -727,7 +758,7 @@ def _expr_trim(
         if node.args
         else ""
     )
-    prev = parent.body[-1]
+    prev = _prev_type_info(parent)
     return Trim(
         parent=parent,
         accept_type_info=prev.ret_type_info,
@@ -749,7 +780,7 @@ def _expr_ltrim(
         if node.args
         else ""
     )
-    prev = parent.body[-1]
+    prev = _prev_type_info(parent)
     return Ltrim(
         parent=parent,
         accept_type_info=prev.ret_type_info,
@@ -771,7 +802,7 @@ def _expr_rtrim(
         if node.args
         else ""
     )
-    prev = parent.body[-1]
+    prev = _prev_type_info(parent)
     return Rtrim(
         parent=parent,
         accept_type_info=prev.ret_type_info,
@@ -785,7 +816,7 @@ def _expr_rtrim(
 def _expr_norm_space(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    prev = parent.body[-1]
+    prev = _prev_type_info(parent)
     return NormalizeSpace(
         parent=parent,
         accept_type_info=prev.ret_type_info,
@@ -799,7 +830,7 @@ def _expr_rm_prefix(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
     substr = ctx.property_defines.get(node.args[0].value, node.args[0].value)
-    prev = parent.body[-1]
+    prev = _prev_type_info(parent)
     return RmPrefix(
         parent=parent,
         accept_type_info=prev.ret_type_info,
@@ -814,7 +845,7 @@ def _expr_rm_suffix(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
     substr = ctx.property_defines.get(node.args[0].value, node.args[0].value)
-    prev = parent.body[-1]
+    prev = _prev_type_info(parent)
     return RmSuffix(
         parent=parent,
         accept_type_info=prev.ret_type_info,
@@ -829,7 +860,7 @@ def _expr_rm_prefix_suffix(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
     substr = ctx.property_defines.get(node.args[0].value, node.args[0].value)
-    prev = parent.body[-1]
+    prev = _prev_type_info(parent)
     return RmPrefixSuffix(
         parent=parent,
         accept_type_info=prev.ret_type_info,
@@ -844,7 +875,7 @@ def _expr_fmt(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
     tmpl = ctx.property_defines.get(node.args[0].value, node.args[0].value)
-    prev = parent.body[-1]
+    prev = _prev_type_info(parent)
     return Fmt(
         parent=parent,
         accept_type_info=prev.ret_type_info,
@@ -858,7 +889,7 @@ def _expr_fmt(
 def _expr_repl(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    prev = parent.body[-1]
+    prev = _prev_type_info(parent)
     if node.children:
         items = {
             str(child.name): str(child.args[0].value) for child in node.children
@@ -890,7 +921,7 @@ def _expr_repl(
 def _expr_lower(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    prev = parent.body[-1]
+    prev = _prev_type_info(parent)
     return Lower(
         parent=parent,
         accept_type_info=prev.ret_type_info,
@@ -903,7 +934,7 @@ def _expr_lower(
 def _expr_upper(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    prev = parent.body[-1]
+    prev = _prev_type_info(parent)
     return Upper(
         parent=parent,
         accept_type_info=prev.ret_type_info,
@@ -936,7 +967,7 @@ def _expr_join(
 def _expr_unescape(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    prev = parent.body[-1]
+    prev = _prev_type_info(parent)
     return Unescape(
         parent=parent,
         accept_type_info=prev.ret_type_info,
@@ -954,7 +985,7 @@ def _expr_re(
 ):
     raw = ctx.property_defines.get(node.args[0].value, node.args[0].value)
     pattern = normalize_regex_pattern(raw)
-    prev = parent.body[-1]
+    prev = _prev_type_info(parent)
     return Re(
         parent=parent,
         pattern=pattern,
@@ -978,7 +1009,7 @@ def _expr_re_all(
 def _expr_re_sub(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    prev = parent.body[-1]
+    prev = _prev_type_info(parent)
     raw = ctx.property_defines.get(node.args[0].value, node.args[0].value)
     pattern = normalize_regex_pattern(raw)
     repl = cast(
@@ -1045,7 +1076,7 @@ def _expr_slice(
 ):
     start, end = int(node.args[0].value), int(node.args[1].value)
     if parent.body:
-        prev = parent.body[-1]
+        prev = _prev_type_info(parent)
         return Slice(
             parent=parent,
             start=start,
@@ -1079,7 +1110,7 @@ def _expr_unique(
 def _expr_to_int(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    prev = parent.body[-1]
+    prev = _prev_type_info(parent)
     return ToInt(
         parent=parent,
         accept_type_info=prev.ret_type_info,
@@ -1092,7 +1123,7 @@ def _expr_to_int(
 def _expr_to_float(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    prev = parent.body[-1]
+    prev = _prev_type_info(parent)
     return ToFloat(
         parent=parent,
         accept_type_info=prev.ret_type_info,
@@ -1108,7 +1139,7 @@ def _expr_to_bool(
     # Guard against empty parent.body is enforced centrally in
     # parse_expressions via _REQUIRES_PREV — handler is reached only when a
     # preceding node exists.
-    prev = parent.body[-1]
+    prev = _prev_type_info(parent)
     return ToBool(parent=parent, accept_type_info=prev.ret_type_info)
 
 
@@ -1164,7 +1195,7 @@ def _expr_fallback(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
     value = [] if not node.args else node.args[0].value
-    prev = parent.body[-1]
+    prev = _prev_type_info(parent)
     prev_ti = prev.ret_type_info
     fb = Fallback(
         parent=parent,
@@ -1189,7 +1220,7 @@ def _expr_filter(
             ret_type_info=TypeInfo(base=VariableType.DOCUMENT, is_array=True),
             is_array=True,
         )
-    prev = parent.body[-1]
+    prev = _prev_type_info(parent)
     return Filter(
         parent=parent,
         accept_type_info=prev.ret_type_info,

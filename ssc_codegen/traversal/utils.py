@@ -13,8 +13,10 @@ from ssc_codegen.ast import (
     PlaceholderSpec,
     PlaceholderTemplate,
     PreValidate,
+    Struct,
     StructBase,
     StructRest,
+    StructType,
 )
 
 
@@ -44,6 +46,17 @@ def module_is_rest_only(module: Module) -> bool:
     """True if ALL structs in the module are REST structs (or there are none)."""
     structs = [n for n in module.body if isinstance(n, StructBase)]
     return len(structs) == 0 or all(isinstance(s, StructRest) for s in structs)
+
+
+def module_has_html_struct(module: Module) -> bool:
+    """True if the module has at least one HTML-parsing struct (not REST, not RAW)."""
+    for n in module.body:
+        if isinstance(n, StructRest):
+            continue
+        if isinstance(n, Struct):
+            if n.type != StructType.RAW:
+                return True
+    return False
 
 
 def err_subclass_name(struct_name: str, err: ErrorResponse) -> str:

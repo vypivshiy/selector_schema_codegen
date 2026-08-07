@@ -49,3 +49,4 @@ class StructType(IntEnum):
     TABLE = auto()
     FLAT = auto()
     REST = auto()
+    RAW = auto()
