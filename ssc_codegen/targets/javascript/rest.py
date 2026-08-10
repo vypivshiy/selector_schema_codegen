@@ -390,13 +390,22 @@ def emit_method_rest(
             t = f"{t}[]"
         bracket = f"[params.{p.name}]" if p.is_optional else f"params.{p.name}"
         lines.append(f"{i1} * @param {{{t}}} {bracket}")
+    lines.append(f"{i1} * @param {{Object}} [opts] per-call request options (headers, etc.)")
     lines.append(f"{i1} * @returns {{Promise<{return_union}>}}")
     lines.append(f"{i1} */")
-    lines.append(f"{i1}static async {method_name}(client{ph_param}) {{")
+    lines.append(f"{i1}static async {method_name}(client{ph_param}, opts = {{}}) {{")
     lines.extend(pre_lines)
+    lines.append(f"{i2}const _kw = {opts_obj};")
+    lines.append(f"{i2}for (const [_k, _v] of Object.entries(opts)) {{")
+    lines.append(f"{i2}    if (typeof _kw[_k] === 'object' && _kw[_k] !== null && typeof _v === 'object' && _v !== null) {{")
+    lines.append(f"{i2}        _kw[_k] = {{..._kw[_k], ..._v}};")
+    lines.append(f"{i2}    }} else {{")
+    lines.append(f"{i2}        _kw[_k] = _v;")
+    lines.append(f"{i2}    }}")
+    lines.append(f"{i2}}}")
     lines.append(
         f"{i2}return {fn_name}(client, {matchers_var}, "
-        f"{spec.method!r}, {url_expr}, {value_fn}, {opts_obj});"
+        f"{spec.method!r}, {url_expr}, {value_fn}, _kw);"
     )
     lines.append(f"{i1}}}")
     return lines
@@ -434,9 +443,11 @@ def emit_method_fetch(
         rl.append(f"{i2}return new {struct_name}(_body);")
         return rl
 
-    lines: list[str] = [f"{i1}static async {method_name}(client{ph_param}) {{"]
+    lines: list[str] = [f"{i1}static async {method_name}(client{ph_param}, opts = {{}}) {{"]
     lines.extend(pre_lines)
 
+    # Build _kw from DSL-specified request options (method/url stay out).
+    kw_parts: list[str] = []
     if http_client == "fetch":
         if params_expr:
             url_inner = spec.url.map(
@@ -446,21 +457,30 @@ def emit_method_fetch(
             url_expr = f"`{url_inner}?${{new URLSearchParams({params_expr})}}`"
         else:
             url_expr = render_value(spec.url)
-        options: list[str] = [f"{i3}method: {spec.method!r},"]
         if headers_expr:
-            options.append(f"{i3}headers: {headers_expr},")
+            kw_parts.append(f"headers: {headers_expr}")
         if spec.cookies:
             cookie_str = "; ".join(
                 f"{k}={v.source}" for k, v in spec.cookies.items()
             )
-            options.append(
-                f"{i3}// cookies: {cookie_str!r}  /* set via headers or credentials */"
+            kw_parts.append(
+                f"// cookies: {cookie_str!r}  /* set via headers or credentials */"
             )
         if body_expr:
-            options.append(f"{i3}body: {body_expr},")
-        lines.append(f"{i2}const _resp = await client({url_expr}, {{")
-        lines.extend(options)
-        lines.append(f"{i2}}});")
+            kw_parts.append(f"body: {body_expr}")
+        kw_obj = "{" + ", ".join(kw_parts) + "}" if kw_parts else "{}"
+        lines.append(f"{i2}const _kw = {kw_obj};")
+        lines.append(f"{i2}for (const [_k, _v] of Object.entries(opts)) {{")
+        lines.append(f"{i2}    if (typeof _kw[_k] === 'object' && _kw[_k] !== null && typeof _v === 'object' && _v !== null) {{")
+        lines.append(f"{i2}        _kw[_k] = {{..._kw[_k], ..._v}};")
+        lines.append(f"{i2}    }} else {{")
+        lines.append(f"{i2}        _kw[_k] = _v;")
+        lines.append(f"{i2}    }}")
+        lines.append(f"{i2}}}")
+        lines.append(
+            f"{i2}const _resp = await client({url_expr},"
+            f" {{ method: {spec.method!r}, ..._kw }});"
+        )
         lines.append(
             f"{i2}if (!_resp.ok) throw new Error(`HTTP ${{_resp.status}}`);"
         )
@@ -469,23 +489,30 @@ def emit_method_fetch(
         else:
             lines.extend(_response_lines("await _resp.text()"))
     else:
-        req_props: list[str] = [
-            f"{i3}method: {spec.method!r},",
-            f"{i3}url: {render_value(spec.url)},",
-        ]
+        url_expr = render_value(spec.url)
         if params_expr:
-            req_props.append(f"{i3}params: {params_expr},")
+            kw_parts.append(f"params: {params_expr}")
         if headers_expr:
-            req_props.append(f"{i3}headers: {headers_expr},")
+            kw_parts.append(f"headers: {headers_expr}")
         if spec.cookies:
-            req_props.append(
-                f"{i3}// cookies: {render_obj(spec.cookies)},",
+            kw_parts.append(
+                f"// cookies: {render_obj(spec.cookies)},"
             )
         if body_expr:
-            req_props.append(f"{i3}data: {body_expr},")
-        lines.append(f"{i2}const _resp = await client.request({{")
-        lines.extend(req_props)
-        lines.append(f"{i2}}});")
+            kw_parts.append(f"data: {body_expr}")
+        kw_obj = "{" + ", ".join(kw_parts) + "}" if kw_parts else "{}"
+        lines.append(f"{i2}const _kw = {kw_obj};")
+        lines.append(f"{i2}for (const [_k, _v] of Object.entries(opts)) {{")
+        lines.append(f"{i2}    if (typeof _kw[_k] === 'object' && _kw[_k] !== null && typeof _v === 'object' && _v !== null) {{")
+        lines.append(f"{i2}        _kw[_k] = {{..._kw[_k], ..._v}};")
+        lines.append(f"{i2}    }} else {{")
+        lines.append(f"{i2}        _kw[_k] = _v;")
+        lines.append(f"{i2}    }}")
+        lines.append(f"{i2}}}")
+        lines.append(
+            f"{i2}const _resp = await client.request({{"
+            f" method: {spec.method!r}, url: {url_expr}, ..._kw }});"
+        )
         lines.extend(_response_lines("_resp.data"))
 
     lines.append(f"{i1}}}")

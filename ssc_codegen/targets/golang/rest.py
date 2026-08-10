@@ -206,7 +206,7 @@ def emit_method_fetch(
     i2 = i1 + ctx.indent_char
 
     lines: list[str] = [
-        f"{i1}func {method_name}(ctx context.Context, client {http.client_type}{ph_params}) (*{name}, error) {{",
+        f"{i1}func {method_name}(ctx context.Context, client {http.client_type}{ph_params}, opts ...sscReqOpt) (*{name}, error) {{",
         f"{i2}req, err := http.NewRequestWithContext(ctx, {_go_str(spec.method)}, {url_expr}, nil)",
         f"{i2}if err != nil {{",
         f"{i2}\treturn nil, err",
@@ -232,6 +232,15 @@ def emit_method_fetch(
         lines.append(
             f"{i2}req.Body = io.NopCloser(strings.NewReader({body_expr}))"
         )
+
+    # Apply per-call opts (user headers are additive).
+    lines.append(f"{i2}if len(opts) > 0 {{")
+    lines.append(f"{i2}\t_opts := &sscReqOpts{{}}")
+    lines.append(f"{i2}\tfor _, o := range opts {{ o(_opts) }}")
+    lines.append(f"{i2}\tfor _k, _vs := range _opts.Headers {{")
+    lines.append(f"{i2}\t\tfor _, _v := range _vs {{ req.Header.Add(_k, _v) }}")
+    lines.append(f"{i2}\t}}")
+    lines.append(f"{i2}}}")
 
     # Execute.
     lines.extend(
@@ -325,29 +334,28 @@ def emit_method_rest(
 
     # Function signature.
     lines.append(
-        f"{i1}func {method_name}(client {http.client_type}{ph_params}) ({ret_type}, error) {{"
+        f"{i1}func {method_name}(client {http.client_type}{ph_params}, opts ...sscReqOpt) ({ret_type}, error) {{"
     )
 
-    # Build opts.
-    opts_lines = _build_opts(spec, i2)
-
-    # Call sscRestCall — inline if nil, multi-line if struct literal.
-    # For void responses, use `_` since the body is discarded.
+    # Build _opts from DSL, apply per-call user opts, then call sscRestCall.
+    opts_lines = _build_opts(spec, i2 + "\t")
     body_var = "_" if not node.response_schema else "body"
-    if len(opts_lines) == 1:
-        lines.append(
-            f"{i2}{body_var}, err := sscRestCall(client, {matchers_var}, "
-            f"{_go_str(spec.method)}, {url_expr}, {opts_lines[0].strip()})"
-        )
+
+    # Assign DSL opts to _opts variable.
+    if len(opts_lines) == 1 and opts_lines[0].strip() == "nil":
+        lines.append(f"{i2}_opts := &sscReqOpts{{}}")
     else:
-        lines.append(
-            f"{i2}{body_var}, err := sscRestCall(client, {matchers_var}, "
-            f"{_go_str(spec.method)}, {url_expr},"
-        )
-        lines.append(f"{opts_lines[0].strip()}")
-        for ol in opts_lines[1:-1]:
+        lines.append(f"{i2}_opts := {opts_lines[0].strip()}")
+        for ol in opts_lines[1:]:
             lines.append(ol)
-        lines.append(f"{opts_lines[-1].strip()})")
+
+    # Apply per-call opts (functional options).
+    lines.append(f"{i2}for _, o := range opts {{ o(_opts) }}")
+
+    lines.append(
+        f"{i2}{body_var}, err := sscRestCall(client, {matchers_var}, "
+        f"{_go_str(spec.method)}, {url_expr}, _opts)"
+    )
 
     # Error propagation.
     lines.append(f"{i2}if err != nil {{")

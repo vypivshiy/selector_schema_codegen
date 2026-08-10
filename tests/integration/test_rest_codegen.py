@@ -737,3 +737,116 @@ class TestRestAiohttpNonJsonContentType:
         # Full envelope preserved on the error path (response-path only
         # narrows Ok.value, never the matcher-visible body).
         assert result.value == {"data": {"x": 1}, "code": 404}
+
+
+# ---------------------------------------------------------------------------
+# 10. Per-call kwargs forwarding (**kwargs → client.request, no client mutation)
+# ---------------------------------------------------------------------------
+
+
+class TestPerCallKwargs:
+    """Verify that **kwargs reach the HTTP client without mutating it.
+
+    The generated wrapper must accept **kwargs, shallow-merge DSL-specified
+    dict kwargs (headers/cookies/params), and forward everything to
+    client.request — the client object must not be modified.
+    """
+
+    def test_user_headers_reach_request(self, header_ns):
+        """Extra headers passed via kwargs appear in the outgoing request."""
+        API = header_ns["API"]
+
+        with respx.mock as mock:
+            route = mock.get("https://api.example.com/me")
+            route.respond(json={"id": 1, "name": "Bob"}, status_code=200)
+
+            client = httpx.Client()
+            API.fetch(client, token="secret", headers={"X-Custom": "yes"})
+
+            sent_headers = route.calls.last.request.headers
+            assert sent_headers["x-custom"] == "yes"
+
+    def test_dsl_and_user_headers_merged(self, header_ns):
+        """DSL Authorization + user X-Custom both present (shallow merge)."""
+        API = header_ns["API"]
+
+        with respx.mock as mock:
+            route = mock.get("https://api.example.com/me")
+            route.respond(json={"id": 1, "name": "Bob"}, status_code=200)
+
+            client = httpx.Client()
+            API.fetch(
+                client,
+                token="secret",
+                headers={"X-Custom": "yes"},
+            )
+
+            sent_headers = route.calls.last.request.headers
+            assert sent_headers["authorization"] == "Bearer secret"
+            assert sent_headers["x-custom"] == "yes"
+
+    def test_user_headers_async(self, header_ns):
+        API = header_ns["API"]
+
+        with respx.mock as mock:
+            route = mock.get("https://api.example.com/me")
+            route.respond(json={"id": 1, "name": "Bob"}, status_code=200)
+
+            async def _run():
+                async with httpx.AsyncClient() as client:
+                    return await API.async_fetch(
+                        client, token="secret", headers={"X-Custom": "async"}
+                    )
+
+            asyncio.run(_run())
+
+            sent_headers = route.calls.last.request.headers
+            assert sent_headers["x-custom"] == "async"
+
+    def test_client_not_mutated(self, header_ns):
+        """Passing kwargs must not modify the client's default headers."""
+        API = header_ns["API"]
+
+        with respx.mock:
+            respx.get("https://api.example.com/me").respond(
+                json={"id": 1, "name": "Bob"}, status_code=200
+            )
+            client = httpx.Client()
+            original_headers = dict(client.headers)
+            API.fetch(client, token="secret", headers={"X-Custom": "yes"})
+            assert dict(client.headers) == original_headers
+
+    def test_no_kwargs_still_works(self, header_ns):
+        """Calling without kwargs must behave identically to before."""
+        API = header_ns["API"]
+
+        with respx.mock as mock:
+            route = mock.get("https://api.example.com/me")
+            route.respond(json={"id": 1, "name": "Bob"}, status_code=200)
+
+            client = httpx.Client()
+            result = API.fetch(client, token="secret")
+
+        assert result.is_ok is True
+        assert result.value == {"id": 1, "name": "Bob"}
+
+    def test_kwargs_forwarded_to_fetch_codegen(self):
+        """HTML struct @request fetch also accepts **kwargs."""
+        src = (
+            'struct Page """\n'
+            "title { css \"h1\"; text }\n"
+            '"""\n'
+            "struct Page type=item {\n"
+            "    title { css \"h1\"; text }\n"
+            "    @request \"\"\"\n"
+            "    GET / HTTP/1.1\n"
+            "    Host: example.com\n"
+            '    """\n'
+            "}\n"
+        )
+        # Just verify codegen produces **kwargs in signature
+        module = _parse(src)
+        from ssc_codegen.targets.python import PY_BS4_CONVERTER
+
+        code = PY_BS4_CONVERTER.convert(module, http_client="httpx")
+        assert "**kwargs: Any" in code

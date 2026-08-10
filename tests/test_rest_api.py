@@ -314,7 +314,7 @@ class TestRestPyConverter:
         )
         module = _parse(src)
         code = CONVERTER.convert(module, http_client="httpx")
-        assert "json={'name': name, 'active': active}" in code
+        assert "_kw[\"json\"] = {'name': name, 'active': active}" in code
         # And no leftover f-string style
         assert 'json=f"' not in code
         assert "json=f'" not in code
@@ -454,6 +454,26 @@ class TestRestJsConverter:
         assert "'error' in _b" in code
         assert "'detail' in _b" in code
         assert "APIErr404ErrorDetail" in code
+
+    def test_js_rest_accepts_opts(self):
+        """JS REST method signature has ``opts = {}`` for per-call overrides."""
+        from ssc_codegen.targets.javascript import JS_CONVERTER
+
+        src = _rest_src()
+        module = _parse(src)
+        code = JS_CONVERTER.convert(module, http_client="fetch")
+        assert "opts = {}" in code
+        assert "const _kw =" in code
+        assert "Object.entries(opts)" in code
+
+    def test_js_fetch_accepts_opts(self):
+        """JS HTML fetch method also accepts ``opts = {}``."""
+        from ssc_codegen.targets.javascript import JS_CONVERTER
+
+        src = _rest_src()
+        module = _parse(src)
+        code = JS_CONVERTER.convert(module, http_client="axios")
+        assert "opts = {}" in code
 
 
 def _method_bodies(code: str) -> str:
@@ -1592,6 +1612,16 @@ class TestResponsePathCodegen:
         assert "_val" not in rest_section
         assert "_err" not in rest_section
         assert "_perr" not in rest_section
+
+    def test_go_rest_accepts_opts(self):
+        """Go REST methods accept variadic ``opts ...sscReqOpt``."""
+        from ssc_codegen.targets.golang import GO_CONVERTER
+
+        module = _parse(self._rest_path_src())
+        code = GO_CONVERTER.convert(module)
+        assert "opts ...sscReqOpt" in code
+        assert "for _, o := range opts {" in code
+        assert "o(_opts)" in code
 
 
 # ---------------------------------------------------------------------------

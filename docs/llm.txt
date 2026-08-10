@@ -79,6 +79,22 @@ The old property syntax `struct Name type=list { ... }` still works but prefer t
 - @rows — table rows selector
 - @match — extract key from row for comparison
 
+### @request and per-call kwargs
+
+Generated methods (`fetch`, `async_fetch`, REST methods) accept extra
+per-call parameters for headers, cookies, timeout, etc. Everything is
+applied **only to the request** — the client object is never mutated.
+
+| Language | Param | Example |
+|---|---|---|
+| Python | `**kwargs: Any` | `API.fetch(client, id="42", headers={"Referer": "..."})` |
+| JS | `opts = {}` | `API.fetch(client, {id}, {headers: {Referer: "..."}})` |
+| Go | `opts ...sscReqOpt` | `Fetch(client, "42", WithHeader("Referer", "..."))` |
+
+Shallow-merge: if DSL specifies `headers` and user passes `headers`, they
+merge (user keys override DSL keys). Non-dict kwargs (`timeout`, `verify`)
+replace entirely.
+
 - @check <name> — boolean check method; runs pipeline on document, returns bool
   Pipeline must contain `to-bool`. Use `fallback` for error recovery.
   ```kdl

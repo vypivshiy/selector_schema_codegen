@@ -296,32 +296,44 @@ def placeholder_args(http: RequestHttp) -> str:
 # ===========================================================================
 
 
-def _build_kwargs(
-    spec: RequestHttp, i2: str, i3: str, include_method_url: bool
+def _build_kw_dict(
+    spec: RequestHttp, i2: str, i3: str
 ) -> tuple[list[str], list[str]]:
-    """Build (pre_lines, kwargs_lines) for request call.
+    """Build (pre_lines, kw_assign_lines) for ``_kw`` dict construction.
 
-    include_method_url=True for fetch (client.request(method, url, ...)).
-    include_method_url=False for rest (ssc_rest_call(client, matchers, method, url, ...)).
+    Produces ``_kw["headers"] = {...}`` style assignments so caller kwargs
+    can be shallow-merged into the same dict before passing ``**_kw`` to
+    ``client.request()`` / ``ssc_rest_call()``.
+
+    pre_lines:   builder helper code (complex dicts needing intermediate vars).
+    kw_lines:    ``_kw["key"] = value`` assignment lines (at i2 indent).
     """
     pre_lines: list[str] = []
-    kwargs_lines: list[str] = []
-    if include_method_url:
-        kwargs_lines.append(f"{i3}{spec.method!r},")
-        kwargs_lines.append(f"{i3}{render_value(spec.url)},")
+    kw_lines: list[str] = []
     for attr, varname in _DICT_KWARGS:
         d = getattr(spec, attr)
         if not d:
             continue
         if dict_needs_builder(d):
             pre_lines.extend(emit_dict_builder(varname, d, i2))
-            kwargs_lines.append(f"{i3}{attr}={varname},")
+            kw_lines.append(f'{i2}_kw["{attr}"] = {varname}')
         else:
-            kwargs_lines.append(f"{i3}{attr}={render_dict(d)},")
+            kw_lines.append(f'{i2}_kw["{attr}"] = {render_dict(d)}')
     body_result = render_body(spec)
     if body_result:
-        kwargs_lines.append(f"{i3}{body_result[0]}={body_result[1]},")
-    return pre_lines, kwargs_lines
+        kw_lines.append(f'{i2}_kw["{body_result[0]}"] = {body_result[1]}')
+    return pre_lines, kw_lines
+
+
+def _merge_loop_lines(i2: str) -> list[str]:
+    """Shallow-merge user kwargs into _kw (dict keys merged key-by-key)."""
+    return [
+        f"{i2}for _k, _v in kwargs.items():",
+        f"{i2}    if isinstance(_kw.get(_k), dict) and isinstance(_v, dict):",
+        f"{i2}        _kw[_k] = {{**_kw[_k], **_v}}",
+        f"{i2}    else:",
+        f"{i2}        _kw[_k] = _v",
+    ]
 
 
 # ===========================================================================
@@ -343,9 +355,22 @@ def emit_method_fetch(
     i2 = i1 + ctx.indent_char
     i3 = i2 + ctx.indent_char
 
-    pre_lines, kwargs_lines = _build_kwargs(
-        spec, i2, i3, include_method_url=True
-    )
+    pre_lines, kw_lines = _build_kw_dict(spec, i2, i3)
+
+    # kwargs_lines for fetch_body_lines: method, url, **_kw
+    fetch_kwargs = [
+        f"{i3}{spec.method!r},",
+        f"{i3}{render_value(spec.url)},",
+        f"{i3}**_kw,",
+    ]
+
+    def _kw_setup() -> list[str]:
+        """Lines to build _kw dict + merge user kwargs before the request."""
+        setup: list[str] = [f"{i2}_kw: Dict[str, Any] = {{}}"]
+        setup.extend(pre_lines)
+        setup.extend(kw_lines)
+        setup.extend(_merge_loop_lines(i2))
+        return setup
 
     lines: list[str] = []
 
@@ -353,14 +378,14 @@ def emit_method_fetch(
     if http.supports_sync_fetch:
         lines.append(f"{i1}@classmethod")
         lines.append(
-            f'{i1}def fetch{suffix}(cls, client: {http.sync_client_type}{ph_params}) -> "{struct_name}":'
+            f'{i1}def fetch{suffix}(cls, client: {http.sync_client_type}{ph_params}, **kwargs: Any) -> "{struct_name}":'
         )
-        lines.extend(pre_lines)
+        lines.extend(_kw_setup())
         lines.extend(
             http.fetch_body_lines(
                 is_async=False,
                 request_call=f"{i2}_resp = client.request(",
-                kwargs_lines=kwargs_lines,
+                kwargs_lines=fetch_kwargs,
                 response_path=node.response_path,
                 response_join=node.response_join,
                 i2=i2,
@@ -372,24 +397,27 @@ def emit_method_fetch(
     # --- async_fetch ------------------------------------------------------
     lines.append(f"{i1}@classmethod")
     lines.append(
-        f'{i1}async def async_fetch{suffix}(cls, client: {http.async_client_type}{ph_params}) -> "{struct_name}":'
+        f'{i1}async def async_fetch{suffix}(cls, client: {http.async_client_type}{ph_params}, **kwargs: Any) -> "{struct_name}":'
     )
     if http.async_fetch_delegates_to_sync:
         # requests: no native async — run the sync fetch in a worker thread
         # via asyncio.to_thread (non-blocking, yields control to the loop).
-        to_thread_args = f"client, {ph_kwargs}" if ph_kwargs else "client"
+        if ph_kwargs:
+            to_thread_args = f"client, {ph_kwargs}, **kwargs"
+        else:
+            to_thread_args = "client, **kwargs"
         lines.append(f"{i2}import asyncio")
         lines.append(
             f"{i2}return await asyncio.to_thread("
             f"cls.fetch{suffix}, {to_thread_args})"
         )
     else:
-        lines.extend(pre_lines)
+        lines.extend(_kw_setup())
         lines.extend(
             http.fetch_body_lines(
                 is_async=True,
                 request_call=f"{i2}_resp = await client.request(",
-                kwargs_lines=kwargs_lines,
+                kwargs_lines=fetch_kwargs,
                 response_path=node.response_path,
                 response_join=node.response_join,
                 i2=i2,
@@ -416,9 +444,7 @@ def emit_method_rest(
 
     doc_line = f'{i2}"""{node.doc}"""' if node.doc else None
 
-    pre_lines, kwargs_lines = _build_kwargs(
-        spec, i2, i3, include_method_url=False
-    )
+    pre_lines, kw_lines = _build_kw_dict(spec, i2, i3)
 
     value_kwarg: list[str] = []
     if node.response_path:
@@ -431,36 +457,31 @@ def emit_method_rest(
         body: list[str] = []
         if doc_line:
             body.append(doc_line)
+        body.append(f"{i2}_kw: Dict[str, Any] = {{}}")
         body.extend(pre_lines)
-        # Wrap in cast(): ssc_rest_call returns Union[Ok[_T], Err] (Err
-        # base — it cannot know the specific Err subclasses that the
-        # heterogeneous matchers list will produce at runtime). The
-        # parser-declared Result alias narrows to the precise union
-        # (Err400 | UnknownErr | TransportErr | ...). cast() documents
-        # this intent at the call site without suppressing mypy via
-        # ``# type: ignore``; the wrapping method's return type is the
-        # stable monad consumers see.
+        body.extend(kw_lines)
+        body.extend(_merge_loop_lines(i2))
         body.append(f"{i2}return cast({ret_type}, {await_kw}{fn_name}(")
         body.append(
             f"{i3}client, {matchers_var}, {spec.method!r},"
             f" {render_value(spec.url)},"
         )
         body.extend(value_kwarg)
-        body.extend(kwargs_lines)
+        body.append(f"{i3}**_kw,")
         body.append(f"{i2}))")
         return body
 
     lines: list[str] = []
     lines.append(f"{i1}@classmethod")
     lines.append(
-        f"{i1}def {method_name}(cls, client: {http.sync_client_type}{ph_params}) -> {ret_type}:"
+        f"{i1}def {method_name}(cls, client: {http.sync_client_type}{ph_params}, **kwargs: Any) -> {ret_type}:"
     )
     lines.extend(_body("ssc_rest_call", ""))
     lines.append("")
 
     lines.append(f"{i1}@classmethod")
     lines.append(
-        f"{i1}async def async_{method_name}(cls, client: {http.async_client_type}{ph_params}) -> {ret_type}:"
+        f"{i1}async def async_{method_name}(cls, client: {http.async_client_type}{ph_params}, **kwargs: Any) -> {ret_type}:"
     )
     lines.extend(_body("ssc_rest_call_async", "await "))
     return lines

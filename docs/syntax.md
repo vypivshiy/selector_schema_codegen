@@ -223,6 +223,22 @@ struct Main {
 - В `dict` `@value` может возвращать любой тип.
 - В `table` `@value` должен возвращать строку. Поля `table` начинают pipeline с `match`.
 
+### @request и per-call kwargs
+
+Сгенерированные методы (`fetch`, `async_fetch`, REST-методы) принимают
+дополнительные per-call параметры для передачи headers, cookies, timeout и
+т.д. — всё применяется **только к запросу**, объект клиента не мутируется.
+
+| Язык | Сигнатура | Пример вызова |
+|---|---|---|
+| Python | `**kwargs: Any` | `API.fetch(client, id="42", headers={"Referer": "..."})` |
+| JS | `opts = {}` | `API.fetch(client, {id}, {headers: {Referer: "..."}})` |
+| Go | `opts ...sscReqOpt` | `Fetch(client, "42", WithHeader("Referer", "..."))` |
+
+**Shallow-merge**: если DSL задаёт `headers` и пользователь передаёт свои
+`headers`, они объединяются (ключи пользователя перезаписывают DSL-ключи).
+Неструктивные kwargs (`timeout`, `verify`, ...) заменяются целиком.
+
 ## Обычные поля
 
 Формы записи:
