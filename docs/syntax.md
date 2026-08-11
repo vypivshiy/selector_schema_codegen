@@ -233,7 +233,14 @@ struct Main {
 |---|---|---|
 | Python | `**kwargs: Any` | `API.fetch(client, id="42", headers={"Referer": "..."})` |
 | JS | `opts = {}` | `API.fetch(client, {id}, {headers: {Referer: "..."}})` |
-| Go | `opts ...sscReqOpt` | `Fetch(client, "42", WithHeader("Referer", "..."))` |
+| Go | `opts ...sscReqOpt` | `NewAPI().Fetch(client, "42", WithHeader("Referer", "..."))` |
+
+**Go нейминг методов**: REST-struct получает пустой маркер + фабрику
+`New<Name>()` + receiver-методы (`NewAPI().Fetch(...)`,
+`NewAPI().GetUsers(...)` при `@request name=get-users`). HTML+`@request`
+генерирует free-function `New<Struct>Fetch(...)` (или `New<Struct><X>`
+при `name=X`) — sibling конструктор к `New<Struct>(input)`. Так
+несколько схем в одном Go-пакете не конфликтуют именами.
 
 **Shallow-merge**: если DSL задаёт `headers` и пользователь передаёт свои
 `headers`, они объединяются (ключи пользователя перезаписывают DSL-ключи).

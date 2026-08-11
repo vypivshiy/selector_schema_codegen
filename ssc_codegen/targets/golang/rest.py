@@ -185,9 +185,14 @@ def emit_method_fetch(
     ctx: WalkContext,
     http: GoHttpLibStrategy,
 ) -> list[str]:
-    """Emit a Go Fetch method for HTML-parser structs with ``@request``.
+    """Emit a Go HTTP-entry function for HTML-parser structs with ``@request``.
 
-    Signature: ``func Fetch(ctx context.Context, client *http.Client, <phs>) (*Name, error)``
+    Signature: ``func New<Struct><Method>(ctx, client, <phs>, opts ...) (*Name, error)``
+
+    Free function (not a receiver method) — semantically a sibling of
+    ``New<Name>(input string)`` that fetches the input from HTTP instead.
+    Struct-name prefix guarantees uniqueness across schemas in the same
+    package (default ``New<Name>Fetch``; ``@request name=X`` → ``New<Name>X``).
 
     Idiomatic Go: cancellation via ``context.Context``, async via ``go f(ctx)``
     on caller side. Headers/body inlined (no ``sscReqOpts`` dependency).
@@ -198,7 +203,8 @@ def emit_method_fetch(
     struct = node.parent
     assert isinstance(struct, StructBase)
     name = to_pascal_case(struct.name)
-    method_name = to_pascal_case(node.name) if node.name else "Fetch"
+    method_suffix = to_pascal_case(node.name) if node.name else "Fetch"
+    func_name = f"New{name}{method_suffix}"
     ph_params = placeholder_params(spec)
     url_expr = render_url(spec.url)
 
@@ -206,7 +212,7 @@ def emit_method_fetch(
     i2 = i1 + ctx.indent_char
 
     lines: list[str] = [
-        f"{i1}func {method_name}(ctx context.Context, client {http.client_type}{ph_params}, opts ...sscReqOpt) (*{name}, error) {{",
+        f"{i1}func {func_name}(ctx context.Context, client {http.client_type}{ph_params}, opts ...sscReqOpt) (*{name}, error) {{",
         f"{i2}req, err := http.NewRequestWithContext(ctx, {_go_str(spec.method)}, {url_expr}, nil)",
         f"{i2}if err != nil {{",
         f"{i2}\treturn nil, err",
@@ -293,12 +299,17 @@ def emit_method_rest(
     node: MethodRest,
     ctx: WalkContext,
     http: GoHttpLibStrategy,
+    rcv: str,
 ) -> list[str]:
     """Emit a Go REST method that calls sscRestCall.
 
     Returns idiomatic ``(value, error)`` tuple:
       - typed value  → ``(*SchemaJson, error)`` or ``([]SchemaJson, error)``
       - void         → ``(struct{}, error)``
+
+    Receiver method on the (empty) marker struct — namespaced by type so
+    multiple REST structs in one package don't collide. Caller writes
+    ``NewApiX().Fetch(client, opts...)`` (factory + receiver).
 
     Errors propagate as typed structs: ``@error`` variants via matchers,
     ``*UnknownErr`` for unmatched HTTP >= 400, ``*TransportErr`` for network.
@@ -307,6 +318,7 @@ def emit_method_rest(
     spec = node.http_request.with_renamed_placeholders(to_camel_case)
     struct = node.parent
     assert isinstance(struct, StructBase)
+    name = to_pascal_case(struct.name)
     method_name = to_pascal_case(node.name) if node.name else "Fetch"
     ph_params = placeholder_params(spec)
     matchers_var = f"{to_snake_case(struct.name)}Matchers"
@@ -332,9 +344,9 @@ def emit_method_rest(
 
     lines: list[str] = []
 
-    # Function signature.
+    # Function signature (receiver method on marker struct).
     lines.append(
-        f"{i1}func {method_name}(client {http.client_type}{ph_params}, opts ...sscReqOpt) ({ret_type}, error) {{"
+        f"{i1}func ({rcv} {name}) {method_name}(client {http.client_type}{ph_params}, opts ...sscReqOpt) ({ret_type}, error) {{"
     )
 
     # Build _opts from DSL, apply per-call user opts, then call sscRestCall.

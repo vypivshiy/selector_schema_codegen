@@ -1607,7 +1607,9 @@ class TestResponsePathCodegen:
         assert "if perr := json.Unmarshal(body, &val)" in code
         assert "if err != nil" in code
         # Old underscore-prefixed names must be gone from rest methods.
-        rest_section = code[code.find("func Fetch") :]
+        # REST methods are receiver methods on the marker struct; match
+        # the receiver-prefixed signature (e.g. "func (a API) Fetch(").
+        rest_section = code[code.find("func (a API) Fetch(") :]
         assert "_body" not in rest_section
         assert "_val" not in rest_section
         assert "_err" not in rest_section
@@ -1622,6 +1624,53 @@ class TestResponsePathCodegen:
         assert "opts ...sscReqOpt" in code
         assert "for _, o := range opts {" in code
         assert "o(_opts)" in code
+
+    def test_go_rest_namespaces_via_receiver_and_factory(self):
+        """Go REST codegen: empty struct + New<Name>() factory +
+        receiver method namespaced by type.
+
+        Without the receiver pattern, two REST structs in the same Go
+        package would emit conflicting package-level ``Fetch`` functions.
+        """
+        from ssc_codegen.targets.golang import GO_CONVERTER
+
+        module = _parse(self._rest_path_src())
+        code = GO_CONVERTER.convert(module)
+        # Empty marker struct.
+        assert "type API struct {" in code
+        # Zero-cost factory on the empty struct.
+        assert "func NewAPI() API { return API{} }" in code
+        # Receiver method — namespaced by type, not a free function.
+        assert "func (a API) Fetch(" in code
+        # The free-function form (the bug) must be gone.
+        assert "\nfunc Fetch(" not in code
+
+    def test_go_html_fetch_uses_newstruct_prefix(self):
+        """Go HTML @request codegen: free function ``New<Struct>Fetch``.
+
+        Struct-name prefix guarantees uniqueness across schemas in the
+        same package (collision regression). Existing ``New<Struct>(input)``
+        constructor for HTML parsing is left untouched.
+        """
+        from ssc_codegen.targets.golang import GO_CONVERTER
+
+        src = (
+            "struct Page {\n"
+            '    @request """\n'
+            "    GET / HTTP/1.1\n"
+            "    Host: example.com\n"
+            '    """\n'
+            '    title { css "h1"; text }\n'
+            "}\n"
+        )
+        module = _parse(src)
+        code = GO_CONVERTER.convert(module)
+        # HTML constructor for direct string input is preserved.
+        assert "func NewPage(input string) (*Page, error)" in code
+        # HTTP-entry constructor is namespaced by struct name.
+        assert "func NewPageFetch(ctx context.Context" in code
+        # Custom @request name=LoadPage → NewPageLoadPage.
+        # (smoke: just verify default case here.)
 
 
 # ---------------------------------------------------------------------------

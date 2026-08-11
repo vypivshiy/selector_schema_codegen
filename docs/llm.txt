@@ -89,7 +89,14 @@ applied **only to the request** — the client object is never mutated.
 |---|---|---|
 | Python | `**kwargs: Any` | `API.fetch(client, id="42", headers={"Referer": "..."})` |
 | JS | `opts = {}` | `API.fetch(client, {id}, {headers: {Referer: "..."}})` |
-| Go | `opts ...sscReqOpt` | `Fetch(client, "42", WithHeader("Referer", "..."))` |
+| Go | `opts ...sscReqOpt` | `NewAPI().Fetch(client, "42", WithHeader("Referer", "..."))` |
+
+Go method naming: REST struct gets an empty marker type + `New<Name>()`
+factory + receiver methods (`NewAPI().Fetch(...)`,
+`NewAPI().GetUsers(...)` when `@request name=get-users`). HTML+`@request`
+emits a free function `New<Struct>Fetch(...)` (or `New<Struct><X>` when
+`name=X`) — a sibling constructor to `New<Struct>(input)`. This keeps
+multiple schemas in one Go package collision-free.
 
 Shallow-merge: if DSL specifies `headers` and user passes `headers`, they
 merge (user keys override DSL keys). Non-dict kwargs (`timeout`, `verify`)

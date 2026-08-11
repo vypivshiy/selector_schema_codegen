@@ -1,0 +1,18 @@
+@doc "Collision regression: two REST structs in one module must compile in the same Go package."
+
+json Alpha { a int }
+json Beta { b str }
+
+struct First type=rest {
+    @request response=Alpha """
+    GET /a HTTP/1.1
+    Host: api.example.com
+    """
+}
+
+struct Second type=rest {
+    @request response=Beta """
+    GET /b HTTP/1.1
+    Host: api.example.com
+    """
+}

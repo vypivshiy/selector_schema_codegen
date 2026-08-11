@@ -61,6 +61,9 @@ _SMOKES = [
     "23_html_fetch.kdl",
     # REST with form-urlencoded body — exercises dict body path.
     "24_rest_form_body.kdl",
+    # Two REST structs in one module — collision regression for
+    # receiver-namespaced methods (default "Fetch" must not clash).
+    "26_multi_rest_namespace.kdl",
 ]
 
 

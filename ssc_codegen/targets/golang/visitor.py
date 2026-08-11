@@ -596,6 +596,12 @@ class GoVisitor(BaseWalker):
         lines.append(f"type {name} struct {{")
         lines.append("}")
         lines.append("")
+        # Empty-struct factory: caller writes New<Name>().Method(...) —
+        # the struct is a pure namespace marker (no state), receiver
+        # methods namespaced by type avoid collisions across schemas in
+        # the same package.
+        lines.append(f"func New{name}() {name} {{ return {name}{{}} }}")
+        lines.append("")
         for child in node.body:
             lines.extend(self.walk(child, ctx))
         return lines
@@ -1885,7 +1891,14 @@ class GoVisitor(BaseWalker):
         if spec.body_kind == "form" and isinstance(spec.body, dict):
             self._builder.require_import('"net/url"')
         self._builder.require_import('"' + self._http.import_path + '"')
-        return rest.emit_method_rest(node, ctx, self._http)
+        struct = node.parent
+        name = (
+            to_pascal_case(struct.name)
+            if isinstance(struct, StructBase)
+            else "X"
+        )
+        rcv = _receiver(name)
+        return rest.emit_method_rest(node, ctx, self._http, rcv)
 
     def visit_method_fetch(
         self, node: MethodFetch, ctx: WalkContext
