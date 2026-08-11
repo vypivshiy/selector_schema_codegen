@@ -297,7 +297,10 @@ class TestQueryPlaceholderCodegen:
 
     def test_signature_has_username_kwarg_httpx(self, query_ph_src: str):
         code = _generate_code(query_ph_src, http_client="httpx")
-        assert "def fetch(cls, client: httpx.Client, *, username: str, **kwargs: Any)" in code
+        assert (
+            "def fetch(cls, client: httpx.Client, *, username: str, **kwargs: Any)"
+            in code
+        )
         assert (
             "async def async_fetch(cls, client: httpx.AsyncClient, *, username: str, **kwargs: Any)"
             in code

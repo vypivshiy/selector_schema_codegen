@@ -390,14 +390,20 @@ def emit_method_rest(
             t = f"{t}[]"
         bracket = f"[params.{p.name}]" if p.is_optional else f"params.{p.name}"
         lines.append(f"{i1} * @param {{{t}}} {bracket}")
-    lines.append(f"{i1} * @param {{Object}} [opts] per-call request options (headers, etc.)")
+    lines.append(
+        f"{i1} * @param {{Object}} [opts] per-call request options (headers, etc.)"
+    )
     lines.append(f"{i1} * @returns {{Promise<{return_union}>}}")
     lines.append(f"{i1} */")
-    lines.append(f"{i1}static async {method_name}(client{ph_param}, opts = {{}}) {{")
+    lines.append(
+        f"{i1}static async {method_name}(client{ph_param}, opts = {{}}) {{"
+    )
     lines.extend(pre_lines)
     lines.append(f"{i2}const _kw = {opts_obj};")
     lines.append(f"{i2}for (const [_k, _v] of Object.entries(opts)) {{")
-    lines.append(f"{i2}    if (typeof _kw[_k] === 'object' && _kw[_k] !== null && typeof _v === 'object' && _v !== null) {{")
+    lines.append(
+        f"{i2}    if (typeof _kw[_k] === 'object' && _kw[_k] !== null && typeof _v === 'object' && _v !== null) {{"
+    )
     lines.append(f"{i2}        _kw[_k] = {{..._kw[_k], ..._v}};")
     lines.append(f"{i2}    }} else {{")
     lines.append(f"{i2}        _kw[_k] = _v;")
@@ -443,7 +449,9 @@ def emit_method_fetch(
         rl.append(f"{i2}return new {struct_name}(_body);")
         return rl
 
-    lines: list[str] = [f"{i1}static async {method_name}(client{ph_param}, opts = {{}}) {{"]
+    lines: list[str] = [
+        f"{i1}static async {method_name}(client{ph_param}, opts = {{}}) {{"
+    ]
     lines.extend(pre_lines)
 
     # Build _kw from DSL-specified request options (method/url stay out).
@@ -471,7 +479,9 @@ def emit_method_fetch(
         kw_obj = "{" + ", ".join(kw_parts) + "}" if kw_parts else "{}"
         lines.append(f"{i2}const _kw = {kw_obj};")
         lines.append(f"{i2}for (const [_k, _v] of Object.entries(opts)) {{")
-        lines.append(f"{i2}    if (typeof _kw[_k] === 'object' && _kw[_k] !== null && typeof _v === 'object' && _v !== null) {{")
+        lines.append(
+            f"{i2}    if (typeof _kw[_k] === 'object' && _kw[_k] !== null && typeof _v === 'object' && _v !== null) {{"
+        )
         lines.append(f"{i2}        _kw[_k] = {{..._kw[_k], ..._v}};")
         lines.append(f"{i2}    }} else {{")
         lines.append(f"{i2}        _kw[_k] = _v;")
@@ -495,15 +505,15 @@ def emit_method_fetch(
         if headers_expr:
             kw_parts.append(f"headers: {headers_expr}")
         if spec.cookies:
-            kw_parts.append(
-                f"// cookies: {render_obj(spec.cookies)},"
-            )
+            kw_parts.append(f"// cookies: {render_obj(spec.cookies)},")
         if body_expr:
             kw_parts.append(f"data: {body_expr}")
         kw_obj = "{" + ", ".join(kw_parts) + "}" if kw_parts else "{}"
         lines.append(f"{i2}const _kw = {kw_obj};")
         lines.append(f"{i2}for (const [_k, _v] of Object.entries(opts)) {{")
-        lines.append(f"{i2}    if (typeof _kw[_k] === 'object' && _kw[_k] !== null && typeof _v === 'object' && _v !== null) {{")
+        lines.append(
+            f"{i2}    if (typeof _kw[_k] === 'object' && _kw[_k] !== null && typeof _v === 'object' && _v !== null) {{"
+        )
         lines.append(f"{i2}        _kw[_k] = {{..._kw[_k], ..._v}};")
         lines.append(f"{i2}    }} else {{")
         lines.append(f"{i2}        _kw[_k] = _v;")

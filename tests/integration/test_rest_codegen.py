@@ -834,11 +834,11 @@ class TestPerCallKwargs:
         """HTML struct @request fetch also accepts **kwargs."""
         src = (
             'struct Page """\n'
-            "title { css \"h1\"; text }\n"
+            'title { css "h1"; text }\n'
             '"""\n'
             "struct Page type=item {\n"
-            "    title { css \"h1\"; text }\n"
-            "    @request \"\"\"\n"
+            '    title { css "h1"; text }\n'
+            '    @request """\n'
             "    GET / HTTP/1.1\n"
             "    Host: example.com\n"
             '    """\n'
