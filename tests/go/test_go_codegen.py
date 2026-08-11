@@ -64,6 +64,12 @@ _SMOKES = [
     # Two REST structs in one module — collision regression for
     # receiver-namespaced methods (default "Fetch" must not clash).
     "26_multi_rest_namespace.kdl",
+    # REST query-string placeholders — regression for params dropped.
+    "27_rest_query_params.kdl",
+    # REST DSL cookies — regression for cookies dropped.
+    "28_rest_cookies.kdl",
+    # HTML @request with params + cookies — regression for both paths.
+    "29_html_fetch_params_cookies.kdl",
 ]
 
 

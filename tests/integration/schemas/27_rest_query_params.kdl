@@ -1,0 +1,10 @@
+@doc "Regression: REST query-string placeholders must reach the URL."
+
+json Resp { x int }
+
+struct API type=rest {
+    @request response=Resp """
+    GET /items?page={{page:int}}&limit={{limit:int}} HTTP/1.1
+    Host: api.example.com
+    """
+}

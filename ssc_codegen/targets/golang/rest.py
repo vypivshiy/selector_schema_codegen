@@ -90,22 +90,60 @@ def render_body_json(tmpl: PlaceholderTemplate) -> str:
     return f"fmt.Sprintf({_go_str(fmt_str)}, {', '.join(args)})"
 
 
-def render_form_body(body: dict[str, PlaceholderTemplate]) -> str:
-    """Render a form-urlencoded dict body as ``url.Values{...}.Encode()``.
+def render_url_values(d: dict[str, PlaceholderTemplate]) -> str:
+    """Render a ``dict[str, PlaceholderTemplate]`` as ``url.Values{...}.Encode()``.
 
-    Keys are literal strings; values may contain placeholders (rendered via
-    ``fmt.Sprintf`` through ``render_url``). ``url.Values`` properly escapes
-    both keys and values per RFC 3986.
+    Shared by form-body and query-string rendering. Keys are literal
+    strings; values may contain placeholders (rendered via ``fmt.Sprintf``
+    through ``render_url``). ``url.Values`` properly escapes both keys
+    and values per RFC 3986. Empty dict → ``'""'``.
     """
-    if not body:
+    if not d:
         return '""'
     parts: list[str] = []
-    for k, tmpl in body.items():
+    for k, tmpl in d.items():
         val = (
             render_url(tmpl) if tmpl.has_placeholders else _go_str(tmpl.source)
         )
         parts.append(f"{_go_str(k)}: []string{{{val}}}")
     return f"url.Values{{{', '.join(parts)}}}.Encode()"
+
+
+def render_form_body(body: dict[str, PlaceholderTemplate]) -> str:
+    """Form-urlencoded body via ``url.Values.Encode()``."""
+    return render_url_values(body)
+
+
+def render_full_url(spec: RequestHttp) -> str:
+    """URL with query string from ``spec.params`` appended.
+
+    When params is empty, returns ``render_url(spec.url)`` unchanged.
+    Otherwise appends ``+ "?" + <url.Values.Encode()>`` to the base URL.
+    """
+    base = render_url(spec.url)
+    if not spec.params:
+        return base
+    return f'({base} + "?" + {render_url_values(spec.params)})'
+
+
+def _render_cookie_pairs(
+    spec: RequestHttp,
+) -> list[tuple[str, str]]:
+    """Render each cookie as ``(key_expr, value_expr)`` pair.
+
+    Value uses ``fmt.Sprintf`` if it contains placeholders (via ``render_url``),
+    otherwise a plain string literal. Returns ``[]`` when ``spec.cookies`` is
+    empty. Used by both the inline HTML-@request path (``req.AddCookie``) and
+    the REST path (``sscReqOpts.Cookies``).
+    """
+    pairs: list[tuple[str, str]] = []
+    for k, tmpl in spec.cookies.items():
+        key = _go_str(k)
+        value = (
+            render_url(tmpl) if tmpl.has_placeholders else _go_str(tmpl.source)
+        )
+        pairs.append((key, value))
+    return pairs
 
 
 # ===========================================================================
@@ -154,9 +192,10 @@ def _build_opts(spec: RequestHttp, indent: str) -> list[str]:
     """Build sscReqOpts construction lines."""
     lines: list[str] = []
     has_headers = bool(spec.headers)
+    has_cookies = bool(spec.cookies)
     has_body = spec.body_kind not in ("empty", None) and spec.body is not None
 
-    if not has_headers and not has_body:
+    if not has_headers and not has_body and not has_cookies:
         return [f"{indent}nil"]
 
     lines.append(f"{indent}&sscReqOpts{{")
@@ -176,6 +215,9 @@ def _build_opts(spec: RequestHttp, indent: str) -> list[str]:
                 val = _go_str(tmpl.source)
             parts.append(f"{_go_str(k)}: []string{{{val}}}")
         lines.append(f"{indent}\tHeaders: sscHeaders{{{', '.join(parts)}}},")
+    if has_cookies:
+        parts = [f"{k}: []string{{{v}}}" for k, v in _render_cookie_pairs(spec)]
+        lines.append(f"{indent}\tCookies: sscHeaders{{{', '.join(parts)}}},")
     lines.append(f"{indent}}}")
     return lines
 
@@ -206,7 +248,7 @@ def emit_method_fetch(
     method_suffix = to_pascal_case(node.name) if node.name else "Fetch"
     func_name = f"New{name}{method_suffix}"
     ph_params = placeholder_params(spec)
-    url_expr = render_url(spec.url)
+    url_expr = render_full_url(spec)
 
     i1 = ctx.indent
     i2 = i1 + ctx.indent_char
@@ -225,6 +267,13 @@ def emit_method_fetch(
             render_url(tmpl) if tmpl.has_placeholders else _go_str(tmpl.source)
         )
         lines.append(f"{i2}req.Header.Set({_go_str(k)}, {val})")
+
+    # Cookies inline (per-cookie AddCookie — values may interpolate
+    # placeholders via fmt.Sprintf produced by _render_cookie_pairs).
+    for key, val in _render_cookie_pairs(spec):
+        lines.append(
+            f"{i2}req.AddCookie(&http.Cookie{{Name: {key}, Value: {val}}})"
+        )
 
     # Body inline (json/raw or form).
     if spec.body_kind in ("json", "raw") and spec.body is not None:
@@ -322,7 +371,7 @@ def emit_method_rest(
     method_name = to_pascal_case(node.name) if node.name else "Fetch"
     ph_params = placeholder_params(spec)
     matchers_var = f"{to_snake_case(struct.name)}Matchers"
-    url_expr = render_url(spec.url)
+    url_expr = render_full_url(spec)
 
     # Resolve return type from AST response_schema (no `any`).
     if node.response_schema:

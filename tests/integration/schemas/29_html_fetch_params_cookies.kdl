@@ -1,0 +1,14 @@
+@doc "Regression: HTML @request with query params + cookies in the same struct."
+
+struct Page {
+    @request """
+    GET /p?id={{id:int}}&tag={{tag}} HTTP/1.1
+    Host: h.example.com
+    Cookie: session=abc; tracking={{tid}}
+    """
+
+    title {
+        css "h1"
+        text
+    }
+}

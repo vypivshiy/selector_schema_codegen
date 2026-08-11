@@ -1672,6 +1672,93 @@ class TestResponsePathCodegen:
         # Custom @request name=LoadPage → NewPageLoadPage.
         # (smoke: just verify default case here.)
 
+    def test_go_rest_query_params_rendered_as_url_values(self):
+        """Go REST query-string placeholders must be rendered as
+        ``url.Values{...}.Encode()`` appended to the URL — not dropped.
+
+        Regression: ``spec.params`` was never read by Go codegen, leaving
+        placeholder params (e.g. ``page``) declared but unused → compile
+        error.
+        """
+        from ssc_codegen.targets.golang import GO_CONVERTER
+
+        src = (
+            "json R { x int }\n"
+            "struct API type=rest {\n"
+            '    @request response=R """\n'
+            "    GET /items?page={{page:int}}&limit=10 HTTP/1.1\n"
+            "    Host: api.example.com\n"
+            '    """\n'
+            "}\n"
+        )
+        module = _parse(src)
+        code = GO_CONVERTER.convert(module)
+        # url.Values construction with placeholder interpolation.
+        assert 'url.Values{"page": []string{fmt.Sprintf("%d", page)}' in code
+        # ".Encode()" suffix + URL concatenation.
+        assert ".Encode()" in code
+        assert '"?" +' in code
+        # Import for net/url is required.
+        assert '"net/url"' in code
+
+    def test_go_rest_cookies_rendered_via_sscReqOpts(self):
+        """Go REST DSL cookies must reach the runtime via sscReqOpts.Cookies.
+
+        Regression: cookies were silently dropped by Go codegen; Python and
+        JS already forwarded them.
+        """
+        from ssc_codegen.targets.golang import GO_CONVERTER
+
+        src = (
+            "json R { x int }\n"
+            "struct API type=rest {\n"
+            '    @request response=R """\n'
+            "    GET /me HTTP/1.1\n"
+            "    Host: api.example.com\n"
+            "    Cookie: session=abc\n"
+            '    """\n'
+            "}\n"
+        )
+        module = _parse(src)
+        code = GO_CONVERTER.convert(module)
+        # Cookies emitted into sscReqOpts.
+        assert 'Cookies: sscHeaders{"session": []string{"abc"}' in code
+
+    def test_go_html_fetch_params_and_cookies(self):
+        """Go HTML @request with query params + cookies in the same struct.
+
+        Params are rendered as ``url.Values{...}.Encode()`` appended to the
+        URL. Cookies are applied inline via ``req.AddCookie`` per cookie.
+        Placeholders in cookie values interpolate via ``fmt.Sprintf``.
+        """
+        from ssc_codegen.targets.golang import GO_CONVERTER
+
+        src = (
+            "struct Page {\n"
+            '    @request """\n'
+            "    GET /p?id={{id:int}} HTTP/1.1\n"
+            "    Host: h.example.com\n"
+            "    Cookie: session=abc; tracking={{tid}}\n"
+            '    """\n'
+            '    title { css "h1"; text }\n'
+            "}\n"
+        )
+        module = _parse(src)
+        code = GO_CONVERTER.convert(module)
+        # Query string built via url.Values.
+        assert 'url.Values{"id": []string{fmt.Sprintf("%d", id)}' in code
+        # Plain cookie literal.
+        assert (
+            'req.AddCookie(&http.Cookie{Name: "session", Value: "abc"})' in code
+        )
+        # Placeholder cookie value interpolated.
+        assert (
+            'req.AddCookie(&http.Cookie{Name: "tracking", Value: fmt.Sprintf("%s", tid)})'
+            in code
+        )
+        # net/url import required for url.Values.
+        assert '"net/url"' in code
+
 
 # ---------------------------------------------------------------------------
 # aiohttp content_type=None — non-JSON Content-Type bug (TASK_MIGRATION §2.1)

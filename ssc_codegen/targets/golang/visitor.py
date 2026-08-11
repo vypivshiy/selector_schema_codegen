@@ -1890,6 +1890,8 @@ class GoVisitor(BaseWalker):
         spec = node.http_request
         if spec.body_kind == "form" and isinstance(spec.body, dict):
             self._builder.require_import('"net/url"')
+        if spec.params:
+            self._builder.require_import('"net/url"')
         self._builder.require_import('"' + self._http.import_path + '"')
         struct = node.parent
         name = (
@@ -1911,6 +1913,8 @@ class GoVisitor(BaseWalker):
         self._builder.require_import('"strings"')
         spec = node.http_request
         if spec.body_kind == "form" and isinstance(spec.body, dict):
+            self._builder.require_import('"net/url"')
+        if spec.params:
             self._builder.require_import('"net/url"')
         if node.response_path:
             self._builder.require_import('"github.com/tidwall/gjson"')

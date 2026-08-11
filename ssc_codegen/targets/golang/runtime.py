@@ -490,6 +490,7 @@ BASE_REST_RUNTIME: list[str] = [
     "",
     "type sscReqOpts struct {",
     "\tHeaders sscHeaders",
+    "\tCookies sscHeaders",
     "\tBody    string",
     "}",
     "",

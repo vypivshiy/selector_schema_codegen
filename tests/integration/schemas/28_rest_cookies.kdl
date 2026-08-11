@@ -1,0 +1,11 @@
+@doc "Regression: DSL cookies must reach sscRestCall via sscReqOpts.Cookies."
+
+json Resp { x int }
+
+struct API type=rest {
+    @request response=Resp """
+    GET /me HTTP/1.1
+    Host: api.example.com
+    Cookie: session=abc
+    """
+}
