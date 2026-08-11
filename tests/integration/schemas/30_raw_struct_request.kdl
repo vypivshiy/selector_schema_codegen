@@ -1,0 +1,15 @@
+// Regression: (raw)struct with @request. The raw-text constructor
+// returns a single value (no error), so the fetch wrapper must
+// append `, nil` to satisfy its (*Name, error) signature.
+(raw)struct RawProxyList {
+    @doc """
+    Plain-text proxy list, one ip:port per line.
+    """
+    @request """
+    curl https://databay.com/free-proxy-list.txt
+    """
+
+    proxies {
+        split "\n"
+    }
+}

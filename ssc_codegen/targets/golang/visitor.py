@@ -138,7 +138,6 @@ from ssc_codegen.naming import (
 from ssc_codegen.traversal.utils import (
     find_predicate_container,
     module_has_html_struct,
-    module_has_rest,
     module_uses_http,
 )
 from ssc_codegen.generation.builder import ModuleBuilder
@@ -321,7 +320,7 @@ class GoVisitor(BaseWalker):
         for imp in self._builder.std_imports:
             if imp not in self._all_std_imports:
                 self._all_std_imports.append(imp)
-        if module_has_rest(module_ast):
+        if module_uses_http(module_ast):
             self._has_rest = True
         out: dict[str, str] = {"": _gofmt("\n".join(lines))}
         for fname, provider in self._file_providers.items():

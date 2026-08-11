@@ -70,6 +70,9 @@ _SMOKES = [
     "28_rest_cookies.kdl",
     # HTML @request with params + cookies — regression for both paths.
     "29_html_fetch_params_cookies.kdl",
+    # (raw)struct with @request — raw constructor returns single value,
+    # wrapper must append `, nil` to satisfy (*Name, error) signature.
+    "30_raw_struct_request.kdl",
 ]
 
 

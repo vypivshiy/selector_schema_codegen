@@ -20,7 +20,9 @@ from ssc_codegen.ast import (
     PlaceholderTemplate,
     ResultAliasDef,
     ResultVariantDef,
+    Struct,
     StructBase,
+    StructType as ST,
 )
 from ssc_codegen.ast.struct import RequestHttp
 from ssc_codegen.naming import to_camel_case, to_pascal_case, to_snake_case
@@ -338,7 +340,13 @@ def emit_method_fetch(
             )
 
     # Construct parser from body.
-    lines.append(f"{i2}return New{name}(string(body))")
+    # (raw)struct constructor returns a single value (*Name), wrapper
+    # signature is (*Name, error) → must add `, nil`. HTML constructor
+    # already returns (*Name, error) so naked tuple pass-through works.
+    if isinstance(struct, Struct) and struct.type == ST.RAW:
+        lines.append(f"{i2}return New{name}(string(body)), nil")
+    else:
+        lines.append(f"{i2}return New{name}(string(body))")
     lines.append(f"{i1}}}")
     lines.append("")
     return lines
