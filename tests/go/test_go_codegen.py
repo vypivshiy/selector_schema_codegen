@@ -73,6 +73,9 @@ _SMOKES = [
     # (raw)struct with @request — raw constructor returns single value,
     # wrapper must append `, nil` to satisfy (*Name, error) signature.
     "30_raw_struct_request.kdl",
+    # css-all + index/first/last — *goquery.Selection is not directly
+    # indexable in Go, must emit .Eq(...).
+    "31_css_all_indexing.kdl",
 ]
 
 

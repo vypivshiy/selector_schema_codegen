@@ -230,15 +230,17 @@ def _gofmt(source: str) -> str:
     if not gofmt:
         return source
     try:
+        # Pass UTF-8 explicitly — Windows text-mode defaults to the OEM
+        # codepage (cp1251/cp437), corrupting non-ASCII bytes in @doc
+        # comments and source strings.
         proc = subprocess.run(
             [gofmt],
-            input=source,
+            input=source.encode("utf-8"),
             capture_output=True,
-            text=True,
             timeout=10,
         )
         if proc.returncode == 0 and proc.stdout:
-            return proc.stdout
+            return proc.stdout.decode("utf-8")
     except (subprocess.SubprocessError, OSError):
         pass
     return source
@@ -1357,6 +1359,14 @@ class GoVisitor(BaseWalker):
         if at and at.base == VT.STRING and not at.is_array:
             idx = f"len({ctx.prv})-{abs(i)}" if i < 0 else str(i)
             return [f"{ctx.indent}{ctx.nxt} := string({ctx.prv}[{idx}])"]
+        if at and at.base == VT.DOCUMENT:
+            # *goquery.Selection is not indexable in Go — use .Eq().
+            # Negative index → Length() + i (i is negative, e.g. -1 → last).
+            if i < 0:
+                idx = f"{ctx.prv}.Length() + {i}"
+            else:
+                idx = str(i)
+            return [f"{ctx.indent}{ctx.nxt} := {ctx.prv}.Eq({idx})"]
         if i < 0:
             return [f"{ctx.indent}{ctx.nxt} := {ctx.prv}[len({ctx.prv})+{i}]"]
         return [f"{ctx.indent}{ctx.nxt} := {ctx.prv}[{i}]"]
