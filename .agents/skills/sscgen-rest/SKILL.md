@@ -1,6 +1,6 @@
 ---
 name: sscgen-rest
-version: "2.1"
+version: "2.2"
 description: >
   Generate KDL Schema DSL configs for REST/JSON HTTP APIs ((rest)struct).
   Use this skill whenever the user wants to: design a `.kdl` schema for an HTTP/JSON
@@ -95,8 +95,28 @@ json ApiError { message str }
 ```
 
 Field types: `str | int | float | bool | null | <RefName>`.
-Modifiers: `(array)Type`, `Type?`.
-Alias: `field-name str "originalKey"`.
+
+Modifiers (combinable; order-independent):
+
+| Modifier | Meaning | Python | Go | JS |
+|---|---|---|---|---|
+| `(array)Type` | Array field | `List[T]` | `[]T` | `Array<T>` |
+| `Type?` | Nullable value (key present, value may be `null`) | `Optional[T]` | `*T` (no `,omitempty`) | `T\|null` |
+| `@omitempty` | Key may be **absent** from JSON entirely (distinct from `?`) | `NotRequired[T]` | `*T` + `json:"name,omitempty"` | `T (OMITEMPTY)` JSDoc marker |
+| `@skip` | Field is parsed by linter but **excluded from generated types**. Type optional (defaults to `str` when omitted). | dropped from TypedDict | dropped from struct | dropped from JSDoc |
+
+Combinations:
+- `inner Inner? @omitempty` — nullable AND may be absent.
+- `debug str? @skip` — parsed-and-discarded (e.g. response echoes back the request; you don't model it).
+- `legacy @skip` — type defaults to `str`; field is dropped from output.
+
+When to use which:
+- Real-world `null` values (e.g. `"name": null`) → `Type?`.
+- Optional keys that may be omitted entirely (e.g. pagination absent on first page) → `@omitempty`.
+- Both → combine.
+- Never needed by client code → `@skip` (don't pollute the typed surface).
+
+Alias: `field-name str "originalKey"` (renames awkward JSON keys to valid field names).
 Top-level array: `(array)json Tags { name str }`.
 
 **Deduplication with `define`.** When multiple `json` schemas share the same set
@@ -140,10 +160,13 @@ Rules for define in json:
    `sorted(response.keys())` against the schema fields.
 2. Are nested objects extracted into their own `json` schemas (not flattened)?
 3. Are nullable fields (`"field": null` in real data) marked `Type?`?
-4. Does the response envelope match? Bare array → `(array)json`; paginated →
+4. Are optional keys (absent in some responses, present in others) marked
+   `@omitempty`? Distinguish from `?` — a key that is present-with-`null`
+   needs `?`, not `@omitempty`. Combine both when both states occur.
+5. Does the response envelope match? Bare array → `(array)json`; paginated →
    include `Meta`/`Pagination` schemas; data wrapper → envelope schema with
    `data` field.
-5. If a swagger is available: cross-reference every response schema
+6. If a swagger is available: cross-reference every response schema
    (`$ref` paths, `allOf` compositions, `properties`) and include all fields
    the swagger defines, even if a single test request happened to have `null`
    for some of them.

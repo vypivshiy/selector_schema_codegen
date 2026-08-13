@@ -1,5 +1,19 @@
 # REST DSL — Quick Reference
 
+## `json` field modifiers
+
+| Declaration | Meaning | Py | Go | JS |
+|---|---|---|---|---|
+| `name str` | required | `str` | `string` | `string` |
+| `name str?` | nullable (value may be `null`) | `Optional[str]` | `*string` | `string\|null` |
+| `name str @omitempty` | key may be absent | `NotRequired[str]` | `*string` + `,omitempty` | `string (OMITEMPTY)` |
+| `name str? @omitempty` | nullable AND may be absent | `NotRequired[Optional[str]]` | `*string` + `,omitempty` | `string\|null (OMITEMPTY)` |
+| `name (array)str` | array | `List[str]` | `[]string` | `Array<string>` |
+| `name str @skip` | parsed, dropped from output types | — | — | — |
+| `name @skip` | type defaults to `str`, dropped from output | — | — | — |
+
+Combine freely: `inner Inner? @omitempty @skip` is valid (parsed-and-discarded).
+
 ## `@request` body — two interchangeable formats
 
 Both produce identical generated code. Pick whichever you have at hand.
