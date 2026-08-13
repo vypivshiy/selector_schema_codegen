@@ -1,6 +1,6 @@
 ---
 name: sscgen-dsl
-version: "2.4"
+version: "2.5"
 dsl_version: "2.0"
 description: >
   Generate KDL Schema DSL (v2.0) scraper configs for **HTML scraping** and
@@ -436,10 +436,10 @@ failed to parse or was a scalar/array-of-scalars.
 
 | `subtype` | Meaning | Extraction pattern |
 |-----------|---------|--------------------|
-| `json-ld` | `<script type="application/ld+json">` — schema.org / SEO data | `css "script[type='application/ld+json']"; raw; jsonify SchemaName` |
-| `json-mime` | `<script type="application/json">` — Next.js `#__NEXT_DATA__`, Nuxt dehydration | if `script_id` present: `css "script#<id>"; raw; jsonify SchemaName` else use `selector` directly |
+| `json-ld` | `<script type="application/ld+json">` — schema.org / SEO data | `css "script[type='application/ld+json']"; raw inner; jsonify SchemaName` |
+| `json-mime` | `<script type="application/json">` — Next.js `#__NEXT_DATA__`, Nuxt dehydration | if `script_id` present: `css "script#<id>"; raw inner; jsonify SchemaName` else use `selector` directly |
 | `js-var` | `var/let/const X = ...` or `window/globalThis/self.X = ...` — SPA hydration (quotes.toscrape.com pattern) | multiline verbose regex extracting `<var_name>` body, then `jsonify`. See `references/examples/quotesToScrape.kdl` |
-| `bare-json` | untyped `<script>` whose body starts with `{` or `[` | `css "script:nth-of-type(N)"; raw; jsonify SchemaName` (use `--css "script" --fields path` probe to disambiguate N) |
+| `bare-json` | untyped `<script>` whose body starts with `{` or `[` | `css "script:nth-of-type(N)"; raw inner; jsonify SchemaName` (use `--css "script" --fields path` probe to disambiguate N) |
 | `attr-json` | attribute value on an element starts with `{` or `[` (e.g. `data-config`, `data-props`) | `css "<selector>"; attr "<attr>"; jsonify SchemaName` |
 
 **Prefer JSON sources over CSS pipelines when available** — typed JSON is
@@ -540,7 +540,7 @@ selector -> extract -> [string ops] -> [regex] -> [type conv] -> [fallback]
 
 #### Field pipeline rules
 1. **Start with a selector**: `css "..."` or `css-all "..."`
-2. **Then extract**: `text`, `attr "name"`, or `raw`
+2. **Then extract**: `text`, `attr "name"`, or `raw` (`raw` = outer HTML incl. element tag; `raw inner` = children only)
 3. **String ops** (optional, in order): `trim`, `lower`, `upper`, `normalize-space`, `rm-prefix`, `rm-suffix`, `rm-prefix-suffix`, `fmt`, `re-sub`, `repl`, `unescape`
 4. **Type conversion** (optional): `to-int`, `to-float`, `to-bool`
 5. **URL normalization** (if path may be relative): `fmt "https://site.com/{{}}"` — inline template, always convert relative paths to absolute URLs
@@ -746,7 +746,7 @@ reference now live in `references/ops-quick-ref.md` — load it when you need
 exact signatures. Summary of what's available:
 
 - **Selectors**: `css`, `css-all`, `css { }` / `css-all { }` (pattern-match, try in order)
-- **Extract**: `text`, `attr "name"`, `attr "n1" "n2" ...`, `raw`
+- **Extract**: `text`, `attr "name"`, `attr "n1" "n2" ...`, `raw` (= outer HTML), `raw inner` (= children only)
 - **String ops** (map over STRING/LIST_STRING): `trim` `ltrim` `rtrim` `normalize-space` `lower` `upper` `rm-prefix` `rm-suffix` `rm-prefix-suffix` `fmt` `re-sub` `repl` `split` `join` `unescape`
 - **Type conversions**: `to-int`, `to-float`, `to-bool`
 - **Array ops**: `first` `last` `index N` (⚠️ see Constraints — prefer `:nth-of-type(N)`) `slice N M` `len` `unique`

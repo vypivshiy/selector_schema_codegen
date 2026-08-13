@@ -37,6 +37,8 @@ Warning at line 8: 'fmt' template is missing the '{{}}' placeholder
 | `'re' must have exactly 1 capture group` | Regex has 0 or 2+ groups | Ensure pattern has exactly one `(...)` group |
 | `'re-all' must have exactly 1 capture group` | re-all pattern has 0 or 2+ groups | Add exactly one `(...)` group; use `(?:...)` for grouping without capturing |
 | `'fmt' template missing '{{}}' placeholder` | fmt value lacks `{{}}` | Add `{{}}` where the value should be inserted |
+| `invalid 'raw' mode '...' — expected 'outer' or 'inner'` | Typo or non-keyword arg after `raw` | Use bare `raw`, `raw outer`, or `raw inner` |
+| `'raw' accepts at most 1 argument` | Multiple args after `raw` | Remove extra args: `raw` / `raw outer` / `raw inner` |
 
 ## Iterative lint algorithm
 

@@ -63,8 +63,11 @@ Pattern-match rules:
 |-----------|--------|--------|-------|
 | `text` | DOCUMENT | STRING | Direct text content |
 | `text` | LIST_DOCUMENT | LIST_STRING | Map over list |
-| `raw` | DOCUMENT | STRING | Unescaped HTML (innerHTML) |
-| `raw` | LIST_DOCUMENT | LIST_STRING | Map over list |
+| `raw` | DOCUMENT | STRING | Outer HTML — element tag included (default) |
+| `raw outer` | DOCUMENT | STRING | Explicit outer HTML, same as bare `raw` |
+| `raw inner` | DOCUMENT | STRING | Inner HTML — children only, own tag excluded |
+| `raw` | LIST_DOCUMENT | LIST_STRING | Map over list (mode applies per element) |
+| `raw inner` | LIST_DOCUMENT | LIST_STRING | Map over list |
 | `attr "name"` | DOCUMENT | STRING | Single attribute; multi-value attrs like `class` joined with space |
 | `attr "name"` | LIST_DOCUMENT | LIST_STRING | Map over list |
 | `attr "n1" "n2" ...` | DOCUMENT | LIST_STRING | Multi-key: returns list, missing attrs skipped |
