@@ -1158,14 +1158,28 @@ class GoVisitor(BaseWalker):
         ]
 
     def visit_raw(self, node: Raw, ctx: WalkContext) -> list[str]:
+        # goquery: Html() method = inner HTML (jQuery semantics);
+        # goquery.OuterHtml(sel) package func = outer HTML.
+        if node.mode == "inner":
+            if not node.is_array:
+                return [
+                    f"{ctx.indent}_html, _ := {ctx.prv}.Html()",
+                    f"{ctx.indent}{ctx.nxt} := _html",
+                ]
+            return [
+                f"{ctx.indent}{ctx.nxt} := {ctx.prv}.Map(func(_ int, s *goquery.Selection) string {{",
+                f"{ctx.indent}\t_h, _ := s.Html()",
+                f"{ctx.indent}\treturn _h",
+                f"{ctx.indent}}})",
+            ]
         if not node.is_array:
             return [
-                f"{ctx.indent}_html, _ := {ctx.prv}.Html()",
+                f"{ctx.indent}_html, _ := goquery.OuterHtml({ctx.prv})",
                 f"{ctx.indent}{ctx.nxt} := _html",
             ]
         return [
             f"{ctx.indent}{ctx.nxt} := {ctx.prv}.Map(func(_ int, s *goquery.Selection) string {{",
-            f"{ctx.indent}\t_h, _ := s.Html()",
+            f"{ctx.indent}\t_h, _ := goquery.OuterHtml(s)",
             f"{ctx.indent}\treturn _h",
             f"{ctx.indent}}})",
         ]

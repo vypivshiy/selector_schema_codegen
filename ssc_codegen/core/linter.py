@@ -87,7 +87,6 @@ _DEFINE_NAME_RE = _re.compile(r"^[A-Z_][A-Z0-9_-]*\Z")
 _NO_ARGS_OPS: frozenset[str] = frozenset(
     {
         "text",
-        "raw",
         "normalize-space",
         "lower",
         "upper",
@@ -1156,6 +1155,26 @@ def lint_pipeline_op(node: KdlNode, lint: LintContext) -> None:
 
     if name == "attr":
         lint_require_args(node, lint, min_count=1, example='attr "href"')
+
+    elif name == "raw":
+        args = _node_args(node)
+        if len(args) > 1:
+            lint.error(
+                node,
+                message="'raw' accepts at most 1 argument",
+                code="E001",
+                hint="example: raw  or  raw outer  or  raw inner",
+            )
+        elif args and args[0] not in ("outer", "inner"):
+            lint.error(
+                node,
+                message=(
+                    f"invalid 'raw' mode {args[0]!r}"
+                    " — expected 'outer' or 'inner'"
+                ),
+                code="E001",
+                hint="example: raw  or  raw outer  or  raw inner",
+            )
 
     elif name in _TRIM_OPS:
         args = _node_args(node)

@@ -165,6 +165,22 @@ class LxmlDomSpelling(DomSpelling):
         return [f"{ctx.indent}{ctx.nxt} = {ctx.prv}.text_content()"]
 
     def raw(self, ctx: ConverterContext, node: Raw) -> list[str]:
+        if node.mode == "inner":
+            self._builder.require_std(
+                "std_inner_html",
+                code="""
+                    def std_inner_html(el):
+                        parts = [el.text or ""]
+                        for child in el.iterchildren():
+                            parts.append(html.tostring(child, encoding="unicode"))
+                        return "".join(parts)
+                """,
+            )
+            if node.accept_type_info.is_array:
+                return [
+                    f"{ctx.indent}{ctx.nxt} = [std_inner_html(i) for i in {ctx.prv}]"
+                ]
+            return [f"{ctx.indent}{ctx.nxt} = std_inner_html({ctx.prv})"]
         if node.accept_type_info.is_array:
             return [
                 f"{ctx.indent}{ctx.nxt} = [html.tostring(i, encoding='unicode') for i in {ctx.prv}]"

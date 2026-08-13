@@ -27,8 +27,12 @@ class Raw(Node):
     Extracts raw HTML string from element(s).
     DOCUMENT → STRING, LIST_DOCUMENT → LIST_STRING.
     accept/ret set by builder from cursor type.
+
+    mode="outer" (default) — outer HTML (element tag included).
+    mode="inner" — inner HTML (children only).
     """
 
+    mode: str = "outer"
     accept_type_info: TypeInfo = field(
         default_factory=lambda: TypeInfo(base=VariableType.DOCUMENT)
     )

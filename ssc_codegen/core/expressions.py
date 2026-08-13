@@ -717,11 +717,31 @@ def _expr_raw(
     else:
         accept_ti = TypeInfo(base=VariableType.DOCUMENT)
         is_arr = False
+    mode = "outer"
+    if len(node.args) > 1:
+        lint.error(
+            node,
+            message="'raw' accepts at most 1 argument",
+            code="E001",
+            hint="example: raw  or  raw outer  or  raw inner",
+        )
+    elif node.args:
+        val = str(node.args[0].value)
+        if val not in ("outer", "inner"):
+            lint.error(
+                node,
+                message=f"invalid 'raw' mode {val!r} — expected 'outer' or 'inner'",
+                code="E001",
+                hint="example: raw  or  raw outer  or  raw inner",
+            )
+        else:
+            mode = val
     return Raw(
         parent=parent,
         accept_type_info=accept_ti,
         ret_type_info=TypeInfo(base=VariableType.STRING, is_array=is_arr),
         is_array=is_arr,
+        mode=mode,
     )
 
 

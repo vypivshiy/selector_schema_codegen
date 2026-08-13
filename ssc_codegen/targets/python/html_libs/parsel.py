@@ -159,6 +159,14 @@ class ParselDomSpelling(DomSpelling):
         ]
 
     def raw(self, ctx: ConverterContext, node: Raw) -> list[str]:
+        if node.mode == "inner":
+            if node.accept_type_info.is_array:
+                return [
+                    f"{ctx.indent}{ctx.nxt} = [''.join(i.xpath('node()').getall()) for i in {ctx.prv}]"
+                ]
+            return [
+                f"{ctx.indent}{ctx.nxt} = ''.join({ctx.prv}.xpath('node()').getall())"
+            ]
         if node.accept_type_info.is_array:
             return [f"{ctx.indent}{ctx.nxt} = {ctx.prv}.getall()"]
         return [f"{ctx.indent}{ctx.nxt} = {ctx.prv}.get()"]

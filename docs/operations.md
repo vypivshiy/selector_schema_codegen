@@ -45,9 +45,12 @@ title {
 | Операция | Тип |
 |---|---|
 | `text` | `DOCUMENT -> STRING`, `LIST_DOCUMENT -> LIST_STRING` |
-| `raw` | `DOCUMENT -> STRING`, `LIST_DOCUMENT -> LIST_STRING` |
+| `raw [outer\|inner]` | `DOCUMENT -> STRING`, `LIST_DOCUMENT -> LIST_STRING` |
 | `attr <name>` | `DOCUMENT -> STRING`, `LIST_DOCUMENT -> LIST_STRING` |
 | `attr <name1> <name2> ...` | `DOCUMENT -> LIST_STRING`, `LIST_DOCUMENT -> LIST_STRING` |
+
+`raw` без аргумента и `raw outer` извлекают внешний HTML (вместе с тегом элемента).
+`raw inner` — внутренний HTML (только содержимое, без тега самого элемента).
 
 При одном ключе возвращает строку (мультизначные атрибуты вроде `class` объединяются через пробел).
 При нескольких ключах возвращает список строк; отсутствующие атрибуты пропускаются.

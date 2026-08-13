@@ -18,6 +18,7 @@ from ssc_codegen.ast import (
     Match,
     Nested,
     PreValidate,
+    Raw,
     ReplMap,
     Return,
     Self,
@@ -287,6 +288,85 @@ def test_parser_supports_inline_raw_extractor():
     assert isinstance(html.body[-1], Return)
     assert html.accept == VariableType.DOCUMENT
     assert html.ret == VariableType.STRING
+
+
+def test_parser_raw_default_mode_is_outer():
+    module = _parse(
+        """
+        struct Main {
+            html { raw }
+        }
+        """
+    )
+    html = _field(_struct(module, "Main"), "html")
+    assert isinstance(html.body[0], Raw)
+    assert html.body[0].mode == "outer"
+
+
+def test_parser_raw_explicit_outer_mode():
+    module = _parse(
+        """
+        struct Main {
+            html { raw outer }
+        }
+        """
+    )
+    html = _field(_struct(module, "Main"), "html")
+    assert isinstance(html.body[0], Raw)
+    assert html.body[0].mode == "outer"
+
+
+def test_parser_raw_inner_mode():
+    module = _parse(
+        """
+        struct Main {
+            html { raw inner }
+        }
+        """
+    )
+    html = _field(_struct(module, "Main"), "html")
+    assert isinstance(html.body[0], Raw)
+    assert html.body[0].mode == "inner"
+
+
+def test_parser_raw_inner_in_array_pipeline():
+    module = _parse(
+        """
+        struct Main {
+            items {
+                css-all ".item"
+                raw inner
+            }
+        }
+        """
+    )
+    items = _field(_struct(module, "Main"), "items")
+    raw_node = items.body[-2]
+    assert isinstance(raw_node, Raw)
+    assert raw_node.mode == "inner"
+    assert raw_node.is_array is True
+
+
+def test_lint_raw_invalid_mode():
+    errs = _lint_errors(
+        """
+        struct Main {
+            html { raw foo }
+        }
+        """
+    )
+    assert any("invalid 'raw' mode" in e for e in errs)
+
+
+def test_lint_raw_too_many_args():
+    errs = _lint_errors(
+        """
+        struct Main {
+            html { raw inner outer }
+        }
+        """
+    )
+    assert any("'raw' accepts at most 1 argument" in e for e in errs)
 
 
 def test_parser_supports_inline_nested_in_books_example():

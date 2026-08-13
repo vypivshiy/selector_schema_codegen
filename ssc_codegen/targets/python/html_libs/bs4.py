@@ -116,6 +116,12 @@ class Bs4DomSpelling(DomSpelling):
         return [f"{ctx.indent}{ctx.nxt} = {ctx.prv}.text"]
 
     def raw(self, ctx: ConverterContext, node: Raw) -> list[str]:
+        if node.mode == "inner":
+            if node.accept_type_info.is_array:
+                return [
+                    f"{ctx.indent}{ctx.nxt} = [i.decode_contents() for i in {ctx.prv}]"
+                ]
+            return [f"{ctx.indent}{ctx.nxt} = {ctx.prv}.decode_contents()"]
         if node.accept_type_info.is_array:
             return [f"{ctx.indent}{ctx.nxt} = [str(i) for i in {ctx.prv}]"]
         return [f"{ctx.indent}{ctx.nxt} = str({ctx.prv})"]

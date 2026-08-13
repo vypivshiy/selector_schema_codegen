@@ -259,7 +259,8 @@ title {
 
 link { css "a"; attr "href" }
 
-html { raw }
+html { raw }              // внешний HTML (по умолчанию)
+html-inner { raw inner }  // внутренний HTML (без тега элемента)
 ```
 
 Вложенные структуры:

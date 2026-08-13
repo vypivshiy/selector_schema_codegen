@@ -827,11 +827,10 @@ class JsVisitor(BaseWalker):
         ]
 
     def visit_raw(self, node: Raw, ctx: WalkContext) -> list[str]:
+        prop = "innerHTML" if node.mode == "inner" else "outerHTML"
         if not node.is_array:
-            return [f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.outerHTML;"]
-        return [
-            f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(el => el.outerHTML);"
-        ]
+            return [f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.{prop};"]
+        return [f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(el => el.{prop});"]
 
     def visit_attr(self, node: Attr, ctx: WalkContext) -> list[str]:
         keys = node.keys

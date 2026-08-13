@@ -143,6 +143,20 @@ class TestStringsBasic:
         assert isinstance(item["slug"], str)
         assert isinstance(item["active_flag"], bool)
 
+    @pytest.mark.parametrize("target", _TARGETS)
+    def test_raw_inner_excludes_own_tag(self, html, target):
+        result = _run_schema(
+            SCHEMAS_DIR / "01_strings_basic.kdl", "StringsBasic", html, target
+        )
+        for item in result:
+            inner = item["inner_html"]
+            outer = item["clean_html"]
+            assert isinstance(inner, str)
+            assert not inner.lstrip().startswith("<article")
+            assert '<h2 class="title">' in inner
+            # inner is a strict substring-ish shrink: shorter than outer
+            assert len(inner) < len(outer)
+
 
 class TestArraysAndConversions:
     def test_returns_list(self, html):

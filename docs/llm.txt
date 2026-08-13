@@ -224,7 +224,9 @@ Pattern-match rules:
 ### Extract
 
 - text: DOCUMENT -> STRING, LIST_DOCUMENT -> LIST_STRING
-- raw: DOCUMENT -> STRING, LIST_DOCUMENT -> LIST_STRING
+- raw [outer|inner]: DOCUMENT -> STRING, LIST_DOCUMENT -> LIST_STRING.
+  Default (no arg) = outer HTML (element tag included). `raw inner` extracts
+  inner HTML (children only). `raw outer` is explicit outer.
 - attr <name>: DOCUMENT -> STRING, LIST_DOCUMENT -> LIST_STRING
 - attr <name1> <name2> ...: DOCUMENT -> LIST_STRING, LIST_DOCUMENT -> LIST_STRING
 

@@ -123,6 +123,16 @@ class TestJsStringsBasic:
         assert isinstance(item["title"], str)
         assert isinstance(item["activeFlag"], bool)
 
+    def test_raw_inner_excludes_own_tag(self):
+        r = _run_js_schema(SCHEMAS_DIR / "01_strings_basic.kdl", "StringsBasic")
+        for item in r:
+            inner = item["innerHtml"]
+            outer = item["cleanHtml"]
+            assert isinstance(inner, str)
+            assert not inner.startswith("<article")
+            assert "foo Title" in inner
+            assert len(inner) < len(outer)
+
 
 # ── ArraysAndConversions ─────────────────────────────────────────────────────
 

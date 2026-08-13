@@ -119,6 +119,24 @@ class SlaxDomSpelling(DomSpelling):
         return [f"{ctx.indent}{ctx.nxt} = {ctx.prv}.text()"]
 
     def raw(self, ctx: ConverterContext, node: Raw) -> list[str]:
+        if node.mode == "inner":
+            self._builder.require_std(
+                "std_inner_html",
+                code="""
+                    def std_inner_html(node):
+                        parts = []
+                        child = node.child
+                        while child:
+                            parts.append(child.html)
+                            child = child.next
+                        return "".join(parts)
+                """,
+            )
+            if node.accept_type_info.is_array:
+                return [
+                    f"{ctx.indent}{ctx.nxt} = [std_inner_html(i) for i in {ctx.prv}]"
+                ]
+            return [f"{ctx.indent}{ctx.nxt} = std_inner_html({ctx.prv})"]
         if node.accept_type_info.is_array:
             return [f"{ctx.indent}{ctx.nxt} = [i.html for i in {ctx.prv}]"]
         return [f"{ctx.indent}{ctx.nxt} = {ctx.prv}.html"]

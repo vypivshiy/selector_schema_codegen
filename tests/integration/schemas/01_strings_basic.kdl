@@ -25,6 +25,10 @@ define STRIP-URL {
         raw
     }
 
+    inner-html {
+        raw inner
+    }
+
     title {
         css ".title"
         text
