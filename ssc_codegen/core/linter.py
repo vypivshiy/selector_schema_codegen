@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import difflib as _difflib
+import keyword as _keyword
 import re as _re
+from collections.abc import Mapping
 from typing import Iterator
 
+from ssc_codegen.naming import to_camel_case, to_pascal_case, to_snake_case
 from ssc_codegen.ast.struct import PLACEHOLDER_WIDE_RE, PlaceholderSpec
 from kdlquery import KdlDocument, KdlNode, ReadDiagnostic, Severity
 
@@ -83,6 +86,87 @@ _VALID_JSON_MODIFIERS = frozenset({"@skip", "@omitempty"})
 _VALID_JSON_TYPES = frozenset({"str", "int", "float", "bool", "null", "nil"})
 
 _DEFINE_NAME_RE = _re.compile(r"^[A-Z_][A-Z0-9_-]*\Z")
+_PORTABLE_IDENTIFIER_RE = _re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\Z")
+_JS_RESERVED = frozenset(
+    {
+        "await",
+        "break",
+        "case",
+        "catch",
+        "class",
+        "const",
+        "constructor",
+        "continue",
+        "debugger",
+        "default",
+        "delete",
+        "do",
+        "else",
+        "enum",
+        "export",
+        "extends",
+        "false",
+        "finally",
+        "for",
+        "function",
+        "if",
+        "implements",
+        "import",
+        "in",
+        "instanceof",
+        "interface",
+        "let",
+        "new",
+        "null",
+        "package",
+        "private",
+        "protected",
+        "public",
+        "return",
+        "static",
+        "super",
+        "switch",
+        "this",
+        "throw",
+        "true",
+        "try",
+        "typeof",
+        "var",
+        "void",
+        "while",
+        "with",
+        "yield",
+    }
+)
+_GO_RESERVED = frozenset(
+    {
+        "break",
+        "default",
+        "func",
+        "interface",
+        "select",
+        "case",
+        "defer",
+        "go",
+        "map",
+        "struct",
+        "chan",
+        "else",
+        "goto",
+        "package",
+        "switch",
+        "const",
+        "fallthrough",
+        "if",
+        "range",
+        "type",
+        "continue",
+        "for",
+        "import",
+        "return",
+        "var",
+    }
+)
 
 _NO_ARGS_OPS: frozenset[str] = frozenset(
     {
@@ -374,7 +458,21 @@ def _lint_structs(
     diags: list[ReadDiagnostic],
     children_defines: dict[str, list[KdlNode]],
 ) -> None:
+    seen_names: set[str] = set()
     for node in doc.select("struct:root"):
+        name = _node_arg(node, 0)
+        if name and name in seen_names:
+            diags.append(
+                _error(
+                    node,
+                    f"duplicate struct definition '{name}'",
+                    source_path,
+                    code="E402",
+                    hint=f"remove or rename duplicate struct '{name}'",
+                )
+            )
+        if name:
+            seen_names.add(name)
         _lint_single_struct(node, source_path, diags, children_defines)
 
 
@@ -388,6 +486,7 @@ def _lint_fns(
     diags: list[ReadDiagnostic],
 ) -> None:
     """Structural lint for ``fn`` / ``(raw)fn`` directives."""
+    seen_names: set[str] = set()
     for node in doc.select("fn:root"):
         name = _node_arg(node, 0)
         if not name:
@@ -401,6 +500,17 @@ def _lint_fns(
                 )
             )
             continue
+        if name in seen_names:
+            diags.append(
+                _error(
+                    node,
+                    f"duplicate fn definition '{name}'",
+                    source_path,
+                    code="E402",
+                    hint=f"remove or rename duplicate fn '{name}'",
+                )
+            )
+        seen_names.add(name)
 
         annotation = node.type_annotation
         if annotation and annotation != "(raw)":
@@ -470,15 +580,8 @@ def _lint_nested_topdown(
             if not target:
                 continue  # arg-count error already emitted inline
             if target not in order:
-                diags.append(
-                    _error(
-                        nested_op,
-                        f"'nested {target}' references undefined struct '{target}'",
-                        source_path,
-                        code="E300",
-                        hint=f"declare 'struct {target} {{ ... }}' at top level",
-                    )
-                )
+                # Imported and genuinely missing refs are distinguished after
+                # imports are flattened by lint_cross_refs().
                 continue
             if order[target] > caller_idx:
                 diags.append(
@@ -853,7 +956,10 @@ def _expand_defines(
 
 
 def lint_cross_refs(
-    nodes: list[KdlNode], source_path: str = ""
+    nodes: list[KdlNode],
+    source_path: str = "",
+    *,
+    node_source_paths: Mapping[int, object] | None = None,
 ) -> list[ReadDiagnostic]:
     """Cross-reference validation — needs merged node list including imports."""
     diags: list[ReadDiagnostic] = []
@@ -862,6 +968,13 @@ def lint_cross_refs(
     rest_response_refs: list[tuple[KdlNode, str]] = []
     rest_error_refs: list[tuple[KdlNode, str]] = []
     json_nodes: dict[str, KdlNode] = {}
+    struct_names: set[str] = set()
+    nested_refs: list[tuple[KdlNode, str]] = []
+
+    def source_for(node: KdlNode) -> str:
+        if node_source_paths is None:
+            return source_path
+        return str(node_source_paths.get(id(node), source_path))
 
     for node in nodes:
         if node.name == "json":
@@ -874,6 +987,13 @@ def lint_cross_refs(
                     field_node, name or "", json_field_refs
                 )
         elif node.name == "struct":
+            struct_name = _node_arg(node, 0)
+            if struct_name:
+                struct_names.add(struct_name)
+            for nested in node.select("nested"):
+                target = _node_arg(nested, 0)
+                if target:
+                    nested_refs.append((nested, target))
             for req in node.select("@request"):
                 response = req.get_prop("response")
                 if response:
@@ -889,7 +1009,7 @@ def lint_cross_refs(
                 _error(
                     req_node,
                     f"@request response='{schema_name}' references undefined json definition '{schema_name}'",
-                    source_path,
+                    source_for(req_node),
                     code="E300",
                     hint=f"define 'json {schema_name} {{ ... }}' or fix the response name",
                 )
@@ -901,7 +1021,7 @@ def lint_cross_refs(
                 _error(
                     err_node,
                     f"@error schema '{schema_name}' references undefined json definition '{schema_name}'",
-                    source_path,
+                    source_for(err_node),
                     code="E300",
                     hint=f"define 'json {schema_name} {{ ... }}' or fix the schema name",
                 )
@@ -913,7 +1033,7 @@ def lint_cross_refs(
                 _error(
                     field_node,
                     f"json field '{field_name}' references undefined json definition '{ref_name}'",
-                    source_path,
+                    source_for(field_node),
                     code="E300",
                     hint=f"define 'json {ref_name} {{ ... }}' or fix the type name",
                 )
@@ -937,14 +1057,254 @@ def lint_cross_refs(
                     _error(
                         kdl_node,
                         f"circular reference detected involving json definition '{name}'",
-                        source_path,
+                        source_for(kdl_node),
                         code="E300",
                         hint="break the cycle by removing or changing one of the referenced types",
                     )
                 )
             break
 
+    for nested_node, target in nested_refs:
+        if target not in struct_names:
+            diags.append(
+                _error(
+                    nested_node,
+                    f"'nested {target}' references undefined struct '{target}'",
+                    source_for(nested_node),
+                    code="E300",
+                    hint=f"declare 'struct {target} {{ ... }}' before use",
+                )
+            )
+
+    _lint_generated_symbols(nodes, diags, source_for)
+
     return diags
+
+
+def _is_valid_generated_identifier(target: str, name: str) -> bool:
+    if not _PORTABLE_IDENTIFIER_RE.fullmatch(name):
+        return False
+    if target == "python":
+        return not _keyword.iskeyword(name)
+    if target == "javascript":
+        return name not in _JS_RESERVED
+    return name not in _GO_RESERVED
+
+
+def _top_level_symbols(kind: str, raw_name: str) -> dict[str, tuple[str, ...]]:
+    pascal = to_pascal_case(raw_name)
+    if kind == "struct":
+        return {
+            "python": (pascal, f"{pascal}Type"),
+            "javascript": (pascal, f"{pascal}Type"),
+            "go": (pascal, f"{pascal}Type"),
+        }
+    if kind == "json":
+        symbol = f"{pascal}Json"
+        return {target: (symbol,) for target in ("python", "javascript", "go")}
+    return {
+        "python": (to_snake_case(raw_name),),
+        "javascript": (to_camel_case(raw_name),),
+        "go": (pascal,),
+    }
+
+
+def _struct_symbols(node: KdlNode, raw_name: str) -> dict[str, tuple[str, ...]]:
+    pascal = to_pascal_case(raw_name)
+    annotation = node.type_annotation
+    struct_type = (
+        annotation[1:-1] if annotation else (node.get_prop("type") or "item")
+    )
+    symbols = (pascal,) if struct_type == "rest" else (pascal, f"{pascal}Type")
+    return {target: symbols for target in ("python", "javascript", "go")}
+
+
+def _scope_symbols(kind: str, raw_name: str) -> dict[str, str]:
+    if kind == "field":
+        snake = to_snake_case(raw_name)
+        pascal = to_pascal_case(raw_name)
+        return {
+            "python": f"_parse_{snake}",
+            "javascript": f"_parse{pascal}",
+            "go": f"parse{pascal}",
+        }
+    if kind in ("request", "check", "placeholder"):
+        return {
+            "python": to_snake_case(raw_name),
+            "javascript": to_camel_case(to_snake_case(raw_name)),
+            "go": to_pascal_case(raw_name)
+            if kind == "request"
+            else to_camel_case(raw_name),
+        }
+    snake = to_snake_case(raw_name)
+    pascal = to_pascal_case(raw_name)
+    return {
+        "python": f"_init_{snake}",
+        "javascript": f"_init{pascal}",
+        "go": f"init{pascal}",
+    }
+
+
+def _register_symbols(
+    *,
+    node: KdlNode,
+    raw_name: str,
+    label: str,
+    symbols: dict[str, tuple[str, ...]],
+    seen: dict[str, dict[str, tuple[KdlNode, str, str]]],
+    diags: list[ReadDiagnostic],
+    source_for,
+    skip_local_exact: bool = True,
+) -> None:
+    for target, target_symbols in symbols.items():
+        for symbol in target_symbols:
+            if not _is_valid_generated_identifier(target, symbol):
+                diags.append(
+                    _error(
+                        node,
+                        f"{label} '{raw_name}' produces invalid {target} identifier '{symbol}'",
+                        source_for(node),
+                        code="E403",
+                        hint=f"rename '{raw_name}' to a portable identifier",
+                    )
+                )
+                continue
+            previous = seen[target].get(symbol)
+            if previous is None:
+                seen[target][symbol] = (node, label, raw_name)
+                continue
+            previous_node, previous_label, previous_raw = previous
+            same_local_exact = (
+                previous_label == label
+                and previous_raw == raw_name
+                and source_for(previous_node) == source_for(node)
+            )
+            if same_local_exact and skip_local_exact:
+                continue
+            diags.append(
+                _error(
+                    node,
+                    f"{target} symbol collision: {label} '{raw_name}' and "
+                    f"{previous_label} '{previous_raw}' both produce '{symbol}'",
+                    source_for(node),
+                    code="E402",
+                    hint=f"rename one declaration so {target} names differ",
+                )
+            )
+
+
+def _lint_generated_symbols(
+    nodes: list[KdlNode],
+    diags: list[ReadDiagnostic],
+    source_for,
+) -> None:
+    targets = ("python", "javascript", "go")
+    top_seen: dict[str, dict[str, tuple[KdlNode, str, str]]] = {
+        target: {} for target in targets
+    }
+    for node in nodes:
+        if node.name not in ("struct", "json", "fn"):
+            continue
+        raw_name = _node_arg(node, 0)
+        if not raw_name:
+            continue
+        _register_symbols(
+            node=node,
+            raw_name=raw_name,
+            label=node.name,
+            symbols=(
+                _struct_symbols(node, raw_name)
+                if node.name == "struct"
+                else _top_level_symbols(node.name, raw_name)
+            ),
+            seen=top_seen,
+            diags=diags,
+            source_for=source_for,
+        )
+        if node.name == "struct":
+            _lint_struct_symbols(node, diags, source_for)
+
+
+def _lint_struct_symbols(
+    node: KdlNode, diags: list[ReadDiagnostic], source_for
+) -> None:
+    targets = ("python", "javascript", "go")
+    seen_by_kind: dict[str, dict[str, dict[str, tuple[KdlNode, str, str]]]] = {}
+
+    def register(child: KdlNode, raw_name: str, kind: str) -> None:
+        registry_kind = "method" if kind in ("check", "request") else kind
+        seen = seen_by_kind.setdefault(
+            registry_kind, {target: {} for target in targets}
+        )
+        scoped = _scope_symbols(kind, raw_name)
+        _register_symbols(
+            node=child,
+            raw_name=raw_name,
+            label=kind,
+            symbols={target: (name,) for target, name in scoped.items()},
+            seen=seen,
+            diags=diags,
+            source_for=source_for,
+            skip_local_exact=False,
+        )
+
+    for child in node.children:
+        if not child.name.startswith("@"):
+            register(child, child.name, "field")
+            continue
+        if child.name == "@check":
+            name = _node_arg(child, 0)
+            if name:
+                register(child, name, "check")
+        elif child.name == "@request":
+            name = child.get_prop("name") or "fetch"
+            register(child, str(name), "request")
+            _lint_placeholder_symbols(child, diags, source_for)
+        elif child.name == "@init":
+            for init_field in child.children:
+                register(init_field, init_field.name, "init field")
+
+
+def _lint_placeholder_symbols(
+    request_node: KdlNode, diags: list[ReadDiagnostic], source_for
+) -> None:
+    raw_payload = str(request_node.args[0].value) if request_node.args else ""
+    targets = ("python", "javascript", "go")
+    seen: dict[str, dict[str, tuple[KdlNode, str, str]]] = {
+        target: {} for target in targets
+    }
+    specs: dict[str, PlaceholderSpec] = {}
+    for match in PLACEHOLDER_WIDE_RE.finditer(raw_payload):
+        spec = PlaceholderSpec.parse(match.group(0))
+        if spec is None:
+            continue
+        previous_spec = specs.get(spec.name)
+        if previous_spec is not None and previous_spec != spec:
+            diags.append(
+                _error(
+                    request_node,
+                    f"placeholder '{spec.name}' uses conflicting type/style declarations",
+                    source_for(request_node),
+                    code="E402",
+                    hint="use one placeholder specification consistently",
+                )
+            )
+            continue
+        specs[spec.name] = spec
+        _register_symbols(
+            node=request_node,
+            raw_name=spec.name,
+            label="placeholder",
+            symbols={
+                target: (name,)
+                for target, name in _scope_symbols(
+                    "placeholder", spec.name
+                ).items()
+            },
+            seen=seen,
+            diags=diags,
+            source_for=source_for,
+        )
 
 
 def _collect_json_field_refs(

@@ -1116,3 +1116,71 @@ class TestRestStructForms:
         s_prefix = next(n for n in m_prefix.body if isinstance(n, StructRest))
         s_prop = next(n for n in m_prop.body if isinstance(n, StructRest))
         assert len(s_prefix.request_configs) == len(s_prop.request_configs)
+
+
+def test_structural_error_returns_diagnostic_instead_of_crashing():
+    module, diagnostics = parse_module("struct {}")
+
+    assert module.body
+    assert any("requires a name" in d.message for d in diagnostics)
+
+
+def test_invalid_request_returns_diagnostic_instead_of_crashing():
+    src = (
+        "struct S {\n"
+        '    @request "not an HTTP request"\n'
+        '    title { css "h1"; text }\n'
+        "}\n"
+    )
+
+    _, diagnostics = parse_module(src)
+
+    assert any("Unsupported @request format" in d.message for d in diagnostics)
+
+
+def test_duplicate_struct_and_field_names_are_rejected():
+    src = (
+        'struct Same { value { css "a"; text }; value { css "b"; text } }\n'
+        'struct Same { other { css "x"; text } }\n'
+    )
+
+    _, diagnostics = parse_module(src)
+    messages = [d.message for d in diagnostics]
+
+    assert any("duplicate struct definition 'Same'" in m for m in messages)
+    assert any("field 'value'" in m and "collision" in m for m in messages)
+
+
+def test_normalized_names_are_checked_for_every_target():
+    src = (
+        'struct Names { foo-bar { css "a"; text }; '
+        'foo_bar { css "b"; text } }\n'
+        "(raw)fn names { trim }\n"
+    )
+
+    _, diagnostics = parse_module(src)
+    messages = [d.message for d in diagnostics]
+
+    assert any(
+        "python symbol collision" in m and "foo_bar" in m for m in messages
+    )
+    assert any("go symbol collision" in m and "Names" in m for m in messages)
+
+
+def test_keyword_and_placeholder_collisions_are_rejected():
+    src = (
+        "(raw)fn class { trim }\n"
+        "struct API type=rest {\n"
+        '    @request name=get response=R """\n'
+        "    GET /u?a={{page-num}}&b={{page_num}} HTTP/1.1\n"
+        "    Host: example.com\n"
+        '    """\n'
+        "}\n"
+        "json R { ok bool }\n"
+    )
+
+    _, diagnostics = parse_module(src)
+    messages = [d.message for d in diagnostics]
+
+    assert any("invalid python identifier 'class'" in m for m in messages)
+    assert any("placeholder" in m and "collision" in m for m in messages)

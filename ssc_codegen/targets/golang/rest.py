@@ -26,6 +26,7 @@ from ssc_codegen.ast import (
 )
 from ssc_codegen.ast.struct import RequestHttp
 from ssc_codegen.naming import to_camel_case, to_pascal_case, to_snake_case
+from ssc_codegen.request_spec import parse_json_template
 from ssc_codegen.targets.golang.http_libs.base import GoHttpLibStrategy
 from ssc_codegen.targets.golang.literals import go_str as _go_str
 from ssc_codegen.traversal.context import WalkContext
@@ -72,24 +73,34 @@ def render_url(tmpl: PlaceholderTemplate) -> str:
 
 
 def render_body_json(tmpl: PlaceholderTemplate) -> str:
-    """Render JSON body template as a Go string expression."""
-    if not tmpl.has_placeholders:
-        return _go_str(tmpl.source)
+    """Render JSON body through encoding/json for correct escaping."""
 
-    fmt_str = ""
-    args: list[str] = []
-    for part in tmpl.parts:
-        if isinstance(part, PlaceholderSpec):
-            fmt_str += _go_fmt_placeholder(part)
-            args.append(to_camel_case(part.name))
-        else:
-            fmt_str += (
-                part.replace("%", "%%").replace("{", "{{").replace("}", "}}")
+    def emit(value: object) -> str:
+        if isinstance(value, PlaceholderSpec):
+            return to_camel_case(value.name)
+        if isinstance(value, PlaceholderTemplate):
+            return render_url(value)
+        if value is None:
+            return "nil"
+        if isinstance(value, bool):
+            return str(value).lower()
+        if isinstance(value, (int, float)):
+            return repr(value)
+        if isinstance(value, str):
+            return _go_str(value)
+        if isinstance(value, list):
+            return "[]any{" + ", ".join(emit(item) for item in value) + "}"
+        if isinstance(value, dict):
+            items = ", ".join(
+                f"{_go_str(str(key))}: {emit(item)}"
+                for key, item in value.items()
             )
+            return "map[string]any{" + items + "}"
+        raise TypeError(
+            f"unsupported JSON body element: {type(value).__name__}"
+        )
 
-    if not args:
-        return _go_str(tmpl.source)
-    return f"fmt.Sprintf({_go_str(fmt_str)}, {', '.join(args)})"
+    return f"stdJSONBody({emit(parse_json_template(tmpl))})"
 
 
 def render_url_values(d: dict[str, PlaceholderTemplate]) -> str:
@@ -102,6 +113,42 @@ def render_url_values(d: dict[str, PlaceholderTemplate]) -> str:
     """
     if not d:
         return '""'
+    if any(
+        (ph := tmpl.single_placeholder()) is not None and ph.is_array
+        for tmpl in d.values()
+    ):
+        lines = ["func() string {", "_values := url.Values{}"]
+        for key, tmpl in d.items():
+            ph = tmpl.single_placeholder()
+            if ph is None or not ph.is_array:
+                lines.append(
+                    f"_values.Set({_go_str(key)}, fmt.Sprint({render_url(tmpl)}))"
+                )
+                continue
+            name = to_camel_case(ph.name)
+            effective_key = f"{key}[]" if ph.style == "bracket" else key
+            if ph.style in ("csv", "pipe", "space"):
+                separator = {"csv": ",", "pipe": "|", "space": " "}[ph.style]
+                parts_name = f"_{name}Parts"
+                lines.extend(
+                    [
+                        f"{parts_name} := make([]string, len({name}))",
+                        f"for _i, _value := range {name} {{",
+                        f"{parts_name}[_i] = fmt.Sprint(_value)",
+                        "}",
+                        f"_values.Set({_go_str(effective_key)}, strings.Join({parts_name}, {_go_str(separator)}))",
+                    ]
+                )
+            else:
+                lines.extend(
+                    [
+                        f"for _, _value := range {name} {{",
+                        f"_values.Add({_go_str(effective_key)}, fmt.Sprint(_value))",
+                        "}",
+                    ]
+                )
+        lines.extend(["return _values.Encode()", "}()"])
+        return "\n".join(lines)
     parts: list[str] = []
     for k, tmpl in d.items():
         val = (
@@ -195,19 +242,26 @@ def _build_opts(spec: RequestHttp, indent: str) -> list[str]:
     lines: list[str] = []
     has_headers = bool(spec.headers)
     has_cookies = bool(spec.cookies)
-    has_body = spec.body_kind not in ("empty", None) and spec.body is not None
+    has_body = (
+        spec.body_kind not in ("empty", None) and spec.payload is not None
+    )
 
     if not has_headers and not has_body and not has_cookies:
         return [f"{indent}nil"]
 
     lines.append(f"{indent}&sscReqOpts{{")
     if has_body:
-        body = spec.body
-        if isinstance(body, PlaceholderTemplate):
-            lines.append(f"{indent}\tBody: {render_body_json(body)},")
-        elif isinstance(body, dict):
+        payload = spec.payload
+        if isinstance(payload, PlaceholderTemplate):
+            body_expr = (
+                render_body_json(payload)
+                if spec.body_kind == "json"
+                else render_url(payload)
+            )
+            lines.append(f"{indent}\tBody: {body_expr},")
+        elif isinstance(payload, dict):
             # form-urlencoded body — url.Values{...}.Encode()
-            lines.append(f"{indent}\tBody: {render_form_body(body)},")
+            lines.append(f"{indent}\tBody: {render_form_body(payload)},")
     if has_headers:
         parts = []
         for k, tmpl in spec.headers.items():
@@ -278,14 +332,18 @@ def emit_method_fetch(
         )
 
     # Body inline (json/raw or form).
-    if spec.body_kind in ("json", "raw") and spec.body is not None:
-        if isinstance(spec.body, PlaceholderTemplate):
-            body_expr = render_body_json(spec.body)
+    if spec.body_kind in ("json", "raw") and spec.payload is not None:
+        if isinstance(spec.payload, PlaceholderTemplate):
+            body_expr = (
+                render_body_json(spec.payload)
+                if spec.body_kind == "json"
+                else render_url(spec.payload)
+            )
             lines.append(
                 f"{i2}req.Body = io.NopCloser(strings.NewReader({body_expr}))"
             )
-    elif spec.body_kind == "form" and isinstance(spec.body, dict):
-        body_expr = render_form_body(spec.body)
+    elif spec.body_kind == "form" and isinstance(spec.payload, dict):
+        body_expr = render_form_body(spec.payload)
         lines.append(
             f"{i2}req.Body = io.NopCloser(strings.NewReader({body_expr}))"
         )
@@ -512,33 +570,27 @@ def emit_matcher_list_def(
     var = f"{to_snake_case(node.struct_name)}Matchers"
     lines = [f"var {var} = []sscErrMatcher{{"]
     for e in node.entries:
-        check_expr: str
-        if e.required_keys:
-            checks = []
-            for key in e.required_keys:
-                checks.append(f"gjson.GetBytes(_b, {_go_str(key)}).Exists()")
-            check_expr = " && ".join(checks)
-        elif e.conditions:
-            checks = []
-            for path, val in e.conditions.items():
-                go_path = _go_str(path)
-                if isinstance(val, bool):
-                    checks.append(
-                        f"gjson.GetBytes(_b, {go_path}).Bool() == {str(val).lower()}"
-                    )
-                elif isinstance(val, (int, float)):
-                    checks.append(
-                        f"gjson.GetBytes(_b, {go_path}).Int() == {val}"
-                    )
-                elif val is None:
-                    checks.append(f"!gjson.GetBytes(_b, {go_path}).Exists()")
-                else:
-                    checks.append(
-                        f"gjson.GetBytes(_b, {go_path}).String() == {_go_str(str(val))}"
-                    )
-            check_expr = " && ".join(checks)
-        else:
-            check_expr = ""
+        checks = [
+            f"gjson.GetBytes(_b, {_go_str(key)}).Exists()"
+            for key in e.required_keys
+        ]
+        for path, val in e.conditions.items():
+            go_path = _go_str(path)
+            if isinstance(val, bool):
+                checks.append(
+                    f"gjson.GetBytes(_b, {go_path}).Bool() == {str(val).lower()}"
+                )
+            elif isinstance(val, int):
+                checks.append(f"gjson.GetBytes(_b, {go_path}).Int() == {val}")
+            elif isinstance(val, float):
+                checks.append(f"gjson.GetBytes(_b, {go_path}).Float() == {val}")
+            elif val is None:
+                checks.append(f"!gjson.GetBytes(_b, {go_path}).Exists()")
+            else:
+                checks.append(
+                    f"gjson.GetBytes(_b, {go_path}).String() == {_go_str(str(val))}"
+                )
+        check_expr = " && ".join(checks)
 
         if check_expr:
             lines.append(

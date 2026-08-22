@@ -137,6 +137,41 @@ def test_circular_import_detected():
     assert any("ircular" in m for m in msgs)
 
 
+def test_diamond_import_is_loaded_once(tmp_path):
+    common = tmp_path / "common.kdl"
+    common.write_text(
+        'struct Common { title { css "h1"; text } }\n', encoding="utf-8"
+    )
+    for name in ("left", "right"):
+        (tmp_path / f"{name}.kdl").write_text(
+            'import "./common.kdl"\n', encoding="utf-8"
+        )
+    root = tmp_path / "root.kdl"
+    root.write_text(
+        'import "./left.kdl"\n'
+        'import "./right.kdl"\n'
+        "struct Root { child { nested Common } }\n",
+        encoding="utf-8",
+    )
+
+    module, diagnostics = _parse_file(root)
+
+    assert not _error_messages(diagnostics)
+    assert [s.name for s in _structs(module)].count("Common") == 1
+
+
+def test_imported_document_is_structurally_linted(tmp_path):
+    imported = tmp_path / "invalid.kdl"
+    imported.write_text("unknown-node\n", encoding="utf-8")
+    root = tmp_path / "root.kdl"
+    root.write_text('import "./invalid.kdl"\n', encoding="utf-8")
+
+    _, diagnostics = _parse_file(root)
+
+    error = next(d for d in diagnostics if "Unknown node" in d.message)
+    assert error.path == str(imported.resolve())
+
+
 # ── error cases ───────────────────────────────────────────────────────────────
 
 

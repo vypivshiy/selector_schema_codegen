@@ -2,11 +2,11 @@
 
 ssc_codegen is a code generator for web scraping parsers.
 Input: .kdl schema files describing HTML extraction rules.
-Output: parser code for Python (bs4, lxml, parsel, selectolax), JavaScript (DOM API).
+Output: parser code for Python (bs4, lxml, parsel, selectolax), JavaScript (DOM API), and Go (goquery).
 
-Pipeline: .kdl schema → KDL parser (custom KDL 2.0: KDLLexer + KDL2CSTParser) → core (AST + lint) → visitor → output code
+Pipeline: .kdl schema → external `kdlquery` parser → core (AST + lint) → visitor → output code
 
-Version: 0.31.0
+Version: 0.37.1
 Python: >=3.10
 CLI entry point: `ssc-gen` (ssc_codegen.main:main)
 
@@ -16,14 +16,11 @@ CLI entry point: `ssc-gen` (ssc_codegen.main:main)
 
 ```
 ssc_codegen/
-├── __init__.py            # parse_module(src, path, css_to_xpath) → Module
+├── __init__.py            # re-exports parse_module
 ├── main.py                # CLI (typer): generate, check, run, health — uses Lang/HtmlLib enums + resolve()
 ├── _logging.py            # ANSI color logging setup
-├── exceptions.py          # ParseError, UnknownNodeError, BuildTimeError
-├── document_utils.py      # CSS→XPath conversion for AST nodes
-├── pseudo_selectors.py    # Parse CSS pseudo-selectors (::text, ::raw, ::attr)
+├── exceptions.py          # ParseError, BuildTimeError
 ├── regex_utils.py         # Regex flag handling, unverbosify
-├── selector_utils.py      # css_to_xpath (cssselect wrapper)
 ├── naming.py              # Pure case-conversion helpers (to_pascal_case/to_snake_case/to_camel_case)
 ├── request_spec.py        # parse_to_http (curl/raw HTTP → RequestHttp AST node), validate_json_body
 ├── health.py              # Selector health check against real HTML
@@ -46,18 +43,18 @@ ssc_codegen/
 │   ├── predicate_ops.py   # PredEq/Ne/Gt/Lt/Ge/Le/Range, PredStarts/Ends/Contains/In/Re/ReAny/ReAll, PredCss/Xpath/HasAttr, PredAttr*, PredText*, PredCount*, LogicNot/And/Or
 │   ├── typedef.py         # TypeDef, TypeDefField
 │   ├── jsondef.py         # JsonDef, JsonDefField
+│   ├── function.py        # module-level fn/(raw)fn AST node
 │   └── helpers.py         # AST utilities
 ├── core/                  # Unified KDL → Module AST reader + integrated linting
-│   ├── __init__.py        # Exports: parse_module, SscReader, ReadDiagnostic
-│   ├── reader.py          # SscReader — walks KDL CST, builds Module AST
-│   ├── adapter.py         # NodeAdapter — KdlNode → handler protocol
-│   ├── contexts.py        # ParseContext, LintContext, ErrorCode, WalkCtx
+│   ├── __init__.py        # Exports parse_module + diagnostic formatting
+│   ├── reader.py          # orchestrates kdlquery parse, lint passes, AST build
+│   ├── contexts.py        # ParseContext, LintContext, WalkCtx
 │   ├── expressions.py     # Pipeline expression parsing, typedef_from_struct
 │   ├── rest_artifacts.py  # rest_artifacts_from_struct — synthesizes ResultVariantDef/ResultAliasDef/MatcherListDef from StructRest (mirrors typedef_from_struct); owns err_subclass_name
 │   ├── predicates.py      # Predicate expression parsing
 │   ├── struct_parser.py   # Struct body parsing
-│   ├── module_handler.py  # handle_define, handle_json, handle_struct, handle_transform, resolve_imports
-│   ├── linting.py         # Argument validation, CSS/XPath/regex linting
+│   ├── module_handler.py  # top-level handlers + import graph resolution
+│   ├── linter.py          # structural, symbol, CSS/XPath/regex linting
 │   ├── type_checking.py   # Pipeline type inference and mismatch detection
 │   └── format.py          # Diagnostic formatting (text + JSON)
 ├── traversal/             # Shared AST traversal core (language-agnostic)
@@ -94,15 +91,14 @@ ssc_codegen/
 │           ├── base.py    # JsHttpLibStrategy(ABC) — fn_name, rest_call_lines()
 │           ├── fetch.py   # FetchStrategy — fetch API
 │           └── axios.py   # AxiosStrategy — axios
+│   └── golang/            # Go backend (goquery + net/http + gjson)
+│       ├── visitor.py     # GoVisitor + gofmt validation + runtime accumulation
+│       ├── rest.py        # REST/fetch codegen
+│       ├── runtime.py     # shared Go helper definitions
+│       └── http_libs/     # net/http strategy
 ├── parsers/               # HTTP transport parsing (consumed by visitors)
 │   ├── curl.py            # parse_curl_command() — POSIX curl → kwargs
 │   └── http.py            # parse_http_request() — raw HTTP/1.1|2 → kwargs
-├── kdl/                   # Custom KDL 2.0 parser (NOT tree-sitter)
-│   ├── __init__.py        # Re-exports all CST, Reader, and DictReader types
-│   ├── parser.py          # KDLLexer, KDL2CSTParser, Token/TokenType, CST node types
-│   ├── reader.py          # Reader ABC, Walker, WalkContext, ReadDiagnostic, DiagnosticCollector, parse_into()
-│   └── dict_reader.py     # DictReader — KDL → Python dict (Node TypedDict)
-
 tests/
 ├── integration/
 │   ├── test_codegen_run.py     # End-to-end: KDL → generate → execute → verify JSON
@@ -111,15 +107,17 @@ tests/
 │   └── fixtures/               # Test HTML fixtures
 ├── js/
 │   └── test_js_codegen.py      # JS codegen tests (Node.js + jsdom)
+├── go/
+│   └── test_go_codegen.py      # gofmt/vet/build integration
 ├── test_parser.py              # KDL parser tests
 ├── test_imports.py             # Import/include tests
-├── test_css_to_xpath.py        # CSS→XPath conversion tests
+├── test_cli.py                  # CLI output planning and JSON diagnostics
 └── test_rest_api.py            # REST/transport layer tests
 
 examples/                       # Real-world .kdl schemas
 docs/
 ├── llm.txt                     # KDL DSL v2.1 syntax reference
-└── learn/                      # Tutorial chapters (01-09)
+└── learn/                      # Tutorial chapters (01-10)
 ```
 
 ---
@@ -157,7 +155,7 @@ ssc-gen scout -i page.html --text '\$\d+\.\d{2}' -f json              # HTML rec
 - `--separate-runtime / -R`: Extract helpers into separate module (default: `sscgen_runtime`)
 - `--runtime-name / -rn`: Custom runtime module name
 - `--skip-lint`: Skip linting pass
-- `--package`: Package/module name for generated code
+- `--package`: Package/module name; Go defaults to `main`
 - `--format / -f`: Output format — `text` | `json`
 
 ---
@@ -169,11 +167,11 @@ ssc-gen scout -i page.html --text '\$\d+\.\d{2}' -f json              # HTML rec
 3. **ModuleBuilder**: Pure data accumulator (generation/builder.py) — replaces old hidden signal pools. Stores imports + std-helper definitions. Registration is idempotent. Target-specific code decides rendering format.
 4. **Two-pass codegen**: `convert_all` runs `_walk_module` twice — pass 1 collects std/import registrations, pass 2 emits output.
 5. **HttpLibStrategy**: REST transport is pluggable per HTTP library. Python: httpx/aiohttp/requests. JS: fetch/axios. Each owns its import line, client types, transport exception, and REST runtime source.
-6. **Dynamic resolver**: `resolve(TargetSpec)` → `TargetProfile`. Validates user input, returns capabilities + `create_converter` factory. No static enum mappings in main.py.
+6. **Dynamic resolver**: `resolve(TargetSpec)` → `TargetProfile`. Validates user input, returns capabilities + `create_converter` factory for Python, JavaScript, or Go.
 7. **Integrated linting**: parsing and linting happen in one pass via `core/`.
 8. **Type-tagged containers**: VariableType/StructType enums enforce strict typing at AST level.
 9. **Recursive nesting**: `Nested` node resolves via struct_map with cycle detection.
-10. **Transport layer**: `@request` stores raw payload in `RequestHttp`; `request_spec.parse_to_http` normalises curl/HTTP into a `RequestHttp` AST node whose string fields are `Template` instances — tokenized into `list[str | PlaceholderSpec]` parts at parse time. Visitors call `RequestHttp.with_renamed_placeholders(transform)` to adapt placeholder names per target language. REST result artifacts are synthesized as AST nodes by `core/rest_artifacts.py`.
+10. **Transport layer**: `request_spec.parse_to_http` normalises curl/HTTP into `RequestHttp`. String fields are tokenized `PlaceholderTemplate` values; request content lives in `RequestHttp.payload` while inherited `Node.body` remains the AST-child list. JSON templates are parsed structurally before target rendering. Visitors call `with_renamed_placeholders(transform)` for target naming.
 11. **Runtime separation**: `--separate-runtime` extracts helper functions into a standalone module; generated parsers import from it instead of inlining.
 
 ---

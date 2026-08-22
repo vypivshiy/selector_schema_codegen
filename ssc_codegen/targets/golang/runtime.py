@@ -37,6 +37,17 @@ BASE_RUNTIME: list[str] = [
 # ---------------------------------------------------------------------------
 
 GO_RUNTIME: dict[str, tuple[list[str], str]] = {
+    "stdJSONBody": (
+        ['"encoding/json"'],
+        """\
+func stdJSONBody(value any) string {
+\tbody, err := json.Marshal(value)
+\tif err != nil {
+\t\tpanic("ssc-gen: encode JSON body: " + err.Error())
+\t}
+\treturn string(body)
+}""",
+    ),
     # === ASSERT ===
     "stdAssert": (
         [],

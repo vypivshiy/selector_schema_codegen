@@ -136,10 +136,16 @@ class PlaceholderSpec:
 def parse_placeholder(match: "_re.Match[str]") -> PlaceholderSpec:
     return PlaceholderSpec(
         name=match.group(1),
-        type_name=match.group(2) or "str",
+        type_name=cast(
+            Literal["str", "int", "float", "bool"],
+            match.group(2) or "str",
+        ),
         is_array=bool(match.group(3)),
         is_optional=bool(match.group(4)),
-        style=match.group(5) or None,
+        style=cast(
+            Literal["repeat", "csv", "bracket", "pipe", "space"] | None,
+            match.group(5) or None,
+        ),
     )
 
 
@@ -260,7 +266,7 @@ class RequestHttp(Node):
 
     Created once at parse time from ``parse_to_http(raw_payload)``;
     converters read fields directly instead of re-parsing raw_payload.
-    String fields (url, headers, cookies, params, body) are ``Template``
+    String fields (url, headers, cookies, params, payload) are ``Template``
     instances: tokenized literal/placeholder parts.
     """
 
@@ -270,7 +276,7 @@ class RequestHttp(Node):
     cookies: dict[str, PlaceholderTemplate] = field(default_factory=dict)
     params: dict[str, PlaceholderTemplate] = field(default_factory=dict)
     body_kind: str = "empty"  # "empty" | "json" | "form" | "raw"
-    body: PlaceholderTemplate | dict[str, PlaceholderTemplate] | None = None
+    payload: PlaceholderTemplate | dict[str, PlaceholderTemplate] | None = None
 
     @property
     def placeholders(self) -> list[PlaceholderSpec]:
@@ -289,10 +295,10 @@ class RequestHttp(Node):
         yield self.url
         for d in (self.headers, self.cookies, self.params):
             yield from d.values()
-        if isinstance(self.body, PlaceholderTemplate):
-            yield self.body
-        elif isinstance(self.body, dict):
-            yield from self.body.values()
+        if isinstance(self.payload, PlaceholderTemplate):
+            yield self.payload
+        elif isinstance(self.payload, dict):
+            yield from self.payload.values()
 
     def with_renamed_placeholders(
         self, transform: Callable[[str], str]
@@ -312,13 +318,13 @@ class RequestHttp(Node):
         ) -> dict[str, PlaceholderTemplate]:
             return {k: v.renamed(mapping) for k, v in d.items()}
 
-        new_body: (
+        new_payload: (
             PlaceholderTemplate | dict[str, PlaceholderTemplate] | None
-        ) = self.body
-        if isinstance(self.body, PlaceholderTemplate):
-            new_body = self.body.renamed(mapping)
-        elif isinstance(self.body, dict):
-            new_body = _rename_dict(self.body)
+        ) = self.payload
+        if isinstance(self.payload, PlaceholderTemplate):
+            new_payload = self.payload.renamed(mapping)
+        elif isinstance(self.payload, dict):
+            new_payload = _rename_dict(self.payload)
 
         return RequestHttp(
             method=self.method,
@@ -327,7 +333,7 @@ class RequestHttp(Node):
             cookies=_rename_dict(self.cookies),
             params=_rename_dict(self.params),
             body_kind=self.body_kind,
-            body=new_body,
+            payload=new_payload,
         )
 
 

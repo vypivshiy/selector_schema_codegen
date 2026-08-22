@@ -50,6 +50,7 @@ class ParseContext:
     structs: dict[str, StructBase] = field(default_factory=dict)
     json_defs: dict[str, JsonDef] = field(default_factory=dict)
     source_path: Path | None = None
+    node_source_paths: dict[int, Path] = field(default_factory=dict)
 
     def all_names(self) -> set[str]:
         return (
@@ -77,6 +78,7 @@ class LintContext:
     )
     _predicate_depth: int = field(default=0)
     _predicate_context: str = ""
+    node_source_paths: dict[int, Path] = field(default_factory=dict)
 
     def error(
         self,
@@ -88,18 +90,22 @@ class LintContext:
         label: str | None = None,
         notes: list[str] | None = None,
     ) -> None:
-        self.diagnostics.append(
-            ReadDiagnostic(
-                message=message,
-                severity=Severity.ERROR,
-                span=node.span,
-                path=self.path,
-                hint=hint,
-                code=code,
-                label=label,
-                notes=tuple(notes) if notes else (),
-            )
+        scope = self.path
+        source_path = self.node_source_paths.get(id(node))
+        diagnostic_notes = tuple(notes) if notes else ()
+        if source_path is not None and scope:
+            diagnostic_notes = (*diagnostic_notes, f"scope: {scope}")
+        diagnostic = ReadDiagnostic(
+            message=message,
+            severity=Severity.ERROR,
+            span=node.span,
+            path=str(source_path) if source_path is not None else scope,
+            hint=hint,
+            code=code,
+            label=label,
+            notes=diagnostic_notes,
         )
+        self.diagnostics.append(diagnostic)
 
     def warning(
         self,
@@ -111,18 +117,22 @@ class LintContext:
         label: str | None = None,
         notes: list[str] | None = None,
     ) -> None:
-        self.diagnostics.append(
-            ReadDiagnostic(
-                message=message,
-                severity=Severity.WARNING,
-                span=node.span,
-                path=self.path,
-                hint=hint,
-                code=code,
-                label=label,
-                notes=tuple(notes) if notes else (),
-            )
+        scope = self.path
+        source_path = self.node_source_paths.get(id(node))
+        diagnostic_notes = tuple(notes) if notes else ()
+        if source_path is not None and scope:
+            diagnostic_notes = (*diagnostic_notes, f"scope: {scope}")
+        diagnostic = ReadDiagnostic(
+            message=message,
+            severity=Severity.WARNING,
+            span=node.span,
+            path=str(source_path) if source_path is not None else scope,
+            hint=hint,
+            code=code,
+            label=label,
+            notes=diagnostic_notes,
         )
+        self.diagnostics.append(diagnostic)
 
     @property
     def path(self) -> str:

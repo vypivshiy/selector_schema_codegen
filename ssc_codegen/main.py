@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import enum
+import keyword
 import traceback
 from pathlib import Path
 from typing import Annotated, List, Literal, Optional
@@ -11,6 +12,9 @@ import typer
 
 from ssc_codegen._logging import logger, setup_debug_logging
 from ssc_codegen.core import parse_module, format_diagnostics, ReadDiagnostic
+from ssc_codegen.exceptions import BuildTimeError
+from kdlquery import Severity
+from kdlquery.types import Position, Span
 from ssc_codegen.targets.resolver import ResolutionError, resolve
 from ssc_codegen.targets.spec import TargetSpec
 from ssc_codegen.targets.profile import TargetProfile
@@ -39,6 +43,64 @@ class HtmlLib(str, enum.Enum):
 class FmtType(str, enum.Enum):
     TEXT = "text"
     JSON = "json"
+
+
+def _dedupe_paths(paths: list[Path]) -> list[Path]:
+    seen: set[str] = set()
+    result: list[Path] = []
+    for path in paths:
+        key = str(path.resolve()).casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(path)
+    return result
+
+
+def _plan_output_files(
+    profile: TargetProfile,
+    kdl_files: list[Path],
+    output: Path,
+    *,
+    separate_runtime: bool,
+    runtime_name: str | None,
+) -> dict[Path, Path]:
+    planned: dict[Path, Path] = {}
+    owners: dict[str, Path | str] = {}
+
+    def register(owner: Path | str, target: Path) -> None:
+        key = str(target.resolve()).casefold()
+        previous = owners.get(key)
+        if previous is not None:
+            raise ValueError(
+                f"output collision: {previous} and {owner} both produce {target}"
+            )
+        owners[key] = owner
+
+    for kdl_file in kdl_files:
+        target = output / kdl_file.with_suffix(profile.file_extension).name
+        register(kdl_file, target)
+        planned[kdl_file] = target
+
+    if separate_runtime:
+        name = runtime_name or "sscgen_runtime"
+        if not name.isidentifier() or keyword.iskeyword(name):
+            raise ValueError(f"invalid Python runtime module name: {name!r}")
+        register("Python runtime", output / f"{name}.py")
+    if profile.language == "go":
+        register("Go runtime", output / "sscgen_runtime.go")
+    return planned
+
+
+def _exception_diagnostic(path: Path, exc: Exception) -> ReadDiagnostic:
+    pos = Position(offset=0, line=0, column=0)
+    return ReadDiagnostic(
+        message=str(exc),
+        severity=Severity.ERROR,
+        span=Span(start=pos, end=pos),
+        path=str(path),
+        code="E000",
+    )
 
 
 def _run_generate(
@@ -71,19 +133,39 @@ def _run_generate(
                 err=True,
             )
 
+    kdl_files = _dedupe_paths(kdl_files)
     if not kdl_files:
         typer.echo("No .kdl files found to process.", err=True)
         raise typer.Exit(code=1)
 
     logger.debug("total %d .kdl file(s) to process", len(kdl_files))
 
+    try:
+        planned_outputs = _plan_output_files(
+            profile,
+            kdl_files,
+            output,
+            separate_runtime=separate_runtime,
+            runtime_name=runtime_name,
+        )
+        if profile.language == "go":
+            from ssc_codegen.targets.golang.visitor import (
+                validate_go_package_name,
+            )
+
+            validate_go_package_name(package or "main")
+    except (ValueError, BuildTimeError) as exc:
+        typer.echo(f"ERROR: {exc}", err=True)
+        raise typer.Exit(code=1)
+
     output.mkdir(parents=True, exist_ok=True)
-    ext = profile.file_extension
     converter = profile.create_converter()
 
     errors: list[str] = []
+    all_diagnostics: list[ReadDiagnostic] = []
 
-    meta: dict = {"package": package or output.name}
+    default_package = "main" if profile.language == "go" else output.name
+    meta: dict = {"package": package or default_package}
     if http_client:
         meta["http_client"] = http_client
 
@@ -112,12 +194,14 @@ def _run_generate(
                 kdl_file.read_text(encoding="utf-8"), source_path=kdl_file
             )
             if not skip_lint:
+                all_diagnostics.extend(err)
                 lint_output = format_diagnostics(
                     err, filepath=kdl_file, fmt=fmt.value
                 )
-                if lint_output:
+                if lint_output and fmt == FmtType.TEXT:
                     typer.echo(lint_output, err=True)
-                    errors.append(lint_output)
+                if any(d.severity == Severity.ERROR for d in err):
+                    errors.append(str(kdl_file))
                     continue
             logger.debug("AST built for %s", kdl_file)
             parsed.append((kdl_file, ast))
@@ -128,6 +212,13 @@ def _run_generate(
             else:
                 typer.echo(f"  ERROR {kdl_file}: {exc}", err=True)
             errors.append(str(kdl_file))
+            all_diagnostics.append(_exception_diagnostic(kdl_file, exc))
+
+    if fmt == FmtType.JSON and all_diagnostics:
+        typer.echo(
+            format_diagnostics(all_diagnostics, fmt="json"),
+            err=True,
+        )
 
     if separate_runtime and parsed:
         runtime_path = output / f"{_runtime_name}.py"
@@ -138,7 +229,7 @@ def _run_generate(
         typer.echo(f"  -> {runtime_path}")
 
     for kdl_file, ast in parsed:
-        out_file = output / kdl_file.with_suffix(ext).name
+        out_file = planned_outputs[kdl_file]
         logger.debug("processing: %s -> %s", kdl_file, out_file)
         try:
             code = converter.convert(ast, **meta)
@@ -422,7 +513,7 @@ def generate_go(
         Optional[str],
         typer.Option(
             "--package",
-            help="Go package name for generated code. Default: output directory name.",
+            help="Go package name for generated code. Default: main.",
         ),
     ] = None,
     fmt: Annotated[
@@ -510,6 +601,7 @@ def check(
                 err=True,
             )
 
+    kdl_files = _dedupe_paths(kdl_files)
     if not kdl_files:
         typer.echo("No .kdl files found to check.", err=True)
         raise typer.Exit(code=1)
@@ -530,15 +622,21 @@ def check(
                 typer.echo(traceback.format_exc(), err=True)
             else:
                 typer.echo(f"  ERROR {kdl_file}: {exc}", err=True)
+            all_results.append(_exception_diagnostic(kdl_file, exc))
             total_errors += 1
             continue
         all_results.extend(errs)
 
-        if errs:
-            total_errors += len(errs)
+        file_errors = [d for d in errs if d.severity == Severity.ERROR]
+        if file_errors:
+            total_errors += len(file_errors)
+        if errs and fmt == FmtType.TEXT:
             output = format_diagnostics(errs, filepath=kdl_file, fmt=fmt.value)
             if output:
                 typer.echo(output, err=True)
+
+    if fmt == FmtType.JSON:
+        typer.echo(format_diagnostics(all_results, fmt="json") or "[]")
 
     if total_errors > 0:
         if fmt == FmtType.TEXT:
@@ -549,8 +647,6 @@ def check(
         raise typer.Exit(code=1)
     if fmt == FmtType.TEXT:
         typer.echo(f"All {len(kdl_files)} file(s) passed linting.")
-    else:
-        typer.echo("[]")
 
 
 @app.command()
@@ -793,7 +889,7 @@ def health(
         raise typer.Exit(code=1)
 
     try:
-        module_ast, _ = parse_module(
+        module_ast, diagnostics = parse_module(
             kdl_path.read_text(encoding="utf-8"), source_path=kdl_path
         )
     except Exception as exc:
@@ -802,6 +898,13 @@ def health(
         else:
             typer.echo(f"ERROR: failed to parse {kdl_path}: {exc}", err=True)
         raise typer.Exit(code=1)
+
+    if diagnostics:
+        output = format_diagnostics(diagnostics, filepath=kdl_path, fmt=fmt)
+        if output:
+            typer.echo(output, err=True)
+        if any(d.severity == Severity.ERROR for d in diagnostics):
+            raise typer.Exit(code=1)
 
     structs = [n for n in module_ast.body if isinstance(n, StructBase)]
     struct_names = [s.name for s in structs]

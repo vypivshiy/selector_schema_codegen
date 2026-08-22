@@ -54,6 +54,9 @@ ssc-gen generate js examples/ -o ./output
 # Go (goquery + net/http)
 ssc-gen generate go schema.kdl -o ./output
 
+# Go package defaults to main; override explicitly when generating a library
+ssc-gen generate go schema.kdl -o ./output --package scraper
+
 # with custom package name
 ssc-gen generate python schema.kdl -L bs4 -o ./parsers --package scraper
 
@@ -84,11 +87,13 @@ ssc-gen check examples/
 
 ```bash
 # from file
-ssc-gen run examples/booksToScrape.kdl:MainCatalogue -l python -L bs4 -i page.html
+ssc-gen run examples/booksToScrape.kdl:MainCatalogue -L bs4 -i page.html
 
 # from stdin
-curl https://books.toscrape.com/ | ssc-gen run examples/booksToScrape.kdl:MainCatalogue -l python -L bs4
+curl https://books.toscrape.com/ | ssc-gen run examples/booksToScrape.kdl:MainCatalogue -L bs4
 ```
+
+`ssc-gen run` executes generated Python in-process. Run only trusted schema files.
 
 ### Health check (verify selectors match elements)
 

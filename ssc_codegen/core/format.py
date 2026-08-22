@@ -41,6 +41,7 @@ def format_diagnostic(
     context_lines: int = 1,
 ) -> str:
     """Format a single diagnostic as a human-readable Rust-style string."""
+    filepath = _diagnostic_filepath(d, filepath)
     src = _resolve_src(src, filepath)
     renderer = _Renderer(use_color=_resolve_color(use_color))
     return renderer.render(
@@ -66,12 +67,14 @@ def format_diagnostics(
             [diagnostic_to_dict(d) for d in diagnostics], indent=2
         )
 
-    src = _resolve_src(src, filepath)
     renderer = _Renderer(use_color=_resolve_color(use_color))
 
     sections = [
         renderer.render(
-            d, src=src, filepath=filepath, context_lines=context_lines
+            d,
+            src=_resolve_src(src, _diagnostic_filepath(d, filepath)),
+            filepath=_diagnostic_filepath(d, filepath),
+            context_lines=context_lines,
         )
         for d in diagnostics
     ]
@@ -95,6 +98,19 @@ def diagnostic_to_dict(d: ReadDiagnostic) -> dict[str, Any]:
             "end": {"offset": e.offset, "line": e.line, "column": e.column},
         },
     }
+
+
+def _diagnostic_filepath(
+    diagnostic: ReadDiagnostic, fallback: str | Path | None
+) -> str | Path | None:
+    if diagnostic.path:
+        try:
+            path = Path(diagnostic.path)
+            if path.is_file():
+                return path
+        except OSError:
+            pass
+    return fallback
 
 
 # ── Renderer ──────────────────────────────────────────────────────────────────
@@ -271,7 +287,7 @@ class _Renderer:
         parts: list[str] = []
         eq = self._styled("=", color=self._dim)
 
-        if d.path:
+        if d.path and _diagnostic_filepath(d, None) is None:
             scope = self._styled("scope:", color=self._cyan, bold=True)
             parts.append(f"{pad} {eq} {scope} {d.path}")
 
@@ -280,8 +296,16 @@ class _Renderer:
             parts.append(f"{pad} {eq} {help_} {d.hint}")
 
         for note in d.notes:
-            note_label = self._styled("note:", color=self._magenta, bold=True)
-            parts.append(f"{pad} {eq} {note_label} {note}")
+            if note.startswith("scope: "):
+                scope_label = self._styled(
+                    "scope:", color=self._cyan, bold=True
+                )
+                parts.append(f"{pad} {eq} {scope_label} {note[7:]}")
+            else:
+                note_label = self._styled(
+                    "note:", color=self._magenta, bold=True
+                )
+                parts.append(f"{pad} {eq} {note_label} {note}")
 
         return parts
 

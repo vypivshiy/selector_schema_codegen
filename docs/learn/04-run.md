@@ -8,7 +8,7 @@
 ## Пример с файлом
 
 ```bash
-ssc-gen run examples/booksToScrape.kdl:MainCatalogue -l python -L bs4 -i page.html
+ssc-gen run examples/booksToScrape.kdl:MainCatalogue -L bs4 -i page.html
 ```
 
 Где:
@@ -20,5 +20,8 @@ ssc-gen run examples/booksToScrape.kdl:MainCatalogue -l python -L bs4 -i page.ht
 ```bash
 curl "https://books.toscrape.com" | ssc-gen run examples/booksToScrape.kdl:MainCatalogue
 ```
+
+> `ssc-gen run` выполняет сгенерированный Python-код внутри текущего процесса.
+> Запускайте только доверенные `.kdl`-схемы.
 
 Это удобно для быстрого теста схемы без сохранения HTML.

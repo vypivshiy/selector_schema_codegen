@@ -21,6 +21,7 @@ import pytest
 
 from kdlquery import Severity
 from ssc_codegen.core import parse_module
+from ssc_codegen.exceptions import BuildTimeError
 from ssc_codegen.targets.golang import GO_CONVERTER
 
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -205,3 +206,19 @@ def test_runtime_gofmt_clean(go_module):
     assert not fmt.stdout.strip(), (
         f"gofmt would reformat runtime:\n{fmt.stdout}"
     )
+
+
+def test_gofmt_failure_is_not_silenced(monkeypatch):
+    from ssc_codegen.targets.golang import visitor
+
+    monkeypatch.setattr(visitor.shutil, "which", lambda _: "gofmt")
+    monkeypatch.setattr(
+        visitor.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args=["gofmt"], returncode=2, stdout=b"", stderr=b"syntax error"
+        ),
+    )
+
+    with pytest.raises(BuildTimeError, match="syntax error"):
+        visitor._gofmt("package main\ninvalid")

@@ -221,7 +221,7 @@ Flat module that assembles the separate runtime file emitted by `-R` /
 ```
 TargetSpec (raw user input)
     → resolve(spec) → TargetProfile (validated capabilities + factory)
-        → profile.create_converter() → PythonVisitor | JsVisitor
+        → profile.create_converter() → PythonVisitor | JsVisitor | GoVisitor
 ```
 
 | Component | File | Role |
@@ -233,7 +233,7 @@ TargetSpec (raw user input)
 ## RequestHttp pipeline (request_spec.py + ast/struct.py)
 
 `parse_to_http(raw_payload) → RequestHttp` — parses curl/raw HTTP into the
-`RequestHttp` AST node. String fields (url, headers, cookies, params, body) are
+`RequestHttp` AST node. String fields (url, headers, cookies, params, payload) are
 `Template` instances: tokenized into `list[str | PlaceholderSpec]` parts at parse
 time via `Template.parse`. Placeholder identity is structural (PlaceholderSpec
 inline in parts), not text-embedded.
@@ -242,6 +242,11 @@ inline in parts), not text-embedded.
 copy with placeholder names passed through a target-language transform
 (`to_snake_case` for Python, `to_camel_case` for JS). Walks structured parts,
 replacing `PlaceholderSpec.name` — **no string rewriting, no regex**.
+
+`RequestHttp.payload` stores request content. `Node.body` is not overridden and
+remains the AST-child list. JSON payloads use `parse_json_template()` so Python
+emits native dict/list values, JavaScript uses `JSON.stringify`, and Go uses
+`encoding/json` via `stdJSONBody`.
 
 Renderers walk `Template.parts` instead of regex-parsing strings:
 - Python: `rest.render_value(Template)`, `rest.render_dict`, `rest.emit_dict_builder`, `rest.render_json_body`, `rest.render_body` in `targets/python/rest.py`
@@ -275,6 +280,7 @@ codegen. Visitors delegate to these via thin `visit_*` wrappers.
 |------|---------------|
 | `targets/python/rest.py` | `render_value`, `render_dict`, `emit_dict_builder`, `render_json_body`, `render_body`, `placeholder_params`, `emit_method_rest`, `emit_method_fetch`, `emit_result_variant_def`, `emit_result_alias_def`, `emit_matcher_list_def`, `runtime_export_names` |
 | `targets/javascript/rest.py` | `render_value`, `render_obj`, `emit_obj_builder`, `emit_params_builder`, `render_json_body`, `render_body`, `emit_method_rest`, `emit_method_fetch`, `emit_result_variant_def`, `emit_result_alias_def`, `emit_matcher_list_def`, `REST_SHARED` |
+| `targets/golang/rest.py` | `render_url`, `render_url_values`, `render_body_json`, `emit_method_rest`, `emit_method_fetch`, `emit_result_variant_def`, `emit_matcher_list_def` |
 
 All `emit_*` functions accept `(node, ctx, http)` where `http` is the
 backend's `HttpLibStrategy`. Result artifact functions (`emit_result_*`,
@@ -285,7 +291,7 @@ backend's `HttpLibStrategy`. Result artifact functions (`emit_result_*`,
 ## Transport layer (@request) — codegen behavior
 
 Optional struct-level directive that embeds a raw HTTP request or POSIX curl command.
-Parsed at codegen time via `request_spec.py:parse_to_http` into a `RequestHttp` AST node.
+Parsed during AST construction via `request_spec.py:parse_to_http` into a `RequestHttp` AST node.
 
 Two visitor nodes:
 - `MethodFetch` — for HTML-parser structs: emits `fetch()` / `async_fetch()` classmethods
@@ -370,12 +376,8 @@ helper even into REST-only modules.
 
 ### Known follow-ups (out of scope)
 
-- `convert_batch` (`visitor.py`) does not propagate `runtime_module` /
-  `http_client` meta between modules in batch mode. Unused by `main.py`
-  (which calls `converter.convert(ast)` per file).
 - `_imports` and `_std_imports` pools in `ModuleBuilder` are separate
   dicts without cross-dedup. Pre-existing duplicates (`import re` may
   appear in both sections of the output). Legal Python, cosmetic only.
-- std helpers (`std_repl_map`, `std_unescape_text`) are inlined into
-  every parser file under `-R` (N copies for N files). Could be moved
-  to the runtime file — separate refactor.
+- Go visitor intentionally accumulates runtime helpers across sequential
+  `convert()` calls before `emit_runtime()`. Converters remain single-threaded.

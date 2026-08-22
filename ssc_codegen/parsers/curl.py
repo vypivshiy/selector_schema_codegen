@@ -59,6 +59,7 @@ def parse_curl_command(
     parts = parts[1:]
 
     method = "GET"
+    method_explicit = False
     url = None
     headers = {}
     data = None
@@ -66,6 +67,7 @@ def parse_curl_command(
     auth = None
     params: Dict[str, Any] = {}
     form_data: Dict[str, str] = {}
+    urlencoded_data: Dict[str, str] = {}
 
     # Convert ignored_flags to set for fast lookup
     ignored_flags_set = set(ignored_flags)
@@ -78,6 +80,7 @@ def parse_curl_command(
             if i >= len(parts):
                 raise ValueError("Missing method after -X/--request")
             method = parts[i].upper()
+            method_explicit = True
             if method not in (
                 "GET",
                 "POST",
@@ -106,10 +109,7 @@ def parse_curl_command(
             i += 1
             if i >= len(parts):
                 raise ValueError("Missing JSON data after --json")
-            try:
-                json_data = json.loads(parts[i])
-            except json.JSONDecodeError as e:
-                raise ValueError(f"Invalid JSON in --json: {e}")
+            json_data = parts[i]
         elif part in ("-u", "--user"):
             i += 1
             if i >= len(parts):
@@ -131,7 +131,7 @@ def parse_curl_command(
             param_part = parts[i]
             if "=" in param_part:
                 key, value = param_part.split("=", 1)
-                params[key] = value
+                urlencoded_data[key] = value
             else:
                 raise ValueError(
                     "Invalid --data-urlencode format, expected key=value"
@@ -153,11 +153,19 @@ def parse_curl_command(
     if url is None:
         raise ValueError("No URL found in curl command")
 
+    if not method_explicit and (
+        data is not None
+        or json_data is not None
+        or form_data
+        or urlencoded_data
+    ):
+        method = "POST"
+
     # Parse query params from URL
     params.update(parse_query_params(url))
 
     # If data looks like JSON and no --json was specified, try to parse as JSON
-    if data and not json_data:
+    if data and json_data is None:
         try:
             json_data = json.loads(data)
             data = None
@@ -174,14 +182,17 @@ def parse_curl_command(
         kwargs["headers"] = headers
 
     # Parse cookies from headers if present
-    if "Cookie" in headers:
-        kwargs["cookies"] = parse_cookies(headers["Cookie"])
-        del headers["Cookie"]
+    cookie_key = next((k for k in headers if k.lower() == "cookie"), None)
+    if cookie_key is not None:
+        kwargs["cookies"] = parse_cookies(headers[cookie_key])
+        del headers[cookie_key]
         if not headers and "headers" in kwargs:
             del kwargs["headers"]
 
     if form_data:
         kwargs["data"] = form_data
+    elif urlencoded_data:
+        kwargs["data"] = urlencoded_data
     elif json_data is not None:
         kwargs["json"] = json_data
     elif data:

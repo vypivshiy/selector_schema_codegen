@@ -165,7 +165,16 @@ def parse_struct(
             raw_payload = str(
                 ctx.property_defines.get(node.args[0].value, node.args[0].value)
             )
-            http = parse_to_http(raw_payload)
+            try:
+                http = parse_to_http(raw_payload)
+            except ValueError as exc:
+                lint.error(
+                    node,
+                    message=str(exc),
+                    code="E002",
+                    hint="use a curl command or raw HTTP request",
+                )
+                continue
             method_name = node.get_prop("name") or ""
             response_path_val = node.get_prop("response-path") or ""
             response_join_val = node.get_prop("response-join") or ""

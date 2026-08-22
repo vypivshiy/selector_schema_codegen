@@ -19,6 +19,7 @@ from ssc_codegen.core.module_handler import (
     handle_function,
     handle_json,
     handle_struct,
+    register_node_sources,
     resolve_imports,
 )
 
@@ -45,18 +46,32 @@ def parse_module(
         ]
 
     ctx = ParseContext(source_path=source_path)
-    lint = LintContext()
+    lint = LintContext(node_source_paths=ctx.node_source_paths)
     top_nodes = list(doc.nodes)
+    if source_path is not None:
+        register_node_sources(top_nodes, source_path, ctx)
     diagnostics: list[ReadDiagnostic] = []
 
     # pass 1 — resolve imports (returns flat list with imported nodes)
     top_nodes = resolve_imports(top_nodes, source_path, ctx, lint, diagnostics)
 
     # pass 2 — structural linting on KdlDocument (current file only)
-    diagnostics.extend(lint_module(doc, str(source_path or "")))
+    root_diagnostics = lint_module(doc, str(source_path or ""))
+    diagnostics.extend(root_diagnostics)
 
     # pass 3 — cross-ref validation on merged flat list
-    diagnostics.extend(lint_cross_refs(top_nodes, str(source_path or "")))
+    diagnostics.extend(
+        lint_cross_refs(
+            top_nodes,
+            str(source_path or ""),
+            node_source_paths=ctx.node_source_paths,
+        )
+    )
+
+    if any(d.severity == Severity.ERROR for d in diagnostics):
+        module = Module()
+        module.source_file = source_path.name if source_path else ""
+        return module, diagnostics
 
     try:
         # pass 4 — collect defines
@@ -74,7 +89,14 @@ def parse_module(
         for node in top_nodes:
             lint.push(node.name)
             if node.name == "@doc":
-                module.doc = str(node.args[0].value)
+                if node.args:
+                    module.doc = str(node.args[0].value)
+                else:
+                    lint.error(
+                        node,
+                        message="'@doc' requires a description string",
+                        code="E001",
+                    )
             elif node.name == "json":
                 handle_json(node, module, ctx, lint)
             elif node.name == "struct":
@@ -109,12 +131,24 @@ def parse_module(
     except (ParseError, BuildTimeError) as exc:
         pos = Position(offset=0, line=0, column=0)
         span = Span(start=pos, end=pos)
-        return Module(), [
-            ReadDiagnostic(
-                message=str(exc),
-                severity=Severity.ERROR,
-                span=span,
-                path=str(source_path) if source_path else "",
-                code="E000",
-            )
-        ]
+        diagnostic = ReadDiagnostic(
+            message=str(exc),
+            severity=Severity.ERROR,
+            span=span,
+            path=str(source_path) if source_path else "",
+            code="E000",
+        )
+        return Module(), [*diagnostics, diagnostic]
+    except (IndexError, KeyError, TypeError, ValueError) as exc:
+        diagnostics.extend(lint.diagnostics)
+        if any(d.severity == Severity.ERROR for d in lint.diagnostics):
+            return Module(), diagnostics
+        pos = Position(offset=0, line=0, column=0)
+        diagnostic = ReadDiagnostic(
+            message=str(exc),
+            severity=Severity.ERROR,
+            span=Span(start=pos, end=pos),
+            path=str(source_path) if source_path else "",
+            code="E000",
+        )
+        return Module(), [*diagnostics, diagnostic]

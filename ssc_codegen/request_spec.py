@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 import re
 import shlex
+from base64 import b64encode
+from typing import Any
 from urllib.parse import urlparse, unquote_plus, urlunparse
 
 from ssc_codegen.ast.struct import (
@@ -26,6 +28,13 @@ from ssc_codegen.parsers.http import parse_http_request
 def _tmpl_dict(d: dict) -> dict[str, PlaceholderTemplate]:
     """Wrap every dict value in a Template."""
     return {k: PlaceholderTemplate.parse(str(v)) for k, v in d.items()}
+
+
+def _header_value(headers: dict, name: str) -> str:
+    for key, value in headers.items():
+        if key.lower() == name.lower():
+            return str(value)
+    return ""
 
 
 # ── Parser → RequestHttp ──────────────────────────────────────────────────────
@@ -77,11 +86,22 @@ def parse_to_http(payload: str) -> RequestHttp:
         params = raw_params
     headers: dict = kwargs.get("headers", {})
     cookies: dict = kwargs.get("cookies", {})
+    auth = kwargs.get("auth")
+    if auth:
+        user, password = auth
+        if PlaceholderSpec.search(user) or PlaceholderSpec.search(password):
+            raise ValueError(
+                "placeholders in curl -u/--user are not supported; "
+                "use an Authorization header"
+            )
+        token = b64encode(f"{user}:{password}".encode()).decode()
+        if not _header_value(headers, "Authorization"):
+            headers["Authorization"] = f"Basic {token}"
 
     # ── body ─────────────────────────────────────────────────────────────────
     body_kind = "empty"
     body: PlaceholderTemplate | dict[str, PlaceholderTemplate] | None = None
-    content_type = headers.get("Content-Type", "").lower()
+    content_type = _header_value(headers, "Content-Type").lower()
 
     if "json" in kwargs or (
         "data" in kwargs and "application/json" in content_type
@@ -89,7 +109,8 @@ def parse_to_http(payload: str) -> RequestHttp:
         body_kind = "json"
         raw_body = _extract_raw_body(payload, fmt)
         validate_json_body(raw_body)
-        body = PlaceholderTemplate.parse(raw_body)  # rendered as f-string
+        body = PlaceholderTemplate.parse(raw_body)
+        parse_json_template(body)
 
     elif "data" in kwargs:
         raw_body = _extract_raw_body(payload, fmt)
@@ -110,7 +131,7 @@ def parse_to_http(payload: str) -> RequestHttp:
         cookies=_tmpl_dict(cookies),
         params=_tmpl_dict(params),
         body_kind=body_kind,
-        body=body,
+        payload=body,
     )
 
 
@@ -188,3 +209,63 @@ def validate_json_body(raw: str) -> None:
             f"{exc.msg}\n"
             f"  body: {raw!r}"
         ) from exc
+
+
+def parse_json_template(tmpl: PlaceholderTemplate) -> Any:
+    """Parse JSON while preserving placeholders as structured values."""
+    if not tmpl.has_placeholders:
+        return json.loads(tmpl.source)
+
+    sentinels: dict[str, PlaceholderSpec] = {}
+    out: list[str] = []
+    in_string = False
+    for part in tmpl.parts:
+        if isinstance(part, PlaceholderSpec):
+            key = f"__SSC_PH_{len(sentinels)}__"
+            while key in tmpl.source:
+                key = "_" + key
+            sentinels[key] = part
+            out.append(key if in_string else json.dumps(key))
+            continue
+        i = 0
+        while i < len(part):
+            ch = part[i]
+            if ch == "\\" and i + 1 < len(part):
+                out.append(part[i : i + 2])
+                i += 2
+                continue
+            if ch == '"':
+                in_string = not in_string
+            out.append(ch)
+            i += 1
+
+    parsed = json.loads("".join(out))
+    sentinel_re = re.compile("|".join(re.escape(key) for key in sentinels))
+
+    def restore(value: Any) -> Any:
+        if isinstance(value, str):
+            if value in sentinels:
+                return sentinels[value]
+            if not sentinel_re.search(value):
+                return value
+            parts: list[str | PlaceholderSpec] = []
+            pos = 0
+            for match in sentinel_re.finditer(value):
+                if match.start() > pos:
+                    parts.append(value[pos : match.start()])
+                parts.append(sentinels[match.group(0)])
+                pos = match.end()
+            if pos < len(value):
+                parts.append(value[pos:])
+            return PlaceholderTemplate(parts=parts)
+        if isinstance(value, list):
+            return [restore(item) for item in value]
+        if isinstance(value, dict):
+            if any(sentinel_re.search(str(key)) for key in value):
+                raise ValueError(
+                    "placeholders in JSON object keys are not supported"
+                )
+            return {key: restore(item) for key, item in value.items()}
+        return value
+
+    return restore(parsed)

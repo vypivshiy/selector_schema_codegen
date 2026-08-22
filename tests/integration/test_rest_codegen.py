@@ -833,9 +833,6 @@ class TestPerCallKwargs:
     def test_kwargs_forwarded_to_fetch_codegen(self):
         """HTML struct @request fetch also accepts **kwargs."""
         src = (
-            'struct Page """\n'
-            'title { css "h1"; text }\n'
-            '"""\n'
             "struct Page type=item {\n"
             '    title { css "h1"; text }\n'
             '    @request """\n'

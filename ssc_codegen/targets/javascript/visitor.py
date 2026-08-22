@@ -182,7 +182,8 @@ def _logic_prefix(op: str, ctx: WalkContext) -> str:
 def _js_docblock(lines: list[str]) -> list[str]:
     if not lines:
         return []
-    return ["/**", *(f" * {line}" if line else " *" for line in lines), " */"]
+    safe = [line.replace("*/", "*\\/") for line in lines]
+    return ["/**", *(f" * {line}" if line else " *" for line in safe), " */"]
 
 
 def _pred_target(node, ctx: WalkContext) -> str:

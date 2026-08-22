@@ -3,6 +3,13 @@ from typing import Dict, Any
 from urllib.parse import urlparse, parse_qs
 
 
+def _find_header(headers: dict[str, str], name: str) -> tuple[str, str] | None:
+    for key, value in headers.items():
+        if key.lower() == name.lower():
+            return key, value
+    return None
+
+
 def parse_query_params(url: str) -> Dict[str, Any]:
     """Parse query parameters from URL into a dict."""
     parsed = urlparse(url)
@@ -99,7 +106,8 @@ def parse_http_request(raw_http: str) -> Dict[str, Any]:
     body = "\n".join(lines[i:]) if i < len(lines) else ""
 
     # Construct URL
-    host = headers.get("Host")
+    host_entry = _find_header(headers, "Host")
+    host = host_entry[1] if host_entry else None
     if host:
         url = f"https://{host}{path}"
     else:
@@ -112,7 +120,8 @@ def parse_http_request(raw_http: str) -> Dict[str, Any]:
     json_data: Any = None
     data: dict[str, Any] | str | None = None
     if body:
-        content_type_full = headers.get("Content-Type", "")
+        content_type_entry = _find_header(headers, "Content-Type")
+        content_type_full = content_type_entry[1] if content_type_entry else ""
         content_type = content_type_full.lower()
         if "multipart/form-data" in content_type:
             # Extract boundary
@@ -141,12 +150,14 @@ def parse_http_request(raw_http: str) -> Dict[str, Any]:
 
     # Parse cookies
     cookies = None
-    if "Cookie" in headers:
-        cookies = parse_cookies(headers["Cookie"])
-        del headers["Cookie"]
+    cookie_entry = _find_header(headers, "Cookie")
+    if cookie_entry:
+        cookies = parse_cookies(cookie_entry[1])
+        del headers[cookie_entry[0]]
 
     # Host is auto-set by HTTP libraries from the URL
-    headers.pop("Host", None)
+    if host_entry:
+        headers.pop(host_entry[0], None)
 
     # Build kwargs
     kwargs: Dict[str, Any] = {

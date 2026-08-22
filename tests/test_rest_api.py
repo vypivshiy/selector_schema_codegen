@@ -8,6 +8,7 @@ Covers:
 from __future__ import annotations
 
 import ast as pyast
+from base64 import b64encode
 
 import pytest
 
@@ -17,6 +18,7 @@ from ssc_codegen.ast import (
     StructRest,
 )
 from ssc_codegen.core import parse_module
+from ssc_codegen.request_spec import parse_to_http
 from kdlquery import Severity
 
 
@@ -125,6 +127,42 @@ class TestRestParser:
         module = _parse(_rest_src())
         struct = next(n for n in module.body if isinstance(n, StructRest))
         assert not any(isinstance(n, StartParse) for n in struct.body)
+
+    def test_curl_body_implies_post_and_keeps_json_placeholders(self):
+        request = parse_to_http(
+            "curl --json "
+            '\'{"name": "{{name}}", "active": {{active:bool}}}\' '
+            "https://example.com/users"
+        )
+
+        assert request.method == "POST"
+        assert request.body_kind == "json"
+        assert {p.name for p in request.placeholders} == {"name", "active"}
+
+    def test_curl_auth_and_data_urlencode_are_preserved(self):
+        request = parse_to_http(
+            "curl -u user:pass --data-urlencode 'query=hello world' "
+            "https://example.com/search"
+        )
+        token = b64encode(b"user:pass").decode()
+
+        assert request.method == "POST"
+        assert request.headers["Authorization"].source == f"Basic {token}"
+        assert request.body_kind == "form"
+        assert request.payload["query"].source == "hello world"
+
+    def test_raw_http_headers_are_case_insensitive(self):
+        request = parse_to_http(
+            "POST /users HTTP/1.1\n"
+            "host: api.example.com\n"
+            "content-type: application/json\n"
+            "cookie: session=abc\n\n"
+            '{"name": "Ada"}'
+        )
+
+        assert request.url.source == "https://api.example.com/users"
+        assert request.body_kind == "json"
+        assert request.cookies["session"].source == "abc"
 
     def test_error_required_keys_parsed(self):
         src = _rest_src(errors="    @error 404 Err error detail\n")
@@ -318,6 +356,49 @@ class TestRestPyConverter:
         # And no leftover f-string style
         assert 'json=f"' not in code
         assert "json=f'" not in code
+
+    def test_json_body_escaping_is_structured_in_js_and_go(self):
+        src = (
+            "json User { id int; name str }\n"
+            "struct API type=rest {\n"
+            '    @request name=create response=User """\n'
+            "    POST /users HTTP/1.1\n"
+            "    Host: x.com\n"
+            "    Content-Type: application/json\n\n"
+            '    {"name": "{{name}}", "active": {{active:bool}}}\n'
+            '    """\n'
+            "}\n"
+        )
+        module = _parse(src)
+
+        from ssc_codegen.targets.golang import GO_CONVERTER
+        from ssc_codegen.targets.javascript import JS_CONVERTER
+
+        js_code = JS_CONVERTER.convert(module, http_client="fetch")
+        go_code = GO_CONVERTER.convert(module)
+
+        assert 'JSON.stringify({"name": name, "active": active})' in js_code
+        assert "stdJSONBody(map[string]any{" in go_code
+        assert '{{\\"name\\"' not in go_code
+
+    def test_go_raw_body_does_not_require_json(self):
+        src = (
+            "struct Page {\n"
+            '    @request """\n'
+            "    POST /submit HTTP/1.1\n"
+            "    Host: x.com\n\n"
+            "    raw={{value}}\n"
+            '    """\n'
+            '    title { css "h1"; text }\n'
+            "}\n"
+        )
+        module = _parse(src)
+
+        from ssc_codegen.targets.golang import GO_CONVERTER
+
+        code = GO_CONVERTER.convert(module)
+
+        assert 'strings.NewReader(fmt.Sprintf("raw=%s", value))' in code
 
     def test_py_required_keys_dispatch(self):
         from ssc_codegen.targets.python import (
@@ -652,6 +733,11 @@ class TestTypedPlaceholdersJsCodegen:
 
     def test_urlsearchparams_repeat_via_append(self):
         code = self._gen("GET /u?tags={{tags:int[]?}} HTTP/1.1")
+        assert "for (const _v of tags)" in code
+        assert "_params.append('tags', String(_v))" in code
+
+    def test_required_repeat_array_also_uses_append(self):
+        code = self._gen("GET /u?tags={{tags:int[]}} HTTP/1.1")
         assert "for (const _v of tags)" in code
         assert "_params.append('tags', String(_v))" in code
 
@@ -1723,6 +1809,26 @@ class TestResponsePathCodegen:
         # Import for net/url is required.
         assert '"net/url"' in code
 
+    def test_go_array_query_styles(self):
+        from ssc_codegen.targets.golang import GO_CONVERTER
+
+        src = (
+            "json R { x int }\n"
+            "struct API type=rest {\n"
+            '    @request response=R """\n'
+            "    GET /items?tags={{tags:int[]}}&ids={{ids:int[]|csv}} HTTP/1.1\n"
+            "    Host: api.example.com\n"
+            '    """\n'
+            "}\n"
+        )
+
+        code = GO_CONVERTER.convert(_parse(src))
+
+        assert "for _, _value := range tags" in code
+        assert '_values.Add("tags", fmt.Sprint(_value))' in code
+        assert "for _i, _value := range ids" in code
+        assert 'strings.Join(_idsParts, ",")' in code
+
     def test_go_rest_cookies_rendered_via_sscReqOpts(self):
         """Go REST DSL cookies must reach the runtime via sscReqOpts.Cookies.
 
@@ -1745,6 +1851,28 @@ class TestResponsePathCodegen:
         code = GO_CONVERTER.convert(module)
         # Cookies emitted into sscReqOpts.
         assert 'Cookies: sscHeaders{"session": []string{"abc"}' in code
+
+    def test_go_error_matcher_combines_keys_conditions_and_float(self):
+        from ssc_codegen.targets.golang import GO_CONVERTER
+
+        src = _rest_src(
+            errors='    @error 404 Err error detail="msg" score=1.5\n'
+        )
+        code = GO_CONVERTER.convert(_parse(src))
+
+        assert 'gjson.GetBytes(_b, "error").Exists()' in code
+        assert 'gjson.GetBytes(_b, "detail").String() == "msg"' in code
+        assert 'gjson.GetBytes(_b, "score").Float() == 1.5' in code
+
+    def test_go_package_defaults_to_main_and_is_validated(self):
+        from ssc_codegen.exceptions import BuildTimeError
+        from ssc_codegen.targets.golang import GO_CONVERTER
+
+        module = _parse("(raw)fn value { trim }\n")
+
+        assert "package main" in GO_CONVERTER.convert(module)
+        with pytest.raises(BuildTimeError, match="invalid Go package"):
+            GO_CONVERTER.convert(module, package="bad-name")
 
     def test_go_html_fetch_params_and_cookies(self):
         """Go HTML @request with query params + cookies in the same struct.

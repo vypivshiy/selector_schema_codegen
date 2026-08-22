@@ -74,7 +74,7 @@ All nodes inherit from `Node` base class (has `body` attribute).
 - `MethodBase` → base for REST method nodes (holds `http_request: RequestHttp`)
 - `MethodFetch(name, response_path, response_join)` → HTML-parser fetch classmethod
 - `MethodRest(name, response_schema, doc)` → REST endpoint method
-- `RequestHttp(method, url, headers, cookies, params, body_kind, body)` → normalized HTTP config (child of MethodBase)
+- `RequestHttp(method, url, headers, cookies, params, body_kind, payload)` → normalized HTTP config (child of MethodBase); inherited `Node.body` remains reserved for AST children
 - `PlaceholderSpec(name, type_name, is_array, is_optional, style)` → parsed `{{...}}` token
 - `ErrorResponse(status, schema_name, conditions, required_keys)` → `@error` mapping inside `type=rest` struct
 

@@ -606,6 +606,9 @@ def _reg_expr(name: str):
 def _expr_css(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
+    if not node.children and not node.args:
+        lint.error(node, message="'css' requires a selector", code="E001")
+        return None
     if node.children:
         queries = [
             resolve_selector_child_name(c.name, ctx) for c in node.children
@@ -622,6 +625,9 @@ def _expr_css(
 def _expr_css_all(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
+    if not node.children and not node.args:
+        lint.error(node, message="'css-all' requires a selector", code="E001")
+        return None
     if node.children:
         queries = [
             resolve_selector_child_name(c.name, ctx) for c in node.children
@@ -638,6 +644,9 @@ def _expr_css_all(
 def _expr_xpath(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
+    if not node.children and not node.args:
+        lint.error(node, message="'xpath' requires an expression", code="E001")
+        return None
     if node.children:
         queries = [
             resolve_selector_child_name(c.name, ctx) for c in node.children
@@ -654,6 +663,11 @@ def _expr_xpath(
 def _expr_xpath_all(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
+    if not node.children and not node.args:
+        lint.error(
+            node, message="'xpath-all' requires an expression", code="E001"
+        )
+        return None
     if node.children:
         queries = [
             resolve_selector_child_name(c.name, ctx) for c in node.children

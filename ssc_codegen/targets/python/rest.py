@@ -7,8 +7,6 @@ Called by PythonVisitor via thin delegate methods.  The HTTP library strategy
 
 from __future__ import annotations
 
-import json
-import re
 from typing import cast
 
 from ssc_codegen.ast import (
@@ -24,7 +22,7 @@ from ssc_codegen.ast import (
 )
 from ssc_codegen.ast.struct import RequestHttp
 from ssc_codegen.naming import to_pascal_case, to_snake_case
-from ssc_codegen.request_spec import validate_json_body
+from ssc_codegen.request_spec import parse_json_template
 from ssc_codegen.targets.python.http_libs.base import HttpLibStrategy
 from ssc_codegen.traversal.context import WalkContext
 from ssc_codegen.traversal.utils import (
@@ -94,33 +92,11 @@ def emit_dict_builder(
 
 
 def render_json_body(tmpl: PlaceholderTemplate) -> str:
-    validate_json_body(tmpl.source)
-    sentinels: dict[str, str] = {}
-    out: list[str] = []
-    in_string = False
-    for part in tmpl.parts:
-        if isinstance(part, PlaceholderSpec):
-            key = f"__SSC_PH_{len(sentinels)}__"
-            sentinels[key] = part.name
-            out.append(key if in_string else '"' + key + '"')
-        else:
-            i = 0
-            n = len(part)
-            while i < n:
-                ch = part[i]
-                if ch == "\\" and i + 1 < n:
-                    out.append(part[i : i + 2])
-                    i += 2
-                    continue
-                if ch == '"':
-                    in_string = not in_string
-                out.append(ch)
-                i += 1
-    substituted = "".join(out)
-    parsed = json.loads(substituted)
-    sentinel_re = re.compile(r"__SSC_PH_\d+__")
-
     def _emit(v: object) -> str:
+        if isinstance(v, PlaceholderSpec):
+            return v.name
+        if isinstance(v, PlaceholderTemplate):
+            return render_value(v)
         if v is None:
             return "None"
         if isinstance(v, bool):
@@ -128,17 +104,6 @@ def render_json_body(tmpl: PlaceholderTemplate) -> str:
         if isinstance(v, (int, float)):
             return repr(v)
         if isinstance(v, str):
-            if v in sentinels:
-                return sentinels[v]
-            if sentinel_re.search(v):
-
-                def _fmt(m: re.Match) -> str:
-                    return "{" + sentinels[m.group(0)] + "}"
-
-                escaped = v.replace("\\", "\\\\").replace("'", "\\'")
-                escaped = escaped.replace("{", "{{").replace("}", "}}")
-                body = sentinel_re.sub(_fmt, escaped)
-                return "f'" + body + "'"
             return repr(v)
         if isinstance(v, dict):
             items = ", ".join(f"{k!r}: {_emit(val)}" for k, val in v.items())
@@ -148,20 +113,20 @@ def render_json_body(tmpl: PlaceholderTemplate) -> str:
             return "[" + items + "]"
         raise TypeError(f"unsupported JSON body element: {type(v).__name__}")
 
-    return _emit(parsed)
+    return _emit(parse_json_template(tmpl))
 
 
 def render_body(spec: RequestHttp) -> tuple[str, str] | None:
-    if spec.body_kind == "empty" or spec.body is None:
+    if spec.body_kind == "empty" or spec.payload is None:
         return None
     if spec.body_kind == "json":
-        assert isinstance(spec.body, PlaceholderTemplate)
-        return ("json", render_json_body(spec.body))
+        assert isinstance(spec.payload, PlaceholderTemplate)
+        return ("json", render_json_body(spec.payload))
     if spec.body_kind == "form":
-        assert isinstance(spec.body, dict)
-        return ("data", render_dict(spec.body))
-    assert isinstance(spec.body, PlaceholderTemplate)
-    return ("data", render_value(spec.body))
+        assert isinstance(spec.payload, dict)
+        return ("data", render_dict(spec.payload))
+    assert isinstance(spec.payload, PlaceholderTemplate)
+    return ("data", render_value(spec.payload))
 
 
 # ===========================================================================
@@ -442,7 +407,7 @@ def emit_method_rest(
     i2 = i1 + ctx.indent_char
     i3 = i2 + ctx.indent_char
 
-    doc_line = f'{i2}"""{node.doc}"""' if node.doc else None
+    doc_line = f"{i2}{node.doc!r}" if node.doc else None
 
     pre_lines, kw_lines = _build_kw_dict(spec, i2, i3)
 

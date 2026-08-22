@@ -1,5 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
+from typing import cast
 
 from .base import Node
 from .types import StructType
@@ -29,4 +30,4 @@ class TypeDef(Node):
 
     @property
     def fields(self) -> list[TypeDefField]:
-        return self.body
+        return cast(list[TypeDefField], self.body)

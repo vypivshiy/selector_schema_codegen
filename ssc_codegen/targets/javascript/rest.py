@@ -22,6 +22,7 @@ from ssc_codegen.ast import (
 )
 from ssc_codegen.ast.struct import RequestHttp
 from ssc_codegen.naming import to_camel_case, to_pascal_case, to_snake_case
+from ssc_codegen.request_spec import parse_json_template
 from ssc_codegen.targets.javascript.http_libs.base import JsHttpLibStrategy
 from ssc_codegen.traversal.context import WalkContext
 from ssc_codegen.traversal.utils import dict_needs_builder, err_subclass_name
@@ -178,25 +179,57 @@ def emit_params_builder(
     return lines
 
 
+def _params_need_builder(d: dict[str, PlaceholderTemplate]) -> bool:
+    for tmpl in d.values():
+        ph = tmpl.single_placeholder()
+        if ph is not None and (
+            ph.is_optional
+            or (ph.is_array and ph.style in (None, "repeat", "bracket"))
+        ):
+            return True
+    return False
+
+
 def render_json_body(tmpl: PlaceholderTemplate) -> str:
-    inner = tmpl.map(
-        lambda ph: "${" + ph.name + "}",
-        lambda s: s.replace("\\", "\\\\").replace("`", "\\`"),
-    )
-    return f"`{inner}`"
+    def emit(value: object) -> str:
+        if isinstance(value, PlaceholderSpec):
+            return value.name
+        if isinstance(value, PlaceholderTemplate):
+            return render_value(value)
+        if value is None:
+            return "null"
+        if isinstance(value, bool):
+            return str(value).lower()
+        if isinstance(value, (int, float)):
+            return repr(value)
+        if isinstance(value, str):
+            return json.dumps(value)
+        if isinstance(value, list):
+            return "[" + ", ".join(emit(item) for item in value) + "]"
+        if isinstance(value, dict):
+            items = ", ".join(
+                f"{json.dumps(str(key))}: {emit(item)}"
+                for key, item in value.items()
+            )
+            return "{" + items + "}"
+        raise TypeError(
+            f"unsupported JSON body element: {type(value).__name__}"
+        )
+
+    return f"JSON.stringify({emit(parse_json_template(tmpl))})"
 
 
 def render_body(spec: RequestHttp) -> tuple[str, str] | None:
-    if spec.body_kind == "empty" or spec.body is None:
+    if spec.body_kind == "empty" or spec.payload is None:
         return None
     if spec.body_kind == "json":
-        assert isinstance(spec.body, PlaceholderTemplate)
-        return ("body", render_json_body(spec.body))
+        assert isinstance(spec.payload, PlaceholderTemplate)
+        return ("body", render_json_body(spec.payload))
     if spec.body_kind == "form":
-        assert isinstance(spec.body, dict)
-        return ("body", f"new URLSearchParams({render_obj(spec.body)})")
-    assert isinstance(spec.body, PlaceholderTemplate)
-    return ("body", render_value(spec.body))
+        assert isinstance(spec.payload, dict)
+        return ("body", f"new URLSearchParams({render_obj(spec.payload)})")
+    assert isinstance(spec.payload, PlaceholderTemplate)
+    return ("body", render_value(spec.payload))
 
 
 # ===========================================================================
@@ -271,7 +304,7 @@ def _prepare_request(
     pre_lines: list[str] = []
     params_expr = None
     if spec.params:
-        if dict_needs_builder(spec.params):
+        if _params_need_builder(spec.params):
             pre_lines.extend(emit_params_builder("_params", spec.params, i3))
             params_expr = "_params"
         else:
@@ -381,7 +414,8 @@ def emit_method_rest(
     if node.doc:
         lines.append(f"{i1}/**")
         for doc_line in node.doc.splitlines():
-            lines.append(f"{i1} * {doc_line}")
+            safe_doc_line = doc_line.replace("*/", "*\\/")
+            lines.append(f"{i1} * {safe_doc_line}")
         lines.append(f"{i1} */")
     lines.append(f"{i1}/**")
     for p in sorted(spec.placeholders, key=lambda p: p.is_optional):
