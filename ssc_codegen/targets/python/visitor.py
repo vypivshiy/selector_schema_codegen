@@ -362,11 +362,9 @@ class PythonVisitor(BaseWalker):
         if has_html:
             for line in self._dom.parser_imports:
                 self._builder.require_import(line)
+        self._builder.require_import("import sys")
         self._builder.require_import(
             "from typing import Any, Dict, List, Optional, TypedDict, Union"
-        )
-        self._builder.require_import(
-            "from typing_extensions import NotRequired"
         )
         self._builder.require_import("import re")
         self._builder.require_import("import json")
@@ -396,6 +394,12 @@ class PythonVisitor(BaseWalker):
             # when the module is HTML-only with a single fetch shortcut and
             # even under -R (signature lives in the parser file).
             self._builder.require_import(self._http.import_line)
+        self._builder.require_import("if sys.version_info >= (3, 11):")
+        self._builder.require_import("    from typing import NotRequired")
+        self._builder.require_import("else:")
+        self._builder.require_import(
+            "    from typing_extensions import NotRequired"
+        )
         return lines
 
     def visit_utilities(self, node: Utilities, ctx: WalkContext) -> list[str]:

@@ -321,7 +321,7 @@ and the method signatures (`client: httpx.Client`). Concretely:
 | Import surface | Under `-R` | Without `-R` | Reason |
 |----------------|------------|--------------|--------|
 | `from typing import Any, Dict, List, Optional, TypedDict, Union` | always | always | TypedDict schema declarations |
-| `from typing_extensions import NotRequired` | always | always | Optional JSON fields |
+| `NotRequired` compatibility import (`typing` on 3.11+, `typing_extensions` on 3.9-3.10) | always | always | Optional JSON fields |
 | `import re`, `import json` | always | always | Regex/jsonify ops |
 | `from typing import Literal` | always | always | Err subclass `status: Literal[<code>]` |
 | `from dataclasses import dataclass` | always | always | `@dataclass` on Err subclasses |

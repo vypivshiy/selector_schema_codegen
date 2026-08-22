@@ -809,6 +809,27 @@ def _get_all_converters():
     }
 
 
+_NOT_REQUIRED_COMPAT_IMPORT = "\n".join(
+    (
+        "if sys.version_info >= (3, 11):",
+        "    from typing import NotRequired",
+        "else:",
+        "    from typing_extensions import NotRequired",
+    )
+)
+
+
+@pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
+def test_not_required_import_is_version_dependent(converter_attr):
+    converter = _get_all_converters()[converter_attr]
+    module = _parse(_rest_src())
+
+    code = converter.convert(module, http_client="httpx")
+
+    assert "import sys" in code
+    assert _NOT_REQUIRED_COMPAT_IMPORT in code
+
+
 class TestSeparateRuntime:
     """Verify -R (separate runtime) works correctly for all Python targets."""
 
@@ -938,6 +959,7 @@ class TestSeparateRuntime:
         code = generated[""]
         assert "from typing import" in code
         assert "TypedDict" in code
+        assert _NOT_REQUIRED_COMPAT_IMPORT in code
         assert "from dataclasses import dataclass" in code
         assert "from typing import Literal" in code
         assert "import httpx" in code
