@@ -1,0 +1,93 @@
+@doc """
+demo extension code with custom usercode inserts
+"""
+
+extension Utils {
+    // single line insert
+    to-base64 {
+        sig str str
+
+        py {
+            import "from base64 import b64encode"
+            emit #"{{out}} = b64encode({{in}}.encode("utf-8")).decode("ascii")"#
+        }
+
+        js {
+            emit #"const {{out}} = btoa({{in}});"#
+        }
+
+        go {
+            import "encoding/base64"
+            emit #"{{out}} := base64.StdEncoding.EncodeToString([]byte({{in}}))"#
+        }
+    }
+    // helper function insert
+    to-rot13 {
+        sig str str
+
+        py {
+            helper rot13 {
+                source #"""
+                    def rot13(value: str) -> str:
+                        table = str.maketrans(
+                            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+                            "NOPQRSTUVWXYZABCDEFGHIJKLMnopqrstuvwxyzabcdefghijklm",
+                        )
+                        return value.translate(table)
+                    """#
+            }
+            emit #"{{out}} = rot13({{in}})"#
+        }
+
+        js {
+            helper rot13 {
+                source #"""
+                    function rot13(value) {
+                        return value.replace(/[A-Za-z]/g, (c) => {
+                            const base = c <= "Z" ? 65 : 97;
+                            return String.fromCharCode(((c.charCodeAt(0) - base + 13) % 26) + base);
+                        });
+                    }
+                    """#
+            }
+            emit #"const {{out}} = rot13({{in}});"#
+        }
+
+        go {
+            helper rot13 {
+                source #"""
+                    func rot13(s string) string {
+                        b := []byte(s)
+                        for i := 0; i < len(b); i++ {
+                            c := b[i]
+                            switch {
+                            case c >= 'A' && c <= 'Z':
+                                b[i] = 'A' + (c-'A'+13)%26
+                            case c >= 'a' && c <= 'z':
+                                b[i] = 'a' + (c-'a'+13)%26
+                            }
+                        }
+                        return string(b)
+                    }
+                    """#
+            }
+            emit #"{{out}} := rot13({{in}})"#
+        }
+    }
+}
+
+
+
+struct Main {
+    title-b64 {
+        css "title"
+        text
+        !Utils.to-base64
+    }
+
+    title-rot13 {
+        css title
+        text
+        !Utils.to-rot13
+    }
+}

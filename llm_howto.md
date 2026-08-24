@@ -10,7 +10,21 @@
 6. **Visitor methods** — implement `visit_<node_name>(self, node, ctx) -> list[str]` in:
    - `targets/python/visitor.py` (PythonVisitor)
    - `targets/javascript/visitor.py` (JsVisitor)
-   - If HTML-specific: add to DomSpelling ABC (`targets/python/html_libs/base.py`) + implement in each spelling subclass
+    - If HTML-specific: add to DomSpelling ABC (`targets/python/html_libs/base.py`) + implement in each spelling subclass
+
+For project-specific or value-producing operations, prefer DSL `extension` instead.
+It uses the existing generic `ExtensionCall` AST node and needs no Python source change:
+
+```kdl
+extension Values {
+    unix-time {
+        sig T int
+        py { import "import time"; emit #"{{out}} = int(time.time())"# }
+        js { emit #"const {{out}} = Math.floor(Date.now() / 1000);"# }
+        go { import "time"; emit #"{{out}} := time.Now().Unix()"# }
+    }
+}
+```
 
 ## Adding a New Struct Directive
 

@@ -22,6 +22,15 @@ from .module import (
 
 from .function import FunctionDef
 
+from .extension import (
+    ExtensionCall,
+    ExtensionDef,
+    ExtensionHelper,
+    ExtensionImport,
+    ExtensionTarget,
+    ExtensionType,
+)
+
 from .typedef import TypeDef, TypeDefField
 
 from .jsondef import JsonDef, JsonDefField
@@ -151,6 +160,13 @@ __all__ = [
     "Utilities",
     # function
     "FunctionDef",
+    # extensions
+    "ExtensionCall",
+    "ExtensionDef",
+    "ExtensionHelper",
+    "ExtensionImport",
+    "ExtensionTarget",
+    "ExtensionType",
     # typedef
     "TypeDef",
     "TypeDefField",

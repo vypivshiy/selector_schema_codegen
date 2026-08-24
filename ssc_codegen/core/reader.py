@@ -22,6 +22,7 @@ from ssc_codegen.core.module_handler import (
     register_node_sources,
     resolve_imports,
 )
+from ssc_codegen.core.extensions import handle_extension
 
 
 def parse_module(
@@ -74,14 +75,16 @@ def parse_module(
         return module, diagnostics
 
     try:
-        # pass 4 — collect defines
+        module = Module()
+        module.source_file = source_path.name if source_path else ""
+        # pass 4 — collect defines and extension declarations
         for node in top_nodes:
             if node.name == "define":
                 handle_define(node, ctx, lint)
+            elif node.name == "extension":
+                handle_extension(node, module, ctx, lint)
 
         # pass 5 — build module
-        module = Module()
-        module.source_file = source_path.name if source_path else ""
         structs: list = []
         typedefs: list = []
         functions: list = []
@@ -106,7 +109,7 @@ def parse_module(
             elif node.name == "fn":
                 fn = handle_function(node, module, ctx, lint)
                 functions.append(fn)
-            elif node.name in ("define", "import"):
+            elif node.name in ("define", "extension", "import"):
                 pass  # already handled
             else:
                 pass  # already reported by structural linter

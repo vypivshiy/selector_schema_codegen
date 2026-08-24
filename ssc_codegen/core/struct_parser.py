@@ -120,6 +120,16 @@ def parse_struct(
             if isinstance(parent, Struct) and parent.type == StructType.RAW:
                 expr.accept_type_info = TypeInfo(base=VariableType.STRING)
             parse_expressions(node.children, expr, ctx, lint)
+            if expr.ret_type_info.base != VariableType.BOOL:
+                lint.error(
+                    node,
+                    message=(
+                        f"@check {check_name} must return BOOL, got "
+                        f"{expr.ret_type_info.base.name}"
+                    ),
+                    code="E100",
+                    hint="finish the pipeline with 'to-bool' or a BOOL extension",
+                )
             if isinstance(parent, Struct) and parent.type == StructType.RAW:
                 _lint_raw_forbidden_ops(expr, lint)
             parent.body.append(expr)

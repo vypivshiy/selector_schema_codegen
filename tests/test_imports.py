@@ -94,11 +94,11 @@ def test_import_struct_has_typedef():
     assert "SharedItem" in typedef_names
 
 
-# ── selective import (feature removed — tests deleted) ────────────────────────
+# ── explicit imports ──────────────────────────────────────────────────────────
 
 
 def test_selective_import_includes_named():
-    """Selective import is no longer implemented; all names are imported."""
+    """Every import names its symbols and their declaration kinds."""
     m, _ = _parse_file(FIXTURES / "selective_schema.kdl")
     page = _struct(m, "SelectivePage")
 
@@ -111,7 +111,7 @@ def test_selective_import_includes_named():
 
 
 def test_transitive_import():
-    """A -> B -> C: A sees names from C."""
+    """Private dependencies remain available to imported declarations."""
     m, _ = _parse_file(FIXTURES / "transitive_schema.kdl")
     structs = _structs(m)
     names = [s.name for s in structs]
@@ -144,13 +144,15 @@ def test_diamond_import_is_loaded_once(tmp_path):
     )
     for name in ("left", "right"):
         (tmp_path / f"{name}.kdl").write_text(
-            'import "./common.kdl"\n', encoding="utf-8"
+            'import "./common.kdl" { (struct)Common }\n'
+            f"struct {name.title()} {{ child {{ nested Common }} }}\n",
+            encoding="utf-8",
         )
     root = tmp_path / "root.kdl"
     root.write_text(
-        'import "./left.kdl"\n'
-        'import "./right.kdl"\n'
-        "struct Root { child { nested Common } }\n",
+        'import "./left.kdl" { (struct)Left }\n'
+        'import "./right.kdl" { (struct)Right }\n'
+        "struct Root { left { nested Left } right { nested Right } }\n",
         encoding="utf-8",
     )
 
@@ -164,11 +166,27 @@ def test_imported_document_is_structurally_linted(tmp_path):
     imported = tmp_path / "invalid.kdl"
     imported.write_text("unknown-node\n", encoding="utf-8")
     root = tmp_path / "root.kdl"
-    root.write_text('import "./invalid.kdl"\n', encoding="utf-8")
+    root.write_text(
+        'import "./invalid.kdl" { (struct)Missing }\n', encoding="utf-8"
+    )
 
     _, diagnostics = _parse_file(root)
 
     error = next(d for d in diagnostics if "Unknown node" in d.message)
+    assert error.path == str(imported.resolve())
+
+
+def test_imported_document_syntax_error_reports_imported_path(tmp_path):
+    imported = tmp_path / "invalid.kdl"
+    imported.write_text("struct Broken {", encoding="utf-8")
+    root = tmp_path / "root.kdl"
+    root.write_text(
+        'import "./invalid.kdl" { (struct)Broken }\n', encoding="utf-8"
+    )
+
+    _, diagnostics = _parse_file(root)
+
+    error = next(d for d in diagnostics if "parse error" in d.message)
     assert error.path == str(imported.resolve())
 
 
@@ -179,7 +197,8 @@ def test_import_file_not_found():
     """Importing a nonexistent file is reported as a diagnostic."""
     bad_kdl = FIXTURES / "import_missing.kdl"
     bad_kdl.write_text(
-        'import "./does_not_exist.kdl"\nstruct X { x { css "x"; text } }\n',
+        'import "./does_not_exist.kdl" { (struct)Missing }\n'
+        'struct X { x { css "x"; text } }\n',
         encoding="utf-8",
     )
     try:
@@ -192,10 +211,124 @@ def test_import_file_not_found():
 
 def test_import_from_string_fails():
     """Using import when parsing from string (no file path) is reported as a diagnostic."""
-    src = 'import "./something.kdl"\nstruct X { x { css "x"; text } }\n'
+    src = (
+        'import "./something.kdl" { (struct)Missing }\n'
+        'struct X { x { css "x"; text } }\n'
+    )
     _, diagnostics = parse_module(src)
     msgs = _error_messages(diagnostics)
     assert any("file path" in m.lower() for m in msgs)
+
+
+def test_import_requires_explicit_typed_symbols(tmp_path):
+    shared = tmp_path / "shared.kdl"
+    shared.write_text('struct Shared { x { css "x"; text } }\n')
+    root = tmp_path / "root.kdl"
+    root.write_text('import "./shared.kdl"\n')
+
+    _, diagnostics = _parse_file(root)
+
+    assert any(
+        "explicit non-empty symbol block" in m
+        for m in _error_messages(diagnostics)
+    )
+
+
+def test_import_wrong_kind_suggests_declared_kind(tmp_path):
+    shared = tmp_path / "shared.kdl"
+    shared.write_text("json Shared { value str }\n")
+    root = tmp_path / "root.kdl"
+    root.write_text('import "./shared.kdl" { (struct)Shared }\n')
+
+    _, diagnostics = _parse_file(root)
+
+    error = next(d for d in diagnostics if "is not declared" in d.message)
+    assert error.hint == "use (json)Shared"
+
+
+def test_import_adds_local_dependency_closure(tmp_path):
+    shared = tmp_path / "shared.kdl"
+    shared.write_text(
+        'struct Helper { x { css "x"; text } }\n'
+        "struct Public { helper { nested Helper } }\n"
+    )
+    root = tmp_path / "root.kdl"
+    root.write_text(
+        'import "./shared.kdl" { (struct)Public }\n'
+        "struct Root { value { nested Public } }\n"
+    )
+
+    module, diagnostics = _parse_file(root)
+
+    assert not _error_messages(diagnostics)
+    assert [struct.name for struct in _structs(module)] == [
+        "Helper",
+        "Public",
+        "Root",
+    ]
+
+
+def test_private_dependency_is_not_reexported(tmp_path):
+    common = tmp_path / "common.kdl"
+    common.write_text('struct Common { x { css "x"; text } }\n')
+    shared = tmp_path / "shared.kdl"
+    shared.write_text(
+        'import "./common.kdl" { (struct)Common }\n'
+        "struct Public { common { nested Common } }\n"
+    )
+    root = tmp_path / "root.kdl"
+    root.write_text(
+        'import "./shared.kdl" { (struct)Public }\n'
+        "struct Root { hidden { nested Common } value { nested Public } }\n"
+    )
+
+    _, diagnostics = _parse_file(root)
+
+    assert any(
+        "not visible" in message for message in _error_messages(diagnostics)
+    )
+
+
+def test_unselected_scalar_define_is_not_added_to_scope(tmp_path):
+    shared = tmp_path / "shared.kdl"
+    shared.write_text('define A="selected" B="private"\n', encoding="utf-8")
+    root = tmp_path / "root.kdl"
+    root.write_text(
+        'import "./shared.kdl" { (define)A }\n'
+        'struct Root { value { css "a"; text; fmt B } }\n',
+        encoding="utf-8",
+    )
+
+    module, diagnostics = _parse_file(root)
+
+    assert not _error_messages(diagnostics)
+    operation = next(
+        node
+        for node in _field_ops(_struct(module, "Root"), "value")
+        if isinstance(node, Fmt)
+    )
+    assert operation.template == "B"
+
+
+def test_private_block_define_is_not_reexported(tmp_path):
+    shared = tmp_path / "shared.kdl"
+    shared.write_text(
+        'define PIPE { css ".x"; text }\nstruct Public { value { PIPE } }\n',
+        encoding="utf-8",
+    )
+    root = tmp_path / "root.kdl"
+    root.write_text(
+        'import "./shared.kdl" { (struct)Public }\n'
+        "struct Root { hidden { PIPE } value { nested Public } }\n",
+        encoding="utf-8",
+    )
+
+    _, diagnostics = _parse_file(root)
+
+    assert any(
+        "define 'PIPE' which is not visible" in message
+        for message in _error_messages(diagnostics)
+    )
 
 
 # ── codegen with imports ──────────────────────────────────────────────────────

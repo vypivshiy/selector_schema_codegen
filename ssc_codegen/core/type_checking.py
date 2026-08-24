@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import NamedTuple
 
-from ssc_codegen.ast import VariableType
+from ssc_codegen.ast import TypeInfo, VariableType
 from kdlquery import KdlNode
 
 from ssc_codegen.core.contexts import DefineKind, LintContext, ParseContext
@@ -268,6 +268,22 @@ def check_pipeline_types(
             continue
 
         if op_name == "self":
+            continue
+
+        if op_name.startswith("!"):
+            definition = ctx.extensions.get(op_name[1:])
+            if definition is None:
+                current_base = VariableType.AUTO
+                current_is_array = False
+                continue
+            current = TypeInfo(base=current_base, is_array=current_is_array)
+            if not definition.accept.accepts(current):
+                current_base = VariableType.AUTO
+                current_is_array = False
+                continue
+            resolved = definition.resolve_return(current)
+            current_base = resolved.base
+            current_is_array = resolved.is_array
             continue
 
         if op_name == "fallback":

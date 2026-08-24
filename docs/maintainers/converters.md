@@ -42,13 +42,13 @@ KDL schema -> kdlquery -> core/reader -> Module AST -> BaseWalker -> output sour
 - `walker.py` — `BaseWalker` (dispatch table `visit_*` через `walk()`),
   методы `walk`, `walk_children`, `walk_pipeline`. Три режима обхода тела:
   container / pipeline / predicate. Никакой кодогенерации здесь.
-- `utils.py` — `module_has_rest`, `module_is_rest_only`, `err_subclass_name`,
+- `utils.py` — `module_has_rest`, `module_is_rest_only`, `module_is_extension_only`, `err_subclass_name`,
   `dict_needs_builder`, `find_predicate_container`, `dict_entry_placeholder`,
   `jsonify_path_to_segments`.
 
 `ssc_codegen/generation/`:
 - `builder.py` — `ModuleBuilder` (pure data): `require_import(line)`,
-  `require_std(name, ...)`, idempotent. Без рендеринга.
+  `require_std(name, ...)`, `require_runtime(name, ...)`, idempotent. Без рендеринга.
 - `runtime.py` — `register_runtime_file(...)` для `-R` / `--separate-runtime`.
 
 ## Подключение бэкенда
@@ -90,8 +90,13 @@ from ssc_codegen.generation.builder import ModuleBuilder
 
 builder = ModuleBuilder()
 builder.require_import("import bs4")
-builder.require_std("ssc_assert", lines=["def ssc_assert(...): ..."], imports=["..."])
+builder.require_std("ssc_assert", code="def ssc_assert(...): ...", imports=["..."])
+builder.require_runtime("project_helper", code="def project_helper(...): ...", imports=[])
 ```
+
+`ExtensionCall` реализован одним `visit_extension_call` на backend. Handler
+выбирает target, регистрирует imports/runtime helpers и подставляет
+`{{in}}`/`{{out}}`/type placeholders в target template.
 
 ## DomSpelling (Python)
 

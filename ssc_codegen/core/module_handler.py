@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 from pathlib import Path
 
 from ssc_codegen.ast import (
@@ -17,8 +16,8 @@ from ssc_codegen.ast import (
     TypeInfo,
 )
 from ssc_codegen.exceptions import BuildTimeError
-from kdlquery import KdlNode, parse as kdl_parse
-from kdlquery.reader import ReadDiagnostic, Severity
+from kdlquery import KdlNode
+from kdlquery.reader import ReadDiagnostic
 
 from ssc_codegen.core.contexts import (
     DefineKind,
@@ -33,8 +32,6 @@ from ssc_codegen.core.struct_parser import (
     parse_struct,
 )
 
-_KDL_TEXT_ENCODING = "utf-8-sig"
-
 
 def register_node_sources(
     nodes: list[KdlNode], source_path: Path, ctx: ParseContext
@@ -45,12 +42,6 @@ def register_node_sources(
         node = pending.pop()
         ctx.node_source_paths[id(node)] = source_path
         pending.extend(node.children)
-
-
-def _attach_source(
-    diagnostic: ReadDiagnostic, source_path: Path
-) -> ReadDiagnostic:
-    return replace(diagnostic, path=str(source_path))
 
 
 def handle_struct(
@@ -150,132 +141,7 @@ def resolve_imports(
     ctx: ParseContext,
     lint: LintContext,
     diagnostics: list[ReadDiagnostic],
-    active: set[str] | None = None,
-    loaded: set[str] | None = None,
 ) -> list[KdlNode]:
-    if active is None:
-        active = set()
-    if loaded is None:
-        loaded = set()
-    if source_path is not None:
-        active.add(str(source_path.resolve()))
+    from ssc_codegen.core.imports import resolve_explicit_imports
 
-    result: list[KdlNode] = []
-    for node in top_nodes:
-        if node.name != "import":
-            result.append(node)
-            continue
-        if not node.args:
-            result.append(node)
-            continue
-        if source_path is None:
-            diagnostics.append(
-                ReadDiagnostic(
-                    message="Cannot use 'import' when parsing from string without a file path",
-                    severity=Severity.ERROR,
-                    span=node.span,
-                    path=lint.path,
-                    code="E003",
-                )
-            )
-            continue
-        raw_path = str(node.args[0].value)
-        import_path = (source_path.parent / raw_path).resolve()
-        import_key = str(import_path)
-        if import_key in active:
-            diagnostics.append(
-                _attach_source(
-                    ReadDiagnostic(
-                        message=f"Circular import detected: {import_path}",
-                        severity=Severity.ERROR,
-                        span=node.span,
-                        path=lint.path,
-                        code="E003",
-                    ),
-                    source_path,
-                )
-            )
-            continue
-        if import_key in loaded:
-            continue
-        if not import_path.is_file():
-            diagnostics.append(
-                ReadDiagnostic(
-                    message=f"import: file not found: {import_path}",
-                    severity=Severity.ERROR,
-                    span=node.span,
-                    path=lint.path,
-                    code="E003",
-                )
-            )
-            continue
-        try:
-            src = import_path.read_text(encoding=_KDL_TEXT_ENCODING)
-        except OSError as e:
-            diagnostics.append(
-                ReadDiagnostic(
-                    message=f"import: cannot read file: {e}",
-                    severity=Severity.ERROR,
-                    span=node.span,
-                    path=lint.path,
-                    code="E003",
-                )
-            )
-            continue
-        try:
-            doc = kdl_parse(src)
-        except Exception as e:
-            diagnostics.append(
-                ReadDiagnostic(
-                    message=f"import: parse error in {import_path}: {e}",
-                    severity=Severity.ERROR,
-                    span=node.span,
-                    path=lint.path,
-                    code="E000",
-                )
-            )
-            continue
-
-        imported_doc_nodes = list(doc.nodes)
-        register_node_sources(imported_doc_nodes, import_path, ctx)
-        from ssc_codegen.core.linter import lint_module
-
-        imported_diagnostics = lint_module(doc, str(import_path))
-        diagnostics.extend(
-            _attach_source(diagnostic, import_path)
-            for diagnostic in imported_diagnostics
-        )
-
-        active.add(import_key)
-        try:
-            imported_nodes = resolve_imports(
-                imported_doc_nodes,
-                import_path,
-                ctx,
-                lint,
-                diagnostics,
-                active,
-                loaded,
-            )
-        finally:
-            active.discard(import_key)
-        loaded.add(import_key)
-        imported_names: set[str] = set()
-        for n in imported_nodes:
-            if n.name == "struct":
-                imported_names.add(str(n.args[0].value))
-            elif n.name in ("json", "define"):
-                imported_names.add(str(n.args[0].value) if n.args else "")
-        for n in result:
-            if n.name == "struct" and str(n.args[0].value) in imported_names:
-                diagnostics.append(
-                    ReadDiagnostic(
-                        message=f"Name conflict: struct '{n.args[0].value}' conflicts with imported name",
-                        severity=Severity.ERROR,
-                        span=n.span,
-                        path=lint.path,
-                        code="E003",
-                    )
-                )
-        result.extend(imported_nodes)
-    return result
+    return resolve_explicit_imports(top_nodes, source_path, ctx, diagnostics)

@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
 
-from ssc_codegen.ast import StructBase, VariableType
+from ssc_codegen.ast import ExtensionDef, StructBase, VariableType
 from kdlquery import KdlNode, ReadDiagnostic, Severity
 
 
@@ -49,6 +49,7 @@ class ParseContext:
     children_defines: dict[str, list[KdlNode]] = field(default_factory=dict)
     structs: dict[str, StructBase] = field(default_factory=dict)
     json_defs: dict[str, JsonDef] = field(default_factory=dict)
+    extensions: dict[str, ExtensionDef] = field(default_factory=dict)
     source_path: Path | None = None
     node_source_paths: dict[int, Path] = field(default_factory=dict)
 
@@ -58,6 +59,7 @@ class ParseContext:
             | set(self.children_defines)
             | set(self.structs)
             | set(self.json_defs)
+            | set(self.extensions)
         )
 
 

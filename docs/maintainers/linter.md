@@ -1,7 +1,7 @@
 # Линтер: как добавлять правила
 
 **Аудитория:** мейнтейнеры
-**Последнее обновление:** 2026-07-21
+**Последнее обновление:** 2026-08-24
 
 Линтер интегрирован в парсер `core/` — отдельного модуля `linter/` больше нет.
 Валидация происходит в одну проход вместе с построением AST.
@@ -18,7 +18,9 @@
 - `expressions.py` — парсинг pipeline-операций в AST + `typedef_from_struct` (генерация `TypeDef` из struct).
 - `predicates.py` — парсинг предикатов (`filter`/`assert`/`match` + `not/and/or`).
 - `struct_parser.py` — разбор тела struct.
-- `module_handler.py` — `handle_define`, `handle_json`, `handle_struct`, `resolve_imports`.
+- `module_handler.py` — `handle_define`, `handle_json`, `handle_struct`.
+- `imports.py` — mandatory typed imports, `SymbolId`, private scopes и dependency closure.
+- `extensions.py` — `extension` declarations и signature resolution.
 - `rest_artifacts.py` — синтез REST-result узлов (`ResultVariantDef`, `ResultAliasDef`, `MatcherListDef`) из `StructRest`.
 - `format.py` — `format_diagnostics(...)` (text + JSON).
 
@@ -28,10 +30,10 @@ KDL-парсер — внешний: `kdlquery` (`KDLParseError`, `KdlNode`, `Re
 ## Модель выполнения (5 проходов в `parse_module`)
 
 1. **KDL parse** — `kdlquery.parse(src)`. Синтаксические ошибки оборачиваются в `ReadDiagnostic` с `code="E000"`.
-2. **resolve_imports** — flattened список top-level узлов с inline'ом импортированных define/json/struct.
+2. **resolve_imports** — source-scoped symbol graph; explicit roots + private closure превращаются в topo-sorted top-level nodes.
 3. **lint_module** — структурная валидация текущего файла (top-level decls, struct bodies, json children, @request placeholders, field names).
 4. **lint_cross_refs** — cross-file проверки: ссылки на define/json/struct, циклы, unknown ops.
-5. **build Module AST** — `handle_define` → `handle_json` / `handle_struct` → `typedef_from_struct` / `rest_artifacts_from_struct` → diagnostics merged.
+5. **build Module AST** — `handle_define` / `handle_extension` → `handle_json` / `handle_struct` → synthetic artifacts → diagnostics merged.
 
 Типы pipeline'а выводятся во время AST-сборки через `check_pipeline_types` (`type_checking.py`).
 

@@ -1,2 +1,2 @@
-import "./circular_a.kdl"
+import "./circular_a.kdl" { (struct)A }
 struct B { y { css "y"; text } }

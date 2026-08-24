@@ -7,6 +7,7 @@ from ssc_codegen.ast import (
     ErrorResponse,
     Filter,
     FunctionDef,
+    JsonDef,
     Match,
     MethodBase,
     Module,
@@ -65,6 +66,16 @@ def module_has_html_struct(module: Module) -> bool:
             if not n.is_raw:
                 return True
     return False
+
+
+def module_is_extension_only(module: Module) -> bool:
+    """True when a module only contributes extension declarations."""
+    if not module.extensions:
+        return False
+    return not any(
+        isinstance(node, (JsonDef, StructBase, FunctionDef))
+        for node in module.body
+    )
 
 
 def err_subclass_name(struct_name: str, err: ErrorResponse) -> str:

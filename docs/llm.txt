@@ -2,7 +2,7 @@
 
 ssc_codegen is a code generator for web scraping parsers.
 Input: .kdl schema files describing HTML extraction rules.
-Output: parser code for Python (bs4, lxml, parsel, selectolax) and JavaScript (DOM API).
+Output: parser code for Python (bs4, lxml, parsel, selectolax), JavaScript (DOM API), and Go (goquery).
 
 Pipeline: .kdl schema -> kdl parser -> AST -> linter -> converter -> output code
 
@@ -10,16 +10,68 @@ Pipeline: .kdl schema -> kdl parser -> AST -> linter -> converter -> output code
 
 A .kdl file contains module-level declarations and struct definitions.
 
-Module-level: import, define, json, struct.
+Module-level: import, define, extension, json, struct, fn.
 
 ## import
 
 ```kdl
-import "./shared.kdl"
-import "./shared.kdl" { Book PriceTransform }
+import "./shared.kdl" {
+    (extension)Utils
+    (struct)Book
+    (json)Response
+    (define)PRICE-FORMAT
+    (fn)parse-title
+}
 ```
 
-Path is relative to current file. Transitive. Cyclic imports forbidden.
+Import block is mandatory and non-empty. Every symbol requires a kind annotation:
+extension, struct, json, define, or fn. Path-only and bare-name imports are errors.
+Path is relative to current file. Imports are private and not re-exported.
+Selected symbols pull their private dependency closure into codegen. Cyclic imports
+and symbol conflicts are forbidden.
+
+## extension
+
+Typed target-specific pipeline operations:
+
+```kdl
+extension Utils {
+    to-base64 {
+        sig str str
+        py {
+            import "from base64 import b64encode"
+            emit #"{{out}} = b64encode({{in}}.encode("utf-8")).decode("ascii")"#
+        }
+        js { emit #"const {{out}} = btoa({{in}});"# }
+        go {
+            import "encoding/base64"
+            emit #"{{out}} := base64.StdEncoding.EncodeToString([]byte({{in}}))"#
+        }
+    }
+}
+```
+
+Call with mandatory `!` prefix: `!Utils.to-base64`. Each direct extension child
+is an operation; there is no `op` node. Signatures support doc/str/int/float/bool,
+`(array)`, `?`, and whole-TypeInfo generic `T`. `sig T T` preserves the input type;
+`sig T bool` accepts any input and returns bool. No implicit array mapping.
+
+Emit placeholders: `{{in}}`, `{{out}}`, `{{in_type}}`, `{{out_type}}`.
+Target-level imports go to the generated parser module. Optional helper syntax:
+
+```kdl
+py {
+    helper normalize_value {
+        import "import re"
+        source #"def normalize_value(value: str) -> str:\n    return re.sub(r'\\s+', ' ', value)"#
+    }
+    emit #"{{out}} = normalize_value({{in}})"#
+}
+```
+
+Helpers are lazy and deduplicated. Python `-R` and Go place them in shared runtime;
+Python without `-R` and JavaScript inline them in utility sections. Extension-only
+files are linted but do not produce generated parser files.
 
 ## define
 

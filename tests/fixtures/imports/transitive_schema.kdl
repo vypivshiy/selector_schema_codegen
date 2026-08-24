@@ -1,6 +1,7 @@
-// imports level2 which itself imports shared_defines
-// FMT-BASE and RE-PRICE should be available transitively
-import "./level2.kdl"
+// Level2Item keeps its private RE-PRICE dependency. FMT-BASE is used locally
+// and therefore must be imported directly (imports are not re-exported).
+import "./level2.kdl" { (struct)Level2Item }
+import "./shared_defines.kdl" { (define)FMT-BASE }
 
 struct TransitivePage {
     url {

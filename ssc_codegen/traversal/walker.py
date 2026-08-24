@@ -28,6 +28,7 @@ from ssc_codegen.ast import (
     MethodRest,
     MethodFetch,
     ErrorResponse,
+    ExtensionCall,
     ResultVariantDef,
     ResultAliasDef,
     MatcherListDef,
@@ -181,6 +182,7 @@ class BaseWalker:
         MethodFetch: "visit_method_fetch",
         MethodRest: "visit_method_rest",
         ErrorResponse: "visit_error_response",
+        ExtensionCall: "visit_extension_call",
         # function
         FunctionDef: "visit_function_def",
         # REST result artifacts

@@ -127,3 +127,71 @@ def test_health_stops_on_schema_diagnostics(tmp_path) -> None:
 
     assert result.exit_code == 1
     assert "Unknown node: unknown" in result.output
+
+
+def test_generate_skips_extension_only_file(tmp_path) -> None:
+    extensions = tmp_path / "extensions.kdl"
+    extensions.write_text(
+        "extension Utils { value { sig T str; py { emit #\"{{out}} = 'x'\"# } } }\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "out"
+
+    result = runner.invoke(
+        app,
+        ["generate", "python", str(extensions), "-o", str(output)],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert not output.exists()
+
+
+def test_extension_library_contributes_to_consumer_runtime(tmp_path) -> None:
+    extensions = tmp_path / "sscgen_runtime.kdl"
+    extensions.write_text(
+        r'''
+extension Utils {
+    value {
+        sig T str
+        py {
+            import "from uuid import uuid4"
+            helper make_value {
+                source #"""
+                    def make_value(value: str) -> str:
+                        return value
+                    """#
+            }
+            emit #"{{out}} = make_value(str(uuid4()))"#
+        }
+    }
+}
+''',
+        encoding="utf-8",
+    )
+    schema = tmp_path / "schema.kdl"
+    schema.write_text(
+        'import "./sscgen_runtime.kdl" { (extension)Utils }\n'
+        "(raw)fn value { !Utils.value }\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "out"
+
+    result = runner.invoke(
+        app,
+        [
+            "generate",
+            "python",
+            str(tmp_path),
+            "-o",
+            str(output),
+            "-R",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert not (output / "sscgen_runtime.kdl.py").exists()
+    generated = (output / "schema.py").read_text(encoding="utf-8")
+    runtime = (output / "sscgen_runtime.py").read_text(encoding="utf-8")
+    assert "from uuid import uuid4" in generated
+    assert "from .sscgen_runtime import make_value" in generated
+    assert "def make_value" in runtime

@@ -1,5 +1,5 @@
 // level2 imports from shared_defines (transitive)
-import "./shared_defines.kdl"
+import "./shared_defines.kdl" { (define)RE-PRICE }
 
 struct Level2Item {
     price {

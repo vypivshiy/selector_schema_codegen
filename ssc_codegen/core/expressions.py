@@ -16,6 +16,7 @@ from ssc_codegen.ast import (
     CssSelect,
     CssSelectAll,
     Fallback,
+    ExtensionCall,
     Field,
     Filter,
     Fmt,
@@ -80,6 +81,7 @@ from ssc_codegen.regex_utils import normalize_regex_pattern
 from typing import cast
 
 from ssc_codegen.core.contexts import LintContext, ParseContext, WalkCtx
+from ssc_codegen.core.extensions import resolve_extension_call
 from ssc_codegen.core.linter import (
     lint_pipeline_op,
     lint_validate_css,
@@ -106,6 +108,7 @@ FieldLikeNode: TypeAlias = (
     | Field
     | InitField
     | FunctionDef
+    | CheckMethod
 )
 
 
@@ -343,6 +346,9 @@ def _build_expression(
             f"'self {ref_name}' syntax is no longer supported; use '@{ref_name}' instead"
         )
 
+    if name.startswith("!"):
+        return _expr_extension(node, parent, ctx, lint)
+
     # dispatch
     handler = _EXPRESSION_HANDLERS.get(name)
     if handler is None:
@@ -417,6 +423,13 @@ def parse_expressions(
             raise BuildTimeError(
                 f"'self {ref_name}' syntax is no longer supported; use '@{ref_name}' instead"
             )
+        if node.name.startswith("!"):
+            lint.push(node.name)
+            lint_pipeline_op(node, lint)
+            extension_expr = _expr_extension(node, parent, ctx, lint)
+            parent.body.append(extension_expr)
+            lint.pop()
+            continue
         handler = _EXPRESSION_HANDLERS.get(node.name)
         if handler is None:
             lint_wildcard_op(node, ctx, lint)
@@ -501,7 +514,10 @@ def parse_expressions(
                         break
             parent.is_array = is_arr
             parent.ret_type_info = TypeInfo(
-                base=last_ret, is_array=is_arr, ref=ref
+                base=last_ret,
+                is_array=is_arr,
+                is_optional=last_ti.is_optional,
+                ref=ref or last_ti.ref,
             )
 
     lint.walk_context = prev_ctx
@@ -534,6 +550,59 @@ def _prev_type_info(
     return SimpleNamespace(
         ret_type_info=parent.accept_type_info,
         is_array=parent.accept_type_info.is_array,
+    )
+
+
+def _expr_extension(
+    node: KdlNode,
+    parent: FieldLikeNode,
+    ctx: ParseContext,
+    lint: LintContext,
+) -> ExtensionCall:
+    ref = node.name[1:]
+    if node.args or node.properties or node.children:
+        lint.error(
+            node,
+            message=f"custom operation '!{ref}' does not accept entries",
+            code="E001",
+        )
+    definition = ctx.extensions.get(ref)
+    prev = _prev_type_info(parent)
+    if definition is None:
+        lint.error(
+            node,
+            message=f"unknown extension operation '{ref}'",
+            code="E300",
+            hint="import its extension namespace and check the operation name",
+        )
+        return ExtensionCall(
+            parent=parent,
+            qualified_name=ref,
+            accept_type_info=prev.ret_type_info,
+            ret_type_info=TypeInfo(base=VariableType.AUTO),
+        )
+    if not definition.accept.accepts(prev.ret_type_info):
+        expected = (
+            definition.accept.generic
+            or (definition.accept.base or VariableType.AUTO).name
+        )
+        lint.error(
+            node,
+            message=(
+                f"custom operation '{ref}' does not accept "
+                f"{prev.ret_type_info.base.name}; expected {expected}"
+            ),
+            code="E100",
+        )
+    ret_type = resolve_extension_call(definition, prev.ret_type_info)
+    return ExtensionCall(
+        parent=parent,
+        qualified_name=ref,
+        definition=definition,
+        accept_type_info=prev.ret_type_info,
+        ret_type_info=ret_type,
+        is_array=ret_type.is_array,
+        span=node.span,
     )
 
 

@@ -27,6 +27,7 @@ from ssc_codegen.ast import (
     CssSelect,
     CssSelectAll,
     ErrorResponse,
+    ExtensionCall,
     Fallback,
     Field,
     Filter,
@@ -126,6 +127,7 @@ from ssc_codegen.ast import (
     XpathSelect,
     XpathSelectAll,
 )
+from ssc_codegen.exceptions import BuildTimeError
 from ssc_codegen.naming import to_camel_case, to_pascal_case
 from ssc_codegen.traversal.utils import (
     find_predicate_container,
@@ -309,9 +311,18 @@ class JsVisitor(BaseWalker):
     # === STD RENDERING ===
 
     def _render_std_section(self, ctx: WalkContext) -> list[str]:
-        if not self._builder.has_std:
+        if not self._builder.has_std and not self._builder.has_runtime:
             return []
-        body: list[str] = []
+        body: list[str] = [
+            item
+            for item in self._builder.runtime_imports
+            if item not in self._builder.imports
+        ]
+        if body:
+            body.append("")
+        for _imps, code in self._builder.runtime_defs.values():
+            body.extend(code.splitlines())
+            body.append("")
         for _imps, code in self._builder.std_defs.values():
             body.extend(code.splitlines())
             body.append("")
@@ -353,10 +364,15 @@ class JsVisitor(BaseWalker):
         return lines
 
     def visit_utilities(self, node: Utilities, ctx: WalkContext) -> list[str]:
-        lines: list[str] = [
-            "const UNMATCHED_TABLE_ROW = Symbol('UNMATCHED_TABLE_ROW');",
-            "",
-        ]
+        lines: list[str] = [*self._builder.imports]
+        if lines:
+            lines.append("")
+        lines.extend(
+            [
+                "const UNMATCHED_TABLE_ROW = Symbol('UNMATCHED_TABLE_ROW');",
+                "",
+            ]
+        )
         mod = node.parent
         if isinstance(mod, Module) and module_has_rest(mod):
             lines.extend(rest.REST_SHARED)
@@ -379,6 +395,34 @@ class JsVisitor(BaseWalker):
         self, node: ErrorResponse, ctx: WalkContext
     ) -> list[str]:
         return []
+
+    def visit_extension_call(
+        self, node: ExtensionCall, ctx: WalkContext
+    ) -> list[str]:
+        definition = node.definition
+        target = definition.targets.get("js") if definition else None
+        if target is None:
+            raise BuildTimeError(
+                f"extension operation '{node.qualified_name}' has no 'js' target"
+            )
+        for item in target.imports:
+            self._builder.require_import(item.value)
+        for helper in target.helpers:
+            self._builder.require_runtime(
+                helper.name,
+                code=helper.source,
+                imports=[item.value for item in helper.imports],
+            )
+        replacements = {
+            "{{in}}": ctx.prv,
+            "{{out}}": ctx.nxt,
+            "{{in_type}}": self._resolve_type(node.accept_type_info),
+            "{{out_type}}": self._resolve_type(node.ret_type_info),
+        }
+        rendered = target.emit
+        for placeholder, value in replacements.items():
+            rendered = rendered.replace(placeholder, value)
+        return [ctx.indent + line for line in rendered.splitlines()]
 
     # === TYPES ===
 

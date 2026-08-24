@@ -8,7 +8,7 @@ Entry point: `parse_module(source, source_path=...) → (Module, list[ReadDiagno
 - `ParseContext` — tracks module state (defines, imports, struct_map)
 - `LintContext` — collects errors/warnings during parse
 - Fatal structural diagnostics stop AST build; malformed input returns diagnostics instead of leaking index/value errors.
-- Import resolution uses separate active/loaded sets, so diamond imports are deduplicated and real cycles are diagnosed.
+- Import resolution uses source-aware `SymbolId(path, kind, name)`, private per-file scopes, and dependency closure. Diamond imports deduplicate by SymbolId; cycles are diagnosed.
 - Type checking happens inline via `core/type_checking.py`
 - Error output: `format_diagnostics(diagnostics) → str`
 
@@ -50,3 +50,15 @@ json_defs → typedefs → REST artifacts/structs → functions
 - `handle_struct` — process struct declarations
 - `resolve_imports` — resolve cross-file imports with cycle/dedup tracking
 - `register_node_sources` — retain source origin for imported diagnostics
+
+### Explicit imports (core/imports.py)
+- Syntax is mandatory: `import "./x.kdl" { (struct)X; (extension)Utils }`.
+- Valid kinds: define, extension, fn, json, struct.
+- Imports are private and cannot be re-exported implicitly.
+- Selected roots pull local/import dependency closure, topologically ordered before AST build.
+- Extension-only root modules are skipped by CLI generation after linting.
+
+### Extensions (core/extensions.py)
+- Top-level `extension Namespace` children are operation declarations.
+- `sig` is parsed into `ExtensionType`; `T` binds full input `TypeInfo`.
+- `!Namespace.operation` resolves to a generic `ExtensionCall` in expressions.py.

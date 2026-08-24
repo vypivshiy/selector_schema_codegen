@@ -1,6 +1,7 @@
 from __future__ import annotations
 import warnings
 from dataclasses import dataclass
+from dataclasses import field
 
 from .base import Node
 
@@ -28,6 +29,7 @@ class Module(Node):
 
     doc: str = ""
     source_file: str = ""
+    extensions: dict[str, "ExtensionDef"] = field(default_factory=dict)
 
     def __post_init__(self):
         self.body.extend(
@@ -112,3 +114,6 @@ class Utilities(Node):
     """
 
     pass
+
+
+from .extension import ExtensionDef  # noqa: E402

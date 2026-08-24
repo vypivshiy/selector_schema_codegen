@@ -1,5 +1,5 @@
 // imports only FMT-BASE from shared defines
-import "./shared_defines.kdl" { FMT-BASE }
+import "./shared_defines.kdl" { (define)FMT-BASE }
 
 struct SelectivePage {
     url {

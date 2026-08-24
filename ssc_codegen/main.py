@@ -141,13 +141,6 @@ def _run_generate(
     logger.debug("total %d .kdl file(s) to process", len(kdl_files))
 
     try:
-        planned_outputs = _plan_output_files(
-            profile,
-            kdl_files,
-            output,
-            separate_runtime=separate_runtime,
-            runtime_name=runtime_name,
-        )
         if profile.language == "go":
             from ssc_codegen.targets.golang.visitor import (
                 validate_go_package_name,
@@ -157,8 +150,6 @@ def _run_generate(
     except (ValueError, BuildTimeError) as exc:
         typer.echo(f"ERROR: {exc}", err=True)
         raise typer.Exit(code=1)
-
-    output.mkdir(parents=True, exist_ok=True)
     converter = profile.create_converter()
 
     errors: list[str] = []
@@ -219,6 +210,35 @@ def _run_generate(
             format_diagnostics(all_diagnostics, fmt="json"),
             err=True,
         )
+
+    from ssc_codegen.traversal.utils import module_is_extension_only
+
+    emitted: list[tuple[Path, Module]] = []
+    for path, module in parsed:
+        if module_is_extension_only(module):
+            logger.debug("skipping extension-only module: %s", path)
+            continue
+        emitted.append((path, module))
+    parsed = emitted
+
+    try:
+        planned_outputs = _plan_output_files(
+            profile,
+            [path for path, _ in parsed],
+            output,
+            separate_runtime=separate_runtime and bool(parsed),
+            runtime_name=runtime_name,
+        )
+    except ValueError as exc:
+        typer.echo(f"ERROR: {exc}", err=True)
+        raise typer.Exit(code=1)
+
+    if not parsed:
+        if errors:
+            raise typer.Exit(code=1)
+        return
+
+    output.mkdir(parents=True, exist_ok=True)
 
     if separate_runtime and parsed:
         runtime_path = output / f"{_runtime_name}.py"

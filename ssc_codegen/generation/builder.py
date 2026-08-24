@@ -17,6 +17,8 @@ class ModuleBuilder:
         self._imports: dict[str, None] = {}
         self._std_defs: dict[str, tuple[list[str], str]] = {}
         self._std_imports: dict[str, None] = {}
+        self._runtime_defs: dict[str, tuple[list[str], str]] = {}
+        self._runtime_imports: dict[str, None] = {}
 
     # === registration (idempotent) ===
 
@@ -44,11 +46,30 @@ class ModuleBuilder:
         for imp in imps:
             self._std_imports.setdefault(imp, None)
 
+    def require_runtime(
+        self,
+        name: str,
+        *,
+        code: str,
+        imports: list[str] | None = None,
+    ) -> None:
+        """Register user helper code for target runtime emission."""
+        imps = list(imports) if imports else []
+        existing = self._runtime_defs.get(name)
+        definition = (imps, code)
+        if existing is not None and existing != definition:
+            raise ValueError(f"conflicting runtime helper definition: {name}")
+        self._runtime_defs.setdefault(name, definition)
+        for imp in imps:
+            self._runtime_imports.setdefault(imp, None)
+
     def reset(self) -> None:
         """Clear all accumulated state."""
         self._imports.clear()
         self._std_defs.clear()
         self._std_imports.clear()
+        self._runtime_defs.clear()
+        self._runtime_imports.clear()
 
     # === queries ===
 
@@ -71,3 +92,19 @@ class ModuleBuilder:
     @property
     def has_std(self) -> bool:
         return bool(self._std_defs)
+
+    @property
+    def runtime_names(self) -> list[str]:
+        return list(self._runtime_defs)
+
+    @property
+    def runtime_defs(self) -> dict[str, tuple[list[str], str]]:
+        return dict(self._runtime_defs)
+
+    @property
+    def runtime_imports(self) -> list[str]:
+        return list(self._runtime_imports)
+
+    @property
+    def has_runtime(self) -> bool:
+        return bool(self._runtime_defs)

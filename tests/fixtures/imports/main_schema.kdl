@@ -1,6 +1,11 @@
-// imports everything from shared files
-import "./shared_defines.kdl"
-import "./shared_struct.kdl"
+import "./shared_defines.kdl" {
+    (define)FMT-BASE
+    (define)RE-PRICE
+    (define)STRIP-PREFIX
+}
+import "./shared_struct.kdl" {
+    (struct)SharedItem
+}
 
 struct Page {
     url {

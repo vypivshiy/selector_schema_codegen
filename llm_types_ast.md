@@ -54,6 +54,13 @@ All nodes inherit from `Node` base class (has `body` attribute).
 - `Module` → top-level container, holds all children. Module-level docstring lives in the `doc` field.
 - `Docstring` (DEPRECATED, kept for backward-compat imports — was a body node; now `Module.doc`)
 - `Utilities`, `CodeStartHook`, `CodeEndHook`
+- `Module.extensions` → qualified-name registry of imported/local `ExtensionDef` declarations.
+
+### Extension layer
+- `ExtensionType` → concrete signature pattern or whole-`TypeInfo` generic `T`.
+- `ExtensionImport`, `ExtensionHelper`, `ExtensionTarget`, `ExtensionDef` → declaration data.
+- `ExtensionCall` → one generic pipeline AST node for every `!Namespace.operation` call.
+- UUID/date/project-specific operations do not get dedicated AST node classes.
 
 ### Struct layer
 - `StructBase` → base for `Struct` (HTML parser) and `StructRest` (REST API). Per-struct docstring lives in the `doc` field (position is visitor-dependent: Python emits it below `class X:`, JS emits it above).
@@ -86,6 +93,7 @@ Regex: Re, ReAll, ReSub
 Array: Index, Slice, Len, Unique
 Cast: ToInt, ToFloat, ToBool, Jsonify, Nested
 Control: Fallback, Self, Return
+Custom: ExtensionCall
 Predicates: Filter, Assert, Match (containers) + PredEq/Ne/Gt/Lt/Ge/Le/Range + PredStarts/Ends/Contains/In/Re/ReAny/ReAll + PredCss/Xpath/HasAttr + PredAttr* + PredText* + PredCount* + LogicNot/And/Or
 
 ### Type definitions

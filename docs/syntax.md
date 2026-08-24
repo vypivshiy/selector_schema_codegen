@@ -1,14 +1,14 @@
 # Синтаксис и структура файла
 
 **Версия DSL:** 2.1  
-**Последнее обновление:** 2026-07-21
+**Последнее обновление:** 2026-08-24
 
 KDL Schema DSL — декларативный язык для описания структур извлечения данных из
 HTML/XML. Файл `.kdl` состоит из модульных объявлений и `struct` описаний.
 
 ## Базовые понятия
 
-- **Module** — файл с объявлениями `import`, `define`, `json`, `struct`.
+- **Module** — файл с объявлениями `import`, `define`, `extension`, `json`, `struct`.
 - **Struct** — структура результата.
 - **Field** — поле структуры с pipeline операций.
 - **Pipeline** — цепочка операций преобразования.
@@ -23,20 +23,26 @@ HTML/XML. Файл `.kdl` состоит из модульных объявле�
 
 ### import
 
-Импортирует определения из другого файла `.kdl`.
+Импортирует явно перечисленные определения из другого файла `.kdl`.
 
 ```kdl
-import "./shared.kdl"
-import "./shared.kdl" { Book PriceTransform }
+import "./shared.kdl" {
+    (extension)Utils
+    (struct)Book
+    (json)Response
+    (define)PRICE-FORMAT
+    (fn)parse-title
+}
 ```
 
 Правила:
-- Путь всегда указывается как первый аргумент.
+- Путь указывается единственным аргументом.
 - Путь разрешается относительно текущего файла.
-- Разрешены селективные импорты через блок `{ Name1 Name2 }`.
+- Непустой блок symbols обязателен.
+- Каждый symbol требует KDL type annotation: `extension`, `struct`, `json`, `define` или `fn`.
 - Конфликты имен запрещены.
-- Импортируются `define`, `json`, `struct`.
-- Импорт транзитивный: если `A` импортирует `B`, а `B` импортирует `C`, то `A` видит `C`.
+- Imports private и автоматически не переэкспортируются.
+- Private dependency closure выбранного symbol подключается автоматически.
 - Циклические импорты запрещены.
 - Импорт работает только при парсинге из файла (нужен путь для резолва).
 
@@ -52,7 +58,10 @@ define RE-PRICE=#"(\d+\.\d+)"#
 `main.kdl`:
 
 ```kdl
-import "./shared_defines.kdl"
+import "./shared_defines.kdl" {
+    (define)BASE-URL
+    (define)RE-PRICE
+}
 
 struct Page {
     link { css "a"; attr "href"; fmt BASE-URL }
@@ -60,11 +69,7 @@ struct Page {
 }
 ```
 
-Селективный импорт:
-
-```kdl
-import "./shared_defines.kdl" { BASE-URL }
-```
+Path-only и bare imports не поддерживаются.
 
 ### @doc
 

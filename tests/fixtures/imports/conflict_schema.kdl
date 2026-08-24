@@ -1,4 +1,4 @@
-import "./shared_defines.kdl"
+import "./shared_defines.kdl" { (define)FMT-BASE }
 
 // this define conflicts with imported FMT-BASE
 define FMT-BASE="https://conflict.com/{{}}"

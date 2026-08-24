@@ -72,10 +72,39 @@ _BASE_UTILITY_LINES: list[str] = [
 ]
 
 
+def _extension_runtime_defs(
+    modules: list[a.Module],
+) -> dict[str, tuple[list[str], str]]:
+    definitions: dict[str, tuple[list[str], str]] = {}
+
+    def walk(node: a.Node) -> None:
+        if isinstance(node, a.ExtensionCall) and node.definition is not None:
+            target = node.definition.targets.get("py")
+            if target is not None:
+                for helper in target.helpers:
+                    value = (
+                        [item.value for item in helper.imports],
+                        helper.source,
+                    )
+                    previous = definitions.get(helper.name)
+                    if previous is not None and previous != value:
+                        raise ValueError(
+                            f"conflicting runtime helper definition: {helper.name}"
+                        )
+                    definitions.setdefault(helper.name, value)
+        for child in node.body:
+            walk(child)
+
+    for module in modules:
+        walk(module)
+    return definitions
+
+
 def runtime_module_content(
     module: a.Module,
     *,
     http_strategy: HttpLibStrategy | None = None,
+    extension_defs: dict[str, tuple[list[str], str]] | None = None,
 ) -> str:
     """Return the full source text of the separate runtime module file.
 
@@ -104,12 +133,21 @@ def runtime_module_content(
                 strategy.import_line,
             ]
         )
+    if extension_defs:
+        for imports, _code in extension_defs.values():
+            for import_line in imports:
+                if import_line not in lines:
+                    lines.append(import_line)
     lines.append("")
     lines.append("")
     lines.extend(_BASE_UTILITY_LINES)
     lines.append("")
     if has_rest:
         lines.extend(strategy.rest_runtime_lines())
+    if extension_defs:
+        for _imports, code in extension_defs.values():
+            lines.append("")
+            lines.extend(code.strip("\n").splitlines())
     return "\n".join(lines)
 
 
@@ -146,6 +184,7 @@ def register_runtime_file(
             runtime_module_content(
                 module_ast,
                 http_strategy=http_strategy,
+                extension_defs=_extension_runtime_defs([module_ast]),
             )
         )
 
@@ -155,7 +194,11 @@ def register_runtime_file(
             modules[0],
         )
         return _apply_fallback(
-            runtime_module_content(ref, http_strategy=http_strategy)
+            runtime_module_content(
+                ref,
+                http_strategy=http_strategy,
+                extension_defs=_extension_runtime_defs(modules),
+            )
         )
 
     return _generate_runtime

@@ -60,12 +60,18 @@ Pure data accumulator — replaces old hidden signal pools (`STD()` / `IMPORT()`
 |---|---|
 | `require_import(line)` | Register an import line (idempotent, order-preserving) |
 | `require_std(name, code=, imports=)` | Register a std-helper definition (idempotent by name) |
+| `require_runtime(name, code=, imports=)` | Register user extension helper for runtime placement |
 | `reset()` | Clear all accumulated state |
 | `.imports` | List of registered import lines |
 | `.std_names` | List of registered std-helper names |
 | `.std_defs` | Dict of name → (imports, code) |
 | `.std_imports` | List of std-scoped import lines |
 | `.has_std` | True if any std helpers registered |
+| `.runtime_defs/.runtime_imports` | Lazy user helper requirements |
+
+`visit_extension_call` selects py/js/go implementation, registers target-level
+imports in the parser module, registers helpers in the runtime pool, then replaces
+`{{in}}`, `{{out}}`, `{{in_type}}`, and `{{out_type}}` in the emit template.
 
 Target visitors access the builder via `self._builder` (PythonVisitor) or
 `self._builder` (JsVisitor). DomSpelling instances receive the builder in

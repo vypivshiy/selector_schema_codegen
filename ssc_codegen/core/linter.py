@@ -84,9 +84,13 @@ _RESERVED_ALLOWED: dict[str, frozenset[str] | None] = {
 
 _VALID_JSON_MODIFIERS = frozenset({"@skip", "@omitempty"})
 _VALID_JSON_TYPES = frozenset({"str", "int", "float", "bool", "null", "nil"})
+_VALID_IMPORT_KINDS = frozenset({"define", "extension", "fn", "json", "struct"})
 
 _DEFINE_NAME_RE = _re.compile(r"^[A-Z_][A-Z0-9_-]*\Z")
+_EXTENSION_NAME_RE = _re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*\Z")
 _PORTABLE_IDENTIFIER_RE = _re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\Z")
+_EXTENSION_PLACEHOLDER_RE = _re.compile(r"\{\{([^{}]+)\}\}")
+_EXTENSION_PLACEHOLDERS = frozenset({"in", "in_type", "out", "out_type"})
 _JS_RESERVED = frozenset(
     {
         "await",
@@ -248,6 +252,8 @@ def lint_module(
     diags: list[ReadDiagnostic] = []
     children_defines: dict[str, list[KdlNode]] = {}
     _lint_top_level(doc, source_path, diags)
+    _lint_imports(doc, source_path, diags)
+    _lint_extensions(doc, source_path, diags)
     _lint_defines(doc, source_path, diags, children_defines)
     _lint_json_defs(doc, source_path, diags, children_defines)
     _lint_structs(doc, source_path, diags, children_defines)
@@ -262,7 +268,9 @@ def _lint_top_level(
     source_path: str,
     diags: list[ReadDiagnostic],
 ) -> None:
-    for node in doc.select(":root:not(@doc, json, struct, fn, define, import)"):
+    for node in doc.select(
+        ":root:not(@doc, json, struct, fn, define, extension, import)"
+    ):
         diags.append(
             _error(
                 node,
@@ -271,6 +279,418 @@ def _lint_top_level(
                 code="E200",
             )
         )
+
+
+def _lint_imports(
+    doc: KdlDocument,
+    source_path: str,
+    diags: list[ReadDiagnostic],
+) -> None:
+    seen_paths: set[str] = set()
+    for node in doc.select("import:root"):
+        args = _node_args(node)
+        if len(args) != 1:
+            diags.append(
+                _error(
+                    node,
+                    "'import' requires exactly one path argument",
+                    source_path,
+                    code="E001",
+                    hint='example: import "./shared.kdl" { (struct)Shared }',
+                )
+            )
+        elif args[0] in seen_paths:
+            diags.append(
+                _error(
+                    node,
+                    f"duplicate import path '{args[0]}'",
+                    source_path,
+                    code="E003",
+                    hint="combine symbols into one import block",
+                )
+            )
+        else:
+            seen_paths.add(args[0])
+        if node.properties:
+            diags.append(
+                _error(
+                    node,
+                    "'import' does not accept properties",
+                    source_path,
+                    code="E001",
+                )
+            )
+        children = list(node.children)
+        if not children:
+            diags.append(
+                _error(
+                    node,
+                    "'import' requires an explicit non-empty symbol block",
+                    source_path,
+                    code="E001",
+                    hint='example: import "./shared.kdl" { (struct)Shared }',
+                )
+            )
+            continue
+        seen_items: set[tuple[str, str]] = set()
+        for child in children:
+            annotation = child.type_annotation
+            if not annotation:
+                diags.append(
+                    _error(
+                        child,
+                        f"imported symbol '{child.name}' requires a kind annotation",
+                        source_path,
+                        code="E001",
+                        hint=f"use `(struct){child.name}` or another explicit kind",
+                    )
+                )
+                continue
+            kind = annotation[1:-1]
+            if kind not in _VALID_IMPORT_KINDS:
+                diags.append(
+                    _error(
+                        child,
+                        f"unknown import kind '{kind}'",
+                        source_path,
+                        code="E002",
+                        hint="valid kinds: "
+                        + ", ".join(sorted(_VALID_IMPORT_KINDS)),
+                    )
+                )
+                continue
+            if child.args or child.properties or child.children:
+                diags.append(
+                    _error(
+                        child,
+                        "import items cannot have arguments, properties, or children",
+                        source_path,
+                        code="E001",
+                        hint=f"use `({kind}){child.name}`",
+                    )
+                )
+            item = (kind, child.name)
+            if item in seen_items:
+                diags.append(
+                    _error(
+                        child,
+                        f"duplicate imported symbol: {kind} '{child.name}'",
+                        source_path,
+                        code="E003",
+                    )
+                )
+            seen_items.add(item)
+
+
+def _lint_extension_type(
+    value,
+    node: KdlNode,
+    source_path: str,
+    diags: list[ReadDiagnostic],
+) -> None:
+    name = str(value.value).rstrip("?")
+    annotation = value.type_annotation
+    if name not in {"T", "bool", "doc", "float", "int", "str"}:
+        diags.append(
+            _error(
+                node,
+                f"unknown extension signature type '{name}'",
+                source_path,
+                code="E400",
+                hint="valid types: T, bool, doc, float, int, str",
+            )
+        )
+    if annotation and annotation != "(array)":
+        diags.append(
+            _error(
+                node,
+                f"unsupported extension type annotation '{annotation}'",
+                source_path,
+                code="E400",
+                hint="only '(array)' is supported",
+            )
+        )
+    if name == "T" and (annotation or str(value.value).endswith("?")):
+        diags.append(
+            _error(
+                node,
+                "generic type T cannot have modifiers",
+                source_path,
+                code="E400",
+            )
+        )
+
+
+def _lint_extension_import(
+    node: KdlNode,
+    target: str,
+    source_path: str,
+    diags: list[ReadDiagnostic],
+) -> None:
+    if len(node.args) != 1 or node.children:
+        diags.append(
+            _error(
+                node,
+                "extension import requires one string argument and no children",
+                source_path,
+                code="E001",
+            )
+        )
+    unknown_props = set(node.properties) - {"alias"}
+    if unknown_props:
+        diags.append(
+            _error(
+                node,
+                "unknown extension import properties: "
+                + ", ".join(sorted(unknown_props)),
+                source_path,
+                code="E002",
+            )
+        )
+    if node.get_prop("alias") and target != "go":
+        diags.append(
+            _error(
+                node,
+                "import alias is only supported for Go package imports",
+                source_path,
+                code="E203",
+            )
+        )
+
+
+def _lint_extension_target(
+    node: KdlNode,
+    source_path: str,
+    diags: list[ReadDiagnostic],
+) -> None:
+    allowed = {"emit", "helper", "import"}
+    for child in node.children:
+        if child.name not in allowed:
+            diags.append(
+                _error(
+                    child,
+                    f"unknown '{node.name}' extension entry '{child.name}'",
+                    source_path,
+                    code="E200",
+                    hint="valid entries: emit, helper, import",
+                )
+            )
+    emits = [child for child in node.children if child.name == "emit"]
+    if len(emits) != 1 or len(emits[0].args) != 1:
+        diags.append(
+            _error(
+                node,
+                f"extension target '{node.name}' requires exactly one `emit <template>`",
+                source_path,
+                code="E001",
+            )
+        )
+    else:
+        template = str(emits[0].args[0].value)
+        placeholders = set(_EXTENSION_PLACEHOLDER_RE.findall(template))
+        unknown = placeholders - _EXTENSION_PLACEHOLDERS
+        if unknown:
+            diags.append(
+                _error(
+                    emits[0],
+                    "unknown extension template placeholders: "
+                    + ", ".join(sorted(unknown)),
+                    source_path,
+                    code="E002",
+                )
+            )
+        if "out" not in placeholders:
+            diags.append(
+                _error(
+                    emits[0],
+                    "extension emit template must assign '{{out}}'",
+                    source_path,
+                    code="E002",
+                )
+            )
+    for child in node.children:
+        if child.name == "import":
+            _lint_extension_import(child, node.name, source_path, diags)
+        elif child.name == "helper":
+            helper_name = str(child.args[0].value) if child.args else ""
+            target_name = {"py": "python", "js": "javascript"}.get(
+                node.name, node.name
+            )
+            if (
+                len(child.args) != 1
+                or not _PORTABLE_IDENTIFIER_RE.fullmatch(helper_name)
+                or not _is_valid_generated_identifier(target_name, helper_name)
+            ):
+                diags.append(
+                    _error(
+                        child,
+                        "helper requires one portable identifier",
+                        source_path,
+                        code="E403",
+                    )
+                )
+            helper_allowed = {"import", "source"}
+            for entry in child.children:
+                if entry.name not in helper_allowed:
+                    diags.append(
+                        _error(
+                            entry,
+                            f"unknown helper entry '{entry.name}'",
+                            source_path,
+                            code="E200",
+                            hint="valid entries: import, source",
+                        )
+                    )
+                elif entry.name == "import":
+                    _lint_extension_import(entry, node.name, source_path, diags)
+            sources = [
+                entry for entry in child.children if entry.name == "source"
+            ]
+            if len(sources) != 1 or len(sources[0].args) != 1:
+                diags.append(
+                    _error(
+                        child,
+                        "helper requires exactly one `source <code>` entry",
+                        source_path,
+                        code="E001",
+                    )
+                )
+
+
+def _lint_extensions(
+    doc: KdlDocument,
+    source_path: str,
+    diags: list[ReadDiagnostic],
+) -> None:
+    seen_namespaces: set[str] = set()
+    for node in doc.select("extension:root"):
+        namespace = _node_arg(node, 0) or ""
+        if len(node.args) != 1 or not _EXTENSION_NAME_RE.fullmatch(namespace):
+            diags.append(
+                _error(
+                    node,
+                    "'extension' requires one portable namespace",
+                    source_path,
+                    code="E001",
+                    hint="example: extension Utils { ... }",
+                )
+            )
+        elif namespace in seen_namespaces:
+            diags.append(
+                _error(
+                    node,
+                    f"duplicate extension namespace '{namespace}'",
+                    source_path,
+                    code="E402",
+                )
+            )
+        seen_namespaces.add(namespace)
+        if not node.children:
+            diags.append(
+                _error(
+                    node,
+                    f"extension '{namespace}' must declare at least one operation",
+                    source_path,
+                    code="E001",
+                )
+            )
+        seen_operations: set[str] = set()
+        for operation in node.children:
+            if (
+                not _EXTENSION_NAME_RE.fullmatch(operation.name)
+                or operation.args
+                or operation.properties
+            ):
+                diags.append(
+                    _error(
+                        operation,
+                        "extension operation must be a portable child node without entries",
+                        source_path,
+                        code="E001",
+                    )
+                )
+            if operation.name in seen_operations:
+                diags.append(
+                    _error(
+                        operation,
+                        f"duplicate extension operation '{namespace}.{operation.name}'",
+                        source_path,
+                        code="E402",
+                    )
+                )
+            seen_operations.add(operation.name)
+            sigs = [
+                child for child in operation.children if child.name == "sig"
+            ]
+            targets = [
+                child
+                for child in operation.children
+                if child.name in ("go", "js", "py")
+            ]
+            unknown = [
+                child
+                for child in operation.children
+                if child.name not in ("go", "js", "py", "sig")
+            ]
+            for child in unknown:
+                diags.append(
+                    _error(
+                        child,
+                        f"unknown extension operation entry '{child.name}'",
+                        source_path,
+                        code="E200",
+                        hint="valid entries: sig, py, js, go",
+                    )
+                )
+            if len(sigs) != 1 or len(sigs[0].args) != 2:
+                diags.append(
+                    _error(
+                        operation,
+                        "extension operation requires exactly one `sig <input> <output>`",
+                        source_path,
+                        code="E001",
+                    )
+                )
+            else:
+                _lint_extension_type(
+                    sigs[0].args[0], sigs[0], source_path, diags
+                )
+                _lint_extension_type(
+                    sigs[0].args[1], sigs[0], source_path, diags
+                )
+                output_name = str(sigs[0].args[1].value).rstrip("?")
+                input_name = str(sigs[0].args[0].value).rstrip("?")
+                if output_name == "T" and input_name != "T":
+                    diags.append(
+                        _error(
+                            sigs[0],
+                            "generic output T must be bound by generic input T",
+                            source_path,
+                            code="E100",
+                        )
+                    )
+            if not targets:
+                diags.append(
+                    _error(
+                        operation,
+                        "extension operation requires at least one target",
+                        source_path,
+                        code="E001",
+                    )
+                )
+            seen_targets: set[str] = set()
+            for target in targets:
+                if target.name in seen_targets:
+                    diags.append(
+                        _error(
+                            target,
+                            f"duplicate extension target '{target.name}'",
+                            source_path,
+                            code="E402",
+                        )
+                    )
+                seen_targets.add(target.name)
+                _lint_extension_target(target, source_path, diags)
 
 
 def _lint_defines(
@@ -818,15 +1238,6 @@ def _lint_reserved_field(
                     f"@check {check_name or ''}block must contain at least one operation",
                     source_path,
                     code="E001",
-                )
-            )
-        elif node.select_one("to-bool") is None:
-            diags.append(
-                _error(
-                    node,
-                    f"@check {check_name or ''}must contain 'to-bool' to guarantee BOOL return type",
-                    source_path,
-                    code="E100",
                 )
             )
     elif field_name == "@error":
@@ -1905,6 +2316,15 @@ def lint_wildcard_op(
                 code="E301",
                 hint=f"declare it in @init: @init {{ {field_name} {{ ... }} }}",
             )
+        return
+
+    if op_name in ctx.extensions:
+        lint.error(
+            node,
+            message=f"custom operation '{op_name}' requires the '!' prefix",
+            code="E001",
+            hint=f"use '!{op_name}'",
+        )
         return
 
     info = lint.defines.get(op_name)

@@ -32,6 +32,7 @@ from ssc_codegen.ast import (
     CssSelect,
     CssSelectAll,
     ErrorResponse,
+    ExtensionCall,
     Fallback,
     Field,
     Filter,
@@ -363,7 +364,11 @@ class GoVisitor(BaseWalker):
         # pass 2: emit output.
         lines = self._walk_module(module_ast, ctx)
         self._all_std_defs.update(self._builder.std_defs)
+        self._all_std_defs.update(self._builder.runtime_defs)
         for imp in self._builder.std_imports:
+            if imp not in self._all_std_imports:
+                self._all_std_imports.append(imp)
+        for imp in self._builder.runtime_imports:
             if imp not in self._all_std_imports:
                 self._all_std_imports.append(imp)
         if module_uses_http(module_ast):
@@ -518,6 +523,42 @@ class GoVisitor(BaseWalker):
         self, node: ErrorResponse, ctx: WalkContext
     ) -> list[str]:
         return []
+
+    def visit_extension_call(
+        self, node: ExtensionCall, ctx: WalkContext
+    ) -> list[str]:
+        definition = node.definition
+        target = definition.targets.get("go") if definition else None
+        if target is None:
+            raise BuildTimeError(
+                f"extension operation '{node.qualified_name}' has no 'go' target"
+            )
+
+        def render_import(value: str, alias: str = "") -> str:
+            spec = _go_str(value)
+            return f"{alias} {spec}" if alias else spec
+
+        for item in target.imports:
+            self._builder.require_import(render_import(item.value, item.alias))
+        for helper in target.helpers:
+            self._builder.require_runtime(
+                helper.name,
+                code=helper.source,
+                imports=[
+                    render_import(item.value, item.alias)
+                    for item in helper.imports
+                ],
+            )
+        replacements = {
+            "{{in}}": ctx.prv,
+            "{{out}}": ctx.nxt,
+            "{{in_type}}": self._resolve_type(node.accept_type_info),
+            "{{out_type}}": self._resolve_type(node.ret_type_info),
+        }
+        rendered = target.emit
+        for placeholder, value in replacements.items():
+            rendered = rendered.replace(placeholder, value)
+        return [ctx.indent + line for line in rendered.splitlines()]
 
     # === TYPES ===
 

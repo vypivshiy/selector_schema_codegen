@@ -10,7 +10,8 @@ Code generator for web scraping parsers. Describe HTML extraction rules in a dec
 
 - Declarative DSL based on KDL 2.0 syntax
 - Static type checking and linting before code generation
-- Multiple output targets: Python (bs4, lxml, parsel, selectolax), JavaScript (DOM API)
+- Multiple output targets: Python (bs4, lxml, parsel, selectolax), JavaScript (DOM API), Go (goquery)
+- Typed user extensions with lazy target imports and runtime helpers
 - Struct types: `item`, `list`, `dict`, `table`, `flat`
 - LLM-friendly: system prompt + linter loop for AI-assisted schema generation
 

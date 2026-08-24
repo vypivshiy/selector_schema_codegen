@@ -30,6 +30,7 @@ ssc_codegen/
 │   ├── base.py            # Node abstract base class
 │   ├── types.py           # VariableType, StructType enums
 │   ├── module.py          # Module, Docstring (deprecated), Utilities, CodeStartHook, CodeEndHook
+│   ├── extension.py       # ExtensionDef/Target/Helper/Type + ExtensionCall
 │   ├── struct.py          # StructBase, Struct, StructRest, Field, Init, InitFieldCall, InitField, PreValidate, SplitDoc, Key, Value, TableConfig, TableMatchKey, TableRows, CheckMethod, StartParse, MethodBase, MethodFetch, MethodRest, RequestHttp, Template (tokenized literal/placeholder parts), PlaceholderSpec, ErrorResponse
 │   ├── rest.py            # ResultVariantDef, ResultAliasDef, MatcherEntry, MatcherListDef (synthesized REST result-artifact nodes)
 │   ├── selectors.py       # CssSelect, CssSelectAll, XpathSelect, XpathSelectAll, CssRemove, XpathRemove
@@ -54,6 +55,8 @@ ssc_codegen/
 │   ├── predicates.py      # Predicate expression parsing
 │   ├── struct_parser.py   # Struct body parsing
 │   ├── module_handler.py  # top-level handlers + import graph resolution
+│   ├── imports.py         # mandatory typed imports, private scopes, dependency closure
+│   ├── extensions.py      # extension declaration parsing + signature resolution
 │   ├── linter.py          # structural, symbol, CSS/XPath/regex linting
 │   ├── type_checking.py   # Pipeline type inference and mismatch detection
 │   └── format.py          # Diagnostic formatting (text + JSON)
@@ -173,6 +176,8 @@ ssc-gen scout -i page.html --text '\$\d+\.\d{2}' -f json              # HTML rec
 9. **Recursive nesting**: `Nested` node resolves via struct_map with cycle detection.
 10. **Transport layer**: `request_spec.parse_to_http` normalises curl/HTTP into `RequestHttp`. String fields are tokenized `PlaceholderTemplate` values; request content lives in `RequestHttp.payload` while inherited `Node.body` remains the AST-child list. JSON templates are parsed structurally before target rendering. Visitors call `with_renamed_placeholders(transform)` for target naming.
 11. **Runtime separation**: `--separate-runtime` extracts helper functions into a standalone module; generated parsers import from it instead of inlining.
+12. **Explicit imports**: `import "./x.kdl" { (struct)X }` is mandatory; imports are private and selected symbols pull source-scoped dependency closure.
+13. **User extensions**: `extension Utils { op-name { sig ...; py/js/go { ... } } }` defines typed custom pipeline operations called as `!Utils.op-name`. Used imports/helpers are registered lazily.
 
 ---
 
