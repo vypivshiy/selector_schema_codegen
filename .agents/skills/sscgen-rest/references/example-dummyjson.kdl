@@ -1,20 +1,3 @@
-@doc """
-Minimal REST API client example targeting DummyJSON (https://dummyjson.com).
-
-Demonstrates:
-  - Nested + envelope json schemas (Product → ProductList).
-  - Typed placeholders: required path id (int), optional query (int?), search query (str).
-  - Both @request body formats: raw HTTP (get-product, create-product) and
-    POSIX curl (list-products, search-products) — fully interchangeable.
-  - POST with JSON body + typed body placeholders.
-  - Error mapping with @error 404.
-
-Lint-clean: `ssc-gen check example-dummyjson.kdl`
-"""
-
-// ── JSON schemas ──────────────────────────────────────────────────────────────
-// camelCase JSON keys bind to snake_case fields via the alias string arg.
-
 json Product {
     id int
     title str
@@ -29,7 +12,6 @@ json Product {
     thumbnail str
 }
 
-// Paginated list envelope returned by /products and /products/search.
 json ProductList {
     products (array)Product
     total int
@@ -37,28 +19,17 @@ json ProductList {
     limit int
 }
 
-// Error body returned on 404, e.g. {"message": "Product with id '99999' not found"}
 json ApiError {
     message str
 }
 
-// Fictional schema for demonstrating field-condition @error matching.
-// Some APIs return 200 for both success and error, using a field like
-// "success" to distinguish. @error 200 with conditions covers this case.
 json ActionResponse {
     success bool
     message str
 }
 
 
-// ── REST struct ───────────────────────────────────────────────────────────────
-
 (rest)struct DummyJsonApi {
-    @doc """
-    DummyJSON Products API.
-    No auth required. Rate limits: none.
-    """
-
     @request name=get-product \
         doc="Fetch one product by id." \
         response=Product \
@@ -68,7 +39,6 @@ json ActionResponse {
     Accept: application/json
     """
 
-    // POSIX curl form — equivalent to raw HTTP; great for DevTools paste-ins.
     @request name=list-products \
         doc="Paginated product list. All params optional." \
         response=ProductList \
@@ -97,15 +67,9 @@ json ActionResponse {
     {"title": "{{title}}", "price": {{price:float}}, "stock": {{stock:int}}}
     """
 
-    // 404 for unknown id — body shape: {"message": "..."}
     @error 404 ApiError
 
-    // Field-condition example (fictional): some APIs return 200 for both
-    // success and error, distinguished by a field in the response body.
-    // Uncomment below to see field-conditions in action:
     // @error 200 ActionResponse success=#false
 
-    // Key-presence example: check that a key exists in the JSON body
-    // regardless of its value (positional arg after schema name).
     // @error 400 ApiError error
 }

@@ -123,20 +123,14 @@ curl https://books.toscrape.com/ | ssc-gen health examples/booksToScrape.kdl:Mai
 LLM agents can generate and validate `.kdl` schemas automatically using the
 linter feedback loop.
 
-### In chats (ChatGPT, Claude, etc.)
-
-Use [SYSTEM_PROMPT.md](SYSTEM_PROMPT.md) as system prompt. After generation,
-run `ssc-gen check -f json` and send errors back to the LLM for correction.
-
 ### In AI-powered IDEs (Claude Code, Cursor, opencode, etc.)
 
-Use the skills under [.agents/skills/](.agents/skills/):
+Project works through `agents + skills`. Use skills under [.agents/skills/](.agents/skills/):
 
 - **`sscgen-dsl`** — HTML scraping schemas (`css`, `text`, `(item)struct`,
   `(list)struct`, `(table)struct`, predicates, `jsonify`).
 - **`sscgen-rest`** — REST/JSON API clients (`(rest)struct`, `@request`,
   `@error`, typed placeholders).
-- **`sscgen-openapi`** — convert OpenAPI/Swagger specs into `.kdl`.
 
 ## Development
 

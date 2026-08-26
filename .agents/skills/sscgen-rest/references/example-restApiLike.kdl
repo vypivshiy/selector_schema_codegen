@@ -112,7 +112,7 @@ json ApiError {
         doc="Paginated product list. All params optional." \
         response=ProductList \
         """
-    GET /products?limit={{limit:int?}}&skip={{skip:int?}}&select={{select:str[]?|csv}} HTTP/1.1
+    GET /products?limit={{limit:int?}}&skip={{skip:int?}}&select={{fields:str[]?|csv}} HTTP/1.1
     Host: dummyjson.com
     Accept: application/json
     """

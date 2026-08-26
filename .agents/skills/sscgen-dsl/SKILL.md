@@ -7,7 +7,7 @@ description: >
   **plain-text parsing** from HTML pages, JS files, URLs, and skill
   instructions. Covers struct types (item) / (list) / (table) / (dict) /
   (raw), css selectors, extract / string / regex / array / cast pipelines,
-  inline constants, transforms, jsonify, and the iterative linter loop.
+  inline constants, jsonify, and the iterative linter loop.
   Use this skill whenever the user wants to: generate a .kdl schema file for HTML
   scraping, write KDL DSL for data extraction from HTML or plain text, work
   with css/css-all/text/attr/raw pipelines, parse JS files / URLs / playlists /
@@ -51,20 +51,21 @@ Generate valid **KDL Schema DSL v2.0** configs for data extraction from:
 > Scout is the only sanctioned HTML inspection tool — see Step 1 for usage
 > and rationale.
 
-## Constraints (always apply)
+## DSL/CLI constraints (always apply)
 
 - **`ssc-gen scout` only for HTML exploration — never `Read` raw `.html`.** See the activation contract above; this constraint has no exceptions.
-- **CSS selectors only** — never use `xpath`, `xpath-all`, `xpath-remove`
-- **No removal operations** — never use `css-remove`, `xpath-remove`. Also `css-remove`/`xpath-remove` do not support the block pattern-match form
-- **No advanced operations** — never use `transform`, `json`/`jsonify` unless the user explicitly requests them
-- **Single-file, self-contained schemas only** — never use `import`. Each site = one complete standalone `.kdl` file
-- **Output filename = domain name.** `example.com` → `example.kdl`. If the domain starts with a digit (`[0-9]`), prefix with `n__`: `123movies.com` → `n__123movies.kdl`
-- **No `define`** — inline all values directly into ops: `fmt "https://site/{{}}"`, `re #"pat"#`, `repl { One "1"; ... }`, `@request """..."""`
 - **No `(rest)struct`**, no `@error` — if the response is JSON, switch to `sscgen-rest` (see **Scope boundary** below for detection signals)
 - **`css-all "..." ; index N` is unreliable for N > 0** — the `index` operator has a known ssc-gen bug where values beyond index 0 may silently fall back to the first element. Use `css "selector:nth-of-type(N)"` instead (see Array ops section)
 - **CSS3 selectors by default** — attribute selectors, structural pseudo-classes (`:nth-child`, `:first-child`, `:nth-of-type`, combinators). **CSS4 pseudo-selectors (`:not()`, `:is()`, `:where()`, `:has()`) ONLY when the user's prompt explicitly says "CSS4 allowed"** — backend support varies (bs4/lxml OK, JS DOMParser/slax partial). Prefer a smarter `[attr^=...]` filter or pipeline `filter {}` over CSS4 when in doubt.
 - Prefer simple, readable pipelines
 - If extraction can be done with a smarter CSS selector, do that instead of adding ops to the pipeline
+
+## Generation policy
+
+- Recommend CSS before XPath, but use supported XPath when user explicitly needs it.
+- Recommend self-contained files and inline values for small schemas; imports and defines remain available when reuse matters.
+- Recommend `ssc-gen scout --discover -f json` for an accessible URL or HTML file. Scout is not required for `ssc-gen check`.
+- See `references/model-friendly.md` for Safe syntax and Repair mode.
 
 ---
 
@@ -986,7 +987,6 @@ If fixing linter errors: emit the **full corrected file**, not just changed line
 ## See also
 
 - **`sscgen-rest`** — for REST/JSON HTTP API clients (`(rest)struct`, `@request`, `@error`, typed placeholders). Share the same DSL surface but a different problem domain.
-- **`sscgen-openapi`** — for converting OpenAPI/Swagger specs to `.kdl` REST clients deterministically.
 
 ---
 

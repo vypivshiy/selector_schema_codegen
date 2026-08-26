@@ -67,25 +67,25 @@ ssc-gen check simple.kdl
 LLM-агент (Claude, ChatGPT и др.) может генерировать и отлаживать `.kdl` схемы
 автоматически. Для этого:
 
-1. **Скормите LLM системный промпт** из `SYSTEM_PROMPT.md` (или `docs/llm.txt`
-   как компактную альтернативу).
-2. **Передайте HTML-страницу** и опишите, какие данные нужно извлечь.
-3. LLM сгенерирует `.kdl` файл.
-4. **Прогоните линтер** для валидации:
+1. **Передайте HTML-страницу или описание API** и опишите, какие данные нужно извлечь.
+2. LLM сгенерирует `.kdl` файл.
+3. **Прогоните линтер** для валидации:
    ```bash
    ssc-gen check schema.kdl -f json
    ```
-5. Если есть ошибки — передайте JSON-вывод обратно LLM, он исправит.
-6. Повторяйте до чистого прохода линтера.
-7. **Сгенерируйте код** парсера:
+4. Если есть ошибки — передайте JSON-вывод обратно LLM, он исправит.
+5. Повторяйте до чистого прохода линтера.
+6. **Сгенерируйте код** парсера:
    ```bash
    ssc-gen generate python schema.kdl -L bs4
    ```
 
-В IDE с поддержкой агентов (Claude Code, Cursor, opencode и т.д.) этот цикл
-может быть полностью автоматизирован через skills из `.agents/skills/`:
-`sscgen-dsl` (HTML scraping), `sscgen-rest` (REST API), `sscgen-openapi`
-(OpenAPI → `.kdl`).
+Проект работает через связку `agents + skills`. В IDE с поддержкой агентов
+(Claude Code, Cursor, opencode и т.д.) этот цикл может быть автоматизирован
+через skills из `.agents/skills/`:
+`sscgen-dsl` (HTML scraping) and `sscgen-rest` (REST API). OpenAPI/Swagger can
+serve as external API contract information, but CLI does not convert it
+automatically; describe resulting KDL manually with `sscgen-rest`.
 
 ## Где смотреть живые примеры
 

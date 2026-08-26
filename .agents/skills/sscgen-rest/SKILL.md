@@ -36,14 +36,31 @@ Generate `(rest)struct` schemas that become typed HTTP clients when run through
    types: `str|int|float|bool`; same name = same full spec; no keyword collisions.
 7. **`@doc` describes the API semantically** (purpose, auth, base URL, rate limits).
    Do NOT list generated method signatures — they are derived from `name=` and
-   placeholders and will rot as the schema evolves.
+    placeholders and will rot as the schema evolves.
+
+These are DSL/CLI constraints. Generation preferences for weaker models are in
+`references/model-friendly.md`.
+
+## Source evidence and API mapping
+
+Build schemas from request-response records, HAR dumps, raw HTTP records, or a
+safe request made by the agent to an accessible URL. Prose is a fallback. An
+OpenAPI/Swagger document is external contract information only: `ssc-gen` does
+not convert it automatically. Extract endpoints, response fields, nullability,
+envelopes, and errors, then write KDL manually.
+
+The `vkru.kdl` pattern is useful: multi-step token preparation, separate REST
+structs, response envelopes, pagination, nullable nested fields, and APIs that
+return errors in HTTP 200 bodies. Model body conditions with `@error`.
+Never copy credentials, cookies, tokens, or confidential responses into schemas,
+references, logs, or examples.
 
 ---
 
 ## Input modes
 
 ### Mode 1 — Generate from scratch
-API description → `json` schemas → `(rest)struct` → lint → emit file.
+request-response/HAR/raw HTTP/accessible URL → `json` schemas → `(rest)struct` → lint → emit file.
 
 ### Mode 2 — Add methods to existing struct
 Append `@request name=<unique>` blocks. Add `@error` only for uncovered statuses. Re-lint.
@@ -309,7 +326,6 @@ spot-check field names and types against it.
 ## See also
 
 - **`sscgen-dsl`** — for HTML scraping (`(item)/(list)/(table)/(flat)/(dict)struct`, css/text/attr pipelines).
-- **`sscgen-openapi`** — when an OpenAPI/Swagger spec is available; deterministic spec → `.kdl` conversion.
 
 ---
 
