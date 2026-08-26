@@ -46,6 +46,7 @@ from kdlquery import KdlNode
 
 from ssc_codegen.core.contexts import LintContext, ParseContext, WalkCtx
 from ssc_codegen.core.expressions import parse_expressions
+from ssc_codegen.core.linter import is_http_status
 from ssc_codegen.core.type_checking import check_pipeline_types
 
 # AST node types forbidden in (raw)struct — they require a DOM document.
@@ -271,6 +272,10 @@ def parse_struct(
                     message=f"@error status must be integer, got {status_raw!r}",
                     code="E002",
                 )
+                continue
+            if not is_http_status(status_int):
+                # Structural lint owns the diagnostic. This only prevents
+                # malformed statuses from producing a partial AST.
                 continue
             schema_name = str(
                 ctx.property_defines.get(node.args[1].value, node.args[1].value)

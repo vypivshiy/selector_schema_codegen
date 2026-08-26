@@ -54,6 +54,11 @@ def _node_args(node: KdlNode) -> list[str]:
     return [str(a.value) for a in node.args]
 
 
+def is_http_status(value: int) -> bool:
+    """Return whether an integer can be used as an HTTP response status."""
+    return 100 <= value <= 599
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Constants
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1261,6 +1266,20 @@ def _lint_reserved_field(
                 )
             )
             return
+        try:
+            status = int(err_args[0])
+        except ValueError:
+            status = None
+        if status is not None and not is_http_status(status):
+            diags.append(
+                _error(
+                    node,
+                    f"@error status must be in HTTP range 100..599, got {status}",
+                    source_path,
+                    code="E002",
+                    hint="use an HTTP status code from 100 through 599",
+                )
+            )
         positional_keys = set(err_args[2:])
         property_keys = set(node.properties.keys())
         duplicates = positional_keys & property_keys
@@ -1513,6 +1532,7 @@ def _lint_generated_symbols(
     targets: Iterable[str] | None = None,
 ) -> None:
     requested = normalize_targets(targets)
+    _lint_placeholder_specifications(nodes, diags, source_for)
     records = _collect_symbol_records(nodes, requested, source_for)
     for finding in target_symbol_plan(records, requested):
         declaration = finding.record.declaration
@@ -1526,6 +1546,35 @@ def _lint_generated_symbols(
                     hint=finding.hint,
                 )
             )
+
+
+def _lint_placeholder_specifications(
+    nodes: list[KdlNode], diags: list[ReadDiagnostic], source_for
+) -> None:
+    """Reject one request parameter being declared with different specs."""
+    for struct in nodes:
+        if struct.name != "struct":
+            continue
+        for request in struct.select("@request"):
+            seen: dict[str, PlaceholderSpec] = {}
+            payload = str(request.args[0].value) if request.args else ""
+            for match in PLACEHOLDER_WIDE_RE.finditer(payload):
+                spec = PlaceholderSpec.parse(match.group(0))
+                if spec is None:
+                    continue
+                previous = seen.get(spec.name)
+                if previous is not None and previous != spec:
+                    diags.append(
+                        _error(
+                            request,
+                            f"placeholder '{spec.name}' uses conflicting type/style declarations",
+                            source_for(request),
+                            code="E402",
+                            hint="use one placeholder specification consistently",
+                        )
+                    )
+                else:
+                    seen[spec.name] = spec
 
 
 def _collect_symbol_records(
@@ -1601,7 +1650,7 @@ def _collect_symbol_records(
                                 name,
                                 target,
                                 local_symbol(SymbolKind.METHOD, name, target),
-                                SymbolScope.REQUEST,
+                                SymbolScope.METHOD,
                                 local_source,
                                 child.span,
                                 child,
@@ -2250,7 +2299,7 @@ def lint_wildcard_op(
     node: KdlNode, ctx: ParseContext, lint: LintContext
 ) -> None:
     """Validate unknown ops in pipeline context."""
-    from ssc_codegen.core.type_checking import OP_TYPES
+    from ssc_codegen.core.type_checking import BUILTIN_PIPELINE_OPS
 
     op_name = node.name
     if not op_name:
@@ -2288,7 +2337,7 @@ def lint_wildcard_op(
         return
 
     _KNOWN_OPS: frozenset[str] = (
-        frozenset(OP_TYPES.keys()) | _EXTRA_PIPELINE_OPS | _PREDICATE_OPS
+        BUILTIN_PIPELINE_OPS | _EXTRA_PIPELINE_OPS | _PREDICATE_OPS
     )
     candidates = sorted(
         _KNOWN_OPS

@@ -182,6 +182,17 @@ class TestRestParser:
         assert errors[0].required_keys == ["error"]
         assert errors[0].conditions == {"detail": "msg"}
 
+    @pytest.mark.parametrize("status", [0, 99, 600, 999])
+    def test_error_status_must_be_http_status(self, status):
+        _, diagnostics = parse_module(
+            _rest_src(errors=f"    @error {status} Err\n")
+        )
+
+        errors = [d for d in diagnostics if d.severity == Severity.ERROR]
+        assert len(errors) == 1
+        assert errors[0].code == "E002"
+        assert "100..599" in errors[0].message
+
 
 # ---------------------------------------------------------------------------
 # Converter tests (smoke)

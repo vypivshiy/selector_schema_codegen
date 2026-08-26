@@ -108,6 +108,11 @@ OP_TYPES: dict[str, OpSig] = {
     ),
 }
 
+# The type signature table is also the authoritative vocabulary for built-in
+# pipeline operations.  Linting and type inference must agree on what is
+# built-in; predicate operations and extensions are intentionally separate.
+BUILTIN_PIPELINE_OPS = frozenset(OP_TYPES)
+
 
 def _vt_compatible(
     got_base: VariableType, got_is_array: bool, expected: VariableType | None

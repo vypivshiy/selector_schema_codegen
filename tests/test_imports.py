@@ -190,6 +190,24 @@ def test_imported_document_syntax_error_reports_imported_path(tmp_path):
     assert error.path == str(imported.resolve())
 
 
+def test_imported_cross_reference_keeps_imported_source_path(tmp_path):
+    imported = tmp_path / "shared.kdl"
+    imported.write_text(
+        "struct Shared { child { nested Missing } }\n", encoding="utf-8"
+    )
+    root = tmp_path / "root.kdl"
+    root.write_text(
+        'import "./shared.kdl" { (struct)Shared }\n', encoding="utf-8"
+    )
+
+    _, diagnostics = _parse_file(root)
+
+    error = next(
+        d for d in diagnostics if "undefined struct 'Missing'" in d.message
+    )
+    assert error.path == str(imported.resolve())
+
+
 # ── error cases ───────────────────────────────────────────────────────────────
 
 

@@ -1184,3 +1184,39 @@ def test_keyword_and_placeholder_collisions_are_rejected():
 
     assert any("invalid python identifier 'class'" in m for m in messages)
     assert any("placeholder" in m and "collision" in m for m in messages)
+
+
+def test_request_and_check_methods_share_generated_namespace():
+    src = (
+        "struct API {\n"
+        '    @request name=validate """\n'
+        "    GET / HTTP/1.1\n"
+        "    Host: example.com\n"
+        '    """\n'
+        "    @check validate { text }\n"
+        '    title { css "h1"; text }\n'
+        "}\n"
+    )
+
+    _, diagnostics = parse_module(src)
+
+    assert any("symbol collision" in d.message for d in diagnostics)
+
+
+def test_request_placeholder_spec_conflict_is_rejected():
+    src = (
+        "struct API {\n"
+        '    @request """\n'
+        "    GET /?a={{id:int}}&b={{id:str}} HTTP/1.1\n"
+        "    Host: example.com\n"
+        '    """\n'
+        '    title { css "h1"; text }\n'
+        "}\n"
+    )
+
+    _, diagnostics = parse_module(src)
+
+    assert any(
+        d.code == "E402" and "conflicting type/style" in d.message
+        for d in diagnostics
+    )

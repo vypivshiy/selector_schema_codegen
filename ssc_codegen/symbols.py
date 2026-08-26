@@ -103,8 +103,6 @@ def is_valid_symbol(target: str, symbol: str) -> bool:
 def target_symbol_plan(
     records: Iterable[SymbolRecord],
     targets: Iterable[str] | None = None,
-    *,
-    source: str = "",
 ) -> tuple[SymbolFinding, ...]:
     """Validate normalized records and report findings in record order."""
     requested = normalize_targets(targets)
@@ -195,6 +193,3 @@ def local_symbol(kind: SymbolKind, raw: str, target: str) -> str:
         "javascript": f"_init{pascal}",
         "go": f"init{pascal}",
     }[target]
-
-
-plan_symbols = target_symbol_plan
