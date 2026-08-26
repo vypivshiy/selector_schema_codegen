@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 import difflib as _difflib
-import keyword as _keyword
 import re as _re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Iterator
 
-from ssc_codegen.naming import to_camel_case, to_pascal_case, to_snake_case
+from ssc_codegen.symbols import (
+    SymbolKind,
+    SymbolRecord,
+    SymbolScope,
+    local_symbol,
+    is_valid_symbol,
+    normalize_targets,
+    top_symbol_names,
+    target_symbol_plan,
+)
 from ssc_codegen.ast.struct import PLACEHOLDER_WIDE_RE, PlaceholderSpec
 from kdlquery import KdlDocument, KdlNode, ReadDiagnostic, Severity
 
@@ -1371,6 +1379,7 @@ def lint_cross_refs(
     source_path: str = "",
     *,
     node_source_paths: Mapping[int, object] | None = None,
+    targets: Iterable[str] | None = None,
 ) -> list[ReadDiagnostic]:
     """Cross-reference validation — needs merged node list including imports."""
     diags: list[ReadDiagnostic] = []
@@ -1487,235 +1496,175 @@ def lint_cross_refs(
                 )
             )
 
-    _lint_generated_symbols(nodes, diags, source_for)
+    _lint_generated_symbols(nodes, diags, source_for, targets=targets)
 
     return diags
 
 
 def _is_valid_generated_identifier(target: str, name: str) -> bool:
-    if not _PORTABLE_IDENTIFIER_RE.fullmatch(name):
-        return False
-    if target == "python":
-        return not _keyword.iskeyword(name)
-    if target == "javascript":
-        return name not in _JS_RESERVED
-    return name not in _GO_RESERVED
-
-
-def _top_level_symbols(kind: str, raw_name: str) -> dict[str, tuple[str, ...]]:
-    pascal = to_pascal_case(raw_name)
-    if kind == "struct":
-        return {
-            "python": (pascal, f"{pascal}Type"),
-            "javascript": (pascal, f"{pascal}Type"),
-            "go": (pascal, f"{pascal}Type"),
-        }
-    if kind == "json":
-        symbol = f"{pascal}Json"
-        return {target: (symbol,) for target in ("python", "javascript", "go")}
-    return {
-        "python": (to_snake_case(raw_name),),
-        "javascript": (to_camel_case(raw_name),),
-        "go": (pascal,),
-    }
-
-
-def _struct_symbols(node: KdlNode, raw_name: str) -> dict[str, tuple[str, ...]]:
-    pascal = to_pascal_case(raw_name)
-    annotation = node.type_annotation
-    struct_type = (
-        annotation[1:-1] if annotation else (node.get_prop("type") or "item")
-    )
-    symbols = (pascal,) if struct_type == "rest" else (pascal, f"{pascal}Type")
-    return {target: symbols for target in ("python", "javascript", "go")}
-
-
-def _scope_symbols(kind: str, raw_name: str) -> dict[str, str]:
-    if kind == "field":
-        snake = to_snake_case(raw_name)
-        pascal = to_pascal_case(raw_name)
-        return {
-            "python": f"_parse_{snake}",
-            "javascript": f"_parse{pascal}",
-            "go": f"parse{pascal}",
-        }
-    if kind in ("request", "check", "placeholder"):
-        return {
-            "python": to_snake_case(raw_name),
-            "javascript": to_camel_case(to_snake_case(raw_name)),
-            "go": to_pascal_case(raw_name)
-            if kind == "request"
-            else to_camel_case(raw_name),
-        }
-    snake = to_snake_case(raw_name)
-    pascal = to_pascal_case(raw_name)
-    return {
-        "python": f"_init_{snake}",
-        "javascript": f"_init{pascal}",
-        "go": f"init{pascal}",
-    }
-
-
-def _register_symbols(
-    *,
-    node: KdlNode,
-    raw_name: str,
-    label: str,
-    symbols: dict[str, tuple[str, ...]],
-    seen: dict[str, dict[str, tuple[KdlNode, str, str]]],
-    diags: list[ReadDiagnostic],
-    source_for,
-    skip_local_exact: bool = True,
-) -> None:
-    for target, target_symbols in symbols.items():
-        for symbol in target_symbols:
-            if not _is_valid_generated_identifier(target, symbol):
-                diags.append(
-                    _error(
-                        node,
-                        f"{label} '{raw_name}' produces invalid {target} identifier '{symbol}'",
-                        source_for(node),
-                        code="E403",
-                        hint=f"rename '{raw_name}' to a portable identifier",
-                    )
-                )
-                continue
-            previous = seen[target].get(symbol)
-            if previous is None:
-                seen[target][symbol] = (node, label, raw_name)
-                continue
-            previous_node, previous_label, previous_raw = previous
-            same_local_exact = (
-                previous_label == label
-                and previous_raw == raw_name
-                and source_for(previous_node) == source_for(node)
-            )
-            if same_local_exact and skip_local_exact:
-                continue
-            diags.append(
-                _error(
-                    node,
-                    f"{target} symbol collision: {label} '{raw_name}' and "
-                    f"{previous_label} '{previous_raw}' both produce '{symbol}'",
-                    source_for(node),
-                    code="E402",
-                    hint=f"rename one declaration so {target} names differ",
-                )
-            )
+    return is_valid_symbol(target, name)
 
 
 def _lint_generated_symbols(
     nodes: list[KdlNode],
     diags: list[ReadDiagnostic],
     source_for,
+    *,
+    targets: Iterable[str] | None = None,
 ) -> None:
-    targets = ("python", "javascript", "go")
-    top_seen: dict[str, dict[str, tuple[KdlNode, str, str]]] = {
-        target: {} for target in targets
-    }
-    for node in nodes:
-        if node.name not in ("struct", "json", "fn"):
-            continue
-        raw_name = _node_arg(node, 0)
-        if not raw_name:
-            continue
-        _register_symbols(
-            node=node,
-            raw_name=raw_name,
-            label=node.name,
-            symbols=(
-                _struct_symbols(node, raw_name)
-                if node.name == "struct"
-                else _top_level_symbols(node.name, raw_name)
-            ),
-            seen=top_seen,
-            diags=diags,
-            source_for=source_for,
-        )
-        if node.name == "struct":
-            _lint_struct_symbols(node, diags, source_for)
-
-
-def _lint_struct_symbols(
-    node: KdlNode, diags: list[ReadDiagnostic], source_for
-) -> None:
-    targets = ("python", "javascript", "go")
-    seen_by_kind: dict[str, dict[str, dict[str, tuple[KdlNode, str, str]]]] = {}
-
-    def register(child: KdlNode, raw_name: str, kind: str) -> None:
-        registry_kind = "method" if kind in ("check", "request") else kind
-        seen = seen_by_kind.setdefault(
-            registry_kind, {target: {} for target in targets}
-        )
-        scoped = _scope_symbols(kind, raw_name)
-        _register_symbols(
-            node=child,
-            raw_name=raw_name,
-            label=kind,
-            symbols={target: (name,) for target, name in scoped.items()},
-            seen=seen,
-            diags=diags,
-            source_for=source_for,
-            skip_local_exact=False,
-        )
-
-    for child in node.children:
-        if not child.name.startswith("@"):
-            register(child, child.name, "field")
-            continue
-        if child.name == "@check":
-            name = _node_arg(child, 0)
-            if name:
-                register(child, name, "check")
-        elif child.name == "@request":
-            name = child.get_prop("name") or "fetch"
-            register(child, str(name), "request")
-            _lint_placeholder_symbols(child, diags, source_for)
-        elif child.name == "@init":
-            for init_field in child.children:
-                register(init_field, init_field.name, "init field")
-
-
-def _lint_placeholder_symbols(
-    request_node: KdlNode, diags: list[ReadDiagnostic], source_for
-) -> None:
-    raw_payload = str(request_node.args[0].value) if request_node.args else ""
-    targets = ("python", "javascript", "go")
-    seen: dict[str, dict[str, tuple[KdlNode, str, str]]] = {
-        target: {} for target in targets
-    }
-    specs: dict[str, PlaceholderSpec] = {}
-    for match in PLACEHOLDER_WIDE_RE.finditer(raw_payload):
-        spec = PlaceholderSpec.parse(match.group(0))
-        if spec is None:
-            continue
-        previous_spec = specs.get(spec.name)
-        if previous_spec is not None and previous_spec != spec:
+    requested = normalize_targets(targets)
+    records = _collect_symbol_records(nodes, requested, source_for)
+    for finding in target_symbol_plan(records, requested):
+        declaration = finding.record.declaration
+        if declaration is not None:
             diags.append(
                 _error(
-                    request_node,
-                    f"placeholder '{spec.name}' uses conflicting type/style declarations",
-                    source_for(request_node),
-                    code="E402",
-                    hint="use one placeholder specification consistently",
+                    declaration,
+                    finding.message,
+                    source_for(declaration),
+                    code=finding.code,
+                    hint=finding.hint,
                 )
             )
+
+
+def _collect_symbol_records(
+    nodes: list[KdlNode], targets: tuple[str, ...], source_for
+) -> tuple[SymbolRecord, ...]:
+    """Normalize CST declarations before handing them to symbol policy."""
+    records: list[SymbolRecord] = []
+
+    def add(
+        node: KdlNode, kind: SymbolKind, raw: str, scope: SymbolScope
+    ) -> None:
+        for target in targets:
+            for symbol in top_symbol_names(kind, raw, target):
+                records.append(
+                    SymbolRecord(
+                        kind,
+                        raw,
+                        target,
+                        symbol,
+                        scope,
+                        source_for(node),
+                        node.span,
+                        node,
+                    )
+                )
+
+    for index, node in enumerate(nodes):
+        raw = _node_arg(node, 0)
+        if not raw:
             continue
-        specs[spec.name] = spec
-        _register_symbols(
-            node=request_node,
-            raw_name=spec.name,
-            label="placeholder",
-            symbols={
-                target: (name,)
-                for target, name in _scope_symbols(
-                    "placeholder", spec.name
-                ).items()
-            },
-            seen=seen,
-            diags=diags,
-            source_for=source_for,
-        )
+        if node.name == "struct":
+            add(node, SymbolKind.STRUCT, raw, SymbolScope.MODULE)
+            local_source = f"{source_for(node)}#{index}"
+            if (node.type_annotation or "").strip(
+                "()"
+            ) != "rest" and node.get_prop("type") != "rest":
+                for target in targets:
+                    records.append(
+                        SymbolRecord(
+                            SymbolKind.TYPE,
+                            raw,
+                            target,
+                            top_symbol_names(SymbolKind.STRUCT, raw, target)[1],
+                            SymbolScope.MODULE,
+                            source_for(node),
+                            node.span,
+                            node,
+                        )
+                    )
+            for child in node.children:
+                if not child.name.startswith("@"):
+                    for target in targets:
+                        records.append(
+                            SymbolRecord(
+                                SymbolKind.FIELD,
+                                child.name,
+                                target,
+                                local_symbol(
+                                    SymbolKind.FIELD, child.name, target
+                                ),
+                                SymbolScope.STRUCT,
+                                local_source,
+                                child.span,
+                                child,
+                            )
+                        )
+                elif child.name == "@request":
+                    name = str(child.get_prop("name") or "fetch")
+                    for target in targets:
+                        records.append(
+                            SymbolRecord(
+                                SymbolKind.METHOD,
+                                name,
+                                target,
+                                local_symbol(SymbolKind.METHOD, name, target),
+                                SymbolScope.REQUEST,
+                                local_source,
+                                child.span,
+                                child,
+                            )
+                        )
+                    payload = str(child.args[0].value) if child.args else ""
+                    for match in PLACEHOLDER_WIDE_RE.finditer(payload):
+                        spec = PlaceholderSpec.parse(match.group(0))
+                        if spec:
+                            for target in targets:
+                                records.append(
+                                    SymbolRecord(
+                                        SymbolKind.PLACEHOLDER,
+                                        spec.name,
+                                        target,
+                                        local_symbol(
+                                            SymbolKind.PLACEHOLDER,
+                                            spec.name,
+                                            target,
+                                        ),
+                                        SymbolScope.PLACEHOLDER,
+                                        local_source,
+                                        child.span,
+                                        child,
+                                    )
+                                )
+                elif child.name == "@check" and child.args:
+                    name = str(child.args[0].value)
+                    for target in targets:
+                        records.append(
+                            SymbolRecord(
+                                SymbolKind.METHOD,
+                                name,
+                                target,
+                                local_symbol(SymbolKind.METHOD, name, target),
+                                SymbolScope.METHOD,
+                                local_source,
+                                child.span,
+                                child,
+                            )
+                        )
+                elif child.name == "@init":
+                    for field in child.children:
+                        for target in targets:
+                            records.append(
+                                SymbolRecord(
+                                    SymbolKind.INIT,
+                                    field.name,
+                                    target,
+                                    local_symbol(
+                                        SymbolKind.INIT, field.name, target
+                                    ),
+                                    SymbolScope.STRUCT,
+                                    local_source,
+                                    field.span,
+                                    field,
+                                )
+                            )
+        elif node.name == "json":
+            add(node, SymbolKind.JSON, raw, SymbolScope.MODULE)
+        elif node.name == "fn":
+            add(node, SymbolKind.FUNCTION, raw, SymbolScope.MODULE)
+    return tuple(records)
 
 
 def _collect_json_field_refs(
