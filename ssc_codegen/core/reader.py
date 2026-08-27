@@ -46,7 +46,7 @@ def parse_module(
             )
         ]
 
-    ctx = ParseContext(source_path=source_path)
+    ctx = ParseContext(source_path=source_path, source_text=src)
     lint = LintContext(node_source_paths=ctx.node_source_paths)
     top_nodes = list(doc.nodes)
     if source_path is not None:
@@ -57,7 +57,7 @@ def parse_module(
     top_nodes = resolve_imports(top_nodes, source_path, ctx, lint, diagnostics)
 
     # pass 2 — structural linting on KdlDocument (current file only)
-    root_diagnostics = lint_module(doc, str(source_path or ""))
+    root_diagnostics = lint_module(doc, str(source_path or ""), source_text=src)
     diagnostics.extend(root_diagnostics)
 
     # pass 3 — cross-ref validation on merged flat list

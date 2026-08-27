@@ -393,8 +393,12 @@ def parse_json_fields(
         alias = ""
         for arg in node.args:
             a = str(arg.value)
-            if a.startswith("@"):
+            raw = ctx.source_text[arg.span.start.offset : arg.span.end.offset]
+            quoted = raw.startswith(('"', "'"))
+            if a in {"@skip", "@omitempty"} and not quoted:
                 modifiers.append(a)
+            elif a.startswith("@") and not quoted:
+                continue
             elif not type_:
                 type_ = a
             else:

@@ -67,6 +67,7 @@ class MatcherEntry:
     required_keys: list[str]  # keys that must exist in the JSON body
     conditions: dict[str, Any]  # path=value checks against the JSON body
     factory_name: str  # ResultVariantDef.name to construct on match
+    error_schema: str = ""
 
 
 @dataclass

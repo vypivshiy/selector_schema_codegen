@@ -127,6 +127,7 @@ from ssc_codegen.ast import (
 from ssc_codegen.exceptions import BuildTimeError
 from ssc_codegen.naming import to_pascal_case, to_snake_case
 from ssc_codegen.traversal.utils import (
+    json_def_mapping,
     jsonify_path_to_segments,
     module_has_html_struct,
     module_has_rest,
@@ -140,6 +141,46 @@ from ssc_codegen.targets.python.http_libs.httpx import HttpxStrategy
 from ssc_codegen.targets.python.http_libs.requests import RequestsStrategy
 from ssc_codegen.traversal.context import WalkContext
 from ssc_codegen.traversal.walker import BaseWalker
+
+
+_PY_JSON_REMAP_HELPER = """def ssc_remap_json_keys(value: Any, mapping: Dict[str, Any]) -> Any:
+    if isinstance(value, list):
+        return [ssc_remap_json_keys(item, mapping) for item in value]
+    if not isinstance(value, dict):
+        return value
+    result: Dict[str, Any] = {}
+    for source, spec in mapping.items():
+        if source not in value:
+            continue
+        output, nested = (spec, None)
+        if isinstance(spec, tuple):
+            output, nested = spec
+        item = value[source]
+        if isinstance(nested, list) and nested:
+            item = [ssc_remap_json_keys(x, nested[0]) for x in item]
+        elif nested is not None:
+            item = ssc_remap_json_keys(item, nested)
+        result[output] = item
+    return result"""
+
+
+def _python_json_mapping(node: JsonDef, definitions: dict[str, JsonDef]) -> list[str]:
+    mapping = json_def_mapping(node, definitions)
+
+    def render(value: object) -> str:
+        if isinstance(value, str):
+            return repr(value)
+        if isinstance(value, tuple):
+            return "(" + repr(value[0]) + ", " + render(value[1]) + ")"
+        if isinstance(value, list):
+            return "[" + ", ".join(render(item) for item in value) + "]"
+        if isinstance(value, dict):
+            return "{" + ", ".join(
+                f"{key!r}: {render(item)}" for key, item in value.items()
+            ) + "}"
+        raise TypeError(f"unsupported JSON mapping value: {value!r}")
+
+    return [f"_{to_snake_case(node.name)}_JSON_MAPPING = {render(mapping)}", ""]
 
 
 class PythonVisitor(BaseWalker):
@@ -522,6 +563,17 @@ class PythonVisitor(BaseWalker):
         lines = [f'{name}Json = TypedDict("{name}Json", {{']
         lines.extend(self.walk_children(node, ctx))
         lines.append("})")
+        if node.has_alias_key:
+            module = node.parent
+            if not isinstance(module, Module):
+                return lines
+            definitions = {
+                n.name: n for n in module.body if isinstance(n, JsonDef)
+            }
+            lines.extend(_python_json_mapping(node, definitions))
+            self._builder.require_std(
+                "ssc_remap_json_keys", code=_PY_JSON_REMAP_HELPER
+            )
         return lines
 
     def visit_jsondef_field(

@@ -8,6 +8,7 @@ from ssc_codegen.ast import (
     Filter,
     FunctionDef,
     JsonDef,
+    JsonDefField,
     Match,
     MethodBase,
     Module,
@@ -19,6 +20,7 @@ from ssc_codegen.ast import (
     StructBase,
     StructRest,
     StructType,
+    VariableType,
 )
 
 
@@ -131,3 +133,57 @@ def jsonify_path_to_segments(query: str) -> list[str]:
         else:
             parts.append(repr(part))
     return parts
+
+
+def json_def_needs_remap(
+    definition: JsonDef,
+    definitions: dict[str, JsonDef],
+    stack: tuple[str, ...] = (),
+) -> bool:
+    """Return whether a JSON definition or nested definition has aliases."""
+    if definition.name in stack:
+        return False
+    if definition.has_alias_key:
+        return True
+    next_stack = (*stack, definition.name)
+    for field in definition.body:
+        if not isinstance(field, JsonDefField):
+            continue
+        info = field.type_info
+        if info.base == VariableType.JSON and info.ref:
+            nested = definitions.get(info.ref)
+            if nested and json_def_needs_remap(nested, definitions, next_stack):
+                return True
+    return False
+
+
+def json_def_mapping(
+    definition: JsonDef,
+    definitions: dict[str, JsonDef],
+    stack: tuple[str, ...] = (),
+) -> dict[str, object]:
+    """Build a complete source-key to canonical-key mapping tree."""
+    if definition.name in stack:
+        return {}
+    next_stack = (*stack, definition.name)
+    mapping: dict[str, object] = {}
+    for field in definition.body:
+        if not isinstance(field, JsonDefField) or field.type_info.skip:
+            continue
+        source = field.alias or field.name
+        output = field.name
+        info = field.type_info
+        nested = (
+            definitions.get(info.ref)
+            if info.base == VariableType.JSON and info.ref
+            else None
+        )
+        if nested and json_def_needs_remap(nested, definitions, next_stack):
+            nested_mapping = json_def_mapping(nested, definitions, next_stack)
+            mapping[source] = (
+                output,
+                [nested_mapping] if info.is_array else nested_mapping,
+            )
+        else:
+            mapping[source] = output
+    return mapping

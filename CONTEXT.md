@@ -30,6 +30,23 @@ _Avoid_: endpoint schema
 A `json` declaration describing JSON data returned by a REST request.
 _Avoid_: response parser, OpenAPI schema
 
+**JSON field name**:
+The canonical field name declared before the type in a `json` field and used
+by generated code and its result annotations.
+_Avoid_: source key, wire key
+
+**JSON key alias**:
+The optional string after a JSON field type that names the source JSON key
+when it differs from the canonical field name. For `context str "@context"`,
+`context` is the canonical field name and `@context` is the JSON key alias.
+_Avoid_: output alias, field rename
+
+**Remapped JSON result**:
+A plain mapping containing only declared canonical JSON field names, produced
+from source JSON keys by applying JSON key aliases; absent source keys are
+omitted and values are not type-validated or cast.
+_Avoid_: validated model, deserialized object
+
 ## Validation And Access
 
 **Schema validation**:

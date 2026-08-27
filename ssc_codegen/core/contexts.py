@@ -51,6 +51,7 @@ class ParseContext:
     json_defs: dict[str, JsonDef] = field(default_factory=dict)
     extensions: dict[str, ExtensionDef] = field(default_factory=dict)
     source_path: Path | None = None
+    source_text: str = ""
     node_source_paths: dict[int, Path] = field(default_factory=dict)
 
     def all_names(self) -> set[str]:

@@ -124,6 +124,7 @@ def rest_artifacts_from_struct(struct: StructRest, parent: Module) -> list:
                 required_keys=list(err.required_keys),
                 conditions=dict(err.conditions),
                 factory_name=key[1],
+                error_schema=err.schema_name,
             )
         )
 

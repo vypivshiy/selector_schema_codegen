@@ -1062,6 +1062,36 @@ class TestJsonDefPathProperty:
         m = _parse(_load_fixture("json_def_path", "plain.kdl"))
         assert _json_def(m, "F").is_array is False
 
+
+class TestJsonAliasMapping:
+    def test_has_alias_key_is_recursive(self):
+        m = _parse(
+            '''json Child { context str "@context" }
+json Parent { child Child }
+'''
+        )
+        assert _json_def(m, "Child").has_alias_key is True
+        assert _json_def(m, "Parent").has_alias_key is True
+
+    def test_duplicate_source_and_output_aliases_are_errors(self):
+        errors = _lint_errors(
+            '''json F {
+    first str "value"
+    second str "value"
+}
+'''
+        )
+        assert any("duplicate json source key" in error for error in errors)
+
+        errors = _lint_errors(
+            '''json F {
+    first str "second"
+    second str
+}
+'''
+        )
+        assert any("conflicts with field name" in error for error in errors)
+
     def test_is_array_prefix(self):
         m = _parse(_load_fixture("json_def_path", "array.kdl"))
         assert _json_def(m, "F").is_array is True

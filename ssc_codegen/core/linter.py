@@ -259,7 +259,7 @@ _PREDICATE_OPS: frozenset[str] = frozenset(
 
 
 def lint_module(
-    doc: KdlDocument, source_path: str = ""
+    doc: KdlDocument, source_path: str = "", *, source_text: str = ""
 ) -> list[ReadDiagnostic]:
     """Structural pre-pass linting on the parsed KDL document."""
     diags: list[ReadDiagnostic] = []
@@ -268,7 +268,7 @@ def lint_module(
     _lint_imports(doc, source_path, diags)
     _lint_extensions(doc, source_path, diags)
     _lint_defines(doc, source_path, diags, children_defines)
-    _lint_json_defs(doc, source_path, diags, children_defines)
+    _lint_json_defs(doc, source_path, diags, children_defines, source_text)
     _lint_structs(doc, source_path, diags, children_defines)
     _lint_fns(doc, source_path, diags)
     _lint_nested_topdown(doc, source_path, diags)
@@ -756,11 +756,12 @@ def _lint_json_defs(
     source_path: str,
     diags: list[ReadDiagnostic],
     children_defines: dict[str, list[KdlNode]],
+    source_text: str = "",
 ) -> None:
     seen_json_names: set[str] = set()
     for node in doc.select("json:root"):
         _lint_single_json(
-            node, source_path, diags, seen_json_names, children_defines
+            node, source_path, diags, seen_json_names, children_defines, source_text
         )
 
 
@@ -770,6 +771,7 @@ def _lint_single_json(
     diags: list[ReadDiagnostic],
     seen_json_names: set[str],
     children_defines: dict[str, list[KdlNode]],
+    source_text: str = "",
 ) -> None:
     name = _node_arg(node, 0)
     if not name:
@@ -811,12 +813,19 @@ def _lint_single_json(
             )
 
     seen_fields: set[str] = set()
+    seen_source_keys: set[str] = set()
+    seen_output_keys: set[str] = set()
+    field_names: set[str] = {child.name for child in node.children}
     _lint_json_children(
         list(node.children),
         source_path,
         diags,
         children_defines,
         seen_fields,
+        seen_source_keys,
+        seen_output_keys,
+        field_names,
+        source_text,
     )
 
 
@@ -826,7 +835,18 @@ def _lint_json_children(
     diags: list[ReadDiagnostic],
     children_defines: dict[str, list[KdlNode]],
     seen_fields: set[str],
+    seen_source_keys: set[str],
+    seen_output_keys: set[str],
+    field_names: set[str],
+    source_text: str = "",
 ) -> None:
+    def is_quoted(arg_index: int) -> bool:
+        if not source_text or arg_index >= len(field_node.args):
+            return False
+        value = field_node.args[arg_index]
+        raw = source_text[value.span.start.offset : value.span.end.offset]
+        return raw.startswith(('"', "'"))
+
     for field_node in children:
         field_name = field_node.name
         args = _node_args(field_node)
@@ -839,13 +859,17 @@ def _lint_json_children(
                 diags,
                 children_defines,
                 seen_fields,
+                seen_source_keys,
+                seen_output_keys,
+                field_names,
+                source_text,
             )
             continue
 
         has_type = False
         has_skip = False
-        for arg in args:
-            if arg.startswith("@"):
+        for index, arg in enumerate(args):
+            if arg.startswith("@") and not is_quoted(index):
                 if arg not in _VALID_JSON_MODIFIERS:
                     diags.append(
                         _error(
@@ -883,6 +907,42 @@ def _lint_json_children(
                 )
             )
         seen_fields.add(field_name)
+        field_names.add(field_name)
+        value_args = [
+            arg for arg in args
+            if not arg.startswith("@") or is_quoted(args.index(arg))
+        ]
+        source_key = value_args[1] if len(value_args) > 1 else field_name
+        if source_key in seen_source_keys:
+            diags.append(
+                _error(
+                    field_node,
+                    f"duplicate json source key '{source_key}'",
+                    source_path,
+                    code="E001",
+                )
+            )
+        seen_source_keys.add(source_key)
+        output_key = field_name
+        if source_key != field_name and source_key in field_names - {field_name}:
+            diags.append(
+                _error(
+                    field_node,
+                    f"json alias '{source_key}' conflicts with field name",
+                    source_path,
+                    code="E001",
+                )
+            )
+        if output_key in seen_output_keys:
+            diags.append(
+                _error(
+                    field_node,
+                    f"duplicate json output key '{output_key}'",
+                    source_path,
+                    code="E001",
+                )
+            )
+        seen_output_keys.add(output_key)
 
 
 def _lint_structs(

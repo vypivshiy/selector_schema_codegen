@@ -128,12 +128,14 @@ from ssc_codegen.ast import (
     XpathSelectAll,
 )
 from ssc_codegen.exceptions import BuildTimeError
-from ssc_codegen.naming import to_camel_case, to_pascal_case
+from ssc_codegen.naming import to_camel_case, to_pascal_case, to_snake_case
 from ssc_codegen.traversal.utils import (
     find_predicate_container,
+    json_def_mapping,
     jsonify_path_to_segments,
     module_has_rest,
 )
+
 from ssc_codegen.generation.builder import ModuleBuilder
 from ssc_codegen.targets.javascript import rest
 from ssc_codegen.targets.javascript.http_libs.axios import AxiosStrategy
@@ -141,6 +143,45 @@ from ssc_codegen.targets.javascript.http_libs.base import JsHttpLibStrategy
 from ssc_codegen.targets.javascript.http_libs.fetch import FetchStrategy
 from ssc_codegen.traversal.context import WalkContext
 from ssc_codegen.traversal.walker import BaseWalker
+
+
+_JS_JSON_REMAP_HELPER = """function sscRemapJsonKeys(value, mapping) {
+  if (Array.isArray(value)) return value.map(item => sscRemapJsonKeys(item, mapping));
+  if (value === null || typeof value !== 'object') return value;
+  const result = {};
+  for (const [source, spec] of Object.entries(mapping)) {
+    if (!Object.prototype.hasOwnProperty.call(value, source)) continue;
+     const output = Array.isArray(spec) ? spec[0] : spec;
+     const nested = Array.isArray(spec) ? spec[1] : null;
+    let item = value[source];
+    if (Array.isArray(nested)) item = item.map(x => sscRemapJsonKeys(x, nested[0]));
+    else if (nested !== null) item = sscRemapJsonKeys(item, nested);
+    result[output] = item;
+  }
+  return result;
+}"""
+
+
+def _js_json_mapping(node: JsonDef, definitions: dict[str, JsonDef]) -> list[str]:
+    mapping = json_def_mapping(node, definitions)
+
+    def render(value: object) -> str:
+        if isinstance(value, str):
+            return json.dumps(value)
+        if isinstance(value, tuple):
+            return "[" + json.dumps(value[0]) + ", " + render(value[1]) + "]"
+        if isinstance(value, list):
+            return "[" + ", ".join(render(item) for item in value) + "]"
+        if isinstance(value, dict):
+            return "{" + ", ".join(
+                f"{json.dumps(key)}: {render(item)}" for key, item in value.items()
+            ) + "}"
+        raise TypeError(f"unsupported JSON mapping value: {value!r}")
+
+    return [
+        f"const _{to_snake_case(node.name)}JsonMapping = {render(mapping)};",
+        "",
+    ]
 
 
 # ===========================================================================
@@ -431,6 +472,15 @@ class JsVisitor(BaseWalker):
         lines = ["/**", f" * @typedef {{Object}} {name}Json"]
         lines.extend(self.walk_children(node, ctx))
         lines.append(" */")
+        if node.has_alias_key:
+            module = node.parent
+            if not isinstance(module, Module):
+                return lines
+            definitions = {
+                n.name: n for n in module.body if isinstance(n, JsonDef)
+            }
+            lines.extend(_js_json_mapping(node, definitions))
+            self._builder.require_std("sscRemapJsonKeys", code=_JS_JSON_REMAP_HELPER)
         return lines
 
     def visit_jsondef_field(

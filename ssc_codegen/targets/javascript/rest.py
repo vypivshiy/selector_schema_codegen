@@ -14,6 +14,7 @@ from ssc_codegen.ast import (
     MatcherListDef,
     MethodFetch,
     MethodRest,
+    Module,
     PlaceholderSpec,
     PlaceholderTemplate,
     ResultAliasDef,
@@ -25,7 +26,11 @@ from ssc_codegen.naming import to_camel_case, to_pascal_case, to_snake_case
 from ssc_codegen.request_spec import parse_json_template
 from ssc_codegen.targets.javascript.http_libs.base import JsHttpLibStrategy
 from ssc_codegen.traversal.context import WalkContext
-from ssc_codegen.traversal.utils import dict_needs_builder, err_subclass_name
+from ssc_codegen.traversal.utils import (
+    dict_needs_builder,
+    err_subclass_name,
+    json_def_mapping,
+)
 
 
 # ===========================================================================
@@ -378,6 +383,9 @@ def emit_method_rest(
         value_fn = "(_b) => null"
     else:
         value_fn = "null"
+    response_mapping = _response_mapping(node)
+    if response_mapping is not None:
+        value_fn = f"(_b) => sscRemapJsonKeys(_b, {_render_mapping(response_mapping)})"
 
     if http_client == "axios":
         url_expr = render_value(spec.url)
@@ -449,6 +457,36 @@ def emit_method_rest(
     )
     lines.append(f"{i1}}}")
     return lines
+
+
+def _response_mapping(node: MethodRest) -> dict[str, object] | None:
+    if not node.response_schema:
+        return None
+    module = node.parent.parent if node.parent is not None else None
+    if not isinstance(module, Module):
+        return None
+    definitions = {n.name: n for n in module.body if isinstance(n, JsonDef)}
+    definition = definitions.get(node.response_schema)
+    if definition is None or not definition.has_alias_key:
+        return None
+    return json_def_mapping(definition, definitions)
+
+
+def _render_mapping(mapping: dict[str, object]) -> str:
+    def render(value: object) -> str:
+        if isinstance(value, str):
+            return json.dumps(value)
+        if isinstance(value, tuple):
+            return "[" + json.dumps(value[0]) + ", " + render(value[1]) + "]"
+        if isinstance(value, list):
+            return "[" + ", ".join(render(item) for item in value) + "]"
+        if isinstance(value, dict):
+            return "{" + ", ".join(
+                f"{json.dumps(key)}: {render(item)}" for key, item in value.items()
+            ) + "}"
+        raise TypeError(f"unsupported JSON mapping value: {value!r}")
+
+    return render(mapping)
 
 
 def emit_method_fetch(
@@ -588,13 +626,27 @@ def emit_result_alias_def(node: ResultAliasDef) -> list[str]:
 def emit_matcher_list_def(node: MatcherListDef) -> list[str]:
     var = f"_{to_snake_case(node.struct_name)}Matchers"
     lines = [f"const {var} = ["]
+    parent = node.parent
+    module = parent.parent if parent is not None else None
+    definitions = (
+        {n.name: n for n in module.body if isinstance(n, JsonDef)}
+        if isinstance(module, Module)
+        else {}
+    )
     for e in node.entries:
         check = render_js_condition_check(e.required_keys, e.conditions)
         check_arg = check if check else "null"
+        mapping = None
+        definition = definitions.get(e.error_schema)
+        if definition is not None and definition.has_alias_key:
+            mapping = _render_mapping(json_def_mapping(definition, definitions))
+        value_expr = (
+            f"sscRemapJsonKeys(_b, {mapping})" if mapping is not None else "_b"
+        )
         lines.append(
             f"    {{ status: {e.status}, check: {check_arg}, "
             f"factory: (_s, _h, _b) => ({{ isOk: false, status: _s, "
-            f"headers: _h, value: _b }}) }},"
+            f"headers: _h, value: {value_expr} }}) }},"
         )
     lines.append("];")
     return lines
