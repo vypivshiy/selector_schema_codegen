@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import enum
+import json
 import keyword
 import traceback
 from pathlib import Path
@@ -18,6 +19,7 @@ from kdlquery.types import Position, Span
 from ssc_codegen.targets.resolver import ResolutionError, resolve
 from ssc_codegen.targets.spec import TargetSpec
 from ssc_codegen.targets.profile import TargetProfile
+from ssc_codegen.json_to_kdl import JsonToKdlError, json_to_kdl
 
 
 app = typer.Typer(
@@ -667,6 +669,54 @@ def check(
         raise typer.Exit(code=1)
     if fmt == FmtType.TEXT:
         typer.echo(f"All {len(kdl_files)} file(s) passed linting.")
+
+
+@app.command("json-to-kdl")
+def json_to_kdl_command(
+    input_file: Annotated[
+        Path,
+        typer.Argument(
+            help="JSON example file.", exists=True, file_okay=True, dir_okay=False
+        ),
+    ],
+    output: Annotated[
+        Path,
+        typer.Option("--output", "-o", help="Output KDL file."),
+    ],
+    name: Annotated[
+        str,
+        typer.Option("--name", help="Root schema name."),
+    ] = "JsonResponse",
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Overwrite an existing output file."),
+    ] = False,
+) -> None:
+    """Generate sscgen JSON definitions from a JSON example."""
+    try:
+        value = json.loads(input_file.read_text(encoding="utf-8"))
+        source = json_to_kdl(value, name=name)
+    except (OSError, json.JSONDecodeError, JsonToKdlError) as exc:
+        typer.echo(f"ERROR: {exc}", err=True)
+        raise typer.Exit(code=1)
+
+    _, diagnostics = parse_module(source, source_path=output)
+    errors = [d for d in diagnostics if d.severity == Severity.ERROR]
+    if errors:
+        typer.echo(format_diagnostics(errors, filepath=output), err=True)
+        raise typer.Exit(code=1)
+
+    if output.exists() and not force:
+        answer = typer.prompt(f"Overwrite '{output}'? [y/N]", default="N")
+        if answer.strip().lower() not in {"y", "yes"}:
+            typer.echo("Output not written.")
+            return
+    try:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(source, encoding="utf-8")
+    except OSError as exc:
+        typer.echo(f"ERROR: {exc}", err=True)
+        raise typer.Exit(code=1)
 
 
 @app.command()
