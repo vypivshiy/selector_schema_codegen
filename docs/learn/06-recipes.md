@@ -171,12 +171,12 @@ struct DataState {
 
 ### Alias ключей в JSON
 
-Если ключ в JSON невалидный для имени поля, можно указать alias:
+Если ключ в JSON невалидный для имени поля, можно указать alias через свойство `from="..."`:
 
 ```kdl
 json Schema {
-    context str "@context"
+    context str from="@context"
 }
 ```
 
-Здесь `context` — имя поля в схеме, `@context` — реальный ключ в JSON.
+Здесь `context` — имя поля в схеме, `@context` — реальный ключ в JSON. Позиционный синтаксис `context str "@context"` считается устаревшим.

@@ -220,9 +220,7 @@ def runtime_export_names(
             names.append("FALLBACK_HTML_STR")
     if module_has_rest(module):
         names.extend(_RUNTIME_REST_EXPORT_NAMES)
-    if any(
-        isinstance(n, JsonDef) and n.has_alias_key for n in module.body
-    ):
+    if any(isinstance(n, JsonDef) and n.has_alias_key for n in module.body):
         names.extend(_RUNTIME_JSON_EXPORT_NAMES)
     return names
 
@@ -504,11 +502,17 @@ def _render_mapping(mapping: dict[str, object]) -> str:
         if isinstance(value, tuple):
             return f"({value[0]!r}, {_render_mapping(value[1])})"
         if isinstance(value, list):
-            return "[" + ", ".join(_render_mapping(item) for item in value) + "]"
+            return (
+                "[" + ", ".join(_render_mapping(item) for item in value) + "]"
+            )
         if isinstance(value, dict):
-            return "{" + ", ".join(
-                f"{key!r}: {render(item)}" for key, item in value.items()
-            ) + "}"
+            return (
+                "{"
+                + ", ".join(
+                    f"{key!r}: {render(item)}" for key, item in value.items()
+                )
+                + "}"
+            )
         raise TypeError(f"unsupported JSON mapping value: {value!r}")
 
     return render(mapping)
@@ -551,15 +555,15 @@ def emit_matcher_list_def(node: MatcherListDef) -> list[str]:
         check_arg = check if check else "None"
         parent = node.parent
         module = parent.parent if parent is not None else None
-        mapping = _schema_mapping_for_entry(e, module if isinstance(module, Module) else None)
+        mapping = _schema_mapping_for_entry(
+            e, module if isinstance(module, Module) else None
+        )
         factory = e.factory_name
         if mapping is not None:
             factory = (
                 f"lambda headers, value: {e.factory_name}(headers=headers, "
                 f"value=ssc_remap_json_keys(value, {_render_mapping(mapping)}))"
             )
-        lines.append(
-            f"    ErrMatcher({e.status}, {check_arg}, {factory}),"
-        )
+        lines.append(f"    ErrMatcher({e.status}, {check_arg}, {factory}),")
     lines.append("]")
     return lines

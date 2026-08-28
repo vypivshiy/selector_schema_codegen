@@ -38,6 +38,9 @@ from ssc_codegen.ast import (
 from ssc_codegen.ast.predicate_ops import LogicNot, PredContains, PredEq
 from ssc_codegen.ast.types import VariableType
 from ssc_codegen.core import parse_module
+from ssc_codegen.targets.golang import GO_CONVERTER
+from ssc_codegen.targets.javascript import JS_CONVERTER
+from ssc_codegen.targets.python import PY_BS4_CONVERTER
 from kdlquery import KDL2CSTParser, KDLParseError, Severity
 
 
@@ -1066,31 +1069,153 @@ class TestJsonDefPathProperty:
 class TestJsonAliasMapping:
     def test_has_alias_key_is_recursive(self):
         m = _parse(
-            '''json Child { context str "@context" }
+            """json Child { context str from="@context" }
 json Parent { child Child }
-'''
+"""
         )
         assert _json_def(m, "Child").has_alias_key is True
         assert _json_def(m, "Parent").has_alias_key is True
 
+    def test_json_from_property_syntax(self):
+        m, diags = parse_module(
+            """json User {
+    user_id int from="id"
+    context str from="@context"
+}
+"""
+        )
+        assert len([d for d in diags if d.severity == Severity.ERROR]) == 0
+        assert len([d for d in diags if d.severity == Severity.WARNING]) == 0
+        f1 = _json_field(m, "User", "user_id")
+        assert f1.alias == "id"
+        f2 = _json_field(m, "User", "context")
+        assert f2.alias == "@context"
+
+    def test_json_positional_alias_deprecated_warning_w011(self):
+        _, diags = parse_module(
+            """json User {
+    user_id int "id"
+}
+"""
+        )
+        warnings = [d for d in diags if d.severity == Severity.WARNING]
+        assert len(warnings) == 1
+        assert warnings[0].code == "W011"
+        assert "deprecated" in warnings[0].message
+        assert 'from="id"' in warnings[0].hint
+
+    def test_json_positional_and_from_conflict_error_e001(self):
+        errors = _lint_errors(
+            """json User {
+    user_id int "id" from="ident"
+}
+"""
+        )
+        assert any(
+            "cannot specify both positional alias and 'from' property" in e
+            for e in errors
+        )
+
+    def test_json_from_empty_or_non_string_error_e001(self):
+        errors = _lint_errors(
+            """json User {
+    user_id int from=""
+}
+"""
+        )
+        assert any(
+            "'from' property must be a non-empty string" in e for e in errors
+        )
+
+        errors_num = _lint_errors(
+            """json User {
+    user_id int from=123
+}
+"""
+        )
+        assert any(
+            "'from' property must be a non-empty string" in e
+            for e in errors_num
+        )
+
     def test_duplicate_source_and_output_aliases_are_errors(self):
         errors = _lint_errors(
-            '''json F {
-    first str "value"
-    second str "value"
+            """json F {
+    first str from="value"
+    second str from="value"
 }
-'''
+"""
         )
         assert any("duplicate json source key" in error for error in errors)
 
         errors = _lint_errors(
-            '''json F {
-    first str "second"
+            """json F {
+    first str from="second"
     second str
 }
-'''
+"""
         )
         assert any("conflicts with field name" in error for error in errors)
+
+    def test_python_jsonify_with_alias_remapping(self):
+        src = """
+json User {
+    user_id int from="id"
+    user_name str from="name"
+}
+
+struct Main {
+    data {
+        raw
+        jsonify User
+    }
+}
+"""
+        m = _parse(src)
+        code = PY_BS4_CONVERTER.convert(m)
+        assert (
+            "_user_JSON_MAPPING = {'id': 'user_id', 'name': 'user_name'}"
+            in code
+        )
+        assert "def ssc_remap_json_keys(" in code
+        assert "ssc_remap_json_keys(json.loads(" in code
+        assert "_user_JSON_MAPPING" in code
+
+    def test_javascript_jsonify_with_alias_remapping(self):
+        src = """
+json User {
+    user_id int from="id"
+    user_name str from="name"
+}
+
+struct Main {
+    data {
+        raw
+        jsonify User
+    }
+}
+"""
+        m = _parse(src)
+        code = JS_CONVERTER.convert(m)
+        assert "const _userJsonMapping = {" in code
+        assert '"id": "user_id"' in code
+        assert "function sscRemapJsonKeys(" in code
+        assert "sscRemapJsonKeys(JSON.parse(" in code
+        assert "_userJsonMapping" in code
+
+    def test_golang_jsondef_with_alias_struct_tags(self):
+        src = """
+json User {
+    user_id int from="id"
+    context str from="@context"
+    tags (array)str @omitempty
+}
+"""
+        m = _parse(src)
+        code = GO_CONVERTER.convert(m)
+        assert 'UserId  int64     `json:"id"`' in code
+        assert 'Context string    `json:"@context"`' in code
+        assert 'Tags    *[]string `json:"tags,omitempty"`' in code
 
     def test_is_array_prefix(self):
         m = _parse(_load_fixture("json_def_path", "array.kdl"))

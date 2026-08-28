@@ -393,6 +393,62 @@ class TestJsonMixed:
         assert result["nested_item"]["title"] == "Single Item Title"
 
 
+class TestJsonAliasedRemapping:
+    @pytest.mark.parametrize("target", _TARGETS)
+    def test_json_alias_remapping_execution(self, html, target):
+        kdl_src = """
+json AuthorSchema {
+    author_name str from="name"
+    author_slug str from="slug"
+}
+
+(array)json QuoteSchema {
+    quote_text str from="text"
+    author AuthorSchema
+    quote_score int from="score"
+}
+
+struct JsonAliasedScraper {
+    @init {
+        raw-json {
+            css "script#test-data"
+            text
+            re #"(\\[.*\\])"#
+        }
+    }
+
+    quotes {
+        @raw-json
+        jsonify QuoteSchema
+    }
+
+    first-author-name {
+        @raw-json
+        jsonify QuoteSchema path="0.author.name"
+    }
+}
+"""
+        module_ast, diagnostics = parse_module(kdl_src)
+        assert not [d for d in diagnostics if d.severity == Severity.ERROR]
+        converter = _get_converter(target)
+        code = converter.convert(module_ast)
+        namespace: dict = {}
+        exec(code, namespace)
+        cls = namespace["JsonAliasedScraper"]
+        res = cls(html).parse()
+        assert isinstance(res["quotes"], list)
+        assert len(res["quotes"]) == 2
+        first = res["quotes"][0]
+        assert first["quote_text"] == "Quote one"
+        assert first["quote_score"] == 7
+        assert first["author"]["author_name"] == "Author One"
+        assert first["author"]["author_slug"] == "author-one"
+        assert "text" not in first
+        assert "score" not in first
+        assert "name" not in first["author"]
+        assert res["first_author_name"] == "Author One"
+
+
 # ── RAW struct tests ──────────────────────────────────────────────────────────
 
 _JS_TEXT = '<script>var player = new Playerjs({id:"player",file:"/v/list/abc.txt"});</script>'

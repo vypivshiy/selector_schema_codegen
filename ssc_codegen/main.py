@@ -676,7 +676,10 @@ def json_to_kdl_command(
     input_file: Annotated[
         Path,
         typer.Argument(
-            help="JSON example file.", exists=True, file_okay=True, dir_okay=False
+            help="JSON example file.",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
         ),
     ],
     output: Annotated[

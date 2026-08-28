@@ -577,7 +577,7 @@ class GoVisitor(BaseWalker):
             return []
         field_name = to_pascal_case(node.name)
         go_type = self._resolve_type(node.type_info)
-        tag = _json_tag(node.name)
+        tag = node.alias if node.alias else _json_tag(node.name)
         omitempty = (
             ",omitempty" if node.type_info and node.type_info.omitempty else ""
         )

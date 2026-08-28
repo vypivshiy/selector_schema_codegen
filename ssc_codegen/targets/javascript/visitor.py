@@ -134,6 +134,7 @@ from ssc_codegen.traversal.utils import (
     json_def_mapping,
     jsonify_path_to_segments,
     module_has_rest,
+    resolve_json_def,
 )
 
 from ssc_codegen.generation.builder import ModuleBuilder
@@ -162,7 +163,9 @@ _JS_JSON_REMAP_HELPER = """function sscRemapJsonKeys(value, mapping) {
 }"""
 
 
-def _js_json_mapping(node: JsonDef, definitions: dict[str, JsonDef]) -> list[str]:
+def _js_json_mapping(
+    node: JsonDef, definitions: dict[str, JsonDef]
+) -> list[str]:
     mapping = json_def_mapping(node, definitions)
 
     def render(value: object) -> str:
@@ -173,9 +176,14 @@ def _js_json_mapping(node: JsonDef, definitions: dict[str, JsonDef]) -> list[str
         if isinstance(value, list):
             return "[" + ", ".join(render(item) for item in value) + "]"
         if isinstance(value, dict):
-            return "{" + ", ".join(
-                f"{json.dumps(key)}: {render(item)}" for key, item in value.items()
-            ) + "}"
+            return (
+                "{"
+                + ", ".join(
+                    f"{json.dumps(key)}: {render(item)}"
+                    for key, item in value.items()
+                )
+                + "}"
+            )
         raise TypeError(f"unsupported JSON mapping value: {value!r}")
 
     return [
@@ -480,7 +488,9 @@ class JsVisitor(BaseWalker):
                 n.name: n for n in module.body if isinstance(n, JsonDef)
             }
             lines.extend(_js_json_mapping(node, definitions))
-            self._builder.require_std("sscRemapJsonKeys", code=_JS_JSON_REMAP_HELPER)
+            self._builder.require_std(
+                "sscRemapJsonKeys", code=_JS_JSON_REMAP_HELPER
+            )
         return lines
 
     def visit_jsondef_field(
@@ -1247,8 +1257,21 @@ class JsVisitor(BaseWalker):
         if node.path:
             parts = jsonify_path_to_segments(node.path)
             path = "".join(f"[{p}]" for p in parts)
-            return [f"{ctx.indent}let {ctx.nxt} = JSON.parse({ctx.prv}){path};"]
-        return [f"{ctx.indent}let {ctx.nxt} = JSON.parse({ctx.prv});"]
+            raw_expr = f"JSON.parse({ctx.prv}){path}"
+        else:
+            raw_expr = f"JSON.parse({ctx.prv})"
+
+        json_def = resolve_json_def(node, node.schema_name)
+        if json_def and json_def.has_alias_key:
+            self._builder.require_std(
+                "sscRemapJsonKeys", code=_JS_JSON_REMAP_HELPER
+            )
+            mapping_name = f"_{to_snake_case(node.schema_name)}JsonMapping"
+            return [
+                f"{ctx.indent}let {ctx.nxt} = sscRemapJsonKeys({raw_expr}, {mapping_name});"
+            ]
+
+        return [f"{ctx.indent}let {ctx.nxt} = {raw_expr};"]
 
     def visit_nested(self, node: Nested, ctx: WalkContext) -> list[str]:
         cls = to_pascal_case(node.struct_name)

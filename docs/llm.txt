@@ -448,7 +448,7 @@ json Author {
 
 Field types: str, int, float, bool, null, <RefName>.
 Modifiers: (array)type for arrays, type? for optional, @omitempty for keys that may be absent, @skip to exclude from output.
-Alias: `field-name type "original-key"`.
+Alias: `field-name type from="source-key"` (positional `"source-key"` is deprecated: W011).
 
 Usage: jsonify <SchemaName> [path="dotted.path"]
 

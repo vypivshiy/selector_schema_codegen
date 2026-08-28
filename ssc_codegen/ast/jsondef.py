@@ -34,7 +34,11 @@ class JsonDef(Node):
     @property
     def has_alias_key(self) -> bool:
         """Whether this definition or a nested JSON definition has an alias."""
-        if any(field.alias for field in self.body if isinstance(field, JsonDefField)):
+        if any(
+            field.alias
+            for field in self.body
+            if isinstance(field, JsonDefField)
+        ):
             return True
         module = self.parent
         while module is not None and not hasattr(module, "body"):
@@ -42,9 +46,7 @@ class JsonDef(Node):
         if module is None:
             return False
         definitions = {
-            node.name: node
-            for node in module.body
-            if isinstance(node, JsonDef)
+            node.name: node for node in module.body if isinstance(node, JsonDef)
         }
         return _has_nested_alias(self, definitions, ())
 
@@ -56,7 +58,11 @@ def _has_nested_alias(
 ) -> bool:
     if definition.name in stack:
         return False
-    if any(field.alias for field in definition.body if isinstance(field, JsonDefField)):
+    if any(
+        field.alias
+        for field in definition.body
+        if isinstance(field, JsonDefField)
+    ):
         return True
     next_stack = (*stack, definition.name)
     for field in definition.body:

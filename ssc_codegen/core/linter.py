@@ -26,6 +26,25 @@ from kdlquery import KdlDocument, KdlNode, ReadDiagnostic, Severity
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
+def _diag(
+    node: KdlNode,
+    message: str,
+    source_path: str,
+    severity: Severity,
+    *,
+    code: str = "",
+    hint: str = "",
+) -> ReadDiagnostic:
+    return ReadDiagnostic(
+        message=message,
+        severity=severity,
+        span=node.span,
+        path=source_path,
+        code=code,
+        hint=hint,
+    )
+
+
 def _error(
     node: KdlNode,
     message: str,
@@ -34,13 +53,21 @@ def _error(
     code: str = "",
     hint: str = "",
 ) -> ReadDiagnostic:
-    return ReadDiagnostic(
-        message=message,
-        severity=Severity.ERROR,
-        span=node.span,
-        path=source_path,
-        code=code,
-        hint=hint,
+    return _diag(
+        node, message, source_path, Severity.ERROR, code=code, hint=hint
+    )
+
+
+def _warning(
+    node: KdlNode,
+    message: str,
+    source_path: str,
+    *,
+    code: str = "",
+    hint: str = "",
+) -> ReadDiagnostic:
+    return _diag(
+        node, message, source_path, Severity.WARNING, code=code, hint=hint
     )
 
 
@@ -761,7 +788,12 @@ def _lint_json_defs(
     seen_json_names: set[str] = set()
     for node in doc.select("json:root"):
         _lint_single_json(
-            node, source_path, diags, seen_json_names, children_defines, source_text
+            node,
+            source_path,
+            diags,
+            seen_json_names,
+            children_defines,
+            source_text,
         )
 
 
@@ -909,10 +941,57 @@ def _lint_json_children(
         seen_fields.add(field_name)
         field_names.add(field_name)
         value_args = [
-            arg for arg in args
+            arg
+            for arg in args
             if not arg.startswith("@") or is_quoted(args.index(arg))
         ]
-        source_key = value_args[1] if len(value_args) > 1 else field_name
+        positional_alias = value_args[1] if len(value_args) > 1 else ""
+        if positional_alias:
+            type_repr = value_args[0] if value_args else "str"
+            diags.append(
+                _warning(
+                    field_node,
+                    'positional JSON key alias is deprecated, use from="..." instead',
+                    source_path,
+                    code="W011",
+                    hint=f'example: {field_name} {type_repr} from="{positional_alias}"',
+                )
+            )
+
+        from_prop = field_node.properties.get("from")
+        from_val: str | None = None
+        if from_prop is not None:
+            if not isinstance(from_prop.value, str) or not from_prop.value:
+                diags.append(
+                    _error(
+                        field_node,
+                        "'from' property must be a non-empty string",
+                        source_path,
+                        code="E001",
+                        hint=f'example: {field_name} str from="source_key"',
+                    )
+                )
+            else:
+                from_val = from_prop.value
+
+            if positional_alias:
+                diags.append(
+                    _error(
+                        field_node,
+                        f"cannot specify both positional alias and 'from' property on json field '{field_name}'",
+                        source_path,
+                        code="E001",
+                        hint="remove positional alias and keep 'from=\"...\"' property",
+                    )
+                )
+
+        if from_val is not None:
+            source_key = from_val
+        elif positional_alias:
+            source_key = positional_alias
+        else:
+            source_key = field_name
+
         if source_key in seen_source_keys:
             diags.append(
                 _error(
@@ -924,7 +1003,9 @@ def _lint_json_children(
             )
         seen_source_keys.add(source_key)
         output_key = field_name
-        if source_key != field_name and source_key in field_names - {field_name}:
+        if source_key != field_name and source_key in field_names - {
+            field_name
+        }:
             diags.append(
                 _error(
                     field_node,

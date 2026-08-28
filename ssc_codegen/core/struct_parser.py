@@ -406,6 +406,11 @@ def parse_json_fields(
         skip = "@skip" in modifiers
         if not type_ and skip:
             type_ = "str"
+        from_prop = node.get_prop("from")
+        if from_prop is not None:
+            resolved = str(ctx.property_defines.get(from_prop, from_prop))
+            if resolved:
+                alias = resolved
         is_array = any(
             arg.type_annotation == "(array)"
             for arg in node.args

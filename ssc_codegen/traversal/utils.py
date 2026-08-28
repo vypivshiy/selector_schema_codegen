@@ -119,6 +119,29 @@ def find_predicate_container(node: Node) -> Node | None:
     return None
 
 
+def find_enclosing_module(node: Node) -> Module | None:
+    """Walk the parent chain to find the enclosing Module."""
+    cur: Node | None = node
+    while cur is not None:
+        if isinstance(cur, Module):
+            return cur
+        cur = cur.parent
+    return None
+
+
+def resolve_json_def(node: Node, schema_name: str) -> JsonDef | None:
+    """Find a JsonDef by name in the enclosing module."""
+    if not schema_name:
+        return None
+    module = find_enclosing_module(node)
+    if module is None:
+        return None
+    for n in module.body:
+        if isinstance(n, JsonDef) and n.name == schema_name:
+            return n
+    return None
+
+
 def jsonify_path_to_segments(query: str) -> list[str]:
     """Split a dot-notation path into segments, quoting string keys.
 

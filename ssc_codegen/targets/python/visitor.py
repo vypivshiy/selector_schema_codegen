@@ -132,6 +132,7 @@ from ssc_codegen.traversal.utils import (
     module_has_html_struct,
     module_has_rest,
     module_uses_http,
+    resolve_json_def,
 )
 from ssc_codegen.generation.builder import ModuleBuilder
 from ssc_codegen.targets.python import rest
@@ -143,7 +144,8 @@ from ssc_codegen.traversal.context import WalkContext
 from ssc_codegen.traversal.walker import BaseWalker
 
 
-_PY_JSON_REMAP_HELPER = """def ssc_remap_json_keys(value: Any, mapping: Dict[str, Any]) -> Any:
+_PY_JSON_REMAP_HELPER = """
+def ssc_remap_json_keys(value: Any, mapping: Dict[str, Any]) -> Any:
     if isinstance(value, list):
         return [ssc_remap_json_keys(item, mapping) for item in value]
     if not isinstance(value, dict):
@@ -161,10 +163,13 @@ _PY_JSON_REMAP_HELPER = """def ssc_remap_json_keys(value: Any, mapping: Dict[str
         elif nested is not None:
             item = ssc_remap_json_keys(item, nested)
         result[output] = item
-    return result"""
+    return result
+"""
 
 
-def _python_json_mapping(node: JsonDef, definitions: dict[str, JsonDef]) -> list[str]:
+def _python_json_mapping(
+    node: JsonDef, definitions: dict[str, JsonDef]
+) -> list[str]:
     mapping = json_def_mapping(node, definitions)
 
     def render(value: object) -> str:
@@ -175,9 +180,13 @@ def _python_json_mapping(node: JsonDef, definitions: dict[str, JsonDef]) -> list
         if isinstance(value, list):
             return "[" + ", ".join(render(item) for item in value) + "]"
         if isinstance(value, dict):
-            return "{" + ", ".join(
-                f"{key!r}: {render(item)}" for key, item in value.items()
-            ) + "}"
+            return (
+                "{"
+                + ", ".join(
+                    f"{key!r}: {render(item)}" for key, item in value.items()
+                )
+                + "}"
+            )
         raise TypeError(f"unsupported JSON mapping value: {value!r}")
 
     return [f"_{to_snake_case(node.name)}_JSON_MAPPING = {render(mapping)}", ""]
@@ -203,6 +212,7 @@ class PythonVisitor(BaseWalker):
         "std_unescape_text",
         "std_assert",
         "std_re_search",
+        "ssc_remap_json_keys",
     }
 
     # --- type resolution spelling ---
@@ -1227,14 +1237,22 @@ class PythonVisitor(BaseWalker):
     def visit_jsonify(self, node: Jsonify, ctx: WalkContext) -> list[str]:
         if node.path:
             parts = jsonify_path_to_segments(node.path)
-            path = ""
-            for part in parts:
-                if part.isdigit():
-                    path += f"[{part}]"
-                else:
-                    path += f"[{part}]"
-            return [f"{ctx.indent}{ctx.nxt} = json.loads({ctx.prv}){path}"]
-        return [f"{ctx.indent}{ctx.nxt} = json.loads({ctx.prv})"]
+            path = "".join(f"[{part}]" for part in parts)
+            raw_expr = f"json.loads({ctx.prv}){path}"
+        else:
+            raw_expr = f"json.loads({ctx.prv})"
+
+        json_def = resolve_json_def(node, node.schema_name)
+        if json_def and json_def.has_alias_key:
+            self._builder.require_std(
+                "ssc_remap_json_keys", code=_PY_JSON_REMAP_HELPER
+            )
+            mapping_name = f"_{to_snake_case(node.schema_name)}_JSON_MAPPING"
+            return [
+                f"{ctx.indent}{ctx.nxt} = ssc_remap_json_keys({raw_expr}, {mapping_name})"
+            ]
+
+        return [f"{ctx.indent}{ctx.nxt} = {raw_expr}"]
 
     def visit_nested(self, node: Nested, ctx: WalkContext) -> list[str]:
         struct_name = to_pascal_case(node.struct_name)

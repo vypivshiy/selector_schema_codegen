@@ -385,7 +385,9 @@ def emit_method_rest(
         value_fn = "null"
     response_mapping = _response_mapping(node)
     if response_mapping is not None:
-        value_fn = f"(_b) => sscRemapJsonKeys(_b, {_render_mapping(response_mapping)})"
+        value_fn = (
+            f"(_b) => sscRemapJsonKeys(_b, {_render_mapping(response_mapping)})"
+        )
 
     if http_client == "axios":
         url_expr = render_value(spec.url)
@@ -481,9 +483,14 @@ def _render_mapping(mapping: dict[str, object]) -> str:
         if isinstance(value, list):
             return "[" + ", ".join(render(item) for item in value) + "]"
         if isinstance(value, dict):
-            return "{" + ", ".join(
-                f"{json.dumps(key)}: {render(item)}" for key, item in value.items()
-            ) + "}"
+            return (
+                "{"
+                + ", ".join(
+                    f"{json.dumps(key)}: {render(item)}"
+                    for key, item in value.items()
+                )
+                + "}"
+            )
         raise TypeError(f"unsupported JSON mapping value: {value!r}")
 
     return render(mapping)

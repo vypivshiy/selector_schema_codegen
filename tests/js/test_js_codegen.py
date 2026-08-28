@@ -199,6 +199,75 @@ class TestJsJsonBasic:
         assert r["firstTags"] == ["alpha", "beta"]
 
 
+def _run_js_src(
+    src: str, struct_name: str, input_file: Path = HTML_FIXTURE
+) -> dict | list:
+    module_ast, diags = parse_module(src)
+    assert not [d for d in diags if d.severity == Severity.ERROR]
+    class_name = to_pascal_case(struct_name)
+    code = JS_CONVERTER.convert(module_ast)
+    proc = subprocess.run(
+        ["node", str(JS_RUNNER), str(input_file), class_name],
+        input=code,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"JS runtime error for {struct_name}:\n{proc.stderr}"
+        )
+    return json.loads(proc.stdout)
+
+
+class TestJsJsonAliasedRemapping:
+    def test_json_alias_remapping(self):
+        kdl_src = """
+json AuthorSchema {
+    author_name str from="name"
+    author_slug str from="slug"
+}
+
+(array)json QuoteSchema {
+    quote_text str from="text"
+    author AuthorSchema
+    quote_score int from="score"
+}
+
+struct JsonAliasedScraper {
+    @init {
+        raw-json {
+            css "script#test-data"
+            text
+            re #"(\\[.*\\])"#
+        }
+    }
+
+    quotes {
+        @raw-json
+        jsonify QuoteSchema
+    }
+
+    first-author-name {
+        @raw-json
+        jsonify QuoteSchema path="0.author.name"
+    }
+}
+"""
+        r = _run_js_src(kdl_src, "JsonAliasedScraper")
+        assert isinstance(r["quotes"], list)
+        assert len(r["quotes"]) == 2
+        first = r["quotes"][0]
+        assert first["quote_text"] == "Quote one"
+        assert first["quote_score"] == 7
+        assert first["author"]["author_name"] == "Author One"
+        assert first["author"]["author_slug"] == "author-one"
+        assert "text" not in first
+        assert "score" not in first
+        assert "name" not in first["author"]
+        assert r["firstAuthorName"] == "Author One"
+
+
 # ── RAW struct ────────────────────────────────────────────────────────────────
 
 _JS_TEXT = '<script>var player = new Playerjs({id:"player",file:"/v/list/abc.txt"});</script>'

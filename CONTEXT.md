@@ -36,8 +36,8 @@ by generated code and its result annotations.
 _Avoid_: source key, wire key
 
 **JSON key alias**:
-The optional string after a JSON field type that names the source JSON key
-when it differs from the canonical field name. For `context str "@context"`,
+The source JSON key specified via `from="..."` property (or legacy positional string argument)
+when it differs from the canonical field name. For `context str from="@context"`,
 `context` is the canonical field name and `@context` is the JSON key alias.
 _Avoid_: output alias, field rename
 

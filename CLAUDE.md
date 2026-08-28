@@ -48,3 +48,17 @@ see `llm_overview.md` file
 
 # docs
 see `docs/llm.txt` file
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues; use the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use canonical labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Use single-context domain docs. See `docs/agents/domain.md`.
