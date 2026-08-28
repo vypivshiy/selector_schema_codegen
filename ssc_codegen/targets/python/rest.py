@@ -553,8 +553,11 @@ def emit_matcher_list_def(node: MatcherListDef) -> list[str]:
     for e in node.entries:
         check = render_py_condition_lambda(e.required_keys, e.conditions)
         check_arg = check if check else "None"
-        parent = node.parent
-        module = parent.parent if parent is not None else None
+        module = (
+            node.parent
+            if isinstance(node.parent, Module)
+            else (node.parent.parent if node.parent is not None else None)
+        )
         mapping = _schema_mapping_for_entry(
             e, module if isinstance(module, Module) else None
         )

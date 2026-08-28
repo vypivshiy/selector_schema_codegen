@@ -847,3 +847,346 @@ class TestPerCallKwargs:
 
         code = PY_BS4_CONVERTER.convert(module, http_client="httpx")
         assert "**kwargs: Any" in code
+
+
+# ---------------------------------------------------------------------------
+# 10. JSON Key Alias Remapping in REST requests and errors
+# ---------------------------------------------------------------------------
+
+
+class TestRestJsonAliasedRemapping:
+    """End-to-end execution of REST codegen with JSON key alias remapping."""
+
+    _ALIASED_REST_SCHEMA = """
+json AuthorInfo {
+    author_name str from="name"
+    author_slug str from="slug"
+}
+
+(array)json ArticleList {
+    article_id int from="id"
+    headline str from="title"
+    author AuthorInfo
+    tags (array)str from="category_tags"
+}
+
+json ValidationErr {
+    error_code str from="code"
+    error_message str from="detail"
+}
+
+struct ArticleAPI type=rest {
+    @error 400 ValidationErr
+    @request response=ArticleList \"\"\"
+    GET /articles HTTP/1.1
+    Host: api.example.com
+    \"\"\"
+}
+"""
+
+    def test_sync_ok_with_json_aliases(self):
+        ns = _generate(self._ALIASED_REST_SCHEMA, http_client="httpx")
+        API = ns["ArticleAPI"]
+
+        with respx.mock:
+            respx.get("https://api.example.com/articles").respond(
+                json=[
+                    {
+                        "id": 101,
+                        "title": "Breaking News",
+                        "author": {"name": "Jane Doe", "slug": "jane-doe"},
+                        "category_tags": ["news", "tech"],
+                        "unmapped_extra": True,
+                    }
+                ],
+                status_code=200,
+            )
+            client = httpx.Client()
+            result = API.fetch(client)
+
+        assert result.is_ok is True
+        assert result.status == 200
+        assert result.value == [
+            {
+                "article_id": 101,
+                "headline": "Breaking News",
+                "author": {
+                    "author_name": "Jane Doe",
+                    "author_slug": "jane-doe",
+                },
+                "tags": ["news", "tech"],
+            }
+        ]
+
+    def test_async_ok_with_json_aliases(self):
+        ns = _generate(self._ALIASED_REST_SCHEMA, http_client="httpx")
+        API = ns["ArticleAPI"]
+
+        with respx.mock:
+
+            async def _run():
+                respx.get("https://api.example.com/articles").respond(
+                    json=[
+                        {
+                            "id": 102,
+                            "title": "Async Post",
+                            "author": {
+                                "name": "John Smith",
+                                "slug": "john-smith",
+                            },
+                            "category_tags": ["async"],
+                        }
+                    ],
+                    status_code=200,
+                )
+                async with httpx.AsyncClient() as client:
+                    return await API.async_fetch(client)
+
+            result = asyncio.run(_run())
+
+        assert result.is_ok is True
+        assert result.value == [
+            {
+                "article_id": 102,
+                "headline": "Async Post",
+                "author": {
+                    "author_name": "John Smith",
+                    "author_slug": "john-smith",
+                },
+                "tags": ["async"],
+            }
+        ]
+
+    def test_typed_error_with_json_aliases(self):
+        ns = _generate(self._ALIASED_REST_SCHEMA, http_client="httpx")
+        API = ns["ArticleAPI"]
+
+        with respx.mock:
+            respx.get("https://api.example.com/articles").respond(
+                json={
+                    "code": "INVALID_QUERY",
+                    "detail": "Limit out of bounds",
+                    "extra": 123,
+                },
+                status_code=400,
+            )
+            client = httpx.Client()
+            result = API.fetch(client)
+
+        assert result.is_ok is False
+        assert result.status == 400
+        assert isinstance(result, ns["ArticleAPIErr400"])
+        assert result.value == {
+            "error_code": "INVALID_QUERY",
+            "error_message": "Limit out of bounds",
+        }
+
+    def test_unmatched_error_with_aliases_preserves_raw_value(self):
+        ns = _generate(self._ALIASED_REST_SCHEMA, http_client="httpx")
+        API = ns["ArticleAPI"]
+
+        with respx.mock:
+            respx.get("https://api.example.com/articles").respond(
+                json={"raw_error": "Internal server crash"},
+                status_code=500,
+            )
+            client = httpx.Client()
+            result = API.fetch(client)
+
+        assert result.is_ok is False
+        assert result.status == 500
+        assert isinstance(result, ns["UnknownErr"])
+        assert result.value == {"raw_error": "Internal server crash"}
+
+    def test_response_path_with_nested_aliases(self):
+        src = """
+json UserProfile {
+    user_id int from="id"
+    display_name str from="name"
+}
+
+struct ProfileAPI type=rest {
+    @request response=UserProfile response-path="data.user" \"\"\"
+    GET /profile HTTP/1.1
+    Host: api.example.com
+    \"\"\"
+}
+"""
+        ns = _generate(src, http_client="httpx")
+        API = ns["ProfileAPI"]
+
+        with respx.mock:
+            respx.get("https://api.example.com/profile").respond(
+                json={
+                    "data": {
+                        "user": {"id": 99, "name": "Bob", "ignored": "yes"}
+                    }
+                },
+                status_code=200,
+            )
+            client = httpx.Client()
+            result = API.fetch(client)
+
+        assert result.is_ok is True
+        assert result.value == {"user_id": 99, "display_name": "Bob"}
+
+    def test_aiohttp_transport_json_aliases(self):
+        aioresponses = pytest.importorskip("aioresponses")
+        from ssc_codegen.targets.python import PY_BS4_CONVERTER
+
+        module = _parse(self._ALIASED_REST_SCHEMA)
+        code = PY_BS4_CONVERTER.convert(module, http_client="aiohttp")
+        ns: dict = {}
+        exec(code, ns)
+        API = ns["ArticleAPI"]
+
+        with aioresponses.aioresponses() as mocked:
+            mocked.get(
+                "https://api.example.com/articles",
+                payload=[
+                    {
+                        "id": 201,
+                        "title": "Aiohttp Title",
+                        "author": {"name": "Aio Author", "slug": "aio-author"},
+                        "category_tags": ["python"],
+                    }
+                ],
+                status=200,
+            )
+            import aiohttp
+
+            async def _run():
+                async with aiohttp.ClientSession() as session:
+                    return await API.async_fetch(session)
+
+            result = asyncio.run(_run())
+
+        assert result.is_ok is True
+        assert result.value == [
+            {
+                "article_id": 201,
+                "headline": "Aiohttp Title",
+                "author": {
+                    "author_name": "Aio Author",
+                    "author_slug": "aio-author",
+                },
+                "tags": ["python"],
+            }
+        ]
+
+    def test_requests_transport_json_aliases(self):
+        from responses import RequestsMock
+        import requests
+        from ssc_codegen.targets.python import PY_BS4_CONVERTER
+
+        module = _parse(self._ALIASED_REST_SCHEMA)
+        code = PY_BS4_CONVERTER.convert(module, http_client="requests")
+        ns: dict = {}
+        exec(code, ns)
+        API = ns["ArticleAPI"]
+
+        with RequestsMock() as rsps:
+            rsps.add(
+                rsps.GET,
+                "https://api.example.com/articles",
+                json=[
+                    {
+                        "id": 301,
+                        "title": "Requests Title",
+                        "author": {"name": "Req Author", "slug": "req-author"},
+                        "category_tags": ["requests"],
+                    }
+                ],
+                status=200,
+            )
+            with requests.Session() as session:
+                result = API.fetch(session)
+
+        assert result.is_ok is True
+        assert result.value == [
+            {
+                "article_id": 301,
+                "headline": "Requests Title",
+                "author": {
+                    "author_name": "Req Author",
+                    "author_slug": "req-author",
+                },
+                "tags": ["requests"],
+            }
+        ]
+
+    def test_rest_separate_runtime_execution(self):
+        import sys
+        import types
+        from ssc_codegen.generation.runtime import runtime_module_content
+        from ssc_codegen.targets.python.http_libs.httpx import HttpxStrategy
+
+        module_ast = _parse(self._ALIASED_REST_SCHEMA)
+        runtime_src = runtime_module_content(
+            module_ast, http_strategy=HttpxStrategy()
+        )
+
+        pkg_name = "test_rest_pkg_runtime"
+        runtime_name = "sscgen_runtime"
+        pkg_mod = types.ModuleType(pkg_name)
+        runtime_mod = types.ModuleType(f"{pkg_name}.{runtime_name}")
+        sys.modules[pkg_name] = pkg_mod
+        sys.modules[f"{pkg_name}.{runtime_name}"] = runtime_mod
+        setattr(pkg_mod, runtime_name, runtime_mod)
+        exec(runtime_src, runtime_mod.__dict__)
+
+        parser_mod = types.ModuleType(f"{pkg_name}.parser")
+        parser_mod.__package__ = pkg_name
+        sys.modules[f"{pkg_name}.parser"] = parser_mod
+        setattr(pkg_mod, "parser", parser_mod)
+
+        try:
+            from ssc_codegen.targets.python import PY_BS4_CONVERTER
+
+            code = PY_BS4_CONVERTER.convert(
+                module_ast,
+                package=pkg_name,
+                runtime_module=runtime_name,
+                http_client="httpx",
+            )
+            assert f"from .{runtime_name} import" in code
+            assert "ssc_remap_json_keys" in code
+            assert "def ssc_remap_json_keys(" not in code
+
+            exec(code, parser_mod.__dict__)
+            API = parser_mod.ArticleAPI
+
+            with respx.mock:
+                respx.get("https://api.example.com/articles").respond(
+                    json=[
+                        {
+                            "id": 401,
+                            "title": "Runtime Title",
+                            "author": {
+                                "name": "Runtime Author",
+                                "slug": "rt-author",
+                            },
+                            "category_tags": ["rt"],
+                        }
+                    ],
+                    status_code=200,
+                )
+                client = httpx.Client()
+                result = API.fetch(client)
+
+            assert result.is_ok is True
+            assert result.value == [
+                {
+                    "article_id": 401,
+                    "headline": "Runtime Title",
+                    "author": {
+                        "author_name": "Runtime Author",
+                        "author_slug": "rt-author",
+                    },
+                    "tags": ["rt"],
+                }
+            ]
+        finally:
+            sys.modules.pop(f"{pkg_name}.parser", None)
+            sys.modules.pop(f"{pkg_name}.{runtime_name}", None)
+            sys.modules.pop(pkg_name, None)

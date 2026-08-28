@@ -1,0 +1,49 @@
+@doc "JSON alias remapping schema: special characters, nested structs, array structs, and REST endpoints."
+
+json GeoLocation {
+    latitude float from="lat"
+    longitude float from="lng"
+}
+
+json AuthorDetail {
+    author_name str from="dc:creator"
+    author_slug str from="slug"
+    location GeoLocation?
+}
+
+(array)json CatalogItem {
+    item_id int from="@id"
+    item_context str from="@context"
+    item_type str from="@type"
+    data_version str from="data-version"
+    author AuthorDetail
+    scores (array)int from="rating_scores"
+}
+
+json AliasedRequestErr {
+    error_code str from="code"
+    error_detail str from="error_description"
+}
+
+struct JsonAliasedHtmlScraper {
+    @init {
+        raw-data {
+            css "script#test-data"
+            text
+            re #"(\[.*\])"#
+        }
+    }
+
+    items {
+        @raw-data
+        jsonify CatalogItem
+    }
+}
+
+struct JsonAliasedApi type=rest {
+    @error 400 AliasedRequestErr
+    @request response=CatalogItem """
+    GET /items HTTP/1.1
+    Host: api.example.com
+    """
+}

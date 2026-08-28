@@ -500,6 +500,10 @@ class PythonVisitor(BaseWalker):
                 names = []
             lines.append(f"from .{runtime} import " + ", ".join(names))
             lines.append("")
+            if isinstance(mod, Module) and module_has_html_struct(mod):
+                for line in self._dom.extra_utilities:
+                    if "FALLBACK_HTML_STR" not in line:
+                        lines.append(line)
             lines.extend(self._render_std_section(ctx))
             return lines
         lines.extend(self._builder.imports)

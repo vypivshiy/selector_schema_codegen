@@ -77,6 +77,8 @@ _SMOKES = [
     # css-all + index/first/last — *goquery.Selection is not directly
     # indexable in Go, must emit .Eq(...).
     "31_css_all_indexing.kdl",
+    # JSON key alias remapping (from="...") struct tags in Go structs.
+    "32_json_aliased_remapping.kdl",
 ]
 
 

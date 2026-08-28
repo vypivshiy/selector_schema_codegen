@@ -200,19 +200,39 @@ class TestJsJsonBasic:
 
 
 def _run_js_src(
-    src: str, struct_name: str, input_file: Path = HTML_FIXTURE
+    src: str,
+    struct_name: str,
+    input_file: Path = HTML_FIXTURE,
+    input_text: str | None = None,
 ) -> dict | list:
     module_ast, diags = parse_module(src)
     assert not [d for d in diags if d.severity == Severity.ERROR]
     class_name = to_pascal_case(struct_name)
     code = JS_CONVERTER.convert(module_ast)
-    proc = subprocess.run(
-        ["node", str(JS_RUNNER), str(input_file), class_name],
-        input=code,
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
+
+    if input_text is not None:
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".txt", delete=False, encoding="utf-8"
+        ) as f:
+            f.write(input_text)
+            target_input = Path(f.name)
+    else:
+        target_input = input_file
+
+    try:
+        proc = subprocess.run(
+            ["node", str(JS_RUNNER), str(target_input), class_name],
+            input=code,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    finally:
+        if input_text is not None:
+            target_input.unlink(missing_ok=True)
+
     if proc.returncode != 0:
         raise RuntimeError(
             f"JS runtime error for {struct_name}:\n{proc.stderr}"
@@ -266,6 +286,259 @@ struct JsonAliasedScraper {
         assert "score" not in first
         assert "name" not in first["author"]
         assert r["firstAuthorName"] == "Author One"
+
+    def test_json_alias_special_characters(self):
+        kdl_src = """
+json SpecialKeysSchema {
+    context str from="@context"
+    doc_type str from="@type"
+    doc_id str from="@id"
+    data_version str from="data-version"
+    creator str from="dc:creator"
+    rating_val float from="rating:score"
+}
+
+struct SpecialKeysScraper {
+    @init {
+        raw-json {
+            css "script#jsonld"
+            text
+        }
+    }
+
+    item {
+        @raw-json
+        jsonify SpecialKeysSchema
+    }
+}
+"""
+        custom_html = """
+        <html>
+        <head>
+            <script id="jsonld" type="application/ld+json">
+            {
+                "@context": "https://schema.org",
+                "@type": "Book",
+                "@id": "urn:isbn:12345",
+                "data-version": "1.4.2",
+                "dc:creator": "Arthur Conan Doyle",
+                "rating:score": 4.95,
+                "unmapped_extra": "drop me"
+            }
+            </script>
+        </head>
+        <body></body>
+        </html>
+        """
+        r = _run_js_src(kdl_src, "SpecialKeysScraper", input_text=custom_html)
+        item = r["item"]
+        assert item == {
+            "context": "https://schema.org",
+            "doc_type": "Book",
+            "doc_id": "urn:isbn:12345",
+            "data_version": "1.4.2",
+            "creator": "Arthur Conan Doyle",
+            "rating_val": 4.95,
+        }
+        assert "@context" not in item
+        assert "unmapped_extra" not in item
+
+    def test_json_alias_deep_nested_and_arrays(self):
+        kdl_src = """
+json SpecDetail {
+    spec_key str from="k"
+    spec_value str from="v"
+}
+
+json ProductItem {
+    product_name str from="name"
+    specs (array)SpecDetail from="spec_list"
+}
+
+json CategoryGroup {
+    category_id int from="cat_id"
+    products (array)ProductItem from="product_items"
+}
+
+(array)json CatalogPayload {
+    catalog_name str from="name"
+    categories (array)CategoryGroup from="cat_groups"
+}
+
+struct DeepCatalogScraper {
+    catalog {
+        css "script#catalog-data"
+        text
+        jsonify CatalogPayload
+    }
+}
+"""
+        custom_html = """
+        <html>
+        <body>
+            <script id="catalog-data" type="application/json">
+            [
+                {
+                    "name": "Electronics",
+                    "cat_groups": [
+                        {
+                            "cat_id": 101,
+                            "product_items": [
+                                {
+                                    "name": "Smartphone",
+                                    "spec_list": [
+                                        {"k": "RAM", "v": "16GB"},
+                                        {"k": "Storage", "v": "512GB"}
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+            </script>
+        </body>
+        </html>
+        """
+        r = _run_js_src(kdl_src, "DeepCatalogScraper", input_text=custom_html)
+        catalog = r["catalog"]
+        assert isinstance(catalog, list)
+        assert len(catalog) == 1
+        cat0 = catalog[0]
+        assert cat0["catalog_name"] == "Electronics"
+        group0 = cat0["categories"][0]
+        assert group0["category_id"] == 101
+        prod0 = group0["products"][0]
+        assert prod0["product_name"] == "Smartphone"
+        specs = prod0["specs"]
+        assert specs == [
+            {"spec_key": "RAM", "spec_value": "16GB"},
+            {"spec_key": "Storage", "spec_value": "512GB"},
+        ]
+
+    def test_json_alias_missing_keys_nulls_and_extra_fields(self):
+        kdl_src = """
+json UserState {
+    account_id int from="id"
+    nickname str from="user_name"
+    avatar_url str? from="avatar"
+    bio_text str? from="bio"
+}
+
+struct UserStateScraper {
+    user {
+        css "script#user-data"
+        text
+        jsonify UserState
+    }
+}
+"""
+        custom_html = """
+        <html>
+        <body>
+            <script id="user-data" type="application/json">
+            {
+                "id": 999,
+                "user_name": "bob",
+                "avatar": null,
+                "extra_key_one": 123,
+                "extra_key_two": {"foo": "bar"}
+            }
+            </script>
+        </body>
+        </html>
+        """
+        r = _run_js_src(kdl_src, "UserStateScraper", input_text=custom_html)
+        user = r["user"]
+        assert user["account_id"] == 999
+        assert user["nickname"] == "bob"
+        assert user["avatar_url"] is None
+        assert "bio_text" not in user
+        assert "extra_key_one" not in user
+        assert "extra_key_two" not in user
+
+    def test_json_alias_define_expansion(self):
+        kdl_src = """
+define COMMON-FIELDS {
+    ident int from="id"
+    is_active bool from="active"
+}
+
+json ExtendedUser {
+    COMMON-FIELDS
+    display_name str from="title"
+}
+
+struct DefineScraper {
+    profile {
+        css "script#profile"
+        text
+        jsonify ExtendedUser
+    }
+}
+"""
+        custom_html = """
+        <html>
+        <body>
+            <script id="profile" type="application/json">
+            {"id": 42, "active": true, "title": "Admin Alice"}
+            </script>
+        </body>
+        </html>
+        """
+        r = _run_js_src(kdl_src, "DefineScraper", input_text=custom_html)
+        assert r["profile"] == {
+            "ident": 42,
+            "is_active": True,
+            "display_name": "Admin Alice",
+        }
+
+    def test_json_alias_raw_struct(self):
+        kdl_src = """
+json ConfigPayload {
+    host_addr str from="host"
+    port_num int from="port"
+    ssl_enabled bool from="tls"
+}
+
+(raw)struct RawConfigParser {
+    config {
+        jsonify ConfigPayload
+    }
+}
+"""
+        raw_json_str = '{"host": "db.internal.net", "port": 5432, "tls": true, "secret": "pwd"}'
+        r = _run_js_src(kdl_src, "RawConfigParser", input_text=raw_json_str)
+        assert r["config"] == {
+            "host_addr": "db.internal.net",
+            "port_num": 5432,
+            "ssl_enabled": True,
+        }
+
+    def test_schema_32_json_aliased_remapping(self):
+        custom_html = """
+        <html><body>
+        <script id="test-data" type="application/json">[{"@id": 100, "@context": "https://example.com/ctx", "@type": "Product", "data-version": "2.0", "author": {"dc:creator": "John Doe", "slug": "johndoe", "location": {"lat": 51.5, "lng": -0.12}}, "rating_scores": [5, 4, 5]}]</script>
+        </body></html>
+        """
+        r = _run_js_schema(
+            SCHEMAS_DIR / "32_json_aliased_remapping.kdl",
+            "JsonAliasedHtmlScraper",
+            input_text=custom_html,
+        )
+        assert isinstance(r["items"], list)
+        item0 = r["items"][0]
+        assert item0["item_id"] == 100
+        assert item0["item_context"] == "https://example.com/ctx"
+        assert item0["item_type"] == "Product"
+        assert item0["data_version"] == "2.0"
+        assert item0["author"]["author_name"] == "John Doe"
+        assert item0["author"]["author_slug"] == "johndoe"
+        assert item0["author"]["location"] == {
+            "latitude": 51.5,
+            "longitude": -0.12,
+        }
+        assert item0["scores"] == [5, 4, 5]
 
 
 # ── RAW struct ────────────────────────────────────────────────────────────────

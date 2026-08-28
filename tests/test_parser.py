@@ -1217,6 +1217,87 @@ json User {
         assert 'Context string    `json:"@context"`' in code
         assert 'Tags    *[]string `json:"tags,omitempty"`' in code
 
+    def test_python_rest_with_alias_remapping_codegen(self):
+        src = """
+json UserResp {
+    user_id int from="id"
+    full_name str from="name"
+}
+
+json ErrResp {
+    err_code str from="code"
+}
+
+struct ApiClient type=rest {
+    @error 400 ErrResp
+    @request response=UserResp \"\"\"
+    GET /users/me HTTP/1.1
+    Host: api.example.com
+    \"\"\"
+}
+"""
+        m = _parse(src)
+        code = PY_BS4_CONVERTER.convert(m, http_client="httpx")
+        assert "def ssc_remap_json_keys(" in code
+        assert (
+            "value_fn=lambda _b: ssc_remap_json_keys(_b, {'id': 'user_id', 'name': 'full_name'})"
+            in code
+        )
+        assert "value=ssc_remap_json_keys(value, {'code': 'err_code'})" in code
+
+    def test_javascript_rest_with_alias_remapping_codegen(self):
+        src = """
+json UserResp {
+    user_id int from="id"
+    full_name str from="name"
+}
+
+json ErrResp {
+    err_code str from="code"
+}
+
+struct ApiClient type=rest {
+    @error 400 ErrResp
+    @request response=UserResp \"\"\"
+    GET /users/me HTTP/1.1
+    Host: api.example.com
+    \"\"\"
+}
+"""
+        m = _parse(src)
+        code = JS_CONVERTER.convert(m)
+        assert "function sscRemapJsonKeys(" in code
+        assert (
+            'sscRemapJsonKeys(_b, {"id": "user_id", "name": "full_name"})'
+            in code
+        )
+        assert 'sscRemapJsonKeys(_b, {"code": "err_code"})' in code
+
+    def test_golang_rest_with_alias_remapping_codegen(self):
+        src = """
+json UserResp {
+    user_id int from="id"
+    full_name str from="name"
+}
+
+json ErrResp {
+    err_code str from="code"
+}
+
+struct ApiClient type=rest {
+    @error 400 ErrResp
+    @request response=UserResp \"\"\"
+    GET /users/me HTTP/1.1
+    Host: api.example.com
+    \"\"\"
+}
+"""
+        m = _parse(src)
+        code = GO_CONVERTER.convert(m)
+        assert 'UserId   int64  `json:"id"`' in code
+        assert 'FullName string `json:"name"`' in code
+        assert 'ErrCode string `json:"code"`' in code
+
     def test_is_array_prefix(self):
         m = _parse(_load_fixture("json_def_path", "array.kdl"))
         assert _json_def(m, "F").is_array is True

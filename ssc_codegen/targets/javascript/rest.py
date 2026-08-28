@@ -633,8 +633,11 @@ def emit_result_alias_def(node: ResultAliasDef) -> list[str]:
 def emit_matcher_list_def(node: MatcherListDef) -> list[str]:
     var = f"_{to_snake_case(node.struct_name)}Matchers"
     lines = [f"const {var} = ["]
-    parent = node.parent
-    module = parent.parent if parent is not None else None
+    module = (
+        node.parent
+        if isinstance(node.parent, Module)
+        else (node.parent.parent if node.parent is not None else None)
+    )
     definitions = (
         {n.name: n for n in module.body if isinstance(n, JsonDef)}
         if isinstance(module, Module)
