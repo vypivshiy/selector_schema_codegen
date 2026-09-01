@@ -64,3 +64,33 @@ _Avoid_: public source
 **Request preparation**:
 Actions required before the target request, such as login, token exchange, cookie setup, special headers, or pagination state.
 _Avoid_: request body
+
+## Codegen Architecture
+
+**AST Node**:
+A strongly-typed dataclass (`ssc_codegen.ast.Node`) representing a syntax element or synthesized artifact in the intermediate representation tree.
+_Avoid_: AST token, grammar symbol
+
+**WalkContext**:
+An immutable traversal context carrying variable naming counters (`ctx.prv`, `ctx.nxt`), indentation depth (`ctx.indent`), and target metadata across AST visits.
+_Avoid_: variable scope, traversal state dict
+
+**BaseWalker**:
+The language-agnostic AST traversal engine that dispatches nodes to `visit_*` handlers across three traversal modes: Container, Pipeline, and Predicate.
+_Avoid_: tree visitor, code emitter base
+
+**ModuleBuilder**:
+A pure data accumulator that registers imports, standard helper functions, and user extension runtime definitions idempotently without rendering target syntax.
+_Avoid_: signal pool, import emitter
+
+**DomSpelling**:
+An abstract interface defining HTML library-specific DOM query expressions and predicate conditions for a target language.
+_Avoid_: DOM adapter, HTML dialect wrapper
+
+**HttpLibStrategy**:
+A strategy defining client library-specific transport code generation, client types, and runtime exception handling for REST requests.
+_Avoid_: transport driver, HTTP handler
+
+**Two-pass codegen**:
+A code generation approach where pass 1 traverses the AST to accumulate required imports and standard helper definitions in `ModuleBuilder`, and pass 2 emits the complete target source file.
+_Avoid_: single-pass emission, forward-declaring generator

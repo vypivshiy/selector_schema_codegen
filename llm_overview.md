@@ -119,6 +119,9 @@ tests/
 
 examples/                       # Real-world .kdl schemas
 docs/
+├── maintainers/
+│   ├── ast_spec.md             # Complete AST node specification for codegen backends
+│   └── converters.md           # Converter architecture & how to write new backends
 ├── llm.txt                     # KDL DSL v2.1 syntax reference
 └── learn/                      # Tutorial chapters (01-10)
 ```

@@ -1,6 +1,7 @@
 # Codegen Architecture (targets/ + traversal/ + generation/)
 
 Replaces the old `converters/` package entirely.
+Full AST node specification and catalog: `docs/maintainers/ast_spec.md`.
 
 ## BaseWalker (traversal/walker.py)
 
