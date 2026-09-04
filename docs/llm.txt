@@ -447,8 +447,9 @@ json Author {
 ```
 
 Field types: str, int, float, bool, null, <RefName>.
-Modifiers: (array)type for arrays, type? for optional, @omitempty for keys that may be absent, @skip to exclude from output.
-Alias: `field-name type from="source-key"` (positional `"source-key"` is deprecated: W011).
+Modifiers: (array)type for arrays, type? for optional (nullable), @omitempty for keys that may be absent, @skip to exclude from output.
+Alias / Dot-Paths: `field-name type from="source.path.0.key"` (supports dot-separated object keys and numeric array indices; positional `"source-key"` is deprecated: W011).
+Strict allowlist projection: generated parsers drop all unmodeled wire fields and validate required non-nullable fields.
 
 Usage: jsonify <SchemaName> [path="dotted.path"]
 

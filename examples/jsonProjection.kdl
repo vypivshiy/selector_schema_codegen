@@ -1,0 +1,60 @@
+@doc """
+Demonstrates strict JSON allowlist projection, dot-path navigation (a.0.b),
+optional/nullable fields, @omitempty modifier, and schema remapping in HTML and REST contexts.
+"""
+
+json GeoLocation {
+    latitude float from="coords.lat"
+    longitude float from="coords.lng"
+}
+
+json UserProfile {
+    user_id str from="@id"
+    display_name str from="profile.display_name"
+    avatar_url str? from="profile.avatar.url"
+    top_badge str? from="badges.0.icon"
+    location GeoLocation?
+    legacy_tag str @omitempty from="meta.legacy_tag"
+}
+
+(array)json UserCatalog {
+    items (array)UserProfile from="results"
+    total_count int from="pagination.total"
+}
+
+json ApiError {
+    error_code str from="error.code"
+    message str from="error.message"
+}
+
+// 1. HTML Scraping with embedded JSON payload
+struct EmbeddedJsonScraper {
+    @init {
+        raw_payload {
+            css "script#__NEXT_DATA__"
+            text
+        }
+    }
+
+    catalog {
+        @raw_payload
+        jsonify UserCatalog path="props.pageProps"
+    }
+
+    first_user {
+        @raw_payload
+        jsonify UserProfile path="props.pageProps.results.0"
+    }
+}
+
+// 2. REST API endpoint returning typed JSON
+struct UsersApi type=rest {
+    @error 400 ApiError
+    @error 404 ApiError
+
+    @request response=UserCatalog """
+    GET /api/v1/users?limit={{limit:int}} HTTP/1.1
+    Host: api.example.com
+    Accept: application/json
+    """
+}
