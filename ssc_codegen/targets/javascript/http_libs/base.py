@@ -1,19 +1,25 @@
+"""Abstract base class and contract for JavaScript HTTP client strategies."""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
 
 class JsHttpLibStrategy(ABC):
-    """HTTP client strategy for JS codegen.
+    """HTTP client strategy for JavaScript REST and fetch code generation.
 
-    JS emits both fetch and axios runtime helpers regardless of selection
-    (small functions, tests verify both are present).  The strategy only
-    determines which helper name generated methods delegate to.
+    Attributes:
+        fn_name: Name of the JavaScript transport dispatcher helper function
+            (e.g. ``"sscRestCall"`` or ``"sscRestCallAxios"``).
     """
 
     fn_name: str = ""
 
     @abstractmethod
     def rest_call_lines(self) -> list[str]:
-        """Library-specific ``sscRestCall`` / ``sscRestCallAxios`` source."""
+        """Generate library-specific `sscRestCall` or `sscRestCallAxios` helper source lines.
+
+        Returns:
+            List of JavaScript source lines implementing the transport call.
+        """
         ...

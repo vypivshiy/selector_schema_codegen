@@ -1,14 +1,17 @@
+"""Axios HTTP transport strategy for JavaScript code generation."""
+
 from __future__ import annotations
 
 from ssc_codegen.targets.javascript.http_libs.base import JsHttpLibStrategy
 
 
 class AxiosStrategy(JsHttpLibStrategy):
-    """Axios client strategy."""
+    """HTTP client strategy utilizing the `axios` library."""
 
     fn_name = "sscRestCallAxios"
 
     def rest_call_lines(self) -> list[str]:
+        """Generate `sscRestCallAxios` helper source using `axios.request()`."""
         return [
             "async function sscRestCallAxios(client, _matchers, method, url, _valueFn, _opts) {",
             "    let _resp;",

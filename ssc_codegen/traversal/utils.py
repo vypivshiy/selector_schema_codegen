@@ -1,4 +1,8 @@
-"""AST utility functions shared across all backends."""
+"""AST utility functions shared across all code generation backends.
+
+Provides inspection helpers for modules, REST structures, JSON schemas,
+predicates, and placeholder templates used by converters during code generation.
+"""
 
 from __future__ import annotations
 
@@ -25,16 +29,29 @@ from ssc_codegen.ast import (
 
 
 def module_has_rest(module: Module) -> bool:
-    """True if the module contains at least one REST struct."""
+    """Check if the module contains at least one REST struct.
+
+    Args:
+        module: The AST `Module` to inspect.
+
+    Returns:
+        `True` if any node in the module body is a `StructRest`, `False` otherwise.
+    """
     return any(isinstance(n, StructRest) for n in module.body)
 
 
 def module_uses_http(module: Module) -> bool:
-    """True if the module contains any fetch/rest method.
+    """Check if the module contains any fetch or REST HTTP method.
 
-    Covers both ``StructRest`` (REST APIs) and HTML structs with a
-    ``fetch`` method — both produce signatures like
-    ``client: httpx.Client`` and therefore need ``import httpx``.
+    Covers both `StructRest` (REST APIs) and HTML structs with a `fetch`
+    method — both generate HTTP signatures (e.g. ``client: httpx.Client``)
+    and require HTTP library imports.
+
+    Args:
+        module: The AST `Module` to inspect.
+
+    Returns:
+        `True` if the module requires HTTP client machinery, `False` otherwise.
     """
     for node in module.body:
         if isinstance(node, StructRest):
@@ -47,16 +64,29 @@ def module_uses_http(module: Module) -> bool:
 
 
 def module_is_rest_only(module: Module) -> bool:
-    """True if ALL structs in the module are REST structs (or there are none)."""
+    """Check if all structs in the module are REST structs.
+
+    Args:
+        module: The AST `Module` to inspect.
+
+    Returns:
+        `True` if there are no non-REST structs in the module, `False` otherwise.
+    """
     structs = [n for n in module.body if isinstance(n, StructBase)]
     return len(structs) == 0 or all(isinstance(s, StructRest) for s in structs)
 
 
 def module_has_html_struct(module: Module) -> bool:
-    """True if the module has at least one HTML-parsing struct or function.
+    """Check if the module has at least one HTML-parsing struct or function.
 
-    RAW structs, (raw)fn, and REST structs are excluded — they don't need
-    an HTML parser backend (bs4/lxml/goquery/DOMParser).
+    RAW structs, `(raw)fn`, and REST structs are excluded because they do not
+    require an HTML parser engine (e.g. `bs4`, `lxml`, `goquery`, or `DOMParser`).
+
+    Args:
+        module: The AST `Module` to inspect.
+
+    Returns:
+        `True` if at least one HTML parser struct or function is present.
     """
     for n in module.body:
         if isinstance(n, StructRest):
@@ -71,7 +101,14 @@ def module_has_html_struct(module: Module) -> bool:
 
 
 def module_is_extension_only(module: Module) -> bool:
-    """True when a module only contributes extension declarations."""
+    """Check if a module only contributes extension declarations.
+
+    Args:
+        module: The AST `Module` to inspect.
+
+    Returns:
+        `True` if the module defines extensions and has no structs or functions.
+    """
     if not module.extensions:
         return False
     return not any(
@@ -81,7 +118,15 @@ def module_is_extension_only(module: Module) -> bool:
 
 
 def err_subclass_name(struct_name: str, err: ErrorResponse) -> str:
-    """Deterministic error-subclass name from struct name + error spec."""
+    """Derive deterministic error-subclass name from struct name and error spec.
+
+    Args:
+        struct_name: The name of the parent REST struct.
+        err: The `ErrorResponse` AST node specifying the HTTP status and type.
+
+    Returns:
+        PascalCase error class name (e.g. ``"UserGetNotFoundError"``).
+    """
     from ssc_codegen.core.rest_artifacts import (
         err_subclass_name as _impl,
     )
@@ -91,13 +136,30 @@ def err_subclass_name(struct_name: str, err: ErrorResponse) -> str:
 
 def dict_entry_placeholder(
     tmpl: PlaceholderTemplate,
-) -> "PlaceholderSpec | None":
-    """Return the PlaceholderSpec for a dict entry value, or None."""
+) -> PlaceholderSpec | None:
+    """Return the single `PlaceholderSpec` for a dictionary entry value template.
+
+    Args:
+        tmpl: The placeholder template to inspect.
+
+    Returns:
+        The `PlaceholderSpec` if the template contains exactly one placeholder,
+        or `None`.
+    """
     return tmpl.single_placeholder()
 
 
 def dict_needs_builder(d: dict[str, PlaceholderTemplate]) -> bool:
-    """True if any dict entry has an optional or bracket-style array placeholder."""
+    """Check if any dictionary entry requires dynamic query/body builder logic.
+
+    Returns `True` if any entry has an optional placeholder or bracket-style array.
+
+    Args:
+        d: Mapping from key names to `PlaceholderTemplate` values.
+
+    Returns:
+        `True` if runtime dictionary assembly helper is required, `False` otherwise.
+    """
     for tmpl in d.values():
         ph = tmpl.single_placeholder()
         if ph is None:
@@ -110,7 +172,14 @@ def dict_needs_builder(d: dict[str, PlaceholderTemplate]) -> bool:
 
 
 def find_predicate_container(node: Node) -> Node | None:
-    """Walk the parent chain to find the enclosing Filter/Assert/Match/PreValidate."""
+    """Walk up the parent chain to find enclosing Filter, Assert, Match, or PreValidate.
+
+    Args:
+        node: Starting AST node.
+
+    Returns:
+        The enclosing container node if found, or `None`.
+    """
     cur = node.parent
     while cur:
         if isinstance(cur, (Filter, Assert, Match, PreValidate)):
@@ -120,7 +189,14 @@ def find_predicate_container(node: Node) -> Node | None:
 
 
 def find_enclosing_module(node: Node) -> Module | None:
-    """Walk the parent chain to find the enclosing Module."""
+    """Walk up the parent chain to find the enclosing `Module` AST root.
+
+    Args:
+        node: Starting AST node.
+
+    Returns:
+        The enclosing `Module` node if found, or `None`.
+    """
     cur: Node | None = node
     while cur is not None:
         if isinstance(cur, Module):
@@ -130,7 +206,15 @@ def find_enclosing_module(node: Node) -> Module | None:
 
 
 def resolve_json_def(node: Node, schema_name: str) -> JsonDef | None:
-    """Find a JsonDef by name in the enclosing module."""
+    """Find a `JsonDef` declaration by name in the enclosing module.
+
+    Args:
+        node: Starting AST node (used to locate the module root).
+        schema_name: The identifier of the JSON schema to look up.
+
+    Returns:
+        The matching `JsonDef` node, or `None` if not found or if schema_name is empty.
+    """
     if not schema_name:
         return None
     module = find_enclosing_module(node)
@@ -143,9 +227,15 @@ def resolve_json_def(node: Node, schema_name: str) -> JsonDef | None:
 
 
 def jsonify_path_to_segments(query: str) -> list[str]:
-    """Split a dot-notation path into segments, quoting string keys.
+    """Split a dot-notation query path into segments, quoting string keys.
 
-    foo.0.bar -> ["foo", "0", "bar"]  (digits stay as strings)
+    For example, ``"foo.0.bar"`` becomes ``["'foo'", "0", "'bar'"]``.
+
+    Args:
+        query: Dot-separated JSON path string.
+
+    Returns:
+        List of formatted path segment expressions.
     """
     if not query:
         return []
@@ -163,7 +253,16 @@ def json_def_needs_remap(
     definitions: dict[str, JsonDef],
     stack: tuple[str, ...] = (),
 ) -> bool:
-    """Return whether a JSON definition or nested definition has aliases."""
+    """Check whether a JSON definition or any nested definition uses field aliases.
+
+    Args:
+        definition: The `JsonDef` node to check.
+        definitions: Mapping of all available `JsonDef` schemas in the module.
+        stack: Cycle-prevention stack of visited schema names.
+
+    Returns:
+        `True` if field alias remapping is required, `False` otherwise.
+    """
     if definition.name in stack:
         return False
     if definition.has_alias_key:
@@ -172,7 +271,7 @@ def json_def_needs_remap(
     for field in definition.body:
         if not isinstance(field, JsonDefField):
             continue
-        info = field.type_info
+        info = field.ret_type_info
         if info.base == VariableType.JSON and info.ref:
             nested = definitions.get(info.ref)
             if nested and json_def_needs_remap(nested, definitions, next_stack):
@@ -185,18 +284,28 @@ def json_def_descriptors(
     definitions: dict[str, JsonDef],
     stack: tuple[str, ...] = (),
 ) -> dict[str, tuple[str, bool, bool, object]]:
-    """Build a dictionary of field descriptors for strict JSON allowlist projection."""
+    """Build dictionary of field descriptors for strict JSON allowlist projection.
+
+    Args:
+        definition: The root `JsonDef` node.
+        definitions: Mapping of all available `JsonDef` schemas in the module.
+        stack: Cycle-prevention stack of visited schema names.
+
+    Returns:
+        Dictionary mapping canonical field names to a tuple of
+        ``(wire_path, is_optional, is_omitempty, nested_descriptors)``.
+    """
     if definition.name in stack:
         return {}
     next_stack = (*stack, definition.name)
     descriptors: dict[str, tuple[str, bool, bool, object]] = {}
     for field in definition.body:
         if not isinstance(field, JsonDefField) or (
-            field.type_info and field.type_info.skip
+            field.ret_type_info and field.ret_type_info.skip
         ):
             continue
         wire_path = field.alias if field.alias else field.name
-        info = field.type_info
+        info = field.ret_type_info
         is_optional = info.is_optional if info else False
         is_omitempty = info.omitempty if info else False
         nested_desc: object = None
@@ -221,17 +330,26 @@ def json_def_mapping(
     definitions: dict[str, JsonDef],
     stack: tuple[str, ...] = (),
 ) -> dict[str, object]:
-    """Build a complete source-key to canonical-key mapping tree."""
+    """Build complete wire-to-canonical key mapping tree for JSON dictionaries.
+
+    Args:
+        definition: The root `JsonDef` node.
+        definitions: Mapping of all available `JsonDef` schemas in the module.
+        stack: Cycle-prevention stack of visited schema names.
+
+    Returns:
+        Dictionary mapping wire keys to canonical names or nested mapping tuples.
+    """
     if definition.name in stack:
         return {}
     next_stack = (*stack, definition.name)
     mapping: dict[str, object] = {}
     for field in definition.body:
-        if not isinstance(field, JsonDefField) or field.type_info.skip:
+        if not isinstance(field, JsonDefField) or field.ret_type_info.skip:
             continue
         source = field.alias or field.name
         output = field.name
-        info = field.type_info
+        info = field.ret_type_info
         nested = (
             definitions.get(info.ref)
             if info.base == VariableType.JSON and info.ref

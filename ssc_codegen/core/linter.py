@@ -82,7 +82,14 @@ def _node_args(node: KdlNode) -> list[str]:
 
 
 def is_http_status(value: int) -> bool:
-    """Return whether an integer can be used as an HTTP response status."""
+    """Validate whether an integer represents a valid HTTP status code (100..599).
+
+    Args:
+        value: Numeric status code candidate.
+
+    Returns:
+        `True` if `100 <= value <= 599`, otherwise `False`.
+    """
     return 100 <= value <= 599
 
 
@@ -288,7 +295,26 @@ _PREDICATE_OPS: frozenset[str] = frozenset(
 def lint_module(
     doc: KdlDocument, source_path: str = "", *, source_text: str = ""
 ) -> list[ReadDiagnostic]:
-    """Structural pre-pass linting on the parsed KDL document."""
+    """Execute single-file structural and syntactic validation passes on a parsed KDL document.
+
+    Checks:
+    - Top-level node whitelist (`struct`, `json`, `fn`, `define`, `extension`, `import`, `@doc`).
+    - Explicit import block syntax and kind annotations.
+    - Extension signatures and valid targets (`py`, `js`, `go`).
+    - Define names (UPPER_CASE) and scalar/block structure.
+    - JSON schema definitions, field types, and dot-notation paths.
+    - Struct structural invariants and required directives per struct type.
+    - Function declarations (`fn`, `(raw)fn`).
+    - Local top-down declaration order (`E302`) for `nested` and `json` type references.
+
+    Args:
+        doc: The parsed `KdlDocument` to validate.
+        source_path: Filesystem path to the KDL source file.
+        source_text: Raw source code text for quoted string checks.
+
+    Returns:
+        List of collected `ReadDiagnostic` warnings and errors.
+    """
     diags: list[ReadDiagnostic] = []
     children_defines: dict[str, list[KdlNode]] = {}
     _lint_top_level(doc, source_path, diags)
@@ -1582,7 +1608,25 @@ def lint_cross_refs(
     node_source_paths: Mapping[int, object] | None = None,
     targets: Iterable[str] | None = None,
 ) -> list[ReadDiagnostic]:
-    """Cross-reference validation — needs merged node list including imports."""
+    """Execute cross-reference validation and multi-target symbol collision checks.
+
+    Operates on the flattened list of top-level nodes after import graph resolution.
+    Validates:
+    - `@request response="..."` references exist in declared JSON schemas (`E300`).
+    - `@error ... <Schema>` references exist in declared JSON schemas (`E300`).
+    - `nested <Struct>` references exist in declared struct definitions (`E300`).
+    - JSON field type references exist and do not form circular reference cycles (`E300`).
+    - Target symbol collisions (`E402`) and invalid target identifiers (`E403`) across Python, JS, Go.
+
+    Args:
+        nodes: Merged flat list of KDL nodes (root file plus imported definitions).
+        source_path: Fallback path to the root document.
+        node_source_paths: Mapping of node object IDs to originating file paths.
+        targets: Target languages to validate generated symbols against.
+
+    Returns:
+        List of collected `ReadDiagnostic` records.
+    """
     diags: list[ReadDiagnostic] = []
     json_names: set[str] = set()
     json_field_refs: list[tuple[KdlNode, str, str, str]] = []
@@ -1956,6 +2000,19 @@ def lint_require_args(
     max_count: int | None = None,
     example: str = "",
 ) -> list[str] | None:
+    """Validate positional argument counts on a KDL node.
+
+    Args:
+        node: The node being validated.
+        lint: Lint context for recording error diagnostics.
+        exact: Optional exact required argument count.
+        min_count: Optional minimum required argument count.
+        max_count: Optional maximum allowed argument count.
+        example: Optional usage example shown in diagnostic hints.
+
+    Returns:
+        List of stringified arguments if validation passes, or `None` on error.
+    """
     args = _node_args(node)
     name = node.name
     count = len(args)
@@ -1995,6 +2052,16 @@ def lint_require_args(
 def lint_require_int_args(
     node: KdlNode, lint: LintContext, args: list[str]
 ) -> bool:
+    """Validate that all provided argument strings are valid integers.
+
+    Args:
+        node: The node being checked.
+        lint: Lint context for reporting errors (`E001`).
+        args: List of argument strings to parse.
+
+    Returns:
+        `True` if all arguments parse as integers, otherwise `False`.
+    """
     name = node.name
     for arg in args:
         try:
@@ -2011,6 +2078,16 @@ def lint_require_int_args(
 
 
 def lint_validate_regex(node: KdlNode, lint: LintContext, pattern: str) -> bool:
+    """Validate Python/PCRE regex syntax at compile time.
+
+    Args:
+        node: The originating KDL node.
+        lint: Lint context for reporting regex syntax errors (`E002`).
+        pattern: The raw regex pattern string to validate.
+
+    Returns:
+        `True` if valid regex syntax, otherwise `False`.
+    """
     try:
         _re.compile(pattern.lstrip())
         return True
@@ -2025,6 +2102,16 @@ def lint_validate_regex(node: KdlNode, lint: LintContext, pattern: str) -> bool:
 
 
 def lint_validate_css(node: KdlNode, lint: LintContext, selector: str) -> bool:
+    """Validate CSS selector syntax using soupsieve parser.
+
+    Args:
+        node: The originating KDL node.
+        lint: Lint context for reporting CSS syntax errors (`E002`).
+        selector: The CSS selector query string to validate.
+
+    Returns:
+        `True` if valid CSS selector, otherwise `False`.
+    """
     try:
         import soupsieve
 
@@ -2042,6 +2129,16 @@ def lint_validate_css(node: KdlNode, lint: LintContext, selector: str) -> bool:
 
 
 def lint_validate_xpath(node: KdlNode, lint: LintContext, expr: str) -> bool:
+    """Validate XPath expression syntax using lxml parser.
+
+    Args:
+        node: The originating KDL node.
+        lint: Lint context for reporting XPath syntax errors (`E002`).
+        expr: The XPath query string to validate.
+
+    Returns:
+        `True` if valid XPath expression, otherwise `False`.
+    """
     try:
         from lxml import etree
 
@@ -2064,6 +2161,15 @@ def lint_validate_xpath(node: KdlNode, lint: LintContext, expr: str) -> bool:
 
 
 def lint_require_predicate_ctx(node: KdlNode, lint: LintContext) -> bool:
+    """Enforce that the current node is placed inside a predicate container.
+
+    Args:
+        node: The predicate node being checked.
+        lint: Lint context tracking predicate nesting depth.
+
+    Returns:
+        `True` if inside a predicate context, otherwise reports `E203` and returns `False`.
+    """
     if lint.in_predicate:
         return True
     name = node.name
@@ -2078,6 +2184,15 @@ def lint_require_predicate_ctx(node: KdlNode, lint: LintContext) -> bool:
 
 
 def lint_require_assert_ctx(node: KdlNode, lint: LintContext) -> bool:
+    """Enforce that the current node is placed inside an `assert` block.
+
+    Args:
+        node: The node being checked.
+        lint: Lint context tracking assert block context.
+
+    Returns:
+        `True` if inside an assert block, otherwise reports `E203` and returns `False`.
+    """
     if lint.in_assert:
         return True
     name = node.name
@@ -2091,7 +2206,12 @@ def lint_require_assert_ctx(node: KdlNode, lint: LintContext) -> bool:
 
 
 def lint_pipeline_op(node: KdlNode, lint: LintContext) -> None:
-    """Validate a single pipeline operation node."""
+    """Perform syntactic and argument-level linting on an individual pipeline operation node.
+
+    Args:
+        node: The pipeline operation KDL node being validated.
+        lint: Lint context for recording validation diagnostics (`E001`, `E002`, `E203`, `E301`).
+    """
     name = node.name
 
     if name in _NO_ARGS_OPS:
@@ -2372,7 +2492,12 @@ def lint_pipeline_op(node: KdlNode, lint: LintContext) -> None:
 
 
 def lint_predicate_op(node: KdlNode, lint: LintContext) -> None:
-    """Validate a predicate operation node inside filter/assert/match."""
+    """Validate argument count, regex patterns, and context constraints for a predicate operation.
+
+    Args:
+        node: The predicate operation KDL node (e.g. `eq`, `contains`, `attr-re`, `len-gt`).
+        lint: Lint context for recording predicate diagnostics.
+    """
     name = node.name
 
     if name in ("eq", "ne"):
@@ -2497,7 +2622,16 @@ def lint_predicate_op(node: KdlNode, lint: LintContext) -> None:
 def lint_wildcard_op(
     node: KdlNode, ctx: ParseContext, lint: LintContext
 ) -> None:
-    """Validate unknown ops in pipeline context."""
+    """Validate unrecognized or dynamic operations appearing within a pipeline context.
+
+    Distinguishes `@init` references, un-prefixed extensions, scalar defines,
+    and provides fuzzy-matching spelling suggestions for typos (`E200`).
+
+    Args:
+        node: The unrecognized KDL node.
+        ctx: Global parse context containing registered extensions and defines.
+        lint: Lint context for recording error diagnostics.
+    """
     from ssc_codegen.core.type_checking import BUILTIN_PIPELINE_OPS
 
     op_name = node.name

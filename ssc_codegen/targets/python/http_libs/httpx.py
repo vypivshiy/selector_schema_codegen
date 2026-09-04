@@ -1,3 +1,5 @@
+"""httpx HTTP client transport strategy for Python code generation."""
+
 from __future__ import annotations
 
 
@@ -5,7 +7,14 @@ from ssc_codegen.targets.python.http_libs.base import HttpLibStrategy
 
 
 class HttpxStrategy(HttpLibStrategy):
-    """httpx HTTP client strategy."""
+    """HTTP transport strategy using `httpx` (sync and async).
+
+    Attributes:
+        import_line: ``"import httpx"``.
+        sync_client_type: ``"httpx.Client"``.
+        async_client_type: ``"httpx.AsyncClient"``.
+        transport_exception: ``"httpx.HTTPError"``.
+    """
 
     import_line = "import httpx"
     sync_client_type = "httpx.Client"

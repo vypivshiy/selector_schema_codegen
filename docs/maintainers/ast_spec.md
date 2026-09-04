@@ -2,40 +2,7 @@
 
 **Назначение:** Полный справочник по промежуточному представлению (AST `ssc_codegen.ast`), контракту обхода (`traversal/`) и правилам генерации кода для всех поддерживаемых и новых target-бэкендов (Python, JavaScript, Go и др.).  
 **Версия DSL:** 2.1  
-**Связанные документы:** [converters.md](converters.md), [types.md](../types.md), [operations.md](../operations.md), [predicates.md](../predicates.md), [CONTEXT.md](../../CONTEXT.md)
-
----
-
-## Содержание
-
-1. [Архитектура кодогенератора](#1-архитектура-кодогенератора)
-   - [BaseWalker и три режима обхода](#basewalker-и-три-режима-обхода)
-   - [WalkContext и модель переменных](#walkcontext-и-модель-переменных)
-   - [ModuleBuilder (накопитель импортов и хелперов)](#modulebuilder)
-   - [Соглашения по Helper-коду (sscruntime) и префиксам ssc/Ssc](#соглашения-по-helper-коду-sscruntime-и-префиксам-sscssc)
-   - [Двухпроходная генерация (Two-pass codegen)](#двухпроходная-генерация-two-pass-codegen)
-2. [Checklist: Создание нового Backend с нуля](#2-checklist-создание-нового-backend-с-нуля)
-3. [Глубокий разбор сложных подсистем](#3-глубокий-разбор-сложных-подсистем)
-   - [1. Fallback (try/catch и синхронизация переменных)](#1-fallback-trycatch-и-синхронизация-переменных)
-   - [2. ExtensionCall (пользовательские операции)](#2-extensioncall-пользовательские-операции)
-   - [3. Таблицы (TableConfig, TableRows, Match, UNMATCHED_TABLE_ROW)](#3-таблицы-tableconfig-tablerows-match-unmatched_table_row)
-   - [4. REST и транспортная модель (@request, Result-артефакты)](#4-rest-и-транспортная-модель-request-result-артефакты)
-   - [5. Nested и Jsonify (вложенные структуры и JSON)](#5-nested-и-jsonify-вложенные-структуры-и-json)
-4. [Каталог AST-узлов](#4-каталог-ast-узлов)
-   - [Группа 1: Модульный уровень](#группа-1-модульный-уровень)
-   - [Группа 2: Определения типов и схем](#группа-2-определения-типов-и-схем)
-   - [Группа 3: Структуры и методы](#группа-3-структуры-и-методы)
-   - [Группа 4: Табличные узлы](#группа-4-табличные-узлы)
-   - [Группа 5: HTTP и REST артефакты](#группа-5-http-и-rest-артефакты)
-   - [Группа 6: Пользовательские расширения](#группа-6-пользовательские-расширения)
-   - [Группа 7: Селекторы DOM](#группа-7-селекторы-dom)
-   - [Группа 8: Извлечение данных](#группа-8-извлечение-данных)
-   - [Группа 9: Строковые трансформации](#группа-9-строковые-трансформации)
-   - [Группа 10: Регулярные выражения](#группа-10-регулярные-выражения)
-   - [Группа 11: Массивы и срезы](#группа-11-массивы-и-срезы)
-   - [Группа 12: Приведение типов](#группа-12-приведение-типов)
-   - [Группа 13: Управление потоком](#группа-13-управление-потоком)
-   - [Группа 14: Предикаты и логические условия](#группа-14-предикаты-и-логические-условия)
+**Связанные документы:** [converters.md](converters.md), [types.md](../types.md), [operations.md](../operations.md), [predicates.md](../predicates.md)
 
 ---
 
@@ -146,6 +113,22 @@ KDL schema -> kdlquery -> core/reader -> Module AST -> BaseWalker (Visitor) -> T
 
 ---
 
+### Соглашения об именовании и предотвращении коллизий типов
+
+В сгенерированном коде часто сосуществуют класс парсера, синтезированный тип возвращаемого значения (`TypeDef`) и модель десериализации JSON (`JsonDef`). Чтобы исключить коллизии имен между классами, типами и моделями (например, `Product` парсер и `Product` тип данных), кодогенераторы строго соблюдают следующие суффиксы:
+
+| Артефакт AST | KDL-декларация | Именование в генераторе | Пример (Python) | Пример (Go) |
+|---|---|---|---|---|
+| **Класс парсера** | `struct Product { ... }` | `PascalCase(name)` | `class Product:` | `type Product struct` |
+| **Синтезированный TypeDef** | Синтез из `Struct` | `PascalCase(name) + "Type"` | `ProductType = TypedDict(...)` | `type ProductType struct` |
+| **JSON Schema Model** | `json User { ... }` | `PascalCase(name) + "Json"` | `class UserJson(TypedDict):` | `type UserJson struct` |
+| **REST Error Variant** | `@error 404 schema=NotFound` | `PascalCase(Struct) + Status + "Err"` | `class UsersClient404Err(Err[...]):` | `type UsersClient404Err struct` |
+| **REST Result Alias** | `MethodRest` в `UsersClient` | `PascalCase(Method) + "Result"` | `GetUserResult = Union[...]` | `type GetUserResult = Result[...]` |
+
+> **Правило для авторов бэкендов:** Если в целевом языке класс парсера и возвращаемый тип данных находятся в общем пространстве имен (Python, JavaScript, Go, TypeScript), **обязательно** добавляйте суффикс `Type` для `TypeDef` и `Json` для `JsonDef`. Это гарантирует 100% совместимость и отсутствие циклических переопределений имен.
+
+---
+
 ### Двухпроходная генерация (Two-pass codegen)
 
 Для предотвращения проблем с порядком объявлений (forward references) и точной сборки заголовка файла генерация выполняется в два прохода:
@@ -186,6 +169,7 @@ KDL schema -> kdlquery -> core/reader -> Module AST -> BaseWalker (Visitor) -> T
 
 ## 3. Глубокий разбор сложных подсистем
 
+<a id="fallback-deep-dive"></a>
 ### 1. Fallback (try/catch и синхронизация переменных)
 
 Узел `Fallback` оборачивает предшествующие операции поля в защитный блок.
@@ -196,14 +180,14 @@ KDL schema -> kdlquery -> core/reader -> Module AST -> BaseWalker (Visitor) -> T
 
 #### Семантика обхода
 1. В `walk_pipeline` появление `Fallback` перехватывается: узел сам управляет обходом своего `body`.
-2. Генератор эмитирует `try` (или аналог).
-3. Внутри `try` вызывается `self.walk_pipeline(node.body, ctx.deeper())`.
-4. В блоке `except / catch` переменной `v_target` присваивается `Fallback.value`.
+2. Генератор эмитирует `try` (или функциональную обертку на языках без `try/catch`).
+3. Внутри защищенного блока вызывается `self.walk_pipeline(node.body, ctx.deeper())`.
+4. В блоке ошибки/паники возвращается `Fallback.value`.
 5. Внешний контекст `ctx` продвигается на `len(node.body)` шагов: `ctx = ctx.advance_n(len(node.body))`.
 
 #### Примеры кодогенерации
 
-**Python:**
+**Python (нативный try/except):**
 ```python
 try:
     v1 = v.select_one(".price")
@@ -214,9 +198,7 @@ except Exception:
     return 0
 ```
 
-> **Важно:** `Fallback` перехватывает **все** исключения (`except Exception:` в Python, `catch (e)` в JavaScript, перехват паники/ошибок через `stdFallback` в Go). Это гарантирует, что любая непредвиденная ошибка в цепочке вычислений (элемент не найден, не сработал regex, не сошелся `assert`, ошибка парсинга JSON или приведения типов) безопасно приводит к возврату заданного fallback-значения.
-
-**JavaScript:**
+**JavaScript (нативный try/catch):**
 ```javascript
 try {
   const v1 = v.querySelector(".price");
@@ -228,14 +210,34 @@ try {
 }
 ```
 
-**Go:**
+**Go (генерация runtime helper'а panic recovery):**
+Поскольку в языке Go отсутствует синтаксическая конструкция `try / catch`, кодогенератор генерирует стандартный generic helper `stdFallback[T any]` (размещаемый в `sscgen_runtime.go` или в шапке модуля), который выполняет анонимную функцию с перехватом паник через `defer / recover`:
+
 ```go
-v3 := stdFallback(func() (int, error) {
+// Runtime Helper (генерируется компилятором в sscgen_runtime.go / заголовке):
+func stdFallback[T any](fn func() T, fallback T) T {
+    var result T
+    defer func() {
+        if r := recover(); r != nil {
+            result = fallback
+        }
+    }()
+    result = fn()
+    return result
+}
+```
+
+И генерирует вызов внутри метода парсера:
+```go
+return stdFallback(func() int {
     v1 := v.Find(".price").First()
     v2 := strings.TrimSpace(v1.Text())
-    return strconv.Atoi(v2)
+    v3, _ := strconv.Atoi(v2)
+    return v3
 }, 0)
 ```
+
+> **Важно:** `Fallback` перехватывает **все** ошибки вычислений (`except Exception:` в Python, `catch (e)` в JavaScript, перехват паники через `stdFallback` в Go). Это гарантирует, что любая непредвиденная ошибка в цепочке вычислений (элемент не найден, не сработал regex, не сошелся `assert`, ошибка парсинга JSON или сбой приведения типов) безопасно приводит к возврату заданного fallback-значения.
 
 ---
 
@@ -309,15 +311,62 @@ class SpecsTable:
 
 REST-структуры (`(rest)struct`) компилируются в клиенты API с типизированными эндпоинтами и монадическими результатами (`Result[T, E]`).
 
-#### Синтезируемые AST-узлы (core/rest_artifacts.py):
-1. `ResultVariantDef`: описание класса ошибки (например, `class GetUser404Err(Err[ErrorJson]): ...`).
-2. `ResultAliasDef`: псевдоним типа результата метода (`GetUserResult = Union[Ok[UserJson], GetUser404Err, UnknownErr, TransportErr]`).
-3. `MatcherListDef`: реестр сопоставителей ошибок `ErrMatcher(status=404, conditions=..., factory=GetUser404Err)`.
+```
+KDL Declaration                  Compiler Core                   AST Nodes                  Generated Client
+(rest)struct UsersClient  ───►  rest_artifacts_from_struct  ───► ResultVariantDef  ───►  class UsersClient404Err(Err[...])
+  @error 404 schema=...          (synthesizes AST nodes)         ResultAliasDef    ───►  GetUserResult = Union[Ok[...], ...]
+  @request ...                                                   MatcherListDef    ───►  _users_matchers = [ErrMatcher(...)]
+                                                                 StructRest        ───►  class UsersClient: def get_user(...)
+```
 
-#### Структура `RequestHttp`:
-Поля URL, заголовков, параметров и тела хранятся в виде токенизированных шаблонов `PlaceholderTemplate`, содержащих литеральные строки и объекты `PlaceholderSpec`.
-- Имена плейсхолдеров преобразуются в конвенцию целевого языка (`to_snake_case` для Python, `to_camel_case` для JS/Go) через метод `with_renamed_placeholders()`.
-- Никакого ручного парсинга regex'ами в конвертерах не производится.
+#### 1. Декларация в KDL
+```kdl
+(rest)struct UsersClient {
+    @error 404 schema=NotFoundJson {
+        body-matches "error.code" "NOT_FOUND"
+    }
+    @error 500 schema=ServerErrorJson
+
+    @request get_user "GET" "https://api.site.com/users/{{id:int}}" {
+        header "Authorization" "Bearer {{token:str}}"
+        query "fields" "{{fields:str[]?|csv}}"
+        response-schema UserJson
+        response-path "data.user"
+    }
+}
+```
+
+#### 2. Синтез артефактов в компиляторе (`core/rest_artifacts.py`)
+Перед посещением `StructRest` компилятор синтезирует три типа AST-узлов и вставляет их в `Module.body`:
+1. `ResultVariantDef`: Описание типизированного класса ошибки для каждого `@error` (например, `UsersClient404Err(Err[NotFoundJson])`, `UsersClient500Err(Err[ServerErrorJson])`).
+2. `ResultAliasDef`: Объединение типов возвращаемого значения метода (`GetUserResult = Union[Ok[UserJson], UsersClient404Err, UsersClient500Err, UnknownErr, TransportErr]`).
+3. `MatcherListDef`: Реестр сопоставителей ошибок `_users_client_matchers = [ErrMatcher(404, conditions, UsersClient404Err), ErrMatcher(500, ..., UsersClient500Err)]`.
+
+#### 3. Модель запроса (`RequestHttp`, `PlaceholderSpec`, `PlaceholderTemplate`)
+- URL, заголовки, параметры и тело запроса нормализуются в токенизированные объекты `PlaceholderTemplate`.
+- Грамматика плейсхолдеров `{{name:type[]?|style}}`:
+  - **Типы**: `str` (по умолчанию), `int`, `float`, `bool`.
+  - **Массивы (`[]`) и стили**: `repeat` (по умолчанию: `?tag=a&tag=b`), `csv` (`?tag=a,b`), `bracket` (`?tag[]=a&tag[]=b`), `pipe` (`?tag=a|b`), `space` (`?tag=a+b`).
+  - **Опциональность (`?`)**: опциональные параметры генерируются со значениями по умолчанию `None` / `null` / `nil`.
+- Метод `with_renamed_placeholders(transform)` преобразует имена плейсхолдеров в конвенцию целевого языка (`to_snake_case` для Python, `to_camel_case` для JS/Go).
+
+#### 4. Стратегии HTTP-клиентов (`HttpLibStrategy`)
+Генератор поддерживает сменные HTTP-библиотеки через `HttpLibStrategy`:
+- **Python**:
+  - `httpx` (по умолчанию): нативные синхронный `client.request()` и асинхронный `await client.request()`.
+  - `aiohttp`: нативный асинхронный клиент; синхронный вызов через `asyncio.run()`.
+  - `requests`: нативный синхронный клиент; асинхронный через `run_in_executor()`.
+- **JavaScript**:
+  - `fetch` (по умолчанию): глобальный `fetch` API.
+  - `axios`: вызовы через инстанс `axios`.
+- **Go**:
+  - `net/http`: вызовы через `http.Client` с десериализацией `encoding/json` и `gjson`.
+
+#### 5. Обработка ответа и извлечение данных (`response_path`)
+1. При статусе 2xx: тело ответа десериализуется в JSON. Если задан `response_path` (например, `"data.user"`), извлекается вложенный объект, после чего он типизируется в `response_schema` и возвращается в `Ok(data)`.
+2. При статусе non-2xx: клиент проходит по `_users_client_matchers`. Если статус и тело удовлетворяют правилу `ErrMatcher`, создается соответствующий `XxxErr(error_body)`.
+3. Если ни один matcher не подошел: возвращается `UnknownErr(status, raw_body)`.
+4. При ошибке сети/таймауте: возвращается `TransportErr(exception)`.
 
 ---
 
@@ -342,14 +391,23 @@ REST-структуры (`(rest)struct`) компилируются в клие�
 
 ### Группа 1: Модульный уровень
 
-#### 1.1 `Module`
-- **Класс:** `ssc_codegen.ast.Module` | **Метод:** `visit_module`
+#### 1.1 `Module` и `Node`
+- **Классы:** `ssc_codegen.ast.Module`, `ssc_codegen.ast.base.Node` | **Метод:** `visit_module`
 - **Категория:** Container
-- **Поля:**
+- **Поля `Module`:**
   - `doc: str` — документация уровня модуля.
   - `source_file: str` — базовое имя исходного `.kdl` файла.
   - `extensions: dict[str, ExtensionDef]` — реестр объявленных расширений.
   - `body: list[Node]` — дочерние элементы модуля (JsonDef, TypeDef, Struct, Hooks).
+- **Поля `Node`:**
+  - `ret_type_info: TypeInfo` — метаданные возвращаемого типа.
+  - `accept_type_info: TypeInfo` — метаданные принимаемого типа.
+  - `is_array: bool` — признак работы со списком/массивом.
+  - `parent: Node | None` — ссылка на родительский узел.
+  - `body: list[Node]` — дочерние узлы.
+- **Устаревшие свойства (Deprecation):**
+  - `Node.ret`, `Node.accept`, `Node.type_info` — устарели (выбрасывают `DeprecationWarning`); используйте `ret_type_info.base`, `accept_type_info.base`, `ret_type_info`.
+  - `Module.docstring`, `StructBase.docstring` — устарели (выбрасывают `DeprecationWarning`); используйте `Module.doc`, `StructBase.doc`.
 - **Кодогенерация:**
   - **Python:** Эмитирует docstring модуля `"""..."""`, импорты из `_builder.imports`, std-хелперы из `_builder.std_defs`, затем обходит дочерние узлы.
   - **JS:** Эмитирует JSDoc-комментарий, хелперы, классы/функции, секцию `module.exports` / `export`.
@@ -653,6 +711,8 @@ REST-структуры (`(rest)struct`) компилируются в клие�
 
 ### Группа 7: Селекторы DOM
 
+Все селекторы элементов (`CssSelect`, `CssSelectAll`, `XpathSelect`, `XpathSelectAll`) хранят последовательность запросов в поле `queries: list[str]` для поддержки fallback-селекторов (`css "h1" "h2"`). Устаревшее свойство `.query` возвращает первый запрос `queries[0]` и выбрасывает `DeprecationWarning`.
+
 | Узел | Метод | KDL | Типы | Python (bs4) | JS | Go (goquery) |
 |---|---|---|---|---|---|---|
 | `CssSelect` | `visit_css_select` | `css ".title"` | `DOC -> DOC` | `v1 = v.select_one(".title")` | `const v1 = v.querySelector(".title");` | `v1 := v.Find(".title").First()` |
@@ -744,7 +804,7 @@ REST-структуры (`(rest)struct`) компилируются в клие�
 
 #### 13.3 `Fallback`
 - **Класс:** `Fallback` | **Метод:** `visit_fallback`
-- **Назначение:** Обработка ошибок в pipeline (см. детальный разбор в [разделе 3.1](#1-fallback-trycatch-и-синхронизация-переменных)).
+- **Назначение:** Обработка ошибок в pipeline (см. детальный разбор в [разделе 3.1](#fallback-deep-dive)).
 
 ---
 

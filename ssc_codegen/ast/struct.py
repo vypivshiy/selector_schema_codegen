@@ -1,3 +1,39 @@
+"""AST nodes for parser structs, field pipelines, tables, and HTTP request models.
+
+This module defines the core structural intermediate representation nodes for both HTML/document
+parsers (`Struct`) and REST API clients (`StructRest`), along with their constituent pipeline
+components, initialization caches, table configurations, and HTTP transport specifications.
+
+### Struct Categories and Lifecycles
+
+1. **Parser Structs (`Struct`)**:
+   - `ITEM`: Single document extraction mapping fields to dictionary properties.
+   - `LIST`: Multi-item extraction with `@split-doc` yielding a list of item objects.
+   - `DICT`: Key-value extraction with `@split-doc`, `@key`, and `@value` yielding a dynamic dictionary.
+   - `TABLE`: Tabular data extraction matching table rows against field rules via `@table`, `@rows`,
+     `@match`, and `@value`.
+   - `FLAT`: Single-field flat list extraction with deduplication.
+   - `RAW`: Plain text/document extraction without DOM parsing.
+
+2. **Constructor Caching Lifecycle (`@init`)**:
+   - `Init`: Container node holding cached computations.
+   - `InitField`: Pipeline calculating an intermediate DOM element or value.
+   - `InitFieldCall`: Invoked in `__init__` constructor and stored in `self._<name>`.
+   - `Self` (in `control.py`): Injected at the start of a field pipeline to read from `self._<name>`.
+
+3. **Pre-Validation Lifecycle (`@pre-validate`)**:
+   - `PreValidate`: Assertion pipeline executed before parsing fields.
+   - Generated as private `_pre_validate(self, document)` method called as the first statement in `parse()`.
+
+4. **REST Client Structs (`StructRest`) & Transport (`@request`)**:
+   - `MethodRest`: REST endpoint method returning a typed result union.
+   - `MethodFetch`: HTTP request method returning a parsed document model.
+   - `RequestHttp`: Normalized HTTP request definition supporting URL, headers, query params, cookies,
+     and body templates.
+   - `PlaceholderSpec` & `PlaceholderTemplate`: Tokenized parameter placeholders `{{name:type[]?|style}}`.
+   - `ErrorResponse`: Declarative HTTP error status mapping.
+"""
+
 from __future__ import annotations
 import re as _re
 import warnings
@@ -31,10 +67,16 @@ PLACEHOLDER_WIDE_RE = _re.compile(r"\{\{([^{}]*)\}\}")
 
 @dataclass
 class PlaceholderSpec:
-    """Parsed `{{...}}` token from an @request payload.
+    """Parsed parameter placeholder token from an HTTP request template.
 
-    All placeholder parsing goes through these methods so the regex stays
-    an internal implementation detail of this module.
+    Represents tokens of the form `{{name:type[]?|style}}`.
+
+    Attributes:
+        name: Identifier of the parameter placeholder.
+        type_name: Primitive scalar type constraint (`"str"`, `"int"`, `"float"`, `"bool"`).
+        is_array: Flag indicating whether the placeholder accepts a list of values.
+        is_optional: Flag indicating whether the parameter is optional.
+        style: Serialization style for array parameters (`"repeat"`, `"csv"`, `"bracket"`, `"pipe"`, `"space"`).
     """
 
     name: str = ""
@@ -49,28 +91,51 @@ class PlaceholderSpec:
 
     @classmethod
     def parse(cls, text: str) -> PlaceholderSpec | None:
-        """Parse *text* that is exactly one placeholder (``{{name:int[]?|csv}}``).
+        """Parse text that is exactly one placeholder token.
 
-        Returns ``None`` when *text* is not a valid placeholder.
+        Args:
+            text: Raw string containing a single placeholder (e.g. `{{name:int[]?|csv}}`).
+
+        Returns:
+            Parsed `PlaceholderSpec` instance, or `None` if syntax does not match.
         """
         m = PLACEHOLDER_RE.fullmatch(text)
         return parse_placeholder(m) if m else None
 
     @staticmethod
     def find_all(text: str) -> list[PlaceholderSpec]:
-        """Return every placeholder found in *text*, in order of appearance."""
+        """Return every placeholder found in text in order of appearance.
+
+        Args:
+            text: Input string to search for placeholders.
+
+        Returns:
+            List of parsed `PlaceholderSpec` objects.
+        """
         return [parse_placeholder(m) for m in PLACEHOLDER_RE.finditer(text)]
 
     @staticmethod
     def search(text: str) -> bool:
-        """True when *text* contains at least one placeholder."""
+        """Check whether text contains at least one placeholder token.
+
+        Args:
+            text: Input string to test.
+
+        Returns:
+            True if text contains at least one placeholder.
+        """
         return PLACEHOLDER_RE.search(text) is not None
 
     @staticmethod
     def match_at(text: str, pos: int) -> tuple[int, PlaceholderSpec] | None:
-        """Try to match a placeholder at *pos*.
+        """Try to match a placeholder at the given string offset.
 
-        Returns ``(end_pos, spec)`` on success, ``None`` otherwise.
+        Args:
+            text: Input string.
+            pos: Starting index in text to match.
+
+        Returns:
+            Tuple of `(end_position, spec)` on success, or `None` on failure.
         """
         m = PLACEHOLDER_RE.match(text, pos)
         if m is None:
@@ -83,10 +148,14 @@ class PlaceholderSpec:
     def sub(
         text: str, replacement: "str | Callable[[PlaceholderSpec], str]"
     ) -> str:
-        """Replace every placeholder in *text*.
+        """Replace every placeholder token in text with a substitute string.
 
-        *replacement* may be a literal string or a callable receiving the
-        parsed ``PlaceholderSpec`` and returning the replacement string.
+        Args:
+            text: Input string containing placeholders.
+            replacement: Literal string or callback receiving each parsed `PlaceholderSpec`.
+
+        Returns:
+            Substituted result string.
         """
         if callable(replacement):
             return PLACEHOLDER_RE.sub(
@@ -96,9 +165,14 @@ class PlaceholderSpec:
 
     @staticmethod
     def rename(text: str, mapping: dict[str, str]) -> str:
-        """Rename placeholder names per *mapping*, preserving all modifiers.
+        """Rename placeholder identifiers in text while preserving all type/style modifiers.
 
-        ``mapping`` maps old name → new name.  Unmapped names are left as-is.
+        Args:
+            text: String containing placeholders.
+            mapping: Map of old placeholder names to new placeholder names.
+
+        Returns:
+            String with remapped placeholder names.
         """
 
         def _repl(m: "_re.Match[str]") -> str:
@@ -120,7 +194,7 @@ class PlaceholderSpec:
         return PLACEHOLDER_RE.sub(_repl, text)
 
     def to_token(self) -> str:
-        """Reconstruct the ``{{name:type[]?|style}}`` source token."""
+        """Reconstruct the canonical source token representation."""
         s = "{{" + self.name
         if self.type_name != "str":
             s += f":{self.type_name}"
@@ -134,6 +208,7 @@ class PlaceholderSpec:
 
 
 def parse_placeholder(match: "_re.Match[str]") -> PlaceholderSpec:
+    """Construct a `PlaceholderSpec` from a regex match object."""
     return PlaceholderSpec(
         name=match.group(1),
         type_name=cast(
@@ -154,12 +229,10 @@ def parse_placeholder(match: "_re.Match[str]") -> PlaceholderSpec:
 
 @dataclass
 class PlaceholderTemplate:
-    """A string value tokenized into literal segments and placeholder specs.
+    """String template segmented into literal chunks and parsed placeholder tokens.
 
-    Created once at parse time (``Template.parse``) from raw ``{{...}}`` text.
-    All codegen renderers walk ``parts`` instead of re-parsing strings with
-    regex.  Placeholder identity is structural (``PlaceholderSpec`` instances
-    inline), so renaming is a parts-walk — no string rewriting.
+    Attributes:
+        parts: Sequence of literal string segments and `PlaceholderSpec` tokens.
     """
 
     parts: list[str | PlaceholderSpec] = field(default_factory=list)
@@ -168,7 +241,14 @@ class PlaceholderTemplate:
 
     @classmethod
     def parse(cls, raw: str) -> "PlaceholderTemplate":
-        """Tokenize *raw* into literal / placeholder parts."""
+        """Tokenize a raw string containing `{{...}}` tokens into parts.
+
+        Args:
+            raw: Raw input string to parse.
+
+        Returns:
+            Parsed `PlaceholderTemplate` instance.
+        """
         parts: list[str | PlaceholderSpec] = []
         buf: list[str] = []
         i = 0
@@ -191,30 +271,38 @@ class PlaceholderTemplate:
 
     @classmethod
     def literal(cls, text: str) -> "PlaceholderTemplate":
-        """Wrap a placeholder-free string."""
+        """Construct a template consisting of a single literal string segment.
+
+        Args:
+            text: Literal text content.
+
+        Returns:
+            `PlaceholderTemplate` wrapping the literal text.
+        """
         return cls(parts=[text])
 
     # ── queries ──────────────────────────────────────────────────────────
 
     @property
     def is_single_placeholder(self) -> bool:
-        """True when parts is exactly ``[PlaceholderSpec]`` (no literals)."""
+        """True if the template consists solely of one placeholder without literal text."""
         return len(self.parts) == 1 and isinstance(
             self.parts[0], PlaceholderSpec
         )
 
     def single_placeholder(self) -> PlaceholderSpec | None:
-        """The sole placeholder if ``is_single_placeholder``, else ``None``."""
+        """Return the sole placeholder if `is_single_placeholder` is True, else `None`."""
         if self.is_single_placeholder:
             return self.parts[0]  # type: ignore[return-value]
         return None
 
     @property
     def has_placeholders(self) -> bool:
+        """True if the template contains at least one placeholder."""
         return any(isinstance(p, PlaceholderSpec) for p in self.parts)
 
     def placeholders(self) -> list[PlaceholderSpec]:
-        """All placeholder specs in this template, in order of appearance."""
+        """Return all placeholder specifications in order of appearance."""
         return [p for p in self.parts if isinstance(p, PlaceholderSpec)]
 
     def map(
@@ -222,10 +310,14 @@ class PlaceholderTemplate:
         on_ph: "Callable[[PlaceholderSpec], str]",
         on_literal: "Callable[[str], str] | None" = None,
     ) -> str:
-        """Walk parts assembling a string.
+        """Assemble a string by transforming placeholders and literal segments.
 
-        ``on_ph`` renders each placeholder; ``on_literal`` (identity by
-        default) transforms each literal segment.
+        Args:
+            on_ph: Renderer callback for `PlaceholderSpec` instances.
+            on_literal: Optional renderer callback for literal string segments.
+
+        Returns:
+            Concatenated result string.
         """
         out: list[str] = []
         for part in self.parts:
@@ -239,11 +331,18 @@ class PlaceholderTemplate:
 
     @property
     def source(self) -> str:
-        """Reconstruct the original ``{{...}}`` source text from parts."""
+        """Reconstruct the original source string."""
         return self.map(lambda ph: ph.to_token())
 
     def renamed(self, mapping: dict[str, str]) -> "PlaceholderTemplate":
-        """Return a copy with placeholder names remapped via *mapping*."""
+        """Return a new template with placeholder names remapped per mapping.
+
+        Args:
+            mapping: Map from current placeholder names to new names.
+
+        Returns:
+            New `PlaceholderTemplate` instance with updated placeholder names.
+        """
         if not self.has_placeholders:
             return self
         new_parts: list[str | PlaceholderSpec] = []
@@ -262,12 +361,16 @@ class PlaceholderTemplate:
 
 @dataclass
 class RequestHttp(Node):
-    """Parsed HTTP request — child node of MethodBase.
+    """Parsed HTTP request configuration payload.
 
-    Created once at parse time from ``parse_to_http(raw_payload)``;
-    converters read fields directly instead of re-parsing raw_payload.
-    String fields (url, headers, cookies, params, payload) are ``Template``
-    instances: tokenized literal/placeholder parts.
+    Attributes:
+        method: HTTP method verb (e.g. `"GET"`, `"POST"`, `"PUT"`, `"DELETE"`).
+        url: Tokenized request URL template containing literal parts and placeholders.
+        headers: Mapping of HTTP header names to tokenized value templates.
+        cookies: Mapping of cookie names to tokenized value templates.
+        params: Mapping of query parameter names to tokenized value templates.
+        body_kind: Kind of request body (`"empty"`, `"json"`, `"form"`, `"raw"`).
+        payload: Tokenized request body payload template or key-value dictionary.
     """
 
     method: str = "GET"
@@ -280,7 +383,7 @@ class RequestHttp(Node):
 
     @property
     def placeholders(self) -> list[PlaceholderSpec]:
-        """Unique placeholders across all string fields."""
+        """Return list of unique placeholders found across all request fields."""
         seen: set[str] = set()
         result: list[PlaceholderSpec] = []
         for tmpl in self._all_templates():
@@ -303,11 +406,13 @@ class RequestHttp(Node):
     def with_renamed_placeholders(
         self, transform: Callable[[str], str]
     ) -> "RequestHttp":
-        """Return a copy with placeholder names passed through *transform*.
+        """Return a copy with placeholder names passed through a transformation function.
 
-        Only the ``PlaceholderSpec.name`` field changes — type/array/optional/
-        style modifiers are preserved.  Operates on structured parts, no string
-        rewriting.
+        Args:
+            transform: Function converting old placeholder names to new names.
+
+        Returns:
+            New `RequestHttp` copy with updated placeholder names.
         """
         mapping = {ph.name: transform(ph.name) for ph in self.placeholders}
         if all(old == new for old, new in mapping.items()):
@@ -339,7 +444,13 @@ class RequestHttp(Node):
 
 @dataclass
 class MethodBase(Node):
-    """Base class for @request method nodes."""
+    """Abstract base node for HTTP method declarations (`@request`).
+
+    Attributes:
+        name: Suffix for the generated method name (empty string generates default `fetch`).
+        response_path: Dot-notation JSON path extracted from 2xx response bodies before schema mapping.
+        response_join: Delimiter string to join multiple string items when extracting lists.
+    """
 
     name: str = ""  # method name suffix; "" = default fetch()
 
@@ -358,26 +469,28 @@ class MethodBase(Node):
 
     @property
     def http_request(self) -> RequestHttp:
+        """The child `RequestHttp` configuration node."""
         return [n for n in self.body if isinstance(n, RequestHttp)][0]
 
     @property
     def placeholders(self) -> list[PlaceholderSpec]:
+        """List of all placeholders required by the underlying HTTP request."""
         return self.http_request.placeholders
 
 
 @dataclass
 class MethodFetch(MethodBase):
-    """Fetch shortcut for regular schemas (Item/List/etc).
-
-    ``fetch()`` returns a parser instance constructed from the HTTP response body.
-    """
+    """Fetch request method for document/HTML parsing structs."""
 
 
 @dataclass
 class MethodRest(MethodBase):
-    """REST method for ``type=rest`` schemas.
+    """REST endpoint method declaration for `type=rest` client structs.
 
-    Method returns ``Ok/TransportErr`` union; no HTML parsing.
+    Attributes:
+        doc: Documentation string for the REST endpoint method.
+        response_schema: Name of the JSON schema model for successful 2xx responses.
+        result_alias_name: Identifier of the generated synthetic result union type alias.
     """
 
     doc: str = ""  # per-method docstring
@@ -392,7 +505,14 @@ class MethodRest(MethodBase):
 
 @dataclass
 class StructBase(Node):
-    """Base class for all struct AST nodes."""
+    """Base class for all struct AST nodes.
+
+    Attributes:
+        type: Struct parsing category (`ITEM`, `LIST`, `DICT`, `TABLE`, `FLAT`, `REST`, `RAW`).
+        name: Declared name of the struct class or client container.
+        keep_order: Flag to preserve source item order in flat list deduplication.
+        doc: Struct-level docstring documentation.
+    """
 
     type: StructType = StructType.ITEM
     name: str = ""
@@ -401,6 +521,7 @@ class StructBase(Node):
 
     @property
     def docstring(self) -> StructDocstring:
+        """Deprecated property for accessing struct docstring."""
         warnings.warn(
             "StructBase.docstring is deprecated; use the .doc field instead.",
             DeprecationWarning,
@@ -421,6 +542,7 @@ class StructBase(Node):
 
     @property
     def request_config(self) -> MethodBase | None:
+        """First request method configuration node if declared on this struct."""
         for node in self.body:
             if isinstance(node, MethodBase):
                 return node
@@ -428,14 +550,17 @@ class StructBase(Node):
 
     @property
     def request_configs(self) -> list[MethodBase]:
+        """List of all request method nodes declared in this struct."""
         return [n for n in self.body if isinstance(n, MethodBase)]
 
     @property
     def use_request(self) -> bool:
+        """True if this struct declares at least one `@request` method."""
         return bool(self.request_configs)
 
     @property
     def errors(self) -> list[ErrorResponse]:
+        """List of all `@error` response mapping nodes declared in this struct."""
         return [n for n in self.body if isinstance(n, ErrorResponse)]
 
     @property
@@ -448,24 +573,19 @@ class StructBase(Node):
 
 @dataclass
 class Struct(StructBase):
-    """HTML-parsing struct.
+    """HTML/document parser struct node.
 
-    DSL: ``struct Name { ... }`` with ``type=item|list|flat|dict|table``.
+    Emitted as a parser class with constructor and field extraction methods.
 
-    The ``type`` field (StructType) discriminates the parsing strategy:
-      ITEM  → single object/dict
-      LIST  → repeating elements → list[dict] (requires @split-doc)
-      FLAT  → deduplicated scalars → list[str]
-      DICT  → key-value map (requires @split-doc + @key + @value)
-      TABLE → HTML table (requires @table + @rows + @match + @value)
-
-    body[0] is always an ``Init`` node (appended in __post_init__).
+    Attributes:
+        type: Parsing strategy (`ITEM`, `LIST`, `DICT`, `TABLE`, `FLAT`, `RAW`).
     """
 
     type: StructType = StructType.ITEM  # overrided
 
     @property
     def init(self) -> Init:
+        """Reference to the pre-computed `@init` block node."""
         return self.body[0]  # type: ignore
 
     def __post_init__(self):
@@ -474,9 +594,9 @@ class Struct(StructBase):
 
 @dataclass
 class StructRest(StructBase):
-    """REST API endpoint namespace. Stores @request methods, no HTML parsing.
+    """REST API endpoint client struct node.
 
-    Unlike ``Struct``, has no ``Init``/``StartParse`` nodes and no field pipelines.
+    Emitted as an API client class with typed HTTP methods returning result unions.
     """
 
     type: StructType = StructType.REST
@@ -490,12 +610,12 @@ class StructRest(StructBase):
 
 @dataclass
 class StructDocstring(Node):
-    """DEPRECATED: use the ``doc`` field on ``StructBase`` instead.
+    """DEPRECATED: Struct-level documentation node.
 
-    DSL: ``-doc "text"`` (struct-level documentation).
-    Retained only for backward-compatibility imports; the class emits a
-    DeprecationWarning on instantiation and is no longer added to struct
-    bodies by ``Struct*.__post_init__``.
+    Retained only for backward-compatibility; use `StructBase.doc` instead.
+
+    Attributes:
+        value: Documentation string.
     """
 
     value: str = ""
@@ -510,11 +630,45 @@ class StructDocstring(Node):
 
 @dataclass
 class PreValidate(Node):
-    """
-    Validates the document before parsing begins.
-    Raises error on failure (caught by fallback if present).
-    DSL: -pre-validate { ... }
-    accept: DOCUMENT, ret: DOCUMENT (pass-through)
+    """Document pre-validation assertion pipeline executed prior to parsing fields.
+
+    Declared via `@pre-validate { assert { ... } }` inside a struct. The code generator emits
+    a private validation method `_pre_validate(self, document)` that runs assertions against
+    the input document before any field extraction is performed in `parse()`.
+
+    Examples:
+        - KDL:
+            ```kdl
+            struct ProductInfo type=table {
+                @pre-validate {
+                    assert { css "table.product_page" }
+                }
+            }
+            ```
+        - Generated Python:
+            ```python
+            def _pre_validate(self, v: Any) -> None:
+                std_assert(bool(v.select("table.product_page")), "ProductInfo.@pre-validate assertion failed")
+
+            def parse(self) -> ProductInfoType:
+                self._pre_validate(self._doc)
+                return { ... }
+            ```
+        - Generated JavaScript:
+            ```javascript
+            _preValidate(v) {
+                sscAssert(v.querySelectorAll("table.product_page").length > 0, "ProductInfo.@pre-validate assertion failed");
+            }
+            ```
+        - Generated Go:
+            ```go
+            func (p *ProductInfo) preValidate(v *goquery.Selection) error {
+                if !stdAssert(v.Find("table.product_page").Length() > 0) {
+                    return errors.New("ProductInfo.@pre-validate assertion failed")
+                }
+                return nil
+            }
+            ```
     """
 
     accept_type_info: TypeInfo = field(
@@ -527,11 +681,28 @@ class PreValidate(Node):
 
 @dataclass
 class CheckMethod(Node):
-    """
-    Boolean check method on the parsed class.
-    DSL: @check <name> { pipeline ... }
-    Runs a pipeline on the document and returns True on success, False on failure.
-    Called manually by the user before parse().
+    """Boolean document validation predicate method (`@check`).
+
+    Generates a public boolean method on the parser class to verify document validity,
+    presence of elements, or business rules.
+
+    Attributes:
+        name: Identifier of the generated boolean check method (e.g. `"is_available"`).
+
+    Examples:
+        - KDL:
+            ```kdl
+            @check is_in_stock {
+                css ".instock"
+                to-bool
+            }
+            ```
+        - Generated Python:
+            ```python
+            def is_in_stock(self) -> bool:
+                v1 = self._doc.select_one(".instock")
+                return bool(v1)
+            ```
     """
 
     name: str = ""
@@ -545,11 +716,10 @@ class CheckMethod(Node):
 
 @dataclass
 class Init(Node):
-    """
-    Pre-computed named values cached before field parsing.
-    Execution order: after PreValidate, before SplitDoc and Fields.
-    DSL: @init { name { pipeline... } ... }
-    body: list[InitFieldCall]
+    """Container for pre-computed cached values initialized in constructor (`@init`).
+
+    Acts as the parent AST container node for all `InitField` computations declared
+    inside `@init { ... }`.
     """
 
     pass
@@ -557,12 +727,13 @@ class Init(Node):
 
 @dataclass
 class InitFieldCall(Node):
-    """
-    Call-site marker inside ``Init`` — emits the constructor line that
-    invokes the corresponding ``InitField`` method and caches the result.
+    """Constructor invocation marker for a cached `@init` computation.
 
-    The ``InitField`` method definition lives in ``Struct.body`` (at
-    class-body level), emitted naturally like a regular ``Field``.
+    Emitted during constructor generation to execute the matching `InitField` calculation
+    and store the result in an internal property (e.g. `self._container = self._init_container()`).
+
+    Attributes:
+        name: Identifier of the cached field to initialize.
     """
 
     name: str = ""
@@ -570,15 +741,32 @@ class InitFieldCall(Node):
 
 @dataclass
 class InitField(Node):
-    """
-    Single named cached pipeline, originally declared inside ``@init``.
-    Lives at ``Struct.body`` level (same as ``Field``) so converters emit
-    it as a standalone method at class-body depth.
-    Referenced in Fields via Self(name=...).
-    ret is resolved after pipeline is built.
+    """Cached pipeline computation declared inside `@init`.
 
-    Separate node from Field — semantics differ:
-    InitField is cached and reachable via Self; Field produces output.
+    Generates a private calculation method (e.g. `_init_container(self)`) whose result
+    is cached in the constructor and referenced by field pipelines via `Self` (`@container`).
+
+    Attributes:
+        name: Field identifier used for internal caching and `@<name>` references.
+
+    Examples:
+        - KDL:
+            ```kdl
+            @init {
+                main_box {
+                    css "div.main-container"
+                }
+            }
+            ```
+        - Generated Python:
+            ```python
+            def _init_main_box(self) -> Any:
+                return self._doc.select_one("div.main-container")
+
+            def __init__(self, document: Any) -> None:
+                self._doc = document
+                self._main_box = self._init_main_box()
+            ```
     """
 
     name: str = ""
@@ -592,11 +780,18 @@ class InitField(Node):
 
 @dataclass
 class SplitDoc(Node):
-    """
-    Splits document into items for list-type structs.
-    DSL: @split-doc { ... }
-    accept: DOCUMENT, ret: DOCUMENT with is_array=True
-    Only valid in struct type=list.
+    """Document splitter pipeline extracting item documents for `type=list` or `type=dict`.
+
+    Attributes:
+        is_array: Always `True` for document splitters.
+
+    Examples:
+        - KDL: `@split-doc { css-all "article.product_pod" }`
+        - Generated Python:
+            ```python
+            for item_doc in self._doc.select("article.product_pod"):
+                # yield/append parsed item
+            ```
     """
 
     accept_type_info: TypeInfo = field(
@@ -612,11 +807,16 @@ class SplitDoc(Node):
 
 @dataclass
 class Key(Node):
-    """
-    Key extraction pipeline for dict-type structs.
-    DSL: @key { ... }
-    accept: DOCUMENT, ret: STRING
-    Only valid in struct type=dict.
+    """Dictionary key extraction pipeline for `type=dict` structs.
+
+    Executed on each item document extracted by `@split-doc` to derive the dictionary entry key.
+
+    Examples:
+        - KDL: `@key { css ".attr-name"; text; trim; }`
+        - Generated Python:
+            ```python
+            k = row_doc.select_one(".attr-name").get_text(strip=True)
+            ```
     """
 
     accept_type_info: TypeInfo = field(
@@ -629,12 +829,16 @@ class Key(Node):
 
 @dataclass
 class Value(Node):
-    """
-    Value extraction pipeline for dict/table-type structs.
-    DSL: @value { ... }
-    dict:  ret can be any type.
-    table: ret must be STRING.
-    Only valid in struct type=dict or type=table.
+    """Value extraction pipeline for `type=dict` or `type=table` structs.
+
+    Executed on each item document or matching table row to extract the corresponding payload value.
+
+    Examples:
+        - KDL: `@value { css ".attr-val"; text; to-int; }`
+        - Generated Python:
+            ```python
+            v = int(row_doc.select_one(".attr-val").get_text(strip=True))
+            ```
     """
 
     accept_type_info: TypeInfo = field(
@@ -647,11 +851,12 @@ class Value(Node):
 
 @dataclass
 class TableConfig(Node):
-    """
-    Selects the table element.
-    DSL: @table { ... }
-    accept: DOCUMENT, ret: DOCUMENT
-    Only valid in struct type=table.
+    """Table root element selection pipeline for `type=table` structs.
+
+    Extracts the root `<table>` element container from the document.
+
+    Examples:
+        - KDL: `@table { css "table.specs-table" }`
     """
 
     accept_type_info: TypeInfo = field(
@@ -664,11 +869,15 @@ class TableConfig(Node):
 
 @dataclass
 class TableRows(Node):
-    """
-    Selects table rows.
-    DSL: @row { ... }
-    accept: DOCUMENT, ret: DOCUMENT with is_array=True
-    Only valid in struct type=table.
+    """Table rows selection pipeline for `type=table` structs.
+
+    Extracts all row container elements (`<tr>`) from the table.
+
+    Attributes:
+        is_array: Always `True` for row selection lists.
+
+    Examples:
+        - KDL: `@rows { css-all "tr" }`
     """
 
     accept_type_info: TypeInfo = field(
@@ -684,11 +893,13 @@ class TableRows(Node):
 
 @dataclass
 class TableMatchKey(Node):
-    """
-    Extracts key cell text from a row for match comparison.
-    DSL: @match { ... }
-    accept: DOCUMENT (row), ret: STRING
-    Only valid in struct type=table.
+    """Table row key extraction pipeline for matching against field conditions.
+
+    Evaluated on each row element to extract the row identifier string (e.g. from `<th>` or `<td>`),
+    which is then tested against `Match` predicate rules in table fields.
+
+    Examples:
+        - KDL: `@match { css "th"; text; trim; lower; }`
     """
 
     accept_type_info: TypeInfo = field(
@@ -701,17 +912,24 @@ class TableMatchKey(Node):
 
 @dataclass
 class ErrorResponse(Node):
-    """
-    Error response mapping for type=rest struct.
-    DSL: @error <status> <SchemaName> [keys...] [field=value ...]
+    """HTTP error response mapping declaration for REST client structs.
 
-    status: HTTP status code [100..599].
-    schema_name: json schema reference for deserialised error body.
-    required_keys: key names that must exist in the JSON body (positional args).
-        Error triggers on matching status + all keys present.
-    conditions: field=value pairs checked against the parsed JSON body.
-        Keys are dot-paths (e.g. "response.success", "data.0.type").
-        When non-empty, the error triggers on matching status + all conditions.
+    Declares handling rules for non-2xx HTTP status codes in `(rest)struct`.
+    Synthesized into `ResultVariantDef` and `MatcherListDef` during compiler AST passes.
+
+    Attributes:
+        status: HTTP status code constraint (100–599, e.g. `404`, `500`).
+        schema_name: Identifier of the JSON schema model used for error payload deserialization.
+        required_keys: Top-level keys required to exist in the error response body.
+        conditions: Map of dot-path property checks against the error JSON body.
+
+    Examples:
+        - KDL:
+            ```kdl
+            @error 404 schema=NotFoundJson {
+                body-matches "code" "RESOURCE_NOT_FOUND"
+            }
+            ```
     """
 
     status: int = 0
@@ -722,14 +940,30 @@ class ErrorResponse(Node):
 
 @dataclass
 class Field(Node):
-    """
-    Regular output field.
-    DSL: field-name { pipeline... }
-    ret is resolved after pipeline is built.
+    """Output property field pipeline node.
 
-    For struct type=table fields, accept is set to STRING
-    (the value cell produced by -value after match resolves the row).
-    For all other struct types, accept defaults to DOCUMENT.
+    Defines a single extracted attribute method on a parser struct, transforming
+    input document `self._doc` through an ordered sequence of child operation nodes.
+
+    Attributes:
+        name: Name of the extracted field property.
+
+    Examples:
+        - KDL:
+            ```kdl
+            title {
+                css "h1.product-title"
+                text
+                trim
+            }
+            ```
+        - Generated Python:
+            ```python
+            def title(self) -> str:
+                v1 = self._doc.select_one("h1.product-title")
+                v2 = v1.get_text(strip=True)
+                return v2.strip()
+            ```
     """
 
     name: str = ""
@@ -742,25 +976,34 @@ class Field(Node):
 
     @property
     def struct(self) -> Struct:
+        """Reference to the parent `Struct` AST node."""
         return cast(Struct, self.parent)
 
 
 @dataclass
 class StartParse(Node):
-    """Endpoint where need run parser"""
+    """Technical marker node representing the generated primary `parse()` method.
+
+    Coordinates document pre-validation, `@split-doc` iteration, and field aggregation
+    into the final output model.
+    """
 
     @property
     def struct(self) -> Struct:
+        """Reference to the parent `Struct` AST node."""
         return cast(Struct, self.parent)
 
     @property
     def use_split_doc(self) -> bool:
+        """True if the parent struct contains a `SplitDoc` node."""
         return any(isinstance(f, SplitDoc) for f in self.struct.body)
 
     @property
     def use_pre_validate(self) -> bool:
+        """True if the parent struct contains a `PreValidate` node."""
         return any(isinstance(f, PreValidate) for f in self.struct.body)
 
     @property
     def fields(self) -> list[Field]:
+        """List of all output fields in the parent struct."""
         return [f for f in self.struct.body if isinstance(f, Field)]

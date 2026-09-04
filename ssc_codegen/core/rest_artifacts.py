@@ -27,10 +27,16 @@ from ssc_codegen.naming import to_pascal_case
 
 
 def err_subclass_name(struct_name: str, err: ErrorResponse) -> str:
-    """Deterministic error-subclass name from struct name + error spec.
+    """Generate a deterministic error variant subclass name for an HTTP error mapping.
 
-    Concatenates PascalCase(struct) + 'Err' + status + PascalCase(required_keys)
-    + PascalCase(condition_keys).  Identical across all languages.
+    Concatenates `PascalCase(struct) + "Err" + status + PascalCase(required_keys) + PascalCase(conditions)`.
+
+    Args:
+        struct_name: Base name of the enclosing REST struct.
+        err: The `ErrorResponse` AST node containing status and condition keys.
+
+    Returns:
+        The deterministic subclass name (e.g. `UserClientErr404NotFound`).
     """
     base = f"{to_pascal_case(struct_name)}Err{err.status}"
     for key in err.required_keys:
@@ -56,18 +62,17 @@ def _result_alias_name(raw_name: str) -> str:
 
 
 def rest_artifacts_from_struct(struct: StructRest, parent: Module) -> list:
-    """Build result/matcher nodes for a ``StructRest``.
+    """Synthesize companion REST result AST nodes from a `StructRest` declaration.
 
-    Returns nodes in emission order: error subclass declarations, per-method
-    result aliases, then the per-struct matcher list.  The caller inserts
-    them into ``Module.body`` before the struct (same pattern as
-    ``typedef_from_struct``).
+    Generates `ResultVariantDef` nodes for unique error conditions, `ResultAliasDef`
+    type aliases for method returns, and `MatcherListDef` condition lists.
 
-    Side effect: sets ``result_alias_name`` on each ``MethodRest`` so the
-    converter can reference the alias in the method signature.
+    Args:
+        struct: Source `StructRest` AST node.
+        parent: The root `Module` AST node owning the generated definitions.
 
-    Carries RAW data only (schema names + array flags, raw condition specs);
-    per-language type/check spelling is the converter's job.
+    Returns:
+        List of synthesized AST nodes in emission order (variants, aliases, matchers).
     """
     out: list = []
 

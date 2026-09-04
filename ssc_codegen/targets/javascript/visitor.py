@@ -410,9 +410,22 @@ def _js_struct_header(node: StructBase) -> list[str]:
 
 
 class JsVisitor(BaseWalker):
-    """Pure ES6 JS (DOM API) codegen visitor.
+    """Pure ES6 / DOM JavaScript code generator visitor.
 
-    All ``visit_*`` handlers return ``list[str]``.
+    Emits standard JavaScript parser classes targeting the browser DOM or Node.js
+    `jsdom` environment. Uses standard `querySelector`, `querySelectorAll`,
+    `textContent`, and `getAttribute` DOM APIs.
+
+    Attributes:
+        TYPES: Mapping from `VariableType` enums to JSDoc type annotations.
+        DEFAULT_TYPE: Fallback JSDoc type string (``"any"``).
+        ARRAY_TYPE_FMT: Array type formatting template (``"{}[]"``).
+        OPTIONAL_TYPE_FMT: Optional type formatting template (``"{}|null"``).
+        DOCUMENT_TYPE: JSDoc type for DOM documents/elements (``"Document|Element"``).
+        DOCUMENT_ARRAY_TYPE: JSDoc type for collections of elements (``"Array<Element>"``).
+        STD_MODULE_NAME: Default module name for separate runtime exports (``"sscgen_runtime"``).
+        var_name: Base prefix for pipeline intermediate variables (default: ``"v"``).
+        indent: Indentation unit string (default: 2 spaces).
     """
 
     TYPES = {
@@ -439,6 +452,12 @@ class JsVisitor(BaseWalker):
     }
 
     def __init__(self, var_name: str = "v", indent: str = " " * 2) -> None:
+        """Initialize the JavaScript visitor.
+
+        Args:
+            var_name: Base prefix for intermediate variables (default: ``"v"``).
+            indent: Indentation unit string (default: 2 spaces).
+        """
         self.var_name = var_name
         self.indent = indent
         self._file_providers: dict[str, Any] = {}
@@ -458,6 +477,8 @@ class JsVisitor(BaseWalker):
     # === FILE PROVIDERS ===
 
     def file(self, filename: str):
+        """Decorator for registering companion file generator functions."""
+
         def decorator(fn):
             self._file_providers[filename] = fn
             return fn
@@ -466,10 +487,31 @@ class JsVisitor(BaseWalker):
 
     # === PUBLIC API ===
 
-    def convert(self, module_ast: Module, **meta) -> str:
+    def convert(self, module_ast: Module, **meta: Any) -> str:
+        """Convert a `Module` AST to a single generated JavaScript source string.
+
+        Args:
+            module_ast: The root `Module` AST node to convert.
+            **meta: Options passed to `WalkContext.meta` (e.g. `http_client`).
+
+        Returns:
+            Generated JavaScript source code string.
+        """
         return self.convert_all(module_ast, **meta)[""]
 
-    def convert_all(self, module_ast: Module, **meta) -> dict[str, str]:
+    def convert_all(self, module_ast: Module, **meta: Any) -> dict[str, str]:
+        """Convert a `Module` AST in a two-pass traversal, emitting main and companion files.
+
+        Pass 1 populates `ModuleBuilder` with required std helpers.
+        Pass 2 generates the complete JavaScript source code.
+
+        Args:
+            module_ast: The root `Module` AST node to convert.
+            **meta: Options controlling generation (e.g. `http_client`).
+
+        Returns:
+            Mapping from filenames (``""`` for the main module) to generated source texts.
+        """
         self._reset_state()
         client = meta.get("http_client")
         if client and client in self._HTTP_STRATEGIES:
@@ -628,11 +670,11 @@ class JsVisitor(BaseWalker):
     def visit_jsondef_field(
         self, node: JsonDefField, ctx: WalkContext
     ) -> list[str]:
-        if node.type_info and node.type_info.skip:
+        if node.ret_type_info and node.ret_type_info.skip:
             return []
         name = node.name
-        type_ = self._resolve_type(node.type_info)
-        if node.type_info.omitempty:
+        type_ = self._resolve_type(node.ret_type_info)
+        if node.ret_type_info.omitempty:
             return [f" * @property {{{type_}}} {name} (OMITEMPTY)"]
         return [f" * @property {{{type_}}} {name}"]
 
@@ -646,7 +688,7 @@ class JsVisitor(BaseWalker):
             value_field = next(
                 f for f in node.fields if to_camel_case(f.name) == "value"
             )
-            value_type = self._resolve_type(value_field.type_info)
+            value_type = self._resolve_type(value_field.ret_type_info)
             return [
                 "/**",
                 f" * @typedef {{Object.<string, {value_type}>}} {name}Type",
@@ -665,7 +707,7 @@ class JsVisitor(BaseWalker):
         name = to_camel_case(node.name)
         if node.typedef.struct_type == ST.TABLE and name == "value":
             return []
-        type_ = self._resolve_type(node.type_info)
+        type_ = self._resolve_type(node.ret_type_info)
         return [f" * @property {{{type_}}} {name}"]
 
     # === STRUCT ===

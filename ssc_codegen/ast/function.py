@@ -1,3 +1,9 @@
+"""AST nodes for module-level standalone parsing and transformation functions.
+
+This module defines `FunctionDef` nodes representing top-level functions declared via `fn`
+(operating on DOM documents) or `(raw)fn` (operating on raw strings).
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -8,13 +14,12 @@ from .types import TypeInfo, VariableType
 
 @dataclass
 class FunctionDef(Node):
-    """Module-level single-value extraction function.
+    """Standalone module-level extraction function declaration (`fn` / `(raw)fn`).
 
-    DSL: ``fn <name> { pipeline }`` or ``(raw)fn <name> { pipeline }``.
-
-    Generates a standalone function instead of a class.
-    ``is_raw`` selects the document type: HTML (DOCUMENT) or plain text (STRING).
-    ``ret_type_info`` is resolved after pipeline build (AUTO → concrete type).
+    Attributes:
+        name: Function identifier name.
+        is_raw: Flag indicating whether function operates on raw text (`STRING`) rather than DOM (`DOCUMENT`).
+        doc: Docstring documentation for the function.
     """
 
     name: str = ""

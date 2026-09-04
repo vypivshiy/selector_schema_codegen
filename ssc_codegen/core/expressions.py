@@ -118,12 +118,30 @@ FieldLikeNode: TypeAlias = (
 def resolve_selector_arg(
     query: str | int | float | bool, ctx: ParseContext
 ) -> str:
+    """Resolve a selector argument against registered scalar defines.
+
+    Args:
+        query: Raw selector argument (string literal or define name).
+        ctx: Global parse context containing scalar defines.
+
+    Returns:
+        The resolved CSS/XPath selector query string.
+    """
     q = str(query) if not isinstance(query, str) else query
     value = ctx.property_defines.get(q, query)
     return value if isinstance(value, str) else str(value)
 
 
 def resolve_selector_child_name(name: str, ctx: ParseContext) -> str:
+    """Resolve a selector child node name in block selector forms.
+
+    Args:
+        name: Name of the child node in block-form selectors (`css { "h1"; "h2" }`).
+        ctx: Global parse context containing scalar defines.
+
+    Returns:
+        The decoded and define-resolved selector string.
+    """
     value = ctx.property_defines.get(name, _decode_scalar(name))
     return value if isinstance(value, str) else str(value)
 
@@ -172,6 +190,16 @@ _DEFINE_REF_RE = _re.compile(r"\{\{([A-Z_][A-Z0-9_-]*)\}\}")
 
 
 def resolve_define_references(value: str, ctx: ParseContext) -> str:
+    """Expand inline template placeholders `{{DEFINE_NAME}}` in scalar strings.
+
+    Args:
+        value: String template containing `{{DEFINE_NAME}}` placeholders.
+        ctx: Global parse context containing registered scalar defines.
+
+    Returns:
+        The substituted string, leaving unknown placeholders intact.
+    """
+
     def _replacer(m: _re.Match) -> str:
         name = m.group(1)
         resolved = ctx.property_defines.get(name)
@@ -206,10 +234,16 @@ _VAR_TYPE_MAP: dict[str, VariableType] = {
 def resolve_index_types(
     parent: FieldLikeNode,
 ) -> tuple[TypeInfo, TypeInfo, bool]:
-    """Return (accept_type_info, ret_type_info, prev_is_array) for Index/First/Last ops.
+    """Return `(accept_type_info, ret_type_info, prev_is_array)` for `Index`/`First`/`Last` ops.
 
-    These ops accept a list and return a scalar, so the return TypeInfo carries
-    the element base with is_array=False.
+    These ops accept a list and return a scalar, so the return `TypeInfo` carries
+    the element base with `is_array=False`.
+
+    Args:
+        parent: The field or pipeline node enclosing the indexing operation.
+
+    Returns:
+        A tuple of `(accept_type_info, ret_type_info, prev_is_array)`.
     """
     if parent.body:
         prev = _prev_type_info(parent)
@@ -222,9 +256,17 @@ def resolve_index_types(
 def resolve_jsonify_type(
     json_def: JsonDef, path: str, ctx: ParseContext
 ) -> tuple[VariableType, bool]:
-    """Resolve the return type and is_array for a jsonify operation.
+    """Resolve the return base type and array status for a `jsonify` operation.
 
-    Returns (base_type, is_array).
+    Navigates dot-notation property paths into nested JSON schema definitions.
+
+    Args:
+        json_def: The root `JsonDef` schema targeted by `jsonify`.
+        path: Optional dot-delimited extraction path (e.g. `"data.items.0"`).
+        ctx: Global parse context containing registered JSON schemas.
+
+    Returns:
+        A tuple of `(base_type, is_array)`.
     """
     ja = json_def.is_array
     if not path:
@@ -245,7 +287,7 @@ def resolve_jsonify_type(
                 break
         if field is None:
             return VariableType.JSON, False
-        ti = field.type_info
+        ti = field.ret_type_info
         if ti is None:
             return VariableType.JSON, False
         if i == len(segments) - 1:
@@ -266,6 +308,18 @@ def resolve_jsonify_type(
 
 
 def typedef_from_struct(struct: StructBase, parent: Module) -> TypeDef:
+    """Synthesize a companion `TypeDef` AST node from a parsed `Struct`.
+
+    Extracts field names and `TypeInfo` descriptors to generate dataclass /
+    interface definitions in target languages.
+
+    Args:
+        struct: The source `Struct` AST node.
+        parent: The root `Module` AST node owning the typedef.
+
+    Returns:
+        The synthesized `TypeDef` AST node.
+    """
     typedef = TypeDef(
         parent=parent, name=struct.name, struct_type=struct._typedef_type
     )
@@ -364,6 +418,19 @@ def parse_expressions(
     *,
     _add_return: bool = True,
 ) -> None:
+    """Parse a sequence of KDL nodes into an execution pipeline attached to `parent`.
+
+    Expands block defines, parses selectors, extraction operations, string mutators,
+    regexes, array manipulations, casts, control flows (`fallback`), filter/assert/match
+    predicates, custom extensions (`!ext`), and terminates with a `Return` node.
+
+    Args:
+        kdl_nodes: Sequence of KDL nodes within the field pipeline.
+        parent: The field-like AST node receiving the parsed pipeline nodes.
+        ctx: Global parse context containing defines, structs, and schemas.
+        lint: Lint context for tracking diagnostics and structural scope.
+        _add_return: Whether to append a trailing `Return` AST node (defaults to `True`).
+    """
     if not kdl_nodes:
         return
 

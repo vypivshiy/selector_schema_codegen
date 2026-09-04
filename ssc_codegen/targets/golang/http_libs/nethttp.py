@@ -1,4 +1,4 @@
-"""net/http strategy for Go REST codegen."""
+"""Standard library net/http transport strategy for Go code generation."""
 
 from __future__ import annotations
 
@@ -6,16 +6,18 @@ from ssc_codegen.targets.golang.http_libs.base import GoHttpLibStrategy
 
 
 class NetHttpStrategy(GoHttpLibStrategy):
-    """Standard library net/http client strategy."""
+    """Standard library `net/http` client transport strategy for Go."""
 
     client_type = "*http.Client"
     import_path = "net/http"
 
     def rest_runtime_lines(self) -> list[str]:
+        """Return the standard `net/http` REST runtime execution function."""
         return _NETHTTP_REST_RUNTIME
 
     @property
     def rest_imports(self) -> list[str]:
+        """Return the list of standard packages required by `_NETHTTP_REST_RUNTIME`."""
         return [
             '"fmt"',
             '"io"',

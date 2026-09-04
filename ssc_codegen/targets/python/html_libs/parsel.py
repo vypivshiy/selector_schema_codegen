@@ -1,3 +1,5 @@
+"""parsel.Selector DOM extraction spelling implementation for Python code generation."""
+
 from __future__ import annotations
 
 from ssc_codegen.ast.cast import ToBool
@@ -30,7 +32,19 @@ from ssc_codegen.targets.python.html_libs.base import DomSpelling
 
 
 class ParselDomSpelling(DomSpelling):
-    """parsel.Selector DOM extraction spelling."""
+    """parsel.Selector DOM extraction spelling implementation.
+
+    Translates AST DOM extraction and predicate nodes into Scrapy/Parsel calls
+    (such as ``css(...)``, ``xpath(...)``, ``get()``, ``getall()``, ``attrib[...]``).
+
+    Attributes:
+        parser_imports: Imports ``from parsel import Selector, SelectorList``.
+        document_type: Type annotation ``Selector``.
+        document_array_type: Type annotation ``SelectorList``.
+        init_arg_type: Accepted input type ``Union[str, Selector, SelectorList]``.
+        init_from_str_expr: Expression ``Selector(document)``.
+        supports_xpath: `True` (Parsel natively supports full XPath expressions).
+    """
 
     # === DATA ===
     parser_imports = ("from parsel import Selector, SelectorList",)

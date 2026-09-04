@@ -1,3 +1,5 @@
+"""BeautifulSoup4 DOM extraction spelling implementation for Python code generation."""
+
 from __future__ import annotations
 
 from ssc_codegen.ast.cast import ToBool
@@ -30,7 +32,20 @@ from ssc_codegen.targets.python.html_libs.base import DomSpelling
 
 
 class Bs4DomSpelling(DomSpelling):
-    """BeautifulSoup4 DOM extraction spelling."""
+    """BeautifulSoup4 DOM extraction spelling implementation.
+
+    Translates AST DOM extraction and predicate nodes into `bs4` API calls
+    (such as ``select_one``, ``select``, ``decompose``, ``get_text``, and tag attributes).
+
+    Attributes:
+        parser_imports: Imports ``from bs4 import BeautifulSoup, ResultSet, Tag``.
+        document_type: Type annotation ``Union[Tag, BeautifulSoup]``.
+        document_array_type: Type annotation ``ResultSet[Tag]``.
+        init_arg_type: Accepted input type ``Union[str, BeautifulSoup, Tag]``.
+        init_from_str_expr: Expression ``BeautifulSoup(document, features=BS4_FEATURES)``.
+        extra_utilities: Defines ``BS4_FEATURES = 'lxml'``.
+        supports_xpath: `False` (BeautifulSoup4 does not support XPath natively).
+    """
 
     # === DATA ===
     parser_imports = ("from bs4 import BeautifulSoup, ResultSet, Tag",)

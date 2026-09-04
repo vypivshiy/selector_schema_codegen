@@ -298,13 +298,13 @@ def _go_unmarshal_json(node: JsonDef) -> list[str]:
     ]
     for field in node.body:
         if not isinstance(field, JsonDefField) or (
-            field.type_info and field.type_info.skip
+            field.ret_type_info and field.ret_type_info.skip
         ):
             continue
         field_name = to_pascal_case(field.name)
         wire_path = field.alias if field.alias else _json_tag(field.name)
         go_wire_path = _go_str(wire_path)
-        info = field.type_info
+        info = field.ret_type_info
         is_optional = info.is_optional if info else False
         is_omitempty = info.omitempty if info else False
         is_array = info.is_array if info else False
@@ -463,9 +463,26 @@ def _go_unmarshal_json(node: JsonDef) -> list[str]:
 
 
 class GoVisitor(BaseWalker):
-    """Go codegen visitor (goquery + net/http + gjson).
+    """Go code generator visitor (goquery + net/http + gjson).
 
-    All ``visit_*`` handlers return ``list[str]``.
+    Generates idiomatic Go 1.26+ parser code from intermediate AST representations.
+    HTML selection is powered by `goquery`, REST transport is handled via standard
+    `net/http`, and JSON path extraction uses `gjson`.
+
+    Helper functions are never inlined into parser files; they are accumulated
+    and emitted into `sscgen_runtime.go` within the same package, preventing
+    duplicate symbol errors when multiple files share a package.
+
+    Attributes:
+        TYPES: Mapping from `VariableType` enums to Go type signatures.
+        DEFAULT_TYPE: Fallback Go type string (``"any"``).
+        ARRAY_TYPE_FMT: Slice type formatting template (``"[]{}"``).
+        OPTIONAL_TYPE_FMT: Pointer type formatting template for optional fields (``"*{}"``).
+        DOCUMENT_TYPE: goquery selection pointer type (``"*goquery.Selection"``).
+        DOCUMENT_ARRAY_TYPE: goquery selection collection pointer type.
+        STD_MODULE_NAME: Canonical runtime filename (``"sscgen_runtime"``).
+        var_name: Base intermediate variable prefix (default: ``"v"``).
+        indent: Indentation string (default: tab ``"\\t"``).
     """
 
     TYPES: dict[VT, str] = {
@@ -487,6 +504,12 @@ class GoVisitor(BaseWalker):
     STD_MODULE_NAME = "sscgen_runtime"
 
     def __init__(self, var_name: str = "v", indent: str = "\t") -> None:
+        """Initialize the Go visitor.
+
+        Args:
+            var_name: Base prefix for intermediate variables (default: ``"v"``).
+            indent: Indentation unit string (default: tab ``"\\t"``).
+        """
         self.var_name = var_name
         self.indent = indent
         self._file_providers: dict[str, Any] = {}
@@ -511,6 +534,8 @@ class GoVisitor(BaseWalker):
     # === FILE PROVIDERS ===
 
     def file(self, filename: str):
+        """Decorator for registering companion file generator functions."""
+
         def decorator(fn):
             self._file_providers[filename] = fn
             return fn
@@ -519,10 +544,31 @@ class GoVisitor(BaseWalker):
 
     # === PUBLIC API ===
 
-    def convert(self, module_ast: Module, **meta) -> str:
+    def convert(self, module_ast: Module, **meta: Any) -> str:
+        """Convert a `Module` AST to a single formatted Go source string.
+
+        Args:
+            module_ast: The root `Module` AST node to convert.
+            **meta: Options passed to `WalkContext.meta` (e.g. `package`).
+
+        Returns:
+            Generated and formatted Go source code string.
+        """
         return self.convert_all(module_ast, **meta)[""]
 
-    def convert_all(self, module_ast: Module, **meta) -> dict[str, str]:
+    def convert_all(self, module_ast: Module, **meta: Any) -> dict[str, str]:
+        """Convert a `Module` AST in a two-pass traversal and format via `gofmt`.
+
+        Pass 1 populates `ModuleBuilder` with required std helpers and imports.
+        Pass 2 generates the complete Go source code.
+
+        Args:
+            module_ast: The root `Module` AST node to convert.
+            **meta: Options controlling generation (e.g. `package`).
+
+        Returns:
+            Mapping from filenames (``""`` for the main module) to generated source texts.
+        """
         self._reset_state()
         ctx = self._make_ctx(meta)
         # pass 1: collect std/import registrations.
@@ -553,10 +599,16 @@ class GoVisitor(BaseWalker):
     # === RUNTIME EMISSION ===
 
     def emit_runtime(self, package: str) -> str:
-        """Emit sscgen_runtime.go with all accumulated helper functions.
+        """Emit ``sscgen_runtime.go`` containing all accumulated runtime helper definitions.
 
-        Same package as parser files — no import needed.
-        Called by main.py after all modules are converted.
+        Emitted into the same package as the parser files without needing imports.
+        Called during CLI compilation after all module ASTs have been converted.
+
+        Args:
+            package: Go package identifier (e.g. ``"main"`` or ``"parsers"``).
+
+        Returns:
+            Formatted source code string for ``sscgen_runtime.go``.
         """
         package = validate_go_package_name(package)
         lines: list[str] = [
@@ -736,26 +788,26 @@ class GoVisitor(BaseWalker):
         lines.append("")
         has_fields = any(
             isinstance(f, JsonDefField)
-            and not (f.type_info and f.type_info.skip)
+            and not (f.ret_type_info and f.ret_type_info.skip)
             for f in node.body
         )
         if has_fields:
             self._builder.require_import('"github.com/tidwall/gjson"')
             has_required = any(
                 isinstance(f, JsonDefField)
-                and not (f.type_info and f.type_info.skip)
-                and not (f.type_info and f.type_info.is_optional)
-                and not (f.type_info and f.type_info.omitempty)
+                and not (f.ret_type_info and f.ret_type_info.skip)
+                and not (f.ret_type_info and f.ret_type_info.is_optional)
+                and not (f.ret_type_info and f.ret_type_info.omitempty)
                 for f in node.body
             )
             if has_required:
                 self._builder.require_import('"fmt"')
             has_nested_json = any(
                 isinstance(f, JsonDefField)
-                and not (f.type_info and f.type_info.skip)
-                and f.type_info
-                and f.type_info.base == VT.JSON
-                and f.type_info.ref
+                and not (f.ret_type_info and f.ret_type_info.skip)
+                and f.ret_type_info
+                and f.ret_type_info.base == VT.JSON
+                and f.ret_type_info.ref
                 for f in node.body
             )
             if has_nested_json:
@@ -766,13 +818,15 @@ class GoVisitor(BaseWalker):
     def visit_jsondef_field(
         self, node: JsonDefField, ctx: WalkContext
     ) -> list[str]:
-        if node.type_info and node.type_info.skip:
+        if node.ret_type_info and node.ret_type_info.skip:
             return []
         field_name = to_pascal_case(node.name)
-        go_type = self._resolve_type(node.type_info)
+        go_type = self._resolve_type(node.ret_type_info)
         tag = node.alias if node.alias else _json_tag(node.name)
         omitempty = (
-            ",omitempty" if node.type_info and node.type_info.omitempty else ""
+            ",omitempty"
+            if node.ret_type_info and node.ret_type_info.omitempty
+            else ""
         )
         return [f'\t{field_name} {go_type} `json:"{tag}{omitempty}"`']
 
@@ -793,7 +847,7 @@ class GoVisitor(BaseWalker):
                     None,
                 )
                 if value_field:
-                    vt = self._resolve_type(value_field.type_info)
+                    vt = self._resolve_type(value_field.ret_type_info)
                 else:
                     vt = "any"
                 return [f"type {name}Type = map[string]{vt}", ""]
@@ -819,7 +873,9 @@ class GoVisitor(BaseWalker):
         go_type = self._resolve_typedef_field_type(node)
         tag = _json_tag(node.name)
         omitempty = (
-            ",omitempty" if node.type_info and node.type_info.omitempty else ""
+            ",omitempty"
+            if node.ret_type_info and node.ret_type_info.omitempty
+            else ""
         )
         return [f'\t{field_name} {go_type} `json:"{tag}{omitempty}"`']
 
@@ -834,7 +890,7 @@ class GoVisitor(BaseWalker):
                     for field in child.body:
                         if isinstance(field, Field) and field.name == node.name:
                             return self._resolve_field_ret_type(field)
-        return self._resolve_type(node.type_info)
+        return self._resolve_type(node.ret_type_info)
 
     # === STRUCT ===
 
@@ -1357,7 +1413,7 @@ class GoVisitor(BaseWalker):
     # === SELECTORS ===
 
     def visit_css_select(self, node: CssSelect, ctx: WalkContext) -> list[str]:
-        queries = node.queries or [node.query]
+        queries = node.queries
         if len(queries) == 1:
             q = _go_str(queries[0])
             return [f"{ctx.indent}{ctx.nxt} := {ctx.prv}.Find({q}).First()"]
@@ -1379,7 +1435,7 @@ class GoVisitor(BaseWalker):
     def visit_css_select_all(
         self, node: CssSelectAll, ctx: WalkContext
     ) -> list[str]:
-        queries = node.queries or [node.query]
+        queries = node.queries
         if len(queries) == 1:
             q = _go_str(queries[0])
             return [f"{ctx.indent}{ctx.nxt} := {ctx.prv}.Find({q})"]

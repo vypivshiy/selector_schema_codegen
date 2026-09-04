@@ -1,9 +1,19 @@
 # mypy: ignore-errors
-"""
-AST nodes for the KDL Schema DSL.
+"""Intermediate representation (AST) node definitions for the KDL Schema DSL.
 
-Import everything from here:
-    from kdl_ast import Module, Field, CssSelect, ...
+Provides strongly-typed dataclass nodes representing all language constructs,
+pipeline operations, predicates, REST endpoint definitions, and type models.
+
+Examples:
+    ```python
+    from ssc_codegen.ast import CssSelect, Field, Module, Struct, Text
+
+    module = Module(source_file="schema.kdl")
+    struct = Struct(name="Product")
+    field = Field(name="title", body=[CssSelect(queries=["h1"]), Text()])
+    struct.body.append(field)
+    module.body.append(struct)
+    ```
 """
 
 from .types import VariableType, StructType, TypeInfo, VT

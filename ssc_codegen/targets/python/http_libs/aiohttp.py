@@ -1,10 +1,20 @@
+"""aiohttp HTTP client transport strategy for Python code generation."""
+
 from __future__ import annotations
 
 from ssc_codegen.targets.python.http_libs.base import HttpLibStrategy
 
 
 class AioHttpStrategy(HttpLibStrategy):
-    """aiohttp HTTP client strategy (async-only, sync wrapped via asyncio.run)."""
+    """HTTP transport strategy using `aiohttp` (async-only).
+
+    Attributes:
+        import_line: ``"import aiohttp"``.
+        sync_client_type: ``"aiohttp.ClientSession"``.
+        async_client_type: ``"aiohttp.ClientSession"``.
+        transport_exception: ``"aiohttp.ClientError"``.
+        supports_sync_fetch: `False` (aiohttp only supports async I/O).
+    """
 
     import_line = "import aiohttp"
     sync_client_type = "aiohttp.ClientSession"

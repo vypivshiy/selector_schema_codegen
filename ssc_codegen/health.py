@@ -1,4 +1,9 @@
-"""Selector health-check: verify that all selectors in a struct match against HTML."""
+"""Selector health verification against real HTML documents.
+
+This module inspects AST structs, extracts all selector queries (CSS, CSS-all,
+XPath, XPath-all, remove filters, fallback defaults), and evaluates them against
+provided HTML to detect broken or fragile selectors without running code generation.
+"""
 
 from __future__ import annotations
 
@@ -7,30 +12,29 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from ssc_codegen.ast import (
+    CssRemove,
     CssSelect,
     CssSelectAll,
-    CssRemove,
-    XpathSelect,
-    XpathSelectAll,
-    XpathRemove,
     Fallback,
-    Nested,
     Field,
     InitField,
-    SplitDoc,
-    PreValidate,
     Key,
-    Value,
-    TableConfig,
-    TableRows,
-    TableMatchKey,
-    StructBase,
-    Struct,
-    StructType,
     Module,
+    Nested,
+    PreValidate,
+    SplitDoc,
+    Struct,
+    StructBase,
+    StructType,
+    TableConfig,
+    TableMatchKey,
+    TableRows,
+    Value,
+    XpathRemove,
+    XpathSelect,
+    XpathSelectAll,
 )
 from ssc_codegen.ast.base import Node as AstNode
-
 
 # selector types that expect exactly one match (or non-None)
 _SINGLE_SELECTORS = (CssSelect, XpathSelect)
@@ -45,17 +49,32 @@ _XPATH_TYPES = (XpathSelect, XpathSelectAll, XpathRemove)
 
 @dataclass
 class SelectorCheck:
-    """Result of checking a single selector."""
+    """Result of checking a single selector expression against HTML.
 
-    path: str  # e.g. "Book.title" or "Book.@split-doc"
-    selector_type: str  # e.g. "css", "css-all", "xpath"
-    query: str  # the selector string
-    matches: int  # number of elements matched
-    status: Literal["ok", "fail", "warn"]  # ok/fail/warn
+    Attributes:
+        path: Dot-separated AST path of the selector (e.g. `"Book.title"`, `"Book.@split-doc"`).
+        selector_type: Type descriptor of the selector (`"css"`, `"css-all"`, `"xpath"`, `"xpath-all"`).
+        query: Raw selector query string.
+        matches: Number of matching elements found in the document.
+        status: Evaluation status (`"ok"`, `"fail"`, or `"warn"`).
+        message: Informational message or reason for warning/failure.
+        fallback_value: Representation of the fallback default value if present.
+    """
+
+    path: str
+    selector_type: str
+    query: str
+    matches: int
+    status: Literal["ok", "fail", "warn"]
     message: str = ""
-    fallback_value: str | None = None  # repr of fallback default if present
+    fallback_value: str | None = None
 
     def to_dict(self) -> dict:
+        """Convert selector check result to a dictionary representation.
+
+        Returns:
+            Dictionary containing selector path, type, query, matches count, and status.
+        """
         d = {
             "path": self.path,
             "selector_type": self.selector_type,
@@ -71,32 +90,77 @@ class SelectorCheck:
 
 @dataclass
 class HealthResult:
-    """Result of health-checking all selectors in a struct."""
+    """Aggregated health check result for a struct and its nested dependencies.
+
+    Attributes:
+        struct_name: Name of the checked root struct.
+        checks: List of individual `SelectorCheck` records.
+
+    Examples:
+        ```python
+        from ssc_codegen import check_struct_health, parse_module
+
+        kdl_source = '''
+        (item)struct Book {
+            title "h1.title" { text }
+            price ".price" { text }
+        }
+        '''
+        ast, _ = parse_module(kdl_source)
+        book_struct = ast.body[0]
+        html = '<div class="book"><h1 class="title">Demo</h1></div>'
+
+        result = check_struct_health(book_struct, html, module=ast)
+        print(result.has_failures())  # True (price failed)
+        print(result.format(fmt="text"))
+        ```
+    """
 
     struct_name: str
     checks: list[SelectorCheck] = field(default_factory=list)
 
     @property
     def failed(self) -> list[SelectorCheck]:
+        """List of failed selector checks (0 matches without fallback)."""
         return [c for c in self.checks if c.status == "fail"]
 
     @property
     def warnings(self) -> list[SelectorCheck]:
+        """List of warning selector checks (0 matches with fallback or remove selector)."""
         return [c for c in self.checks if c.status == "warn"]
 
     @property
     def ok(self) -> list[SelectorCheck]:
+        """List of successful selector checks."""
         return [c for c in self.checks if c.status == "ok"]
 
     def has_failures(self) -> bool:
+        """Return True if any selector check failed.
+
+        Returns:
+            True if failed checks exist, False otherwise.
+        """
         return len(self.failed) > 0
 
     def format(self, fmt: Literal["text", "json"] = "text") -> str:
+        """Format the health check summary as human-readable text or JSON.
+
+        Args:
+            fmt: Output formatting style, either `"text"` or `"json"`.
+
+        Returns:
+            Formatted string report.
+        """
         if fmt == "json":
             return json.dumps(self.to_dict(), indent=2, ensure_ascii=False)
         return self._format_text()
 
     def to_dict(self) -> dict:
+        """Convert health results and summary metrics to a dictionary.
+
+        Returns:
+            Dictionary with struct name, checks list, total, ok, failed, and warning counts.
+        """
         return {
             "struct": self.struct_name,
             "checks": [c.to_dict() for c in self.checks],
@@ -111,7 +175,6 @@ class HealthResult:
             return f"{self.struct_name}: no selectors found"
 
         lines: list[str] = []
-        # find max widths for alignment
         max_path = max(len(c.path) for c in self.checks)
         max_type = max(len(c.selector_type) for c in self.checks)
 
@@ -133,7 +196,6 @@ class HealthResult:
                 f"{c.query!r:<40}  {status_str}  {detail}"
             )
 
-        # summary
         total = len(self.checks)
         n_ok = len(self.ok)
         n_fail = len(self.failed)
@@ -156,19 +218,19 @@ class _SelectorInfo:
 
     path: str
     node: AstNode
-    fallback_value: str | None = None  # repr of default value, or None
+    fallback_value: str | None = None
 
 
 @dataclass
 class _NestedRef:
     """Internal: a nested struct reference found in a pipeline."""
 
-    path: str  # e.g. "MainCatalogue.books"
-    struct_name: str  # target struct name
+    path: str
+    struct_name: str
 
 
 def _find_fallback(node: AstNode) -> str | None:
-    """Check if a pipeline node (Field, etc.) contains a Fallback and return its repr'd value."""
+    """Check if a pipeline node contains a Fallback and return its repr value."""
     for child in node.body:
         if isinstance(child, Fallback):
             return repr(child.value)
@@ -232,7 +294,6 @@ def _collect_selectors(
             selectors.extend(s)
             nested_refs.extend(n)
         else:
-            # recurse into any other node that might contain selectors
             s, n = _collect_selectors(child, path_prefix, fallback)
             selectors.extend(s)
             nested_refs.extend(n)
@@ -274,10 +335,36 @@ def _check_xpath(html_tree, query: str) -> int:
 def check_struct_health(
     struct: StructBase, html: str, module: Module | None = None
 ) -> HealthResult:
-    """Check all selectors in a struct (and nested structs) against HTML."""
+    """Check all selectors in a struct (and recursively in nested structs) against HTML.
+
+    Evaluates single selectors (requiring >= 1 match), multi selectors (requiring > 0
+    matches), and removal selectors against parsed HTML using BeautifulSoup4 and lxml.
+    Selectors with fallback defaults are downgraded from failure to warning if 0 matches occur.
+
+    Args:
+        struct: Root struct AST node whose selectors will be evaluated.
+        html: Raw HTML string representing sample page content.
+        module: Optional parent Module AST containing definitions of nested structs.
+
+    Returns:
+        HealthResult holding the list of all checked selectors, counts, and health status.
+
+    Examples:
+        ```python
+        from ssc_codegen import check_struct_health, parse_module
+
+        ast, _ = parse_module(
+            '(item)struct Item { title "h1" { text }; price ".price" { text } }'
+        )
+        item_struct = ast.body[0]
+        html = "<html><body><h1>Example Item</h1></body></html>"
+
+        report = check_struct_health(item_struct, html, module=ast)
+        print(f"Passed: {not report.has_failures()}")
+        ```
+    """
     from bs4 import BeautifulSoup
 
-    # build struct lookup from module
     struct_map: dict[str, StructBase] = {}
     if module is not None:
         struct_map = {
@@ -301,7 +388,6 @@ def check_struct_health(
         )
         return result
 
-    # collect selectors + nested refs, then recurse into nested structs
     visited: set[str] = set()
     _check_struct_recursive(
         struct, struct.name, soup, html, struct_map, result, visited
@@ -326,7 +412,6 @@ def _check_struct_recursive(
 
     selectors, nested_refs = _collect_selectors(struct, path_prefix)
 
-    # check if we need lxml for xpath
     has_xpath = any(isinstance(info.node, _XPATH_TYPES) for info in selectors)
     lxml_tree = None
     if has_xpath:
@@ -340,11 +425,10 @@ def _check_struct_recursive(
     for info in selectors:
         sel_node = info.node
         queries = getattr(sel_node, "queries", [])
-        query = sel_node.query  # type: ignore[attr-defined]
+        query = queries[0] if queries else getattr(sel_node, "query", "")
         report_query = query
         sel_type = _selector_type_name(sel_node)
 
-        # run the selector
         if isinstance(sel_node, _CSS_TYPES):
             if queries:
                 count = 0
@@ -380,7 +464,6 @@ def _check_struct_recursive(
         else:
             continue
 
-        # selector error (invalid selector syntax)
         if count == -1:
             result.checks.append(
                 SelectorCheck(
@@ -394,9 +477,7 @@ def _check_struct_recursive(
             )
             continue
 
-        # evaluate result
         if isinstance(sel_node, _REMOVE_SELECTORS):
-            # remove selectors: 0 matches is just a warning
             status: Literal["ok", "fail", "warn"] = (
                 "ok" if count > 0 else "warn"
             )
@@ -407,7 +488,6 @@ def _check_struct_recursive(
         else:
             status = "ok" if count > 0 else "fail"
 
-        # downgrade FAIL → WARN when field has fallback
         fallback_value = info.fallback_value
         if status == "fail" and fallback_value is not None:
             status = "warn"
@@ -433,7 +513,6 @@ def _check_struct_recursive(
             )
         )
 
-    # recurse into nested structs
     for ref in nested_refs:
         nested_struct = struct_map.get(ref.struct_name)
         if nested_struct is None:

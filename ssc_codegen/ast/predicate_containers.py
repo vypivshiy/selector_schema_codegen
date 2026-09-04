@@ -1,3 +1,11 @@
+"""AST container nodes for predicate evaluation, list filtering, assertions, and table matching.
+
+This module defines top-level predicate containers used in field pipelines:
+- `Filter`: Filters list collections according to inner condition nodes.
+- `Assert`: Asserts that the current value satisfies inner condition nodes, raising `SscAssertionError` on failure.
+- `Match`: Table row matcher testing key conditions and mapping values.
+"""
+
 from __future__ import annotations
 from dataclasses import dataclass, field
 
@@ -7,10 +15,15 @@ from .types import TypeInfo, VariableType
 
 @dataclass
 class Filter(Node):
-    """
-    Filters a list, removing elements that do not match all predicates.
-    Predicates in body are combined with AND by default.
-    accept/ret follow the cursor list type (STRING or DOCUMENT with is_array=True).
+    """Filters a list of items according to inner predicate conditions.
+
+    Inner conditions are joined with `AND` logic by default unless `or { ... }` is used.
+
+    Examples:
+        - KDL: `filter { starts "http"; ends ".png"; }`
+        - Python: `v1 = [x for x in v if x.startswith("http") and x.endswith(".png")]`
+        - JavaScript: `const v1 = v.filter(x => x.startsWith("http") && x.endsWith(".png"));`
+        - Go: filter loop over slice matching predicate helper
     """
 
     accept_type_info: TypeInfo = field(
@@ -26,16 +39,19 @@ class Filter(Node):
 
 @dataclass
 class Assert(Node):
-    """
-    Validates the current value without modifying it.
-    Raises error if any predicate fails (caught by Fallback if present).
-    Pass-through: accept == ret == cursor type.
-    Can appear multiple times in a pipeline.
+    """Validates the current pipeline value against inner conditions.
 
-    Source location is carried in the inherited ``span`` field (KdlNode.span)
-    plus ``Module.source_file`` (basename of the originating .kdl). Both are
-    populated by the parser and used verbatim in the default assertion
-    message so consumers can find the offending .kdl line.
+    Raises an assertion error (`SscAssertionError` / `std_assert`) if any inner predicate fails.
+    Source location (`span`) and source file are embedded in the default assertion message.
+
+    Attributes:
+        message: Optional custom failure error message.
+
+    Examples:
+        - KDL: `assert "Price must be positive" { gt 0 }`
+        - Python: `std_assert(v > 0, "Price must be positive")`
+        - JavaScript: `sscAssert(v > 0, "Price must be positive");`
+        - Go: `stdAssert(v > 0, "Price must be positive")`
     """
 
     message: str = ""
@@ -49,12 +65,14 @@ class Assert(Node):
 
 @dataclass
 class Match(Node):
-    """
-    Selects a table row whose key cell (from -match pipeline) satisfies
-    all predicates, then returns the value cell (from -value pipeline).
-    Only valid inside Field of struct type=table.
-    accept: DOCUMENT (row element), ret: STRING (value cell text).
-    Predicates in body are combined with AND.
+    """Matches table row keys against conditions to extract corresponding values.
+
+    Iterates over rows of a `type=table` struct, applying key extraction (`@match`).
+    When key satisfies all inner predicates, evaluates and returns the row's `@value`.
+
+    Examples:
+        - KDL: `match { eq "SKU" }`
+        - Python: iterates over rows checking key text, returns value cell
     """
 
     accept_type_info: TypeInfo = field(

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from kdlquery import KdlNode
 
 from ssc_codegen.ast import (
@@ -26,7 +28,18 @@ _TYPE_NAMES: dict[str, VariableType] = {
 }
 
 
-def parse_extension_type(value) -> ExtensionType:
+def parse_extension_type(value: Any) -> ExtensionType:
+    """Parse a KDL value and type annotation into an `ExtensionType` signature descriptor.
+
+    Args:
+        value: KDL argument or value representing a type name (e.g. `str`, `str?`, `(array)int`, `T`).
+
+    Returns:
+        The parsed `ExtensionType` structure.
+
+    Raises:
+        BuildTimeError: If generic `T` has modifiers or if the type name is unrecognized.
+    """
     name = str(value.value)
     is_optional = name.endswith("?")
     if is_optional:
@@ -45,6 +58,15 @@ def parse_extension_type(value) -> ExtensionType:
 def resolve_extension_call(
     definition: ExtensionDef, input_type: TypeInfo
 ) -> TypeInfo:
+    """Compute the return `TypeInfo` produced by invoking an extension operation on `input_type`.
+
+    Args:
+        definition: The target `ExtensionDef` declaration.
+        input_type: The `TypeInfo` entering the extension step.
+
+    Returns:
+        The output `TypeInfo` produced by the extension, or `AUTO` if input is incompatible.
+    """
     if not definition.accept.accepts(input_type):
         return TypeInfo(base=VariableType.AUTO)
     return definition.resolve_return(input_type)
@@ -108,6 +130,20 @@ def handle_extension(
     ctx: ParseContext,
     lint: LintContext,
 ) -> list[ExtensionDef]:
+    """Parse a top-level KDL `extension` block into `ExtensionDef` instances.
+
+    Args:
+        node: The KDL `extension` declaration node.
+        module: The root `Module` AST node registering the extensions.
+        ctx: Global parse context for storing definitions.
+        lint: Lint context for recording duplicate name diagnostics (`E402`).
+
+    Returns:
+        List of parsed `ExtensionDef` objects.
+
+    Raises:
+        BuildTimeError: If the extension namespace argument is missing.
+    """
     if not node.args:
         raise BuildTimeError("'extension' requires a namespace")
     namespace = str(node.args[0].value)

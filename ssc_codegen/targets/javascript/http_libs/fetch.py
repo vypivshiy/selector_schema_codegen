@@ -1,14 +1,17 @@
+"""Native fetch HTTP transport strategy for JavaScript code generation."""
+
 from __future__ import annotations
 
 from ssc_codegen.targets.javascript.http_libs.base import JsHttpLibStrategy
 
 
 class FetchStrategy(JsHttpLibStrategy):
-    """Native ``fetch()`` strategy."""
+    """HTTP client strategy utilizing the standard browser/Node.js `fetch()` API."""
 
     fn_name = "sscRestCall"
 
     def rest_call_lines(self) -> list[str]:
+        """Generate `sscRestCall` helper source using standard `fetch()`."""
         return [
             "async function sscRestCall(client, _matchers, method, url, _valueFn, _opts) {",
             "    let _resp;",

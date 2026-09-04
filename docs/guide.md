@@ -60,7 +60,7 @@ ssc-gen check simple.kdl
 }
 ```
 
-Документ — строка, HTML-операции запрещены. См. [syntax.md](syntax.md#rawstruct--парсинг-простого-текста).
+Документ — строка, HTML-операции запрещены. См. [syntax.md](syntax.md#rawstruct).
 
 ## Генерация с помощью LLM
 

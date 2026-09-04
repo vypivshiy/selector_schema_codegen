@@ -1,4 +1,4 @@
-"""Pipeline type checking — op signatures, compatibility, mismatch hints."""
+"""Pipeline type checking — operation signatures, compatibility, and type inference."""
 
 from __future__ import annotations
 
@@ -14,6 +14,16 @@ from ssc_codegen.core.contexts import DefineKind, LintContext, ParseContext
 
 
 class OpSig(NamedTuple):
+    """Static type signature for a built-in pipeline operation.
+
+    Attributes:
+        accept: Expected input base type (`None` means any type accepted).
+        ret: Produced output base type (`None` means unchanged input base type).
+        list_propagates: Whether list cardinality of the input carries over to output.
+        force_list: Whether this operation always forces the output to be a list.
+        force_scalar: Whether this operation always forces the output to be a scalar.
+    """
+
     accept: VariableType | None  # base type (None = any)
     ret: VariableType | None  # base type return (None = unchanged)
     list_propagates: bool = True  # input is_array → output is_array
@@ -258,12 +268,155 @@ def check_pipeline_types(
     lint: LintContext,
     start_type: VariableType = VariableType.DOCUMENT,
 ) -> VariableType:
-    """Check pipeline type compatibility.
+    """Validate type compatibility across a sequence of pipeline operations.
 
-    Tracks (current_base, current_is_array) internally.
-    Returns the final base type (for backward compat with callers that
-    only need the VariableType).
+    Simulates the transformation of types through consecutive operations,
+    tracking base type and array cardinality, inlining block defines, checking
+    fallback compatibility, and reporting `E100` type mismatch diagnostics.
+
+    Args:
+        ops: Sequence of KDL nodes making up the pipeline steps.
+        ctx: Global parse context with defines and extensions.
+        lint: Lint context for recording type diagnostics.
+        start_type: Input base type entering the first operation (defaults to `DOCUMENT`).
+
+    Returns:
+        The final `VariableType` base produced by the pipeline.
     """
+    current_base = start_type
+    current_is_array = False
+
+    for node in ops:
+        op_name = node.name
+        if not op_name:
+            continue
+
+        if op_name == "self":
+            continue
+
+        if op_name.startswith("!"):
+            definition = ctx.extensions.get(op_name[1:])
+            if definition is None:
+                current_base = VariableType.AUTO
+                current_is_array = False
+                continue
+            current = TypeInfo(base=current_base, is_array=current_is_array)
+            if not definition.accept.accepts(current):
+                current_base = VariableType.AUTO
+                current_is_array = False
+                continue
+            resolved = definition.resolve_return(current)
+            current_base = resolved.base
+            current_is_array = resolved.is_array
+            continue
+
+        if op_name == "fallback":
+            fb_base, fb_is_array = _fallback_literal_type(node, lint)
+            if fb_base is None:
+                continue
+            if fb_is_array:
+                if not current_is_array:
+                    lint.error(
+                        node,
+                        message=f"'fallback {{}}' is only valid for list types, got {current_base.name}",
+                        code="E100",
+                        hint="use 'css-all' or 'xpath-all' to produce a list",
+                    )
+                continue
+            if fb_base == VariableType.NULL:
+                if current_base not in (
+                    VariableType.STRING,
+                    VariableType.INT,
+                    VariableType.FLOAT,
+                    VariableType.AUTO,
+                ):
+                    lint.error(
+                        node,
+                        message=f"'fallback #null' only valid for STRING/INT/FLOAT, got {current_base.name}",
+                        code="E100",
+                    )
+                # #null marks the type as optional — we don't change base
+                continue
+            if (
+                not _vt_compatible(current_base, current_is_array, fb_base)
+                and current_base != VariableType.AUTO
+            ):
+                lint.error(
+                    node,
+                    message=f"'fallback' type {fb_base.name} does not match pipeline {current_base.name}",
+                    code="E100",
+                    hint=f"use a {current_base.name.lower()} literal or #null",
+                )
+                continue
+            current_base = fb_base
+            current_is_array = fb_is_array
+            continue
+
+        if op_name == "filter":
+            if not current_is_array and current_base != VariableType.AUTO:
+                lint.error(
+                    node,
+                    message=f"'filter' requires a list type, got {current_base.name}",
+                    code="E100",
+                    hint="use 'css-all', 'xpath-all', 're-all', or 'split' first",
+                )
+            continue
+
+        if op_name == "assert":
+            continue
+
+        if op_name == "match":
+            if current_base != start_type:
+                lint.error(
+                    node,
+                    message="'match' must be the first operation in the field pipeline",
+                    code="E100",
+                )
+            elif not _vt_compatible(
+                current_base, current_is_array, VariableType.DOCUMENT
+            ):
+                lint.error(
+                    node,
+                    message=f"'match' requires DOCUMENT, got {current_base.name}",
+                    code="E100",
+                )
+            current_base, current_is_array = _resolve_op_ret(
+                "match", current_base, current_is_array
+            )
+            continue
+
+        # block define — inline expansion
+        if op_name in ctx.children_defines or op_name in lint.defines:
+            define_ops = _get_define_ops(op_name, ctx, lint)
+            if define_ops:
+                result_base = check_pipeline_types(
+                    define_ops, ctx, lint, start_type=current_base
+                )
+                current_base = result_base
+            continue
+
+        # regular op
+        sig = OP_TYPES.get(op_name)
+        if sig is None:
+            current_base = VariableType.AUTO
+            continue
+        if sig.accept is not None and not _vt_compatible(
+            current_base, current_is_array, sig.accept
+        ):
+            lint.error(
+                node,
+                message=f"'{op_name}' does not accept {current_base.name}; expected {sig.accept.name}",
+                code="E100",
+                hint=_type_mismatch_hint(
+                    op_name, current_base, current_is_array
+                ),
+            )
+            current_base = VariableType.AUTO
+            continue
+        current_base, current_is_array = _resolve_op_ret(
+            op_name, current_base, current_is_array
+        )
+    return current_base
     current_base = start_type
     current_is_array = False
 

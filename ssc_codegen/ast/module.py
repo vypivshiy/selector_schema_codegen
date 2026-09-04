@@ -1,3 +1,14 @@
+"""AST root node, insertion hooks, and technical marker definitions for compiled modules.
+
+This module defines the top-level intermediate representation container `Module` and its
+structural child markers:
+- `Module`: Root AST node containing all structs, functions, type definitions, and extensions.
+- `CodeStartHook`: Insertion point for user code emitted before generated structs (`code-start`).
+- `CodeEndHook`: Insertion point for user code emitted after generated structs (`code-end`).
+- `Utilities`: Technical placeholder marking the location for standard runtime helper functions.
+- `Docstring`: Deprecated node retained for backward compatibility (prefer `Module.doc`).
+"""
+
 from __future__ import annotations
 import warnings
 from dataclasses import dataclass
@@ -8,23 +19,15 @@ from .base import Node
 
 @dataclass
 class Module(Node):
-    """
-    Root node.
-    Build order of body:
-      Utilities, CodeStartHook
-      → JsonDef entries → TypeDef entries → Struct entries
-      → CodeEndHook
+    """Root intermediate representation node for a compiled schema file.
 
-    The module-level docstring lives in the ``doc`` field and is always
-    emitted first by the converter (before any body traversal).
+    Maintains all schema definitions including JSON mappings, generated type
+    definitions, user structs, and extension registries.
 
-    Import statements are no longer AST body nodes — the converter emits
-    them directly from the ``visit_module`` handler based on module shape
-    (REST present, REST-only, separate runtime) and build options.
-
-    ``source_file`` is the basename of the originating .kdl file; populated
-    by the parser from ParseContext.source_path. Used by codegen to format
-    source-location messages for Assert/Re/etc.
+    Attributes:
+        doc: Module-level docstring documentation.
+        source_file: Basename of the originating source `.kdl` schema file.
+        extensions: Registry mapping namespace names to custom `ExtensionDef` instances.
     """
 
     doc: str = ""
@@ -41,6 +44,11 @@ class Module(Node):
 
     @property
     def docstring(self) -> Docstring:
+        """Deprecated property for accessing module docstring.
+
+        Warning:
+            Deprecated: Use `Module.doc` instead.
+        """
         warnings.warn(
             "Module.docstring is deprecated; use the Module.doc field instead.",
             DeprecationWarning,
@@ -59,18 +67,21 @@ class Module(Node):
 
     @property
     def utilities(self) -> Utilities:
+        """Reference to the module's utilities placeholder node."""
         return self.body[0]  # type: ignore
 
     @property
     def code_start(self) -> CodeStartHook:
+        """Reference to the module's start hook node."""
         return self.body[1]  # type: ignore
 
 
 @dataclass
 class CodeStartHook(Node):
-    """
-    User code insertion point before all generated code.
-    Codegen emits body content verbatim at the top of the output file.
+    """User code insertion point emitted before generated structs (`code-start`).
+
+    Attributes:
+        body: Ordered list of custom user-injected code nodes.
     """
 
     pass
@@ -78,9 +89,10 @@ class CodeStartHook(Node):
 
 @dataclass
 class CodeEndHook(Node):
-    """
-    User code insertion point after all generated structs.
-    Codegen emits body content verbatim at the bottom of the output file.
+    """User code insertion point emitted after all generated structs (`code-end`).
+
+    Attributes:
+        body: Ordered list of custom user-injected code nodes.
     """
 
     pass
@@ -88,12 +100,12 @@ class CodeEndHook(Node):
 
 @dataclass
 class Docstring(Node):
-    """DEPRECATED: use the ``doc`` field on ``Module`` instead.
+    """DEPRECATED: Module-level docstring node.
 
-    Module-level docstring. DSL: ``doc "text"``.
-    Retained only for backward-compatibility imports; the class emits a
-    DeprecationWarning on instantiation and is no longer added to
-    ``Module.body`` by ``Module.__post_init__``.
+    Retained only for backward-compatibility; use `Module.doc` instead.
+
+    Attributes:
+        value: Text documentation string.
     """
 
     value: str = ""
@@ -108,10 +120,7 @@ class Docstring(Node):
 
 @dataclass
 class Utilities(Node):
-    """
-    Technical node — codegen inserts shared helper functions into body.
-    Not produced from DSL directly; populated during codegen phase.
-    """
+    """Technical AST node serving as the insertion point for standard helpers."""
 
     pass
 

@@ -1,4 +1,4 @@
-"""Explicit, source-scoped KDL import resolution."""
+"""Explicit, source-scoped KDL import resolution and dependency closure computation."""
 
 from __future__ import annotations
 
@@ -21,6 +21,14 @@ _KDL_TEXT_ENCODING = "utf-8-sig"
 
 @dataclass(frozen=True)
 class SymbolId:
+    """Globally unique identifier for an imported or exported declaration symbol.
+
+    Attributes:
+        path: Canonical filesystem path to the defining schema file.
+        kind: Kind of declaration (`"define"`, `"extension"`, `"fn"`, `"json"`, `"struct"`).
+        name: Declared symbol name.
+    """
+
     path: Path
     kind: str
     name: str
@@ -28,6 +36,17 @@ class SymbolId:
 
 @dataclass
 class SourceUnit:
+    """An individual KDL source file and its local symbol table.
+
+    Attributes:
+        path: Canonical filesystem path to the file.
+        nodes: Parsed top-level KDL nodes.
+        exports: Map of `(kind, name)` to `SymbolId` declared in this file.
+        export_nodes: Mapping from `SymbolId` to the declaring `KdlNode`.
+        scope: Combined symbol visibility map (local declarations + explicit imports).
+        ordered_roots: Topological order of symbols declared or imported in this unit.
+    """
+
     path: Path
     nodes: list[KdlNode]
     exports: dict[tuple[str, str], SymbolId] = field(default_factory=dict)
@@ -525,7 +544,21 @@ def resolve_explicit_imports(
     ctx: ParseContext,
     diagnostics: list[ReadDiagnostic],
 ) -> list[KdlNode]:
-    """Resolve mandatory typed imports and return dependency-ordered nodes."""
+    """Resolve mandatory typed imports and return a merged, dependency-ordered node list.
+
+    Traverses the import graph, verifies that imported symbols exist in their source
+    files and match declared type annotations, detects circular dependencies (`E300`),
+    and orders imported definitions topologically ahead of consumers.
+
+    Args:
+        top_nodes: Sequence of top-level KDL nodes from the root document.
+        source_path: Canonical filesystem path to the root schema file.
+        ctx: Global parse context for storing file origin mappings.
+        diagnostics: Output list receiving import validation errors and warnings.
+
+    Returns:
+        Flattened list of KDL nodes with all imported definitions resolved and ordered.
+    """
     import_nodes = [node for node in top_nodes if node.name == "import"]
     if not import_nodes:
         return top_nodes

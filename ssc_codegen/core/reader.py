@@ -28,7 +28,41 @@ from ssc_codegen.core.extensions import handle_extension
 def parse_module(
     src: str, *, source_path: Path | None = None
 ) -> tuple[Module, list[ReadDiagnostic]]:
-    """Parse KDL source -> Module AST + diagnostics."""
+    """Parse KDL DSL source into an intermediate Module AST and diagnostics list.
+
+    Performs KDL parsing, import graph resolution, structural and cross-reference
+    linting passes, pipeline type inference, and AST construction.
+
+    Args:
+        src: KDL source text defining structs, typedefs, extensions, and functions.
+        source_path: Optional filesystem path to the schema file, used for diagnostic
+            spans and relative import path resolution.
+
+    Returns:
+        A tuple of `(Module, list[ReadDiagnostic])`:
+            - `Module`: The root AST module containing parsed struct and helper definitions.
+              If critical syntax or structural errors occur, returns an empty `Module()`.
+            - `list[ReadDiagnostic]`: List of warnings, errors, and informational diagnostics
+              produced during parsing and linting.
+
+    Examples:
+        ```python
+        from pathlib import Path
+        from ssc_codegen import parse_module
+
+        kdl = '''
+        (item)struct Product {
+            title "h1.name" { text }
+            price ".price" { text; rm-prefix "$" ; to-float }
+        }
+        '''
+        ast, diagnostics = parse_module(kdl, source_path=Path("product.kdl"))
+        if any(d.severity.value == "error" for d in diagnostics):
+            print("Failed with errors:", diagnostics)
+        else:
+            print(f"Parsed {len(ast.body)} top-level node(s)")
+        ```
+    """
     try:
         doc = kdl_parse(src)
     except KDLParseError as exc:

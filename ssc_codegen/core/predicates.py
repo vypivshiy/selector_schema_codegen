@@ -61,6 +61,17 @@ def parse_filter_expr(
     ctx: ParseContext,
     lint: LintContext,
 ) -> None:
+    """Parse predicate expressions inside a `filter { ... }` block.
+
+    Expands block defines, validates predicate operations, resolves nested
+    boolean connectives (`and`, `or`, `not`), and appends predicate nodes to `parent`.
+
+    Args:
+        kdl_nodes: Sequence of KDL nodes within the filter predicate block.
+        parent: The `Filter` or logical connective AST node receiving child predicates.
+        ctx: Global parse context containing defines and schemas.
+        lint: Lint context for validating predicate syntax and context constraints.
+    """
     lint._predicate_depth += 1
     old_ctx = lint._predicate_context
     lint._predicate_context = "filter"
@@ -85,6 +96,17 @@ def parse_assert_expr(
     ctx: ParseContext,
     lint: LintContext,
 ) -> None:
+    """Parse assertion predicate expressions inside an `assert { ... }` block.
+
+    Supports DOM, string, regex, count (`len-*`), and logical predicates,
+    appending assertion condition AST nodes to `parent`.
+
+    Args:
+        kdl_nodes: Sequence of KDL nodes within the assert block.
+        parent: The `Assert` or logical connective AST node receiving conditions.
+        ctx: Global parse context containing defines.
+        lint: Lint context for validating assert operations.
+    """
     lint._predicate_depth += 1
     old_ctx = lint._predicate_context
     lint._predicate_context = "assert"
@@ -109,6 +131,16 @@ def parse_match_expr(
     ctx: ParseContext,
     lint: LintContext,
 ) -> None:
+    """Parse pattern matching predicate expressions inside a `match { ... }` block.
+
+    Handles table match key extraction and dispatch logic.
+
+    Args:
+        kdl_nodes: Sequence of KDL nodes within the match block.
+        parent: The `Match` or logical connective AST node receiving match conditions.
+        ctx: Global parse context containing defines.
+        lint: Lint context for checking match predicates.
+    """
     lint._predicate_depth += 1
     old_ctx = lint._predicate_context
     lint._predicate_context = "match"

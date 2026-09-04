@@ -40,7 +40,18 @@ def format_diagnostic(
     use_color: bool | None = None,
     context_lines: int = 1,
 ) -> str:
-    """Format a single diagnostic as a human-readable Rust-style string."""
+    """Format a single compiler diagnostic as a human-readable Rust-style report.
+
+    Args:
+        d: The `ReadDiagnostic` record to format.
+        src: Optional KDL source code string for displaying contextual code lines.
+        filepath: Optional filesystem path associated with the diagnostic span.
+        use_color: Force ANSI color output (True/False) or auto-detect from TTY (None).
+        context_lines: Number of surrounding lines of source code to show.
+
+    Returns:
+        Formatted multi-line diagnostic string with code underlines and annotations.
+    """
     filepath = _diagnostic_filepath(d, filepath)
     src = _resolve_src(src, filepath)
     renderer = _Renderer(use_color=_resolve_color(use_color))
@@ -58,7 +69,29 @@ def format_diagnostics(
     use_color: bool | None = None,
     context_lines: int = 1,
 ) -> str:
-    """Format a list of diagnostics as text or JSON."""
+    """Format a sequence of diagnostics into a human-readable report or JSON payload.
+
+    Args:
+        diagnostics: List of `ReadDiagnostic` records from parsing or linting passes.
+        src: Optional KDL source code string to display context code snippets.
+        filepath: Optional filesystem path associated with the diagnostic spans.
+        fmt: Output format style, either `"text"` (Rust-style compiler diagnostics) or `"json"`.
+        use_color: Force ANSI color output (True/False) or auto-detect based on TTY (None).
+        context_lines: Number of surrounding lines of source code to display in text mode.
+
+    Returns:
+        Formatted multi-line diagnostic string or JSON array string. Returns an empty
+        string if `diagnostics` is empty.
+
+    Examples:
+        ```python
+        from ssc_codegen import format_diagnostics, parse_module
+
+        _, diagnostics = parse_module("(item)struct Broken {")
+        if diagnostics:
+            print(format_diagnostics(diagnostics, fmt="text"))
+        ```
+    """
     if not diagnostics:
         return ""
 
@@ -83,7 +116,14 @@ def format_diagnostics(
 
 
 def diagnostic_to_dict(d: ReadDiagnostic) -> dict[str, Any]:
-    """Serialize a single diagnostic to a JSON-friendly dict."""
+    """Serialize a single `ReadDiagnostic` record into a JSON-serializable dictionary.
+
+    Args:
+        d: The `ReadDiagnostic` instance to convert.
+
+    Returns:
+        Dictionary containing code, severity, message, hint, path, label, notes, and span offsets.
+    """
     s, e = d.span.start, d.span.end
     return {
         "code": d.code,

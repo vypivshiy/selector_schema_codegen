@@ -1,4 +1,8 @@
-"""Resolve a TargetSpec into a validated TargetProfile."""
+"""Target resolution and backend capability validation.
+
+This module validates raw `TargetSpec` instances and constructs corresponding
+`TargetProfile` capability descriptors with appropriate visitor/converter factories.
+"""
 
 from __future__ import annotations
 
@@ -7,11 +11,54 @@ from ssc_codegen.targets.spec import TargetSpec
 
 
 class ResolutionError(ValueError):
-    """Target resolution or validation failed."""
+    """Raised when target resolution, backend validation, or option validation fails.
+
+    Examples:
+        ```python
+        from ssc_codegen.targets.resolver import ResolutionError, resolve
+        from ssc_codegen.targets.spec import TargetSpec
+
+        try:
+            resolve(TargetSpec(lang="ruby"))
+        except ResolutionError as exc:
+            print(f"Unsupported target: {exc}")
+        ```
+    """
 
 
 def resolve(spec: TargetSpec) -> TargetProfile:
-    """Validate user input and return the matching profile."""
+    """Validate user-supplied target specification and return the matching profile.
+
+    Inspects the language, HTML/DOM library, HTTP client options, and runtime
+    separation flags in `spec`. If all options are valid and supported by the
+    chosen target backend, returns a fully configured `TargetProfile`.
+
+    Args:
+        spec: Raw target options specifying language, library, and codegen flags.
+
+    Returns:
+        TargetProfile containing validated capabilities and a converter factory.
+
+    Raises:
+        ResolutionError: If the specified language is unknown or if incompatible/unsupported
+            options are passed for that language (e.g. `--lib` for JS/Go, or unsupported HTTP clients).
+
+    Examples:
+        ```python
+        from ssc_codegen.targets.resolver import resolve
+        from ssc_codegen.targets.spec import TargetSpec
+
+        # Resolve standard Python + BeautifulSoup4 target
+        py_profile = resolve(TargetSpec(lang="python", lib="bs4"))
+        converter = py_profile.create_converter()
+
+        # Resolve JavaScript target with Fetch HTTP client
+        js_profile = resolve(TargetSpec(lang="js", http_client="fetch"))
+
+        # Resolve Go target
+        go_profile = resolve(TargetSpec(lang="go"))
+        ```
+    """
     if spec.lang == "python":
         return _resolve_python(spec)
     if spec.lang in ("javascript", "js"):
@@ -24,6 +71,17 @@ def resolve(spec: TargetSpec) -> TargetProfile:
 
 
 def _resolve_python(spec: TargetSpec) -> TargetProfile:
+    """Resolve and validate configuration for the Python codegen backend.
+
+    Args:
+        spec: Target configuration for Python.
+
+    Returns:
+        TargetProfile for Python code generation.
+
+    Raises:
+        ResolutionError: If an unknown HTML library or unsupported HTTP client is specified.
+    """
     from ssc_codegen.targets.python.html_libs.bs4 import Bs4DomSpelling
     from ssc_codegen.targets.python.html_libs.lxml import LxmlDomSpelling
     from ssc_codegen.targets.python.html_libs.parsel import ParselDomSpelling
@@ -71,6 +129,18 @@ def _resolve_python(spec: TargetSpec) -> TargetProfile:
 
 
 def _resolve_js(spec: TargetSpec) -> TargetProfile:
+    """Resolve and validate configuration for the JavaScript (DOM API) backend.
+
+    Args:
+        spec: Target configuration for JavaScript.
+
+    Returns:
+        TargetProfile for JavaScript code generation.
+
+    Raises:
+        ResolutionError: If DOM library or unsupported HTTP client is specified,
+            or if separate runtime is requested.
+    """
     from ssc_codegen.targets.javascript.visitor import JsVisitor
 
     if spec.lib is not None:
@@ -98,6 +168,17 @@ def _resolve_js(spec: TargetSpec) -> TargetProfile:
 
 
 def _resolve_go(spec: TargetSpec) -> TargetProfile:
+    """Resolve and validate configuration for the Go (goquery + net/http) backend.
+
+    Args:
+        spec: Target configuration for Go.
+
+    Returns:
+        TargetProfile for Go code generation.
+
+    Raises:
+        ResolutionError: If DOM library, custom HTTP client, or separate runtime is requested.
+    """
     from ssc_codegen.targets.golang.visitor import GoVisitor
 
     if spec.lib is not None:

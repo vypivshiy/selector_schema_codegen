@@ -48,6 +48,14 @@ class FmtType(str, enum.Enum):
 
 
 def _dedupe_paths(paths: list[Path]) -> list[Path]:
+    """Deduplicate file paths preserving insertion order and case-folding.
+
+    Args:
+        paths: Sequence of filesystem paths.
+
+    Returns:
+        List of unique paths with duplicate entries removed.
+    """
     seen: set[str] = set()
     result: list[Path] = []
     for path in paths:
@@ -67,6 +75,22 @@ def _plan_output_files(
     separate_runtime: bool,
     runtime_name: str | None,
 ) -> dict[Path, Path]:
+    """Calculate and validate target output paths for all input schemas.
+
+    Args:
+        profile: Resolved target backend profile.
+        kdl_files: Input schema file paths to be compiled.
+        output: Destination directory.
+        separate_runtime: Whether a separate runtime module is being generated.
+        runtime_name: Custom name for the separated runtime module if provided.
+
+    Returns:
+        Mapping from input KDL file path to destination compiled file path.
+
+    Raises:
+        ValueError: If multiple inputs resolve to the same output file or if the
+            runtime module name is not a valid identifier.
+    """
     planned: dict[Path, Path] = {}
     owners: dict[str, Path | str] = {}
 
@@ -95,6 +119,15 @@ def _plan_output_files(
 
 
 def _exception_diagnostic(path: Path, exc: Exception) -> ReadDiagnostic:
+    """Create a fatal error diagnostic from an unhandled exception.
+
+    Args:
+        path: File path where the exception occurred.
+        exc: Exception instance.
+
+    Returns:
+        ReadDiagnostic representing the error.
+    """
     pos = Position(offset=0, line=0, column=0)
     return ReadDiagnostic(
         message=str(exc),
@@ -118,7 +151,27 @@ def _run_generate(
     verbose: bool = False,
     fmt: FmtType = FmtType.TEXT,
 ) -> None:
-    """Shared generation loop for all language subcommands."""
+    """Execute the shared compilation pipeline for all code generator subcommands.
+
+    Discovers `.kdl` files, parses and lints schemas into AST modules, filters
+    extension-only modules, coordinates runtime module separation, invokes target
+    converters, and writes compiled source files to the output directory.
+
+    Args:
+        profile: Resolved target profile specifying language and capabilities.
+        files: List of input `.kdl` files or directories to compile.
+        output: Destination directory for generated code.
+        package: Package or module name for generated code.
+        http_client: HTTP transport strategy for `@request` definitions.
+        separate_runtime: If True, extract helpers into a standalone runtime module.
+        runtime_name: Name of the standalone runtime module.
+        skip_lint: If True, bypass linting diagnostics before code emission.
+        verbose: Enable verbose error output with stack traces.
+        fmt: Diagnostic output format (`FmtType.TEXT` or `FmtType.JSON`).
+
+    Raises:
+        typer.Exit: With exit code 1 if parsing, linting, or code emission fails.
+    """
     kdl_files: list[Path] = []
     for path in files:
         if path.is_dir():
@@ -1276,6 +1329,14 @@ def version() -> None:
     except ImportError:
         ver = "unknown"
     typer.echo(ver)
+
+
+def get_click_app():
+    """Return the underlying Click command for documentation generation."""
+    return typer.main.get_command(app)
+
+
+cli = get_click_app()
 
 
 def main() -> None:

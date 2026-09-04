@@ -94,3 +94,18 @@ _Avoid_: transport driver, HTTP handler
 **Two-pass codegen**:
 A code generation approach where pass 1 traverses the AST to accumulate required imports and standard helper definitions in `ModuleBuilder`, and pass 2 emits the complete target source file.
 _Avoid_: single-pass emission, forward-declaring generator
+
+## Documentation Standards
+
+**API Reference**:
+The generated technical reference derived from code signatures, type annotations, and docstrings via `mkdocstrings` (Griffe AST parser) and CLI command introspection via `mkdocs-click`.
+_Avoid_: user guide, tutorial
+
+**Google-style docstring**:
+The mandatory docstring format (Args, Returns, Raises, Yields) for all public and architectural functions, classes, and methods across the codebase.
+_Avoid_: Sphinx reST docstring, NumPy docstring
+
+**Architectural Reference Scope**:
+The full coverage boundary of the API reference spanning the public facade, AST intermediate representation, core reader/linter passes, traversal engine, and backend target converters.
+_Avoid_: public-only facade
+

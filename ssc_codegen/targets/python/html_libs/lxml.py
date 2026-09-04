@@ -1,3 +1,5 @@
+"""lxml.html DOM extraction spelling implementation for Python code generation."""
+
 from __future__ import annotations
 
 from ssc_codegen.ast.cast import ToBool
@@ -30,7 +32,20 @@ from ssc_codegen.targets.python.html_libs.base import DomSpelling
 
 
 class LxmlDomSpelling(DomSpelling):
-    """lxml.html DOM extraction spelling."""
+    """lxml.html DOM extraction spelling implementation.
+
+    Translates AST DOM extraction and predicate nodes into `lxml.html` calls
+    (such as ``cssselect``, ``xpath``, ``drop_tree``, ``text_content``, ``attrib``).
+
+    Attributes:
+        parser_imports: Imports ``from lxml import html`` and ``from lxml.html import HtmlElement``.
+        document_type: Type annotation ``HtmlElement``.
+        document_array_type: Type annotation ``List[HtmlElement]``.
+        init_arg_type: Accepted input type ``Union[str, HtmlElement]``.
+        init_from_str_expr: Expression ``html.fromstring(document.strip() or FALLBACK_HTML_STR)``.
+        extra_utilities: Fallback empty HTML string constant ``FALLBACK_HTML_STR``.
+        supports_xpath: `True` (lxml natively supports full XPath 1.0 expressions).
+    """
 
     # === DATA ===
     parser_imports = (

@@ -1,4 +1,4 @@
-"""Struct and JSON field parsing."""
+"""Parsing logic for Struct, FunctionDef, and JsonDef declaration bodies."""
 
 from __future__ import annotations
 
@@ -91,6 +91,18 @@ def parse_struct(
     ctx: ParseContext,
     lint: LintContext,
 ) -> None:
+    """Parse children of a KDL struct node into the corresponding AST representation.
+
+    Handles `@doc`, `@init`, `@pre-validate`, `@check`, `@split-doc`, `@key`,
+    `@value`, `@table`, `@rows`, `@match`, `@request`, `@error`, regular fields,
+    and appends a `StartParse` lifecycle anchor for non-REST structs.
+
+    Args:
+        kdl_nodes: Children nodes of the KDL struct declaration.
+        parent: The parent `Struct` or `StructRest` AST node to populate.
+        ctx: Global parse context for resolving defines and type references.
+        lint: Lint context for recording validation diagnostics.
+    """
     prev_ctx = lint.walk_context
     lint.walk_context = WalkCtx.STRUCT_BODY
     expr: Node | CheckMethod | ErrorResponse
@@ -344,11 +356,16 @@ def parse_function(
     ctx: ParseContext,
     lint: LintContext,
 ) -> None:
-    """Parse the body of a ``fn`` / ``(raw)fn`` directive.
+    """Parse the body of a standalone `fn` or `(raw)fn` function.
 
-    The body is a flat pipeline (same ops as a Field), optionally preceded
-    by ``@doc``. No struct-level directives (@init, @check, @split-doc, etc.)
-    are accepted — those are reported by the structural linter.
+    The body represents a single transformation pipeline optionally preceded
+    by `@doc`. Struct-level directives (@init, @check, etc.) are rejected.
+
+    Args:
+        kdl_nodes: Children nodes of the KDL function declaration.
+        fn: The `FunctionDef` AST node to populate.
+        ctx: Global parse context for resolving defines.
+        lint: Lint context for recording validation diagnostics.
     """
     prev_ctx = lint.walk_context
     lint.walk_context = WalkCtx.PIPELINE
@@ -382,6 +399,17 @@ def parse_function(
 def parse_json_fields(
     nodes: Sequence[KdlNode], parent: JsonDef, ctx: ParseContext
 ) -> None:
+    """Parse field declarations inside a `json` schema definition.
+
+    Expands block defines, parses field modifiers (`@skip`, `@omitempty`),
+    resolves primitive types, array annotations, optionality (`?`), and
+    key remapping (`from="..."` or positional aliases).
+
+    Args:
+        nodes: Children nodes of the KDL json declaration.
+        parent: The `JsonDef` AST node to populate with `JsonDefField` children.
+        ctx: Global parse context containing defines and registered schemas.
+    """
     for node in nodes:
         # Block define expansion in json context
         if not node.args and node.name in ctx.children_defines:

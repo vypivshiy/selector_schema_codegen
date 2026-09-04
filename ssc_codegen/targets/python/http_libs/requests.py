@@ -1,13 +1,19 @@
+"""requests HTTP client transport strategy for Python code generation."""
+
 from __future__ import annotations
 
 from ssc_codegen.targets.python.http_libs.base import HttpLibStrategy
 
 
 class RequestsStrategy(HttpLibStrategy):
-    """requests HTTP client strategy (sync-only, async via executor).
+    """HTTP transport strategy using `requests` (sync, async via worker threads).
 
-    ``requests`` has no async API - ``async_fetch`` wraps the sync call
-    through ``asyncio.get_event_loop().run_in_executor()``.
+    Attributes:
+        import_line: ``"import requests"``.
+        sync_client_type: ``"requests.Session"``.
+        async_client_type: ``"requests.Session"``.
+        transport_exception: ``"requests.RequestException"``.
+        async_fetch_delegates_to_sync: `True` (delegates async to `run_in_executor`).
     """
 
     import_line = "import requests"

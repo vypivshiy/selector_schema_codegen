@@ -430,7 +430,26 @@ def extract_fields(
 
 @dataclass
 class ScoutResult:
-    """Aggregated scout output."""
+    """Aggregated output from an HTML reconnaissance scout execution.
+
+    Attributes:
+        matched: Total number of tags matching the filter and navigation criteria.
+        returned: Number of matched tags included in this page/result set.
+        limit: Maximum results limit specified for the query.
+        offset: Offset/pagination start index.
+        truncated: True if total matches exceeded `offset + limit`.
+        results: List of extracted attribute/tag dictionaries for matched elements.
+
+    Examples:
+        ```python
+        from ssc_codegen.explore import ScoutFilters, compile_filters, run_scout, NavSpec
+
+        filters = compile_filters(text=r"\\$\\d+\\.\\d{2}", attrs=[], tag=None, css=None)
+        result = run_scout("<div>$19.99</div>", filters, NavSpec(), ["path", "text"])
+        print(result.matched)  # 1
+        print(result.to_json())
+        ```
+    """
 
     matched: int
     returned: int
@@ -440,6 +459,11 @@ class ScoutResult:
     results: list[dict[str, object]]
 
     def to_json(self) -> str:
+        """Format the scout results as indented JSON.
+
+        Returns:
+            JSON-formatted string representation.
+        """
         return json.dumps(
             {
                 "matched": self.matched,
@@ -454,6 +478,11 @@ class ScoutResult:
         )
 
     def to_text(self) -> str:
+        """Format the scout results as tab-separated lines.
+
+        Returns:
+            Tabular text summary of matched paths, tags, and text.
+        """
         if not self.results:
             return "0 matches"
         lines: list[str] = []
@@ -480,9 +509,39 @@ def run_scout(
     offset: int = 0,
     snippet: int = DEFAULT_SNIPPET,
 ) -> ScoutResult:
-    """Run scout end-to-end on raw HTML.
+    """Run HTML reconnaissance query with regex filters, CSS scoping, and navigation.
 
-    Raises FilterError on invalid regex / CSS / unknown field.
+    Parses the document, applies text and attribute regex filters and CSS intersection,
+    navigates relative DOM positions (up, down, next, prev), extracts requested
+    fields (including CSS selector paths), and returns paginated match statistics.
+
+    Args:
+        html: Raw HTML input content.
+        filters: Pre-compiled filter specifications for tag, text, and attributes.
+        nav: Navigation step instructions (parent, child, siblings).
+        fields: List of fields to extract (e.g. `["path", "tag", "text", "attrs"]`).
+        invert: If True, select elements that DO NOT match filter criteria.
+        limit: Maximum number of records to return.
+        offset: Number of initial records to skip.
+        snippet: Maximum string length for text and HTML previews before truncation.
+
+    Returns:
+        ScoutResult containing match count, pagination metadata, and extracted field rows.
+
+    Raises:
+        FilterError: If filter execution, field resolution, or line number tracking fails.
+
+    Examples:
+        ```python
+        from ssc_codegen.explore import compile_filters, run_scout, NavSpec
+
+        html_doc = '<section class="items"><div class="price">$42.00</div></section>'
+        filters = compile_filters(text=r"\\$\\d+", attrs=[], tag=None, css=None)
+        nav = NavSpec(up=1)  # climb to parent container
+
+        result = run_scout(html_doc, filters, nav, ["path", "tag", "text"])
+        print(f"Matched {result.matched} elements")
+        ```
     """
     soup = parse_html(html)
     matched_tags = find_matches(soup, filters, invert=invert)
@@ -608,13 +667,34 @@ LABEL_TAGS: frozenset[str] = frozenset({"strong", "b", "dt", "label"})
 
 @dataclass
 class DiscoverResult:
-    """Aggregated overview of an HTML document.
+    """Aggregated structural overview and selector candidate summary for an HTML document.
 
-    Returned by `run_discover`. Designed as a single-call replacement for
-    brute-force selector guessing: gives LLMs the page's structure
-    (tag/class/id frequency, repeating containers with pre-computed
-    common descendants, embedded JSON signals, table candidates, page
-    summary) so selector design can start from data, not from guesses.
+    Returned by `run_discover`. Designed as a single-call analysis tool for
+    discovering page structure (tag/class/id distributions, repeating sibling containers
+    with pre-computed common descendants, embedded JSON signals, table candidates,
+    and page-level summary metrics).
+
+    Attributes:
+        tag_stats: List of most frequent HTML tag names and counts.
+        class_stats: List of most frequent CSS class names and counts.
+        id_stats: List of id attributes and counts.
+        data_attrs: List of discovered `data-*` attribute names.
+        repeat_containers: Repeating sibling containers (list-struct candidates) with
+            suggested item selectors and descendant field patterns.
+        json_signals: Embedded JSON data blocks found in scripts or attributes.
+        table_candidates: Discovered table structures with column/row key headers.
+        page_summary: High-level document flags (`has_table`, `has_embedded_json`, `container_count_estimate`).
+        sample_normalized: True if sample values have normalized whitespace (collapsed).
+
+    Examples:
+        ```python
+        from ssc_codegen.explore import run_discover
+
+        html = '<ul class="items"><li>Item 1</li><li>Item 2</li></ul>'
+        overview = run_discover(html)
+        print(overview.page_summary)
+        print(overview.to_json())
+        ```
     """
 
     tag_stats: list[dict[str, object]]
@@ -1373,14 +1453,32 @@ def _find_repeat_containers(
 
 
 def run_discover(html: str) -> DiscoverResult:
-    """Build a `DiscoverResult` overview for the given HTML.
+    """Build a comprehensive `DiscoverResult` structural overview for the given HTML document.
 
-    Single-call replacement for blind selector probing: returns tag/class
-    frequency, custom data-* attributes, groups of repeating siblings
-    (list-struct candidates) with their common descendants (field hints),
-    embedded JSON signals (typed <script>, JS-var assignments, bare JSON
-    bodies, JSON-shaped attributes), table candidates with row keys, and
-    a page-level summary.
+    Performs static analysis on HTML to discover repeating containers for list structs,
+    table schemas, embedded JSON payloads in `<script>` tags, and CSS class/tag frequency
+    distributions without requiring prior knowledge of the document's structure.
+
+    Args:
+        html: Raw HTML string representing page content.
+
+    Returns:
+        DiscoverResult containing structural statistics, list container candidates,
+        table candidates, and embedded JSON signals.
+
+    Examples:
+        ```python
+        from ssc_codegen.explore import run_discover
+
+        html = '''
+        <table>
+            <tr><th>Name</th><th>Price</th></tr>
+            <tr><td>Widget</td><td>$10</td></tr>
+        </table>
+        '''
+        discovery = run_discover(html)
+        print(f"Discovered {len(discovery.table_candidates)} table candidate(s)")
+        ```
     """
     soup = parse_html(html)
     tag_stats, class_stats, id_stats, data_attrs, class_count = (

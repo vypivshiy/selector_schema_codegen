@@ -1,3 +1,5 @@
+"""selectolax.lexbor DOM extraction spelling implementation for Python code generation."""
+
 from __future__ import annotations
 
 from ssc_codegen.ast.cast import ToBool
@@ -30,7 +32,20 @@ from ssc_codegen.targets.python.html_libs.base import DomSpelling
 
 
 class SlaxDomSpelling(DomSpelling):
-    """selectolax.lexbor DOM extraction spelling."""
+    """selectolax.lexbor DOM extraction spelling implementation.
+
+    Translates AST DOM extraction and predicate nodes into high-performance
+    `selectolax.lexbor` API calls (such as ``css_first``, ``css``, ``decompose``,
+    ``text(deep=True)``, ``attributes[...]``).
+
+    Attributes:
+        parser_imports: Imports Lexbor parser and node classes.
+        document_type: Type annotation ``Node``.
+        document_array_type: Type annotation ``List[Node]``.
+        init_arg_type: Accepted input type ``Union[str, HTMLParser, Node]``.
+        init_from_str_expr: Expression ``HTMLParser(document)``.
+        supports_xpath: `False` (selectolax does not support XPath expressions).
+    """
 
     # === DATA ===
     parser_imports = (

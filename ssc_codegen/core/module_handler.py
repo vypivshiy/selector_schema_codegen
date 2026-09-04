@@ -1,4 +1,4 @@
-"""Module-level handlers — struct, json, define, imports."""
+"""Module-level node handlers for struct, json, define, function, and import resolution."""
 
 from __future__ import annotations
 
@@ -36,7 +36,13 @@ from ssc_codegen.core.struct_parser import (
 def register_node_sources(
     nodes: list[KdlNode], source_path: Path, ctx: ParseContext
 ) -> None:
-    """Record source origin for top-level nodes and all descendants."""
+    """Recursively map KDL node object IDs to their originating file path.
+
+    Args:
+        nodes: Sequence of top-level KDL nodes.
+        source_path: Filesystem path to the KDL file containing `nodes`.
+        ctx: Parse context storing the `node_source_paths` lookup table.
+    """
     pending = list(nodes)
     while pending:
         node = pending.pop()
@@ -47,6 +53,20 @@ def register_node_sources(
 def handle_struct(
     node: KdlNode, module: Module, ctx: ParseContext, lint: LintContext
 ) -> StructBase:
+    """Parse a top-level KDL `struct` node into a `Struct` or `StructRest` AST node.
+
+    Args:
+        node: The KDL `struct` node.
+        module: The root `Module` AST node owning the struct.
+        ctx: Global parse context for storing the parsed struct.
+        lint: Lint context for recording structural validation diagnostics.
+
+    Returns:
+        The instantiated and populated `Struct` or `StructRest` AST node.
+
+    Raises:
+        BuildTimeError: If the struct type annotation is unrecognized.
+    """
     raw = node.type_annotation
     type_ = raw[1:-1] if raw else (node.get_prop("type") or "item")
     keep_order = node.get_prop("keep-order") or False
@@ -84,6 +104,20 @@ def handle_struct(
 def handle_function(
     node: KdlNode, module: Module, ctx: ParseContext, lint: LintContext
 ) -> FunctionDef:
+    """Parse a top-level KDL `fn` or `(raw)fn` node into a `FunctionDef` AST node.
+
+    Args:
+        node: The KDL function node.
+        module: The root `Module` AST node owning the function.
+        ctx: Global parse context.
+        lint: Lint context for recording validation diagnostics.
+
+    Returns:
+        The instantiated and populated `FunctionDef` AST node.
+
+    Raises:
+        BuildTimeError: If the function name argument is missing.
+    """
     raw_annotation = node.type_annotation
     is_raw = raw_annotation == "(raw)"
     if not node.args:
@@ -106,6 +140,17 @@ def handle_function(
 def handle_json(
     node: KdlNode, module: Module, ctx: ParseContext, lint: LintContext
 ) -> JsonDef:
+    """Parse a top-level KDL `json` schema declaration into a `JsonDef` AST node.
+
+    Args:
+        node: The KDL `json` declaration node.
+        module: The root `Module` AST node owning the schema.
+        ctx: Global parse context for storing the schema definition.
+        lint: Lint context for recording diagnostics.
+
+    Returns:
+        The instantiated and populated `JsonDef` AST node.
+    """
     name = str(node.args[0].value) if node.args else ""
     is_array = node.type_annotation == "(array)"
     path = node.get_prop("path") or ""
@@ -116,6 +161,13 @@ def handle_json(
 
 
 def handle_define(node: KdlNode, ctx: ParseContext, lint: LintContext) -> None:
+    """Parse a top-level KDL `define` into scalar constants or pipeline blocks.
+
+    Args:
+        node: The KDL `define` node.
+        ctx: Global parse context receiving the registered define values.
+        lint: Lint context storing define metadata for validation passes.
+    """
     if node.children:
         ctx.children_defines[str(node.args[0].value)] = list(node.children)
         lint.defines[str(node.args[0].value)] = DefineInfo(
@@ -142,6 +194,18 @@ def resolve_imports(
     lint: LintContext,
     diagnostics: list[ReadDiagnostic],
 ) -> list[KdlNode]:
+    """Resolve cross-file imports and return a flattened dependency-ordered node list.
+
+    Args:
+        top_nodes: Initial top-level KDL nodes from the root document.
+        source_path: Path to the root document on disk.
+        ctx: Global parse context for node provenance tracking.
+        lint: Lint context.
+        diagnostics: List receiving import validation diagnostics.
+
+    Returns:
+        Flattened list of all required KDL nodes in topological dependency order.
+    """
     from ssc_codegen.core.imports import resolve_explicit_imports
 
     return resolve_explicit_imports(top_nodes, source_path, ctx, diagnostics)

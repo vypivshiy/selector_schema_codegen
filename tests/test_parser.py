@@ -1498,3 +1498,54 @@ def test_request_placeholder_spec_conflict_is_rejected():
         d.code == "E402" and "conflicting type/style" in d.message
         for d in diagnostics
     )
+
+
+def test_ast_deprecated_properties_emit_warnings():
+    import pytest
+    from ssc_codegen.ast.base import Node
+    from ssc_codegen.ast.selectors import (
+        CssSelect,
+        CssSelectAll,
+        XpathSelect,
+        XpathSelectAll,
+    )
+    from ssc_codegen.ast.module import Module, Docstring
+    from ssc_codegen.ast.struct import Struct, StructDocstring
+
+    node = Node()
+    with pytest.deprecated_call():
+        _ = node.ret
+    with pytest.deprecated_call():
+        _ = node.accept
+    with pytest.deprecated_call():
+        _ = node.type_info
+
+    css_sel = CssSelect(queries=[".a", ".b"])
+    with pytest.deprecated_call():
+        assert css_sel.query == ".a"
+
+    css_sel_all = CssSelectAll(queries=[".x"])
+    with pytest.deprecated_call():
+        assert css_sel_all.query == ".x"
+
+    xpath_sel = XpathSelect(queries=["//div"])
+    with pytest.deprecated_call():
+        assert xpath_sel.query == "//div"
+
+    xpath_sel_all = XpathSelectAll(queries=["//span"])
+    with pytest.deprecated_call():
+        assert xpath_sel_all.query == "//span"
+
+    mod = Module(doc="test")
+    with pytest.deprecated_call():
+        _ = mod.docstring
+
+    st = Struct(name="S", doc="test")
+    with pytest.deprecated_call():
+        _ = st.docstring
+
+    with pytest.deprecated_call():
+        _ = Docstring(value="hello")
+
+    with pytest.deprecated_call():
+        _ = StructDocstring(value="hello")

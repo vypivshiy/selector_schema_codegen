@@ -1,3 +1,5 @@
+"""Abstract base class and contract for Python HTML DOM extraction dialects."""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -32,22 +34,42 @@ from ssc_codegen.generation.builder import ModuleBuilder
 
 
 class DomSpelling(ABC):
-    """Dialect-specific HTML extraction spelling (data + behavior).
+    """Dialect-specific HTML extraction spelling strategy (data + behavior).
 
-    Holds a builder reference for registering std helpers and imports.
+    Encapsulates all HTML library-specific differences (BeautifulSoup4,
+    lxml.html, parsel, or selectolax/slax) so that `PythonVisitor` remains
+    dialect-agnostic.
 
     Contract:
-        - Expression methods return ``list[str]`` (complete codegen lines).
-        - Predicate methods return ``str`` (condition fragment; the visitor
-          wraps with ``_pred_line`` to produce the final formatted line).
+        - **Expression methods** return ``list[str]`` representing complete
+          generated statements (e.g. ``v1 = v.select_one(...)``).
+        - **Predicate methods** return ``str`` representing an unindented boolean
+          condition fragment (e.g. ``bool(v.find(...))``); `PythonVisitor`
+          wraps this fragment with control flow and indentation.
+        - **Data attributes** declare parser imports, document type annotations,
+          initialization expressions, and XPath capability flags.
+
+    Attributes:
+        parser_imports: Tuple of required top-level import statement lines.
+        document_type: Type annotation string for a single parsed HTML element/document.
+        document_array_type: Type annotation string for a collection of elements.
+        init_arg_type: Type annotation string accepted by `__init__` (e.g. `Union[str, ...]`).
+        init_from_str_expr: Python expression parsing a string `document` into a DOM tree.
+        extra_utilities: Module-level helper constants or definitions.
+        supports_xpath: `True` if this DOM library supports XPath expressions natively.
     """
 
     def __init__(self, builder: ModuleBuilder) -> None:
+        """Initialize the DOM spelling strategy with an accumulator builder.
+
+        Args:
+            builder: The `ModuleBuilder` for registering std helpers and imports.
+        """
         self._builder = builder
 
     @property
     def builder(self) -> ModuleBuilder:
-        """Access the module builder for registering imports / std helpers."""
+        """Access the module builder for registering imports and std helpers."""
         return self._builder
 
     # === DATA (override in concrete subclasses) ===
@@ -63,84 +85,297 @@ class DomSpelling(ABC):
     # === EXPRESSION BEHAVIOR (return list[str] — complete lines) ===
 
     @abstractmethod
-    def css_select(
-        self, ctx: ConverterContext, node: CssSelect
-    ) -> list[str]: ...
+    def css_select(self, ctx: ConverterContext, node: CssSelect) -> list[str]:
+        """Generate code for selecting a single matching DOM node via CSS selector.
+
+        Args:
+            ctx: Current traversal context.
+            node: `CssSelect` AST node.
+
+        Returns:
+            List of generated code lines.
+        """
+        ...
 
     @abstractmethod
     def css_select_all(
         self, ctx: ConverterContext, node: CssSelectAll
-    ) -> list[str]: ...
+    ) -> list[str]:
+        """Generate code for selecting all matching DOM nodes via CSS selector.
+
+        Args:
+            ctx: Current traversal context.
+            node: `CssSelectAll` AST node.
+
+        Returns:
+            List of generated code lines.
+        """
+        ...
 
     @abstractmethod
-    def css_remove(
-        self, ctx: ConverterContext, node: CssRemove
-    ) -> list[str]: ...
+    def css_remove(self, ctx: ConverterContext, node: CssRemove) -> list[str]:
+        """Generate code for removing matched DOM elements in-place.
+
+        Args:
+            ctx: Current traversal context.
+            node: `CssRemove` AST node.
+
+        Returns:
+            List of generated code lines.
+        """
+        ...
 
     @abstractmethod
     def xpath_select(
         self, ctx: ConverterContext, node: XpathSelect
-    ) -> list[str]: ...
+    ) -> list[str]:
+        """Generate code for selecting a single matching DOM node via XPath.
+
+        Args:
+            ctx: Current traversal context.
+            node: `XpathSelect` AST node.
+
+        Returns:
+            List of generated code lines.
+        """
+        ...
 
     @abstractmethod
     def xpath_select_all(
         self, ctx: ConverterContext, node: XpathSelectAll
-    ) -> list[str]: ...
+    ) -> list[str]:
+        """Generate code for selecting all matching DOM nodes via XPath.
+
+        Args:
+            ctx: Current traversal context.
+            node: `XpathSelectAll` AST node.
+
+        Returns:
+            List of generated code lines.
+        """
+        ...
 
     @abstractmethod
     def xpath_remove(
         self, ctx: ConverterContext, node: XpathRemove
-    ) -> list[str]: ...
+    ) -> list[str]:
+        """Generate code for removing matched XPath elements in-place.
+
+        Args:
+            ctx: Current traversal context.
+            node: `XpathRemove` AST node.
+
+        Returns:
+            List of generated code lines.
+        """
+        ...
 
     @abstractmethod
-    def text(self, ctx: ConverterContext, node: Text) -> list[str]: ...
+    def text(self, ctx: ConverterContext, node: Text) -> list[str]:
+        """Generate code for extracting combined text content from a DOM node.
+
+        Args:
+            ctx: Current traversal context.
+            node: `Text` AST node.
+
+        Returns:
+            List of generated code lines.
+        """
+        ...
 
     @abstractmethod
-    def raw(self, ctx: ConverterContext, node: Raw) -> list[str]: ...
+    def raw(self, ctx: ConverterContext, node: Raw) -> list[str]:
+        """Generate code for extracting raw inner/outer HTML markup from a DOM node.
+
+        Args:
+            ctx: Current traversal context.
+            node: `Raw` AST node.
+
+        Returns:
+            List of generated code lines.
+        """
+        ...
 
     @abstractmethod
-    def attr(self, ctx: ConverterContext, node: Attr) -> list[str]: ...
+    def attr(self, ctx: ConverterContext, node: Attr) -> list[str]:
+        """Generate code for extracting an HTML element attribute value.
+
+        Args:
+            ctx: Current traversal context.
+            node: `Attr` AST node.
+
+        Returns:
+            List of generated code lines.
+        """
+        ...
 
     @abstractmethod
-    def to_bool(self, ctx: ConverterContext, node: ToBool) -> list[str]: ...
+    def to_bool(self, ctx: ConverterContext, node: ToBool) -> list[str]:
+        """Generate code for casting a DOM element or text value to boolean.
+
+        Args:
+            ctx: Current traversal context.
+            node: `ToBool` AST node.
+
+        Returns:
+            List of generated code lines.
+        """
+        ...
 
     # === PREDICATE BEHAVIOR (return str — condition fragment) ===
 
     @abstractmethod
-    def pred_css(self, node: PredCss) -> str: ...
+    def pred_css(self, node: PredCss) -> str:
+        """Generate boolean condition checking if CSS selector matches.
+
+        Args:
+            node: `PredCss` AST node.
+
+        Returns:
+            Boolean condition string expression.
+        """
+        ...
 
     @abstractmethod
-    def pred_xpath(self, node: PredXpath) -> str: ...
+    def pred_xpath(self, node: PredXpath) -> str:
+        """Generate boolean condition checking if XPath selector matches.
+
+        Args:
+            node: `PredXpath` AST node.
+
+        Returns:
+            Boolean condition string expression.
+        """
+        ...
 
     @abstractmethod
-    def pred_has_attr(self, node: PredHasAttr) -> str: ...
+    def pred_has_attr(self, node: PredHasAttr) -> str:
+        """Generate boolean condition checking if element has specified attribute.
+
+        Args:
+            node: `PredHasAttr` AST node.
+
+        Returns:
+            Boolean condition string expression.
+        """
+        ...
 
     @abstractmethod
-    def pred_attr_contains(self, node: PredAttrContains) -> str: ...
+    def pred_attr_contains(self, node: PredAttrContains) -> str:
+        """Generate boolean condition checking if attribute contains substring.
+
+        Args:
+            node: `PredAttrContains` AST node.
+
+        Returns:
+            Boolean condition string expression.
+        """
+        ...
 
     @abstractmethod
-    def pred_attr_starts(self, node: PredAttrStarts) -> str: ...
+    def pred_attr_starts(self, node: PredAttrStarts) -> str:
+        """Generate boolean condition checking if attribute starts with prefix.
+
+        Args:
+            node: `PredAttrStarts` AST node.
+
+        Returns:
+            Boolean condition string expression.
+        """
+        ...
 
     @abstractmethod
-    def pred_attr_ends(self, node: PredAttrEnds) -> str: ...
+    def pred_attr_ends(self, node: PredAttrEnds) -> str:
+        """Generate boolean condition checking if attribute ends with suffix.
+
+        Args:
+            node: `PredAttrEnds` AST node.
+
+        Returns:
+            Boolean condition string expression.
+        """
+        ...
 
     @abstractmethod
-    def pred_attr_eq(self, node: PredAttrEq) -> str: ...
+    def pred_attr_eq(self, node: PredAttrEq) -> str:
+        """Generate boolean condition checking if attribute equals expected value.
+
+        Args:
+            node: `PredAttrEq` AST node.
+
+        Returns:
+            Boolean condition string expression.
+        """
+        ...
 
     @abstractmethod
-    def pred_attr_ne(self, node: PredAttrNe) -> str: ...
+    def pred_attr_ne(self, node: PredAttrNe) -> str:
+        """Generate boolean condition checking if attribute does not equal value.
+
+        Args:
+            node: `PredAttrNe` AST node.
+
+        Returns:
+            Boolean condition string expression.
+        """
+        ...
 
     @abstractmethod
-    def pred_attr_re(self, node: PredAttrRe) -> str: ...
+    def pred_attr_re(self, node: PredAttrRe) -> str:
+        """Generate boolean condition checking if attribute matches regular expression.
+
+        Args:
+            node: `PredAttrRe` AST node.
+
+        Returns:
+            Boolean condition string expression.
+        """
+        ...
 
     @abstractmethod
-    def pred_text_contains(self, node: PredTextContains) -> str: ...
+    def pred_text_contains(self, node: PredTextContains) -> str:
+        """Generate boolean condition checking if text content contains substring.
+
+        Args:
+            node: `PredTextContains` AST node.
+
+        Returns:
+            Boolean condition string expression.
+        """
+        ...
 
     @abstractmethod
-    def pred_text_starts(self, node: PredTextStarts) -> str: ...
+    def pred_text_starts(self, node: PredTextStarts) -> str:
+        """Generate boolean condition checking if text content starts with prefix.
+
+        Args:
+            node: `PredTextStarts` AST node.
+
+        Returns:
+            Boolean condition string expression.
+        """
+        ...
 
     @abstractmethod
-    def pred_text_ends(self, node: PredTextEnds) -> str: ...
+    def pred_text_ends(self, node: PredTextEnds) -> str:
+        """Generate boolean condition checking if text content ends with suffix.
+
+        Args:
+            node: `PredTextEnds` AST node.
+
+        Returns:
+            Boolean condition string expression.
+        """
+        ...
 
     @abstractmethod
-    def pred_text_re(self, node: PredTextRe) -> str: ...
+    def pred_text_re(self, node: PredTextRe) -> str:
+        """Generate boolean condition checking if text content matches regex.
+
+        Args:
+            node: `PredTextRe` AST node.
+
+        Returns:
+            Boolean condition string expression.
+        """
+        ...

@@ -69,6 +69,12 @@ dev = [
     "ruff>=0.9.3",
     "selectolax>=0.3.27",
 ]
+docs = [
+    "mkdocs>=1.6.0",
+    "mkdocs-material>=9.5.0",
+    "mkdocstrings[python]>=0.27.0",
+    "mkdocs-click>=0.8.1",
+]
 
 [tool.ruff]
 target-version = "py310"

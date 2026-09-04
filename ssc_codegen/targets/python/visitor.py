@@ -299,11 +299,25 @@ def _python_json_mapping(
 
 
 class PythonVisitor(BaseWalker):
-    """Shared Python codegen visitor.
+    """Shared Python code generator visitor.
 
-    All ``visit_*`` handlers return ``list[str]``.  DOM-specific methods
-    (selectors, extract, cast, DOM predicates) are overridden by concrete
-    dialect subclasses that delegate to a ``DomSpelling`` strategy.
+    Generates typed Python parser modules from intermediate AST representations.
+    All ``visit_*`` handlers return ``list[str]``. DOM-specific operations
+    (CSS/XPath selection, text/attribute extraction, DOM predicates) are
+    delegated to a `DomSpelling` strategy (`Bs4DomSpelling`, `LxmlDomSpelling`,
+    `ParselDomSpelling`, or `SlaxDomSpelling`).
+
+    REST/fetch methods and transport calls are orchestrated in cooperation with
+    an `HttpLibStrategy` (`HttpxStrategy`, `AioHttpStrategy`, `RequestsStrategy`).
+
+    Attributes:
+        STD_MODULE_NAME: Default module name when std helpers are emitted separately.
+        DEFAULT_TYPE: Fallback type annotation string (``"Any"``).
+        TYPES: Mapping from `VariableType` enums to Python type annotation strings.
+        ARRAY_TYPE_FMT: Formatting template for list types (``"List[{}]"``).
+        OPTIONAL_TYPE_FMT: Formatting template for optional types (``"Optional[{}]"``).
+        var_name: Base variable prefix used in pipeline steps (default: ``"v"``).
+        indent: Indentation string unit (default: 4 spaces).
     """
 
     STD_MODULE_NAME: str = "ssc_std"
@@ -350,13 +364,17 @@ class PythonVisitor(BaseWalker):
 
     @classmethod
     def http_strategy_for(cls, http_client: str | None) -> HttpLibStrategy:
-        """Return the HTTP strategy that will be used for code generation.
+        """Resolve and instantiate the HTTP transport strategy for given client identifier.
 
-        Single source of truth for "which strategy given user input":
-        ``convert_all`` uses it for parser-file imports, ``main.py`` uses
-        it to thread ``transport_import_line`` into ``register_runtime_file``
-        so the runtime file's ``except <lib>.<Exc>`` clause is consistent
-        with the parser file's transport imports.
+        Single source of truth for strategy resolution. Used by `convert_all`
+        for parser file codegen and by CLI runtime assembly to guarantee
+        matching transport imports and error handling.
+
+        Args:
+            http_client: Client identifier string (``"httpx"``, ``"aiohttp"``, or ``"requests"``).
+
+        Returns:
+            Instantiated `HttpLibStrategy` (defaults to `HttpxStrategy`).
         """
         if http_client and http_client in cls._HTTP_STRATEGIES:
             return cls._HTTP_STRATEGIES[http_client]()
@@ -368,6 +386,13 @@ class PythonVisitor(BaseWalker):
         indent: str = " " * 4,
         dom_spelling_cls: type | None = None,
     ) -> None:
+        """Initialize the Python visitor.
+
+        Args:
+            var_name: Base prefix for pipeline intermediate variables (default: ``"v"``).
+            indent: Indentation unit string (default: 4 spaces).
+            dom_spelling_cls: Optional concrete `DomSpelling` subclass for HTML DOM parsing.
+        """
         self.var_name = var_name
         self.indent = indent
         self._dom_spelling_cls = dom_spelling_cls
@@ -390,6 +415,8 @@ class PythonVisitor(BaseWalker):
     # === FILE PROVIDERS ===
 
     def file(self, filename: str):
+        """Decorator for registering external companion file generator functions."""
+
         def decorator(fn):
             self._file_providers[filename] = fn
             return fn
@@ -398,10 +425,31 @@ class PythonVisitor(BaseWalker):
 
     # === PUBLIC API ===
 
-    def convert(self, module_ast: Module, **meta) -> str:
+    def convert(self, module_ast: Module, **meta: Any) -> str:
+        """Convert a `Module` AST to a single generated Python source string.
+
+        Args:
+            module_ast: The root `Module` AST node to convert.
+            **meta: Options passed to `WalkContext.meta` (e.g. `http_client`, `runtime_name`).
+
+        Returns:
+            Generated Python source code string.
+        """
         return self.convert_all(module_ast, inline_std=True, **meta)[""]
 
-    def convert_all(self, module_ast: Module, **meta) -> dict[str, str]:
+    def convert_all(self, module_ast: Module, **meta: Any) -> dict[str, str]:
+        """Convert a `Module` AST in a two-pass traversal, emitting main and companion files.
+
+        Pass 1 populates `ModuleBuilder` with required std helpers and imports.
+        Pass 2 generates the complete source code.
+
+        Args:
+            module_ast: The root `Module` AST node to convert.
+            **meta: Options controlling generation (e.g. `http_client`, `inline_std`).
+
+        Returns:
+            Mapping from filenames (``""`` for the main module) to generated source texts.
+        """
         self._reset_state()
         self._http = self.http_strategy_for(meta.get("http_client"))
         ctx = self._make_ctx(meta)
@@ -704,11 +752,11 @@ class PythonVisitor(BaseWalker):
     def visit_jsondef_field(
         self, node: JsonDefField, ctx: WalkContext
     ) -> list[str]:
-        if node.type_info and node.type_info.skip:
+        if node.ret_type_info and node.ret_type_info.skip:
             return []
         name = node.name
-        t = self._resolve_type(node.type_info)
-        if node.type_info and node.type_info.omitempty:
+        t = self._resolve_type(node.ret_type_info)
+        if node.ret_type_info and node.ret_type_info.omitempty:
             t = f"NotRequired[{t}]"
         return [f"{name!r}: {t},"]
 
@@ -735,7 +783,7 @@ class PythonVisitor(BaseWalker):
         if node.typedef.struct_type == ST.FLAT:
             return []
         name = to_snake_case(node.name)
-        t = self._resolve_type(node.type_info)
+        t = self._resolve_type(node.ret_type_info)
         if node.typedef.struct_type == ST.DICT:
             if name == "value":
                 typedef_name = to_pascal_case(node.typedef.name)

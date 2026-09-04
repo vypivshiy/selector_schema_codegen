@@ -164,18 +164,32 @@ _BASE_UTILITY_LINES: list[str] = [
 
 
 class SscJsonError(Exception):
-    pass
+    """Base exception for runtime JSON projection and dotpath resolution failures."""
 
 
 class SscJsonPathError(SscJsonError):
-    pass
+    """Raised when traversal of a dot-separated path fails on invalid types or out-of-bounds indices."""
 
 
 class SscJsonFieldMissingError(SscJsonError):
-    pass
+    """Raised when a non-optional required JSON field is absent in input data."""
 
 
 def ssc_resolve_dotpath(data: Any, path: str, is_optional: bool) -> Any:
+    """Traverse a dot-separated query path over nested dicts and lists.
+
+    Args:
+        data: Root JSON-compatible data structure (dict, list, or primitive).
+        path: Dot-separated path string (e.g. ``"data.users.0.name"``).
+        is_optional: If `True`, returns `None` upon encountering a missing key,
+            null parent, or out-of-bounds index instead of raising an error.
+
+    Returns:
+        The extracted value at the target path, or `None` if optional and missing.
+
+    Raises:
+        SscJsonPathError: If path traversal fails and `is_optional` is `False`.
+    """
     current = data
     for seg in path.split("."):
         if current is None:
@@ -217,6 +231,23 @@ def ssc_resolve_dotpath(data: Any, path: str, is_optional: bool) -> Any:
 def ssc_json_project(
     data: Any, field_descriptors: dict[str, tuple[str, bool, bool, Any]]
 ) -> Any:
+    """Project raw JSON dictionary or list into a validated canonical schema dict.
+
+    Applies strict field allowlisting, alias path resolution, nullability checks,
+    and recursive nested schema projections.
+
+    Args:
+        data: The input JSON data (dict or list of dicts).
+        field_descriptors: Mapping of canonical field names to a tuple of
+            ``(wire_path, is_optional, is_omitempty, nested_descriptors)``.
+
+    Returns:
+        Projected dictionary with canonical keys, or list of projected dictionaries.
+
+    Raises:
+        SscJsonFieldMissingError: If a required field is missing or null.
+        SscJsonPathError: If path resolution fails for a required field.
+    """
     if isinstance(data, list):
         return [ssc_json_project(item, field_descriptors) for item in data]
     if not isinstance(data, dict):
@@ -271,6 +302,17 @@ def ssc_json_project(
 def _extension_runtime_defs(
     modules: list[a.Module],
 ) -> dict[str, tuple[list[str], str]]:
+    """Extract and aggregate runtime helper definitions from extension calls across modules.
+
+    Args:
+        modules: List of AST `Module` instances to scan.
+
+    Returns:
+        Dictionary mapping helper names to tuples of ``(import_lines, source_code)``.
+
+    Raises:
+        ValueError: If conflicting definitions are encountered for the same helper name.
+    """
     definitions: dict[str, tuple[list[str], str]] = {}
 
     def walk(node: a.Node) -> None:
@@ -302,15 +344,21 @@ def runtime_module_content(
     http_strategy: HttpLibStrategy | None = None,
     extension_defs: dict[str, tuple[list[str], str]] | None = None,
 ) -> str:
-    """Return the full source text of the separate runtime module file.
+    """Generate the full Python source text for the separate runtime module file.
 
-    ``http_strategy`` is the HTTP library strategy (e.g. ``HttpxStrategy()``)
-    chosen by the user. The runtime's ``ssc_rest_call`` references the
-    transport exception class (e.g. ``httpx.HTTPError``) in its ``except``
-    clause, so it must import the matching HTTP library. The strategy owns
-    both the import line and the REST runtime source (Ok/Err/ssc_rest_call
-    etc.) — single source of truth, no drift between parser and runtime.
-    Defaults to ``HttpxStrategy`` when not provided.
+    Emits base string/regex/HTML unescape utilities, JSON dotpath/projection helpers,
+    REST runtime definitions (Result types `Ok`/`Err`, error dispatch, transport call
+    handlers), and custom extension runtime helpers.
+
+    Args:
+        module: Representative AST `Module` to check for REST structures or utilities.
+        http_strategy: The HTTP library strategy (e.g. `HttpxStrategy`, `AioHttpStrategy`,
+            or `RequestsStrategy`). Controls the transport exception handling and
+            matching library import in `ssc_rest_call`. Defaults to `HttpxStrategy`.
+        extension_defs: Optional pre-collected dictionary of extension helpers.
+
+    Returns:
+        Complete Python source code string for the runtime module.
     """
     strategy = http_strategy or HttpxStrategy()
     lines: list[str] = [
@@ -354,11 +402,20 @@ def register_runtime_file(
     include_fallback: bool = False,
     http_strategy: HttpLibStrategy | None = None,
 ) -> Callable[[list[a.Module]], str]:
-    """Register a runtime module file provider on the converter.
+    """Register a runtime module file generator on the given converter instance.
 
-    ``http_strategy`` is the canonical source for both the transport import
-    line and the REST runtime source. It should match the HttpLibStrategy
-    that will be applied to the parser codegen (see main.py).
+    Wires a file hook for ``<runtime_name>.py`` that generates runtime helpers
+    when ``--separate-runtime`` (`-R`) is requested.
+
+    Args:
+        converter: Target converter object exposing a ``.file()`` decorator hook.
+        runtime_name: Module filename without extension (default: ``"sscgen_runtime"``).
+        include_fallback: If `True`, includes fallback empty HTML document constants.
+        http_strategy: The canonical HTTP transport strategy to apply across parser
+            and runtime code generation. Defaults to `HttpxStrategy`.
+
+    Returns:
+        A callable taking a list of `Module` ASTs and returning the full runtime source.
     """
 
     # Normalize callers that don't pass http_strategy.
