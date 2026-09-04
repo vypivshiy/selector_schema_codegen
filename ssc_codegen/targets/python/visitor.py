@@ -127,6 +127,7 @@ from ssc_codegen.ast import (
 from ssc_codegen.exceptions import BuildTimeError
 from ssc_codegen.naming import to_pascal_case, to_snake_case
 from ssc_codegen.traversal.utils import (
+    json_def_descriptors,
     json_def_mapping,
     jsonify_path_to_segments,
     module_has_html_struct,
@@ -144,7 +145,78 @@ from ssc_codegen.traversal.context import WalkContext
 from ssc_codegen.traversal.walker import BaseWalker
 
 
-_PY_JSON_REMAP_HELPER = """
+_PY_JSON_PROJECT_HELPER = """
+class SscJsonError(Exception):
+    pass
+
+class SscJsonPathError(SscJsonError):
+    pass
+
+class SscJsonFieldMissingError(SscJsonError):
+    pass
+
+def ssc_resolve_dotpath(data: Any, path: str, is_optional: bool) -> Any:
+    current = data
+    for seg in path.split('.'):
+        if current is None:
+            if is_optional:
+                return None
+            raise SscJsonPathError(f"Cannot traverse segment '{seg}' on null object in path '{path}'")
+        if seg.isdigit():
+            idx = int(seg)
+            if not isinstance(current, list):
+                if is_optional:
+                    return None
+                raise SscJsonPathError(f"Expected list for index '{idx}' in path '{path}', got {type(current).__name__}")
+            if not (0 <= idx < len(current)):
+                if is_optional:
+                    return None
+                raise SscJsonPathError(f"Index {idx} out of bounds (len={len(current)}) in path '{path}'")
+            current = current[idx]
+        elif isinstance(current, dict):
+            if seg not in current:
+                if is_optional:
+                    return None
+                raise SscJsonPathError(f"Missing key '{seg}' in path '{path}'")
+            current = current[seg]
+        else:
+            if is_optional:
+                return None
+            raise SscJsonPathError(f"Cannot access key '{seg}' on non-dict {type(current).__name__} in path '{path}'")
+    return current
+
+def ssc_json_project(data: Any, field_descriptors: Dict[str, Tuple[str, bool, bool, Any]]) -> Any:
+    if isinstance(data, list):
+        return [ssc_json_project(item, field_descriptors) for item in data]
+    if not isinstance(data, dict):
+        return data
+    result: Dict[str, Any] = {}
+    for canonical_name, (wire_path, is_optional, is_omitempty, nested_desc) in field_descriptors.items():
+        if '.' in wire_path or wire_path.isdigit():
+            val = ssc_resolve_dotpath(data, wire_path, is_optional=is_optional or is_omitempty)
+        else:
+            if wire_path not in data:
+                if is_omitempty or is_optional:
+                    val = None
+                else:
+                    raise SscJsonFieldMissingError(f"Required JSON field '{wire_path}' (mapped to '{canonical_name}') is missing")
+            else:
+                val = data[wire_path]
+        if val is None:
+            if is_omitempty:
+                continue
+            if not is_optional:
+                raise SscJsonFieldMissingError(f"Field '{wire_path}' is null, but '{canonical_name}' is not nullable")
+            result[canonical_name] = None
+            continue
+        if nested_desc is not None:
+            if isinstance(nested_desc, list) and nested_desc:
+                val = [ssc_json_project(x, nested_desc[0]) for x in val if x is not None] if isinstance(val, list) else ssc_json_project(val, nested_desc[0])
+            else:
+                val = ssc_json_project(val, nested_desc)
+        result[canonical_name] = val
+    return result
+
 def ssc_remap_json_keys(value: Any, mapping: Dict[str, Any]) -> Any:
     if isinstance(value, list):
         return [ssc_remap_json_keys(item, mapping) for item in value]
@@ -165,6 +237,40 @@ def ssc_remap_json_keys(value: Any, mapping: Dict[str, Any]) -> Any:
         result[output] = item
     return result
 """
+
+_PY_JSON_REMAP_HELPER = _PY_JSON_PROJECT_HELPER
+
+
+def _python_json_descriptors(
+    node: JsonDef, definitions: dict[str, JsonDef]
+) -> list[str]:
+    descriptors = json_def_descriptors(node, definitions)
+
+    def render(value: object) -> str:
+        if value is None:
+            return "None"
+        if isinstance(value, bool):
+            return "True" if value else "False"
+        if isinstance(value, str):
+            return repr(value)
+        if isinstance(value, tuple):
+            return "(" + ", ".join(render(x) for x in value) + ")"
+        if isinstance(value, list):
+            return "[" + ", ".join(render(item) for item in value) + "]"
+        if isinstance(value, dict):
+            return (
+                "{"
+                + ", ".join(
+                    f"{key!r}: {render(item)}" for key, item in value.items()
+                )
+                + "}"
+            )
+        raise TypeError(f"unsupported JSON descriptor value: {value!r}")
+
+    return [
+        f"_{to_snake_case(node.name)}_JSON_DESCRIPTORS = {render(descriptors)}",
+        "",
+    ]
 
 
 def _python_json_mapping(
@@ -212,6 +318,11 @@ class PythonVisitor(BaseWalker):
         "std_unescape_text",
         "std_assert",
         "std_re_search",
+        "ssc_json_project",
+        "ssc_resolve_dotpath",
+        "SscJsonError",
+        "SscJsonPathError",
+        "SscJsonFieldMissingError",
         "ssc_remap_json_keys",
     }
 
@@ -577,16 +688,16 @@ class PythonVisitor(BaseWalker):
         lines = [f'{name}Json = TypedDict("{name}Json", {{']
         lines.extend(self.walk_children(node, ctx))
         lines.append("})")
-        if node.has_alias_key:
-            module = node.parent
-            if not isinstance(module, Module):
-                return lines
+        module = node.parent
+        if isinstance(module, Module):
             definitions = {
                 n.name: n for n in module.body if isinstance(n, JsonDef)
             }
-            lines.extend(_python_json_mapping(node, definitions))
+            lines.extend(_python_json_descriptors(node, definitions))
             self._builder.require_std(
-                "ssc_remap_json_keys", code=_PY_JSON_REMAP_HELPER
+                "ssc_json_project",
+                code=_PY_JSON_PROJECT_HELPER,
+                imports=["from typing import Tuple"],
             )
         return lines
 
@@ -1247,13 +1358,15 @@ class PythonVisitor(BaseWalker):
             raw_expr = f"json.loads({ctx.prv})"
 
         json_def = resolve_json_def(node, node.schema_name)
-        if json_def and json_def.has_alias_key:
+        if json_def:
             self._builder.require_std(
-                "ssc_remap_json_keys", code=_PY_JSON_REMAP_HELPER
+                "ssc_json_project",
+                code=_PY_JSON_PROJECT_HELPER,
+                imports=["from typing import Tuple"],
             )
-            mapping_name = f"_{to_snake_case(node.schema_name)}_JSON_MAPPING"
+            desc_name = f"_{to_snake_case(node.schema_name)}_JSON_DESCRIPTORS"
             return [
-                f"{ctx.indent}{ctx.nxt} = ssc_remap_json_keys({raw_expr}, {mapping_name})"
+                f"{ctx.indent}{ctx.nxt} = ssc_json_project({raw_expr}, {desc_name})"
             ]
 
         return [f"{ctx.indent}{ctx.nxt} = {raw_expr}"]

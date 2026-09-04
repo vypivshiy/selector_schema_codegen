@@ -638,7 +638,7 @@ struct UserStateScraper {
         assert user["account_id"] == 999
         assert user["nickname"] == "bob"
         assert user["avatar_url"] is None
-        assert "bio_text" not in user
+        assert user["bio_text"] is None
         assert "extra_key_one" not in user
         assert "extra_key_two" not in user
 
@@ -723,7 +723,7 @@ json ConfigPayload {
 
         kdl_src = """
 json UserInfo {
-    user_id int from="id"
+    user_id int @omitempty from="id"
     user_name str from="name"
 }
 
@@ -764,8 +764,8 @@ struct RuntimeTestScraper {
                 runtime_module=runtime_name,
             )
             assert f"from .{runtime_name} import" in code
-            assert "ssc_remap_json_keys" in code
-            assert "def ssc_remap_json_keys(" not in code
+            assert "ssc_json_project" in code
+            assert "def ssc_json_project(" not in code
 
             ns: dict = {
                 "__name__": f"{pkg_name}.parser",

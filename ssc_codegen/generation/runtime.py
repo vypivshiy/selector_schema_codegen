@@ -70,6 +70,77 @@ _BASE_UTILITY_LINES: list[str] = [
     "",
     "UNMATCHED_TABLE_ROW = UnmatchedTableRow()",
     "",
+    "class SscJsonError(Exception):",
+    "    pass",
+    "",
+    "class SscJsonPathError(SscJsonError):",
+    "    pass",
+    "",
+    "class SscJsonFieldMissingError(SscJsonError):",
+    "    pass",
+    "",
+    "def ssc_resolve_dotpath(data: Any, path: str, is_optional: bool) -> Any:",
+    "    current = data",
+    "    for seg in path.split('.'):",
+    "        if current is None:",
+    "            if is_optional:",
+    "                return None",
+    "            raise SscJsonPathError(f\"Cannot traverse segment '{seg}' on null object in path '{path}'\")",
+    "        if seg.isdigit():",
+    "            idx = int(seg)",
+    "            if not isinstance(current, list):",
+    "                if is_optional:",
+    "                    return None",
+    "                raise SscJsonPathError(f\"Expected list for index '{idx}' in path '{path}', got {type(current).__name__}\")",
+    "            if not (0 <= idx < len(current)):",
+    "                if is_optional:",
+    "                    return None",
+    "                raise SscJsonPathError(f\"Index {idx} out of bounds (len={len(current)}) in path '{path}'\")",
+    "            current = current[idx]",
+    "        elif isinstance(current, dict):",
+    "            if seg not in current:",
+    "                if is_optional:",
+    "                    return None",
+    "                raise SscJsonPathError(f\"Missing key '{seg}' in path '{path}'\")",
+    "            current = current[seg]",
+    "        else:",
+    "            if is_optional:",
+    "                return None",
+    "            raise SscJsonPathError(f\"Cannot access key '{seg}' on non-dict {type(current).__name__} in path '{path}'\")",
+    "    return current",
+    "",
+    "def ssc_json_project(data: Any, field_descriptors: Dict[str, Tuple[str, bool, bool, Any]]) -> Any:",
+    "    if isinstance(data, list):",
+    "        return [ssc_json_project(item, field_descriptors) for item in data]",
+    "    if not isinstance(data, dict):",
+    "        return data",
+    "    result: Dict[str, Any] = {}",
+    "    for canonical_name, (wire_path, is_optional, is_omitempty, nested_desc) in field_descriptors.items():",
+    "        if '.' in wire_path or wire_path.isdigit():",
+    "            val = ssc_resolve_dotpath(data, wire_path, is_optional=is_optional or is_omitempty)",
+    "        else:",
+    "            if wire_path not in data:",
+    "                if is_omitempty or is_optional:",
+    "                    val = None",
+    "                else:",
+    "                    raise SscJsonFieldMissingError(f\"Required JSON field '{wire_path}' (mapped to '{canonical_name}') is missing\")",
+    "            else:",
+    "                val = data[wire_path]",
+    "        if val is None:",
+    "            if is_omitempty:",
+    "                continue",
+    "            if not is_optional:",
+    "                raise SscJsonFieldMissingError(f\"Field '{wire_path}' is null, but '{canonical_name}' is not nullable\")",
+    "            result[canonical_name] = None",
+    "            continue",
+    "        if nested_desc is not None:",
+    "            if isinstance(nested_desc, list) and nested_desc:",
+    "                val = [ssc_json_project(x, nested_desc[0]) for x in val if x is not None] if isinstance(val, list) else ssc_json_project(val, nested_desc[0])",
+    "            else:",
+    "                val = ssc_json_project(val, nested_desc)",
+    "        result[canonical_name] = val",
+    "    return result",
+    "",
     "def ssc_remap_json_keys(value: Any, mapping: Dict[str, Any]) -> Any:",
     "    if isinstance(value, list):",
     "        return [ssc_remap_json_keys(item, mapping) for item in value]",
@@ -90,6 +161,111 @@ _BASE_UTILITY_LINES: list[str] = [
     "        result[output] = item",
     "    return result",
 ]
+
+
+class SscJsonError(Exception):
+    pass
+
+
+class SscJsonPathError(SscJsonError):
+    pass
+
+
+class SscJsonFieldMissingError(SscJsonError):
+    pass
+
+
+def ssc_resolve_dotpath(data: Any, path: str, is_optional: bool) -> Any:
+    current = data
+    for seg in path.split("."):
+        if current is None:
+            if is_optional:
+                return None
+            raise SscJsonPathError(
+                f"Cannot traverse segment '{seg}' on null object in path '{path}'"
+            )
+        if seg.isdigit():
+            idx = int(seg)
+            if not isinstance(current, list):
+                if is_optional:
+                    return None
+                raise SscJsonPathError(
+                    f"Expected list for index '{idx}' in path '{path}', got {type(current).__name__}"
+                )
+            if not (0 <= idx < len(current)):
+                if is_optional:
+                    return None
+                raise SscJsonPathError(
+                    f"Index {idx} out of bounds (len={len(current)}) in path '{path}'"
+                )
+            current = current[idx]
+        elif isinstance(current, dict):
+            if seg not in current:
+                if is_optional:
+                    return None
+                raise SscJsonPathError(f"Missing key '{seg}' in path '{path}'")
+            current = current[seg]
+        else:
+            if is_optional:
+                return None
+            raise SscJsonPathError(
+                f"Cannot access key '{seg}' on non-dict {type(current).__name__} in path '{path}'"
+            )
+    return current
+
+
+def ssc_json_project(
+    data: Any, field_descriptors: dict[str, tuple[str, bool, bool, Any]]
+) -> Any:
+    if isinstance(data, list):
+        return [ssc_json_project(item, field_descriptors) for item in data]
+    if not isinstance(data, dict):
+        return data
+    result: dict[str, Any] = {}
+    for canonical_name, (
+        wire_path,
+        is_optional,
+        is_omitempty,
+        nested_desc,
+    ) in field_descriptors.items():
+        if "." in wire_path or wire_path.isdigit():
+            val = ssc_resolve_dotpath(
+                data, wire_path, is_optional=is_optional or is_omitempty
+            )
+        else:
+            if wire_path not in data:
+                if is_omitempty or is_optional:
+                    val = None
+                else:
+                    raise SscJsonFieldMissingError(
+                        f"Required JSON field '{wire_path}' (mapped to '{canonical_name}') is missing"
+                    )
+            else:
+                val = data[wire_path]
+        if val is None:
+            if is_omitempty:
+                continue
+            if not is_optional:
+                raise SscJsonFieldMissingError(
+                    f"Field '{wire_path}' is null, but '{canonical_name}' is not nullable"
+                )
+            result[canonical_name] = None
+            continue
+        if nested_desc is not None:
+            if isinstance(nested_desc, list) and nested_desc:
+                val = (
+                    [
+                        ssc_json_project(x, nested_desc[0])
+                        for x in val
+                        if x is not None
+                    ]
+                    if isinstance(val, list)
+                    else ssc_json_project(val, nested_desc[0])
+                )
+            else:
+                val = ssc_json_project(val, nested_desc)
+        result[canonical_name] = val
+    return result
 
 
 def _extension_runtime_defs(
@@ -142,7 +318,7 @@ def runtime_module_content(
         "from __future__ import annotations",
         "import re",
         "import sys",
-        "from typing import Any, Callable, Dict, Generic, List, Literal, Mapping, Optional, TypeVar, Union",
+        "from typing import Any, Callable, Dict, Generic, List, Literal, Mapping, Optional, Tuple, TypeVar, Union",
         "from html import unescape as ssc_html_unescape",
     ]
     has_rest = module_has_rest(module)

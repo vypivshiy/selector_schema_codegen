@@ -240,8 +240,14 @@ class TestRestPyConverter:
         module = _parse(src)
         code = CONVERTER.convert(module, http_client="httpx")
         # matchers list routes status codes to Err subclasses
-        assert "ErrMatcher(404, None, APIErr404)," in code
-        assert "ErrMatcher(500, None, APIErr500)," in code
+        assert (
+            "ErrMatcher(404, None, lambda headers, value: APIErr404(headers=headers, value=ssc_json_project(value,"
+            in code
+        )
+        assert (
+            "ErrMatcher(500, None, lambda headers, value: APIErr500(headers=headers, value=ssc_json_project(value,"
+            in code
+        )
         # no raise in method bodies (errors are returned, not raised)
         assert "raise" not in _method_bodies(code)
 
@@ -577,7 +583,9 @@ def _method_bodies(code: str) -> str:
     indent = 0
     for line in code.splitlines():
         stripped = line.lstrip()
-        if re.match(r"(async\s+)?def \w", stripped):
+        if re.match(r"(async\s+)?def \w", stripped) and len(line) > len(
+            stripped
+        ):
             in_method = True
             indent = len(line) - len(stripped)
             continue
@@ -1643,8 +1651,10 @@ class TestResponsePathCodegen:
 
         module = _parse(self._rest_path_src())
         code = CONVERTER.convert(module, http_client="httpx")
-        # value_fn extracts via dict access chain using path segments
-        assert "value_fn=lambda _b: _b['data']['user']," in code
+        # value_fn extracts via dict access chain using path segments and projects into User schema
+        assert (
+            "value_fn=lambda _b: ssc_json_project(_b['data']['user']," in code
+        )
 
     def test_py_path_dominates_over_void_when_no_schema(self):
         """response-path with no response-schema still emits value_fn
@@ -1689,8 +1699,8 @@ class TestResponsePathCodegen:
 
         module = _parse(self._rest_path_src())
         code = JS_CONVERTER.convert(module, http_client="fetch")
-        # JS uses double-quoted JSON-style keys (json.dumps output)
-        assert '(_b) => _b["data"]["user"]' in code
+        # JS uses double-quoted JSON-style keys and projects into User schema
+        assert '(_b) => sscJsonProject(_b["data"]["user"],' in code
 
     def test_js_void_without_path_emits_null(self):
         from ssc_codegen.targets.javascript import JS_CONVERTER

@@ -180,6 +180,42 @@ def json_def_needs_remap(
     return False
 
 
+def json_def_descriptors(
+    definition: JsonDef,
+    definitions: dict[str, JsonDef],
+    stack: tuple[str, ...] = (),
+) -> dict[str, tuple[str, bool, bool, object]]:
+    """Build a dictionary of field descriptors for strict JSON allowlist projection."""
+    if definition.name in stack:
+        return {}
+    next_stack = (*stack, definition.name)
+    descriptors: dict[str, tuple[str, bool, bool, object]] = {}
+    for field in definition.body:
+        if not isinstance(field, JsonDefField) or (
+            field.type_info and field.type_info.skip
+        ):
+            continue
+        wire_path = field.alias if field.alias else field.name
+        info = field.type_info
+        is_optional = info.is_optional if info else False
+        is_omitempty = info.omitempty if info else False
+        nested_desc: object = None
+        if info and info.base == VariableType.JSON and info.ref:
+            nested_def = definitions.get(info.ref)
+            if nested_def:
+                sub_desc = json_def_descriptors(
+                    nested_def, definitions, next_stack
+                )
+                nested_desc = [sub_desc] if info.is_array else sub_desc
+        descriptors[field.name] = (
+            wire_path,
+            is_optional,
+            is_omitempty,
+            nested_desc,
+        )
+    return descriptors
+
+
 def json_def_mapping(
     definition: JsonDef,
     definitions: dict[str, JsonDef],

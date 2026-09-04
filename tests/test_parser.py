@@ -1157,6 +1157,42 @@ json Parent { child Child }
         )
         assert any("conflicts with field name" in error for error in errors)
 
+    def test_malformed_dotpath_and_whitespace_diagnostics(self):
+        # E040: malformed dotpaths
+        for bad_path in ["..", ".a", "a.", "a..b"]:
+            errors = _lint_errors(
+                f"""json F {{
+    first str from="{bad_path}"
+}}
+"""
+            )
+            assert any("malformed dot-path" in error for error in errors), (
+                f"Failed for {bad_path}"
+            )
+
+        # E040 on json path property
+        errors_json_path = _lint_errors(
+            """json F path="..data" {
+    first str
+}
+"""
+        )
+        assert any("malformed dot-path" in error for error in errors_json_path)
+
+        # W040: leading/trailing whitespace
+        _, diags = parse_module(
+            """json F {
+    first str from="  a.b  "
+}
+"""
+        )
+        assert any(
+            d.severity == Severity.WARNING
+            and "leading or trailing whitespace" in d.message
+            and d.code == "W040"
+            for d in diags
+        )
+
     def test_python_jsonify_with_alias_remapping(self):
         src = """
 json User {
@@ -1174,12 +1210,12 @@ struct Main {
         m = _parse(src)
         code = PY_BS4_CONVERTER.convert(m)
         assert (
-            "_user_JSON_MAPPING = {'id': 'user_id', 'name': 'user_name'}"
+            "_user_JSON_DESCRIPTORS = {'user_id': ('id', False, False, None), 'user_name': ('name', False, False, None)}"
             in code
         )
-        assert "def ssc_remap_json_keys(" in code
-        assert "ssc_remap_json_keys(json.loads(" in code
-        assert "_user_JSON_MAPPING" in code
+        assert "def ssc_json_project(" in code
+        assert "ssc_json_project(json.loads(" in code
+        assert "_user_JSON_DESCRIPTORS" in code
 
     def test_javascript_jsonify_with_alias_remapping(self):
         src = """
@@ -1197,11 +1233,11 @@ struct Main {
 """
         m = _parse(src)
         code = JS_CONVERTER.convert(m)
-        assert "const _userJsonMapping = {" in code
-        assert '"id": "user_id"' in code
-        assert "function sscRemapJsonKeys(" in code
-        assert "sscRemapJsonKeys(JSON.parse(" in code
-        assert "_userJsonMapping" in code
+        assert "const _userJsonDescriptors = {" in code
+        assert '"user_id": ["id", false, false, null]' in code
+        assert "function sscJsonProject(" in code
+        assert "sscJsonProject(JSON.parse(" in code
+        assert "_userJsonDescriptors" in code
 
     def test_golang_jsondef_with_alias_struct_tags(self):
         src = """
@@ -1238,12 +1274,15 @@ struct ApiClient type=rest {
 """
         m = _parse(src)
         code = PY_BS4_CONVERTER.convert(m, http_client="httpx")
-        assert "def ssc_remap_json_keys(" in code
+        assert "def ssc_json_project(" in code
         assert (
-            "value_fn=lambda _b: ssc_remap_json_keys(_b, {'id': 'user_id', 'name': 'full_name'})"
+            "value_fn=lambda _b: ssc_json_project(_b, {'user_id': ('id', False, False, None), 'full_name': ('name', False, False, None)})"
             in code
         )
-        assert "value=ssc_remap_json_keys(value, {'code': 'err_code'})" in code
+        assert (
+            "value=ssc_json_project(value, {'err_code': ('code', False, False, None)})"
+            in code
+        )
 
     def test_javascript_rest_with_alias_remapping_codegen(self):
         src = """
@@ -1266,12 +1305,15 @@ struct ApiClient type=rest {
 """
         m = _parse(src)
         code = JS_CONVERTER.convert(m)
-        assert "function sscRemapJsonKeys(" in code
+        assert "function sscJsonProject(" in code
         assert (
-            'sscRemapJsonKeys(_b, {"id": "user_id", "name": "full_name"})'
+            'sscJsonProject(_b, {"user_id": ["id", false, false, null], "full_name": ["name", false, false, null]})'
             in code
         )
-        assert 'sscRemapJsonKeys(_b, {"code": "err_code"})' in code
+        assert (
+            'sscJsonProject(_b, {"err_code": ["code", false, false, null]})'
+            in code
+        )
 
     def test_golang_rest_with_alias_remapping_codegen(self):
         src = """

@@ -194,6 +194,49 @@ def test_go_smoke_compile(schema_file, go_module):
     )
 
 
+def test_go_dotpath_unmarshal_compiles(go_module):
+    """Verify that a Go schema with dot-path navigation generates valid UnmarshalJSON."""
+    src = """
+json GeoLocation {
+    latitude float from="coords.lat"
+    longitude float from="coords.lng"
+}
+
+json UserProfile {
+    user_id str from="meta.id"
+    avatar_url str? from="profile.avatar.url"
+    top_badge str? from="badges.0.icon"
+    location GeoLocation?
+}
+
+struct UserParser {
+    user {
+        css "script#data"
+        text
+        jsonify UserProfile
+    }
+}
+"""
+    module_ast, diagnostics = parse_module(src)
+    errors = [d for d in diagnostics if d.severity == Severity.ERROR]
+    assert not errors
+
+    code = GO_CONVERTER.convert(module_ast, package="sscgen_test")
+    out = go_module / "dotpath_test.go"
+    out.write_bytes(code.encode("utf-8"))
+
+    fmt = subprocess.run(
+        ["gofmt", "-l", str(out)], capture_output=True, text=True
+    )
+    assert fmt.returncode == 0
+    assert not fmt.stdout.strip()
+
+    build = subprocess.run(
+        ["go", "build", "./..."], cwd=go_module, capture_output=True, text=True
+    )
+    assert build.returncode == 0, f"go build failed:\n{build.stderr}"
+
+
 def test_runtime_gofmt_clean(go_module):
     """sscgen_runtime.go must be gofmt-clean after emitting helpers."""
     # Trigger helper accumulation by compiling one HTML + one REST schema.

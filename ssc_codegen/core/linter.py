@@ -778,6 +778,16 @@ def _lint_defines(
             )
 
 
+def _is_malformed_dotpath(path: str) -> bool:
+    if not path:
+        return True
+    if path.startswith(".") or path.endswith("."):
+        return True
+    if ".." in path:
+        return True
+    return any(seg == "" for seg in path.split("."))
+
+
 def _lint_json_defs(
     doc: KdlDocument,
     source_path: str,
@@ -840,6 +850,16 @@ def _lint_single_json(
                     "'path' property must be a non-empty string",
                     source_path,
                     code="E002",
+                    hint='example: json MySchema path="response.data" { ... }',
+                )
+            )
+        elif _is_malformed_dotpath(path_val):
+            diags.append(
+                _error(
+                    node,
+                    f"malformed dot-path '{path_val}'",
+                    source_path,
+                    code="E040",
                     hint='example: json MySchema path="response.data" { ... }',
                 )
             )
@@ -973,6 +993,26 @@ def _lint_json_children(
                 )
             else:
                 from_val = from_prop.value
+                if from_val != from_val.strip():
+                    diags.append(
+                        _warning(
+                            field_node,
+                            f"leading or trailing whitespace in 'from' path '{from_val}'",
+                            source_path,
+                            code="W040",
+                            hint=f'remove whitespace: from="{from_val.strip()}"',
+                        )
+                    )
+                if _is_malformed_dotpath(from_val.strip()):
+                    diags.append(
+                        _error(
+                            field_node,
+                            f"malformed dot-path '{from_val}'",
+                            source_path,
+                            code="E040",
+                            hint=f'example: {field_name} str from="profile.avatar.url"',
+                        )
+                    )
 
             if positional_alias:
                 diags.append(
@@ -998,7 +1038,8 @@ def _lint_json_children(
                     field_node,
                     f"duplicate json source key '{source_key}'",
                     source_path,
-                    code="E001",
+                    code="E041",
+                    hint=f"rename or remove one of the fields mapping to '{source_key}'",
                 )
             )
         seen_source_keys.add(source_key)
@@ -1011,7 +1052,7 @@ def _lint_json_children(
                     field_node,
                     f"json alias '{source_key}' conflicts with field name",
                     source_path,
-                    code="E001",
+                    code="E041",
                 )
             )
         if output_key in seen_output_keys:
@@ -2212,6 +2253,23 @@ def lint_pipeline_op(node: KdlNode, lint: LintContext) -> None:
 
     elif name == "jsonify":
         lint_require_args(node, lint, exact=1, example="jsonify MySchema")
+        path_prop = node.properties.get("path")
+        if path_prop is not None:
+            path_val = str(path_prop.value)
+            if not path_val:
+                lint.error(
+                    node,
+                    message="'path' property must be a non-empty string",
+                    code="E002",
+                    hint='example: jsonify MySchema path="response.data"',
+                )
+            elif _is_malformed_dotpath(path_val.strip()):
+                lint.error(
+                    node,
+                    message=f"malformed dot-path '{path_val}'",
+                    code="E040",
+                    hint='example: jsonify MySchema path="response.data"',
+                )
 
     elif name == "nested":
         lint_require_args(node, lint, exact=1, example="nested MyStruct")

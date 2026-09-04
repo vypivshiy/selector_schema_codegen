@@ -7,7 +7,7 @@ Called by PythonVisitor via thin delegate methods.  The HTTP library strategy
 
 from __future__ import annotations
 
-from typing import cast
+from typing import Mapping, cast
 
 from ssc_codegen.ast import (
     JsonDef,
@@ -30,7 +30,7 @@ from ssc_codegen.traversal.utils import (
     dict_needs_builder,
     module_has_html_struct,
     module_has_rest,
-    json_def_mapping,
+    json_def_descriptors,
 )
 
 
@@ -186,7 +186,14 @@ _RUNTIME_REST_EXPORT_NAMES: list[str] = [
     "ssc_rest_call_async",
 ]
 
-_RUNTIME_JSON_EXPORT_NAMES: list[str] = ["ssc_remap_json_keys"]
+_RUNTIME_JSON_EXPORT_NAMES: list[str] = [
+    "SscJsonError",
+    "SscJsonPathError",
+    "SscJsonFieldMissingError",
+    "ssc_resolve_dotpath",
+    "ssc_json_project",
+    "ssc_remap_json_keys",
+]
 
 # Always exported regardless of module type so consumer code can
 # ``except SscAssertionError`` / ``except SscRegexError`` unconditionally —
@@ -220,7 +227,7 @@ def runtime_export_names(
             names.append("FALLBACK_HTML_STR")
     if module_has_rest(module):
         names.extend(_RUNTIME_REST_EXPORT_NAMES)
-    if any(isinstance(n, JsonDef) and n.has_alias_key for n in module.body):
+    if any(isinstance(n, JsonDef) for n in module.body):
         names.extend(_RUNTIME_JSON_EXPORT_NAMES)
     return names
 
@@ -418,21 +425,21 @@ def emit_method_rest(
     pre_lines, kw_lines = _build_kw_dict(spec, i2, i3)
 
     value_kwarg: list[str] = []
-    response_mapping = _response_mapping(node)
+    response_desc = _response_descriptors(node)
     if node.response_path:
         accessor = "".join(f"[{p!r}]" for p in node.response_path.split("."))
-        if response_mapping is None:
+        if response_desc is None:
             value_kwarg = [f"{i3}value_fn=lambda _b: _b{accessor},"]
         else:
             value_kwarg = [
-                f"{i3}value_fn=lambda _b: ssc_remap_json_keys(_b{accessor}, {_render_mapping(response_mapping)}),"
+                f"{i3}value_fn=lambda _b: ssc_json_project(_b{accessor}, {_render_descriptors(response_desc)}),"
             ]
     elif not node.response_schema:
         value_kwarg = [f"{i3}value_fn=lambda _: None,"]
-    elif response_mapping is not None:
-        mapping = _render_mapping(response_mapping)
+    elif response_desc is not None:
+        desc_str = _render_descriptors(response_desc)
         value_kwarg = [
-            f"{i3}value_fn=lambda _b: ssc_remap_json_keys(_b, {mapping}),"
+            f"{i3}value_fn=lambda _b: ssc_json_project(_b, {desc_str}),"
         ]
 
     def _body(fn_name: str, await_kw: str) -> list[str]:
@@ -469,7 +476,9 @@ def emit_method_rest(
     return lines
 
 
-def _response_mapping(node: MethodRest) -> dict[str, object] | None:
+def _response_descriptors(
+    node: MethodRest,
+) -> dict[str, tuple[str, bool, bool, object]] | None:
     if not node.response_schema:
         return None
     module = node.parent.parent if node.parent is not None else None
@@ -477,22 +486,47 @@ def _response_mapping(node: MethodRest) -> dict[str, object] | None:
         return None
     definitions = {n.name: n for n in module.body if isinstance(n, JsonDef)}
     definition = definitions.get(node.response_schema)
-    if definition is None or not definition.has_alias_key:
+    if definition is None:
         return None
-    return json_def_mapping(definition, definitions)
+    return json_def_descriptors(definition, definitions)
 
 
-def _schema_mapping_for_entry(
+def _schema_descriptors_for_entry(
     entry: object, module: Module | None
-) -> dict[str, object] | None:
+) -> dict[str, tuple[str, bool, bool, object]] | None:
     schema = getattr(entry, "error_schema", "")
     if not schema or not isinstance(module, Module):
         return None
     definitions = {n.name: n for n in module.body if isinstance(n, JsonDef)}
     definition = definitions.get(schema)
-    if definition is None or not definition.has_alias_key:
+    if definition is None:
         return None
-    return json_def_mapping(definition, definitions)
+    return json_def_descriptors(definition, definitions)
+
+
+def _render_descriptors(descriptors: Mapping[str, object]) -> str:
+    def render(value: object) -> str:
+        if value is None:
+            return "None"
+        if isinstance(value, bool):
+            return "True" if value else "False"
+        if isinstance(value, str):
+            return repr(value)
+        if isinstance(value, tuple):
+            return "(" + ", ".join(render(x) for x in value) + ")"
+        if isinstance(value, list):
+            return "[" + ", ".join(render(item) for item in value) + "]"
+        if isinstance(value, dict):
+            return (
+                "{"
+                + ", ".join(
+                    f"{key!r}: {render(item)}" for key, item in value.items()
+                )
+                + "}"
+            )
+        raise TypeError(f"unsupported JSON descriptor value: {value!r}")
+
+    return render(descriptors)
 
 
 def _render_mapping(mapping: dict[str, object]) -> str:
@@ -558,15 +592,16 @@ def emit_matcher_list_def(node: MatcherListDef) -> list[str]:
             if isinstance(node.parent, Module)
             else (node.parent.parent if node.parent is not None else None)
         )
-        mapping = _schema_mapping_for_entry(
+        desc = _schema_descriptors_for_entry(
             e, module if isinstance(module, Module) else None
         )
         factory = e.factory_name
-        if mapping is not None:
+        if desc is not None:
             factory = (
                 f"lambda headers, value: {e.factory_name}(headers=headers, "
-                f"value=ssc_remap_json_keys(value, {_render_mapping(mapping)}))"
+                f"value=ssc_json_project(value, {_render_descriptors(desc)}))"
             )
         lines.append(f"    ErrMatcher({e.status}, {check_arg}, {factory}),")
     lines.append("]")
+    lines.append("")
     return lines

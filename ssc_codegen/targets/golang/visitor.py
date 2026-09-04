@@ -291,6 +291,172 @@ def validate_go_package_name(value: object) -> str:
     return package
 
 
+def _go_unmarshal_json(node: JsonDef) -> list[str]:
+    name = to_pascal_case(node.name)
+    lines = [
+        f"func (res *{name}Json) UnmarshalJSON(raw []byte) error {{",
+    ]
+    for field in node.body:
+        if not isinstance(field, JsonDefField) or (
+            field.type_info and field.type_info.skip
+        ):
+            continue
+        field_name = to_pascal_case(field.name)
+        wire_path = field.alias if field.alias else _json_tag(field.name)
+        go_wire_path = _go_str(wire_path)
+        info = field.type_info
+        is_optional = info.is_optional if info else False
+        is_omitempty = info.omitempty if info else False
+        is_array = info.is_array if info else False
+        base = info.base if info else VT.STRING
+        ref = info.ref if info else None
+
+        res_var = f"res{field_name}"
+
+        # If base == VT.JSON and ref
+        if base == VT.JSON and ref:
+            child_type = f"{to_pascal_case(ref)}Json"
+            if is_array:
+                if is_optional or is_omitempty:
+                    lines.append(
+                        f"\tif {res_var} := gjson.GetBytes(raw, {go_wire_path}); {res_var}.Exists() && {res_var}.Type != gjson.Null {{"
+                    )
+                    lines.append(f"\t\tvar items []{child_type}")
+                    lines.append(
+                        f"\t\tfor _, item := range {res_var}.Array() {{"
+                    )
+                    lines.append(f"\t\t\tvar child {child_type}")
+                    lines.append(
+                        "\t\t\tif err := json.Unmarshal([]byte(item.Raw), &child); err != nil {"
+                    )
+                    lines.append("\t\t\t\treturn err")
+                    lines.append("\t\t\t}")
+                    lines.append("\t\t\titems = append(items, child)")
+                    lines.append("\t\t}")
+                    lines.append(f"\t\tres.{field_name} = &items")
+                    lines.append("\t}")
+                else:
+                    lines.append(
+                        f"\t{res_var} := gjson.GetBytes(raw, {go_wire_path})"
+                    )
+                    lines.append(
+                        f"\tif !{res_var}.Exists() || {res_var}.Type == gjson.Null {{"
+                    )
+                    lines.append(
+                        f"\t\treturn fmt.Errorf(\"required JSON field '{wire_path}' missing\")"
+                    )
+                    lines.append("\t}")
+                    lines.append(f"\tfor _, item := range {res_var}.Array() {{")
+                    lines.append(f"\t\tvar child {child_type}")
+                    lines.append(
+                        "\t\tif err := json.Unmarshal([]byte(item.Raw), &child); err != nil {"
+                    )
+                    lines.append("\t\t\treturn err")
+                    lines.append("\t\t}")
+                    lines.append(
+                        f"\t\tres.{field_name} = append(res.{field_name}, child)"
+                    )
+                    lines.append("\t}")
+            else:
+                if is_optional or is_omitempty:
+                    lines.append(
+                        f"\tif {res_var} := gjson.GetBytes(raw, {go_wire_path}); {res_var}.Exists() && {res_var}.Type != gjson.Null {{"
+                    )
+                    lines.append(f"\t\tvar child {child_type}")
+                    lines.append(
+                        f"\t\tif err := json.Unmarshal([]byte({res_var}.Raw), &child); err != nil {{"
+                    )
+                    lines.append("\t\t\treturn err")
+                    lines.append("\t\t}")
+                    lines.append(f"\t\tres.{field_name} = &child")
+                    lines.append("\t}")
+                else:
+                    lines.append(
+                        f"\t{res_var} := gjson.GetBytes(raw, {go_wire_path})"
+                    )
+                    lines.append(
+                        f"\tif !{res_var}.Exists() || {res_var}.Type == gjson.Null {{"
+                    )
+                    lines.append(
+                        f"\t\treturn fmt.Errorf(\"required JSON field '{wire_path}' missing\")"
+                    )
+                    lines.append("\t}")
+                    lines.append(
+                        f"\tif err := json.Unmarshal([]byte({res_var}.Raw), &res.{field_name}); err != nil {{"
+                    )
+                    lines.append("\t\treturn err")
+                    lines.append("\t}")
+            continue
+
+        # Primitives: STRING, INT, FLOAT, BOOL
+        getter = {
+            VT.STRING: ".String()",
+            VT.INT: ".Int()",
+            VT.FLOAT: ".Float()",
+            VT.BOOL: ".Bool()",
+        }.get(base, ".Value()")
+
+        cast_elem = {
+            VT.INT: "int64",
+            VT.FLOAT: "float64",
+            VT.BOOL: "bool",
+            VT.STRING: "string",
+        }.get(base, "any")
+
+        if is_array:
+            if is_optional or is_omitempty:
+                lines.append(
+                    f"\tif {res_var} := gjson.GetBytes(raw, {go_wire_path}); {res_var}.Exists() && {res_var}.Type != gjson.Null {{"
+                )
+                lines.append(f"\t\tvar items []{cast_elem}")
+                lines.append(f"\t\tfor _, item := range {res_var}.Array() {{")
+                lines.append(f"\t\t\titems = append(items, item{getter})")
+                lines.append("\t\t}")
+                lines.append(f"\t\tres.{field_name} = &items")
+                lines.append("\t}")
+            else:
+                lines.append(
+                    f"\t{res_var} := gjson.GetBytes(raw, {go_wire_path})"
+                )
+                lines.append(
+                    f"\tif !{res_var}.Exists() || {res_var}.Type == gjson.Null {{"
+                )
+                lines.append(
+                    f"\t\treturn fmt.Errorf(\"required JSON field '{wire_path}' missing\")"
+                )
+                lines.append("\t}")
+                lines.append(f"\tfor _, item := range {res_var}.Array() {{")
+                lines.append(
+                    f"\t\tres.{field_name} = append(res.{field_name}, item{getter})"
+                )
+                lines.append("\t}")
+        else:
+            if is_optional or is_omitempty:
+                lines.append(
+                    f"\tif {res_var} := gjson.GetBytes(raw, {go_wire_path}); {res_var}.Exists() && {res_var}.Type != gjson.Null {{"
+                )
+                lines.append(f"\tv := {res_var}{getter}")
+                lines.append(f"\tres.{field_name} = &v")
+                lines.append("\t}")
+            else:
+                lines.append(
+                    f"\t{res_var} := gjson.GetBytes(raw, {go_wire_path})"
+                )
+                lines.append(
+                    f"\tif !{res_var}.Exists() || {res_var}.Type == gjson.Null {{"
+                )
+                lines.append(
+                    f"\t\treturn fmt.Errorf(\"required JSON field '{wire_path}' missing\")"
+                )
+                lines.append("\t}")
+                lines.append(f"\tres.{field_name} = {res_var}{getter}")
+
+    lines.append("\treturn nil")
+    lines.append("}")
+    lines.append("")
+    return lines
+
+
 # ===========================================================================
 # GoVisitor
 # ===========================================================================
@@ -568,6 +734,33 @@ class GoVisitor(BaseWalker):
         lines.extend(self.walk_children(node, ctx))
         lines.append("}")
         lines.append("")
+        has_fields = any(
+            isinstance(f, JsonDefField)
+            and not (f.type_info and f.type_info.skip)
+            for f in node.body
+        )
+        if has_fields:
+            self._builder.require_import('"github.com/tidwall/gjson"')
+            has_required = any(
+                isinstance(f, JsonDefField)
+                and not (f.type_info and f.type_info.skip)
+                and not (f.type_info and f.type_info.is_optional)
+                and not (f.type_info and f.type_info.omitempty)
+                for f in node.body
+            )
+            if has_required:
+                self._builder.require_import('"fmt"')
+            has_nested_json = any(
+                isinstance(f, JsonDefField)
+                and not (f.type_info and f.type_info.skip)
+                and f.type_info
+                and f.type_info.base == VT.JSON
+                and f.type_info.ref
+                for f in node.body
+            )
+            if has_nested_json:
+                self._builder.require_import('"encoding/json"')
+            lines.extend(_go_unmarshal_json(node))
         return lines
 
     def visit_jsondef_field(

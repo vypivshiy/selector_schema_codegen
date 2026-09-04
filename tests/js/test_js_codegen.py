@@ -453,7 +453,7 @@ struct UserStateScraper {
         assert user["account_id"] == 999
         assert user["nickname"] == "bob"
         assert user["avatar_url"] is None
-        assert "bio_text" not in user
+        assert user["bio_text"] is None
         assert "extra_key_one" not in user
         assert "extra_key_two" not in user
 
@@ -539,6 +539,36 @@ json ConfigPayload {
             "longitude": -0.12,
         }
         assert item0["scores"] == [5, 4, 5]
+
+    def test_json_dot_path_and_omitempty_projection(self):
+        kdl_src = """
+json DotProfile {
+    user_id str from="meta.user_id"
+    avatar_url str? from="profile.avatar.url"
+    top_badge str? from="badges.0.icon"
+    legacy_id int @omitempty from="meta.legacy.id"
+}
+
+(raw)struct DotParser {
+    user {
+        jsonify DotProfile
+    }
+}
+"""
+        raw_json_str = """{
+            "meta": {"user_id": "u42"},
+            "profile": {"avatar": {"url": "https://example.com/icon.png", "width": 64}},
+            "badges": [{"icon": "shield", "level": 1}],
+            "extra_key": "drop_me"
+        }"""
+        r = _run_js_src(kdl_src, "DotParser", input_text=raw_json_str)
+        assert r["user"] == {
+            "user_id": "u42",
+            "avatar_url": "https://example.com/icon.png",
+            "top_badge": "shield",
+        }
+        assert "legacy_id" not in r["user"]
+        assert "extra_key" not in r["user"]
 
 
 # ── RAW struct ────────────────────────────────────────────────────────────────

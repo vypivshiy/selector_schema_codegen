@@ -131,6 +131,7 @@ from ssc_codegen.exceptions import BuildTimeError
 from ssc_codegen.naming import to_camel_case, to_pascal_case, to_snake_case
 from ssc_codegen.traversal.utils import (
     find_predicate_container,
+    json_def_descriptors,
     json_def_mapping,
     jsonify_path_to_segments,
     module_has_rest,
@@ -146,14 +147,109 @@ from ssc_codegen.traversal.context import WalkContext
 from ssc_codegen.traversal.walker import BaseWalker
 
 
-_JS_JSON_REMAP_HELPER = """function sscRemapJsonKeys(value, mapping) {
+_JS_JSON_PROJECT_HELPER = """class SscJsonError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'SscJsonError';
+  }
+}
+class SscJsonPathError extends SscJsonError {
+  constructor(message) {
+    super(message);
+    this.name = 'SscJsonPathError';
+  }
+}
+class SscJsonFieldMissingError extends SscJsonError {
+  constructor(message) {
+    super(message);
+    this.name = 'SscJsonFieldMissingError';
+  }
+}
+
+function sscResolveDotpath(data, path, isOptional) {
+  let current = data;
+  const parts = path.split('.');
+  for (const seg of parts) {
+    if (current == null) {
+      if (isOptional) return null;
+      throw new SscJsonPathError(`Cannot traverse segment '${seg}' on null object in path '${path}'`);
+    }
+    if (/^\\d+$/.test(seg)) {
+      const idx = parseInt(seg, 10);
+      if (!Array.isArray(current)) {
+        if (isOptional) return null;
+        throw new SscJsonPathError(`Expected list for index '${idx}' in path '${path}', got ${typeof current}`);
+      }
+      if (idx < 0 || idx >= current.length) {
+        if (isOptional) return null;
+        throw new SscJsonPathError(`Index ${idx} out of bounds (len=${current.length}) in path '${path}'`);
+      }
+      current = current[idx];
+    } else if (typeof current === 'object') {
+      if (!(seg in current)) {
+        if (isOptional) return null;
+        throw new SscJsonPathError(`Missing key '${seg}' in path '${path}'`);
+      }
+      current = current[seg];
+    } else {
+      if (isOptional) return null;
+      throw new SscJsonPathError(`Cannot access key '${seg}' on non-dict ${typeof current} in path '${path}'`);
+    }
+  }
+  return current;
+}
+
+function sscJsonProject(data, descriptors) {
+  if (Array.isArray(data)) {
+    return data.map(item => sscJsonProject(item, descriptors));
+  }
+  if (data == null || typeof data !== 'object') return data;
+
+  const result = {};
+  for (const [canonical, [wirePath, isOptional, isOmitempty, nested]] of Object.entries(descriptors)) {
+    let val;
+    if (wirePath.includes('.') || /^\\d+$/.test(wirePath)) {
+      val = sscResolveDotpath(data, wirePath, isOptional || isOmitempty);
+    } else {
+      if (!(wirePath in data)) {
+        if (isOmitempty || isOptional) {
+          val = null;
+        } else {
+          throw new SscJsonFieldMissingError(`Required JSON field '${wirePath}' (mapped to '${canonical}') is missing`);
+        }
+      } else {
+        val = data[wirePath];
+      }
+    }
+
+    if (val === null || val === undefined) {
+      if (isOmitempty) continue;
+      if (!isOptional) {
+        throw new SscJsonFieldMissingError(`Field '${wirePath}' is null, but '${canonical}' is not nullable`);
+      }
+      result[canonical] = null;
+      continue;
+    }
+
+    if (nested) {
+      val = Array.isArray(nested)
+        ? (Array.isArray(val) ? val.map(x => sscJsonProject(x, nested[0])) : sscJsonProject(val, nested[0]))
+        : sscJsonProject(val, nested);
+    }
+
+    result[canonical] = val;
+  }
+  return result;
+}
+
+function sscRemapJsonKeys(value, mapping) {
   if (Array.isArray(value)) return value.map(item => sscRemapJsonKeys(item, mapping));
   if (value === null || typeof value !== 'object') return value;
   const result = {};
   for (const [source, spec] of Object.entries(mapping)) {
     if (!Object.prototype.hasOwnProperty.call(value, source)) continue;
-     const output = Array.isArray(spec) ? spec[0] : spec;
-     const nested = Array.isArray(spec) ? spec[1] : null;
+    const output = Array.isArray(spec) ? spec[0] : spec;
+    const nested = Array.isArray(spec) ? spec[1] : null;
     let item = value[source];
     if (Array.isArray(nested)) item = item.map(x => sscRemapJsonKeys(x, nested[0]));
     else if (nested !== null) item = sscRemapJsonKeys(item, nested);
@@ -161,6 +257,41 @@ _JS_JSON_REMAP_HELPER = """function sscRemapJsonKeys(value, mapping) {
   }
   return result;
 }"""
+
+_JS_JSON_REMAP_HELPER = _JS_JSON_PROJECT_HELPER
+
+
+def _js_json_descriptors(
+    node: JsonDef, definitions: dict[str, JsonDef]
+) -> list[str]:
+    descriptors = json_def_descriptors(node, definitions)
+
+    def render(value: object) -> str:
+        if value is None:
+            return "null"
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if isinstance(value, str):
+            return json.dumps(value)
+        if isinstance(value, tuple):
+            return "[" + ", ".join(render(x) for x in value) + "]"
+        if isinstance(value, list):
+            return "[" + ", ".join(render(item) for item in value) + "]"
+        if isinstance(value, dict):
+            return (
+                "{"
+                + ", ".join(
+                    f"{json.dumps(key)}: {render(item)}"
+                    for key, item in value.items()
+                )
+                + "}"
+            )
+        raise TypeError(f"unsupported JSON descriptor value: {value!r}")
+
+    return [
+        f"const _{to_snake_case(node.name)}JsonDescriptors = {render(descriptors)};",
+        "",
+    ]
 
 
 def _js_json_mapping(
@@ -427,6 +558,9 @@ class JsVisitor(BaseWalker):
             lines.extend(rest.REST_SHARED)
             lines.extend(FetchStrategy().rest_call_lines())
             lines.extend(AxiosStrategy().rest_call_lines())
+            self._builder.require_std(
+                "sscJsonProject", code=_JS_JSON_PROJECT_HELPER
+            )
         lines.extend(self._render_std_section(ctx))
         return lines
 
@@ -480,16 +614,14 @@ class JsVisitor(BaseWalker):
         lines = ["/**", f" * @typedef {{Object}} {name}Json"]
         lines.extend(self.walk_children(node, ctx))
         lines.append(" */")
-        if node.has_alias_key:
-            module = node.parent
-            if not isinstance(module, Module):
-                return lines
+        module = node.parent
+        if isinstance(module, Module):
             definitions = {
                 n.name: n for n in module.body if isinstance(n, JsonDef)
             }
-            lines.extend(_js_json_mapping(node, definitions))
+            lines.extend(_js_json_descriptors(node, definitions))
             self._builder.require_std(
-                "sscRemapJsonKeys", code=_JS_JSON_REMAP_HELPER
+                "sscJsonProject", code=_JS_JSON_PROJECT_HELPER
             )
         return lines
 
@@ -1262,13 +1394,13 @@ class JsVisitor(BaseWalker):
             raw_expr = f"JSON.parse({ctx.prv})"
 
         json_def = resolve_json_def(node, node.schema_name)
-        if json_def and json_def.has_alias_key:
+        if json_def:
             self._builder.require_std(
-                "sscRemapJsonKeys", code=_JS_JSON_REMAP_HELPER
+                "sscJsonProject", code=_JS_JSON_PROJECT_HELPER
             )
-            mapping_name = f"_{to_snake_case(node.schema_name)}JsonMapping"
+            desc_name = f"_{to_snake_case(node.schema_name)}JsonDescriptors"
             return [
-                f"{ctx.indent}let {ctx.nxt} = sscRemapJsonKeys({raw_expr}, {mapping_name});"
+                f"{ctx.indent}let {ctx.nxt} = sscJsonProject({raw_expr}, {desc_name});"
             ]
 
         return [f"{ctx.indent}let {ctx.nxt} = {raw_expr};"]

@@ -8,6 +8,7 @@ Called by JsVisitor via thin delegate methods.  The HTTP library strategy
 from __future__ import annotations
 
 import json
+from typing import Mapping
 
 from ssc_codegen.ast import (
     JsonDef,
@@ -29,6 +30,7 @@ from ssc_codegen.traversal.context import WalkContext
 from ssc_codegen.traversal.utils import (
     dict_needs_builder,
     err_subclass_name,
+    json_def_descriptors,
     json_def_mapping,
 )
 
@@ -374,20 +376,23 @@ def emit_method_rest(
     )
 
     fn_name = http.fn_name
+    response_desc = _response_descriptors(node)
     if node.response_path:
         accessor = "".join(
             f"[{json.dumps(p)}]" for p in node.response_path.split(".")
         )
-        value_fn = f"(_b) => _b{accessor}"
+        if response_desc is None:
+            value_fn = f"(_b) => _b{accessor}"
+        else:
+            value_fn = f"(_b) => sscJsonProject(_b{accessor}, {_render_descriptors(response_desc)})"
     elif not node.response_schema:
         value_fn = "(_b) => null"
+    elif response_desc is not None:
+        value_fn = (
+            f"(_b) => sscJsonProject(_b, {_render_descriptors(response_desc)})"
+        )
     else:
         value_fn = "null"
-    response_mapping = _response_mapping(node)
-    if response_mapping is not None:
-        value_fn = (
-            f"(_b) => sscRemapJsonKeys(_b, {_render_mapping(response_mapping)})"
-        )
 
     if http_client == "axios":
         url_expr = render_value(spec.url)
@@ -459,6 +464,47 @@ def emit_method_rest(
     )
     lines.append(f"{i1}}}")
     return lines
+
+
+def _response_descriptors(
+    node: MethodRest,
+) -> dict[str, tuple[str, bool, bool, object]] | None:
+    if not node.response_schema:
+        return None
+    module = node.parent.parent if node.parent is not None else None
+    if not isinstance(module, Module):
+        return None
+    definitions = {n.name: n for n in module.body if isinstance(n, JsonDef)}
+    definition = definitions.get(node.response_schema)
+    if definition is None:
+        return None
+    return json_def_descriptors(definition, definitions)
+
+
+def _render_descriptors(descriptors: Mapping[str, object]) -> str:
+    def render(value: object) -> str:
+        if value is None:
+            return "null"
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if isinstance(value, str):
+            return json.dumps(value)
+        if isinstance(value, tuple):
+            return "[" + ", ".join(render(x) for x in value) + "]"
+        if isinstance(value, list):
+            return "[" + ", ".join(render(item) for item in value) + "]"
+        if isinstance(value, dict):
+            return (
+                "{"
+                + ", ".join(
+                    f"{json.dumps(key)}: {render(item)}"
+                    for key, item in value.items()
+                )
+                + "}"
+            )
+        raise TypeError(f"unsupported JSON descriptor value: {value!r}")
+
+    return render(descriptors)
 
 
 def _response_mapping(node: MethodRest) -> dict[str, object] | None:
@@ -646,13 +692,13 @@ def emit_matcher_list_def(node: MatcherListDef) -> list[str]:
     for e in node.entries:
         check = render_js_condition_check(e.required_keys, e.conditions)
         check_arg = check if check else "null"
-        mapping = None
+        desc = None
         definition = definitions.get(e.error_schema)
-        if definition is not None and definition.has_alias_key:
-            mapping = _render_mapping(json_def_mapping(definition, definitions))
-        value_expr = (
-            f"sscRemapJsonKeys(_b, {mapping})" if mapping is not None else "_b"
-        )
+        if definition is not None:
+            desc = _render_descriptors(
+                json_def_descriptors(definition, definitions)
+            )
+        value_expr = f"sscJsonProject(_b, {desc})" if desc is not None else "_b"
         lines.append(
             f"    {{ status: {e.status}, check: {check_arg}, "
             f"factory: (_s, _h, _b) => ({{ isOk: false, status: _s, "
