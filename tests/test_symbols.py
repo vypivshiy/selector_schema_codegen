@@ -85,13 +85,14 @@ def test_plan_accepts_normalized_records_and_preserves_metadata():
 
 
 def test_targets_are_normalized_and_unknown_targets_rejected():
-    assert normalize_targets(("py", "js", "go", "py")) == (
+    assert normalize_targets(("py", "js", "go", "rust", "py")) == (
         "python",
         "javascript",
         "go",
+        "rust",
     )
     with pytest.raises(ValueError, match="Unknown target"):
-        normalize_targets(("rust",))
+        normalize_targets(("ruby",))
 
 
 def test_plan_reports_collision_and_invalid_identifier_in_record_order():

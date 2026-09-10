@@ -91,11 +91,15 @@ struct Main {
 
     all-quotes { @raw-json; jsonify Quote }
     first-quote { @raw-json; jsonify Quote path="0" }
-    author-slug { @raw-json; jsonify Quote path="2.author.slug" }
+    author { @raw-json; jsonify Author path="2.author" }
 }
 ```
 
 `jsonify` принимает один обязательный аргумент — имя схемы, и опциональное свойство `path="..."` для извлечения поддерева перед применением схемы.
+Путь выбирает **фрагмент входного JSON**, а не поле внутри объявленной схемы:
+кардинальность результата всегда берётся из объявления `json` / `(array)json`.
+Например, `(array)json Quote` с `path="data.quotes"` возвращает `Vec<QuoteJson>`,
+а `json Author` с `path="data.author"` возвращает один `AuthorJson`.
 
 ## JSON в атрибуте/свойстве HTML
 

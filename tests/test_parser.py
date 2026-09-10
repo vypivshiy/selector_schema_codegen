@@ -1372,6 +1372,32 @@ class TestJsonifyAst:
         j = self._jsonify_node("jsonify", "array_def.kdl")
         assert j.ret_type_info.is_array is True
 
+    def test_array_def_cardinality_survives_fragment_path(self, tmp_path):
+        schema = tmp_path / "array_path.kdl"
+        schema.write_text(
+            """
+(array)json Q {
+    x str
+}
+
+struct M {
+    f {
+        css "s"
+        text
+        jsonify Q path="data.items"
+    }
+}
+""",
+            encoding="utf-8",
+        )
+        module = _parse(schema.read_text(encoding="utf-8"))
+        struct = _struct(module, "M")
+        field = _field(struct, "f")
+        jsonify = next(n for n in field.body if isinstance(n, Jsonify))
+        assert jsonify.ret_type_info.base == VariableType.JSON
+        assert jsonify.ret_type_info.is_array is True
+        assert jsonify.ret_type_info.ref == "Q"
+
     def test_undefined_schema_errors(self):
         errs = _lint_errors(_load_fixture("jsonify", "undefined_schema.kdl"))
         assert any("not found" in e.lower() for e in errs)

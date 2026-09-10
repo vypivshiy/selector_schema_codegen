@@ -25,7 +25,7 @@ KDL schema -> kdlquery -> core/reader -> Module AST -> BaseWalker -> output sour
 - реализацию pipeline операций (выражения);
 - реализацию предикатов (фильтры, ассерты, матчинг);
 - вызовы `nested` / `jsonify` / JSON allowlist проекции;
-- интеграцию с DOM API (через `DomSpelling` в Python, DOM API в JS, `goquery` в Go);
+- интеграцию с DOM API (через `DomSpelling` в Python, DOM API в JS, `goquery` в Go, `dom_query` в Rust);
 - интеграцию с HTTP-клиентом (через `HttpLibStrategy` в Python, `JsHttpLibStrategy` в JS, `GoHttpLibStrategy` в Go);
 - генерацию REST-result типов (`Ok`, `Err<Status>`, `UnknownErr`, `TransportErr`).
 
@@ -87,11 +87,20 @@ KDL schema -> kdlquery -> core/reader -> Module AST -> BaseWalker -> output sour
 - DOM API реализован через библиотеку `goquery`.
 - **Инвариант генерации Runtime-хелперов**: все хелперы (`stdFallback`, `std_unescape_text`, REST runtime) **всегда** генерируются в `sscgen_runtime.go` в пределах того же пакета (`package main`), исключая ошибки `redeclared in this block` при наличии нескольких файлов в пакете.
 - `GoHttpLibStrategy(ABC)` (`http_libs/base.py`):
-  - `NetHttpStrategy`: стандартная библиотека `net/http` (`*http.Client`).
+   - `NetHttpStrategy`: стандартная библиотека `net/http` (`*http.Client`).
+
+### 4. Rust (`ssc_codegen/targets/rust/`)
+- `RustVisitor(BaseWalker)` генерирует owned-парсеры с `Result<_, SscError>`.
+- DOM хранится в `Rc<RefCell<Document>>`, а selection/cache handles представлены
+  стабильными `dom_query::NodeId`; это поддерживает nested-парсеры и detached cache
+  без self-referential структур.
+- Общий соседний модуль `sscgen_runtime.rs` содержит DOM, Unicode, regex и JSON helpers.
+- Первая версия намеренно отклоняет XPath, `@request` и REST с диагностикой генерации.
+- Cargo-зависимости: `dom_query = "0.28"`, `regex`, `serde` с feature `derive`, `serde_json`.
 
 ## Two-pass сборка (Two-pass codegen)
 
-Метод `convert_all` в `PythonVisitor`, `JsVisitor` и `GoVisitor` выполняет обход в два прохода:
+Метод `convert_all` в `PythonVisitor`, `JsVisitor`, `GoVisitor` и `RustVisitor` выполняет обход в два прохода:
 1. **Pass 1 (Discovery)**: холостой проход по AST для регистрации всех необходимых импортов, стандартных хелперов и рантайм-функций в `ModuleBuilder`.
 2. **Pass 2 (Emission)**: генерация финального исходного кода с уже сформированным заголовком модуля и импортами.
 

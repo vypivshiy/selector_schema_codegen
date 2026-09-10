@@ -65,8 +65,10 @@ def resolve(spec: TargetSpec) -> TargetProfile:
         return _resolve_js(spec)
     if spec.lang == "go":
         return _resolve_go(spec)
+    if spec.lang == "rust":
+        return _resolve_rust(spec)
     raise ResolutionError(
-        f"Unknown language '{spec.lang}'. Use 'python', 'js', or 'go'."
+        f"Unknown language '{spec.lang}'. Use 'python', 'js', 'go', or 'rust'."
     )
 
 
@@ -199,4 +201,26 @@ def _resolve_go(spec: TargetSpec) -> TargetProfile:
         file_extension=".go",
         create_converter=lambda: GoVisitor(),
         http_clients=(),
+    )
+
+
+def _resolve_rust(spec: TargetSpec) -> TargetProfile:
+    """Resolve the Rust ``dom_query`` backend."""
+    from ssc_codegen.targets.rust.visitor import RustVisitor
+
+    if spec.lib is not None:
+        raise ResolutionError("--lib is not applicable for Rust.")
+    if spec.http_client is not None:
+        raise ResolutionError(
+            "Rust HTML @request and REST transport are not supported yet."
+        )
+    if spec.separate_runtime:
+        raise ResolutionError(
+            "Rust always emits the shared sscgen_runtime.rs module."
+        )
+    return TargetProfile(
+        language="rust",
+        file_extension=".rs",
+        create_converter=lambda: RustVisitor(),
+        supports_separate_runtime=False,
     )

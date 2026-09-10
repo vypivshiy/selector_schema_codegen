@@ -91,6 +91,45 @@ def test_generate_go_rejects_invalid_package_before_writing(tmp_path) -> None:
     assert not output.exists()
 
 
+def test_generate_rust_writes_parser_and_shared_runtime(tmp_path) -> None:
+    schema = tmp_path / "value.kdl"
+    schema.write_text("(raw)fn value { trim }\n", encoding="utf-8")
+    output = tmp_path / "out"
+
+    result = runner.invoke(
+        app, ["generate", "rust", str(schema), "-o", str(output)]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (output / "value.rs").exists()
+    assert (output / "sscgen_runtime.rs").exists()
+    assert "super::sscgen_runtime" in (output / "value.rs").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_generate_rust_rejects_rest_schema(tmp_path) -> None:
+    schema = tmp_path / "api.kdl"
+    schema.write_text(
+        """json User { id int; name str }
+struct Api type=rest {
+    @request response=User \"\"\"
+    GET /users HTTP/1.1
+    Host: api.example.com
+    \"\"\"
+}
+""",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app, ["generate", "rust", str(schema), "-o", str(tmp_path / "out")]
+    )
+
+    assert result.exit_code == 1
+    assert "Rust target does not support REST" in result.output
+
+
 def test_check_json_is_single_document_for_multiple_files(tmp_path) -> None:
     files = []
     for name in ("one", "two"):

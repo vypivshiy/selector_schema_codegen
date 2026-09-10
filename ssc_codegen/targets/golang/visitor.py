@@ -1107,9 +1107,9 @@ class GoVisitor(BaseWalker):
         for child in reversed(node.body):
             ti = getattr(child, "ret_type_info", None)
             if ti and ti.base not in (VT.AUTO, VT.NULL):
-                if ti.base == VT.NESTED and not ti.ref:
+                if ti.base == VT.NESTED:
                     for bc in node.body:
-                        sn = getattr(bc, "struct_name", None)
+                        sn = ti.ref or getattr(bc, "struct_name", None)
                         if sn:
                             return self._nested_struct_ret_type(sn, bc)
                 if ti.base == VT.JSON and not ti.ref:
@@ -1812,7 +1812,11 @@ class GoVisitor(BaseWalker):
         val = self._go_fallback_value(node.value, ret_type)
         lines = [f"{ctx.indent}return stdFallback(func() {ret_type} {{"]
         lines.extend(self.walk_pipeline(node.body, inner_ctx))
-        lines.append(f"{inner_indent}return {last_var}")
+        if ret_type.startswith("*"):
+            lines.append(f"{inner_indent}_fallback_value := {last_var}")
+            lines.append(f"{inner_indent}return &_fallback_value")
+        else:
+            lines.append(f"{inner_indent}return {last_var}")
         lines.append(f"{ctx.indent}}}, {val})")
         return lines
 
@@ -1906,6 +1910,8 @@ class GoVisitor(BaseWalker):
         Prefers the inferred type from the fallback body's last operation.
         Falls back to the enclosing field's declared return type.
         """
+        if node.ret_type_info and node.ret_type_info.is_optional:
+            return self._resolve_type(node.ret_type_info)
         if node.body:
             last = node.body[-1]
             for attr in ("ret_type_info", "accept_type_info"):

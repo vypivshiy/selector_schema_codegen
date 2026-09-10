@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast as _py_ast
 import re as _re
 from collections.abc import Sequence
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any, Callable, TypeAlias
 
@@ -24,7 +25,6 @@ from ssc_codegen.ast import (
     Index,
     InitField,
     JsonDef,
-    JsonDefField,
     Jsonify,
     Join,
     Key,
@@ -258,7 +258,12 @@ def resolve_jsonify_type(
 ) -> tuple[VariableType, bool]:
     """Resolve the return base type and array status for a `jsonify` operation.
 
-    Navigates dot-notation property paths into nested JSON schema definitions.
+    Resolves the selected JSON fragment from the named schema declaration.
+
+    ``path`` selects a value in the input JSON document; it does not navigate
+    through the fields of the declared schema.  The schema name therefore
+    remains the source of truth for both the generated model reference and its
+    cardinality.
 
     Args:
         json_def: The root `JsonDef` schema targeted by `jsonify`.
@@ -271,37 +276,7 @@ def resolve_jsonify_type(
     ja = json_def.is_array
     if not path:
         return VariableType.JSON, ja
-    segments = path.split(".")
-    current_def = json_def
-    current_is_array = ja
-    for i, segment in enumerate(segments):
-        if current_is_array and segment.isdigit():
-            current_is_array = False
-            continue
-        field = None
-        for f in current_def.body:
-            if isinstance(f, JsonDefField) and (
-                f.name == segment or f.alias == segment
-            ):
-                field = f
-                break
-        if field is None:
-            return VariableType.JSON, False
-        ti = field.ret_type_info
-        if ti is None:
-            return VariableType.JSON, False
-        if i == len(segments) - 1:
-            return ti.base, ti.is_array
-        if ti.base != VariableType.JSON:
-            return VariableType.JSON, False
-        if not ti.ref:
-            return VariableType.JSON, False
-        nested_def = ctx.json_defs.get(ti.ref)
-        if not nested_def:
-            return VariableType.JSON, False
-        current_def = nested_def
-        current_is_array = ti.is_array
-    return VariableType.JSON, current_is_array
+    return VariableType.JSON, ja
 
 
 # ── Typedef builder ──────────────────────────────────────────────────────────────
@@ -1307,7 +1282,11 @@ def _expr_jsonify(
         parent=parent,
         schema_name=schema_name,
         path=path,
-        ret_type_info=TypeInfo(base=ret_type, is_array=is_array),
+        ret_type_info=TypeInfo(
+            base=ret_type,
+            is_array=is_array,
+            ref=schema_name if ret_type == VariableType.JSON else None,
+        ),
     )
 
 
@@ -1331,7 +1310,11 @@ def _expr_nested(
     return Nested(
         parent=parent,
         struct_name=struct_name,
-        ret_type_info=TypeInfo(base=VariableType.NESTED, is_array=is_array),
+        ret_type_info=TypeInfo(
+            base=VariableType.NESTED,
+            is_array=is_array,
+            ref=struct_name,
+        ),
     )
 
 
@@ -1345,12 +1328,13 @@ def _expr_fallback(
     value = [] if not node.args else node.args[0].value
     prev = _prev_type_info(parent)
     prev_ti = prev.ret_type_info
+    ret_ti = replace(prev_ti, is_optional=True) if value is None else prev_ti
     fb = Fallback(
         parent=parent,
         value=value,
         body=list(parent.body),
         accept_type_info=prev_ti,
-        ret_type_info=prev_ti,
+        ret_type_info=ret_ti,
     )
     parent.body = [fb]
     return fb

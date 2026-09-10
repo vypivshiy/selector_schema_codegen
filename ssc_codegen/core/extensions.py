@@ -163,7 +163,7 @@ def handle_extension(
             targets={
                 child.name: _parse_target(child)
                 for child in operation.children
-                if child.name in ("py", "js", "go")
+                if child.name in ("py", "js", "go", "rust")
             },
         )
         qualified_name = definition.qualified_name

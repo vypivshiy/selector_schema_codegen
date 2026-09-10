@@ -109,7 +109,9 @@ OP_TYPES: dict[str, OpSig] = {
         VariableType.STRING, VariableType.FLOAT, list_propagates=True
     ),
     "to-bool": OpSig(None, VariableType.BOOL, force_scalar=True),
-    "jsonify": OpSig(VariableType.STRING, VariableType.JSON, force_scalar=True),
+    # The named JsonDef owns cardinality.  The input path selects a fragment
+    # and must not force an array schema back to a scalar result.
+    "jsonify": OpSig(VariableType.STRING, VariableType.JSON),
     "nested": OpSig(
         VariableType.DOCUMENT, VariableType.NESTED, force_scalar=True
     ),

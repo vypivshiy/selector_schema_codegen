@@ -300,7 +300,7 @@ def lint_module(
     Checks:
     - Top-level node whitelist (`struct`, `json`, `fn`, `define`, `extension`, `import`, `@doc`).
     - Explicit import block syntax and kind annotations.
-    - Extension signatures and valid targets (`py`, `js`, `go`).
+    - Extension signatures and valid targets (`py`, `js`, `go`, `rust`).
     - Define names (UPPER_CASE) and scalar/block structure.
     - JSON schema definitions, field types, and dot-notation paths.
     - Struct structural invariants and required directives per struct type.
@@ -513,7 +513,7 @@ def _lint_extension_import(
                 code="E002",
             )
         )
-    if node.get_prop("alias") and target != "go":
+    if node.get_prop("alias") and target not in ("go", "rust"):
         diags.append(
             _error(
                 node,
@@ -691,12 +691,12 @@ def _lint_extensions(
             targets = [
                 child
                 for child in operation.children
-                if child.name in ("go", "js", "py")
+                if child.name in ("go", "js", "py", "rust")
             ]
             unknown = [
                 child
                 for child in operation.children
-                if child.name not in ("go", "js", "py", "sig")
+                if child.name not in ("go", "js", "py", "rust", "sig")
             ]
             for child in unknown:
                 diags.append(
@@ -705,7 +705,7 @@ def _lint_extensions(
                         f"unknown extension operation entry '{child.name}'",
                         source_path,
                         code="E200",
-                        hint="valid entries: sig, py, js, go",
+                        hint="valid entries: sig, py, js, go, rust",
                     )
                 )
             if len(sigs) != 1 or len(sigs[0].args) != 2:

@@ -2,7 +2,7 @@
 
 ssc_codegen is a code generator for web scraping parsers.
 Input: .kdl schema files describing HTML extraction rules.
-Output: parser code for Python (bs4, lxml, parsel, selectolax), JavaScript (DOM API), and Go (goquery).
+Output: parser code for Python (bs4, lxml, parsel, selectolax), JavaScript (DOM API), Go (goquery), and Rust (dom_query).
 
 Pipeline: .kdl schema → external `kdlquery` parser → core (AST + lint) → visitor → output code
 
@@ -99,6 +99,10 @@ ssc_codegen/
 │       ├── rest.py        # REST/fetch codegen
 │       ├── runtime.py     # shared Go helper definitions
 │       └── http_libs/     # net/http strategy
+│   └── rust/               # Rust backend (dom_query + regex + serde)
+│       ├── visitor.py     # RustVisitor and owned parser lifecycle
+│       ├── runtime.py     # shared sscgen_runtime.rs source
+│       └── regex.py       # Rust regex compatibility checks
 ├── parsers/               # HTTP transport parsing (consumed by visitors)
 │   ├── curl.py            # parse_curl_command() — POSIX curl → kwargs
 │   └── http.py            # parse_http_request() — raw HTTP/1.1|2 → kwargs
@@ -137,6 +141,7 @@ ssc-gen generate python schema.kdl -L parsel -o out/                  # Python +
 ssc-gen generate python schema.kdl -L slax -o out/                    # Python + selectolax
 ssc-gen generate js schema.kdl -o out/                                # JavaScript (vanilla DOM)
 ssc-gen generate go schema.kdl -o out/                                # Go (goquery + net/http)
+ssc-gen generate rust schema.kdl -o out/                              # Rust (dom_query + serde)
 ssc-gen generate python schema.kdl -L bs4 -o out/ --http-client httpx # with @request support
 ssc-gen generate python schema.kdl -L bs4 -o out/ -R                  # separate runtime module
 ssc-gen generate python schema.kdl -L bs4 -o out/ -R -rn my_runtime   # custom runtime name
@@ -153,7 +158,8 @@ ssc-gen scout -i page.html --text '\$\d+\.\d{2}' -f json              # HTML rec
 **Commands:**
 - `generate python <files>`: Generate Python parser code
 - `generate js <files>`: Generate JavaScript parser code
-- `generate go <files>`: Generate Go parser code (goquery + net/http)
+ - `generate go <files>`: Generate Go parser code (goquery + net/http)
+ - `generate rust <files>`: Generate Rust parser modules (dom_query + serde)
 
 **Flags:**
 - `--lib / -L`: HTML library (Python only) — `bs4` (default) | `lxml` | `parsel` | `slax`

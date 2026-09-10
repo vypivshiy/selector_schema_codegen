@@ -39,7 +39,7 @@ class SymbolScope(str, Enum):
     RUNTIME = "runtime"
 
 
-TARGETS = ("python", "javascript", "go")
+TARGETS = ("python", "javascript", "go", "rust")
 _ALIASES = {"py": "python", "js": "javascript"}
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\Z")
 PYTHON_RESERVED = frozenset(keyword.kwlist)
@@ -48,6 +48,9 @@ JAVASCRIPT_RESERVED = frozenset(
 )
 GO_RESERVED = frozenset(
     "break default func interface select case defer go map struct chan else goto package switch const fallthrough if range type continue for import return var".split()
+)
+RUST_RESERVED = frozenset(
+    "as break const continue crate else enum extern false fn for if impl in let loop match mod move mut pub ref return self Self static struct super trait true type unsafe use where while async await dyn abstract become box do final macro override priv typeof unsized virtual yield try".split()
 )
 
 
@@ -91,6 +94,7 @@ def target_reserved_words(target: str) -> frozenset[str]:
         "python": PYTHON_RESERVED,
         "javascript": JAVASCRIPT_RESERVED,
         "go": GO_RESERVED,
+        "rust": RUST_RESERVED,
     }[target]
 
 
@@ -165,6 +169,7 @@ def top_symbol_names(
         "python": (to_snake_case(raw),),
         "javascript": (to_camel_case(raw),),
         "go": (pascal,),
+        "rust": (to_snake_case(raw),),
     }[target]
 
 
@@ -175,21 +180,25 @@ def local_symbol(kind: SymbolKind, raw: str, target: str) -> str:
             "python": f"_parse_{snake}",
             "javascript": f"_parse{pascal}",
             "go": f"parse{pascal}",
+            "rust": snake,
         }[target]
     if kind is SymbolKind.METHOD:
         return {
             "python": snake,
             "javascript": to_camel_case(snake),
             "go": pascal,
+            "rust": snake,
         }[target]
     if kind is SymbolKind.PLACEHOLDER:
         return {
             "python": snake,
             "javascript": to_camel_case(snake),
             "go": to_camel_case(raw),
+            "rust": snake,
         }[target]
     return {
         "python": f"_init_{snake}",
         "javascript": f"_init{pascal}",
         "go": f"init{pascal}",
+        "rust": f"init_{snake}",
     }[target]

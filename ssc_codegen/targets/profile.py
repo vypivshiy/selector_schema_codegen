@@ -19,7 +19,7 @@ class TargetProfile:
     and provide metadata needed for file layout and converter instantiation.
 
     Attributes:
-        language: Canonical target language name (`"python"`, `"javascript"`, or `"go"`).
+        language: Canonical target language name (`"python"`, `"javascript"`, `"go"`, or `"rust"`).
         file_extension: File extension for generated source files (e.g. `".py"`, `".js"`, `".go"`).
         create_converter: Zero-argument factory callable returning an initialized
             visitor/converter instance capable of traversing `Module` ASTs.

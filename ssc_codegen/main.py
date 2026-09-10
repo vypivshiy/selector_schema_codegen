@@ -115,6 +115,8 @@ def _plan_output_files(
         register("Python runtime", output / f"{name}.py")
     if profile.language == "go":
         register("Go runtime", output / "sscgen_runtime.go")
+    if profile.language == "rust":
+        register("Rust runtime", output / "sscgen_runtime.rs")
     return planned
 
 
@@ -335,6 +337,14 @@ def _run_generate(
             runtime_path.write_bytes(
                 converter.emit_runtime(meta["package"]).encode("utf-8")
             )
+            typer.echo(f"  -> {runtime_path}")
+
+    if profile.language == "rust":
+        from ssc_codegen.targets.rust.visitor import RustVisitor
+
+        if isinstance(converter, RustVisitor):
+            runtime_path = output / "sscgen_runtime.rs"
+            runtime_path.write_text(converter.emit_runtime(), encoding="utf-8")
             typer.echo(f"  -> {runtime_path}")
 
     if errors:
@@ -616,6 +626,68 @@ def generate_go(
         files,
         output,
         package=package,
+        skip_lint=skip_lint,
+        verbose=verbose,
+        fmt=fmt,
+    )
+
+
+@gen_app.command("rust")
+def generate_rust(
+    files: Annotated[
+        List[Path],
+        typer.Argument(
+            help="One or more .kdl schema files or directories containing .kdl files to compile.",
+            exists=True,
+            file_okay=True,
+            dir_okay=True,
+            readable=True,
+        ),
+    ],
+    output: Annotated[
+        Path,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Output directory. Created automatically if it does not exist.",
+            file_okay=False,
+            dir_okay=True,
+            writable=True,
+        ),
+    ] = Path("."),
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose", "-v", help="Print full tracebacks on errors."
+        ),
+    ] = False,
+    skip_lint: Annotated[
+        bool,
+        typer.Option(
+            "--skip-lint", help="Skip linting before code generation."
+        ),
+    ] = False,
+    fmt: Annotated[
+        FmtType,
+        typer.Option(
+            "--format",
+            "-f",
+            help="Output format: 'text' (human-readable) or 'json'.",
+        ),
+    ] = FmtType.TEXT,
+) -> None:
+    """Compile HTML and raw KDL schemas into Rust parser modules."""
+    if verbose:
+        setup_debug_logging()
+    try:
+        profile = resolve(TargetSpec(lang="rust"))
+    except ResolutionError as exc:
+        typer.echo(f"ERROR: {exc}", err=True)
+        raise typer.Exit(code=1)
+    _run_generate(
+        profile,
+        files,
+        output,
         skip_lint=skip_lint,
         verbose=verbose,
         fmt=fmt,
