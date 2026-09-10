@@ -1311,9 +1311,21 @@ def _expr_nested(
         StructType.FLAT,
         StructType.LIST,
     )
+    prev = _prev_type_info(parent)
+    if isinstance(struct, Struct) and struct.type == StructType.RAW:
+        if prev.ret_type_info.base not in (
+            VariableType.STRING,
+            VariableType.AUTO,
+        ):
+            lint.error(
+                node,
+                message=f"'nested {struct_name}': target is a (raw)struct and requires STRING input, got {prev.ret_type_info.base.name}",
+                code="E100",
+            )
     return Nested(
         parent=parent,
         struct_name=struct_name,
+        accept_type_info=prev.ret_type_info,
         ret_type_info=TypeInfo(
             base=VariableType.NESTED,
             is_array=is_array,

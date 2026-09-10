@@ -812,3 +812,289 @@ fn main() {
     )
     assert result.returncode == 0, result.stderr
     assert "JSON_OK" in result.stdout
+
+
+def test_html_fn_compiles_and_runs(tmp_path: Path) -> None:
+    """Non-raw HTML fn parses input into dom_query::Document and evaluates pipelines."""
+    schema = """
+struct CardInfo {
+    title {
+        css "h2"
+        text
+    }
+}
+
+fn page_title {
+    @doc "Extract the <h1> text from an HTML document."
+    css "h1"
+    text
+    trim
+}
+
+fn active_links {
+    css-all "a"
+    filter {
+        attr-eq "class" "active"
+    }
+    attr "href"
+}
+
+fn parse_card {
+    css ".card"
+    nested CardInfo
+}
+"""
+    module, diagnostics = parse_module(schema)
+    assert not [item for item in diagnostics if item.severity.name == "ERROR"]
+
+    source_dir = _write_cargo_project(tmp_path)
+    converter = RustVisitor()
+    (source_dir / "parser.rs").write_text(
+        converter.convert(module), encoding="utf-8"
+    )
+    (source_dir / "sscgen_runtime.rs").write_text(
+        converter.emit_runtime(), encoding="utf-8"
+    )
+    (source_dir / "main.rs").write_text(
+        r"""mod parser;
+mod sscgen_runtime;
+
+fn main() {
+    let html = r#"
+    <html>
+        <body>
+            <h1>  Hello Rust Functions!  </h1>
+            <a class="active" href="/home">Home</a>
+            <a href="/about">About</a>
+            <a class="active" href="/contact">Contact</a>
+            <div class="card">
+                <h2>Featured Card</h2>
+            </div>
+        </body>
+    </html>
+    "#;
+
+    let title = parser::page_title(html).expect("page_title should succeed");
+    assert_eq!(title, "Hello Rust Functions!");
+
+    let links = parser::active_links(html).expect("active_links should succeed");
+    assert_eq!(links, vec!["/home".to_string(), "/contact".to_string()]);
+
+    let card = parser::parse_card(html).expect("parse_card should succeed");
+    assert_eq!(card.title, "Featured Card");
+
+    println!("HTML_FN_OK");
+}
+""",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        ["cargo", "run", "--quiet"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env=_cargo_env(),
+        encoding="utf-8",
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "HTML_FN_OK" in result.stdout
+
+
+def test_raw_nested_compiles_and_runs(tmp_path: Path) -> None:
+    """Raw struct nested invocations support raw-to-raw, raw-to-html, and html-to-raw pipelines."""
+    schema = """
+(raw)struct RawMetadata {
+    version {
+        re #"ver=([0-9]+\\.[0-9]+)"#
+    }
+}
+
+struct HtmlCard {
+    heading {
+        css "h3"
+        text
+    }
+}
+
+(raw)struct InnerSnippet {
+    id {
+        re #"id=(\\d+)"#
+        to-int
+    }
+    label {
+        re #"name=([a-zA-Z]+)"#
+    }
+}
+
+(raw)struct OuterEnvelope {
+    snippet {
+        nested InnerSnippet
+    }
+    card {
+        re #"(<div class=\"card\">.*?</div>)"#
+        nested HtmlCard
+    }
+}
+
+struct HtmlWithRawChild {
+    meta {
+        css "div#meta"
+        text
+        nested RawMetadata
+    }
+}
+"""
+    module, diagnostics = parse_module(schema)
+    assert not [item for item in diagnostics if item.severity.name == "ERROR"]
+
+    source_dir = _write_cargo_project(tmp_path)
+    converter = RustVisitor()
+    (source_dir / "parser.rs").write_text(
+        converter.convert(module), encoding="utf-8"
+    )
+    (source_dir / "sscgen_runtime.rs").write_text(
+        converter.emit_runtime(), encoding="utf-8"
+    )
+    (source_dir / "main.rs").write_text(
+        r"""mod parser;
+mod sscgen_runtime;
+
+fn main() {
+    let raw_data = "id=123;name=Rust;extra=<div class=\"card\"><h3>Card Heading</h3></div>";
+    let mut envelope_parser = parser::OuterEnvelopeParser::new(raw_data).expect("envelope parser init");
+    let envelope = envelope_parser.parse().expect("envelope parse");
+    // Verify memory safety: parsed child types outlive parser drop
+    drop(envelope_parser);
+    assert_eq!(envelope.snippet.id, 123);
+    assert_eq!(envelope.snippet.label, "Rust");
+    assert_eq!(envelope.card.heading, "Card Heading");
+    let s = serde_json::to_string(&envelope.snippet).expect("snippet serializes independently");
+    assert!(s.contains("\"id\":123"));
+
+    let html_data = "<html><body><div id=\"meta\">ver=2.5;build=release</div></body></html>";
+    let mut html_parser = parser::HtmlWithRawChildParser::new(html_data).expect("html parser init");
+    let html_res = html_parser.parse().expect("html parse");
+    drop(html_parser);
+    assert_eq!(html_res.meta.version, "2.5");
+
+    println!("RAW_NESTED_OK");
+}
+""",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        ["cargo", "run", "--quiet"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env=_cargo_env(),
+        encoding="utf-8",
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "RAW_NESTED_OK" in result.stdout
+
+
+def test_fn_schema_25_compiles_and_runs(tmp_path: Path) -> None:
+    """Full 25_fn.kdl schema with HTML and raw functions runs successfully."""
+    schema_path = (
+        Path(__file__).resolve().parents[1]
+        / "integration"
+        / "schemas"
+        / "25_fn.kdl"
+    )
+    module, diagnostics = parse_module(
+        schema_path.read_text(encoding="utf-8"), source_path=schema_path
+    )
+    assert not [item for item in diagnostics if item.severity.name == "ERROR"]
+
+    source_dir = _write_cargo_project(tmp_path)
+    converter = RustVisitor()
+    (source_dir / "parser.rs").write_text(
+        converter.convert(module), encoding="utf-8"
+    )
+    (source_dir / "sscgen_runtime.rs").write_text(
+        converter.emit_runtime(), encoding="utf-8"
+    )
+    (source_dir / "main.rs").write_text(
+        r"""mod parser;
+mod sscgen_runtime;
+
+fn main() {
+    let fn_html = "<html><body><h1>Hello World</h1><a href='/a'>A</a><a href='/b'>B</a></body></html>";
+    let fn_raw = "first line\nsecond line\nthird line";
+    let fn_version = "app version=1.2.3 released";
+
+    let title = parser::page_title(fn_html).unwrap();
+    assert_eq!(title, "Hello World");
+
+    let links = parser::all_links(fn_html).unwrap();
+    assert_eq!(links, vec!["/a".to_string(), "/b".to_string()]);
+
+    let first = parser::first_line(fn_raw).unwrap();
+    assert_eq!(first, "first line");
+
+    let ver = parser::extract_version(fn_version).unwrap();
+    assert_eq!(ver, "1.2.3");
+
+    println!("SCHEMA_25_OK");
+}
+""",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        ["cargo", "run", "--quiet"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env=_cargo_env(),
+        encoding="utf-8",
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "SCHEMA_25_OK" in result.stdout
+
+
+def test_raw_nested_rejects_document_input() -> None:
+    """Invoking a (raw)struct with DOCUMENT input must be rejected with E100."""
+    schema = """
+(raw)struct ChildRaw {
+    v { re #"v=(\\d+)"# }
+}
+
+struct ParentHtml {
+    field {
+        css "div"
+        nested ChildRaw
+    }
+}
+"""
+    _, diagnostics = parse_module(schema)
+    errors = [d for d in diagnostics if d.severity.name == "ERROR"]
+    assert any(
+        "target is a (raw)struct and requires STRING input" in d.message
+        for d in errors
+    )
+
+
+def test_nested_rejects_list_string_input() -> None:
+    """Invoking nested with a list of strings must be rejected with E100."""
+    schema = """
+(raw)struct ChildRaw {
+    v { re #"v=(\\d+)"# }
+}
+
+(raw)struct ParentRaw {
+    field {
+        re-all #"v=(\\d+)"#
+        nested ChildRaw
+    }
+}
+"""
+    _, diagnostics = parse_module(schema)
+    errors = [d for d in diagnostics if d.severity.name == "ERROR"]
+    assert any(
+        "'nested' does not accept STRING; expected DOCUMENT" in d.message
+        for d in errors
+    )

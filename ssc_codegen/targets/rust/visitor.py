@@ -318,11 +318,31 @@ class RustVisitor(BaseWalker):
                 and not field
             ):
                 field = getattr(current, "name", "") or "check"
+            if isinstance(current, FunctionDef):
+                return current.name or "fn"
             if isinstance(current, StructBase):
                 struct = current.name
                 break
             current = getattr(current, "parent", None)
         return f"{struct}.{field}" if struct and field else struct or "pipeline"
+
+    def _is_in_function(self, node: Any) -> bool:
+        current = node
+        while current is not None:
+            if isinstance(current, FunctionDef):
+                return True
+            if isinstance(current, StructBase):
+                return False
+            current = getattr(current, "parent", None)
+        return False
+
+    def _dom_ref(self, node: Any) -> str:
+        return "&dom" if self._is_in_function(node) else "&self.dom"
+
+    def _dom_clone(self, node: Any) -> str:
+        return (
+            "dom.clone()" if self._is_in_function(node) else "self.dom.clone()"
+        )
 
     def _type(self, info: TypeInfo | None, *, field: bool = False) -> str:
         if info is None:
@@ -371,12 +391,14 @@ class RustVisitor(BaseWalker):
         return None
 
     def _is_raw(self, node: Any) -> bool:
-        struct = (
-            node
-            if isinstance(node, StructBase)
-            else self._enclosing_struct(node)
-        )
-        return isinstance(struct, Struct) and struct.type == ST.RAW
+        current = node
+        while current is not None:
+            if isinstance(current, StructBase):
+                return isinstance(current, Struct) and current.type == ST.RAW
+            if isinstance(current, FunctionDef):
+                return current.is_raw
+            current = getattr(current, "parent", None)
+        return False
 
     # === module and declarations ==========================================
 
@@ -978,15 +1000,23 @@ class RustVisitor(BaseWalker):
         ]
 
     def visit_nested(self, node: Nested, ctx: WalkContext) -> list[str]:
-        if self._is_raw(node):
-            raise BuildTimeError(
-                "nested is not supported inside raw Rust parsers"
-            )
         cls = _pascal(node.struct_name)
+        child_struct = self._structs.get(node.struct_name)
+        is_child_raw = (
+            isinstance(child_struct, Struct) and child_struct.type == ST.RAW
+        )
+        if self._is_raw(node) or is_child_raw:
+            return [
+                self._line(
+                    ctx,
+                    f"let {ctx.nxt} = {cls}Parser::new(&{ctx.prv})?.parse()?;",
+                )
+            ]
+        dom = self._dom_clone(node)
         return [
             self._line(
                 ctx,
-                f'let {ctx.nxt} = {cls}Parser::from_existing(self.dom.clone(), rt::first_node(&{ctx.prv}, "{self._context(node)}")?)?.parse()?;',
+                f'let {ctx.nxt} = {cls}Parser::from_existing({dom}, rt::first_node(&{ctx.prv}, "{self._context(node)}")?)?.parse()?;',
             )
         ]
 
@@ -1037,10 +1067,11 @@ class RustVisitor(BaseWalker):
 
     def visit_css_select(self, node: CssSelect, ctx: WalkContext) -> list[str]:
         queries = ", ".join(_str(q) for q in node.queries)
+        dom = self._dom_ref(node)
         return [
             self._line(
                 ctx,
-                f'let {ctx.nxt} = rt::select(&self.dom, &{ctx.prv}, &[{queries}], "{self._context(node)}")?;',
+                f'let {ctx.nxt} = rt::select({dom}, &{ctx.prv}, &[{queries}], "{self._context(node)}")?;',
             )
         ]
 
@@ -1048,21 +1079,23 @@ class RustVisitor(BaseWalker):
         self, node: CssSelectAll, ctx: WalkContext
     ) -> list[str]:
         queries = ", ".join(_str(q) for q in node.queries)
+        dom = self._dom_ref(node)
         return [
             self._line(
                 ctx,
-                f'let {ctx.nxt} = rt::select_all(&self.dom, &{ctx.prv}, &[{queries}], "{self._context(node)}")?;',
+                f'let {ctx.nxt} = rt::select_all({dom}, &{ctx.prv}, &[{queries}], "{self._context(node)}")?;',
             )
         ]
 
     def visit_css_remove(self, node: CssRemove, ctx: WalkContext) -> list[str]:
         removed = f"_{ctx.nxt}_removed"
+        dom = self._dom_ref(node)
         return [
             self._line(
                 ctx,
-                f'let {removed} = rt::select_all(&self.dom, &{ctx.prv}, &[{_str(node.query)}], "{self._context(node)}")?;',
+                f'let {removed} = rt::select_all({dom}, &{ctx.prv}, &[{_str(node.query)}], "{self._context(node)}")?;',
             ),
-            self._line(ctx, f"rt::remove(&self.dom, &{removed})?;"),
+            self._line(ctx, f"rt::remove({dom}, &{removed})?;"),
             self._line(ctx, f"let {ctx.nxt} = {ctx.prv}.clone();"),
         ]
 
@@ -1076,48 +1109,51 @@ class RustVisitor(BaseWalker):
     visit_xpath_remove = _xpath
 
     def visit_text(self, node: Text, ctx: WalkContext) -> list[str]:
+        dom = self._dom_ref(node)
         if node.ret_type_info.is_array:
             return [
                 self._line(
-                    ctx, f"let {ctx.nxt} = rt::text_all(&self.dom, &{ctx.prv});"
+                    ctx, f"let {ctx.nxt} = rt::text_all({dom}, &{ctx.prv});"
                 )
             ]
         return [
             self._line(
                 ctx,
-                f'let {ctx.nxt} = rt::text(&self.dom, &{ctx.prv}, "{self._context(node)}")?;',
+                f'let {ctx.nxt} = rt::text({dom}, &{ctx.prv}, "{self._context(node)}")?;',
             )
         ]
 
     def visit_raw(self, node: Raw, ctx: WalkContext) -> list[str]:
         inner = node.mode == "inner"
+        dom = self._dom_ref(node)
         if node.ret_type_info.is_array:
             return [
                 self._line(
                     ctx,
-                    f"let {ctx.nxt} = rt::raw_all(&self.dom, &{ctx.prv}, {str(inner).lower()});",
+                    f"let {ctx.nxt} = rt::raw_all({dom}, &{ctx.prv}, {str(inner).lower()});",
                 )
             ]
         return [
             self._line(
                 ctx,
-                f'let {ctx.nxt} = rt::raw(&self.dom, &{ctx.prv}, {str(inner).lower()}, "{self._context(node)}")?;',
+                f'let {ctx.nxt} = rt::raw({dom}, &{ctx.prv}, {str(inner).lower()}, "{self._context(node)}")?;',
             )
         ]
 
     def visit_attr(self, node: Attr, ctx: WalkContext) -> list[str]:
         names = ", ".join(_str(q) for q in node.keys)
+        dom = self._dom_ref(node)
         if node.ret_type_info.is_array:
             return [
                 self._line(
                     ctx,
-                    f"let {ctx.nxt} = rt::attr_all(&self.dom, &{ctx.prv}, &[{names}]);",
+                    f"let {ctx.nxt} = rt::attr_all({dom}, &{ctx.prv}, &[{names}]);",
                 )
             ]
         return [
             self._line(
                 ctx,
-                f'let {ctx.nxt} = rt::attr(&self.dom, &{ctx.prv}, &[{names}], "{self._context(node)}")?;',
+                f'let {ctx.nxt} = rt::attr({dom}, &{ctx.prv}, &[{names}], "{self._context(node)}")?;',
             )
         ]
 
@@ -1476,8 +1512,9 @@ class RustVisitor(BaseWalker):
 
     def visit_predicate_css(self, node: PredCss, ctx: WalkContext) -> list[str]:
         target = self._predicate_target(node)
+        dom = self._dom_ref(node)
         return self._pred_line(
-            f"rt::pred_css(&self.dom, {target}, {_str(node.query)})", ctx
+            f"rt::pred_css({dom}, {target}, {_str(node.query)})", ctx
         )
 
     def visit_predicate_xpath(
@@ -1491,7 +1528,8 @@ class RustVisitor(BaseWalker):
         if operation == "re":
             validate_rust_pattern(node.pattern)
         target = self._predicate_target(node)
-        attr = f"rt::pred_attr(&self.dom, {target}, {_str(node.name)}).unwrap_or_default()"
+        dom = self._dom_ref(node)
+        attr = f"rt::pred_attr({dom}, {target}, {_str(node.name)}).unwrap_or_default()"
         values = [_str(value) for value in getattr(node, "values", ())]
         if operation == "eq":
             expr = self._or([f"{attr} == {value}" for value in values])
@@ -1515,10 +1553,11 @@ class RustVisitor(BaseWalker):
         self, node: PredHasAttr, ctx: WalkContext
     ) -> list[str]:
         target = self._predicate_target(node)
+        dom = self._dom_ref(node)
         # pred_attr returns a value; an empty value is still a present attribute,
         # so query the DOM directly through a non-empty-name fallback.
         checks = [
-            f"rt::pred_attr(&self.dom, {target}, {_str(name)}).is_some()"
+            f"rt::pred_attr({dom}, {target}, {_str(name)}).is_some()"
             for name in node.attrs
         ]
         return self._pred_line(self._or(checks), ctx)
@@ -1559,8 +1598,9 @@ class RustVisitor(BaseWalker):
         if operation == "re":
             validate_rust_pattern(node.pattern)
         target = self._predicate_target(node)
+        dom = self._dom_ref(node)
         if target.startswith("&"):
-            value = f"rt::pred_text(&self.dom, {target})"
+            value = f"rt::pred_text({dom}, {target})"
         else:
             value = target
         values = (
@@ -1780,14 +1820,27 @@ class RustVisitor(BaseWalker):
     def visit_function_def(
         self, node: FunctionDef, ctx: WalkContext
     ) -> list[str]:
-        if not node.is_raw:
-            raise BuildTimeError("Rust target supports only raw functions")
         name = _ident(node.name)
         typ = self._type(node.ret_type_info)
-        lines = [
-            f"pub fn {name}(document: impl Into<String>) -> Result<{typ}, rt::SscError> {{",
-            "    let v = document.into();",
-        ]
+        lines: list[str] = []
+        if node.doc:
+            lines.extend(
+                f"// {line}" if line else "//" for line in node.doc.splitlines()
+            )
+        lines.append(
+            f"pub fn {name}(document: impl Into<String>) -> Result<{typ}, rt::SscError> {{"
+        )
+        if node.is_raw:
+            lines.append("    let v = document.into();")
+        else:
+            lines.extend(
+                [
+                    "    let document = Document::from(document.into());",
+                    "    let dom = Rc::new(RefCell::new(document));",
+                    "    let root = rt::root_id(&dom);",
+                    "    let v = vec![root];",
+                ]
+            )
         lines.extend(self.walk_children(node, ctx))
         if not any(isinstance(n, Return) for n in node.body):
             lines.append(
