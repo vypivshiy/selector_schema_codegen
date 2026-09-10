@@ -20,6 +20,18 @@ _Avoid_: HTML client, OpenAPI converter
 An ordered sequence of KDL operations that changes an input value into a field result.
 _Avoid_: transform (unless referring to a confirmed project operation)
 
+**Precomputed field**:
+A named value derived from parser input by an `@init` pipeline during parser initialization and cached for later `@name` references on that instance.
+_Avoid_: constructor argument, automatically emitted result field
+
+**DOM side effect**:
+A pipeline operation's modification of the shared document tree, visible to subsequent operations that use that tree.
+_Avoid_: pipeline-local copy, isolated transformation
+
+**Cached detached node**:
+A node removed from the document tree that remains accessible through an existing precomputed field. New queries from the document root no longer select it, while cached references still observe changes to the same node.
+_Avoid_: invalidated cache entry, immutable snapshot
+
 ## API Terms
 
 **Request**:
@@ -40,6 +52,10 @@ The source JSON key specified via `from="..."` property (or legacy positional st
 when it differs from the canonical field name. For `context str from="@context"`,
 `context` is the canonical field name and `@context` is the JSON key alias.
 _Avoid_: output alias, field rename
+
+**Selected JSON fragment**:
+The JSON value selected by a `jsonify` operation's `path`, or the entire input JSON value when no path is specified. The named JSON schema describes this fragment; its declaration determines whether the result is an object or an array of objects.
+_Avoid_: path through the declared schema, implicitly validated envelope
 
 **Remapped JSON result**:
 A plain mapping containing only declared canonical JSON field names, produced
@@ -66,6 +82,14 @@ Actions required before the target request, such as login, token exchange, cooki
 _Avoid_: request body
 
 ## Codegen Architecture
+
+**Schema converter**:
+The part of schema code generation that produces parser source code for a chosen target language.
+_Avoid_: schema parser, generated parser
+
+**HTML backend**:
+The HTML library used by a generated parser to build, query, and modify the document tree described by an HTML schema.
+_Avoid_: target language, HTTP client
 
 **AST Node**:
 A strongly-typed dataclass (`ssc_codegen.ast.Node`) representing a syntax element or synthesized artifact in the intermediate representation tree.

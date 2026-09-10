@@ -7,7 +7,9 @@ import re
 from ssc_codegen.exceptions import BuildTimeError
 
 
-_UNSUPPORTED = re.compile(r"\(\?[=!<]|\\[1-9]")
+_UNSUPPORTED = re.compile(
+    r"\(\?[=!<]|\\[1-9]|\(\?P=[a-zA-Z_]\w*\)|\\k<[a-zA-Z_]\w*>|\\k'[a-zA-Z_]\w*'"
+)
 
 
 def validate_rust_pattern(pattern: str) -> str:
@@ -31,12 +33,32 @@ def validate_rust_pattern(pattern: str) -> str:
 
 
 def rust_replacement(replacement: str) -> str:
-    """Translate DSL/Python numeric replacement groups to Rust syntax."""
+    """Translate DSL/Python numeric replacement groups to Rust syntax.
+
+    Translates numeric backreferences in either DSL/Python format (``\\1``) or
+    POSIX/Rust format (``$1``) into Rust regex capture group syntax (``$1``),
+    while escaping literal dollar signs as ``$$``.
+
+    Args:
+        replacement: Raw replacement string from the schema.
+
+    Returns:
+        Rust-compatible replacement string with group references translated.
+    """
     parts: list[str] = []
     cursor = 0
-    for match in re.finditer(r"\\([1-9][0-9]*)", replacement):
-        parts.append(replacement[cursor : match.start()].replace("$", "$$"))
-        parts.append(f"${match.group(1)}")
+    pattern = re.compile(r"\\([1-9][0-9]*)|(?:\$([1-9][0-9]*))|(\$\$)|(\$)")
+    for match in pattern.finditer(replacement):
+        bs_group, dollar_group, double_dollar, single_dollar = match.groups()
+        parts.append(replacement[cursor : match.start()])
+        if bs_group:
+            parts.append(f"${bs_group}")
+        elif dollar_group:
+            parts.append(f"${dollar_group}")
+        elif double_dollar:
+            parts.append("$$")
+        elif single_dollar:
+            parts.append("$$")
         cursor = match.end()
-    parts.append(replacement[cursor:].replace("$", "$$"))
+    parts.append(replacement[cursor:])
     return "".join(parts)

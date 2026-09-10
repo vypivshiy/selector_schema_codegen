@@ -17,8 +17,8 @@ class TargetSpec:
     Represents caller-supplied options specifying the target language, HTML/DOM
     library, HTTP transport client, and runtime distribution strategy.
 
-        Attributes:
-            lang: Target programming language identifier (`"python"`, `"javascript"` / `"js"`, `"go"`, `"rust"`).
+    Attributes:
+        lang: Target programming language identifier (`"python"`, `"javascript"` / `"js"`, `"go"`, `"rust"`).
         lib: HTML parser or DOM library (Python only: `"bs4"`, `"lxml"`, `"parsel"`, `"slax"`).
             Defaults to None (which resolves to `"bs4"` for Python).
         http_client: HTTP client strategy for `@request` REST code generation.

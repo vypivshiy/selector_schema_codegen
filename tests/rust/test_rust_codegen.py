@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from ssc_codegen.core import parse_module
+from ssc_codegen.exceptions import BuildTimeError
 from ssc_codegen.targets.rust import RustVisitor
 
 
@@ -19,10 +20,16 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+_SHARED_TARGET_DIR = (
+    Path(__file__).resolve().parents[2] / "target" / "test_rust_target"
+)
+
+
 def _cargo_env() -> dict[str, str]:
     """Keep concurrent full-suite Cargo builds within CI memory limits."""
     env = os.environ.copy()
-    env["CARGO_BUILD_JOBS"] = "1"
+    env.setdefault("CARGO_BUILD_JOBS", "1")
+    env.setdefault("CARGO_TARGET_DIR", str(_SHARED_TARGET_DIR))
     return env
 
 
@@ -287,3 +294,521 @@ fn main() {
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "prefix-x"
+
+
+def test_unsupported_features_diagnostics() -> None:
+    """Ensure clear BuildTimeError diagnostics for unsupported DSL features."""
+    converter = RustVisitor()
+
+    # XPath select
+    m1, _ = parse_module('struct X { title { xpath "//h1"; text } }')
+    with pytest.raises(BuildTimeError, match="XPath"):
+        converter.convert(m1)
+
+    # XPath remove
+    m2, _ = parse_module('struct X { title { xpath-remove "//script"; text } }')
+    with pytest.raises(BuildTimeError, match="XPath"):
+        converter.convert(m2)
+
+    # HTML @request
+    m3, _ = parse_module(
+        'struct X {\n @request """\ncurl https://example.com\n"""\n title { css "h1"; text }\n}'
+    )
+    with pytest.raises(BuildTimeError, match="@request"):
+        converter.convert(m3)
+
+    # REST struct
+    m4, _ = parse_module(
+        '(rest)struct X {\n @request response="" """\ncurl https://example.com\n"""\n}'
+    )
+    with pytest.raises(BuildTimeError, match="REST"):
+        converter.convert(m4)
+
+    # Regex lookaround
+    m5, _ = parse_module('struct X { title { css "h1"; text; re #"(?=a)b"# } }')
+    with pytest.raises(BuildTimeError, match="lookaround"):
+        converter.convert(m5)
+
+    # Regex backreference
+    m6, _ = parse_module(
+        'struct X { title { css "h1"; text; re #"([a-z])\\1"# } }'
+    )
+    with pytest.raises(BuildTimeError, match="backreferences"):
+        converter.convert(m6)
+
+    # Extension without rust target
+    m7, _ = parse_module(
+        """
+extension Ops {
+    calc {
+        sig int int
+        py { emit "{{out}} = {{in}} * 2" }
+    }
+}
+(raw)fn run { !Ops.calc }
+"""
+    )
+    with pytest.raises(BuildTimeError, match="has no 'rust' target"):
+        converter.convert(m7)
+
+
+def test_lifecycle_precomputed_init_and_detached_dom_nodes(
+    tmp_path: Path,
+) -> None:
+    """Validate fallible init, repeatable parse, checks, detached nodes and ownership."""
+    schema = """
+struct ChildCard {
+    badge {
+        css ".badge"
+        text
+        trim
+    }
+}
+
+struct ParentDoc {
+    @init {
+        cached-banner {
+            css "#banner"
+        }
+    }
+
+    @pre-validate {
+        assert {
+            css "main"
+        }
+    }
+
+    @check is-published {
+        css ".published"
+        to-bool
+    }
+
+    title {
+        css "h1"
+        text
+        trim
+    }
+
+    banner-text-before-remove {
+        @cached-banner
+        text
+        trim
+    }
+
+    remove-banner {
+        css-remove "#banner"
+        to-bool
+    }
+
+    remove-nonexistent {
+        css-remove ".no-such-class"
+        to-bool
+    }
+
+    banner-after-remove {
+        css "#banner"
+        text
+        fallback "gone"
+    }
+
+    banner-from-cache-after-remove {
+        @cached-banner
+        text
+        trim
+    }
+
+    child {
+        css ".card"
+        nested ChildCard
+    }
+}
+"""
+    module, diagnostics = parse_module(schema)
+    assert not [item for item in diagnostics if item.severity.name == "ERROR"]
+    source_dir = _write_cargo_project(tmp_path)
+    converter = RustVisitor()
+    (source_dir / "parser.rs").write_text(
+        converter.convert(module), encoding="utf-8"
+    )
+    (source_dir / "sscgen_runtime.rs").write_text(
+        converter.emit_runtime(), encoding="utf-8"
+    )
+    (source_dir / "main.rs").write_text(
+        r"""mod parser;
+mod sscgen_runtime;
+
+fn main() {
+    let valid_html = "<main><div class=\"published\">Yes</div><div id=\"banner\">Important Notice</div><h1>Parent Title</h1><div class=\"card\"><span class=\"badge\">VIP</span></div></main>";
+
+    // 1. Successful initialization and check method
+    let mut parser = parser::ParentDocParser::new(valid_html).expect("init should succeed");
+    assert!(parser.is_published().expect("check should succeed"));
+
+    // 2. Repeatable parse execution
+    let res1 = parser.parse().expect("first parse should succeed");
+    let res2 = parser.parse().expect("second parse should succeed");
+    assert_eq!(res1.title, res2.title);
+    assert_eq!(res1.title, "Parent Title");
+    assert_eq!(res1.banner_text_before_remove, "Important Notice");
+    assert_eq!(res1.banner_after_remove, "gone");
+    assert_eq!(res1.banner_from_cache_after_remove, "Important Notice");
+    assert_eq!(res1.child.badge, "VIP");
+
+    // 3. Extracted output outlives dropped parser instance
+    drop(parser);
+    let serialized = serde_json::to_string(&res1).expect("owned result serializes after parser drop");
+    assert!(serialized.contains("Parent Title"));
+
+    // 4. Missing init field fails early in constructor
+    let bad_html = "<main><h1>No banner</h1></main>";
+    let init_err = parser::ParentDocParser::new(bad_html);
+    assert!(init_err.is_err(), "missing init selector must fail constructor");
+
+    // 5. Pre-validate assertion failure aborts parse
+    let no_main_html = "<div id=\"banner\">Notice</div><h1>Title</h1>";
+    let mut bad_preval = parser::ParentDocParser::new(no_main_html).expect("init succeeds");
+    let parse_err = bad_preval.parse();
+    assert!(parse_err.is_err(), "failing pre-validation must abort parse");
+
+    println!("LIFECYCLE_OK");
+}
+""",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        ["cargo", "run", "--quiet"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env=_cargo_env(),
+        encoding="utf-8",
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "LIFECYCLE_OK" in result.stdout
+
+
+def test_all_struct_shapes_execute(tmp_path: Path) -> None:
+    """Validate list, flat, dict, table, and raw split-doc struct shapes."""
+    schema = """
+(list)struct ListItem {
+    @split-doc {
+        css-all "li"
+    }
+    name {
+        text
+        trim
+    }
+}
+
+(flat)struct FlatTags {
+    tags {
+        css-all ".tag"
+        text
+        trim
+    }
+}
+
+(dict)struct DictProps {
+    @split-doc {
+        css-all ".prop"
+    }
+    @key {
+        attr "data-key"
+    }
+    @value {
+        text
+        trim
+    }
+}
+
+(table)struct TableInfo {
+    @table {
+        css "table"
+    }
+    @rows {
+        css-all "tr"
+    }
+    @match {
+        css "th"
+        text
+        trim
+        lower
+    }
+    @value {
+        css "td"
+        text
+        trim
+    }
+
+    id {
+        match {
+            eq "id"
+        }
+    }
+
+    qty {
+        match {
+            eq "quantity"
+        }
+        to-int
+        fallback 0
+    }
+
+    cost {
+        match {
+            eq "cost"
+        }
+        to-float
+        fallback 0.0
+    }
+}
+
+(raw)struct RawLines {
+    @split-doc {
+        split "\\n"
+    }
+    item {
+        trim
+    }
+}
+"""
+    module, diagnostics = parse_module(schema)
+    assert not [item for item in diagnostics if item.severity.name == "ERROR"]
+    source_dir = _write_cargo_project(tmp_path)
+    converter = RustVisitor()
+    (source_dir / "parser.rs").write_text(
+        converter.convert(module), encoding="utf-8"
+    )
+    (source_dir / "sscgen_runtime.rs").write_text(
+        converter.emit_runtime(), encoding="utf-8"
+    )
+    (source_dir / "main.rs").write_text(
+        r"""mod parser;
+mod sscgen_runtime;
+
+fn main() {
+    let html = "<ul><li>Alpha</li><li>Beta</li></ul><div class=\"tag\">rust</div><div class=\"tag\">parser</div><div class=\"tag\">rust</div><div class=\"prop\" data-key=\"color\">blue</div><div class=\"prop\" data-key=\"size\">large</div><table><tr><th>ID</th><td>XYZ-99</td></tr><tr><th>Quantity</th><td>15</td></tr><tr><th>Cost</th><td>19.95</td></tr><tr><th>Ignored</th><td>skip</td></tr></table>";
+
+    // List struct
+    let mut list_p = parser::ListItemParser::new(html).unwrap();
+    let list_res = list_p.parse().unwrap();
+    assert_eq!(list_res.len(), 2);
+    assert_eq!(list_res[0].name, "Alpha");
+    assert_eq!(list_res[1].name, "Beta");
+
+    // Flat struct
+    let mut flat_p = parser::FlatTagsParser::new(html).unwrap();
+    let flat_res = flat_p.parse().unwrap();
+    assert_eq!(flat_res.len(), 2);
+    assert!(flat_res.contains(&"rust".to_string()));
+    assert!(flat_res.contains(&"parser".to_string()));
+
+    // Dict struct
+    let mut dict_p = parser::DictPropsParser::new(html).unwrap();
+    let dict_res = dict_p.parse().unwrap();
+    assert_eq!(dict_res.get("color").map(String::as_str), Some("blue"));
+    assert_eq!(dict_res.get("size").map(String::as_str), Some("large"));
+
+    // Table struct
+    let mut table_p = parser::TableInfoParser::new(html).unwrap();
+    let table_res = table_p.parse().unwrap();
+    assert_eq!(table_res.get("id").and_then(|v| v.as_str()), Some("XYZ-99"));
+    assert_eq!(table_res.get("qty").and_then(|v| v.as_i64()), Some(15));
+    assert_eq!(table_res.get("cost").and_then(|v| v.as_f64()), Some(19.95));
+    assert_eq!(table_res.get("Ignored"), None);
+
+    // Raw struct with split-doc
+    let mut raw_p = parser::RawLinesParser::new("first\nsecond\nthird\n").unwrap();
+    let raw_res = raw_p.parse().unwrap();
+    assert_eq!(raw_res.len(), 4);
+    assert_eq!(raw_res[0].item, "first");
+    assert_eq!(raw_res[1].item, "second");
+    assert_eq!(raw_res[2].item, "third");
+
+    println!("SHAPES_OK");
+}
+""",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        ["cargo", "run", "--quiet"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env=_cargo_env(),
+        encoding="utf-8",
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "SHAPES_OK" in result.stdout
+
+
+def test_unicode_string_slice_index_fmt_and_fallback(tmp_path: Path) -> None:
+    """Validate Unicode scalar chars(), index bounds, fmt, backreferences, and fallback."""
+    schema = r"""
+(raw)struct TextSuite {
+    cyrillic-slice {
+        slice 0 6
+    }
+    emoji-slice {
+        slice 7 9
+    }
+    inverted-slice {
+        slice 5 2
+    }
+    char-len {
+        len
+    }
+    index-emoji {
+        index 7
+    }
+    negative-index {
+        index -1
+    }
+    formatted {
+        fmt "prefix-{{}}-suffix"
+    }
+    dollar-sub {
+        re-sub #"(\w+)"# "$1-ok"
+    }
+    backslash-sub {
+        re-sub #"(\w+)"# #"\1-ok"#
+    }
+    opt-field {
+        re #"(not_found)"#
+        fallback #null
+    }
+    default-field {
+        re #"(not_found)"#
+        fallback "recovered"
+    }
+}
+"""
+    module, diagnostics = parse_module(schema)
+    assert not [item for item in diagnostics if item.severity.name == "ERROR"]
+    source_dir = _write_cargo_project(tmp_path)
+    converter = RustVisitor()
+    (source_dir / "parser.rs").write_text(
+        converter.convert(module), encoding="utf-8"
+    )
+    (source_dir / "sscgen_runtime.rs").write_text(
+        converter.emit_runtime(), encoding="utf-8"
+    )
+    (source_dir / "main.rs").write_text(
+        r"""mod parser;
+mod sscgen_runtime;
+
+fn main() {
+    let input = "Привет 🦀 world";
+    let mut p = parser::TextSuiteParser::new(input).unwrap();
+    let res = p.parse().unwrap();
+
+    assert_eq!(res.cyrillic_slice, "Привет");
+    assert_eq!(res.emoji_slice, "🦀 ");
+    assert_eq!(res.inverted_slice, "");
+    assert_eq!(res.char_len, 14);
+    assert_eq!(res.index_emoji, "🦀");
+    assert_eq!(res.negative_index, "d");
+    assert_eq!(res.formatted, "prefix-Привет 🦀 world-suffix");
+    assert_eq!(res.dollar_sub, "Привет-ok 🦀 world-ok");
+    assert_eq!(res.backslash_sub, "Привет-ok 🦀 world-ok");
+    assert_eq!(res.opt_field, None);
+    assert_eq!(res.default_field, "recovered");
+
+    // Index out of bounds error
+    assert!(sscgen_runtime::index("abc", 50, "test").is_err());
+    assert!(sscgen_runtime::index("abc", -50, "test").is_err());
+
+    println!("UNICODE_OK");
+}
+""",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        ["cargo", "run", "--quiet"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env=_cargo_env(),
+        encoding="utf-8",
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "UNICODE_OK" in result.stdout
+
+
+def test_json_fragment_first_and_array_schema_execute(tmp_path: Path) -> None:
+    """Validate fragment-first JSON array decoding, dot-path aliases, omitempty, and required error."""
+    schema = """
+(array)json ItemRecord {
+    item-id int from="nested.raw_id"
+    title str
+    label str?
+    extra str? @omitempty
+}
+
+(raw)struct CatalogPayload {
+    items {
+        jsonify ItemRecord path="data.catalog"
+    }
+}
+"""
+    module, diagnostics = parse_module(schema)
+    assert not [item for item in diagnostics if item.severity.name == "ERROR"]
+    source_dir = _write_cargo_project(tmp_path)
+    converter = RustVisitor()
+    (source_dir / "parser.rs").write_text(
+        converter.convert(module), encoding="utf-8"
+    )
+    (source_dir / "sscgen_runtime.rs").write_text(
+        converter.emit_runtime(), encoding="utf-8"
+    )
+    (source_dir / "main.rs").write_text(
+        r"""mod parser;
+mod sscgen_runtime;
+
+fn main() {
+    let valid_json = r#"{"data":{"catalog":[{"nested":{"raw_id":42},"title":"Gadget","label":"first","extra":"present"},{"nested":{"raw_id":43},"title":"Widget","label":null,"extra":null}]}}"#;
+    let mut p = parser::CatalogPayloadParser::new(valid_json).unwrap();
+    let res = p.parse().unwrap();
+
+    assert_eq!(res.items.len(), 2);
+    assert_eq!(res.items[0].item_id, 42);
+    assert_eq!(res.items[0].title, "Gadget");
+    assert_eq!(res.items[0].label.as_deref(), Some("first"));
+    assert_eq!(res.items[0].extra.as_deref(), Some("present"));
+
+    assert_eq!(res.items[1].item_id, 43);
+    assert_eq!(res.items[1].title, "Widget");
+    assert_eq!(res.items[1].label, None);
+    assert_eq!(res.items[1].extra, None);
+
+    // Serialization skips omitempty field
+    let s0 = serde_json::to_string(&res.items[0]).unwrap();
+    let s1 = serde_json::to_string(&res.items[1]).unwrap();
+    assert!(s0.contains("\"extra\":\"present\""));
+    assert!(!s1.contains("\"extra\""), "omitempty field must be skipped when None: {}", s1);
+
+    // Missing required field produces SscError
+    let missing_json = r#"{"data":{"catalog":[{"nested":{"raw_id":99}}]}}"#; // missing title
+    let mut p_bad = parser::CatalogPayloadParser::new(missing_json).unwrap();
+    let parse_err = p_bad.parse();
+    assert!(parse_err.is_err(), "missing required title must fail");
+
+    println!("JSON_OK");
+}
+""",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        ["cargo", "run", "--quiet"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env=_cargo_env(),
+        encoding="utf-8",
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "JSON_OK" in result.stdout

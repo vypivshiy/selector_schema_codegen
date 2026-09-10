@@ -1194,23 +1194,27 @@ def _expr_slice(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
     start, end = int(node.args[0].value), int(node.args[1].value)
-    if parent.body:
-        prev = _prev_type_info(parent)
-        return Slice(
-            parent=parent,
-            start=start,
-            end=end,
-            accept_type_info=prev.ret_type_info,
-            ret_type_info=prev.ret_type_info,
-        )
-    return Slice(parent=parent, start=start, end=end)
+    prev = _prev_type_info(parent)
+    ti = prev.ret_type_info
+    return Slice(
+        parent=parent,
+        start=start,
+        end=end,
+        accept_type_info=ti,
+        ret_type_info=ti,
+    )
 
 
 @_reg_expr("len")
 def _expr_len(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    return Len(parent=parent)
+    prev = _prev_type_info(parent)
+    return Len(
+        parent=parent,
+        accept_type_info=prev.ret_type_info,
+        ret_type_info=TypeInfo(base=VariableType.INT),
+    )
 
 
 @_reg_expr("unique")
