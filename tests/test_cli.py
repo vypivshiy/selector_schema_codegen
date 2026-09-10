@@ -108,7 +108,7 @@ def test_generate_rust_writes_parser_and_shared_runtime(tmp_path) -> None:
     )
 
 
-def test_generate_rust_rejects_rest_schema(tmp_path) -> None:
+def test_generate_rust_supports_rest_schema(tmp_path) -> None:
     schema = tmp_path / "api.kdl"
     schema.write_text(
         """json User { id int; name str }
@@ -126,8 +126,10 @@ struct Api type=rest {
         app, ["generate", "rust", str(schema), "-o", str(tmp_path / "out")]
     )
 
-    assert result.exit_code == 1
-    assert "Rust target does not support REST" in result.output
+    assert result.exit_code == 0
+    out_file = tmp_path / "out" / "api.rs"
+    assert out_file.exists()
+    assert "pub struct Api;" in out_file.read_text(encoding="utf-8")
 
 
 def test_check_json_is_single_document_for_multiple_files(tmp_path) -> None:

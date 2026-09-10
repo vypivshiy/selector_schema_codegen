@@ -213,6 +213,8 @@ class RustVisitor(BaseWalker):
         self._builder = ModuleBuilder()
         self._structs: dict[str, StructBase] = {}
         self._json_defs: dict[str, JsonDef] = {}
+        self._result_variants: dict[str, ResultVariantDef] = {}
+        self._emitted_aliases: set[str] = set()
         self._runtime_imports: list[str] = []
         self._runtime_helpers: list[str] = []
         self._predicate_locals: dict[int, tuple[str, bool]] = {}
@@ -221,6 +223,8 @@ class RustVisitor(BaseWalker):
         self._builder.reset()
         self._structs = {}
         self._json_defs = {}
+        self._result_variants = {}
+        self._emitted_aliases = set()
         self._predicate_locals = {}
 
     def _ctx(self, meta: dict[str, Any]) -> WalkContext:
@@ -274,9 +278,14 @@ class RustVisitor(BaseWalker):
         ]
         imports.append("use serde::Serialize;")
         if any(
-            isinstance(n, JsonDef)
+            isinstance(
+                n, (JsonDef, StructRest, MatcherListDef, ResultVariantDef)
+            )
             or getattr(n, "struct_type", None) == ST.TABLE
-            or any(isinstance(c, MethodFetch) for c in getattr(n, "body", ()))
+            or any(
+                isinstance(c, (MethodFetch, MethodRest))
+                for c in getattr(n, "body", ())
+            )
             for n in module_ast.body
         ):
             imports.append("use serde_json::Value;")
@@ -597,9 +606,7 @@ class RustVisitor(BaseWalker):
     def visit_struct_rest(
         self, node: StructRest, ctx: WalkContext
     ) -> list[str]:
-        raise BuildTimeError(
-            "Rust target does not support REST schemas or @request yet"
-        )
+        return rest.emit_struct_rest(node, ctx, self.walk)
 
     def _constructor(self, node: Struct) -> list[str]:
         raw = node.type == ST.RAW
@@ -1791,9 +1798,7 @@ class RustVisitor(BaseWalker):
     def visit_method_rest(
         self, node: MethodRest, ctx: WalkContext
     ) -> list[str]:
-        raise BuildTimeError(
-            "Rust target does not support REST schemas or @request yet"
-        )
+        return rest.emit_method_rest(node, ctx)
 
     def visit_error_response(
         self, node: ErrorResponse, ctx: WalkContext
@@ -1803,21 +1808,51 @@ class RustVisitor(BaseWalker):
     def visit_result_variant_def(
         self, node: ResultVariantDef, ctx: WalkContext
     ) -> list[str]:
-        raise BuildTimeError(
-            "Rust target does not support REST result types yet"
-        )
+        self._result_variants[node.name] = node
+        return rest.emit_result_variant_def(node)
 
     def visit_result_alias_def(
         self, node: ResultAliasDef, ctx: WalkContext
     ) -> list[str]:
-        raise BuildTimeError(
-            "Rust target does not support REST result types yet"
+        struct_name = ""
+        if isinstance(node.parent, Module):
+            for n in node.parent.body:
+                if isinstance(n, StructRest):
+                    for child in n.body:
+                        if (
+                            isinstance(child, MethodRest)
+                            and child.result_alias_name == node.name
+                            and (
+                                not node.response_schema
+                                or child.response_schema == node.response_schema
+                            )
+                        ):
+                            struct_name = n.name
+                            break
+                if struct_name:
+                    break
+        if not struct_name and node.err_variants:
+            first_err = self._result_variants.get(node.err_variants[0])
+            if first_err and isinstance(first_err.parent, StructBase):
+                struct_name = first_err.parent.name
+        if not struct_name:
+            struct_name = node.name.removesuffix("Result")
+        return rest.emit_result_alias_def(
+            node, struct_name, self._emitted_aliases
         )
 
     def visit_matcher_list_def(
         self, node: MatcherListDef, ctx: WalkContext
     ) -> list[str]:
-        raise BuildTimeError("Rust target does not support REST matchers yet")
+        is_single_rest = True
+        if isinstance(node.parent, Module):
+            rest_count = sum(
+                1 for n in node.parent.body if isinstance(n, StructRest)
+            )
+            is_single_rest = rest_count <= 1
+        return rest.emit_matcher_list_def(
+            node, self._result_variants, is_single_rest
+        )
 
     def visit_function_def(
         self, node: FunctionDef, ctx: WalkContext

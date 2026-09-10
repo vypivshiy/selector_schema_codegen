@@ -312,13 +312,6 @@ def test_unsupported_features_diagnostics() -> None:
     with pytest.raises(BuildTimeError, match="XPath"):
         converter.convert(m2)
 
-    # REST struct
-    m4, _ = parse_module(
-        '(rest)struct X {\n @request response="" """\ncurl https://example.com\n"""\n}'
-    )
-    with pytest.raises(BuildTimeError, match="REST"):
-        converter.convert(m4)
-
     # Regex lookaround
     m5, _ = parse_module('struct X { title { css "h1"; text; re #"(?=a)b"# } }')
     with pytest.raises(BuildTimeError, match="lookaround"):
@@ -1427,3 +1420,480 @@ async fn main() {
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == '{"heading":"Inner Heading"}'
+
+
+def test_all_rest_schemas_compile(tmp_path: Path) -> None:
+    """All 17 REST schemas generate valid Rust and compile together in a single Cargo project."""
+    schemas_dir = (
+        Path(__file__).resolve().parents[1] / "integration" / "schemas"
+    )
+    schemas = [
+        "08_rest_basic.kdl",
+        "09_rest_void.kdl",
+        "10_rest_err_404.kdl",
+        "11_rest_err_404_500.kdl",
+        "12_rest_err_404_keys.kdl",
+        "13_rest_err_200_field.kdl",
+        "14_rest_int_placeholder.kdl",
+        "15_rest_query_opt.kdl",
+        "16_rest_header.kdl",
+        "17_rest_post.kdl",
+        "20_rest_prefix_form.kdl",
+        "21_rest_multi_method.kdl",
+        "22_rest_response_path.kdl",
+        "24_rest_form_body.kdl",
+        "26_multi_rest_namespace.kdl",
+        "27_rest_query_params.kdl",
+        "28_rest_cookies.kdl",
+    ]
+
+    source_dir = tmp_path / "src"
+    source_dir.mkdir()
+    (tmp_path / "Cargo.toml").write_text(
+        """[package]
+name = "sscgen_rust_rest_schemas"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dom_query = "0.28"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+""",
+        encoding="utf-8",
+    )
+
+    converter = RustVisitor()
+    (source_dir / "sscgen_runtime.rs").write_text(
+        converter.emit_runtime(), encoding="utf-8"
+    )
+
+    modules: list[str] = ["mod sscgen_runtime;"]
+    for schema_file in schemas:
+        schema_path = schemas_dir / schema_file
+        src = schema_path.read_text(encoding="utf-8-sig")
+        module_ast, diagnostics = parse_module(src, source_path=schema_path)
+        errors = [d for d in diagnostics if d.severity.name == "ERROR"]
+        assert not errors, f"Lint errors in {schema_file}: {errors}"
+
+        mod_name = f"rest_{schema_file.split('_')[0]}"
+        (source_dir / f"{mod_name}.rs").write_text(
+            converter.convert(module_ast), encoding="utf-8"
+        )
+        modules.append(f"mod {mod_name};")
+
+    modules.append("fn main() {}")
+    (source_dir / "main.rs").write_text("\n".join(modules), encoding="utf-8")
+
+    result = subprocess.run(
+        ["cargo", "check", "--quiet"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env=_cargo_env(),
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_rest_endpoint_execution(tmp_path: Path) -> None:
+    """REST client executes requests, matches typed errors, handles unknown status, and exposes err.status()."""
+    schema = """
+json User {
+    id int
+    name str
+}
+
+json Err {
+    code int
+    message str
+}
+
+struct API type=rest {
+    @error 404 Err
+    @request name=get-user response=User \"\"\"
+    GET http://127.0.0.1:{{port:int}}/users/{{id:int}} HTTP/1.1
+    \"\"\"
+}
+"""
+    module_ast, diagnostics = parse_module(schema)
+    errors = [d for d in diagnostics if d.severity.name == "ERROR"]
+    assert not errors
+
+    source_dir = tmp_path / "src"
+    source_dir.mkdir()
+    (tmp_path / "Cargo.toml").write_text(
+        """[package]
+name = "sscgen_rust_rest_exec"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dom_query = "0.28"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+""",
+        encoding="utf-8",
+    )
+
+    converter = RustVisitor()
+    (source_dir / "parser.rs").write_text(
+        converter.convert(module_ast), encoding="utf-8"
+    )
+    (source_dir / "sscgen_runtime.rs").write_text(
+        converter.emit_runtime(), encoding="utf-8"
+    )
+    (source_dir / "main.rs").write_text(
+        """mod sscgen_runtime;
+mod parser;
+
+use std::io::{Read, Write};
+use std::net::TcpListener;
+use std::thread;
+
+#[tokio::main]
+async fn main() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            let mut stream = stream.unwrap();
+            let mut buf = [0u8; 2048];
+            let n = match stream.read(&mut buf) {
+                Ok(n) if n > 0 => n,
+                _ => continue,
+            };
+            let req_str = String::from_utf8_lossy(&buf[..n]);
+
+            if req_str.contains("/users/1") {
+                let body = r#"{"id":1,"name":"Alice"}"#;
+                let resp = format!(
+                    "HTTP/1.1 200 OK\\r\\nContent-Type: application/json\\r\\nContent-Length: {}\\r\\nConnection: close\\r\\n\\r\\n{}",
+                    body.len(), body
+                );
+                let _ = stream.write_all(resp.as_bytes());
+            } else if req_str.contains("/users/2") {
+                let body = r#"{"code":404,"message":"user not found"}"#;
+                let resp = format!(
+                    "HTTP/1.1 404 Not Found\\r\\nContent-Type: application/json\\r\\nContent-Length: {}\\r\\nConnection: close\\r\\n\\r\\n{}",
+                    body.len(), body
+                );
+                let _ = stream.write_all(resp.as_bytes());
+            } else if req_str.contains("/users/3") {
+                let body = r#"{"detail":"bad gateway"}"#;
+                let resp = format!(
+                    "HTTP/1.1 502 Bad Gateway\\r\\nContent-Type: application/json\\r\\nContent-Length: {}\\r\\nConnection: close\\r\\n\\r\\n{}",
+                    body.len(), body
+                );
+                let _ = stream.write_all(resp.as_bytes());
+            }
+        }
+    });
+
+    let client = reqwest::Client::new();
+
+    // 1. Success response
+    let user = parser::API::get_user(&client, port as i64, 1).await.unwrap();
+    assert_eq!(user.id, 1);
+    assert_eq!(user.name, "Alice");
+
+    // 2. Typed error response (@error 404)
+    match parser::API::get_user(&client, port as i64, 2).await {
+        Err(parser::APIError::Err404(err)) => {
+            assert_eq!(err.code, 404);
+            assert_eq!(err.message, "user not found");
+        }
+        other => panic!("expected Err404, got {:?}", other),
+    }
+
+    // 3. Unknown error response (HTTP 502)
+    match parser::API::get_user(&client, port as i64, 3).await {
+        Err(err) => {
+            assert_eq!(err.status(), Some(502));
+            match err {
+                parser::APIError::Unknown(status, val) => {
+                    assert_eq!(status, 502);
+                    assert_eq!(val["detail"], "bad gateway");
+                }
+                other => panic!("expected Unknown, got {:?}", other),
+            }
+        }
+        other => panic!("expected Err, got {:?}", other),
+    }
+
+    println!("REST_EXEC_OK");
+}
+""",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ["cargo", "run", "--quiet"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env=_cargo_env(),
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "REST_EXEC_OK" in result.stdout
+
+
+def test_rest_condition_matching_execution(tmp_path: Path) -> None:
+    """REST client matches conditional @error rules and distinguishes matched vs unmatched status."""
+    schema = """
+json Err {
+    error str
+    detail str
+}
+
+json User {
+    id int
+    name str
+}
+
+struct API type=rest {
+    @error 404 Err error detail
+    @request response=User \"\"\"
+    GET http://127.0.0.1:{{port:int}}/items/{{id:int}} HTTP/1.1
+    \"\"\"
+}
+"""
+    module_ast, diagnostics = parse_module(schema)
+    errors = [d for d in diagnostics if d.severity.name == "ERROR"]
+    assert not errors
+
+    source_dir = tmp_path / "src"
+    source_dir.mkdir()
+    (tmp_path / "Cargo.toml").write_text(
+        """[package]
+name = "sscgen_rust_rest_cond"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dom_query = "0.28"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+""",
+        encoding="utf-8",
+    )
+
+    converter = RustVisitor()
+    (source_dir / "parser.rs").write_text(
+        converter.convert(module_ast), encoding="utf-8"
+    )
+    (source_dir / "sscgen_runtime.rs").write_text(
+        converter.emit_runtime(), encoding="utf-8"
+    )
+    (source_dir / "main.rs").write_text(
+        """mod sscgen_runtime;
+mod parser;
+
+use std::io::{Read, Write};
+use std::net::TcpListener;
+use std::thread;
+
+#[tokio::main]
+async fn main() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            let mut stream = stream.unwrap();
+            let mut buf = [0u8; 2048];
+            let n = match stream.read(&mut buf) {
+                Ok(n) if n > 0 => n,
+                _ => continue,
+            };
+            let req_str = String::from_utf8_lossy(&buf[..n]);
+
+            if req_str.contains("/items/1") {
+                let body = r#"{"error":"NOT_FOUND","detail":"item 1 missing"}"#;
+                let resp = format!(
+                    "HTTP/1.1 404 Not Found\\r\\nContent-Type: application/json\\r\\nContent-Length: {}\\r\\nConnection: close\\r\\n\\r\\n{}",
+                    body.len(), body
+                );
+                let _ = stream.write_all(resp.as_bytes());
+            } else if req_str.contains("/items/2") {
+                let body = r#"{"error":"NOT_FOUND"}"#;
+                let resp = format!(
+                    "HTTP/1.1 404 Not Found\\r\\nContent-Type: application/json\\r\\nContent-Length: {}\\r\\nConnection: close\\r\\n\\r\\n{}",
+                    body.len(), body
+                );
+                let _ = stream.write_all(resp.as_bytes());
+            }
+        }
+    });
+
+    let client = reqwest::Client::new();
+
+    // 1. Matched conditional error
+    match parser::API::fetch(&client, port as i64, 1).await {
+        Err(parser::APIError::Err404ErrorDetail(e)) => {
+            assert_eq!(e.error, "NOT_FOUND");
+            assert_eq!(e.detail, "item 1 missing");
+        }
+        other => panic!("expected Err404ErrorDetail, got {:?}", other),
+    }
+
+    // 2. Unmatched condition on 404 -> falls back to Unknown
+    match parser::API::fetch(&client, port as i64, 2).await {
+        Err(parser::APIError::Unknown(404, val)) => {
+            assert_eq!(val["error"], "NOT_FOUND");
+        }
+        other => panic!("expected Unknown(404), got {:?}", other),
+    }
+
+    println!("REST_COND_OK");
+}
+""",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ["cargo", "run", "--quiet"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env=_cargo_env(),
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "REST_COND_OK" in result.stdout
+
+
+def test_rest_void_and_response_path_execution(tmp_path: Path) -> None:
+    """REST void endpoint returns Ok(()) and response-path extracts nested model."""
+    schema = """
+json User {
+    id int
+    name str
+}
+
+struct ApiVoid type=rest {
+    @request \"\"\"
+    POST http://127.0.0.1:{{port:int}}/ping HTTP/1.1
+    \"\"\"
+}
+
+struct ApiUser type=rest {
+    @request response=User response-path="data.user" \"\"\"
+    GET http://127.0.0.1:{{port:int}}/me HTTP/1.1
+    \"\"\"
+}
+"""
+    module_ast, diagnostics = parse_module(schema)
+    errors = [d for d in diagnostics if d.severity.name == "ERROR"]
+    assert not errors
+
+    source_dir = tmp_path / "src"
+    source_dir.mkdir()
+    (tmp_path / "Cargo.toml").write_text(
+        """[package]
+name = "sscgen_rust_rest_void_path"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dom_query = "0.28"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+""",
+        encoding="utf-8",
+    )
+
+    converter = RustVisitor()
+    (source_dir / "parser.rs").write_text(
+        converter.convert(module_ast), encoding="utf-8"
+    )
+    (source_dir / "sscgen_runtime.rs").write_text(
+        converter.emit_runtime(), encoding="utf-8"
+    )
+    (source_dir / "main.rs").write_text(
+        """mod sscgen_runtime;
+mod parser;
+
+use std::io::{Read, Write};
+use std::net::TcpListener;
+use std::thread;
+
+#[tokio::main]
+async fn main() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            let mut stream = stream.unwrap();
+            let mut buf = [0u8; 2048];
+            let n = match stream.read(&mut buf) {
+                Ok(n) if n > 0 => n,
+                _ => continue,
+            };
+            let req_str = String::from_utf8_lossy(&buf[..n]);
+
+            if req_str.contains("/ping") {
+                let resp = "HTTP/1.1 200 OK\\r\\nContent-Length: 0\\r\\nConnection: close\\r\\n\\r\\n";
+                let _ = stream.write_all(resp.as_bytes());
+            } else if req_str.contains("/me") {
+                let body = r#"{"data":{"user":{"id":42,"name":"Bob"}}}"#;
+                let resp = format!(
+                    "HTTP/1.1 200 OK\\r\\nContent-Type: application/json\\r\\nContent-Length: {}\\r\\nConnection: close\\r\\n\\r\\n{}",
+                    body.len(), body
+                );
+                let _ = stream.write_all(resp.as_bytes());
+            }
+        }
+    });
+
+    let client = reqwest::Client::new();
+
+    // 1. Void endpoint returns Ok(())
+    let void_res = parser::ApiVoid::fetch(&client, port as i64).await;
+    assert!(void_res.is_ok());
+
+    // 2. response-path extracts nested UserJson
+    let user = parser::ApiUser::fetch(&client, port as i64).await.unwrap();
+    assert_eq!(user.id, 42);
+    assert_eq!(user.name, "Bob");
+
+    // 3. Transport error when targeting closed port
+    let dead_res = parser::ApiVoid::fetch(&client, 1).await;
+    match dead_res {
+        Err(parser::ApiVoidError::Transport(e)) => {
+            assert!(e.is_connect());
+        }
+        other => panic!("expected Transport error, got {:?}", other),
+    }
+
+    println!("REST_VOID_PATH_OK");
+}
+""",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ["cargo", "run", "--quiet"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env=_cargo_env(),
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "REST_VOID_PATH_OK" in result.stdout

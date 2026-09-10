@@ -211,6 +211,16 @@ pub fn regex_sub(value: String, pattern: &str, replacement: &str, context: &str)
     Ok(re.replace_all(&value, replacement).into_owned())
 }
 
+pub fn json_opt<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
+    if path.is_empty() { return Some(value); }
+    let mut current = value;
+    for segment in path.split('.') {
+        current = (if let Ok(index) = segment.parse::<usize>() {
+            current.get(index)
+        } else { current.get(segment) })?;
+    }
+    Some(current)
+}
 pub fn json_path<'a>(value: &'a Value, path: &str, context: &str) -> Result<&'a Value, SscError> {
     if path.is_empty() { return Ok(value); }
     let mut current = value;
