@@ -211,11 +211,22 @@ def rust_variant_name(struct_name: str, factory_name: str) -> str:
     return factory_name
 
 
+def placeholder_params(spec: RequestHttp) -> list[str]:
+    """Emit the client and placeholder parameter signatures for reqwest methods."""
+    ordered_phs = sorted(spec.placeholders, key=lambda p: p.is_optional)
+    params = ["client: &reqwest::Client"]
+    for ph in ordered_phs:
+        params.append(f"{_ident(ph.name)}: {rust_ph_type(ph)}")
+    return params
+
+
 def render_rust_condition(path: str, val: Any) -> str:
     """Render a condition check against a serde_json::Value."""
     path_lit = _str(path)
     if val is None:
-        return f"rt::json_opt(_body_val, {path_lit}).is_none()"
+        return (
+            f"rt::json_opt(_body_val, {path_lit}).map_or(true, |v| v.is_null())"
+        )
     if isinstance(val, bool):
         b = "true" if val else "false"
         return f"rt::json_opt(_body_val, {path_lit}).and_then(|v| v.as_bool()) == Some({b})"
@@ -366,11 +377,7 @@ def emit_method_fetch(
     struct_name = _pascal(parent.name)
     method_name = f"fetch_{to_snake_case(node.name)}" if node.name else "fetch"
     context = f"{struct_name}.{method_name}"
-
-    ordered_phs = sorted(spec.placeholders, key=lambda p: p.is_optional)
-    params = ["client: &reqwest::Client"]
-    for ph in ordered_phs:
-        params.append(f"{_ident(ph.name)}: {rust_ph_type(ph)}")
+    params = placeholder_params(spec)
 
     i1 = "    "
     i2 = "        "
@@ -431,13 +438,47 @@ def emit_result_variant_def(node: ResultVariantDef) -> list[str]:
     return []
 
 
+def resolve_struct_name_for_alias(
+    node: ResultAliasDef,
+    result_variants: dict[str, ResultVariantDef] | None = None,
+) -> str:
+    """Determine the enclosing struct name for a synthesized ResultAliasDef."""
+    parent = node.parent
+    if isinstance(parent, StructBase):
+        return parent.name
+    from ssc_codegen.ast.module import Module
+
+    if isinstance(parent, Module):
+        for n in parent.body:
+            if isinstance(n, StructRest):
+                for child in n.body:
+                    if (
+                        isinstance(child, MethodRest)
+                        and child.result_alias_name == node.name
+                        and (
+                            not node.response_schema
+                            or child.response_schema == node.response_schema
+                        )
+                    ):
+                        return n.name
+    if result_variants and node.err_variants:
+        first_err = result_variants.get(node.err_variants[0])
+        if first_err and isinstance(first_err.parent, StructBase):
+            return first_err.parent.name
+    return node.name.removesuffix("Result")
+
+
 def emit_result_alias_def(
     node: ResultAliasDef,
-    struct_name: str,
+    struct_name: str = "",
     emitted_aliases: set[str] | None = None,
+    result_variants: dict[str, ResultVariantDef] | None = None,
 ) -> list[str]:
     """Emit the type alias for a REST endpoint result."""
-    struct_pascal = _pascal(struct_name)
+    effective_struct = struct_name or resolve_struct_name_for_alias(
+        node, result_variants
+    )
+    struct_pascal = _pascal(effective_struct)
     enum_name = f"{struct_pascal}Error"
     if node.response_schema:
         s_pascal = f"{_pascal(node.response_schema)}Json"
@@ -588,6 +629,7 @@ def emit_matcher_list_def(
 
         if entry.error_schema:
             s_pascal = f"{_pascal(entry.error_schema)}Json"
+            fallback_expr = f"let fallback = if _body_val.is_null() {{ serde_json::Value::String(_body_text.to_string()) }} else {{ _body_val.clone() }}; return Some({enum_name}::Unknown(_status, fallback));"
             if is_array:
                 lines.extend(
                     [
@@ -596,7 +638,7 @@ def emit_matcher_list_def(
                         f"{ind}        return Some({enum_name}::{v_name}(decoded));",
                         f"{ind}    }}",
                         f"{ind}}}",
-                        f"{ind}return Some({enum_name}::Unknown(_status, _body_val.clone()));",
+                        f"{ind}{fallback_expr}",
                     ]
                 )
             else:
@@ -605,7 +647,7 @@ def emit_matcher_list_def(
                         f"{ind}if let Ok(decoded) = {s_pascal}::from_value(_body_val.clone()) {{",
                         f"{ind}    return Some({enum_name}::{v_name}(decoded));",
                         f"{ind}}}",
-                        f"{ind}return Some({enum_name}::Unknown(_status, _body_val.clone()));",
+                        f"{ind}{fallback_expr}",
                     ]
                 )
         else:
@@ -643,11 +685,7 @@ def emit_method_rest(
     enum_name = f"{struct_pascal}Error"
     method_name = to_snake_case(node.name) if node.name else "fetch"
     context = f"{struct_pascal}.{method_name}"
-
-    ordered_phs = sorted(spec.placeholders, key=lambda p: p.is_optional)
-    params = ["client: &reqwest::Client"]
-    for ph in ordered_phs:
-        params.append(f"{_ident(ph.name)}: {rust_ph_type(ph)}")
+    params = placeholder_params(spec)
 
     if node.response_schema:
         s_pascal = f"{_pascal(node.response_schema)}Json"

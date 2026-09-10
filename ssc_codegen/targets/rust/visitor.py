@@ -1814,31 +1814,10 @@ class RustVisitor(BaseWalker):
     def visit_result_alias_def(
         self, node: ResultAliasDef, ctx: WalkContext
     ) -> list[str]:
-        struct_name = ""
-        if isinstance(node.parent, Module):
-            for n in node.parent.body:
-                if isinstance(n, StructRest):
-                    for child in n.body:
-                        if (
-                            isinstance(child, MethodRest)
-                            and child.result_alias_name == node.name
-                            and (
-                                not node.response_schema
-                                or child.response_schema == node.response_schema
-                            )
-                        ):
-                            struct_name = n.name
-                            break
-                if struct_name:
-                    break
-        if not struct_name and node.err_variants:
-            first_err = self._result_variants.get(node.err_variants[0])
-            if first_err and isinstance(first_err.parent, StructBase):
-                struct_name = first_err.parent.name
-        if not struct_name:
-            struct_name = node.name.removesuffix("Result")
         return rest.emit_result_alias_def(
-            node, struct_name, self._emitted_aliases
+            node,
+            emitted_aliases=self._emitted_aliases,
+            result_variants=self._result_variants,
         )
 
     def visit_matcher_list_def(
