@@ -118,6 +118,7 @@ from ssc_codegen.exceptions import BuildTimeError
 from ssc_codegen.generation.builder import ModuleBuilder
 from ssc_codegen.naming import to_pascal_case, to_snake_case
 from ssc_codegen.symbols import RUST_RESERVED
+from ssc_codegen.targets.rust import rest
 from ssc_codegen.targets.rust.regex import (
     rust_replacement,
     validate_rust_pattern,
@@ -275,6 +276,7 @@ class RustVisitor(BaseWalker):
         if any(
             isinstance(n, JsonDef)
             or getattr(n, "struct_type", None) == ST.TABLE
+            or any(isinstance(c, MethodFetch) for c in getattr(n, "body", ()))
             for n in module_ast.body
         ):
             imports.append("use serde_json::Value;")
@@ -1784,7 +1786,7 @@ class RustVisitor(BaseWalker):
     def visit_method_fetch(
         self, node: MethodFetch, ctx: WalkContext
     ) -> list[str]:
-        raise BuildTimeError("Rust target does not support HTML @request yet")
+        return rest.emit_method_fetch(node, ctx)
 
     def visit_method_rest(
         self, node: MethodRest, ctx: WalkContext

@@ -210,9 +210,9 @@ def _resolve_rust(spec: TargetSpec) -> TargetProfile:
 
     if spec.lib is not None:
         raise ResolutionError("--lib is not applicable for Rust.")
-    if spec.http_client is not None:
+    if spec.http_client is not None and spec.http_client != "reqwest":
         raise ResolutionError(
-            "Rust HTML @request and REST transport are not supported yet."
+            f"Invalid HTTP client '{spec.http_client}' for Rust. Valid options: reqwest."
         )
     if spec.separate_runtime:
         raise ResolutionError(
@@ -222,5 +222,6 @@ def _resolve_rust(spec: TargetSpec) -> TargetProfile:
         language="rust",
         file_extension=".rs",
         create_converter=lambda: RustVisitor(),
+        http_clients=("reqwest",),
         supports_separate_runtime=False,
     )

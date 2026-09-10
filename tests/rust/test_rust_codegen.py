@@ -11,7 +11,9 @@ import pytest
 
 from ssc_codegen.core import parse_module
 from ssc_codegen.exceptions import BuildTimeError
+from ssc_codegen.targets.resolver import ResolutionError, resolve
 from ssc_codegen.targets.rust import RustVisitor
+from ssc_codegen.targets.spec import TargetSpec
 
 
 pytestmark = pytest.mark.skipif(
@@ -309,13 +311,6 @@ def test_unsupported_features_diagnostics() -> None:
     m2, _ = parse_module('struct X { title { xpath-remove "//script"; text } }')
     with pytest.raises(BuildTimeError, match="XPath"):
         converter.convert(m2)
-
-    # HTML @request
-    m3, _ = parse_module(
-        'struct X {\n @request """\ncurl https://example.com\n"""\n title { css "h1"; text }\n}'
-    )
-    with pytest.raises(BuildTimeError, match="@request"):
-        converter.convert(m3)
 
     # REST struct
     m4, _ = parse_module(
@@ -1098,3 +1093,337 @@ def test_nested_rejects_list_string_input() -> None:
         "'nested' does not accept STRING; expected DOCUMENT" in d.message
         for d in errors
     )
+
+
+def test_rust_resolver_http_client() -> None:
+    """Rust target accepts reqwest as HTTP client and rejects unsupported clients."""
+    profile = resolve(TargetSpec(lang="rust", http_client="reqwest"))
+    assert profile.language == "rust"
+    assert "reqwest" in profile.http_clients
+
+    with pytest.raises(ResolutionError, match="Invalid HTTP client 'httpx'"):
+        resolve(TargetSpec(lang="rust", http_client="httpx"))
+
+
+def test_rust_method_fetch_code_generation() -> None:
+    """MethodFetch generates async fetch method with query params, headers, and cookies."""
+    schema = """
+struct PostPage {
+    @request response-path="data.content" \"\"\"
+    GET /posts/{{id:int}}?tag={{tag}}&category={{cat?}} HTTP/1.1
+    Host: example.com
+    X-Api-Key: {{api_key}}
+    Cookie: session=xyz; token={{auth_token}}
+    \"\"\"
+
+    title {
+        css "h1"
+        text
+    }
+}
+"""
+    module, diagnostics = parse_module(schema)
+    errors = [d for d in diagnostics if d.severity.name == "ERROR"]
+    assert not errors
+
+    converter = RustVisitor()
+    code = converter.convert(module)
+
+    assert "pub async fn fetch(" in code
+    assert "client: &reqwest::Client" in code
+    assert "id: i64" in code
+    assert "tag: &str" in code
+    assert "api_key: &str" in code
+    assert "auth_token: &str" in code
+    assert "cat: Option<&str>" in code
+    assert "reqwest::Method::GET" in code
+    assert "Self::new(body)" in code
+
+
+def test_rust_method_fetch_named_and_raw() -> None:
+    """MethodFetch supports custom method name and (raw)struct targets."""
+    schema = """
+(raw)struct ProxyList {
+    @request name="custom_feed" \"\"\"
+    GET /proxies/{{region}} HTTP/1.1
+    Host: example.com
+    \"\"\"
+
+    items {
+        split "\\n"
+    }
+}
+"""
+    module, diagnostics = parse_module(schema)
+    errors = [d for d in diagnostics if d.severity.name == "ERROR"]
+    assert not errors
+
+    converter = RustVisitor()
+    code = converter.convert(module)
+
+    assert "pub async fn fetch_custom_feed(" in code
+    assert "client: &reqwest::Client" in code
+    assert "region: &str" in code
+    assert "Self::new(body)" in code
+
+
+def test_rust_method_fetch_json_and_form_body() -> None:
+    """MethodFetch supports JSON and form payloads."""
+    schema = """
+struct JsonPage {
+    @request \"\"\"
+    POST /api/items HTTP/1.1
+    Host: example.com
+    Content-Type: application/json
+
+    {"query": "{{q}}", "page": 1}
+    \"\"\"
+
+    title {
+        css "h1"
+        text
+    }
+}
+
+struct FormPage {
+    @request \"\"\"
+    POST /form HTTP/1.1
+    Host: example.com
+    Content-Type: application/x-www-form-urlencoded
+
+    username={{user}}&role=admin
+    \"\"\"
+
+    title {
+        css "h1"
+        text
+    }
+}
+"""
+    module, diagnostics = parse_module(schema)
+    errors = [d for d in diagnostics if d.severity.name == "ERROR"]
+    assert not errors
+
+    converter = RustVisitor()
+    code = converter.convert(module)
+
+    assert "req = req.json(&serde_json::json!({" in code
+    assert '"query": (q)' in code
+    assert "req = req.form(&form_pairs);" in code
+
+
+def test_rust_method_fetch_array_param_styles() -> None:
+    """MethodFetch handles array parameters with csv, pipe, repeat, and bracket styles."""
+    schema = """
+struct SearchPage {
+    @request \"\"\"
+    GET /search?tags={{tags:str[]|csv}}&ids={{ids:int[]|repeat}}&pipes={{pipes:str[]?|pipe}}&brackets={{brackets:str[]|bracket}} HTTP/1.1
+    Host: example.com
+    \"\"\"
+
+    title {
+        css "h1"
+        text
+    }
+}
+"""
+    module, diagnostics = parse_module(schema)
+    errors = [d for d in diagnostics if d.severity.name == "ERROR"]
+    assert not errors
+
+    converter = RustVisitor()
+    code = converter.convert(module)
+
+    assert "tags: &[&str]" in code
+    assert "ids: &[i64]" in code
+    assert "pipes: Option<&[&str]>" in code
+    assert "brackets: &[&str]" in code
+    assert 'join(",")' in code
+    assert 'join("|")' in code
+    assert '"brackets[]"' in code
+
+
+def test_html_fetch_compiles_and_runs(tmp_path: Path) -> None:
+    """HTML parser with @request compiles and executes async fetch via reqwest."""
+    schema = """
+struct PostPage {
+    @request \"\"\"
+    curl http://127.0.0.1:{{port:int}}/posts?tag={{tag}}
+    \"\"\"
+
+    title {
+        css "h1"
+        text
+    }
+}
+"""
+    module, diagnostics = parse_module(schema)
+    errors = [d for d in diagnostics if d.severity.name == "ERROR"]
+    assert not errors
+
+    source_dir = tmp_path / "src"
+    source_dir.mkdir()
+    (tmp_path / "Cargo.toml").write_text(
+        """[package]
+name = "sscgen_rust_fetch"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dom_query = "0.28"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+""",
+        encoding="utf-8",
+    )
+    converter = RustVisitor()
+    (source_dir / "parser.rs").write_text(
+        converter.convert(module), encoding="utf-8"
+    )
+    (source_dir / "sscgen_runtime.rs").write_text(
+        converter.emit_runtime(), encoding="utf-8"
+    )
+    (source_dir / "main.rs").write_text(
+        """mod sscgen_runtime;
+mod parser;
+
+use std::io::{Read, Write};
+use std::net::TcpListener;
+use std::thread;
+
+#[tokio::main]
+async fn main() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            let mut stream = stream.unwrap();
+            let mut buf = [0u8; 1024];
+            let _ = stream.read(&mut buf);
+            let body = "<html><body><h1>Fetched Title</h1></body></html>";
+            let response = format!(
+                "HTTP/1.1 200 OK\\r\\nContent-Type: text/html\\r\\nContent-Length: {}\\r\\nConnection: close\\r\\n\\r\\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            break;
+        }
+    });
+
+    let client = reqwest::Client::new();
+    let mut parser = parser::PostPageParser::fetch(&client, port as i64, "rust").await.unwrap();
+    let result = parser.parse().unwrap();
+    println!("{}", serde_json::to_string(&result).unwrap());
+}
+""",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ["cargo", "run", "--quiet"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env=_cargo_env(),
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == '{"title":"Fetched Title"}'
+
+
+def test_html_fetch_response_path_compiles_and_runs(tmp_path: Path) -> None:
+    """HTML parser with @request response-path extracts HTML from JSON envelope."""
+    schema = """
+struct JsonEnvelopePage {
+    @request response-path="data.markup" \"\"\"
+    curl http://127.0.0.1:{{port:int}}/envelope
+    \"\"\"
+
+    heading {
+        css "h2"
+        text
+    }
+}
+"""
+    module, diagnostics = parse_module(schema)
+    errors = [d for d in diagnostics if d.severity.name == "ERROR"]
+    assert not errors
+
+    source_dir = tmp_path / "src"
+    source_dir.mkdir()
+    (tmp_path / "Cargo.toml").write_text(
+        """[package]
+name = "sscgen_rust_fetch_envelope"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dom_query = "0.28"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+""",
+        encoding="utf-8",
+    )
+    converter = RustVisitor()
+    (source_dir / "parser.rs").write_text(
+        converter.convert(module), encoding="utf-8"
+    )
+    (source_dir / "sscgen_runtime.rs").write_text(
+        converter.emit_runtime(), encoding="utf-8"
+    )
+    (source_dir / "main.rs").write_text(
+        """mod sscgen_runtime;
+mod parser;
+
+use std::io::{Read, Write};
+use std::net::TcpListener;
+use std::thread;
+
+#[tokio::main]
+async fn main() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            let mut stream = stream.unwrap();
+            let mut buf = [0u8; 1024];
+            let _ = stream.read(&mut buf);
+            let body = r#"{"data":{"markup":"<div><h2>Inner Heading</h2></div>"}}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\\r\\nContent-Type: application/json\\r\\nContent-Length: {}\\r\\nConnection: close\\r\\n\\r\\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            break;
+        }
+    });
+
+    let client = reqwest::Client::new();
+    let mut parser = parser::JsonEnvelopePageParser::fetch(&client, port as i64).await.unwrap();
+    let result = parser.parse().unwrap();
+    println!("{}", serde_json::to_string(&result).unwrap());
+}
+""",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ["cargo", "run", "--quiet"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env=_cargo_env(),
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == '{"heading":"Inner Heading"}'

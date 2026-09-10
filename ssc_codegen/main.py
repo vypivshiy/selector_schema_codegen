@@ -655,6 +655,13 @@ def generate_rust(
             writable=True,
         ),
     ] = Path("."),
+    http_client: Annotated[
+        Optional[str],
+        typer.Option(
+            "--http-client",
+            help="HTTP client library for @request codegen: 'reqwest' (default).",
+        ),
+    ] = None,
     verbose: Annotated[
         bool,
         typer.Option(
@@ -680,7 +687,7 @@ def generate_rust(
     if verbose:
         setup_debug_logging()
     try:
-        profile = resolve(TargetSpec(lang="rust"))
+        profile = resolve(TargetSpec(lang="rust", http_client=http_client))
     except ResolutionError as exc:
         typer.echo(f"ERROR: {exc}", err=True)
         raise typer.Exit(code=1)
@@ -688,6 +695,7 @@ def generate_rust(
         profile,
         files,
         output,
+        http_client=http_client,
         skip_lint=skip_lint,
         verbose=verbose,
         fmt=fmt,
