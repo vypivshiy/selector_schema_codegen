@@ -1099,7 +1099,7 @@ class JsVisitor(BaseWalker):
         ]
 
     def visit_text(self, node: Text, ctx: WalkContext) -> list[str]:
-        if not node.is_array:
+        if not node.ret_type_info.is_array:
             return [f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.textContent;"]
         return [
             f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(el => el.textContent);"
@@ -1107,13 +1107,13 @@ class JsVisitor(BaseWalker):
 
     def visit_raw(self, node: Raw, ctx: WalkContext) -> list[str]:
         prop = "innerHTML" if node.mode == "inner" else "outerHTML"
-        if not node.is_array:
+        if not node.ret_type_info.is_array:
             return [f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.{prop};"]
         return [f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(el => el.{prop});"]
 
     def visit_attr(self, node: Attr, ctx: WalkContext) -> list[str]:
         keys = node.keys
-        if not node.is_array:
+        if not node.ret_type_info.is_array:
             if len(keys) == 1:
                 return [
                     f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.getAttribute({keys[0]!r});"
@@ -1135,7 +1135,7 @@ class JsVisitor(BaseWalker):
 
     def visit_trim(self, node: Trim, ctx: WalkContext) -> list[str]:
         substr = node.substr
-        if not node.is_array:
+        if not node.ret_type_info.is_array:
             if not substr:
                 return [f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.trim();"]
             return [
@@ -1157,7 +1157,7 @@ class JsVisitor(BaseWalker):
 
     def visit_l_trim(self, node: Ltrim, ctx: WalkContext) -> list[str]:
         substr = node.substr
-        if not node.is_array:
+        if not node.ret_type_info.is_array:
             if not substr:
                 return [f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.trimStart();"]
             return [
@@ -1179,7 +1179,7 @@ class JsVisitor(BaseWalker):
 
     def visit_r_trim(self, node: Rtrim, ctx: WalkContext) -> list[str]:
         substr = node.substr
-        if not node.is_array:
+        if not node.ret_type_info.is_array:
             if not substr:
                 return [f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.trimEnd();"]
             return [
@@ -1205,7 +1205,7 @@ class JsVisitor(BaseWalker):
             code="function _rmPrefix(s, p) { return s.startsWith(p) ? s.slice(p.length) : s; }",
         )
         v = repr(node.substr)
-        if not node.is_array:
+        if not node.ret_type_info.is_array:
             return [f"{ctx.indent}let {ctx.nxt} = _rmPrefix({ctx.prv}, {v});"]
         return [
             f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => _rmPrefix(s, {v}));"
@@ -1217,7 +1217,7 @@ class JsVisitor(BaseWalker):
             code="function _rmSuffix(s, p) { return s.endsWith(p) ? s.slice(0, -p.length) : s; }",
         )
         v = repr(node.substr)
-        if not node.is_array:
+        if not node.ret_type_info.is_array:
             return [f"{ctx.indent}let {ctx.nxt} = _rmSuffix({ctx.prv}, {v});"]
         return [
             f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => _rmSuffix(s, {v}));"
@@ -1235,7 +1235,7 @@ class JsVisitor(BaseWalker):
             code="function _rmSuffix(s, p) { return s.endsWith(p) ? s.slice(0, -p.length) : s; }",
         )
         v = repr(node.substr)
-        if not node.is_array:
+        if not node.ret_type_info.is_array:
             return [
                 f"{ctx.indent}let {ctx.nxt} = _rmSuffix(_rmPrefix({ctx.prv}, {v}), {v});"
             ]
@@ -1246,7 +1246,7 @@ class JsVisitor(BaseWalker):
     def visit_format(self, node: Fmt, ctx: WalkContext) -> list[str]:
         tmpl = node.template.replace("{{}}", "${_v}").replace("`", "\\`")
         js_tmpl = "`" + tmpl + "`"
-        if not node.is_array:
+        if not node.ret_type_info.is_array:
             return [
                 f"{ctx.indent}let {ctx.nxt} = ((_v) => {js_tmpl})({ctx.prv});"
             ]
@@ -1255,7 +1255,7 @@ class JsVisitor(BaseWalker):
     def visit_repl(self, node: Repl, ctx: WalkContext) -> list[str]:
         old = repr(node.old)
         new = repr(node.new)
-        if not node.is_array:
+        if not node.ret_type_info.is_array:
             return [
                 f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.replaceAll({old}, {new});"
             ]
@@ -1274,21 +1274,21 @@ class JsVisitor(BaseWalker):
             ),
         )
         rmap = repr(dict(node.replacements))
-        if not node.is_array:
+        if not node.ret_type_info.is_array:
             return [f"{ctx.indent}let {ctx.nxt} = _replMap({ctx.prv}, {rmap});"]
         return [
             f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => _replMap(s, {rmap}));"
         ]
 
     def visit_lower(self, node: Lower, ctx: WalkContext) -> list[str]:
-        if not node.is_array:
+        if not node.ret_type_info.is_array:
             return [f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.toLowerCase();"]
         return [
             f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => s.toLowerCase());"
         ]
 
     def visit_upper(self, node: Upper, ctx: WalkContext) -> list[str]:
-        if not node.is_array:
+        if not node.ret_type_info.is_array:
             return [f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.toUpperCase();"]
         return [
             f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => s.toUpperCase());"
@@ -1309,7 +1309,7 @@ class JsVisitor(BaseWalker):
             "_normalizeText",
             code="function _normalizeText(s) { return s ? s.trim().replace(/\\s+/g, ' ') : ''; }",
         )
-        if not node.is_array:
+        if not node.ret_type_info.is_array:
             return [f"{ctx.indent}let {ctx.nxt} = _normalizeText({ctx.prv});"]
         return [
             f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => _normalizeText(s));"
@@ -1325,7 +1325,7 @@ class JsVisitor(BaseWalker):
                 "}"
             ),
         )
-        if not node.is_array:
+        if not node.ret_type_info.is_array:
             return [f"{ctx.indent}let {ctx.nxt} = _unescapeText({ctx.prv});"]
         return [
             f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => _unescapeText(s));"
@@ -1357,7 +1357,7 @@ class JsVisitor(BaseWalker):
         )
         rx = _py_re_to_js_re(node.pattern)
         msg_literal = _js_literal(msg)
-        if not node.is_array:
+        if not node.ret_type_info.is_array:
             return [
                 f"{ctx.indent}let {ctx.nxt} = _stdReSearch({rx}, {ctx.prv}, {msg_literal});"
             ]
@@ -1374,7 +1374,7 @@ class JsVisitor(BaseWalker):
     def visit_re_sub(self, node: ReSub, ctx: WalkContext) -> list[str]:
         rx_g = _py_re_to_js_re(node.pattern, global_flag=True)
         repl = repr(node.repl)
-        if not node.is_array:
+        if not node.ret_type_info.is_array:
             return [
                 f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.replace({rx_g}, {repl});"
             ]
@@ -1411,14 +1411,14 @@ class JsVisitor(BaseWalker):
     # === CASTS ===
 
     def visit_to_int(self, node: ToInt, ctx: WalkContext) -> list[str]:
-        if not node.is_array:
+        if not node.ret_type_info.is_array:
             return [f"{ctx.indent}let {ctx.nxt} = parseInt({ctx.prv}, 10);"]
         return [
             f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => parseInt(s, 10));"
         ]
 
     def visit_to_float(self, node: ToFloat, ctx: WalkContext) -> list[str]:
-        if not node.is_array:
+        if not node.ret_type_info.is_array:
             return [f"{ctx.indent}let {ctx.nxt} = parseFloat({ctx.prv});"]
         return [
             f"{ctx.indent}let {ctx.nxt} = {ctx.prv}.map(s => parseFloat(s));"

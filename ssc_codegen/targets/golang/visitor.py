@@ -1484,7 +1484,7 @@ class GoVisitor(BaseWalker):
     # === EXTRACTS ===
 
     def visit_text(self, node: Text, ctx: WalkContext) -> list[str]:
-        if not node.is_array:
+        if not node.ret_type_info.is_array:
             return [f"{ctx.indent}{ctx.nxt} := {ctx.prv}.Text()"]
         return [
             f"{ctx.indent}{ctx.nxt} := {ctx.prv}.Map(func(_ int, s *goquery.Selection) string {{",
@@ -1496,7 +1496,7 @@ class GoVisitor(BaseWalker):
         # goquery: Html() method = inner HTML (jQuery semantics);
         # goquery.OuterHtml(sel) package func = outer HTML.
         if node.mode == "inner":
-            if not node.is_array:
+            if not node.ret_type_info.is_array:
                 return [
                     f"{ctx.indent}_html, _ := {ctx.prv}.Html()",
                     f"{ctx.indent}{ctx.nxt} := _html",
@@ -1507,7 +1507,7 @@ class GoVisitor(BaseWalker):
                 f"{ctx.indent}\treturn _h",
                 f"{ctx.indent}}})",
             ]
-        if not node.is_array:
+        if not node.ret_type_info.is_array:
             return [
                 f"{ctx.indent}_html, _ := goquery.OuterHtml({ctx.prv})",
                 f"{ctx.indent}{ctx.nxt} := _html",
@@ -1521,7 +1521,7 @@ class GoVisitor(BaseWalker):
 
     def visit_attr(self, node: Attr, ctx: WalkContext) -> list[str]:
         keys = node.keys
-        if not node.is_array:
+        if not node.ret_type_info.is_array:
             if len(keys) == 1:
                 k = _go_str(keys[0])
                 return [f'{ctx.indent}{ctx.nxt} := {ctx.prv}.AttrOr({k}, "")']
@@ -1559,31 +1559,31 @@ class GoVisitor(BaseWalker):
     # === STRING ===
 
     def visit_trim(self, node: Trim, ctx: WalkContext) -> list[str]:
-        fn = "stdTrimArr" if node.is_array else "stdTrim"
+        fn = "stdTrimArr" if node.ret_type_info.is_array else "stdTrim"
         self._require(fn)
         v = _go_str(node.substr) if node.substr else '""'
         return [f"{ctx.indent}{ctx.nxt} := {fn}({ctx.prv}, {v})"]
 
     def visit_l_trim(self, node: Ltrim, ctx: WalkContext) -> list[str]:
-        fn = "stdLTrimArr" if node.is_array else "stdLTrim"
+        fn = "stdLTrimArr" if node.ret_type_info.is_array else "stdLTrim"
         self._require(fn)
         v = _go_str(node.substr) if node.substr else '""'
         return [f"{ctx.indent}{ctx.nxt} := {fn}({ctx.prv}, {v})"]
 
     def visit_r_trim(self, node: Rtrim, ctx: WalkContext) -> list[str]:
-        fn = "stdRTrimArr" if node.is_array else "stdRTrim"
+        fn = "stdRTrimArr" if node.ret_type_info.is_array else "stdRTrim"
         self._require(fn)
         v = _go_str(node.substr) if node.substr else '""'
         return [f"{ctx.indent}{ctx.nxt} := {fn}({ctx.prv}, {v})"]
 
     def visit_rm_prefix(self, node: RmPrefix, ctx: WalkContext) -> list[str]:
-        fn = "stdRmPrefixArr" if node.is_array else "stdRmPrefix"
+        fn = "stdRmPrefixArr" if node.ret_type_info.is_array else "stdRmPrefix"
         self._require(fn)
         v = _go_str(node.substr)
         return [f"{ctx.indent}{ctx.nxt} := {fn}({ctx.prv}, {v})"]
 
     def visit_rm_suffix(self, node: RmSuffix, ctx: WalkContext) -> list[str]:
-        fn = "stdRmSuffixArr" if node.is_array else "stdRmSuffix"
+        fn = "stdRmSuffixArr" if node.ret_type_info.is_array else "stdRmSuffix"
         self._require(fn)
         v = _go_str(node.substr)
         return [f"{ctx.indent}{ctx.nxt} := {fn}({ctx.prv}, {v})"]
@@ -1591,39 +1591,43 @@ class GoVisitor(BaseWalker):
     def visit_rm_prefix_suffix(
         self, node: RmPrefixSuffix, ctx: WalkContext
     ) -> list[str]:
-        fn = "stdRmPrefixSuffixArr" if node.is_array else "stdRmPrefixSuffix"
+        fn = (
+            "stdRmPrefixSuffixArr"
+            if node.ret_type_info.is_array
+            else "stdRmPrefixSuffix"
+        )
         self._require(fn)
         v = _go_str(node.substr)
         return [f"{ctx.indent}{ctx.nxt} := {fn}({ctx.prv}, {v})"]
 
     def visit_format(self, node: Fmt, ctx: WalkContext) -> list[str]:
-        fn = "stdFmtArr" if node.is_array else "stdFmt"
+        fn = "stdFmtArr" if node.ret_type_info.is_array else "stdFmt"
         self._require(fn)
         tmpl = _go_str(node.template)
         return [f"{ctx.indent}{ctx.nxt} := {fn}({tmpl}, {ctx.prv})"]
 
     def visit_repl(self, node: Repl, ctx: WalkContext) -> list[str]:
-        fn = "stdReplArr" if node.is_array else "stdRepl"
+        fn = "stdReplArr" if node.ret_type_info.is_array else "stdRepl"
         self._require(fn)
         old = _go_str(node.old)
         new = _go_str(node.new)
         return [f"{ctx.indent}{ctx.nxt} := {fn}({ctx.prv}, {old}, {new})"]
 
     def visit_repl_map(self, node: ReplMap, ctx: WalkContext) -> list[str]:
-        fn = "stdReplMapArr" if node.is_array else "stdReplMap"
+        fn = "stdReplMapArr" if node.ret_type_info.is_array else "stdReplMap"
         self._require(fn)
         rmap = _go_str_map(dict(node.replacements))
         return [f"{ctx.indent}{ctx.nxt} := {fn}({ctx.prv}, {rmap})"]
 
     def visit_lower(self, node: Lower, ctx: WalkContext) -> list[str]:
-        if node.is_array:
+        if node.ret_type_info.is_array:
             self._require("stdLowerArr")
             return [f"{ctx.indent}{ctx.nxt} := stdLowerArr({ctx.prv})"]
         self._builder.require_import('"strings"')
         return [f"{ctx.indent}{ctx.nxt} := strings.ToLower({ctx.prv})"]
 
     def visit_upper(self, node: Upper, ctx: WalkContext) -> list[str]:
-        if node.is_array:
+        if node.ret_type_info.is_array:
             self._require("stdUpperArr")
             return [f"{ctx.indent}{ctx.nxt} := stdUpperArr({ctx.prv})"]
         self._builder.require_import('"strings"')
@@ -1642,19 +1646,21 @@ class GoVisitor(BaseWalker):
     def visit_norm_space(
         self, node: NormalizeSpace, ctx: WalkContext
     ) -> list[str]:
-        fn = "stdNormSpaceArr" if node.is_array else "stdNormSpace"
+        fn = (
+            "stdNormSpaceArr" if node.ret_type_info.is_array else "stdNormSpace"
+        )
         self._require(fn)
         return [f"{ctx.indent}{ctx.nxt} := {fn}({ctx.prv})"]
 
     def visit_unescape(self, node: Unescape, ctx: WalkContext) -> list[str]:
-        fn = "stdUnescapeArr" if node.is_array else "stdUnescape"
+        fn = "stdUnescapeArr" if node.ret_type_info.is_array else "stdUnescape"
         self._require(fn)
         return [f"{ctx.indent}{ctx.nxt} := {fn}({ctx.prv})"]
 
     # === REGEX ===
 
     def visit_re(self, node: Re, ctx: WalkContext) -> list[str]:
-        fn = "stdReSearchArr" if node.is_array else "stdReSearch"
+        fn = "stdReSearchArr" if node.ret_type_info.is_array else "stdReSearch"
         self._require(fn)
         location = self._resolve_location(node)
         src_file = self._resolve_source_file(node)
@@ -1687,7 +1693,7 @@ class GoVisitor(BaseWalker):
         self._builder.require_import('"regexp"')
         pattern = py_re_to_go_raw(node.pattern)
         repl = _go_str(node.repl)
-        if not node.is_array:
+        if not node.ret_type_info.is_array:
             return [
                 f"{ctx.indent}_re := regexp.MustCompile({pattern})",
                 f"{ctx.indent}{ctx.nxt} := _re.ReplaceAllString({ctx.prv}, {repl})",
@@ -1739,12 +1745,12 @@ class GoVisitor(BaseWalker):
     # === CASTS ===
 
     def visit_to_int(self, node: ToInt, ctx: WalkContext) -> list[str]:
-        fn = "stdToIntArr" if node.is_array else "stdToInt"
+        fn = "stdToIntArr" if node.ret_type_info.is_array else "stdToInt"
         self._require(fn)
         return [f"{ctx.indent}{ctx.nxt} := {fn}({ctx.prv})"]
 
     def visit_to_float(self, node: ToFloat, ctx: WalkContext) -> list[str]:
-        fn = "stdToFloatArr" if node.is_array else "stdToFloat"
+        fn = "stdToFloatArr" if node.ret_type_info.is_array else "stdToFloat"
         self._require(fn)
         return [f"{ctx.indent}{ctx.nxt} := {fn}({ctx.prv})"]
 

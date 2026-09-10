@@ -135,6 +135,7 @@ dmypy.json
 
 # project
 test_schemas/
+graphify-out/
 .idea/.gitignore
 .idea/.name
 .idea/misc.xml

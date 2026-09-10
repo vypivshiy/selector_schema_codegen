@@ -248,7 +248,7 @@ def resolve_index_types(
     if parent.body:
         prev = _prev_type_info(parent)
         ret_ti = TypeInfo(base=prev.ret_type_info.base)
-        return prev.ret_type_info, ret_ti, prev.is_array
+        return prev.ret_type_info, ret_ti, prev.ret_type_info.is_array
     auto = TypeInfo(base=VariableType.AUTO)
     return auto, auto, True
 
@@ -390,7 +390,6 @@ def _build_expression(
             parent=parent,
             accept_type_info=prev_ti,
             ret_type_info=prev_ti,
-            is_array=init_field.is_array,
             name=field_name,
         )
 
@@ -480,7 +479,6 @@ def parse_expressions(
                 parent=parent,
                 accept_type_info=prev_ti,
                 ret_type_info=prev_ti,
-                is_array=init_field.is_array,
                 name=field_name,
             )
             parent.body.append(expr)
@@ -566,20 +564,21 @@ def parse_expressions(
         if isinstance(parent, (Field, Value, InitField, FunctionDef)):
             last_ret = last_ti.base
             is_arr = (
-                parent.body[-2].is_array if len(parent.body) >= 2 else False
+                parent.body[-2].ret_type_info.is_array
+                if len(parent.body) >= 2
+                else False
             )
             ref: str | None = None
             if last_ret in (VariableType.NESTED, VariableType.JSON):
                 for child in parent.body:
                     if isinstance(child, Nested):
                         ref = child.struct_name
-                        is_arr = child.is_array
+                        is_arr = child.ret_type_info.is_array
                         break
                     if isinstance(child, Jsonify):
                         ref = child.schema_name
-                        is_arr = child.is_array
+                        is_arr = child.ret_type_info.is_array
                         break
-            parent.is_array = is_arr
             parent.ret_type_info = TypeInfo(
                 base=last_ret,
                 is_array=is_arr,
@@ -611,13 +610,8 @@ def _prev_type_info(
     """
     if parent.body:
         prev = parent.body[-1]
-        return SimpleNamespace(
-            ret_type_info=prev.ret_type_info, is_array=prev.is_array
-        )
-    return SimpleNamespace(
-        ret_type_info=parent.accept_type_info,
-        is_array=parent.accept_type_info.is_array,
-    )
+        return SimpleNamespace(ret_type_info=prev.ret_type_info)
+    return SimpleNamespace(ret_type_info=parent.accept_type_info)
 
 
 def _expr_extension(
@@ -668,7 +662,6 @@ def _expr_extension(
         definition=definition,
         accept_type_info=prev.ret_type_info,
         ret_type_info=ret_type,
-        is_array=ret_type.is_array,
         span=node.span,
     )
 
@@ -844,7 +837,7 @@ def _expr_text(
     if parent.body:
         prev = _prev_type_info(parent)
         accept_ti = prev.ret_type_info
-        is_arr = prev.is_array
+        is_arr = prev.ret_type_info.is_array
     else:
         accept_ti = TypeInfo(base=VariableType.DOCUMENT)
         is_arr = False
@@ -852,7 +845,6 @@ def _expr_text(
         parent=parent,
         accept_type_info=accept_ti,
         ret_type_info=TypeInfo(base=VariableType.STRING, is_array=is_arr),
-        is_array=is_arr,
     )
 
 
@@ -863,7 +855,7 @@ def _expr_raw(
     if parent.body:
         prev = _prev_type_info(parent)
         accept_ti = prev.ret_type_info
-        is_arr = prev.is_array
+        is_arr = prev.ret_type_info.is_array
     else:
         accept_ti = TypeInfo(base=VariableType.DOCUMENT)
         is_arr = False
@@ -890,7 +882,6 @@ def _expr_raw(
         parent=parent,
         accept_type_info=accept_ti,
         ret_type_info=TypeInfo(base=VariableType.STRING, is_array=is_arr),
-        is_array=is_arr,
         mode=mode,
     )
 
@@ -902,7 +893,7 @@ def _expr_attr(
     if parent.body:
         prev = _prev_type_info(parent)
         accept_ti = prev.ret_type_info
-        is_arr = prev.is_array
+        is_arr = prev.ret_type_info.is_array
     else:
         accept_ti = TypeInfo(base=VariableType.DOCUMENT)
         is_arr = False
@@ -910,7 +901,6 @@ def _expr_attr(
         parent=parent,
         accept_type_info=accept_ti,
         ret_type_info=TypeInfo(base=VariableType.STRING, is_array=is_arr),
-        is_array=is_arr,
         keys=tuple(a.value for a in node.args),
     )
 
@@ -935,7 +925,6 @@ def _expr_trim(
         parent=parent,
         accept_type_info=prev.ret_type_info,
         ret_type_info=prev.ret_type_info,
-        is_array=prev.is_array,
         substr=substr,
     )
 
@@ -957,7 +946,6 @@ def _expr_ltrim(
         parent=parent,
         accept_type_info=prev.ret_type_info,
         ret_type_info=prev.ret_type_info,
-        is_array=prev.is_array,
         substr=substr,
     )
 
@@ -979,7 +967,6 @@ def _expr_rtrim(
         parent=parent,
         accept_type_info=prev.ret_type_info,
         ret_type_info=prev.ret_type_info,
-        is_array=prev.is_array,
         substr=substr,
     )
 
@@ -993,7 +980,6 @@ def _expr_norm_space(
         parent=parent,
         accept_type_info=prev.ret_type_info,
         ret_type_info=prev.ret_type_info,
-        is_array=prev.is_array,
     )
 
 
@@ -1007,7 +993,6 @@ def _expr_rm_prefix(
         parent=parent,
         accept_type_info=prev.ret_type_info,
         ret_type_info=prev.ret_type_info,
-        is_array=prev.is_array,
         substr=cast(str, substr),
     )
 
@@ -1022,7 +1007,6 @@ def _expr_rm_suffix(
         parent=parent,
         accept_type_info=prev.ret_type_info,
         ret_type_info=prev.ret_type_info,
-        is_array=prev.is_array,
         substr=cast(str, substr),
     )
 
@@ -1037,7 +1021,6 @@ def _expr_rm_prefix_suffix(
         parent=parent,
         accept_type_info=prev.ret_type_info,
         ret_type_info=prev.ret_type_info,
-        is_array=prev.is_array,
         substr=cast(str, substr),
     )
 
@@ -1052,7 +1035,6 @@ def _expr_fmt(
         parent=parent,
         accept_type_info=prev.ret_type_info,
         ret_type_info=prev.ret_type_info,
-        is_array=prev.is_array,
         template=cast(str, tmpl),
     )
 
@@ -1070,7 +1052,6 @@ def _expr_repl(
             parent=parent,
             accept_type_info=prev.ret_type_info,
             ret_type_info=prev.ret_type_info,
-            is_array=prev.is_array,
             replacements=items,
         )
     old = cast(
@@ -1083,7 +1064,6 @@ def _expr_repl(
         parent=parent,
         accept_type_info=prev.ret_type_info,
         ret_type_info=prev.ret_type_info,
-        is_array=prev.is_array,
         old=old,
         new=new,
     )
@@ -1098,7 +1078,6 @@ def _expr_lower(
         parent=parent,
         accept_type_info=prev.ret_type_info,
         ret_type_info=prev.ret_type_info,
-        is_array=prev.is_array,
     )
 
 
@@ -1111,7 +1090,6 @@ def _expr_upper(
         parent=parent,
         accept_type_info=prev.ret_type_info,
         ret_type_info=prev.ret_type_info,
-        is_array=prev.is_array,
     )
 
 
@@ -1144,7 +1122,6 @@ def _expr_unescape(
         parent=parent,
         accept_type_info=prev.ret_type_info,
         ret_type_info=prev.ret_type_info,
-        is_array=prev.is_array,
     )
 
 
@@ -1163,7 +1140,6 @@ def _expr_re(
         pattern=pattern,
         accept_type_info=prev.ret_type_info,
         ret_type_info=prev.ret_type_info,
-        is_array=prev.is_array,
         span=node.span,
     )
 
@@ -1191,7 +1167,6 @@ def _expr_re_sub(
         parent=parent,
         accept_type_info=prev.ret_type_info,
         ret_type_info=prev.ret_type_info,
-        is_array=prev.is_array,
         pattern=pattern,
         repl=repl,
     )
@@ -1210,7 +1185,6 @@ def _expr_index(
         i=int(node.args[0].value),
         accept_type_info=accept_ti,
         ret_type_info=ret_ti,
-        is_array=False,
     )
 
 
@@ -1224,7 +1198,6 @@ def _expr_first(
         i=0,
         accept_type_info=accept_ti,
         ret_type_info=ret_ti,
-        is_array=False,
     )
 
 
@@ -1238,7 +1211,6 @@ def _expr_last(
         i=-1,
         accept_type_info=accept_ti,
         ret_type_info=ret_ti,
-        is_array=False,
     )
 
 
@@ -1255,7 +1227,6 @@ def _expr_slice(
             end=end,
             accept_type_info=prev.ret_type_info,
             ret_type_info=prev.ret_type_info,
-            is_array=prev.is_array,
         )
     return Slice(parent=parent, start=start, end=end)
 
@@ -1286,8 +1257,9 @@ def _expr_to_int(
     return ToInt(
         parent=parent,
         accept_type_info=prev.ret_type_info,
-        ret_type_info=TypeInfo(base=VariableType.INT, is_array=prev.is_array),
-        is_array=prev.is_array,
+        ret_type_info=TypeInfo(
+            base=VariableType.INT, is_array=prev.ret_type_info.is_array
+        ),
     )
 
 
@@ -1299,8 +1271,9 @@ def _expr_to_float(
     return ToFloat(
         parent=parent,
         accept_type_info=prev.ret_type_info,
-        ret_type_info=TypeInfo(base=VariableType.FLOAT, is_array=prev.is_array),
-        is_array=prev.is_array,
+        ret_type_info=TypeInfo(
+            base=VariableType.FLOAT, is_array=prev.ret_type_info.is_array
+        ),
     )
 
 
@@ -1335,7 +1308,6 @@ def _expr_jsonify(
         schema_name=schema_name,
         path=path,
         ret_type_info=TypeInfo(base=ret_type, is_array=is_array),
-        is_array=is_array,
     )
 
 
@@ -1356,7 +1328,11 @@ def _expr_nested(
         StructType.FLAT,
         StructType.LIST,
     )
-    return Nested(parent=parent, struct_name=struct_name, is_array=is_array)
+    return Nested(
+        parent=parent,
+        struct_name=struct_name,
+        ret_type_info=TypeInfo(base=VariableType.NESTED, is_array=is_array),
+    )
 
 
 # -- control --------------------------------------------------------------------
@@ -1375,7 +1351,6 @@ def _expr_fallback(
         body=list(parent.body),
         accept_type_info=prev_ti,
         ret_type_info=prev_ti,
-        is_array=prev.is_array,
     )
     parent.body = [fb]
     return fb
@@ -1390,14 +1365,12 @@ def _expr_filter(
             parent=parent,
             accept_type_info=TypeInfo(base=VariableType.DOCUMENT),
             ret_type_info=TypeInfo(base=VariableType.DOCUMENT, is_array=True),
-            is_array=True,
         )
     prev = _prev_type_info(parent)
     return Filter(
         parent=parent,
         accept_type_info=prev.ret_type_info,
         ret_type_info=prev.ret_type_info,
-        is_array=prev.is_array,
     )
 
 

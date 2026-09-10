@@ -1176,7 +1176,7 @@ class PythonVisitor(BaseWalker):
 
     def visit_trim(self, node: Trim, ctx: WalkContext) -> list[str]:
         value = "" if node.substr == "" else repr(node.substr)
-        if node.is_array:
+        if node.ret_type_info.is_array:
             return [
                 f"{ctx.indent}{ctx.nxt} = [i.strip({value}) for i in {ctx.prv}]"
             ]
@@ -1184,7 +1184,7 @@ class PythonVisitor(BaseWalker):
 
     def visit_l_trim(self, node: Ltrim, ctx: WalkContext) -> list[str]:
         value = "" if node.substr == "" else repr(node.substr)
-        if node.is_array:
+        if node.ret_type_info.is_array:
             return [
                 f"{ctx.indent}{ctx.nxt} = [i.lstrip({value}) for i in {ctx.prv}]"
             ]
@@ -1192,7 +1192,7 @@ class PythonVisitor(BaseWalker):
 
     def visit_r_trim(self, node: Rtrim, ctx: WalkContext) -> list[str]:
         value = "" if node.substr == "" else repr(node.substr)
-        if node.is_array:
+        if node.ret_type_info.is_array:
             return [
                 f"{ctx.indent}{ctx.nxt} = [i.rstrip({value}) for i in {ctx.prv}]"
             ]
@@ -1200,7 +1200,7 @@ class PythonVisitor(BaseWalker):
 
     def visit_rm_prefix(self, node: RmPrefix, ctx: WalkContext) -> list[str]:
         value = repr(node.substr)
-        if node.is_array:
+        if node.ret_type_info.is_array:
             return [
                 f"{ctx.indent}{ctx.nxt} = [i.removeprefix({value}) for i in {ctx.prv}]"
             ]
@@ -1208,7 +1208,7 @@ class PythonVisitor(BaseWalker):
 
     def visit_rm_suffix(self, node: RmSuffix, ctx: WalkContext) -> list[str]:
         value = repr(node.substr)
-        if node.is_array:
+        if node.ret_type_info.is_array:
             return [
                 f"{ctx.indent}{ctx.nxt} = [i.removesuffix({value}) for i in {ctx.prv}]"
             ]
@@ -1218,7 +1218,7 @@ class PythonVisitor(BaseWalker):
         self, node: RmPrefixSuffix, ctx: WalkContext
     ) -> list[str]:
         value = repr(node.substr)
-        if node.is_array:
+        if node.ret_type_info.is_array:
             return [
                 f"{ctx.indent}{ctx.nxt} = [i.removeprefix({value}).removesuffix({value}) for i in {ctx.prv}]"
             ]
@@ -1228,7 +1228,7 @@ class PythonVisitor(BaseWalker):
 
     def visit_format(self, node: Fmt, ctx: WalkContext) -> list[str]:
         tmpl = repr(node.template.replace("{{}}", "{}", 1))
-        if node.is_array:
+        if node.ret_type_info.is_array:
             return [
                 f"{ctx.indent}{ctx.nxt} = [{tmpl}.format(i) for i in {ctx.prv}]"
             ]
@@ -1237,7 +1237,7 @@ class PythonVisitor(BaseWalker):
     def visit_repl(self, node: Repl, ctx: WalkContext) -> list[str]:
         old = repr(node.old)
         new = repr(node.new)
-        if node.is_array:
+        if node.ret_type_info.is_array:
             return [
                 f"{ctx.indent}{ctx.nxt} = [i.replace({old}, {new}) for i in {ctx.prv}]"
             ]
@@ -1254,19 +1254,19 @@ class PythonVisitor(BaseWalker):
                     return s
             """,
         )
-        if node.is_array:
+        if node.ret_type_info.is_array:
             return [
                 f"{ctx.indent}{ctx.nxt} = [std_repl_map(i, {repl_dict}) for i in {ctx.prv}]"
             ]
         return [f"{ctx.indent}{ctx.nxt} = std_repl_map({ctx.prv}, {repl_dict})"]
 
     def visit_lower(self, node: Lower, ctx: WalkContext) -> list[str]:
-        if node.is_array:
+        if node.ret_type_info.is_array:
             return [f"{ctx.indent}{ctx.nxt} = [i.lower() for i in {ctx.prv}]"]
         return [f"{ctx.indent}{ctx.nxt} = {ctx.prv}.lower()"]
 
     def visit_upper(self, node: Upper, ctx: WalkContext) -> list[str]:
-        if node.is_array:
+        if node.ret_type_info.is_array:
             return [f"{ctx.indent}{ctx.nxt} = [i.upper() for i in {ctx.prv}]"]
         return [f"{ctx.indent}{ctx.nxt} = {ctx.prv}.upper()"]
 
@@ -1281,7 +1281,7 @@ class PythonVisitor(BaseWalker):
     def visit_norm_space(
         self, node: NormalizeSpace, ctx: WalkContext
     ) -> list[str]:
-        if node.is_array:
+        if node.ret_type_info.is_array:
             return [
                 f"{ctx.indent}{ctx.nxt} = [' '.join(i.split()) if i else '' for i in {ctx.prv}]"
             ]
@@ -1312,7 +1312,7 @@ class PythonVisitor(BaseWalker):
                     return s
             """,
         )
-        if node.is_array:
+        if node.ret_type_info.is_array:
             return [
                 f"{ctx.indent}{ctx.nxt} = [std_unescape_text(i) for i in {ctx.prv}]"
             ]
@@ -1345,7 +1345,7 @@ class PythonVisitor(BaseWalker):
             """,
         )
         pattern = repr(node.pattern)
-        if node.is_array:
+        if node.ret_type_info.is_array:
             return [
                 f"{ctx.indent}{ctx.nxt} = [std_re_search({pattern}, i, {msg!r}) for i in {ctx.prv}]"
             ]
@@ -1360,7 +1360,7 @@ class PythonVisitor(BaseWalker):
     def visit_re_sub(self, node: ReSub, ctx: WalkContext) -> list[str]:
         pattern = repr(node.pattern)
         repl = repr(node.repl)
-        if node.is_array:
+        if node.ret_type_info.is_array:
             return [
                 f"{ctx.indent}{ctx.nxt} = [re.sub({pattern}, {repl}, i) for i in {ctx.prv}]"
             ]
@@ -1388,12 +1388,12 @@ class PythonVisitor(BaseWalker):
     # === CASTS ===
 
     def visit_to_int(self, node: ToInt, ctx: WalkContext) -> list[str]:
-        if node.is_array:
+        if node.ret_type_info.is_array:
             return [f"{ctx.indent}{ctx.nxt} = [int(i) for i in {ctx.prv}]"]
         return [f"{ctx.indent}{ctx.nxt} = int({ctx.prv})"]
 
     def visit_to_float(self, node: ToFloat, ctx: WalkContext) -> list[str]:
-        if node.is_array:
+        if node.ret_type_info.is_array:
             return [f"{ctx.indent}{ctx.nxt} = [float(i) for i in {ctx.prv}]"]
         return [f"{ctx.indent}{ctx.nxt} = float({ctx.prv})"]
 

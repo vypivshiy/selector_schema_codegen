@@ -72,12 +72,24 @@ A strongly-typed dataclass (`ssc_codegen.ast.Node`) representing a syntax elemen
 _Avoid_: AST token, grammar symbol
 
 **WalkContext**:
-An immutable traversal context carrying variable naming counters (`ctx.prv`, `ctx.nxt`), indentation depth (`ctx.indent`), and target metadata across AST visits.
-_Avoid_: variable scope, traversal state dict
+ The traversal-only context carrying variable naming counters (`ctx.prv`, `ctx.nxt`) and indentation depth (`ctx.indent`) across AST visits. Target/build customizations belong to a separate options or extension context.
+ _Avoid_: variable scope, traversal state dict, backend options bag
+
+**AST no-op node**:
+ A registered technical or insertion-point node whose handler intentionally emits no target code. This is different from an unknown AST node, which is a generation error.
+ _Avoid_: silently ignored node
+
+**Legacy array flag**:
+ The removed `Node.is_array` representation that was replaced by `TypeInfo.is_array` as the canonical array modifier.
+ _Avoid_: second type source of truth
 
 **BaseWalker**:
-The language-agnostic AST traversal engine that dispatches nodes to `visit_*` handlers across three traversal modes: Container, Pipeline, and Predicate.
-_Avoid_: tree visitor, code emitter base
+ The language-agnostic AST traversal engine that dispatches nodes to `visit_*` handlers across three traversal modes: Container, Pipeline, and Predicate.
+ _Avoid_: tree visitor, code emitter base
+
+**Visitor handler**:
+ An explicit target-specific `visit_*` dispatch endpoint. Its visibility is part of the backend contract and should not be hidden behind components that only forward the same methods.
+ _Avoid_: incidental delegation method
 
 **ModuleBuilder**:
 A pure data accumulator that registers imports, standard helper functions, and user extension runtime definitions idempotently without rendering target syntax.
@@ -108,4 +120,3 @@ _Avoid_: Sphinx reST docstring, NumPy docstring
 **Architectural Reference Scope**:
 The full coverage boundary of the API reference spanning the public facade, AST intermediate representation, core reader/linter passes, traversal engine, and backend target converters.
 _Avoid_: public-only facade
-

@@ -78,7 +78,6 @@ class ReAll(Node):
             base=VariableType.STRING, is_array=True
         )
     )
-    is_array: bool = True
 
 
 @dataclass

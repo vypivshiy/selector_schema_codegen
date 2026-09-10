@@ -73,7 +73,6 @@ class Slice(Node):
     ret_type_info: TypeInfo = field(
         default_factory=lambda: TypeInfo(base=VariableType.AUTO, is_array=True)
     )
-    is_array: bool = True
 
 
 @dataclass
@@ -123,4 +122,3 @@ class Unique(Node):
             base=VariableType.STRING, is_array=True
         )
     )
-    is_array: bool = True

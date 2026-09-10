@@ -181,7 +181,7 @@ def test_parser_resolves_jsonify_and_nested_nodes():
     assert jsonify.path == "props.pageProps.titleResults"
     assert jsonify.accept == VariableType.STRING
     assert jsonify.ret == VariableType.JSON
-    assert jsonify.is_array is False
+    assert jsonify.ret_type_info.is_array is False
 
     # nested parsing is covered on an example that actually produces Nested AST nodes
     assert selector_parse.accept == VariableType.DOCUMENT
@@ -206,7 +206,7 @@ def test_parser_builds_nested_node_for_inline_pipeline():
     assert nested.struct_name == "Child"
     assert nested.accept == VariableType.DOCUMENT
     assert nested.ret == VariableType.NESTED
-    assert nested.is_array is False
+    assert nested.ret_type_info.is_array is False
     assert isinstance(child.body[-1], Return)
 
 
@@ -347,7 +347,7 @@ def test_parser_raw_inner_in_array_pipeline():
     raw_node = items.body[-2]
     assert isinstance(raw_node, Raw)
     assert raw_node.mode == "inner"
-    assert raw_node.is_array is True
+    assert raw_node.ret_type_info.is_array is True
 
 
 def test_lint_raw_invalid_mode():
@@ -379,7 +379,7 @@ def test_parser_supports_inline_nested_in_books_example():
 
     nested = next(node for node in books.body if isinstance(node, Nested))
     assert nested.struct_name == "Book"
-    assert nested.is_array is True
+    assert nested.ret_type_info.is_array is True
     assert books.ret == VariableType.NESTED
     assert isinstance(books.body[-1], Return)
 
@@ -461,7 +461,7 @@ def test_parser_supports_inline_filter_not_block():
     ]
     assert isinstance(filter_node.body[0].body[0], PredContains)
     assert links.ret == VariableType.STRING
-    assert links.is_array
+    assert links.ret_type_info.is_array
 
 
 def test_parser_resolves_json_definition_field_shapes():
@@ -964,7 +964,7 @@ class TestJsonFieldTypes:
         m = _parse(_load_fixture("json_types", "str.kdl"))
         f = _json_field(m, "F", "x")
         assert f.ret == VariableType.STRING
-        assert f.is_array is False
+        assert f.ret_type_info.is_array is False
         assert f.ret_type_info.is_optional is False
 
     def test_int_field(self):
@@ -1362,7 +1362,7 @@ class TestJsonifyAst:
         j = self._jsonify_node("jsonify", "no_path.kdl")
         assert j.schema_name == "Q"
         assert j.path == ""
-        assert j.is_array is False
+        assert j.ret_type_info.is_array is False
 
     def test_with_path(self):
         j = self._jsonify_node("jsonify", "with_path.kdl")
@@ -1370,7 +1370,7 @@ class TestJsonifyAst:
 
     def test_array_def_is_array(self):
         j = self._jsonify_node("jsonify", "array_def.kdl")
-        assert j.is_array is True
+        assert j.ret_type_info.is_array is True
 
     def test_undefined_schema_errors(self):
         errs = _lint_errors(_load_fixture("jsonify", "undefined_schema.kdl"))

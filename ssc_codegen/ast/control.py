@@ -145,7 +145,6 @@ class Fallback(Node):
             self.ret_type_info = TypeInfo(
                 base=VariableType.STRING, is_array=True
             )
-            self.is_array = True
 
 
 @dataclass

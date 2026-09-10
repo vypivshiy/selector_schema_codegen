@@ -782,9 +782,6 @@ class InitField(Node):
 class SplitDoc(Node):
     """Document splitter pipeline extracting item documents for `type=list` or `type=dict`.
 
-    Attributes:
-        is_array: Always `True` for document splitters.
-
     Examples:
         - KDL: `@split-doc { css-all "article.product_pod" }`
         - Generated Python:
@@ -802,7 +799,6 @@ class SplitDoc(Node):
             base=VariableType.DOCUMENT, is_array=True
         )
     )
-    is_array: bool = True
 
 
 @dataclass
@@ -873,9 +869,6 @@ class TableRows(Node):
 
     Extracts all row container elements (`<tr>`) from the table.
 
-    Attributes:
-        is_array: Always `True` for row selection lists.
-
     Examples:
         - KDL: `@rows { css-all "tr" }`
     """
@@ -888,7 +881,6 @@ class TableRows(Node):
             base=VariableType.DOCUMENT, is_array=True
         )
     )
-    is_array: bool = True
 
 
 @dataclass

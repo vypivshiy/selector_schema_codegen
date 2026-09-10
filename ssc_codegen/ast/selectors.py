@@ -66,7 +66,6 @@ class CssSelectAll(Node):
             base=VariableType.DOCUMENT, is_array=True
         )
     )
-    is_array: bool = True
 
     @property
     def query(self) -> str:
@@ -139,7 +138,6 @@ class XpathSelectAll(Node):
             base=VariableType.DOCUMENT, is_array=True
         )
     )
-    is_array: bool = True
 
     @property
     def query(self) -> str:

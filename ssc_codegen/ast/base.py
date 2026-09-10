@@ -17,7 +17,6 @@ class Node:
     Attributes:
         ret_type_info: Resolved type metadata of the value returned by this node.
         accept_type_info: Resolved type metadata of the input value accepted by this node.
-        is_array: Flag indicating whether the node operates in a list/array context.
         parent: Reference to the parent AST node (excluded from representation and comparison).
         body: Ordered list of child AST nodes contained within this node.
         span: Optional source code location tracking (line, column) from the KDL source.
@@ -29,7 +28,6 @@ class Node:
     accept_type_info: TypeInfo = field(
         default_factory=lambda: TypeInfo(base=VariableType.AUTO)
     )
-    is_array: bool = False
     parent: Node | None = field(default=None, repr=False)
     body: list[Node] = field(default_factory=list)
     span: Span | None = field(default=None, repr=False, compare=False)

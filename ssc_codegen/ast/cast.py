@@ -110,7 +110,6 @@ class Jsonify(Node):
     ret_type_info: TypeInfo = field(
         default_factory=lambda: TypeInfo(base=VariableType.JSON)
     )
-    is_array: bool = False
 
 
 @dataclass
@@ -131,7 +130,6 @@ class Nested(Node):
     """
 
     struct_name: str = ""
-    is_array: bool = False
     accept_type_info: TypeInfo = field(
         default_factory=lambda: TypeInfo(base=VariableType.DOCUMENT)
     )
