@@ -112,6 +112,7 @@ from ssc_codegen.ast import (
     Upper,
     Utilities,
     Value,
+    VariableType,
     VariableType as VT,
 )
 from ssc_codegen.exceptions import BuildTimeError
@@ -1008,7 +1009,11 @@ class RustVisitor(BaseWalker):
         is_child_raw = (
             isinstance(child_struct, Struct) and child_struct.type == ST.RAW
         )
-        if self._is_raw(node) or is_child_raw:
+        is_input_str = bool(
+            node.accept_type_info
+            and node.accept_type_info.base == VariableType.STRING
+        )
+        if self._is_raw(node) or is_child_raw or is_input_str:
             return [
                 self._line(
                     ctx,
@@ -1839,7 +1844,8 @@ class RustVisitor(BaseWalker):
         lines: list[str] = []
         if node.doc:
             lines.extend(
-                f"// {line}" if line else "//" for line in node.doc.splitlines()
+                f"/// {line}" if line else "///"
+                for line in node.doc.splitlines()
             )
         lines.append(
             f"pub fn {name}(document: impl Into<String>) -> Result<{typ}, rt::SscError> {{"

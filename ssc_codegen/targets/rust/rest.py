@@ -526,7 +526,7 @@ def emit_matcher_list_def(
             typ = f"Vec<{s_pascal}>" if is_array else s_pascal
             variant_info[v_name] = (typ, entry.status, False)
         else:
-            variant_info[v_name] = ("String", entry.status, True)
+            variant_info[v_name] = ("serde_json::Value", entry.status, False)
 
     lines = [
         "#[derive(Debug)]",
@@ -652,7 +652,7 @@ def emit_matcher_list_def(
                 )
         else:
             lines.append(
-                f"{ind}return Some({enum_name}::{v_name}(_body_text.to_string()));"
+                f"{ind}return Some({enum_name}::{v_name}(if _body_val.is_null() {{ serde_json::Value::String(_body_text.to_string()) }} else {{ _body_val.clone() }}));"
             )
 
         if checks:

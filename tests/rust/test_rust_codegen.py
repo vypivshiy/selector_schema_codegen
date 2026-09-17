@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from ssc_codegen.ast import MatcherEntry, MatcherListDef
 from ssc_codegen.core import parse_module
 from ssc_codegen.exceptions import BuildTimeError
 from ssc_codegen.targets.resolver import ResolutionError, resolve
@@ -837,9 +838,9 @@ fn parse_card {
 
     source_dir = _write_cargo_project(tmp_path)
     converter = RustVisitor()
-    (source_dir / "parser.rs").write_text(
-        converter.convert(module), encoding="utf-8"
-    )
+    code = converter.convert(module)
+    assert "/// Extract the <h1> text from an HTML document." in code
+    (source_dir / "parser.rs").write_text(code, encoding="utf-8")
     (source_dir / "sscgen_runtime.rs").write_text(
         converter.emit_runtime(), encoding="utf-8"
     )
@@ -932,15 +933,23 @@ struct HtmlWithRawChild {
         nested RawMetadata
     }
 }
+
+struct HtmlWithRawHtmlChild {
+    card {
+        css "div.card-wrap"
+        raw
+        nested HtmlCard
+    }
+}
 """
     module, diagnostics = parse_module(schema)
     assert not [item for item in diagnostics if item.severity.name == "ERROR"]
 
     source_dir = _write_cargo_project(tmp_path)
     converter = RustVisitor()
-    (source_dir / "parser.rs").write_text(
-        converter.convert(module), encoding="utf-8"
-    )
+    code = converter.convert(module)
+    assert "HtmlCardParser::new(&v" in code
+    (source_dir / "parser.rs").write_text(code, encoding="utf-8")
     (source_dir / "sscgen_runtime.rs").write_text(
         converter.emit_runtime(), encoding="utf-8"
     )
@@ -965,6 +974,12 @@ fn main() {
     let html_res = html_parser.parse().expect("html parse");
     drop(html_parser);
     assert_eq!(html_res.meta.version, "2.5");
+
+    let html_data2 = "<html><body><div class=\"card-wrap\"><h3>Nested Card Heading</h3></div></body></html>";
+    let mut html_raw_child_parser = parser::HtmlWithRawHtmlChildParser::new(html_data2).expect("html raw child parser init");
+    let html_raw_child_res = html_raw_child_parser.parse().expect("html raw child parse");
+    drop(html_raw_child_parser);
+    assert_eq!(html_raw_child_res.card.heading, "Nested Card Heading");
 
     println!("RAW_NESTED_OK");
 }
@@ -1234,6 +1249,44 @@ struct SearchPage {
     assert 'join(",")' in code
     assert 'join("|")' in code
     assert '"brackets[]"' in code
+
+
+def test_untyped_error_variant_holds_serde_json_value() -> None:
+    """MatcherListDef with untyped error entries emits variants holding serde_json::Value."""
+    schema = """
+json User {
+    id int
+}
+
+struct API type=rest {
+    @request name=get-user response=User \"\"\"
+    GET http://127.0.0.1/users/{{id:int}} HTTP/1.1
+    \"\"\"
+}
+"""
+    module_ast, diagnostics = parse_module(schema)
+    errors = [d for d in diagnostics if d.severity.name == "ERROR"]
+    assert not errors
+
+    for n in module_ast.body:
+        if isinstance(n, MatcherListDef):
+            n.entries.append(
+                MatcherEntry(
+                    status=400,
+                    required_keys=[],
+                    conditions={},
+                    factory_name="APIErr400",
+                    error_schema="",
+                )
+            )
+
+    converter = RustVisitor()
+    code = converter.convert(module_ast)
+
+    assert "Err400(serde_json::Value)," in code
+    assert "pub type APIErr400 = serde_json::Value;" in code
+    assert "return Some(APIError::Err400(if _body_val.is_null()" in code
+    assert "_body_val.clone()" in code
 
 
 def test_html_fetch_compiles_and_runs(tmp_path: Path) -> None:
@@ -1523,6 +1576,20 @@ struct API type=rest {
     errors = [d for d in diagnostics if d.severity.name == "ERROR"]
     assert not errors
 
+    # Inject an untyped error 400 entry to verify variants holding raw serde_json::Value
+    for n in module_ast.body:
+        if isinstance(n, MatcherListDef):
+            n.entries.insert(
+                0,
+                MatcherEntry(
+                    status=400,
+                    required_keys=[],
+                    conditions={},
+                    factory_name="APIErr400",
+                    error_schema="",
+                ),
+            )
+
     source_dir = tmp_path / "src"
     source_dir.mkdir()
     (tmp_path / "Cargo.toml").write_text(
@@ -1543,9 +1610,9 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
     )
 
     converter = RustVisitor()
-    (source_dir / "parser.rs").write_text(
-        converter.convert(module_ast), encoding="utf-8"
-    )
+    code = converter.convert(module_ast)
+    assert "Err400(serde_json::Value)" in code
+    (source_dir / "parser.rs").write_text(code, encoding="utf-8")
     (source_dir / "sscgen_runtime.rs").write_text(
         converter.emit_runtime(), encoding="utf-8"
     )
@@ -1593,6 +1660,13 @@ async fn main() {
                     body.len(), body
                 );
                 let _ = stream.write_all(resp.as_bytes());
+            } else if req_str.contains("/users/4") {
+                let body = r#"{"bad_input":true,"detail":"missing field"}"#;
+                let resp = format!(
+                    "HTTP/1.1 400 Bad Request\\r\\nContent-Type: application/json\\r\\nContent-Length: {}\\r\\nConnection: close\\r\\n\\r\\n{}",
+                    body.len(), body
+                );
+                let _ = stream.write_all(resp.as_bytes());
             }
         }
     });
@@ -1627,6 +1701,21 @@ async fn main() {
                     assert_eq!(val["detail"], "bad gateway");
                 }
                 other => panic!("expected Unknown, got {:?}", other),
+            }
+        }
+        other => panic!("expected Err, got {:?}", other),
+    }
+
+    // 4. Untyped error response (@error 400 holding serde_json::Value)
+    match parser::API::get_user(&client, port as i64, 4).await {
+        Err(err) => {
+            assert_eq!(err.status(), Some(400));
+            match err {
+                parser::APIError::Err400(val) => {
+                    assert_eq!(val["bad_input"], true);
+                    assert_eq!(val["detail"], "missing field");
+                }
+                other => panic!("expected Err400, got {:?}", other),
             }
         }
         other => panic!("expected Err, got {:?}", other),
