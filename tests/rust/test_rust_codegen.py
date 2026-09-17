@@ -1599,10 +1599,14 @@ async fn main() {
 
     let client = reqwest::Client::new();
 
-    // 1. Success response
-    let user = parser::API::get_user(&client, port as i64, 1).await.unwrap();
+    // 1. Success response via typed aliases
+    let user_res: parser::GetUserResult = parser::API::get_user(&client, port as i64, 1).await;
+    let user = user_res.unwrap();
     assert_eq!(user.id, 1);
     assert_eq!(user.name, "Alice");
+
+    let api_res: parser::APIGetUserResult = parser::API::get_user(&client, port as i64, 1).await;
+    assert_eq!(api_res.unwrap().id, 1);
 
     // 2. Typed error response (@error 404)
     match parser::API::get_user(&client, port as i64, 2).await {
