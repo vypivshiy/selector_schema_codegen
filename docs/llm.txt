@@ -454,7 +454,7 @@ json Author {
 Field types: str, int, float, bool, null, <RefName>.
 Dictionary schemas:
 - Top-level: `(dict)json Name { @key <ScalarType>; @value <Type>; }` (@key defaults to str; @value supports scalar, (array)type, or <RefName>).
-- Inline dict fields: `field (dict) { @key str; @value (array)str; }`.
+- Inline dict fields: `field (dict)DictName { @key str; @value (array)str; }` or `(dict)field { @key str; @value (array)str; }`.
 - Target types: Python `Dict[K, V]`, Go `map[K]V`, Rust `HashMap<K, V>`, JS `Record<K, V>`.
 
 Inline nested schemas (hoisted by compiler):

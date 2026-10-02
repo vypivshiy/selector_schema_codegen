@@ -86,7 +86,7 @@ json Item {
 
 json ApiResponse {
     id str
-    translations (dict) {
+    translations (dict)Translations {
         @key str
         @value (array)str
     }

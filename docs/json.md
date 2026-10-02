@@ -67,8 +67,8 @@ json Author {
    Задаёт явное имя результирующей модели (например, `franchise Franchise { ... }` → `FranchiseJson`).
 3. **Именованные массивы объектов (`field_name (array)ItemModel { ... }`)**:
    Задаёт массив вложенных объектов (например, `nodes (array)Node { ... }` → `NodeJson`). Из-за грамматики KDL 2.0 указание имени модели обязательно.
-4. **Инлайн-словари (`field_name (dict) { ... }`)**:
-   Объявляет анонимный словарь в поле родительской модели с директивами `@key` и `@value`.
+4. **Инлайн-словари (`field_name (dict)DictName { ... }` или `(dict)field_name { ... }`)**:
+   Объявляет словарь в поле родительской модели с директивами `@key` и `@value`. В KDL 2.0 аннотация типа должна предшествовать значению или имени узла: указывается `field_name (dict)DictName { ... }` (аналогично `(array)ItemModel`) либо префикс узла `(dict)field_name { ... }`.
 
 ```kdl
 json AnimeResponse {
@@ -90,7 +90,7 @@ json AnimeResponse {
     }
 
     // Инлайн словарь
-    translations (dict) {
+    translations (dict)Translations {
         @key int
         @value (array)str
     }

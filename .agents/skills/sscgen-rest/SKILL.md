@@ -139,7 +139,7 @@ Top-level array: `(array)json Tags { name str }`.
 **Dictionary schemas (`(dict)json` & inline `(dict)`):**
 For JSON objects with dynamic, numeric, or arbitrary keys and homogeneous values (e.g. `{"1": ["jap", "dub"], "2": ["jap"]}`):
 - Top-level: `(dict)json Translations { @key int; @value (array)str; }` (Python `Dict[int, List[str]]`, Go `map[int64][]string`, Rust `HashMap<i64, Vec<String>>`, JS `Record<number, string[]>`).
-- Inline dict: `translations (dict) { @key str; @value (array)str; }`.
+- Inline dict: `translations (dict)Translations { @key str; @value (array)str; }` or `(dict)translations { @key str; @value (array)str; }`.
 - `@key` defaults to `str` if omitted. Supported scalar key types: `str`, `int`, `float`, `bool`.
 - `@value` can be a scalar, `(array)Type`, or reference to another `json` schema.
 
