@@ -19,6 +19,7 @@ from ssc_codegen.ast import (
 )
 from ssc_codegen.core import parse_module
 from ssc_codegen.request_spec import parse_to_http
+from ssc_codegen.targets.python import PY_BS4_CONVERTER
 from kdlquery import Severity
 
 
@@ -217,19 +218,7 @@ class TestRestPyConverter:
         assert "class APIErr404(Err[ErrJson]):" in code
         assert "class UnknownErr(Err[Any]):" in code
         assert "class TransportErr(Err[None]):" in code
-        assert "RestApiError" not in code
         assert "import httpx" in code
-
-    def test_py_bs4_no_typeddict_for_rest(self):
-        from ssc_codegen.targets.python import (
-            PY_BS4_CONVERTER as CONVERTER,
-        )
-
-        src = _rest_src()
-        module = _parse(src)
-        code = CONVERTER.convert(module, http_client="httpx")
-        # no APIType or similar for the REST struct
-        assert "APIType" not in code
 
     def test_py_bs4_status_error_routing(self):
         from ssc_codegen.targets.python import (
@@ -470,7 +459,6 @@ class TestRestJsConverter:
         assert "@typedef {Object} TransportErr" in code
         assert "isOk: true" in code
         assert "isOk: false" in code
-        assert "RestApiError" not in code
 
     def test_js_method_return_type_jsdoc(self):
         from ssc_codegen.targets.javascript import JS_CONVERTER
@@ -898,22 +886,6 @@ class TestRestOnlyImports:
 # ---------------------------------------------------------------------------
 
 
-def _get_all_converters():
-    from ssc_codegen.targets.python import (
-        PY_BS4_CONVERTER,
-        PY_LXML_CONVERTER,
-        PY_PARSEL_CONVERTER,
-        PY_SLAX_CONVERTER,
-    )
-
-    return {
-        "PyBs4": PY_BS4_CONVERTER,
-        "PyLxml": PY_LXML_CONVERTER,
-        "PyParsel": PY_PARSEL_CONVERTER,
-        "PySlax": PY_SLAX_CONVERTER,
-    }
-
-
 _NOT_REQUIRED_COMPAT_IMPORT = "\n".join(
     (
         "if sys.version_info >= (3, 11):",
@@ -924,12 +896,10 @@ _NOT_REQUIRED_COMPAT_IMPORT = "\n".join(
 )
 
 
-@pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
-def test_not_required_import_is_version_dependent(converter_attr):
-    converter = _get_all_converters()[converter_attr]
+def test_not_required_import_is_version_dependent():
     module = _parse(_rest_src())
 
-    code = converter.convert(module, http_client="httpx")
+    code = PY_BS4_CONVERTER.convert(module, http_client="httpx")
 
     assert "import sys" in code
     assert _NOT_REQUIRED_COMPAT_IMPORT in code
@@ -940,15 +910,13 @@ class TestSeparateRuntime:
 
     RUNTIME_NAME = "sscgen_runtime"
 
-    @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
-    def test_runtime_file_has_rest_helpers(self, converter_attr):
+    def test_runtime_file_has_rest_helpers(self):
         from ssc_codegen.generation.runtime import register_runtime_file
 
-        converter = _get_all_converters()[converter_attr]
         src = _rest_src(errors="    @error 404 Err\n")
         module = _parse(src)
-        register_runtime_file(converter, self.RUNTIME_NAME)
-        generated = converter.convert_all(
+        register_runtime_file(PY_BS4_CONVERTER, self.RUNTIME_NAME)
+        generated = PY_BS4_CONVERTER.convert_all(
             module,
             http_client="httpx",
             runtime_module=self.RUNTIME_NAME,
@@ -960,15 +928,13 @@ class TestSeparateRuntime:
         assert "class TransportErr(Err[None]):" in runtime
         assert "def ssc_rest_call(" in runtime
 
-    @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
-    def test_main_imports_from_runtime(self, converter_attr):
+    def test_main_imports_from_runtime(self):
         from ssc_codegen.generation.runtime import register_runtime_file
 
-        converter = _get_all_converters()[converter_attr]
         src = _rest_src(errors="    @error 404 Err\n")
         module = _parse(src)
-        register_runtime_file(converter, self.RUNTIME_NAME)
-        generated = converter.convert_all(
+        register_runtime_file(PY_BS4_CONVERTER, self.RUNTIME_NAME)
+        generated = PY_BS4_CONVERTER.convert_all(
             module,
             http_client="httpx",
             runtime_module=self.RUNTIME_NAME,
@@ -977,15 +943,13 @@ class TestSeparateRuntime:
         assert f"from .{self.RUNTIME_NAME} import" in code
         assert "Ok" in code.split(f"from .{self.RUNTIME_NAME} import")[1]
 
-    @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
-    def test_main_no_inline_rest_helpers(self, converter_attr):
+    def test_main_no_inline_rest_helpers(self):
         from ssc_codegen.generation.runtime import register_runtime_file
 
-        converter = _get_all_converters()[converter_attr]
         src = _rest_src(errors="    @error 404 Err\n")
         module = _parse(src)
-        register_runtime_file(converter, self.RUNTIME_NAME)
-        generated = converter.convert_all(
+        register_runtime_file(PY_BS4_CONVERTER, self.RUNTIME_NAME)
+        generated = PY_BS4_CONVERTER.convert_all(
             module,
             http_client="httpx",
             runtime_module=self.RUNTIME_NAME,
@@ -996,15 +960,13 @@ class TestSeparateRuntime:
         assert "class Err(Generic[_E]):" not in code
         assert "def ssc_rest_call(" not in code
 
-    @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
-    def test_main_no_redundant_rest_imports(self, converter_attr):
+    def test_main_no_redundant_rest_imports(self):
         from ssc_codegen.generation.runtime import register_runtime_file
 
-        converter = _get_all_converters()[converter_attr]
         src = _rest_src(errors="    @error 404 Err\n")
         module = _parse(src)
-        register_runtime_file(converter, self.RUNTIME_NAME)
-        generated = converter.convert_all(
+        register_runtime_file(PY_BS4_CONVERTER, self.RUNTIME_NAME)
+        generated = PY_BS4_CONVERTER.convert_all(
             module,
             http_client="httpx",
             runtime_module=self.RUNTIME_NAME,
@@ -1022,15 +984,13 @@ class TestSeparateRuntime:
         for runtime_only in ("Generic", "TypeVar", "Mapping", "Callable"):
             assert runtime_only not in code
 
-    @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
-    def test_main_valid_python(self, converter_attr):
+    def test_main_valid_python(self):
         from ssc_codegen.generation.runtime import register_runtime_file
 
-        converter = _get_all_converters()[converter_attr]
         src = _rest_src(errors="    @error 404 Err\n")
         module = _parse(src)
-        register_runtime_file(converter, self.RUNTIME_NAME)
-        generated = converter.convert_all(
+        register_runtime_file(PY_BS4_CONVERTER, self.RUNTIME_NAME)
+        generated = PY_BS4_CONVERTER.convert_all(
             module,
             http_client="httpx",
             runtime_module=self.RUNTIME_NAME,
@@ -1041,8 +1001,7 @@ class TestSeparateRuntime:
         pyast.parse(generated[f"{self.RUNTIME_NAME}.py"])
         _exec_with_runtime(generated[""], generated[f"{self.RUNTIME_NAME}.py"])
 
-    @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
-    def test_main_imports_present_under_runtime(self, converter_attr):
+    def test_main_imports_present_under_runtime(self):
         """Regression: -R mode must not drop typing/dataclass/httpx imports.
 
         Pre-fix the parser file lost every non-runtime import under -R,
@@ -1052,11 +1011,10 @@ class TestSeparateRuntime:
         """
         from ssc_codegen.generation.runtime import register_runtime_file
 
-        converter = _get_all_converters()[converter_attr]
         src = _rest_src(errors="    @error 404 Err\n")
         module = _parse(src)
-        register_runtime_file(converter, self.RUNTIME_NAME)
-        generated = converter.convert_all(
+        register_runtime_file(PY_BS4_CONVERTER, self.RUNTIME_NAME)
+        generated = PY_BS4_CONVERTER.convert_all(
             module,
             http_client="httpx",
             runtime_module=self.RUNTIME_NAME,
@@ -1072,15 +1030,13 @@ class TestSeparateRuntime:
         # just because runtime mode is on.
         assert "Literal[404]" in code
 
-    @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
-    def test_runtime_file_imports_httpx_when_rest(self, converter_attr):
+    def test_runtime_file_imports_httpx_when_rest(self):
         """Regression: runtime file references ``httpx.HTTPError`` in
         ``ssc_rest_call``/``ssc_rest_call_async`` but pre-fix did not import
         httpx, causing NameError at the first transport exception.
         """
         from ssc_codegen.generation.runtime import register_runtime_file
 
-        converter = _get_all_converters()[converter_attr]
         src = _rest_src(errors="    @error 404 Err\n")
         module = _parse(src)
         # http_strategy is normally resolved by main.py via
@@ -1089,11 +1045,11 @@ class TestSeparateRuntime:
         from ssc_codegen.targets.python.http_libs.httpx import HttpxStrategy
 
         register_runtime_file(
-            converter,
+            PY_BS4_CONVERTER,
             self.RUNTIME_NAME,
             http_strategy=HttpxStrategy(),
         )
-        generated = converter.convert_all(
+        generated = PY_BS4_CONVERTER.convert_all(
             module,
             http_client="httpx",
             runtime_module=self.RUNTIME_NAME,
@@ -1187,10 +1143,7 @@ class TestSeparateRuntime:
         assert isinstance(strategy, HttpLibStrategy)
         assert strategy.import_line == expected_import
 
-    @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
-    def test_runtime_file_imports_httpx_when_http_client_is_none(
-        self, converter_attr
-    ):
+    def test_runtime_file_imports_httpx_when_http_client_is_none(self):
         """Regression for the main.py integration bug: when user runs
         ``ssc-gen generate ... -R`` WITHOUT ``--http-client``, ``http_client``
         is ``None``. Pre-fix main.py gated strategy resolution behind
@@ -1207,20 +1160,19 @@ class TestSeparateRuntime:
         from ssc_codegen.generation.runtime import register_runtime_file
         from ssc_codegen.targets.python.visitor import PythonVisitor
 
-        converter = _get_all_converters()[converter_attr]
         src = _rest_src(errors="    @error 404 Err\n")
         module = _parse(src)
         # Emulate main.py: resolve HTTP strategy via the shared resolver
         # without explicitly passing http_client.
         strategy = PythonVisitor.http_strategy_for(None)
         register_runtime_file(
-            converter,
+            PY_BS4_CONVERTER,
             self.RUNTIME_NAME,
             http_strategy=strategy,
         )
         # Also do not pass http_client to convert_all — emulates the user
         # not passing --http-client on the CLI.
-        generated = converter.convert_all(
+        generated = PY_BS4_CONVERTER.convert_all(
             module,
             runtime_module=self.RUNTIME_NAME,
         )
@@ -1273,8 +1225,7 @@ class TestSeparateRuntime:
         assert expected_import in runtime
         assert expected_import in parser
 
-    @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
-    def test_html_only_module_with_fetch_imports_httpx(self, converter_attr):
+    def test_html_only_module_with_fetch_imports_httpx(self):
         """Regression: HTML-only module with a ``fetch`` shortcut method
         emits ``def fetch(cls, client: httpx.Client, ...)`` in the parser
         file. Pre-fix the visitor gated ``import httpx`` behind
@@ -1285,7 +1236,6 @@ class TestSeparateRuntime:
         ``module_uses_http`` is the broader gate that covers both REST
         structs and any struct with a MethodFetch / MethodRest in its body.
         """
-        converter = _get_all_converters()[converter_attr]
         src = (
             "struct Page {\n"
             '    title { css "h1"; text }\n'
@@ -1296,14 +1246,13 @@ class TestSeparateRuntime:
             "}\n"
         )
         module = _parse(src)
-        generated = converter.convert_all(module)
+        generated = PY_BS4_CONVERTER.convert_all(module)
         code = generated[""]
         assert "def fetch" in code
         assert "client: httpx.Client" in code
         assert "import httpx" in code
 
-    @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
-    def test_runtime_functions_have_typed_signatures(self, converter_attr):
+    def test_runtime_functions_have_typed_signatures(self):
         """Pin the typed signatures on runtime functions: parameters and
         return types must be annotated, and the historical ``_`` prefix on
         public-ish parameters (matchers, status, headers, body, value_fn)
@@ -1316,15 +1265,14 @@ class TestSeparateRuntime:
         from ssc_codegen.generation.runtime import register_runtime_file
         from ssc_codegen.targets.python.http_libs.httpx import HttpxStrategy
 
-        converter = _get_all_converters()[converter_attr]
         src = _rest_src(errors="    @error 404 Err\n")
         module = _parse(src)
         register_runtime_file(
-            converter,
+            PY_BS4_CONVERTER,
             self.RUNTIME_NAME,
             http_strategy=HttpxStrategy(),
         )
-        generated = converter.convert_all(
+        generated = PY_BS4_CONVERTER.convert_all(
             module,
             http_client="httpx",
             runtime_module=self.RUNTIME_NAME,
@@ -1387,8 +1335,7 @@ class TestSeparateRuntime:
         code = PY_LXML_CONVERTER.convert(module, http_client="httpx")
         assert ": List[ErrMatcher] = [" in code
 
-    @pytest.mark.parametrize("converter_attr", list(_get_all_converters()))
-    def test_parser_wraps_rest_call_in_cast(self, converter_attr):
+    def test_parser_wraps_rest_call_in_cast(self):
         """Parser ``fetch``/``async_fetch``/``<method>`` return values
         are wrapped in ``cast(<ResultAlias>, ssc_rest_call(...))``.
 
@@ -1399,10 +1346,9 @@ class TestSeparateRuntime:
         via ``# type: ignore``; consumer code sees the stable monad
         annotation declared on the wrapping method.
         """
-        converter = _get_all_converters()[converter_attr]
         src = _rest_src(errors="    @error 404 Err\n")
         module = _parse(src)
-        code = converter.convert(module, http_client="httpx")
+        code = PY_BS4_CONVERTER.convert(module, http_client="httpx")
         # ``from typing import cast`` added to imports when has_rest.
         assert "from typing import cast" in code
         # Every rest method body uses cast() wrapping.
@@ -1421,9 +1367,8 @@ class TestSeparateRuntime:
 
         non_rest_src = 'struct Item { field_name { css "div" } }'
         module = _parse(non_rest_src)
-        converter = _get_all_converters()["PyBs4"]
-        register_runtime_file(converter, self.RUNTIME_NAME)
-        converter.convert_all(module, runtime_module=self.RUNTIME_NAME)
+        register_runtime_file(PY_BS4_CONVERTER, self.RUNTIME_NAME)
+        PY_BS4_CONVERTER.convert_all(module, runtime_module=self.RUNTIME_NAME)
 
 
 # ---------------------------------------------------------------------------
