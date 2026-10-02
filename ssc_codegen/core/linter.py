@@ -2135,7 +2135,7 @@ def _collect_symbol_records(
                             node,
                         )
                     )
-            for child in node.children:
+            for child_index, child in enumerate(node.children):
                 if not child.name.startswith("@"):
                     for target in targets:
                         records.append(
@@ -2168,9 +2168,12 @@ def _collect_symbol_records(
                             )
                         )
                     payload = str(child.args[0].value) if child.args else ""
+                    request_source = f"{local_source}#req#{child_index}"
+                    seen_placeholders: set[str] = set()
                     for match in PLACEHOLDER_WIDE_RE.finditer(payload):
                         spec = PlaceholderSpec.parse(match.group(0))
-                        if spec:
+                        if spec and spec.name not in seen_placeholders:
+                            seen_placeholders.add(spec.name)
                             for target in targets:
                                 records.append(
                                     SymbolRecord(
@@ -2183,7 +2186,7 @@ def _collect_symbol_records(
                                             target,
                                         ),
                                         SymbolScope.PLACEHOLDER,
-                                        local_source,
+                                        request_source,
                                         child.span,
                                         child,
                                     )

@@ -52,6 +52,7 @@ GO_RESERVED = frozenset(
 RUST_RESERVED = frozenset(
     "as break const continue crate else enum extern false fn for if impl in let loop match mod move mut pub ref return self Self static struct super trait true type unsafe use where while async await dyn abstract become box do final macro override priv typeof unsized virtual yield try".split()
 )
+RUST_CANNOT_BE_RAW = frozenset({"crate", "self", "super", "Self", "_"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,7 +95,7 @@ def target_reserved_words(target: str) -> frozenset[str]:
         "python": PYTHON_RESERVED,
         "javascript": JAVASCRIPT_RESERVED,
         "go": GO_RESERVED,
-        "rust": RUST_RESERVED,
+        "rust": RUST_CANNOT_BE_RAW,
     }[target]
 
 

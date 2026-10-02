@@ -1457,3 +1457,86 @@ def test_ast_deprecated_properties_emit_warnings():
 
     with pytest.deprecated_call():
         _ = StructDocstring(value="hello")
+
+
+def test_multiple_requests_can_share_placeholder_names():
+    src = (
+        "(rest)struct API {\n"
+        '    @request name=list_items """\n'
+        "    GET /items?page={{page:int?}}&limit={{limit:int?}} HTTP/1.1\n"
+        "    Host: example.com\n"
+        '    """\n'
+        '    @request name=get_item """\n'
+        "    GET /items/{{id:int}}?limit={{limit:int?}} HTTP/1.1\n"
+        "    Host: example.com\n"
+        '    """\n'
+        "}\n"
+    )
+    ast, diagnostics = parse_module(src)
+    assert not any(d.severity == Severity.ERROR for d in diagnostics), (
+        diagnostics
+    )
+    assert len(ast.body) > 0
+
+
+def test_repeated_placeholder_in_single_request_does_not_collide():
+    src = (
+        "(rest)struct API {\n"
+        '    @request name=get_video """\n'
+        "    GET /video/{{id}}?track_id={{id}} HTTP/1.1\n"
+        "    Host: example.com\n"
+        '    """\n'
+        "}\n"
+    )
+    ast, diagnostics = parse_module(src)
+    assert not any(d.severity == Severity.ERROR for d in diagnostics), (
+        diagnostics
+    )
+    assert len(ast.body) > 0
+
+
+def test_rust_raw_escapable_keywords_in_fields_and_placeholders():
+    src = (
+        "struct Data {\n"
+        '    ref { css "a"; text }\n'
+        '    type { css "b"; text }\n'
+        "}\n"
+        "(rest)struct API {\n"
+        '    @request name=get """\n'
+        "    GET /?pub={{pub}} HTTP/1.1\n"
+        "    Host: example.com\n"
+        '    """\n'
+        "}\n"
+    )
+    ast, diagnostics = parse_module(src)
+    assert not any(d.severity == Severity.ERROR for d in diagnostics), (
+        diagnostics
+    )
+    assert len(ast.body) > 0
+
+
+def test_parse_module_with_specific_target_ignores_other_targets():
+    src = 'struct Data {\n    self { css "a"; text }\n}\n'
+    # 'self' produces '_parse_self' in Python (valid), but 'self' in Rust (invalid)
+    ast, diagnostics = parse_module(src, targets=("python",))
+    assert not any(d.severity == Severity.ERROR for d in diagnostics), (
+        diagnostics
+    )
+    assert len(ast.body) > 0
+
+
+def test_conflicting_placeholder_names_in_same_request_trigger_e402():
+    src = (
+        "(rest)struct API {\n"
+        '    @request name=search """\n'
+        "    GET /search?page-num={{page-num}}&page_num={{page_num}} HTTP/1.1\n"
+        "    Host: example.com\n"
+        '    """\n'
+        "}\n"
+    )
+    _, diagnostics = parse_module(src)
+    e402 = [d for d in diagnostics if d.code == "E402"]
+    assert len(e402) > 0
+    assert any(
+        "placeholder" in d.message and "page_num" in d.message for d in e402
+    )

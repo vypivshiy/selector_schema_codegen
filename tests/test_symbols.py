@@ -130,3 +130,38 @@ def test_plan_reports_collision_and_invalid_identifier_in_record_order():
     assert [finding.code for finding in findings] == ["E402", "E403"]
     assert findings[0].previous == records[0]
     assert all(isinstance(finding, SymbolFinding) for finding in findings)
+
+
+def test_rust_raw_escapable_keywords_are_valid_symbols():
+    from ssc_codegen.symbols import is_valid_symbol
+
+    assert is_valid_symbol("rust", "ref") is True
+    assert is_valid_symbol("rust", "type") is True
+    assert is_valid_symbol("rust", "pub") is True
+    assert is_valid_symbol("rust", "match") is True
+
+    # Non-escapable keywords cannot be raw identifiers in Rust
+    assert is_valid_symbol("rust", "self") is False
+    assert is_valid_symbol("rust", "Self") is False
+    assert is_valid_symbol("rust", "super") is False
+    assert is_valid_symbol("rust", "crate") is False
+
+
+def test_python_valid_and_invalid_symbols():
+    from ssc_codegen.symbols import is_valid_symbol
+
+    assert is_valid_symbol("python", "id") is True
+    assert is_valid_symbol("python", "ref") is True
+    assert is_valid_symbol("python", "type") is True
+    assert is_valid_symbol("python", "pub") is True
+    assert is_valid_symbol("python", "class") is False
+    assert is_valid_symbol("python", "def") is False
+
+
+def test_go_valid_and_invalid_symbols():
+    from ssc_codegen.symbols import is_valid_symbol
+
+    assert is_valid_symbol("go", "id") is True
+    assert is_valid_symbol("go", "func") is False
+    assert is_valid_symbol("go", "type") is False
+    assert is_valid_symbol("go", "struct") is False

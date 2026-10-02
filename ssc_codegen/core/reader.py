@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from pathlib import Path
 
 from ssc_codegen.ast import Module, StructRest
@@ -27,7 +28,11 @@ from ssc_codegen.core.extensions import handle_extension
 
 
 def parse_module(
-    src: str, *, source_path: Path | None = None
+    src: str,
+    *,
+    source_path: Path | None = None,
+    targets: Iterable[str] | None = None,
+    skip_lint: bool = False,
 ) -> tuple[Module, list[ReadDiagnostic]]:
     """Parse KDL DSL source into an intermediate Module AST and diagnostics list.
 
@@ -96,23 +101,27 @@ def parse_module(
     # pass 1 — resolve imports (returns flat list with imported nodes)
     top_nodes = resolve_imports(top_nodes, source_path, ctx, lint, diagnostics)
 
-    # pass 2 — structural linting on KdlDocument (current file only)
-    root_diagnostics = lint_module(doc, str(source_path or ""), source_text=src)
-    diagnostics.extend(root_diagnostics)
-
-    # pass 3 — cross-ref validation on merged flat list
-    diagnostics.extend(
-        lint_cross_refs(
-            top_nodes,
-            str(source_path or ""),
-            node_source_paths=ctx.node_source_paths,
+    if not skip_lint:
+        # pass 2 — structural linting on KdlDocument (current file only)
+        root_diagnostics = lint_module(
+            doc, str(source_path or ""), source_text=src
         )
-    )
+        diagnostics.extend(root_diagnostics)
 
-    if any(d.severity == Severity.ERROR for d in diagnostics):
-        module = Module()
-        module.source_file = source_path.name if source_path else ""
-        return module, diagnostics
+        # pass 3 — cross-ref validation on merged flat list
+        diagnostics.extend(
+            lint_cross_refs(
+                top_nodes,
+                str(source_path or ""),
+                node_source_paths=ctx.node_source_paths,
+                targets=targets,
+            )
+        )
+
+        if any(d.severity == Severity.ERROR for d in diagnostics):
+            module = Module()
+            module.source_file = source_path.name if source_path else ""
+            return module, diagnostics
 
     try:
         module = Module()

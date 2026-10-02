@@ -236,3 +236,106 @@ extension Utils {
     assert "from uuid import uuid4" in generated
     assert "from .sscgen_runtime import make_value" in generated
     assert "def make_value" in runtime
+
+
+def test_check_with_target_filter(tmp_path) -> None:
+    # 'self' produces '_parse_self' in Python (valid), but 'self' in Rust (invalid)
+    schema = tmp_path / "schema.kdl"
+    schema.write_text(
+        'struct Data { self { css "h1"; text } }\n', encoding="utf-8"
+    )
+
+    # check with all targets should fail on Rust
+    res_all = runner.invoke(app, ["check", str(schema)])
+    assert res_all.exit_code == 1
+    assert "rust identifier" in res_all.output
+
+    # check targeting python specifically should pass
+    res_py = runner.invoke(app, ["check", str(schema), "-t", "python"])
+    assert res_py.exit_code == 0, res_py.output
+
+    # check targeting rust specifically should fail on 'self'
+    res_rust = runner.invoke(app, ["check", str(schema), "-t", "rust"])
+    assert res_rust.exit_code == 1
+    assert "rust identifier" in res_rust.output
+
+
+def test_generate_python_with_shared_placeholders_and_keywords(
+    tmp_path,
+) -> None:
+    schema = tmp_path / "api.kdl"
+    schema.write_text(
+        "struct Data {\n"
+        '    ref { css "a"; text }\n'
+        '    type { css "b"; text }\n'
+        "}\n\n"
+        "(rest)struct Api {\n"
+        '    @request name=list_items """\n'
+        "        GET /items?page={{page:int?}}&limit={{limit:int?}}&pub={{pub}} HTTP/1.1\n"
+        "        Host: example.com\n"
+        '        """\n'
+        '    @request name=get_item """\n'
+        "        GET /items/{{id:int}}?limit={{limit:int?}} HTTP/1.1\n"
+        "        Host: example.com\n"
+        '        """\n'
+        "}\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "out"
+    result = runner.invoke(
+        app,
+        ["generate", "python", str(schema), "-o", str(output)],
+    )
+    assert result.exit_code == 0, result.output
+    generated = (output / "api.py").read_text(encoding="utf-8")
+    assert "def _parse_ref(" in generated
+    assert "def _parse_type(" in generated
+    assert "def list_items(" in generated
+    assert "pub: str" in generated
+    assert "def get_item(" in generated
+
+
+def test_generate_rust_with_raw_identifiers(tmp_path) -> None:
+    schema = tmp_path / "schema.kdl"
+    schema.write_text(
+        "struct Data {\n"
+        '    ref { css "a"; text }\n'
+        '    type { css "b"; text }\n'
+        "}\n\n"
+        "(rest)struct Api {\n"
+        '    @request name=get """\n'
+        "        GET /?pub={{pub}} HTTP/1.1\n"
+        "        Host: example.com\n"
+        '        """\n'
+        "}\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "out"
+    result = runner.invoke(
+        app,
+        ["generate", "rust", str(schema), "-o", str(output)],
+    )
+    assert result.exit_code == 0, result.output
+    generated = (output / "schema.rs").read_text(encoding="utf-8")
+    assert "pub r#ref: String," in generated
+    assert "pub r#type: String," in generated
+    assert "r#pub: &str" in generated
+
+
+def test_health_and_run_use_python_target_validation(tmp_path) -> None:
+    schema = tmp_path / "schema.kdl"
+    schema.write_text(
+        'struct Item {\n    self { css "h1"; text }\n}\n',
+        encoding="utf-8",
+    )
+    html = tmp_path / "page.html"
+    html.write_text("<h1>Hello</h1>", encoding="utf-8")
+
+    health_res = runner.invoke(
+        app, ["health", f"{schema}:Item", "-i", str(html)]
+    )
+    assert health_res.exit_code == 0, health_res.output
+
+    run_res = runner.invoke(app, ["run", f"{schema}:Item", "-i", str(html)])
+    assert run_res.exit_code == 0, run_res.output
+    assert '"self": "Hello"' in run_res.output

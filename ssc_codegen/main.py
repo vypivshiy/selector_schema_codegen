@@ -239,7 +239,10 @@ def _run_generate(
     for kdl_file in kdl_files:
         try:
             ast, err = parse_module(
-                kdl_file.read_text(encoding="utf-8"), source_path=kdl_file
+                kdl_file.read_text(encoding="utf-8"),
+                source_path=kdl_file,
+                targets=(profile.language,),
+                skip_lint=skip_lint,
             )
             if not skip_lint:
                 all_diagnostics.extend(err)
@@ -714,6 +717,14 @@ def check(
             readable=True,
         ),
     ],
+    target: Annotated[
+        Optional[str],
+        typer.Option(
+            "--target",
+            "-t",
+            help="Validate symbols for a specific target language (python, javascript, go, rust). Default: all targets.",
+        ),
+    ] = None,
     fmt: Annotated[
         FmtType,
         typer.Option(
@@ -769,7 +780,9 @@ def check(
     for kdl_file in kdl_files:
         try:
             _, errs = parse_module(
-                kdl_file.read_text(encoding="utf-8"), source_path=kdl_file
+                kdl_file.read_text(encoding="utf-8"),
+                source_path=kdl_file,
+                targets=(target,) if target else None,
             )
         except Exception as exc:
             if verbose:
@@ -935,7 +948,9 @@ def run(
 
     try:
         module_ast, errs = parse_module(
-            kdl_path.read_text(encoding="utf-8"), source_path=kdl_path
+            kdl_path.read_text(encoding="utf-8"),
+            source_path=kdl_path,
+            targets=("python",),
         )
         if errs:
             output = format_diagnostics(errs, filepath=kdl_path, fmt=fmt.value)
@@ -1096,7 +1111,9 @@ def health(
 
     try:
         module_ast, diagnostics = parse_module(
-            kdl_path.read_text(encoding="utf-8"), source_path=kdl_path
+            kdl_path.read_text(encoding="utf-8"),
+            source_path=kdl_path,
+            targets=("python",),
         )
     except Exception as exc:
         if verbose:

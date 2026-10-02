@@ -751,6 +751,34 @@ struct SearchPage {
     assert '"brackets[]"' in code
 
 
+def test_rust_escapable_keywords_in_fields_and_request_params() -> None:
+    """Rust backend generates r#raw identifiers for keywords like ref, type, pub."""
+    schema = """
+struct Data {
+    ref { css "a"; text }
+    type { css "b"; text }
+}
+(rest)struct Api {
+    @request name=get \"\"\"
+    GET /?pub={{pub}} HTTP/1.1
+    Host: example.com
+    \"\"\"
+}
+"""
+    module, diagnostics = parse_module(schema, targets=("rust",))
+    assert not any(d.severity.name == "ERROR" for d in diagnostics), diagnostics
+
+    converter = RustVisitor()
+    code = converter.convert(module)
+
+    assert "pub r#ref: String," in code
+    assert "pub r#type: String," in code
+    assert "fn r#ref(&mut self" in code
+    assert "fn r#type(&mut self" in code
+    assert "pub async fn get(" in code
+    assert "r#pub: &str" in code
+
+
 def test_untyped_error_variant_holds_serde_json_value() -> None:
     """MatcherListDef with untyped error entries emits variants holding serde_json::Value."""
     schema = """
