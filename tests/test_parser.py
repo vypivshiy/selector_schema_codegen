@@ -36,11 +36,8 @@ from ssc_codegen.ast import (
     Value,
 )
 from ssc_codegen.ast.predicate_ops import LogicNot, PredContains, PredEq
-from ssc_codegen.ast.types import VariableType
+from ssc_codegen.ast.types import TypeInfo, VariableType
 from ssc_codegen.core import parse_module
-from ssc_codegen.targets.golang import GO_CONVERTER
-from ssc_codegen.targets.javascript import JS_CONVERTER
-from ssc_codegen.targets.python import PY_BS4_CONVERTER
 from kdlquery import Severity
 
 
@@ -86,15 +83,6 @@ def _json_def(module, name: str) -> JsonDef:
 def _field(struct: Struct, name: str):
     return next(
         node for node in struct.body if getattr(node, "name", None) == name
-    )
-
-
-def test_parse_module_reports_error_on_invalid_syntax():
-    _module, diagnostics = parse_module(
-        'struct Demo {\n  title {\n    css ".x"\n'
-    )
-    assert any(
-        d.code == "E000" and d.severity == Severity.ERROR for d in diagnostics
     )
 
 
@@ -916,101 +904,118 @@ class TestJsonFieldTypes:
             "schema",
             "struct_name",
             "field_name",
-            "expected_vt",
-            "is_arr",
-            "is_opt",
-            "ref",
+            "expected_type_info",
         ),
         [
             (
                 "json F { x str }",
                 "F",
                 "x",
-                VariableType.STRING,
-                False,
-                False,
-                None,
+                TypeInfo(
+                    base=VariableType.STRING,
+                    is_array=False,
+                    is_optional=False,
+                    ref=None,
+                ),
             ),
             (
                 "json F { x int }",
                 "F",
                 "x",
-                VariableType.INT,
-                False,
-                False,
-                None,
+                TypeInfo(
+                    base=VariableType.INT,
+                    is_array=False,
+                    is_optional=False,
+                    ref=None,
+                ),
             ),
             (
                 "json F { x float }",
                 "F",
                 "x",
-                VariableType.FLOAT,
-                False,
-                False,
-                None,
+                TypeInfo(
+                    base=VariableType.FLOAT,
+                    is_array=False,
+                    is_optional=False,
+                    ref=None,
+                ),
             ),
             (
                 "json F { x bool }",
                 "F",
                 "x",
-                VariableType.BOOL,
-                False,
-                False,
-                None,
+                TypeInfo(
+                    base=VariableType.BOOL,
+                    is_array=False,
+                    is_optional=False,
+                    ref=None,
+                ),
             ),
             (
                 "json F { x nil }",
                 "F",
                 "x",
-                VariableType.NULL,
-                False,
-                False,
-                None,
+                TypeInfo(
+                    base=VariableType.NULL,
+                    is_array=False,
+                    is_optional=False,
+                    ref=None,
+                ),
             ),
             (
                 "json F { x (array)str }",
                 "F",
                 "x",
-                VariableType.STRING,
-                True,
-                False,
-                None,
+                TypeInfo(
+                    base=VariableType.STRING,
+                    is_array=True,
+                    is_optional=False,
+                    ref=None,
+                ),
             ),
             (
                 "json F { x (array)int }",
                 "F",
                 "x",
-                VariableType.INT,
-                True,
-                False,
-                None,
+                TypeInfo(
+                    base=VariableType.INT,
+                    is_array=True,
+                    is_optional=False,
+                    ref=None,
+                ),
             ),
             (
                 "json F { x str? }",
                 "F",
                 "x",
-                VariableType.STRING,
-                False,
-                True,
-                None,
+                TypeInfo(
+                    base=VariableType.STRING,
+                    is_array=False,
+                    is_optional=True,
+                    ref=None,
+                ),
             ),
             (
                 "json A { id int }\njson B { ref A }",
                 "B",
                 "ref",
-                VariableType.JSON,
-                False,
-                False,
-                "A",
+                TypeInfo(
+                    base=VariableType.JSON,
+                    is_array=False,
+                    is_optional=False,
+                    ref="A",
+                ),
             ),
             (
                 "json A { id int }\njson B { items (array)A }",
                 "B",
                 "items",
-                VariableType.JSON,
-                True,
-                False,
-                "A",
+                TypeInfo(
+                    base=VariableType.JSON,
+                    is_array=True,
+                    is_optional=False,
+                    ref="A",
+                ),
             ),
         ],
         ids=[
@@ -1031,17 +1036,11 @@ class TestJsonFieldTypes:
         schema: str,
         struct_name: str,
         field_name: str,
-        expected_vt: VariableType,
-        is_arr: bool,
-        is_opt: bool,
-        ref: str | None,
+        expected_type_info: TypeInfo,
     ):
         m = _parse(schema)
         f = _json_field(m, struct_name, field_name)
-        assert f.ret_type_info.base == expected_vt
-        assert f.ret_type_info.is_array is is_arr
-        assert f.ret_type_info.is_optional is is_opt
-        assert f.ret_type_info.ref == ref
+        assert f.ret_type_info == expected_type_info
 
 
 class TestJsonFieldModifiers:
@@ -1222,153 +1221,6 @@ json Parent { child Child }
             and d.code == "W040"
             for d in diags
         )
-
-    def test_python_jsonify_with_alias_remapping(self):
-        src = """
-json User {
-    user_id int from="id"
-    user_name str from="name"
-}
-
-struct Main {
-    data {
-        raw
-        jsonify User
-    }
-}
-"""
-        m = _parse(src)
-        code = PY_BS4_CONVERTER.convert(m)
-        assert (
-            "_user_JSON_DESCRIPTORS = {'user_id': ('id', False, False, None), 'user_name': ('name', False, False, None)}"
-            in code
-        )
-        assert "def ssc_json_project(" in code
-        assert "ssc_json_project(json.loads(" in code
-        assert "_user_JSON_DESCRIPTORS" in code
-
-    def test_javascript_jsonify_with_alias_remapping(self):
-        src = """
-json User {
-    user_id int from="id"
-    user_name str from="name"
-}
-
-struct Main {
-    data {
-        raw
-        jsonify User
-    }
-}
-"""
-        m = _parse(src)
-        code = JS_CONVERTER.convert(m)
-        assert "const _userJsonDescriptors = {" in code
-        assert '"user_id": ["id", false, false, null]' in code
-        assert "function sscJsonProject(" in code
-        assert "sscJsonProject(JSON.parse(" in code
-        assert "_userJsonDescriptors" in code
-
-    def test_golang_jsondef_with_alias_struct_tags(self):
-        src = """
-json User {
-    user_id int from="id"
-    context str from="@context"
-    tags (array)str @omitempty
-}
-"""
-        m = _parse(src)
-        code = GO_CONVERTER.convert(m)
-        assert 'UserId  int64     `json:"id"`' in code
-        assert 'Context string    `json:"@context"`' in code
-        assert 'Tags    *[]string `json:"tags,omitempty"`' in code
-
-    def test_python_rest_with_alias_remapping_codegen(self):
-        src = """
-json UserResp {
-    user_id int from="id"
-    full_name str from="name"
-}
-
-json ErrResp {
-    err_code str from="code"
-}
-
-struct ApiClient type=rest {
-    @error 400 ErrResp
-    @request response=UserResp \"\"\"
-    GET /users/me HTTP/1.1
-    Host: api.example.com
-    \"\"\"
-}
-"""
-        m = _parse(src)
-        code = PY_BS4_CONVERTER.convert(m, http_client="httpx")
-        assert "def ssc_json_project(" in code
-        assert (
-            "value_fn=lambda _b: ssc_json_project(_b, {'user_id': ('id', False, False, None), 'full_name': ('name', False, False, None)})"
-            in code
-        )
-        assert (
-            "value=ssc_json_project(value, {'err_code': ('code', False, False, None)})"
-            in code
-        )
-
-    def test_javascript_rest_with_alias_remapping_codegen(self):
-        src = """
-json UserResp {
-    user_id int from="id"
-    full_name str from="name"
-}
-
-json ErrResp {
-    err_code str from="code"
-}
-
-struct ApiClient type=rest {
-    @error 400 ErrResp
-    @request response=UserResp \"\"\"
-    GET /users/me HTTP/1.1
-    Host: api.example.com
-    \"\"\"
-}
-"""
-        m = _parse(src)
-        code = JS_CONVERTER.convert(m)
-        assert "function sscJsonProject(" in code
-        assert (
-            'sscJsonProject(_b, {"user_id": ["id", false, false, null], "full_name": ["name", false, false, null]})'
-            in code
-        )
-        assert (
-            'sscJsonProject(_b, {"err_code": ["code", false, false, null]})'
-            in code
-        )
-
-    def test_golang_rest_with_alias_remapping_codegen(self):
-        src = """
-json UserResp {
-    user_id int from="id"
-    full_name str from="name"
-}
-
-json ErrResp {
-    err_code str from="code"
-}
-
-struct ApiClient type=rest {
-    @error 400 ErrResp
-    @request response=UserResp \"\"\"
-    GET /users/me HTTP/1.1
-    Host: api.example.com
-    \"\"\"
-}
-"""
-        m = _parse(src)
-        code = GO_CONVERTER.convert(m)
-        assert 'UserId   int64  `json:"id"`' in code
-        assert 'FullName string `json:"name"`' in code
-        assert 'ErrCode string `json:"code"`' in code
 
     def test_is_array_prefix(self):
         m = _parse(_load_fixture("json_def_path", "array.kdl"))

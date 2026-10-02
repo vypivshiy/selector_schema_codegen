@@ -108,20 +108,26 @@ class TestStringsBasic:
         assert len(result) == 2
 
         # Check non-HTML extracted values match expected across all backends
-        assert {k: v for k, v in result[0].items() if "html" not in k} == {
-            "title": "bar Title One",
-            "link": "https://example.testguide",
-            "slug": "slug-one",
-            "normalized_code": "foo-bar",
-            "active_flag": True,
-        }
-        assert {k: v for k, v in result[1].items() if "html" not in k} == {
-            "title": "bar Title Two",
-            "link": "https://example.testreadme/",
-            "slug": "slug-two",
-            "normalized_code": "code-4",
-            "active_flag": True,
-        }
+        non_html = [
+            {k: v for k, v in item.items() if "html" not in k}
+            for item in result
+        ]
+        assert non_html == [
+            {
+                "title": "bar Title One",
+                "link": "https://example.testguide",
+                "slug": "slug-one",
+                "normalized_code": "foo-bar",
+                "active_flag": True,
+            },
+            {
+                "title": "bar Title Two",
+                "link": "https://example.testreadme/",
+                "slug": "slug-two",
+                "normalized_code": "code-4",
+                "active_flag": True,
+            },
+        ]
 
         # Check raw HTML fields across targets
         for item in result:
