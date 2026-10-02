@@ -401,15 +401,22 @@ def _parse_dict_type_directives(
     children: Sequence[KdlNode],
     ctx: ParseContext,
     lint: LintContext | None = None,
+    parent_def: JsonDef | None = None,
+    field_name: str = "",
+    explicit_dict_name: str = "",
 ) -> tuple[TypeInfo, TypeInfo]:
-    """Parse '@key' and '@value' directives from a dict JSON schema block."""
+    """Parse '@key' and '@value' directives from a dict JSON schema block.
+
+    Hoists child blocks declared inside '@value' into independent `JsonDef`
+    AST nodes in `ctx.json_defs` ordered ahead of parent schemas.
+    """
     key_info: TypeInfo | None = None
     val_info: TypeInfo | None = None
 
     for child in children:
-        if child.name == "@key":
+        if child.name.rstrip("?") == "@key":
             key_arg = str(child.args[0].value) if child.args else "str"
-            is_opt = key_arg.endswith("?")
+            is_opt = child.name.endswith("?") or key_arg.endswith("?")
             key_arg = key_arg.rstrip("?")
             match key_arg:
                 case "int":
@@ -421,35 +428,95 @@ def _parse_dict_type_directives(
                 case _:
                     base = VariableType.STRING
             key_info = TypeInfo(base=base, is_optional=is_opt)
-        elif child.name == "@value":
-            val_arg = str(child.args[0].value) if child.args else "str"
-            is_arr = any(
-                (arg.type_annotation or "").strip("()") == "array"
-                for arg in child.args
-            )
-            is_opt = val_arg.endswith("?")
-            val_arg = val_arg.rstrip("?")
-            ref_name: str | None = None
-            match val_arg:
-                case "str":
-                    base = VariableType.STRING
-                case "int":
-                    base = VariableType.INT
-                case "float":
-                    base = VariableType.FLOAT
-                case "bool":
-                    base = VariableType.BOOL
-                case "null" | "nil":
-                    base = VariableType.NULL
-                case _:
-                    base = VariableType.JSON
-                    ref_name = val_arg
-            val_info = TypeInfo(
-                base=base,
-                is_array=is_arr,
-                is_optional=is_opt,
-                ref=ref_name,
-            )
+        elif child.name.rstrip("?") == "@value":
+            is_opt = child.name.endswith("?")
+            is_arr = False
+            explicit_model_name = ""
+
+            raw_ann = (child.type_annotation or "").strip("()")
+            if raw_ann.endswith("?"):
+                is_opt = True
+                raw_ann = raw_ann.rstrip("?")
+            if raw_ann.lower() == "array":
+                is_arr = True
+            elif raw_ann:
+                explicit_model_name = raw_ann
+
+            for arg in child.args:
+                arg_ann = (arg.type_annotation or "").strip("()")
+                if arg_ann.lower() == "array":
+                    is_arr = True
+                val_str = str(arg.value)
+                if val_str.endswith("?"):
+                    is_opt = True
+                    val_str = val_str.rstrip("?")
+                if val_str.lower() == "array":
+                    is_arr = True
+                elif not explicit_model_name and val_str:
+                    explicit_model_name = val_str
+
+            if child.children:
+                if explicit_model_name:
+                    child_schema_name = explicit_model_name
+                elif explicit_dict_name:
+                    child_schema_name = f"{explicit_dict_name}Value"
+                elif parent_def and parent_def.name and field_name:
+                    child_schema_name = (
+                        f"{parent_def.name}{to_pascal_case(field_name)}Value"
+                    )
+                elif parent_def and parent_def.name:
+                    child_schema_name = f"{parent_def.name}Value"
+                elif field_name:
+                    child_schema_name = f"{to_pascal_case(field_name)}Value"
+                else:
+                    child_schema_name = "Value"
+
+                module_owner = (
+                    parent_def.parent if parent_def is not None else None
+                )
+                while module_owner is not None and not hasattr(
+                    module_owner, "body"
+                ):
+                    module_owner = module_owner.parent
+
+                sub_json_def = JsonDef(
+                    parent=module_owner
+                    or (parent_def.parent if parent_def else None),
+                    name=child_schema_name,
+                    is_array=False,
+                )
+                parse_json_fields(child.children, sub_json_def, ctx, lint)
+                ctx.json_defs[sub_json_def.name] = sub_json_def
+
+                val_info = TypeInfo(
+                    base=VariableType.JSON,
+                    is_array=is_arr,
+                    is_optional=is_opt,
+                    ref=child_schema_name,
+                )
+            else:
+                val_arg = explicit_model_name or "str"
+                ref_name: str | None = None
+                match val_arg:
+                    case "str":
+                        base = VariableType.STRING
+                    case "int":
+                        base = VariableType.INT
+                    case "float":
+                        base = VariableType.FLOAT
+                    case "bool":
+                        base = VariableType.BOOL
+                    case "null" | "nil":
+                        base = VariableType.NULL
+                    case _:
+                        base = VariableType.JSON
+                        ref_name = val_arg
+                val_info = TypeInfo(
+                    base=base,
+                    is_array=is_arr,
+                    is_optional=is_opt,
+                    ref=ref_name,
+                )
 
     if key_info is None:
         key_info = TypeInfo(base=VariableType.STRING)
@@ -504,6 +571,7 @@ def parse_json_fields(
             is_optional = name.endswith("?")
             name = name.rstrip("?")
             modifiers: list[str] = []
+            explicit_dict_name = ""
             for arg in node.args:
                 a = str(arg.value)
                 raw = (
@@ -514,6 +582,18 @@ def parse_json_fields(
                 quoted = raw.startswith(('"', "'"))
                 if a in {"@skip", "@omitempty"} and not quoted:
                     modifiers.append(a)
+                elif a.startswith("@") and not quoted:
+                    continue
+                elif (
+                    not explicit_dict_name
+                    and a not in {"(dict)", "dict"}
+                    and not quoted
+                ):
+                    if a.endswith("?"):
+                        is_optional = True
+                        a = a.rstrip("?")
+                    if a:
+                        explicit_dict_name = a
             skip = "@skip" in modifiers
             may_miss = "@omitempty" in modifiers
             from_prop = node.get_prop("from")
@@ -529,7 +609,12 @@ def parse_json_fields(
                     alias = resolved
             doc = node.get_prop("doc") or ""
             key_info, val_info = _parse_dict_type_directives(
-                node.children, ctx, lint
+                node.children,
+                ctx,
+                lint,
+                parent_def=parent,
+                field_name=name,
+                explicit_dict_name=explicit_dict_name,
             )
             parent.body.append(
                 JsonDefField(
