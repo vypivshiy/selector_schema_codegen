@@ -30,25 +30,57 @@ def html() -> str:
 # ─────────────────────────── filter compilation ────────────────────
 
 
-def test_parse_attr_present() -> None:
-    flt = parse_attr_flag("data-card", ignore_case=False, fixed=False)
-    assert flt.name == "data-card"
-    assert flt.kind == "present"
+@pytest.fixture
+def make_filters():
+    def _create(
+        *,
+        text: str | None = None,
+        attrs: list[str] | tuple[str, ...] = (),
+        tag: str | None = None,
+        css: str | None = None,
+        ignore_case: bool = False,
+        fixed: bool = False,
+    ):
+        return compile_filters(
+            text=text,
+            attrs=attrs,
+            tag=tag,
+            css=css,
+            ignore_case=ignore_case,
+            fixed=fixed,
+        )
+
+    return _create
 
 
-def test_parse_attr_exact() -> None:
-    flt = parse_attr_flag("data-card=1", ignore_case=False, fixed=False)
-    assert flt.kind == "exact"
-    assert flt.value == "1"
-
-
-def test_parse_attr_regex() -> None:
-    flt = parse_attr_flag(
-        "href=~/nested/\\w+\\.html", ignore_case=False, fixed=False
-    )
-    assert flt.kind == "regex"
-    assert flt.value == r"/nested/\w+\.html"
-    assert flt.compiled is not None
+@pytest.mark.parametrize(
+    "raw,expected_name,expected_kind,expected_value,has_regex",
+    [
+        ("data-card", "data-card", "present", None, False),
+        ("data-card=1", "data-card", "exact", "1", False),
+        (
+            "href=~/nested/\\w+\\.html",
+            "href",
+            "regex",
+            r"/nested/\w+\.html",
+            True,
+        ),
+    ],
+)
+def test_parse_attr_flag_variants(
+    raw: str,
+    expected_name: str,
+    expected_kind: str,
+    expected_value: str | None,
+    has_regex: bool,
+) -> None:
+    flt = parse_attr_flag(raw, ignore_case=False, fixed=False)
+    assert flt.name == expected_name
+    assert flt.kind == expected_kind
+    if expected_value is not None:
+        assert flt.value == expected_value
+    if has_regex:
+        assert flt.compiled is not None
 
 
 def test_parse_attr_empty_name_raises() -> None:
@@ -56,47 +88,32 @@ def test_parse_attr_empty_name_raises() -> None:
         parse_attr_flag("=value", ignore_case=False, fixed=False)
 
 
-def test_compile_filters_text() -> None:
-    flt = compile_filters(
-        text="foo", attrs=[], tag=None, css=None, ignore_case=False, fixed=False
-    )
+@pytest.mark.parametrize(
+    "text,ignore_case,fixed,match_target,non_match_target",
+    [
+        ("foo", False, False, "foo", None),
+        ("$5.99", False, True, "price is $5.99", "5.99"),
+        ("FOO", True, False, "foo bar", None),
+    ],
+)
+def test_compile_filters_text_matching(
+    make_filters,
+    text: str,
+    ignore_case: bool,
+    fixed: bool,
+    match_target: str,
+    non_match_target: str | None,
+) -> None:
+    flt = make_filters(text=text, ignore_case=ignore_case, fixed=fixed)
     assert flt.text_regex is not None
-    assert flt.text_regex.search("foo") is not None
+    assert flt.text_regex.search(match_target) is not None
+    if non_match_target is not None:
+        assert flt.text_regex.search(non_match_target) is None
 
 
-def test_compile_filters_fixed_escapes() -> None:
-    flt = compile_filters(
-        text="$5.99",
-        attrs=[],
-        tag=None,
-        css=None,
-        ignore_case=False,
-        fixed=True,
-    )
-    assert flt.text_regex is not None
-    # Literal $ should not anchor-match
-    assert flt.text_regex.search("price is $5.99") is not None
-    assert flt.text_regex.search("5.99") is None
-
-
-def test_compile_filters_ignore_case() -> None:
-    flt = compile_filters(
-        text="FOO", attrs=[], tag=None, css=None, ignore_case=True, fixed=False
-    )
-    assert flt.text_regex is not None
-    assert flt.text_regex.search("foo bar") is not None
-
-
-def test_compile_filters_invalid_regex_raises() -> None:
+def test_compile_filters_invalid_regex_raises(make_filters) -> None:
     with pytest.raises(FilterError):
-        compile_filters(
-            text="[",
-            attrs=[],
-            tag=None,
-            css=None,
-            ignore_case=False,
-            fixed=False,
-        )
+        make_filters(text="[")
 
 
 # ─────────────────────────── text/attr/tag filters ─────────────────

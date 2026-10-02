@@ -1,5 +1,8 @@
 """Tests for (raw)struct lint rules: forbidden HTML operations."""
 
+from __future__ import annotations
+
+import pytest
 from ssc_codegen.core import parse_module
 from kdlquery import Severity
 
@@ -9,25 +12,21 @@ def _check_errors(src: str) -> list[str]:
     return [d.message for d in diags if d.severity == Severity.ERROR]
 
 
+_FORBIDDEN_OPS = {
+    "css": 'css ".x"',
+    "text": "text",
+    "raw": "raw",
+    "attr": 'attr "href"',
+    "xpath": 'xpath "//div"',
+}
+
+
 class TestRawLintForbiddenOps:
-    def test_css_forbidden(self):
-        errors = _check_errors('(raw)struct S {\n  f { css ".x" }\n}\n')
-        assert any("forbidden" in e for e in errors)
-
-    def test_text_forbidden(self):
-        errors = _check_errors("(raw)struct S {\n  f { text }\n}\n")
-        assert any("forbidden" in e for e in errors)
-
-    def test_raw_forbidden(self):
-        errors = _check_errors("(raw)struct S {\n  f { raw }\n}\n")
-        assert any("forbidden" in e for e in errors)
-
-    def test_attr_forbidden(self):
-        errors = _check_errors('(raw)struct S {\n  f { attr "href" }\n}\n')
-        assert any("forbidden" in e for e in errors)
-
-    def test_xpath_forbidden(self):
-        errors = _check_errors('(raw)struct S {\n  f { xpath "//div" }\n}\n')
+    @pytest.mark.parametrize("op", ["css", "text", "raw", "attr", "xpath"])
+    def test_forbidden_ops(self, op: str) -> None:
+        errors = _check_errors(
+            f"(raw)struct S {{\n  f {{ {_FORBIDDEN_OPS[op]} }}\n}}\n"
+        )
         assert any("forbidden" in e for e in errors)
 
     def test_string_ops_allowed(self):
