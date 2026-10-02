@@ -165,6 +165,12 @@ class SscJsonFieldMissingError extends SscJsonError {
     this.name = 'SscJsonFieldMissingError';
   }
 }
+class SscJsonSchemaError extends SscJsonError {
+  constructor(message) {
+    super(message);
+    this.name = 'SscJsonSchemaError';
+  }
+}
 
 function sscResolveDotpath(data, path, isOptional) {
   let current = data;
@@ -200,6 +206,24 @@ function sscResolveDotpath(data, path, isOptional) {
 }
 
 function sscJsonProject(data, descriptors) {
+  if (descriptors && descriptors.__dict__) {
+    if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+      throw new SscJsonSchemaError(`Expected object for dict schema, got ${data === null ? 'null' : Array.isArray(data) ? 'array' : typeof data}`);
+    }
+    const valDesc = descriptors.__value__;
+    if (valDesc == null) return data;
+    const result = {};
+    for (const [k, v] of Object.entries(data)) {
+      if (Array.isArray(valDesc) && valDesc.length > 0) {
+        result[k] = Array.isArray(v)
+          ? v.map(x => (x != null ? sscJsonProject(x, valDesc[0]) : x))
+          : sscJsonProject(v, valDesc[0]);
+      } else {
+        result[k] = sscJsonProject(v, valDesc);
+      }
+    }
+    return result;
+  }
   if (Array.isArray(data)) {
     return data.map(item => sscJsonProject(item, descriptors));
   }
@@ -232,9 +256,13 @@ function sscJsonProject(data, descriptors) {
     }
 
     if (nested) {
-      val = Array.isArray(nested)
-        ? (Array.isArray(val) ? val.map(x => sscJsonProject(x, nested[0])) : sscJsonProject(val, nested[0]))
-        : sscJsonProject(val, nested);
+      if (typeof nested === 'object' && nested.__dict__) {
+        val = sscJsonProject(val, nested);
+      } else {
+        val = Array.isArray(nested)
+          ? (Array.isArray(val) ? val.map(x => sscJsonProject(x, nested[0])) : sscJsonProject(val, nested[0]))
+          : sscJsonProject(val, nested);
+      }
     }
 
     result[canonical] = val;
@@ -555,6 +583,32 @@ class JsVisitor(BaseWalker):
     def _resolve_type(self, type_info: TypeInfo | None) -> str:
         if type_info is None:
             return self.DEFAULT_TYPE
+        if type_info.is_dict:
+            key_map = {
+                VT.STRING: "string",
+                VT.INT: "number",
+                VT.FLOAT: "number",
+                VT.BOOL: "boolean",
+            }
+            key_base = (
+                type_info.key_type_info.base
+                if type_info.key_type_info
+                else VT.STRING
+            )
+            key_type = key_map.get(key_base, "string")
+            val_type = (
+                self._resolve_type(type_info.value_type_info)
+                if type_info.value_type_info
+                else self.DEFAULT_TYPE
+            )
+            t = f"Record<{key_type}, {val_type}>"
+            if type_info.is_array:
+                t = self.ARRAY_TYPE_FMT.format(t)
+            if type_info.is_optional or (
+                self.OPTIONAL_ON_OMITEMPTY and type_info.omitempty
+            ):
+                t = self.OPTIONAL_TYPE_FMT.format(t)
+            return t
         if type_info.base == VT.NESTED and type_info.ref:
             t = f"{to_pascal_case(type_info.ref)}Type"
         elif type_info.base == VT.JSON and type_info.ref:
@@ -653,10 +707,46 @@ class JsVisitor(BaseWalker):
 
     def visit_jsondef(self, node: JsonDef, ctx: WalkContext) -> list[str]:
         name = to_pascal_case(node.name)
+        if node.is_dict:
+            key_map = {
+                VT.STRING: "string",
+                VT.INT: "number",
+                VT.FLOAT: "number",
+                VT.BOOL: "boolean",
+            }
+            key_base = (
+                node.key_type_info.base if node.key_type_info else VT.STRING
+            )
+            key_type = key_map.get(key_base, "string")
+            val_type = (
+                self._resolve_type(node.value_type_info)
+                if node.value_type_info
+                else self.DEFAULT_TYPE
+            )
+            lines = [
+                "/**",
+                f" * @typedef {{Record<{key_type}, {val_type}>}} {name}Json",
+                " */",
+            ]
+            module = node.parent
+            while module is not None and not isinstance(module, Module):
+                module = module.parent
+            if isinstance(module, Module):
+                definitions = {
+                    n.name: n for n in module.body if isinstance(n, JsonDef)
+                }
+                lines.extend(_js_json_descriptors(node, definitions))
+                self._builder.require_std(
+                    "sscJsonProject", code=_JS_JSON_PROJECT_HELPER
+                )
+            return lines
+
         lines = ["/**", f" * @typedef {{Object}} {name}Json"]
         lines.extend(self.walk_children(node, ctx))
         lines.append(" */")
         module = node.parent
+        while module is not None and not isinstance(module, Module):
+            module = module.parent
         if isinstance(module, Module):
             definitions = {
                 n.name: n for n in module.body if isinstance(n, JsonDef)

@@ -133,8 +133,22 @@ When to use which:
 - Both → combine.
 - Never needed by client code → `@skip` (don't pollute the typed surface).
 
-Alias: `field-name str "originalKey"` (renames awkward JSON keys to valid field names).
+Alias: `field-name str from="originalKey"` (or positional `"originalKey"` — deprecated: W011; `path="..."` accepted as synonym with W041).
 Top-level array: `(array)json Tags { name str }`.
+
+**Dictionary schemas (`(dict)json` & inline `(dict)`):**
+For JSON objects with dynamic, numeric, or arbitrary keys and homogeneous values (e.g. `{"1": ["jap", "dub"], "2": ["jap"]}`):
+- Top-level: `(dict)json Translations { @key int; @value (array)str; }` (Python `Dict[int, List[str]]`, Go `map[int64][]string`, Rust `HashMap<i64, Vec<String>>`, JS `Record<number, string[]>`).
+- Inline dict: `translations (dict) { @key str; @value (array)str; }`.
+- `@key` defaults to `str` if omitted. Supported scalar key types: `str`, `int`, `float`, `bool`.
+- `@value` can be a scalar, `(array)Type`, or reference to another `json` schema.
+
+**Inline nested schemas (compiler hoisting):**
+Instead of polluting the module with dozens of small top-level helper schemas, define them directly inside the parent schema:
+- Anonymous inline object: `material_data { anime_title str; year int; }` (synthesizes `{Parent}{Field}` in PascalCase, e.g. `AnimeResponseMaterialDataJson`).
+- Explicitly named inline object: `franchise Franchise { id str; shikimori_id str; }` (emits `FranchiseJson`).
+- Explicitly named inline array: `links (array)Links { id int; relation str; }` (emits `LinksJson`).
+Inline blocks support full modifier symmetry: `from="..."`, `@omitempty`, `?` (nullable). The compiler hoists them ahead of the parent in topological dependency order.
 
 **Deduplication with `define`.** When multiple `json` schemas share the same set
 of base fields, extract them into a block define and reference it as a bare name

@@ -71,7 +71,37 @@ json Item {
 Правила:
 - `json <Name> { ... }` объявляет схему.
 - `(array)json <Name>` помечает схему как массив верхнего уровня.
+- `(dict)json <Name>` объявляет динамический словарь (`@key <ScalarType>`, `@value <Type>`).
 - Поля могут ссылаться на другие `json` схемы по имени.
+
+### JSON Dictionary схемы (`(dict)json` и `(dict)` поля)
+
+Для JSON-объектов с динамическими/числовыми ключами (например, переводы по ID серий `{"1": ["jap", "dub"]}`):
+
+```kdl
+(dict)json Translations {
+    @key int
+    @value (array)str
+}
+
+json ApiResponse {
+    id str
+    translations (dict) {
+        @key str
+        @value (array)str
+    }
+}
+```
+
+Типы ключей (`@key`): `str` (по умолчанию), `int`, `float`, `bool`.
+
+### Вложенные инлайн-схемы (Inline JSON Schemas)
+
+Компилятор автоматически выполняет хоистинг инлайн-блоков перед родительской схемой:
+- Анонимные блоки `material_data { ... }` → синтезируют имя `{Parent}{Field}` в PascalCase (`ApiResponseMaterialDataJson`).
+- Явно именованные блоки `franchise Franchise { ... }` → генерируют `FranchiseJson`.
+- Именованные массивы `nodes (array)Node { ... }` → генерируют `NodeJson`.
+- Поддерживают модификаторы `from="..."`, `@omitempty`, `?` (nullable).
 
 ### Переиспользование полей через define
 

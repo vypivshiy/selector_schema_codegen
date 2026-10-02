@@ -118,7 +118,12 @@ price { text; re RE-PRICE; to-float }
 
 ### json
 
-Объявление JSON схем. См. [json.md](json.md).
+Объявление JSON схем для `jsonify` и REST-ответов (`@request response=Schema`).
+- Объектная схема: `json Name { ... }`
+- Массив верхнего уровня: `(array)json Name { ... }`
+- Словарь с динамическими ключами: `(dict)json Name { @key int; @value (array)str; }`
+- Вложенные инлайн-блоки: анонимные `field { ... }`, именованные `field Model { ... }`, массивы `field (array)Item { ... }`, инлайн-словари `field (dict) { ... }`.
+См. [json.md](json.md).
 
 ### struct
 

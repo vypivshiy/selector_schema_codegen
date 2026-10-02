@@ -148,13 +148,14 @@ Prefer `css "selector:nth-of-type(N)"`. Full note → `../SKILL.md` Constraints.
 | Operation | Accept | Return | Notes |
 |-----------|--------|--------|-------|
 | `nested StructName` | DOCUMENT | NESTED | Recurse into another struct; terminal |
-| `jsonify SchemaName [path="..."]` | STRING | JSON | Deserialize JSON into typed schema; terminal |
+| `jsonify SchemaName [path="..."]` | STRING | JSON | Deserialize JSON into typed schema (`json`, `(array)json`, or `(dict)json`); terminal |
 
 `jsonify` `path` accepts dotted navigation:
 - `""` — apply schema to whole value
 - `"0"` — array index
 - `"field"` — object key
 - `"0.author.slug"` — combined
+(If schema has `path="..."`, it is used by default when `jsonify` omits `path`).
 
 ### Control
 

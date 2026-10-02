@@ -190,6 +190,7 @@ _RUNTIME_JSON_EXPORT_NAMES: list[str] = [
     "SscJsonError",
     "SscJsonPathError",
     "SscJsonFieldMissingError",
+    "SscJsonSchemaError",
     "ssc_resolve_dotpath",
     "ssc_json_project",
     "ssc_remap_json_keys",

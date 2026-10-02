@@ -2,6 +2,7 @@ import pytest
 from ssc_codegen.generation.runtime import (
     SscJsonPathError,
     SscJsonFieldMissingError,
+    SscJsonSchemaError,
     ssc_resolve_dotpath,
     ssc_json_project,
 )
@@ -218,3 +219,353 @@ json CatalogItem {
     assert result["items"]["missing_note"] is None
     assert "omitted_val" not in result["items"]
     assert "secret_token" not in result["items"]
+
+
+def test_top_level_dict_json_codegen_and_execution():
+    src = """
+(dict)json Translations {
+    @key int
+    @value (array)str
+}
+
+(raw)struct Scraper {
+    translations {
+        jsonify Translations
+    }
+}
+"""
+    module, diags = parse_module(src)
+    assert not any(d.severity.name == "ERROR" for d in diags)
+    code = PY_BS4_CONVERTER.convert(module)
+    assert "TranslationsJson = Dict[int, List[str]]" in code
+    assert (
+        "_translations_JSON_DESCRIPTORS = {'__dict__': True, '__value__': None}"
+        in code
+    )
+    ns = {}
+    exec(compile(code, "<test>", "exec"), ns)
+    payload = '{"1": ["jap", "eng"], "10": ["rus"]}'
+    res = ns["Scraper"](payload).parse()
+    assert res["translations"] == {"1": ["jap", "eng"], "10": ["rus"]}
+
+
+def test_top_level_dict_json_with_schema_ref():
+    src = """
+json Episode {
+    id int
+    title str from="episode_title"
+}
+
+(dict)json EpisodeMap {
+    @key str
+    @value Episode
+}
+
+(raw)struct Scraper {
+    episodes {
+        jsonify EpisodeMap
+    }
+}
+"""
+    module, diags = parse_module(src)
+    assert not any(d.severity.name == "ERROR" for d in diags)
+    code = PY_BS4_CONVERTER.convert(module)
+    assert "EpisodeMapJson = Dict[str, EpisodeJson]" in code
+    assert (
+        "_episode_map_JSON_DESCRIPTORS = {'__dict__': True, '__value__': {'id': ('id', False, False, None), 'title': ('episode_title', False, False, None)}}"
+        in code
+    )
+    ns = {}
+    exec(compile(code, "<test>", "exec"), ns)
+    payload = """{
+        "ep_1": {"id": 1, "episode_title": "Pilot", "extra": "drop"},
+        "ep_2": {"id": 2, "episode_title": "Finale", "extra": "drop"}
+    }"""
+    res = ns["Scraper"](payload).parse()
+    assert res["episodes"] == {
+        "ep_1": {"id": 1, "title": "Pilot"},
+        "ep_2": {"id": 2, "title": "Finale"},
+    }
+
+
+def test_inline_dict_field_codegen_and_execution():
+    src = """
+json AnimeInfo {
+    id int
+    translations (dict) {
+        @key str
+        @value (array)str
+    }
+}
+
+(raw)struct Scraper {
+    anime {
+        jsonify AnimeInfo
+    }
+}
+"""
+    module, diags = parse_module(src)
+    assert not any(d.severity.name == "ERROR" for d in diags)
+    code = PY_BS4_CONVERTER.convert(module)
+    assert "'translations': Dict[str, List[str]]" in code
+    assert (
+        "'translations': ('translations', False, False, {'__dict__': True, '__value__': None})"
+        in code
+    )
+    ns = {}
+    exec(compile(code, "<test>", "exec"), ns)
+    payload = """{
+        "id": 123,
+        "translations": {
+            "1": ["jap", "eng"],
+            "2": ["rus"]
+        }
+    }"""
+    res = ns["Scraper"](payload).parse()
+    assert res["anime"]["id"] == 123
+    assert res["anime"]["translations"] == {
+        "1": ["jap", "eng"],
+        "2": ["rus"],
+    }
+
+
+def test_inline_anonymous_object_block():
+    src = """
+json AnimeResponse {
+    id str
+    material_data {
+        anime_title str
+        year int
+    }
+}
+
+(raw)struct Scraper {
+    anime {
+        jsonify AnimeResponse
+    }
+}
+"""
+    module, diags = parse_module(src)
+    assert not any(d.severity.name == "ERROR" for d in diags)
+    code = PY_BS4_CONVERTER.convert(module)
+    assert "AnimeResponseMaterialDataJson = TypedDict" in code
+    assert "'material_data': AnimeResponseMaterialDataJson" in code
+    ns = {}
+    exec(compile(code, "<test>", "exec"), ns)
+    payload = """{
+        "id": "a1",
+        "material_data": {
+            "anime_title": "Steins;Gate",
+            "year": 2011,
+            "extra_field": "drop"
+        }
+    }"""
+    res = ns["Scraper"](payload).parse()
+    assert res["anime"]["id"] == "a1"
+    assert res["anime"]["material_data"] == {
+        "anime_title": "Steins;Gate",
+        "year": 2011,
+    }
+
+
+def test_inline_explicitly_named_object_block():
+    src = """
+json AnimeResponse {
+    id str
+    franchise Franchise {
+        id str
+        name str from="franchise_name"
+    }
+}
+
+(raw)struct Scraper {
+    anime {
+        jsonify AnimeResponse
+    }
+}
+"""
+    module, diags = parse_module(src)
+    assert not any(d.severity.name == "ERROR" for d in diags)
+    code = PY_BS4_CONVERTER.convert(module)
+    assert 'FranchiseJson = TypedDict("FranchiseJson"' in code
+    assert "'franchise': FranchiseJson" in code
+    ns = {}
+    exec(compile(code, "<test>", "exec"), ns)
+    payload = """{
+        "id": "a2",
+        "franchise": {
+            "id": "f1",
+            "franchise_name": "Science Adventure",
+            "ignored": 999
+        }
+    }"""
+    res = ns["Scraper"](payload).parse()
+    assert res["anime"]["id"] == "a2"
+    assert res["anime"]["franchise"] == {
+        "id": "f1",
+        "name": "Science Adventure",
+    }
+
+
+def test_inline_explicitly_named_array_block():
+    src = """
+json AnimeResponse {
+    id str
+    links (array)Links {
+        id int
+        relation str
+    }
+}
+
+(raw)struct Scraper {
+    anime {
+        jsonify AnimeResponse
+    }
+}
+"""
+    module, diags = parse_module(src)
+    assert not any(d.severity.name == "ERROR" for d in diags)
+    code = PY_BS4_CONVERTER.convert(module)
+    assert 'LinksJson = TypedDict("LinksJson"' in code
+    assert "'links': List[LinksJson]" in code
+    ns = {}
+    exec(compile(code, "<test>", "exec"), ns)
+    payload = """{
+        "id": "a3",
+        "links": [
+            {"id": 10, "relation": "prequel", "junk": 1},
+            {"id": 11, "relation": "sequel", "junk": 2}
+        ]
+    }"""
+    res = ns["Scraper"](payload).parse()
+    assert res["anime"]["id"] == "a3"
+    assert res["anime"]["links"] == [
+        {"id": 10, "relation": "prequel"},
+        {"id": 11, "relation": "sequel"},
+    ]
+
+
+def test_end_to_end_combined_dict_and_inline_schemas():
+    src = """
+json Episode {
+    id int
+    title str from="ep_title"
+}
+
+(dict)json EpisodeMap {
+    @key int
+    @value Episode
+}
+
+json AnimeComplete {
+    id str
+    franchise Franchise {
+        id str
+    }
+    links (array)Links {
+        id int
+        relation str
+    }
+    material_data {
+        anime_title str
+        year int
+    }
+    translations (dict) {
+        @key str
+        @value (array)str
+    }
+    episodes EpisodeMap?
+}
+
+(raw)struct Scraper {
+    anime {
+        jsonify AnimeComplete
+    }
+}
+"""
+    module, diags = parse_module(src)
+    assert not any(d.severity.name == "ERROR" for d in diags)
+    code = PY_BS4_CONVERTER.convert(module)
+    ns = {}
+    exec(compile(code, "<test>", "exec"), ns)
+    payload = """{
+        "id": "c1",
+        "franchise": {"id": "fr1", "extra": 1},
+        "links": [{"id": 1, "relation": "spin_off", "other": 2}],
+        "material_data": {"anime_title": "Fullmetal Alchemist", "year": 2009},
+        "translations": {"1": ["jap", "eng"]},
+        "episodes": {
+            "1": {"id": 101, "ep_title": "To Challenge the Sun", "skip": 0}
+        }
+    }"""
+    res = ns["Scraper"](payload).parse()
+    anime = res["anime"]
+    assert anime["id"] == "c1"
+    assert anime["franchise"] == {"id": "fr1"}
+    assert anime["links"] == [{"id": 1, "relation": "spin_off"}]
+    assert anime["material_data"] == {
+        "anime_title": "Fullmetal Alchemist",
+        "year": 2009,
+    }
+    assert anime["translations"] == {"1": ["jap", "eng"]}
+    assert anime["episodes"] == {
+        "1": {"id": 101, "title": "To Challenge the Sun"}
+    }
+
+
+def test_ssc_json_schema_error_on_non_dict_payload():
+    # 1. Direct ssc_json_project unit tests
+    dict_desc = {"__dict__": True, "__value__": None}
+    with pytest.raises(SscJsonSchemaError, match="Expected dict, got list"):
+        ssc_json_project(["item1", "item2"], dict_desc)
+    with pytest.raises(SscJsonSchemaError, match="Expected dict, got int"):
+        ssc_json_project(12345, dict_desc)
+    with pytest.raises(SscJsonSchemaError, match="Expected dict, got str"):
+        ssc_json_project("string_payload", dict_desc)
+
+    # 2. Top-level dict schema execution error
+    top_src = """
+(dict)json Translations {
+    @key int
+    @value (array)str
+}
+
+(raw)struct TopScraper {
+    data {
+        jsonify Translations
+    }
+}
+"""
+    m_top, _ = parse_module(top_src)
+    code_top = PY_BS4_CONVERTER.convert(m_top)
+    ns_top = {}
+    exec(compile(code_top, "<test>", "exec"), ns_top)
+    ErrTop = ns_top["SscJsonSchemaError"]
+    with pytest.raises(ErrTop, match="Expected dict, got list"):
+        ns_top["TopScraper"]("[1, 2, 3]").parse()
+
+    # 3. Inline dict field execution error
+    inline_src = """
+json MediaItem {
+    id int
+    translations (dict) {
+        @key str
+        @value (array)str
+    }
+}
+
+(raw)struct InlineScraper {
+    item {
+        jsonify MediaItem
+    }
+}
+"""
+    m_inline, _ = parse_module(inline_src)
+    code_inline = PY_BS4_CONVERTER.convert(m_inline)
+    ns_inline = {}
+    exec(compile(code_inline, "<test>", "exec"), ns_inline)
+    ErrInline = ns_inline["SscJsonSchemaError"]
+    with pytest.raises(ErrInline, match="Expected dict, got list"):
+        ns_inline["InlineScraper"](
+            '{"id": 1, "translations": ["not", "a", "dict"]}'
+        ).parse()

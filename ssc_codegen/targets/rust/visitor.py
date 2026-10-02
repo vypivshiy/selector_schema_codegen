@@ -150,6 +150,23 @@ def _pascal(value: str) -> str:
     return f"R#{name}" if name in _RUST_KEYWORDS else name
 
 
+def _rust_key_type(info: TypeInfo | None) -> str:
+    """Map a dictionary key type to its Rust type representation."""
+    if info is None:
+        return "String"
+    match info.base:
+        case VT.STRING:
+            return "String"
+        case VT.INT:
+            return "i64"
+        case VT.FLOAT:
+            return "f64"
+        case VT.BOOL:
+            return "bool"
+        case _:
+            return "String"
+
+
 def _rustfmt(source: str) -> str:
     """Format generated Rust when the stable toolchain is available.
 
@@ -348,6 +365,13 @@ class RustVisitor(BaseWalker):
     def _type(self, info: TypeInfo | None, *, field: bool = False) -> str:
         if info is None:
             return self.DEFAULT_TYPE
+        if info.is_dict:
+            key_type = _rust_key_type(info.key_type_info)
+            val_type = self._type(info.value_type_info)
+            result = f"std::collections::HashMap<{key_type}, {val_type}>"
+            if info.is_optional or info.omitempty:
+                result = self.OPTIONAL_TYPE_FMT.format(result)
+            return result
         if info.base == VT.DOCUMENT:
             result = self.DOCUMENT_TYPE
         elif info.base == VT.NESTED and info.ref:
@@ -469,9 +493,21 @@ class RustVisitor(BaseWalker):
         return lines
 
     def visit_jsondef(self, node: JsonDef, ctx: WalkContext) -> list[str]:
+        if node.is_dict:
+            name = f"{_pascal(node.name)}Json"
+            key_type = _rust_key_type(node.key_type_info)
+            val_type = self._type(node.value_type_info)
+            return [
+                f"pub type {name} = std::collections::HashMap<{key_type}, {val_type}>;",
+                "",
+            ]
         self._builder.require_import("use serde_json::Value;")
+        self._builder.require_import("use serde::Deserialize;")
         name = f"{_pascal(node.name)}Json"
-        lines = ["#[derive(Debug, Clone, Serialize)]", f"pub struct {name} {{"]
+        lines = [
+            "#[derive(Debug, Clone, Serialize, Deserialize)]",
+            f"pub struct {name} {{",
+        ]
         lines.extend(self.walk_children(node, ctx))
         lines.extend(
             [
@@ -514,7 +550,22 @@ class RustVisitor(BaseWalker):
                 "            Ok(raw) if !raw.is_null() => {",
             ]
         )
-        if info.base == VT.JSON and info.ref:
+        is_dict = (
+            field.is_dict
+            or info.is_dict
+            or bool(
+                info.ref
+                and self._json_defs.get(info.ref)
+                and self._json_defs[info.ref].is_dict
+            )
+        )
+        if is_dict:
+            inner_type = typ[7:-1] if typ.startswith("Option<") else typ
+            decoded = f'rt::decode::<{inner_type}>(raw.clone(), "jsonify.{field.name}")?'
+            lines.append(
+                f"                {('Some(' + decoded + ')') if optional else decoded}"
+            )
+        elif info.base == VT.JSON and info.ref:
             child = f"{_pascal(info.ref)}Json"
             if info.is_array:
                 decoded = f"values.iter().cloned().map({child}::from_value).collect::<Result<Vec<_>, _>>()?"
@@ -1393,7 +1444,13 @@ class RustVisitor(BaseWalker):
             )
         name = f"{_pascal(node.schema_name)}Json"
         parsed = f'rt::parse_json(&{ctx.prv}, {_str(node.path or "")}, "{self._context(node)}")?'
-        if node.ret_type_info.is_array:
+        target_def = self._json_defs.get(node.schema_name)
+        if target_def and target_def.is_dict:
+            target_type = (
+                f"Vec<{name}>" if node.ret_type_info.is_array else name
+            )
+            expr = f'rt::decode::<{target_type}>({parsed}, "{self._context(node)}")?'
+        elif node.ret_type_info.is_array:
             expr = f'{parsed}.as_array().ok_or_else(|| rt::SscError::new("{self._context(node)}", "expected JSON array"))?.iter().cloned().map({name}::from_value).collect::<Result<Vec<_>, _>>()?'
         else:
             expr = f"{name}::from_value({parsed})?"

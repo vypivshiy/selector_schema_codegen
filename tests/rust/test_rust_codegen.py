@@ -789,6 +789,222 @@ struct API type=rest {
     assert "_body_val.clone()" in code
 
 
+def test_rust_top_level_dict_json_codegen() -> None:
+    """Top-level (dict)json generates HashMap type alias and maps key types."""
+    schema = """
+(dict)json Translations {
+    @key str
+    @value (array)str
+}
+
+(dict)json NumericLookup {
+    @key int
+    @value str
+}
+
+json Document {
+    translations Translations
+}
+"""
+    module, diagnostics = parse_module(schema)
+    errors = [d for d in diagnostics if d.severity.name == "ERROR"]
+    assert not errors
+
+    converter = RustVisitor()
+    code = converter.convert(module)
+
+    assert (
+        "pub type TranslationsJson = std::collections::HashMap<String, Vec<String>>;"
+        in code
+    )
+    assert (
+        "pub type NumericLookupJson = std::collections::HashMap<i64, String>;"
+        in code
+    )
+    assert "pub translations: TranslationsJson," in code
+    assert (
+        'rt::decode::<TranslationsJson>(raw.clone(), "jsonify.translations")?'
+        in code
+    )
+
+
+def test_rust_parent_struct_with_inline_dict_field_codegen() -> None:
+    """Parent struct with inline (dict) field generates HashMap field and rt::decode."""
+    schema = """
+json AnimeResponse {
+    translations (dict) {
+        @key str
+        @value (array)str
+    }
+    optional_rates (dict)? @omitempty {
+        @key int
+        @value float
+    }
+}
+"""
+    module, diagnostics = parse_module(schema)
+    errors = [d for d in diagnostics if d.severity.name == "ERROR"]
+    assert not errors
+
+    converter = RustVisitor()
+    code = converter.convert(module)
+
+    assert "#[derive(Debug, Clone, Serialize, Deserialize)]" in code
+    assert "pub struct AnimeResponseJson {" in code
+    assert (
+        "pub translations: std::collections::HashMap<String, Vec<String>>,"
+        in code
+    )
+    assert (
+        "pub optional_rates: Option<std::collections::HashMap<i64, f64>>,"
+        in code
+    )
+    assert "std::collections::HashMap<String, Vec<String>>" in code
+    assert "rt::decode::<std::collections::HashMap<i64, f64>>(" in code
+    assert '"jsonify.translations"' in code
+    assert '"jsonify.optional_rates"' in code
+
+
+def test_rust_parent_struct_with_hoisted_inline_blocks_codegen() -> None:
+    """Parent struct with hoisted inline object and array blocks generates standard child structs."""
+    schema = """
+json AnimeResponse {
+    franchise Franchise {
+        id str
+        nodes (array)Node {
+            id int
+            name str
+        }
+    }
+    material_data {
+        title str
+    }
+}
+"""
+    module, diagnostics = parse_module(schema)
+    errors = [d for d in diagnostics if d.severity.name == "ERROR"]
+    assert not errors
+
+    converter = RustVisitor()
+    code = converter.convert(module)
+
+    assert "pub struct NodeJson {" in code
+    assert "pub struct FranchiseJson {" in code
+    assert "pub struct AnimeResponseMaterialDataJson {" in code
+    assert "pub struct AnimeResponseJson {" in code
+    assert "pub nodes: Vec<NodeJson>," in code
+    assert "pub franchise: FranchiseJson," in code
+    assert "pub material_data: AnimeResponseMaterialDataJson," in code
+    assert "NodeJson::from_value" in code
+    assert "FranchiseJson::from_value" in code
+    assert "AnimeResponseMaterialDataJson::from_value" in code
+
+
+def test_rust_json_dict_and_inline_schemas_execute(tmp_path: Path) -> None:
+    """End-to-end execution of top-level dict, inline dict, and hoisted inline schemas in Cargo."""
+    source_dir = _write_cargo_project(tmp_path)
+    converter = RustVisitor()
+    (source_dir / "sscgen_runtime.rs").write_text(
+        converter.emit_runtime(), encoding="utf-8"
+    )
+
+    schema = """
+(dict)json Translations {
+    @key str
+    @value (array)str
+}
+
+json AnimeResponse {
+    id str
+    translations (dict) {
+        @key str
+        @value (array)str
+    }
+    top_translations Translations
+    franchise Franchise {
+        id str
+        nodes (array)Node {
+            id int
+            name str
+        }
+    }
+    material_data {
+        title str
+    }
+}
+
+(raw)struct AnimePayload {
+    response { jsonify AnimeResponse }
+}
+"""
+    module, diagnostics = parse_module(schema)
+    assert not [d for d in diagnostics if d.severity.name == "ERROR"]
+    (source_dir / "parser.rs").write_text(
+        converter.convert(module), encoding="utf-8"
+    )
+
+    (source_dir / "main.rs").write_text(
+        """
+mod sscgen_runtime;
+mod parser;
+
+use parser::AnimePayloadParser;
+
+fn main() {
+    let payload = r#"{
+        "id": "anime-1",
+        "translations": {
+            "1": ["jap", "eng"],
+            "2": ["ita"]
+        },
+        "top_translations": {
+            "main": ["jap"]
+        },
+        "franchise": {
+            "id": "fr-1",
+            "nodes": [
+                {"id": 101, "name": "Episode 1"},
+                {"id": 102, "name": "Episode 2"}
+            ]
+        },
+        "material_data": {
+            "title": "My Anime Title"
+        }
+    }"#;
+
+    let mut parser = AnimePayloadParser::new(payload).expect("parser init failed");
+    let result = parser.parse().expect("parse failed");
+    let resp = result.response;
+
+    assert_eq!(resp.id, "anime-1");
+    assert_eq!(resp.translations.get("1").unwrap(), &vec!["jap".to_string(), "eng".to_string()]);
+    assert_eq!(resp.translations.get("2").unwrap(), &vec!["ita".to_string()]);
+    assert_eq!(resp.top_translations.get("main").unwrap(), &vec!["jap".to_string()]);
+    assert_eq!(resp.franchise.id, "fr-1");
+    assert_eq!(resp.franchise.nodes.len(), 2);
+    assert_eq!(resp.franchise.nodes[0].id, 101);
+    assert_eq!(resp.franchise.nodes[0].name, "Episode 1");
+    assert_eq!(resp.franchise.nodes[1].id, 102);
+    assert_eq!(resp.material_data.title, "My Anime Title");
+
+    println!("DICT_AND_INLINE_JSON_PASSED");
+}
+""",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ["cargo", "run", "--quiet"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env=_cargo_env(),
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "DICT_AND_INLINE_JSON_PASSED" in result.stdout
+
+
 def test_all_rest_schemas_compile(tmp_path: Path) -> None:
     """All 17 REST schemas generate valid Rust and compile together in a single Cargo project."""
     schemas_dir = (

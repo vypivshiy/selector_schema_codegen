@@ -198,6 +198,8 @@ def _go_zero(go_type: str) -> str:
         return "nil"
     if go_type.startswith("[]"):
         return go_type + "{}"
+    if go_type.startswith("map["):
+        return "nil"
     if go_type in ("string",):
         return '""'
     if go_type in ("int64", "int", "int32", "float64", "float32", "bool"):
@@ -291,7 +293,10 @@ def validate_go_package_name(value: object) -> str:
     return package
 
 
-def _go_unmarshal_json(node: JsonDef) -> list[str]:
+def _go_unmarshal_json(
+    node: JsonDef, visitor: GoVisitor | None = None
+) -> list[str]:
+    v = visitor or GoVisitor()
     name = to_pascal_case(node.name)
     lines = [
         f"func (res *{name}Json) UnmarshalJSON(raw []byte) error {{",
@@ -312,6 +317,58 @@ def _go_unmarshal_json(node: JsonDef) -> list[str]:
         ref = info.ref if info else None
 
         res_var = f"res{field_name}"
+
+        is_dict_field = field.is_dict or (info is not None and info.is_dict)
+        if is_dict_field:
+            v._builder.require_import('"encoding/json"')
+            key_info = field.key_type_info or (
+                info.key_type_info if info else None
+            )
+            val_info = field.value_type_info or (
+                info.value_type_info if info else None
+            )
+            key_type = "string"
+            if key_info:
+                key_type = {
+                    VT.STRING: "string",
+                    VT.INT: "int64",
+                    VT.FLOAT: "float64",
+                    VT.BOOL: "bool",
+                }.get(key_info.base, "string")
+            val_type = v._resolve_type(val_info)
+            map_type = f"map[{key_type}]{val_type}"
+            if is_array:
+                map_type = f"[]{map_type}"
+
+            if is_optional or is_omitempty:
+                lines.append(
+                    f"\tif {res_var} := gjson.GetBytes(raw, {go_wire_path}); {res_var}.Exists() && {res_var}.Type != gjson.Null {{"
+                )
+                lines.append(f"\t\tvar child {map_type}")
+                lines.append(
+                    f"\t\tif err := json.Unmarshal([]byte({res_var}.Raw), &child); err != nil {{"
+                )
+                lines.append("\t\t\treturn err")
+                lines.append("\t\t}")
+                lines.append(f"\t\tres.{field_name} = &child")
+                lines.append("\t}")
+            else:
+                lines.append(
+                    f"\t{res_var} := gjson.GetBytes(raw, {go_wire_path})"
+                )
+                lines.append(
+                    f"\tif !{res_var}.Exists() || {res_var}.Type == gjson.Null {{"
+                )
+                lines.append(
+                    f"\t\treturn fmt.Errorf(\"required JSON field '{wire_path}' missing\")"
+                )
+                lines.append("\t}")
+                lines.append(
+                    f"\tif err := json.Unmarshal([]byte({res_var}.Raw), &res.{field_name}); err != nil {{"
+                )
+                lines.append("\t\treturn err")
+                lines.append("\t}")
+            continue
 
         # If base == VT.JSON and ref
         if base == VT.JSON and ref:
@@ -664,6 +721,24 @@ class GoVisitor(BaseWalker):
     def _resolve_type(self, type_info: TypeInfo | None) -> str:
         if type_info is None:
             return self.DEFAULT_TYPE
+        if type_info.is_dict:
+            key_type = "string"
+            if type_info.key_type_info:
+                key_type = {
+                    VT.STRING: "string",
+                    VT.INT: "int64",
+                    VT.FLOAT: "float64",
+                    VT.BOOL: "bool",
+                }.get(type_info.key_type_info.base, "string")
+            val_type = self._resolve_type(type_info.value_type_info)
+            result = f"map[{key_type}]{val_type}"
+            if type_info.is_array and type_info.base != VT.DOCUMENT:
+                result = self.ARRAY_TYPE_FMT.format(result)
+            if type_info.is_optional or (
+                self.OPTIONAL_ON_OMITEMPTY and type_info.omitempty
+            ):
+                result = self.OPTIONAL_TYPE_FMT.format(result)
+            return result
         if type_info.base == VT.NESTED and type_info.ref:
             t = f"{to_pascal_case(type_info.ref)}Type"
         elif type_info.base == VT.JSON and type_info.ref:
@@ -778,9 +853,25 @@ class GoVisitor(BaseWalker):
             rendered = rendered.replace(placeholder, value)
         return [ctx.indent + line for line in rendered.splitlines()]
 
+    def _go_unmarshal_json(self, node: JsonDef) -> list[str]:
+        return _go_unmarshal_json(node, self)
+
     # === TYPES ===
 
     def visit_jsondef(self, node: JsonDef, ctx: WalkContext) -> list[str]:
+        if node.is_dict:
+            name = to_pascal_case(node.name)
+            key_type = "string"
+            if node.key_type_info:
+                key_type = {
+                    VT.STRING: "string",
+                    VT.INT: "int64",
+                    VT.FLOAT: "float64",
+                    VT.BOOL: "bool",
+                }.get(node.key_type_info.base, "string")
+            val_type = self._resolve_type(node.value_type_info)
+            return [f"type {name}Json = map[{key_type}]{val_type}", ""]
+
         name = to_pascal_case(node.name)
         lines = [f"type {name}Json struct {{", "\t// JSON schema"]
         lines.extend(self.walk_children(node, ctx))
@@ -810,9 +901,15 @@ class GoVisitor(BaseWalker):
                 and f.ret_type_info.ref
                 for f in node.body
             )
-            if has_nested_json:
+            has_dict_field = any(
+                isinstance(f, JsonDefField)
+                and not (f.ret_type_info and f.ret_type_info.skip)
+                and (f.is_dict or (f.ret_type_info and f.ret_type_info.is_dict))
+                for f in node.body
+            )
+            if has_nested_json or has_dict_field:
                 self._builder.require_import('"encoding/json"')
-            lines.extend(_go_unmarshal_json(node))
+            lines.extend(self._go_unmarshal_json(node))
         return lines
 
     def visit_jsondef_field(

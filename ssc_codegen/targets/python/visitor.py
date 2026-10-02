@@ -155,6 +155,9 @@ class SscJsonPathError(SscJsonError):
 class SscJsonFieldMissingError(SscJsonError):
     pass
 
+class SscJsonSchemaError(SscJsonError):
+    pass
+
 def ssc_resolve_dotpath(data: Any, path: str, is_optional: bool) -> Any:
     current = data
     for seg in path.split('.'):
@@ -185,7 +188,16 @@ def ssc_resolve_dotpath(data: Any, path: str, is_optional: bool) -> Any:
             raise SscJsonPathError(f"Cannot access key '{seg}' on non-dict {type(current).__name__} in path '{path}'")
     return current
 
-def ssc_json_project(data: Any, field_descriptors: Dict[str, Tuple[str, bool, bool, Any]]) -> Any:
+def ssc_json_project(data: Any, field_descriptors: Any) -> Any:
+    if isinstance(field_descriptors, dict) and field_descriptors.get('__dict__'):
+        if not isinstance(data, dict):
+            raise SscJsonSchemaError(f"Expected dict, got {type(data).__name__}")
+        val_desc = field_descriptors.get('__value__')
+        if val_desc is None:
+            return data
+        if isinstance(val_desc, list) and val_desc:
+            return {k: [ssc_json_project(x, val_desc[0]) for x in v if x is not None] if isinstance(v, list) else ssc_json_project(v, val_desc[0]) for k, v in data.items()}
+        return {k: ssc_json_project(v, val_desc) for k, v in data.items()}
     if isinstance(data, list):
         return [ssc_json_project(item, field_descriptors) for item in data]
     if not isinstance(data, dict):
@@ -210,7 +222,9 @@ def ssc_json_project(data: Any, field_descriptors: Dict[str, Tuple[str, bool, bo
             result[canonical_name] = None
             continue
         if nested_desc is not None:
-            if isinstance(nested_desc, list) and nested_desc:
+            if isinstance(nested_desc, dict) and nested_desc.get('__dict__'):
+                val = ssc_json_project(val, nested_desc)
+            elif isinstance(nested_desc, list) and nested_desc:
                 val = [ssc_json_project(x, nested_desc[0]) for x in val if x is not None] if isinstance(val, list) else ssc_json_project(val, nested_desc[0])
             else:
                 val = ssc_json_project(val, nested_desc)
@@ -548,6 +562,24 @@ class PythonVisitor(BaseWalker):
     def _resolve_type(self, type_info: TypeInfo | None) -> str:
         if type_info is None:
             return self.DEFAULT_TYPE
+        if type_info.is_dict:
+            key_map = {
+                VT.STRING: "str",
+                VT.INT: "int",
+                VT.FLOAT: "float",
+                VT.BOOL: "bool",
+            }
+            key_type = "str"
+            if type_info.key_type_info is not None:
+                key_type = key_map.get(type_info.key_type_info.base, "str")
+            val_type = self._resolve_type(type_info.value_type_info)
+            res = f"Dict[{key_type}, {val_type}]"
+            self._builder.require_import("from typing import Dict")
+            if type_info.is_array:
+                res = f"List[{res}]"
+            if type_info.is_optional:
+                res = f"Optional[{res}]"
+            return res
         if type_info.base == VT.NESTED and type_info.ref:
             t = f"{to_pascal_case(type_info.ref)}Type"
         elif type_info.base == VT.JSON and type_info.ref:
@@ -732,6 +764,33 @@ class PythonVisitor(BaseWalker):
     # === TYPES ===
 
     def visit_jsondef(self, node: JsonDef, ctx: WalkContext) -> list[str]:
+        if node.is_dict:
+            name = to_pascal_case(node.name)
+            key_map = {
+                VT.STRING: "str",
+                VT.INT: "int",
+                VT.FLOAT: "float",
+                VT.BOOL: "bool",
+            }
+            key_type = "str"
+            if node.key_type_info is not None:
+                key_type = key_map.get(node.key_type_info.base, "str")
+            val_type = self._resolve_type(node.value_type_info)
+            lines = [f"{name}Json = Dict[{key_type}, {val_type}]", ""]
+            self._builder.require_import("from typing import Dict")
+            module = node.parent
+            if isinstance(module, Module):
+                definitions = {
+                    n.name: n for n in module.body if isinstance(n, JsonDef)
+                }
+                lines.extend(_python_json_descriptors(node, definitions))
+                self._builder.require_std(
+                    "ssc_json_project",
+                    code=_PY_JSON_PROJECT_HELPER,
+                    imports=["from typing import Tuple"],
+                )
+            return lines
+
         name = to_pascal_case(node.name)
         lines = [f'{name}Json = TypedDict("{name}Json", {{']
         lines.extend(self.walk_children(node, ctx))

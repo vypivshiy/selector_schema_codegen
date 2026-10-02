@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .base import Node
-from .types import VariableType
+from .types import TypeInfo, VariableType
 
 
 @dataclass
@@ -26,6 +26,9 @@ class JsonDefField(Node):
         alias: Original key or dot-notation path in the source JSON payload (`from="..."`).
             Supports nested dot-paths (e.g. `from="author.name"`, `from="data.0.id"`).
         doc: Field documentation comment.
+        is_dict: Flag indicating whether this field is an inline dictionary block.
+        key_type_info: TypeInfo for dictionary key if is_dict is True.
+        value_type_info: TypeInfo for dictionary value if is_dict is True.
 
     Examples:
         - KDL: `fullName str from="full_name"`, `avatarUrl str from="profile.images.avatar"`
@@ -36,6 +39,9 @@ class JsonDefField(Node):
     type_name: str = ""
     alias: str = ""
     doc: str = ""
+    is_dict: bool = False
+    key_type_info: TypeInfo | None = None
+    value_type_info: TypeInfo | None = None
 
 
 @dataclass
@@ -49,7 +55,10 @@ class JsonDef(Node):
     Attributes:
         name: Identifier of the JSON schema model (e.g. `"User"`).
         is_array: Flag indicating whether the schema represents an array of items (`(array)json`).
+        is_dict: Flag indicating whether the schema represents a dictionary (`(dict)json`).
         path: Dot-notation nested path to extract from the raw JSON prior to deserialization.
+        key_type_info: TypeInfo for dictionary key if is_dict is True.
+        value_type_info: TypeInfo for dictionary value if is_dict is True.
 
     Examples:
         - KDL:
@@ -88,7 +97,10 @@ class JsonDef(Node):
 
     name: str = ""
     is_array: bool = False
+    is_dict: bool = False
     path: str = ""
+    key_type_info: TypeInfo | None = None
+    value_type_info: TypeInfo | None = None
 
     @property
     def has_alias_key(self) -> bool:
@@ -118,6 +130,15 @@ def _has_nested_alias(
     """Recursively check whether a JSON definition or referenced schemas contain aliased fields."""
     if definition.name in stack:
         return False
+    if definition.is_dict:
+        val_info = definition.value_type_info
+        if val_info and val_info.base == VariableType.JSON and val_info.ref:
+            nested = definitions.get(val_info.ref)
+            if nested and _has_nested_alias(
+                nested, definitions, (*stack, definition.name)
+            ):
+                return True
+        return False
     if any(
         field.alias
         for field in definition.body
@@ -128,10 +149,20 @@ def _has_nested_alias(
     for field in definition.body:
         if not isinstance(field, JsonDefField):
             continue
-        ref = field.ret_type_info.ref
+        info = field.ret_type_info
+        if (field.is_dict or (info and info.is_dict)) and field.value_type_info:
+            val_info = field.value_type_info
+            if val_info.base == VariableType.JSON and val_info.ref:
+                nested = definitions.get(val_info.ref)
+                if nested and _has_nested_alias(
+                    nested, definitions, next_stack
+                ):
+                    return True
+            continue
+        ref = info.ref if info else None
         nested = (
             definitions.get(ref)
-            if ref and field.ret_type_info.base == VariableType.JSON
+            if ref and info and info.base == VariableType.JSON
             else None
         )
         if nested and _has_nested_alias(nested, definitions, next_stack):

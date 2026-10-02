@@ -444,11 +444,25 @@ json Author {
     author Author
     text str
 }
+
+(dict)json Translations {
+    @key int
+    @value (array)str
+}
 ```
 
 Field types: str, int, float, bool, null, <RefName>.
+Dictionary schemas:
+- Top-level: `(dict)json Name { @key <ScalarType>; @value <Type>; }` (@key defaults to str; @value supports scalar, (array)type, or <RefName>).
+- Inline dict fields: `field (dict) { @key str; @value (array)str; }`.
+- Target types: Python `Dict[K, V]`, Go `map[K]V`, Rust `HashMap<K, V>`, JS `Record<K, V>`.
+
+Inline nested schemas (hoisted by compiler):
+- Anonymous object: `field { ... }` (synthesizes PascalCase `{Parent}{Field}`).
+- Explicitly named object: `field ModelName { ... }`.
+- Explicitly named array: `field (array)ItemModel { ... }`.
 Modifiers: (array)type for arrays, type? for optional (nullable), @omitempty for keys that may be absent, @skip to exclude from output.
-Alias / Dot-Paths: `field-name type from="source.path.0.key"` (supports dot-separated object keys and numeric array indices; positional `"source-key"` is deprecated: W011).
+Alias / Dot-Paths: `field-name type from="source.path.0.key"` (path="..." also accepted as synonym with W041 hint; supports dot-separated object keys and numeric array indices; positional `"source-key"` is deprecated: W011).
 Strict allowlist projection: generated parsers drop all unmodeled wire fields and validate required non-nullable fields.
 
 Usage: jsonify <SchemaName> [path="dotted.path"]

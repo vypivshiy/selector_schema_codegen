@@ -79,6 +79,9 @@ _BASE_UTILITY_LINES: list[str] = [
     "class SscJsonFieldMissingError(SscJsonError):",
     "    pass",
     "",
+    "class SscJsonSchemaError(SscJsonError):",
+    "    pass",
+    "",
     "def ssc_resolve_dotpath(data: Any, path: str, is_optional: bool) -> Any:",
     "    current = data",
     "    for seg in path.split('.'):",
@@ -109,7 +112,16 @@ _BASE_UTILITY_LINES: list[str] = [
     "            raise SscJsonPathError(f\"Cannot access key '{seg}' on non-dict {type(current).__name__} in path '{path}'\")",
     "    return current",
     "",
-    "def ssc_json_project(data: Any, field_descriptors: Dict[str, Tuple[str, bool, bool, Any]]) -> Any:",
+    "def ssc_json_project(data: Any, field_descriptors: Any) -> Any:",
+    "    if isinstance(field_descriptors, dict) and field_descriptors.get('__dict__'):",
+    "        if not isinstance(data, dict):",
+    '            raise SscJsonSchemaError(f"Expected dict, got {type(data).__name__}")',
+    "        val_desc = field_descriptors.get('__value__')",
+    "        if val_desc is None:",
+    "            return data",
+    "        if isinstance(val_desc, list) and val_desc:",
+    "            return {k: [ssc_json_project(x, val_desc[0]) for x in v if x is not None] if isinstance(v, list) else ssc_json_project(v, val_desc[0]) for k, v in data.items()}",
+    "        return {k: ssc_json_project(v, val_desc) for k, v in data.items()}",
     "    if isinstance(data, list):",
     "        return [ssc_json_project(item, field_descriptors) for item in data]",
     "    if not isinstance(data, dict):",
@@ -134,7 +146,9 @@ _BASE_UTILITY_LINES: list[str] = [
     "            result[canonical_name] = None",
     "            continue",
     "        if nested_desc is not None:",
-    "            if isinstance(nested_desc, list) and nested_desc:",
+    "            if isinstance(nested_desc, dict) and nested_desc.get('__dict__'):",
+    "                val = ssc_json_project(val, nested_desc)",
+    "            elif isinstance(nested_desc, list) and nested_desc:",
     "                val = [ssc_json_project(x, nested_desc[0]) for x in val if x is not None] if isinstance(val, list) else ssc_json_project(val, nested_desc[0])",
     "            else:",
     "                val = ssc_json_project(val, nested_desc)",
@@ -173,6 +187,10 @@ class SscJsonPathError(SscJsonError):
 
 class SscJsonFieldMissingError(SscJsonError):
     """Raised when a non-optional required JSON field is absent in input data."""
+
+
+class SscJsonSchemaError(SscJsonError):
+    """Raised when input JSON does not match schema structure (e.g. expected dict but got non-dict)."""
 
 
 def ssc_resolve_dotpath(data: Any, path: str, is_optional: bool) -> Any:
@@ -228,9 +246,7 @@ def ssc_resolve_dotpath(data: Any, path: str, is_optional: bool) -> Any:
     return current
 
 
-def ssc_json_project(
-    data: Any, field_descriptors: dict[str, tuple[str, bool, bool, Any]]
-) -> Any:
+def ssc_json_project(data: Any, field_descriptors: Any) -> Any:
     """Project raw JSON dictionary or list into a validated canonical schema dict.
 
     Applies strict field allowlisting, alias path resolution, nullability checks,
@@ -239,7 +255,8 @@ def ssc_json_project(
     Args:
         data: The input JSON data (dict or list of dicts).
         field_descriptors: Mapping of canonical field names to a tuple of
-            ``(wire_path, is_optional, is_omitempty, nested_descriptors)``.
+            ``(wire_path, is_optional, is_omitempty, nested_descriptors)``, or
+            dict descriptor ``{"__dict__": True, "__value__": val_desc}``.
 
     Returns:
         Projected dictionary with canonical keys, or list of projected dictionaries.
@@ -247,7 +264,33 @@ def ssc_json_project(
     Raises:
         SscJsonFieldMissingError: If a required field is missing or null.
         SscJsonPathError: If path resolution fails for a required field.
+        SscJsonSchemaError: If schema structure is violated (e.g. non-dict passed to dict schema).
     """
+    if isinstance(field_descriptors, dict) and field_descriptors.get(
+        "__dict__"
+    ):
+        if not isinstance(data, dict):
+            raise SscJsonSchemaError(
+                f"Expected dict, got {type(data).__name__}"
+            )
+        val_desc = field_descriptors.get("__value__")
+        if val_desc is None:
+            return data
+        if isinstance(val_desc, list) and val_desc:
+            return {
+                k: (
+                    [
+                        ssc_json_project(x, val_desc[0])
+                        for x in v
+                        if x is not None
+                    ]
+                    if isinstance(v, list)
+                    else ssc_json_project(v, val_desc[0])
+                )
+                for k, v in data.items()
+            }
+        return {k: ssc_json_project(v, val_desc) for k, v in data.items()}
+
     if isinstance(data, list):
         return [ssc_json_project(item, field_descriptors) for item in data]
     if not isinstance(data, dict):
@@ -283,7 +326,9 @@ def ssc_json_project(
             result[canonical_name] = None
             continue
         if nested_desc is not None:
-            if isinstance(nested_desc, list) and nested_desc:
+            if isinstance(nested_desc, dict) and nested_desc.get("__dict__"):
+                val = ssc_json_project(val, nested_desc)
+            elif isinstance(nested_desc, list) and nested_desc:
                 val = (
                     [
                         ssc_json_project(x, nested_desc[0])

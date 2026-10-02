@@ -469,8 +469,8 @@ KDL Declaration                  Compiler Core                   AST Nodes      
 #### 2.2 `JsonDef` & `JsonDefField`
 - **Классы:** `JsonDef`, `JsonDefField` | **Методы:** `visit_jsondef`, `visit_jsondef_field`
 - **Категория:** Container
-- **Поля `JsonDef`:** `name: str`, `is_array: bool`, `path: str`, `body: list[JsonDefField]`.
-- **Поля `JsonDefField`:** `name: str`, `type_name: str`, `alias: str`, `doc: str`, `ret_type_info: TypeInfo`.
+- **Поля `JsonDef`:** `name: str`, `is_array: bool`, `is_dict: bool`, `path: str`, `key_type_info: TypeInfo | None`, `value_type_info: TypeInfo | None`, `body: list[JsonDefField]`.
+- **Поля `JsonDefField`:** `name: str`, `type_name: str`, `alias: str`, `doc: str`, `is_dict: bool`, `key_type_info: TypeInfo | None`, `value_type_info: TypeInfo | None`, `ret_type_info: TypeInfo`.
 - **KDL:**
   ```kdl
   json User {

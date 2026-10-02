@@ -298,6 +298,17 @@ def json_def_descriptors(
     if definition.name in stack:
         return {}
     next_stack = (*stack, definition.name)
+    if definition.is_dict:
+        val_desc: object = None
+        val_info = definition.value_type_info
+        if val_info and val_info.base == VariableType.JSON and val_info.ref:
+            val_def = definitions.get(val_info.ref)
+            if val_def:
+                sub_desc = json_def_descriptors(
+                    val_def, definitions, next_stack
+                )
+                val_desc = [sub_desc] if val_info.is_array else sub_desc
+        return {"__dict__": True, "__value__": val_desc}  # type: ignore[return-value, dict-item]
     descriptors: dict[str, tuple[str, bool, bool, object]] = {}
     for field in definition.body:
         if not isinstance(field, JsonDefField) or (
@@ -309,7 +320,26 @@ def json_def_descriptors(
         is_optional = info.is_optional if info else False
         is_omitempty = info.omitempty if info else False
         nested_desc: object = None
-        if info and info.base == VariableType.JSON and info.ref:
+        if field.is_dict or (info and info.is_dict):
+            f_val_desc: object = None
+            f_val_info = field.value_type_info or (
+                info.value_type_info if info else None
+            )
+            if (
+                f_val_info
+                and f_val_info.base == VariableType.JSON
+                and f_val_info.ref
+            ):
+                f_val_def = definitions.get(f_val_info.ref)
+                if f_val_def:
+                    f_sub_desc = json_def_descriptors(
+                        f_val_def, definitions, next_stack
+                    )
+                    f_val_desc = (
+                        [f_sub_desc] if f_val_info.is_array else f_sub_desc
+                    )
+            nested_desc = {"__dict__": True, "__value__": f_val_desc}
+        elif info and info.base == VariableType.JSON and info.ref:
             nested_def = definitions.get(info.ref)
             if nested_def:
                 sub_desc = json_def_descriptors(

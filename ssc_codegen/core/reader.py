@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from ssc_codegen.ast import Module, StructRest
@@ -63,8 +64,13 @@ def parse_module(
             print(f"Parsed {len(ast.body)} top-level node(s)")
         ```
     """
+    normalized_src = re.sub(
+        r"(?<!\(dict\))(\b[a-zA-Z_][\w-]*)\s+\(dict\)(\??)(?=\s*(?:\{|from|path|@))",
+        r"(dict)\1\2",
+        src,
+    )
     try:
-        doc = kdl_parse(src)
+        doc = kdl_parse(normalized_src)
     except KDLParseError as exc:
         pos = Position(offset=0, line=exc.line, column=exc.col)
         span = Span(start=pos, end=pos)

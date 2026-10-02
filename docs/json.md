@@ -29,6 +29,77 @@ json Author {
 }
 ```
 
+### JSON Dictionary схемы (`(dict)json`)
+
+Для JSON-объектов с динамическими произвольными или числовыми ключами и однородными значениями (словари переводов по ID серий, карты ресурсов, локализация) используются словарь-схемы `(dict)json`:
+
+```kdl
+(dict)json EpisodeTranslations {
+    @key int
+    @value (array)str
+}
+
+(dict)json ResourceCatalog {
+    @key str
+    @value ResourceItem
+}
+```
+
+Внутри `(dict)json` разрешены только директивы `@key` и `@value`:
+- `@value <Type>` — **обязательная** директива, задающая тип значений: скаляр (`str`, `int`, `float`, `bool`), массив `(array)Type` или ссылка на другую `json` схему.
+- `@key <ScalarType>` — **опциональная** директива, задающая скалярный тип ключа (`str`, `int`, `float`, `bool`). По умолчанию `@key str`.
+
+Генераторы кода создают нативные типизированные словари:
+- **Python**: `EpisodeTranslationsJson = Dict[int, List[str]]`
+- **Go**: `type EpisodeTranslationsJson = map[int64][]string`
+- **Rust**: `pub type EpisodeTranslationsJson = std::collections::HashMap<i64, Vec<String>>;`
+- **JavaScript**: `/** @typedef {Record<number, string[]>} EpisodeTranslationsJson */`
+
+При рантайм-проекции (`ssc_json_project`) проверяется, что входные данные являются словарем (иначе генерируется `SscJsonSchemaError`), а значения рекурсивно ремаппятся, если `@value` ссылается на модель с алиасами.
+
+## Вложенные инлайн-схемы (Inline JSON Schemas)
+
+Вместо объявления десятков плоских глобальных схем в модуле, вложенные структуры можно объявлять непосредственно внутри полей родительской `json` схемы:
+
+1. **Анонимные объекты (`field_name { ... }`)**:
+   Имя модели синтезируется компилятором по цепочке предков: `{ParentName}{FieldName}` в PascalCase (например, `AnimeResponse` + `material_data` → `AnimeResponseMaterialDataJson`).
+2. **Явно именованные объекты (`field_name ModelName { ... }`)**:
+   Задаёт явное имя результирующей модели (например, `franchise Franchise { ... }` → `FranchiseJson`).
+3. **Именованные массивы объектов (`field_name (array)ItemModel { ... }`)**:
+   Задаёт массив вложенных объектов (например, `nodes (array)Node { ... }` → `NodeJson`). Из-за грамматики KDL 2.0 указание имени модели обязательно.
+4. **Инлайн-словари (`field_name (dict) { ... }`)**:
+   Объявляет анонимный словарь в поле родительской модели с директивами `@key` и `@value`.
+
+```kdl
+json AnimeResponse {
+    id str
+
+    // Явно именованный вложенный объект
+    franchise Franchise {
+        id str
+        links (array)Links {
+            id int
+            relation str
+        }
+    }
+
+    // Анонимный вложенный объект (AnimeResponseMaterialDataJson)
+    material_data {
+        anime_title str
+        year int
+    }
+
+    // Инлайн словарь
+    translations (dict) {
+        @key int
+        @value (array)str
+    }
+}
+```
+
+Все инлайн-поля поддерживают модификаторы `from="..."`, `@omitempty`, `?` (nullable), а также `path="..."` как синоним для `from="..."` (с предупреждением `W041`).
+Компилятор выполняет **хоистинг** (поднятие) инлайн-схем в топологическом порядке зависимостей выше родительской схемы.
+
 Типы полей:
 
 | Тип | Описание |
@@ -79,6 +150,7 @@ json UserProfile {
 | `E040` | `error` | Некорректный синтаксис dot-path (пустые сегменты `a..b`, ведущие/замыкающие точки `.a` / `a.`). |
 | `E041` | `error` | Коллизия алиасов (два поля ссылаются на один и тот же путь источника). |
 | `W040` | `warning` | Необрезанные пробелы в начале/конце `from="..."`. |
+| `W041` | `warning` | Использование `path="..."` вместо `from="..."` для алиаса JSON поля. |
 | `W011` | `warning` | Устаревший позиционный алиас (рекомендуется использовать `from="..."`). |
 
 ## Использование `jsonify`

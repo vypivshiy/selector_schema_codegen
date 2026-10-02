@@ -41,6 +41,7 @@ from ssc_codegen.ast import (
     XpathSelect,
     XpathSelectAll,
 )
+from ssc_codegen.naming import to_pascal_case
 from ssc_codegen.request_spec import parse_to_http
 from kdlquery import KdlNode
 
@@ -396,32 +397,259 @@ def parse_function(
     lint.walk_context = prev_ctx
 
 
+def _parse_dict_type_directives(
+    children: Sequence[KdlNode],
+    ctx: ParseContext,
+    lint: LintContext | None = None,
+) -> tuple[TypeInfo, TypeInfo]:
+    """Parse '@key' and '@value' directives from a dict JSON schema block."""
+    key_info: TypeInfo | None = None
+    val_info: TypeInfo | None = None
+
+    for child in children:
+        if child.name == "@key":
+            key_arg = str(child.args[0].value) if child.args else "str"
+            is_opt = key_arg.endswith("?")
+            key_arg = key_arg.rstrip("?")
+            match key_arg:
+                case "int":
+                    base = VariableType.INT
+                case "float":
+                    base = VariableType.FLOAT
+                case "bool":
+                    base = VariableType.BOOL
+                case _:
+                    base = VariableType.STRING
+            key_info = TypeInfo(base=base, is_optional=is_opt)
+        elif child.name == "@value":
+            val_arg = str(child.args[0].value) if child.args else "str"
+            is_arr = any(
+                (arg.type_annotation or "").strip("()") == "array"
+                for arg in child.args
+            )
+            is_opt = val_arg.endswith("?")
+            val_arg = val_arg.rstrip("?")
+            ref_name: str | None = None
+            match val_arg:
+                case "str":
+                    base = VariableType.STRING
+                case "int":
+                    base = VariableType.INT
+                case "float":
+                    base = VariableType.FLOAT
+                case "bool":
+                    base = VariableType.BOOL
+                case "null" | "nil":
+                    base = VariableType.NULL
+                case _:
+                    base = VariableType.JSON
+                    ref_name = val_arg
+            val_info = TypeInfo(
+                base=base,
+                is_array=is_arr,
+                is_optional=is_opt,
+                ref=ref_name,
+            )
+
+    if key_info is None:
+        key_info = TypeInfo(base=VariableType.STRING)
+    if val_info is None:
+        val_info = TypeInfo(base=VariableType.STRING)
+
+    return key_info, val_info
+
+
 def parse_json_fields(
-    nodes: Sequence[KdlNode], parent: JsonDef, ctx: ParseContext
+    nodes: Sequence[KdlNode],
+    parent: JsonDef,
+    ctx: ParseContext,
+    lint: LintContext | None = None,
 ) -> None:
     """Parse field declarations inside a `json` schema definition.
 
     Expands block defines, parses field modifiers (`@skip`, `@omitempty`),
     resolves primitive types, array annotations, optionality (`?`), and
-    key remapping (`from="..."` or positional aliases).
+    key remapping (`from="..."` or positional aliases). Also hoists inline
+    anonymous and explicitly named child `JsonDef` blocks.
 
     Args:
         nodes: Children nodes of the KDL json declaration.
         parent: The `JsonDef` AST node to populate with `JsonDefField` children.
         ctx: Global parse context containing defines and registered schemas.
+        lint: Optional lint context for diagnostics.
     """
     for node in nodes:
         # Block define expansion in json context
         if not node.args and node.name in ctx.children_defines:
-            parse_json_fields(ctx.children_defines[node.name], parent, ctx)
+            parse_json_fields(
+                ctx.children_defines[node.name], parent, ctx, lint
+            )
             continue
+
+        raw_ann = node.type_annotation or ""
+        type_prop = node.get_prop("type") or ""
+        is_dict_field = (
+            raw_ann.strip("()") == "dict"
+            or type_prop == "dict"
+            or any(
+                (arg.type_annotation or "").strip("()") == "dict"
+                or str(arg.value) == "(dict)"
+                for arg in node.args
+            )
+        )
+
+        # Inline (dict) field
+        if is_dict_field:
+            name = node.name
+            is_optional = name.endswith("?")
+            name = name.rstrip("?")
+            modifiers: list[str] = []
+            for arg in node.args:
+                a = str(arg.value)
+                raw = (
+                    ctx.source_text[arg.span.start.offset : arg.span.end.offset]
+                    if ctx.source_text
+                    else ""
+                )
+                quoted = raw.startswith(('"', "'"))
+                if a in {"@skip", "@omitempty"} and not quoted:
+                    modifiers.append(a)
+            skip = "@skip" in modifiers
+            may_miss = "@omitempty" in modifiers
+            from_prop = node.get_prop("from")
+            path_prop = node.get_prop("path")
+            alias = ""
+            if from_prop is not None:
+                resolved = str(ctx.property_defines.get(from_prop, from_prop))
+                if resolved:
+                    alias = resolved
+            elif path_prop is not None:
+                resolved = str(ctx.property_defines.get(path_prop, path_prop))
+                if resolved:
+                    alias = resolved
+            doc = node.get_prop("doc") or ""
+            key_info, val_info = _parse_dict_type_directives(
+                node.children, ctx, lint
+            )
+            parent.body.append(
+                JsonDefField(
+                    parent=parent,
+                    name=name,
+                    alias=alias,
+                    doc=doc,
+                    is_dict=True,
+                    key_type_info=key_info,
+                    value_type_info=val_info,
+                    ret_type_info=TypeInfo(
+                        base=VariableType.JSON,
+                        is_array=False,
+                        is_optional=is_optional,
+                        is_dict=True,
+                        key_type_info=key_info,
+                        value_type_info=val_info,
+                        omitempty=may_miss,
+                        skip=skip,
+                    ),
+                )
+            )
+            continue
+
+        # Inline object / array block
+        if node.children:
+            name = node.name
+            is_optional = name.endswith("?")
+            name = name.rstrip("?")
+            modifiers = []
+            type_ = ""
+            for arg in node.args:
+                a = str(arg.value)
+                raw = (
+                    ctx.source_text[arg.span.start.offset : arg.span.end.offset]
+                    if ctx.source_text
+                    else ""
+                )
+                quoted = raw.startswith(('"', "'"))
+                if a in {"@skip", "@omitempty"} and not quoted:
+                    modifiers.append(a)
+                elif a.startswith("@") and not quoted:
+                    continue
+                elif not type_:
+                    type_ = a
+            skip = "@skip" in modifiers
+            may_miss = "@omitempty" in modifiers
+            from_prop = node.get_prop("from")
+            path_prop = node.get_prop("path")
+            alias = ""
+            if from_prop is not None:
+                resolved = str(ctx.property_defines.get(from_prop, from_prop))
+                if resolved:
+                    alias = resolved
+            elif path_prop is not None:
+                resolved = str(ctx.property_defines.get(path_prop, path_prop))
+                if resolved:
+                    alias = resolved
+            doc = node.get_prop("doc") or ""
+
+            is_array = any(
+                (arg.type_annotation or "").strip("()") == "array"
+                for arg in node.args
+            )
+            if type_.endswith("?"):
+                is_optional = True
+                type_ = type_.rstrip("?")
+
+            # Synthesize or use explicit name
+            if type_:
+                child_schema_name = type_
+            else:
+                child_schema_name = f"{parent.name}{to_pascal_case(name)}"
+
+            # Find module ancestor for parent
+            module_owner = parent.parent
+            while module_owner is not None and not hasattr(
+                module_owner, "body"
+            ):
+                module_owner = module_owner.parent
+
+            sub_json_def = JsonDef(
+                parent=module_owner or parent.parent,
+                name=child_schema_name,
+                is_array=False,
+            )
+            # Recursively parse inline fields
+            parse_json_fields(node.children, sub_json_def, ctx, lint)
+            # Register in ctx.json_defs ahead of parent
+            ctx.json_defs[sub_json_def.name] = sub_json_def
+
+            parent.body.append(
+                JsonDefField(
+                    parent=parent,
+                    name=name,
+                    ret_type_info=TypeInfo(
+                        base=VariableType.JSON,
+                        is_array=is_array,
+                        is_optional=is_optional,
+                        ref=child_schema_name,
+                        omitempty=may_miss,
+                        skip=skip,
+                    ),
+                    alias=alias,
+                    doc=doc,
+                )
+            )
+            continue
+
         name = node.name
-        modifiers: list[str] = []
+        modifiers = []
         type_ = ""
         alias = ""
         for arg in node.args:
             a = str(arg.value)
-            raw = ctx.source_text[arg.span.start.offset : arg.span.end.offset]
+            raw = (
+                ctx.source_text[arg.span.start.offset : arg.span.end.offset]
+                if ctx.source_text
+                else ""
+            )
             quoted = raw.startswith(('"', "'"))
             if a in {"@skip", "@omitempty"} and not quoted:
                 modifiers.append(a)
@@ -435,12 +663,17 @@ def parse_json_fields(
         if not type_ and skip:
             type_ = "str"
         from_prop = node.get_prop("from")
+        path_prop = node.get_prop("path")
         if from_prop is not None:
             resolved = str(ctx.property_defines.get(from_prop, from_prop))
             if resolved:
                 alias = resolved
+        elif path_prop is not None:
+            resolved = str(ctx.property_defines.get(path_prop, path_prop))
+            if resolved:
+                alias = resolved
         is_array = any(
-            arg.type_annotation == "(array)"
+            (arg.type_annotation or "").strip("()") == "array"
             for arg in node.args
             if str(arg.value) == type_
         )
@@ -461,7 +694,7 @@ def parse_json_fields(
             case _:
                 ref_name = type_
                 is_array_ref = any(
-                    arg.type_annotation == "(array)"
+                    (arg.type_annotation or "").strip("()") == "array"
                     for arg in node.args
                     if str(arg.value) == ref_name
                 )

@@ -262,6 +262,12 @@ def _run_js_src(
     return _WORKER.execute(code, class_name, html)
 
 
+def _convert_kdl(src: str) -> str:
+    module_ast, diags = parse_module(src)
+    assert not [d for d in diags if d.severity == Severity.ERROR]
+    return JS_CONVERTER.convert(module_ast)
+
+
 class TestJsJsonAliasedRemapping:
     def test_json_alias_remapping(self):
         kdl_src = """
@@ -591,6 +597,475 @@ json DotProfile {
         }
         assert "legacy_id" not in r["user"]
         assert "extra_key" not in r["user"]
+
+
+class TestJsJsonDictAndInlineSchemas:
+    def test_top_level_dict_json_codegen_and_execution(self):
+        kdl_src = """
+(dict)json Translations {
+    @key str
+    @value (array)str
+}
+
+(raw)struct TranslationsParser {
+    translations {
+        jsonify Translations
+    }
+}
+"""
+        code = _convert_kdl(kdl_src)
+        assert "* @typedef {Record<string, string[]>} TranslationsJson" in code
+        assert (
+            'const _translationsJsonDescriptors = {"__dict__": true, "__value__": null};'
+            in code
+        )
+        assert "class SscJsonSchemaError extends SscJsonError" in code
+
+        raw_payload = json.dumps(
+            {
+                "1": ["jap", "Мега-Аниме"],
+                "10": ["jap", "СВ-Дубль"],
+            }
+        )
+        r = _run_js_src(kdl_src, "TranslationsParser", input_text=raw_payload)
+        assert r["translations"] == {
+            "1": ["jap", "Мега-Аниме"],
+            "10": ["jap", "СВ-Дубль"],
+        }
+
+        # Passing non-object throws SscJsonSchemaError
+        with pytest.raises(
+            RuntimeError, match="Expected object for dict schema"
+        ):
+            _run_js_src(
+                kdl_src, "TranslationsParser", input_text='["invalid", "array"]'
+            )
+
+    def test_top_level_dict_json_with_object_values(self):
+        kdl_src = """
+json Author {
+    name str from="author_name"
+    age int
+}
+
+(dict)json AuthorMap {
+    @key str
+    @value Author
+}
+
+(raw)struct AuthorMapParser {
+    authors {
+        jsonify AuthorMap
+    }
+}
+"""
+        code = _convert_kdl(kdl_src)
+        assert "* @typedef {Record<string, AuthorJson>} AuthorMapJson" in code
+        assert (
+            'const _author_mapJsonDescriptors = {"__dict__": true, "__value__":'
+            in code
+        )
+
+        raw_payload = json.dumps(
+            {
+                "alice": {"author_name": "Alice Smith", "age": 30},
+                "bob": {"author_name": "Bob Jones", "age": 25},
+            }
+        )
+        r = _run_js_src(kdl_src, "AuthorMapParser", input_text=raw_payload)
+        assert r["authors"] == {
+            "alice": {"name": "Alice Smith", "age": 30},
+            "bob": {"name": "Bob Jones", "age": 25},
+        }
+
+    def test_top_level_dict_key_types(self):
+        kdl_src = """
+(dict)json IntKeyDict {
+    @key int
+    @value float
+}
+
+(dict)json BoolKeyDict {
+    @key bool
+    @value str
+}
+"""
+        code = _convert_kdl(kdl_src)
+        assert "* @typedef {Record<number, number>} IntKeyDictJson" in code
+        assert "* @typedef {Record<boolean, string>} BoolKeyDictJson" in code
+
+    def test_inline_dict_codegen_and_execution(self):
+        kdl_src = """
+json AnimeResponse {
+    id str
+    translations (dict) {
+        @key str
+        @value (array)str
+    }
+}
+
+(raw)struct AnimeParser {
+    anime {
+        jsonify AnimeResponse
+    }
+}
+"""
+        code = _convert_kdl(kdl_src)
+        assert "* @property {Record<string, string[]>} translations" in code
+
+        raw_payload = json.dumps(
+            {
+                "id": "anime_42",
+                "translations": {
+                    "1": ["jap", "dub"],
+                    "2": ["rus"],
+                },
+            }
+        )
+        r = _run_js_src(kdl_src, "AnimeParser", input_text=raw_payload)
+        assert r["anime"] == {
+            "id": "anime_42",
+            "translations": {
+                "1": ["jap", "dub"],
+                "2": ["rus"],
+            },
+        }
+
+        # Non-dict child throws error
+        with pytest.raises(
+            RuntimeError, match="Expected object for dict schema"
+        ):
+            _run_js_src(
+                kdl_src,
+                "AnimeParser",
+                input_text='{"id": "anime_42", "translations": [1, 2, 3]}',
+            )
+
+    def test_inline_dict_nullable_and_omitempty(self):
+        kdl_src = """
+json ConfigResponse {
+    id str
+    meta (dict)? @omitempty {
+        @key str
+        @value str
+    }
+    tags (dict)? {
+        @key str
+        @value str
+    }
+}
+
+(raw)struct ConfigParser {
+    cfg {
+        jsonify ConfigResponse
+    }
+}
+"""
+        code = _convert_kdl(kdl_src)
+        assert (
+            "* @property {Record<string, string>|null} meta (OMITEMPTY)" in code
+        )
+        assert "* @property {Record<string, string>|null} tags" in code
+
+        # When omitted on wire (meta omitted, tags null)
+        r1 = _run_js_src(kdl_src, "ConfigParser", input_text='{"id": "c1"}')
+        assert r1["cfg"] == {"id": "c1", "tags": None}
+        assert "meta" not in r1["cfg"]
+
+        # When null on wire (meta omitted due to omitempty, tags explicitly null)
+        r2 = _run_js_src(
+            kdl_src,
+            "ConfigParser",
+            input_text='{"id": "c1", "meta": null, "tags": null}',
+        )
+        assert r2["cfg"] == {"id": "c1", "tags": None}
+        assert "meta" not in r2["cfg"]
+
+        # When provided on wire
+        r3 = _run_js_src(
+            kdl_src,
+            "ConfigParser",
+            input_text='{"id": "c1", "meta": {"env": "prod"}, "tags": {"team": "core"}}',
+        )
+        assert r3["cfg"] == {
+            "id": "c1",
+            "meta": {"env": "prod"},
+            "tags": {"team": "core"},
+        }
+
+    def test_field_referencing_top_level_dict_json(self):
+        kdl_src = """
+(dict)json Translations {
+    @key str
+    @value (array)str
+}
+
+json AnimeResponse {
+    id str
+    translations Translations
+}
+
+(raw)struct AnimeParser {
+    anime {
+        jsonify AnimeResponse
+    }
+}
+"""
+        code = _convert_kdl(kdl_src)
+        assert "* @property {TranslationsJson} translations" in code
+        assert "* @typedef {Record<string, string[]>} TranslationsJson" in code
+
+        raw_payload = json.dumps(
+            {
+                "id": "anime_99",
+                "translations": {
+                    "1": ["jap", "dub"],
+                },
+            }
+        )
+        r = _run_js_src(kdl_src, "AnimeParser", input_text=raw_payload)
+        assert r["anime"] == {
+            "id": "anime_99",
+            "translations": {
+                "1": ["jap", "dub"],
+            },
+        }
+
+    def test_top_level_dict_json_with_array_of_objects(self):
+        kdl_src = """
+json Contributor {
+    name str from="full_name"
+    role str
+}
+
+(dict)json ProjectContributors {
+    @key str
+    @value (array)Contributor
+}
+
+(raw)struct ContributorParser {
+    projects {
+        jsonify ProjectContributors
+    }
+}
+"""
+        code = _convert_kdl(kdl_src)
+        assert (
+            "* @typedef {Record<string, ContributorJson[]>} ProjectContributorsJson"
+            in code
+        )
+
+        raw_payload = json.dumps(
+            {
+                "frontend": [
+                    {"full_name": "Alice", "role": "lead", "ignore": 1},
+                    {"full_name": "Bob", "role": "dev"},
+                ],
+                "backend": [
+                    {"full_name": "Charlie", "role": "architect"},
+                ],
+            }
+        )
+        r = _run_js_src(kdl_src, "ContributorParser", input_text=raw_payload)
+        assert r["projects"] == {
+            "frontend": [
+                {"name": "Alice", "role": "lead"},
+                {"name": "Bob", "role": "dev"},
+            ],
+            "backend": [
+                {"name": "Charlie", "role": "architect"},
+            ],
+        }
+
+    def test_inline_anonymous_object_block(self):
+        kdl_src = """
+json MediaItem {
+    id str
+    material_data {
+        anime_title str from="title"
+        year int
+        next_episode_at str?
+    }
+}
+
+(raw)struct MediaParser {
+    media {
+        jsonify MediaItem
+    }
+}
+"""
+        code = _convert_kdl(kdl_src)
+        assert "@typedef {Object} MediaItemMaterialDataJson" in code
+        assert "* @property {string} anime_title" in code
+        assert "* @property {number} year" in code
+        assert "* @property {string|null} next_episode_at" in code
+        assert "* @property {MediaItemMaterialDataJson} material_data" in code
+
+        raw_payload = json.dumps(
+            {
+                "id": "media_99",
+                "material_data": {
+                    "title": "Frieren",
+                    "year": 2023,
+                    "next_episode_at": None,
+                    "unrelated": "ignore_me",
+                },
+            }
+        )
+        r = _run_js_src(kdl_src, "MediaParser", input_text=raw_payload)
+        assert r["media"] == {
+            "id": "media_99",
+            "material_data": {
+                "anime_title": "Frieren",
+                "year": 2023,
+                "next_episode_at": None,
+            },
+        }
+
+    def test_inline_named_array_block(self):
+        kdl_src = """
+json GraphResponse {
+    id str
+    nodes (array)Node {
+        id int
+        name str from="title"
+        score float
+    }
+}
+
+(raw)struct GraphParser {
+    graph {
+        jsonify GraphResponse
+    }
+}
+"""
+        code = _convert_kdl(kdl_src)
+        assert "@typedef {Object} NodeJson" in code
+        assert "* @property {number} id" in code
+        assert "* @property {string} name" in code
+        assert "* @property {number} score" in code
+        assert "* @property {NodeJson[]} nodes" in code
+
+        raw_payload = json.dumps(
+            {
+                "id": "g1",
+                "nodes": [
+                    {"id": 10, "title": "Alpha", "score": 9.2},
+                    {"id": 20, "title": "Beta", "score": 8.7},
+                ],
+            }
+        )
+        r = _run_js_src(kdl_src, "GraphParser", input_text=raw_payload)
+        assert r["graph"] == {
+            "id": "g1",
+            "nodes": [
+                {"id": 10, "name": "Alpha", "score": 9.2},
+                {"id": 20, "name": "Beta", "score": 8.7},
+            ],
+        }
+
+    def test_inline_combined_nested_hierarchy(self):
+        kdl_src = """
+json AnimeResponse {
+    id str
+    anime_poster str
+
+    franchise Franchise {
+        id str
+        shikimori_id str from="shiki_id"
+
+        links (array)Links {
+            id int
+            relation str
+        }
+
+        nodes (array)Node {
+            id int
+            name str
+            score float
+        }
+    }
+
+    material_data {
+        anime_title str from="title"
+        year int
+    }
+
+    self_hosted SelfHosted? from="self_hosted_data" @omitempty {
+        available bool
+        episodes (array)str
+        translations (dict) {
+            @key str
+            @value (array)str
+        }
+    }
+}
+
+(raw)struct FullAnimeParser {
+    data {
+        jsonify AnimeResponse
+    }
+}
+"""
+        code = _convert_kdl(kdl_src)
+        assert "@typedef {Object} FranchiseJson" in code
+        assert "@typedef {Object} LinksJson" in code
+        assert "@typedef {Object} NodeJson" in code
+        assert "@typedef {Object} AnimeResponseMaterialDataJson" in code
+        assert "@typedef {Object} SelfHostedJson" in code
+        assert "@typedef {Object} AnimeResponseJson" in code
+        assert "* @property {FranchiseJson} franchise" in code
+        assert "* @property {LinksJson[]} links" in code
+        assert "* @property {NodeJson[]} nodes" in code
+        assert (
+            "* @property {AnimeResponseMaterialDataJson} material_data" in code
+        )
+        assert (
+            "* @property {SelfHostedJson|null} self_hosted (OMITEMPTY)" in code
+        )
+        assert "* @property {Record<string, string[]>} translations" in code
+
+        raw_payload = json.dumps(
+            {
+                "id": "anime_full",
+                "anime_poster": "https://example.com/poster.jpg",
+                "franchise": {
+                    "id": "fr_1",
+                    "shiki_id": "sh_100",
+                    "links": [{"id": 1, "relation": "sequel"}],
+                    "nodes": [{"id": 10, "name": "Original", "score": 8.5}],
+                },
+                "material_data": {
+                    "title": "Anime Title",
+                    "year": 2024,
+                },
+                "self_hosted_data": {
+                    "available": True,
+                    "episodes": ["ep1", "ep2"],
+                    "translations": {"1": ["jap", "eng"]},
+                },
+            }
+        )
+        r = _run_js_src(kdl_src, "FullAnimeParser", input_text=raw_payload)
+        assert r["data"] == {
+            "id": "anime_full",
+            "anime_poster": "https://example.com/poster.jpg",
+            "franchise": {
+                "id": "fr_1",
+                "shikimori_id": "sh_100",
+                "links": [{"id": 1, "relation": "sequel"}],
+                "nodes": [{"id": 10, "name": "Original", "score": 8.5}],
+            },
+            "material_data": {
+                "anime_title": "Anime Title",
+                "year": 2024,
+            },
+            "self_hosted": {
+                "available": True,
+                "episodes": ["ep1", "ep2"],
+                "translations": {"1": ["jap", "eng"]},
+            },
+        }
 
 
 # ── RAW struct ────────────────────────────────────────────────────────────────

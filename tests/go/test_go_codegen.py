@@ -13,6 +13,7 @@ Only HTML-parsing schemas are exercised.
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -334,3 +335,322 @@ def test_gofmt_failure_is_not_silenced(monkeypatch):
 
     with pytest.raises(BuildTimeError, match="syntax error"):
         visitor._gofmt("package main\ninvalid")
+
+
+def test_go_top_level_dict_json(go_module):
+    """Verify Go codegen for top-level (dict)json schemas."""
+    src = """
+(dict)json Translations {
+    @key str
+    @value (array)str
+}
+
+(dict)json NumericLookup {
+    @key int
+    @value bool
+}
+
+json AnimeResponse {
+    id str
+    translations Translations
+    lookup NumericLookup? @omitempty
+}
+
+struct AnimeParser {
+    anime {
+        css "script#data"
+        text
+        jsonify AnimeResponse
+    }
+}
+"""
+    module_ast, diagnostics = parse_module(src)
+    errors = [d for d in diagnostics if d.severity == Severity.ERROR]
+    assert not errors
+
+    code = GO_CONVERTER.convert(module_ast, package="sscgen_test")
+    assert "type TranslationsJson = map[string][]string" in code
+    assert "type NumericLookupJson = map[int64]bool" in code
+    assert re.search(
+        r'Translations\s+TranslationsJson\s+`json:"translations"`', code
+    )
+    assert re.search(
+        r'Lookup\s+\*NumericLookupJson\s+`json:"lookup,omitempty"`', code
+    )
+
+    out = go_module / "toplevel_dict.go"
+    out.write_bytes(code.encode("utf-8"))
+
+    runtime = go_module / "sscgen_runtime.go"
+    runtime.write_bytes(
+        GO_CONVERTER.emit_runtime("sscgen_test").encode("utf-8")
+    )
+
+    fmt = subprocess.run(
+        ["gofmt", "-l", str(out)], capture_output=True, text=True
+    )
+    assert fmt.returncode == 0
+    assert not fmt.stdout.strip()
+
+    vet = subprocess.run(
+        ["go", "vet", "./..."], cwd=go_module, capture_output=True, text=True
+    )
+    assert vet.returncode == 0, f"go vet failed:\n{vet.stderr}"
+
+    build = subprocess.run(
+        ["go", "build", "./..."], cwd=go_module, capture_output=True, text=True
+    )
+    assert build.returncode == 0, f"go build failed:\n{build.stderr}"
+
+    test_go = go_module / "toplevel_dict_test.go"
+    test_go.write_text(
+        """package sscgen_test
+
+import (
+	"encoding/json"
+	"testing"
+)
+
+func TestTopLevelDictUnmarshal(t *testing.T) {
+	raw := []byte(`{"id":"a1","translations":{"1":["jap","en"]},"lookup":{"100":true}}`)
+	var resp AnimeResponseJson
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if resp.Id != "a1" {
+		t.Errorf("expected id a1, got %s", resp.Id)
+	}
+	if len(resp.Translations["1"]) != 2 {
+		t.Errorf("expected 2 translations, got %v", resp.Translations["1"])
+	}
+	if resp.Lookup == nil || !(*resp.Lookup)[100] {
+		t.Errorf("expected lookup[100] == true, got %v", resp.Lookup)
+	}
+}
+""",
+        encoding="utf-8",
+    )
+    test_run = subprocess.run(
+        ["go", "test", "-v", "./..."],
+        cwd=go_module,
+        capture_output=True,
+        text=True,
+    )
+    assert test_run.returncode == 0, (
+        f"go test failed:\n{test_run.stderr}\n{test_run.stdout}"
+    )
+
+
+def test_go_parent_struct_inline_dict_field(go_module):
+    """Verify Go codegen for parent struct with inline (dict) fields."""
+    src = """
+json Catalog {
+    name str
+    translations (dict) {
+        @key str
+        @value (array)str
+    }
+    meta (dict)? @omitempty {
+        @key str
+        @value str
+    }
+    flags (dict) from="custom_flags" {
+        @key int
+        @value bool
+    }
+}
+
+struct CatalogParser {
+    catalog {
+        css "script#catalog"
+        text
+        jsonify Catalog
+    }
+}
+"""
+    module_ast, diagnostics = parse_module(src)
+    errors = [d for d in diagnostics if d.severity == Severity.ERROR]
+    assert not errors
+
+    code = GO_CONVERTER.convert(module_ast, package="sscgen_test")
+    assert re.search(
+        r'Translations\s+map\[string\]\[\]string\s+`json:"translations"`', code
+    )
+    assert re.search(
+        r'Meta\s+\*map\[string\]string\s+`json:"meta,omitempty"`', code
+    )
+    assert re.search(r'Flags\s+map\[int64\]bool\s+`json:"custom_flags"`', code)
+
+    out = go_module / "inline_dict.go"
+    out.write_bytes(code.encode("utf-8"))
+
+    runtime = go_module / "sscgen_runtime.go"
+    runtime.write_bytes(
+        GO_CONVERTER.emit_runtime("sscgen_test").encode("utf-8")
+    )
+
+    fmt = subprocess.run(
+        ["gofmt", "-l", str(out)], capture_output=True, text=True
+    )
+    assert fmt.returncode == 0
+    assert not fmt.stdout.strip()
+
+    vet = subprocess.run(
+        ["go", "vet", "./..."], cwd=go_module, capture_output=True, text=True
+    )
+    assert vet.returncode == 0, f"go vet failed:\n{vet.stderr}"
+
+    build = subprocess.run(
+        ["go", "build", "./..."], cwd=go_module, capture_output=True, text=True
+    )
+    assert build.returncode == 0, f"go build failed:\n{build.stderr}"
+
+    test_go = go_module / "inline_dict_test.go"
+    test_go.write_text(
+        """package sscgen_test
+
+import (
+	"encoding/json"
+	"testing"
+)
+
+func TestInlineDictUnmarshal(t *testing.T) {
+	raw := []byte(`{"name":"test","translations":{"10":["ru","en"]},"meta":{"author":"alice"},"custom_flags":{"42":true}}`)
+	var c CatalogJson
+	if err := json.Unmarshal(raw, &c); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if c.Name != "test" {
+		t.Errorf("expected name test, got %s", c.Name)
+	}
+	if len(c.Translations["10"]) != 2 {
+		t.Errorf("expected 2 translations, got %v", c.Translations["10"])
+	}
+	if c.Meta == nil || (*c.Meta)["author"] != "alice" {
+		t.Errorf("expected author alice, got %v", c.Meta)
+	}
+	if !c.Flags[42] {
+		t.Errorf("expected flags[42] to be true")
+	}
+}
+""",
+        encoding="utf-8",
+    )
+    test_run = subprocess.run(
+        ["go", "test", "-v", "./..."],
+        cwd=go_module,
+        capture_output=True,
+        text=True,
+    )
+    assert test_run.returncode == 0, (
+        f"go test failed:\n{test_run.stderr}\n{test_run.stdout}"
+    )
+
+
+def test_go_parent_struct_hoisted_inline_schemas(go_module):
+    """Verify Go codegen for parent struct with hoisted inline object and array blocks."""
+    src = """
+json AnimeResponse {
+    id str
+    material_data {
+        anime_title str
+        year int
+    }
+    nodes (array)Node {
+        id int
+        name str
+    }
+    extra ExtraInfo? from="extra_info" @omitempty {
+        details str
+    }
+}
+
+struct AnimeResponseParser {
+    anime {
+        css "script#anime"
+        text
+        jsonify AnimeResponse
+    }
+}
+"""
+    module_ast, diagnostics = parse_module(src)
+    errors = [d for d in diagnostics if d.severity == Severity.ERROR]
+    assert not errors
+
+    code = GO_CONVERTER.convert(module_ast, package="sscgen_test")
+    assert "type AnimeResponseMaterialDataJson struct" in code
+    assert "type NodeJson struct" in code
+    assert "type ExtraInfoJson struct" in code
+    assert re.search(
+        r'MaterialData\s+AnimeResponseMaterialDataJson\s+`json:"material_data"`',
+        code,
+    )
+    assert re.search(r'Nodes\s+\[\]NodeJson\s+`json:"nodes"`', code)
+    assert re.search(
+        r'Extra\s+\*ExtraInfoJson\s+`json:"extra_info,omitempty"`', code
+    )
+
+    out = go_module / "hoisted_inline.go"
+    out.write_bytes(code.encode("utf-8"))
+
+    runtime = go_module / "sscgen_runtime.go"
+    runtime.write_bytes(
+        GO_CONVERTER.emit_runtime("sscgen_test").encode("utf-8")
+    )
+
+    fmt = subprocess.run(
+        ["gofmt", "-l", str(out)], capture_output=True, text=True
+    )
+    assert fmt.returncode == 0
+    assert not fmt.stdout.strip()
+
+    vet = subprocess.run(
+        ["go", "vet", "./..."], cwd=go_module, capture_output=True, text=True
+    )
+    assert vet.returncode == 0, f"go vet failed:\n{vet.stderr}"
+
+    build = subprocess.run(
+        ["go", "build", "./..."], cwd=go_module, capture_output=True, text=True
+    )
+    assert build.returncode == 0, f"go build failed:\n{build.stderr}"
+
+    test_go = go_module / "hoisted_inline_test.go"
+    test_go.write_text(
+        """package sscgen_test
+
+import (
+	"encoding/json"
+	"testing"
+)
+
+func TestHoistedInlineUnmarshal(t *testing.T) {
+	raw := []byte(`{"id":"a2","material_data":{"anime_title":"Title","year":2024},"nodes":[{"id":1,"name":"Hero"}],"extra_info":{"details":"Extra"}}`)
+	var resp AnimeResponseJson
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if resp.Id != "a2" {
+		t.Errorf("expected id a2, got %s", resp.Id)
+	}
+	if resp.MaterialData.AnimeTitle != "Title" || resp.MaterialData.Year != 2024 {
+		t.Errorf("unexpected material data: %+v", resp.MaterialData)
+	}
+	if len(resp.Nodes) != 1 || resp.Nodes[0].Name != "Hero" {
+		t.Errorf("unexpected nodes: %+v", resp.Nodes)
+	}
+	if resp.Extra == nil || resp.Extra.Details != "Extra" {
+		t.Errorf("unexpected extra: %+v", resp.Extra)
+	}
+}
+""",
+        encoding="utf-8",
+    )
+    test_run = subprocess.run(
+        ["go", "test", "-v", "./..."],
+        cwd=go_module,
+        capture_output=True,
+        text=True,
+    )
+    assert test_run.returncode == 0, (
+        f"go test failed:\n{test_run.stderr}\n{test_run.stdout}"
+    )

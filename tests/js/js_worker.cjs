@@ -14,8 +14,9 @@ const rl = readline.createInterface({
 
 rl.on("line", (line) => {
   if (!line.trim()) return;
+  let req;
   try {
-    const req = JSON.parse(line);
+    req = JSON.parse(line);
     const { window } = new JSDOM(req.html, { url: "http://localhost" });
     global.document = window.document;
     global.DOMParser = window.DOMParser;
@@ -27,6 +28,6 @@ rl.on("line", (line) => {
     const result = new Cls(req.html).parse();
     console.log(JSON.stringify({ id: req.id, ok: true, result: result }));
   } catch (err) {
-    console.log(JSON.stringify({ id: req.id, ok: false, error: err.toString() }));
+    console.log(JSON.stringify({ id: req ? req.id : null, ok: false, error: err.toString() }));
   }
 });

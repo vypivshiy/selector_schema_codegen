@@ -27,6 +27,7 @@ from ssc_codegen.core.contexts import (
 )
 from ssc_codegen.core.expressions import resolve_define_references
 from ssc_codegen.core.struct_parser import (
+    _parse_dict_type_directives,
     parse_function,
     parse_json_fields,
     parse_struct,
@@ -152,10 +153,26 @@ def handle_json(
         The instantiated and populated `JsonDef` AST node.
     """
     name = str(node.args[0].value) if node.args else ""
-    is_array = node.type_annotation == "(array)"
+    raw_ann = node.type_annotation or ""
+    type_prop = node.get_prop("type") or ""
+    is_array = raw_ann.strip("()") == "array" or type_prop == "array"
+    is_dict = raw_ann.strip("()") == "dict" or type_prop == "dict"
     path = node.get_prop("path") or ""
-    json_def = JsonDef(parent=module, name=name, is_array=is_array, path=path)
-    parse_json_fields(node.children, json_def, ctx)
+    json_def = JsonDef(
+        parent=module,
+        name=name,
+        is_array=is_array,
+        is_dict=is_dict,
+        path=path,
+    )
+    if is_dict:
+        key_info, val_info = _parse_dict_type_directives(
+            node.children, ctx, lint
+        )
+        json_def.key_type_info = key_info
+        json_def.value_type_info = val_info
+    else:
+        parse_json_fields(node.children, json_def, ctx, lint)
     ctx.json_defs[json_def.name] = json_def
     return json_def
 

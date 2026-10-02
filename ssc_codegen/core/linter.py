@@ -17,6 +17,7 @@ from ssc_codegen.symbols import (
     top_symbol_names,
     target_symbol_plan,
 )
+from ssc_codegen.naming import to_pascal_case
 from ssc_codegen.ast.struct import PLACEHOLDER_WIDE_RE, PlaceholderSpec
 from kdlquery import KdlDocument, KdlNode, ReadDiagnostic, Severity
 
@@ -822,14 +823,109 @@ def _lint_json_defs(
     source_text: str = "",
 ) -> None:
     seen_json_names: set[str] = set()
+    declared_json_names: set[str] = set()
+    for node in doc.select("json:root"):
+        name = _node_arg(node, 0)
+        if name:
+            seen_json_names.add(name)
+
     for node in doc.select("json:root"):
         _lint_single_json(
             node,
             source_path,
             diags,
-            seen_json_names,
+            declared_json_names,
             children_defines,
             source_text,
+            seen_json_names_all=seen_json_names,
+        )
+
+
+def _lint_dict_json_block(
+    node: KdlNode,
+    source_path: str,
+    diags: list[ReadDiagnostic],
+) -> None:
+    seen_directives: set[str] = set()
+    has_value = False
+    valid_key_types = {"str", "int", "float", "bool"}
+
+    for child in node.children:
+        child_name = child.name
+        if child_name not in ("@key", "@value"):
+            diags.append(
+                _error(
+                    child,
+                    f"unexpected child '{child_name}' in dict schema block; only '@key' and '@value' directives are permitted",
+                    source_path,
+                    code="E001",
+                    hint="use '@value <Type>' and optional '@key <ScalarType>'",
+                )
+            )
+            continue
+
+        if child_name in seen_directives:
+            diags.append(
+                _error(
+                    child,
+                    f"duplicate '{child_name}' directive in dict schema block",
+                    source_path,
+                    code="E001",
+                    hint=f"remove duplicate '{child_name}'",
+                )
+            )
+        seen_directives.add(child_name)
+
+        if child_name == "@key":
+            if not child.args:
+                diags.append(
+                    _error(
+                        child,
+                        "'@key' requires a scalar type ('str', 'int', 'float', 'bool')",
+                        source_path,
+                        code="E001",
+                        hint="example: @key int",
+                    )
+                )
+            else:
+                raw_key_type = str(child.args[0].value).rstrip("?")
+                is_arr = any(
+                    (arg.type_annotation or "").strip("()") == "array"
+                    for arg in child.args
+                )
+                if is_arr or raw_key_type not in valid_key_types:
+                    diags.append(
+                        _error(
+                            child,
+                            f"unsupported key type '{raw_key_type}' in '@key'; only scalar types ({', '.join(sorted(valid_key_types))}) are supported",
+                            source_path,
+                            code="E001",
+                            hint=f"valid key types: {', '.join(sorted(valid_key_types))}",
+                        )
+                    )
+
+        elif child_name == "@value":
+            has_value = True
+            if not child.args:
+                diags.append(
+                    _error(
+                        child,
+                        "'@value' requires a type specification",
+                        source_path,
+                        code="E001",
+                        hint="example: @value (array)str  or  @value Item",
+                    )
+                )
+
+    if not has_value:
+        diags.append(
+            _error(
+                node,
+                "dict schema block is missing mandatory '@value' directive",
+                source_path,
+                code="E001",
+                hint="add '@value <Type>' specifying the dictionary value type",
+            )
         )
 
 
@@ -840,6 +936,8 @@ def _lint_single_json(
     seen_json_names: set[str],
     children_defines: dict[str, list[KdlNode]],
     source_text: str = "",
+    *,
+    seen_json_names_all: set[str] | None = None,
 ) -> None:
     name = _node_arg(node, 0)
     if not name:
@@ -890,6 +988,14 @@ def _lint_single_json(
                 )
             )
 
+    raw_ann = node.type_annotation or ""
+    type_prop = node.properties.get("type")
+    type_prop_val = str(type_prop.value) if type_prop is not None else ""
+    is_dict = raw_ann.strip("()") == "dict" or type_prop_val == "dict"
+    if is_dict:
+        _lint_dict_json_block(node, source_path, diags)
+        return
+
     seen_fields: set[str] = set()
     seen_source_keys: set[str] = set()
     seen_output_keys: set[str] = set()
@@ -904,6 +1010,9 @@ def _lint_single_json(
         seen_output_keys,
         field_names,
         source_text,
+        seen_json_names=seen_json_names_all
+        if seen_json_names_all is not None
+        else seen_json_names,
     )
 
 
@@ -917,6 +1026,7 @@ def _lint_json_children(
     seen_output_keys: set[str],
     field_names: set[str],
     source_text: str = "",
+    seen_json_names: set[str] | None = None,
 ) -> None:
     def is_quoted(arg_index: int) -> bool:
         if not source_text or arg_index >= len(field_node.args):
@@ -927,6 +1037,7 @@ def _lint_json_children(
 
     for field_node in children:
         field_name = field_node.name
+        clean_field_name = field_name.rstrip("?")
         args = _node_args(field_node)
 
         # Block define expansion
@@ -941,8 +1052,34 @@ def _lint_json_children(
                 seen_output_keys,
                 field_names,
                 source_text,
+                seen_json_names,
             )
             continue
+
+        path_prop = field_node.properties.get("path")
+        if path_prop is not None:
+            diags.append(
+                _warning(
+                    field_node,
+                    "use 'from' instead of 'path' to specify JSON key alias on fields",
+                    source_path,
+                    code="W041",
+                    hint=f"example: {field_name} ... from={path_prop.value!r}",
+                )
+            )
+
+        raw_ann = field_node.type_annotation or ""
+        type_prop = field_node.properties.get("type")
+        type_prop_val = str(type_prop.value) if type_prop is not None else ""
+        is_dict_field = (
+            raw_ann.strip("()") == "dict"
+            or type_prop_val == "dict"
+            or any(
+                (arg.type_annotation or "").strip("()") == "dict"
+                or str(arg.value) == "(dict)"
+                for arg in field_node.args
+            )
+        )
 
         has_type = False
         has_skip = False
@@ -963,6 +1100,99 @@ def _lint_json_children(
             else:
                 has_type = True
 
+        has_children = bool(field_node.children)
+        raw_field = (
+            source_text[
+                field_node.span.start.offset : field_node.span.end.offset
+            ]
+            if source_text
+            else ""
+        )
+        is_empty_block = (
+            not has_children
+            and "{" in raw_field
+            and not (not args and field_name in children_defines)
+        )
+
+        if is_empty_block:
+            diags.append(
+                _error(
+                    field_node,
+                    f"empty inline json block '{field_name}'",
+                    source_path,
+                    code="E001",
+                    hint="add field definitions to the inline block or remove it",
+                )
+            )
+
+        if has_skip and (has_children or is_empty_block):
+            diags.append(
+                _error(
+                    field_node,
+                    f"cannot use '@skip' on inline json block '{field_name}'",
+                    source_path,
+                    code="E002",
+                    hint="remove '@skip' from inline block declaration",
+                )
+            )
+
+        if is_dict_field:
+            has_type = True
+            _lint_dict_json_block(field_node, source_path, diags)
+        elif has_children and len(field_node.children) > 0:
+            has_type = True
+            is_array = any(
+                (arg.type_annotation or "").strip("()") == "array"
+                for arg in field_node.args
+            )
+            value_args = [
+                arg
+                for arg in args
+                if not arg.startswith("@") or is_quoted(args.index(arg))
+            ]
+            if is_array and not value_args:
+                diags.append(
+                    _error(
+                        field_node,
+                        f"inline array block '{field_name}' requires an item model name",
+                        source_path,
+                        code="E001",
+                        hint=f"example: {field_name} (array)ItemModelName {{ ... }}",
+                    )
+                )
+            elif value_args:
+                explicit_name = value_args[0].rstrip("?")
+                if seen_json_names is not None:
+                    if explicit_name in seen_json_names:
+                        diags.append(
+                            _error(
+                                field_node,
+                                f"duplicate json definition '{explicit_name}'",
+                                source_path,
+                                code="E001",
+                                hint=f"rename inline schema '{explicit_name}' to avoid collision",
+                            )
+                        )
+                    else:
+                        seen_json_names.add(explicit_name)
+
+            sub_seen_fields: set[str] = set()
+            sub_seen_source_keys: set[str] = set()
+            sub_seen_output_keys: set[str] = set()
+            sub_field_names: set[str] = {c.name for c in field_node.children}
+            _lint_json_children(
+                list(field_node.children),
+                source_path,
+                diags,
+                children_defines,
+                sub_seen_fields,
+                sub_seen_source_keys,
+                sub_seen_output_keys,
+                sub_field_names,
+                source_text,
+                seen_json_names,
+            )
+
         if not has_type and not has_skip:
             diags.append(
                 _error(
@@ -974,7 +1204,7 @@ def _lint_json_children(
                 )
             )
 
-        if field_name in seen_fields:
+        if clean_field_name in seen_fields:
             diags.append(
                 _error(
                     field_node,
@@ -984,14 +1214,19 @@ def _lint_json_children(
                     hint=f"remove or rename the duplicate '{field_name}' field",
                 )
             )
-        seen_fields.add(field_name)
-        field_names.add(field_name)
+        seen_fields.add(clean_field_name)
+        field_names.add(clean_field_name)
         value_args = [
             arg
             for arg in args
             if not arg.startswith("@") or is_quoted(args.index(arg))
         ]
-        positional_alias = value_args[1] if len(value_args) > 1 else ""
+        positional_alias = (
+            value_args[1]
+            if len(value_args) > 1
+            and not (has_children and len(field_node.children) > 0)
+            else ""
+        )
         if positional_alias:
             type_repr = value_args[0] if value_args else "str"
             diags.append(
@@ -1050,13 +1285,19 @@ def _lint_json_children(
                         hint="remove positional alias and keep 'from=\"...\"' property",
                     )
                 )
+        elif (
+            path_prop is not None
+            and isinstance(path_prop.value, str)
+            and path_prop.value
+        ):
+            from_val = path_prop.value
 
         if from_val is not None:
             source_key = from_val
         elif positional_alias:
             source_key = positional_alias
         else:
-            source_key = field_name
+            source_key = clean_field_name
 
         if source_key in seen_source_keys:
             diags.append(
@@ -1069,9 +1310,9 @@ def _lint_json_children(
                 )
             )
         seen_source_keys.add(source_key)
-        output_key = field_name
-        if source_key != field_name and source_key in field_names - {
-            field_name
+        output_key = clean_field_name
+        if source_key != clean_field_name and source_key in field_names - {
+            clean_field_name
         }:
             diags.append(
                 _error(
@@ -1301,6 +1542,46 @@ def _iter_json_field_type_refs(
         if not args and field_node.name in children_defines:
             queue = list(children_defines[field_node.name]) + queue
             continue
+
+        if field_node.children:
+            raw_ann = field_node.type_annotation or ""
+            type_prop = field_node.properties.get("type")
+            type_prop_val = (
+                str(type_prop.value) if type_prop is not None else ""
+            )
+            is_dict = (
+                raw_ann.strip("()") == "dict"
+                or type_prop_val == "dict"
+                or any(
+                    (arg.type_annotation or "").strip("()") == "dict"
+                    or str(arg.value) == "(dict)"
+                    for arg in field_node.args
+                )
+            )
+            if is_dict:
+                for c in field_node.children:
+                    if c.name == "@value":
+                        v_arg = str(c.args[0].value) if c.args else ""
+                        if v_arg.startswith("(array)"):
+                            v_arg = v_arg[len("(array)") :]
+                        if v_arg.endswith("?"):
+                            v_arg = v_arg[:-1]
+                        if v_arg and v_arg not in _VALID_JSON_TYPES:
+                            yield c, v_arg
+            else:
+                queue = list(field_node.children) + queue
+            continue
+
+        if field_node.name == "@value":
+            v_arg = str(field_node.args[0].value) if field_node.args else ""
+            if v_arg.startswith("(array)"):
+                v_arg = v_arg[len("(array)") :]
+            if v_arg.endswith("?"):
+                v_arg = v_arg[:-1]
+            if v_arg and v_arg not in _VALID_JSON_TYPES:
+                yield field_node, v_arg
+            continue
+
         type_ = ""
         for a in args:
             if a.startswith("@"):
@@ -1649,7 +1930,11 @@ def lint_cross_refs(
                 json_nodes[name] = node
             for field_node in node.children:
                 _collect_json_field_refs(
-                    field_node, name or "", json_field_refs
+                    field_node,
+                    name or "",
+                    json_field_refs,
+                    json_names,
+                    json_nodes,
                 )
         elif node.name == "struct":
             struct_name = _node_arg(node, 0)
@@ -1946,8 +2231,77 @@ def _collect_json_field_refs(
     field_node: KdlNode,
     parent_json_name: str,
     refs: list[tuple[KdlNode, str, str, str]],
+    json_names: set[str],
+    json_nodes: dict[str, KdlNode],
 ) -> None:
     field_name = field_node.name
+    raw_ann = field_node.type_annotation or ""
+    type_prop = field_node.properties.get("type")
+    type_prop_val = str(type_prop.value) if type_prop is not None else ""
+    is_dict = (
+        raw_ann.strip("()") == "dict"
+        or type_prop_val == "dict"
+        or any(
+            (arg.type_annotation or "").strip("()") == "dict"
+            or str(arg.value) == "(dict)"
+            for arg in field_node.args
+        )
+    )
+
+    if field_node.children:
+        if is_dict:
+            for child in field_node.children:
+                if child.name == "@value":
+                    val_arg = str(child.args[0].value) if child.args else ""
+                    if val_arg.startswith("(array)"):
+                        val_arg = val_arg[len("(array)") :]
+                    if val_arg.endswith("?"):
+                        val_arg = val_arg[:-1]
+                    if val_arg and val_arg not in _VALID_JSON_TYPES:
+                        refs.append(
+                            (child, field_name, val_arg, parent_json_name)
+                        )
+            return
+
+        # Inline block
+        args = _node_args(field_node)
+        type_args = [arg for arg in args if not arg.startswith("@")]
+        if type_args:
+            raw_type = type_args[0]
+            if raw_type.startswith("(array)"):
+                raw_type = raw_type[len("(array)") :]
+            if raw_type.endswith("?"):
+                raw_type = raw_type[:-1]
+            child_schema_name = raw_type
+        else:
+            clean_field = field_name.rstrip("?")
+            child_schema_name = (
+                f"{parent_json_name}{to_pascal_case(clean_field)}"
+            )
+
+        json_names.add(child_schema_name)
+        json_nodes[child_schema_name] = field_node
+        refs.append(
+            (field_node, field_name, child_schema_name, parent_json_name)
+        )
+
+        for child in field_node.children:
+            _collect_json_field_refs(
+                child, child_schema_name, refs, json_names, json_nodes
+            )
+        return
+
+    # Special case: top-level (dict)json @value
+    if field_node.name == "@value":
+        val_arg = str(field_node.args[0].value) if field_node.args else ""
+        if val_arg.startswith("(array)"):
+            val_arg = val_arg[len("(array)") :]
+        if val_arg.endswith("?"):
+            val_arg = val_arg[:-1]
+        if val_arg and val_arg not in _VALID_JSON_TYPES:
+            refs.append((field_node, field_name, val_arg, parent_json_name))
+        return
+
     type_found = False
     for arg in field_node.args:
         val = str(arg.value)

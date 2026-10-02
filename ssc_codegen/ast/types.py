@@ -54,6 +54,9 @@ class TypeInfo:
     ref: str | None = None  # raw struct/JsonDef name — converter adds suffix
     omitempty: bool = False  # @omitempty — key may be absent from JSON
     skip: bool = False  # @skip — field parsed but excluded from output
+    is_dict: bool = False
+    key_type_info: TypeInfo | None = None
+    value_type_info: TypeInfo | None = None
 
     @property
     def is_list(self) -> bool:
