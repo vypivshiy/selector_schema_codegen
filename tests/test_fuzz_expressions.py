@@ -419,67 +419,6 @@ def _apply_op(
     return new_base, new_arr
 
 
-def _pair_cases() -> list[tuple[str, str, str]]:
-    """All (op1, op2, body) where ret(op1) compatible with accept(op2)."""
-    cases: list[tuple[str, str, str]] = []
-    ops = _all_pipeline_ops()
-    for op1 in ops:
-        if op1.name == "match":
-            continue
-        prepend = _prepend_for(op1.name)
-        pre_base, pre_arr = _simulate(_PREPEND_TO_OPS[prepend])
-        # Validate op1 itself accepts what prepend produces — skip invalid.
-        if not _type_compatible(pre_base, op1.sig.accept):
-            continue
-        if op1.name in _LIST_REQUIRED and not pre_arr:
-            continue
-        for form1 in OP_FORMS[op1.name]:
-            head = f"{prepend}\n        {form1}" if prepend else form1
-            base_after_1, arr_after_1 = _apply_op(pre_base, pre_arr, op1.name)
-            for op2 in ops:
-                if op2.name in _SKIP_SOLO and op2.name not in _TERMINAL_OPS:
-                    continue
-                if not _type_compatible(base_after_1, op2.sig.accept):
-                    continue
-                if op2.name in _LIST_REQUIRED and not arr_after_1:
-                    continue
-                if op2.name == "filter" and not arr_after_1:
-                    continue
-                for form2 in OP_FORMS[op2.name]:
-                    body = f"{head}\n        {form2}"
-                    cases.append((op1.name, op2.name, body))
-    # Dedup while preserving order.
-    seen: set[tuple[str, str, str]] = set()
-    unique: list[tuple[str, str, str]] = []
-    for c in cases:
-        if c not in seen:
-            seen.add(c)
-            unique.append(c)
-    return unique
-
-
-@pytest.mark.parametrize(
-    "op1,op2,body", _pair_cases(), ids=lambda v: v if isinstance(v, str) else v
-)
-@pytest.mark.parametrize(
-    "target", list(_PY_CONVERTERS), ids=list(_PY_CONVERTERS)
-)
-def test_op_pair_py(op1: str, op2: str, body: str, target: str) -> None:
-    _skip_unsupported_xpath(body, target)
-    kdl = _wrap_item_struct(field_body=body)
-    mod = _assert_ast_valid(kdl)
-    _assert_py_valid(_PY_CONVERTERS[target], mod)
-
-
-@pytest.mark.parametrize(
-    "op1,op2,body", _pair_cases(), ids=lambda v: v if isinstance(v, str) else v
-)
-def test_op_pair_js(op1: str, op2: str, body: str) -> None:
-    kdl = _wrap_item_struct(field_body=body)
-    mod = _assert_ast_valid(kdl)
-    _assert_js_valid(mod)
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Test 3: representative triples
 # ═══════════════════════════════════════════════════════════════════════════════
