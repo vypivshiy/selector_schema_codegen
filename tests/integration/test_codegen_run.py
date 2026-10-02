@@ -89,20 +89,6 @@ _SCHEMAS = [
 _TARGETS = ["py-bs4", "py-lxml", "py-parsel", "py-slax"]
 
 
-# ── Parametrized: each schema × each target ───────────────────────────────────
-
-
-@pytest.mark.parametrize(
-    "schema_file,struct_name", _SCHEMAS, ids=[f"{s}:{n}" for s, n in _SCHEMAS]
-)
-@pytest.mark.parametrize("target", _TARGETS)
-def test_codegen_runs_without_error(schema_file, struct_name, target, html):
-    """Generated code executes and returns a result without exceptions."""
-    schema_path = SCHEMAS_DIR / schema_file
-    result = _run_schema(schema_path, struct_name, html, target)
-    assert result is not None
-
-
 # ── Structure validation tests (py-bs4 baseline) ─────────────────────────────
 
 
@@ -114,52 +100,41 @@ def test_codegen_runs_without_error(schema_file, struct_name, target, html):
 
 class TestStringsBasic:
     @pytest.mark.parametrize("target", _TARGETS)
-    def test_returns_list(self, html, target):
+    def test_strings_basic_extraction(self, html, target):
         result = _run_schema(
             SCHEMAS_DIR / "01_strings_basic.kdl", "StringsBasic", html, target
         )
         assert isinstance(result, list)
         assert len(result) == 2
 
-    @pytest.mark.parametrize("target", _TARGETS)
-    def test_fields_present(self, html, target):
-        result = _run_schema(
-            SCHEMAS_DIR / "01_strings_basic.kdl", "StringsBasic", html, target
-        )
-        for item in result:
-            assert "title" in item
-            assert "link" in item
-            assert "slug" in item
-            assert "active_flag" in item
+        # Check non-HTML extracted values match expected across all backends
+        assert {k: v for k, v in result[0].items() if "html" not in k} == {
+            "title": "bar Title One",
+            "link": "https://example.testguide",
+            "slug": "slug-one",
+            "normalized_code": "foo-bar",
+            "active_flag": True,
+        }
+        assert {k: v for k, v in result[1].items() if "html" not in k} == {
+            "title": "bar Title Two",
+            "link": "https://example.testreadme/",
+            "slug": "slug-two",
+            "normalized_code": "code-4",
+            "active_flag": True,
+        }
 
-    @pytest.mark.parametrize("target", _TARGETS)
-    def test_field_types(self, html, target):
-        result = _run_schema(
-            SCHEMAS_DIR / "01_strings_basic.kdl", "StringsBasic", html, target
-        )
-        item = result[0]
-        assert isinstance(item["title"], str)
-        assert isinstance(item["link"], str)
-        assert isinstance(item["slug"], str)
-        assert isinstance(item["active_flag"], bool)
-
-    @pytest.mark.parametrize("target", _TARGETS)
-    def test_raw_inner_excludes_own_tag(self, html, target):
-        result = _run_schema(
-            SCHEMAS_DIR / "01_strings_basic.kdl", "StringsBasic", html, target
-        )
+        # Check raw HTML fields across targets
         for item in result:
             inner = item["inner_html"]
             outer = item["clean_html"]
             assert isinstance(inner, str)
             assert not inner.lstrip().startswith("<article")
             assert '<h2 class="title">' in inner
-            # inner is a strict substring-ish shrink: shorter than outer
             assert len(inner) < len(outer)
 
 
 class TestArraysAndConversions:
-    def test_returns_list(self, html):
+    def test_arrays_and_conversions_values(self, html):
         result = _run_schema(
             SCHEMAS_DIR / "02_arrays_and_conversions.kdl",
             "ArraysAndConversions",
@@ -168,31 +143,33 @@ class TestArraysAndConversions:
         assert isinstance(result, list)
         assert len(result) == 2
 
-    def test_field_types(self, html):
-        result = _run_schema(
-            SCHEMAS_DIR / "02_arrays_and_conversions.kdl",
-            "ArraysAndConversions",
-            html,
-        )
-        item = result[0]
-        assert isinstance(item["token_list"], list)
-        assert isinstance(item["first_token"], str)
-        assert isinstance(item["state_code"], int)
-        assert isinstance(item["score"], int)
-        assert isinstance(item["ratio"], float)
-        assert isinstance(item["any_link_count"], int)
-
-    def test_token_list_values(self, html):
-        result = _run_schema(
-            SCHEMAS_DIR / "02_arrays_and_conversions.kdl",
-            "ArraysAndConversions",
-            html,
-        )
-        assert result[0]["token_list"] == [
+        item0 = result[0]
+        assert item0["token_list"] == [
             "tag-core-alpha1-x",
             "item-beta2-y",
             "ref3",
         ]
+        assert item0["first_token"] == "tag-core-alpha1-x"
+        assert item0["second_token"] == "item-beta2-y"
+        assert item0["last_token"] == "ref3"
+        assert item0["token_window"] == "tag-core-alpha1-x|item-beta2-y"
+        assert item0["state_code"] == 1
+        assert item0["score"] == 41
+        assert item0["ratio"] == 0.75
+        assert item0["any_link_count"] == 2
+        assert item0["flags_joined"] == "ALPHA,BETA"
+
+        item1 = result[1]
+        assert item1["token_list"] == [
+            "tag-core-alpha1-x",
+            "item-beta2-y",
+            "ref3",
+        ]
+        assert item1["state_code"] == 0
+        assert item1["score"] == 18
+        assert item1["ratio"] == 1.5
+        assert item1["any_link_count"] == 1
+        assert item1["flags_joined"] == "GAMMA,DELTA"
 
 
 class TestFiltersAndPredicates:
@@ -291,106 +268,98 @@ def test_all_targets_produce_same_result(schema_file, struct_name, html):
 
 
 def test_json_nested_root(html):
-    _run_schema(SCHEMAS_DIR / "04_json_and_nested.kdl", "JsonNestedRoot", html)
+    result = _run_schema(
+        SCHEMAS_DIR / "04_json_and_nested.kdl", "JsonNestedRoot", html
+    )
+    assert result["title"] == "DSL Coverage Fixture"
+    assert result["first_author_name"] == "Author One"
+    assert result["first_score"] == 7
+    assert result["nested_item"] == {
+        "title": "Single Item Title",
+        "active": True,
+    }
+    assert result["nested_list"] == [
+        {"href": "/nested/one.html", "name": "Nested One"},
+        {"href": "/nested/two.html", "name": "Nested Two"},
+    ]
+    assert len(result["json_payload"]) == 2
+    assert result["json_payload"][0]["text"] == "Quote one"
+    assert result["json_payload"][1]["text"] == "Quote two"
 
 
 def test_coverage_root_full(html):
-    _run_schema(SCHEMAS_DIR / "00_full.kdl", "CoverageRoot", html)
+    result = _run_schema(SCHEMAS_DIR / "00_full.kdl", "CoverageRoot", html)
+    assert result["title"] == "DSL Coverage Fixture"
+    assert result["canonical"] == "https://example.test/coverage"
+    assert result["first_author_name"] == "Author One"
+    assert result["first_score"] == 7
+    assert result["nested_item"] == {
+        "title": "Single Item Title",
+        "active": True,
+    }
+    assert len(result["cards"]) == 2
+    assert result["table_data"]["identifier"] == "ABC-123"
 
 
 # ── JSON integration: validate parsed results ────────────────────────────────
 
 
 class TestJsonBasic:
-    def test_full_payload_returns_list(self, html):
+    def test_json_basic_extraction(self, html):
         result = _run_schema(
             SCHEMAS_DIR / "18_json_basic.kdl", "JsonBasic", html
         )
-        assert isinstance(result, dict)
-        payload = result["full_payload"]
-        assert isinstance(payload, list)
-        assert len(payload) == 2
-
-    def test_full_payload_item_shape(self, html):
-        result = _run_schema(
-            SCHEMAS_DIR / "18_json_basic.kdl", "JsonBasic", html
-        )
-        item = result["full_payload"][0]
-        assert item["text"] == "Quote one"
-        assert item["score"] == 7
-        assert item["rating"] == 4.5
-        assert item["active"] is True
-
-    def test_full_payload_nested_ref(self, html):
-        result = _run_schema(
-            SCHEMAS_DIR / "18_json_basic.kdl", "JsonBasic", html
-        )
-        author = result["full_payload"][0]["author"]
-        assert isinstance(author, dict)
-        assert author["name"] == "Author One"
-        assert author["slug"] == "author-one"
-
-    def test_full_payload_array_field(self, html):
-        result = _run_schema(
-            SCHEMAS_DIR / "18_json_basic.kdl", "JsonBasic", html
-        )
-        assert result["full_payload"][0]["tags"] == ["alpha", "beta"]
-
-    def test_full_payload_second_item(self, html):
-        result = _run_schema(
-            SCHEMAS_DIR / "18_json_basic.kdl", "JsonBasic", html
-        )
-        item = result["full_payload"][1]
-        assert item["text"] == "Quote two"
-        assert item["score"] == 12
-        assert item["active"] is False
-
-    def test_path_author_name(self, html):
-        result = _run_schema(
-            SCHEMAS_DIR / "18_json_basic.kdl", "JsonBasic", html
-        )
-        assert result["first_author_name"] == "Author One"
-        assert isinstance(result["first_author_name"], str)
-
-    def test_path_score(self, html):
-        result = _run_schema(
-            SCHEMAS_DIR / "18_json_basic.kdl", "JsonBasic", html
-        )
-        assert result["first_score"] == 7
-
-    def test_path_tags(self, html):
-        result = _run_schema(
-            SCHEMAS_DIR / "18_json_basic.kdl", "JsonBasic", html
-        )
-        assert result["first_tags"] == ["alpha", "beta"]
-
-    def test_path_second_text(self, html):
-        result = _run_schema(
-            SCHEMAS_DIR / "18_json_basic.kdl", "JsonBasic", html
-        )
-        assert result["second_text"] == "Quote two"
+        assert result == {
+            "first_author_name": "Author One",
+            "first_score": 7,
+            "first_tags": ["alpha", "beta"],
+            "second_text": "Quote two",
+            "full_payload": [
+                {
+                    "text": "Quote one",
+                    "author": {"name": "Author One", "slug": "author-one"},
+                    "tags": ["alpha", "beta"],
+                    "score": 7,
+                    "rating": 4.5,
+                    "active": True,
+                    "note": "note text",
+                },
+                {
+                    "text": "Quote two",
+                    "author": {"name": "Author Two", "slug": "author-two"},
+                    "tags": ["core"],
+                    "score": 12,
+                    "rating": 3.0,
+                    "active": False,
+                    "note": None,
+                },
+            ],
+        }
 
 
 class TestJsonMixed:
-    def test_html_title_parsed(self, html):
+    def test_json_mixed_extraction(self, html):
         result = _run_schema(
             SCHEMAS_DIR / "19_json_mixed.kdl", "JsonMixed", html
         )
-        assert result["html_title"] == "DSL Coverage Fixture"
-
-    def test_json_payload_parsed(self, html):
-        result = _run_schema(
-            SCHEMAS_DIR / "19_json_mixed.kdl", "JsonMixed", html
-        )
-        assert isinstance(result["json_payload"], list)
-        assert len(result["json_payload"]) == 2
-
-    def test_nested_item_parsed(self, html):
-        result = _run_schema(
-            SCHEMAS_DIR / "19_json_mixed.kdl", "JsonMixed", html
-        )
-        assert isinstance(result["nested_item"], dict)
-        assert result["nested_item"]["title"] == "Single Item Title"
+        assert result == {
+            "html_title": "DSL Coverage Fixture",
+            "nested_item": {"title": "Single Item Title"},
+            "json_payload": [
+                {
+                    "text": "Quote one",
+                    "author": {"name": "Author One", "slug": "author-one"},
+                    "tags": ["alpha", "beta"],
+                    "score": 7,
+                },
+                {
+                    "text": "Quote two",
+                    "author": {"name": "Author Two", "slug": "author-two"},
+                    "tags": ["core"],
+                    "score": 12,
+                },
+            ],
+        }
 
 
 class TestJsonAliasedRemapping:
