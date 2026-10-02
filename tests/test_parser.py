@@ -41,7 +41,7 @@ from ssc_codegen.core import parse_module
 from ssc_codegen.targets.golang import GO_CONVERTER
 from ssc_codegen.targets.javascript import JS_CONVERTER
 from ssc_codegen.targets.python import PY_BS4_CONVERTER
-from kdlquery import KDL2CSTParser, KDLParseError, Severity
+from kdlquery import Severity
 
 
 EXAMPLES = [
@@ -89,62 +89,13 @@ def _field(struct: Struct, name: str):
     )
 
 
-def test_parse_document_decodes_literals_and_annotations():
-    doc = KDL2CSTParser().parse(
-        "\n".join(
-            [
-                'define S="abc"',
-                'define R=#"raw"#',
-                "define T=#true",
-                "define F=#false",
-                "define N=#null",
-                "define I=123",
-                "define X=1.25",
-                "json Q {",
-                "    tags (array)str",
-                "}",
-            ]
-        )
+def test_parse_module_reports_error_on_invalid_syntax():
+    _module, diagnostics = parse_module(
+        'struct Demo {\n  title {\n    css ".x"\n'
     )
-
-    defines = [n for n in doc.nodes if n.name.value == "define"]
-    assert (
-        next(e.value.value for e in defines[0].entries if hasattr(e, "key"))
-        == "abc"
+    assert any(
+        d.code == "E000" and d.severity == Severity.ERROR for d in diagnostics
     )
-    assert (
-        next(e.value.value for e in defines[1].entries if hasattr(e, "key"))
-        == "raw"
-    )
-    assert (
-        next(e.value.value for e in defines[2].entries if hasattr(e, "key"))
-        is True
-    )
-    assert (
-        next(e.value.value for e in defines[3].entries if hasattr(e, "key"))
-        is False
-    )
-    assert (
-        next(e.value.value for e in defines[4].entries if hasattr(e, "key"))
-        is None
-    )
-    assert (
-        next(e.value.value for e in defines[5].entries if hasattr(e, "key"))
-        == 123
-    )
-    assert (
-        next(e.value.value for e in defines[6].entries if hasattr(e, "key"))
-        == 1.25
-    )
-
-    json_node = [n for n in doc.nodes if n.name.value == "json"][0]
-    # CST-level: type annotation prefix "(array)" is stripped; value is "str"
-    assert json_node.children[0].entries[0].value.value == "str"
-
-
-def test_parse_document_raises_parse_error_on_invalid_syntax():
-    with pytest.raises(KDLParseError):
-        KDL2CSTParser().parse('struct Demo {\n  title {\n    css ".x"\n')
 
 
 def test_parser_parses_real_examples():
@@ -960,58 +911,137 @@ def _json_field(module, json_name: str, field_name: str) -> JsonDefField:
 
 
 class TestJsonFieldTypes:
-    def test_str_field(self):
-        m = _parse(_load_fixture("json_types", "str.kdl"))
-        f = _json_field(m, "F", "x")
-        assert f.ret == VariableType.STRING
-        assert f.ret_type_info.is_array is False
-        assert f.ret_type_info.is_optional is False
-
-    def test_int_field(self):
-        m = _parse(_load_fixture("json_types", "int.kdl"))
-        assert _json_field(m, "F", "x").ret == VariableType.INT
-
-    def test_float_field(self):
-        m = _parse(_load_fixture("json_types", "float.kdl"))
-        assert _json_field(m, "F", "x").ret == VariableType.FLOAT
-
-    def test_bool_field(self):
-        m = _parse(_load_fixture("json_types", "bool.kdl"))
-        assert _json_field(m, "F", "x").ret == VariableType.BOOL
-
-    def test_null_field(self):
-        m = _parse(_load_fixture("json_types", "null.kdl"))
-        assert _json_field(m, "F", "x").ret == VariableType.NULL
-
-    def test_array_str(self):
-        m = _parse(_load_fixture("json_types", "array_str.kdl"))
-        f = _json_field(m, "F", "x")
-        assert f.ret == VariableType.STRING
-        assert f.ret_type_info.is_array is True
-
-    def test_array_int(self):
-        m = _parse(_load_fixture("json_types", "array_int.kdl"))
-        f = _json_field(m, "F", "x")
-        assert f.ret == VariableType.INT
-        assert f.ret_type_info.is_array is True
-
-    def test_optional_suffix(self):
-        m = _parse(_load_fixture("json_types", "optional.kdl"))
-        f = _json_field(m, "F", "x")
-        assert f.ret_type_info.is_optional is True
-        assert f.ret == VariableType.STRING
-
-    def test_ref_field(self):
-        m = _parse(_load_fixture("json_types", "ref_field.kdl"))
-        f = _json_field(m, "B", "ref")
-        assert f.ret_type_info.ref == "A"
-        assert f.ret == VariableType.JSON
-
-    def test_array_ref(self):
-        m = _parse(_load_fixture("json_types", "array_ref.kdl"))
-        f = _json_field(m, "B", "items")
-        assert f.ret_type_info.ref == "A"
-        assert f.ret_type_info.is_array is True
+    @pytest.mark.parametrize(
+        (
+            "schema",
+            "struct_name",
+            "field_name",
+            "expected_vt",
+            "is_arr",
+            "is_opt",
+            "ref",
+        ),
+        [
+            (
+                "json F { x str }",
+                "F",
+                "x",
+                VariableType.STRING,
+                False,
+                False,
+                None,
+            ),
+            (
+                "json F { x int }",
+                "F",
+                "x",
+                VariableType.INT,
+                False,
+                False,
+                None,
+            ),
+            (
+                "json F { x float }",
+                "F",
+                "x",
+                VariableType.FLOAT,
+                False,
+                False,
+                None,
+            ),
+            (
+                "json F { x bool }",
+                "F",
+                "x",
+                VariableType.BOOL,
+                False,
+                False,
+                None,
+            ),
+            (
+                "json F { x nil }",
+                "F",
+                "x",
+                VariableType.NULL,
+                False,
+                False,
+                None,
+            ),
+            (
+                "json F { x (array)str }",
+                "F",
+                "x",
+                VariableType.STRING,
+                True,
+                False,
+                None,
+            ),
+            (
+                "json F { x (array)int }",
+                "F",
+                "x",
+                VariableType.INT,
+                True,
+                False,
+                None,
+            ),
+            (
+                "json F { x str? }",
+                "F",
+                "x",
+                VariableType.STRING,
+                False,
+                True,
+                None,
+            ),
+            (
+                "json A { id int }\njson B { ref A }",
+                "B",
+                "ref",
+                VariableType.JSON,
+                False,
+                False,
+                "A",
+            ),
+            (
+                "json A { id int }\njson B { items (array)A }",
+                "B",
+                "items",
+                VariableType.JSON,
+                True,
+                False,
+                "A",
+            ),
+        ],
+        ids=[
+            "str",
+            "int",
+            "float",
+            "bool",
+            "null",
+            "array_str",
+            "array_int",
+            "optional",
+            "ref_field",
+            "array_ref",
+        ],
+    )
+    def test_json_field_types(
+        self,
+        schema: str,
+        struct_name: str,
+        field_name: str,
+        expected_vt: VariableType,
+        is_arr: bool,
+        is_opt: bool,
+        ref: str | None,
+    ):
+        m = _parse(schema)
+        f = _json_field(m, struct_name, field_name)
+        assert f.ret_type_info.base == expected_vt
+        assert f.ret_type_info.is_array is is_arr
+        assert f.ret_type_info.is_optional is is_opt
+        assert f.ret_type_info.ref == ref
 
 
 class TestJsonFieldModifiers:

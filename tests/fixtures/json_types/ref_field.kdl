@@ -1,7 +1,0 @@
-json A {
-    id int
-}
-
-json B {
-    ref A
-}
