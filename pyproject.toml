@@ -64,6 +64,7 @@ dev = [
     "mypy>=1.14.1",
     "parsel>=1.9.1",
     "pytest>=8.3.4",
+    "pytest-xdist>=3.6.0",
     "respx>=0.23.1",
     "responses>=0.25",
     "ruff>=0.9.3",
@@ -114,3 +115,10 @@ omit = [
     "*/scripts/*",
     "*/tests/*"
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "toolchain: Tests requiring external toolchains (Rust cargo, Go compiler, Node.js)",
+]
+

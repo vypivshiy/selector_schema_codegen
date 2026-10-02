@@ -21,12 +21,81 @@ from ssc_codegen.naming import to_pascal_case
 ROOT = Path(__file__).resolve().parent.parent.parent
 SCHEMAS_DIR = ROOT / "tests" / "integration" / "schemas"
 HTML_FIXTURE = ROOT / "tests" / "integration" / "fixtures" / "dsl_coverage.html"
-JS_RUNNER = Path(__file__).resolve().parent / "js_runner.cjs"
+JS_WORKER = Path(__file__).resolve().parent / "js_worker.cjs"
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("node") is None,
-    reason="Node.js not found in PATH",
-)
+pytestmark = [
+    pytest.mark.skipif(
+        shutil.which("node") is None,
+        reason="Node.js not found in PATH",
+    ),
+    pytest.mark.toolchain,
+]
+
+
+class _JsWorkerSession:
+    def __init__(self) -> None:
+        self._proc: subprocess.Popen | None = None
+        self._req_id = 0
+
+    def _ensure_proc(self) -> None:
+        if self._proc is None or self._proc.poll() is not None:
+            self._proc = subprocess.Popen(
+                ["node", str(JS_WORKER)],
+                cwd=ROOT,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+            )
+
+    def execute(self, code: str, class_name: str, html: str) -> dict | list:
+        self._ensure_proc()
+        self._req_id += 1
+        payload = json.dumps(
+            {
+                "id": self._req_id,
+                "code": code,
+                "className": class_name,
+                "html": html,
+            }
+        )
+        assert self._proc and self._proc.stdin and self._proc.stdout
+        try:
+            self._proc.stdin.write(payload + "\n")
+            self._proc.stdin.flush()
+            line = self._proc.stdout.readline()
+        except (BrokenPipeError, OSError):
+            self._proc = None
+            raise RuntimeError("JS worker process crashed or disconnected")
+
+        if not line:
+            stderr = self._proc.stderr.read() if self._proc.stderr else ""
+            self._proc = None
+            raise RuntimeError(f"JS worker exited unexpectedly: {stderr}")
+
+        res = json.loads(line)
+        if not res.get("ok"):
+            raise RuntimeError(res.get("error", "Unknown JS execution error"))
+        return res["result"]
+
+    def close(self) -> None:
+        if self._proc and self._proc.poll() is None:
+            try:
+                self._proc.terminate()
+                self._proc.wait(timeout=2)
+            except Exception:
+                pass
+            self._proc = None
+
+
+_WORKER = _JsWorkerSession()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _cleanup_js_worker():
+    yield
+    _WORKER.close()
 
 
 def _parse_kdl(schema_path: Path):
@@ -47,35 +116,12 @@ def _run_js_schema(
     module_ast = _parse_kdl(schema_path)
     class_name = to_pascal_case(struct_name)
     code = JS_CONVERTER.convert(module_ast)
-
-    if input_text is not None:
-        import tempfile
-
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".txt", delete=False, encoding="utf-8"
-        ) as f:
-            f.write(input_text)
-            input_file = Path(f.name)
-    else:
-        input_file = HTML_FIXTURE
-
-    try:
-        proc = subprocess.run(
-            ["node", str(JS_RUNNER), str(input_file), class_name],
-            input=code,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-    finally:
-        if input_text is not None:
-            input_file.unlink(missing_ok=True)
-
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"JS runtime error for {schema_path.name}:{struct_name}:\n{proc.stderr}"
-        )
-    return json.loads(proc.stdout)
+    html = (
+        input_text
+        if input_text is not None
+        else HTML_FIXTURE.read_text(encoding="utf-8")
+    )
+    return _WORKER.execute(code, class_name, html)
 
 
 # ── Smoke: each schema × js-pure generates valid JS that runs ────────────────
@@ -209,35 +255,11 @@ def _run_js_src(
     assert not [d for d in diags if d.severity == Severity.ERROR]
     class_name = to_pascal_case(struct_name)
     code = JS_CONVERTER.convert(module_ast)
-
     if input_text is not None:
-        import tempfile
-
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".txt", delete=False, encoding="utf-8"
-        ) as f:
-            f.write(input_text)
-            target_input = Path(f.name)
+        html = input_text
     else:
-        target_input = input_file
-
-    try:
-        proc = subprocess.run(
-            ["node", str(JS_RUNNER), str(target_input), class_name],
-            input=code,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-    finally:
-        if input_text is not None:
-            target_input.unlink(missing_ok=True)
-
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"JS runtime error for {struct_name}:\n{proc.stderr}"
-        )
-    return json.loads(proc.stdout)
+        html = input_file.read_text(encoding="utf-8")
+    return _WORKER.execute(code, class_name, html)
 
 
 class TestJsJsonAliasedRemapping:

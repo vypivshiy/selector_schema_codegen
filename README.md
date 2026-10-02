@@ -137,17 +137,33 @@ Project works through `agents + skills`. Use skills under [.agents/skills/](.age
 ```bash
 uv sync                  # install dependencies
 uv build --wheel         # build wheel
-uv run pytest            # run tests
 uv run ruff check ssc_codegen/
+uv run mypy ssc_codegen/
+```
+
+### Running tests
+
+```bash
+# Run full test suite
+uv run pytest
+
+# Run full test suite in parallel (faster, recommended)
+uv run pytest -n auto
+
+# Fast test run: skip external toolchains (Rust cargo, Go, Node.js)
+uv run pytest -m "not toolchain"
+
+# Run only toolchain tests (Go, Rust, JavaScript integration)
+uv run pytest -m toolchain
 ```
 
 ### Test dependencies
 
-Python tests require only `uv sync`. JS integration tests additionally need:
+Python and parser tests require only `uv sync`.
 
-```bash
-npm install      # installs jsdom (dev dependency in package.json)
-```
+Integration smoke tests for external compilers are skipped automatically if their toolchains are missing:
 
-Node.js must be installed and available as `node` in PATH. JS tests are automatically skipped if Node.js is not found.
+- **JavaScript**: Requires Node.js in PATH and `npm install` (`jsdom` in `package.json`).
+- **Go**: Requires `go` in PATH.
+- **Rust**: Requires `cargo` in PATH.
 ```

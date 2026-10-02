@@ -73,6 +73,10 @@ _Avoid_: integration test
 Successful `ssc-gen generate` for a user-selected target and backend; it checks code generation but does not prove runtime correctness against a source.
 _Avoid_: source validation
 
+**Toolchain validation**:
+External compiler or runtime execution (`cargo`, `go build`, `node + jsdom`) verifying that emitted target code compiles, type-checks, and executes correctly within its native ecosystem.
+_Avoid_: code generation validation, linting
+
 **Authenticated source**:
 A source requiring cookies, credentials, tokens, or a session established by prior actions.
 _Avoid_: public source

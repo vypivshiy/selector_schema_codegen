@@ -27,10 +27,13 @@ from ssc_codegen.targets.golang import GO_CONVERTER
 ROOT = Path(__file__).resolve().parent.parent.parent
 SCHEMAS_DIR = ROOT / "tests" / "integration" / "schemas"
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("go") is None,
-    reason="Go toolchain not found in PATH",
-)
+pytestmark = [
+    pytest.mark.skipif(
+        shutil.which("go") is None,
+        reason="Go toolchain not found in PATH",
+    ),
+    pytest.mark.toolchain,
+]
 
 # HTML-only schemas. REST (08-22) skipped — needs HTTP mock infra.
 _SMOKES = [
@@ -151,46 +154,110 @@ def _generate_and_write(go_module: Path, schema_file: str) -> Path:
     return out
 
 
-@pytest.mark.parametrize("schema_file", _SMOKES)
-def test_go_smoke_compile(schema_file, go_module):
-    """Schema generates Go that passes gofmt + go vet + go build."""
-    out = _generate_and_write(go_module, schema_file)
+def _attribute_tool_output(
+    output: str, pkg_to_schema: dict[str, str]
+) -> dict[str, list[str]]:
+    attributed: dict[str, list[str]] = {s: [] for s in pkg_to_schema.values()}
+    current_schema: str | None = None
+    for line in output.splitlines():
+        found = False
+        for pkg, s in pkg_to_schema.items():
+            if pkg in line:
+                current_schema = s
+                attributed[s].append(line)
+                found = True
+                break
+        if not found and current_schema:
+            attributed[current_schema].append(line)
+    return attributed
 
-    # gofmt -l: must list no files (empty stdout).
+
+@pytest.fixture(scope="module")
+def _go_batch_results(_go_module_template, tmp_path_factory):
+    batch_dir = tmp_path_factory.mktemp("gobatch")
+    shutil.copy(_go_module_template / "go.mod", batch_dir / "go.mod")
+    go_sum = _go_module_template / "go.sum"
+    if go_sum.exists():
+        shutil.copy(go_sum, batch_dir / "go.sum")
+
+    pkg_to_schema: dict[str, str] = {}
+    for schema_file in _SMOKES:
+        pkg_name = f"pkg_{Path(schema_file).stem}"
+        pkg_to_schema[pkg_name] = schema_file
+        pkg_dir = batch_dir / pkg_name
+        pkg_dir.mkdir(parents=True, exist_ok=True)
+        ast = _parse_kdl(SCHEMAS_DIR / schema_file)
+        code = GO_CONVERTER.convert(ast, package=pkg_name)
+        (pkg_dir / f"{Path(schema_file).stem}.go").write_bytes(
+            code.encode("utf-8")
+        )
+        (pkg_dir / "sscgen_runtime.go").write_bytes(
+            GO_CONVERTER.emit_runtime(pkg_name).encode("utf-8")
+        )
+
+    # 1. gofmt -l .
     fmt = subprocess.run(
-        ["gofmt", "-l", str(out)],
+        ["gofmt", "-l", "."],
+        cwd=batch_dir,
         capture_output=True,
         text=True,
     )
-    assert fmt.returncode == 0, f"gofmt failed: {fmt.stderr}"
-    assert not fmt.stdout.strip(), (
-        f"gofmt would reformat {out.name}:\n{fmt.stdout}"
-    )
+    unformatted = [
+        line.strip() for line in fmt.stdout.splitlines() if line.strip()
+    ]
+    fmt_errors = _attribute_tool_output("\n".join(unformatted), pkg_to_schema)
 
-    # go vet ./...
+    # 2. go vet ./...
     vet = subprocess.run(
         ["go", "vet", "./..."],
-        cwd=go_module,
+        cwd=batch_dir,
         capture_output=True,
         text=True,
         timeout=120,
     )
-    assert vet.returncode == 0, (
-        f"go vet failed for {schema_file}:\n"
-        f"STDOUT:\n{vet.stdout}\nSTDERR:\n{vet.stderr}"
-    )
+    vet_errors = _attribute_tool_output(vet.stderr, pkg_to_schema)
 
-    # go build ./...
+    # 3. go build ./...
     build = subprocess.run(
         ["go", "build", "./..."],
-        cwd=go_module,
+        cwd=batch_dir,
         capture_output=True,
         text=True,
         timeout=120,
     )
-    assert build.returncode == 0, (
-        f"go build failed for {schema_file}:\n"
-        f"STDOUT:\n{build.stdout}\nSTDERR:\n{build.stderr}"
+    build_errors = _attribute_tool_output(build.stderr, pkg_to_schema)
+
+    results = {}
+    for pkg_name, schema_file in pkg_to_schema.items():
+        results[schema_file] = {
+            "fmt_clean": len(fmt_errors[schema_file]) == 0,
+            "fmt_output": "\n".join(fmt_errors[schema_file]),
+            "vet_ok": vet.returncode == 0 or len(vet_errors[schema_file]) == 0,
+            "vet_error": "\n".join(vet_errors[schema_file]) or vet.stderr,
+            "build_ok": build.returncode == 0
+            or len(build_errors[schema_file]) == 0,
+            "build_error": "\n".join(build_errors[schema_file]) or build.stderr,
+        }
+        if vet.returncode != 0 and not any(vet_errors.values()):
+            results[schema_file]["vet_ok"] = False
+        if build.returncode != 0 and not any(build_errors.values()):
+            results[schema_file]["build_ok"] = False
+
+    return results
+
+
+@pytest.mark.parametrize("schema_file", _SMOKES)
+def test_go_smoke_compile(schema_file, _go_batch_results):
+    """Schema generates Go that passes gofmt + go vet + go build."""
+    res = _go_batch_results[schema_file]
+    assert res["fmt_clean"], (
+        f"gofmt would reformat files in {schema_file}:\n{res['fmt_output']}"
+    )
+    assert res["vet_ok"], (
+        f"go vet failed for {schema_file}:\n{res['vet_error']}"
+    )
+    assert res["build_ok"], (
+        f"go build failed for {schema_file}:\n{res['build_error']}"
     )
 
 
