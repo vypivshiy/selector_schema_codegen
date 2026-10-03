@@ -156,7 +156,7 @@ class _Generator:
                         f"{indent}{field_name}{from_part}{omitempty_part} {{"
                     )
                     child_lines = self._render_object_fields(
-                        samples,
+                        [s for s in samples if isinstance(s, dict)],
                         indent_level=indent_level + 1,
                         scope_name=field_name,
                         ancestors=ancestors + [field_name],
@@ -165,18 +165,20 @@ class _Generator:
                     lines.append(f"{indent}}}")
 
             # 2. Arrays
-            elif len(samples) == 1 and isinstance(samples[0], list):
-                sample_list = samples[0]
-                if not sample_list:
+            elif all(isinstance(s, list) for s in samples):
+                all_items = [
+                    item for sample_list in samples for item in sample_list
+                ]
+                if not all_items:
                     lines.append(
                         f"{indent}{field_name} (array)null @skip{from_part}{omitempty_part} // empty array"
                     )
                 else:
-                    types = [_type_name(item) for item in sample_list]
+                    types = [_type_name(item) for item in all_items]
                     unique = list(dict.fromkeys(types))
                     if len(unique) == 1 and unique[0] == "object":
                         if all(
-                            isinstance(x, dict) and not x for x in sample_list
+                            isinstance(x, dict) and not x for x in all_items
                         ):
                             lines.append(
                                 f"{indent}{field_name} (array)null @skip{from_part}{omitempty_part} // empty object"
@@ -189,7 +191,7 @@ class _Generator:
                                 f"{indent}{field_name} (array){item_model_name}{from_part}{omitempty_part} {{"
                             )
                             child_lines = self._render_object_fields(
-                                sample_list,
+                                [x for x in all_items if isinstance(x, dict)],
                                 indent_level=indent_level + 1,
                                 scope_name=item_model_name,
                                 ancestors=ancestors + [field_name],
@@ -213,20 +215,21 @@ class _Generator:
             # 3. Primitive scalars, nulls, and heterogeneous samples
             else:
                 types = [_type_name(item) for item in samples]
-                if len(set(types)) == 1 and types[0] not in {
+                unique = list(dict.fromkeys(types))
+                if len(unique) == 1 and unique[0] not in {
                     "object",
                     "array",
                 }:
-                    if types[0] == "nil":
+                    if unique[0] == "nil":
                         lines.append(
                             f"{indent}{field_name} nil{from_part}{omitempty_part} // unknown real type"
                         )
                     else:
                         lines.append(
-                            f"{indent}{field_name} {types[0]}{from_part}{omitempty_part}"
+                            f"{indent}{field_name} {unique[0]}{from_part}{omitempty_part}"
                         )
                 else:
-                    types_comment = ", ".join(types)
+                    types_comment = ", ".join(unique)
                     lines.append(
                         f"{indent}{field_name} @skip{from_part}{omitempty_part} // {types_comment}"
                     )
