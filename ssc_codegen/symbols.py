@@ -76,6 +76,24 @@ class SymbolFinding:
     previous: SymbolRecord | None = None
 
 
+HTTP_REQUEST_SIGNATURES: tuple[str, ...] = (
+    "curl ",
+    "http://",
+    "https://",
+    "GET ",
+    "POST ",
+    "-H ",
+    "-d ",
+    "-X ",
+    "--",
+)
+
+REQUEST_LINE_CONTINUATION_HINT: str = (
+    "KDL terminates line continuations ('\\') at single-line '//' comments; "
+    "move comments outside multi-line '@request' continuations or escape them"
+)
+
+
 def normalize_targets(targets: Iterable[str] | None = None) -> tuple[str, ...]:
     result: list[str] = []
     for target in TARGETS if targets is None else targets:
@@ -118,12 +136,20 @@ def target_symbol_plan(
         if record.target not in requested:
             continue
         if not is_valid_symbol(record.target, record.symbol):
+            hint = (
+                REQUEST_LINE_CONTINUATION_HINT
+                if (
+                    record.kind is SymbolKind.FIELD
+                    and record.raw_name.startswith(HTTP_REQUEST_SIGNATURES)
+                )
+                else f"rename '{record.raw_name}' to a portable identifier"
+            )
             findings.append(
                 SymbolFinding(
                     record,
                     "E403",
                     f"{record.kind.value} '{record.raw_name}' produces invalid {record.target} identifier '{record.symbol}'",
-                    f"rename '{record.raw_name}' to a portable identifier",
+                    hint,
                 )
             )
             continue

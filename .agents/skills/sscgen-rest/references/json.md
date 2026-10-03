@@ -95,12 +95,80 @@ json ApiResponse {
 
 Типы ключей (`@key`): `str` (по умолчанию), `int`, `float`, `bool`.
 
+#### Инлайн-блоки схем в директиве `@value`
+
+Директива `@value` как в словарях верхнего уровня `(dict)json`, так и в инлайн-полях `(dict)` поддерживает дочерний блок полей `{ ... }`. Это позволяет описывать сложные вложенные структуры ответов REST API:
+
+```kdl
+json AnimeResponse {
+    translations (dict)Translation {
+        @key str
+        @value TranslationValue {
+            is_active bool
+            episodes (dict)EpisodeMap {
+                @key int
+                @value EpisodeValue {
+                    link str from="stream_url"
+                    bitrate int?
+                    secret_token @skip
+                }
+            }
+        }
+    }
+}
+
+(rest)struct AnimeAPI {
+    @request response=AnimeResponse """
+    GET /anime/{{id:int}} HTTP/1.1
+    Host: api.example.com
+    """
+    @error 404 Err
+}
+```
+
+Top-level словарь как схема ответа REST-запроса с инлайн-блоком:
+
+```kdl
+(dict)json AnimeTranslations {
+    @key str
+    @value {
+        title str from="wire_title"
+        active bool
+    }
+}
+
+(rest)struct AnimeAPI {
+    @request response=AnimeTranslations """
+    GET /anime/translations HTTP/1.1
+    Host: api.example.com
+    """
+    @error 404 Err
+}
+```
+
+**Синтаксические формы `@value` с блоком:**
+- Явное имя модели: `@value ModelName { ... }` или `(ModelName)@value { ... }`.
+- Массивы моделей: `@value (array)ItemModel { ... }` или `(array)@value ItemModel { ... }` (указание `ItemModel` обязательно).
+- Анонимный блок: `@value { ... }` автоматически синтезирует каноническое имя модели:
+  - В именованном инлайн-словаре `field (dict)DictName`: `{DictName}Value` (`TranslationValueJson`).
+  - В анонимном инлайн-словаре `field (dict)` под родителем `Parent`: `{Parent}{Field.to_pascal_case()}Value` (`AnimeResponseTranslationsValueJson`).
+  - В словаре верхнего уровня `(dict)json DictName`: `{DictSchema}Value` (`AnimeTranslationsValueJson`).
+
+**Рекурсивный хоистинг:** Вложенные словари и объекты компилятор поднимает post-order (снизу вверх, от листовых `EpisodeValue` к родительским `TranslationValue` и `AnimeResponse`), гарантируя топологический порядок и отсутствие циклических ссылок в сгенерированных типах (Python `TypedDict`, Go `struct`, Rust `struct`, JavaScript JSDoc `@typedef`).
+
+**Валидация линтера:**
+- Пустой блок `{}` внутри `@value` запрещён (`error[E001]`).
+- `@skip` на блоке `@value` запрещён (`error[E002]`).
+- Массив без имени модели элемента `(array)@value { ... }` запрещён (`error[E001]`).
+- Коллизия явного имени модели с существующей схемой вызывает `error[E001]`.
+
 ### Вложенные инлайн-схемы (Inline JSON Schemas)
 
 Компилятор автоматически выполняет хоистинг инлайн-блоков перед родительской схемой:
 - Анонимные блоки `material_data { ... }` → синтезируют имя `{Parent}{Field}` в PascalCase (`ApiResponseMaterialDataJson`).
 - Явно именованные блоки `franchise Franchise { ... }` → генерируют `FranchiseJson`.
 - Именованные массивы `nodes (array)Node { ... }` → генерируют `NodeJson`.
+- Блоки значений словарей `@value ModelName { ... }` / `@value { ... }` → синтезируют `{DictName}Value` / `{Parent}{Field}Value` / `{DictSchema}Value`.
 - Поддерживают модификаторы `from="..."`, `@omitempty`, `?` (nullable).
 
 ### Переиспользование полей через define

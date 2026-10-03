@@ -654,3 +654,376 @@ func TestHoistedInlineUnmarshal(t *testing.T) {
     assert test_run.returncode == 0, (
         f"go test failed:\n{test_run.stderr}\n{test_run.stdout}"
     )
+
+
+def test_go_top_level_dict_with_inline_value_schema(go_module):
+    """Verify Go codegen for top-level (dict)json with inline @value block."""
+    src = """
+(dict)json Translations {
+    @key str
+    @value TranslationValue {
+        title str from="display_title"
+        count int
+        notes @skip
+    }
+}
+
+json Catalog {
+    name str
+    translations Translations
+}
+
+struct CatalogParser {
+    catalog {
+        css "script#catalog"
+        text
+        jsonify Catalog
+    }
+}
+"""
+    module_ast, diagnostics = parse_module(src)
+    errors = [d for d in diagnostics if d.severity == Severity.ERROR]
+    assert not errors
+
+    code = GO_CONVERTER.convert(module_ast, package="sscgen_test")
+    assert "type TranslationValueJson struct" in code
+    assert "type TranslationsJson = map[string]TranslationValueJson" in code
+    assert re.search(r'Title\s+string\s+`json:"display_title"`', code)
+    assert re.search(r'Count\s+int64\s+`json:"count"`', code)
+    assert "Notes" not in code
+    assert re.search(
+        r'Translations\s+TranslationsJson\s+`json:"translations"`', code
+    )
+
+    out = go_module / "toplevel_dict_inline_value.go"
+    out.write_bytes(code.encode("utf-8"))
+
+    runtime = go_module / "sscgen_runtime.go"
+    runtime.write_bytes(
+        GO_CONVERTER.emit_runtime("sscgen_test").encode("utf-8")
+    )
+
+    fmt = subprocess.run(
+        ["gofmt", "-l", str(out)], capture_output=True, text=True
+    )
+    assert fmt.returncode == 0
+    assert not fmt.stdout.strip()
+
+    vet = subprocess.run(
+        ["go", "vet", "./..."], cwd=go_module, capture_output=True, text=True
+    )
+    assert vet.returncode == 0, f"go vet failed:\n{vet.stderr}"
+
+    build = subprocess.run(
+        ["go", "build", "./..."], cwd=go_module, capture_output=True, text=True
+    )
+    assert build.returncode == 0, f"go build failed:\n{build.stderr}"
+
+    test_go = go_module / "toplevel_dict_inline_value_test.go"
+    test_go.write_text(
+        """package sscgen_test
+
+import (
+	"encoding/json"
+	"testing"
+)
+
+func TestTopLevelDictWithInlineValueUnmarshal(t *testing.T) {
+	raw := []byte(`{"name":"summer-season","translations":{"rus":{"display_title":"Русский","count":12,"notes":"ignore"},"eng":{"display_title":"English","count":24}}}`)
+	var c CatalogJson
+	if err := json.Unmarshal(raw, &c); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if c.Name != "summer-season" {
+		t.Errorf("expected name summer-season, got %s", c.Name)
+	}
+	if len(c.Translations) != 2 {
+		t.Fatalf("expected 2 translations, got %d", len(c.Translations))
+	}
+	rus := c.Translations["rus"]
+	if rus.Title != "Русский" || rus.Count != 12 {
+		t.Errorf("unexpected rus translation: %+v", rus)
+	}
+	eng := c.Translations["eng"]
+	if eng.Title != "English" || eng.Count != 24 {
+		t.Errorf("unexpected eng translation: %+v", eng)
+	}
+}
+""",
+        encoding="utf-8",
+    )
+    test_run = subprocess.run(
+        ["go", "test", "-v", "./..."],
+        cwd=go_module,
+        capture_output=True,
+        text=True,
+    )
+    assert test_run.returncode == 0, (
+        f"go test failed:\n{test_run.stderr}\n{test_run.stdout}"
+    )
+
+
+def test_go_nested_dict_value_schema_multi_level(go_module):
+    """Verify Go codegen for multi-level nested dictionary value schemas (e.g. anime translations)."""
+    src = """
+json AnimeResponse {
+    translations (dict)Translation {
+        @key str
+        @value TranslationValue {
+            episodes (dict)EpisodeMap {
+                @key int
+                @value EpisodeValue {
+                    link str from="stream_url"
+                    screenshots @skip
+                }
+            }
+            is_active bool
+            season int
+            kind str from="type"
+        }
+    }
+}
+
+struct AnimeParser {
+    anime {
+        css "script#anime"
+        text
+        jsonify AnimeResponse
+    }
+}
+"""
+    module_ast, diagnostics = parse_module(src)
+    errors = [d for d in diagnostics if d.severity == Severity.ERROR]
+    assert not errors
+
+    code = GO_CONVERTER.convert(module_ast, package="sscgen_test")
+    # Verify hoisted struct definitions exist with expected fields and JSON tags
+    assert "type EpisodeValueJson struct" in code
+    assert re.search(r'Link\s+string\s+`json:"stream_url"`', code)
+    assert "Screenshots" not in code
+
+    assert "type TranslationValueJson struct" in code
+    assert re.search(
+        r'Episodes\s+map\[int64\]EpisodeValueJson\s+`json:"episodes"`', code
+    )
+    assert re.search(r'IsActive\s+bool\s+`json:"is_active"`', code)
+    assert re.search(r'Season\s+int64\s+`json:"season"`', code)
+    assert re.search(r'Kind\s+string\s+`json:"type"`', code)
+
+    assert "type AnimeResponseJson struct" in code
+    assert re.search(
+        r'Translations\s+map\[string\]TranslationValueJson\s+`json:"translations"`',
+        code,
+    )
+
+    out = go_module / "nested_dict_multi_level.go"
+    out.write_bytes(code.encode("utf-8"))
+
+    runtime = go_module / "sscgen_runtime.go"
+    runtime.write_bytes(
+        GO_CONVERTER.emit_runtime("sscgen_test").encode("utf-8")
+    )
+
+    fmt = subprocess.run(
+        ["gofmt", "-l", str(out)], capture_output=True, text=True
+    )
+    assert fmt.returncode == 0
+    assert not fmt.stdout.strip()
+
+    vet = subprocess.run(
+        ["go", "vet", "./..."], cwd=go_module, capture_output=True, text=True
+    )
+    assert vet.returncode == 0, f"go vet failed:\n{vet.stderr}"
+
+    build = subprocess.run(
+        ["go", "build", "./..."], cwd=go_module, capture_output=True, text=True
+    )
+    assert build.returncode == 0, f"go build failed:\n{build.stderr}"
+
+    test_go = go_module / "nested_dict_multi_level_test.go"
+    test_go.write_text(
+        """package sscgen_test
+
+import (
+	"encoding/json"
+	"testing"
+)
+
+func TestNestedDictMultiLevelUnmarshal(t *testing.T) {
+	raw := []byte(`{
+		"translations": {
+			"sub": {
+				"episodes": {
+					"1": {"stream_url": "https://cdn.example.com/ep1.mp4", "screenshots": ["s1.jpg"]},
+					"2": {"stream_url": "https://cdn.example.com/ep2.mp4"}
+				},
+				"is_active": true,
+				"season": 2,
+				"type": "tv"
+			}
+		}
+	}`)
+	var resp AnimeResponseJson
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if len(resp.Translations) != 1 {
+		t.Fatalf("expected 1 translation, got %d", len(resp.Translations))
+	}
+	sub, ok := resp.Translations["sub"]
+	if !ok {
+		t.Fatalf("missing key 'sub'")
+	}
+	if !sub.IsActive || sub.Season != 2 || sub.Kind != "tv" {
+		t.Errorf("unexpected sub translation metadata: %+v", sub)
+	}
+	if len(sub.Episodes) != 2 {
+		t.Fatalf("expected 2 episodes, got %d", len(sub.Episodes))
+	}
+	ep1, ok1 := sub.Episodes[1]
+	if !ok1 || ep1.Link != "https://cdn.example.com/ep1.mp4" {
+		t.Errorf("unexpected ep1: %+v", ep1)
+	}
+	ep2, ok2 := sub.Episodes[2]
+	if !ok2 || ep2.Link != "https://cdn.example.com/ep2.mp4" {
+		t.Errorf("unexpected ep2: %+v", ep2)
+	}
+}
+""",
+        encoding="utf-8",
+    )
+    test_run = subprocess.run(
+        ["go", "test", "-v", "./..."],
+        cwd=go_module,
+        capture_output=True,
+        text=True,
+    )
+    assert test_run.returncode == 0, (
+        f"go test failed:\n{test_run.stderr}\n{test_run.stdout}"
+    )
+
+
+def test_go_inline_dict_anonymous_value_and_array_value(go_module):
+    """Verify Go codegen for anonymous @value block and @value (array)ItemModel."""
+    src = """
+json Project {
+    groups (dict) {
+        @key str
+        @value (array)GroupItem {
+            id int
+            name str
+        }
+    }
+    settings (dict) {
+        @key str
+        @value {
+            enabled bool
+            priority int? @omitempty
+        }
+    }
+}
+
+struct ProjectParser {
+    project {
+        css "script#proj"
+        text
+        jsonify Project
+    }
+}
+"""
+    module_ast, diagnostics = parse_module(src)
+    errors = [d for d in diagnostics if d.severity == Severity.ERROR]
+    assert not errors
+
+    code = GO_CONVERTER.convert(module_ast, package="sscgen_test")
+    assert "type GroupItemJson struct" in code
+    assert re.search(r'Id\s+int64\s+`json:"id"`', code)
+    assert re.search(r'Name\s+string\s+`json:"name"`', code)
+
+    assert "type ProjectSettingsValueJson struct" in code
+    assert re.search(r'Enabled\s+bool\s+`json:"enabled"`', code)
+    assert re.search(r'Priority\s+\*int64\s+`json:"priority,omitempty"`', code)
+
+    assert re.search(
+        r'Groups\s+map\[string\]\[\]GroupItemJson\s+`json:"groups"`', code
+    )
+    assert re.search(
+        r'Settings\s+map\[string\]ProjectSettingsValueJson\s+`json:"settings"`',
+        code,
+    )
+
+    out = go_module / "inline_dict_anon_and_array.go"
+    out.write_bytes(code.encode("utf-8"))
+
+    runtime = go_module / "sscgen_runtime.go"
+    runtime.write_bytes(
+        GO_CONVERTER.emit_runtime("sscgen_test").encode("utf-8")
+    )
+
+    fmt = subprocess.run(
+        ["gofmt", "-l", str(out)], capture_output=True, text=True
+    )
+    assert fmt.returncode == 0
+    assert not fmt.stdout.strip()
+
+    vet = subprocess.run(
+        ["go", "vet", "./..."], cwd=go_module, capture_output=True, text=True
+    )
+    assert vet.returncode == 0, f"go vet failed:\n{vet.stderr}"
+
+    build = subprocess.run(
+        ["go", "build", "./..."], cwd=go_module, capture_output=True, text=True
+    )
+    assert build.returncode == 0, f"go build failed:\n{build.stderr}"
+
+    test_go = go_module / "inline_dict_anon_and_array_test.go"
+    test_go.write_text(
+        """package sscgen_test
+
+import (
+	"encoding/json"
+	"testing"
+)
+
+func TestInlineDictAnonAndArrayUnmarshal(t *testing.T) {
+	raw := []byte(`{
+		"groups": {
+			"dev": [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]
+		},
+		"settings": {
+			"general": {"enabled": true, "priority": 10},
+			"advanced": {"enabled": false}
+		}
+	}`)
+	var proj ProjectJson
+	if err := json.Unmarshal(raw, &proj); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	devGroup, ok := proj.Groups["dev"]
+	if !ok || len(devGroup) != 2 {
+		t.Fatalf("expected 2 dev group items, got %+v", devGroup)
+	}
+	if devGroup[0].Name != "Alice" || devGroup[1].Name != "Bob" {
+		t.Errorf("unexpected dev group items: %+v", devGroup)
+	}
+	genSettings, ok := proj.Settings["general"]
+	if !ok || !genSettings.Enabled || genSettings.Priority == nil || *genSettings.Priority != 10 {
+		t.Errorf("unexpected general settings: %+v", genSettings)
+	}
+	advSettings, ok := proj.Settings["advanced"]
+	if !ok || advSettings.Enabled || advSettings.Priority != nil {
+		t.Errorf("unexpected advanced settings: %+v", advSettings)
+	}
+}
+""",
+        encoding="utf-8",
+    )
+    test_run = subprocess.run(
+        ["go", "test", "-v", "./..."],
+        cwd=go_module,
+        capture_output=True,
+        text=True,
+    )
+    assert test_run.returncode == 0, (
+        f"go test failed:\n{test_run.stderr}\n{test_run.stdout}"
+    )

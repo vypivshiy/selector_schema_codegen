@@ -167,7 +167,12 @@ def handle_json(
     )
     if is_dict:
         key_info, val_info = _parse_dict_type_directives(
-            node.children, ctx, lint
+            node.children,
+            ctx,
+            lint,
+            parent_def=json_def,
+            field_name="",
+            explicit_dict_name=json_def.name,
         )
         json_def.key_type_info = key_info
         json_def.value_type_info = val_info

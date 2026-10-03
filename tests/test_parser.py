@@ -1540,3 +1540,704 @@ def test_conflicting_placeholder_names_in_same_request_trigger_e402():
     assert any(
         "placeholder" in d.message and "page_num" in d.message for d in e402
     )
+
+
+class TestJsonDictNestedValueAstHoisting:
+    """Tests for inline schema blocks in @value directives and recursive AST hoisting."""
+
+    def test_inline_dict_value_explicit_name(self) -> None:
+        src = """
+json AnimeResponse {
+    translations (dict)Translation {
+        @key str
+        @value TranslationValue {
+            link str
+            is_active bool
+        }
+    }
+}
+"""
+        module, diags = parse_module(src, skip_lint=True)
+        assert not any(d.severity == Severity.ERROR for d in diags)
+
+        json_defs = [node for node in module.body if isinstance(node, JsonDef)]
+        assert [j.name for j in json_defs] == [
+            "TranslationValue",
+            "AnimeResponse",
+        ]
+
+        trans_val = json_defs[0]
+        assert trans_val.name == "TranslationValue"
+        assert trans_val.is_dict is False
+        assert trans_val.is_array is False
+        val_fields = {
+            f.name: f for f in trans_val.body if isinstance(f, JsonDefField)
+        }
+        assert "link" in val_fields
+        assert val_fields["link"].ret_type_info.base == VariableType.STRING
+        assert "is_active" in val_fields
+        assert val_fields["is_active"].ret_type_info.base == VariableType.BOOL
+
+        anime_resp = json_defs[1]
+        fields = [f for f in anime_resp.body if isinstance(f, JsonDefField)]
+        field = fields[0]
+        assert isinstance(field, JsonDefField)
+        assert field.name == "translations"
+        assert field.is_dict is True
+        assert field.key_type_info is not None
+        assert field.key_type_info.base == VariableType.STRING
+        assert field.value_type_info is not None
+        assert field.value_type_info.base == VariableType.JSON
+        assert field.value_type_info.ref == "TranslationValue"
+        assert field.value_type_info.is_array is False
+        assert field.value_type_info.is_optional is False
+
+    def test_inline_dict_value_leading_annotation(self) -> None:
+        src = """
+json AnimeResponse {
+    translations (dict)Translation {
+        @key str
+        (TranslationValue)@value {
+            link str
+        }
+    }
+}
+"""
+        module, diags = parse_module(src, skip_lint=True)
+        assert not any(d.severity == Severity.ERROR for d in diags)
+
+        json_defs = [node for node in module.body if isinstance(node, JsonDef)]
+        assert [j.name for j in json_defs] == [
+            "TranslationValue",
+            "AnimeResponse",
+        ]
+
+        fields = [f for f in json_defs[1].body if isinstance(f, JsonDefField)]
+        field = fields[0]
+        assert isinstance(field, JsonDefField)
+        assert field.value_type_info is not None
+        assert field.value_type_info.ref == "TranslationValue"
+        assert field.value_type_info.base == VariableType.JSON
+        assert field.value_type_info.is_array is False
+
+    def test_inline_dict_value_array_block(self) -> None:
+        src1 = """
+json Catalog {
+    items (dict) {
+        @key str
+        @value (array)ItemModel {
+            id int
+            title str
+        }
+    }
+}
+"""
+        module1, diags1 = parse_module(src1, skip_lint=True)
+        assert not any(d.severity == Severity.ERROR for d in diags1)
+        jdefs1 = [n for n in module1.body if isinstance(n, JsonDef)]
+        assert [j.name for j in jdefs1] == ["ItemModel", "Catalog"]
+        item_model1 = jdefs1[0]
+        assert item_model1.is_array is False
+        assert {
+            f.name: f.ret_type_info.base
+            for f in item_model1.body
+            if isinstance(f, JsonDefField)
+        } == {
+            "id": VariableType.INT,
+            "title": VariableType.STRING,
+        }
+        val_fields1 = [f for f in jdefs1[1].body if isinstance(f, JsonDefField)]
+        val_info1 = val_fields1[0].value_type_info
+        assert val_info1 is not None
+        assert val_info1.base == VariableType.JSON
+        assert val_info1.ref == "ItemModel"
+        assert val_info1.is_array is True
+
+        src2 = """
+json Catalog {
+    items (dict) {
+        @key str
+        (array)@value ItemModel {
+            id int
+            title str
+        }
+    }
+}
+"""
+        module2, diags2 = parse_module(src2, skip_lint=True)
+        assert not any(d.severity == Severity.ERROR for d in diags2)
+        jdefs2 = [n for n in module2.body if isinstance(n, JsonDef)]
+        assert [j.name for j in jdefs2] == ["ItemModel", "Catalog"]
+        val_fields2 = [f for f in jdefs2[1].body if isinstance(f, JsonDefField)]
+        val_info2 = val_fields2[0].value_type_info
+        assert val_info2 is not None
+        assert val_info2.base == VariableType.JSON
+        assert val_info2.ref == "ItemModel"
+        assert val_info2.is_array is True
+
+    def test_inline_dict_value_optional_modifiers(self) -> None:
+        variants = [
+            ("@value TranslationValue? { link str }", "TranslationValue"),
+            ("(TranslationValue?)@value { link str }", "TranslationValue"),
+            ("@value? TranslationValue { link str }", "TranslationValue"),
+            ("@value? { link str }", "TranslationsValue"),
+        ]
+        for val_directive, expected_ref in variants:
+            src = f"""
+(dict)json Translations {{
+    @key str
+    {val_directive}
+}}
+"""
+            module, diags = parse_module(src, skip_lint=True)
+            assert not any(d.severity == Severity.ERROR for d in diags)
+            jdefs = [n for n in module.body if isinstance(n, JsonDef)]
+            assert [j.name for j in jdefs] == [expected_ref, "Translations"]
+            top_dict = jdefs[1]
+            assert top_dict.value_type_info is not None
+            assert top_dict.value_type_info.is_optional is True
+            assert top_dict.value_type_info.ref == expected_ref
+            assert top_dict.value_type_info.base == VariableType.JSON
+
+    def test_anonymous_model_synthesis_named_dict(self) -> None:
+        src = """
+json AnimeResponse {
+    translations (dict)Translation {
+        @key str
+        @value {
+            link str
+        }
+    }
+}
+"""
+        module, diags = parse_module(src, skip_lint=True)
+        assert not any(d.severity == Severity.ERROR for d in diags)
+        jdefs = [n for n in module.body if isinstance(n, JsonDef)]
+        assert [j.name for j in jdefs] == ["TranslationValue", "AnimeResponse"]
+        fields = [f for f in jdefs[1].body if isinstance(f, JsonDefField)]
+        val_info = fields[0].value_type_info
+        assert val_info is not None
+        assert val_info.ref == "TranslationValue"
+        assert val_info.base == VariableType.JSON
+
+    def test_anonymous_model_synthesis_anon_dict(self) -> None:
+        src = """
+json AnimeResponse {
+    translations (dict) {
+        @key str
+        @value {
+            link str
+        }
+    }
+}
+"""
+        module, diags = parse_module(src, skip_lint=True)
+        assert not any(d.severity == Severity.ERROR for d in diags)
+        jdefs = [n for n in module.body if isinstance(n, JsonDef)]
+        assert [j.name for j in jdefs] == [
+            "AnimeResponseTranslationsValue",
+            "AnimeResponse",
+        ]
+        fields = [f for f in jdefs[1].body if isinstance(f, JsonDefField)]
+        val_info = fields[0].value_type_info
+        assert val_info is not None
+        assert val_info.ref == "AnimeResponseTranslationsValue"
+        assert val_info.base == VariableType.JSON
+
+    def test_anonymous_model_synthesis_top_level_dict(self) -> None:
+        src = """
+(dict)json Translations {
+    @key str
+    @value {
+        link str
+    }
+}
+"""
+        module, diags = parse_module(src, skip_lint=True)
+        assert not any(d.severity == Severity.ERROR for d in diags)
+        jdefs = [n for n in module.body if isinstance(n, JsonDef)]
+        assert [j.name for j in jdefs] == ["TranslationsValue", "Translations"]
+        top_dict = jdefs[1]
+        assert top_dict.value_type_info is not None
+        assert top_dict.value_type_info.ref == "TranslationsValue"
+        assert top_dict.value_type_info.base == VariableType.JSON
+
+    def test_top_level_dict_json_explicit_value_block(self) -> None:
+        src = """
+(dict)json Translations {
+    @key str
+    @value CustomModel {
+        link str
+        code int
+    }
+}
+"""
+        module, diags = parse_module(src, skip_lint=True)
+        assert not any(d.severity == Severity.ERROR for d in diags)
+        jdefs = [n for n in module.body if isinstance(n, JsonDef)]
+        assert [j.name for j in jdefs] == ["CustomModel", "Translations"]
+        top_dict = jdefs[1]
+        assert top_dict.value_type_info is not None
+        assert top_dict.value_type_info.ref == "CustomModel"
+
+    def test_multi_level_recursive_hoisting_leaf_first(self) -> None:
+        src = """
+json AnimeResponse {
+    translations (dict)Translation {
+        @key str
+        @value TranslationValue {
+            episodes (dict)EpisodeMap {
+                @key int
+                @value EpisodeValue {
+                    link str
+                    screenshots @skip
+                }
+            }
+            is_active bool
+        }
+    }
+}
+"""
+        module, diags = parse_module(src, skip_lint=True)
+        assert not any(d.severity == Severity.ERROR for d in diags)
+        jdefs = [n for n in module.body if isinstance(n, JsonDef)]
+        assert [j.name for j in jdefs] == [
+            "EpisodeValue",
+            "TranslationValue",
+            "AnimeResponse",
+        ]
+
+        ep_val = jdefs[0]
+        ep_fields = {
+            f.name: f for f in ep_val.body if isinstance(f, JsonDefField)
+        }
+        assert ep_fields["link"].ret_type_info.base == VariableType.STRING
+        assert ep_fields["screenshots"].ret_type_info.skip is True
+
+        trans_val = jdefs[1]
+        trans_fields = {
+            f.name: f for f in trans_val.body if isinstance(f, JsonDefField)
+        }
+        assert trans_fields["episodes"].is_dict is True
+        assert trans_fields["episodes"].key_type_info.base == VariableType.INT
+        assert trans_fields["episodes"].value_type_info.ref == "EpisodeValue"
+        assert trans_fields["is_active"].ret_type_info.base == VariableType.BOOL
+
+        anime_resp = jdefs[2]
+        anime_fields = {
+            f.name: f for f in anime_resp.body if isinstance(f, JsonDefField)
+        }
+        assert anime_fields["translations"].is_dict is True
+        assert (
+            anime_fields["translations"].key_type_info.base
+            == VariableType.STRING
+        )
+        assert (
+            anime_fields["translations"].value_type_info.ref
+            == "TranslationValue"
+        )
+
+    def test_multi_level_anonymous_recursive_hoisting(self) -> None:
+        src = """
+json Root {
+    data (dict) {
+        @key str
+        @value {
+            episodes (dict) {
+                @key int
+                @value {
+                    leaf_str str
+                }
+            }
+        }
+    }
+}
+"""
+        module, diags = parse_module(src, skip_lint=True)
+        assert not any(d.severity == Severity.ERROR for d in diags)
+        jdefs = [n for n in module.body if isinstance(n, JsonDef)]
+        assert [j.name for j in jdefs] == [
+            "RootDataValueEpisodesValue",
+            "RootDataValue",
+            "Root",
+        ]
+
+    def test_value_block_field_modifiers_and_nested_objects(self) -> None:
+        src = """
+(dict)json Translations {
+    @key str
+    @value TranslationValue {
+        wire_url str from="url"
+        backup_url str? @omitempty
+        internal_id int @skip
+        nested_meta {
+            version int
+        }
+    }
+}
+"""
+        module, diags = parse_module(src, skip_lint=True)
+        assert not any(d.severity == Severity.ERROR for d in diags)
+        jdefs = [n for n in module.body if isinstance(n, JsonDef)]
+        assert [j.name for j in jdefs] == [
+            "TranslationValueNestedMeta",
+            "TranslationValue",
+            "Translations",
+        ]
+
+        trans_val = jdefs[1]
+        fields = {
+            f.name: f for f in trans_val.body if isinstance(f, JsonDefField)
+        }
+        assert fields["wire_url"].alias == "url"
+        assert fields["backup_url"].ret_type_info.is_optional is True
+        assert fields["backup_url"].ret_type_info.omitempty is True
+        assert fields["internal_id"].ret_type_info.skip is True
+        assert (
+            fields["nested_meta"].ret_type_info.ref
+            == "TranslationValueNestedMeta"
+        )
+
+    def test_parse_context_direct_hoisting(self) -> None:
+        from kdlquery import parse as kdl_parse
+        from ssc_codegen.core.contexts import ParseContext
+        from ssc_codegen.core.struct_parser import _parse_dict_type_directives
+
+        ctx = ParseContext()
+        parent = JsonDef(name="ParentModel")
+        doc = kdl_parse("""
+dict_field {
+    @key int
+    @value {
+        name str
+    }
+}
+""")
+        dict_node = doc.nodes[0]
+        key_info, val_info = _parse_dict_type_directives(
+            dict_node.children,
+            ctx,
+            parent_def=parent,
+            field_name="items",
+            explicit_dict_name="",
+        )
+        assert key_info.base == VariableType.INT
+        assert val_info.base == VariableType.JSON
+        assert val_info.ref == "ParentModelItemsValue"
+        assert "ParentModelItemsValue" in ctx.json_defs
+        hoisted = ctx.json_defs["ParentModelItemsValue"]
+        assert hoisted.name == "ParentModelItemsValue"
+        hoisted_fields = [
+            f for f in hoisted.body if isinstance(f, JsonDefField)
+        ]
+        assert len(hoisted_fields) == 1
+        assert hoisted_fields[0].name == "name"
+
+
+class TestJsonDictNestedValueLinterValidation:
+    """Tests for linter validation and diagnostic hints for inline @value blocks."""
+
+    def test_valid_nested_fields_no_errors(self) -> None:
+        src = """
+json AnimeResponse {
+    translations (dict)Translation {
+        @key str
+        @value TranslationValue {
+            link str
+            is_active bool
+        }
+    }
+}
+"""
+        _, diags = parse_module(src)
+        errors = [d for d in diags if d.severity == Severity.ERROR]
+        assert not errors, f"Unexpected errors: {[e.message for e in errors]}"
+
+    def test_empty_inline_block_e001(self) -> None:
+        # Inline dict with empty @value block
+        src = """
+json AnimeResponse {
+    translations (dict) {
+        @key str
+        @value {
+        }
+    }
+}
+"""
+        _, diags = parse_module(src)
+        errors = [d for d in diags if d.severity == Severity.ERROR]
+        assert any(
+            d.code == "E001"
+            and "empty inline json block in '@value'" in d.message
+            for d in errors
+        )
+        assert any(
+            "add fields to inline block or remove empty braces"
+            in (d.hint or "")
+            for d in errors
+        )
+
+        # Top-level (dict)json with empty @value block
+        src_top = """
+(dict)json Translations {
+    @key str
+    @value {}
+}
+"""
+        _, diags_top = parse_module(src_top)
+        errors_top = [d for d in diags_top if d.severity == Severity.ERROR]
+        assert any(
+            d.code == "E001"
+            and "empty inline json block in '@value'" in d.message
+            for d in errors_top
+        )
+
+    def test_skip_on_inline_block_e002(self) -> None:
+        src = """
+json AnimeResponse {
+    translations (dict) {
+        @key str
+        @value @skip {
+            link str
+        }
+    }
+}
+"""
+        _, diags = parse_module(src)
+        errors = [d for d in diags if d.severity == Severity.ERROR]
+        assert any(
+            d.code == "E002"
+            and "cannot use '@skip' on inline json block in '@value'"
+            in d.message
+            for d in errors
+        )
+        assert any(
+            "remove '@skip' from '@value' declaration" in (d.hint or "")
+            for d in errors
+        )
+
+        # Top-level (dict)json with @skip on @value block
+        src_top = """
+(dict)json Translations {
+    @key str
+    @value @skip {
+        link str
+    }
+}
+"""
+        _, diags_top = parse_module(src_top)
+        errors_top = [d for d in diags_top if d.severity == Severity.ERROR]
+        assert any(
+            d.code == "E002"
+            and "cannot use '@skip' on inline json block in '@value'"
+            in d.message
+            for d in errors_top
+        )
+
+    def test_anonymous_array_without_item_model_e001(self) -> None:
+        src = """
+json AnimeResponse {
+    translations (dict) {
+        @key str
+        (array)@value {
+            link str
+        }
+    }
+}
+"""
+        _, diags = parse_module(src)
+        errors = [d for d in diags if d.severity == Severity.ERROR]
+        assert any(
+            d.code == "E001"
+            and "inline array block in '@value' requires an item model name"
+            in d.message
+            for d in errors
+        )
+        assert any(
+            "example: (array)@value ItemModel { ... } or @value (array)ItemModel { ... }"
+            in (d.hint or "")
+            for d in errors
+        )
+
+        # Valid array with item model name passes
+        src_valid = """
+json AnimeResponse {
+    translations (dict) {
+        @key str
+        (array)@value ItemModel {
+            link str
+        }
+    }
+}
+"""
+        _, diags_valid = parse_module(src_valid)
+        errors_valid = [d for d in diags_valid if d.severity == Severity.ERROR]
+        assert not errors_valid
+
+    def test_duplicate_model_name_collision_e001(self) -> None:
+        # Collision with existing top-level json schema
+        src = """
+json TranslationValue {
+    id int
+}
+json AnimeResponse {
+    translations (dict) {
+        @key str
+        @value TranslationValue {
+            link str
+        }
+    }
+}
+"""
+        _, diags = parse_module(src)
+        errors = [d for d in diags if d.severity == Severity.ERROR]
+        assert any(
+            d.code == "E001"
+            and "duplicate json definition 'TranslationValue'" in d.message
+            for d in errors
+        )
+        assert any(
+            "rename inline schema 'TranslationValue' to avoid collision"
+            in (d.hint or "")
+            for d in errors
+        )
+
+        # Collision between two inline dict fields using same explicit model name
+        src_two = """
+json AnimeResponse {
+    t1 (dict) {
+        @key str
+        @value Model {
+            link str
+        }
+    }
+    t2 (dict) {
+        @key str
+        @value Model {
+            url str
+        }
+    }
+}
+"""
+        _, diags_two = parse_module(src_two)
+        errors_two = [d for d in diags_two if d.severity == Severity.ERROR]
+        assert any(
+            d.code == "E001"
+            and "duplicate json definition 'Model'" in d.message
+            for d in errors_two
+        )
+
+    def test_cross_ref_hoisted_value_no_false_e300(self) -> None:
+        # Field referencing hoisted schema in same module
+        src = """
+json AnimeResponse {
+    translations (dict)Translation {
+        @key str
+        @value TranslationValue {
+            link str
+        }
+    }
+    extra TranslationValue
+}
+"""
+        _, diags = parse_module(src)
+        errors = [d for d in diags if d.severity == Severity.ERROR]
+        assert not any(d.code == "E300" for d in errors), (
+            f"Unexpected E300: {[e.message for e in errors]}"
+        )
+
+        # Anonymous top-level (dict)json with inline block
+        src_top = """
+(dict)json Translations {
+    @key str
+    @value {
+        link str
+    }
+}
+"""
+        _, diags_top = parse_module(src_top)
+        errors_top = [d for d in diags_top if d.severity == Severity.ERROR]
+        assert not any(d.code == "E300" for d in errors_top)
+
+    def test_cross_ref_undefined_inside_value_block_e300(self) -> None:
+        src = """
+json AnimeResponse {
+    translations (dict) {
+        @key str
+        @value {
+            author NonExistentModel
+        }
+    }
+}
+"""
+        _, diags = parse_module(src)
+        errors = [d for d in diags if d.severity == Severity.ERROR]
+        assert any(
+            d.code == "E300"
+            and "references undefined json definition 'NonExistentModel'"
+            in d.message
+            for d in errors
+        )
+
+    def test_cross_ref_defined_inside_value_block_ok(self) -> None:
+        src = """
+json Author {
+    name str
+}
+json AnimeResponse {
+    translations (dict) {
+        @key str
+        @value {
+            author Author
+        }
+    }
+}
+"""
+        _, diags = parse_module(src)
+        errors = [d for d in diags if d.severity == Severity.ERROR]
+        assert not errors, f"Unexpected errors: {[e.message for e in errors]}"
+
+    def test_request_broken_line_continuation_hint(self) -> None:
+        from ssc_codegen.symbols import REQUEST_LINE_CONTINUATION_HINT
+
+        # In rest struct: field named like curl request
+        src = """
+(rest)struct MyApi {
+    "curl https://api.example.com"
+}
+"""
+        _, diags = parse_module(src)
+        assert any(d.hint == REQUEST_LINE_CONTINUATION_HINT for d in diags), (
+            f"diags: {[(d.code, d.message, d.hint) for d in diags]}"
+        )
+
+        # In regular struct: field named like http url
+        src_regular = """
+struct MyScraper {
+    "https://example.com"
+}
+"""
+        _, diags_reg = parse_module(src_regular)
+        assert any(
+            d.hint == REQUEST_LINE_CONTINUATION_HINT for d in diags_reg
+        ), f"diags_reg: {[(d.code, d.message, d.hint) for d in diags_reg]}"
+
+        # With POST signature
+        src_post = """
+struct MyScraper {
+    "POST /api/v1/items"
+}
+"""
+        _, diags_post = parse_module(src_post)
+        assert any(d.hint == REQUEST_LINE_CONTINUATION_HINT for d in diags_post)
+
+        # With -H header continuation signature
+        src_header = """
+(rest)struct MyApi {
+    "-H 'Authorization: Bearer token'"
+}
+"""
+        _, diags_header = parse_module(src_header)
+        assert any(
+            d.hint == REQUEST_LINE_CONTINUATION_HINT for d in diags_header
+        )

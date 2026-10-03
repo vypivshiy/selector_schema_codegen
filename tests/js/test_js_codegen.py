@@ -7,6 +7,7 @@ and validates the parse results. All tests are skipped if Node.js is not found.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -39,9 +40,31 @@ class _JsWorkerSession:
 
     def _ensure_proc(self) -> None:
         if self._proc is None or self._proc.poll() is not None:
+            env = os.environ.copy()
+            if "NODE_PATH" not in env:
+                candidates = [
+                    ROOT / "node_modules",
+                ]
+                try:
+                    proc = subprocess.run(
+                        ["git", "rev-parse", "--git-common-dir"],
+                        cwd=ROOT,
+                        capture_output=True,
+                        text=True,
+                    )
+                    if proc.returncode == 0 and proc.stdout.strip():
+                        common_git = Path(proc.stdout.strip())
+                        candidates.append(common_git.parent / "node_modules")
+                except Exception:
+                    pass
+                for cand in candidates:
+                    if cand.is_dir():
+                        env["NODE_PATH"] = str(cand.resolve())
+                        break
             self._proc = subprocess.Popen(
                 ["node", str(JS_WORKER)],
                 cwd=ROOT,
+                env=env,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -1064,6 +1087,191 @@ json AnimeResponse {
                 "available": True,
                 "episodes": ["ep1", "ep2"],
                 "translations": {"1": ["jap", "eng"]},
+            },
+        }
+
+    def test_top_level_dict_with_inline_value_block_codegen_and_execution(self):
+        kdl_src = """
+(dict)json Translations {
+    @key str
+    @value TranslationValue {
+        title str from="display_title"
+        count int
+        notes @skip
+    }
+}
+
+(raw)struct TranslationsParser {
+    translations {
+        jsonify Translations
+    }
+}
+"""
+        code = _convert_kdl(kdl_src)
+        assert "* @typedef {Object} TranslationValueJson" in code
+        assert "* @property {string} title" in code
+        assert "* @property {number} count" in code
+        assert "notes" not in code
+        assert (
+            "* @typedef {Record<string, TranslationValueJson>} TranslationsJson"
+            in code
+        )
+        assert (
+            'const _translationsJsonDescriptors = {"__dict__": true, "__value__": {"title": ["display_title", false, false, null], "count": ["count", false, false, null]}};'
+            in code
+        )
+
+        raw_payload = json.dumps(
+            {
+                "rus": {
+                    "display_title": "Русский",
+                    "count": 12,
+                    "notes": "ignore",
+                },
+                "eng": {"display_title": "English", "count": 24},
+            }
+        )
+        r = _run_js_src(kdl_src, "TranslationsParser", input_text=raw_payload)
+        assert r["translations"] == {
+            "rus": {"title": "Русский", "count": 12},
+            "eng": {"title": "English", "count": 24},
+        }
+
+    def test_nested_dict_value_schema_multi_level_codegen_and_execution(self):
+        kdl_src = """
+json AnimeResponse {
+    translations (dict)Translation {
+        @key str
+        @value TranslationValue {
+            episodes (dict)EpisodeMap {
+                @key int
+                @value EpisodeValue {
+                    link str from="stream_url"
+                    screenshots @skip
+                }
+            }
+            is_active bool
+            kind str from="type"
+        }
+    }
+}
+
+(raw)struct AnimeParser {
+    anime {
+        jsonify AnimeResponse
+    }
+}
+"""
+        code = _convert_kdl(kdl_src)
+        assert "* @typedef {Object} EpisodeValueJson" in code
+        assert "* @property {string} link" in code
+        assert "screenshots" not in code
+        assert "* @typedef {Object} TranslationValueJson" in code
+        assert "* @property {Record<number, EpisodeValueJson>} episodes" in code
+        assert "* @property {boolean} is_active" in code
+        assert "* @property {string} kind" in code
+        assert "* @typedef {Object} AnimeResponseJson" in code
+        assert (
+            "* @property {Record<string, TranslationValueJson>} translations"
+            in code
+        )
+
+        raw_payload = json.dumps(
+            {
+                "translations": {
+                    "sub": {
+                        "episodes": {
+                            "1": {
+                                "stream_url": "https://stream/1",
+                                "screenshots": ["s1.jpg"],
+                            },
+                            "2": {"stream_url": "https://stream/2"},
+                        },
+                        "is_active": True,
+                        "type": "tv",
+                    }
+                }
+            }
+        )
+        r = _run_js_src(kdl_src, "AnimeParser", input_text=raw_payload)
+        assert r["anime"] == {
+            "translations": {
+                "sub": {
+                    "episodes": {
+                        "1": {"link": "https://stream/1"},
+                        "2": {"link": "https://stream/2"},
+                    },
+                    "is_active": True,
+                    "kind": "tv",
+                }
+            }
+        }
+
+    def test_inline_dict_anonymous_value_block_and_array_value_codegen_and_execution(
+        self,
+    ):
+        kdl_src = """
+json Project {
+    groups (dict) {
+        @key str
+        @value (array)GroupItem {
+            id int
+            name str from="group_name"
+        }
+    }
+    settings (dict) {
+        @key str
+        @value {
+            enabled bool
+            priority int? @omitempty
+        }
+    }
+}
+
+(raw)struct ProjectParser {
+    proj {
+        jsonify Project
+    }
+}
+"""
+        code = _convert_kdl(kdl_src)
+        assert "* @typedef {Object} GroupItemJson" in code
+        assert "* @property {number} id" in code
+        assert "* @property {string} name" in code
+        assert "* @typedef {Object} ProjectSettingsValueJson" in code
+        assert "* @property {boolean} enabled" in code
+        assert "* @property {number|null} priority (OMITEMPTY)" in code
+        assert "* @property {Record<string, GroupItemJson[]>} groups" in code
+        assert (
+            "* @property {Record<string, ProjectSettingsValueJson>} settings"
+            in code
+        )
+
+        raw_payload = json.dumps(
+            {
+                "groups": {
+                    "backend": [
+                        {"id": 1, "group_name": "Core"},
+                        {"id": 2, "group_name": "Ops"},
+                    ]
+                },
+                "settings": {
+                    "notifications": {"enabled": True, "priority": 5},
+                    "telemetry": {"enabled": False},
+                },
+            }
+        )
+        r = _run_js_src(kdl_src, "ProjectParser", input_text=raw_payload)
+        assert r["proj"] == {
+            "groups": {
+                "backend": [
+                    {"id": 1, "name": "Core"},
+                    {"id": 2, "name": "Ops"},
+                ]
+            },
+            "settings": {
+                "notifications": {"enabled": True, "priority": 5},
+                "telemetry": {"enabled": False},
             },
         }
 

@@ -141,13 +141,15 @@ For JSON objects with dynamic, numeric, or arbitrary keys and homogeneous values
 - Top-level: `(dict)json Translations { @key int; @value (array)str; }` (Python `Dict[int, List[str]]`, Go `map[int64][]string`, Rust `HashMap<i64, Vec<String>>`, JS `Record<number, string[]>`).
 - Inline dict: `translations (dict)Translations { @key str; @value (array)str; }` or `(dict)translations { @key str; @value (array)str; }`.
 - `@key` defaults to `str` if omitted. Supported scalar key types: `str`, `int`, `float`, `bool`.
-- `@value` can be a scalar, `(array)Type`, or reference to another `json` schema.
+- `@value` can be a scalar, `(array)Type`, reference to another `json` schema, or an inline schema block `{ ... }`.
+- Inline `@value` blocks: `@value Model { ... }`, `(Model)@value { ... }`, `@value (array)ItemModel { ... }`, or anonymous `@value { ... }` (synthesizes `{DictName}Value`, `{Parent}{Field}Value`, or `{DictSchema}Value`). Hoisted recursively post-order before enclosing schema.
 
 **Inline nested schemas (compiler hoisting):**
 Instead of polluting the module with dozens of small top-level helper schemas, define them directly inside the parent schema:
 - Anonymous inline object: `material_data { anime_title str; year int; }` (synthesizes `{Parent}{Field}` in PascalCase, e.g. `AnimeResponseMaterialDataJson`).
 - Explicitly named inline object: `franchise Franchise { id str; shikimori_id str; }` (emits `FranchiseJson`).
 - Explicitly named inline array: `links (array)Links { id int; relation str; }` (emits `LinksJson`).
+- Inline `@value` dictionary block: `@value Model { ... }` or `@value { ... }`.
 Inline blocks support full modifier symmetry: `from="..."`, `@omitempty`, `?` (nullable). The compiler hoists them ahead of the parent in topological dependency order.
 
 **Deduplication with `define`.** When multiple `json` schemas share the same set
