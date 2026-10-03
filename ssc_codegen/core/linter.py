@@ -8,6 +8,8 @@ from collections.abc import Iterable, Mapping
 from typing import Iterator
 
 from ssc_codegen.symbols import (
+    HTTP_REQUEST_SIGNATURES,
+    REQUEST_LINE_CONTINUATION_HINT,
     SymbolKind,
     SymbolRecord,
     SymbolScope,
@@ -841,10 +843,61 @@ def _lint_json_defs(
         )
 
 
+def _extract_value_model_and_array(
+    child: KdlNode,
+) -> tuple[str, bool]:
+    raw_ann = (child.type_annotation or "").strip("()")
+    if raw_ann.endswith("?"):
+        raw_ann = raw_ann.rstrip("?")
+    is_arr = raw_ann.lower() == "array"
+    explicit_model_name = ""
+    if raw_ann and raw_ann.lower() != "array":
+        explicit_model_name = raw_ann
+
+    for arg in child.args:
+        arg_ann = (arg.type_annotation or "").strip("()")
+        if arg_ann.lower() == "array":
+            is_arr = True
+        val_str = str(arg.value)
+        if val_str.endswith("?"):
+            val_str = val_str.rstrip("?")
+        if val_str.startswith("@"):
+            continue
+        if val_str.lower() in ("array", "(array)"):
+            is_arr = True
+        elif not explicit_model_name and val_str:
+            explicit_model_name = val_str
+
+    return explicit_model_name, is_arr
+
+
+def _synthesize_value_schema_name(
+    explicit_model_name: str,
+    explicit_dict_name: str,
+    parent_json_name: str,
+    field_name: str,
+) -> str:
+    if explicit_model_name:
+        return explicit_model_name
+    if explicit_dict_name:
+        return f"{explicit_dict_name}Value"
+    clean_field = field_name.rstrip("?")
+    if parent_json_name and clean_field:
+        return f"{parent_json_name}{to_pascal_case(clean_field)}Value"
+    if parent_json_name:
+        return f"{parent_json_name}Value"
+    if clean_field:
+        return f"{to_pascal_case(clean_field)}Value"
+    return "Value"
+
+
 def _lint_dict_json_block(
     node: KdlNode,
     source_path: str,
     diags: list[ReadDiagnostic],
+    children_defines: dict[str, list[KdlNode]] | None = None,
+    source_text: str = "",
+    seen_json_names: set[str] | None = None,
 ) -> None:
     seen_directives: set[str] = set()
     has_value = False
@@ -906,15 +959,101 @@ def _lint_dict_json_block(
 
         elif child_name == "@value":
             has_value = True
-            if not child.args:
+            raw_child = (
+                source_text[child.span.start.offset : child.span.end.offset]
+                if source_text
+                else ""
+            )
+            has_children = bool(child.children)
+            is_empty_block = not has_children and "{" in raw_child
+
+            has_skip = (
+                any(str(arg.value) == "@skip" for arg in child.args)
+                or (child.type_annotation or "").strip("()") == "@skip"
+            )
+
+            explicit_model_name, is_arr = _extract_value_model_and_array(child)
+
+            if is_empty_block:
                 diags.append(
                     _error(
                         child,
-                        "'@value' requires a type specification",
+                        "empty inline json block in '@value'",
                         source_path,
                         code="E001",
-                        hint="example: @value (array)str  or  @value Item",
+                        hint="add fields to inline block or remove empty braces",
                     )
+                )
+
+            if has_skip and (has_children or is_empty_block):
+                diags.append(
+                    _error(
+                        child,
+                        "cannot use '@skip' on inline json block in '@value'",
+                        source_path,
+                        code="E002",
+                        hint="remove '@skip' from '@value' declaration",
+                    )
+                )
+
+            if (
+                (has_children or is_empty_block)
+                and is_arr
+                and not explicit_model_name
+            ):
+                diags.append(
+                    _error(
+                        child,
+                        "inline array block in '@value' requires an item model name",
+                        source_path,
+                        code="E001",
+                        hint="example: (array)@value ItemModel { ... } or @value (array)ItemModel { ... }",
+                    )
+                )
+
+            if (has_children or is_empty_block) and explicit_model_name:
+                if seen_json_names is not None:
+                    if explicit_model_name in seen_json_names:
+                        diags.append(
+                            _error(
+                                child,
+                                f"duplicate json definition '{explicit_model_name}'",
+                                source_path,
+                                code="E001",
+                                hint=f"rename inline schema '{explicit_model_name}' to avoid collision",
+                            )
+                        )
+                    else:
+                        seen_json_names.add(explicit_model_name)
+
+            if not has_children and not is_empty_block:
+                if not explicit_model_name:
+                    diags.append(
+                        _error(
+                            child,
+                            "'@value' requires a type specification",
+                            source_path,
+                            code="E001",
+                            hint="example: @value (array)str  or  @value Item",
+                        )
+                    )
+
+            if has_children:
+                sub_seen_fields: set[str] = set()
+                sub_seen_source_keys: set[str] = set()
+                sub_seen_output_keys: set[str] = set()
+                sub_field_names: set[str] = {c.name for c in child.children}
+                _lint_json_children(
+                    list(child.children),
+                    source_path,
+                    diags,
+                    children_defines if children_defines is not None else {},
+                    sub_seen_fields,
+                    sub_seen_source_keys,
+                    sub_seen_output_keys,
+                    sub_field_names,
+                    source_text,
+                    seen_json_names=seen_json_names,
                 )
 
     if not has_value:
@@ -993,7 +1132,16 @@ def _lint_single_json(
     type_prop_val = str(type_prop.value) if type_prop is not None else ""
     is_dict = raw_ann.strip("()") == "dict" or type_prop_val == "dict"
     if is_dict:
-        _lint_dict_json_block(node, source_path, diags)
+        _lint_dict_json_block(
+            node,
+            source_path,
+            diags,
+            children_defines=children_defines,
+            source_text=source_text,
+            seen_json_names=seen_json_names_all
+            if seen_json_names_all is not None
+            else seen_json_names,
+        )
         return
 
     seen_fields: set[str] = set()
@@ -1138,7 +1286,14 @@ def _lint_json_children(
 
         if is_dict_field:
             has_type = True
-            _lint_dict_json_block(field_node, source_path, diags)
+            _lint_dict_json_block(
+                field_node,
+                source_path,
+                diags,
+                children_defines=children_defines,
+                source_text=source_text,
+                seen_json_names=seen_json_names,
+            )
         elif has_children and len(field_node.children) > 0:
             has_type = True
             is_array = any(
@@ -1561,25 +1716,28 @@ def _iter_json_field_type_refs(
             if is_dict:
                 for c in field_node.children:
                     if c.name == "@value":
-                        v_arg = str(c.args[0].value) if c.args else ""
-                        if v_arg.startswith("(array)"):
-                            v_arg = v_arg[len("(array)") :]
-                        if v_arg.endswith("?"):
-                            v_arg = v_arg[:-1]
-                        if v_arg and v_arg not in _VALID_JSON_TYPES:
-                            yield c, v_arg
+                        if c.children:
+                            queue = list(c.children) + queue
+                        else:
+                            explicit_model, _ = _extract_value_model_and_array(
+                                c
+                            )
+                            if (
+                                explicit_model
+                                and explicit_model not in _VALID_JSON_TYPES
+                            ):
+                                yield c, explicit_model
             else:
                 queue = list(field_node.children) + queue
             continue
 
         if field_node.name == "@value":
-            v_arg = str(field_node.args[0].value) if field_node.args else ""
-            if v_arg.startswith("(array)"):
-                v_arg = v_arg[len("(array)") :]
-            if v_arg.endswith("?"):
-                v_arg = v_arg[:-1]
-            if v_arg and v_arg not in _VALID_JSON_TYPES:
-                yield field_node, v_arg
+            if field_node.children:
+                queue = list(field_node.children) + queue
+            else:
+                explicit_model, _ = _extract_value_model_and_array(field_node)
+                if explicit_model and explicit_model not in _VALID_JSON_TYPES:
+                    yield field_node, explicit_model
             continue
 
         type_ = ""
@@ -1657,12 +1815,18 @@ def _lint_single_struct(
             )
         else:
             if struct_type == "rest":
+                hint = (
+                    REQUEST_LINE_CONTINUATION_HINT
+                    if field_name.startswith(HTTP_REQUEST_SIGNATURES)
+                    else ""
+                )
                 diags.append(
                     _error(
                         field_node,
                         f"regular field '{field_name}' not allowed in struct type='rest'",
                         source_path,
                         code="E203",
+                        hint=hint,
                     )
                 )
             else:
@@ -1832,13 +1996,18 @@ def _lint_regular_field_structural(
     if len(expanded) == 1 and expanded[0].name == "nested":
         return
     if not expanded:
+        hint = (
+            REQUEST_LINE_CONTINUATION_HINT
+            if field_name.startswith(HTTP_REQUEST_SIGNATURES)
+            else f'add at least one operation: {field_name} {{ css ".item"; text }}'
+        )
         diags.append(
             _error(
                 field_node,
                 f"field '{field_name}' has no operations",
                 source_path,
                 code="E001",
-                hint=f'add at least one operation: {field_name} {{ css ".item"; text }}',
+                hint=hint,
             )
         )
         return
@@ -2242,28 +2411,93 @@ def _collect_json_field_refs(
     type_prop = field_node.properties.get("type")
     type_prop_val = str(type_prop.value) if type_prop is not None else ""
     is_dict = (
-        raw_ann.strip("()") == "dict"
+        raw_ann.strip("()").rstrip("?") == "dict"
         or type_prop_val == "dict"
         or any(
-            (arg.type_annotation or "").strip("()") == "dict"
-            or str(arg.value) == "(dict)"
+            (arg.type_annotation or "").strip("()").rstrip("?") == "dict"
+            or str(arg.value).rstrip("?") == "(dict)"
             for arg in field_node.args
         )
     )
 
+    if field_node.name == "@value":
+        explicit_model_name, is_arr = _extract_value_model_and_array(field_node)
+        if field_node.children:
+            child_schema_name = _synthesize_value_schema_name(
+                explicit_model_name,
+                explicit_dict_name="",
+                parent_json_name=parent_json_name,
+                field_name="",
+            )
+            json_names.add(child_schema_name)
+            json_nodes[child_schema_name] = field_node
+            refs.append(
+                (field_node, field_name, child_schema_name, parent_json_name)
+            )
+            for sub_child in field_node.children:
+                _collect_json_field_refs(
+                    sub_child,
+                    child_schema_name,
+                    refs,
+                    json_names,
+                    json_nodes,
+                )
+        else:
+            val_arg = explicit_model_name
+            if val_arg and val_arg not in _VALID_JSON_TYPES:
+                refs.append((field_node, field_name, val_arg, parent_json_name))
+        return
+
     if field_node.children:
         if is_dict:
+            explicit_dict_name = ""
+            for arg in field_node.args:
+                a = str(arg.value)
+                if a in {"@skip", "@omitempty"} or a.startswith("@"):
+                    continue
+                if a not in {"(dict)", "dict"}:
+                    if a.endswith("?"):
+                        a = a.rstrip("?")
+                    if a:
+                        explicit_dict_name = a
+                        break
+
             for child in field_node.children:
                 if child.name == "@value":
-                    val_arg = str(child.args[0].value) if child.args else ""
-                    if val_arg.startswith("(array)"):
-                        val_arg = val_arg[len("(array)") :]
-                    if val_arg.endswith("?"):
-                        val_arg = val_arg[:-1]
-                    if val_arg and val_arg not in _VALID_JSON_TYPES:
-                        refs.append(
-                            (child, field_name, val_arg, parent_json_name)
+                    explicit_model_name, is_arr = (
+                        _extract_value_model_and_array(child)
+                    )
+                    if child.children:
+                        child_schema_name = _synthesize_value_schema_name(
+                            explicit_model_name,
+                            explicit_dict_name,
+                            parent_json_name,
+                            field_name,
                         )
+                        json_names.add(child_schema_name)
+                        json_nodes[child_schema_name] = child
+                        refs.append(
+                            (
+                                child,
+                                field_name,
+                                child_schema_name,
+                                parent_json_name,
+                            )
+                        )
+                        for sub_child in child.children:
+                            _collect_json_field_refs(
+                                sub_child,
+                                child_schema_name,
+                                refs,
+                                json_names,
+                                json_nodes,
+                            )
+                    else:
+                        val_arg = explicit_model_name
+                        if val_arg and val_arg not in _VALID_JSON_TYPES:
+                            refs.append(
+                                (child, field_name, val_arg, parent_json_name)
+                            )
             return
 
         # Inline block
@@ -2292,17 +2526,6 @@ def _collect_json_field_refs(
             _collect_json_field_refs(
                 child, child_schema_name, refs, json_names, json_nodes
             )
-        return
-
-    # Special case: top-level (dict)json @value
-    if field_node.name == "@value":
-        val_arg = str(field_node.args[0].value) if field_node.args else ""
-        if val_arg.startswith("(array)"):
-            val_arg = val_arg[len("(array)") :]
-        if val_arg.endswith("?"):
-            val_arg = val_arg[:-1]
-        if val_arg and val_arg not in _VALID_JSON_TYPES:
-            refs.append((field_node, field_name, val_arg, parent_json_name))
         return
 
     type_found = False
