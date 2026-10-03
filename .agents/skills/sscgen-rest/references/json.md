@@ -205,15 +205,29 @@ json ItemDetail {
 
 ### Alias ключей
 
-Если ключ в JSON неудобен как имя поля, можно задать alias:
+Если ключ в JSON неудобен как имя поля, можно задать alias через атрибут `from="..."`:
 
 ```kdl
 json Schema {
-    context str "@context"
+    context str from="@context"
 }
 ```
 
-`context` — имя поля в схеме, `@context` — реальный ключ в JSON.
+`context` — имя поля в схеме, `@context` — реальный ключ в JSON. (Устаревший позиционный синтаксис `context str "@context"` вызывает предупреждение W011).
+
+## Автоматическая генерация схем из JSON (`ssc-gen json-to-kdl`)
+
+CLI-команда `json-to-kdl` позволяет автоматически создать `.kdl` схему из примера JSON-ответа:
+
+```bash
+ssc-gen json-to-kdl example.json -o schema.kdl
+ssc-gen json-to-kdl example.json -o schema.kdl --name ApiResponse --force
+```
+
+- Генерирует единую иерархическую инлайн-схему с анонимными объектами `field { ... }` и массивами `items (array)ItemsItem { ... }`.
+- Автоматически назначает `from="<raw_key>"` для нестандартных имён ключей.
+- Рекурсивно объединяет множественные примеры объектов в массивах и проставляет `@omitempty` для частичных полей.
+- Валидирует сгенерированный KDL через `parse_module` перед записью на диск.
 
 ## Использование `jsonify`
 

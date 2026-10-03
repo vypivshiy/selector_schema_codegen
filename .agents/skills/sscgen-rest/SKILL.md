@@ -97,14 +97,26 @@ Things to determine for every endpoint:
 
 ### Step 2 — Design `json` schemas
 
-**Innermost first.** Full syntax in `references/json.md`.
+Full syntax in `references/json.md`.
 
-Start from the deepest nested objects and work outward. For each object observed
-in the real API response (or defined in the swagger spec), create a `json` schema
-with **all** its fields — every single key from the actual JSON, with the correct
-type and nullability.
+> **CLI Bootstrapping:** If you have sample JSON response files (e.g. from `curl` or DevTools), you can bootstrap the schema via:
+> `ssc-gen json-to-kdl response.json -o schema.kdl --name ResponseName`
+> This generates a modern hierarchical inline schema (`field { ... }` and `(array)ItemModel { ... }`) with `from="..."` key aliasing and multi-sample `@omitempty` merging.
+
+For each object observed in the real API response (or defined in the swagger spec), create a `json` schema with **all** its fields — every single key from the actual JSON, with the correct type and nullability. You can write either hierarchical inline schemas or standalone schemas:
 
 ```kdl
+// Inline style (hierarchical, DSL v2.2+)
+json Post {
+    id int
+    title str
+    author {
+        id int
+        name str
+    }
+}
+
+// Or standalone style
 json Author { id int; name str }
 json Post   { id int; title str; author Author }
 json PostList { posts (array)Post; total int }

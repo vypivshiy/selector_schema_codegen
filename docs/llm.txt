@@ -665,6 +665,10 @@ ssc-gen health schema.kdl:StructName -i page.html
 ssc-gen scout -i page.html --text '\$\d+\.\d{2}' -f json
 ssc-gen scout -i page.html --discover -f json
 
+# generate inline JSON schema from sample JSON payload
+ssc-gen json-to-kdl payload.json -o schema.kdl
+ssc-gen json-to-kdl payload.json -o schema.kdl --name ApiResponse --force
+
 # print version
 ssc-gen version
 ```
@@ -672,6 +676,18 @@ ssc-gen version
 Languages: `generate python`, `generate js`, `generate go`.
 HTML libraries (`--lib / -L`, Python only): `bs4` (default), `lxml`, `parsel`, `slax`.
 HTTP clients (`--http-client`): Python — `httpx` (default) | `aiohttp` | `requests`; JS — `fetch` (default) | `axios`.
+
+### `json-to-kdl` — Bootstrap inline JSON schemas
+
+Automatically generates a modern hierarchical `.kdl` schema file from a sample JSON payload.
+Nested objects are emitted as anonymous inline blocks, object arrays as `(array)ItemModel`
+blocks with collision resolution, and raw keys use `from="..."`. Output is validated with
+`parse_module` before writing.
+
+```bash
+ssc-gen json-to-kdl example.json -o schema.kdl
+ssc-gen json-to-kdl example.json -o schema.kdl --name ResponseSchema --force
+```
 
 ### `scout` — HTML reconnaissance
 

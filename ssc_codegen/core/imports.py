@@ -182,13 +182,11 @@ class _Resolver:
                 node for node in self.units[path].nodes if id(node) == node_id
             )
             if not define_node.children and define_node.properties:
-                define_node.properties = MappingProxyType(
-                    {
-                        name: value
-                        for name, value in define_node.properties.items()
-                        if name in names
-                    }
-                )
+                define_node.properties = {
+                    name: value
+                    for name, value in define_node.properties.items()
+                    if name in names
+                }
 
         emitted_nodes: set[tuple[Path, int]] = set()
         emitted_names: dict[tuple[str, str], SymbolId] = {}
