@@ -453,17 +453,29 @@ json Author {
 
 Field types: str, int, float, bool, null, <RefName>.
 Dictionary schemas:
-- Top-level: `(dict)json Name { @key <ScalarType>; @value <Type>; }` (@key defaults to str; @value supports scalar, (array)type, or <RefName>).
-- Inline dict fields: `field (dict)DictName { @key str; @value (array)str; }` or `(dict)field { @key str; @value (array)str; }`.
+- Top-level: `(dict)json Name { @key <ScalarType>; @value <Type>; }` (@key defaults to str; @value supports scalar, (array)type, <RefName>, or an inline schema block `{ ... }`).
+- Inline dict fields: `field (dict)DictName { @key str; @value <Type>; }` or `(dict)field { @key str; @value <Type>; }`.
+- Inline `@value` schema blocks: `@value` directives in top-level `(dict)json` and inline `(dict)` fields accept child field blocks `{ ... }`:
+  - Explicit model name: `@value ModelName { ... }` or `(ModelName)@value { ... }`.
+  - Array of models: `@value (array)ItemModel { ... }` or `(array)@value ItemModel { ... }` (item model name is mandatory; anonymous array raises E001).
+  - Anonymous model synthesis: `@value { ... }` synthesizes PascalCase model names:
+    - In named inline dict `field (dict)DictName`: `{DictName}Value` (e.g. `TranslationValue`).
+    - In anonymous inline dict `field (dict)` under parent: `{Parent}{Field.to_pascal_case()}Value` (e.g. `AnimeResponseTranslationsValue`).
+    - In top-level `(dict)json DictName`: `{DictSchema}Value` (e.g. `TranslationsValue`).
+  - Multi-level nested dictionaries: `@value` blocks can contain nested `(dict)` fields with `@value` blocks, hoisted recursively post-order (innermost leaves hoisted first).
+  - Modifiers: fields inside `@value` support `from="..."`, `@omitempty`, `?` (nullable), `@skip`, and nested blocks. `@value` itself supports `?` for optional/nullable dictionary values (`@value Model? { ... }`, `(Model?)@value { ... }`, `@value? Model { ... }`, `@value? { ... }`).
+  - Validation: empty block `{}` in `@value` raises E001; `@skip` on `@value` with block raises E002; name collisions raise E001.
 - Target types: Python `Dict[K, V]`, Go `map[K]V`, Rust `HashMap<K, V>`, JS `Record<K, V>`.
 
 Inline nested schemas (hoisted by compiler):
 - Anonymous object: `field { ... }` (synthesizes PascalCase `{Parent}{Field}`).
 - Explicitly named object: `field ModelName { ... }`.
 - Explicitly named array: `field (array)ItemModel { ... }`.
+- Dictionary value block: `@value ModelName { ... }` / `@value { ... }` (synthesized `{DictName}Value` / `{Parent}{Field}Value` / `{DictSchema}Value`).
 Modifiers: (array)type for arrays, type? for optional (nullable), @omitempty for keys that may be absent, @skip to exclude from output.
 Alias / Dot-Paths: `field-name type from="source.path.0.key"` (path="..." also accepted as synonym with W041 hint; supports dot-separated object keys and numeric array indices; positional `"source-key"` is deprecated: W011).
 Strict allowlist projection: generated parsers drop all unmodeled wire fields and validate required non-nullable fields.
+KDL line continuation caveat: single-line `//` comments after `\` continuations consume the newline and break the continuation; linter provides a protective diagnostic hint if broken request fragments become stray fields.
 
 Usage: jsonify <SchemaName> [path="dotted.path"]
 
