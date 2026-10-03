@@ -1570,14 +1570,17 @@ json AnimeResponse {
         assert trans_val.name == "TranslationValue"
         assert trans_val.is_dict is False
         assert trans_val.is_array is False
-        val_fields = {f.name: f for f in trans_val.body}
+        val_fields = {
+            f.name: f for f in trans_val.body if isinstance(f, JsonDefField)
+        }
         assert "link" in val_fields
         assert val_fields["link"].ret_type_info.base == VariableType.STRING
         assert "is_active" in val_fields
         assert val_fields["is_active"].ret_type_info.base == VariableType.BOOL
 
         anime_resp = json_defs[1]
-        field = anime_resp.body[0]
+        fields = [f for f in anime_resp.body if isinstance(f, JsonDefField)]
+        field = fields[0]
         assert isinstance(field, JsonDefField)
         assert field.name == "translations"
         assert field.is_dict is True
@@ -1609,7 +1612,8 @@ json AnimeResponse {
             "AnimeResponse",
         ]
 
-        field = json_defs[1].body[0]
+        fields = [f for f in json_defs[1].body if isinstance(f, JsonDefField)]
+        field = fields[0]
         assert isinstance(field, JsonDefField)
         assert field.value_type_info is not None
         assert field.value_type_info.ref == "TranslationValue"
@@ -1634,11 +1638,16 @@ json Catalog {
         assert [j.name for j in jdefs1] == ["ItemModel", "Catalog"]
         item_model1 = jdefs1[0]
         assert item_model1.is_array is False
-        assert {f.name: f.ret_type_info.base for f in item_model1.body} == {
+        assert {
+            f.name: f.ret_type_info.base
+            for f in item_model1.body
+            if isinstance(f, JsonDefField)
+        } == {
             "id": VariableType.INT,
             "title": VariableType.STRING,
         }
-        val_info1 = jdefs1[1].body[0].value_type_info
+        val_fields1 = [f for f in jdefs1[1].body if isinstance(f, JsonDefField)]
+        val_info1 = val_fields1[0].value_type_info
         assert val_info1 is not None
         assert val_info1.base == VariableType.JSON
         assert val_info1.ref == "ItemModel"
@@ -1659,7 +1668,8 @@ json Catalog {
         assert not any(d.severity == Severity.ERROR for d in diags2)
         jdefs2 = [n for n in module2.body if isinstance(n, JsonDef)]
         assert [j.name for j in jdefs2] == ["ItemModel", "Catalog"]
-        val_info2 = jdefs2[1].body[0].value_type_info
+        val_fields2 = [f for f in jdefs2[1].body if isinstance(f, JsonDefField)]
+        val_info2 = val_fields2[0].value_type_info
         assert val_info2 is not None
         assert val_info2.base == VariableType.JSON
         assert val_info2.ref == "ItemModel"
@@ -1704,7 +1714,8 @@ json AnimeResponse {
         assert not any(d.severity == Severity.ERROR for d in diags)
         jdefs = [n for n in module.body if isinstance(n, JsonDef)]
         assert [j.name for j in jdefs] == ["TranslationValue", "AnimeResponse"]
-        val_info = jdefs[1].body[0].value_type_info
+        fields = [f for f in jdefs[1].body if isinstance(f, JsonDefField)]
+        val_info = fields[0].value_type_info
         assert val_info is not None
         assert val_info.ref == "TranslationValue"
         assert val_info.base == VariableType.JSON
@@ -1727,7 +1738,8 @@ json AnimeResponse {
             "AnimeResponseTranslationsValue",
             "AnimeResponse",
         ]
-        val_info = jdefs[1].body[0].value_type_info
+        fields = [f for f in jdefs[1].body if isinstance(f, JsonDefField)]
+        val_info = fields[0].value_type_info
         assert val_info is not None
         assert val_info.ref == "AnimeResponseTranslationsValue"
         assert val_info.base == VariableType.JSON
@@ -1796,19 +1808,25 @@ json AnimeResponse {
         ]
 
         ep_val = jdefs[0]
-        ep_fields = {f.name: f for f in ep_val.body}
+        ep_fields = {
+            f.name: f for f in ep_val.body if isinstance(f, JsonDefField)
+        }
         assert ep_fields["link"].ret_type_info.base == VariableType.STRING
         assert ep_fields["screenshots"].ret_type_info.skip is True
 
         trans_val = jdefs[1]
-        trans_fields = {f.name: f for f in trans_val.body}
+        trans_fields = {
+            f.name: f for f in trans_val.body if isinstance(f, JsonDefField)
+        }
         assert trans_fields["episodes"].is_dict is True
         assert trans_fields["episodes"].key_type_info.base == VariableType.INT
         assert trans_fields["episodes"].value_type_info.ref == "EpisodeValue"
         assert trans_fields["is_active"].ret_type_info.base == VariableType.BOOL
 
         anime_resp = jdefs[2]
-        anime_fields = {f.name: f for f in anime_resp.body}
+        anime_fields = {
+            f.name: f for f in anime_resp.body if isinstance(f, JsonDefField)
+        }
         assert anime_fields["translations"].is_dict is True
         assert (
             anime_fields["translations"].key_type_info.base
@@ -1868,7 +1886,9 @@ json Root {
         ]
 
         trans_val = jdefs[1]
-        fields = {f.name: f for f in trans_val.body}
+        fields = {
+            f.name: f for f in trans_val.body if isinstance(f, JsonDefField)
+        }
         assert fields["wire_url"].alias == "url"
         assert fields["backup_url"].ret_type_info.is_optional is True
         assert fields["backup_url"].ret_type_info.omitempty is True
@@ -1907,8 +1927,11 @@ dict_field {
         assert "ParentModelItemsValue" in ctx.json_defs
         hoisted = ctx.json_defs["ParentModelItemsValue"]
         assert hoisted.name == "ParentModelItemsValue"
-        assert len(hoisted.body) == 1
-        assert hoisted.body[0].name == "name"
+        hoisted_fields = [
+            f for f in hoisted.body if isinstance(f, JsonDefField)
+        ]
+        assert len(hoisted_fields) == 1
+        assert hoisted_fields[0].name == "name"
 
 
 class TestJsonDictNestedValueLinterValidation:
@@ -2207,3 +2230,14 @@ struct MyScraper {
 """
         _, diags_post = parse_module(src_post)
         assert any(d.hint == REQUEST_LINE_CONTINUATION_HINT for d in diags_post)
+
+        # With -H header continuation signature
+        src_header = """
+(rest)struct MyApi {
+    "-H 'Authorization: Bearer token'"
+}
+"""
+        _, diags_header = parse_module(src_header)
+        assert any(
+            d.hint == REQUEST_LINE_CONTINUATION_HINT for d in diags_header
+        )
