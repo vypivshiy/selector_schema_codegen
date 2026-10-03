@@ -82,6 +82,10 @@ HTTP_REQUEST_SIGNATURES: tuple[str, ...] = (
     "https://",
     "GET ",
     "POST ",
+    "-H ",
+    "-d ",
+    "-X ",
+    "--",
 )
 
 REQUEST_LINE_CONTINUATION_HINT: str = (

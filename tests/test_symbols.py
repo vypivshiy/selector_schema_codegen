@@ -176,6 +176,10 @@ def test_http_request_signature_line_continuation_hint():
         "https://example.com/api",
         "GET /users/123",
         "POST /submit",
+        "-H 'Authorization: Bearer token'",
+        '-d \'{"key": "val"}\'',
+        "-X PATCH",
+        "--header 'Content-Type: application/json'",
     ]
     records = tuple(
         SymbolRecord(

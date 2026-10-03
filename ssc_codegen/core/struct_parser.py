@@ -447,6 +447,8 @@ def _parse_dict_type_directives(
                 if arg_ann.lower() == "array":
                     is_arr = True
                 val_str = str(arg.value)
+                if val_str.startswith("@"):
+                    continue
                 if val_str.endswith("?"):
                     is_opt = True
                     val_str = val_str.rstrip("?")
