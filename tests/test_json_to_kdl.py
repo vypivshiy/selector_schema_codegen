@@ -324,25 +324,171 @@ def test_json_text_to_kdl_convenience_function() -> None:
     assert not any(d.severity.name == "ERROR" for d in diags)
 
 
-def test_json_to_kdl_cli_writes_and_requires_confirmation(tmp_path) -> None:
+def test_json_to_kdl_cli_writes_output_file(tmp_path) -> None:
     input_file = tmp_path / "input.json"
-    output_file = tmp_path / "output.kdl"
-    input_file.write_text(json.dumps({"id": 1}), encoding="utf-8")
+    output_file = tmp_path / "nested" / "output.kdl"
+    input_file.write_text(
+        json.dumps({"id": 1, "profile": {"name": "Alice"}}), encoding="utf-8"
+    )
 
     runner = CliRunner()
     result = runner.invoke(
         app, ["json-to-kdl", str(input_file), "-o", str(output_file)]
     )
     assert result.exit_code == 0, result.output
-    assert "id int" in output_file.read_text(encoding="utf-8")
+    content = output_file.read_text(encoding="utf-8")
+    assert "json JsonResponse {" in content
+    assert "profile {" in content
+    assert "name str" in content
 
+
+def test_json_to_kdl_cli_interactive_prompt_abort(tmp_path) -> None:
+    input_file = tmp_path / "input.json"
+    output_file = tmp_path / "output.kdl"
+    input_file.write_text(json.dumps({"id": 1}), encoding="utf-8")
+    output_file.write_text("initial content", encoding="utf-8")
+
+    runner = CliRunner()
     result = runner.invoke(
         app,
         ["json-to-kdl", str(input_file), "-o", str(output_file)],
         input="n\n",
     )
-    assert result.exit_code == 0
+    assert result.exit_code == 0, result.output
+    assert f"Overwrite '{output_file}'? [y/N]" in result.output
     assert "Output not written." in result.output
+    assert output_file.read_text(encoding="utf-8") == "initial content"
+
+
+def test_json_to_kdl_cli_interactive_prompt_overwrite(tmp_path) -> None:
+    input_file = tmp_path / "input.json"
+    output_file = tmp_path / "output.kdl"
+    input_file.write_text(json.dumps({"id": 42}), encoding="utf-8")
+    output_file.write_text("initial content", encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        ["json-to-kdl", str(input_file), "-o", str(output_file)],
+        input="y\n",
+    )
+    assert result.exit_code == 0, result.output
+    assert f"Overwrite '{output_file}'? [y/N]" in result.output
+    assert "Output not written." not in result.output
+    content = output_file.read_text(encoding="utf-8")
+    assert "id int" in content
+    assert content != "initial content"
+
+
+def test_json_to_kdl_cli_force_overwrites_without_prompt(tmp_path) -> None:
+    input_file = tmp_path / "input.json"
+    output_file = tmp_path / "output.kdl"
+    input_file.write_text(json.dumps({"id": 100}), encoding="utf-8")
+    output_file.write_text("initial content", encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        ["json-to-kdl", str(input_file), "-o", str(output_file), "--force"],
+    )
+    assert result.exit_code == 0, result.output
+    assert "Overwrite" not in result.output
+    content = output_file.read_text(encoding="utf-8")
+    assert "id int" in content
+    assert content != "initial content"
+
+
+def test_json_to_kdl_cli_custom_name(tmp_path) -> None:
+    # 1. Object root with custom name
+    input_file = tmp_path / "input.json"
+    output_file = tmp_path / "output.kdl"
+    input_file.write_text(json.dumps({"user": "bob"}), encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "json-to-kdl",
+            str(input_file),
+            "-o",
+            str(output_file),
+            "--name",
+            "UserDetailResponse",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    content = output_file.read_text(encoding="utf-8")
+    assert "json UserDetailResponse {" in content
+    assert "user str" in content
+
+    # 2. Array root with custom name
+    arr_input = tmp_path / "arr_input.json"
+    arr_output = tmp_path / "arr_output.kdl"
+    arr_input.write_text(json.dumps([{"slug": "article-1"}]), encoding="utf-8")
+
+    result_arr = runner.invoke(
+        app,
+        [
+            "json-to-kdl",
+            str(arr_input),
+            "-o",
+            str(arr_output),
+            "--name",
+            "ArticleList",
+        ],
+    )
+    assert result_arr.exit_code == 0, result_arr.output
+    arr_content = arr_output.read_text(encoding="utf-8")
+    assert "(array)json ArticleListItem {" in arr_content
+    assert "slug str" in arr_content
+
+
+def test_json_to_kdl_cli_validation_failure_exits_with_error(
+    tmp_path, monkeypatch
+) -> None:
+    input_file = tmp_path / "input.json"
+    output_file = tmp_path / "output.kdl"
+    input_file.write_text(json.dumps({"id": 1}), encoding="utf-8")
+
+    monkeypatch.setattr(
+        "ssc_codegen.main.json_to_kdl",
+        lambda *args, **kwargs: "json Broken {\n    invalid syntax @@@\n}\n",
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        ["json-to-kdl", str(input_file), "-o", str(output_file)],
+    )
+    assert result.exit_code == 1
+    assert "error" in result.output.lower()
+    assert not output_file.exists()
+
+
+def test_json_to_kdl_cli_invalid_json_or_unsupported_root(tmp_path) -> None:
+    runner = CliRunner()
+
+    # Malformed JSON
+    bad_json = tmp_path / "bad.json"
+    bad_out = tmp_path / "bad_out.kdl"
+    bad_json.write_text("{not json", encoding="utf-8")
+    res1 = runner.invoke(
+        app, ["json-to-kdl", str(bad_json), "-o", str(bad_out)]
+    )
+    assert res1.exit_code == 1
+    assert "ERROR:" in res1.output
+    assert not bad_out.exists()
+
+    # Unsupported root type (e.g. integer)
+    bad_root = tmp_path / "bad_root.json"
+    bad_root_out = tmp_path / "bad_root_out.kdl"
+    bad_root.write_text("123", encoding="utf-8")
+    res2 = runner.invoke(
+        app, ["json-to-kdl", str(bad_root), "-o", str(bad_root_out)]
+    )
+    assert res2.exit_code == 1
+    assert "ERROR:" in res2.output
+    assert not bad_root_out.exists()
 
 
 def test_json_to_kdl_inline_array_of_objects() -> None:

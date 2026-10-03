@@ -368,7 +368,10 @@ def _resolve_src(src: str | None, filepath: str | Path | None) -> str:
     if src is not None:
         return src
     if filepath is not None:
-        return Path(filepath).read_text(encoding="utf-8-sig")
+        try:
+            return Path(filepath).read_text(encoding="utf-8-sig")
+        except OSError:
+            return ""
     return ""
 
 

@@ -852,7 +852,9 @@ def json_to_kdl_command(
     _, diagnostics = parse_module(source, source_path=output)
     errors = [d for d in diagnostics if d.severity == Severity.ERROR]
     if errors:
-        typer.echo(format_diagnostics(errors, filepath=output), err=True)
+        typer.echo(
+            format_diagnostics(errors, src=source, filepath=output), err=True
+        )
         raise typer.Exit(code=1)
 
     if output.exists() and not force:
