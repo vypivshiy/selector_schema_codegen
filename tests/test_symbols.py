@@ -165,3 +165,53 @@ def test_go_valid_and_invalid_symbols():
     assert is_valid_symbol("go", "func") is False
     assert is_valid_symbol("go", "type") is False
     assert is_valid_symbol("go", "struct") is False
+
+
+def test_http_request_signature_line_continuation_hint():
+    from ssc_codegen.symbols import REQUEST_LINE_CONTINUATION_HINT
+
+    signatures = [
+        "curl 'https://api.example.com/v1'",
+        "http://example.com/api",
+        "https://example.com/api",
+        "GET /users/123",
+        "POST /submit",
+    ]
+    records = tuple(
+        SymbolRecord(
+            SymbolKind.FIELD,
+            sig,
+            "python",
+            f"_parse_{sig}",
+            SymbolScope.STRUCT,
+            "schema.kdl",
+            (idx + 1, 1),
+        )
+        for idx, sig in enumerate(signatures)
+    )
+
+    findings = target_symbol_plan(records, ("python",))
+    assert len(findings) == len(signatures)
+    for finding in findings:
+        assert finding.code == "E403"
+        assert finding.hint == REQUEST_LINE_CONTINUATION_HINT
+
+    # Verify a standard invalid field identifier still gets the portable identifier hint
+    normal_record = (
+        SymbolRecord(
+            SymbolKind.FIELD,
+            "invalid field name with spaces",
+            "python",
+            "_parse_invalid field name with spaces",
+            SymbolScope.STRUCT,
+            "schema.kdl",
+            (10, 1),
+        ),
+    )
+    normal_findings = target_symbol_plan(normal_record, ("python",))
+    assert len(normal_findings) == 1
+    assert normal_findings[0].code == "E403"
+    assert (
+        "rename 'invalid field name with spaces' to a portable identifier"
+        in normal_findings[0].hint
+    )

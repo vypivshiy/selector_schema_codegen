@@ -1909,3 +1909,301 @@ dict_field {
         assert hoisted.name == "ParentModelItemsValue"
         assert len(hoisted.body) == 1
         assert hoisted.body[0].name == "name"
+
+
+class TestJsonDictNestedValueLinterValidation:
+    """Tests for linter validation and diagnostic hints for inline @value blocks."""
+
+    def test_valid_nested_fields_no_errors(self) -> None:
+        src = """
+json AnimeResponse {
+    translations (dict)Translation {
+        @key str
+        @value TranslationValue {
+            link str
+            is_active bool
+        }
+    }
+}
+"""
+        _, diags = parse_module(src)
+        errors = [d for d in diags if d.severity == Severity.ERROR]
+        assert not errors, f"Unexpected errors: {[e.message for e in errors]}"
+
+    def test_empty_inline_block_e001(self) -> None:
+        # Inline dict with empty @value block
+        src = """
+json AnimeResponse {
+    translations (dict) {
+        @key str
+        @value {
+        }
+    }
+}
+"""
+        _, diags = parse_module(src)
+        errors = [d for d in diags if d.severity == Severity.ERROR]
+        assert any(
+            d.code == "E001"
+            and "empty inline json block in '@value'" in d.message
+            for d in errors
+        )
+        assert any(
+            "add fields to inline block or remove empty braces"
+            in (d.hint or "")
+            for d in errors
+        )
+
+        # Top-level (dict)json with empty @value block
+        src_top = """
+(dict)json Translations {
+    @key str
+    @value {}
+}
+"""
+        _, diags_top = parse_module(src_top)
+        errors_top = [d for d in diags_top if d.severity == Severity.ERROR]
+        assert any(
+            d.code == "E001"
+            and "empty inline json block in '@value'" in d.message
+            for d in errors_top
+        )
+
+    def test_skip_on_inline_block_e002(self) -> None:
+        src = """
+json AnimeResponse {
+    translations (dict) {
+        @key str
+        @value @skip {
+            link str
+        }
+    }
+}
+"""
+        _, diags = parse_module(src)
+        errors = [d for d in diags if d.severity == Severity.ERROR]
+        assert any(
+            d.code == "E002"
+            and "cannot use '@skip' on inline json block in '@value'"
+            in d.message
+            for d in errors
+        )
+        assert any(
+            "remove '@skip' from '@value' declaration" in (d.hint or "")
+            for d in errors
+        )
+
+        # Top-level (dict)json with @skip on @value block
+        src_top = """
+(dict)json Translations {
+    @key str
+    @value @skip {
+        link str
+    }
+}
+"""
+        _, diags_top = parse_module(src_top)
+        errors_top = [d for d in diags_top if d.severity == Severity.ERROR]
+        assert any(
+            d.code == "E002"
+            and "cannot use '@skip' on inline json block in '@value'"
+            in d.message
+            for d in errors_top
+        )
+
+    def test_anonymous_array_without_item_model_e001(self) -> None:
+        src = """
+json AnimeResponse {
+    translations (dict) {
+        @key str
+        (array)@value {
+            link str
+        }
+    }
+}
+"""
+        _, diags = parse_module(src)
+        errors = [d for d in diags if d.severity == Severity.ERROR]
+        assert any(
+            d.code == "E001"
+            and "inline array block in '@value' requires an item model name"
+            in d.message
+            for d in errors
+        )
+        assert any(
+            "example: (array)@value ItemModel { ... } or @value (array)ItemModel { ... }"
+            in (d.hint or "")
+            for d in errors
+        )
+
+        # Valid array with item model name passes
+        src_valid = """
+json AnimeResponse {
+    translations (dict) {
+        @key str
+        (array)@value ItemModel {
+            link str
+        }
+    }
+}
+"""
+        _, diags_valid = parse_module(src_valid)
+        errors_valid = [d for d in diags_valid if d.severity == Severity.ERROR]
+        assert not errors_valid
+
+    def test_duplicate_model_name_collision_e001(self) -> None:
+        # Collision with existing top-level json schema
+        src = """
+json TranslationValue {
+    id int
+}
+json AnimeResponse {
+    translations (dict) {
+        @key str
+        @value TranslationValue {
+            link str
+        }
+    }
+}
+"""
+        _, diags = parse_module(src)
+        errors = [d for d in diags if d.severity == Severity.ERROR]
+        assert any(
+            d.code == "E001"
+            and "duplicate json definition 'TranslationValue'" in d.message
+            for d in errors
+        )
+        assert any(
+            "rename inline schema 'TranslationValue' to avoid collision"
+            in (d.hint or "")
+            for d in errors
+        )
+
+        # Collision between two inline dict fields using same explicit model name
+        src_two = """
+json AnimeResponse {
+    t1 (dict) {
+        @key str
+        @value Model {
+            link str
+        }
+    }
+    t2 (dict) {
+        @key str
+        @value Model {
+            url str
+        }
+    }
+}
+"""
+        _, diags_two = parse_module(src_two)
+        errors_two = [d for d in diags_two if d.severity == Severity.ERROR]
+        assert any(
+            d.code == "E001"
+            and "duplicate json definition 'Model'" in d.message
+            for d in errors_two
+        )
+
+    def test_cross_ref_hoisted_value_no_false_e300(self) -> None:
+        # Field referencing hoisted schema in same module
+        src = """
+json AnimeResponse {
+    translations (dict)Translation {
+        @key str
+        @value TranslationValue {
+            link str
+        }
+    }
+    extra TranslationValue
+}
+"""
+        _, diags = parse_module(src)
+        errors = [d for d in diags if d.severity == Severity.ERROR]
+        assert not any(d.code == "E300" for d in errors), (
+            f"Unexpected E300: {[e.message for e in errors]}"
+        )
+
+        # Anonymous top-level (dict)json with inline block
+        src_top = """
+(dict)json Translations {
+    @key str
+    @value {
+        link str
+    }
+}
+"""
+        _, diags_top = parse_module(src_top)
+        errors_top = [d for d in diags_top if d.severity == Severity.ERROR]
+        assert not any(d.code == "E300" for d in errors_top)
+
+    def test_cross_ref_undefined_inside_value_block_e300(self) -> None:
+        src = """
+json AnimeResponse {
+    translations (dict) {
+        @key str
+        @value {
+            author NonExistentModel
+        }
+    }
+}
+"""
+        _, diags = parse_module(src)
+        errors = [d for d in diags if d.severity == Severity.ERROR]
+        assert any(
+            d.code == "E300"
+            and "references undefined json definition 'NonExistentModel'"
+            in d.message
+            for d in errors
+        )
+
+    def test_cross_ref_defined_inside_value_block_ok(self) -> None:
+        src = """
+json Author {
+    name str
+}
+json AnimeResponse {
+    translations (dict) {
+        @key str
+        @value {
+            author Author
+        }
+    }
+}
+"""
+        _, diags = parse_module(src)
+        errors = [d for d in diags if d.severity == Severity.ERROR]
+        assert not errors, f"Unexpected errors: {[e.message for e in errors]}"
+
+    def test_request_broken_line_continuation_hint(self) -> None:
+        from ssc_codegen.symbols import REQUEST_LINE_CONTINUATION_HINT
+
+        # In rest struct: field named like curl request
+        src = """
+(rest)struct MyApi {
+    "curl https://api.example.com"
+}
+"""
+        _, diags = parse_module(src)
+        assert any(d.hint == REQUEST_LINE_CONTINUATION_HINT for d in diags), (
+            f"diags: {[(d.code, d.message, d.hint) for d in diags]}"
+        )
+
+        # In regular struct: field named like http url
+        src_regular = """
+struct MyScraper {
+    "https://example.com"
+}
+"""
+        _, diags_reg = parse_module(src_regular)
+        assert any(
+            d.hint == REQUEST_LINE_CONTINUATION_HINT for d in diags_reg
+        ), f"diags_reg: {[(d.code, d.message, d.hint) for d in diags_reg]}"
+
+        # With POST signature
+        src_post = """
+struct MyScraper {
+    "POST /api/v1/items"
+}
+"""
+        _, diags_post = parse_module(src_post)
+        assert any(d.hint == REQUEST_LINE_CONTINUATION_HINT for d in diags_post)
