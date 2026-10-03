@@ -1190,3 +1190,193 @@ struct ProfileAPI type=rest {
             sys.modules.pop(f"{pkg_name}.parser", None)
             sys.modules.pop(f"{pkg_name}.{runtime_name}", None)
             sys.modules.pop(pkg_name, None)
+
+    def test_rest_nested_dict_value_blocks_execution(self):
+        src = """
+json AnimeResponse {
+    translations (dict) {
+        @key str
+        @value {
+            is_active bool
+            episodes (dict)EpisodeMap {
+                @key int
+                @value EpisodeValue {
+                    link str from="stream_url"
+                    bitrate int?
+                    secret_token @skip
+                }
+            }
+        }
+    }
+}
+
+json Err {
+    code int
+    message str
+}
+
+(rest)struct AnimeAPI {
+    @request response=AnimeResponse \"\"\"
+    GET /anime/{{id:int}} HTTP/1.1
+    Host: api.example.com
+    \"\"\"
+    @error 404 Err
+}
+"""
+        ns = _generate(src, http_client="httpx")
+        API = ns["AnimeAPI"]
+
+        # Ensure generated code compiles without syntax/type descriptor issues
+        from ssc_codegen.targets.python import PY_BS4_CONVERTER
+
+        mod = _parse(src)
+        code = PY_BS4_CONVERTER.convert(mod, http_client="httpx")
+        compile(code, "<rest_test>", "exec")
+
+        # Sync fetch execution
+        with respx.mock:
+            respx.get("https://api.example.com/anime/42").respond(
+                json={
+                    "translations": {
+                        "sub_en": {
+                            "is_active": True,
+                            "unmodeled_noise": "drop",
+                            "episodes": {
+                                "1": {
+                                    "stream_url": "https://stream.example/1",
+                                    "bitrate": 1080,
+                                    "secret_token": "hidden",
+                                    "fps": 60,
+                                }
+                            },
+                        }
+                    }
+                },
+                status_code=200,
+            )
+            client = httpx.Client()
+            result = API.fetch(client, id=42)
+
+        assert result.is_ok is True
+        assert result.status == 200
+        assert result.value == {
+            "translations": {
+                "sub_en": {
+                    "is_active": True,
+                    "episodes": {
+                        "1": {
+                            "link": "https://stream.example/1",
+                            "bitrate": 1080,
+                        }
+                    },
+                }
+            }
+        }
+
+        # Async fetch execution
+        with respx.mock:
+            respx.get("https://api.example.com/anime/42").respond(
+                json={
+                    "translations": {
+                        "sub_en": {
+                            "is_active": True,
+                            "episodes": {
+                                "2": {
+                                    "stream_url": "https://stream.example/2",
+                                    "bitrate": None,
+                                }
+                            },
+                        }
+                    }
+                },
+                status_code=200,
+            )
+
+            async def _run():
+                async with httpx.AsyncClient() as aclient:
+                    return await API.async_fetch(aclient, id=42)
+
+            async_res = asyncio.run(_run())
+
+        assert async_res.is_ok is True
+        assert async_res.value == {
+            "translations": {
+                "sub_en": {
+                    "is_active": True,
+                    "episodes": {
+                        "2": {
+                            "link": "https://stream.example/2",
+                            "bitrate": None,
+                        }
+                    },
+                }
+            }
+        }
+
+    def test_rest_top_level_dict_with_inline_value_block_execution(self):
+        src = """
+(dict)json AnimeTranslations {
+    @key str
+    @value {
+        title str from="wire_title"
+        active bool
+        episodes (dict)EpisodeMap {
+            @key int
+            @value EpisodeValue {
+                link str from="stream_url"
+                bitrate int?
+            }
+        }
+    }
+}
+
+json Err {
+    code int
+    message str
+}
+
+(rest)struct AnimeAPI {
+    @request response=AnimeTranslations \"\"\"
+    GET /anime/translations HTTP/1.1
+    Host: api.example.com
+    \"\"\"
+    @error 404 Err
+}
+"""
+        ns = _generate(src, http_client="httpx")
+        API = ns["AnimeAPI"]
+
+        with respx.mock:
+            respx.get("https://api.example.com/anime/translations").respond(
+                json={
+                    "sub_en": {
+                        "wire_title": "English Sub",
+                        "active": True,
+                        "extra": "ignore",
+                        "episodes": {
+                            "1": {
+                                "stream_url": "https://stream.example/1",
+                                "bitrate": 1080,
+                            }
+                        },
+                    }
+                },
+                status_code=200,
+            )
+            client = httpx.Client()
+            result = API.fetch(client)
+
+        assert result.is_ok is True
+        assert result.status == 200
+        assert result.value == {
+            "sub_en": {
+                "title": "English Sub",
+                "active": True,
+                "episodes": {
+                    "1": {
+                        "link": "https://stream.example/1",
+                        "bitrate": 1080,
+                    }
+                },
+            }
+        }

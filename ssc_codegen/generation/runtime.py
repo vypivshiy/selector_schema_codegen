@@ -120,8 +120,8 @@ _BASE_UTILITY_LINES: list[str] = [
     "        if val_desc is None:",
     "            return data",
     "        if isinstance(val_desc, list) and val_desc:",
-    "            return {k: [ssc_json_project(x, val_desc[0]) for x in v if x is not None] if isinstance(v, list) else ssc_json_project(v, val_desc[0]) for k, v in data.items()}",
-    "        return {k: ssc_json_project(v, val_desc) for k, v in data.items()}",
+    "            return {k: [ssc_json_project(x, val_desc[0]) for x in v if x is not None] if isinstance(v, list) else (ssc_json_project(v, val_desc[0]) if v is not None else None) for k, v in data.items()}",
+    "        return {k: (ssc_json_project(v, val_desc) if v is not None else None) for k, v in data.items()}",
     "    if isinstance(data, list):",
     "        return [ssc_json_project(item, field_descriptors) for item in data]",
     "    if not isinstance(data, dict):",
@@ -285,11 +285,18 @@ def ssc_json_project(data: Any, field_descriptors: Any) -> Any:
                         if x is not None
                     ]
                     if isinstance(v, list)
-                    else ssc_json_project(v, val_desc[0])
+                    else (
+                        ssc_json_project(v, val_desc[0])
+                        if v is not None
+                        else None
+                    )
                 )
                 for k, v in data.items()
             }
-        return {k: ssc_json_project(v, val_desc) for k, v in data.items()}
+        return {
+            k: (ssc_json_project(v, val_desc) if v is not None else None)
+            for k, v in data.items()
+        }
 
     if isinstance(data, list):
         return [ssc_json_project(item, field_descriptors) for item in data]
