@@ -1,4 +1,5 @@
 import json
+from typing import Any
 import pytest
 from typer.testing import CliRunner
 
@@ -10,6 +11,13 @@ from ssc_codegen.json_to_kdl import (
     json_text_to_kdl,
 )
 from ssc_codegen.main import app
+
+
+def _parse_valid(source: str) -> tuple[Any, dict[str, Any]]:
+    module, diags = parse_module(source)
+    assert not any(d.severity.name == "ERROR" for d in diags)
+    defs = {node.name: node for node in module.body if hasattr(node, "name")}
+    return module, defs
 
 
 def test_json_to_kdl_generates_nested_definitions() -> None:
@@ -33,10 +41,7 @@ def test_json_to_kdl_generates_nested_definitions() -> None:
     )
     assert source == expected
 
-    module, diags = parse_module(source)
-    assert not any(d.severity.name == "ERROR" for d in diags)
-
-    defs = {node.name: node for node in module.body if hasattr(node, "name")}
+    _, defs = _parse_valid(source)
     assert "JsonResponseUserProfile" in defs
     assert "JsonResponseUser" in defs
     assert "JsonResponse" in defs
@@ -75,10 +80,7 @@ def test_json_to_kdl_root_array_uses_item_schema() -> None:
     source = json_to_kdl([{"id": 1}])
 
     assert source == "(array)json JsonResponseItem {\n    id int\n}\n"
-    module, diags = parse_module(source)
-    assert not any(d.severity.name == "ERROR" for d in diags)
-
-    defs = {node.name: node for node in module.body if hasattr(node, "name")}
+    _, defs = _parse_valid(source)
     assert "JsonResponseItem" in defs
     item_def = defs["JsonResponseItem"]
     assert getattr(item_def, "is_array", False) is True
@@ -112,10 +114,7 @@ def test_json_to_kdl_anonymous_inline_deep_nesting() -> None:
     )
     assert source == expected
 
-    module, diags = parse_module(source)
-    assert not any(d.severity.name == "ERROR" for d in diags)
-
-    defs = {node.name: node for node in module.body if hasattr(node, "name")}
+    _, defs = _parse_valid(source)
     assert "JsonResponseCompanyDepartmentLead" in defs
     assert "JsonResponseCompanyDepartment" in defs
     assert "JsonResponseCompany" in defs
@@ -150,10 +149,7 @@ def test_json_to_kdl_canonical_from_remapping() -> None:
     )
     assert source == expected
 
-    module, diags = parse_module(source)
-    assert not any(d.severity.name == "ERROR" for d in diags)
-
-    defs = {node.name: node for node in module.body if hasattr(node, "name")}
+    _, defs = _parse_valid(source)
     root_fields = {f.name: f for f in defs["JsonResponse"].body}
     assert root_fields["kebab_case"].alias == "kebab-case"
     assert root_fields["context"].alias == "@context"
@@ -189,11 +185,7 @@ def test_json_to_kdl_empty_objects_emitted_as_skip_scalar() -> None:
     assert source == expected
 
     # Must parse with 0 errors and no E001/E002 diagnostics
-    module, diags = parse_module(source)
-    errors = [d for d in diags if d.severity.name == "ERROR"]
-    assert not errors
-
-    defs = {node.name: node for node in module.body if hasattr(node, "name")}
+    _, defs = _parse_valid(source)
     root_fields = {f.name: f for f in defs["JsonResponse"].body}
     assert root_fields["empty"].ret_type_info.skip is True
     assert root_fields["empty_remapped"].ret_type_info.skip is True
@@ -207,22 +199,19 @@ def test_json_to_kdl_empty_root_object() -> None:
     source = json_to_kdl({})
     assert source == "json JsonResponse {\n}\n"
 
-    module, diags = parse_module(source)
-    assert not any(d.severity.name == "ERROR" for d in diags)
+    _parse_valid(source)
 
 
 def test_json_to_kdl_custom_root_name() -> None:
     source = json_to_kdl({"name": "foo"}, name="CustomModel")
     assert source == "json CustomModel {\n    name str\n}\n"
 
-    module, diags = parse_module(source)
-    assert not any(d.severity.name == "ERROR" for d in diags)
+    _parse_valid(source)
 
     source_arr = json_to_kdl([{"name": "foo"}], name="Catalog")
     assert source_arr == "(array)json CatalogItem {\n    name str\n}\n"
 
-    module_arr, diags_arr = parse_module(source_arr)
-    assert not any(d.severity.name == "ERROR" for d in diags_arr)
+    _parse_valid(source_arr)
 
 
 def test_json_to_kdl_primitive_arrays_all_types() -> None:
@@ -245,8 +234,7 @@ def test_json_to_kdl_primitive_arrays_all_types() -> None:
     )
     assert source == expected
 
-    module, diags = parse_module(source)
-    assert not any(d.severity.name == "ERROR" for d in diags)
+    _parse_valid(source)
 
 
 def test_json_to_kdl_null_values() -> None:
@@ -263,8 +251,7 @@ def test_json_to_kdl_null_values() -> None:
     )
     assert source == expected
 
-    module, diags = parse_module(source)
-    assert not any(d.severity.name == "ERROR" for d in diags)
+    _parse_valid(source)
 
 
 def test_json_to_kdl_root_array_with_omitempty() -> None:
@@ -282,10 +269,7 @@ def test_json_to_kdl_root_array_with_omitempty() -> None:
     )
     assert source == expected
 
-    module, diags = parse_module(source)
-    assert not any(d.severity.name == "ERROR" for d in diags)
-
-    defs = {node.name: node for node in module.body if hasattr(node, "name")}
+    _, defs = _parse_valid(source)
     item_fields = {f.name: f for f in defs["JsonResponseItem"].body}
     assert item_fields["id"].ret_type_info.omitempty is False
     assert item_fields["extra"].ret_type_info.omitempty is True
@@ -320,8 +304,7 @@ def test_json_text_to_kdl_convenience_function() -> None:
     source = json_text_to_kdl(raw_text)
     assert source == "json JsonResponse {\n    name str\n    age int\n}\n"
 
-    module, diags = parse_module(source)
-    assert not any(d.severity.name == "ERROR" for d in diags)
+    _parse_valid(source)
 
 
 def test_json_to_kdl_cli_writes_output_file(tmp_path) -> None:
@@ -516,10 +499,7 @@ def test_json_to_kdl_inline_array_of_objects() -> None:
     )
     assert source == expected
 
-    module, diags = parse_module(source)
-    assert not any(d.severity.name == "ERROR" for d in diags)
-
-    defs = {node.name: node for node in module.body if hasattr(node, "name")}
+    _, defs = _parse_valid(source)
     assert "UsersItem" in defs
     assert "OptionsItem" in defs
     assert "JsonResponseSettings" in defs
@@ -565,10 +545,7 @@ def test_json_to_kdl_inline_array_with_aliasing_and_omitempty() -> None:
     )
     assert source == expected
 
-    module, diags = parse_module(source)
-    assert not any(d.severity.name == "ERROR" for d in diags)
-
-    defs = {node.name: node for node in module.body if hasattr(node, "name")}
+    _, defs = _parse_valid(source)
     item_def = defs["UserItemsItem"]
     assert item_def.body[0].name == "item_id"
     assert item_def.body[0].alias == "item-id"
@@ -609,10 +586,7 @@ def test_json_to_kdl_collision_disambiguation_with_ancestors() -> None:
     )
     assert source == expected
 
-    module, diags = parse_module(source)
-    assert not any(d.severity.name == "ERROR" for d in diags)
-
-    defs = {node.name: node for node in module.body if hasattr(node, "name")}
+    _, defs = _parse_valid(source)
     assert "ItemsItem" in defs
     assert "ProfileItemsItem" in defs
     assert "JsonResponseOrder" in defs
@@ -672,10 +646,7 @@ def test_json_to_kdl_collision_disambiguation_multi_level_ancestors() -> None:
     )
     assert source == expected
 
-    module, diags = parse_module(source)
-    assert not any(d.severity.name == "ERROR" for d in diags)
-
-    defs = {node.name: node for node in module.body if hasattr(node, "name")}
+    _, defs = _parse_valid(source)
     assert "ItemsItem" in defs
     assert "OrderItemsItem" in defs
     assert "WarehouseOrderItemsItem" in defs
@@ -707,10 +678,7 @@ def test_json_to_kdl_collision_numeric_suffix_when_ancestor_collides() -> None:
     )
     assert source == expected
 
-    module, diags = parse_module(source)
-    assert not any(d.severity.name == "ERROR" for d in diags)
-
-    defs = {node.name: node for node in module.body if hasattr(node, "name")}
+    _, defs = _parse_valid(source)
     assert "ItemsItem" in defs
     assert "ProfileItemsItem" in defs
     assert "ProfileItemsItem2" in defs
@@ -730,10 +698,7 @@ def test_json_to_kdl_top_level_array_collision_with_root_schema() -> None:
     )
     assert source == expected
 
-    module, diags = parse_module(source)
-    assert not any(d.severity.name == "ERROR" for d in diags)
-
-    defs = {node.name: node for node in module.body if hasattr(node, "name")}
+    _, defs = _parse_valid(source)
     assert "JsonResponseItem" in defs
     assert "JsonResponseItem2" in defs
     assert defs["JsonResponseItem"].is_array is True
@@ -752,10 +717,7 @@ def test_json_to_kdl_top_level_object_collision_with_root_name() -> None:
     )
     assert source == expected
 
-    module, diags = parse_module(source)
-    assert not any(d.severity.name == "ERROR" for d in diags)
-
-    defs = {node.name: node for node in module.body if hasattr(node, "name")}
+    _, defs = _parse_valid(source)
     assert "CustomItem" in defs
     assert "CustomItem2" in defs
 
@@ -796,10 +758,7 @@ def test_json_to_kdl_deep_array_hierarchies() -> None:
     )
     assert source == expected
 
-    module, diags = parse_module(source)
-    assert not any(d.severity.name == "ERROR" for d in diags)
-
-    defs = {node.name: node for node in module.body if hasattr(node, "name")}
+    _, defs = _parse_valid(source)
     assert "MembersItem" in defs
     assert "TeamsItem" in defs
     assert "DepartmentsItem" in defs
@@ -843,10 +802,7 @@ def test_json_to_kdl_multi_sample_arrays_different_keys_omitempty() -> None:
     )
     assert source == expected
 
-    module, diags = parse_module(source)
-    assert not any(d.severity.name == "ERROR" for d in diags)
-
-    defs = {node.name: node for node in module.body if hasattr(node, "name")}
+    _, defs = _parse_valid(source)
     item_fields = {f.name: f for f in defs["JsonResponseItem"].body}
     assert item_fields["id"].ret_type_info.omitempty is False
     assert item_fields["name"].ret_type_info.omitempty is True
@@ -898,10 +854,7 @@ def test_json_to_kdl_recursive_nested_objects_merging_with_omitempty() -> None:
     )
     assert source == expected
 
-    module, diags = parse_module(source)
-    assert not any(d.severity.name == "ERROR" for d in diags)
-
-    defs = {node.name: node for node in module.body if hasattr(node, "name")}
+    _, defs = _parse_valid(source)
     profile_fields = {
         f.name: f for f in defs["JsonResponseItemUserProfile"].body
     }
@@ -940,10 +893,7 @@ def test_json_to_kdl_recursive_nested_objects_partial_child_blocks() -> None:
     )
     assert source == expected
 
-    module, diags = parse_module(source)
-    assert not any(d.severity.name == "ERROR" for d in diags)
-
-    defs = {node.name: node for node in module.body if hasattr(node, "name")}
+    _, defs = _parse_valid(source)
     item_fields = {f.name: f for f in defs["JsonResponseItem"].body}
     assert item_fields["user"].ret_type_info.omitempty is True
 
@@ -989,10 +939,7 @@ def test_json_to_kdl_nested_arrays_across_multiple_parent_samples() -> None:
     )
     assert source == expected
 
-    module, diags = parse_module(source)
-    assert not any(d.severity.name == "ERROR" for d in diags)
-
-    defs = {node.name: node for node in module.body if hasattr(node, "name")}
+    _, defs = _parse_valid(source)
     assert "OrdersItem" in defs
     orders_fields = {f.name: f for f in defs["OrdersItem"].body}
     assert orders_fields["sku"].ret_type_info.omitempty is False
@@ -1052,10 +999,7 @@ def test_json_to_kdl_deep_nested_arrays_across_multiple_parent_samples() -> (
     )
     assert source == expected
 
-    module, diags = parse_module(source)
-    assert not any(d.severity.name == "ERROR" for d in diags)
-
-    defs = {node.name: node for node in module.body if hasattr(node, "name")}
+    _, defs = _parse_valid(source)
     assert "DepartmentsItem" in defs
     assert "TeamsItem" in defs
 
@@ -1096,10 +1040,7 @@ def test_json_to_kdl_heterogeneous_types_fallback_to_skip() -> None:
     )
     assert source == expected
 
-    module, diags = parse_module(source)
-    assert not any(d.severity.name == "ERROR" for d in diags)
-
-    defs = {node.name: node for node in module.body if hasattr(node, "name")}
+    _, defs = _parse_valid(source)
     fields = {f.name: f for f in defs["JsonResponseItem"].body}
     for f_name in [
         "scalar_mix",
@@ -1126,8 +1067,7 @@ def test_json_to_kdl_empty_objects_merging_and_optionality() -> None:
     assert src_all_empty == (
         "(array)json JsonResponseItem {\n    meta @skip // empty object\n}\n"
     )
-    _, diags = parse_module(src_all_empty)
-    assert not any(d.severity.name == "ERROR" for d in diags)
+    _parse_valid(src_all_empty)
 
     # 2. Some empty, some non-empty -> merged and marked @omitempty
     some_empty = [{"meta": {}}, {"meta": {"version": 1}}]
@@ -1139,8 +1079,7 @@ def test_json_to_kdl_empty_objects_merging_and_optionality() -> None:
         "    }\n"
         "}\n"
     )
-    _, diags = parse_module(src_some_empty)
-    assert not any(d.severity.name == "ERROR" for d in diags)
+    _parse_valid(src_some_empty)
 
     # 3. Some empty, some non-empty, some missing -> meta gets @omitempty, version gets @omitempty
     mixed_meta = [{"meta": {}}, {"meta": {"version": 1}}, {}]
@@ -1152,15 +1091,14 @@ def test_json_to_kdl_empty_objects_merging_and_optionality() -> None:
         "    }\n"
         "}\n"
     )
-    _, diags = parse_module(src_mixed_meta)
-    assert not any(d.severity.name == "ERROR" for d in diags)
+    _parse_valid(src_mixed_meta)
 
     # 4. Array of empty objects across all samples
     arr_empty_objs = [{"items": [{}]}, {"items": [{}]}]
     src_arr_empty = json_to_kdl(arr_empty_objs)
     assert src_arr_empty == (
         "(array)json JsonResponseItem {\n"
-        "    items (array)null @skip // empty object\n"
+        "    items (array)null @skip // empty objects\n"
         "}\n"
     )
 
@@ -1174,8 +1112,7 @@ def test_json_to_kdl_empty_objects_merging_and_optionality() -> None:
         "    }\n"
         "}\n"
     )
-    _, diags = parse_module(src_arr_mixed)
-    assert not any(d.severity.name == "ERROR" for d in diags)
+    _parse_valid(src_arr_mixed)
 
 
 def test_json_to_kdl_empty_and_populated_arrays_merging() -> None:
@@ -1185,8 +1122,7 @@ def test_json_to_kdl_empty_and_populated_arrays_merging() -> None:
     assert source_pop == (
         "(array)json JsonResponseItem {\n    tags (array)str\n}\n"
     )
-    _, diags = parse_module(source_pop)
-    assert not any(d.severity.name == "ERROR" for d in diags)
+    _parse_valid(source_pop)
 
     # 2. All empty array samples
     data_all_empty = [{"tags": []}, {"tags": []}]
@@ -1212,5 +1148,4 @@ def test_json_to_kdl_empty_and_populated_arrays_merging() -> None:
     assert source_pop_missing == (
         "(array)json JsonResponseItem {\n    tags (array)str @omitempty\n}\n"
     )
-    _, diags = parse_module(source_pop_missing)
-    assert not any(d.severity.name == "ERROR" for d in diags)
+    _parse_valid(source_pop_missing)

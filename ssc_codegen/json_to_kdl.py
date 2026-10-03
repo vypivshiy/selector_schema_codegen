@@ -14,10 +14,6 @@ class JsonToKdlError(ValueError):
     """Raised when an example cannot be represented by JSON definitions."""
 
 
-def _path(path: tuple[str, ...]) -> str:
-    return "$" if not path else "$." + ".".join(path)
-
-
 _RESERVED_FIELD_NAMES = frozenset({"true", "false", "null", "inf", "nan"})
 
 
@@ -31,6 +27,19 @@ def _field_name(key: str) -> str:
     ):
         normalized = "k_" + normalized
     return normalized
+
+
+def _format_skip_field(
+    indent: str,
+    field_name: str,
+    from_part: str,
+    omitempty_part: str,
+    comment: str,
+    *,
+    is_array: bool = False,
+) -> str:
+    type_part = " (array)null" if is_array else ""
+    return f"{indent}{field_name}{type_part} @skip{from_part}{omitempty_part} // {comment}"
 
 
 def _type_name(value: Any) -> str:
@@ -48,7 +57,7 @@ def _type_name(value: Any) -> str:
         return "object"
     if isinstance(value, list):
         return "array"
-    raise JsonToKdlError(f"unsupported JSON value at {_path(())}")
+    raise JsonToKdlError("unsupported JSON value at $")
 
 
 class _Generator:
@@ -149,7 +158,13 @@ class _Generator:
                 if all(not s for s in samples):
                     # Empty object safety: emit @skip without child block
                     lines.append(
-                        f"{indent}{field_name} @skip{from_part}{omitempty_part} // empty object"
+                        _format_skip_field(
+                            indent,
+                            field_name,
+                            from_part,
+                            omitempty_part,
+                            "empty object",
+                        )
                     )
                 else:
                     lines.append(
@@ -171,7 +186,14 @@ class _Generator:
                 ]
                 if not all_items:
                     lines.append(
-                        f"{indent}{field_name} (array)null @skip{from_part}{omitempty_part} // empty array"
+                        _format_skip_field(
+                            indent,
+                            field_name,
+                            from_part,
+                            omitempty_part,
+                            "empty array",
+                            is_array=True,
+                        )
                     )
                 else:
                     types = [_type_name(item) for item in all_items]
@@ -181,7 +203,14 @@ class _Generator:
                             isinstance(x, dict) and not x for x in all_items
                         ):
                             lines.append(
-                                f"{indent}{field_name} (array)null @skip{from_part}{omitempty_part} // empty object"
+                                _format_skip_field(
+                                    indent,
+                                    field_name,
+                                    from_part,
+                                    omitempty_part,
+                                    "empty objects",
+                                    is_array=True,
+                                )
                             )
                         else:
                             item_model_name = self._resolve_item_model_name(
@@ -209,7 +238,14 @@ class _Generator:
                     else:
                         types_comment = ", ".join(unique)
                         lines.append(
-                            f"{indent}{field_name} (array)null @skip{from_part}{omitempty_part} // {types_comment}"
+                            _format_skip_field(
+                                indent,
+                                field_name,
+                                from_part,
+                                omitempty_part,
+                                types_comment,
+                                is_array=True,
+                            )
                         )
 
             # 3. Primitive scalars, nulls, and heterogeneous samples
@@ -231,7 +267,13 @@ class _Generator:
                 else:
                     types_comment = ", ".join(unique)
                     lines.append(
-                        f"{indent}{field_name} @skip{from_part}{omitempty_part} // {types_comment}"
+                        _format_skip_field(
+                            indent,
+                            field_name,
+                            from_part,
+                            omitempty_part,
+                            types_comment,
+                        )
                     )
 
         return lines
