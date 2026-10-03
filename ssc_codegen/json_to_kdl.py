@@ -5,38 +5,30 @@ from __future__ import annotations
 import json
 import keyword
 import re
-from dataclasses import dataclass, field
 from typing import Any
+
+from ssc_codegen.naming import to_pascal_case
 
 
 class JsonToKdlError(ValueError):
     """Raised when an example cannot be represented by JSON definitions."""
 
 
-@dataclass
-class _Definition:
-    name: str
-    fields: list[str] = field(default_factory=list)
-    field_names: set[str] = field(default_factory=set)
-    is_array: bool = False
-
-    def add_field(self, name: str, definition: str) -> None:
-        if name in self.field_names:
-            raise JsonToKdlError(
-                f"normalized field name collision in {self.name}: {name!r}"
-            )
-        self.field_names.add(name)
-        self.fields.append(definition)
-
-
 def _path(path: tuple[str, ...]) -> str:
     return "$" if not path else "$." + ".".join(path)
+
+
+_RESERVED_FIELD_NAMES = frozenset({"true", "false", "null", "inf", "nan"})
 
 
 def _field_name(key: str) -> str:
     normalized = re.sub(r"[^0-9A-Za-z_]", "_", key)
     normalized = re.sub(r"_+", "_", normalized).strip("_") or "field"
-    if normalized[0].isdigit() or keyword.iskeyword(normalized):
+    if (
+        normalized[0].isdigit()
+        or keyword.iskeyword(normalized)
+        or normalized in _RESERVED_FIELD_NAMES
+    ):
         normalized = "k_" + normalized
     return normalized
 
@@ -60,109 +52,152 @@ def _type_name(value: Any) -> str:
 
 
 class _Generator:
-    def __init__(self) -> None:
-        self.definitions: list[_Definition] = []
-
     def generate(self, value: Any, name: str) -> str:
         if isinstance(value, dict):
-            self._object(value, name, ())
+            header = f"json {name} {{"
+            body_lines = self._render_object_fields(
+                value, indent_level=1, scope_name=name
+            )
         elif (
             isinstance(value, list)
             and value
             and all(isinstance(item, dict) for item in value)
         ):
-            self._object(value, name + "Item", (), is_array=True)
+            item_name = name + "Item"
+            header = f"(array)json {item_name} {{"
+            body_lines = self._render_object_fields(
+                value, indent_level=1, scope_name=item_name
+            )
         else:
             raise JsonToKdlError(
                 "JSON root must be an object or a non-empty array of objects"
             )
-        return (
-            "\n\n".join(self._render(item) for item in self.definitions) + "\n"
-        )
 
-    def _object(
+        if not body_lines:
+            return f"{header}\n}}\n"
+
+        body_text = "\n".join(body_lines)
+        return f"{header}\n{body_text}\n}}\n"
+
+    def _render_object_fields(
         self,
         values: dict[str, Any] | list[dict[str, Any]],
-        name: str,
-        path: tuple[str, ...],
-        *,
-        is_array: bool = False,
-    ) -> str:
-        definition = _Definition(name=name, is_array=is_array)
+        indent_level: int,
+        scope_name: str,
+    ) -> list[str]:
         objects = values if isinstance(values, list) else [values]
         merged: dict[str, list[Any]] = {}
         order: list[str] = []
         for obj in objects:
-            for key, value in obj.items():
+            for key, val in obj.items():
                 if key not in merged:
                     order.append(key)
                     merged[key] = []
-                merged[key].append(value)
+                merged[key].append(val)
+
+        seen_field_names: set[str] = set()
+        lines: list[str] = []
+        indent = " " * (indent_level * 4)
 
         for key in order:
             samples = merged[key]
             field_name = _field_name(key)
-            field_path = path + (key,)
-            expression = self._field(samples, name, field_name, field_path)
-            if field_name != key:
-                code, separator, comment = expression.partition(" // ")
-                expression = f'{code} "{key}"'
-                if separator:
-                    expression += f"{separator}{comment}"
-            if len(samples) < len(objects):
-                expression += " @omitempty"
-            definition.add_field(field_name, expression)
-        self.definitions.append(definition)
-        return name
+            if field_name in seen_field_names:
+                raise JsonToKdlError(
+                    f"normalized field name collision in {scope_name}: {field_name!r}"
+                )
+            seen_field_names.add(field_name)
 
-    def _field(
-        self,
-        samples: list[Any],
-        parent_name: str,
-        field_name: str,
-        path: tuple[str, ...],
-    ) -> str:
-        if len(samples) == 1 and isinstance(samples[0], dict):
-            child_name = parent_name + field_name[:1].upper() + field_name[1:]
-            self._object(samples[0], child_name, path)
-            return f"{field_name} {child_name}"
-        if len(samples) == 1 and isinstance(samples[0], list):
-            return self._array(samples[0], parent_name, field_name, path)
+            from_part = f" from={json.dumps(key)}" if field_name != key else ""
+            is_omitempty = len(samples) < len(objects)
+            omitempty_part = " @omitempty" if is_omitempty else ""
 
-        types = [_type_name(item) for item in samples]
-        if len(set(types)) == 1 and types[0] not in {"object", "array"}:
-            suffix = " // unknown real type" if types[0] == "nil" else ""
-            return f"{field_name} {types[0]}{suffix}"
-        return f"{field_name} @skip // {', '.join(types)}"
+            # 1. Single or merged nested dictionaries
+            if all(isinstance(s, dict) for s in samples):
+                if all(not s for s in samples):
+                    # Empty object safety: emit @skip without child block
+                    lines.append(
+                        f"{indent}{field_name} @skip{from_part}{omitempty_part} // empty object"
+                    )
+                else:
+                    lines.append(
+                        f"{indent}{field_name}{from_part}{omitempty_part} {{"
+                    )
+                    child_lines = self._render_object_fields(
+                        samples,
+                        indent_level=indent_level + 1,
+                        scope_name=field_name,
+                    )
+                    lines.extend(child_lines)
+                    lines.append(f"{indent}}}")
 
-    def _array(
-        self,
-        values: list[Any],
-        parent_name: str,
-        field_name: str,
-        path: tuple[str, ...],
-    ) -> str:
-        if not values:
-            return f"{field_name} (array)null @skip // empty array"
-        types = [_type_name(item) for item in values]
-        unique = list(dict.fromkeys(types))
-        if len(unique) == 1 and unique[0] == "object":
-            child_name = (
-                parent_name + field_name[:1].upper() + field_name[1:] + "Item"
-            )
-            self._object(values, child_name, path, is_array=True)
-            return f"{field_name} (array){child_name}"
-        if len(unique) == 1 and unique[0] not in {"array", "object"}:
-            return f"{field_name} (array){unique[0]}"
-        return f"{field_name} (array)null @skip // {', '.join(unique)}"
+            # 2. Arrays
+            elif len(samples) == 1 and isinstance(samples[0], list):
+                sample_list = samples[0]
+                if not sample_list:
+                    lines.append(
+                        f"{indent}{field_name} (array)null @skip{from_part}{omitempty_part} // empty array"
+                    )
+                else:
+                    types = [_type_name(item) for item in sample_list]
+                    unique = list(dict.fromkeys(types))
+                    if len(unique) == 1 and unique[0] == "object":
+                        if all(
+                            isinstance(x, dict) and not x for x in sample_list
+                        ):
+                            lines.append(
+                                f"{indent}{field_name} (array)null @skip{from_part}{omitempty_part} // empty object"
+                            )
+                        else:
+                            item_model_name = (
+                                to_pascal_case(field_name) + "Item"
+                            )
+                            lines.append(
+                                f"{indent}{field_name} (array){item_model_name}{from_part}{omitempty_part} {{"
+                            )
+                            child_lines = self._render_object_fields(
+                                sample_list,
+                                indent_level=indent_level + 1,
+                                scope_name=item_model_name,
+                            )
+                            lines.extend(child_lines)
+                            lines.append(f"{indent}}}")
+                    elif len(unique) == 1 and unique[0] not in {
+                        "array",
+                        "object",
+                        "nil",
+                    }:
+                        lines.append(
+                            f"{indent}{field_name} (array){unique[0]}{from_part}{omitempty_part}"
+                        )
+                    else:
+                        types_comment = ", ".join(unique)
+                        lines.append(
+                            f"{indent}{field_name} (array)null @skip{from_part}{omitempty_part} // {types_comment}"
+                        )
 
-    @staticmethod
-    def _render(definition: _Definition) -> str:
-        prefix = "(array)" if definition.is_array else ""
-        lines = [f"{prefix}json {definition.name} {{"]
-        lines.extend(f"    {item}" for item in definition.fields)
-        lines.append("}")
-        return "\n".join(lines)
+            # 3. Primitive scalars, nulls, and heterogeneous samples
+            else:
+                types = [_type_name(item) for item in samples]
+                if len(set(types)) == 1 and types[0] not in {
+                    "object",
+                    "array",
+                }:
+                    if types[0] == "nil":
+                        lines.append(
+                            f"{indent}{field_name} nil{from_part}{omitempty_part} // unknown real type"
+                        )
+                    else:
+                        lines.append(
+                            f"{indent}{field_name} {types[0]}{from_part}{omitempty_part}"
+                        )
+                else:
+                    types_comment = ", ".join(types)
+                    lines.append(
+                        f"{indent}{field_name} @skip{from_part}{omitempty_part} // {types_comment}"
+                    )
+
+        return lines
 
 
 def json_to_kdl(value: Any, *, name: str = "JsonResponse") -> str:
