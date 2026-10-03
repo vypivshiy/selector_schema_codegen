@@ -1,3 +1,4 @@
+import re
 import pytest
 from ssc_codegen.generation.runtime import (
     SscJsonPathError,
@@ -569,3 +570,434 @@ json MediaItem {
         ns_inline["InlineScraper"](
             '{"id": 1, "translations": ["not", "a", "dict"]}'
         ).parse()
+
+
+def test_anime_response_nested_dict_hierarchy_runtime_projection():
+    src = """
+json AnimeResponse {
+    translations (dict)Translation {
+        @key str
+        @value TranslationValue {
+            episodes (dict)EpisodeMap {
+                @key int
+                @value EpisodeValue {
+                    link str
+                    screenshots @skip
+                }
+            }
+            is_active bool
+            season int
+            type str
+            viewers int
+            watch_seconds int
+        }
+    }
+}
+
+(raw)struct Scraper {
+    anime {
+        jsonify AnimeResponse
+    }
+}
+"""
+    module, diags = parse_module(src)
+    assert not any(d.severity.name == "ERROR" for d in diags)
+
+    code = PY_BS4_CONVERTER.convert(module)
+
+    # 1. Verify topological dependency order of emitted TypedDicts
+    ep_pos = code.find('EpisodeValueJson = TypedDict("EpisodeValueJson"')
+    tr_pos = code.find(
+        'TranslationValueJson = TypedDict("TranslationValueJson"'
+    )
+    an_pos = code.find('AnimeResponseJson = TypedDict("AnimeResponseJson"')
+    assert ep_pos != -1, "EpisodeValueJson must be defined"
+    assert tr_pos != -1, "TranslationValueJson must be defined"
+    assert an_pos != -1, "AnimeResponseJson must be defined"
+    assert ep_pos < tr_pos < an_pos, (
+        "Hoisted schemas must be emitted in post-order dependency sequence"
+    )
+
+    # 2. Verify nested descriptor structure
+    assert "_episode_value_JSON_DESCRIPTORS" in code
+    assert "_translation_value_JSON_DESCRIPTORS" in code
+    assert "_anime_response_JSON_DESCRIPTORS" in code
+    assert (
+        "'episodes': ('episodes', False, False, {'__dict__': True, '__value__': {'link': ('link', False, False, None)}})"
+        in code
+    )
+
+    # 3. Execute projection against realistic nested dictionary payload
+    ns: dict = {}
+    exec(compile(code, "<test>", "exec"), ns)
+    payload = """{
+        "translations": {
+            "sub_ru": {
+                "is_active": true,
+                "season": 1,
+                "type": "sub",
+                "viewers": 1500,
+                "watch_seconds": 142000,
+                "unmodeled_field": "drop_me",
+                "episodes": {
+                    "1": {
+                        "link": "https://stream.example/ep1.mp4",
+                        "screenshots": ["s1.png", "s2.png"],
+                        "fps": 60
+                    },
+                    "2": {
+                        "link": "https://stream.example/ep2.mp4",
+                        "screenshots": ["s3.png"],
+                        "fps": 60
+                    }
+                }
+            },
+            "dub_en": {
+                "is_active": false,
+                "season": 2,
+                "type": "dub",
+                "viewers": 300,
+                "watch_seconds": 25000,
+                "episodes": {
+                    "10": {
+                        "link": "https://stream.example/ep10.mp4",
+                        "screenshots": []
+                    }
+                }
+            }
+        },
+        "extra_root_prop": 999
+    }"""
+    res = ns["Scraper"](payload).parse()
+    anime = res["anime"]
+    assert "extra_root_prop" not in anime
+    assert set(anime["translations"].keys()) == {"sub_ru", "dub_en"}
+
+    sub_ru = anime["translations"]["sub_ru"]
+    assert "unmodeled_field" not in sub_ru
+    assert sub_ru["is_active"] is True
+    assert sub_ru["season"] == 1
+    assert sub_ru["type"] == "sub"
+    assert sub_ru["viewers"] == 1500
+    assert sub_ru["watch_seconds"] == 142000
+    assert sub_ru["episodes"] == {
+        "1": {"link": "https://stream.example/ep1.mp4"},
+        "2": {"link": "https://stream.example/ep2.mp4"},
+    }
+    # Screenshots was @skip and fps was unmodeled - neither should be present
+    assert "screenshots" not in sub_ru["episodes"]["1"]
+    assert "fps" not in sub_ru["episodes"]["1"]
+
+    dub_en = anime["translations"]["dub_en"]
+    assert dub_en["is_active"] is False
+    assert dub_en["season"] == 2
+    assert dub_en["type"] == "dub"
+    assert dub_en["viewers"] == 300
+    assert dub_en["watch_seconds"] == 25000
+    assert dub_en["episodes"] == {
+        "10": {"link": "https://stream.example/ep10.mp4"},
+    }
+
+
+def test_inline_dict_value_modifiers_runtime_projection():
+    src = """
+json StreamCatalog {
+    channels (dict) {
+        @key str
+        @value {
+            display_title str from="channel_title"
+            backup_stream str? from="backup.url"
+            featured bool @omitempty from="meta.is_featured"
+            notes str?
+            internal_debug @skip
+            bitrates (dict) {
+                @key int
+                @value {
+                    endpoint str from="stream_endpoint"
+                    codec str?
+                    extra_tag @skip
+                }
+            }
+        }
+    }
+}
+
+(raw)struct Scraper {
+    catalog {
+        jsonify StreamCatalog
+    }
+}
+"""
+    module, diags = parse_module(src)
+    assert not any(d.severity.name == "ERROR" for d in diags)
+
+    code = PY_BS4_CONVERTER.convert(module)
+    ns: dict = {}
+    exec(compile(code, "<test>", "exec"), ns)
+
+    payload = """{
+        "channels": {
+            "ch_main": {
+                "channel_title": "Main Channel",
+                "backup": {"url": "https://backup.example/stream"},
+                "meta": {"is_featured": true},
+                "notes": null,
+                "internal_debug": "secret_token",
+                "unmodeled_attr": 42,
+                "bitrates": {
+                    "1080": {
+                        "stream_endpoint": "https://cdn.example/1080p",
+                        "codec": "h264",
+                        "extra_tag": "discard"
+                    },
+                    "720": {
+                        "stream_endpoint": "https://cdn.example/720p",
+                        "codec": null
+                    }
+                }
+            },
+            "ch_alt": {
+                "channel_title": "Alternative Channel",
+                "notes": "Community stream",
+                "bitrates": {}
+            }
+        }
+    }"""
+    res = ns["Scraper"](payload).parse()
+    channels = res["catalog"]["channels"]
+
+    # Channel 1 assertions
+    ch_main = channels["ch_main"]
+    assert ch_main["display_title"] == "Main Channel"
+    assert ch_main["backup_stream"] == "https://backup.example/stream"
+    assert ch_main["featured"] is True
+    assert ch_main["notes"] is None
+    assert "internal_debug" not in ch_main
+    assert "unmodeled_attr" not in ch_main
+    assert ch_main["bitrates"] == {
+        "1080": {
+            "endpoint": "https://cdn.example/1080p",
+            "codec": "h264",
+        },
+        "720": {
+            "endpoint": "https://cdn.example/720p",
+            "codec": None,
+        },
+    }
+    assert "extra_tag" not in ch_main["bitrates"]["1080"]
+
+    # Channel 2 assertions (@omitempty, missing optional dotpaths)
+    ch_alt = channels["ch_alt"]
+    assert ch_alt["display_title"] == "Alternative Channel"
+    assert ch_alt["backup_stream"] is None
+    assert "featured" not in ch_alt
+    assert ch_alt["notes"] == "Community stream"
+    assert ch_alt["bitrates"] == {}
+
+    # Validation errors on invalid payloads
+    missing_required_payload = """{
+        "channels": {
+            "bad": {
+                "backup": {"url": "http://x"},
+                "bitrates": {}
+            }
+        }
+    }"""
+    Err = ns["SscJsonFieldMissingError"]
+    with pytest.raises(
+        Err,
+        match=re.escape(
+            "Required JSON field 'channel_title' (mapped to 'display_title') is missing"
+        ),
+    ):
+        ns["Scraper"](missing_required_payload).parse()
+
+    null_non_nullable_payload = """{
+        "channels": {
+            "bad": {
+                "channel_title": null,
+                "bitrates": {}
+            }
+        }
+    }"""
+    with pytest.raises(
+        Err,
+        match=re.escape(
+            "Field 'channel_title' is null, but 'display_title' is not nullable"
+        ),
+    ):
+        ns["Scraper"](null_non_nullable_payload).parse()
+
+
+def test_top_level_dict_json_with_inline_value_block_projection():
+    src = """
+(dict)json Translations {
+    @key str
+    @value {
+        title str from="wire_name"
+        active bool
+        description str?
+        badge str @omitempty from="meta.badge"
+        raw_token @skip
+    }
+}
+
+(raw)struct Scraper {
+    translations {
+        jsonify Translations
+    }
+}
+"""
+    module, diags = parse_module(src)
+    assert not any(d.severity.name == "ERROR" for d in diags)
+
+    code = PY_BS4_CONVERTER.convert(module)
+    assert code.find(
+        'TranslationsValueJson = TypedDict("TranslationsValueJson"'
+    ) < code.find("TranslationsJson = Dict[str, TranslationsValueJson]")
+    assert (
+        "_translations_JSON_DESCRIPTORS = {'__dict__': True, '__value__':"
+        in code
+    )
+
+    ns: dict = {}
+    exec(compile(code, "<test>", "exec"), ns)
+    assert ns["_translations_JSON_DESCRIPTORS"] == {
+        "__dict__": True,
+        "__value__": {
+            "title": ("wire_name", False, False, None),
+            "active": ("active", False, False, None),
+            "description": ("description", True, False, None),
+            "badge": ("meta.badge", False, True, None),
+        },
+    }
+    payload = """{
+        "en": {
+            "wire_name": "English",
+            "active": true,
+            "description": null,
+            "raw_token": "secret_abc",
+            "extra_field": 123
+        },
+        "ja": {
+            "wire_name": "Japanese",
+            "active": false,
+            "description": "Original sound",
+            "meta": {"badge": "original"}
+        }
+    }"""
+    res = ns["Scraper"](payload).parse()
+    assert res["translations"] == {
+        "en": {
+            "title": "English",
+            "active": True,
+            "description": None,
+        },
+        "ja": {
+            "title": "Japanese",
+            "active": False,
+            "description": "Original sound",
+            "badge": "original",
+        },
+    }
+
+
+def test_inline_dict_array_value_block_projection():
+    src = """
+json PlaylistLibrary {
+    categories (dict) {
+        @key str
+        @value (array)PlaylistItem {
+            track_id int from="id"
+            title str
+            lossless bool?
+            discarded_blob @skip
+        }
+    }
+}
+
+(raw)struct Scraper {
+    library {
+        jsonify PlaylistLibrary
+    }
+}
+"""
+    module, diags = parse_module(src)
+    assert not any(d.severity.name == "ERROR" for d in diags)
+
+    code = PY_BS4_CONVERTER.convert(module)
+    assert 'PlaylistItemJson = TypedDict("PlaylistItemJson"' in code
+    assert "'categories': Dict[str, List[PlaylistItemJson]]" in code
+
+    ns: dict = {}
+    exec(compile(code, "<test>", "exec"), ns)
+    payload = """{
+        "categories": {
+            "rock": [
+                {"id": 1, "title": "Song A", "lossless": true, "discarded_blob": "xxx", "meta": 1},
+                {"id": 2, "title": "Song B", "lossless": null}
+            ],
+            "jazz": []
+        }
+    }"""
+    res = ns["Scraper"](payload).parse()
+    assert res["library"]["categories"] == {
+        "rock": [
+            {"track_id": 1, "title": "Song A", "lossless": True},
+            {"track_id": 2, "title": "Song B", "lossless": None},
+        ],
+        "jazz": [],
+    }
+
+
+def test_nested_dict_value_null_entry_projection():
+    src = """
+json MediaHub {
+    seasons (dict) {
+        @key str
+        @value {
+            season_num int
+            episodes (dict) {
+                @key int
+                @value {
+                    link str
+                }
+            }
+        }
+    }
+}
+
+(raw)struct Scraper {
+    hub {
+        jsonify MediaHub
+    }
+}
+"""
+    module, diags = parse_module(src)
+    assert not any(d.severity.name == "ERROR" for d in diags)
+
+    code = PY_BS4_CONVERTER.convert(module)
+    ns: dict = {}
+    exec(compile(code, "<test>", "exec"), ns)
+
+    payload = """{
+        "seasons": {
+            "s1": {
+                "season_num": 1,
+                "episodes": {
+                    "1": {"link": "https://stream.example/1"}
+                }
+            },
+            "s2": null
+        }
+    }"""
+    res = ns["Scraper"](payload).parse()
+    assert res["hub"]["seasons"] == {
+        "s1": {
+            "season_num": 1,
+            "episodes": {
+                "1": {"link": "https://stream.example/1"},
+            },
+        },
+        "s2": None,
+    }
