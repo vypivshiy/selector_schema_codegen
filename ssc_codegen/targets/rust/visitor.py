@@ -611,12 +611,15 @@ class RustVisitor(BaseWalker):
             return []
         info = node.ret_type_info or TypeInfo(base=VT.STRING)
         typ = self._type(info)
-        attr = (
-            '#[serde(skip_serializing_if = "Option::is_none")]'
-            if info.is_optional or info.omitempty
-            else ""
-        )
-        lines = [f"{ctx.indent}{attr}"] if attr else []
+        serde_items: list[str] = []
+        if node.alias and "." not in node.alias:
+            alias_escaped = node.alias.replace("\\", "\\\\").replace('"', '\\"')
+            serde_items.append(f'alias = "{alias_escaped}"')
+        if info.is_optional or info.omitempty:
+            serde_items.append('skip_serializing_if = "Option::is_none"')
+        lines = []
+        if serde_items:
+            lines.append(f"{ctx.indent}#[serde({', '.join(serde_items)})]")
         lines.append(f"{ctx.indent}pub {_ident(node.name)}: {typ},")
         return lines
 

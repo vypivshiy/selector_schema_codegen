@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -928,6 +929,133 @@ json AnimeResponse {
     assert "AnimeResponseMaterialDataJson::from_value" in code
 
 
+def test_rust_nested_dict_value_schema_multi_level_codegen() -> None:
+    """Multi-level nested dictionary value schemas generate hoisted Serde structs in topological order."""
+    schema = """
+json AnimeResponse {
+    translations (dict)Translation {
+        @key str
+        @value TranslationValue {
+            episodes (dict)EpisodeMap {
+                @key int
+                @value EpisodeValue {
+                    link str from="stream_url"
+                    screenshots @skip
+                }
+            }
+            is_active bool
+            season int
+            kind str from="type"
+        }
+    }
+}
+"""
+    module, diagnostics = parse_module(schema)
+    errors = [d for d in diagnostics if d.severity.name == "ERROR"]
+    assert not errors
+
+    converter = RustVisitor()
+    code = converter.convert(module)
+
+    # 1. EpisodeValueJson struct with Serde derives and skipped screenshots
+    assert "pub struct EpisodeValueJson {" in code
+    assert '#[serde(alias = "stream_url")]' in code
+    assert "pub link: String," in code
+    assert "screenshots" not in code
+    assert "impl EpisodeValueJson {" in code
+
+    # 2. TranslationValueJson struct with nested episodes HashMap
+    assert "pub struct TranslationValueJson {" in code
+    assert '#[serde(alias = "type")]' in code
+    assert (
+        "pub episodes: std::collections::HashMap<i64, EpisodeValueJson>,"
+        in code
+    )
+    assert "pub is_active: bool," in code
+    assert "pub season: i64," in code
+    assert "pub kind: String," in code
+    assert re.search(
+        r"rt::decode::<\s*std::collections::HashMap<i64, EpisodeValueJson>,?\s*>",
+        code,
+    )
+
+    # 3. AnimeResponseJson struct with translations HashMap
+    assert "pub struct AnimeResponseJson {" in code
+    assert (
+        "pub translations: std::collections::HashMap<String, TranslationValueJson>,"
+        in code
+    )
+    assert re.search(
+        r"rt::decode::<\s*std::collections::HashMap<String, TranslationValueJson>,?\s*>",
+        code,
+    )
+
+    # 4. Topological order: EpisodeValueJson before TranslationValueJson before AnimeResponseJson
+    idx_ep = code.index("pub struct EpisodeValueJson {")
+    idx_tr = code.index("pub struct TranslationValueJson {")
+    idx_resp = code.index("pub struct AnimeResponseJson {")
+    assert idx_ep < idx_tr < idx_resp
+
+
+def test_rust_nested_dict_anonymous_and_array_value_codegen() -> None:
+    """Anonymous @value and @value (array)ItemModel generate appropriate structs and HashMap/Vec types."""
+    schema = """
+(dict)json TopTranslations {
+    @key str
+    @value TopValue {
+        title str
+    }
+}
+
+json Project {
+    groups (dict) {
+        @key str
+        @value (array)GroupItem {
+            id int
+            name str
+        }
+    }
+    settings (dict) {
+        @key str
+        @value {
+            enabled bool
+            priority int? @omitempty
+        }
+    }
+}
+"""
+    module, diagnostics = parse_module(schema)
+    errors = [d for d in diagnostics if d.severity.name == "ERROR"]
+    assert not errors
+
+    converter = RustVisitor()
+    code = converter.convert(module)
+
+    assert (
+        "pub type TopTranslationsJson = std::collections::HashMap<String, TopValueJson>;"
+        in code
+    )
+    assert "pub struct TopValueJson {" in code
+    assert "pub struct GroupItemJson {" in code
+    assert "pub struct ProjectSettingsValueJson {" in code
+    assert (
+        "pub groups: std::collections::HashMap<String, Vec<GroupItemJson>>,"
+        in code
+    )
+    assert (
+        "pub settings: std::collections::HashMap<String, ProjectSettingsValueJson>,"
+        in code
+    )
+    assert re.search(
+        r"rt::decode::<\s*std::collections::HashMap<String, Vec<GroupItemJson>>,?\s*>",
+        code,
+    )
+    assert re.search(
+        r"rt::decode::<\s*std::collections::HashMap<String, ProjectSettingsValueJson>,?\s*>",
+        code,
+    )
+
+
 def test_rust_json_dict_and_inline_schemas_execute(tmp_path: Path) -> None:
     """End-to-end execution of top-level dict, inline dict, and hoisted inline schemas in Cargo."""
     source_dir = _write_cargo_project(tmp_path)
@@ -1031,6 +1159,129 @@ fn main() {
     )
     assert result.returncode == 0, result.stderr
     assert "DICT_AND_INLINE_JSON_PASSED" in result.stdout
+
+
+def test_rust_nested_dict_value_schemas_execute(tmp_path: Path) -> None:
+    """Cargo-backed end-to-end execution of multi-level nested dictionary value schemas."""
+    source_dir = _write_cargo_project(tmp_path)
+    converter = RustVisitor()
+    (source_dir / "sscgen_runtime.rs").write_text(
+        converter.emit_runtime(), encoding="utf-8"
+    )
+
+    schema = """
+(dict)json TopTranslations {
+    @key str
+    @value TopValue {
+        label str from="tag"
+    }
+}
+
+json AnimeResponse {
+    id str
+    top_translations TopTranslations
+    translations (dict)Translation {
+        @key str
+        @value TranslationValue {
+            episodes (dict)EpisodeMap {
+                @key int
+                @value EpisodeValue {
+                    link str from="stream_url"
+                    screenshots @skip
+                }
+            }
+            is_active bool
+            kind str from="type"
+        }
+    }
+    groups (dict) {
+        @key str
+        @value (array)GroupItem {
+            id int
+            name str
+        }
+    }
+}
+
+(raw)struct AnimePayload {
+    response { jsonify AnimeResponse }
+}
+"""
+    module, diagnostics = parse_module(schema)
+    assert not [d for d in diagnostics if d.severity.name == "ERROR"]
+
+    (source_dir / "parser.rs").write_text(
+        converter.convert(module), encoding="utf-8"
+    )
+
+    (source_dir / "main.rs").write_text(
+        r"""
+mod sscgen_runtime;
+mod parser;
+
+use parser::AnimePayloadParser;
+
+fn main() {
+    let payload = r#"{
+        "id": "anime-multi",
+        "top_translations": {
+            "featured": {"tag": "official"}
+        },
+        "translations": {
+            "sub": {
+                "episodes": {
+                    "1": {"stream_url": "https://stream.test/1", "screenshots": ["s1.png"]},
+                    "2": {"stream_url": "https://stream.test/2"}
+                },
+                "is_active": true,
+                "type": "tv"
+            }
+        },
+        "groups": {
+            "fansub": [
+                {"id": 10, "name": "Team A"},
+                {"id": 20, "name": "Team B"}
+            ]
+        }
+    }"#;
+
+    let mut parser = AnimePayloadParser::new(payload).expect("parser init failed");
+    let result = parser.parse().expect("parse failed");
+    let resp = result.response;
+
+    assert_eq!(resp.id, "anime-multi");
+    assert_eq!(resp.top_translations.get("featured").unwrap().label, "official");
+
+    let sub = resp.translations.get("sub").expect("missing sub translations");
+    assert!(sub.is_active);
+    assert_eq!(sub.kind, "tv");
+    assert_eq!(sub.episodes.len(), 2);
+    assert_eq!(sub.episodes.get(&1).unwrap().link, "https://stream.test/1");
+    assert_eq!(sub.episodes.get(&2).unwrap().link, "https://stream.test/2");
+
+    let fs = resp.groups.get("fansub").expect("missing fansub group");
+    assert_eq!(fs.len(), 2);
+    assert_eq!(fs[0].id, 10);
+    assert_eq!(fs[0].name, "Team A");
+    assert_eq!(fs[1].id, 20);
+    assert_eq!(fs[1].name, "Team B");
+
+    println!("NESTED_DICT_VALUE_SCHEMAS_RUST_PASSED");
+}
+""",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ["cargo", "run", "--quiet"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env=_cargo_env(),
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "NESTED_DICT_VALUE_SCHEMAS_RUST_PASSED" in result.stdout
 
 
 def test_all_rest_schemas_compile(tmp_path: Path) -> None:
