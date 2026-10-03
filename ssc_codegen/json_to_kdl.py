@@ -52,11 +52,39 @@ def _type_name(value: Any) -> str:
 
 
 class _Generator:
+    def __init__(self) -> None:
+        self.used_model_names: set[str] = set()
+
+    def _resolve_item_model_name(
+        self, field_name: str, ancestors: list[str]
+    ) -> str:
+        candidate = to_pascal_case(field_name) + "Item"
+        if candidate not in self.used_model_names:
+            self.used_model_names.add(candidate)
+            return candidate
+
+        for i in range(len(ancestors) - 1, -1, -1):
+            prefix = "".join(to_pascal_case(a) for a in ancestors[i:])
+            candidate = f"{prefix}{to_pascal_case(field_name)}Item"
+            if candidate not in self.used_model_names:
+                self.used_model_names.add(candidate)
+                return candidate
+
+        base_candidate = candidate
+        suffix = 2
+        while True:
+            candidate = f"{base_candidate}{suffix}"
+            if candidate not in self.used_model_names:
+                self.used_model_names.add(candidate)
+                return candidate
+            suffix += 1
+
     def generate(self, value: Any, name: str) -> str:
         if isinstance(value, dict):
+            self.used_model_names = {name}
             header = f"json {name} {{"
             body_lines = self._render_object_fields(
-                value, indent_level=1, scope_name=name
+                value, indent_level=1, scope_name=name, ancestors=[]
             )
         elif (
             isinstance(value, list)
@@ -64,9 +92,10 @@ class _Generator:
             and all(isinstance(item, dict) for item in value)
         ):
             item_name = name + "Item"
+            self.used_model_names = {item_name, name}
             header = f"(array)json {item_name} {{"
             body_lines = self._render_object_fields(
-                value, indent_level=1, scope_name=item_name
+                value, indent_level=1, scope_name=item_name, ancestors=[]
             )
         else:
             raise JsonToKdlError(
@@ -84,7 +113,10 @@ class _Generator:
         values: dict[str, Any] | list[dict[str, Any]],
         indent_level: int,
         scope_name: str,
+        ancestors: list[str] | None = None,
     ) -> list[str]:
+        if ancestors is None:
+            ancestors = []
         objects = values if isinstance(values, list) else [values]
         merged: dict[str, list[Any]] = {}
         order: list[str] = []
@@ -127,6 +159,7 @@ class _Generator:
                         samples,
                         indent_level=indent_level + 1,
                         scope_name=field_name,
+                        ancestors=ancestors + [field_name],
                     )
                     lines.extend(child_lines)
                     lines.append(f"{indent}}}")
@@ -149,8 +182,8 @@ class _Generator:
                                 f"{indent}{field_name} (array)null @skip{from_part}{omitempty_part} // empty object"
                             )
                         else:
-                            item_model_name = (
-                                to_pascal_case(field_name) + "Item"
+                            item_model_name = self._resolve_item_model_name(
+                                field_name, ancestors
                             )
                             lines.append(
                                 f"{indent}{field_name} (array){item_model_name}{from_part}{omitempty_part} {{"
@@ -159,6 +192,7 @@ class _Generator:
                                 sample_list,
                                 indent_level=indent_level + 1,
                                 scope_name=item_model_name,
+                                ancestors=ancestors + [field_name],
                             )
                             lines.extend(child_lines)
                             lines.append(f"{indent}}}")

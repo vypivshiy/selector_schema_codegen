@@ -343,3 +343,338 @@ def test_json_to_kdl_cli_writes_and_requires_confirmation(tmp_path) -> None:
     )
     assert result.exit_code == 0
     assert "Output not written." in result.output
+
+
+def test_json_to_kdl_inline_array_of_objects() -> None:
+    data = {
+        "users": [{"id": 1, "username": "alice", "active": True}],
+        "settings": {
+            "options": [{"key": "theme", "value": "dark"}],
+        },
+    }
+    source = json_to_kdl(data)
+    expected = (
+        "json JsonResponse {\n"
+        "    users (array)UsersItem {\n"
+        "        id int\n"
+        "        username str\n"
+        "        active bool\n"
+        "    }\n"
+        "    settings {\n"
+        "        options (array)OptionsItem {\n"
+        "            key str\n"
+        "            value str\n"
+        "        }\n"
+        "    }\n"
+        "}\n"
+    )
+    assert source == expected
+
+    module, diags = parse_module(source)
+    assert not any(d.severity.name == "ERROR" for d in diags)
+
+    defs = {node.name: node for node in module.body if hasattr(node, "name")}
+    assert "UsersItem" in defs
+    assert "OptionsItem" in defs
+    assert "JsonResponseSettings" in defs
+    assert "JsonResponse" in defs
+
+    users_def = defs["UsersItem"]
+    assert getattr(users_def, "is_array", False) is False
+    assert [f.name for f in users_def.body] == ["id", "username", "active"]
+
+    options_def = defs["OptionsItem"]
+    assert getattr(options_def, "is_array", False) is False
+    assert [f.name for f in options_def.body] == ["key", "value"]
+
+    settings_def = defs["JsonResponseSettings"]
+    assert settings_def.body[0].name == "options"
+    assert settings_def.body[0].ret_type_info.is_array is True
+    assert settings_def.body[0].ret_type_info.ref == "OptionsItem"
+
+    root_def = defs["JsonResponse"]
+    assert root_def.body[0].name == "users"
+    assert root_def.body[0].ret_type_info.is_array is True
+    assert root_def.body[0].ret_type_info.ref == "UsersItem"
+    assert root_def.body[1].name == "settings"
+    assert root_def.body[1].ret_type_info.is_array is False
+    assert root_def.body[1].ret_type_info.ref == "JsonResponseSettings"
+
+
+def test_json_to_kdl_inline_array_with_aliasing_and_omitempty() -> None:
+    data = {
+        "user-items": [
+            {"item-id": 10, "label": "first"},
+            {"item-id": 20},
+        ]
+    }
+    source = json_to_kdl(data)
+    expected = (
+        "json JsonResponse {\n"
+        '    user_items (array)UserItemsItem from="user-items" {\n'
+        '        item_id int from="item-id"\n'
+        "        label str @omitempty\n"
+        "    }\n"
+        "}\n"
+    )
+    assert source == expected
+
+    module, diags = parse_module(source)
+    assert not any(d.severity.name == "ERROR" for d in diags)
+
+    defs = {node.name: node for node in module.body if hasattr(node, "name")}
+    item_def = defs["UserItemsItem"]
+    assert item_def.body[0].name == "item_id"
+    assert item_def.body[0].alias == "item-id"
+    assert item_def.body[0].ret_type_info.omitempty is False
+    assert item_def.body[1].name == "label"
+    assert item_def.body[1].ret_type_info.omitempty is True
+
+    root_def = defs["JsonResponse"]
+    assert root_def.body[0].name == "user_items"
+    assert root_def.body[0].alias == "user-items"
+    assert root_def.body[0].ret_type_info.is_array is True
+    assert root_def.body[0].ret_type_info.ref == "UserItemsItem"
+
+
+def test_json_to_kdl_collision_disambiguation_with_ancestors() -> None:
+    data = {
+        "order": {
+            "items": [{"id": 1}],
+        },
+        "profile": {
+            "items": [{"name": "a"}],
+        },
+    }
+    source = json_to_kdl(data)
+    expected = (
+        "json JsonResponse {\n"
+        "    order {\n"
+        "        items (array)ItemsItem {\n"
+        "            id int\n"
+        "        }\n"
+        "    }\n"
+        "    profile {\n"
+        "        items (array)ProfileItemsItem {\n"
+        "            name str\n"
+        "        }\n"
+        "    }\n"
+        "}\n"
+    )
+    assert source == expected
+
+    module, diags = parse_module(source)
+    assert not any(d.severity.name == "ERROR" for d in diags)
+
+    defs = {node.name: node for node in module.body if hasattr(node, "name")}
+    assert "ItemsItem" in defs
+    assert "ProfileItemsItem" in defs
+    assert "JsonResponseOrder" in defs
+    assert "JsonResponseProfile" in defs
+    assert "JsonResponse" in defs
+
+    assert defs["JsonResponseOrder"].body[0].ret_type_info.ref == "ItemsItem"
+    assert (
+        defs["JsonResponseProfile"].body[0].ret_type_info.ref
+        == "ProfileItemsItem"
+    )
+
+
+def test_json_to_kdl_collision_disambiguation_multi_level_ancestors() -> None:
+    data = {
+        "company": {
+            "order": {
+                "items": [{"id": 1}],
+            }
+        },
+        "store": {
+            "order": {
+                "items": [{"sku": "SKU-1"}],
+            }
+        },
+        "warehouse": {
+            "order": {
+                "items": [{"qty": 50}],
+            }
+        },
+    }
+    source = json_to_kdl(data)
+    expected = (
+        "json JsonResponse {\n"
+        "    company {\n"
+        "        order {\n"
+        "            items (array)ItemsItem {\n"
+        "                id int\n"
+        "            }\n"
+        "        }\n"
+        "    }\n"
+        "    store {\n"
+        "        order {\n"
+        "            items (array)OrderItemsItem {\n"
+        "                sku str\n"
+        "            }\n"
+        "        }\n"
+        "    }\n"
+        "    warehouse {\n"
+        "        order {\n"
+        "            items (array)WarehouseOrderItemsItem {\n"
+        "                qty int\n"
+        "            }\n"
+        "        }\n"
+        "    }\n"
+        "}\n"
+    )
+    assert source == expected
+
+    module, diags = parse_module(source)
+    assert not any(d.severity.name == "ERROR" for d in diags)
+
+    defs = {node.name: node for node in module.body if hasattr(node, "name")}
+    assert "ItemsItem" in defs
+    assert "OrderItemsItem" in defs
+    assert "WarehouseOrderItemsItem" in defs
+
+
+def test_json_to_kdl_collision_numeric_suffix_when_ancestor_collides() -> None:
+    data = {
+        "items": [{"id": 1}],
+        "profile_items": [{"id": 2}],
+        "profile": {
+            "items": [{"name": "a"}],
+        },
+    }
+    source = json_to_kdl(data)
+    expected = (
+        "json JsonResponse {\n"
+        "    items (array)ItemsItem {\n"
+        "        id int\n"
+        "    }\n"
+        "    profile_items (array)ProfileItemsItem {\n"
+        "        id int\n"
+        "    }\n"
+        "    profile {\n"
+        "        items (array)ProfileItemsItem2 {\n"
+        "            name str\n"
+        "        }\n"
+        "    }\n"
+        "}\n"
+    )
+    assert source == expected
+
+    module, diags = parse_module(source)
+    assert not any(d.severity.name == "ERROR" for d in diags)
+
+    defs = {node.name: node for node in module.body if hasattr(node, "name")}
+    assert "ItemsItem" in defs
+    assert "ProfileItemsItem" in defs
+    assert "ProfileItemsItem2" in defs
+    assert "JsonResponseProfile" in defs
+    assert "JsonResponse" in defs
+
+
+def test_json_to_kdl_top_level_array_collision_with_root_schema() -> None:
+    data = [{"json_response": [{"id": 1}]}]
+    source = json_to_kdl(data)
+    expected = (
+        "(array)json JsonResponseItem {\n"
+        "    json_response (array)JsonResponseItem2 {\n"
+        "        id int\n"
+        "    }\n"
+        "}\n"
+    )
+    assert source == expected
+
+    module, diags = parse_module(source)
+    assert not any(d.severity.name == "ERROR" for d in diags)
+
+    defs = {node.name: node for node in module.body if hasattr(node, "name")}
+    assert "JsonResponseItem" in defs
+    assert "JsonResponseItem2" in defs
+    assert defs["JsonResponseItem"].is_array is True
+    assert defs["JsonResponseItem2"].is_array is False
+
+
+def test_json_to_kdl_top_level_object_collision_with_root_name() -> None:
+    data = {"custom": [{"id": 1}]}
+    source = json_to_kdl(data, name="CustomItem")
+    expected = (
+        "json CustomItem {\n"
+        "    custom (array)CustomItem2 {\n"
+        "        id int\n"
+        "    }\n"
+        "}\n"
+    )
+    assert source == expected
+
+    module, diags = parse_module(source)
+    assert not any(d.severity.name == "ERROR" for d in diags)
+
+    defs = {node.name: node for node in module.body if hasattr(node, "name")}
+    assert "CustomItem" in defs
+    assert "CustomItem2" in defs
+
+
+def test_json_to_kdl_deep_array_hierarchies() -> None:
+    data = {
+        "departments": [
+            {
+                "name": "Engineering",
+                "teams": [
+                    {
+                        "name": "Backend",
+                        "members": [
+                            {
+                                "name": "Alice",
+                                "active": True,
+                            }
+                        ],
+                    }
+                ],
+            }
+        ]
+    }
+    source = json_to_kdl(data)
+    expected = (
+        "json JsonResponse {\n"
+        "    departments (array)DepartmentsItem {\n"
+        "        name str\n"
+        "        teams (array)TeamsItem {\n"
+        "            name str\n"
+        "            members (array)MembersItem {\n"
+        "                name str\n"
+        "                active bool\n"
+        "            }\n"
+        "        }\n"
+        "    }\n"
+        "}\n"
+    )
+    assert source == expected
+
+    module, diags = parse_module(source)
+    assert not any(d.severity.name == "ERROR" for d in diags)
+
+    defs = {node.name: node for node in module.body if hasattr(node, "name")}
+    assert "MembersItem" in defs
+    assert "TeamsItem" in defs
+    assert "DepartmentsItem" in defs
+    assert "JsonResponse" in defs
+
+    members_def = defs["MembersItem"]
+    assert [f.name for f in members_def.body] == ["name", "active"]
+
+    teams_def = defs["TeamsItem"]
+    assert teams_def.body[0].name == "name"
+    assert teams_def.body[1].name == "members"
+    assert teams_def.body[1].ret_type_info.is_array is True
+    assert teams_def.body[1].ret_type_info.ref == "MembersItem"
+
+    depts_def = defs["DepartmentsItem"]
+    assert depts_def.body[0].name == "name"
+    assert depts_def.body[1].name == "teams"
+    assert depts_def.body[1].ret_type_info.is_array is True
+    assert depts_def.body[1].ret_type_info.ref == "TeamsItem"
+
+    root_def = defs["JsonResponse"]
+    assert root_def.body[0].name == "departments"
+    assert root_def.body[0].ret_type_info.is_array is True
+    assert root_def.body[0].ret_type_info.ref == "DepartmentsItem"
