@@ -1,5 +1,7 @@
 # Specification: Inline JSON-to-KDL Schema Generation
 
+**Status:** Implemented
+
 ## Problem Statement
 
 When creating scraping schemas or REST API response schemas from sample JSON payloads, developers use `json_to_kdl` (and the `ssc-gen json-to-kdl` CLI command) to automatically bootstrap `.kdl` schema files. Previously, the generator flattened nested JSON hierarchies into multiple standalone top-level `json` declarations written in reverse topological order, inventing global PascalCase identifiers (`JsonResponseUser`, `JsonResponseUserProfile`, etc.) for every nested object.

@@ -153,13 +153,20 @@ ssc-gen check schema.kdl -f json                                      # lint onl
 ssc-gen run schema.kdl:StructName -i page.html -L bs4                 # generate + execute + output JSON
 ssc-gen health schema.kdl:StructName -i page.html -L bs4              # check selectors against HTML
 ssc-gen scout -i page.html --text '\$\d+\.\d{2}' -f json              # HTML recon: regex on text/attrs
+ssc-gen json-to-kdl payload.json -o schema.kdl                         # generate inline JSON schema from JSON sample
+ssc-gen json-to-kdl payload.json -o schema.kdl --name ApiResponse -f   # custom root schema name, overwrite
 ```
 
 **Commands:**
 - `generate python <files>`: Generate Python parser code
 - `generate js <files>`: Generate JavaScript parser code
- - `generate go <files>`: Generate Go parser code (goquery + net/http)
- - `generate rust <files>`: Generate Rust parser modules (dom_query + serde)
+- `generate go <files>`: Generate Go parser code (goquery + net/http)
+- `generate rust <files>`: Generate Rust parser modules (dom_query + serde)
+- `check <files>`: Lint and validate .kdl schemas
+- `run <schema:struct>`: Generate and run parser, output JSON
+- `health <schema:struct>`: Check selector health against HTML
+- `scout`: HTML reconnaissance (regex on text/attrs)
+- `json-to-kdl <file> -o <out>`: Bootstrap inline JSON schema definitions from a JSON example
 
 **Flags:**
 - `--lib / -L`: HTML library (Python only) — `bs4` (default) | `lxml` | `parsel` | `slax`

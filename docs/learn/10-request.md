@@ -288,6 +288,10 @@ json ApiError {
 > снимите трафик через [mitmproxy2swagger](https://github.com/alufers/mitmproxy2swagger)
 > и сгенерируйте клиент любым openapi-generator'ом
 > (опционально с LLM-помощью для разметки схем).
+>
+> Схему ответа можно быстро сгенерировать из сохраненного JSON-ответа командой:
+> `ssc-gen json-to-kdl response.json -o schema.kdl --name Product`
+
 
 REST-методы возвращают **Result-значение** вместо того чтобы бросать
 исключение. Это единообразно для всех target-языков (Python/JS/будущие Go,
