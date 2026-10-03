@@ -678,3 +678,393 @@ def test_json_to_kdl_deep_array_hierarchies() -> None:
     assert root_def.body[0].name == "departments"
     assert root_def.body[0].ret_type_info.is_array is True
     assert root_def.body[0].ret_type_info.ref == "DepartmentsItem"
+
+
+def test_json_to_kdl_multi_sample_arrays_different_keys_omitempty() -> None:
+    data = [
+        {"id": 1, "name": "Alice"},
+        {"id": 2, "age": 30},
+        {"id": 3, "name": "Charlie", "email": "c@example.com"},
+    ]
+    source = json_to_kdl(data)
+    expected = (
+        "(array)json JsonResponseItem {\n"
+        "    id int\n"
+        "    name str @omitempty\n"
+        "    age int @omitempty\n"
+        "    email str @omitempty\n"
+        "}\n"
+    )
+    assert source == expected
+
+    module, diags = parse_module(source)
+    assert not any(d.severity.name == "ERROR" for d in diags)
+
+    defs = {node.name: node for node in module.body if hasattr(node, "name")}
+    item_fields = {f.name: f for f in defs["JsonResponseItem"].body}
+    assert item_fields["id"].ret_type_info.omitempty is False
+    assert item_fields["name"].ret_type_info.omitempty is True
+    assert item_fields["age"].ret_type_info.omitempty is True
+    assert item_fields["email"].ret_type_info.omitempty is True
+
+
+def test_json_to_kdl_recursive_nested_objects_merging_with_omitempty() -> None:
+    data = [
+        {
+            "user": {
+                "id": 1,
+                "profile": {
+                    "first_name": "Alice",
+                    "city": "London",
+                },
+            }
+        },
+        {
+            "user": {
+                "id": 2,
+                "profile": {
+                    "first_name": "Bob",
+                    "country": "UK",
+                },
+            }
+        },
+        {
+            "user": {
+                "id": 3,
+                "profile": {
+                    "first_name": "Charlie",
+                },
+            }
+        },
+    ]
+    source = json_to_kdl(data)
+    expected = (
+        "(array)json JsonResponseItem {\n"
+        "    user {\n"
+        "        id int\n"
+        "        profile {\n"
+        "            first_name str\n"
+        "            city str @omitempty\n"
+        "            country str @omitempty\n"
+        "        }\n"
+        "    }\n"
+        "}\n"
+    )
+    assert source == expected
+
+    module, diags = parse_module(source)
+    assert not any(d.severity.name == "ERROR" for d in diags)
+
+    defs = {node.name: node for node in module.body if hasattr(node, "name")}
+    profile_fields = {
+        f.name: f for f in defs["JsonResponseItemUserProfile"].body
+    }
+    assert profile_fields["first_name"].ret_type_info.omitempty is False
+    assert profile_fields["city"].ret_type_info.omitempty is True
+    assert profile_fields["country"].ret_type_info.omitempty is True
+
+
+def test_json_to_kdl_recursive_nested_objects_partial_child_blocks() -> None:
+    data = [
+        {
+            "user": {
+                "profile": {"display_name": "Alice", "avatar": "a.png"},
+            }
+        },
+        {
+            "user": {
+                "profile": {"display_name": "Bob"},
+            }
+        },
+        {
+            "user": {},
+        },
+        {},
+    ]
+    source = json_to_kdl(data)
+    expected = (
+        "(array)json JsonResponseItem {\n"
+        "    user @omitempty {\n"
+        "        profile @omitempty {\n"
+        "            display_name str\n"
+        "            avatar str @omitempty\n"
+        "        }\n"
+        "    }\n"
+        "}\n"
+    )
+    assert source == expected
+
+    module, diags = parse_module(source)
+    assert not any(d.severity.name == "ERROR" for d in diags)
+
+    defs = {node.name: node for node in module.body if hasattr(node, "name")}
+    item_fields = {f.name: f for f in defs["JsonResponseItem"].body}
+    assert item_fields["user"].ret_type_info.omitempty is True
+
+    user_fields = {f.name: f for f in defs["JsonResponseItemUser"].body}
+    assert user_fields["profile"].ret_type_info.omitempty is True
+
+    profile_fields = {
+        f.name: f for f in defs["JsonResponseItemUserProfile"].body
+    }
+    assert profile_fields["display_name"].ret_type_info.omitempty is False
+    assert profile_fields["avatar"].ret_type_info.omitempty is True
+
+
+def test_json_to_kdl_nested_arrays_across_multiple_parent_samples() -> None:
+    data = [
+        {
+            "id": 1,
+            "tags": ["python", "kdl"],
+            "orders": [
+                {"sku": "A1", "price": 10},
+            ],
+        },
+        {
+            "id": 2,
+            "tags": ["rust"],
+            "orders": [
+                {"sku": "B2", "price": 20, "discount": 5},
+                {"sku": "B3", "price": 30},
+            ],
+        },
+    ]
+    source = json_to_kdl(data)
+    expected = (
+        "(array)json JsonResponseItem {\n"
+        "    id int\n"
+        "    tags (array)str\n"
+        "    orders (array)OrdersItem {\n"
+        "        sku str\n"
+        "        price int\n"
+        "        discount int @omitempty\n"
+        "    }\n"
+        "}\n"
+    )
+    assert source == expected
+
+    module, diags = parse_module(source)
+    assert not any(d.severity.name == "ERROR" for d in diags)
+
+    defs = {node.name: node for node in module.body if hasattr(node, "name")}
+    assert "OrdersItem" in defs
+    orders_fields = {f.name: f for f in defs["OrdersItem"].body}
+    assert orders_fields["sku"].ret_type_info.omitempty is False
+    assert orders_fields["price"].ret_type_info.omitempty is False
+    assert orders_fields["discount"].ret_type_info.omitempty is True
+
+
+def test_json_to_kdl_deep_nested_arrays_across_multiple_parent_samples() -> (
+    None
+):
+    data = [
+        {
+            "company": "Acme",
+            "departments": [
+                {
+                    "name": "Engineering",
+                    "teams": [
+                        {"lead": "Alice", "size": 10},
+                    ],
+                }
+            ],
+        },
+        {
+            "company": "Globex",
+            "departments": [
+                {
+                    "name": "Design",
+                    "budget": 20000,
+                    "teams": [
+                        {"lead": "Bob", "remote": True},
+                        {"lead": "Charlie", "size": 5},
+                    ],
+                },
+                {
+                    "name": "Sales",
+                    "teams": [
+                        {"lead": "David"},
+                    ],
+                },
+            ],
+        },
+    ]
+    source = json_to_kdl(data)
+    expected = (
+        "(array)json JsonResponseItem {\n"
+        "    company str\n"
+        "    departments (array)DepartmentsItem {\n"
+        "        name str\n"
+        "        teams (array)TeamsItem {\n"
+        "            lead str\n"
+        "            size int @omitempty\n"
+        "            remote bool @omitempty\n"
+        "        }\n"
+        "        budget int @omitempty\n"
+        "    }\n"
+        "}\n"
+    )
+    assert source == expected
+
+    module, diags = parse_module(source)
+    assert not any(d.severity.name == "ERROR" for d in diags)
+
+    defs = {node.name: node for node in module.body if hasattr(node, "name")}
+    assert "DepartmentsItem" in defs
+    assert "TeamsItem" in defs
+
+    teams_fields = {f.name: f for f in defs["TeamsItem"].body}
+    assert teams_fields["lead"].ret_type_info.omitempty is False
+    assert teams_fields["size"].ret_type_info.omitempty is True
+    assert teams_fields["remote"].ret_type_info.omitempty is True
+
+    depts_fields = {f.name: f for f in defs["DepartmentsItem"].body}
+    assert depts_fields["name"].ret_type_info.omitempty is False
+    assert depts_fields["teams"].ret_type_info.omitempty is False
+    assert depts_fields["budget"].ret_type_info.omitempty is True
+
+
+def test_json_to_kdl_heterogeneous_types_fallback_to_skip() -> None:
+    data = [
+        {
+            "scalar_mix": 42,
+            "obj_or_scalar": {"foo": "bar"},
+            "obj_or_arr": {"key": 1},
+            "arr_or_scalar": ["item"],
+        },
+        {
+            "scalar_mix": "forty-two",
+            "obj_or_scalar": "plain text",
+            "obj_or_arr": [1, 2],
+            "arr_or_scalar": 100,
+        },
+    ]
+    source = json_to_kdl(data)
+    expected = (
+        "(array)json JsonResponseItem {\n"
+        "    scalar_mix @skip // int, str\n"
+        "    obj_or_scalar @skip // object, str\n"
+        "    obj_or_arr @skip // object, array\n"
+        "    arr_or_scalar @skip // array, int\n"
+        "}\n"
+    )
+    assert source == expected
+
+    module, diags = parse_module(source)
+    assert not any(d.severity.name == "ERROR" for d in diags)
+
+    defs = {node.name: node for node in module.body if hasattr(node, "name")}
+    fields = {f.name: f for f in defs["JsonResponseItem"].body}
+    for f_name in [
+        "scalar_mix",
+        "obj_or_scalar",
+        "obj_or_arr",
+        "arr_or_scalar",
+    ]:
+        assert fields[f_name].ret_type_info.skip is True
+
+    # Heterogeneous items within an array field across samples
+    arr_data = [
+        {"arr_mix": ["str_val"], "obj_arr_mix": [{"id": 1}]},
+        {"arr_mix": [999], "obj_arr_mix": ["string_item"]},
+    ]
+    arr_source = json_to_kdl(arr_data)
+    assert "arr_mix (array)null @skip // str, int" in arr_source
+    assert "obj_arr_mix (array)null @skip // object, str" in arr_source
+
+
+def test_json_to_kdl_empty_objects_merging_and_optionality() -> None:
+    # 1. All samples empty dict
+    all_empty = [{"meta": {}}, {"meta": {}}]
+    src_all_empty = json_to_kdl(all_empty)
+    assert src_all_empty == (
+        "(array)json JsonResponseItem {\n    meta @skip // empty object\n}\n"
+    )
+    _, diags = parse_module(src_all_empty)
+    assert not any(d.severity.name == "ERROR" for d in diags)
+
+    # 2. Some empty, some non-empty -> merged and marked @omitempty
+    some_empty = [{"meta": {}}, {"meta": {"version": 1}}]
+    src_some_empty = json_to_kdl(some_empty)
+    assert src_some_empty == (
+        "(array)json JsonResponseItem {\n"
+        "    meta {\n"
+        "        version int @omitempty\n"
+        "    }\n"
+        "}\n"
+    )
+    _, diags = parse_module(src_some_empty)
+    assert not any(d.severity.name == "ERROR" for d in diags)
+
+    # 3. Some empty, some non-empty, some missing -> meta gets @omitempty, version gets @omitempty
+    mixed_meta = [{"meta": {}}, {"meta": {"version": 1}}, {}]
+    src_mixed_meta = json_to_kdl(mixed_meta)
+    assert src_mixed_meta == (
+        "(array)json JsonResponseItem {\n"
+        "    meta @omitempty {\n"
+        "        version int @omitempty\n"
+        "    }\n"
+        "}\n"
+    )
+    _, diags = parse_module(src_mixed_meta)
+    assert not any(d.severity.name == "ERROR" for d in diags)
+
+    # 4. Array of empty objects across all samples
+    arr_empty_objs = [{"items": [{}]}, {"items": [{}]}]
+    src_arr_empty = json_to_kdl(arr_empty_objs)
+    assert src_arr_empty == (
+        "(array)json JsonResponseItem {\n"
+        "    items (array)null @skip // empty object\n"
+        "}\n"
+    )
+
+    # 5. Array with empty object and populated object
+    arr_mixed_objs = [{"items": [{}]}, {"items": [{"id": 1}]}]
+    src_arr_mixed = json_to_kdl(arr_mixed_objs)
+    assert src_arr_mixed == (
+        "(array)json JsonResponseItem {\n"
+        "    items (array)ItemsItem {\n"
+        "        id int @omitempty\n"
+        "    }\n"
+        "}\n"
+    )
+    _, diags = parse_module(src_arr_mixed)
+    assert not any(d.severity.name == "ERROR" for d in diags)
+
+
+def test_json_to_kdl_empty_and_populated_arrays_merging() -> None:
+    # 1. Some empty array samples, some populated
+    data_populated = [{"tags": []}, {"tags": ["a", "b"]}]
+    source_pop = json_to_kdl(data_populated)
+    assert source_pop == (
+        "(array)json JsonResponseItem {\n    tags (array)str\n}\n"
+    )
+    _, diags = parse_module(source_pop)
+    assert not any(d.severity.name == "ERROR" for d in diags)
+
+    # 2. All empty array samples
+    data_all_empty = [{"tags": []}, {"tags": []}]
+    source_empty = json_to_kdl(data_all_empty)
+    assert source_empty == (
+        "(array)json JsonResponseItem {\n"
+        "    tags (array)null @skip // empty array\n"
+        "}\n"
+    )
+
+    # 3. Empty array in some samples, missing in other
+    data_empty_missing = [{"tags": []}, {}]
+    source_empty_missing = json_to_kdl(data_empty_missing)
+    assert source_empty_missing == (
+        "(array)json JsonResponseItem {\n"
+        "    tags (array)null @skip @omitempty // empty array\n"
+        "}\n"
+    )
+
+    # 4. Populated array in some, missing in other
+    data_pop_missing = [{"tags": ["a"]}, {}]
+    source_pop_missing = json_to_kdl(data_pop_missing)
+    assert source_pop_missing == (
+        "(array)json JsonResponseItem {\n    tags (array)str @omitempty\n}\n"
+    )
+    _, diags = parse_module(source_pop_missing)
+    assert not any(d.severity.name == "ERROR" for d in diags)
