@@ -137,6 +137,8 @@ from ssc_codegen.traversal.utils import (
 )
 from ssc_codegen.generation.builder import ModuleBuilder
 from ssc_codegen.targets.python import rest
+from ssc_codegen.targets.python.html_libs.base import DomSpelling
+from ssc_codegen.targets.python.html_libs.bs4 import Bs4DomSpelling
 from ssc_codegen.targets.python.http_libs.aiohttp import AioHttpStrategy
 from ssc_codegen.targets.python.http_libs.base import HttpLibStrategy
 from ssc_codegen.targets.python.http_libs.httpx import HttpxStrategy
@@ -398,7 +400,8 @@ class PythonVisitor(BaseWalker):
         self,
         var_name: str = "v",
         indent: str = " " * 4,
-        dom_spelling_cls: type | None = None,
+        dom_spelling_cls: type[DomSpelling] | None = None,
+        bs4_parser: str = "lxml",
     ) -> None:
         """Initialize the Python visitor.
 
@@ -406,20 +409,29 @@ class PythonVisitor(BaseWalker):
             var_name: Base prefix for pipeline intermediate variables (default: ``"v"``).
             indent: Indentation unit string (default: 4 spaces).
             dom_spelling_cls: Optional concrete `DomSpelling` subclass for HTML DOM parsing.
+            bs4_parser: HTML parser engine for BeautifulSoup4 (default: ``"lxml"``).
         """
         self.var_name = var_name
         self.indent = indent
-        self._dom_spelling_cls = dom_spelling_cls
+        self._dom_spelling_cls: type[DomSpelling] | None = dom_spelling_cls
+        self.bs4_parser = bs4_parser
         self._file_providers: dict[str, Any] = {}
         self._reset_state()
 
     # === STATE ===
 
-    def _reset_state(self) -> None:
+    def _reset_state(self, bs4_parser: str | None = None) -> None:
         self._builder = ModuleBuilder()
         self._http: HttpLibStrategy = HttpxStrategy()
+        if bs4_parser is not None:
+            self.bs4_parser = bs4_parser
         if self._dom_spelling_cls is not None:
-            self._dom = self._dom_spelling_cls(self._builder)
+            if issubclass(self._dom_spelling_cls, Bs4DomSpelling):
+                self._dom: DomSpelling = self._dom_spelling_cls(
+                    self._builder, parser=self.bs4_parser
+                )
+            else:
+                self._dom = self._dom_spelling_cls(self._builder)
 
     def _make_ctx(self, meta: dict) -> WalkContext:
         return WalkContext(
@@ -464,7 +476,8 @@ class PythonVisitor(BaseWalker):
         Returns:
             Mapping from filenames (``""`` for the main module) to generated source texts.
         """
-        self._reset_state()
+        bs4_parser = meta.get("bs4_parser", self.bs4_parser)
+        self._reset_state(bs4_parser=bs4_parser)
         self._http = self.http_strategy_for(meta.get("http_client"))
         ctx = self._make_ctx(meta)
         self._walk_module(module_ast, ctx)
@@ -629,6 +642,8 @@ class PythonVisitor(BaseWalker):
         if has_html:
             for line in self._dom.parser_imports:
                 self._builder.require_import(line)
+            if isinstance(self._dom, Bs4DomSpelling):
+                self._builder.require_import("from typing import Literal")
         self._builder.require_import("import sys")
         self._builder.require_import(
             "from typing import Any, Dict, List, Optional, TypedDict, Union"
@@ -902,7 +917,7 @@ class PythonVisitor(BaseWalker):
             ]
         else:
             lines = [
-                f"{i}def __init__(self, document: {self._dom.init_arg_type}):",
+                f"{i}def __init__(self, document: {self._dom.init_arg_type}{self._dom.init_extra_params}){self._dom.init_return_type}:",
                 f"{i2}if isinstance(document, str):",
                 f"{i3}self._doc = {self._dom.init_from_str_expr}",
                 f"{i2}else:",
@@ -1003,7 +1018,12 @@ class PythonVisitor(BaseWalker):
         name = to_snake_case(node.name)
         t_ret = self._resolve_type(node.ret_type_info)
         inner = ctx.deeper()
-        lines = [f"{ctx.indent}def {name}(document: str) -> {t_ret}:"]
+        if node.is_raw:
+            lines = [f"{ctx.indent}def {name}(document: str) -> {t_ret}:"]
+        else:
+            lines = [
+                f"{ctx.indent}def {name}(document: str{self._dom.fn_extra_params}) -> {t_ret}:"
+            ]
         if node.doc:
             lines.append(f"{inner.indent}{node.doc!r}")
         if node.is_raw:

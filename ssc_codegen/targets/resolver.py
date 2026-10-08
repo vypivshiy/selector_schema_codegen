@@ -84,13 +84,14 @@ def _resolve_python(spec: TargetSpec) -> TargetProfile:
     Raises:
         ResolutionError: If an unknown HTML library or unsupported HTTP client is specified.
     """
+    from ssc_codegen.targets.python.html_libs.base import DomSpelling
     from ssc_codegen.targets.python.html_libs.bs4 import Bs4DomSpelling
     from ssc_codegen.targets.python.html_libs.lxml import LxmlDomSpelling
     from ssc_codegen.targets.python.html_libs.parsel import ParselDomSpelling
     from ssc_codegen.targets.python.html_libs.slax import SlaxDomSpelling
     from ssc_codegen.targets.python.visitor import PythonVisitor
 
-    spellings = {
+    spellings: dict[str, type[DomSpelling]] = {
         "bs4": Bs4DomSpelling,
         "lxml": LxmlDomSpelling,
         "parsel": ParselDomSpelling,
@@ -104,6 +105,19 @@ def _resolve_python(spec: TargetSpec) -> TargetProfile:
             f"Available: {', '.join(sorted(spellings))}."
         )
 
+    valid_bs4_parsers = ("lxml", "html.parser", "html5lib")
+    if spec.bs4_parser is not None:
+        if lib != "bs4":
+            raise ResolutionError(
+                f"--bs4-parser is only applicable when --lib is bs4, not '{lib}'."
+            )
+        if spec.bs4_parser not in valid_bs4_parsers:
+            raise ResolutionError(
+                f"Invalid --bs4-parser '{spec.bs4_parser}'. "
+                f"Permitted values: 'lxml', 'html.parser', 'html5lib'."
+            )
+
+    effective_bs4_parser = spec.bs4_parser or "lxml"
     spelling_cls = spellings[lib]
 
     if spec.http_client is not None:
@@ -118,7 +132,10 @@ def _resolve_python(spec: TargetSpec) -> TargetProfile:
         pass  # supported, with fallback
 
     def _factory() -> PythonVisitor:
-        return PythonVisitor(dom_spelling_cls=spelling_cls)
+        return PythonVisitor(
+            dom_spelling_cls=spelling_cls,
+            bs4_parser=effective_bs4_parser,
+        )
 
     return TargetProfile(
         language="python",
@@ -147,6 +164,9 @@ def _resolve_js(spec: TargetSpec) -> TargetProfile:
 
     if spec.lib is not None:
         raise ResolutionError("--lib is not applicable for JavaScript.")
+
+    if spec.bs4_parser is not None:
+        raise ResolutionError("--bs4-parser is not applicable for JavaScript.")
 
     if spec.http_client is not None:
         valid = ("fetch", "axios")
@@ -185,6 +205,8 @@ def _resolve_go(spec: TargetSpec) -> TargetProfile:
 
     if spec.lib is not None:
         raise ResolutionError("--lib is not applicable for Go.")
+    if spec.bs4_parser is not None:
+        raise ResolutionError("--bs4-parser is not applicable for Go.")
     if spec.http_client is not None:
         raise ResolutionError(
             "Go uses net/http exclusively. --http-client is not applicable."
@@ -210,6 +232,8 @@ def _resolve_rust(spec: TargetSpec) -> TargetProfile:
 
     if spec.lib is not None:
         raise ResolutionError("--lib is not applicable for Rust.")
+    if spec.bs4_parser is not None:
+        raise ResolutionError("--bs4-parser is not applicable for Rust.")
     if spec.http_client is not None and spec.http_client != "reqwest":
         raise ResolutionError(
             f"Invalid HTTP client '{spec.http_client}' for Rust. Valid options: reqwest."

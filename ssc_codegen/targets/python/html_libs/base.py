@@ -29,8 +29,8 @@ from ssc_codegen.ast.selectors import (
     XpathSelect,
     XpathSelectAll,
 )
-from ssc_codegen.traversal.context import WalkContext as ConverterContext
 from ssc_codegen.generation.builder import ModuleBuilder
+from ssc_codegen.traversal.context import WalkContext as ConverterContext
 
 
 class DomSpelling(ABC):
@@ -54,6 +54,9 @@ class DomSpelling(ABC):
         document_type: Type annotation string for a single parsed HTML element/document.
         document_array_type: Type annotation string for a collection of elements.
         init_arg_type: Type annotation string accepted by `__init__` (e.g. `Union[str, ...]`).
+        init_extra_params: Optional keyword parameter signature fragment for `__init__`.
+        init_return_type: Return type annotation for `__init__` (e.g. `" -> None"` or `""`).
+        fn_extra_params: Optional keyword parameter signature fragment for function definitions.
         init_from_str_expr: Python expression parsing a string `document` into a DOM tree.
         extra_utilities: Module-level helper constants or definitions.
         supports_xpath: `True` if this DOM library supports XPath expressions natively.
@@ -78,6 +81,9 @@ class DomSpelling(ABC):
     document_type: str = "Any"
     document_array_type: str = "List[Any]"
     init_arg_type: str = "Any"
+    init_extra_params: str = ""
+    init_return_type: str = ""
+    fn_extra_params: str = ""
     init_from_str_expr: str = "document"
     extra_utilities: tuple[str, ...] = ()
     supports_xpath: bool = False

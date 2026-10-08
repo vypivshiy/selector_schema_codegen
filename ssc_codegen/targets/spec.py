@@ -28,6 +28,8 @@ class TargetSpec:
         separate_runtime: Whether to extract utility/helper functions into a standalone
             runtime module rather than inlining them into each generated file.
             Supported for Python. Defaults to False.
+        bs4_parser: Underlying HTML parser engine for BeautifulSoup4 ("lxml", "html.parser", "html5lib").
+            Python bs4 only. Defaults to None (resolves to "lxml").
 
     Examples:
         ```python
@@ -59,3 +61,4 @@ class TargetSpec:
     lib: str | None = None
     http_client: str | None = None
     separate_runtime: bool = False
+    bs4_parser: str | None = None
