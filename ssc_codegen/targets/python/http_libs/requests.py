@@ -25,9 +25,9 @@ class RequestsStrategy(HttpLibStrategy):
     # asyncio.to_thread (worker thread, non-blocking). See emit_method_fetch.
     async_fetch_delegates_to_sync = True
 
-    def rest_runtime_lines(self) -> list[str]:
+    def rest_runtime_lines(self, http_io: str = "both") -> list[str]:
         exc = self.transport_exception
-        return [
+        lines = [
             "_T = TypeVar('_T')",
             "_E = TypeVar('_E')",
             "",
@@ -91,46 +91,58 @@ class RequestsStrategy(HttpLibStrategy):
             "    return UnknownErr(status=status, headers=headers, value=body)",
             "",
             "",
-            "def ssc_rest_call(",
-            "    client: requests.Session,",
-            "    matchers: List[ErrMatcher],",
-            "    method: str,",
-            "    url: str,",
-            "    value_fn: Optional[Callable[[Any], _T]] = None,",
-            "    **kw: Any,",
-            ") -> Union[Ok[_T], Err]:",
-            "    try:",
-            "        resp = client.request(method, url, **kw)",
-            "        status = resp.status_code",
-            "        headers = {k.lower(): v for k, v in resp.headers.items()}",
-            "        try:",
-            "            body = resp.json()",
-            "        except Exception:",
-            "            body = None",
-            f"    except {exc} as exc:",
-            "        return TransportErr(cause=repr(exc))",
-            "    err = ssc_dispatch_err(matchers, status, headers, body)",
-            "    if err is not None:",
-            "        return err",
-            "    value = body if value_fn is None else value_fn(body)",
-            "    return Ok(status=status, headers=headers, value=value)",
-            "",
-            "",
-            "async def ssc_rest_call_async(",
-            "    client: requests.Session,",
-            "    matchers: List[ErrMatcher],",
-            "    method: str,",
-            "    url: str,",
-            "    value_fn: Optional[Callable[[Any], _T]] = None,",
-            "    **kw: Any,",
-            ") -> Union[Ok[_T], Err]:",
-            "    import asyncio",
-            "    loop = asyncio.get_event_loop()",
-            "    return await loop.run_in_executor(",
-            "        None,",
-            "        lambda: ssc_rest_call(",
-            "            client, matchers, method, url, value_fn, **kw",
-            "        ),",
-            "    )",
-            "",
         ]
+        # ssc_rest_call is needed for sync/both modes and as execution delegate for async mode
+        if http_io in ("both", "sync", "async"):
+            lines.extend(
+                [
+                    "def ssc_rest_call(",
+                    "    client: requests.Session,",
+                    "    matchers: List[ErrMatcher],",
+                    "    method: str,",
+                    "    url: str,",
+                    "    value_fn: Optional[Callable[[Any], _T]] = None,",
+                    "    **kw: Any,",
+                    ") -> Union[Ok[_T], Err]:",
+                    "    try:",
+                    "        resp = client.request(method, url, **kw)",
+                    "        status = resp.status_code",
+                    "        headers = {k.lower(): v for k, v in resp.headers.items()}",
+                    "        try:",
+                    "            body = resp.json()",
+                    "        except Exception:",
+                    "            body = None",
+                    f"    except {exc} as exc:",
+                    "        return TransportErr(cause=repr(exc))",
+                    "    err = ssc_dispatch_err(matchers, status, headers, body)",
+                    "    if err is not None:",
+                    "        return err",
+                    "    value = body if value_fn is None else value_fn(body)",
+                    "    return Ok(status=status, headers=headers, value=value)",
+                    "",
+                    "",
+                ]
+            )
+        if http_io in ("both", "async"):
+            lines.extend(
+                [
+                    "async def ssc_rest_call_async(",
+                    "    client: requests.Session,",
+                    "    matchers: List[ErrMatcher],",
+                    "    method: str,",
+                    "    url: str,",
+                    "    value_fn: Optional[Callable[[Any], _T]] = None,",
+                    "    **kw: Any,",
+                    ") -> Union[Ok[_T], Err]:",
+                    "    import asyncio",
+                    "    loop = asyncio.get_event_loop()",
+                    "    return await loop.run_in_executor(",
+                    "        None,",
+                    "        lambda: ssc_rest_call(",
+                    "            client, matchers, method, url, value_fn, **kw",
+                    "        ),",
+                    "    )",
+                    "",
+                ]
+            )
+        return lines

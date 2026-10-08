@@ -153,6 +153,7 @@ def _run_generate(
     verbose: bool = False,
     fmt: FmtType = FmtType.TEXT,
     bs4_parser: Optional[str] = None,
+    http_io: str = "both",
 ) -> None:
     """Execute the shared compilation pipeline for all code generator subcommands.
 
@@ -219,6 +220,8 @@ def _run_generate(
         meta["http_client"] = http_client
     if bs4_parser:
         meta["bs4_parser"] = bs4_parser
+    if http_io:
+        meta["http_io"] = http_io
 
     if separate_runtime:
         from ssc_codegen.generation.runtime import register_runtime_file
@@ -430,6 +433,13 @@ def generate_python(
             ),
         ),
     ] = None,
+    http_io: Annotated[
+        str,
+        typer.Option(
+            "--http-io",
+            help="HTTP I/O mode for generated methods: both (default) | sync | async.",
+        ),
+    ] = "both",
     separate_runtime: Annotated[
         bool,
         typer.Option(
@@ -466,6 +476,7 @@ def generate_python(
                 http_client=http_client,
                 separate_runtime=separate_runtime,
                 bs4_parser=bs4_parser,
+                http_io=http_io,
             )
         )
     except ResolutionError as exc:
@@ -489,6 +500,7 @@ def generate_python(
         verbose=verbose,
         fmt=fmt,
         bs4_parser=bs4_parser,
+        http_io=http_io,
     )
 
 

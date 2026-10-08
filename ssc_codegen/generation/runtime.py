@@ -438,7 +438,7 @@ def runtime_module_content(
     lines.extend(_BASE_UTILITY_LINES)
     lines.append("")
     if has_rest:
-        lines.extend(strategy.rest_runtime_lines())
+        lines.extend(strategy.rest_runtime_lines(http_io="both"))
     if extension_defs:
         for _imports, code in extension_defs.values():
             lines.append("")

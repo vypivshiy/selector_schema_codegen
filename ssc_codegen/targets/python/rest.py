@@ -208,7 +208,7 @@ _RUNTIME_ALWAYS_EXPORT_NAMES: list[str] = [
 
 
 def runtime_export_names(
-    module: Module, *, need_fallback: bool = False
+    module: Module, *, need_fallback: bool = False, http_io: str = "both"
 ) -> list[str]:
     """Compute the list of names the parser file must import from the runtime.
 
@@ -219,7 +219,7 @@ def runtime_export_names(
       imported (cheap, may be referenced by visit_field/visit_match).
     - HTML module whose DomSpelling declares ``FALLBACK_HTML_STR`` in
       ``extra_utilities``: also import that constant.
-    - Module with REST structs: also import REST names.
+    - Module with REST structs: also import REST names filtered by http_io mode.
     """
     names: list[str] = list(_RUNTIME_ALWAYS_EXPORT_NAMES)
     if module_has_html_struct(module):
@@ -227,7 +227,18 @@ def runtime_export_names(
         if need_fallback:
             names.append("FALLBACK_HTML_STR")
     if module_has_rest(module):
-        names.extend(_RUNTIME_REST_EXPORT_NAMES)
+        rest_names = [
+            "Ok",
+            "Err",
+            "UnknownErr",
+            "TransportErr",
+            "ErrMatcher",
+        ]
+        if http_io in ("both", "sync"):
+            rest_names.append("ssc_rest_call")
+        if http_io in ("both", "async"):
+            rest_names.append("ssc_rest_call_async")
+        names.extend(rest_names)
     if any(isinstance(n, JsonDef) for n in module.body):
         names.extend(_RUNTIME_JSON_EXPORT_NAMES)
     return names
@@ -329,6 +340,7 @@ def emit_method_fetch(
     suffix = ("_" + to_snake_case(node.name)) if node.name else ""
     ph_params = placeholder_params(spec)
     ph_kwargs = placeholder_args(spec)
+    http_io = ctx.meta.get("http_io", "both")
 
     i1 = ctx.indent
     i2 = i1 + ctx.indent_char
@@ -351,16 +363,13 @@ def emit_method_fetch(
         setup.extend(_merge_loop_lines(i2))
         return setup
 
-    lines: list[str] = []
-
-    # --- sync fetch (httpx, requests) -------------------------------------
-    if http.supports_sync_fetch:
-        lines.append(f"{i1}@classmethod")
-        lines.append(
-            f'{i1}def fetch{suffix}(cls, client: {http.sync_client_type}{ph_params}, **kwargs: Any) -> "{struct_name}":'
-        )
-        lines.extend(_kw_setup())
-        lines.extend(
+    def _sync_fetch_lines(fn_name: str) -> list[str]:
+        res: list[str] = [
+            f"{i1}@classmethod",
+            f'{i1}def {fn_name}{suffix}(cls, client: {http.sync_client_type}{ph_params}, **kwargs: Any) -> "{struct_name}":',
+        ]
+        res.extend(_kw_setup())
+        res.extend(
             http.fetch_body_lines(
                 is_async=False,
                 request_call=f"{i2}_resp = client.request(",
@@ -371,38 +380,57 @@ def emit_method_fetch(
                 i3=i3,
             )
         )
-        lines.append("")
+        return res
+
+    lines: list[str] = []
+
+    # --- sync fetch (httpx, requests) -------------------------------------
+    has_sync = http_io in ("both", "sync") and http.supports_sync_fetch
+    if has_sync:
+        lines.extend(_sync_fetch_lines("fetch"))
+
+    # When requests + async only, we need a private sync implementation (_fetch)
+    # for async_fetch to delegate to via asyncio.to_thread.
+    needs_private_sync = (
+        http_io == "async" and http.async_fetch_delegates_to_sync
+    )
+    if needs_private_sync:
+        lines.extend(_sync_fetch_lines("_fetch"))
 
     # --- async_fetch ------------------------------------------------------
-    lines.append(f"{i1}@classmethod")
-    lines.append(
-        f'{i1}async def async_fetch{suffix}(cls, client: {http.async_client_type}{ph_params}, **kwargs: Any) -> "{struct_name}":'
-    )
-    if http.async_fetch_delegates_to_sync:
-        # requests: no native async — run the sync fetch in a worker thread
-        # via asyncio.to_thread (non-blocking, yields control to the loop).
-        if ph_kwargs:
-            to_thread_args = f"client, {ph_kwargs}, **kwargs"
-        else:
-            to_thread_args = "client, **kwargs"
-        lines.append(f"{i2}import asyncio")
+    if http_io in ("both", "async"):
+        if lines:
+            lines.append("")
+        lines.append(f"{i1}@classmethod")
         lines.append(
-            f"{i2}return await asyncio.to_thread("
-            f"cls.fetch{suffix}, {to_thread_args})"
+            f'{i1}async def async_fetch{suffix}(cls, client: {http.async_client_type}{ph_params}, **kwargs: Any) -> "{struct_name}":'
         )
-    else:
-        lines.extend(_kw_setup())
-        lines.extend(
-            http.fetch_body_lines(
-                is_async=True,
-                request_call=f"{i2}_resp = await client.request(",
-                kwargs_lines=fetch_kwargs,
-                response_path=node.response_path,
-                response_join=node.response_join,
-                i2=i2,
-                i3=i3,
+        if http.async_fetch_delegates_to_sync:
+            # requests: no native async — run the sync fetch in a worker thread
+            # via asyncio.to_thread (non-blocking, yields control to the loop).
+            if ph_kwargs:
+                to_thread_args = f"client, {ph_kwargs}, **kwargs"
+            else:
+                to_thread_args = "client, **kwargs"
+            lines.append(f"{i2}import asyncio")
+            target_method = "cls._fetch" if needs_private_sync else "cls.fetch"
+            lines.append(
+                f"{i2}return await asyncio.to_thread("
+                f"{target_method}{suffix}, {to_thread_args})"
             )
-        )
+        else:
+            lines.extend(_kw_setup())
+            lines.extend(
+                http.fetch_body_lines(
+                    is_async=True,
+                    request_call=f"{i2}_resp = await client.request(",
+                    kwargs_lines=fetch_kwargs,
+                    response_path=node.response_path,
+                    response_join=node.response_join,
+                    i2=i2,
+                    i3=i3,
+                )
+            )
     return lines
 
 
@@ -416,6 +444,7 @@ def emit_method_rest(
     ret_type = node.result_alias_name or "None"
     ph_params = placeholder_params(spec)
     matchers_var = f"{to_snake_case(struct.name).upper()}_MATCHERS"
+    http_io = ctx.meta.get("http_io", "both")
 
     i1 = ctx.indent
     i2 = i1 + ctx.indent_char
@@ -462,18 +491,21 @@ def emit_method_rest(
         return body
 
     lines: list[str] = []
-    lines.append(f"{i1}@classmethod")
-    lines.append(
-        f"{i1}def {method_name}(cls, client: {http.sync_client_type}{ph_params}, **kwargs: Any) -> {ret_type}:"
-    )
-    lines.extend(_body("ssc_rest_call", ""))
-    lines.append("")
+    if http_io in ("both", "sync"):
+        lines.append(f"{i1}@classmethod")
+        lines.append(
+            f"{i1}def {method_name}(cls, client: {http.sync_client_type}{ph_params}, **kwargs: Any) -> {ret_type}:"
+        )
+        lines.extend(_body("ssc_rest_call", ""))
 
-    lines.append(f"{i1}@classmethod")
-    lines.append(
-        f"{i1}async def async_{method_name}(cls, client: {http.async_client_type}{ph_params}, **kwargs: Any) -> {ret_type}:"
-    )
-    lines.extend(_body("ssc_rest_call_async", "await "))
+    if http_io in ("both", "async"):
+        if lines:
+            lines.append("")
+        lines.append(f"{i1}@classmethod")
+        lines.append(
+            f"{i1}async def async_{method_name}(cls, client: {http.async_client_type}{ph_params}, **kwargs: Any) -> {ret_type}:"
+        )
+        lines.extend(_body("ssc_rest_call_async", "await "))
     return lines
 
 
