@@ -163,6 +163,18 @@ _Avoid_: DOM adapter, HTML dialect wrapper
 A strategy defining client library-specific transport code generation, client types, and runtime exception handling for REST requests.
 _Avoid_: transport driver, HTTP handler
 
+**HTTP I/O mode**:
+The generation mode (`both`, `sync`, `async`) controlling which client methods (`fetch`/`async_fetch` and REST endpoints) and client type annotations are emitted for a parser.
+_Avoid_: HTTP methods, request flavor, transport concurrency
+
+**BS4 parser engine**:
+The underlying HTML parser feature (`lxml`, `html.parser`, `html5lib`) configured via `BS4_FEATURES` and used by `BeautifulSoup(document, features=...)`.
+_Avoid_: HTML parser backend, soup dialect
+
+**HTTP fallback import**:
+The conditional import pattern (`try: import httpx2 as httpx except ImportError: import httpx`) allowing generated code to leverage modern forks while maintaining backwards compatibility.
+_Avoid_: optional dependency shim, dynamic client loader
+
 **Two-pass codegen**:
 A code generation approach where pass 1 traverses the AST to accumulate required imports and standard helper definitions in `ModuleBuilder`, and pass 2 emits the complete target source file.
 _Avoid_: single-pass emission, forward-declaring generator
