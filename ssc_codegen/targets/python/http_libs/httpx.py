@@ -25,9 +25,9 @@ class HttpxStrategy(HttpLibStrategy):
     async_client_type = "httpx.AsyncClient"
     transport_exception = "httpx.HTTPError"
 
-    def rest_runtime_lines(self) -> list[str]:
+    def rest_runtime_lines(self, http_io: str = "both") -> list[str]:
         exc = self.transport_exception
-        return [
+        lines = [
             "_T = TypeVar('_T')",
             "_E = TypeVar('_E')",
             "",
@@ -91,56 +91,67 @@ class HttpxStrategy(HttpLibStrategy):
             "    return UnknownErr(status=status, headers=headers, value=body)",
             "",
             "",
-            "def ssc_rest_call(",
-            f"    client: {self.sync_client_type},",
-            "    matchers: List[ErrMatcher],",
-            "    method: str,",
-            "    url: str,",
-            "    value_fn: Optional[Callable[[Any], _T]] = None,",
-            "    **kw: Any,",
-            ") -> Union[Ok[_T], Err]:",
-            "    try:",
-            "        resp = client.request(method, url, **kw)",
-            "        status = resp.status_code",
-            "        headers = {k.lower(): v for k, v in resp.headers.items()}",
-            "        try:",
-            "            body = resp.json()",
-            "        except Exception:",
-            "            body = None",
-            f"    except {exc} as exc:",
-            "        return TransportErr(cause=repr(exc))",
-            "    err = ssc_dispatch_err(matchers, status, headers, body)",
-            "    if err is not None:",
-            "        return err",
-            "    value = body if value_fn is None else value_fn(body)",
-            "    return Ok(status=status, headers=headers, value=value)",
-            "",
-            "",
-            "async def ssc_rest_call_async(",
-            f"    client: {self.async_client_type},",
-            "    matchers: List[ErrMatcher],",
-            "    method: str,",
-            "    url: str,",
-            "    value_fn: Optional[Callable[[Any], _T]] = None,",
-            "    **kw: Any,",
-            ") -> Union[Ok[_T], Err]:",
-            "    try:",
-            "        resp = await client.request(method, url, **kw)",
-            "        status = resp.status_code",
-            "        headers = {k.lower(): v for k, v in resp.headers.items()}",
-            "        try:",
-            "            body = resp.json()",
-            "        except Exception:",
-            "            body = None",
-            f"    except {exc} as exc:",
-            "        return TransportErr(cause=repr(exc))",
-            "    err = ssc_dispatch_err(matchers, status, headers, body)",
-            "    if err is not None:",
-            "        return err",
-            "    value = body if value_fn is None else value_fn(body)",
-            "    return Ok(status=status, headers=headers, value=value)",
-            "",
         ]
+        if http_io in ("both", "sync"):
+            lines.extend(
+                [
+                    "def ssc_rest_call(",
+                    f"    client: {self.sync_client_type},",
+                    "    matchers: List[ErrMatcher],",
+                    "    method: str,",
+                    "    url: str,",
+                    "    value_fn: Optional[Callable[[Any], _T]] = None,",
+                    "    **kw: Any,",
+                    ") -> Union[Ok[_T], Err]:",
+                    "    try:",
+                    "        resp = client.request(method, url, **kw)",
+                    "        status = resp.status_code",
+                    "        headers = {k.lower(): v for k, v in resp.headers.items()}",
+                    "        try:",
+                    "            body = resp.json()",
+                    "        except Exception:",
+                    "            body = None",
+                    f"    except {exc} as exc:",
+                    "        return TransportErr(cause=repr(exc))",
+                    "    err = ssc_dispatch_err(matchers, status, headers, body)",
+                    "    if err is not None:",
+                    "        return err",
+                    "    value = body if value_fn is None else value_fn(body)",
+                    "    return Ok(status=status, headers=headers, value=value)",
+                    "",
+                    "",
+                ]
+            )
+        if http_io in ("both", "async"):
+            lines.extend(
+                [
+                    "async def ssc_rest_call_async(",
+                    f"    client: {self.async_client_type},",
+                    "    matchers: List[ErrMatcher],",
+                    "    method: str,",
+                    "    url: str,",
+                    "    value_fn: Optional[Callable[[Any], _T]] = None,",
+                    "    **kw: Any,",
+                    ") -> Union[Ok[_T], Err]:",
+                    "    try:",
+                    "        resp = await client.request(method, url, **kw)",
+                    "        status = resp.status_code",
+                    "        headers = {k.lower(): v for k, v in resp.headers.items()}",
+                    "        try:",
+                    "            body = resp.json()",
+                    "        except Exception:",
+                    "            body = None",
+                    f"    except {exc} as exc:",
+                    "        return TransportErr(cause=repr(exc))",
+                    "    err = ssc_dispatch_err(matchers, status, headers, body)",
+                    "    if err is not None:",
+                    "        return err",
+                    "    value = body if value_fn is None else value_fn(body)",
+                    "    return Ok(status=status, headers=headers, value=value)",
+                    "",
+                ]
+            )
+        return lines
 
 
 class Httpx2Strategy(HttpxStrategy):

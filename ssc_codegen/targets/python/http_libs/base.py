@@ -40,8 +40,13 @@ class HttpLibStrategy(ABC):
     # === BEHAVIOR ===
 
     @abstractmethod
-    def rest_runtime_lines(self) -> list[str]:
+    def rest_runtime_lines(self, http_io: str = "both") -> list[str]:
         """Generate REST runtime source lines (`Ok`, `Err`, `ssc_rest_call`, etc.).
+
+        Args:
+            http_io: HTTP method generation mode (`"both"`, `"sync"`, `"async"`).
+                Controls which call helpers (`ssc_rest_call` and/or `ssc_rest_call_async`)
+                are included in the returned lines. Defaults to `"both"`.
 
         Returns:
             List of Python code lines implementing the REST runtime helpers with

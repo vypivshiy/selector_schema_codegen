@@ -117,6 +117,13 @@ def _resolve_python(spec: TargetSpec) -> TargetProfile:
                 f"Permitted values: 'lxml', 'html.parser', 'html5lib'."
             )
 
+    valid_http_io = ("both", "sync", "async")
+    if spec.http_io not in valid_http_io:
+        raise ResolutionError(
+            f"Invalid --http-io '{spec.http_io}'. "
+            f"Permitted values: 'both', 'sync', 'async'."
+        )
+
     effective_bs4_parser = spec.bs4_parser or "lxml"
     spelling_cls = spellings[lib]
 
@@ -128,6 +135,12 @@ def _resolve_python(spec: TargetSpec) -> TargetProfile:
                 f"Got '{spec.http_client}'."
             )
 
+    if spec.http_client == "aiohttp" and spec.http_io == "sync":
+        raise ResolutionError(
+            "aiohttp does not support synchronous I/O (--http-io sync). "
+            "Use 'both', 'async', or a different HTTP client."
+        )
+
     if spec.separate_runtime and lib == "lxml":
         pass  # supported, with fallback
 
@@ -135,6 +148,7 @@ def _resolve_python(spec: TargetSpec) -> TargetProfile:
         return PythonVisitor(
             dom_spelling_cls=spelling_cls,
             bs4_parser=effective_bs4_parser,
+            http_io=spec.http_io,
         )
 
     return TargetProfile(
@@ -167,6 +181,9 @@ def _resolve_js(spec: TargetSpec) -> TargetProfile:
 
     if spec.bs4_parser is not None:
         raise ResolutionError("--bs4-parser is not applicable for JavaScript.")
+
+    if spec.http_io != "both":
+        raise ResolutionError("--http-io is not applicable for JavaScript.")
 
     if spec.http_client is not None:
         valid = ("fetch", "axios")
@@ -207,6 +224,8 @@ def _resolve_go(spec: TargetSpec) -> TargetProfile:
         raise ResolutionError("--lib is not applicable for Go.")
     if spec.bs4_parser is not None:
         raise ResolutionError("--bs4-parser is not applicable for Go.")
+    if spec.http_io != "both":
+        raise ResolutionError("--http-io is not applicable for Go.")
     if spec.http_client is not None:
         raise ResolutionError(
             "Go uses net/http exclusively. --http-client is not applicable."
@@ -234,6 +253,8 @@ def _resolve_rust(spec: TargetSpec) -> TargetProfile:
         raise ResolutionError("--lib is not applicable for Rust.")
     if spec.bs4_parser is not None:
         raise ResolutionError("--bs4-parser is not applicable for Rust.")
+    if spec.http_io != "both":
+        raise ResolutionError("--http-io is not applicable for Rust.")
     if spec.http_client is not None and spec.http_client != "reqwest":
         raise ResolutionError(
             f"Invalid HTTP client '{spec.http_client}' for Rust. Valid options: reqwest."
