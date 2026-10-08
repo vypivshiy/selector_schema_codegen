@@ -152,6 +152,7 @@ def _run_generate(
     skip_lint: bool = False,
     verbose: bool = False,
     fmt: FmtType = FmtType.TEXT,
+    bs4_parser: Optional[str] = None,
 ) -> None:
     """Execute the shared compilation pipeline for all code generator subcommands.
 
@@ -216,6 +217,8 @@ def _run_generate(
     meta: dict = {"package": package or default_package}
     if http_client:
         meta["http_client"] = http_client
+    if bs4_parser:
+        meta["bs4_parser"] = bs4_parser
 
     if separate_runtime:
         from ssc_codegen.generation.runtime import register_runtime_file
@@ -385,6 +388,16 @@ def generate_python(
             help="HTML parsing library. Default: bs4.",
         ),
     ] = None,
+    bs4_parser: Annotated[
+        Optional[str],
+        typer.Option(
+            "--bs4-parser",
+            help=(
+                "Underlying HTML parser engine for bs4: "
+                "lxml (default) | html.parser | html5lib."
+            ),
+        ),
+    ] = None,
     verbose: Annotated[
         bool,
         typer.Option(
@@ -452,6 +465,7 @@ def generate_python(
                 lib=lib.value if lib else None,
                 http_client=http_client,
                 separate_runtime=separate_runtime,
+                bs4_parser=bs4_parser,
             )
         )
     except ResolutionError as exc:
@@ -474,6 +488,7 @@ def generate_python(
         skip_lint=skip_lint,
         verbose=verbose,
         fmt=fmt,
+        bs4_parser=bs4_parser,
     )
 
 
@@ -886,6 +901,16 @@ def run(
             help="HTML parsing library. Default: bs4.",
         ),
     ] = None,
+    bs4_parser: Annotated[
+        Optional[str],
+        typer.Option(
+            "--bs4-parser",
+            help=(
+                "Underlying HTML parser engine for bs4: "
+                "lxml (default) | html.parser | html5lib."
+            ),
+        ),
+    ] = None,
     input_file: Annotated[
         Path | None,
         typer.Option(
@@ -984,6 +1009,7 @@ def run(
             TargetSpec(
                 lang="python",
                 lib=lib.value if lib else None,
+                bs4_parser=bs4_parser,
             )
         )
     except ResolutionError as exc:
