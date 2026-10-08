@@ -153,7 +153,7 @@ def _run_generate(
     verbose: bool = False,
     fmt: FmtType = FmtType.TEXT,
     bs4_parser: Optional[str] = None,
-    http_io: str = "both",
+    http_io: Optional[str] = None,
 ) -> None:
     """Execute the shared compilation pipeline for all code generator subcommands.
 
@@ -434,12 +434,12 @@ def generate_python(
         ),
     ] = None,
     http_io: Annotated[
-        str,
+        Optional[str],
         typer.Option(
             "--http-io",
             help="HTTP I/O mode for generated methods: both (default) | sync | async.",
         ),
-    ] = "both",
+    ] = None,
     separate_runtime: Annotated[
         bool,
         typer.Option(

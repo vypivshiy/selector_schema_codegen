@@ -658,8 +658,6 @@ class PythonVisitor(BaseWalker):
         if has_html:
             for line in self._dom.parser_imports:
                 self._builder.require_import(line)
-            if isinstance(self._dom, Bs4DomSpelling):
-                self._builder.require_import("from typing import Literal")
         self._builder.require_import("import sys")
         self._builder.require_import(
             "from typing import Any, Dict, List, Optional, TypedDict, Union"
@@ -718,9 +716,13 @@ class PythonVisitor(BaseWalker):
                 )
             else:
                 need_fallback = False
-            names = rest.runtime_export_names(
-                mod, need_fallback=need_fallback, http_io=http_io
-            ) if isinstance(mod, Module) else []
+            names = (
+                rest.runtime_export_names(
+                    mod, need_fallback=need_fallback, http_io=http_io
+                )
+                if isinstance(mod, Module)
+                else []
+            )
             lines.append(f"from .{runtime} import " + ", ".join(names))
             lines.append("")
             if isinstance(mod, Module) and module_has_html_struct(mod):
@@ -934,7 +936,7 @@ class PythonVisitor(BaseWalker):
             ]
         else:
             lines = [
-                f"{i}def __init__(self, document: {self._dom.init_arg_type}{self._dom.init_extra_params}){self._dom.init_return_type}:",
+                f"{i}def __init__(self, document: {self._dom.init_arg_type}{self._dom.init_extra_params}) -> None:",
                 f"{i2}if isinstance(document, str):",
                 f"{i3}self._doc = {self._dom.init_from_str_expr}",
                 f"{i2}else:",
