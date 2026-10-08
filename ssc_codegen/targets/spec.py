@@ -22,7 +22,7 @@ class TargetSpec:
         lib: HTML parser or DOM library (Python only: `"bs4"`, `"lxml"`, `"parsel"`, `"slax"`).
             Defaults to None (which resolves to `"bs4"` for Python).
         http_client: HTTP client strategy for `@request` REST code generation.
-            Supported Python clients: `"httpx"`, `"aiohttp"`, `"requests"`.
+            Supported Python clients: `"httpx"`, `"httpx2"`, `"aiohttp"`, `"requests"`.
             Supported JavaScript clients: `"fetch"`, `"axios"`.
             Defaults to None (which selects default client for the backend).
         separate_runtime: Whether to extract utility/helper functions into a standalone

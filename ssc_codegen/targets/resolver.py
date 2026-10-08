@@ -121,7 +121,7 @@ def _resolve_python(spec: TargetSpec) -> TargetProfile:
     spelling_cls = spellings[lib]
 
     if spec.http_client is not None:
-        valid = ("httpx", "aiohttp", "requests")
+        valid = ("httpx", "httpx2", "aiohttp", "requests")
         if spec.http_client not in valid:
             raise ResolutionError(
                 f"Python accepts --http-client: {', '.join(valid)}. "
@@ -141,7 +141,7 @@ def _resolve_python(spec: TargetSpec) -> TargetProfile:
         language="python",
         file_extension=".py",
         create_converter=_factory,
-        http_clients=("httpx", "aiohttp", "requests"),
+        http_clients=("httpx", "httpx2", "aiohttp", "requests"),
         supports_separate_runtime=True,
         runtime_include_fallback=(lib == "lxml"),
     )
