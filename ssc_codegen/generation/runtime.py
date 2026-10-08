@@ -6,7 +6,6 @@ from collections.abc import Callable
 from typing import Any
 
 import ssc_codegen.ast as a
-
 from ssc_codegen.targets.python.http_libs.base import HttpLibStrategy
 from ssc_codegen.targets.python.http_libs.httpx import HttpxStrategy
 from ssc_codegen.traversal.utils import module_has_rest
@@ -485,10 +484,17 @@ def register_runtime_file(
 
     @converter.file(f"{runtime_name}.py")
     def _runtime_provider(module_ast: a.Module, meta):
+        strat = http_strategy
+        if (
+            meta
+            and meta.get("http_client")
+            and hasattr(converter, "http_strategy_for")
+        ):
+            strat = converter.http_strategy_for(meta.get("http_client"))
         return _apply_fallback(
             runtime_module_content(
                 module_ast,
-                http_strategy=http_strategy,
+                http_strategy=strat,
                 extension_defs=_extension_runtime_defs([module_ast]),
             )
         )

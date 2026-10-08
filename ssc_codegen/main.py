@@ -413,7 +413,7 @@ def generate_python(
             "--http-client",
             help=(
                 "HTTP client for @request codegen: "
-                "httpx (default) | aiohttp | requests."
+                "httpx (default) | httpx2 | aiohttp | requests."
             ),
         ),
     ] = None,

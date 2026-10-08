@@ -339,3 +339,78 @@ def test_health_and_run_use_python_target_validation(tmp_path) -> None:
     run_res = runner.invoke(app, ["run", f"{schema}:Item", "-i", str(html)])
     assert run_res.exit_code == 0, run_res.output
     assert '"self": "Hello"' in run_res.output
+
+
+def test_generate_python_with_httpx2_client(tmp_path) -> None:
+    schema = tmp_path / "api.kdl"
+    schema.write_text(
+        'struct Api type=rest {\n    @request """\n    GET / HTTP/1.1\n    Host: example.com\n    """\n}\n',
+        encoding="utf-8",
+    )
+    output = tmp_path / "out"
+    result = runner.invoke(
+        app,
+        [
+            "generate",
+            "python",
+            str(schema),
+            "-o",
+            str(output),
+            "--http-client",
+            "httpx2",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    generated = (output / "api.py").read_text(encoding="utf-8")
+    assert "import httpx2" in generated
+    assert "client: httpx2.Client" in generated
+
+
+def test_generate_python_with_httpx_client_fallback(tmp_path) -> None:
+    from ssc_codegen.targets.python.http_libs.httpx import HTTPX_FALLBACK_IMPORT
+
+    schema = tmp_path / "api.kdl"
+    schema.write_text(
+        'struct Api type=rest {\n    @request """\n    GET / HTTP/1.1\n    Host: example.com\n    """\n}\n',
+        encoding="utf-8",
+    )
+    output = tmp_path / "out"
+    result = runner.invoke(
+        app,
+        [
+            "generate",
+            "python",
+            str(schema),
+            "-o",
+            str(output),
+            "--http-client",
+            "httpx",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    generated = (output / "api.py").read_text(encoding="utf-8")
+    assert HTTPX_FALLBACK_IMPORT in generated
+    assert "client: httpx.Client" in generated
+
+
+def test_generate_js_rejects_httpx2_client(tmp_path) -> None:
+    schema = tmp_path / "api.kdl"
+    schema.write_text(
+        'struct Api type=rest {\n    @request """\n    GET / HTTP/1.1\n    Host: example.com\n    """\n}\n',
+        encoding="utf-8",
+    )
+    output = tmp_path / "out"
+    result = runner.invoke(
+        app,
+        [
+            "generate",
+            "js",
+            str(schema),
+            "-o",
+            str(output),
+            "--http-client",
+            "httpx2",
+        ],
+    )
+    assert result.exit_code == 1
+    assert "JavaScript accepts --http-client" in result.output

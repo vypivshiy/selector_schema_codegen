@@ -2,21 +2,25 @@
 
 from __future__ import annotations
 
-
 from ssc_codegen.targets.python.http_libs.base import HttpLibStrategy
+
+HTTPX_FALLBACK_IMPORT = """try:
+    import httpx2 as httpx
+except ImportError:
+    import httpx"""
 
 
 class HttpxStrategy(HttpLibStrategy):
-    """HTTP transport strategy using `httpx` (sync and async).
+    """HTTP transport strategy using `httpx` (sync and async) with `httpx2` fallback.
 
     Attributes:
-        import_line: ``"import httpx"``.
+        import_line: Fallback import block attempting ``httpx2`` before ``httpx``.
         sync_client_type: ``"httpx.Client"``.
         async_client_type: ``"httpx.AsyncClient"``.
         transport_exception: ``"httpx.HTTPError"``.
     """
 
-    import_line = "import httpx"
+    import_line = HTTPX_FALLBACK_IMPORT
     sync_client_type = "httpx.Client"
     async_client_type = "httpx.AsyncClient"
     transport_exception = "httpx.HTTPError"
@@ -88,7 +92,7 @@ class HttpxStrategy(HttpLibStrategy):
             "",
             "",
             "def ssc_rest_call(",
-            "    client: httpx.Client,",
+            f"    client: {self.sync_client_type},",
             "    matchers: List[ErrMatcher],",
             "    method: str,",
             "    url: str,",
@@ -113,7 +117,7 @@ class HttpxStrategy(HttpLibStrategy):
             "",
             "",
             "async def ssc_rest_call_async(",
-            "    client: httpx.AsyncClient,",
+            f"    client: {self.async_client_type},",
             "    matchers: List[ErrMatcher],",
             "    method: str,",
             "    url: str,",
@@ -137,3 +141,19 @@ class HttpxStrategy(HttpLibStrategy):
             "    return Ok(status=status, headers=headers, value=value)",
             "",
         ]
+
+
+class Httpx2Strategy(HttpxStrategy):
+    """HTTP transport strategy using strict `httpx2` (sync and async).
+
+    Attributes:
+        import_line: ``"import httpx2"``.
+        sync_client_type: ``"httpx2.Client"``.
+        async_client_type: ``"httpx2.AsyncClient"``.
+        transport_exception: ``"httpx2.HTTPError"``.
+    """
+
+    import_line = "import httpx2"
+    sync_client_type = "httpx2.Client"
+    async_client_type = "httpx2.AsyncClient"
+    transport_exception = "httpx2.HTTPError"

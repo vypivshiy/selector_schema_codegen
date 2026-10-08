@@ -139,7 +139,10 @@ from ssc_codegen.generation.builder import ModuleBuilder
 from ssc_codegen.targets.python import rest
 from ssc_codegen.targets.python.http_libs.aiohttp import AioHttpStrategy
 from ssc_codegen.targets.python.http_libs.base import HttpLibStrategy
-from ssc_codegen.targets.python.http_libs.httpx import HttpxStrategy
+from ssc_codegen.targets.python.http_libs.httpx import (
+    Httpx2Strategy,
+    HttpxStrategy,
+)
 from ssc_codegen.targets.python.http_libs.requests import RequestsStrategy
 from ssc_codegen.traversal.context import WalkContext
 from ssc_codegen.traversal.walker import BaseWalker
@@ -372,6 +375,7 @@ class PythonVisitor(BaseWalker):
 
     _HTTP_STRATEGIES: dict[str, type[HttpLibStrategy]] = {
         "httpx": HttpxStrategy,
+        "httpx2": Httpx2Strategy,
         "aiohttp": AioHttpStrategy,
         "requests": RequestsStrategy,
     }
@@ -385,7 +389,7 @@ class PythonVisitor(BaseWalker):
         matching transport imports and error handling.
 
         Args:
-            http_client: Client identifier string (``"httpx"``, ``"aiohttp"``, or ``"requests"``).
+            http_client: Client identifier string (``"httpx"``, ``"httpx2"``, ``"aiohttp"``, or ``"requests"``).
 
         Returns:
             Instantiated `HttpLibStrategy` (defaults to `HttpxStrategy`).
