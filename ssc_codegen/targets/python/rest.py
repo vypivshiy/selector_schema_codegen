@@ -220,6 +220,15 @@ def runtime_export_names(
     - HTML module whose DomSpelling declares ``FALLBACK_HTML_STR`` in
       ``extra_utilities``: also import that constant.
     - Module with REST structs: also import REST names filtered by http_io mode.
+
+    Args:
+        module: AST module being processed.
+        need_fallback: Whether fallback HTML parsing constants are required.
+        http_io: HTTP method generation mode ("both", "sync", "async").
+            Defaults to "both".
+
+    Returns:
+        List of symbol names to import from the shared runtime module.
     """
     names: list[str] = list(_RUNTIME_ALWAYS_EXPORT_NAMES)
     if module_has_html_struct(module):

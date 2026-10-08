@@ -64,6 +64,17 @@ class AioHttpStrategy(HttpLibStrategy):
         return lines
 
     def rest_runtime_lines(self, http_io: str = "both") -> list[str]:
+        """Generate REST runtime source lines with aiohttp transport exception handling.
+
+        Args:
+            http_io: HTTP method generation mode (`"both"`, `"sync"`, `"async"`).
+                Controls which call helpers (`ssc_rest_call` and/or `ssc_rest_call_async`)
+                are included in the returned lines. Defaults to `"both"`.
+
+        Returns:
+            List of Python code lines implementing REST runtime helpers with
+            aiohttp-specific exception catching.
+        """
         exc = self.transport_exception
         lines = [
             "_T = TypeVar('_T')",

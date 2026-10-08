@@ -44,7 +44,6 @@ class Bs4DomSpelling(DomSpelling):
         document_array_type: Type annotation ``ResultSet[Tag]``.
         init_arg_type: Accepted input type ``Union[str, BeautifulSoup, Tag]``.
         init_extra_params: Keyword argument signature with default ``features: Literal[...] = BS4_FEATURES``.
-        init_return_type: Return type annotation `` -> None``.
         fn_extra_params: Function keyword argument signature with default ``features: Literal[...] = BS4_FEATURES``.
         init_from_str_expr: Expression ``BeautifulSoup(document, features=features)``.
         extra_utilities: Defines ``BS4_FEATURES: Literal["html.parser", "lxml", "html5lib"] = ...``.
@@ -60,7 +59,6 @@ class Bs4DomSpelling(DomSpelling):
     document_array_type = "ResultSet[Tag]"
     init_arg_type = "Union[str, BeautifulSoup, Tag]"
     init_extra_params = ', *, features: Literal["html.parser", "lxml", "html5lib"] = BS4_FEATURES'
-    init_return_type = " -> None"
     fn_extra_params = ', *, features: Literal["html.parser", "lxml", "html5lib"] = BS4_FEATURES'
     init_from_str_expr = "BeautifulSoup(document, features=features)"
     extra_utilities: tuple[str, ...] = (
@@ -70,6 +68,13 @@ class Bs4DomSpelling(DomSpelling):
     supports_xpath = False
 
     def __init__(self, builder: ModuleBuilder, parser: str = "lxml") -> None:
+        """Initialize the BeautifulSoup4 DOM spelling instance.
+
+        Args:
+            builder: Module builder used for registering imports and runtime helpers.
+            parser: Underlying HTML parser feature engine ("lxml", "html.parser",
+                or "html5lib"). Defaults to "lxml".
+        """
         super().__init__(builder)
         self._parser = parser
         self.extra_utilities = (
@@ -79,10 +84,20 @@ class Bs4DomSpelling(DomSpelling):
 
     @property
     def parser(self) -> str:
+        """Get the underlying HTML parser feature engine.
+
+        Returns:
+            Configured HTML parser engine name ("lxml", "html.parser", or "html5lib").
+        """
         return self._parser
 
     @parser.setter
     def parser(self, value: str) -> None:
+        """Set the underlying HTML parser feature engine and update module constants.
+
+        Args:
+            value: HTML parser engine name ("lxml", "html.parser", or "html5lib").
+        """
         self._parser = value
         self.extra_utilities = (
             f'BS4_FEATURES: Literal["html.parser", "lxml", "html5lib"] = {value!r}',

@@ -31,7 +31,7 @@ class TargetSpec:
         bs4_parser: Underlying HTML parser engine for BeautifulSoup4 ("lxml", "html.parser", "html5lib").
             Python bs4 only. Defaults to None (resolves to "lxml").
         http_io: HTTP method generation mode ("both", "sync", "async").
-            Python only. Defaults to "both".
+            Python only. Defaults to None (resolves to "both").
 
     Examples:
         ```python
@@ -64,4 +64,4 @@ class TargetSpec:
     http_client: str | None = None
     separate_runtime: bool = False
     bs4_parser: str | None = None
-    http_io: str = "both"
+    http_io: str | None = None
