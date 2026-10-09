@@ -8,7 +8,6 @@ Called by JsVisitor via thin delegate methods.  The HTTP library strategy
 from __future__ import annotations
 
 import json
-from typing import Mapping
 
 from ssc_codegen.ast import (
     JsonDef,
@@ -23,17 +22,19 @@ from ssc_codegen.ast import (
     StructBase,
 )
 from ssc_codegen.ast.struct import RequestHttp
-from ssc_codegen.naming import to_camel_case, to_pascal_case, to_snake_case
+from ssc_codegen.naming import (
+    json_descriptor_var_name,
+    to_camel_case,
+    to_pascal_case,
+    to_snake_case,
+)
 from ssc_codegen.request_spec import parse_json_template
 from ssc_codegen.targets.javascript.http_libs.base import JsHttpLibStrategy
 from ssc_codegen.traversal.context import WalkContext
 from ssc_codegen.traversal.utils import (
     dict_needs_builder,
     err_subclass_name,
-    json_def_descriptors,
-    json_def_mapping,
 )
-
 
 # ===========================================================================
 # REST shared runtime source (Ok/Err/sscDispatchErr/etc.)
@@ -376,21 +377,30 @@ def emit_method_rest(
     )
 
     fn_name = http.fn_name
-    response_desc = _response_descriptors(node)
+    module = node.parent
+    while module is not None and not isinstance(module, Module):
+        module = module.parent
+    has_response_schema = False
+    if node.response_schema and isinstance(module, Module):
+        has_response_schema = any(
+            isinstance(n, JsonDef) and n.name == node.response_schema
+            for n in module.body
+        )
+
     if node.response_path:
         accessor = "".join(
             f"[{json.dumps(p)}]" for p in node.response_path.split(".")
         )
-        if response_desc is None:
-            value_fn = f"(_b) => _b{accessor}"
+        if has_response_schema:
+            desc_var = json_descriptor_var_name(node.response_schema)
+            value_fn = f"(_b) => sscJsonProject(_b{accessor}, {desc_var})"
         else:
-            value_fn = f"(_b) => sscJsonProject(_b{accessor}, {_render_descriptors(response_desc)})"
+            value_fn = f"(_b) => _b{accessor}"
     elif not node.response_schema:
         value_fn = "(_b) => null"
-    elif response_desc is not None:
-        value_fn = (
-            f"(_b) => sscJsonProject(_b, {_render_descriptors(response_desc)})"
-        )
+    elif has_response_schema:
+        desc_var = json_descriptor_var_name(node.response_schema)
+        value_fn = f"(_b) => sscJsonProject(_b, {desc_var})"
     else:
         value_fn = "null"
 
@@ -464,82 +474,6 @@ def emit_method_rest(
     )
     lines.append(f"{i1}}}")
     return lines
-
-
-def _response_descriptors(
-    node: MethodRest,
-) -> dict[str, tuple[str, bool, bool, object]] | None:
-    if not node.response_schema:
-        return None
-    module = node.parent.parent if node.parent is not None else None
-    if not isinstance(module, Module):
-        return None
-    definitions = {n.name: n for n in module.body if isinstance(n, JsonDef)}
-    definition = definitions.get(node.response_schema)
-    if definition is None:
-        return None
-    return json_def_descriptors(definition, definitions, expand_refs=True)
-
-
-def _render_descriptors(descriptors: Mapping[str, object]) -> str:
-    def render(value: object) -> str:
-        if value is None:
-            return "null"
-        if isinstance(value, bool):
-            return "true" if value else "false"
-        if isinstance(value, str):
-            return json.dumps(value)
-        if isinstance(value, tuple):
-            return "[" + ", ".join(render(x) for x in value) + "]"
-        if isinstance(value, list):
-            return "[" + ", ".join(render(item) for item in value) + "]"
-        if isinstance(value, dict):
-            return (
-                "{"
-                + ", ".join(
-                    f"{json.dumps(key)}: {render(item)}"
-                    for key, item in value.items()
-                )
-                + "}"
-            )
-        raise TypeError(f"unsupported JSON descriptor value: {value!r}")
-
-    return render(descriptors)
-
-
-def _response_mapping(node: MethodRest) -> dict[str, object] | None:
-    if not node.response_schema:
-        return None
-    module = node.parent.parent if node.parent is not None else None
-    if not isinstance(module, Module):
-        return None
-    definitions = {n.name: n for n in module.body if isinstance(n, JsonDef)}
-    definition = definitions.get(node.response_schema)
-    if definition is None or not definition.has_alias_key:
-        return None
-    return json_def_mapping(definition, definitions)
-
-
-def _render_mapping(mapping: dict[str, object]) -> str:
-    def render(value: object) -> str:
-        if isinstance(value, str):
-            return json.dumps(value)
-        if isinstance(value, tuple):
-            return "[" + json.dumps(value[0]) + ", " + render(value[1]) + "]"
-        if isinstance(value, list):
-            return "[" + ", ".join(render(item) for item in value) + "]"
-        if isinstance(value, dict):
-            return (
-                "{"
-                + ", ".join(
-                    f"{json.dumps(key)}: {render(item)}"
-                    for key, item in value.items()
-                )
-                + "}"
-            )
-        raise TypeError(f"unsupported JSON mapping value: {value!r}")
-
-    return render(mapping)
 
 
 def emit_method_fetch(
@@ -679,11 +613,9 @@ def emit_result_alias_def(node: ResultAliasDef) -> list[str]:
 def emit_matcher_list_def(node: MatcherListDef) -> list[str]:
     var = f"_{to_snake_case(node.struct_name)}Matchers"
     lines = [f"const {var} = ["]
-    module = (
-        node.parent
-        if isinstance(node.parent, Module)
-        else (node.parent.parent if node.parent is not None else None)
-    )
+    module = node.parent
+    while module is not None and not isinstance(module, Module):
+        module = module.parent
     definitions = (
         {n.name: n for n in module.body if isinstance(n, JsonDef)}
         if isinstance(module, Module)
@@ -692,13 +624,12 @@ def emit_matcher_list_def(node: MatcherListDef) -> list[str]:
     for e in node.entries:
         check = render_js_condition_check(e.required_keys, e.conditions)
         check_arg = check if check else "null"
-        desc = None
-        definition = definitions.get(e.error_schema)
-        if definition is not None:
-            desc = _render_descriptors(
-                json_def_descriptors(definition, definitions, expand_refs=True)
-            )
-        value_expr = f"sscJsonProject(_b, {desc})" if desc is not None else "_b"
+        desc_var = None
+        if e.error_schema and e.error_schema in definitions:
+            desc_var = json_descriptor_var_name(e.error_schema)
+        value_expr = (
+            f"sscJsonProject(_b, {desc_var})" if desc_var is not None else "_b"
+        )
         lines.append(
             f"    {{ status: {e.status}, check: {check_arg}, "
             f"factory: (_s, _h, _b) => ({{ isOk: false, status: _s, "
