@@ -28,7 +28,6 @@ from ssc_codegen.ast import (
     StructType,
     VariableType,
 )
-from ssc_codegen.naming import json_descriptor_var_name  # noqa: F401
 
 
 @dataclass(frozen=True)

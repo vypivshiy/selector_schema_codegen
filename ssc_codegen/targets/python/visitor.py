@@ -148,6 +148,7 @@ from ssc_codegen.targets.python.http_libs.requests import RequestsStrategy
 from ssc_codegen.traversal.context import WalkContext
 from ssc_codegen.traversal.utils import (
     DescriptorRef,
+    find_enclosing_module,
     json_def_descriptors,
     jsonify_path_to_segments,
     module_has_html_struct,
@@ -795,7 +796,7 @@ class PythonVisitor(BaseWalker):
             val_type = self._resolve_type(node.value_type_info)
             lines = [f"{name}Json = Dict[{key_type}, {val_type}]", ""]
             self._builder.require_import("from typing import Dict")
-            module = node.parent
+            module = find_enclosing_module(node)
             if isinstance(module, Module):
                 definitions = {
                     n.name: n for n in module.body if isinstance(n, JsonDef)
@@ -812,7 +813,7 @@ class PythonVisitor(BaseWalker):
         lines = [f'{name}Json = TypedDict("{name}Json", {{']
         lines.extend(self.walk_children(node, ctx))
         lines.append("})")
-        module = node.parent
+        module = find_enclosing_module(node)
         if isinstance(module, Module):
             definitions = {
                 n.name: n for n in module.body if isinstance(n, JsonDef)

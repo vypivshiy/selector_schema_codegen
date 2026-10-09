@@ -15,8 +15,8 @@ from pathlib import Path
 import httpx
 import pytest
 import respx
-
 from kdlquery import Severity
+
 from ssc_codegen.core import parse_module
 from ssc_codegen.targets.javascript import JS_CONVERTER
 from ssc_codegen.targets.python import PY_BS4_CONVERTER
@@ -1554,12 +1554,9 @@ json ApiErr {
         assert err_res.value == {"code": 40401, "message": "Catalog empty"}
 
     def test_aniliberty_real_world_schema_benchmark(self):
-        aniliberty_path = Path(
-            r"D:\PycharmProjects\anicli-api\dev\src\aniliberty_parser.kdl"
+        aniliberty_path = (
+            Path(__file__).parent / "schemas" / "aniliberty_benchmark.kdl"
         )
-        if not aniliberty_path.exists():
-            pytest.skip("aniliberty_parser.kdl benchmark file not found")
-
         mod, diags = parse_module(aniliberty_path.read_text(encoding="utf-8"))
         assert not [d for d in diags if d.severity == Severity.ERROR]
 

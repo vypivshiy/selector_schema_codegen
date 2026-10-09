@@ -14,7 +14,6 @@ from ssc_codegen.ast import (
     MatcherListDef,
     MethodFetch,
     MethodRest,
-    Module,
     PlaceholderSpec,
     PlaceholderTemplate,
     ResultAliasDef,
@@ -34,6 +33,7 @@ from ssc_codegen.traversal.context import WalkContext
 from ssc_codegen.traversal.utils import (
     dict_needs_builder,
     err_subclass_name,
+    find_enclosing_module,
 )
 
 # ===========================================================================
@@ -288,8 +288,7 @@ def js_name(name: str) -> str:
 def ok_payload_type(node: MethodRest) -> str:
     if not node.response_schema:
         return "null"
-    struct = node.parent
-    module = struct.parent if struct is not None else None
+    module = find_enclosing_module(node)
     schema_type = f"{to_pascal_case(node.response_schema)}Json"
     if module is not None:
         for n in module.body:
@@ -377,11 +376,9 @@ def emit_method_rest(
     )
 
     fn_name = http.fn_name
-    module = node.parent
-    while module is not None and not isinstance(module, Module):
-        module = module.parent
+    module = find_enclosing_module(node)
     has_response_schema = False
-    if node.response_schema and isinstance(module, Module):
+    if node.response_schema and module is not None:
         has_response_schema = any(
             isinstance(n, JsonDef) and n.name == node.response_schema
             for n in module.body
@@ -613,12 +610,10 @@ def emit_result_alias_def(node: ResultAliasDef) -> list[str]:
 def emit_matcher_list_def(node: MatcherListDef) -> list[str]:
     var = f"_{to_snake_case(node.struct_name)}Matchers"
     lines = [f"const {var} = ["]
-    module = node.parent
-    while module is not None and not isinstance(module, Module):
-        module = module.parent
+    module = find_enclosing_module(node)
     definitions = (
         {n.name: n for n in module.body if isinstance(n, JsonDef)}
-        if isinstance(module, Module)
+        if module is not None
         else {}
     )
     for e in node.entries:

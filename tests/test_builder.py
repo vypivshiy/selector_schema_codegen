@@ -19,7 +19,7 @@ def test_builder_require_import_handles_multiline_and_deduplicates() -> None:
     builder = ModuleBuilder()
     indented_block = """
         try:
-            import httpx2 as httpx  # type: ignore[import-not-found]
+            import httpx2 as httpx
         except ImportError:
             import httpx
     """

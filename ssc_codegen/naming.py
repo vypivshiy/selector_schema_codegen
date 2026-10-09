@@ -25,6 +25,12 @@ def to_snake_case(s: str) -> str:
 def json_descriptor_var_name(name: str) -> str:
     """Format canonical module-level JSON descriptor constant identifier.
 
+    Args:
+        name: Struct, type, or response schema name to format.
+
+    Returns:
+        Canonical uppercase identifier prefixed with ``JSON_DESCRIPTOR_``.
+
     Examples:
         'Episode'                 -> 'JSON_DESCRIPTOR_EPISODE'
         'CatalogReleasesResponse' -> 'JSON_DESCRIPTOR_CATALOG_RELEASES_RESPONSE'
