@@ -1,13 +1,15 @@
 import re
+
 import pytest
-from ssc_codegen.generation.runtime import (
-    SscJsonPathError,
-    SscJsonFieldMissingError,
-    SscJsonSchemaError,
-    ssc_resolve_dotpath,
-    ssc_json_project,
-)
+
 from ssc_codegen.core import parse_module
+from ssc_codegen.generation.runtime import (
+    SscJsonFieldMissingError,
+    SscJsonPathError,
+    SscJsonSchemaError,
+    ssc_json_project,
+    ssc_resolve_dotpath,
+)
 from ssc_codegen.targets.python import PY_BS4_CONVERTER
 
 
@@ -187,6 +189,20 @@ json CatalogItem {
     assert not any(d.severity.name == "ERROR" for d in diags)
 
     code = PY_BS4_CONVERTER.convert(module)
+    assert "JSON_DESCRIPTOR_GEO_LOCATION" in code
+    assert "JSON_DESCRIPTOR_AUTHOR_DETAIL" in code
+    assert "JSON_DESCRIPTOR_CATALOG_ITEM" in code
+    assert (
+        "'location': ('location', True, False, JSON_DESCRIPTOR_GEO_LOCATION)"
+        in code
+    )
+    assert (
+        "'author': ('author', False, False, JSON_DESCRIPTOR_AUTHOR_DETAIL)"
+        in code
+    )
+    assert (
+        "ssc_json_project(json.loads(v), JSON_DESCRIPTOR_CATALOG_ITEM)" in code
+    )
     ns = {}
     exec(compile(code, "<test>", "exec"), ns)
 
@@ -240,7 +256,7 @@ def test_top_level_dict_json_codegen_and_execution():
     code = PY_BS4_CONVERTER.convert(module)
     assert "TranslationsJson = Dict[int, List[str]]" in code
     assert (
-        "_translations_JSON_DESCRIPTORS = {'__dict__': True, '__value__': None}"
+        "JSON_DESCRIPTOR_TRANSLATIONS = {'__dict__': True, '__value__': None}"
         in code
     )
     ns = {}
@@ -273,7 +289,11 @@ json Episode {
     code = PY_BS4_CONVERTER.convert(module)
     assert "EpisodeMapJson = Dict[str, EpisodeJson]" in code
     assert (
-        "_episode_map_JSON_DESCRIPTORS = {'__dict__': True, '__value__': {'id': ('id', False, False, None), 'title': ('episode_title', False, False, None)}}"
+        "JSON_DESCRIPTOR_EPISODE = {'id': ('id', False, False, None), 'title': ('episode_title', False, False, None)}"
+        in code
+    )
+    assert (
+        "JSON_DESCRIPTOR_EPISODE_MAP = {'__dict__': True, '__value__': JSON_DESCRIPTOR_EPISODE}"
         in code
     )
     ns = {}
@@ -429,6 +449,13 @@ json AnimeResponse {
     code = PY_BS4_CONVERTER.convert(module)
     assert 'LinksJson = TypedDict("LinksJson"' in code
     assert "'links': List[LinksJson]" in code
+    assert "JSON_DESCRIPTOR_LINKS" in code
+    assert "JSON_DESCRIPTOR_ANIME_RESPONSE" in code
+    assert "'links': ('links', False, False, [JSON_DESCRIPTOR_LINKS])" in code
+    assert (
+        "ssc_json_project(json.loads(v), JSON_DESCRIPTOR_ANIME_RESPONSE)"
+        in code
+    )
     ns = {}
     exec(compile(code, "<test>", "exec"), ns)
     payload = """{
@@ -619,11 +646,15 @@ json AnimeResponse {
     )
 
     # 2. Verify nested descriptor structure
-    assert "_episode_value_JSON_DESCRIPTORS" in code
-    assert "_translation_value_JSON_DESCRIPTORS" in code
-    assert "_anime_response_JSON_DESCRIPTORS" in code
+    assert "JSON_DESCRIPTOR_EPISODE_VALUE" in code
+    assert "JSON_DESCRIPTOR_TRANSLATION_VALUE" in code
+    assert "JSON_DESCRIPTOR_ANIME_RESPONSE" in code
     assert (
-        "'episodes': ('episodes', False, False, {'__dict__': True, '__value__': {'link': ('link', False, False, None)}})"
+        "'episodes': ('episodes', False, False, {'__dict__': True, '__value__': JSON_DESCRIPTOR_EPISODE_VALUE})"
+        in code
+    )
+    assert (
+        "'translations': ('translations', False, False, {'__dict__': True, '__value__': JSON_DESCRIPTOR_TRANSLATION_VALUE})"
         in code
     )
 
@@ -856,13 +887,13 @@ def test_top_level_dict_json_with_inline_value_block_projection():
         'TranslationsValueJson = TypedDict("TranslationsValueJson"'
     ) < code.find("TranslationsJson = Dict[str, TranslationsValueJson]")
     assert (
-        "_translations_JSON_DESCRIPTORS = {'__dict__': True, '__value__':"
+        "JSON_DESCRIPTOR_TRANSLATIONS = {'__dict__': True, '__value__': JSON_DESCRIPTOR_TRANSLATIONS_VALUE}"
         in code
     )
 
     ns: dict = {}
     exec(compile(code, "<test>", "exec"), ns)
-    assert ns["_translations_JSON_DESCRIPTORS"] == {
+    assert ns["JSON_DESCRIPTOR_TRANSLATIONS"] == {
         "__dict__": True,
         "__value__": {
             "title": ("wire_name", False, False, None),
@@ -928,6 +959,16 @@ json PlaylistLibrary {
     code = PY_BS4_CONVERTER.convert(module)
     assert 'PlaylistItemJson = TypedDict("PlaylistItemJson"' in code
     assert "'categories': Dict[str, List[PlaylistItemJson]]" in code
+    assert "JSON_DESCRIPTOR_PLAYLIST_ITEM" in code
+    assert "JSON_DESCRIPTOR_PLAYLIST_LIBRARY" in code
+    assert (
+        "'categories': ('categories', False, False, {'__dict__': True, '__value__': [JSON_DESCRIPTOR_PLAYLIST_ITEM]})"
+        in code
+    )
+    assert (
+        "ssc_json_project(json.loads(v), JSON_DESCRIPTOR_PLAYLIST_LIBRARY)"
+        in code
+    )
 
     ns: dict = {}
     exec(compile(code, "<test>", "exec"), ns)
