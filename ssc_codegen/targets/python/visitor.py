@@ -263,7 +263,7 @@ _PY_JSON_REMAP_HELPER = _PY_JSON_PROJECT_HELPER
 def _python_json_descriptors(
     node: JsonDef, definitions: dict[str, JsonDef]
 ) -> list[str]:
-    descriptors = json_def_descriptors(node, definitions)
+    descriptors = json_def_descriptors(node, definitions, expand_refs=True)
 
     def render(value: object) -> str:
         if value is None:

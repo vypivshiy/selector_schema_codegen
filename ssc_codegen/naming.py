@@ -22,6 +22,17 @@ def to_snake_case(s: str) -> str:
     return s.lower()
 
 
+def json_descriptor_var_name(name: str) -> str:
+    """Format canonical module-level JSON descriptor constant identifier.
+
+    Examples:
+        'Episode'                 -> 'JSON_DESCRIPTOR_EPISODE'
+        'CatalogReleasesResponse' -> 'JSON_DESCRIPTOR_CATALOG_RELEASES_RESPONSE'
+    """
+    clean_name = to_snake_case(name).lstrip("_").upper()
+    return f"JSON_DESCRIPTOR_{clean_name}"
+
+
 def to_pascal_case(s: str) -> str:
     """
     'my_field_name' -> 'MyFieldName'
