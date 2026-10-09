@@ -145,6 +145,7 @@ from ssc_codegen.targets.javascript.http_libs.fetch import FetchStrategy
 from ssc_codegen.traversal.context import WalkContext
 from ssc_codegen.traversal.utils import (
     DescriptorRef,
+    find_enclosing_module,
     find_predicate_container,
     json_def_descriptors,
     jsonify_path_to_segments,
@@ -705,9 +706,7 @@ class JsVisitor(BaseWalker):
                 f" * @typedef {{Record<{key_type}, {val_type}>}} {name}Json",
                 " */",
             ]
-            module = node.parent
-            while module is not None and not isinstance(module, Module):
-                module = module.parent
+            module = find_enclosing_module(node)
             if isinstance(module, Module):
                 definitions = {
                     n.name: n for n in module.body if isinstance(n, JsonDef)
@@ -721,9 +720,7 @@ class JsVisitor(BaseWalker):
         lines = ["/**", f" * @typedef {{Object}} {name}Json"]
         lines.extend(self.walk_children(node, ctx))
         lines.append(" */")
-        module = node.parent
-        while module is not None and not isinstance(module, Module):
-            module = module.parent
+        module = find_enclosing_module(node)
         if isinstance(module, Module):
             definitions = {
                 n.name: n for n in module.body if isinstance(n, JsonDef)

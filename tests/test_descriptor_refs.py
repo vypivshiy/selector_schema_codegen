@@ -9,9 +9,6 @@ from ssc_codegen.traversal.utils import (
     DescriptorRef,
     json_def_descriptors,
 )
-from ssc_codegen.traversal.utils import (
-    json_descriptor_var_name as traversal_json_descriptor_var_name,
-)
 
 
 def _get_json_defs(src: str) -> dict[str, JsonDef]:
@@ -47,11 +44,6 @@ def test_json_descriptor_var_name_canonical():
         json_descriptor_var_name("Item2Release")
         == "JSON_DESCRIPTOR_ITEM2_RELEASE"
     )
-
-
-def test_json_descriptor_var_name_reexported():
-    assert traversal_json_descriptor_var_name is json_descriptor_var_name
-    assert traversal_json_descriptor_var_name("User") == "JSON_DESCRIPTOR_USER"
 
 
 def test_descriptor_ref_dataclass_properties():

@@ -22,6 +22,18 @@ Current code generators for JSON schemas (`JsonDef`) inline deeply nested dictio
    - Update `emit_method_rest` and `emit_matcher_list_def` in `python/rest.py` to reference `JSON_DESCRIPTOR_{SCHEMA_NAME.upper()}` by name instead of inlining dictionary literals. Support `response_path` accessors alongside descriptor constants.
    - Remove dead descriptor rendering helpers from `python/rest.py`.
 
+3. **JavaScript Target Alignment**:
+   - Emit top-level constants named `const JSON_DESCRIPTOR_{SCHEMA_NAME.upper()} = ...;`.
+   - Render `DescriptorRef` as unquoted constant identifiers (e.g. `JSON_DESCRIPTOR_CHILD`, `[JSON_DESCRIPTOR_CHILD]`, `{"__dict__": true, "__value__": JSON_DESCRIPTOR_CHILD}`).
+   - Update `visit_jsonify` to pass `JSON_DESCRIPTOR_{SCHEMA_NAME.upper()}` to `sscJsonProject`.
+   - Update `emit_method_rest` and `emit_matcher_list_def` in `javascript/rest.py` to reference `JSON_DESCRIPTOR_{SCHEMA_NAME.upper()}` instead of inlining object literals.
+   - Support `response_path` accessors alongside descriptor constants.
+
+4. **Verification & Benchmarking**:
+   - Ensure all unit and integration tests pass (1600+ tests).
+   - Verify generated code with ruff format and mypy.
+   - Benchmark against `aniliberty_parser.kdl` to verify dramatic reduction in code size and duplicate dictionary literals.
+
 ## User Stories
 
 1. As a developer writing schemas with nested JSON models, I want generated descriptor dictionaries to reference child schemas by constant name rather than duplicating them inline, keeping generated files compact and readable.
