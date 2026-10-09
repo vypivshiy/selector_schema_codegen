@@ -169,7 +169,7 @@ _BASE_UTILITY_LINES: list[str] = [
     "        item = value[source]",
     "        if isinstance(nested, list) and nested:",
     "            item = [ssc_remap_json_keys(x, nested[0]) for x in item]",
-    "        elif nested is not None:",
+    "        elif isinstance(nested, dict):",
     "            item = ssc_remap_json_keys(item, nested)",
     "        result[output] = item",
     "    return result",

@@ -7,6 +7,7 @@ with respx-mocked httpx → assert Result objects.
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import re
 from pathlib import Path
@@ -15,8 +16,10 @@ import httpx
 import pytest
 import respx
 
-from ssc_codegen.core import parse_module
 from kdlquery import Severity
+from ssc_codegen.core import parse_module
+from ssc_codegen.targets.javascript import JS_CONVERTER
+from ssc_codegen.targets.python import PY_BS4_CONVERTER
 
 SCHEMAS_DIR = Path(__file__).parent / "schemas"
 
@@ -1379,4 +1382,251 @@ json Err {
                     }
                 },
             }
+        }
+
+
+class TestJsonDescriptorModularCodegen:
+    """End-to-end integration tests verifying modular JSON descriptor constants,
+    symbolic referencing in REST methods/matchers, and execution."""
+
+    _NESTED_SCHEMA = """
+json LeafImage {
+    src str
+    width int?
+}
+
+json Genre {
+    id int
+    name str
+    icon LeafImage
+}
+
+json Release {
+    id int
+    title str from="wire_title"
+    genres (array)Genre
+}
+
+json CatalogResponse {
+    items (array)Release
+    total int
+}
+
+json ApiErr {
+    code int
+    message str
+}
+
+(rest)struct CatalogAPI {
+    @request response=CatalogResponse \"\"\"
+    GET /api/catalog HTTP/1.1
+    Host: api.example.com
+    \"\"\"
+    @error 404 ApiErr
+}
+"""
+
+    def test_modular_descriptors_and_rest_reference_usage(self):
+        mod = _parse(self._NESTED_SCHEMA)
+        py_code = PY_BS4_CONVERTER.convert_all(mod)[""]
+
+        # 1. Verify descriptor naming convention
+        assert "JSON_DESCRIPTOR_LEAF_IMAGE = " in py_code
+        assert "JSON_DESCRIPTOR_GENRE = " in py_code
+        assert "JSON_DESCRIPTOR_RELEASE = " in py_code
+        assert "JSON_DESCRIPTOR_CATALOG_RESPONSE = " in py_code
+        assert "JSON_DESCRIPTOR_API_ERR = " in py_code
+
+        # 2. Verify no old private descriptor constants
+        assert "_leaf_image_JSON_DESCRIPTORS" not in py_code
+        assert "_genre_JSON_DESCRIPTORS" not in py_code
+        assert "_release_JSON_DESCRIPTORS" not in py_code
+        assert "_catalog_response_JSON_DESCRIPTORS" not in py_code
+
+        # 3. Verify descriptor modularity: child schemas referenced by name, not duplicated inline
+        assert (
+            "'icon': ('icon', False, False, JSON_DESCRIPTOR_LEAF_IMAGE)"
+            in py_code
+        )
+        assert (
+            "'genres': ('genres', False, False, [JSON_DESCRIPTOR_GENRE])"
+            in py_code
+        )
+        assert (
+            "'items': ('items', False, False, [JSON_DESCRIPTOR_RELEASE])"
+            in py_code
+        )
+
+        # 4. Verify REST method uses descriptor constant reference
+        assert (
+            "value_fn=lambda _b: ssc_json_project(_b, JSON_DESCRIPTOR_CATALOG_RESPONSE)"
+            in py_code
+        )
+
+        # 5. Verify error matcher uses descriptor constant reference
+        assert (
+            "value=ssc_json_project(value, JSON_DESCRIPTOR_API_ERR)" in py_code
+        )
+
+        # 6. Syntax validation
+        ast.parse(py_code)
+
+        # 7. JavaScript target alignment
+        js_code = JS_CONVERTER.convert_all(mod)[""]
+        assert "const JSON_DESCRIPTOR_LEAF_IMAGE = " in js_code
+        assert "const JSON_DESCRIPTOR_CATALOG_RESPONSE = " in js_code
+        assert "JSON_DESCRIPTOR_CATALOG_RESPONSE" in js_code
+        assert "JSON_DESCRIPTOR_API_ERR" in js_code
+        assert (
+            "(_b) => sscJsonProject(_b, JSON_DESCRIPTOR_CATALOG_RESPONSE)"
+            in js_code
+        )
+        assert "value: sscJsonProject(_b, JSON_DESCRIPTOR_API_ERR)" in js_code
+
+        # 8. Execution test with respx (success + 404 error)
+        ns: dict = {}
+        exec(py_code, ns)
+        API = ns["CatalogAPI"]
+
+        with respx.mock:
+            respx.get("https://api.example.com/api/catalog").respond(
+                json={
+                    "items": [
+                        {
+                            "id": 10,
+                            "wire_title": "Attack on Titan",
+                            "extra_release_field": "drop",
+                            "genres": [
+                                {
+                                    "id": 1,
+                                    "name": "Action",
+                                    "extra_genre_field": "drop",
+                                    "icon": {
+                                        "src": "https://img.example/1.png",
+                                        "width": 100,
+                                        "height": 200,
+                                    },
+                                }
+                            ],
+                        }
+                    ],
+                    "total": 1,
+                    "extra_page_field": "drop",
+                },
+                status_code=200,
+            )
+            client = httpx.Client()
+            res = API.fetch(client)
+
+        assert res.is_ok is True
+        assert res.value == {
+            "items": [
+                {
+                    "id": 10,
+                    "title": "Attack on Titan",
+                    "genres": [
+                        {
+                            "id": 1,
+                            "name": "Action",
+                            "icon": {
+                                "src": "https://img.example/1.png",
+                                "width": 100,
+                            },
+                        }
+                    ],
+                }
+            ],
+            "total": 1,
+        }
+
+        # 9. Execution test: 404 error projection
+        with respx.mock:
+            respx.get("https://api.example.com/api/catalog").respond(
+                json={"code": 40401, "message": "Catalog empty", "debug": 123},
+                status_code=404,
+            )
+            client = httpx.Client()
+            err_res = API.fetch(client)
+
+        assert err_res.is_ok is False
+        assert err_res.status == 404
+        assert isinstance(err_res, ns["CatalogAPIErr404"])
+        assert err_res.value == {"code": 40401, "message": "Catalog empty"}
+
+    def test_aniliberty_real_world_schema_benchmark(self):
+        aniliberty_path = Path(
+            r"D:\PycharmProjects\anicli-api\dev\src\aniliberty_parser.kdl"
+        )
+        if not aniliberty_path.exists():
+            pytest.skip("aniliberty_parser.kdl benchmark file not found")
+
+        mod, diags = parse_module(aniliberty_path.read_text(encoding="utf-8"))
+        assert not [d for d in diags if d.severity == Severity.ERROR]
+
+        py_code = PY_BS4_CONVERTER.convert_all(mod)[""]
+        js_code = JS_CONVERTER.convert_all(mod)[""]
+
+        # Validate descriptor naming
+        py_desc_constants = [
+            line.split(" = ")[0]
+            for line in py_code.splitlines()
+            if line.startswith("JSON_DESCRIPTOR_")
+        ]
+        assert len(py_desc_constants) >= 25
+        assert "_JSON_DESCRIPTORS" not in py_code
+
+        js_desc_constants = [
+            line.split(" = ")[0]
+            for line in js_code.splitlines()
+            if line.startswith("const JSON_DESCRIPTOR_")
+        ]
+        assert len(js_desc_constants) >= 25
+        assert "JsonDescriptors = " not in js_code
+
+        # Validate reference usage in REST methods and matchers
+        assert "JSON_DESCRIPTOR_CATALOG_RELEASES_RESPONSE" in py_code
+        assert "JSON_DESCRIPTOR_API_ERROR" in py_code
+        assert "JSON_DESCRIPTOR_RELEASE_DETAIL" in py_code
+
+        # Validate code size reduction: Python unformatted < 50,000 bytes (was 98,819 bytes)
+        assert len(py_code.encode("utf-8")) < 50_000
+        assert len(js_code.encode("utf-8")) < 45_000
+
+        # Validate Python AST syntax
+        ast.parse(py_code)
+
+        # Validate execution
+        ns: dict = {}
+        exec(py_code, ns)
+        API = ns["AnilibertyApi"]
+
+        with respx.mock:
+            respx.get("https://aniliberty.top/api/v1/app/status").respond(
+                json={
+                    "request": {
+                        "ip": "127.0.0.1",
+                        "country": "US",
+                        "iso_code": "USA",
+                        "timezone": "UTC",
+                        "unwanted": True,
+                    },
+                    "is_alive": True,
+                    "available_api_endpoints": ["/app/status"],
+                    "extra": 999,
+                },
+                status_code=200,
+            )
+            client = httpx.Client()
+            res = API.app_status(client)
+
+        assert res.is_ok is True
+        assert res.value == {
+            "request": {
+                "ip": "127.0.0.1",
+                "country": "US",
+                "iso_code": "USA",
+                "timezone": "UTC",
+            },
+            "is_alive": True,
+            "available_api_endpoints": ["/app/status"],
         }
