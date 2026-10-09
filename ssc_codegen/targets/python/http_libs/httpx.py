@@ -5,7 +5,7 @@ from __future__ import annotations
 from ssc_codegen.targets.python.http_libs.base import HttpLibStrategy
 
 HTTPX_FALLBACK_IMPORT = """try:
-    import httpx2 as httpx
+    import httpx2 as httpx  # type: ignore[import-not-found]
 except ImportError:
     import httpx"""
 
@@ -84,7 +84,9 @@ class HttpxStrategy(HttpLibStrategy):
             "        if self.check is not None:",
             "            if not isinstance(body, dict) or not self.check(body):",
             "                return None",
-            "        return self.factory(headers=headers, value=body)",
+            "        if self.factory is not None:",
+            "            return self.factory(headers=headers, value=body)",
+            "        return None",
             "",
             "",
             "def ssc_dispatch_err(",

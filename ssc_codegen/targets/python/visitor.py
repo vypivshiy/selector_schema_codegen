@@ -258,11 +258,12 @@ def ssc_remap_json_keys(value: Any, mapping: Dict[str, Any]) -> Any:
         item = value[source]
         if isinstance(nested, list) and nested:
             item = [ssc_remap_json_keys(x, nested[0]) for x in item]
-        elif nested is not None:
+        elif isinstance(nested, dict):
             item = ssc_remap_json_keys(item, nested)
         result[output] = item
     return result
 """
+
 
 def _python_json_descriptors(
     node: JsonDef, definitions: dict[str, JsonDef]
@@ -803,7 +804,7 @@ class PythonVisitor(BaseWalker):
                 self._builder.require_std(
                     "ssc_json_project",
                     code=_PY_JSON_PROJECT_HELPER,
-                    imports=["from typing import Tuple"],
+                    imports=[],
                 )
             return lines
 
@@ -820,7 +821,7 @@ class PythonVisitor(BaseWalker):
             self._builder.require_std(
                 "ssc_json_project",
                 code=_PY_JSON_PROJECT_HELPER,
-                imports=["from typing import Tuple"],
+                imports=[],
             )
         return lines
 
@@ -1490,7 +1491,7 @@ class PythonVisitor(BaseWalker):
             self._builder.require_std(
                 "ssc_json_project",
                 code=_PY_JSON_PROJECT_HELPER,
-                imports=["from typing import Tuple"],
+                imports=[],
             )
             desc_name = json_descriptor_var_name(node.schema_name)
             return [
