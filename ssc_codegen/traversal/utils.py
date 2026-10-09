@@ -293,8 +293,6 @@ def json_def_descriptors(
     definition: JsonDef,
     definitions: dict[str, JsonDef] | None = None,
     stack: tuple[str, ...] = (),
-    *,
-    expand_refs: bool = False,
 ) -> dict[str, tuple[str, bool, bool, object]]:
     """Build dictionary of field descriptors for strict JSON allowlist projection.
 
@@ -302,9 +300,6 @@ def json_def_descriptors(
         definition: The root `JsonDef` node.
         definitions: Optional mapping of all available `JsonDef` schemas in the module.
         stack: Cycle-prevention stack of visited schema names.
-        expand_refs: If True, recursively expands referenced schemas inline (legacy
-            compatibility for visitors pending migration). If False (default), emits
-            symbolic `DescriptorRef` instances.
 
     Returns:
         Dictionary mapping canonical field names to a tuple of
@@ -312,20 +307,12 @@ def json_def_descriptors(
     """
     if definition.name in stack:
         return {}
-    next_stack = (*stack, definition.name)
-    defs = definitions or {}
     if definition.is_dict:
         val_desc: object = None
         val_info = definition.value_type_info
         if val_info and val_info.base == VariableType.JSON and val_info.ref:
-            if expand_refs and val_info.ref in defs:
-                sub_desc = json_def_descriptors(
-                    defs[val_info.ref], defs, next_stack, expand_refs=True
-                )
-                val_desc = [sub_desc] if val_info.is_array else sub_desc
-            else:
-                ref = DescriptorRef(val_info.ref)
-                val_desc = [ref] if val_info.is_array else ref
+            ref = DescriptorRef(val_info.ref)
+            val_desc = [ref] if val_info.is_array else ref
         return {"__dict__": True, "__value__": val_desc}  # type: ignore[return-value, dict-item]
     descriptors: dict[str, tuple[str, bool, bool, object]] = {}
     for field in definition.body:
@@ -348,26 +335,12 @@ def json_def_descriptors(
                 and f_val_info.base == VariableType.JSON
                 and f_val_info.ref
             ):
-                if expand_refs and f_val_info.ref in defs:
-                    f_sub_desc = json_def_descriptors(
-                        defs[f_val_info.ref], defs, next_stack, expand_refs=True
-                    )
-                    f_val_desc = (
-                        [f_sub_desc] if f_val_info.is_array else f_sub_desc
-                    )
-                else:
-                    ref = DescriptorRef(f_val_info.ref)
-                    f_val_desc = [ref] if f_val_info.is_array else ref
+                ref = DescriptorRef(f_val_info.ref)
+                f_val_desc = [ref] if f_val_info.is_array else ref
             nested_desc = {"__dict__": True, "__value__": f_val_desc}
         elif info and info.base == VariableType.JSON and info.ref:
-            if expand_refs and info.ref in defs:
-                sub_desc = json_def_descriptors(
-                    defs[info.ref], defs, next_stack, expand_refs=True
-                )
-                nested_desc = [sub_desc] if info.is_array else sub_desc
-            else:
-                ref = DescriptorRef(info.ref)
-                nested_desc = [ref] if info.is_array else ref
+            ref = DescriptorRef(info.ref)
+            nested_desc = [ref] if info.is_array else ref
         descriptors[field.name] = (
             wire_path,
             is_optional,
