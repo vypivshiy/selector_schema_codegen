@@ -6,7 +6,7 @@ Output: parser code for Python (bs4, lxml, parsel, selectolax), JavaScript (DOM 
 
 Pipeline: .kdl schema → external `kdlquery` parser → core (AST + lint) → visitor → output code
 
-Version: 0.37.1
+Version: 0.41.0
 Python: >=3.10
 CLI entry point: `ssc-gen` (ssc_codegen.main:main)
 

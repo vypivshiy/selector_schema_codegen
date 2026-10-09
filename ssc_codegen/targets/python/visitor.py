@@ -137,9 +137,14 @@ from ssc_codegen.traversal.utils import (
 )
 from ssc_codegen.generation.builder import ModuleBuilder
 from ssc_codegen.targets.python import rest
+from ssc_codegen.targets.python.html_libs.base import DomSpelling
+from ssc_codegen.targets.python.html_libs.bs4 import Bs4DomSpelling
 from ssc_codegen.targets.python.http_libs.aiohttp import AioHttpStrategy
 from ssc_codegen.targets.python.http_libs.base import HttpLibStrategy
-from ssc_codegen.targets.python.http_libs.httpx import HttpxStrategy
+from ssc_codegen.targets.python.http_libs.httpx import (
+    Httpx2Strategy,
+    HttpxStrategy,
+)
 from ssc_codegen.targets.python.http_libs.requests import RequestsStrategy
 from ssc_codegen.traversal.context import WalkContext
 from ssc_codegen.traversal.walker import BaseWalker
@@ -372,6 +377,7 @@ class PythonVisitor(BaseWalker):
 
     _HTTP_STRATEGIES: dict[str, type[HttpLibStrategy]] = {
         "httpx": HttpxStrategy,
+        "httpx2": Httpx2Strategy,
         "aiohttp": AioHttpStrategy,
         "requests": RequestsStrategy,
     }
@@ -385,7 +391,7 @@ class PythonVisitor(BaseWalker):
         matching transport imports and error handling.
 
         Args:
-            http_client: Client identifier string (``"httpx"``, ``"aiohttp"``, or ``"requests"``).
+            http_client: Client identifier string (``"httpx"``, ``"httpx2"``, ``"aiohttp"``, or ``"requests"``).
 
         Returns:
             Instantiated `HttpLibStrategy` (defaults to `HttpxStrategy`).
@@ -398,7 +404,9 @@ class PythonVisitor(BaseWalker):
         self,
         var_name: str = "v",
         indent: str = " " * 4,
-        dom_spelling_cls: type | None = None,
+        dom_spelling_cls: type[DomSpelling] | None = None,
+        bs4_parser: str = "lxml",
+        http_io: str = "both",
     ) -> None:
         """Initialize the Python visitor.
 
@@ -406,24 +414,43 @@ class PythonVisitor(BaseWalker):
             var_name: Base prefix for pipeline intermediate variables (default: ``"v"``).
             indent: Indentation unit string (default: 4 spaces).
             dom_spelling_cls: Optional concrete `DomSpelling` subclass for HTML DOM parsing.
+            bs4_parser: HTML parser engine for BeautifulSoup4 (default: ``"lxml"``).
+            http_io: HTTP method generation mode (default: ``"both"``).
         """
         self.var_name = var_name
         self.indent = indent
-        self._dom_spelling_cls = dom_spelling_cls
+        self._dom_spelling_cls: type[DomSpelling] | None = dom_spelling_cls
+        self.bs4_parser = bs4_parser
+        self.http_io = http_io
         self._file_providers: dict[str, Any] = {}
         self._reset_state()
 
     # === STATE ===
 
-    def _reset_state(self) -> None:
+    def _reset_state(
+        self,
+        bs4_parser: str | None = None,
+        http_io: str | None = None,
+    ) -> None:
         self._builder = ModuleBuilder()
         self._http: HttpLibStrategy = HttpxStrategy()
+        if bs4_parser is not None:
+            self.bs4_parser = bs4_parser
+        if http_io is not None:
+            self.http_io = http_io
         if self._dom_spelling_cls is not None:
-            self._dom = self._dom_spelling_cls(self._builder)
+            if issubclass(self._dom_spelling_cls, Bs4DomSpelling):
+                self._dom: DomSpelling = self._dom_spelling_cls(
+                    self._builder, parser=self.bs4_parser
+                )
+            else:
+                self._dom = self._dom_spelling_cls(self._builder)
 
     def _make_ctx(self, meta: dict) -> WalkContext:
+        ctx_meta = dict(meta)
+        ctx_meta.setdefault("http_io", self.http_io)
         return WalkContext(
-            var_name=self.var_name, indent_char=self.indent, meta=dict(meta)
+            var_name=self.var_name, indent_char=self.indent, meta=ctx_meta
         )
 
     # === FILE PROVIDERS ===
@@ -464,7 +491,9 @@ class PythonVisitor(BaseWalker):
         Returns:
             Mapping from filenames (``""`` for the main module) to generated source texts.
         """
-        self._reset_state()
+        bs4_parser = meta.get("bs4_parser", self.bs4_parser)
+        http_io = meta.get("http_io", self.http_io)
+        self._reset_state(bs4_parser=bs4_parser, http_io=http_io)
         self._http = self.http_strategy_for(meta.get("http_client"))
         ctx = self._make_ctx(meta)
         self._walk_module(module_ast, ctx)
@@ -672,6 +701,7 @@ class PythonVisitor(BaseWalker):
     def visit_utilities(self, node: Utilities, ctx: WalkContext) -> list[str]:
         lines: list[str] = []
         runtime = ctx.meta.get("runtime_module")
+        http_io = ctx.meta.get("http_io", self.http_io)
         if runtime:
             # Even under -R, the parser file still declares TypedDict schemas,
             # @dataclass Err subclasses (Literal[<status>]), uses httpx type
@@ -679,16 +709,20 @@ class PythonVisitor(BaseWalker):
             # All non-runtime imports must be emitted into the parser file.
             lines.extend(self._builder.imports)
             mod = node.parent
-            if isinstance(mod, Module):
+            if isinstance(mod, Module) and hasattr(self, "_dom"):
                 need_fallback = any(
                     "FALLBACK_HTML_STR" in line
                     for line in self._dom.extra_utilities
                 )
-                names = rest.runtime_export_names(
-                    mod, need_fallback=need_fallback
-                )
             else:
-                names = []
+                need_fallback = False
+            names = (
+                rest.runtime_export_names(
+                    mod, need_fallback=need_fallback, http_io=http_io
+                )
+                if isinstance(mod, Module)
+                else []
+            )
             lines.append(f"from .{runtime} import " + ", ".join(names))
             lines.append("")
             if isinstance(mod, Module) and module_has_html_struct(mod):
@@ -714,7 +748,7 @@ class PythonVisitor(BaseWalker):
             for line in self._dom.extra_utilities:
                 lines.append(line)
         if isinstance(mod, Module) and module_has_rest(mod):
-            lines.extend(self._http.rest_runtime_lines())
+            lines.extend(self._http.rest_runtime_lines(http_io=http_io))
         lines.extend(self._render_std_section(ctx))
         return lines
 
@@ -902,7 +936,7 @@ class PythonVisitor(BaseWalker):
             ]
         else:
             lines = [
-                f"{i}def __init__(self, document: {self._dom.init_arg_type}):",
+                f"{i}def __init__(self, document: {self._dom.init_arg_type}{self._dom.init_extra_params}) -> None:",
                 f"{i2}if isinstance(document, str):",
                 f"{i3}self._doc = {self._dom.init_from_str_expr}",
                 f"{i2}else:",
@@ -1003,7 +1037,12 @@ class PythonVisitor(BaseWalker):
         name = to_snake_case(node.name)
         t_ret = self._resolve_type(node.ret_type_info)
         inner = ctx.deeper()
-        lines = [f"{ctx.indent}def {name}(document: str) -> {t_ret}:"]
+        if node.is_raw:
+            lines = [f"{ctx.indent}def {name}(document: str) -> {t_ret}:"]
+        else:
+            lines = [
+                f"{ctx.indent}def {name}(document: str{self._dom.fn_extra_params}) -> {t_ret}:"
+            ]
         if node.doc:
             lines.append(f"{inner.indent}{node.doc!r}")
         if node.is_raw:

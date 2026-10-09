@@ -1111,11 +1111,12 @@ class TestSeparateRuntime:
     @pytest.mark.parametrize(
         "http_client, expected_strategy, expected_import",
         [
-            (None, "HttpxStrategy", "import httpx"),
-            ("httpx", "HttpxStrategy", "import httpx"),
+            (None, "HttpxStrategy", "fallback"),
+            ("httpx", "HttpxStrategy", "fallback"),
+            ("httpx2", "Httpx2Strategy", "import httpx2"),
             ("aiohttp", "AioHttpStrategy", "import aiohttp"),
             ("requests", "RequestsStrategy", "import requests"),
-            ("<bogus>", "HttpxStrategy", "import httpx"),  # fallback to default
+            ("<bogus>", "HttpxStrategy", "fallback"),  # fallback to default
         ],
     )
     def test_http_strategy_for_returns_correct_default(
@@ -1127,7 +1128,11 @@ class TestSeparateRuntime:
         """
         from ssc_codegen.targets.python.http_libs.aiohttp import AioHttpStrategy
         from ssc_codegen.targets.python.http_libs.base import HttpLibStrategy
-        from ssc_codegen.targets.python.http_libs.httpx import HttpxStrategy
+        from ssc_codegen.targets.python.http_libs.httpx import (
+            HTTPX_FALLBACK_IMPORT,
+            Httpx2Strategy,
+            HttpxStrategy,
+        )
         from ssc_codegen.targets.python.http_libs.requests import (
             RequestsStrategy,
         )
@@ -1136,12 +1141,16 @@ class TestSeparateRuntime:
         strategy = PythonVisitor.http_strategy_for(http_client)
         type_map = {
             "HttpxStrategy": HttpxStrategy,
+            "Httpx2Strategy": Httpx2Strategy,
             "AioHttpStrategy": AioHttpStrategy,
             "RequestsStrategy": RequestsStrategy,
         }
         assert isinstance(strategy, type_map[expected_strategy])
         assert isinstance(strategy, HttpLibStrategy)
-        assert strategy.import_line == expected_import
+        if expected_import == "fallback":
+            assert strategy.import_line == HTTPX_FALLBACK_IMPORT
+        else:
+            assert strategy.import_line == expected_import
 
     def test_runtime_file_imports_httpx_when_http_client_is_none(self):
         """Regression for the main.py integration bug: when user runs
@@ -1190,6 +1199,7 @@ class TestSeparateRuntime:
         "http_client, expected_import",
         [
             ("httpx", "import httpx"),
+            ("httpx2", "import httpx2"),
             ("aiohttp", "import aiohttp"),
             ("requests", "import requests"),
         ],
@@ -1251,6 +1261,155 @@ class TestSeparateRuntime:
         assert "def fetch" in code
         assert "client: httpx.Client" in code
         assert "import httpx" in code
+        from ssc_codegen.targets.python.http_libs.httpx import (
+            HTTPX_FALLBACK_IMPORT,
+        )
+
+        assert HTTPX_FALLBACK_IMPORT in code
+
+    def test_html_only_module_with_fetch_imports_httpx2(self):
+        """HTML-only module with a fetch method under httpx2 emits strict
+        import httpx2 and client: httpx2.Client signatures.
+        """
+        src = (
+            "struct Page {\n"
+            '    title { css "h1"; text }\n'
+            '    @request """\n'
+            "    GET / HTTP/1.1\n"
+            "    Host: example.com\n"
+            '    """\n'
+            "}\n"
+        )
+        module = _parse(src)
+        generated = PY_BS4_CONVERTER.convert_all(module, http_client="httpx2")
+        code = generated[""]
+        assert "def fetch" in code
+        assert "client: httpx2.Client" in code
+        assert "client: httpx2.AsyncClient" in code
+        assert "import httpx2" in code
+        assert "import httpx\n" not in code
+
+    def test_httpx_fallback_separate_runtime_roundtrip(self, monkeypatch):
+        """End-to-end code generation and runtime execution for httpx (fallback).
+        Verifies both fallback execution paths:
+        1. When httpx2 is not present, ImportError falls back to httpx.
+        2. When httpx2 is present in sys.modules, import httpx2 as httpx succeeds.
+        """
+        import sys
+
+        import httpx
+        from ssc_codegen.generation.runtime import register_runtime_file
+        from ssc_codegen.targets.python import PY_LXML_CONVERTER
+        from ssc_codegen.targets.python.http_libs.httpx import (
+            HTTPX_FALLBACK_IMPORT,
+        )
+        from ssc_codegen.targets.python.visitor import PythonVisitor
+
+        src = _rest_src(errors="    @error 404 Err\n")
+        module = _parse(src)
+        strategy = PythonVisitor.http_strategy_for("httpx")
+        register_runtime_file(
+            PY_LXML_CONVERTER,
+            self.RUNTIME_NAME,
+            http_strategy=strategy,
+        )
+        generated = PY_LXML_CONVERTER.convert_all(
+            module,
+            http_client="httpx",
+            runtime_module=self.RUNTIME_NAME,
+        )
+        runtime = generated[f"{self.RUNTIME_NAME}.py"]
+        parser = generated[""]
+
+        assert HTTPX_FALLBACK_IMPORT in runtime
+        assert HTTPX_FALLBACK_IMPORT in parser
+        assert "client: httpx.Client" in parser
+        assert "client: httpx.AsyncClient" in parser
+        assert "client: httpx.Client" in runtime
+        assert "client: httpx.AsyncClient" in runtime
+        assert "except httpx.HTTPError as exc:" in runtime
+
+        # Path 1: httpx2 is not installed -> executes via fallback to httpx
+        ns = _exec_with_runtime(parser, runtime)
+        assert "API" in ns
+
+        # Path 2: httpx2 is installed/mocked -> executes via import httpx2 as httpx
+        monkeypatch.setitem(sys.modules, "httpx2", httpx)
+        ns2 = _exec_with_runtime(parser, runtime)
+        assert "API" in ns2
+
+    def test_httpx2_strict_separate_runtime_roundtrip(self, monkeypatch):
+        """End-to-end code generation and runtime execution for strict httpx2.
+        Verifies strict import httpx2 and signatures (httpx2.Client, httpx2.AsyncClient,
+        httpx2.HTTPError) in both parser and runtime file, and successful execution
+        via _exec_with_runtime with synthetic httpx2 module.
+        """
+        import sys
+
+        import httpx
+        from ssc_codegen.generation.runtime import register_runtime_file
+        from ssc_codegen.targets.python import PY_LXML_CONVERTER
+        from ssc_codegen.targets.python.http_libs.httpx import (
+            HTTPX_FALLBACK_IMPORT,
+        )
+        from ssc_codegen.targets.python.visitor import PythonVisitor
+
+        src = _rest_src(errors="    @error 404 Err\n")
+        module = _parse(src)
+        strategy = PythonVisitor.http_strategy_for("httpx2")
+        register_runtime_file(
+            PY_LXML_CONVERTER,
+            self.RUNTIME_NAME,
+            http_strategy=strategy,
+        )
+        generated = PY_LXML_CONVERTER.convert_all(
+            module,
+            http_client="httpx2",
+            runtime_module=self.RUNTIME_NAME,
+        )
+        runtime = generated[f"{self.RUNTIME_NAME}.py"]
+        parser = generated[""]
+
+        assert "import httpx2" in runtime
+        assert "import httpx2" in parser
+        assert HTTPX_FALLBACK_IMPORT not in runtime
+        assert HTTPX_FALLBACK_IMPORT not in parser
+        assert "import httpx\n" not in runtime
+        assert "import httpx\n" not in parser
+        assert "client: httpx2.Client" in parser
+        assert "client: httpx2.AsyncClient" in parser
+        assert "client: httpx2.Client" in runtime
+        assert "client: httpx2.AsyncClient" in runtime
+        assert "except httpx2.HTTPError as exc:" in runtime
+
+        monkeypatch.setitem(sys.modules, "httpx2", httpx)
+        ns = _exec_with_runtime(parser, runtime)
+        assert "API" in ns
+
+    def test_httpx2_inline_mode_roundtrip(self, monkeypatch):
+        """Inline mode (without separate runtime): verifies strict httpx2
+        emits import httpx2 and inlines helper with httpx2 signatures.
+        """
+        import sys
+
+        import httpx
+        from ssc_codegen.targets.python import PY_BS4_CONVERTER
+
+        src = _rest_src(errors="    @error 404 Err\n")
+        module = _parse(src)
+        generated = PY_BS4_CONVERTER.convert_all(module, http_client="httpx2")
+        parser = generated[""]
+
+        assert "import httpx2" in parser
+        assert "import httpx\n" not in parser
+        assert "client: httpx2.Client" in parser
+        assert "client: httpx2.AsyncClient" in parser
+        assert "except httpx2.HTTPError as exc:" in parser
+
+        monkeypatch.setitem(sys.modules, "httpx2", httpx)
+        ns: dict = {}
+        exec(compile(parser, "<inline>", "exec"), ns)
+        assert "API" in ns
 
     def test_runtime_functions_have_typed_signatures(self):
         """Pin the typed signatures on runtime functions: parameters and

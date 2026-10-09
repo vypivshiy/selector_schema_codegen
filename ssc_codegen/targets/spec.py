@@ -22,12 +22,16 @@ class TargetSpec:
         lib: HTML parser or DOM library (Python only: `"bs4"`, `"lxml"`, `"parsel"`, `"slax"`).
             Defaults to None (which resolves to `"bs4"` for Python).
         http_client: HTTP client strategy for `@request` REST code generation.
-            Supported Python clients: `"httpx"`, `"aiohttp"`, `"requests"`.
+            Supported Python clients: `"httpx"`, `"httpx2"`, `"aiohttp"`, `"requests"`.
             Supported JavaScript clients: `"fetch"`, `"axios"`.
             Defaults to None (which selects default client for the backend).
         separate_runtime: Whether to extract utility/helper functions into a standalone
             runtime module rather than inlining them into each generated file.
             Supported for Python. Defaults to False.
+        bs4_parser: Underlying HTML parser engine for BeautifulSoup4 ("lxml", "html.parser", "html5lib").
+            Python bs4 only. Defaults to None (resolves to "lxml").
+        http_io: HTTP method generation mode ("both", "sync", "async").
+            Python only. Defaults to None (resolves to "both").
 
     Examples:
         ```python
@@ -59,3 +63,5 @@ class TargetSpec:
     lib: str | None = None
     http_client: str | None = None
     separate_runtime: bool = False
+    bs4_parser: str | None = None
+    http_io: str | None = None

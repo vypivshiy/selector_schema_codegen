@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import inspect
+
 
 class ModuleBuilder:
     """Language-agnostic accumulator for imports and helper definitions.
@@ -50,12 +52,17 @@ class ModuleBuilder:
     def require_import(self, line: str) -> None:
         """Register a top-level import line.
 
-        Deduplicated and order-preserving. The line string is stored as-is.
+        Deduplicated and order-preserving. Multi-line blocks are normalized
+        with `inspect.cleandoc` to remove uniform indentation.
 
         Args:
             line: The verbatim import statement line for the target language.
         """
-        self._imports.setdefault(line, None)
+        if "\n" in line:
+            cleaned = inspect.cleandoc(line)
+        else:
+            cleaned = line
+        self._imports.setdefault(cleaned, None)
 
     def require_std(
         self,

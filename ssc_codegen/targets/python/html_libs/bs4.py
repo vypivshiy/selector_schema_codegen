@@ -27,8 +27,9 @@ from ssc_codegen.ast.selectors import (
     XpathSelect,
     XpathSelectAll,
 )
-from ssc_codegen.traversal.context import WalkContext as ConverterContext
+from ssc_codegen.generation.builder import ModuleBuilder
 from ssc_codegen.targets.python.html_libs.base import DomSpelling
+from ssc_codegen.traversal.context import WalkContext as ConverterContext
 
 
 class Bs4DomSpelling(DomSpelling):
@@ -38,23 +39,70 @@ class Bs4DomSpelling(DomSpelling):
     (such as ``select_one``, ``select``, ``decompose``, ``get_text``, and tag attributes).
 
     Attributes:
-        parser_imports: Imports ``from bs4 import BeautifulSoup, ResultSet, Tag``.
+        parser_imports: Imports ``from bs4 import BeautifulSoup, ResultSet, Tag`` and ``Literal``.
         document_type: Type annotation ``Union[Tag, BeautifulSoup]``.
         document_array_type: Type annotation ``ResultSet[Tag]``.
         init_arg_type: Accepted input type ``Union[str, BeautifulSoup, Tag]``.
-        init_from_str_expr: Expression ``BeautifulSoup(document, features=BS4_FEATURES)``.
-        extra_utilities: Defines ``BS4_FEATURES = 'lxml'``.
+        init_extra_params: Keyword argument signature with default ``features: Literal[...] = BS4_FEATURES``.
+        fn_extra_params: Function keyword argument signature with default ``features: Literal[...] = BS4_FEATURES``.
+        init_from_str_expr: Expression ``BeautifulSoup(document, features=features)``.
+        extra_utilities: Defines ``BS4_FEATURES: Literal["html.parser", "lxml", "html5lib"] = ...``.
         supports_xpath: `False` (BeautifulSoup4 does not support XPath natively).
     """
 
     # === DATA ===
-    parser_imports = ("from bs4 import BeautifulSoup, ResultSet, Tag",)
+    parser_imports = (
+        "from bs4 import BeautifulSoup, ResultSet, Tag",
+        "from typing import Literal",
+    )
     document_type = "Union[Tag, BeautifulSoup]"
     document_array_type = "ResultSet[Tag]"
     init_arg_type = "Union[str, BeautifulSoup, Tag]"
-    init_from_str_expr = "BeautifulSoup(document, features=BS4_FEATURES)"
-    extra_utilities = ("BS4_FEATURES = 'lxml'", "")
+    init_extra_params = ', *, features: Literal["html.parser", "lxml", "html5lib"] = BS4_FEATURES'
+    fn_extra_params = ', *, features: Literal["html.parser", "lxml", "html5lib"] = BS4_FEATURES'
+    init_from_str_expr = "BeautifulSoup(document, features=features)"
+    extra_utilities: tuple[str, ...] = (
+        'BS4_FEATURES: Literal["html.parser", "lxml", "html5lib"] = \'lxml\'',
+        "",
+    )
     supports_xpath = False
+
+    def __init__(self, builder: ModuleBuilder, parser: str = "lxml") -> None:
+        """Initialize the BeautifulSoup4 DOM spelling instance.
+
+        Args:
+            builder: Module builder used for registering imports and runtime helpers.
+            parser: Underlying HTML parser feature engine ("lxml", "html.parser",
+                or "html5lib"). Defaults to "lxml".
+        """
+        super().__init__(builder)
+        self._parser = parser
+        self.extra_utilities = (
+            f'BS4_FEATURES: Literal["html.parser", "lxml", "html5lib"] = {parser!r}',
+            "",
+        )
+
+    @property
+    def parser(self) -> str:
+        """Get the underlying HTML parser feature engine.
+
+        Returns:
+            Configured HTML parser engine name ("lxml", "html.parser", or "html5lib").
+        """
+        return self._parser
+
+    @parser.setter
+    def parser(self, value: str) -> None:
+        """Set the underlying HTML parser feature engine and update module constants.
+
+        Args:
+            value: HTML parser engine name ("lxml", "html.parser", or "html5lib").
+        """
+        self._parser = value
+        self.extra_utilities = (
+            f'BS4_FEATURES: Literal["html.parser", "lxml", "html5lib"] = {value!r}',
+            "",
+        )
 
     # === EXPRESSIONS ===
 
@@ -167,8 +215,10 @@ class Bs4DomSpelling(DomSpelling):
         if node.accept_type_info.is_array:
             return [f"{ctx.indent}{ctx.nxt} = len({ctx.prv}) > 0"]
         return [
-            f"{ctx.indent}{ctx.nxt} = not ({ctx.prv} is None or {ctx.prv} == '' "
-            f"or (type({ctx.prv}) is int and {ctx.prv} == 0))"
+            (
+                f"{ctx.indent}{ctx.nxt} = not ({ctx.prv} is None or {ctx.prv} == '' "
+                f"or (type({ctx.prv}) is int and {ctx.prv} == 0))"
+            )
         ]
 
     # === PREDICATES ===

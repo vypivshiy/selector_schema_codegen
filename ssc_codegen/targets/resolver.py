@@ -84,13 +84,14 @@ def _resolve_python(spec: TargetSpec) -> TargetProfile:
     Raises:
         ResolutionError: If an unknown HTML library or unsupported HTTP client is specified.
     """
+    from ssc_codegen.targets.python.html_libs.base import DomSpelling
     from ssc_codegen.targets.python.html_libs.bs4 import Bs4DomSpelling
     from ssc_codegen.targets.python.html_libs.lxml import LxmlDomSpelling
     from ssc_codegen.targets.python.html_libs.parsel import ParselDomSpelling
     from ssc_codegen.targets.python.html_libs.slax import SlaxDomSpelling
     from ssc_codegen.targets.python.visitor import PythonVisitor
 
-    spellings = {
+    spellings: dict[str, type[DomSpelling]] = {
         "bs4": Bs4DomSpelling,
         "lxml": LxmlDomSpelling,
         "parsel": ParselDomSpelling,
@@ -104,30 +105,80 @@ def _resolve_python(spec: TargetSpec) -> TargetProfile:
             f"Available: {', '.join(sorted(spellings))}."
         )
 
+    valid_bs4_parsers = ("lxml", "html.parser", "html5lib")
+    if spec.bs4_parser is not None:
+        if lib != "bs4":
+            raise ResolutionError(
+                f"--bs4-parser is only applicable when --lib is bs4, not '{lib}'."
+            )
+        if spec.bs4_parser not in valid_bs4_parsers:
+            raise ResolutionError(
+                f"Invalid --bs4-parser '{spec.bs4_parser}'. "
+                f"Permitted values: 'lxml', 'html.parser', 'html5lib'."
+            )
+
+    effective_bs4_parser = spec.bs4_parser or "lxml"
+    effective_http_io = spec.http_io or "both"
+
+    valid_http_io = ("both", "sync", "async")
+    if effective_http_io not in valid_http_io:
+        raise ResolutionError(
+            f"Invalid --http-io '{spec.http_io}'. "
+            f"Permitted values: 'both', 'sync', 'async'."
+        )
+
     spelling_cls = spellings[lib]
 
     if spec.http_client is not None:
-        valid = ("httpx", "aiohttp", "requests")
+        valid = ("httpx", "httpx2", "aiohttp", "requests")
         if spec.http_client not in valid:
             raise ResolutionError(
                 f"Python accepts --http-client: {', '.join(valid)}. "
                 f"Got '{spec.http_client}'."
             )
 
+    if spec.http_client == "aiohttp" and effective_http_io == "sync":
+        raise ResolutionError(
+            "aiohttp does not support synchronous I/O (--http-io sync). "
+            "Use 'both', 'async', or a different HTTP client."
+        )
+
     if spec.separate_runtime and lib == "lxml":
         pass  # supported, with fallback
 
     def _factory() -> PythonVisitor:
-        return PythonVisitor(dom_spelling_cls=spelling_cls)
+        return PythonVisitor(
+            dom_spelling_cls=spelling_cls,
+            bs4_parser=effective_bs4_parser,
+            http_io=effective_http_io,
+        )
 
     return TargetProfile(
         language="python",
         file_extension=".py",
         create_converter=_factory,
-        http_clients=("httpx", "aiohttp", "requests"),
+        http_clients=("httpx", "httpx2", "aiohttp", "requests"),
         supports_separate_runtime=True,
         runtime_include_fallback=(lib == "lxml"),
     )
+
+
+def _reject_python_only_options(spec: TargetSpec, lang_name: str) -> None:
+    """Validate that Python-only target options are not specified.
+
+    Args:
+        spec: Raw target options to validate.
+        lang_name: Target backend language name for error reporting.
+
+    Raises:
+        ResolutionError: If `--bs4-parser` or `--http-io` is provided.
+    """
+    if spec.bs4_parser is not None:
+        raise ResolutionError(
+            f"--bs4-parser is not applicable for {lang_name}."
+        )
+    if spec.http_io is not None:
+        raise ResolutionError(f"--http-io is not applicable for {lang_name}.")
 
 
 def _resolve_js(spec: TargetSpec) -> TargetProfile:
@@ -147,6 +198,8 @@ def _resolve_js(spec: TargetSpec) -> TargetProfile:
 
     if spec.lib is not None:
         raise ResolutionError("--lib is not applicable for JavaScript.")
+
+    _reject_python_only_options(spec, "JavaScript")
 
     if spec.http_client is not None:
         valid = ("fetch", "axios")
@@ -185,6 +238,7 @@ def _resolve_go(spec: TargetSpec) -> TargetProfile:
 
     if spec.lib is not None:
         raise ResolutionError("--lib is not applicable for Go.")
+    _reject_python_only_options(spec, "Go")
     if spec.http_client is not None:
         raise ResolutionError(
             "Go uses net/http exclusively. --http-client is not applicable."
@@ -210,6 +264,7 @@ def _resolve_rust(spec: TargetSpec) -> TargetProfile:
 
     if spec.lib is not None:
         raise ResolutionError("--lib is not applicable for Rust.")
+    _reject_python_only_options(spec, "Rust")
     if spec.http_client is not None and spec.http_client != "reqwest":
         raise ResolutionError(
             f"Invalid HTTP client '{spec.http_client}' for Rust. Valid options: reqwest."

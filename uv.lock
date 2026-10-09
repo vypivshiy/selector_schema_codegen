@@ -2347,7 +2347,7 @@ wheels = [
 
 [[package]]
 name = "ssc-codegen"
-version = "0.40.0"
+version = "0.41.0"
 source = { editable = "." }
 dependencies = [
     { name = "bs4" },
