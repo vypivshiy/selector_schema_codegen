@@ -478,7 +478,7 @@ def _response_descriptors(
     definition = definitions.get(node.response_schema)
     if definition is None:
         return None
-    return json_def_descriptors(definition, definitions)
+    return json_def_descriptors(definition, definitions, expand_refs=True)
 
 
 def _render_descriptors(descriptors: Mapping[str, object]) -> str:
@@ -696,7 +696,7 @@ def emit_matcher_list_def(node: MatcherListDef) -> list[str]:
         definition = definitions.get(e.error_schema)
         if definition is not None:
             desc = _render_descriptors(
-                json_def_descriptors(definition, definitions)
+                json_def_descriptors(definition, definitions, expand_refs=True)
             )
         value_expr = f"sscJsonProject(_b, {desc})" if desc is not None else "_b"
         lines.append(
