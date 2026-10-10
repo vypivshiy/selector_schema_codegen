@@ -18,8 +18,8 @@ import re as _re
 from typing import Any
 
 from ssc_codegen.ast import (
-    Attr,
     Assert,
+    Attr,
     CheckMethod,
     CodeEndHook,
     CodeStartHook,
@@ -33,14 +33,14 @@ from ssc_codegen.ast import (
     Filter,
     Fmt,
     FunctionDef,
+    Index,
     Init,
     InitField,
     InitFieldCall,
-    Index,
+    Join,
     JsonDef,
     JsonDefField,
     Jsonify,
-    Join,
     Key,
     Len,
     LogicAnd,
@@ -49,12 +49,12 @@ from ssc_codegen.ast import (
     Lower,
     Ltrim,
     Match,
+    MatcherListDef,
     MethodFetch,
     MethodRest,
     Module,
     Nested,
     NormalizeSpace,
-    PreValidate,
     PredAttrContains,
     PredAttrEnds,
     PredAttrEq,
@@ -83,15 +83,15 @@ from ssc_codegen.ast import (
     PredTextRe,
     PredTextStarts,
     PredXpath,
+    PreValidate,
     Raw,
     Re,
     ReAll,
-    ReSub,
     Repl,
     ReplMap,
+    ReSub,
     ResultAliasDef,
     ResultVariantDef,
-    MatcherListDef,
     Return,
     RmPrefix,
     RmPrefixSuffix,
@@ -105,7 +105,6 @@ from ssc_codegen.ast import (
     Struct,
     StructBase,
     StructRest,
-    StructType as ST,
     TableConfig,
     TableMatchKey,
     TableRows,
@@ -117,35 +116,43 @@ from ssc_codegen.ast import (
     TypeDef,
     TypeDefField,
     TypeInfo,
-    Unique,
     Unescape,
+    Unique,
     Upper,
     Utilities,
     Value,
-    VariableType as VT,
     XpathRemove,
     XpathSelect,
     XpathSelectAll,
 )
-from ssc_codegen.exceptions import BuildTimeError
-from ssc_codegen.naming import to_camel_case, to_pascal_case, to_snake_case
-from ssc_codegen.traversal.utils import (
-    find_predicate_container,
-    json_def_descriptors,
-    json_def_mapping,
-    jsonify_path_to_segments,
-    module_has_rest,
-    resolve_json_def,
+from ssc_codegen.ast import (
+    StructType as ST,
 )
-
+from ssc_codegen.ast import (
+    VariableType as VT,
+)
+from ssc_codegen.exceptions import BuildTimeError
 from ssc_codegen.generation.builder import ModuleBuilder
+from ssc_codegen.naming import (
+    json_descriptor_var_name,
+    to_camel_case,
+    to_pascal_case,
+)
 from ssc_codegen.targets.javascript import rest
 from ssc_codegen.targets.javascript.http_libs.axios import AxiosStrategy
 from ssc_codegen.targets.javascript.http_libs.base import JsHttpLibStrategy
 from ssc_codegen.targets.javascript.http_libs.fetch import FetchStrategy
 from ssc_codegen.traversal.context import WalkContext
+from ssc_codegen.traversal.utils import (
+    DescriptorRef,
+    find_enclosing_module,
+    find_predicate_container,
+    json_def_descriptors,
+    jsonify_path_to_segments,
+    module_has_rest,
+    resolve_json_def,
+)
 from ssc_codegen.traversal.walker import BaseWalker
-
 
 _JS_JSON_PROJECT_HELPER = """class SscJsonError extends Error {
   constructor(message) {
@@ -286,8 +293,6 @@ function sscRemapJsonKeys(value, mapping) {
   return result;
 }"""
 
-_JS_JSON_REMAP_HELPER = _JS_JSON_PROJECT_HELPER
-
 
 def _js_json_descriptors(
     node: JsonDef, definitions: dict[str, JsonDef]
@@ -295,6 +300,8 @@ def _js_json_descriptors(
     descriptors = json_def_descriptors(node, definitions)
 
     def render(value: object) -> str:
+        if isinstance(value, DescriptorRef):
+            return json_descriptor_var_name(value.schema_name)
         if value is None:
             return "null"
         if isinstance(value, bool):
@@ -317,36 +324,7 @@ def _js_json_descriptors(
         raise TypeError(f"unsupported JSON descriptor value: {value!r}")
 
     return [
-        f"const _{to_snake_case(node.name)}JsonDescriptors = {render(descriptors)};",
-        "",
-    ]
-
-
-def _js_json_mapping(
-    node: JsonDef, definitions: dict[str, JsonDef]
-) -> list[str]:
-    mapping = json_def_mapping(node, definitions)
-
-    def render(value: object) -> str:
-        if isinstance(value, str):
-            return json.dumps(value)
-        if isinstance(value, tuple):
-            return "[" + json.dumps(value[0]) + ", " + render(value[1]) + "]"
-        if isinstance(value, list):
-            return "[" + ", ".join(render(item) for item in value) + "]"
-        if isinstance(value, dict):
-            return (
-                "{"
-                + ", ".join(
-                    f"{json.dumps(key)}: {render(item)}"
-                    for key, item in value.items()
-                )
-                + "}"
-            )
-        raise TypeError(f"unsupported JSON mapping value: {value!r}")
-
-    return [
-        f"const _{to_snake_case(node.name)}JsonMapping = {render(mapping)};",
+        f"const {json_descriptor_var_name(node.name)} = {render(descriptors)};",
         "",
     ]
 
@@ -728,9 +706,7 @@ class JsVisitor(BaseWalker):
                 f" * @typedef {{Record<{key_type}, {val_type}>}} {name}Json",
                 " */",
             ]
-            module = node.parent
-            while module is not None and not isinstance(module, Module):
-                module = module.parent
+            module = find_enclosing_module(node)
             if isinstance(module, Module):
                 definitions = {
                     n.name: n for n in module.body if isinstance(n, JsonDef)
@@ -744,9 +720,7 @@ class JsVisitor(BaseWalker):
         lines = ["/**", f" * @typedef {{Object}} {name}Json"]
         lines.extend(self.walk_children(node, ctx))
         lines.append(" */")
-        module = node.parent
-        while module is not None and not isinstance(module, Module):
-            module = module.parent
+        module = find_enclosing_module(node)
         if isinstance(module, Module):
             definitions = {
                 n.name: n for n in module.body if isinstance(n, JsonDef)
@@ -1530,7 +1504,7 @@ class JsVisitor(BaseWalker):
             self._builder.require_std(
                 "sscJsonProject", code=_JS_JSON_PROJECT_HELPER
             )
-            desc_name = f"_{to_snake_case(node.schema_name)}JsonDescriptors"
+            desc_name = json_descriptor_var_name(node.schema_name)
             return [
                 f"{ctx.indent}let {ctx.nxt} = sscJsonProject({raw_expr}, {desc_name});"
             ]

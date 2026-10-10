@@ -91,6 +91,14 @@ from source JSON keys by applying JSON key aliases; absent source keys are
 omitted and values are not type-validated or cast.
 _Avoid_: validated model, deserialized object
 
+**JSON field descriptor**:
+The 4-tuple `(wire_path, is_optional, is_omitempty, nested_descriptors)` defining extraction and mapping metadata for a single field in a JSON schema during runtime JSON projection.
+_Avoid_: field validator, serialization spec
+
+**JSON descriptor constant**:
+A module-level constant holding the field descriptor dictionary for a declared JSON schema, referenced by request handlers and error matchers during runtime JSON projection.
+_Avoid_: schema reflection metadata, runtime type dictionary, hardcoded projection literal
+
 ## Validation And Access
 
 **Schema validation**:

@@ -14,128 +14,127 @@ import inspect
 from typing import Any
 
 from ssc_codegen.ast import (
-    Module,
-    Utilities,
-    JsonDef,
-    JsonDefField,
-    TypeDef,
-    TypeDefField,
-    Struct,
-    StructBase,
-    StructRest,
-    StartParse,
-    Init,
-    InitFieldCall,
-    InitField,
-    Field,
-    FunctionDef,
-    PreValidate,
+    Assert,
+    Attr,
     CheckMethod,
-    SplitDoc,
-    Key,
-    Value,
-    TableConfig,
-    TableMatchKey,
-    TableRows,
-    MethodRest,
-    MethodFetch,
-    ErrorResponse,
-    ExtensionCall,
-    ResultVariantDef,
-    ResultAliasDef,
-    MatcherListDef,
+    CodeEndHook,
+    CodeStartHook,
+    CssRemove,
     CssSelect,
     CssSelectAll,
-    CssRemove,
-    XpathSelect,
-    XpathSelectAll,
-    XpathRemove,
-    Attr,
-    Text,
-    Raw,
-    Fmt,
-    Repl,
-    ReplMap,
-    Lower,
-    Upper,
-    Split,
-    Join,
-    NormalizeSpace,
-    Unescape,
-    Trim,
-    Ltrim,
-    Rtrim,
-    RmPrefix,
-    RmSuffix,
-    RmPrefixSuffix,
-    Re,
-    ReAll,
-    ReSub,
-    Index,
-    Slice,
-    Len,
-    Unique,
-    ToInt,
-    ToFloat,
-    ToBool,
-    Jsonify,
-    Nested,
-    Self,
-    Return,
-    Node,
+    ErrorResponse,
+    ExtensionCall,
     Fallback,
+    Field,
     Filter,
-    Assert,
-    Match,
+    Fmt,
+    FunctionDef,
+    Index,
+    Init,
+    InitField,
+    InitFieldCall,
+    Join,
+    JsonDef,
+    JsonDefField,
+    Jsonify,
+    Key,
+    Len,
     LogicAnd,
     LogicNot,
     LogicOr,
-    PredCss,
-    PredXpath,
-    PredHasAttr,
+    Lower,
+    Ltrim,
+    Match,
+    MatcherListDef,
+    MethodFetch,
+    MethodRest,
+    Module,
+    Nested,
+    Node,
+    NormalizeSpace,
     PredAttrContains,
-    PredAttrStarts,
     PredAttrEnds,
     PredAttrEq,
     PredAttrNe,
     PredAttrRe,
-    PredTextContains,
-    PredTextStarts,
-    PredTextEnds,
-    PredTextRe,
+    PredAttrStarts,
     PredContains,
-    PredEq,
-    PredNe,
-    PredStarts,
-    PredEnds,
     PredCountEq,
+    PredCountGe,
     PredCountGt,
+    PredCountLe,
     PredCountLt,
     PredCountNe,
-    PredCountGe,
-    PredCountLe,
     PredCountRange,
+    PredCss,
+    PredEnds,
+    PredEq,
+    PredHasAttr,
+    PredNe,
     PredRe,
     PredReAll,
     PredReAny,
-    CodeEndHook,
-    CodeStartHook,
+    PredStarts,
+    PredTextContains,
+    PredTextEnds,
+    PredTextRe,
+    PredTextStarts,
+    PredXpath,
+    PreValidate,
+    Raw,
+    Re,
+    ReAll,
+    Repl,
+    ReplMap,
+    ReSub,
+    ResultAliasDef,
+    ResultVariantDef,
+    Return,
+    RmPrefix,
+    RmPrefixSuffix,
+    RmSuffix,
+    Rtrim,
+    Self,
+    Slice,
+    Split,
+    SplitDoc,
+    StartParse,
+    Struct,
+    StructBase,
+    StructRest,
+    TableConfig,
+    TableMatchKey,
+    TableRows,
+    Text,
+    ToBool,
+    ToFloat,
+    ToInt,
+    Trim,
+    TypeDef,
+    TypeDefField,
     TypeInfo,
-    VariableType as VT,
+    Unescape,
+    Unique,
+    Upper,
+    Utilities,
+    Value,
+    XpathRemove,
+    XpathSelect,
+    XpathSelectAll,
+)
+from ssc_codegen.ast import (
     StructType as ST,
 )
-from ssc_codegen.exceptions import BuildTimeError
-from ssc_codegen.naming import to_pascal_case, to_snake_case
-from ssc_codegen.traversal.utils import (
-    json_def_descriptors,
-    json_def_mapping,
-    jsonify_path_to_segments,
-    module_has_html_struct,
-    module_has_rest,
-    module_uses_http,
-    resolve_json_def,
+from ssc_codegen.ast import (
+    VariableType as VT,
 )
+from ssc_codegen.exceptions import BuildTimeError
 from ssc_codegen.generation.builder import ModuleBuilder
+from ssc_codegen.naming import (
+    json_descriptor_var_name,
+    to_pascal_case,
+    to_snake_case,
+)
 from ssc_codegen.targets.python import rest
 from ssc_codegen.targets.python.html_libs.base import DomSpelling
 from ssc_codegen.targets.python.html_libs.bs4 import Bs4DomSpelling
@@ -147,8 +146,17 @@ from ssc_codegen.targets.python.http_libs.httpx import (
 )
 from ssc_codegen.targets.python.http_libs.requests import RequestsStrategy
 from ssc_codegen.traversal.context import WalkContext
+from ssc_codegen.traversal.utils import (
+    DescriptorRef,
+    find_enclosing_module,
+    json_def_descriptors,
+    jsonify_path_to_segments,
+    module_has_html_struct,
+    module_has_rest,
+    module_uses_http,
+    resolve_json_def,
+)
 from ssc_codegen.traversal.walker import BaseWalker
-
 
 _PY_JSON_PROJECT_HELPER = """
 class SscJsonError(Exception):
@@ -251,13 +259,11 @@ def ssc_remap_json_keys(value: Any, mapping: Dict[str, Any]) -> Any:
         item = value[source]
         if isinstance(nested, list) and nested:
             item = [ssc_remap_json_keys(x, nested[0]) for x in item]
-        elif nested is not None:
+        elif isinstance(nested, dict):
             item = ssc_remap_json_keys(item, nested)
         result[output] = item
     return result
 """
-
-_PY_JSON_REMAP_HELPER = _PY_JSON_PROJECT_HELPER
 
 
 def _python_json_descriptors(
@@ -272,6 +278,8 @@ def _python_json_descriptors(
             return "True" if value else "False"
         if isinstance(value, str):
             return repr(value)
+        if isinstance(value, DescriptorRef):
+            return json_descriptor_var_name(value.schema_name)
         if isinstance(value, tuple):
             return "(" + ", ".join(render(x) for x in value) + ")"
         if isinstance(value, list):
@@ -286,35 +294,11 @@ def _python_json_descriptors(
             )
         raise TypeError(f"unsupported JSON descriptor value: {value!r}")
 
+    var_name = json_descriptor_var_name(node.name)
     return [
-        f"_{to_snake_case(node.name)}_JSON_DESCRIPTORS = {render(descriptors)}",
+        f"{var_name} = {render(descriptors)}",
         "",
     ]
-
-
-def _python_json_mapping(
-    node: JsonDef, definitions: dict[str, JsonDef]
-) -> list[str]:
-    mapping = json_def_mapping(node, definitions)
-
-    def render(value: object) -> str:
-        if isinstance(value, str):
-            return repr(value)
-        if isinstance(value, tuple):
-            return "(" + repr(value[0]) + ", " + render(value[1]) + ")"
-        if isinstance(value, list):
-            return "[" + ", ".join(render(item) for item in value) + "]"
-        if isinstance(value, dict):
-            return (
-                "{"
-                + ", ".join(
-                    f"{key!r}: {render(item)}" for key, item in value.items()
-                )
-                + "}"
-            )
-        raise TypeError(f"unsupported JSON mapping value: {value!r}")
-
-    return [f"_{to_snake_case(node.name)}_JSON_MAPPING = {render(mapping)}", ""]
 
 
 class PythonVisitor(BaseWalker):
@@ -812,7 +796,7 @@ class PythonVisitor(BaseWalker):
             val_type = self._resolve_type(node.value_type_info)
             lines = [f"{name}Json = Dict[{key_type}, {val_type}]", ""]
             self._builder.require_import("from typing import Dict")
-            module = node.parent
+            module = find_enclosing_module(node)
             if isinstance(module, Module):
                 definitions = {
                     n.name: n for n in module.body if isinstance(n, JsonDef)
@@ -821,7 +805,7 @@ class PythonVisitor(BaseWalker):
                 self._builder.require_std(
                     "ssc_json_project",
                     code=_PY_JSON_PROJECT_HELPER,
-                    imports=["from typing import Tuple"],
+                    imports=[],
                 )
             return lines
 
@@ -829,7 +813,7 @@ class PythonVisitor(BaseWalker):
         lines = [f'{name}Json = TypedDict("{name}Json", {{']
         lines.extend(self.walk_children(node, ctx))
         lines.append("})")
-        module = node.parent
+        module = find_enclosing_module(node)
         if isinstance(module, Module):
             definitions = {
                 n.name: n for n in module.body if isinstance(n, JsonDef)
@@ -838,7 +822,7 @@ class PythonVisitor(BaseWalker):
             self._builder.require_std(
                 "ssc_json_project",
                 code=_PY_JSON_PROJECT_HELPER,
-                imports=["from typing import Tuple"],
+                imports=[],
             )
         return lines
 
@@ -1508,9 +1492,9 @@ class PythonVisitor(BaseWalker):
             self._builder.require_std(
                 "ssc_json_project",
                 code=_PY_JSON_PROJECT_HELPER,
-                imports=["from typing import Tuple"],
+                imports=[],
             )
-            desc_name = f"_{to_snake_case(node.schema_name)}_JSON_DESCRIPTORS"
+            desc_name = json_descriptor_var_name(node.schema_name)
             return [
                 f"{ctx.indent}{ctx.nxt} = ssc_json_project({raw_expr}, {desc_name})"
             ]

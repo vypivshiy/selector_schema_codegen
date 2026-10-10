@@ -13,11 +13,11 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from kdlquery import Severity
 
 from ssc_codegen.core import parse_module
-from kdlquery import Severity
-from ssc_codegen.targets.javascript import JS_CONVERTER
 from ssc_codegen.naming import to_pascal_case
+from ssc_codegen.targets.javascript import JS_CONVERTER
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 SCHEMAS_DIR = ROOT / "tests" / "integration" / "schemas"
@@ -639,7 +639,7 @@ class TestJsJsonDictAndInlineSchemas:
         code = _convert_kdl(kdl_src)
         assert "* @typedef {Record<string, string[]>} TranslationsJson" in code
         assert (
-            'const _translationsJsonDescriptors = {"__dict__": true, "__value__": null};'
+            'const JSON_DESCRIPTOR_TRANSLATIONS = {"__dict__": true, "__value__": null};'
             in code
         )
         assert "class SscJsonSchemaError extends SscJsonError" in code
@@ -685,7 +685,7 @@ json Author {
         code = _convert_kdl(kdl_src)
         assert "* @typedef {Record<string, AuthorJson>} AuthorMapJson" in code
         assert (
-            'const _author_mapJsonDescriptors = {"__dict__": true, "__value__":'
+            'const JSON_DESCRIPTOR_AUTHOR_MAP = {"__dict__": true, "__value__": JSON_DESCRIPTOR_AUTHOR};'
             in code
         )
 
@@ -1117,7 +1117,7 @@ json AnimeResponse {
             in code
         )
         assert (
-            'const _translationsJsonDescriptors = {"__dict__": true, "__value__": {"title": ["display_title", false, false, null], "count": ["count", false, false, null]}};'
+            'const JSON_DESCRIPTOR_TRANSLATIONS = {"__dict__": true, "__value__": JSON_DESCRIPTOR_TRANSLATION_VALUE};'
             in code
         )
 
@@ -1326,3 +1326,122 @@ class TestJsRawStructList:
         assert r[0]["quality"] == "480p"
         assert r[0]["url"] == "/v/anime/01_480p.m3u8"
         assert r[2]["quality"] == "1080p"
+
+
+class TestJsJsonDescriptorAlignment:
+    def test_nested_schema_descriptor_references_and_jsonify(self):
+        kdl_src = """
+json Child {
+    id int
+    name str
+}
+
+json Parent {
+    child Child
+    children (array)Child
+    child_map (dict) {
+        @key str
+        @value Child
+    }
+}
+
+(raw)struct ParentParser {
+    data {
+        jsonify Parent
+    }
+}
+"""
+        code = _convert_kdl(kdl_src)
+        assert (
+            'const JSON_DESCRIPTOR_CHILD = {"id": ["id", false, false, null], "name": ["name", false, false, null]};'
+            in code
+        )
+        assert (
+            'const JSON_DESCRIPTOR_PARENT = {"child": ["child", false, false, JSON_DESCRIPTOR_CHILD], "children": ["children", false, false, [JSON_DESCRIPTOR_CHILD]], "child_map": ["child_map", false, false, {"__dict__": true, "__value__": JSON_DESCRIPTOR_CHILD}]};'
+            in code
+        )
+        assert "sscJsonProject(JSON.parse(v), JSON_DESCRIPTOR_PARENT)" in code
+
+        payload = json.dumps(
+            {
+                "child": {"id": 1, "name": "c1"},
+                "children": [{"id": 2, "name": "c2"}],
+                "child_map": {"k1": {"id": 3, "name": "c3"}},
+            }
+        )
+        r = _run_js_src(kdl_src, "ParentParser", input_text=payload)
+        assert r["data"] == {
+            "child": {"id": 1, "name": "c1"},
+            "children": [{"id": 2, "name": "c2"}],
+            "child_map": {"k1": {"id": 3, "name": "c3"}},
+        }
+
+    def test_rest_codegen_descriptor_constants_and_references(self):
+        kdl_src = '''
+json User {
+    id int
+    name str
+}
+
+json ApiError {
+    code int
+    message str
+}
+
+(rest)struct UserClient {
+    @error 404 ApiError
+
+    @request name=get-me response=User """
+    GET /users/me HTTP/1.1
+    Host: api.example.com
+    """
+
+    @request name=get-nested response=User response-path="data.user" """
+    GET /users/nested HTTP/1.1
+    Host: api.example.com
+    """
+
+    @request name=ping """
+    GET /ping HTTP/1.1
+    Host: api.example.com
+    """
+}
+'''
+        code = _convert_kdl(kdl_src)
+
+        assert (
+            'const JSON_DESCRIPTOR_USER = {"id": ["id", false, false, null], "name": ["name", false, false, null]};'
+            in code
+        )
+        assert (
+            'const JSON_DESCRIPTOR_API_ERROR = {"code": ["code", false, false, null], "message": ["message", false, false, null]};'
+            in code
+        )
+
+        assert "(_b) => sscJsonProject(_b, JSON_DESCRIPTOR_USER)" in code
+        assert (
+            '(_b) => sscJsonProject(_b["data"]["user"], JSON_DESCRIPTOR_USER)'
+            in code
+        )
+        assert "(_b) => null" in code
+
+        assert (
+            "factory: (_s, _h, _b) => ({ isOk: false, status: _s, headers: _h, value: sscJsonProject(_b, JSON_DESCRIPTOR_API_ERROR) })"
+            in code
+        )
+
+        assert 'sscJsonProject(_b, {"code"' not in code
+        assert 'sscJsonProject(_b, {"id"' not in code
+
+        node_eval = subprocess.run(
+            [
+                "node",
+                "-e",
+                code
+                + "\nif (typeof UserClient !== 'function') throw new Error('missing client');",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert node_eval.returncode == 0

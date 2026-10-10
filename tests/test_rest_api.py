@@ -228,13 +228,13 @@ class TestRestPyConverter:
         src = _rest_src(errors="    @error 404 Err\n    @error 500 Err\n")
         module = _parse(src)
         code = CONVERTER.convert(module, http_client="httpx")
-        # matchers list routes status codes to Err subclasses
+        # matchers list routes status codes to Err subclasses referencing descriptor constants
         assert (
-            "ErrMatcher(404, None, lambda headers, value: APIErr404(headers=headers, value=ssc_json_project(value,"
+            "ErrMatcher(404, None, lambda headers, value: APIErr404(headers=headers, value=ssc_json_project(value, JSON_DESCRIPTOR_ERR)))"
             in code
         )
         assert (
-            "ErrMatcher(500, None, lambda headers, value: APIErr500(headers=headers, value=ssc_json_project(value,"
+            "ErrMatcher(500, None, lambda headers, value: APIErr500(headers=headers, value=ssc_json_project(value, JSON_DESCRIPTOR_ERR)))"
             in code
         )
         # no raise in method bodies (errors are returned, not raised)
@@ -1757,7 +1757,8 @@ class TestResponsePathCodegen:
         code = CONVERTER.convert(module, http_client="httpx")
         # value_fn extracts via dict access chain using path segments and projects into User schema
         assert (
-            "value_fn=lambda _b: ssc_json_project(_b['data']['user']," in code
+            "value_fn=lambda _b: ssc_json_project(_b['data']['user'], JSON_DESCRIPTOR_USER),"
+            in code
         )
 
     def test_py_path_dominates_over_void_when_no_schema(self):
@@ -1797,6 +1798,65 @@ class TestResponsePathCodegen:
         module = _parse(src)
         code = CONVERTER.convert(module, http_client="httpx")
         assert "value_fn=lambda _: None," in code
+
+    def test_py_rest_value_fn_and_matchers_reference_descriptor_constants(self):
+        from ssc_codegen.targets.python import (
+            PY_BS4_CONVERTER as CONVERTER,
+        )
+
+        kdl_src = '''
+json User {
+    id int
+    name str
+}
+
+json ApiError {
+    code int
+    message str
+}
+
+struct ApiClient type=rest {
+    @error 400 ApiError
+
+    @request name=get-user response=User """
+    GET /users/me HTTP/1.1
+    Host: api.example.com
+    """
+
+    @request name=get-nested-user response=User response-path="data.user" """
+    GET /users/nested HTTP/1.1
+    Host: api.example.com
+    """
+
+    @request name=ping """
+    GET /ping HTTP/1.1
+    Host: api.example.com
+    """
+}
+'''
+        module = _parse(kdl_src)
+        code = CONVERTER.convert(module, http_client="httpx")
+
+        assert "JSON_DESCRIPTOR_USER = {" in code
+        assert "JSON_DESCRIPTOR_API_ERROR = {" in code
+
+        assert (
+            "value_fn=lambda _b: ssc_json_project(_b, JSON_DESCRIPTOR_USER),"
+            in code
+        )
+        assert (
+            "value_fn=lambda _b: ssc_json_project(_b['data']['user'], JSON_DESCRIPTOR_USER),"
+            in code
+        )
+        assert "value_fn=lambda _: None," in code
+
+        assert (
+            "lambda headers, value: ApiClientErr400(headers=headers, value=ssc_json_project(value, JSON_DESCRIPTOR_API_ERROR))"
+            in code
+        )
+
+        assert "ssc_json_project(_b, {'id':" not in code
+        assert "ssc_json_project(value, {'code':" not in code
 
     def test_js_emits_value_fn_accessor(self):
         from ssc_codegen.targets.javascript import JS_CONVERTER
