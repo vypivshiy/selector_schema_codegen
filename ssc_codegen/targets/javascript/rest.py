@@ -22,7 +22,7 @@ from ssc_codegen.ast import (
 )
 from ssc_codegen.ast.struct import RequestHttp
 from ssc_codegen.naming import (
-    json_descriptor_var_name,
+    js_json_projector_name,
     to_camel_case,
     to_pascal_case,
     to_snake_case,
@@ -389,15 +389,15 @@ def emit_method_rest(
             f"[{json.dumps(p)}]" for p in node.response_path.split(".")
         )
         if has_response_schema:
-            desc_var = json_descriptor_var_name(node.response_schema)
-            value_fn = f"(_b) => sscJsonProject(_b{accessor}, {desc_var})"
+            proj_fn = js_json_projector_name(node.response_schema)
+            value_fn = f"(_b) => {proj_fn}(_b{accessor})"
         else:
             value_fn = f"(_b) => _b{accessor}"
     elif not node.response_schema:
         value_fn = "(_b) => null"
     elif has_response_schema:
-        desc_var = json_descriptor_var_name(node.response_schema)
-        value_fn = f"(_b) => sscJsonProject(_b, {desc_var})"
+        proj_fn = js_json_projector_name(node.response_schema)
+        value_fn = f"(_b) => {proj_fn}(_b)"
     else:
         value_fn = "null"
 
@@ -619,12 +619,10 @@ def emit_matcher_list_def(node: MatcherListDef) -> list[str]:
     for e in node.entries:
         check = render_js_condition_check(e.required_keys, e.conditions)
         check_arg = check if check else "null"
-        desc_var = None
+        proj_fn = None
         if e.error_schema and e.error_schema in definitions:
-            desc_var = json_descriptor_var_name(e.error_schema)
-        value_expr = (
-            f"sscJsonProject(_b, {desc_var})" if desc_var is not None else "_b"
-        )
+            proj_fn = js_json_projector_name(e.error_schema)
+        value_expr = f"{proj_fn}(_b)" if proj_fn is not None else "_b"
         lines.append(
             f"    {{ status: {e.status}, check: {check_arg}, "
             f"factory: (_s, _h, _b) => ({{ isOk: false, status: _s, "
