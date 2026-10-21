@@ -229,3 +229,22 @@ def local_symbol(kind: SymbolKind, raw: str, target: str) -> str:
         "go": f"init{pascal}",
         "rust": f"init_{snake}",
     }[target]
+
+
+def json_field_symbol(raw: str, target: str) -> str:
+    """Return the generated target identifier for a canonical JSON field name.
+
+    Args:
+        raw (str): Canonical JSON field name (without trailing ``?``).
+        target (str): Normalized target language name.
+
+    Returns:
+        str: Target-specific field identifier.
+    """
+    clean = raw.rstrip("?")
+    return {
+        "python": to_snake_case(clean),
+        "javascript": to_camel_case(clean),
+        "go": to_pascal_case(clean),
+        "rust": to_snake_case(clean),
+    }[target]

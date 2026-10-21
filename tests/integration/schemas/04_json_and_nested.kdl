@@ -73,14 +73,9 @@ struct JsonNestedRoot {
         jsonify JsonQuote
     }
 
-    first-author-name {
+    first-author {
         @raw-json
-        jsonify JsonQuote path="0.author.name"
-    }
-
-    first-score {
-        @raw-json
-        jsonify JsonQuote path="0.score"
+        jsonify JsonAuthor path="0.author"
     }
 
     nested-item {
