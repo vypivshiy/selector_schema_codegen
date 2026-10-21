@@ -331,14 +331,123 @@ pub fn pred_text(dom: &Dom, roots: &Nodes) -> String { text_all(dom, roots).join
 """
 
 
+RUST_HTTP_RUNTIME = r"""
+pub async fn fetch_html(
+    req: reqwest::RequestBuilder,
+    context: &str,
+    response_path: Option<&str>,
+    response_join: Option<&str>,
+) -> Result<String, SscError> {
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| SscError::new(context, e.to_string()))?;
+    let status = resp.status().as_u16();
+    let body = resp
+        .text()
+        .await
+        .map_err(|e| SscError::new(context, e.to_string()))?;
+    if status >= 400 {
+        return Err(SscError::new(context, format!("HTTP {status}: {body}")));
+    }
+    if let Some(path) = response_path {
+        let body_val = parse_json(&body, path, context)?;
+        return Ok(match (body_val, response_join) {
+            (Value::Array(items), Some(sep)) => items
+                .iter()
+                .map(|item| {
+                    item.as_str()
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| item.to_string())
+                })
+                .collect::<Vec<_>>()
+                .join(sep),
+            (Value::String(s), _) => s,
+            (other, _) => other.to_string(),
+        });
+    }
+    Ok(body)
+}
+
+pub async fn rest_call<T, E, M, D>(
+    req: reqwest::RequestBuilder,
+    context: &str,
+    response_path: Option<&str>,
+    match_err: M,
+    decode: D,
+    unknown_err: fn(u16, Value) -> E,
+) -> Result<T, E>
+where
+    E: From<reqwest::Error>,
+    M: FnOnce(u16, &Value, &str) -> Option<E>,
+    D: FnOnce(Value) -> Result<T, SscError>,
+{
+    let resp = req.send().await?;
+    let status = resp.status().as_u16();
+    let body_text = resp.text().await?;
+    let body_val: Value = serde_json::from_str(&body_text).unwrap_or(Value::Null);
+    if let Some(err) = match_err(status, &body_val, &body_text) {
+        return Err(err);
+    }
+    if status >= 400 {
+        let unknown_val = if body_val.is_null() {
+            Value::String(body_text)
+        } else {
+            body_val
+        };
+        return Err(unknown_err(status, unknown_val));
+    }
+    let target_val = if let Some(path) = response_path {
+        json_path(&body_val, path, context)
+            .map_err(|e| unknown_err(status, Value::String(e.to_string())))?
+            .0
+            .into_owned()
+    } else {
+        body_val
+    };
+    decode(target_val).map_err(|e| unknown_err(status, Value::String(e.to_string())))
+}
+
+pub async fn rest_call_void<E, M>(
+    req: reqwest::RequestBuilder,
+    match_err: M,
+    unknown_err: fn(u16, Value) -> E,
+) -> Result<(), E>
+where
+    E: From<reqwest::Error>,
+    M: FnOnce(u16, &Value, &str) -> Option<E>,
+{
+    let resp = req.send().await?;
+    let status = resp.status().as_u16();
+    let body_text = resp.text().await?;
+    let body_val: Value = serde_json::from_str(&body_text).unwrap_or(Value::Null);
+    if let Some(err) = match_err(status, &body_val, &body_text) {
+        return Err(err);
+    }
+    if status >= 400 {
+        let unknown_val = if body_val.is_null() {
+            Value::String(body_text)
+        } else {
+            body_val
+        };
+        return Err(unknown_err(status, unknown_val));
+    }
+    Ok(())
+}
+"""
+
+
 def rust_runtime_content(
-    extra_imports: list[str] | None = None, helpers: list[str] | None = None
+    extra_imports: list[str] | None = None,
+    helpers: list[str] | None = None,
+    include_http: bool = False,
 ) -> str:
     """Return the shared Rust runtime source with extension helpers appended.
 
     Args:
         extra_imports: Optional additional use declarations to insert.
         helpers: Optional helper function implementations to append.
+        include_http: Whether to append HTTP/REST transport helpers.
 
     Returns:
         The complete Rust runtime module source code.
@@ -349,6 +458,8 @@ def rust_runtime_content(
         source = source.replace(
             marker, marker + "".join(f"{line}\n" for line in extra_imports), 1
         )
+    if include_http:
+        source += "\n" + RUST_HTTP_RUNTIME.strip() + "\n"
     if helpers:
         source += "\n" + "\n\n".join(helpers) + "\n"
     return source

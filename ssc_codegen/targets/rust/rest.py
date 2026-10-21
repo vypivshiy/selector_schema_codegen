@@ -381,55 +381,30 @@ def emit_method_fetch(
 
     i1 = "    "
     i2 = "        "
-    lines: list[str] = [
+    lines: list[str] = []
+    if getattr(node, "doc", ""):
+        for doc_line in node.doc.splitlines():
+            lines.append(f"{i1}// {doc_line}" if doc_line else f"{i1}//")
+    lines.append(
         f"{i1}pub async fn {method_name}({', '.join(params)}) -> Result<Self, rt::SscError> {{"
-    ]
+    )
 
     lines.extend(_emit_request_builder(spec, i2, context=context))
 
-    # Execute request.
+    path_opt = (
+        f"Some({_str(node.response_path)})" if node.response_path else "None"
+    )
+    join_opt = (
+        f"Some({_str(node.response_join)})" if node.response_join else "None"
+    )
     lines.extend(
         [
-            f"{i2}let resp = req.send().await.map_err(|e| rt::SscError::new({_str(context)}, e.to_string()))?;",
-            f"{i2}let status = resp.status();",
-            f"{i2}let body = resp.text().await.map_err(|e| rt::SscError::new({_str(context)}, e.to_string()))?;",
-            f"{i2}if status.as_u16() >= 400 {{",
-            f'{i2}    return Err(rt::SscError::new({_str(context)}, format!("HTTP {{}}: {{body}}", status.as_u16())));',
-            f"{i2}}}",
+            f"{i2}let body = rt::fetch_html(req, {_str(context)}, {path_opt}, {join_opt}).await?;",
+            f"{i2}Self::new(body)",
+            f"{i1}}}",
+            "",
         ]
     )
-
-    # Response extraction via JSON path.
-    if node.response_path:
-        lines.append(
-            f"{i2}let body_val = rt::parse_json(&body, {_str(node.response_path)}, {_str(context)})?;"
-        )
-        if node.response_join:
-            lines.extend(
-                [
-                    f"{i2}let body = match body_val {{",
-                    f"{i2}    serde_json::Value::Array(items) => items.iter()",
-                    f"{i2}        .map(|item| item.as_str().map(|s| s.to_string()).unwrap_or_else(|| item.to_string()))",
-                    f"{i2}        .collect::<Vec<_>>()",
-                    f"{i2}        .join({_str(node.response_join)}),",
-                    f"{i2}    serde_json::Value::String(s) => s,",
-                    f"{i2}    other => other.to_string(),",
-                    f"{i2}}};",
-                ]
-            )
-        else:
-            lines.extend(
-                [
-                    f"{i2}let body = match body_val {{",
-                    f"{i2}    serde_json::Value::String(s) => s,",
-                    f"{i2}    other => other.to_string(),",
-                    f"{i2}}};",
-                ]
-            )
-
-    lines.append(f"{i2}Self::new(body)")
-    lines.append(f"{i1}}}")
-    lines.append("")
     return lines
 
 
@@ -709,60 +684,29 @@ def emit_method_rest(
 
     lines.extend(_emit_request_builder(spec, i2))
 
-    lines.extend(
-        [
-            f"{i2}let resp = req.send().await?;",
-            f"{i2}let status = resp.status().as_u16();",
-            f"{i2}let body_text = resp.text().await?;",
-            f"{i2}let body_val: serde_json::Value = serde_json::from_str(&body_text)"
-            f".unwrap_or(serde_json::Value::Null);",
-            f"{i2}if let Some(err) = match_{struct_snake}_error(status, &body_val, &body_text) {{",
-            f"{i2}    return Err(err);",
-            f"{i2}}}",
-            f"{i2}if status >= 400 {{",
-            f"{i2}    let unknown_val = if body_val.is_null() {{",
-            f"{i2}        serde_json::Value::String(body_text)",
-            f"{i2}    }} else {{",
-            f"{i2}        body_val",
-            f"{i2}    }};",
-            f"{i2}    return Err({enum_name}::Unknown(status, unknown_val));",
-            f"{i2}}}",
-        ]
-    )
-
     if not node.response_schema:
-        lines.append(f"{i2}Ok(())")
+        lines.append(
+            f"{i2}rt::rest_call_void(req, match_{struct_snake}_error, {enum_name}::Unknown).await"
+        )
     else:
         s_pascal = f"{_pascal(node.response_schema)}Json"
         is_array = getattr(node, "response_is_array", False)
-        if node.response_path:
-            lines.append(
-                f"{i2}let target_val = rt::json_path(&body_val, {_str(node.response_path)}, {_str(context)})"
-                f".map_err(|e| {enum_name}::Unknown(status, serde_json::Value::String(e.to_string())))?;"
-            )
-        else:
-            lines.append(f"{i2}let target_val = &body_val;")
-
+        path_opt = (
+            f"Some({_str(node.response_path)})"
+            if node.response_path
+            else "None"
+        )
         if is_array:
-            lines.extend(
-                [
-                    f"{i2}let items = target_val.as_array()"
-                    f'.ok_or_else(|| {enum_name}::Unknown(status, serde_json::Value::String("expected JSON array".to_string())))?;',
-                    f"{i2}let result = items.iter().cloned()"
-                    f".map({s_pascal}::from_value)"
-                    f".collect::<Result<Vec<_>, _>>()"
-                    f".map_err(|e| {enum_name}::Unknown(status, serde_json::Value::String(e.to_string())))?;",
-                    f"{i2}Ok(result)",
-                ]
+            decode_expr = (
+                f"|val| val.as_array()"
+                f'.ok_or_else(|| rt::SscError::new({_str(context)}, "expected JSON array"))?'
+                f".iter().cloned().map({s_pascal}::from_value).collect::<Result<Vec<_>, _>>()"
             )
         else:
-            lines.extend(
-                [
-                    f"{i2}let result = {s_pascal}::from_value(target_val.clone())"
-                    f".map_err(|e| {enum_name}::Unknown(status, serde_json::Value::String(e.to_string())))?;",
-                    f"{i2}Ok(result)",
-                ]
-            )
+            decode_expr = f"{s_pascal}::from_value"
+        lines.append(
+            f"{i2}rt::rest_call(req, {_str(context)}, {path_opt}, match_{struct_snake}_error, {decode_expr}, {enum_name}::Unknown).await"
+        )
 
     lines.append(f"{i1}}}")
     lines.append("")
