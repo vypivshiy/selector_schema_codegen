@@ -126,7 +126,10 @@ from ssc_codegen.targets.rust.regex import (
 )
 from ssc_codegen.targets.rust.runtime import rust_runtime_content
 from ssc_codegen.traversal.context import WalkContext
-from ssc_codegen.traversal.utils import find_predicate_container
+from ssc_codegen.traversal.utils import (
+    classify_gjson_path,
+    find_predicate_container,
+)
 from ssc_codegen.traversal.walker import BaseWalker
 
 
@@ -493,8 +496,18 @@ class RustVisitor(BaseWalker):
         return lines
 
     def visit_jsondef(self, node: JsonDef, ctx: WalkContext) -> list[str]:
+        """Emit a Rust JSON schema struct or dictionary type alias with `from_value`.
+
+        Args:
+            node (JsonDef): The JSON schema definition AST node.
+            ctx (WalkContext): Traversal state context.
+
+        Returns:
+            list[str]: Generated Rust declaration and projector implementation lines.
+        """
+        schema_name = _pascal(node.name)
         if node.is_dict:
-            name = f"{_pascal(node.name)}Json"
+            name = f"{schema_name}Json"
             key_type = _rust_key_type(node.key_type_info)
             val_type = self._type(node.value_type_info)
             return [
@@ -503,7 +516,7 @@ class RustVisitor(BaseWalker):
             ]
         self._builder.require_import("use serde_json::Value;")
         self._builder.require_import("use serde::Deserialize;")
-        name = f"{_pascal(node.name)}Json"
+        name = f"{schema_name}Json"
         lines = [
             "#[derive(Debug, Clone, Serialize, Deserialize)]",
             f"pub struct {name} {{",
@@ -518,14 +531,14 @@ class RustVisitor(BaseWalker):
             ]
         )
         lines.append(
-            '        value.as_object().ok_or_else(|| rt::SscError::new("jsonify", "expected JSON object"))?;'
+            f'        value.as_object().ok_or_else(|| rt::SscError::new({_str(schema_name)}, "expected JSON object"))?;'
         )
         for field in node.body:
             if not isinstance(field, JsonDefField) or (
                 field.ret_type_info and field.ret_type_info.skip
             ):
                 continue
-            lines.extend(self._json_field_decode(field))
+            lines.extend(self._json_field_decode(field, schema_name))
         lines.append("        Ok(Self {")
         for field in node.body:
             if isinstance(field, JsonDefField) and not (
@@ -535,15 +548,19 @@ class RustVisitor(BaseWalker):
         lines.extend(["        })", "    }", "", "}", ""])
         return lines
 
-    def _json_field_decode(self, field: JsonDefField) -> list[str]:
+    def _json_field_decode(
+        self, field: JsonDefField, schema_name: str
+    ) -> list[str]:
+        """Emit Rust statements that extract and decode a single JSON schema field."""
         info = field.ret_type_info or TypeInfo(base=VT.STRING)
         name = _ident(field.name)
         wire = field.alias or field.name
         optional = info.is_optional or info.omitempty
         typ = self._type(info)
         path = _str(wire)
+        ctx_lit = _str(f"{schema_name}.{field.name}")
         lines = [
-            f'        let {name} = match rt::json_path(&value, {path}, "jsonify.{field.name}") {{'
+            f"        let {name} = match rt::json_path(&value, {path}, {ctx_lit}) {{"
         ]
         lines.extend(
             [
@@ -561,7 +578,7 @@ class RustVisitor(BaseWalker):
         )
         if is_dict:
             inner_type = typ[7:-1] if typ.startswith("Option<") else typ
-            decoded = f'rt::decode::<{inner_type}>(raw.clone(), "jsonify.{field.name}")?'
+            decoded = f"rt::decode::<{inner_type}>(raw.clone(), {ctx_lit})?"
             lines.append(
                 f"                {('Some(' + decoded + ')') if optional else decoded}"
             )
@@ -571,7 +588,7 @@ class RustVisitor(BaseWalker):
                 decoded = f"values.iter().cloned().map({child}::from_value).collect::<Result<Vec<_>, _>>()?"
                 lines.extend(
                     [
-                        '                let values = raw.as_array().ok_or_else(|| rt::SscError::new("jsonify", "expected JSON array"))?;',
+                        f'                let values = raw.as_array().ok_or_else(|| rt::SscError::new({ctx_lit}, "expected JSON array"))?;',
                         f"                {('Some(' + decoded + ')') if optional else decoded}",
                     ]
                 )
@@ -582,7 +599,7 @@ class RustVisitor(BaseWalker):
                 )
         else:
             inner_type = typ[7:-1] if typ.startswith("Option<") else typ
-            decoded = f'rt::decode::<{inner_type}>(raw.clone(), "jsonify.{field.name}")?'
+            decoded = f"rt::decode::<{inner_type}>(raw.clone(), {ctx_lit})?"
             lines.append(
                 f"                {('Some(' + decoded + ')') if optional else decoded}"
             )
@@ -591,7 +608,7 @@ class RustVisitor(BaseWalker):
             lines.append("            Ok(_) => None,")
         else:
             lines.append(
-                f'            Ok(_) => return Err(rt::SscError::new("jsonify.{field.name}", "required field is null")),'
+                f'            Ok(_) => return Err(rt::SscError::new({ctx_lit}, "required field is null")),'
             )
         if optional:
             lines.append("            Err(_) => None,")
@@ -607,14 +624,24 @@ class RustVisitor(BaseWalker):
     def visit_jsondef_field(
         self, node: JsonDefField, ctx: WalkContext
     ) -> list[str]:
+        """Emit a Rust struct field declaration with Serde attributes for a JSON field.
+
+        Args:
+            node (JsonDefField): The JSON field AST node.
+            ctx (WalkContext): Traversal state context.
+
+        Returns:
+            list[str]: Generated Rust struct field lines.
+        """
         if node.ret_type_info and node.ret_type_info.skip:
             return []
         info = node.ret_type_info or TypeInfo(base=VT.STRING)
         typ = self._type(info)
         serde_items: list[str] = []
-        if node.alias and "." not in node.alias:
-            alias_escaped = node.alias.replace("\\", "\\\\").replace('"', '\\"')
-            serde_items.append(f'alias = "{alias_escaped}"')
+        if node.alias:
+            is_direct_key, unescaped_key = classify_gjson_path(node.alias)
+            if is_direct_key:
+                serde_items.append(f"alias = {_str(unescaped_key)}")
         if info.is_optional or info.omitempty:
             serde_items.append('skip_serializing_if = "Option::is_none"')
         lines = []

@@ -852,7 +852,7 @@ json Document {
     )
     assert "pub translations: TranslationsJson," in code
     assert (
-        'rt::decode::<TranslationsJson>(raw.clone(), "jsonify.translations")?'
+        'rt::decode::<TranslationsJson>(raw.clone(), "Document.translations")?'
         in code
     )
 
@@ -890,8 +890,8 @@ json AnimeResponse {
     )
     assert "std::collections::HashMap<String, Vec<String>>" in code
     assert "rt::decode::<std::collections::HashMap<i64, f64>>(" in code
-    assert '"jsonify.translations"' in code
-    assert '"jsonify.optional_rates"' in code
+    assert '"AnimeResponse.translations"' in code
+    assert '"AnimeResponse.optional_rates"' in code
 
 
 def test_rust_parent_struct_with_hoisted_inline_blocks_codegen() -> None:
@@ -1723,3 +1723,107 @@ async fn main() {
     )
     assert result.returncode == 0, result.stderr
     assert "ALL_REST_PASSED" in result.stdout
+
+
+def test_rust_gjson_paths_and_error_contexts_execute(tmp_path: Path) -> None:
+    """Verify GJSON path subset (escaped dots, array length, array projection) and schema-qualified error contexts in Rust."""
+    source_dir = _write_cargo_project(tmp_path)
+    converter = RustVisitor()
+    (source_dir / "sscgen_runtime.rs").write_text(
+        converter.emit_runtime(), encoding="utf-8"
+    )
+
+    schema = r"""
+json ReleaseSummary {
+    os_version str from="os\\.version"
+    item_count int from="items.#"
+    tag_names (array)str from="tags.#.name"
+    first_tag str from="tags.0.name"
+    literal_hash str from="\\#"
+    literal_zero str from="\\0"
+}
+
+(raw)struct ReleaseEnvelope {
+    summary { jsonify ReleaseSummary path="meta\\.data.release" }
+}
+"""
+    module, diagnostics = parse_module(schema)
+    assert not [d for d in diagnostics if d.severity.name == "ERROR"]
+    code = converter.convert(module)
+
+    # Direct escaped keys emit unescaped serde alias; path queries omit serde alias
+    assert '#[serde(alias = "os.version")]' in code
+    assert '#[serde(alias = "#")]' in code
+    assert '#[serde(alias = "0")]' in code
+    assert 'alias = "items.#"' not in code
+    assert 'alias = "tags.#.name"' not in code
+    assert '"ReleaseSummary.os_version"' in code
+    assert '"ReleaseSummary.item_count"' in code
+    assert '"ReleaseSummary.tag_names"' in code
+
+    (source_dir / "parser.rs").write_text(code, encoding="utf-8")
+    (source_dir / "main.rs").write_text(
+        r"""
+mod sscgen_runtime;
+mod parser;
+
+use parser::{ReleaseEnvelopeParser, ReleaseSummaryJson};
+
+fn main() {
+    let payload = r##"{
+        "meta.data": {
+            "release": {
+                "os.version": "14.2.1",
+                "items": [10, 20, 30],
+                "tags": [
+                    {"name": "action"},
+                    {"name": null},
+                    {"other": "ignored"},
+                    {"name": "sci-fi"}
+                ],
+                "#": "hash-val",
+                "0": "zero-val"
+            }
+        }
+    }"##;
+
+    let mut parser = ReleaseEnvelopeParser::new(payload).expect("init failed");
+    let parsed = parser.parse().expect("parse failed");
+    assert_eq!(parsed.summary.os_version, "14.2.1");
+    assert_eq!(parsed.summary.item_count, 3);
+    assert_eq!(
+        parsed.summary.tag_names,
+        vec!["action".to_string(), "sci-fi".to_string()]
+    );
+    assert_eq!(parsed.summary.first_tag, "action");
+    assert_eq!(parsed.summary.literal_hash, "hash-val");
+    assert_eq!(parsed.summary.literal_zero, "zero-val");
+
+    // Verify schema-qualified error context on missing field
+    let bad_val: serde_json::Value = serde_json::from_str(r#"{"os.version": "1.0"}"#).unwrap();
+    let err = ReleaseSummaryJson::from_value(bad_val).unwrap_err();
+    assert_eq!(err.context, "ReleaseSummary.item_count");
+    assert!(err.to_string().contains("ReleaseSummary.item_count"));
+
+    // Verify schema-qualified error context on non-object input
+    let non_obj: serde_json::Value = serde_json::from_str("null").unwrap();
+    let err_obj = ReleaseSummaryJson::from_value(non_obj).unwrap_err();
+    assert_eq!(err_obj.context, "ReleaseSummary");
+
+    println!("GJSON_RUST_PASSED");
+}
+""",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ["cargo", "run", "--quiet"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env=_cargo_env(),
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "GJSON_RUST_PASSED" in result.stdout
+

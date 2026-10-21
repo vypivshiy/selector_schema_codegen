@@ -211,30 +211,139 @@ pub fn regex_sub(value: String, pattern: &str, replacement: &str, context: &str)
     Ok(re.replace_all(&value, replacement).into_owned())
 }
 
-pub fn json_opt<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
-    if path.is_empty() { return Some(value); }
-    let mut current = value;
-    for segment in path.split('.') {
-        current = (if let Ok(index) = segment.parse::<usize>() {
-            current.get(index)
-        } else { current.get(segment) })?;
+#[derive(Debug, PartialEq)]
+pub struct JsonRef<'a>(pub std::borrow::Cow<'a, Value>);
+
+impl<'a> JsonRef<'a> {
+    pub fn as_str(&self) -> Option<&'a str> {
+        match &self.0 {
+            std::borrow::Cow::Borrowed(v) => v.as_str(),
+            std::borrow::Cow::Owned(_) => None,
+        }
     }
-    Some(current)
+
+    pub fn clone(&self) -> Value {
+        self.0.as_ref().clone()
+    }
 }
-pub fn json_path<'a>(value: &'a Value, path: &str, context: &str) -> Result<&'a Value, SscError> {
-    if path.is_empty() { return Ok(value); }
-    let mut current = value;
-    for segment in path.split('.') {
-        current = (if let Ok(index) = segment.parse::<usize>() {
-            current.get(index)
-        } else { current.get(segment) })
-            .ok_or_else(|| SscError::new(context, format!("missing JSON path segment '{segment}'")))?;
+
+impl<'a> std::ops::Deref for JsonRef<'a> {
+    type Target = Value;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
-    Ok(current)
+}
+
+fn next_gjson_segment(path: &str) -> (String, bool, Option<&str>) {
+    let mut unescaped = String::with_capacity(path.len());
+    let mut has_escape = false;
+    let mut chars = path.char_indices();
+    while let Some((idx, ch)) = chars.next() {
+        if ch == '\\' {
+            has_escape = true;
+            if let Some((_, next_ch)) = chars.next() {
+                unescaped.push(next_ch);
+            } else {
+                unescaped.push('\\');
+            }
+        } else if ch == '.' {
+            return (unescaped, has_escape, Some(&path[idx + 1..]));
+        } else {
+            unescaped.push(ch);
+        }
+    }
+    (unescaped, has_escape, None)
+}
+
+pub fn json_opt<'a>(value: &'a Value, path: &str) -> Option<JsonRef<'a>> {
+    if path.is_empty() {
+        return Some(JsonRef(std::borrow::Cow::Borrowed(value)));
+    }
+    let mut current = value;
+    let mut rem = Some(path);
+    while let Some(r) = rem {
+        let (segment, has_escape, next_rem) = next_gjson_segment(r);
+        rem = next_rem;
+        if !has_escape && segment == "#" {
+            let arr = current.as_array()?;
+            return match rem {
+                None => Some(JsonRef(std::borrow::Cow::Owned(Value::Number(
+                    (arr.len() as u64).into(),
+                )))),
+                Some(subpath) => {
+                    let mut out = Vec::new();
+                    for item in arr {
+                        if let Some(v) = json_opt(item, subpath) {
+                            if !v.is_null() {
+                                out.push(v.0.into_owned());
+                            }
+                        }
+                    }
+                    Some(JsonRef(std::borrow::Cow::Owned(Value::Array(out))))
+                }
+            };
+        }
+        current = if !has_escape {
+            if let Ok(index) = segment.parse::<usize>() {
+                current.get(index).or_else(|| current.get(segment.as_str()))
+            } else {
+                current.get(segment.as_str())
+            }
+        } else {
+            current.get(segment.as_str())
+        }?;
+    }
+    Some(JsonRef(std::borrow::Cow::Borrowed(current)))
+}
+pub fn json_path<'a>(value: &'a Value, path: &str, context: &str) -> Result<JsonRef<'a>, SscError> {
+    if path.is_empty() {
+        return Ok(JsonRef(std::borrow::Cow::Borrowed(value)));
+    }
+    let mut current = value;
+    let mut rem = Some(path);
+    while let Some(r) = rem {
+        let (segment, has_escape, next_rem) = next_gjson_segment(r);
+        rem = next_rem;
+        if !has_escape && segment == "#" {
+            let arr = current.as_array().ok_or_else(|| {
+                SscError::new(context, "expected JSON array for '#' operator")
+            })?;
+            return match rem {
+                None => Ok(JsonRef(std::borrow::Cow::Owned(Value::Number(
+                    (arr.len() as u64).into(),
+                )))),
+                Some(subpath) => {
+                    let mut out = Vec::new();
+                    for item in arr {
+                        if let Some(v) = json_opt(item, subpath) {
+                            if !v.is_null() {
+                                out.push(v.0.into_owned());
+                            }
+                        }
+                    }
+                    Ok(JsonRef(std::borrow::Cow::Owned(Value::Array(out))))
+                }
+            };
+        }
+        let next_val = if !has_escape {
+            if let Ok(index) = segment.parse::<usize>() {
+                current.get(index).or_else(|| current.get(segment.as_str()))
+            } else {
+                current.get(segment.as_str())
+            }
+        } else {
+            current.get(segment.as_str())
+        };
+        current = next_val.ok_or_else(|| {
+            SscError::new(context, format!("missing JSON path segment '{segment}'"))
+        })?;
+    }
+    Ok(JsonRef(std::borrow::Cow::Borrowed(current)))
 }
 pub fn parse_json(value: &str, path: &str, context: &str) -> Result<Value, SscError> {
     let parsed: Value = serde_json::from_str(value).map_err(|e| SscError::new(context, e.to_string()))?;
-    Ok(json_path(&parsed, path, context)?.clone())
+    Ok(json_path(&parsed, path, context)?.0.into_owned())
 }
 pub fn decode<T: DeserializeOwned>(value: Value, context: &str) -> Result<T, SscError> {
     serde_json::from_value(value).map_err(|e| SscError::new(context, e.to_string()))
