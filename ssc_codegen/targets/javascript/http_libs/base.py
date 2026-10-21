@@ -11,9 +11,12 @@ class JsHttpLibStrategy(ABC):
     Attributes:
         fn_name: Name of the JavaScript transport dispatcher helper function
             (e.g. ``"sscRestCall"`` or ``"sscRestCallAxios"``).
+        fetch_fn_name: Name of the JavaScript HTML/text fetch helper function
+            (e.g. ``"sscFetch"`` or ``"sscFetchAxios"``).
     """
 
     fn_name: str = ""
+    fetch_fn_name: str = ""
 
     @abstractmethod
     def rest_call_lines(self) -> list[str]:
@@ -21,5 +24,14 @@ class JsHttpLibStrategy(ABC):
 
         Returns:
             List of JavaScript source lines implementing the transport call.
+        """
+        ...
+
+    @abstractmethod
+    def fetch_call_lines(self) -> list[str]:
+        """Generate library-specific `sscFetch` or `sscFetchAxios` helper source lines.
+
+        Returns:
+            List of JavaScript source lines implementing the fetch call.
         """
         ...

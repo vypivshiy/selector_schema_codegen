@@ -7,6 +7,7 @@ Called by JsVisitor via thin delegate methods.  The HTTP library strategy
 
 from __future__ import annotations
 
+import inspect
 import json
 
 from ssc_codegen.ast import (
@@ -31,69 +32,142 @@ from ssc_codegen.request_spec import parse_json_template
 from ssc_codegen.targets.javascript.http_libs.base import JsHttpLibStrategy
 from ssc_codegen.traversal.context import WalkContext
 from ssc_codegen.traversal.utils import (
-    dict_needs_builder,
     err_subclass_name,
     find_enclosing_module,
 )
 
 # ===========================================================================
-# REST shared runtime source (Ok/Err/sscDispatchErr/etc.)
+# HTTP & REST shared runtime source
 # ===========================================================================
 
+HTTP_SHARED: list[str] = [
+    *inspect.cleandoc(
+        """
+        function sscBuildParams(params) {
+            if (params instanceof URLSearchParams) return params;
+            const sp = new URLSearchParams();
+            for (const [k, v] of Object.entries(params || {})) {
+                if (v === undefined || v === null) continue;
+                if (Array.isArray(v)) {
+                    for (const _v of v) {
+                        if (_v !== undefined && _v !== null) sp.append(k, String(_v));
+                    }
+                } else {
+                    sp.set(k, String(v));
+                }
+            }
+            return sp;
+        }
+
+        function sscPrepareReq(url, dslOpts = {}, opts = {}, isAxios = false) {
+            const _kw = {};
+            let _params = null;
+            if (dslOpts && dslOpts.params) {
+                _params = {};
+                for (const [k, v] of Object.entries(dslOpts.params)) {
+                    if (v !== undefined && v !== null) _params[k] = v;
+                }
+            }
+            if (dslOpts && dslOpts.headers) {
+                const _h = {};
+                for (const [k, v] of Object.entries(dslOpts.headers)) {
+                    if (v !== undefined && v !== null) _h[k] = v;
+                }
+                if (Object.keys(_h).length > 0) _kw.headers = _h;
+            }
+            if (dslOpts && dslOpts.body !== undefined) {
+                if (isAxios) _kw.data = dslOpts.body;
+                else _kw.body = dslOpts.body;
+            }
+            if (opts) {
+                for (const [_k, _v] of Object.entries(opts)) {
+                    if (_k === 'params' && _v !== undefined && _v !== null) {
+                        if (_v instanceof URLSearchParams) {
+                            _params = _params ? { ..._params, ...Object.fromEntries(_v.entries()) } : _v;
+                        } else if (typeof _v === 'object') {
+                            _params = { ...(_params || {}), ..._v };
+                        }
+                    } else if (typeof _kw[_k] === 'object' && _kw[_k] !== null && typeof _v === 'object' && _v !== null) {
+                        _kw[_k] = { ..._kw[_k], ..._v };
+                    } else {
+                        _kw[_k] = _v;
+                    }
+                }
+            }
+            if (_params !== null) {
+                const _sp = sscBuildParams(_params);
+                const _qs = _sp.toString();
+                if (isAxios) {
+                    if (_qs) _kw.params = _sp;
+                } else if (_qs) {
+                    url = url + (url.includes('?') ? '&' : '?') + _qs;
+                }
+            }
+            return { url, _kw };
+        }
+        """
+    ).splitlines(),
+    "",
+]
+
 REST_SHARED: list[str] = [
-    "/**",
-    " * @template T",
-    " * @typedef {Object} Ok",
-    " * @property {true} isOk",
-    " * @property {number} status",
-    " * @property {Object<string, string>} headers",
-    " * @property {T} value",
-    " */",
-    "",
-    "/**",
-    " * @template E",
-    " * @typedef {Object} Err",
-    " * @property {false} isOk",
-    " * @property {number} status",
-    " * @property {Object<string, string>} headers",
-    " * @property {E} value",
-    " */",
-    "",
-    "/**",
-    " * @typedef {Object} UnknownErr",
-    " * @property {false} isOk",
-    " * @property {number} status",
-    " * @property {Object<string, string>} headers",
-    " * @property {*} value",
-    " */",
-    "",
-    "/**",
-    " * @typedef {Object} TransportErr",
-    " * @property {false} isOk",
-    " * @property {0} status",
-    " * @property {Object<string, string>} headers",
-    " * @property {null} value",
-    " * @property {string} cause",
-    " */",
-    "",
-    "/**",
-    " * @typedef {Object} ErrMatcher",
-    " * @property {number} status",
-    " * @property {function(Object): boolean|null} check",
-    " * @property {function(number, Object, *): Err} factory",
-    " */",
-    "",
-    "function sscDispatchErr(_matchers, _status, _headers, _body) {",
-    "    for (const _m of _matchers) {",
-    "        if (_m.status !== _status) continue;",
-    "        if (_m.check !== null) {",
-    "            if (!(_body instanceof Object) || !_m.check(_body)) continue;",
-    "        }",
-    "        return _m.factory(_status, _headers, _body);",
-    "    }",
-    "    if (_status >= 200 && _status < 300) return null;",
-    "    return { isOk: false, status: _status, headers: _headers, value: _body };",
-    "}",
+    *inspect.cleandoc(
+        """
+        /**
+         * @template T
+         * @typedef {Object} Ok
+         * @property {true} isOk
+         * @property {number} status
+         * @property {Object<string, string>} headers
+         * @property {T} value
+         */
+
+        /**
+         * @template E
+         * @typedef {Object} Err
+         * @property {false} isOk
+         * @property {number} status
+         * @property {Object<string, string>} headers
+         * @property {E} value
+         */
+
+        /**
+         * @typedef {Object} UnknownErr
+         * @property {false} isOk
+         * @property {number} status
+         * @property {Object<string, string>} headers
+         * @property {*} value
+         */
+
+        /**
+         * @typedef {Object} TransportErr
+         * @property {false} isOk
+         * @property {0} status
+         * @property {Object<string, string>} headers
+         * @property {null} value
+         * @property {string} cause
+         */
+
+        /**
+         * @typedef {Object} ErrMatcher
+         * @property {number} status
+         * @property {function(Object): boolean|null} check
+         * @property {function(number, Object, *): Err} factory
+         */
+
+        function sscDispatchErr(_matchers, _status, _headers, _body) {
+            for (const _m of _matchers) {
+                if (_m.status !== _status) continue;
+                if (_m.check !== null) {
+                    if (!(_body instanceof Object) || !_m.check(_body)) continue;
+                }
+                return _m.factory(_status, _headers, _body);
+            }
+            if (_status >= 200 && _status < 300) return null;
+            return { isOk: false, status: _status, headers: _headers, value: _body };
+        }
+        """
+    ).splitlines(),
     "",
 ]
 
@@ -113,7 +187,10 @@ _JS_PRIM_JSDOC = {
 
 def _js_array_join(ph: PlaceholderSpec) -> str:
     sep = _JS_STYLE_SEP[ph.style or "csv"]
-    return f"{ph.name}.map(String).join({sep!r})"
+    joined = f"{ph.name}.map(String).join({sep!r})"
+    if ph.is_optional:
+        return f"({ph.name} != null ? {joined} : null)"
+    return joined
 
 
 def render_value(tmpl: PlaceholderTemplate) -> str:
@@ -133,69 +210,16 @@ def render_value(tmpl: PlaceholderTemplate) -> str:
 def render_obj(d: dict[str, PlaceholderTemplate]) -> str:
     if not d:
         return "{}"
-    inner = ", ".join(f"{k!r}: {render_value(v)}" for k, v in d.items())
-    return "{" + inner + "}"
-
-
-def emit_obj_builder(
-    varname: str, d: dict[str, PlaceholderTemplate], indent: str
-) -> list[str]:
-    lines = [f"{indent}const {varname} = {{}};"]
-    for key, tmpl in d.items():
-        ph = tmpl.single_placeholder()
-        expr = render_value(tmpl)
-        if ph is not None and ph.is_optional:
-            lines.append(
-                f"{indent}if ({ph.name} !== undefined && {ph.name} !== null) "
-                f"{varname}[{key!r}] = {expr};"
-            )
-        else:
-            lines.append(f"{indent}{varname}[{key!r}] = {expr};")
-    return lines
-
-
-def emit_params_builder(
-    varname: str, d: dict[str, PlaceholderTemplate], indent: str
-) -> list[str]:
-    lines = [f"{indent}const {varname} = new URLSearchParams();"]
-    for key, tmpl in d.items():
-        ph = tmpl.single_placeholder()
-        if ph is None:
-            lines.append(
-                f"{indent}{varname}.set({key!r}, {render_value(tmpl)});"
-            )
-            continue
-        effective_key = (
-            f"{key}[]" if (ph.is_array and ph.style == "bracket") else key
+    parts: list[str] = []
+    for k, v in d.items():
+        ph = v.single_placeholder()
+        eff_k = (
+            f"{k}[]"
+            if (ph is not None and ph.is_array and ph.style == "bracket")
+            else k
         )
-        if ph.is_array and ph.style in (None, "repeat", "bracket"):
-            op = (
-                f"for (const _v of {ph.name}) "
-                f"{varname}.append({effective_key!r}, String(_v));"
-            )
-        elif ph.is_array:
-            op = f"{varname}.set({effective_key!r}, {_js_array_join(ph)});"
-        else:
-            scalar = ph.name if ph.type_name == "str" else f"String({ph.name})"
-            op = f"{varname}.set({effective_key!r}, {scalar});"
-        if ph.is_optional:
-            lines.append(
-                f"{indent}if ({ph.name} !== undefined && {ph.name} !== null) {op}"
-            )
-        else:
-            lines.append(f"{indent}{op}")
-    return lines
-
-
-def _params_need_builder(d: dict[str, PlaceholderTemplate]) -> bool:
-    for tmpl in d.values():
-        ph = tmpl.single_placeholder()
-        if ph is not None and (
-            ph.is_optional
-            or (ph.is_array and ph.style in (None, "repeat", "bracket"))
-        ):
-            return True
-    return False
+        parts.append(f"{eff_k!r}: {render_value(v)}")
+    return "{" + ", ".join(parts) + "}"
 
 
 def render_json_body(tmpl: PlaceholderTemplate) -> str:
@@ -304,28 +328,25 @@ def ok_payload_type(node: MethodRest) -> str:
 # ===========================================================================
 
 
-def _prepare_request(
-    spec: RequestHttp, i3: str
-) -> tuple[list[str], str | None, str | None, str | None]:
-    """Extract pre_lines + params/headers/body expressions from a spec."""
-    pre_lines: list[str] = []
-    params_expr = None
+def _render_dsl_opts(
+    spec: RequestHttp,
+    *,
+    response_path: str = "",
+    response_join: str = "",
+) -> str:
+    opts_parts: list[str] = []
     if spec.params:
-        if _params_need_builder(spec.params):
-            pre_lines.extend(emit_params_builder("_params", spec.params, i3))
-            params_expr = "_params"
-        else:
-            params_expr = render_obj(spec.params)
-    headers_expr = None
+        opts_parts.append(f"params: {render_obj(spec.params)}")
     if spec.headers:
-        if dict_needs_builder(spec.headers):
-            pre_lines.extend(emit_obj_builder("_headers", spec.headers, i3))
-            headers_expr = "_headers"
-        else:
-            headers_expr = render_obj(spec.headers)
+        opts_parts.append(f"headers: {render_obj(spec.headers)}")
     body_result = render_body(spec)
-    body_expr = body_result[1] if body_result else None
-    return pre_lines, params_expr, headers_expr, body_expr
+    if body_result:
+        opts_parts.append(f"body: {body_result[1]}")
+    if response_path:
+        opts_parts.append(f"responsePath: {response_path!r}")
+    if response_join:
+        opts_parts.append(f"responseJoin: {response_join!r}")
+    return "{" + ", ".join(opts_parts) + "}" if opts_parts else "{}"
 
 
 def _placeholder_param(spec: RequestHttp) -> str:
@@ -346,12 +367,12 @@ def emit_method_rest(
     node: MethodRest, ctx: WalkContext, http: JsHttpLibStrategy
 ) -> list[str]:
     spec = node.http_request.with_renamed_placeholders(js_name)
-    http_client = ctx.meta.get("http_client", "fetch")
     ind = ctx.indent_char
-    i1, i2, i3 = (ctx.indent + ind * n for n in range(3))
+    i1, i2 = ctx.indent, ctx.indent + ind
 
     ph_param = _placeholder_param(spec)
-    pre_lines, params_expr, headers_expr, body_expr = _prepare_request(spec, i3)
+    url_expr = render_value(spec.url)
+    dsl_opts = _render_dsl_opts(spec)
 
     raw_name = node.name or "fetch"
     method_name = to_camel_case(to_snake_case(raw_name))
@@ -401,43 +422,14 @@ def emit_method_rest(
     else:
         value_fn = "null"
 
-    if http_client == "axios":
-        url_expr = render_value(spec.url)
-        opts_parts: list[str] = []
-        if params_expr:
-            opts_parts.append(f"params: {params_expr}")
-        if headers_expr:
-            opts_parts.append(f"headers: {headers_expr}")
-        if body_expr:
-            opts_parts.append(f"data: {body_expr}")
-    else:
-        if params_expr:
-            url_inner = spec.url.map(
-                lambda ph: "${" + ph.name + "}",
-                lambda s: s.replace("`", "\\`"),
-            )
-            if params_expr == "_params":
-                url_expr = f"`{url_inner}?${{{params_expr}.toString()}}`"
-            else:
-                url_expr = (
-                    f"`{url_inner}?${{new URLSearchParams({params_expr})}}`"
-                )
-        else:
-            url_expr = render_value(spec.url)
-        opts_parts = []
-        if headers_expr:
-            opts_parts.append(f"headers: {headers_expr}")
-        if body_expr:
-            opts_parts.append(f"body: {body_expr}")
-
-    opts_obj = "{" + ", ".join(opts_parts) + "}" if opts_parts else "{}"
-
     lines: list[str] = []
     if node.doc:
         lines.append(f"{i1}/**")
         for doc_line in node.doc.splitlines():
             safe_doc_line = doc_line.replace("*/", "*\\/")
-            lines.append(f"{i1} * {safe_doc_line}")
+            lines.append(
+                f"{i1} * {safe_doc_line}" if safe_doc_line else f"{i1} *"
+            )
         lines.append(f"{i1} */")
     lines.append(f"{i1}/**")
     for p in sorted(spec.placeholders, key=lambda p: p.is_optional):
@@ -454,20 +446,9 @@ def emit_method_rest(
     lines.append(
         f"{i1}static async {method_name}(client{ph_param}, opts = {{}}) {{"
     )
-    lines.extend(pre_lines)
-    lines.append(f"{i2}const _kw = {opts_obj};")
-    lines.append(f"{i2}for (const [_k, _v] of Object.entries(opts)) {{")
-    lines.append(
-        f"{i2}    if (typeof _kw[_k] === 'object' && _kw[_k] !== null && typeof _v === 'object' && _v !== null) {{"
-    )
-    lines.append(f"{i2}        _kw[_k] = {{..._kw[_k], ..._v}};")
-    lines.append(f"{i2}    }} else {{")
-    lines.append(f"{i2}        _kw[_k] = _v;")
-    lines.append(f"{i2}    }}")
-    lines.append(f"{i2}}}")
     lines.append(
         f"{i2}return {fn_name}(client, {matchers_var}, "
-        f"{spec.method!r}, {url_expr}, {value_fn}, _kw);"
+        f"{spec.method!r}, {url_expr}, {value_fn}, {dsl_opts}, opts);"
     )
     lines.append(f"{i1}}}")
     return lines
@@ -477,111 +458,38 @@ def emit_method_fetch(
     node: MethodFetch, ctx: WalkContext, http: JsHttpLibStrategy
 ) -> list[str]:
     spec = node.http_request.with_renamed_placeholders(js_name)
-    http_client = ctx.meta.get("http_client", "fetch")
     ind = ctx.indent_char
-    i1, i2, i3 = (ctx.indent + ind * n for n in range(3))
+    i1, i2 = ctx.indent, ctx.indent + ind
 
     ph_param = _placeholder_param(spec)
-    pre_lines, params_expr, headers_expr, body_expr = _prepare_request(spec, i3)
+    url_expr = render_value(spec.url)
+    dsl_opts = _render_dsl_opts(
+        spec,
+        response_path=node.response_path,
+        response_join=node.response_join,
+    )
 
     struct_name = to_pascal_case(node.parent.name)  # type: ignore[union-attr]
     method_name = "fetch" + (to_pascal_case(node.name) if node.name else "")
+    fetch_fn = http.fetch_fn_name
 
-    def _response_lines(data_expr: str) -> list[str]:
-        rl: list[str] = []
-        if node.response_path:
-            accessor = "".join(
-                f"[{p!r}]" for p in node.response_path.split(".")
+    lines: list[str] = []
+    doc = getattr(node, "doc", "")
+    if doc:
+        lines.append(f"{i1}/**")
+        for doc_line in doc.splitlines():
+            safe_doc_line = doc_line.replace("*/", "*\\/")
+            lines.append(
+                f"{i1} * {safe_doc_line}" if safe_doc_line else f"{i1} *"
             )
-            rl.append(f"{i2}const _data = {data_expr};")
-            if node.response_join:
-                rl.append(
-                    f"{i2}const _body = _data{accessor}.join({node.response_join!r});"
-                )
-            else:
-                rl.append(f"{i2}const _body = _data{accessor};")
-        else:
-            rl.append(f"{i2}const _body = {data_expr};")
-        rl.append(f"{i2}return new {struct_name}(_body);")
-        return rl
-
-    lines: list[str] = [
-        f"{i1}static async {method_name}(client{ph_param}, opts = {{}}) {{"
-    ]
-    lines.extend(pre_lines)
-
-    # Build _kw from DSL-specified request options (method/url stay out).
-    kw_parts: list[str] = []
-    if http_client == "fetch":
-        if params_expr:
-            url_inner = spec.url.map(
-                lambda ph: "${" + ph.name + "}",
-                lambda s: s.replace("`", "\\`"),
-            )
-            url_expr = f"`{url_inner}?${{new URLSearchParams({params_expr})}}`"
-        else:
-            url_expr = render_value(spec.url)
-        if headers_expr:
-            kw_parts.append(f"headers: {headers_expr}")
-        if spec.cookies:
-            cookie_str = "; ".join(
-                f"{k}={v.source}" for k, v in spec.cookies.items()
-            )
-            kw_parts.append(
-                f"// cookies: {cookie_str!r}  /* set via headers or credentials */"
-            )
-        if body_expr:
-            kw_parts.append(f"body: {body_expr}")
-        kw_obj = "{" + ", ".join(kw_parts) + "}" if kw_parts else "{}"
-        lines.append(f"{i2}const _kw = {kw_obj};")
-        lines.append(f"{i2}for (const [_k, _v] of Object.entries(opts)) {{")
-        lines.append(
-            f"{i2}    if (typeof _kw[_k] === 'object' && _kw[_k] !== null && typeof _v === 'object' && _v !== null) {{"
-        )
-        lines.append(f"{i2}        _kw[_k] = {{..._kw[_k], ..._v}};")
-        lines.append(f"{i2}    }} else {{")
-        lines.append(f"{i2}        _kw[_k] = _v;")
-        lines.append(f"{i2}    }}")
-        lines.append(f"{i2}}}")
-        lines.append(
-            f"{i2}const _resp = await client({url_expr},"
-            f" {{ method: {spec.method!r}, ..._kw }});"
-        )
-        lines.append(
-            f"{i2}if (!_resp.ok) throw new Error(`HTTP ${{_resp.status}}`);"
-        )
-        if node.response_path:
-            lines.extend(_response_lines("await _resp.json()"))
-        else:
-            lines.extend(_response_lines("await _resp.text()"))
-    else:
-        url_expr = render_value(spec.url)
-        if params_expr:
-            kw_parts.append(f"params: {params_expr}")
-        if headers_expr:
-            kw_parts.append(f"headers: {headers_expr}")
-        if spec.cookies:
-            kw_parts.append(f"// cookies: {render_obj(spec.cookies)},")
-        if body_expr:
-            kw_parts.append(f"data: {body_expr}")
-        kw_obj = "{" + ", ".join(kw_parts) + "}" if kw_parts else "{}"
-        lines.append(f"{i2}const _kw = {kw_obj};")
-        lines.append(f"{i2}for (const [_k, _v] of Object.entries(opts)) {{")
-        lines.append(
-            f"{i2}    if (typeof _kw[_k] === 'object' && _kw[_k] !== null && typeof _v === 'object' && _v !== null) {{"
-        )
-        lines.append(f"{i2}        _kw[_k] = {{..._kw[_k], ..._v}};")
-        lines.append(f"{i2}    }} else {{")
-        lines.append(f"{i2}        _kw[_k] = _v;")
-        lines.append(f"{i2}    }}")
-        lines.append(f"{i2}}}")
-        lines.append(
-            f"{i2}const _resp = await client.request({{"
-            f" method: {spec.method!r}, url: {url_expr}, ..._kw }});"
-        )
-        lines.extend(_response_lines("_resp.data"))
-
-    lines.append(f"{i1}}}")
+        lines.append(f"{i1} */")
+    lines.extend(
+        [
+            f"{i1}static async {method_name}(client{ph_param}, opts = {{}}) {{",
+            f"{i2}return new {struct_name}(await {fetch_fn}(client, {spec.method!r}, {url_expr}, {dsl_opts}, opts));",
+            f"{i1}}}",
+        ]
+    )
     return lines
 
 
