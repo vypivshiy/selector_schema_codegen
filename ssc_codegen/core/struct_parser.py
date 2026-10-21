@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Sequence
 from typing import Any
 
@@ -109,7 +110,7 @@ def parse_struct(
     expr: Node | CheckMethod | ErrorResponse
     for node in kdl_nodes:
         if node.name == "@doc":
-            parent.doc = str(node.args[0].value)
+            parent.doc = inspect.cleandoc(str(node.args[0].value))
         elif node.name == "@init":
             if isinstance(parent, Struct):
                 _parse_init_fields(node.children, parent, ctx, lint)
@@ -245,6 +246,10 @@ def parse_struct(
                     code="E001",
                 )
 
+            doc_val = node.get_prop("doc") or ""
+            resolved_doc = inspect.cleandoc(
+                str(ctx.property_defines.get(doc_val, doc_val))
+            )
             if is_rest:
                 rest_method = MethodRest(parent=parent, name=method_name)
                 rest_method.response_path = response_path_val
@@ -254,10 +259,7 @@ def parse_struct(
                         response_schema_val, response_schema_val
                     )
                 )
-                doc_val = node.get_prop("doc") or ""
-                rest_method.doc = str(
-                    ctx.property_defines.get(doc_val, doc_val)
-                )
+                rest_method.doc = resolved_doc
                 http.parent = rest_method
                 rest_method.body.append(http)
                 parent.body.append(rest_method)
@@ -265,6 +267,7 @@ def parse_struct(
                 fetch_method = MethodFetch(parent=parent, name=method_name)
                 fetch_method.response_path = response_path_val
                 fetch_method.response_join = response_join_val
+                fetch_method.doc = resolved_doc
                 http.parent = fetch_method
                 fetch_method.body.append(http)
                 parent.body.append(fetch_method)
@@ -374,7 +377,7 @@ def parse_function(
     pipeline_nodes: list[KdlNode] = []
     for node in kdl_nodes:
         if node.name == "@doc":
-            fn.doc = str(node.args[0].value)
+            fn.doc = inspect.cleandoc(str(node.args[0].value))
         elif node.name.startswith("@"):
             continue  # structural linter already reported E203
         else:
@@ -609,7 +612,7 @@ def parse_json_fields(
                 resolved = str(ctx.property_defines.get(path_prop, path_prop))
                 if resolved:
                     alias = resolved
-            doc = node.get_prop("doc") or ""
+            doc = inspect.cleandoc(str(node.get_prop("doc") or ""))
             key_info, val_info = _parse_dict_type_directives(
                 node.children,
                 ctx,
@@ -675,7 +678,7 @@ def parse_json_fields(
                 resolved = str(ctx.property_defines.get(path_prop, path_prop))
                 if resolved:
                     alias = resolved
-            doc = node.get_prop("doc") or ""
+            doc = inspect.cleandoc(str(node.get_prop("doc") or ""))
 
             is_array = any(
                 (arg.type_annotation or "").strip("()") == "array"
@@ -789,7 +792,7 @@ def parse_json_fields(
                     is_array = True
                 ret_type = VariableType.JSON
         may_miss = "@omitempty" in modifiers
-        doc = node.get_prop("doc") or ""
+        doc = inspect.cleandoc(str(node.get_prop("doc") or ""))
         parent.body.append(
             JsonDefField(
                 parent=parent,

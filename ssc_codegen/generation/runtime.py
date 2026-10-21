@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 from typing import Any
 
@@ -136,66 +137,73 @@ def ssc_json_req_path(data: Any, path: str, target: str = '') -> Any:
 
 from ssc_codegen.targets.python.http_libs.base import HttpLibStrategy  # noqa: E402
 from ssc_codegen.targets.python.http_libs.httpx import HttpxStrategy  # noqa: E402
-from ssc_codegen.traversal.utils import module_has_rest  # noqa: E402
+from ssc_codegen.traversal.utils import (  # noqa: E402
+    module_has_rest,
+    module_uses_http,
+)
 
 _BASE_UTILITY_LINES: list[str] = [
-    "_RE_HEX_ENTITY = re.compile(r'&#x([0-9a-fA-F]+);')",
-    "_RE_UNICODE_ENTITY = re.compile(r'\\\\u([0-9a-fA-F]{4})')",
-    "_RE_BYTES_ENTITY = re.compile(r'\\\\x([0-9a-fA-F]{2})')",
-    "_RE_CHARS_MAP = {'\\\\b': '\\b', '\\\\f': '\\f', '\\\\n': '\\n', '\\\\r': '\\r', '\\\\t': '\\t'}",
-    "",
-    "class SscAssertionError(Exception):",
-    "    pass",
-    "",
-    "class SscRegexError(Exception):",
-    "    pass",
-    "",
-    "def std_assert(cond: bool, msg: str = '') -> None:",
-    "    if not cond:",
-    "        raise SscAssertionError(msg or 'ssc-gen assertion failed')",
-    "",
-    "def std_re_search(pattern: str, value: str, msg: str = '') -> str:",
-    "    m = re.search(pattern, value)",
-    "    if m is None:",
-    "        raise SscRegexError(msg or 'ssc-gen re-match failed')",
-    "    return m[1]",
-    "",
-    "def std_repl_map(s: str, rmap: Dict[str, str]) -> str:",
-    "    for k, v in rmap.items():",
-    "        s = s.replace(k, v)",
-    "    return s",
-    "",
-    "def std_normalize_text(text: str) -> str:",
-    "    return ' '.join(text.split()) if text else \"\"",
-    "",
-    "class UnmatchedTableRow:",
-    "    pass",
-    "",
-    "def std_unescape_text(text: str) -> str:",
-    "    s = ssc_html_unescape(text)",
-    "    s = _RE_HEX_ENTITY.sub(lambda m: chr(int(m.group(1), 16)), s)",
-    "    s = _RE_UNICODE_ENTITY.sub(lambda m: chr(int(m.group(1), 16)), s)",
-    "    s = _RE_BYTES_ENTITY.sub(lambda m: chr(int(m.group(1), 16)), s)",
-    "    for ch, r in _RE_CHARS_MAP.items():",
-    "        s = s.replace(ch, r)",
-    "    return s",
-    "",
-    "if sys.version_info >= (3, 9):",
-    "    def std_rm_prefix(s: str, p: str) -> str:",
-    "        return s.removeprefix(p)",
-    "",
-    "    def std_rm_suffix(s: str, p: str) -> str:",
-    "        return s.removesuffix(p)",
-    "",
-    "else:",
-    "    def std_rm_prefix(s: str, p: str) -> str:",
-    "        return s[len(p):] if s.startswith(p) else s",
-    "",
-    "    def std_rm_suffix(s: str, p: str) -> str:",
-    "        return s[:-(len(p))] if s.endswith(p) else s",
-    "",
-    "",
-    "UNMATCHED_TABLE_ROW = UnmatchedTableRow()",
+    *inspect.cleandoc(
+        r"""
+        _RE_HEX_ENTITY = re.compile(r'&#x([0-9a-fA-F]+);')
+        _RE_UNICODE_ENTITY = re.compile(r'\\u([0-9a-fA-F]{4})')
+        _RE_BYTES_ENTITY = re.compile(r'\\x([0-9a-fA-F]{2})')
+        _RE_CHARS_MAP = {'\\b': '\b', '\\f': '\f', '\\n': '\n', '\\r': '\r', '\\t': '\t'}
+
+        class SscAssertionError(Exception):
+            pass
+
+        class SscRegexError(Exception):
+            pass
+
+        def std_assert(cond: bool, msg: str = '') -> None:
+            if not cond:
+                raise SscAssertionError(msg or 'ssc-gen assertion failed')
+
+        def std_re_search(pattern: str, value: str, msg: str = '') -> str:
+            m = re.search(pattern, value)
+            if m is None:
+                raise SscRegexError(msg or 'ssc-gen re-match failed')
+            return m[1]
+
+        def std_repl_map(s: str, rmap: Dict[str, str]) -> str:
+            for k, v in rmap.items():
+                s = s.replace(k, v)
+            return s
+
+        def std_normalize_text(text: str) -> str:
+            return ' '.join(text.split()) if text else ""
+
+        class UnmatchedTableRow:
+            pass
+
+        def std_unescape_text(text: str) -> str:
+            s = ssc_html_unescape(text)
+            s = _RE_HEX_ENTITY.sub(lambda m: chr(int(m.group(1), 16)), s)
+            s = _RE_UNICODE_ENTITY.sub(lambda m: chr(int(m.group(1), 16)), s)
+            s = _RE_BYTES_ENTITY.sub(lambda m: chr(int(m.group(1), 16)), s)
+            for ch, r in _RE_CHARS_MAP.items():
+                s = s.replace(ch, r)
+            return s
+
+        if sys.version_info >= (3, 9):
+            def std_rm_prefix(s: str, p: str) -> str:
+                return s.removeprefix(p)
+
+            def std_rm_suffix(s: str, p: str) -> str:
+                return s.removesuffix(p)
+
+        else:
+            def std_rm_prefix(s: str, p: str) -> str:
+                return s[len(p):] if s.startswith(p) else s
+
+            def std_rm_suffix(s: str, p: str) -> str:
+                return s[:-(len(p))] if s.endswith(p) else s
+
+
+        UNMATCHED_TABLE_ROW = UnmatchedTableRow()
+        """
+    ).splitlines(),
     "",
     *PY_JSON_PROJECT_HELPER.strip("\n").splitlines(),
 ]
@@ -503,13 +511,11 @@ def runtime_module_content(
         "from html import unescape as ssc_html_unescape",
     ]
     has_rest = module_has_rest(module)
+    uses_http = has_rest or module_uses_http(module)
     if has_rest:
-        lines.extend(
-            [
-                "from dataclasses import dataclass, field",
-                strategy.import_line,
-            ]
-        )
+        lines.append("from dataclasses import dataclass, field")
+    if uses_http:
+        lines.append(strategy.import_line)
     if extension_defs:
         for imports, _code in extension_defs.values():
             for import_line in imports:
@@ -519,8 +525,12 @@ def runtime_module_content(
     lines.append("")
     lines.extend(_BASE_UTILITY_LINES)
     lines.append("")
+    if uses_http:
+        lines.extend(strategy.merge_kwargs_lines())
     if has_rest:
         lines.extend(strategy.rest_runtime_lines(http_io="both"))
+    if uses_http:
+        lines.extend(strategy.fetch_runtime_lines(http_io="both"))
     if extension_defs:
         for _imports, code in extension_defs.values():
             lines.append("")
@@ -584,7 +594,7 @@ def register_runtime_file(
     def _generate_runtime(modules: list[a.Module]) -> str:
         ref = next(
             (m for m in modules if module_has_rest(m)),
-            modules[0],
+            next((m for m in modules if module_uses_http(m)), modules[0]),
         )
         return _apply_fallback(
             runtime_module_content(
