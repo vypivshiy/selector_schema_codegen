@@ -191,6 +191,40 @@ class TestRestSuccess:
         assert result.is_ok is True
         assert result.value is None
 
+    def test_200_null_or_primitive_or_invalid_body_raises_schema_error(
+        self, basic_ns
+    ):
+        API = basic_ns["API"]
+        SchemaErr = basic_ns["SscJsonSchemaError"]
+
+        with respx.mock:
+            respx.get("https://api.example.com/users/null").respond(
+                content=b"null",
+                headers={"Content-Type": "application/json"},
+                status_code=200,
+            )
+            respx.get("https://api.example.com/users/prim").respond(
+                json=12345, status_code=200
+            )
+            respx.get("https://api.example.com/users/bad").respond(
+                content=b"<html>not json</html>",
+                headers={"Content-Type": "text/html"},
+                status_code=200,
+            )
+            client = httpx.Client()
+            with pytest.raises(
+                SchemaErr, match="User: Expected dict, got NoneType"
+            ):
+                API.fetch(client, id="null")
+            with pytest.raises(
+                SchemaErr, match="User: Expected dict, got int"
+            ):
+                API.fetch(client, id="prim")
+            with pytest.raises(
+                SchemaErr, match="User: Expected dict, got NoneType"
+            ):
+                API.fetch(client, id="bad")
+
 
 # ---------------------------------------------------------------------------
 # 2. Error dispatch
@@ -1153,8 +1187,11 @@ struct ProfileAPI type=rest {
                 http_client="httpx",
             )
             assert f"from .{runtime_name} import" in code
-            assert "ssc_remap_json_keys" in code
-            assert "def ssc_remap_json_keys(" not in code
+            assert "ssc_resolve_dotpath" in code
+            assert "def ssc_resolve_dotpath(" not in code
+            assert "def _project_article_list(" in code
+            assert "ssc_json_project" not in code
+            assert "ssc_remap_json_keys" not in code
 
             exec(code, parser_mod.__dict__)
             API = parser_mod.ArticleAPI
@@ -1430,42 +1467,45 @@ json ApiErr {
         mod = _parse(self._NESTED_SCHEMA)
         py_code = PY_BS4_CONVERTER.convert_all(mod)[""]
 
-        # 1. Verify descriptor naming convention
-        assert "JSON_DESCRIPTOR_LEAF_IMAGE = " in py_code
-        assert "JSON_DESCRIPTOR_GENRE = " in py_code
-        assert "JSON_DESCRIPTOR_RELEASE = " in py_code
-        assert "JSON_DESCRIPTOR_CATALOG_RESPONSE = " in py_code
-        assert "JSON_DESCRIPTOR_API_ERR = " in py_code
-
-        # 2. Verify no old private descriptor constants
-        assert "_leaf_image_JSON_DESCRIPTORS" not in py_code
-        assert "_genre_JSON_DESCRIPTORS" not in py_code
-        assert "_release_JSON_DESCRIPTORS" not in py_code
-        assert "_catalog_response_JSON_DESCRIPTORS" not in py_code
-
-        # 3. Verify descriptor modularity: child schemas referenced by name, not duplicated inline
+        # 1. Verify projector function naming convention
+        assert "def _project_leaf_image(data: Any) -> LeafImageJson:" in py_code
+        assert "def _project_genre(data: Any) -> GenreJson:" in py_code
+        assert "def _project_release(data: Any) -> ReleaseJson:" in py_code
         assert (
-            "'icon': ('icon', False, False, JSON_DESCRIPTOR_LEAF_IMAGE)"
+            "def _project_catalog_response(data: Any) -> CatalogResponseJson:"
+            in py_code
+        )
+        assert "def _project_api_err(data: Any) -> ApiErrJson:" in py_code
+
+        # 2. Verify no descriptor constants or legacy helpers
+        assert "JSON_DESCRIPTOR_" not in py_code
+        assert "_JSON_DESCRIPTORS" not in py_code
+        assert "ssc_json_project" not in py_code
+        assert "ssc_remap_json_keys" not in py_code
+
+        # 3. Verify projector modularity: child schemas called directly by function name
+        assert (
+            "_project_leaf_image(ssc_json_req(_d, 'icon', 'Genre'))"
             in py_code
         )
         assert (
-            "'genres': ('genres', False, False, [JSON_DESCRIPTOR_GENRE])"
+            "[_project_genre(_x) for _x in ssc_expect_list(ssc_json_req(_d, 'genres', 'Release'), 'Release.genres') if _x is not None]"
             in py_code
         )
         assert (
-            "'items': ('items', False, False, [JSON_DESCRIPTOR_RELEASE])"
-            in py_code
-        )
-
-        # 4. Verify REST method uses descriptor constant reference
-        assert (
-            "value_fn=lambda _b: ssc_json_project(_b, JSON_DESCRIPTOR_CATALOG_RESPONSE)"
+            "[_project_release(_x) for _x in ssc_expect_list(ssc_json_req(_d, 'items', 'CatalogResponse'), 'CatalogResponse.items') if _x is not None]"
             in py_code
         )
 
-        # 5. Verify error matcher uses descriptor constant reference
+        # 4. Verify REST method calls projector function directly
         assert (
-            "value=ssc_json_project(value, JSON_DESCRIPTOR_API_ERR)" in py_code
+            "value_fn=lambda _b: _project_catalog_response(_b)"
+            in py_code
+        )
+
+        # 5. Verify error matcher calls projector function directly
+        assert (
+            "value=_project_api_err(value)" in py_code
         )
 
         # 6. Syntax validation
@@ -1563,13 +1603,14 @@ json ApiErr {
         py_code = PY_BS4_CONVERTER.convert_all(mod)[""]
         js_code = JS_CONVERTER.convert_all(mod)[""]
 
-        # Validate descriptor naming
-        py_desc_constants = [
-            line.split(" = ")[0]
+        # Validate projector function naming
+        py_projectors = [
+            line.split("(")[0]
             for line in py_code.splitlines()
-            if line.startswith("JSON_DESCRIPTOR_")
+            if line.startswith("def _project_")
         ]
-        assert len(py_desc_constants) >= 25
+        assert len(py_projectors) >= 25
+        assert "JSON_DESCRIPTOR_" not in py_code
         assert "_JSON_DESCRIPTORS" not in py_code
 
         js_desc_constants = [
@@ -1581,9 +1622,9 @@ json ApiErr {
         assert "JsonDescriptors = " not in js_code
 
         # Validate reference usage in REST methods and matchers
-        assert "JSON_DESCRIPTOR_CATALOG_RELEASES_RESPONSE" in py_code
-        assert "JSON_DESCRIPTOR_API_ERROR" in py_code
-        assert "JSON_DESCRIPTOR_RELEASE_DETAIL" in py_code
+        assert "_project_catalog_releases_response" in py_code
+        assert "_project_api_error" in py_code
+        assert "_project_release_detail" in py_code
 
         # Validate code size reduction: Python unformatted < 50,000 bytes (was 98,819 bytes)
         assert len(py_code.encode("utf-8")) < 50_000

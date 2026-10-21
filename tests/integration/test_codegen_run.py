@@ -278,8 +278,10 @@ def test_json_nested_root(html):
         SCHEMAS_DIR / "04_json_and_nested.kdl", "JsonNestedRoot", html
     )
     assert result["title"] == "DSL Coverage Fixture"
-    assert result["first_author_name"] == "Author One"
-    assert result["first_score"] == 7
+    assert result["first_author"] == {
+        "name": "Author One",
+        "slug": "author-one",
+    }
     assert result["nested_item"] == {
         "title": "Single Item Title",
         "active": True,
@@ -297,8 +299,10 @@ def test_coverage_root_full(html):
     result = _run_schema(SCHEMAS_DIR / "00_full.kdl", "CoverageRoot", html)
     assert result["title"] == "DSL Coverage Fixture"
     assert result["canonical"] == "https://example.test/coverage"
-    assert result["first_author_name"] == "Author One"
-    assert result["first_score"] == 7
+    assert result["first_author"] == {
+        "name": "Author One",
+        "slug": "author-one",
+    }
     assert result["nested_item"] == {
         "title": "Single Item Title",
         "active": True,
@@ -316,10 +320,8 @@ class TestJsonBasic:
             SCHEMAS_DIR / "18_json_basic.kdl", "JsonBasic", html
         )
         assert result == {
-            "first_author_name": "Author One",
-            "first_score": 7,
-            "first_tags": ["alpha", "beta"],
-            "second_text": "Quote two",
+            "first_author": {"name": "Author One", "slug": "author-one"},
+            "second_author": {"name": "Author Two", "slug": "author-two"},
             "full_payload": [
                 {
                     "text": "Quote one",
@@ -397,9 +399,9 @@ struct JsonAliasedScraper {
         jsonify QuoteSchema
     }
 
-    first-author-name {
+    first-author {
         @raw-json
-        jsonify QuoteSchema path="0.author.name"
+        jsonify AuthorSchema path="0.author"
     }
 }
 """
@@ -421,7 +423,10 @@ struct JsonAliasedScraper {
         assert "text" not in first
         assert "score" not in first
         assert "name" not in first["author"]
-        assert res["first_author_name"] == "Author One"
+        assert res["first_author"] == {
+            "author_name": "Author One",
+            "author_slug": "author-one",
+        }
 
     @pytest.mark.parametrize("target", _TARGETS)
     def test_json_alias_special_character_keys(self, target):
@@ -739,8 +744,11 @@ struct RuntimeTestScraper {
                 runtime_module=runtime_name,
             )
             assert f"from .{runtime_name} import" in code
-            assert "ssc_json_project" in code
-            assert "def ssc_json_project(" not in code
+            assert "ssc_resolve_dotpath" in code
+            assert "def ssc_resolve_dotpath(" not in code
+            assert "def _project_user_info(" in code
+            assert "ssc_json_project" not in code
+            assert "ssc_remap_json_keys" not in code
 
             ns: dict = {
                 "__name__": f"{pkg_name}.parser",
