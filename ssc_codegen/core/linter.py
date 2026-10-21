@@ -13,13 +13,15 @@ from ssc_codegen.symbols import (
     SymbolKind,
     SymbolRecord,
     SymbolScope,
-    local_symbol,
     is_valid_symbol,
+    json_field_symbol,
+    local_symbol,
     normalize_targets,
-    top_symbol_names,
     target_symbol_plan,
+    top_symbol_names,
 )
 from ssc_codegen.naming import to_pascal_case
+from ssc_codegen.traversal.utils import is_malformed_gjson_path
 from ssc_codegen.ast.struct import PLACEHOLDER_WIDE_RE, PlaceholderSpec
 from kdlquery import KdlDocument, KdlNode, ReadDiagnostic, Severity
 
@@ -138,6 +140,7 @@ _VALID_IMPORT_KINDS = frozenset({"define", "extension", "fn", "json", "struct"})
 
 _DEFINE_NAME_RE = _re.compile(r"^[A-Z_][A-Z0-9_-]*\Z")
 _EXTENSION_NAME_RE = _re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*\Z")
+_JSON_FIELD_NAME_RE = _re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*\Z")
 _PORTABLE_IDENTIFIER_RE = _re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\Z")
 _EXTENSION_PLACEHOLDER_RE = _re.compile(r"\{\{([^{}]+)\}\}")
 _EXTENSION_PLACEHOLDERS = frozenset({"in", "in_type", "out", "out_type"})
@@ -808,13 +811,28 @@ def _lint_defines(
 
 
 def _is_malformed_dotpath(path: str) -> bool:
-    if not path:
-        return True
-    if path.startswith(".") or path.endswith("."):
-        return True
-    if ".." in path:
-        return True
-    return any(seg == "" for seg in path.split("."))
+    return is_malformed_gjson_path(path)
+
+
+def _sanitize_json_field_name(raw: str) -> str:
+    s = raw.lstrip("@")
+    s = _re.sub(r"[^A-Za-z0-9_-]+", "_", s)
+    s = _re.sub(r"_+", "_", s).strip("_-")
+    if not s:
+        return "field"
+    if s[0].isdigit():
+        return f"k_{s}"
+    return s
+
+
+def _json_field_type_repr(field_node: KdlNode) -> str:
+    for arg in field_node.args:
+        val = str(arg.value)
+        if val.startswith("@"):
+            continue
+        ann = arg.type_annotation or ""
+        return f"{ann}{val}" if ann else val
+    return "str"
 
 
 def _lint_json_defs(
@@ -1110,13 +1128,13 @@ def _lint_single_json(
             diags.append(
                 _error(
                     node,
-                    "'path' property must be a non-empty string",
+                    "'path' property must be a non-empty string (malformed dot-path '')",
                     source_path,
-                    code="E002",
+                    code="E040",
                     hint='example: json MySchema path="response.data" { ... }',
                 )
             )
-        elif _is_malformed_dotpath(path_val):
+        elif _is_malformed_dotpath(path_val.strip()):
             diags.append(
                 _error(
                     node,
@@ -1203,6 +1221,34 @@ def _lint_json_children(
                 seen_json_names,
             )
             continue
+
+        if not _JSON_FIELD_NAME_RE.fullmatch(clean_field_name):
+            type_repr = _json_field_type_repr(field_node)
+            if clean_field_name.endswith(":"):
+                name_without_colon = _sanitize_json_field_name(
+                    clean_field_name[:-1]
+                )
+                hint = (
+                    f"in KDL field name and type are separated by space "
+                    f"('{name_without_colon} {type_repr}'); if the JSON key ends "
+                    f"with ':', use '{name_without_colon} {type_repr} "
+                    f'from="{clean_field_name}"\''
+                )
+            else:
+                sanitized_name = _sanitize_json_field_name(clean_field_name)
+                hint = (
+                    f"use a portable identifier with 'from', e.g. "
+                    f'\'{sanitized_name} {type_repr} from="{clean_field_name}"\''
+                )
+            diags.append(
+                _error(
+                    field_node,
+                    f"invalid json field name '{field_name}'; field names must be portable identifiers matching ^[A-Za-z_][A-Za-z0-9_-]*$",
+                    source_path,
+                    code="E403",
+                    hint=hint,
+                )
+            )
 
         path_prop = field_node.properties.get("path")
         if path_prop is not None:
@@ -1397,13 +1443,23 @@ def _lint_json_children(
         from_prop = field_node.properties.get("from")
         from_val: str | None = None
         if from_prop is not None:
-            if not isinstance(from_prop.value, str) or not from_prop.value:
+            if not isinstance(from_prop.value, str):
                 diags.append(
                     _error(
                         field_node,
                         "'from' property must be a non-empty string",
                         source_path,
                         code="E001",
+                        hint=f'example: {field_name} str from="source_key"',
+                    )
+                )
+            elif not from_prop.value:
+                diags.append(
+                    _error(
+                        field_node,
+                        "'from' property must be a non-empty string (malformed dot-path '')",
+                        source_path,
+                        code="E040",
                         hint=f'example: {field_name} str from="source_key"',
                     )
                 )
@@ -2262,6 +2318,12 @@ def _collect_symbol_records(
 ) -> tuple[SymbolRecord, ...]:
     """Normalize CST declarations before handing them to symbol policy."""
     records: list[SymbolRecord] = []
+    children_defines: dict[str, list[KdlNode]] = {}
+    for node in nodes:
+        if node.name == "define":
+            args = _node_args(node)
+            if args and node.children:
+                children_defines[args[0]] = list(node.children)
 
     def add(
         node: KdlNode, kind: SymbolKind, raw: str, scope: SymbolScope
@@ -2279,6 +2341,77 @@ def _collect_symbol_records(
                         node.span,
                         node,
                     )
+                )
+
+    def collect_json_fields(
+        children: list[KdlNode],
+        scope_source: str,
+        visiting_defines: set[str] | None = None,
+    ) -> None:
+        if visiting_defines is None:
+            visiting_defines = set()
+        for child_index, field_node in enumerate(children):
+            field_name = field_node.name
+            if not field_name:
+                continue
+            clean_name = field_name.rstrip("?")
+            args = _node_args(field_node)
+            if (
+                not args
+                and field_name in children_defines
+                and field_name not in visiting_defines
+            ):
+                visiting_defines.add(field_name)
+                collect_json_fields(
+                    children_defines[field_name],
+                    scope_source,
+                    visiting_defines,
+                )
+                visiting_defines.discard(field_name)
+                continue
+
+            raw_ann = field_node.type_annotation or ""
+            type_prop = field_node.properties.get("type")
+            type_prop_val = (
+                str(type_prop.value) if type_prop is not None else ""
+            )
+            is_dict_field = (
+                raw_ann.strip("()").rstrip("?") == "dict"
+                or type_prop_val == "dict"
+                or any(
+                    (arg.type_annotation or "").strip("()").rstrip("?")
+                    == "dict"
+                    or str(arg.value).rstrip("?") == "(dict)"
+                    for arg in field_node.args
+                )
+            )
+
+            if _JSON_FIELD_NAME_RE.fullmatch(clean_name):
+                for target in targets:
+                    records.append(
+                        SymbolRecord(
+                            SymbolKind.FIELD,
+                            clean_name,
+                            target,
+                            json_field_symbol(clean_name, target),
+                            SymbolScope.STRUCT,
+                            scope_source,
+                            field_node.span,
+                            field_node,
+                        )
+                    )
+
+            if is_dict_field:
+                for dict_child in field_node.children:
+                    if dict_child.name == "@value" and dict_child.children:
+                        collect_json_fields(
+                            list(dict_child.children),
+                            f"{scope_source}#f{child_index}#val",
+                        )
+            elif field_node.children:
+                collect_json_fields(
+                    list(field_node.children),
+                    f"{scope_source}#f{child_index}",
                 )
 
     for index, node in enumerate(nodes):
@@ -2394,6 +2527,25 @@ def _collect_symbol_records(
                             )
         elif node.name == "json":
             add(node, SymbolKind.JSON, raw, SymbolScope.MODULE)
+            local_source = f"{source_for(node)}#json#{index}"
+            raw_ann = node.type_annotation or ""
+            type_prop = node.properties.get("type")
+            type_prop_val = (
+                str(type_prop.value) if type_prop is not None else ""
+            )
+            is_dict = (
+                raw_ann.strip("()").rstrip("?") == "dict"
+                or type_prop_val == "dict"
+            )
+            if is_dict:
+                for dict_child in node.children:
+                    if dict_child.name == "@value" and dict_child.children:
+                        collect_json_fields(
+                            list(dict_child.children),
+                            f"{local_source}#val",
+                        )
+            else:
+                collect_json_fields(list(node.children), local_source)
         elif node.name == "fn":
             add(node, SymbolKind.FUNCTION, raw, SymbolScope.MODULE)
     return tuple(records)
@@ -2959,8 +3111,8 @@ def lint_pipeline_op(node: KdlNode, lint: LintContext) -> None:
             if not path_val:
                 lint.error(
                     node,
-                    message="'path' property must be a non-empty string",
-                    code="E002",
+                    message="'path' property must be a non-empty string (malformed dot-path '')",
+                    code="E040",
                     hint='example: jsonify MySchema path="response.data"',
                 )
             elif _is_malformed_dotpath(path_val.strip()):

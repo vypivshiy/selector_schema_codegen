@@ -7,6 +7,7 @@ predicates, and placeholder templates used by converters during code generation.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 from ssc_codegen.ast import (
     Assert,
@@ -233,6 +234,160 @@ def resolve_json_def(node: Node, schema_name: str) -> JsonDef | None:
         if isinstance(n, JsonDef) and n.name == schema_name:
             return n
     return None
+
+
+@dataclass(frozen=True, slots=True)
+class GjsonSegment:
+    """Single parsed segment of a GJSON path expression."""
+
+    kind: Literal["key", "index", "hash"]
+    key: str = ""
+    index: int | None = None
+
+
+def parse_gjson_path(path: str) -> tuple[GjsonSegment, ...]:
+    """Parse and validate a filter-free GJSON path expression into segments.
+
+    Args:
+        path (str): Raw GJSON path expression string.
+
+    Returns:
+        tuple[GjsonSegment, ...]: Ordered tuple of parsed key, index, or hash segments.
+
+    Raises:
+        ValueError: If the path is empty, contains empty segments, has an invalid
+            or trailing escape sequence, uses negative array indices, or includes
+            unsupported filter expressions.
+    """
+    if not path:
+        raise ValueError("Empty GJSON path expression")
+
+    raw_chars: list[str] = []
+    unescaped_chars: list[str] = []
+    has_escape = False
+    has_unescaped_hash = False
+    raw_segments: list[tuple[str, str, bool, bool]] = []
+
+    i = 0
+    n = len(path)
+    while i < n:
+        ch = path[i]
+        if ch == "\\":
+            if i + 1 >= n:
+                raise ValueError(
+                    f"Trailing unescaped backslash in GJSON path '{path}'"
+                )
+            nxt = path[i + 1]
+            if nxt not in (".", "\\", "#", "-") and not nxt.isdigit():
+                raise ValueError(
+                    f"Invalid escape sequence '\\{nxt}' in GJSON path '{path}'"
+                )
+            raw_chars.append(ch)
+            raw_chars.append(nxt)
+            unescaped_chars.append(nxt)
+            has_escape = True
+            i += 2
+        elif ch == ".":
+            if not raw_chars:
+                raise ValueError(f"Empty segment in GJSON path '{path}'")
+            raw_segments.append(
+                (
+                    "".join(raw_chars),
+                    "".join(unescaped_chars),
+                    has_escape,
+                    has_unescaped_hash,
+                )
+            )
+            raw_chars = []
+            unescaped_chars = []
+            has_escape = False
+            has_unescaped_hash = False
+            i += 1
+        else:
+            if ch == "#":
+                has_unescaped_hash = True
+            raw_chars.append(ch)
+            unescaped_chars.append(ch)
+            i += 1
+
+    if not raw_chars:
+        raise ValueError(f"Empty trailing segment in GJSON path '{path}'")
+    raw_segments.append(
+        (
+            "".join(raw_chars),
+            "".join(unescaped_chars),
+            has_escape,
+            has_unescaped_hash,
+        )
+    )
+
+    segments: list[GjsonSegment] = []
+    for (
+        raw_seg,
+        unescaped_seg,
+        seg_has_escape,
+        seg_has_hash,
+    ) in raw_segments:
+        if raw_seg == "#":
+            segments.append(GjsonSegment(kind="hash", key="#"))
+        elif seg_has_hash:
+            raise ValueError(
+                f"Unsupported GJSON filter or hash expression '{raw_seg}' in '{path}'"
+            )
+        elif (
+            not seg_has_escape
+            and raw_seg.startswith("-")
+            and raw_seg[1:].isdigit()
+        ):
+            raise ValueError(
+                f"Negative array index '{raw_seg}' is not supported in GJSON path '{path}'"
+            )
+        elif not seg_has_escape and raw_seg.isdigit():
+            segments.append(
+                GjsonSegment(
+                    kind="index", key=raw_seg, index=int(raw_seg)
+                )
+            )
+        else:
+            segments.append(GjsonSegment(kind="key", key=unescaped_seg))
+
+    return tuple(segments)
+
+
+def is_malformed_gjson_path(path: str) -> bool:
+    """Check whether a GJSON path expression violates the supported subset grammar.
+
+    Args:
+        path (str): Raw GJSON path expression string to validate.
+
+    Returns:
+        bool: ``True`` if the path is malformed, ``False`` if valid.
+    """
+    try:
+        parse_gjson_path(path)
+        return False
+    except ValueError:
+        return True
+
+
+def classify_gjson_path(path: str) -> tuple[bool, str]:
+    """Classify a GJSON path into a direct O(1) dictionary key or a path query.
+
+    Args:
+        path (str): GJSON path expression string.
+
+    Returns:
+        tuple[bool, str]: ``(True, unescaped_key)`` when the expression resolves
+        to a single flat object key, or ``(False, path)`` when it requires
+        multi-segment, index, or array projection evaluation.
+    """
+    try:
+        segments = parse_gjson_path(path)
+    except ValueError:
+        return False, path
+    if len(segments) == 1 and segments[0].kind == "key":
+        return True, segments[0].key
+    return False, path
 
 
 def jsonify_path_to_segments(query: str) -> list[str]:

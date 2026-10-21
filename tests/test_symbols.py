@@ -219,3 +219,43 @@ def test_http_request_signature_line_continuation_hint():
         "rename 'invalid field name with spaces' to a portable identifier"
         in normal_findings[0].hint
     )
+
+
+def test_json_field_symbol_mappings_and_reserved_words():
+    from ssc_codegen.symbols import is_valid_symbol, json_field_symbol
+
+    assert json_field_symbol("user-id", "python") == "user_id"
+    assert json_field_symbol("user-id", "javascript") == "userId"
+    assert json_field_symbol("user-id", "go") == "UserId"
+    assert json_field_symbol("user-id", "rust") == "user_id"
+
+    # 'type' is valid in all 4 targets (Go exports PascalCase 'Type', Rust uses r#type)
+    for target in ("python", "javascript", "go", "rust"):
+        sym = json_field_symbol("type", target)
+        assert is_valid_symbol(target, sym) is True
+
+    # Target reserved words are rejected for their respective targets
+    assert is_valid_symbol("python", json_field_symbol("class", "python")) is False
+    assert is_valid_symbol("javascript", json_field_symbol("class", "javascript")) is False
+    assert is_valid_symbol("javascript", json_field_symbol("function", "javascript")) is False
+    assert is_valid_symbol("rust", json_field_symbol("self", "rust")) is False
+    assert is_valid_symbol("rust", json_field_symbol("super", "rust")) is False
+    assert is_valid_symbol("rust", json_field_symbol("crate", "rust")) is False
+
+
+def test_projector_naming_helpers():
+    from ssc_codegen.naming import (
+        js_json_projector_name,
+        python_json_projector_name,
+    )
+
+    assert python_json_projector_name("Episode") == "_project_episode"
+    assert (
+        python_json_projector_name("CatalogReleasesResponse")
+        == "_project_catalog_releases_response"
+    )
+    assert js_json_projector_name("Episode") == "_projectEpisode"
+    assert (
+        js_json_projector_name("CatalogReleasesResponse")
+        == "_projectCatalogReleasesResponse"
+    )

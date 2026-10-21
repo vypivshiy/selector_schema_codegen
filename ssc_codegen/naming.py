@@ -39,6 +39,35 @@ def json_descriptor_var_name(name: str) -> str:
     return f"JSON_DESCRIPTOR_{clean_name}"
 
 
+def python_json_projector_name(name: str) -> str:
+    """Format canonical Python JSON projector function identifier.
+
+    Args:
+        name (str): Struct, type, or JSON schema name to format.
+
+    Returns:
+        str: Snake-case function identifier prefixed with ``_project_``.
+    """
+    clean_name = to_snake_case(name).lstrip("_")
+    return f"_project_{clean_name}"
+
+
+def js_json_projector_name(name: str) -> str:
+    """Format canonical JavaScript JSON projector function identifier.
+
+    Args:
+        name (str): Struct, type, or JSON schema name to format.
+
+    Returns:
+        str: Pascal-suffixed function identifier prefixed with ``_project``.
+    """
+    return f"_project{to_pascal_case(name)}"
+
+
+python_projector_name = python_json_projector_name
+js_projector_name = js_json_projector_name
+
+
 def to_pascal_case(s: str) -> str:
     """
     'my_field_name' -> 'MyFieldName'
