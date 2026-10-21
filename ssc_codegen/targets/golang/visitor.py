@@ -138,6 +138,7 @@ from ssc_codegen.naming import (
     to_snake_case,
 )
 from ssc_codegen.traversal.utils import (
+    classify_gjson_path,
     find_predicate_container,
     module_has_html_struct,
     module_uses_http,
@@ -309,6 +310,7 @@ def _go_unmarshal_json(
         field_name = to_pascal_case(field.name)
         wire_path = field.alias if field.alias else _json_tag(field.name)
         go_wire_path = _go_str(wire_path)
+        missing_err_msg = _go_str(f"required JSON field '{wire_path}' missing")
         info = field.ret_type_info
         is_optional = info.is_optional if info else False
         is_omitempty = info.omitempty if info else False
@@ -360,7 +362,7 @@ def _go_unmarshal_json(
                     f"\tif !{res_var}.Exists() || {res_var}.Type == gjson.Null {{"
                 )
                 lines.append(
-                    f"\t\treturn fmt.Errorf(\"required JSON field '{wire_path}' missing\")"
+                    f"\t\treturn fmt.Errorf({missing_err_msg})"
                 )
                 lines.append("\t}")
                 lines.append(
@@ -400,7 +402,7 @@ def _go_unmarshal_json(
                         f"\tif !{res_var}.Exists() || {res_var}.Type == gjson.Null {{"
                     )
                     lines.append(
-                        f"\t\treturn fmt.Errorf(\"required JSON field '{wire_path}' missing\")"
+                        f"\t\treturn fmt.Errorf({missing_err_msg})"
                     )
                     lines.append("\t}")
                     lines.append(f"\tfor _, item := range {res_var}.Array() {{")
@@ -435,7 +437,7 @@ def _go_unmarshal_json(
                         f"\tif !{res_var}.Exists() || {res_var}.Type == gjson.Null {{"
                     )
                     lines.append(
-                        f"\t\treturn fmt.Errorf(\"required JSON field '{wire_path}' missing\")"
+                        f"\t\treturn fmt.Errorf({missing_err_msg})"
                     )
                     lines.append("\t}")
                     lines.append(
@@ -479,7 +481,7 @@ def _go_unmarshal_json(
                     f"\tif !{res_var}.Exists() || {res_var}.Type == gjson.Null {{"
                 )
                 lines.append(
-                    f"\t\treturn fmt.Errorf(\"required JSON field '{wire_path}' missing\")"
+                    f"\t\treturn fmt.Errorf({missing_err_msg})"
                 )
                 lines.append("\t}")
                 lines.append(f"\tfor _, item := range {res_var}.Array() {{")
@@ -503,7 +505,7 @@ def _go_unmarshal_json(
                     f"\tif !{res_var}.Exists() || {res_var}.Type == gjson.Null {{"
                 )
                 lines.append(
-                    f"\t\treturn fmt.Errorf(\"required JSON field '{wire_path}' missing\")"
+                    f"\t\treturn fmt.Errorf({missing_err_msg})"
                 )
                 lines.append("\t}")
                 lines.append(f"\tres.{field_name} = {res_var}{getter}")
@@ -919,7 +921,12 @@ class GoVisitor(BaseWalker):
             return []
         field_name = to_pascal_case(node.name)
         go_type = self._resolve_type(node.ret_type_info)
-        tag = node.alias if node.alias else _json_tag(node.name)
+        if node.alias:
+            is_direct, unescaped_key = classify_gjson_path(node.alias)
+            raw_tag = unescaped_key if is_direct else node.alias
+        else:
+            raw_tag = _json_tag(node.name)
+        tag = raw_tag.replace("\\", "\\\\").replace('"', '\\"')
         omitempty = (
             ",omitempty"
             if node.ret_type_info and node.ret_type_info.omitempty

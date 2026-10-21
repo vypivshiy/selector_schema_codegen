@@ -1027,3 +1027,118 @@ func TestInlineDictAnonAndArrayUnmarshal(t *testing.T) {
     assert test_run.returncode == 0, (
         f"go test failed:\n{test_run.stderr}\n{test_run.stdout}"
     )
+
+
+def test_go_gjson_path_subset_escaped_dots_hash_len_and_projection(go_module):
+    """Verify Go codegen and runtime execution for GJSON path subset:
+    escaped dots (from="os\\.version"), array length (from="items.#"),
+    and array element projection (from="tags.#.name") via gjson.
+    """
+    src = r"""
+json ReleaseManifest {
+    os_version str from="os\\.version"
+    item_count int from="items.#"
+    tag_names (array)str from="tags.#.name"
+    first_tag str from="tags.0.name"
+}
+
+(raw)struct ManifestEnvelope {
+    manifest {
+        jsonify ReleaseManifest path="envelope\\.data"
+    }
+}
+"""
+    module_ast, diagnostics = parse_module(src)
+    errors = [d for d in diagnostics if d.severity == Severity.ERROR]
+    assert not errors
+
+    code = GO_CONVERTER.convert(module_ast, package="sscgen_test")
+    assert 'gjson.GetBytes(raw, "os\\\\.version")' in code
+    assert 'gjson.GetBytes(raw, "items.#")' in code
+    assert 'gjson.GetBytes(raw, "tags.#.name")' in code
+    assert 'gjson.GetBytes(raw, "tags.0.name")' in code
+
+    out = go_module / "gjson_subset.go"
+    out.write_bytes(code.encode("utf-8"))
+
+    runtime = go_module / "sscgen_runtime.go"
+    runtime.write_bytes(
+        GO_CONVERTER.emit_runtime("sscgen_test").encode("utf-8")
+    )
+
+    fmt = subprocess.run(
+        ["gofmt", "-l", str(out)], capture_output=True, text=True
+    )
+    assert fmt.returncode == 0
+    assert not fmt.stdout.strip()
+
+    vet = subprocess.run(
+        ["go", "vet", "./..."], cwd=go_module, capture_output=True, text=True
+    )
+    assert vet.returncode == 0, f"go vet failed:\n{vet.stderr}"
+
+    build = subprocess.run(
+        ["go", "build", "./..."], cwd=go_module, capture_output=True, text=True
+    )
+    assert build.returncode == 0, f"go build failed:\n{build.stderr}"
+
+    test_go = go_module / "gjson_subset_test.go"
+    test_go.write_text(
+        """package sscgen_test
+
+import (
+	"encoding/json"
+	"reflect"
+	"testing"
+)
+
+func TestGjsonPathSubsetUnmarshal(t *testing.T) {
+	raw := []byte(`{
+		"os.version": "24.04",
+		"items": ["a", "b", "c"],
+		"tags": [
+			{"name": "action", "id": 1},
+			{"other": "skipped"},
+			{"name": "sci-fi", "id": 2}
+		]
+	}`)
+	var manifest ReleaseManifestJson
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if manifest.OsVersion != "24.04" {
+		t.Errorf("expected OsVersion '24.04', got %q", manifest.OsVersion)
+	}
+	if manifest.ItemCount != 3 {
+		t.Errorf("expected ItemCount 3, got %d", manifest.ItemCount)
+	}
+	expectedTags := []string{"action", "sci-fi"}
+	if !reflect.DeepEqual(manifest.TagNames, expectedTags) {
+		t.Errorf("expected TagNames %v, got %v", expectedTags, manifest.TagNames)
+	}
+	if manifest.FirstTag != "action" {
+		t.Errorf("expected FirstTag 'action', got %q", manifest.FirstTag)
+	}
+
+	envelopeRaw := `{"envelope.data": {"os.version": "14.2.1", "items": [10, 20], "tags": [{"name": "drama"}]}}`
+	envRes := NewManifestEnvelope(envelopeRaw).Parse()
+	if envRes.Manifest.OsVersion != "14.2.1" || envRes.Manifest.ItemCount != 2 {
+		t.Errorf("unexpected envelope parse result: %+v", envRes.Manifest)
+	}
+	if !reflect.DeepEqual(envRes.Manifest.TagNames, []string{"drama"}) {
+		t.Errorf("unexpected envelope tag names: %v", envRes.Manifest.TagNames)
+	}
+}
+""",
+        encoding="utf-8",
+    )
+    test_run = subprocess.run(
+        ["go", "test", "-v", "./..."],
+        cwd=go_module,
+        capture_output=True,
+        text=True,
+    )
+    assert test_run.returncode == 0, (
+        f"go test failed:\n{test_run.stderr}\n{test_run.stdout}"
+    )
+

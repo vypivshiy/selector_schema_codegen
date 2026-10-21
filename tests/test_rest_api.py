@@ -1864,7 +1864,9 @@ struct ApiClient type=rest {
         module = _parse(self._rest_path_src())
         code = JS_CONVERTER.convert(module, http_client="fetch")
         # JS uses double-quoted JSON-style keys and projects into User schema
-        assert '(_b) => sscJsonProject(_b["data"]["user"],' in code
+        assert '(_b) => _projectUser(_b["data"]["user"])' in code
+        assert "JSON_DESCRIPTOR_" not in code
+        assert "sscJsonProject" not in code
 
     def test_js_void_without_path_emits_null(self):
         from ssc_codegen.targets.javascript import JS_CONVERTER
