@@ -1513,15 +1513,15 @@ json ApiErr {
 
         # 7. JavaScript target alignment
         js_code = JS_CONVERTER.convert_all(mod)[""]
-        assert "const JSON_DESCRIPTOR_LEAF_IMAGE = " in js_code
-        assert "const JSON_DESCRIPTOR_CATALOG_RESPONSE = " in js_code
-        assert "JSON_DESCRIPTOR_CATALOG_RESPONSE" in js_code
-        assert "JSON_DESCRIPTOR_API_ERR" in js_code
-        assert (
-            "(_b) => sscJsonProject(_b, JSON_DESCRIPTOR_CATALOG_RESPONSE)"
-            in js_code
-        )
-        assert "value: sscJsonProject(_b, JSON_DESCRIPTOR_API_ERR)" in js_code
+        assert "function _projectLeafImage(data)" in js_code
+        assert "function _projectCatalogResponse(data)" in js_code
+        assert "_projectCatalogResponse" in js_code
+        assert "_projectApiErr" in js_code
+        assert "(_b) => _projectCatalogResponse(_b)" in js_code
+        assert "value: _projectApiErr(_b)" in js_code
+        assert "JSON_DESCRIPTOR_" not in js_code
+        assert "sscJsonProject" not in js_code
+        assert "sscRemapJsonKeys" not in js_code
 
         # 8. Execution test with respx (success + 404 error)
         ns: dict = {}
@@ -1613,18 +1613,24 @@ json ApiErr {
         assert "JSON_DESCRIPTOR_" not in py_code
         assert "_JSON_DESCRIPTORS" not in py_code
 
-        js_desc_constants = [
-            line.split(" = ")[0]
+        js_projectors = [
+            line.split("(")[0]
             for line in js_code.splitlines()
-            if line.startswith("const JSON_DESCRIPTOR_")
+            if line.startswith("function _project")
         ]
-        assert len(js_desc_constants) >= 25
+        assert len(js_projectors) >= 25
+        assert "JSON_DESCRIPTOR_" not in js_code
         assert "JsonDescriptors = " not in js_code
+        assert "sscJsonProject" not in js_code
+        assert "sscRemapJsonKeys" not in js_code
 
         # Validate reference usage in REST methods and matchers
         assert "_project_catalog_releases_response" in py_code
         assert "_project_api_error" in py_code
         assert "_project_release_detail" in py_code
+        assert "_projectCatalogReleasesResponse" in js_code
+        assert "_projectApiError" in js_code
+        assert "_projectReleaseDetail" in js_code
 
         # Validate code size reduction: Python unformatted < 50,000 bytes (was 98,819 bytes)
         assert len(py_code.encode("utf-8")) < 50_000

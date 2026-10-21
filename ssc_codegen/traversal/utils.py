@@ -15,7 +15,6 @@ from ssc_codegen.ast import (
     Filter,
     FunctionDef,
     JsonDef,
-    JsonDefField,
     Match,
     MethodBase,
     Module,
@@ -27,15 +26,7 @@ from ssc_codegen.ast import (
     StructBase,
     StructRest,
     StructType,
-    VariableType,
 )
-
-
-@dataclass(frozen=True)
-class DescriptorRef:
-    """Symbolic reference to another JSON schema descriptor constant."""
-
-    schema_name: str
 
 
 def module_has_rest(module: Module) -> bool:
@@ -389,157 +380,3 @@ def classify_gjson_path(path: str) -> tuple[bool, str]:
         return True, segments[0].key
     return False, path
 
-
-def jsonify_path_to_segments(query: str) -> list[str]:
-    """Split a dot-notation query path into segments, quoting string keys.
-
-    For example, ``"foo.0.bar"`` becomes ``["'foo'", "0", "'bar'"]``.
-
-    Args:
-        query: Dot-separated JSON path string.
-
-    Returns:
-        List of formatted path segment expressions.
-    """
-    if not query:
-        return []
-    parts: list[str] = []
-    for part in query.split("."):
-        if part.isdigit():
-            parts.append(part)
-        else:
-            parts.append(repr(part))
-    return parts
-
-
-def json_def_needs_remap(
-    definition: JsonDef,
-    definitions: dict[str, JsonDef],
-    stack: tuple[str, ...] = (),
-) -> bool:
-    """Check whether a JSON definition or any nested definition uses field aliases.
-
-    Args:
-        definition: The `JsonDef` node to check.
-        definitions: Mapping of all available `JsonDef` schemas in the module.
-        stack: Cycle-prevention stack of visited schema names.
-
-    Returns:
-        `True` if field alias remapping is required, `False` otherwise.
-    """
-    if definition.name in stack:
-        return False
-    if definition.has_alias_key:
-        return True
-    next_stack = (*stack, definition.name)
-    for field in definition.body:
-        if not isinstance(field, JsonDefField):
-            continue
-        info = field.ret_type_info
-        if info.base == VariableType.JSON and info.ref:
-            nested = definitions.get(info.ref)
-            if nested and json_def_needs_remap(nested, definitions, next_stack):
-                return True
-    return False
-
-
-def json_def_descriptors(
-    definition: JsonDef,
-    definitions: dict[str, JsonDef] | None = None,
-    stack: tuple[str, ...] = (),
-) -> dict[str, tuple[str, bool, bool, object]]:
-    """Build dictionary of field descriptors for strict JSON allowlist projection.
-
-    Args:
-        definition: The root `JsonDef` node.
-        definitions: Optional mapping of all available `JsonDef` schemas in the module.
-        stack: Cycle-prevention stack of visited schema names.
-
-    Returns:
-        Dictionary mapping canonical field names to a tuple of
-        ``(wire_path, is_optional, is_omitempty, nested_descriptors)``.
-    """
-    if definition.name in stack:
-        return {}
-    if definition.is_dict:
-        val_desc: object = None
-        val_info = definition.value_type_info
-        if val_info and val_info.base == VariableType.JSON and val_info.ref:
-            ref = DescriptorRef(val_info.ref)
-            val_desc = [ref] if val_info.is_array else ref
-        return {"__dict__": True, "__value__": val_desc}  # type: ignore[return-value, dict-item]
-    descriptors: dict[str, tuple[str, bool, bool, object]] = {}
-    for field in definition.body:
-        if not isinstance(field, JsonDefField) or (
-            field.ret_type_info and field.ret_type_info.skip
-        ):
-            continue
-        wire_path = field.alias if field.alias else field.name
-        info = field.ret_type_info
-        is_optional = info.is_optional if info else False
-        is_omitempty = info.omitempty if info else False
-        nested_desc: object = None
-        if field.is_dict or (info and info.is_dict):
-            f_val_desc: object = None
-            f_val_info = field.value_type_info or (
-                info.value_type_info if info else None
-            )
-            if (
-                f_val_info
-                and f_val_info.base == VariableType.JSON
-                and f_val_info.ref
-            ):
-                ref = DescriptorRef(f_val_info.ref)
-                f_val_desc = [ref] if f_val_info.is_array else ref
-            nested_desc = {"__dict__": True, "__value__": f_val_desc}
-        elif info and info.base == VariableType.JSON and info.ref:
-            ref = DescriptorRef(info.ref)
-            nested_desc = [ref] if info.is_array else ref
-        descriptors[field.name] = (
-            wire_path,
-            is_optional,
-            is_omitempty,
-            nested_desc,
-        )
-    return descriptors
-
-
-def json_def_mapping(
-    definition: JsonDef,
-    definitions: dict[str, JsonDef],
-    stack: tuple[str, ...] = (),
-) -> dict[str, object]:
-    """Build complete wire-to-canonical key mapping tree for JSON dictionaries.
-
-    Args:
-        definition: The root `JsonDef` node.
-        definitions: Mapping of all available `JsonDef` schemas in the module.
-        stack: Cycle-prevention stack of visited schema names.
-
-    Returns:
-        Dictionary mapping wire keys to canonical names or nested mapping tuples.
-    """
-    if definition.name in stack:
-        return {}
-    next_stack = (*stack, definition.name)
-    mapping: dict[str, object] = {}
-    for field in definition.body:
-        if not isinstance(field, JsonDefField) or field.ret_type_info.skip:
-            continue
-        source = field.alias or field.name
-        output = field.name
-        info = field.ret_type_info
-        nested = (
-            definitions.get(info.ref)
-            if info.base == VariableType.JSON and info.ref
-            else None
-        )
-        if nested and json_def_needs_remap(nested, definitions, next_stack):
-            nested_mapping = json_def_mapping(nested, definitions, next_stack)
-            mapping[source] = (
-                output,
-                [nested_mapping] if info.is_array else nested_mapping,
-            )
-        else:
-            mapping[source] = output
-    return mapping
