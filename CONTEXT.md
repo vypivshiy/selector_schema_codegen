@@ -178,6 +178,10 @@ _Avoid_: optional dependency shim, dynamic client loader
 A code generation approach where pass 1 traverses the AST to accumulate required imports and standard helper definitions in `ModuleBuilder`, and pass 2 emits the complete target source file.
 _Avoid_: single-pass emission, forward-declaring generator
 
+**Runtime HTTP delegation**:
+The codegen pattern where generated `MethodRest` and `MethodFetch` methods emit only a typed signature and a single delegation call, while request option filtering, caller option merging, `response_path` extraction, and response decoding execute inside the target runtime helper.
+_Avoid_: inlined request boilerplate, template-rendered endpoint body
+
 ## Documentation Standards
 
 **API Reference**:
