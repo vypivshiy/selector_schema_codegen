@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from ssc_codegen.targets.python.http_libs.base import HttpLibStrategy
+import inspect
+
+from ssc_codegen.targets.python.http_libs.base import (
+    HttpLibStrategy,
+    _REST_SHARED_RUNTIME,
+)
 
 
 class AioHttpStrategy(HttpLibStrategy):
@@ -23,6 +28,44 @@ class AioHttpStrategy(HttpLibStrategy):
 
     # aiohttp is async-only: no synchronous ``fetch`` is generated.
     supports_sync_fetch = False
+
+    def fetch_runtime_lines(self, http_io: str = "both") -> list[str]:
+        """Generate async fetch runtime source lines (`ssc_fetch_async`) for aiohttp.
+
+        Args:
+            http_io (str): HTTP method generation mode (`"both"`, `"sync"`, `"async"`).
+
+        Returns:
+            list[str]: Python source lines implementing `ssc_fetch_async`.
+        """
+        lines: list[str] = []
+        if http_io in ("both", "async"):
+            lines.extend(
+                inspect.cleandoc(
+                    """
+                    async def ssc_fetch_async(
+                        client: aiohttp.ClientSession,
+                        method: str,
+                        url: str,
+                        response_path: str = '',
+                        response_join: str = '',
+                        **kw: Any,
+                    ) -> str:
+                        async with client.request(method, url, **kw) as _resp:
+                            _resp.raise_for_status()
+                            if response_path:
+                                _data = await _resp.json(content_type=None)
+                                for _p in response_path.split('.'):
+                                    _data = _data[_p]
+                                _body = response_join.join(_data) if response_join else _data
+                            else:
+                                _body = await _resp.text()
+                            return _body
+                    """
+                ).splitlines()
+            )
+            lines.append("")
+        return lines
 
     def fetch_body_lines(
         self,
@@ -67,145 +110,84 @@ class AioHttpStrategy(HttpLibStrategy):
         """Generate REST runtime source lines with aiohttp transport exception handling.
 
         Args:
-            http_io: HTTP method generation mode (`"both"`, `"sync"`, `"async"`).
+            http_io (str): HTTP method generation mode (`"both"`, `"sync"`, `"async"`).
                 Controls which call helpers (`ssc_rest_call` and/or `ssc_rest_call_async`)
                 are included in the returned lines. Defaults to `"both"`.
 
         Returns:
-            List of Python code lines implementing REST runtime helpers with
+            list[str]: List of Python code lines implementing REST runtime helpers with
             aiohttp-specific exception catching.
         """
         exc = self.transport_exception
-        lines = [
-            "_T = TypeVar('_T')",
-            "_E = TypeVar('_E')",
-            "",
-            "@dataclass(frozen=True)",
-            "class Ok(Generic[_T]):",
-            "    status: int = 0",
-            "    headers: Dict[str, str] = field(default_factory=dict)",
-            "    value: _T = None  # type: ignore[assignment]",
-            "    is_ok: Literal[True] = True",
-            "",
-            "@dataclass(frozen=True)",
-            "class Err(Generic[_E]):",
-            "    status: int = 0",
-            "    headers: Dict[str, str] = field(default_factory=dict)",
-            "    value: _E = None  # type: ignore[assignment]",
-            "    is_ok: Literal[False] = False",
-            "",
-            "@dataclass(frozen=True)",
-            "class UnknownErr(Err[Any]):",
-            "    pass",
-            "",
-            "@dataclass(frozen=True)",
-            "class TransportErr(Err[None]):",
-            "    status: Literal[0] = 0",
-            "    cause: str = ''",
-            "    value: None = None",
-            "    headers: Dict[str, str] = field(default_factory=dict)",
-            "",
-            "@dataclass(frozen=True)",
-            "class ErrMatcher:",
-            "    status: int",
-            "    check: Optional[Callable[[dict], bool]] = None",
-            "    factory: Optional[Callable[..., Err]] = None",
-            "",
-            "    def match(",
-            "        self,",
-            "        status: int,",
-            "        headers: Dict[str, str],",
-            "        body: Any,",
-            "    ) -> Optional[Err]:",
-            "        if status != self.status:",
-            "            return None",
-            "        if self.check is not None:",
-            "            if not isinstance(body, dict) or not self.check(body):",
-            "                return None",
-            "        return self.factory(headers=headers, value=body)",
-            "",
-            "",
-            "def ssc_dispatch_err(",
-            "    matchers: List[ErrMatcher],",
-            "    status: int,",
-            "    headers: Dict[str, str],",
-            "    body: Any,",
-            ") -> Optional[Err]:",
-            "    for matcher in matchers:",
-            "        err = matcher.match(status, headers, body)",
-            "        if err is not None:",
-            "            return err",
-            "    if 200 <= status < 300:",
-            "        return None",
-            "    return UnknownErr(status=status, headers=headers, value=body)",
-            "",
-            "",
-        ]
+        lines = [*_REST_SHARED_RUNTIME.splitlines(), "", ""]
         if http_io in ("both", "sync"):
             lines.extend(
-                [
-                    "def ssc_rest_call(",
-                    "    client: aiohttp.ClientSession,",
-                    "    matchers: List[ErrMatcher],",
-                    "    method: str,",
-                    "    url: str,",
-                    "    value_fn: Optional[Callable[[Any], _T]] = None,",
-                    "    **kw: Any,",
-                    ") -> Union[Ok[_T], Err]:",
-                    "    async def go() -> Union[Ok[_T], Err]:",
-                    "        try:",
-                    "            async with client.request(method, url, **kw) as resp:",
-                    "                status = resp.status",
-                    "                headers = {k.lower(): v for k, v in resp.headers.items()}",
-                    "                try:",
-                    "                    body = await resp.json(content_type=None)",
-                    "                except Exception:",
-                    "                    body = None",
-                    f"        except {exc} as exc:",
-                    "            return TransportErr(cause=repr(exc))",
-                    "        err = ssc_dispatch_err(matchers, status, headers, body)",
-                    "        if err is not None:",
-                    "            return err",
-                    "        value = body if value_fn is None else value_fn(body)",
-                    "        return Ok(status=status, headers=headers, value=value)",
-                    "    try:",
-                    "        asyncio.get_running_loop()",
-                    "    except RuntimeError:",
-                    "        return asyncio.run(go())",
-                    "    import concurrent.futures",
-                    "    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:",
-                    "        return pool.submit(asyncio.run, go()).result()",
-                    "",
-                    "",
-                ]
+                inspect.cleandoc(
+                    f"""
+                    def ssc_rest_call(
+                        client: aiohttp.ClientSession,
+                        matchers: List[ErrMatcher],
+                        method: str,
+                        url: str,
+                        value_fn: Optional[Callable[[Any], _T]] = None,
+                        **kw: Any,
+                    ) -> Union[Ok[_T], Err]:
+                        async def go() -> Union[Ok[_T], Err]:
+                            try:
+                                async with client.request(method, url, **kw) as resp:
+                                    status = resp.status
+                                    headers = {{k.lower(): v for k, v in resp.headers.items()}}
+                                    try:
+                                        body = await resp.json(content_type=None)
+                                    except Exception:
+                                        body = None
+                            except {exc} as exc:
+                                return TransportErr(cause=repr(exc))
+                            err = ssc_dispatch_err(matchers, status, headers, body)
+                            if err is not None:
+                                return err
+                            value = body if value_fn is None else value_fn(body)
+                            return Ok(status=status, headers=headers, value=value)
+                        try:
+                            asyncio.get_running_loop()
+                        except RuntimeError:
+                            return asyncio.run(go())
+                        import concurrent.futures
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                            return pool.submit(asyncio.run, go()).result()
+                    """
+                ).splitlines()
             )
+            lines.extend(["", ""])
         if http_io in ("both", "async"):
             lines.extend(
-                [
-                    "async def ssc_rest_call_async(",
-                    "    client: aiohttp.ClientSession,",
-                    "    matchers: List[ErrMatcher],",
-                    "    method: str,",
-                    "    url: str,",
-                    "    value_fn: Optional[Callable[[Any], _T]] = None,",
-                    "    **kw: Any,",
-                    ") -> Union[Ok[_T], Err]:",
-                    "    try:",
-                    "        async with client.request(method, url, **kw) as resp:",
-                    "            status = resp.status",
-                    "            headers = {k.lower(): v for k, v in resp.headers.items()}",
-                    "            try:",
-                    "                body = await resp.json(content_type=None)",
-                    "            except Exception:",
-                    "                body = None",
-                    f"    except {exc} as exc:",
-                    "        return TransportErr(cause=repr(exc))",
-                    "    err = ssc_dispatch_err(matchers, status, headers, body)",
-                    "    if err is not None:",
-                    "        return err",
-                    "    value = body if value_fn is None else value_fn(body)",
-                    "    return Ok(status=status, headers=headers, value=value)",
-                    "",
-                ]
+                inspect.cleandoc(
+                    f"""
+                    async def ssc_rest_call_async(
+                        client: aiohttp.ClientSession,
+                        matchers: List[ErrMatcher],
+                        method: str,
+                        url: str,
+                        value_fn: Optional[Callable[[Any], _T]] = None,
+                        **kw: Any,
+                    ) -> Union[Ok[_T], Err]:
+                        try:
+                            async with client.request(method, url, **kw) as resp:
+                                status = resp.status
+                                headers = {{k.lower(): v for k, v in resp.headers.items()}}
+                                try:
+                                    body = await resp.json(content_type=None)
+                                except Exception:
+                                    body = None
+                        except {exc} as exc:
+                            return TransportErr(cause=repr(exc))
+                        err = ssc_dispatch_err(matchers, status, headers, body)
+                        if err is not None:
+                            return err
+                        value = body if value_fn is None else value_fn(body)
+                        return Ok(status=status, headers=headers, value=value)
+                    """
+                ).splitlines()
             )
+            lines.append("")
         return lines

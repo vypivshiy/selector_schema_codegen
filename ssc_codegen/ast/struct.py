@@ -453,6 +453,7 @@ class MethodBase(Node):
     """
 
     name: str = ""  # method name suffix; "" = default fetch()
+    doc: str = ""  # per-method docstring
 
     #: Dot-notation JSON path extracted from the 2xx response body before it
     #: becomes ``Ok.value`` (REST) or the parser input (fetch). Example:
