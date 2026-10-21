@@ -148,6 +148,7 @@ from ssc_codegen.traversal.utils import (
     find_enclosing_module,
     find_predicate_container,
     module_has_rest,
+    module_uses_http,
     resolve_json_def,
 )
 from ssc_codegen.traversal.walker import BaseWalker
@@ -832,6 +833,10 @@ class JsVisitor(BaseWalker):
             ]
         )
         mod = node.parent
+        if isinstance(mod, Module) and module_uses_http(mod):
+            lines.extend(rest.HTTP_SHARED)
+            lines.extend(FetchStrategy().fetch_call_lines())
+            lines.extend(AxiosStrategy().fetch_call_lines())
         if isinstance(mod, Module) and module_has_rest(mod):
             lines.extend(rest.REST_SHARED)
             lines.extend(FetchStrategy().rest_call_lines())
