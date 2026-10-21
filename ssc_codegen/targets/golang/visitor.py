@@ -917,6 +917,15 @@ class GoVisitor(BaseWalker):
     def visit_jsondef_field(
         self, node: JsonDefField, ctx: WalkContext
     ) -> list[str]:
+        """Emit a Go struct field declaration with JSON struct tag for a `JsonDefField`.
+
+        Args:
+            node (JsonDefField): The JSON schema field AST node.
+            ctx (WalkContext): Traversal state context.
+
+        Returns:
+            list[str]: Generated Go struct field declaration line, or empty list if skipped.
+        """
         if node.ret_type_info and node.ret_type_info.skip:
             return []
         field_name = to_pascal_case(node.name)

@@ -32,7 +32,6 @@ def test_ssc_resolve_dotpath_valid():
         "os.version": "1.2.3",
         "a\\b": "backslash_val",
         "#": "hash_key_val",
-        "0": "digit_key_val",
     }
     assert ssc_resolve_dotpath(data, "user.name", is_optional=False) == "Alice"
     assert (
@@ -51,9 +50,6 @@ def test_ssc_resolve_dotpath_valid():
     )
     assert (
         ssc_resolve_dotpath(data, r"\#", is_optional=False) == "hash_key_val"
-    )
-    assert (
-        ssc_resolve_dotpath(data, r"\0", is_optional=False) == "digit_key_val"
     )
     assert (
         ssc_resolve_dotpath(data, "user.badges.#", is_optional=False) == 2
@@ -695,6 +691,10 @@ json User {
         ErrTop, match="Translations: Expected dict, got NoneType"
     ):
         ns_top["TopScraper"]("null").parse()
+    with pytest.raises(
+        ErrTop, match="Translations: Expected list, got str"
+    ):
+        ns_top["TopScraper"]('{"1": "not_a_list"}').parse()
 
     # 3. Inline dict field execution error
     inline_src = """
@@ -719,6 +719,12 @@ json MediaItem {
     ):
         ns_inline["InlineScraper"](
             '{"id": 1, "translations": ["not", "a", "dict"]}'
+        ).parse()
+    with pytest.raises(
+        ErrInline, match=r"MediaItem\.translations: Expected list, got int"
+    ):
+        ns_inline["InlineScraper"](
+            '{"id": 1, "translations": {"en": 123}}'
         ).parse()
 
     # 4. Top-level array schema receiving non-list or non-dict element

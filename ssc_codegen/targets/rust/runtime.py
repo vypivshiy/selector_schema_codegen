@@ -238,15 +238,18 @@ impl<'a> std::ops::Deref for JsonRef<'a> {
 fn next_gjson_segment(path: &str) -> (String, bool, Option<&str>) {
     let mut unescaped = String::with_capacity(path.len());
     let mut has_escape = false;
-    let mut chars = path.char_indices();
+    let mut chars = path.char_indices().peekable();
     while let Some((idx, ch)) = chars.next() {
         if ch == '\\' {
-            has_escape = true;
-            if let Some((_, next_ch)) = chars.next() {
-                unescaped.push(next_ch);
-            } else {
-                unescaped.push('\\');
+            if let Some(&(_, next_ch)) = chars.peek() {
+                if matches!(next_ch, '.' | '\\' | '#') {
+                    has_escape = true;
+                    chars.next();
+                    unescaped.push(next_ch);
+                    continue;
+                }
             }
+            unescaped.push('\\');
         } else if ch == '.' {
             return (unescaped, has_escape, Some(&path[idx + 1..]));
         } else {
@@ -257,44 +260,7 @@ fn next_gjson_segment(path: &str) -> (String, bool, Option<&str>) {
 }
 
 pub fn json_opt<'a>(value: &'a Value, path: &str) -> Option<JsonRef<'a>> {
-    if path.is_empty() {
-        return Some(JsonRef(std::borrow::Cow::Borrowed(value)));
-    }
-    let mut current = value;
-    let mut rem = Some(path);
-    while let Some(r) = rem {
-        let (segment, has_escape, next_rem) = next_gjson_segment(r);
-        rem = next_rem;
-        if !has_escape && segment == "#" {
-            let arr = current.as_array()?;
-            return match rem {
-                None => Some(JsonRef(std::borrow::Cow::Owned(Value::Number(
-                    (arr.len() as u64).into(),
-                )))),
-                Some(subpath) => {
-                    let mut out = Vec::new();
-                    for item in arr {
-                        if let Some(v) = json_opt(item, subpath) {
-                            if !v.is_null() {
-                                out.push(v.0.into_owned());
-                            }
-                        }
-                    }
-                    Some(JsonRef(std::borrow::Cow::Owned(Value::Array(out))))
-                }
-            };
-        }
-        current = if !has_escape {
-            if let Ok(index) = segment.parse::<usize>() {
-                current.get(index).or_else(|| current.get(segment.as_str()))
-            } else {
-                current.get(segment.as_str())
-            }
-        } else {
-            current.get(segment.as_str())
-        }?;
-    }
-    Some(JsonRef(std::borrow::Cow::Borrowed(current)))
+    json_path(value, path, "").ok()
 }
 pub fn json_path<'a>(value: &'a Value, path: &str, context: &str) -> Result<JsonRef<'a>, SscError> {
     if path.is_empty() {
@@ -328,7 +294,7 @@ pub fn json_path<'a>(value: &'a Value, path: &str, context: &str) -> Result<Json
         }
         let next_val = if !has_escape {
             if let Ok(index) = segment.parse::<usize>() {
-                current.get(index).or_else(|| current.get(segment.as_str()))
+                current.as_array().and_then(|arr| arr.get(index))
             } else {
                 current.get(segment.as_str())
             }

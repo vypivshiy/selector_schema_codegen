@@ -6,9 +6,137 @@ from collections.abc import Callable
 from typing import Any
 
 import ssc_codegen.ast as a
-from ssc_codegen.targets.python.http_libs.base import HttpLibStrategy
-from ssc_codegen.targets.python.http_libs.httpx import HttpxStrategy
-from ssc_codegen.traversal.utils import module_has_rest
+
+PY_JSON_PROJECT_HELPER = """
+class SscJsonError(Exception):
+    pass
+
+class SscJsonPathError(SscJsonError):
+    pass
+
+class SscJsonFieldMissingError(SscJsonError):
+    pass
+
+class SscJsonSchemaError(SscJsonError):
+    pass
+
+def ssc_expect_dict(data: Any, target: str = '') -> Dict[str, Any]:
+    if not isinstance(data, dict):
+        prefix = f'{target}: ' if target else ''
+        raise SscJsonSchemaError(f"{prefix}Expected dict, got {type(data).__name__}")
+    return data
+
+def ssc_expect_list(data: Any, target: str = '') -> List[Any]:
+    if not isinstance(data, list):
+        prefix = f'{target}: ' if target else ''
+        raise SscJsonSchemaError(f"{prefix}Expected list, got {type(data).__name__}")
+    return data
+
+def ssc_resolve_dotpath(data: Any, path: str, is_optional: bool = False, target: str = '') -> Any:
+    prefix = f'{target}: ' if target else ''
+    raw_segs: List[str] = []
+    buf: List[str] = []
+    i = 0
+    n = len(path)
+    while i < n:
+        ch = path[i]
+        if ch == '\\\\' and i + 1 < n and path[i + 1] in ('.', '\\\\', '#'):
+            buf.append(ch)
+            buf.append(path[i + 1])
+            i += 2
+        elif ch == '.':
+            raw_segs.append(''.join(buf))
+            buf = []
+            i += 1
+        else:
+            buf.append(ch)
+            i += 1
+    raw_segs.append(''.join(buf))
+    current = data
+    for idx_seg, raw_seg in enumerate(raw_segs):
+        if raw_seg == '#':
+            if current is None:
+                if is_optional:
+                    return None
+                raise SscJsonPathError(f"{prefix}Cannot traverse segment '#' on null object in path '{path}'")
+            if not isinstance(current, list):
+                if is_optional:
+                    return None
+                raise SscJsonPathError(f"{prefix}Expected list for '#' in path '{path}', got {type(current).__name__}")
+            if idx_seg == len(raw_segs) - 1:
+                return len(current)
+            subpath = '.'.join(raw_segs[idx_seg + 1:])
+            out: List[Any] = []
+            for item in current:
+                v = ssc_resolve_dotpath(item, subpath, is_optional=True, target=target)
+                if v is not None:
+                    out.append(v)
+            return out
+        has_escape = '\\\\' in raw_seg
+        if has_escape:
+            seg_chars: List[str] = []
+            j = 0
+            m = len(raw_seg)
+            while j < m:
+                if raw_seg[j] == '\\\\' and j + 1 < m and raw_seg[j + 1] in ('.', '\\\\', '#'):
+                    seg_chars.append(raw_seg[j + 1])
+                    j += 2
+                else:
+                    seg_chars.append(raw_seg[j])
+                    j += 1
+            seg = ''.join(seg_chars)
+        else:
+            seg = raw_seg
+        if current is None:
+            if is_optional:
+                return None
+            raise SscJsonPathError(f"{prefix}Cannot traverse segment '{seg}' on null object in path '{path}'")
+        if not has_escape and seg.isdigit():
+            idx = int(seg)
+            if not isinstance(current, list):
+                if is_optional:
+                    return None
+                raise SscJsonPathError(f"{prefix}Expected list for index '{idx}' in path '{path}', got {type(current).__name__}")
+            if not (0 <= idx < len(current)):
+                if is_optional:
+                    return None
+                raise SscJsonPathError(f"{prefix}Index {idx} out of bounds (len={len(current)}) in path '{path}'")
+            current = current[idx]
+        elif isinstance(current, dict):
+            if seg not in current:
+                if is_optional:
+                    return None
+                raise SscJsonPathError(f"{prefix}Missing key '{seg}' in path '{path}'")
+            current = current[seg]
+        else:
+            if is_optional:
+                return None
+            raise SscJsonPathError(f"{prefix}Cannot access key '{seg}' on non-dict {type(current).__name__} in path '{path}'")
+    return current
+
+def ssc_json_req(data: Dict[str, Any], key: str, target: str = '') -> Any:
+    fname = target.rsplit('.', 1)[-1] if '.' in target else key
+    qual = target if (not target or '.' in target) else f'{target}.{fname}'
+    prefix = f'{qual}: ' if qual else ''
+    if key not in data:
+        raise SscJsonFieldMissingError(f"{prefix}Required JSON field '{key}' (mapped to '{fname}') is missing")
+    val = data[key]
+    if val is None:
+        raise SscJsonFieldMissingError(f"{prefix}Field '{key}' is null, but '{fname}' is not nullable")
+    return val
+
+def ssc_json_req_path(data: Any, path: str, target: str = '') -> Any:
+    val = ssc_resolve_dotpath(data, path, is_optional=False, target=target)
+    if val is None:
+        prefix = f'{target}: ' if target else ''
+        fname = target.rsplit('.', 1)[-1] if '.' in target else path
+        raise SscJsonFieldMissingError(f"{prefix}Field '{path}' is null, but '{fname}' is not nullable")
+    return val
+"""
+
+from ssc_codegen.targets.python.http_libs.base import HttpLibStrategy  # noqa: E402
+from ssc_codegen.targets.python.http_libs.httpx import HttpxStrategy  # noqa: E402
+from ssc_codegen.traversal.utils import module_has_rest  # noqa: E402
 
 _BASE_UTILITY_LINES: list[str] = [
     "_RE_HEX_ENTITY = re.compile(r'&#x([0-9a-fA-F]+);')",
@@ -69,130 +197,7 @@ _BASE_UTILITY_LINES: list[str] = [
     "",
     "UNMATCHED_TABLE_ROW = UnmatchedTableRow()",
     "",
-    "class SscJsonError(Exception):",
-    "    pass",
-    "",
-    "class SscJsonPathError(SscJsonError):",
-    "    pass",
-    "",
-    "class SscJsonFieldMissingError(SscJsonError):",
-    "    pass",
-    "",
-    "class SscJsonSchemaError(SscJsonError):",
-    "    pass",
-    "",
-    "def ssc_expect_dict(data: Any, target: str = '') -> Dict[str, Any]:",
-    "    if not isinstance(data, dict):",
-    "        prefix = f'{target}: ' if target else ''",
-    '        raise SscJsonSchemaError(f"{prefix}Expected dict, got {type(data).__name__}")',
-    "    return data",
-    "",
-    "def ssc_expect_list(data: Any, target: str = '') -> List[Any]:",
-    "    if not isinstance(data, list):",
-    "        prefix = f'{target}: ' if target else ''",
-    '        raise SscJsonSchemaError(f"{prefix}Expected list, got {type(data).__name__}")',
-    "    return data",
-    "",
-    "def ssc_resolve_dotpath(data: Any, path: str, is_optional: bool = False, target: str = '') -> Any:",
-    "    prefix = f'{target}: ' if target else ''",
-    "    raw_segs: List[str] = []",
-    "    buf: List[str] = []",
-    "    i = 0",
-    "    n = len(path)",
-    "    while i < n:",
-    "        ch = path[i]",
-    "        if ch == '\\\\' and i + 1 < n:",
-    "            buf.append(ch)",
-    "            buf.append(path[i + 1])",
-    "            i += 2",
-    "        elif ch == '.':",
-    "            raw_segs.append(''.join(buf))",
-    "            buf = []",
-    "            i += 1",
-    "        else:",
-    "            buf.append(ch)",
-    "            i += 1",
-    "    raw_segs.append(''.join(buf))",
-    "    current = data",
-    "    for idx_seg, raw_seg in enumerate(raw_segs):",
-    "        if raw_seg == '#':",
-    "            if current is None:",
-    "                if is_optional:",
-    "                    return None",
-    "                raise SscJsonPathError(f\"{prefix}Cannot traverse segment '#' on null object in path '{path}'\")",
-    "            if not isinstance(current, list):",
-    "                if is_optional:",
-    "                    return None",
-    "                raise SscJsonPathError(f\"{prefix}Expected list for '#' in path '{path}', got {type(current).__name__}\")",
-    "            if idx_seg == len(raw_segs) - 1:",
-    "                return len(current)",
-    "            subpath = '.'.join(raw_segs[idx_seg + 1:])",
-    "            out: List[Any] = []",
-    "            for item in current:",
-    "                v = ssc_resolve_dotpath(item, subpath, is_optional=True, target=target)",
-    "                if v is not None:",
-    "                    out.append(v)",
-    "            return out",
-    "        has_escape = '\\\\' in raw_seg",
-    "        if has_escape:",
-    "            seg_chars: List[str] = []",
-    "            j = 0",
-    "            m = len(raw_seg)",
-    "            while j < m:",
-    "                if raw_seg[j] == '\\\\' and j + 1 < m:",
-    "                    seg_chars.append(raw_seg[j + 1])",
-    "                    j += 2",
-    "                else:",
-    "                    seg_chars.append(raw_seg[j])",
-    "                    j += 1",
-    "            seg = ''.join(seg_chars)",
-    "        else:",
-    "            seg = raw_seg",
-    "        if current is None:",
-    "            if is_optional:",
-    "                return None",
-    "            raise SscJsonPathError(f\"{prefix}Cannot traverse segment '{seg}' on null object in path '{path}'\")",
-    "        if not has_escape and seg.isdigit():",
-    "            idx = int(seg)",
-    "            if not isinstance(current, list):",
-    "                if is_optional:",
-    "                    return None",
-    "                raise SscJsonPathError(f\"{prefix}Expected list for index '{idx}' in path '{path}', got {type(current).__name__}\")",
-    "            if not (0 <= idx < len(current)):",
-    "                if is_optional:",
-    "                    return None",
-    "                raise SscJsonPathError(f\"{prefix}Index {idx} out of bounds (len={len(current)}) in path '{path}'\")",
-    "            current = current[idx]",
-    "        elif isinstance(current, dict):",
-    "            if seg not in current:",
-    "                if is_optional:",
-    "                    return None",
-    "                raise SscJsonPathError(f\"{prefix}Missing key '{seg}' in path '{path}'\")",
-    "            current = current[seg]",
-    "        else:",
-    "            if is_optional:",
-    "                return None",
-    "            raise SscJsonPathError(f\"{prefix}Cannot access key '{seg}' on non-dict {type(current).__name__} in path '{path}'\")",
-    "    return current",
-    "",
-    "def ssc_json_req(data: Dict[str, Any], key: str, target: str = '', field: str = '') -> Any:",
-    "    fname = field or (target.rsplit('.', 1)[-1] if '.' in target else key)",
-    "    qual = target if (not target or '.' in target) else f'{target}.{fname}'",
-    "    prefix = f'{qual}: ' if qual else ''",
-    "    if key not in data:",
-    "        raise SscJsonFieldMissingError(f\"{prefix}Required JSON field '{key}' (mapped to '{fname}') is missing\")",
-    "    val = data[key]",
-    "    if val is None:",
-    "        raise SscJsonFieldMissingError(f\"{prefix}Field '{key}' is null, but '{fname}' is not nullable\")",
-    "    return val",
-    "",
-    "def ssc_json_req_path(data: Any, path: str, target: str = '', field: str = '') -> Any:",
-    "    val = ssc_resolve_dotpath(data, path, is_optional=False, target=target)",
-    "    if val is None:",
-    "        prefix = f'{target}: ' if target else ''",
-    "        fname = field or (target.rsplit('.', 1)[-1] if '.' in target else path)",
-    "        raise SscJsonFieldMissingError(f\"{prefix}Field '{path}' is null, but '{fname}' is not nullable\")",
-    "    return val",
+    *PY_JSON_PROJECT_HELPER.strip("\n").splitlines(),
 ]
 
 
@@ -278,7 +283,7 @@ def ssc_resolve_dotpath(
     n = len(path)
     while i < n:
         ch = path[i]
-        if ch == "\\" and i + 1 < n:
+        if ch == "\\" and i + 1 < n and path[i + 1] in (".", "\\", "#"):
             buf.append(ch)
             buf.append(path[i + 1])
             i += 2
@@ -322,7 +327,11 @@ def ssc_resolve_dotpath(
             j = 0
             m = len(raw_seg)
             while j < m:
-                if raw_seg[j] == "\\" and j + 1 < m:
+                if (
+                    raw_seg[j] == "\\"
+                    and j + 1 < m
+                    and raw_seg[j + 1] in (".", "\\", "#")
+                ):
                     seg_chars.append(raw_seg[j + 1])
                     j += 2
                 else:
@@ -369,16 +378,13 @@ def ssc_resolve_dotpath(
     return current
 
 
-def ssc_json_req(
-    data: dict[str, Any], key: str, target: str = "", field: str = ""
-) -> Any:
+def ssc_json_req(data: dict[str, Any], key: str, target: str = "") -> Any:
     """Extract a required non-nullable field by direct dictionary key.
 
     Args:
         data (dict[str, Any]): Source JSON object dictionary.
         key (str): Unescaped wire key to look up.
         target (str): Qualified `<SchemaName>.<field_name>` context.
-        field (str): Optional canonical field name override.
 
     Returns:
         Any: The non-null value associated with `key`.
@@ -386,7 +392,7 @@ def ssc_json_req(
     Raises:
         SscJsonFieldMissingError: If `key` is missing or its value is `None`.
     """
-    fname = field or (target.rsplit(".", 1)[-1] if "." in target else key)
+    fname = target.rsplit(".", 1)[-1] if "." in target else key
     qual = target if (not target or "." in target) else f"{target}.{fname}"
     prefix = f"{qual}: " if qual else ""
     if key not in data:
@@ -401,16 +407,13 @@ def ssc_json_req(
     return val
 
 
-def ssc_json_req_path(
-    data: Any, path: str, target: str = "", field: str = ""
-) -> Any:
+def ssc_json_req_path(data: Any, path: str, target: str = "") -> Any:
     """Extract a required non-nullable field via a GJSON path expression.
 
     Args:
         data (Any): Source JSON object dictionary.
         path (str): GJSON path expression to evaluate.
         target (str): Qualified `<SchemaName>.<field_name>` context.
-        field (str): Optional canonical field name override.
 
     Returns:
         Any: The non-null value resolved at `path`.
@@ -422,7 +425,7 @@ def ssc_json_req_path(
     val = ssc_resolve_dotpath(data, path, is_optional=False, target=target)
     if val is None:
         prefix = f"{target}: " if target else ""
-        fname = field or (target.rsplit(".", 1)[-1] if "." in target else path)
+        fname = target.rsplit(".", 1)[-1] if "." in target else path
         raise SscJsonFieldMissingError(
             f"{prefix}Field '{path}' is null, but '{fname}' is not nullable"
         )

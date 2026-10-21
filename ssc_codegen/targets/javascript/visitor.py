@@ -192,7 +192,7 @@ function _sscSplitGjsonPath(path) {
   let escaped = false;
   for (let i = 0; i < path.length; i++) {
     const ch = path[i];
-    if (ch === '\\\\' && i + 1 < path.length) {
+    if (ch === '\\\\' && i + 1 < path.length && (path[i + 1] === '.' || path[i + 1] === '\\\\' || path[i + 1] === '#')) {
       raw += ch + path[i + 1];
       key += path[i + 1];
       escaped = true;
@@ -264,15 +264,17 @@ function sscJsonField(data, key, target, isOptional = false, isOmitempty = false
   if (!Object.prototype.hasOwnProperty.call(data, key)) {
     if (isOmitempty) return undefined;
     if (isOptional) return null;
-    const canonical = target.slice(target.indexOf('.') + 1);
-    throw new SscJsonFieldMissingError(`${target}: Required JSON field '${key}' (mapped to '${canonical}') is missing`);
+    const canonical = target.includes('.') ? target.slice(target.indexOf('.') + 1) : key;
+    const qual = target.includes('.') ? target : `${target}.${canonical}`;
+    throw new SscJsonFieldMissingError(`${qual}: Required JSON field '${key}' (mapped to '${canonical}') is missing`);
   }
   const val = data[key];
   if (val == null) {
     if (isOmitempty) return undefined;
     if (isOptional) return null;
-    const canonical = target.slice(target.indexOf('.') + 1);
-    throw new SscJsonFieldMissingError(`${target}: Field '${key}' is null, but '${canonical}' is not nullable`);
+    const canonical = target.includes('.') ? target.slice(target.indexOf('.') + 1) : key;
+    const qual = target.includes('.') ? target : `${target}.${canonical}`;
+    throw new SscJsonFieldMissingError(`${qual}: Field '${key}' is null, but '${canonical}' is not nullable`);
   }
   return val;
 }
@@ -295,7 +297,17 @@ def _js_transform_value_expr(
     target: str,
     definitions: dict[str, JsonDef],
 ) -> str:
-    """Build JavaScript expression projecting a non-null JSON field value."""
+    """Build a JavaScript expression that validates and projects a non-null JSON field value.
+
+    Args:
+        val_expr (str): Source JavaScript expression yielding the raw non-null field value.
+        field (JsonDefField): The JSON schema field AST node.
+        target (str): Qualified `<SchemaName>.<field_name>` error context string.
+        definitions (dict[str, JsonDef]): Map of schema names to `JsonDef` nodes in the module.
+
+    Returns:
+        str: JavaScript expression returning the projected and container-validated value.
+    """
     info = field.ret_type_info
     target_lit = json.dumps(target)
     if field.is_dict or (info and info.is_dict):
@@ -315,6 +327,11 @@ def _js_transform_value_expr(
                 f"Object.fromEntries(Object.entries(sscExpectObject({val_expr}, {target_lit}))"
                 f".map(([k, v]) => [k, v != null ? {child_proj}(v) : null]))"
             )
+        if f_val_info and f_val_info.is_array:
+            return (
+                f"Object.fromEntries(Object.entries(sscExpectObject({val_expr}, {target_lit}))"
+                f".map(([k, v]) => [k, v != null ? sscExpectArray(v, {target_lit}) : null]))"
+            )
         return f"{{ ...sscExpectObject({val_expr}, {target_lit}) }}"
     if info and info.base == VT.JSON and info.ref:
         child_proj = js_json_projector_name(info.ref)
@@ -326,15 +343,26 @@ def _js_transform_value_expr(
                 f".map(x => {child_proj}(x))"
             )
         return f"{child_proj}({val_expr})"
+    if info and info.is_array:
+        return f"sscExpectArray({val_expr}, {target_lit})"
     return val_expr
 
 
 def _js_json_projector(
     node: JsonDef, definitions: dict[str, JsonDef]
 ) -> list[str]:
-    """Emit JavaScript projector function lines for a `JsonDef` schema."""
+    """Emit a dedicated JavaScript JSON projector function for a `JsonDef` schema.
+
+    Args:
+        node (JsonDef): The JSON schema definition AST node.
+        definitions (dict[str, JsonDef]): Map of schema names to `JsonDef` nodes in the module.
+
+    Returns:
+        list[str]: Generated JavaScript source lines defining `_project<Schema>`.
+    """
     fn_name = js_json_projector_name(node.name)
-    schema_lit = json.dumps(node.name)
+    schema_title = to_pascal_case(node.name)
+    schema_lit = json.dumps(schema_title)
 
     if node.is_dict:
         val_info = node.value_type_info
@@ -352,6 +380,11 @@ def _js_json_projector(
                     f"  return Object.fromEntries(Object.entries(sscExpectObject(data, {schema_lit}))"
                     f".map(([k, v]) => [k, v != null ? {child_proj}(v) : null]));"
                 )
+        elif val_info and val_info.is_array:
+            body_line = (
+                f"  return Object.fromEntries(Object.entries(sscExpectObject(data, {schema_lit}))"
+                f".map(([k, v]) => [k, v != null ? sscExpectArray(v, {schema_lit}) : null]));"
+            )
         else:
             body_line = (
                 f"  return {{ ...sscExpectObject(data, {schema_lit}) }};"
@@ -385,6 +418,7 @@ def _js_json_projector(
                     and f.ret_type_info.base == VT.JSON
                     and f.ret_type_info.ref
                 )
+                or (f.ret_type_info and f.ret_type_info.is_array)
             )
         )
         for f in active_fields
@@ -403,7 +437,7 @@ def _js_json_projector(
         info = field.ret_type_info
         is_optional = bool(info.is_optional) if info else False
         is_omitempty = bool(info.omitempty) if info else False
-        target = f"{node.name}.{canonical}"
+        target = f"{schema_title}.{canonical}"
         is_direct_key, unescaped_key = classify_gjson_path(wire_path)
         if is_omitempty:
             flags_suffix = f", {'true' if is_optional else 'false'}, true"
@@ -412,9 +446,12 @@ def _js_json_projector(
         else:
             flags_suffix = ""
         if is_direct_key:
+            field_target = (
+                schema_title if unescaped_key == canonical else target
+            )
             extract_expr = (
                 f"sscJsonField(data, {json.dumps(unescaped_key)}, "
-                f"{json.dumps(target)}{flags_suffix})"
+                f"{json.dumps(field_target)}{flags_suffix})"
             )
         else:
             extract_expr = (
@@ -425,6 +462,7 @@ def _js_json_projector(
         needs_transform = bool(
             (field.is_dict or (info and info.is_dict))
             or (info and info.base == VT.JSON and info.ref)
+            or (info and info.is_array)
         )
         is_ident = bool(_re.match(r"^[A-Za-z_$][A-Za-z0-9_$]*$", canonical))
         obj_key = canonical if is_ident else json.dumps(canonical)
@@ -850,6 +888,15 @@ class JsVisitor(BaseWalker):
     # === TYPES ===
 
     def visit_jsondef(self, node: JsonDef, ctx: WalkContext) -> list[str]:
+        """Emit JSDoc `@typedef` block and JavaScript JSON projector function for a `JsonDef` schema.
+
+        Args:
+            node (JsonDef): The JSON schema definition AST node.
+            ctx (WalkContext): Traversal state context.
+
+        Returns:
+            list[str]: Generated JSDoc comment and projector function lines.
+        """
         name = to_pascal_case(node.name)
         if node.is_dict:
             key_map = {
@@ -872,20 +919,11 @@ class JsVisitor(BaseWalker):
                 f" * @typedef {{Record<{key_type}, {val_type}>}} {name}Json",
                 " */",
             ]
-            module = find_enclosing_module(node)
-            if isinstance(module, Module):
-                definitions = {
-                    n.name: n for n in module.body if isinstance(n, JsonDef)
-                }
-                lines.extend(_js_json_projector(node, definitions))
-                self._builder.require_std(
-                    "sscResolveDotpath", code=_JS_JSON_PROJECT_HELPER
-                )
-            return lines
+        else:
+            lines = ["/**", f" * @typedef {{Object}} {name}Json"]
+            lines.extend(self.walk_children(node, ctx))
+            lines.append(" */")
 
-        lines = ["/**", f" * @typedef {{Object}} {name}Json"]
-        lines.extend(self.walk_children(node, ctx))
-        lines.append(" */")
         module = find_enclosing_module(node)
         if isinstance(module, Module):
             definitions = {
@@ -1658,6 +1696,15 @@ class JsVisitor(BaseWalker):
         return [f"{ctx.indent}let {ctx.nxt} = Boolean({ctx.prv});"]
 
     def visit_jsonify(self, node: Jsonify, ctx: WalkContext) -> list[str]:
+        """Emit JavaScript statements that parse JSON, optionally resolve a GJSON path, and project into a schema.
+
+        Args:
+            node (Jsonify): The `jsonify` pipeline operation AST node.
+            ctx (WalkContext): Traversal state context.
+
+        Returns:
+            list[str]: Generated JavaScript pipeline statement lines.
+        """
         if node.path:
             self._builder.require_std(
                 "sscResolveDotpath", code=_JS_JSON_PROJECT_HELPER

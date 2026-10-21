@@ -47,10 +47,6 @@ def js_json_projector_name(name: str) -> str:
     return f"_project{to_pascal_case(name)}"
 
 
-python_projector_name = python_json_projector_name
-js_projector_name = js_json_projector_name
-
-
 def to_pascal_case(s: str) -> str:
     """
     'my_field_name' -> 'MyFieldName'
