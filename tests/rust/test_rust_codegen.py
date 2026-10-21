@@ -1329,9 +1329,6 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
     )
 
     converter = RustVisitor()
-    (source_dir / "sscgen_runtime.rs").write_text(
-        converter.emit_runtime(), encoding="utf-8"
-    )
 
     modules: list[str] = ["mod sscgen_runtime;"]
     for schema_file in schemas:
@@ -1347,6 +1344,9 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
         )
         modules.append(f"mod {mod_name};")
 
+    (source_dir / "sscgen_runtime.rs").write_text(
+        converter.emit_runtime(), encoding="utf-8"
+    )
     modules.append("fn main() {}")
     (source_dir / "main.rs").write_text("\n".join(modules), encoding="utf-8")
 
@@ -1384,9 +1384,6 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
         encoding="utf-8",
     )
     converter = RustVisitor()
-    (source_dir / "sscgen_runtime.rs").write_text(
-        converter.emit_runtime(), encoding="utf-8"
-    )
 
     # 1. HTML fetch
     s1 = """
@@ -1482,6 +1479,9 @@ struct ApiUser type=rest {
     assert not [item for item in d5 if item.severity.name == "ERROR"]
     (source_dir / "p_rest_void_path.rs").write_text(
         converter.convert(m5), encoding="utf-8"
+    )
+    (source_dir / "sscgen_runtime.rs").write_text(
+        converter.emit_runtime(), encoding="utf-8"
     )
 
     (source_dir / "main.rs").write_text(

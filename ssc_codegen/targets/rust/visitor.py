@@ -129,6 +129,7 @@ from ssc_codegen.traversal.context import WalkContext
 from ssc_codegen.traversal.utils import (
     classify_gjson_path,
     find_predicate_container,
+    module_uses_http,
 )
 from ssc_codegen.traversal.walker import BaseWalker
 
@@ -238,6 +239,7 @@ class RustVisitor(BaseWalker):
         self._emitted_aliases: set[str] = set()
         self._runtime_imports: list[str] = []
         self._runtime_helpers: list[str] = []
+        self._has_http: bool = False
         self._predicate_locals: dict[int, tuple[str, bool]] = {}
 
     def _reset_state(self) -> None:
@@ -292,6 +294,8 @@ class RustVisitor(BaseWalker):
         self._walk_module(module_ast, ctx)
         self._emitted_aliases.clear()
         lines = self._walk_module(module_ast, ctx)
+        if module_uses_http(module_ast):
+            self._has_http = True
         imports = [
             "use std::cell::RefCell;",
             "use std::rc::Rc;",
@@ -317,7 +321,11 @@ class RustVisitor(BaseWalker):
             BuildTimeError: If formatting the runtime fails.
         """
         return _rustfmt(
-            rust_runtime_content(self._runtime_imports, self._runtime_helpers)
+            rust_runtime_content(
+                self._runtime_imports,
+                self._runtime_helpers,
+                include_http=self._has_http,
+            )
         )
 
     def _walk_module(self, module: Module, ctx: WalkContext) -> list[str]:
@@ -655,7 +663,13 @@ class RustVisitor(BaseWalker):
             self._builder.require_import("use serde_json::Value;")
         name = _pascal(node.name)
         raw = node.type == ST.RAW
-        lines = [f"pub struct {name}Parser {{"]
+        lines: list[str] = []
+        if node.doc:
+            lines.extend(
+                f"/// {line}" if line else "///"
+                for line in node.doc.splitlines()
+            )
+        lines.append(f"pub struct {name}Parser {{")
         lines.append(f"    {'source: String' if raw else 'dom: rt::Dom,'}")
         if not raw:
             lines.append("    root: NodeId,")
