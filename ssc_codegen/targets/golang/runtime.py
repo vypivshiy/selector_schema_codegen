@@ -16,21 +16,24 @@ without scanning generated source text.
 
 from __future__ import annotations
 
+import inspect
+
 # Lines that are ALWAYS present in sscgen_runtime.go.
-BASE_RUNTIME: list[str] = [
-    "// stdFallback runs fn with panic recovery, returning fallback on panic.",
-    "func stdFallback[T any](fn func() T, fallback T) T {",
-    "\tvar result T",
-    "\tdefer func() {",
-    "\t\tif r := recover(); r != nil {",
-    "\t\t\tresult = fallback",
-    "\t\t}",
-    "\t}()",
-    "\tresult = fn()",
-    "\treturn result",
-    "}",
-    "",
-]
+BASE_RUNTIME: list[str] = inspect.cleandoc(
+    """
+    // stdFallback runs fn with panic recovery, returning fallback on panic.
+    func stdFallback[T any](fn func() T, fallback T) T {
+    	var result T
+    	defer func() {
+    		if r := recover(); r != nil {
+    			result = fallback
+    		}
+    	}()
+    	result = fn()
+    	return result
+    }
+    """
+).splitlines()
 
 # ---------------------------------------------------------------------------
 # Optional helpers — keyed by name, value is (go_imports, go_source).
@@ -496,63 +499,64 @@ func stdJsonifyValue(jsonStr, path string) any {
 # REST runtime — emitted only when module has REST structs.
 # ---------------------------------------------------------------------------
 
-BASE_REST_RUNTIME: list[str] = [
-    "type sscHeaders = map[string][]string",
-    "",
-    "type sscReqOpts struct {",
-    "\tHeaders sscHeaders",
-    "\tCookies sscHeaders",
-    "\tBody    string",
-    "}",
-    "",
-    "// sscReqOpt is a functional option for per-call request overrides.",
-    "// Applied after DSL-specified opts; user headers are additive (shallow-merge).",
-    "type sscReqOpt func(*sscReqOpts)",
-    "",
-    "// WithHeader adds a per-call header value (additive — does not replace DSL headers).",
-    "func WithHeader(key, val string) sscReqOpt {",
-    "\treturn func(o *sscReqOpts) {",
-    "\t\tif o.Headers == nil {",
-    "\t\t\to.Headers = sscHeaders{}",
-    "\t\t}",
-    "\t\to.Headers[key] = append(o.Headers[key], val)",
-    "\t}",
-    "}",
-    "",
-    "type sscErrMatcher struct {",
-    "\tStatus  int",
-    "\tCheck   func([]byte) bool",
-    "\tFactory func(int, []byte) error",
-    "}",
-    "",
-    "func sscDispatchErr(matchers []sscErrMatcher, status int, headers sscHeaders, body []byte) error {",
-    "\tfor _, m := range matchers {",
-    "\t\tif m.Status == status {",
-    "\t\t\tif m.Check == nil || m.Check(body) {",
-    "\t\t\t\treturn m.Factory(status, body)",
-    "\t\t\t}",
-    "\t\t}",
-    "\t}",
-    "\treturn nil",
-    "}",
-    "",
-    "// UnknownErr — unmatched HTTP >= 400 response.",
-    "type UnknownErr struct {",
-    "\tStatus int",
-    "\tBody   string",
-    "}",
-    "",
-    "func (e *UnknownErr) Error() string {",
-    '\treturn fmt.Sprintf("ssc-gen: unexpected HTTP %d: %s", e.Status, e.Body)',
-    "}",
-    "",
-    "// TransportErr — network/transport level failure.",
-    "type TransportErr struct {",
-    "\tCause string",
-    "}",
-    "",
-    "func (e *TransportErr) Error() string {",
-    '\treturn "ssc-gen: transport error: " + e.Cause',
-    "}",
-    "",
-]
+BASE_REST_RUNTIME: list[str] = inspect.cleandoc(
+    """
+    type sscHeaders = map[string][]string
+
+    type sscReqOpts struct {
+    	Headers sscHeaders
+    	Cookies sscHeaders
+    	Body    string
+    }
+
+    // sscReqOpt is a functional option for per-call request overrides.
+    // Applied after DSL-specified opts; user headers are additive (shallow-merge).
+    type sscReqOpt func(*sscReqOpts)
+
+    // WithHeader adds a per-call header value (additive — does not replace DSL headers).
+    func WithHeader(key, val string) sscReqOpt {
+    	return func(o *sscReqOpts) {
+    		if o.Headers == nil {
+    			o.Headers = sscHeaders{}
+    		}
+    		o.Headers[key] = append(o.Headers[key], val)
+    	}
+    }
+
+    type sscErrMatcher struct {
+    	Status  int
+    	Check   func([]byte) bool
+    	Factory func(int, []byte) error
+    }
+
+    func sscDispatchErr(matchers []sscErrMatcher, status int, headers sscHeaders, body []byte) error {
+    	for _, m := range matchers {
+    		if m.Status == status {
+    			if m.Check == nil || m.Check(body) {
+    				return m.Factory(status, body)
+    			}
+    		}
+    	}
+    	return nil
+    }
+
+    // UnknownErr — unmatched HTTP >= 400 response.
+    type UnknownErr struct {
+    	Status int
+    	Body   string
+    }
+
+    func (e *UnknownErr) Error() string {
+    	return fmt.Sprintf("ssc-gen: unexpected HTTP %d: %s", e.Status, e.Body)
+    }
+
+    // TransportErr — network/transport level failure.
+    type TransportErr struct {
+    	Cause string
+    }
+
+    func (e *TransportErr) Error() string {
+    	return "ssc-gen: transport error: " + e.Cause
+    }
+    """
+).splitlines()

@@ -691,10 +691,13 @@ class GoVisitor(BaseWalker):
             lines.append("")
 
         lines.extend(BASE_RUNTIME)
+        lines.append("")
 
         if self._has_rest:
             lines.extend(BASE_REST_RUNTIME)
+            lines.append("")
             lines.extend(self._http.rest_runtime_lines())
+            lines.append("")
 
         for _imps, code in self._all_std_defs.values():
             # GO_RUNTIME entries are pre-formatted with literal tabs — do NOT
@@ -1306,7 +1309,7 @@ class GoVisitor(BaseWalker):
         lines: list[str] = []
         if node.doc:
             for doc_line in node.doc.splitlines():
-                lines.append(f"// {doc_line}")
+                lines.append(f"// {doc_line}" if doc_line else "//")
         lines.append(f"func {name}(document string) {t_ret} {{")
         if node.is_raw:
             lines.append(f"{inner.indent}{inner.var_name} := document")
@@ -2365,28 +2368,9 @@ class GoVisitor(BaseWalker):
     def visit_method_rest(
         self, node: MethodRest, ctx: WalkContext
     ) -> list[str]:
-        self._builder.require_import('"fmt"')
-        if node.response_schema:
-            self._builder.require_import('"encoding/json"')
-        if node.response_path:
-            self._builder.require_import('"github.com/tidwall/gjson"')
         spec = node.http_request
         if spec.body_kind == "json":
             self._require("stdJSONBody")
-        if spec.body_kind == "form" and isinstance(spec.payload, dict):
-            self._builder.require_import('"net/url"')
-        if spec.params:
-            self._builder.require_import('"net/url"')
-        joined_templates = list(spec.params.values())
-        if spec.body_kind == "form" and isinstance(spec.payload, dict):
-            joined_templates.extend(spec.payload.values())
-        if any(
-            (ph := tmpl.single_placeholder()) is not None
-            and ph.is_array
-            and ph.style in ("csv", "pipe", "space")
-            for tmpl in joined_templates
-        ):
-            self._builder.require_import('"strings"')
         self._builder.require_import('"' + self._http.import_path + '"')
         struct = node.parent
         name = (
@@ -2395,24 +2379,31 @@ class GoVisitor(BaseWalker):
             else "X"
         )
         rcv = _receiver(name)
-        return rest.emit_method_rest(node, ctx, self._http, rcv)
+        lines = rest.emit_method_rest(node, ctx, self._http, rcv)
+        joined = "\n".join(lines)
+        if "fmt." in joined:
+            self._builder.require_import('"fmt"')
+        if "url.Values" in joined:
+            self._builder.require_import('"net/url"')
+        if "strings." in joined:
+            self._builder.require_import('"strings"')
+        return lines
 
     def visit_method_fetch(
         self, node: MethodFetch, ctx: WalkContext
     ) -> list[str]:
         # Free function Fetch(ctx, client, ...) (*Name, error) for HTML structs.
         self._builder.require_import('"context"')
-        self._builder.require_import('"fmt"')
-        self._builder.require_import('"io"')
-        self._builder.require_import('"net/http"')
-        self._builder.require_import('"strings"')
+        self._builder.require_import('"' + self._http.import_path + '"')
         spec = node.http_request
         if spec.body_kind == "json":
             self._require("stdJSONBody")
-        if spec.body_kind == "form" and isinstance(spec.payload, dict):
+        lines = rest.emit_method_fetch(node, ctx, self._http)
+        joined = "\n".join(lines)
+        if "fmt." in joined:
+            self._builder.require_import('"fmt"')
+        if "url.Values" in joined:
             self._builder.require_import('"net/url"')
-        if spec.params:
-            self._builder.require_import('"net/url"')
-        if node.response_path:
-            self._builder.require_import('"github.com/tidwall/gjson"')
-        return rest.emit_method_fetch(node, ctx, self._http)
+        if "strings." in joined:
+            self._builder.require_import('"strings"')
+        return lines
