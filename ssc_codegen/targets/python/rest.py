@@ -23,7 +23,7 @@ from ssc_codegen.ast import (
 )
 from ssc_codegen.ast.struct import RequestHttp
 from ssc_codegen.naming import (
-    json_descriptor_var_name,
+    python_json_projector_name,
     to_pascal_case,
     to_snake_case,
 )
@@ -194,9 +194,11 @@ _RUNTIME_JSON_EXPORT_NAMES: list[str] = [
     "SscJsonPathError",
     "SscJsonFieldMissingError",
     "SscJsonSchemaError",
+    "ssc_expect_dict",
+    "ssc_expect_list",
     "ssc_resolve_dotpath",
-    "ssc_json_project",
-    "ssc_remap_json_keys",
+    "ssc_json_req",
+    "ssc_json_req_path",
 ]
 
 # Always exported regardless of module type so consumer code can
@@ -479,7 +481,7 @@ def emit_method_rest(
         accessor = "".join(f"[{p!r}]" for p in node.response_path.split("."))
         if has_response_schema:
             value_kwarg = [
-                f"{i3}value_fn=lambda _b: ssc_json_project(_b{accessor}, {json_descriptor_var_name(node.response_schema)}),"
+                f"{i3}value_fn=lambda _b: {python_json_projector_name(node.response_schema)}(_b{accessor}),"
             ]
         else:
             value_kwarg = [f"{i3}value_fn=lambda _b: _b{accessor},"]
@@ -487,7 +489,7 @@ def emit_method_rest(
         value_kwarg = [f"{i3}value_fn=lambda _: None,"]
     elif has_response_schema:
         value_kwarg = [
-            f"{i3}value_fn=lambda _b: ssc_json_project(_b, {json_descriptor_var_name(node.response_schema)}),"
+            f"{i3}value_fn=lambda _b: {python_json_projector_name(node.response_schema)}(_b),"
         ]
 
     def _body(fn_name: str, await_kw: str) -> list[str]:
@@ -572,7 +574,7 @@ def emit_matcher_list_def(node: MatcherListDef) -> list[str]:
         if e.error_schema and e.error_schema in definitions:
             factory = (
                 f"lambda headers, value: {e.factory_name}(headers=headers, "
-                f"value=ssc_json_project(value, {json_descriptor_var_name(e.error_schema)}))"
+                f"value={python_json_projector_name(e.error_schema)}(value))"
             )
         lines.append(f"    ErrMatcher({e.status}, {check_arg}, {factory}),")
     lines.append("]")

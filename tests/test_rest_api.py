@@ -228,13 +228,13 @@ class TestRestPyConverter:
         src = _rest_src(errors="    @error 404 Err\n    @error 500 Err\n")
         module = _parse(src)
         code = CONVERTER.convert(module, http_client="httpx")
-        # matchers list routes status codes to Err subclasses referencing descriptor constants
+        # matchers list routes status codes to Err subclasses calling generated projectors
         assert (
-            "ErrMatcher(404, None, lambda headers, value: APIErr404(headers=headers, value=ssc_json_project(value, JSON_DESCRIPTOR_ERR)))"
+            "ErrMatcher(404, None, lambda headers, value: APIErr404(headers=headers, value=_project_err(value)))"
             in code
         )
         assert (
-            "ErrMatcher(500, None, lambda headers, value: APIErr500(headers=headers, value=ssc_json_project(value, JSON_DESCRIPTOR_ERR)))"
+            "ErrMatcher(500, None, lambda headers, value: APIErr500(headers=headers, value=_project_err(value)))"
             in code
         )
         # no raise in method bodies (errors are returned, not raised)
@@ -1757,7 +1757,7 @@ class TestResponsePathCodegen:
         code = CONVERTER.convert(module, http_client="httpx")
         # value_fn extracts via dict access chain using path segments and projects into User schema
         assert (
-            "value_fn=lambda _b: ssc_json_project(_b['data']['user'], JSON_DESCRIPTOR_USER),"
+            "value_fn=lambda _b: _project_user(_b['data']['user']),"
             in code
         )
 
@@ -1837,26 +1837,26 @@ struct ApiClient type=rest {
         module = _parse(kdl_src)
         code = CONVERTER.convert(module, http_client="httpx")
 
-        assert "JSON_DESCRIPTOR_USER = {" in code
-        assert "JSON_DESCRIPTOR_API_ERROR = {" in code
+        assert "def _project_user(data: Any) -> UserJson:" in code
+        assert "def _project_api_error(data: Any) -> ApiErrorJson:" in code
 
         assert (
-            "value_fn=lambda _b: ssc_json_project(_b, JSON_DESCRIPTOR_USER),"
+            "value_fn=lambda _b: _project_user(_b),"
             in code
         )
         assert (
-            "value_fn=lambda _b: ssc_json_project(_b['data']['user'], JSON_DESCRIPTOR_USER),"
+            "value_fn=lambda _b: _project_user(_b['data']['user']),"
             in code
         )
         assert "value_fn=lambda _: None," in code
 
         assert (
-            "lambda headers, value: ApiClientErr400(headers=headers, value=ssc_json_project(value, JSON_DESCRIPTOR_API_ERROR))"
+            "lambda headers, value: ApiClientErr400(headers=headers, value=_project_api_error(value))"
             in code
         )
 
-        assert "ssc_json_project(_b, {'id':" not in code
-        assert "ssc_json_project(value, {'code':" not in code
+        assert "JSON_DESCRIPTOR_" not in code
+        assert "ssc_json_project" not in code
 
     def test_js_emits_value_fn_accessor(self):
         from ssc_codegen.targets.javascript import JS_CONVERTER
