@@ -71,33 +71,24 @@ The static type annotation declared via `@key` in a JSON dict schema (defaulting
 _Avoid_: key coercion, runtime key casting
 
 **JSON field name**:
-The canonical field name declared before the type in a `json` field and used
-by generated code and its result annotations.
+The portable identifier declared before the type in a `json` field and used as the canonical property name in generated code and its result annotations.
 _Avoid_: source key, wire key
 
 **JSON key alias**:
-The source JSON key specified via `from="..."` property (or legacy positional string argument)
-when it differs from the canonical field name. For `context str from="@context"`,
-`context` is the canonical field name and `@context` is the JSON key alias.
+The source JSON key or GJSON path expression specified via `from="..."` property when the wire key or nested path differs from the canonical JSON field name. For `context str from="@context"`, `context` is the JSON field name and `@context` is the JSON key alias.
 _Avoid_: output alias, field rename
+
+**GJSON path expression**:
+A deterministic path expression (supporting object keys, escaped literal dots `\.`, non-negative array indices, array length `#`, and array projection `#.subpath`, without predicate filters) used in `from="..."` and `path="..."` to extract values from JSON data.
+_Avoid_: JSONPath, JMESPath, filter query
 
 **Selected JSON fragment**:
 The JSON value selected by a `jsonify` operation's `path`, or the entire input JSON value when no path is specified. The named JSON schema describes this fragment; its declaration determines whether the result is an object or an array of objects.
 _Avoid_: path through the declared schema, implicitly validated envelope
 
-**Remapped JSON result**:
-A plain mapping containing only declared canonical JSON field names, produced
-from source JSON keys by applying JSON key aliases; absent source keys are
-omitted and values are not type-validated or cast.
-_Avoid_: validated model, deserialized object
-
-**JSON field descriptor**:
-The 4-tuple `(wire_path, is_optional, is_omitempty, nested_descriptors)` defining extraction and mapping metadata for a single field in a JSON schema during runtime JSON projection.
-_Avoid_: field validator, serialization spec
-
-**JSON descriptor constant**:
-A module-level constant holding the field descriptor dictionary for a declared JSON schema, referenced by request handlers and error matchers during runtime JSON projection.
-_Avoid_: schema reflection metadata, runtime type dictionary, hardcoded projection literal
+**JSON projector**:
+A generated schema-specific function or method that validates container structure, resolves declared fields and nested schemas, enforces nullability (`?`) and `@omitempty` rules, and returns the canonical projected structure with schema-qualified error diagnostics.
+_Avoid_: JSON descriptor constant, JSON field descriptor, runtime schema interpreter
 
 ## Validation And Access
 

@@ -1,5 +1,7 @@
 # JSON Key Alias Remapping
 
+Status: superseded by ADR-0005
+
 Accepted: Python and JavaScript JSON responses use the DSL field name as the
 canonical result key, while the `from="..."` property identifies the source JSON
 key (for example, `context str from="@context"`). The legacy positional alias
