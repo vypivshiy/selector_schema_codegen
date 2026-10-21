@@ -1740,7 +1740,6 @@ json ReleaseSummary {
     tag_names (array)str from="tags.#.name"
     first_tag str from="tags.0.name"
     literal_hash str from="\\#"
-    literal_zero str from="\\0"
 }
 
 (raw)struct ReleaseEnvelope {
@@ -1754,7 +1753,6 @@ json ReleaseSummary {
     # Direct escaped keys emit unescaped serde alias; path queries omit serde alias
     assert '#[serde(alias = "os.version")]' in code
     assert '#[serde(alias = "#")]' in code
-    assert '#[serde(alias = "0")]' in code
     assert 'alias = "items.#"' not in code
     assert 'alias = "tags.#.name"' not in code
     assert '"ReleaseSummary.os_version"' in code
@@ -1781,8 +1779,7 @@ fn main() {
                     {"other": "ignored"},
                     {"name": "sci-fi"}
                 ],
-                "#": "hash-val",
-                "0": "zero-val"
+                "#": "hash-val"
             }
         }
     }"##;
@@ -1797,7 +1794,11 @@ fn main() {
     );
     assert_eq!(parsed.summary.first_tag, "action");
     assert_eq!(parsed.summary.literal_hash, "hash-val");
-    assert_eq!(parsed.summary.literal_zero, "zero-val");
+
+    // Verify integer index segment requires an array and does not fall back to object key lookup
+    let obj_with_digit_key: serde_json::Value = serde_json::from_str(r#"{"0": "not-an-array"}"#).unwrap();
+    assert!(sscgen_runtime::json_opt(&obj_with_digit_key, "0").is_none());
+    assert!(sscgen_runtime::json_path(&obj_with_digit_key, "0", "ctx").is_err());
 
     // Verify schema-qualified error context on missing field
     let bad_val: serde_json::Value = serde_json::from_str(r#"{"os.version": "1.0"}"#).unwrap();

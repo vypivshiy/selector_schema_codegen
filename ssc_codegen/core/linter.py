@@ -810,10 +810,6 @@ def _lint_defines(
             )
 
 
-def _is_malformed_dotpath(path: str) -> bool:
-    return is_malformed_gjson_path(path)
-
-
 def _sanitize_json_field_name(raw: str) -> str:
     s = raw.lstrip("@")
     s = _re.sub(r"[^A-Za-z0-9_-]+", "_", s)
@@ -1134,7 +1130,7 @@ def _lint_single_json(
                     hint='example: json MySchema path="response.data" { ... }',
                 )
             )
-        elif _is_malformed_dotpath(path_val.strip()):
+        elif is_malformed_gjson_path(path_val.strip()):
             diags.append(
                 _error(
                     node,
@@ -1475,7 +1471,7 @@ def _lint_json_children(
                             hint=f'remove whitespace: from="{from_val.strip()}"',
                         )
                     )
-                if _is_malformed_dotpath(from_val.strip()):
+                if is_malformed_gjson_path(from_val.strip()):
                     diags.append(
                         _error(
                             field_node,
@@ -3115,7 +3111,7 @@ def lint_pipeline_op(node: KdlNode, lint: LintContext) -> None:
                     code="E040",
                     hint='example: jsonify MySchema path="response.data"',
                 )
-            elif _is_malformed_dotpath(path_val.strip()):
+            elif is_malformed_gjson_path(path_val.strip()):
                 lint.error(
                     node,
                     message=f"malformed dot-path '{path_val}'",

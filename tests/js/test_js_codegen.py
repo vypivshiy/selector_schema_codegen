@@ -1444,8 +1444,6 @@ json ReleaseManifest {
     nested_version str from="meta.os\\.version"
     backslash_key str from="meta.path\\\\dir"
     hash_key str from="meta.\\#"
-    digit_key str from="meta.\\0"
-    neg_key str from="meta.\\-1"
     item_count int from="items.#"
     opt_count int? from="missing.#"
     tag_names (array)str from="tags.#.name"
@@ -1485,8 +1483,6 @@ json ReleaseManifest {
                         "os.version": "6.8.0-generic",
                         "path\\dir": "C:\\bin",
                         "#": "pound_val",
-                        "0": "zero_val",
-                        "-1": "minus_one_val",
                     },
                     "items": ["a", "b", "c"],
                     "tags": [
@@ -1507,8 +1503,6 @@ json ReleaseManifest {
             "nested_version": "6.8.0-generic",
             "backslash_key": "C:\\bin",
             "hash_key": "pound_val",
-            "digit_key": "zero_val",
-            "neg_key": "minus_one_val",
             "item_count": 3,
             "opt_count": None,
             "tag_names": ["action", "sci-fi"],
@@ -1524,8 +1518,6 @@ json ReleaseManifest {
                         "os.version": "6.8.0-generic",
                         "path\\dir": "C:\\bin",
                         "#": "pound_val",
-                        "0": "zero_val",
-                        "-1": "minus_one_val",
                     },
                     "items": "not_an_array",
                     "tags": [],
@@ -1541,19 +1533,24 @@ json ReleaseManifest {
 
     def test_schema_error_on_null_or_primitive_and_qualified_field_errors(self):
         kdl_src = """
-json UserProfile {
+json user_profile {
     id int
     username str from="user_name"
     city str from="address.city"
+    tags (array)str?
+    translations (dict)? {
+        @key str
+        @value (array)str
+    }
 }
 
 (raw)struct ProfileParser {
     profile {
-        jsonify UserProfile
+        jsonify user_profile
     }
 }
 """
-        # Null root throws SscJsonSchemaError with SchemaName
+        # Null root throws SscJsonSchemaError with PascalCase SchemaName
         with pytest.raises(
             RuntimeError,
             match=r"SscJsonSchemaError: UserProfile: Expected object, got null",
@@ -1605,6 +1602,28 @@ json UserProfile {
                 kdl_src,
                 "ProfileParser",
                 input_text='{"id": 1, "user_name": "alice", "address": {}}',
+            )
+
+        # Non-array on scalar array field throws SscJsonSchemaError with UserProfile.tags
+        with pytest.raises(
+            RuntimeError,
+            match=r"SscJsonSchemaError: UserProfile\.tags: Expected array, got string",
+        ):
+            _run_js_src(
+                kdl_src,
+                "ProfileParser",
+                input_text='{"id": 1, "user_name": "alice", "address": {"city": "NY"}, "tags": "not_an_array"}',
+            )
+
+        # Non-array value in (dict) with @value (array)str throws SscJsonSchemaError
+        with pytest.raises(
+            RuntimeError,
+            match=r"SscJsonSchemaError: UserProfile\.translations: Expected array, got string",
+        ):
+            _run_js_src(
+                kdl_src,
+                "ProfileParser",
+                input_text='{"id": 1, "user_name": "alice", "address": {"city": "NY"}, "translations": {"en": "not_an_array"}}',
             )
 
     def test_nested_projector_call_stack_and_rest_null_body_error(self):

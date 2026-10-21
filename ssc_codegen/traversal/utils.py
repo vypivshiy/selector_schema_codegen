@@ -269,7 +269,7 @@ def parse_gjson_path(path: str) -> tuple[GjsonSegment, ...]:
                     f"Trailing unescaped backslash in GJSON path '{path}'"
                 )
             nxt = path[i + 1]
-            if nxt not in (".", "\\", "#", "-") and not nxt.isdigit():
+            if nxt not in (".", "\\", "#"):
                 raise ValueError(
                     f"Invalid escape sequence '\\{nxt}' in GJSON path '{path}'"
                 )
