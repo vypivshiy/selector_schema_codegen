@@ -8,13 +8,21 @@ json GeoLocation {
     longitude float from="coords.lng"
 }
 
-json UserProfile {
+define USER-PROFILE-FIELDS {
     user_id str from="@id"
     display_name str from="profile.display_name"
     avatar_url str? from="profile.avatar.url"
     top_badge str? from="badges.0.icon"
     location GeoLocation?
     legacy_tag str @omitempty from="meta.legacy_tag"
+}
+
+json UserProfile {
+    USER-PROFILE-FIELDS
+}
+
+(array)json UserProfileList {
+    USER-PROFILE-FIELDS
 }
 
 json UserCatalog {
@@ -41,6 +49,11 @@ struct EmbeddedJsonScraper {
         jsonify UserCatalog path="props.pageProps"
     }
 
+    all_users {
+        @raw_payload
+        jsonify UserProfileList path="props.pageProps.results"
+    }
+
     first_user {
         @raw_payload
         jsonify UserProfile path="props.pageProps.results.0"
@@ -52,8 +65,14 @@ struct UsersApi type=rest {
     @error 400 ApiError
     @error 404 ApiError
 
-    @request response=UserCatalog """
+    @request name=get-catalog response=UserCatalog """
     GET /api/v1/users?limit={{limit:int}} HTTP/1.1
+    Host: api.example.com
+    Accept: application/json
+    """
+
+    @request name=list-users response=UserProfileList """
+    GET /api/v1/users/raw HTTP/1.1
     Host: api.example.com
     Accept: application/json
     """
