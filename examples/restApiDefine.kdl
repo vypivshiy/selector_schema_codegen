@@ -23,15 +23,15 @@ json OptItem {
 
 json Response {
     // skip field if your dont want parse it
-    meta-info @skip
+    meta_info @skip
 
     // mark if this field maybe missing and exclude in response
-    track-id str @omitempty
+    track_id str @omitempty
 
     // optional via ? suffix
     id int?
     // combine optional + omitempty
-    track-id2 int? @omitempty
+    track_id2 int? @omitempty
     item OptItem?
 }
 

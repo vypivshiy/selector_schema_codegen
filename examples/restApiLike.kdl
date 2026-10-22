@@ -17,8 +17,8 @@ Equivalent alternatives you can retarget by swapping host/paths:
 
 
 // ── JSON schemas ──────────────────────────────────────────────────────────────
-// camelCase JSON keys are bound to snake_case fields via alias (the second
-// string arg). See docs/json.md for full reference.
+// camelCase JSON keys are bound to snake_case fields via from="..." alias.
+// See docs/json.md for full reference.
 
 json Dimensions {
     width float
@@ -27,18 +27,18 @@ json Dimensions {
 }
 
 json Meta {
-    created_at str "createdAt"
-    updated_at str "updatedAt"
+    created_at str from="createdAt"
+    updated_at str from="updatedAt"
     barcode str
-    qr_code str "qrCode"
+    qr_code str from="qrCode"
 }
 
 json Review {
     rating int
     comment str
     date str
-    reviewer_name str "reviewerName"
-    reviewer_email str "reviewerEmail"
+    reviewer_name str from="reviewerName"
+    reviewer_email str from="reviewerEmail"
 }
 
 json Product {
@@ -47,7 +47,7 @@ json Product {
     description str
     category str
     price float
-    discount_percentage float "discountPercentage"
+    discount_percentage float from="discountPercentage"
     rating float
     stock int
     tags (array)str
@@ -55,12 +55,12 @@ json Product {
     sku str
     weight float
     dimensions Dimensions
-    warranty_information str "warrantyInformation"
-    shipping_information str "shippingInformation"
-    availability_status str "availabilityStatus"
+    warranty_information str from="warrantyInformation"
+    shipping_information str from="shippingInformation"
+    availability_status str from="availabilityStatus"
     reviews (array)Review
-    return_policy str "returnPolicy"
-    minimum_order_quantity int "minimumOrderQuantity"
+    return_policy str from="returnPolicy"
+    minimum_order_quantity int from="minimumOrderQuantity"
     meta Meta
     images (array)str
     thumbnail str
@@ -112,7 +112,7 @@ json ApiError {
         doc="Paginated product list. All params optional." \
         response=ProductList \
         """
-    GET /products?limit={{limit:int?}}&skip={{skip:int?}}&select={{select:str[]?|csv}} HTTP/1.1
+    GET /products?limit={{limit:int?}}&skip={{skip:int?}}&select={{fields:str[]?|csv}} HTTP/1.1
     Host: dummyjson.com
     Accept: application/json
     """

@@ -314,24 +314,19 @@ def _dispatch_err(_status, _headers, _body):
     ...
 ```
 
-### Внутренняя структура модуля
+### Делегирование HTTP-запросов в рантайм (Runtime HTTP Delegation)
 
-Для устранения дублирования в REST-методах генерируются два приватных
-helper'а:
+Сгенерированные методы `@request` (`MethodRest` и `MethodFetch`) во всех четырёх таргетах состоят из сигнатуры, нормализованного через `cleandoc` докстринга и одного `return`-вызова рантайм-хелпера:
+- **Python**: `ssc_rest_call` / `ssc_rest_call_async`, `ssc_fetch` / `ssc_fetch_async` и `ssc_merge_kwargs`.
+- **JavaScript**: `sscRestCall` / `sscRestCallAxios`, `sscFetch` / `sscFetchAxios`, `sscPrepareReq` и `sscBuildParams`.
+- **Go**: `sscRestCallValue[T]`, `sscRestCallSlice[T]`, `sscRestCallVoid` и `sscFetchHTML` в `sscgen_runtime.go`.
+- **Rust**: `rt::rest_call`, `rt::rest_call_void` и `rt::fetch_html` в `sscgen_runtime.rs`.
 
-- **`_parse_response(resp)`** (на уровне модуля) — извлекает
-  `(status, headers, body)` из ответа HTTP-клиента. В JS-таргете две версии:
-  `_parseResponse` для `fetch` и `_parseResponseAxios` для axios (axios
-  заранее парсит JSON и возвращает `headers` объектом).
-- **`_dispatch_err(status, headers, body)`** (static-метод каждого
-  `(rest)struct`) — маршрутизация по объявленным `@error` в нужный
-  Err-подкласс плюс `UnknownErr` для нераспознанных статусов. Возвращает
-  `None` для 2xx (или типизированный Err при сработавшем field-discriminator).
-
-Это детали реализации. Подклассы генерируемых классов (Python) могут их
-переопределять — например, чтобы добавить нестандартную логику обработки
-ошибок — но напрямую модифицировать сгенерированный файл не следует: при
-перегенерации правки теряются.
+Рантайм-хелперы автоматически:
+1. Отфильтровывают `None` / `null` / `undefined` значения опциональных плейсхолдеров (`?`) из `params`, `headers` и `cookies`.
+2. Сохраняют `None` / `null` внутри JSON-тела запроса (`"key": null`).
+3. Выполняют поверхностное слияние (`shallow merge`) пользовательских `**kwargs` / `opts` / `sscReqOpt` поверх словарей `headers`, `params`, `cookies` из схемы.
+4. Извлекают `response-path` / `response-join` и проецируют ответ через функцию-проектор схемы (`_project_<schema>` / `_project<Schema>`).
 
 ## Что @request не делает
 

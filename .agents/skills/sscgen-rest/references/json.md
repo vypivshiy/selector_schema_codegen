@@ -203,17 +203,38 @@ json ItemDetail {
 **Когда использовать:** ≥3 json-схем с ≥4 общими полями.
 **Максимальный размер тела define:** 30 полей.
 
-### Alias ключей
+### Alias ключей и GJSON-пути (`from="..."`, `E403`, `E040`)
 
-Если ключ в JSON неудобен как имя поля, можно задать alias через атрибут `from="..."`:
+Имена полей в `json` схемах проверяются линтером (`E403`): каноническое имя поля (после удаления `?`) должно соответствовать `^[A-Za-z_][A-Za-z0-9_]*$` (`snake_case` или `camelCase`; `kebab-case` в полях `json` запрещён) и не совпадать с зарезервированными словами целевых языков.
+- Частая опечатка: `url: str` с двоеточием отклоняется `E403` (в KDL имя поля и тип разделяются пробелом: `url str`).
+- Ключи с дефисами или спецсимволами (`track-id`, `@context`, `@type`, `$id`, `os.version`) требуют валидного имени поля с `_` и атрибута `from="..."`:
 
 ```kdl
 json Schema {
+    track_id str from="track-id"
     context str from="@context"
+    os_version str from="os\\.version"
+    author_name str from="data.authors.0.name"
+    items_count int from="items.#"
+    tag_names (array)str from="tags.#.name"
 }
 ```
 
-`context` — имя поля в схеме, `@context` — реальный ключ в JSON. (Устаревший позиционный синтаксис `context str "@context"` вызывает предупреждение W011).
+Поддерживаемый GJSON-подмножество путей в `from="..."` и `jsonify path="..."` (валидируется `E040`):
+- Сегменты ключей объектов (`user.profile.name`).
+- Экранирование буквальной точки `\.` и обратной косой черты `\\` внутри ключа (`from="os\\.version"` читает плоский ключ `"os.version"`).
+- Неотрицательные целочисленные индексы массивов (`0`, `1`, ...).
+- Длина массива на конце пути (`items.#` → `int`).
+- Проекция элементов массива (`tags.#.name` → извлекает `name` из каждого элемента массива `tags` в `(array)str` без промежуточной `json` схемы).
+
+(Устаревший позиционный синтаксис `context str "@context"` вызывает предупреждение `W011`; синоним `path="..."` на поле вызывает `W041`).
+
+### Кодогенерация JSON Projectors
+
+В Python (`_project_<schema>`) и JavaScript (`_project<Schema>`), как и в Go (`UnmarshalJSON`) и Rust (`from_value`), для каждой `json` схемы генерируется отдельная функция-проектор:
+- Проверяет тип входного контейнера (`dict` для объекта/словаря, `list` для `(array)json`), выбрасывая `SscJsonSchemaError` при `null` или примитивах.
+- Для плоских ключей выполняет прямое `O(1)` чтение из словаря, а для многосегментных путей и `#` вызывает встроенный GJSON микро-интерпретатор.
+- Включает квалифицированный контекст `<SchemaName>.<field_name>` в сообщения `SscJsonFieldMissingError`, `SscJsonPathError` и `SscJsonSchemaError`.
 
 ## Автоматическая генерация схем из JSON (`ssc-gen json-to-kdl`)
 
@@ -238,21 +259,21 @@ struct Main {
     }
 
     all-quotes { @raw-json; jsonify Quote }
-    first-quote { @raw-json; jsonify Quote path="0" }
-    author-slug { @raw-json; jsonify Quote path="2.author.slug" }
+    first-author { @raw-json; jsonify Author path="0.author" }
+    second-author { @raw-json; jsonify Author path="1.author" }
 }
 ```
 
-`jsonify` принимает один обязательный аргумент — имя схемы.
+`jsonify` принимает один обязательный аргумент — имя целевой `json` схемы, в которую проецируется выбранный по `path` JSON-фрагмент.
 
 ### path навигация
 
-`path` позволяет перейти к элементам или полям:
+`path` использует тот же GJSON-синтаксис (`E040`) для выбора JSON-фрагмента перед вызовом проектора схемы:
 
 - `""` — применить схему к результату целиком
-- `"0"` — индекс массива
-- `"field"` — доступ к полю
-- `"0.author.slug"` — комбинированный путь
+- `"0"` — индекс массива (выбранный элемент должен соответствовать целевой схеме)
+- `"0.author"` — вложенный путь до объекта `Author`
+- `"props.pageProps.results"` — путь внутри Next.js/SPA гидратации
 
 ## JSON в атрибуте/свойстве HTML
 

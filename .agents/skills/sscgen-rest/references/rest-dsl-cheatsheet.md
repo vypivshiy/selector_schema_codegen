@@ -200,17 +200,23 @@ else                       console.log('unknown', r.status, r.value);
 
 ```bash
 # lint (always run after every edit)
-ssc-gen check schema.kdl                  # text output
+ssc-gen check schema.kdl                  # text output (validates all 4 targets)
 ssc-gen check schema.kdl -f json          # JSON for automated fixing
+ssc-gen check schema.kdl -t python        # target-specific symbol check
 
-# generate code (REST struct requires --http-client)
+# generate code
 ssc-gen generate python schema.kdl -L bs4 --http-client httpx -o out/  # sync + async_fetch
-ssc-gen generate js schema.kdl         --http-client fetch -o out/
-ssc-gen generate js schema.kdl         --http-client axios -o out/
+ssc-gen generate python schema.kdl -L bs4 --http-client httpx2 --http-io async -R -o out/
+ssc-gen generate js     schema.kdl --http-client fetch -o out/
+ssc-gen generate js     schema.kdl --http-client axios -o out/
+ssc-gen generate go     schema.kdl -o out/                             # schema.go + sscgen_runtime.go
+ssc-gen generate rust   schema.kdl --http-client reqwest -o out/       # schema.rs + sscgen_runtime.rs
 ```
 
-Languages: `python`, `js`. Python libs (`-L`): `bs4` (default) | `lxml` | `parsel` | `slax`. JS has no `--lib` (native DOMParser).
-HTTP clients: Python — `httpx` (default, sync+async) | `aiohttp` (async only) | `requests` (sync only); JS — `fetch` (default) | `axios`.
+Languages: `python`, `js`, `go`, `rust`.
+Python libs (`-L`): `bs4` (default, `--bs4-parser lxml|html.parser|html5lib`) | `lxml` | `parsel` | `slax`.
+HTTP clients: Python — `httpx` (default, `httpx2` fallback import) | `httpx2` | `aiohttp` (async only) | `requests`; JS — `fetch` (default) | `axios`; Go — `net/http` (built-in); Rust — `reqwest` (default).
+Python `--http-io`: `both` (default) | `sync` | `async`. Python `-R` / `--separate-runtime` extracts runtime helpers into `sscgen_runtime.py`.
 
-Without `--http-client` the generator silently ignores `@request` — the resulting
+Without `--http-client` in Python/JS the generator silently ignores `@request` — the resulting
 file will not contain any HTTP methods.

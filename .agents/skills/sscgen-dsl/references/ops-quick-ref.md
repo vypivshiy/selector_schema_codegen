@@ -150,12 +150,14 @@ Prefer `css "selector:nth-of-type(N)"`. Full note → `../SKILL.md` Constraints.
 | `nested StructName` | DOCUMENT | NESTED | Recurse into another struct; terminal |
 | `jsonify SchemaName [path="..."]` | STRING | JSON | Deserialize JSON into typed schema (`json`, `(array)json`, or `(dict)json`); terminal |
 
-`jsonify` `path` accepts dotted navigation:
+`jsonify` `path` accepts the deterministic GJSON path subset (validated by `E040`):
 - `""` — apply schema to whole value
-- `"0"` — array index
-- `"field"` — object key
-- `"0.author.slug"` — combined
-(If schema has `path="..."`, it is used by default when `jsonify` omits `path`).
+- `"0"` — non-negative array index
+- `"field"` — object key (`"os\\.version"` escapes literal dot in key)
+- `"0.author"` — combined path selecting the JSON fragment passed to the target schema's projector
+- `"items.#"` — array length (`int`)
+- `"items.#.name"` — array element projection
+(Note: `jsonify <Schema> path="..."` always projects the selected JSON fragment through `<Schema>`'s projector — `<Schema>` must match the shape of the fragment at `path`).
 
 ### Control
 

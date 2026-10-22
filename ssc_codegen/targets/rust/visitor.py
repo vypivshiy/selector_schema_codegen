@@ -670,7 +670,7 @@ class RustVisitor(BaseWalker):
                 for line in node.doc.splitlines()
             )
         lines.append(f"pub struct {name}Parser {{")
-        lines.append(f"    {'source: String' if raw else 'dom: rt::Dom,'}")
+        lines.append(f"    {'source: String,' if raw else 'dom: rt::Dom,'}")
         if not raw:
             lines.append("    root: NodeId,")
         for init in (n for n in node.body if isinstance(n, InitField)):

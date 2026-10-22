@@ -1,6 +1,6 @@
 ---
 name: sscgen-dsl
-version: "2.5"
+version: "2.6"
 dsl_version: "2.0"
 description: >
   Generate KDL Schema DSL (v2.0) scraper configs for **HTML scraping** and
@@ -828,8 +828,10 @@ code is a **classmethod-like constructor**: caller passes an HTTP client +
 method parameters, gets back a parsed struct instance.
 
 **Generated signatures:**
-- Python: `@classmethod def fetch(cls, client: HttpClient, **params) -> Self`
-- JS (ES6 class): `static async fetch(client, params) -> <Struct>`
+- Python: `@classmethod def fetch(cls, client: HttpClient, *, ..., **kwargs) -> Self` (plus `async_fetch` when `--http-io both|async`)
+- JS (ES6 class): `static async fetch(client, params = {}, opts = {}) -> Promise<Struct>`
+- Go: `func New<Struct>Fetch(ctx context.Context, client *http.Client, ..., opts ...sscReqOpt) (*<Struct>, error)`
+- Rust: `pub async fn fetch(client: &reqwest::Client, ...) -> Result<Self, rt::SscError>`
 
 ```kdl
 struct MainPage {
@@ -844,15 +846,15 @@ struct MainPage {
 
 Call site:
 ```python
-page = MainPage.fetch(client, page_num=2)
+page = MainPage.fetch(client, page_num="2")
 ```
 ```js
-const page = await MainPage.fetch(client, { page_num: 2 });
+const page = await MainPage.fetch(client, { pageNum: "2" });
 ```
 
-Lowercase `{{name}}` placeholders resolve at runtime from method params.
+Lowercase `{{name}}` placeholders resolve at runtime from method params. Runtime helpers (`ssc_fetch` / `ssc_fetch_async` + `ssc_merge_kwargs` in Python, `sscFetch` / `sscFetchAxios` in JS, `sscFetchHTML` in Go, `rt::fetch_html` in Rust) automatically filter `None`/`null`/`undefined` from optional `params`/`headers`/`cookies`, preserve `null` inside JSON request bodies, and shallow-merge caller `**kwargs`/`opts`.
 
-> Requires `--http-client httpx|requests|aiohttp` (Python) or `--http-client fetch|axios` (JS) at `ssc-gen generate python|js`. Without it, `@request` is silently ignored.
+> Requires `--http-client httpx|httpx2|requests|aiohttp` (Python), `--http-client fetch|axios` (JS), or `--http-client reqwest` (Rust) at `ssc-gen generate`. Without it in Python/JS, `@request` is silently ignored.
 
 ---
 
@@ -892,21 +894,23 @@ curl https://example.com | ssc-gen health schema.kdl:StructName
 
 ## Codegen Targets
 
-`ssc-gen run` and `ssc-gen generate <lang>` support multiple language targets:
+`ssc-gen run` and `ssc-gen generate <lang>` support four language targets:
 
-| Target | Command | Default lib | Alt libs | Output style |
-|--------|---------|-------------|----------|--------------|
-| Python | `ssc-gen generate python` (default for `run`) | `bs4` | `lxml`, `parsel`, `slax` | dataclass-like, `from_html(html) -> Self` classmethod |
-| JavaScript | `ssc-gen generate js` | native DOMParser | (none; `--lib` rejected) | ES6 class with `static fromHtml(html)` |
-| Go | `ssc-gen generate go` | goquery + net/http | (none; `--lib` rejected) | struct + `FromHTML(html string) (T, error)` |
+| Target | Command | Default lib | Alt libs / flags | Output style |
+|--------|---------|-------------|------------------|--------------|
+| Python | `ssc-gen generate python` (default for `run`) | `bs4` (`--bs4-parser lxml\|html.parser\|html5lib`) | `lxml`, `parsel`, `slax`; `--http-io both\|sync\|async`; `-R` | class with `parse(self)` + `TypedDict` |
+| JavaScript | `ssc-gen generate js` | `linkedom` / DOMParser | (none; `--lib` rejected) | ES6 class with `parse()` |
+| Go | `ssc-gen generate go` | `goquery` + `net/http` | (none; `--lib` rejected) | struct + `New<Struct>(html string)` + `Parse()` |
+| Rust | `ssc-gen generate rust` | `scraper` + `reqwest` | `--http-client reqwest` | `<Struct>Parser::new(html)` + `parse()` |
 
 ```bash
-ssc-gen generate python schema.kdl -L bs4 -o out/   # -> schema.py
+ssc-gen generate python schema.kdl -L bs4 -o out/   # -> schema.py (add -R for sscgen_runtime.py)
 ssc-gen generate js     schema.kdl        -o out/   # -> schema.js
 ssc-gen generate go     schema.kdl        -o out/   # -> schema.go + sscgen_runtime.go
+ssc-gen generate rust   schema.kdl        -o out/   # -> schema.rs + sscgen_runtime.rs
 ```
 
-All targets share the same `.kdl` schema — only codegen differs. For `@request`-bearing structs, pass `--http-client httpx|aiohttp|requests` (Python) or `--http-client axios|fetch` (JS). Go uses net/http exclusively (no `--http-client`).
+All targets share the same `.kdl` schema — only codegen differs. For `@request`-bearing structs, pass `--http-client httpx|httpx2|aiohttp|requests` (Python), `--http-client axios|fetch` (JS), or `--http-client reqwest` (Rust). Go uses `net/http` exclusively.
 
 ### Loop algorithm
 
@@ -1007,6 +1011,6 @@ For full KDL examples:
 - `booksToScrape.kdl` — `(list)struct` with price regex extraction, `fallback`, URL normalization via `fmt`
 - `hackernews.kdl` — `(list)struct` with `@doc` HTML signature, multi-struct composition, `fmt` URL building
 - `imdbcom.kdl` — search results page, `nested` struct composition, `css-all` field for genres
-- `quotesToScrape.kdl` — `json` schema + `jsonify`, inline multiline regex with `(?xs)` flags, `path="0"` accessor
+- `quotesToScrape.kdl` — `json` schema + `jsonify`, inline multiline regex with `(?xs)` flags, `path="0.author"` GJSON path accessor
 - `regexFallback.kdl` — `re` no-match + `fallback` recovery, `re-all` single-group extraction, `@pre-validate`
 - `rawParser.kdl` — `(raw)struct` plain-text parsing: JS regex extraction, URL query params, m3u8 playlist split, CSV with `@init`, fetch remote text

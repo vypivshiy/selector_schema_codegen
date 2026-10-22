@@ -17,7 +17,7 @@ json UserProfile {
     legacy_tag str @omitempty from="meta.legacy_tag"
 }
 
-(array)json UserCatalog {
+json UserCatalog {
     items (array)UserProfile from="results"
     total_count int from="pagination.total"
 }

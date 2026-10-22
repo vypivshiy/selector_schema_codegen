@@ -1,6 +1,6 @@
 ---
 name: sscgen-rest
-version: "2.2"
+version: "2.3"
 description: >
   Generate KDL Schema DSL configs for REST/JSON HTTP APIs ((rest)struct).
   Use this skill whenever the user wants to: design a `.kdl` schema for an HTTP/JSON
@@ -17,7 +17,7 @@ description: >
 # sscgen-rest — Skill (REST/JSON API clients)
 
 Generate `(rest)struct` schemas that become typed HTTP clients when run through
-`ssc-gen generate python|js ... --http-client httpx|fetch|axios`.
+`ssc-gen generate python|js|go|rust ...`.
 
 > **REST only.** This skill handles `json` schemas + `@request` + `@error`.
 > For HTML scraping (`css`, `text`, `attr`, `nested`, `(item)struct / (list)struct / …`) → `sscgen-dsl`.
@@ -34,9 +34,11 @@ Generate `(rest)struct` schemas that become typed HTTP clients when run through
 5. **`@error` on 2xx requires field-conditions** (key presence or value equality) to avoid false positives.
 6. **Typed placeholders**: `[]` and `?` forbidden in URL path; `|style` requires `[]`;
    types: `str|int|float|bool`; same name = same full spec; no keyword collisions.
-7. **`@doc` describes the API semantically** (purpose, auth, base URL, rate limits).
+7. **Portable `json` field identifiers (`E403`)**: every `json` field name (after stripping `?`) must match `^[A-Za-z_][A-Za-z0-9_]*$` (`snake_case` or `camelCase`; `kebab-case` is forbidden in `json` fields) and avoid target reserved words. Separate field name and type with a space (`url str`, never `url: str`); map wire keys containing `-`, `@`, `:`, or `.` via `from="..."` (e.g. `track_id str from="track-id"`).
+8. **`@doc` describes the API semantically** (purpose, auth, base URL, rate limits).
+   Multi-line `@doc """..."""` blocks are auto-dedented (`cleandoc`) at parse time.
    Do NOT list generated method signatures — they are derived from `name=` and
-    placeholders and will rot as the schema evolves.
+   placeholders and will rot as the schema evolves.
 
 These are DSL/CLI constraints. Generation preferences for weaker models are in
 `references/model-friendly.md`.
@@ -145,7 +147,13 @@ When to use which:
 - Both → combine.
 - Never needed by client code → `@skip` (don't pollute the typed surface).
 
-Alias: `field-name str from="originalKey"` (or positional `"originalKey"` — deprecated: W011; `path="..."` accepted as synonym with W041).
+Alias & GJSON path expressions (`from="..."`, validated by `E040`):
+- Direct key remap: `context str from="@context"` (for keys with `@`, `:`, `$`, spaces, or target reserved words; positional `"originalKey"` is deprecated with `W011`; `path="..."` is accepted with `W041`).
+- Literal dot in key: `os_version str from="os\\.version"` (escape literal `.` with `\.` and `\` with `\\`).
+- Nested path & array index: `author_name str from="data.authors.0.name"`.
+- Array length (`#`): `count int from="items.#"` (extracts integer length of array).
+- Array element projection (`#.subpath`): `tag_names (array)str from="tags.#.name"` (projects `.name` from every element of `tags` into a flat array without an intermediate `json` schema).
+
 Top-level array: `(array)json Tags { name str }`.
 
 **Dictionary schemas (`(dict)json` & inline `(dict)`):**
@@ -262,17 +270,21 @@ the typed response (or `@error`-mapped error). The schema is the single
 source of truth — no need to remember URLs, headers, or query-string formats
 at call sites.
 
-**Generated signatures:**
+**Generated signatures & runtime HTTP delegation:**
 
 | Backend | Signature |
 |---------|-----------|
-| Python (`httpx`, default) | `@classmethod def fetch(cls, client: httpx.Client, **params) -> Result[Response, Error]` + `async_fetch(client, **params)` |
-| Python (`requests`, sync only) | `@classmethod def fetch(cls, client: requests.Session, **params) -> Result[...]` |
-| Python (`aiohttp`, async only) | `@classmethod async def fetch(cls, client: aiohttp.ClientSession, **params) -> Result[...]` |
-| JS (`fetch` or `axios`) | `static async fetch(client, params) -> Result<Response, Error>` |
+| Python (`httpx` / `httpx2`, default) | `@classmethod def fetch(cls, client: httpx.Client, *, ..., **kwargs) -> Result[Response, Error]` + `async_fetch(client, *, ..., **kwargs)` (filtered by `--http-io both\|sync\|async`) |
+| Python (`requests`) | `@classmethod def fetch(cls, client: requests.Session, *, ..., **kwargs) -> Result[...]` (+ `async_fetch` via `asyncio.to_thread` when `--http-io both\|async`) |
+| Python (`aiohttp`, async only) | `@classmethod async def async_fetch(cls, client: aiohttp.ClientSession, *, ..., **kwargs) -> Result[...]` |
+| JS (`fetch` or `axios`) | `static async fetch(client, params = {}, opts = {}) -> Promise<Result<Response, Error>>` |
+| Go (`net/http`) | `func (Struct) Fetch(client *http.Client, ..., opts ...sscReqOpt) (*ResponseJson, error)` |
+| Rust (`reqwest`) | `pub async fn fetch(client: &reqwest::Client, ...) -> Result<ResponseJson, EndpointError>` |
 
-`**params` come from `{{name:type}}` placeholders in the `@request` body.
-Example: `{{id:int}}` → `id: int` kwarg (Py) / `id: number` field (JS).
+All targets delegate request preparation and response projection to shared runtime helpers (`ssc_rest_call` + `ssc_merge_kwargs` in Python, `sscRestCall` + `sscPrepareReq` in JS, `sscRestCallValue[T]` / `sscRestCallSlice[T]` / `sscRestCallVoid` in Go, `rt::rest_call` / `rt::rest_call_void` in Rust):
+- Optional placeholders (`?`) set to `None` / `null` / `undefined` in `params`, `headers`, and `cookies` are omitted automatically.
+- Optional placeholders (`?`) set to `None` / `null` inside a JSON request body are preserved as JSON `null` (`"key": null`).
+- Per-call `**kwargs` (Python), `opts` (JS), or `sscReqOpt` (Go) shallow-merge `headers`, `params`, and `cookies` on top of schema defaults.
 
 Call site:
 ```python
@@ -307,20 +319,28 @@ Loop until exit 0. Cap 5 iterations on same line; then explain conflict.
 ### Step 5 — Generate code (optional)
 
 ```bash
-# Python — sync + async (httpx default)
+# Python — sync + async (httpx default; falls back from httpx2 to httpx)
 ssc-gen generate python schema.kdl -L bs4 --http-client httpx -o out/
-ssc-gen generate python schema.kdl -L lxml --http-client requests -o out/   # sync only
+ssc-gen generate python schema.kdl -L bs4 --http-client httpx2 --http-io async -o out/
+ssc-gen generate python schema.kdl -L lxml --http-client requests --http-io sync -o out/
 ssc-gen generate python schema.kdl -L lxml --http-client aiohttp -o out/    # async only
 
 # JavaScript
 ssc-gen generate js schema.kdl --http-client fetch -o out/
 ssc-gen generate js schema.kdl --http-client axios -o out/
+
+# Go (goquery + net/http; emits schema.go + sscgen_runtime.go)
+ssc-gen generate go schema.kdl -o out/
+
+# Rust (scraper + reqwest; emits schema.rs + sscgen_runtime.rs)
+ssc-gen generate rust schema.kdl --http-client reqwest -o out/
 ```
 
-> Python libs (`-L`): `bs4` (default) | `lxml` | `parsel` | `slax`. JS has no `--lib` flag (uses native DOMParser).
-> HTTP clients: Python — `httpx` (default, sync+async) | `aiohttp` (async only) | `requests` (sync only); JS — `fetch` (default) | `axios`
+> Python libs (`-L`): `bs4` (default, `--bs4-parser lxml|html.parser|html5lib`) | `lxml` | `parsel` | `slax`.
+> HTTP clients: Python — `httpx` (default, `httpx2` fallback import) | `httpx2` (strict `import httpx2`) | `aiohttp` (async only) | `requests`; JS — `fetch` (default) | `axios`; Go — `net/http` (built-in); Rust — `reqwest` (default).
+> Python `--http-io`: `both` (default) | `sync` | `async`. Python `-R` / `--separate-runtime` extracts runtime helpers into `sscgen_runtime.py`.
 
-Without `--http-client`, `@request` is silently ignored.
+Without `--http-client` in Python/JS, `@request` is silently ignored.
 
 ---
 

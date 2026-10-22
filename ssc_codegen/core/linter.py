@@ -140,7 +140,7 @@ _VALID_IMPORT_KINDS = frozenset({"define", "extension", "fn", "json", "struct"})
 
 _DEFINE_NAME_RE = _re.compile(r"^[A-Z_][A-Z0-9_-]*\Z")
 _EXTENSION_NAME_RE = _re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*\Z")
-_JSON_FIELD_NAME_RE = _re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*\Z")
+_JSON_FIELD_NAME_RE = _re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\Z")
 _PORTABLE_IDENTIFIER_RE = _re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\Z")
 _EXTENSION_PLACEHOLDER_RE = _re.compile(r"\{\{([^{}]+)\}\}")
 _EXTENSION_PLACEHOLDERS = frozenset({"in", "in_type", "out", "out_type"})
@@ -812,8 +812,8 @@ def _lint_defines(
 
 def _sanitize_json_field_name(raw: str) -> str:
     s = raw.lstrip("@")
-    s = _re.sub(r"[^A-Za-z0-9_-]+", "_", s)
-    s = _re.sub(r"_+", "_", s).strip("_-")
+    s = _re.sub(r"[^A-Za-z0-9_]+", "_", s)
+    s = _re.sub(r"_+", "_", s).strip("_")
     if not s:
         return "field"
     if s[0].isdigit():
@@ -1239,7 +1239,7 @@ def _lint_json_children(
             diags.append(
                 _error(
                     field_node,
-                    f"invalid json field name '{field_name}'; field names must be portable identifiers matching ^[A-Za-z_][A-Za-z0-9_-]*$",
+                    f"invalid json field name '{field_name}'; field names must be portable identifiers matching ^[A-Za-z_][A-Za-z0-9_]*$",
                     source_path,
                     code="E403",
                     hint=hint,

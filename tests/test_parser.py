@@ -2356,6 +2356,22 @@ json Root {
         assert any("invalid rust identifier 'self'" in m for m in messages)
         assert any("invalid python identifier 'def'" in m for m in messages)
 
+    def test_kebab_case_in_json_field_name_emits_e403_with_from_hint(
+        self,
+    ) -> None:
+        src = """
+json Response {
+    track-id str
+}
+"""
+        _, diags = parse_module(src)
+        e403 = [d for d in diags if d.code == "E403"]
+        assert len(e403) == 1
+        assert (
+            e403[0].hint
+            == 'use a portable identifier with \'from\', e.g. \'track_id str from="track-id"\''
+        )
+
 
 class TestGjsonPathValidationE040:
     """Tests for GJSON path expression validation (E040) and classification."""

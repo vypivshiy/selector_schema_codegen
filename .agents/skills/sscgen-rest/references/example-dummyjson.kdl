@@ -4,7 +4,7 @@ json Product {
     description str
     category str
     price float
-    discount_percentage float "discountPercentage"
+    discount_percentage float from="discountPercentage"
     rating float
     stock int
     brand str?

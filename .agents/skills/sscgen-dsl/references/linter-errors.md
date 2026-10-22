@@ -39,6 +39,8 @@ Warning at line 8: 'fmt' template is missing the '{{}}' placeholder
 | `'fmt' template missing '{{}}' placeholder` | fmt value lacks `{{}}` | Add `{{}}` where the value should be inserted |
 | `invalid 'raw' mode '...' — expected 'outer' or 'inner'` | Typo or non-keyword arg after `raw` | Use bare `raw`, `raw outer`, or `raw inner` |
 | `'raw' accepts at most 1 argument` | Multiple args after `raw` | Remove extra args: `raw` / `raw outer` / `raw inner` |
+| `E403: invalid json field name '...'` | Non-portable `json` field name (e.g. `url: str` with colon or `@context str`) or target reserved word | Use space-separated portable identifier (`url str`) and map special wire keys via `from="@context"` |
+| `E040: malformed GJSON path '...'` | Invalid `from="..."` or `jsonify path="..."` (empty segment `a..b`, leading/trailing `.`, negative index, or `#[...]` filter) | Use valid GJSON path subset: keys (`a.b`), escaped literal dots (`os\.version`), non-negative indices (`0`), array count (`items.#`), or array projection (`tags.#.name`) |
 
 ## Iterative lint algorithm
 

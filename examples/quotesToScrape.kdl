@@ -46,21 +46,17 @@ struct Main {
     """
 
     data {
-        // use computed value. should be a firts
+        // use computed value. should be first
         @raw-json
         jsonify Quote
     }
-    // patches example
-    first-quote {
+    // path example: extract nested Author objects by array index
+    first-author {
         @raw-json
-        jsonify Quote path="0"
+        jsonify Author path="0.author"
     }
-    second-quote {
+    second-author {
         @raw-json
-        jsonify Quote path="1"
-    }
-    third-slug {
-        @raw-json
-        jsonify Quote path="2.author.slug"
+        jsonify Author path="1.author"
     }
 }

@@ -18,7 +18,7 @@ When defining `json` schemas in KDL 2.0 and executing generated parsers or REST 
 Align all four target backends and the linter around **ADR-0005**:
 
 1. **Strict Portable JSON Field Names (`E403`)**:
-   Enforce in `ssc-gen check` that every canonical **JSON field name** (after stripping `?`) matches `^[A-Za-z_][A-Za-z0-9_-]*$` and is valid across target languages (`E403`). Provide contextual hints when a field name ends with `:` (suggesting `url str` or `from="url:"`) or contains special characters like `@` (suggesting `from="@..."`).
+   Enforce in `ssc-gen check` that every canonical **JSON field name** (after stripping `?`) matches `^[A-Za-z_][A-Za-z0-9_]*$` and is valid across target languages (`E403`). Provide contextual hints when a field name ends with `:` (suggesting `url str` or `from="url:"`) or contains non-identifier characters like `-` or `@` (suggesting `from="..."`).
 
 2. **Compile-Time Validation and Runtime Micro-Interpreter for GJSON Path Expressions (`E040`)**:
    Define and validate a deterministic, filter-free **GJSON path expression** grammar in `from="..."` and `jsonify path="..."` supporting:
@@ -55,7 +55,7 @@ Align all four target backends and the linter around **ADR-0005**:
 ## Implementation Decisions
 
 1. **Linter Validation for JSON Field Names (`E403`)**:
-   - Extend `json` field linting and symbol collection so every **JSON field name** (with trailing `?` stripped) is validated against `^[A-Za-z_][A-Za-z0-9_-]*$` and target identifier/reserved-word rules (`SymbolKind.FIELD` / `json` field check).
+   - Extend `json` field linting and symbol collection so every **JSON field name** (with trailing `?` stripped) is validated against `^[A-Za-z_][A-Za-z0-9_]*$` and target identifier/reserved-word rules (`SymbolKind.FIELD` / `json` field check).
    - Emit `E403` when validation fails:
      - If the raw field name ends with `:`, attach hint: `in KDL field name and type are separated by space ('<name_without_colon> <type>'); if the JSON key ends with ':', use '<name_without_colon> <type> from="<raw_name>"'`.
      - If the raw field name starts with `@` or contains other non-identifier characters, attach hint: `use a portable identifier with 'from', e.g. '<sanitized_name> <type> from="<raw_name>"'`.

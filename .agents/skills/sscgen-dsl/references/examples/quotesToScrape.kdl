@@ -27,7 +27,7 @@ struct Main {
             """#
         jsonify Quote
     }
-    first-quote {
+    first-author {
         raw
         re #"""
             (?xs)
@@ -35,9 +35,9 @@ struct Main {
             ( \[ .* \] )
             ;\s+for
             """#
-        jsonify Quote path="0"
+        jsonify Author path="0.author"
     }
-    second-quote {
+    second-author {
         raw
         re #"""
             (?xs)
@@ -45,16 +45,6 @@ struct Main {
             ( \[ .* \] )
             ;\s+for
             """#
-        jsonify Quote path="1"
-    }
-    third-slug {
-        raw
-        re #"""
-            (?xs)
-            var\s+data\s*=\s*
-            ( \[ .* \] )
-            ;\s+for
-            """#
-        jsonify Quote path="2.author.slug"
+        jsonify Author path="1.author"
     }
 }
