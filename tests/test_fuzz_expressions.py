@@ -120,19 +120,6 @@ def _all_pipeline_ops() -> list[OpSpec]:
     return [OpSpec(n, s) for n, s in OP_TYPES.items() if n in OP_FORMS]
 
 
-def _type_compatible(
-    prev_ret: VariableType | None, accept: VariableType | None
-) -> bool:
-    """Mirror of `_vt_compatible` in type_checking — non-erroring variant."""
-    if accept is None:
-        return True
-    if prev_ret is None:
-        return True
-    if prev_ret == VariableType.AUTO or accept == VariableType.AUTO:
-        return True
-    return prev_ret == accept
-
-
 def _prepend_for(op_name: str) -> str:
     """Return pipeline body lines that produce an acceptable input type.
 
@@ -255,12 +242,6 @@ def _wrap_item_struct(*, field_body: str, field_name: str = "f") -> str:
     )
 
 
-def _indent_block(body: str, indent: str = "        ") -> str:
-    """Re-indent a multi-line body string to live inside a field block."""
-    lines = body.splitlines()
-    return "\n".join(indent + ln if ln else ln for ln in lines)
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Validators
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -327,11 +308,6 @@ def _assert_js_valid(mod: object) -> None:
         Path(js_path).unlink(missing_ok=True)
 
 
-# Parametrize ids helper: keep pytest output readable.
-def _converter_id(target: str) -> str:
-    return target
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Test 1: solo op (with prepend context when needed)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -370,53 +346,6 @@ def test_solo_op_js(op_name: str, body: str) -> None:
     kdl = _wrap_item_struct(field_body=body)
     mod = _assert_ast_valid(kdl)
     _assert_js_valid(mod)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Test 2: type-compatible op pairs
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-def _simulate(ops: list[str]) -> tuple[VariableType, bool]:
-    """Simulate (base, is_array) state after running `ops` from DOCUMENT."""
-    base = VariableType.DOCUMENT
-    arr = False
-    for n in ops:
-        sig = OP_TYPES.get(n)
-        if sig is None:
-            continue
-        new_base = sig.ret if sig.ret is not None else base
-        if sig.force_list:
-            new_arr = True
-        elif sig.force_scalar:
-            new_arr = False
-        else:
-            new_arr = arr
-        base, arr = new_base, new_arr
-    return base, arr
-
-
-# Mapping from `_prepend_for` outputs to the op sequences they represent.
-_PREPEND_TO_OPS: dict[str, list[str]] = {
-    "": [],
-    'css ".x"': ["css"],
-    'css ".x"\n        text': ["css", "text"],
-    'css-all ".x"\n        text': ["css-all", "text"],
-}
-
-
-def _apply_op(
-    base: VariableType, arr: bool, op_name: str
-) -> tuple[VariableType, bool]:
-    sig = OP_TYPES[op_name]
-    new_base = sig.ret if sig.ret is not None else base
-    if sig.force_list:
-        new_arr = True
-    elif sig.force_scalar:
-        new_arr = False
-    else:
-        new_arr = arr
-    return new_base, new_arr
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

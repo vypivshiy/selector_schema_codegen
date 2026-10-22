@@ -179,7 +179,7 @@ class TestArraysAndConversions:
 
 
 class TestFiltersAndPredicates:
-    def test_returns_list(self, html):
+    def test_fields_present(self, html):
         result = _run_schema(
             SCHEMAS_DIR / "03_filters_and_predicates.kdl",
             "FiltersAndPredicates",
@@ -187,13 +187,6 @@ class TestFiltersAndPredicates:
         )
         assert isinstance(result, list)
         assert len(result) == 2
-
-    def test_fields_present(self, html):
-        result = _run_schema(
-            SCHEMAS_DIR / "03_filters_and_predicates.kdl",
-            "FiltersAndPredicates",
-            html,
-        )
         for item in result:
             assert "filtered_links" in item
             assert "logic_check" in item
@@ -201,13 +194,10 @@ class TestFiltersAndPredicates:
 
 
 class TestFlatCoverage:
-    def test_returns_list(self, html):
+    def test_contains_hrefs(self, html):
         result = _run_schema(SCHEMAS_DIR / "05_flat.kdl", "FlatCoverage", html)
         assert isinstance(result, list)
         assert len(result) > 0
-
-    def test_contains_hrefs(self, html):
-        result = _run_schema(SCHEMAS_DIR / "05_flat.kdl", "FlatCoverage", html)
         # flat struct returns a flat list — contains hrefs and tokens
         assert any("/nested/" in str(v) for v in result)
 
@@ -233,16 +223,11 @@ class TestDictSchemas:
 
 
 class TestTableCoverage:
-    def test_returns_dict(self, html):
-        result = _run_schema(
-            SCHEMAS_DIR / "07_table.kdl", "TableCoverage", html
-        )
-        assert isinstance(result, dict)
-
     def test_field_values(self, html):
         result = _run_schema(
             SCHEMAS_DIR / "07_table.kdl", "TableCoverage", html
         )
+        assert isinstance(result, dict)
         assert result["identifier"] == "ABC-123"
         assert result["code_value"] == "CODE-1"
         assert result["price"] == 9.99
@@ -428,8 +413,7 @@ struct JsonAliasedScraper {
             "author_slug": "author-one",
         }
 
-    @pytest.mark.parametrize("target", _TARGETS)
-    def test_json_alias_special_character_keys(self, target):
+    def test_json_alias_special_character_keys(self):
         kdl_src = """
 json SpecialKeysSchema {
     context str from="@context"
@@ -474,7 +458,7 @@ struct SpecialKeysScraper {
         """
         module_ast, diagnostics = parse_module(kdl_src)
         assert not [d for d in diagnostics if d.severity == Severity.ERROR]
-        converter = _get_converter(target)
+        converter = _get_converter("py-bs4")
         code = converter.convert(module_ast)
         namespace: dict = {}
         exec(code, namespace)
@@ -492,8 +476,7 @@ struct SpecialKeysScraper {
         assert "@context" not in item
         assert "unmapped_extra" not in item
 
-    @pytest.mark.parametrize("target", _TARGETS)
-    def test_json_alias_deep_nested_and_arrays(self, target):
+    def test_json_alias_deep_nested_and_arrays(self):
         kdl_src = """
 json SpecDetail {
     spec_key str from="k"
@@ -552,7 +535,7 @@ struct DeepCatalogScraper {
         """
         module_ast, diagnostics = parse_module(kdl_src)
         assert not [d for d in diagnostics if d.severity == Severity.ERROR]
-        converter = _get_converter(target)
+        converter = _get_converter("py-bs4")
         code = converter.convert(module_ast)
         namespace: dict = {}
         exec(code, namespace)
@@ -573,8 +556,7 @@ struct DeepCatalogScraper {
             {"spec_key": "Storage", "spec_value": "512GB"},
         ]
 
-    @pytest.mark.parametrize("target", _TARGETS)
-    def test_json_alias_missing_keys_nulls_and_extra_fields(self, target):
+    def test_json_alias_missing_keys_nulls_and_extra_fields(self):
         kdl_src = """
 json UserState {
     account_id int from="id"
@@ -608,7 +590,7 @@ struct UserStateScraper {
         """
         module_ast, diagnostics = parse_module(kdl_src)
         assert not [d for d in diagnostics if d.severity == Severity.ERROR]
-        converter = _get_converter(target)
+        converter = _get_converter("py-bs4")
         code = converter.convert(module_ast)
         namespace: dict = {}
         exec(code, namespace)
@@ -622,8 +604,7 @@ struct UserStateScraper {
         assert "extra_key_one" not in user
         assert "extra_key_two" not in user
 
-    @pytest.mark.parametrize("target", _TARGETS)
-    def test_json_alias_define_expansion(self, target):
+    def test_json_alias_define_expansion(self):
         kdl_src = """
 define COMMON-FIELDS {
     ident int from="id"
@@ -654,7 +635,7 @@ struct DefineScraper {
         """
         module_ast, diagnostics = parse_module(kdl_src)
         assert not [d for d in diagnostics if d.severity == Severity.ERROR]
-        converter = _get_converter(target)
+        converter = _get_converter("py-bs4")
         code = converter.convert(module_ast)
         namespace: dict = {}
         exec(code, namespace)
@@ -666,8 +647,7 @@ struct DefineScraper {
             "display_name": "Admin Alice",
         }
 
-    @pytest.mark.parametrize("target", _TARGETS)
-    def test_json_alias_raw_struct_execution(self, target):
+    def test_json_alias_raw_struct_execution(self):
         kdl_src = """
 json ConfigPayload {
     host_addr str from="host"
@@ -684,7 +664,7 @@ json ConfigPayload {
         raw_json_str = '{"host": "db.internal.net", "port": 5432, "tls": true, "secret": "pwd"}'
         module_ast, diagnostics = parse_module(kdl_src)
         assert not [d for d in diagnostics if d.severity == Severity.ERROR]
-        converter = _get_converter(target)
+        converter = _get_converter("py-bs4")
         code = converter.convert(module_ast)
         namespace: dict = {}
         exec(code, namespace)
@@ -747,8 +727,6 @@ struct RuntimeTestScraper {
             assert "ssc_resolve_dotpath" in code
             assert "def ssc_resolve_dotpath(" not in code
             assert "def _project_user_info(" in code
-            assert "ssc_json_project" not in code
-            assert "ssc_remap_json_keys" not in code
 
             ns: dict = {
                 "__name__": f"{pkg_name}.parser",

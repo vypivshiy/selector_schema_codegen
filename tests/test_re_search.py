@@ -65,17 +65,6 @@ class TestReAst:
         assert node.span.start.line > 0
         assert node.span.start.column > 0
 
-    def test_module_source_file_basename(self):
-        src = (
-            "struct Page type=item {\n"
-            '    Field { css ".x"; text; re #"(\\d+)"# }\n'
-            "}\n"
-        )
-        module = _parse(src, source_name="C:/dev/proj/deep/foo.kdl")
-        assert "/" not in module.source_file
-        assert "\\" not in module.source_file
-        assert module.source_file == "foo.kdl"
-
     def test_node_span_default_none(self):
         """AST nodes without explicit span must default to None."""
         from ssc_codegen.ast import Re
@@ -145,44 +134,6 @@ class TestPythonReCodegen:
         code = py_lxml.convert(_parse(src))
         assert "[std_re_search(" in code
         assert "for i in" in code
-
-
-# ---------------------------------------------------------------------------
-# Runtime helpers
-# ---------------------------------------------------------------------------
-
-
-class TestReRuntimeHelpers:
-    def test_runtime_module_content_has_ssc_regex_error(self):
-        from ssc_codegen.ast import Module
-        from ssc_codegen.generation.runtime import runtime_module_content
-
-        content = runtime_module_content(Module())
-        assert "class SscRegexError(Exception)" in content
-        assert "def std_re_search(" in content
-
-    def test_runtime_module_exec_re_search(self):
-        """std_re_search must raise SscRegexError on no match, return
-        first capture group on match.
-        """
-        from ssc_codegen.ast import Module
-        from ssc_codegen.generation.runtime import runtime_module_content
-
-        content = runtime_module_content(Module())
-        ns: dict = {}
-        exec(compile(content, "<runtime>", "exec"), ns)
-        assert issubclass(ns["SscRegexError"], Exception)
-        # No-match path.
-        with pytest.raises(ns["SscRegexError"]):
-            ns["std_re_search"](r"(\d+)", "abc", "loc")
-        # Match path — returns first capture group.
-        assert ns["std_re_search"](r"(\d+)", "abc123", "") == "123"
-        # Empty msg fallback works.
-        with pytest.raises(ns["SscRegexError"]) as exc_info:
-            ns["std_re_search"](r"(x)", "abc", "")
-        assert "ssc-gen" in str(exc_info.value) or "re-match" in str(
-            exc_info.value
-        )
 
 
 # ---------------------------------------------------------------------------

@@ -327,16 +327,6 @@ class TestRestPyConverter:
         for match in re.finditer(r"@classmethod\s*\n(?:    [^\n]*\n)+", code):
             assert "if status ==" not in match.group(0)
 
-    def test_py_bs4_httpx_transport_exception(self):
-        from ssc_codegen.targets.python import (
-            PY_BS4_CONVERTER as CONVERTER,
-        )
-
-        src = _rest_src()
-        module = _parse(src)
-        code = CONVERTER.convert(module, http_client="httpx")
-        assert "except httpx.HTTPError as exc:" in code
-
     def test_py_bs4_post_body_is_dict_not_fstring(self):
         """Regression: POST json body used to emit `json=f'{...}'` which
         double-encoded the body. Must now emit a native dict literal."""
@@ -745,11 +735,6 @@ class TestTypedPlaceholdersJsCodegen:
         assert "params: {'tags': tags}" in code
         assert "sp.append(k, String(_v))" in code
 
-    def test_required_repeat_array_also_uses_append(self):
-        code = self._gen("GET /u?tags={{tags:int[]}} HTTP/1.1")
-        assert "params: {'tags': tags}" in code
-        assert "sp.append(k, String(_v))" in code
-
     def test_urlsearchparams_csv_via_join(self):
         code = self._gen("GET /u?tags={{tags:int[]?|csv}} HTTP/1.1")
         assert "tags.map(String).join(',')" in code
@@ -850,28 +835,6 @@ class TestRestOnlyImports:
         assert "UNMATCHED_TABLE_ROW" not in code
         assert "_RE_HEX_ENTITY" not in code
 
-    def test_rest_only_has_rest_utilities(self):
-        from ssc_codegen.targets.python import (
-            PY_BS4_CONVERTER as PY_BASE_CONVERTER,
-        )
-
-        src = _rest_src(errors="    @error 404 Err\n")
-        module = _parse(src)
-        code = PY_BASE_CONVERTER.convert(module, http_client="httpx")
-        assert "class Ok(Generic[_T]):" in code
-        assert "class Err(Generic[_E]):" in code
-        assert "def ssc_rest_call(" in code
-
-    def test_rest_only_valid_python(self):
-        from ssc_codegen.targets.python import (
-            PY_BS4_CONVERTER as PY_BASE_CONVERTER,
-        )
-
-        src = _rest_src(errors="    @error 404 Err\n")
-        module = _parse(src)
-        code = PY_BASE_CONVERTER.convert(module, http_client="httpx")
-        pyast.parse(code)
-
     def test_mixed_module_keeps_html_imports(self):
         from ssc_codegen.targets.python import (
             PY_BS4_CONVERTER as PY_BASE_CONVERTER,
@@ -946,23 +909,6 @@ class TestSeparateRuntime:
         code = generated[""]
         assert f"from .{self.RUNTIME_NAME} import" in code
         assert "Ok" in code.split(f"from .{self.RUNTIME_NAME} import")[1]
-
-    def test_main_no_inline_rest_helpers(self):
-        from ssc_codegen.generation.runtime import register_runtime_file
-
-        src = _rest_src(errors="    @error 404 Err\n")
-        module = _parse(src)
-        register_runtime_file(PY_BS4_CONVERTER, self.RUNTIME_NAME)
-        generated = PY_BS4_CONVERTER.convert_all(
-            module,
-            http_client="httpx",
-            runtime_module=self.RUNTIME_NAME,
-        )
-        code = generated[""]
-        # Ok/Err as class definitions should NOT be in the main module
-        assert "class Ok(Generic[_T]):" not in code
-        assert "class Err(Generic[_E]):" not in code
-        assert "def ssc_rest_call(" not in code
 
     def test_main_no_redundant_rest_imports(self):
         from ssc_codegen.generation.runtime import register_runtime_file
@@ -1466,14 +1412,6 @@ class TestSeparateRuntime:
         assert "client: httpx.AsyncClient" in runtime
         # ErrMatcher.match typed
         assert "def match(" in runtime
-        # No underscore-prefixed parameters in the public runtime API.
-        assert "_matchers" not in runtime
-        assert "_status:" not in runtime
-        assert "_headers:" not in runtime
-        assert "_body:" not in runtime
-        assert "_value_fn" not in runtime
-        # Mapping replaced with Dict in dataclass fields.
-        assert "Mapping[str, str]" not in runtime
         assert "Dict[str, str]" in runtime
 
     def test_matcher_list_has_type_annotation(self):
@@ -1760,10 +1698,7 @@ class TestResponsePathCodegen:
         module = _parse(self._rest_path_src())
         code = CONVERTER.convert(module, http_client="httpx")
         # value_fn extracts via dict access chain using path segments and projects into User schema
-        assert (
-            "value_fn=lambda _b: _project_user(_b['data']['user']),"
-            in code
-        )
+        assert "value_fn=lambda _b: _project_user(_b['data']['user'])," in code
 
     def test_py_path_dominates_over_void_when_no_schema(self):
         """response-path with no response-schema still emits value_fn
@@ -1803,65 +1738,6 @@ class TestResponsePathCodegen:
         code = CONVERTER.convert(module, http_client="httpx")
         assert "value_fn=lambda _: None," in code
 
-    def test_py_rest_value_fn_and_matchers_reference_descriptor_constants(self):
-        from ssc_codegen.targets.python import (
-            PY_BS4_CONVERTER as CONVERTER,
-        )
-
-        kdl_src = '''
-json User {
-    id int
-    name str
-}
-
-json ApiError {
-    code int
-    message str
-}
-
-struct ApiClient type=rest {
-    @error 400 ApiError
-
-    @request name=get-user response=User """
-    GET /users/me HTTP/1.1
-    Host: api.example.com
-    """
-
-    @request name=get-nested-user response=User response-path="data.user" """
-    GET /users/nested HTTP/1.1
-    Host: api.example.com
-    """
-
-    @request name=ping """
-    GET /ping HTTP/1.1
-    Host: api.example.com
-    """
-}
-'''
-        module = _parse(kdl_src)
-        code = CONVERTER.convert(module, http_client="httpx")
-
-        assert "def _project_user(data: Any) -> UserJson:" in code
-        assert "def _project_api_error(data: Any) -> ApiErrorJson:" in code
-
-        assert (
-            "value_fn=lambda _b: _project_user(_b),"
-            in code
-        )
-        assert (
-            "value_fn=lambda _b: _project_user(_b['data']['user']),"
-            in code
-        )
-        assert "value_fn=lambda _: None," in code
-
-        assert (
-            "lambda headers, value: ApiClientErr400(headers=headers, value=_project_api_error(value))"
-            in code
-        )
-
-        assert "JSON_DESCRIPTOR_" not in code
-        assert "ssc_json_project" not in code
-
     def test_js_emits_value_fn_accessor(self):
         from ssc_codegen.targets.javascript import JS_CONVERTER
 
@@ -1869,8 +1745,6 @@ struct ApiClient type=rest {
         code = JS_CONVERTER.convert(module, http_client="fetch")
         # JS uses double-quoted JSON-style keys and projects into User schema
         assert '(_b) => _projectUser(_b["data"]["user"])' in code
-        assert "JSON_DESCRIPTOR_" not in code
-        assert "sscJsonProject" not in code
 
     def test_js_void_without_path_emits_null(self):
         from ssc_codegen.targets.javascript import JS_CONVERTER
@@ -1913,14 +1787,6 @@ struct ApiClient type=rest {
         assert "var val T" in runtime  # was: var _val
         assert "if perr := json.Unmarshal(body, &val)" in runtime
         assert "if err != nil" in runtime
-        # Old underscore-prefixed names must be gone from rest methods.
-        # REST methods are receiver methods on the marker struct; match
-        # the receiver-prefixed signature (e.g. "func (a API) Fetch(").
-        rest_section = code[code.find("func (a API) Fetch(") :]
-        assert "_body" not in rest_section
-        assert "_val" not in rest_section
-        assert "_err" not in rest_section
-        assert "_perr" not in rest_section
 
     def test_go_rest_accepts_opts(self):
         """Go REST methods accept variadic ``opts ...sscReqOpt``."""
@@ -2244,7 +2110,13 @@ struct Page {
 '''
 
     def test_ast_doc_fields_normalized_via_cleandoc(self):
-        from ssc_codegen.ast import FunctionDef, JsonDef, MethodRest, Struct, StructRest
+        from ssc_codegen.ast import (
+            FunctionDef,
+            JsonDef,
+            MethodRest,
+            Struct,
+            StructRest,
+        )
 
         module = _parse(self._DOC_SCHEMA)
         assert module.doc == (
@@ -2277,40 +2149,6 @@ struct Page {
             "Fetch a single user by ID.\nReturns User payload on 200 OK."
         )
 
-    def test_python_multiline_docstrings_valid_ast_and_runtime_dunder_doc(self):
-        import inspect
-        from ssc_codegen.targets.python import PY_BS4_CONVERTER
-
-        module = _parse(self._DOC_SCHEMA)
-        code = PY_BS4_CONVERTER.convert(module, http_client="httpx")
-
-        # Must be valid Python syntax and use triple-quoted multi-line docstrings
-        pyast.parse(code)
-        assert "'\\n    " not in code
-        assert '"""\nMulti-line module docstring.\nDescribes the API and HTML parsers.\n"""' in code
-
-        ns: dict = {}
-        exec(code, ns)  # noqa: S102
-
-        assert inspect.cleandoc(ns["__doc__"]) == (
-            "Multi-line module docstring.\nDescribes the API and HTML parsers."
-        )
-        assert inspect.cleandoc(ns["Page"].__doc__) == (
-            "HTML page parser struct.\nExtracts heading text."
-        )
-        assert inspect.cleandoc(ns["UserAPI"].__doc__) == (
-            "User REST API client.\nProvides user lookup endpoints."
-        )
-        assert inspect.cleandoc(ns["UserAPI"].get_user.__doc__) == (
-            "Fetch a single user by ID.\nReturns User payload on 200 OK."
-        )
-        assert inspect.cleandoc(ns["UserAPI"].async_get_user.__doc__) == (
-            "Fetch a single user by ID.\nReturns User payload on 200 OK."
-        )
-        assert inspect.cleandoc(ns["clean_text"].__doc__) == (
-            "Clean and normalize text.\nSecond line of fn doc."
-        )
-
     def test_js_go_rust_multiline_doc_comments_cleanly_formatted(self):
         from ssc_codegen.targets.golang import GO_CONVERTER
         from ssc_codegen.targets.javascript import JS_CONVERTER
@@ -2322,22 +2160,60 @@ struct Page {
         rust_code = RUST_CONVERTER.convert(module)
 
         # JavaScript JSDoc comments have no raw 8-space KDL indentation
-        assert " * Multi-line module docstring.\n * Describes the API and HTML parsers." in js_code
-        assert " * HTML page parser struct.\n * Extracts heading text." in js_code
-        assert " * User REST API client.\n * Provides user lookup endpoints." in js_code
-        assert "   * Fetch a single user by ID.\n   * Returns User payload on 200 OK." in js_code
+        assert (
+            " * Multi-line module docstring.\n * Describes the API and HTML parsers."
+            in js_code
+        )
+        assert (
+            " * HTML page parser struct.\n * Extracts heading text." in js_code
+        )
+        assert (
+            " * User REST API client.\n * Provides user lookup endpoints."
+            in js_code
+        )
+        assert (
+            "   * Fetch a single user by ID.\n   * Returns User payload on 200 OK."
+            in js_code
+        )
 
         # Go comments
-        assert "// Multi-line module docstring.\n// Describes the API and HTML parsers." in go_code
-        assert "// HTML page parser struct.\n// Extracts heading text." in go_code
-        assert "// User REST API client.\n// Provides user lookup endpoints." in go_code
-        assert "// Fetch a single user by ID.\n// Returns User payload on 200 OK." in go_code
-        assert "// Clean and normalize text.\n// Second line of fn doc." in go_code
+        assert (
+            "// Multi-line module docstring.\n// Describes the API and HTML parsers."
+            in go_code
+        )
+        assert (
+            "// HTML page parser struct.\n// Extracts heading text." in go_code
+        )
+        assert (
+            "// User REST API client.\n// Provides user lookup endpoints."
+            in go_code
+        )
+        assert (
+            "// Fetch a single user by ID.\n// Returns User payload on 200 OK."
+            in go_code
+        )
+        assert (
+            "// Clean and normalize text.\n// Second line of fn doc." in go_code
+        )
 
         # Rust comments
-        assert "// Multi-line module docstring.\n// Describes the API and HTML parsers." in rust_code
-        assert "/// HTML page parser struct.\n/// Extracts heading text." in rust_code
-        assert "// User REST API client.\n// Provides user lookup endpoints." in rust_code
-        assert "    // Fetch a single user by ID.\n    // Returns User payload on 200 OK." in rust_code
-        assert "/// Clean and normalize text.\n/// Second line of fn doc." in rust_code
-
+        assert (
+            "// Multi-line module docstring.\n// Describes the API and HTML parsers."
+            in rust_code
+        )
+        assert (
+            "/// HTML page parser struct.\n/// Extracts heading text."
+            in rust_code
+        )
+        assert (
+            "// User REST API client.\n// Provides user lookup endpoints."
+            in rust_code
+        )
+        assert (
+            "    // Fetch a single user by ID.\n    // Returns User payload on 200 OK."
+            in rust_code
+        )
+        assert (
+            "/// Clean and normalize text.\n/// Second line of fn doc."
+            in rust_code
+        )

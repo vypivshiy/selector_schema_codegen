@@ -216,9 +216,7 @@ class TestRestSuccess:
                 SchemaErr, match="User: Expected dict, got NoneType"
             ):
                 API.fetch(client, id="null")
-            with pytest.raises(
-                SchemaErr, match="User: Expected dict, got int"
-            ):
+            with pytest.raises(SchemaErr, match="User: Expected dict, got int"):
                 API.fetch(client, id="prim")
             with pytest.raises(
                 SchemaErr, match="User: Expected dict, got NoneType"
@@ -1190,8 +1188,6 @@ struct ProfileAPI type=rest {
             assert "ssc_resolve_dotpath" in code
             assert "def ssc_resolve_dotpath(" not in code
             assert "def _project_article_list(" in code
-            assert "ssc_json_project" not in code
-            assert "ssc_remap_json_keys" not in code
 
             exec(code, parser_mod.__dict__)
             API = parser_mod.ArticleAPI
@@ -1477,16 +1473,9 @@ json ApiErr {
         )
         assert "def _project_api_err(data: Any) -> ApiErrJson:" in py_code
 
-        # 2. Verify no descriptor constants or legacy helpers
-        assert "JSON_DESCRIPTOR_" not in py_code
-        assert "_JSON_DESCRIPTORS" not in py_code
-        assert "ssc_json_project" not in py_code
-        assert "ssc_remap_json_keys" not in py_code
-
-        # 3. Verify projector modularity: child schemas called directly by function name
+        # 2. Verify projector modularity: child schemas called directly by function name
         assert (
-            "_project_leaf_image(ssc_json_req(_d, 'icon', 'Genre'))"
-            in py_code
+            "_project_leaf_image(ssc_json_req(_d, 'icon', 'Genre'))" in py_code
         )
         assert (
             "[_project_genre(_x) for _x in ssc_expect_list(ssc_json_req(_d, 'genres', 'Release'), 'Release.genres') if _x is not None]"
@@ -1497,21 +1486,16 @@ json ApiErr {
             in py_code
         )
 
-        # 4. Verify REST method calls projector function directly
-        assert (
-            "value_fn=lambda _b: _project_catalog_response(_b)"
-            in py_code
-        )
+        # 3. Verify REST method calls projector function directly
+        assert "value_fn=lambda _b: _project_catalog_response(_b)" in py_code
 
-        # 5. Verify error matcher calls projector function directly
-        assert (
-            "value=_project_api_err(value)" in py_code
-        )
+        # 4. Verify error matcher calls projector function directly
+        assert "value=_project_api_err(value)" in py_code
 
-        # 6. Syntax validation
+        # 5. Syntax validation
         ast.parse(py_code)
 
-        # 7. JavaScript target alignment
+        # 6. JavaScript target alignment
         js_code = JS_CONVERTER.convert_all(mod)[""]
         assert "function _projectLeafImage(data)" in js_code
         assert "function _projectCatalogResponse(data)" in js_code
@@ -1519,11 +1503,8 @@ json ApiErr {
         assert "_projectApiErr" in js_code
         assert "(_b) => _projectCatalogResponse(_b)" in js_code
         assert "value: _projectApiErr(_b)" in js_code
-        assert "JSON_DESCRIPTOR_" not in js_code
-        assert "sscJsonProject" not in js_code
-        assert "sscRemapJsonKeys" not in js_code
 
-        # 8. Execution test with respx (success + 404 error)
+        # 7. Execution test with respx (success + 404 error)
         ns: dict = {}
         exec(py_code, ns)
         API = ns["CatalogAPI"]
@@ -1610,8 +1591,6 @@ json ApiErr {
             if line.startswith("def _project_")
         ]
         assert len(py_projectors) >= 25
-        assert "JSON_DESCRIPTOR_" not in py_code
-        assert "_JSON_DESCRIPTORS" not in py_code
 
         js_projectors = [
             line.split("(")[0]
@@ -1619,10 +1598,6 @@ json ApiErr {
             if line.startswith("function _project")
         ]
         assert len(js_projectors) >= 25
-        assert "JSON_DESCRIPTOR_" not in js_code
-        assert "JsonDescriptors = " not in js_code
-        assert "sscJsonProject" not in js_code
-        assert "sscRemapJsonKeys" not in js_code
 
         # Validate reference usage in REST methods and matchers
         assert "_project_catalog_releases_response" in py_code
@@ -1770,4 +1745,3 @@ json User {
             assert sent_req.headers["x-custom"] == "from-caller"
             # Both DSL 'tag' and caller 'extra' query params are present
             assert dict(sent_req.url.params) == {"tag": "v1", "extra": "yes"}
-

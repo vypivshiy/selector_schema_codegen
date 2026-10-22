@@ -211,20 +211,17 @@ def test_imported_cross_reference_keeps_imported_source_path(tmp_path):
 # ── error cases ───────────────────────────────────────────────────────────────
 
 
-def test_import_file_not_found():
+def test_import_file_not_found(tmp_path):
     """Importing a nonexistent file is reported as a diagnostic."""
-    bad_kdl = FIXTURES / "import_missing.kdl"
+    bad_kdl = tmp_path / "import_missing.kdl"
     bad_kdl.write_text(
         'import "./does_not_exist.kdl" { (struct)Missing }\n'
         'struct X { x { css "x"; text } }\n',
         encoding="utf-8",
     )
-    try:
-        _, diagnostics = _parse_file(bad_kdl)
-        msgs = _error_messages(diagnostics)
-        assert any("file not found" in m.lower() for m in msgs)
-    finally:
-        bad_kdl.unlink(missing_ok=True)
+    _, diagnostics = _parse_file(bad_kdl)
+    msgs = _error_messages(diagnostics)
+    assert any("file not found" in m.lower() for m in msgs)
 
 
 def test_import_from_string_fails():

@@ -161,9 +161,7 @@ from ssc_codegen.traversal.utils import (
 from ssc_codegen.traversal.walker import BaseWalker
 
 
-def _needs_field_transform(
-    field: JsonDefField, info: TypeInfo | None
-) -> bool:
+def _needs_field_transform(field: JsonDefField, info: TypeInfo | None) -> bool:
     """Check whether a JSON field requires non-trivial projection when non-null.
 
     Args:
@@ -204,11 +202,7 @@ def _transform_field_value(
         f_val_info = field.value_type_info or (
             info.value_type_info if info else None
         )
-        if (
-            f_val_info
-            and f_val_info.base == VT.JSON
-            and f_val_info.ref
-        ):
+        if f_val_info and f_val_info.base == VT.JSON and f_val_info.ref:
             child_proj = python_json_projector_name(f_val_info.ref)
             if f_val_info.is_array:
                 return (
@@ -298,9 +292,7 @@ def _python_json_projector(
 
         if not is_optional and not is_omitempty:
             if is_direct:
-                req_target = (
-                    schema_name if unescaped_key == fname else target
-                )
+                req_target = schema_name if unescaped_key == fname else target
                 raw_expr = (
                     f"ssc_json_req({d_var}, {unescaped_key!r}, {req_target!r})"
                 )
@@ -317,9 +309,7 @@ def _python_json_projector(
                 raw_expr = f"{d_var}.get({unescaped_key!r})"
             else:
                 raw_expr = f"ssc_resolve_dotpath({d_var}, {wire_path!r}, True, {target!r})"
-            val_expr = _transform_field_value(
-                "_v", field, target, definitions
-            )
+            val_expr = _transform_field_value("_v", field, target, definitions)
             omitempty_lines.append(f"{ind}if (_v := {raw_expr}) is not None:")
             omitempty_lines.append(f"{ind}    _res[{fname!r}] = {val_expr}")
         else:
@@ -399,7 +389,6 @@ class PythonVisitor(BaseWalker):
     an `HttpLibStrategy` (`HttpxStrategy`, `AioHttpStrategy`, `RequestsStrategy`).
 
     Attributes:
-        STD_MODULE_NAME: Default module name when std helpers are emitted separately.
         DEFAULT_TYPE: Fallback type annotation string (``"Any"``).
         TYPES: Mapping from `VariableType` enums to Python type annotation strings.
         ARRAY_TYPE_FMT: Formatting template for list types (``"List[{}]"``).
@@ -407,8 +396,6 @@ class PythonVisitor(BaseWalker):
         var_name: Base variable prefix used in pipeline steps (default: ``"v"``).
         indent: Indentation string unit (default: 4 spaces).
     """
-
-    STD_MODULE_NAME: str = "ssc_std"
 
     # Std helpers that exist in the runtime module under the same name.
     # Under -R, import directly instead of inlining their definitions.
@@ -548,7 +535,7 @@ class PythonVisitor(BaseWalker):
         Returns:
             Generated Python source code string.
         """
-        return self.convert_all(module_ast, inline_std=True, **meta)[""]
+        return self.convert_all(module_ast, **meta)[""]
 
     def convert_all(self, module_ast: Module, **meta: Any) -> dict[str, str]:
         """Convert a `Module` AST in a two-pass traversal, emitting main and companion files.
@@ -558,7 +545,7 @@ class PythonVisitor(BaseWalker):
 
         Args:
             module_ast: The root `Module` AST node to convert.
-            **meta: Options controlling generation (e.g. `http_client`, `inline_std`).
+            **meta: Options controlling generation (e.g. `http_client`, `runtime_module`).
 
         Returns:
             Mapping from filenames (``""`` for the main module) to generated source texts.
@@ -571,9 +558,6 @@ class PythonVisitor(BaseWalker):
         self._walk_module(module_ast, ctx)
         lines = self._walk_module(module_ast, ctx)
         out: dict[str, str] = {"": "\n".join(lines)}
-        if not ctx.meta.get("inline_std", True) and self._builder.has_std:
-            name = ctx.meta.get("std_module_name", self.STD_MODULE_NAME)
-            out[name] = self._render_std_module()
         for fname, provider in self._file_providers.items():
             out[fname] = provider(module_ast, ctx.meta)
         return out
@@ -619,44 +603,22 @@ class PythonVisitor(BaseWalker):
                     lines.extend(inspect.cleandoc(code).splitlines())
                     lines.append("")
             return lines
-        if ctx.meta.get("inline_std", True):
-            body: list[str] = []
-            for _imps, code in self._builder.runtime_defs.values():
-                body.extend(code.strip("\n").splitlines())
-                body.append("")
-            for _imps, code in self._builder.std_defs.values():
-                body.extend(inspect.cleandoc(code).splitlines())
-                body.append("")
-            imports = [
-                *(
-                    item
-                    for item in self._builder.runtime_imports
-                    if item not in self._builder.imports
-                ),
-                *self._builder.std_imports,
-            ]
-            return [*dict.fromkeys(imports), "", *body]
-        module_name = ctx.meta.get("std_module_name", self.STD_MODULE_NAME)
-        names = [*self._builder.runtime_names, *self._builder.std_names]
-        return [f"from {module_name} import {', '.join(names)}"]
-
-    def _render_std_module(self) -> str:
-        lines: list[str] = ["# autogenerated std runtime. DO NOT EDIT", ""]
-        lines.extend(
-            dict.fromkeys(
-                [
-                    *self._builder.runtime_imports,
-                    *self._builder.std_imports,
-                ]
-            )
-        )
+        body: list[str] = []
         for _imps, code in self._builder.runtime_defs.values():
-            lines.append("")
-            lines.extend(code.strip("\n").splitlines())
+            body.extend(code.strip("\n").splitlines())
+            body.append("")
         for _imps, code in self._builder.std_defs.values():
-            lines.append("")
-            lines.extend(inspect.cleandoc(code).splitlines())
-        return "\n".join(lines)
+            body.extend(inspect.cleandoc(code).splitlines())
+            body.append("")
+        imports = [
+            *(
+                item
+                for item in self._builder.runtime_imports
+                if item not in self._builder.imports
+            ),
+            *self._builder.std_imports,
+        ]
+        return [*dict.fromkeys(imports), "", *body]
 
     # === TYPE RESOLUTION ===
 
@@ -1183,7 +1145,8 @@ class PythonVisitor(BaseWalker):
                         )
                 if node.struct.keep_order:
                     lines.append(f"{i2}return list(dict.fromkeys(_result))")
-                lines.append(f"{i2}return list(set(_result))")
+                else:
+                    lines.append(f"{i2}return list(set(_result))")
             case ST.TABLE:
                 lines.append(f"{i2}_result: {name}Type = {{}}")
                 lines.append(f"{i2}_table = self._table_config(self._doc)")
@@ -1686,10 +1649,6 @@ class PythonVisitor(BaseWalker):
                 return current.source_file
             current = current.parent
         return ""
-
-    def _resolve_assert_location(self, node: Assert) -> str:
-        """Back-compat shim; delegates to :meth:`_resolve_location`."""
-        return self._resolve_location(node)
 
     def visit_assert(self, node: Assert, ctx: WalkContext) -> list[str]:
         location = self._resolve_location(node)

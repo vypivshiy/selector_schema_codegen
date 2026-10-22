@@ -6,7 +6,6 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from types import MappingProxyType
 
 from kdlquery import KDLParseError, KdlNode, ReadDiagnostic, Severity
 from kdlquery import parse as kdl_parse

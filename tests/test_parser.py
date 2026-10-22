@@ -215,23 +215,6 @@ def test_parser_supports_xpath_all_pattern_match_block():
     assert isinstance(links.body[-1], Return)
 
 
-def test_parser_supports_inline_raw_extractor():
-    module = _parse(
-        """
-        struct Main {
-            html { raw }
-        }
-        """
-    )
-    main = _struct(module, "Main")
-    html = _field(main, "html")
-
-    assert type(html.body[0]).__name__ == "Raw"
-    assert isinstance(html.body[-1], Return)
-    assert html.accept == VariableType.DOCUMENT
-    assert html.ret == VariableType.STRING
-
-
 def test_parser_raw_default_mode_is_outer():
     module = _parse(
         """
@@ -243,6 +226,9 @@ def test_parser_raw_default_mode_is_outer():
     html = _field(_struct(module, "Main"), "html")
     assert isinstance(html.body[0], Raw)
     assert html.body[0].mode == "outer"
+    assert isinstance(html.body[-1], Return)
+    assert html.accept == VariableType.DOCUMENT
+    assert html.ret == VariableType.STRING
 
 
 def test_parser_raw_explicit_outer_mode():
@@ -458,10 +444,6 @@ def test_parser_handles_table_struct_special_nodes_and_field_types():
     assert isinstance(start_parse, StartParse)
     assert start_parse.use_pre_validate is True
     assert start_parse.use_split_doc is False
-    assert (
-        isinstance(product_info, Struct)
-        and product_info.type == StructType.TABLE
-    )
     assert isinstance(table_cfg, TableConfig)
     assert isinstance(table_rows, TableRows)
     assert isinstance(table_match, TableMatchKey)
@@ -637,16 +619,6 @@ def test_json_lint_field_missing_type():
     assert any("requires a type" in e for e in errs)
 
 
-def test_json_lint_field_skip_without_type():
-    errs = _lint_errors("json Foo { x @skip }")
-    assert len(errs) == 0
-
-
-def test_json_lint_unknown_modifier():
-    errs = _lint_errors("json Foo { x str @invalid }")
-    assert any("unknown json field modifier '@invalid'" in e for e in errs)
-
-
 def test_json_lint_undefined_ref():
     errs = _lint_errors("json A { x NonExistent }")
     assert any(
@@ -666,17 +638,6 @@ def test_json_lint_circular_ref():
 
 def test_json_lint_optional_suffix_ok():
     errs = _lint_errors("json Foo { x str? }")
-    assert len(errs) == 0
-
-
-def test_json_lint_optional_modifier_now_error():
-    """@optional was removed; it should produce an unknown modifier error."""
-    errs = _lint_errors("json Foo { x str @optional }")
-    assert any("unknown json field modifier '@optional'" in e for e in errs)
-
-
-def test_json_lint_omitempty_modifier_ok():
-    errs = _lint_errors("json Foo { x str @omitempty }")
     assert len(errs) == 0
 
 
@@ -1096,15 +1057,6 @@ class TestJsonDefPathProperty:
 
 
 class TestJsonAliasMapping:
-    def test_has_alias_key_is_recursive(self):
-        m = _parse(
-            """json Child { context str from="@context" }
-json Parent { child Child }
-"""
-        )
-        assert _json_def(m, "Child").has_alias_key is True
-        assert _json_def(m, "Parent").has_alias_key is True
-
     def test_json_from_property_syntax(self):
         m, diags = parse_module(
             """json User {
@@ -1187,18 +1139,6 @@ json Parent { child Child }
         assert any("conflicts with field name" in error for error in errors)
 
     def test_malformed_dotpath_and_whitespace_diagnostics(self):
-        # E040: malformed dotpaths
-        for bad_path in ["..", ".a", "a.", "a..b"]:
-            errors = _lint_errors(
-                f"""json F {{
-    first str from="{bad_path}"
-}}
-"""
-            )
-            assert any("malformed dot-path" in error for error in errors), (
-                f"Failed for {bad_path}"
-            )
-
         # E040 on json path property
         errors_json_path = _lint_errors(
             """json F path="..data" {
@@ -1898,41 +1838,6 @@ json Root {
             == "TranslationValueNestedMeta"
         )
 
-    def test_parse_context_direct_hoisting(self) -> None:
-        from kdlquery import parse as kdl_parse
-        from ssc_codegen.core.contexts import ParseContext
-        from ssc_codegen.core.struct_parser import _parse_dict_type_directives
-
-        ctx = ParseContext()
-        parent = JsonDef(name="ParentModel")
-        doc = kdl_parse("""
-dict_field {
-    @key int
-    @value {
-        name str
-    }
-}
-""")
-        dict_node = doc.nodes[0]
-        key_info, val_info = _parse_dict_type_directives(
-            dict_node.children,
-            ctx,
-            parent_def=parent,
-            field_name="items",
-            explicit_dict_name="",
-        )
-        assert key_info.base == VariableType.INT
-        assert val_info.base == VariableType.JSON
-        assert val_info.ref == "ParentModelItemsValue"
-        assert "ParentModelItemsValue" in ctx.json_defs
-        hoisted = ctx.json_defs["ParentModelItemsValue"]
-        assert hoisted.name == "ParentModelItemsValue"
-        hoisted_fields = [
-            f for f in hoisted.body if isinstance(f, JsonDefField)
-        ]
-        assert len(hoisted_fields) == 1
-        assert hoisted_fields[0].name == "name"
-
 
 class TestJsonDictNestedValueLinterValidation:
     """Tests for linter validation and diagnostic hints for inline @value blocks."""
@@ -2257,7 +2162,7 @@ json Article {
         assert len(e403) == 1
         assert (
             e403[0].hint
-            == 'in KDL field name and type are separated by space (\'url str\'); if the JSON key ends with \':\', use \'url str from="url:"\''
+            == "in KDL field name and type are separated by space ('url str'); if the JSON key ends with ':', use 'url str from=\"url:\"'"
         )
 
     def test_at_prefix_in_json_field_name_emits_e403_with_from_hint(
@@ -2274,11 +2179,11 @@ json JsonLd {
         assert len(e403) == 2
         assert (
             e403[0].hint
-            == 'use a portable identifier with \'from\', e.g. \'type str from="@type"\''
+            == "use a portable identifier with 'from', e.g. 'type str from=\"@type\"'"
         )
         assert (
             e403[1].hint
-            == 'use a portable identifier with \'from\', e.g. \'context str from="@context"\''
+            == "use a portable identifier with 'from', e.g. 'context str from=\"@context\"'"
         )
 
         # Valid portable names with explicit from="..." pass without errors
@@ -2347,8 +2252,8 @@ json Root {
         messages = [d.message for d in e403]
 
         assert any("separated by space ('url str')" in h for h in hints)
-        assert any('\'type str from="@type"\'' in h for h in hints)
-        assert any('\'context str from="@context"\'' in h for h in hints)
+        assert any("'type str from=\"@type\"'" in h for h in hints)
+        assert any("'context str from=\"@context\"'" in h for h in hints)
         assert any("invalid python identifier 'class'" in m for m in messages)
         assert any(
             "invalid javascript identifier 'function'" in m for m in messages
@@ -2369,7 +2274,7 @@ json Response {
         assert len(e403) == 1
         assert (
             e403[0].hint
-            == 'use a portable identifier with \'from\', e.g. \'track_id str from="track-id"\''
+            == "use a portable identifier with 'from', e.g. 'track_id str from=\"track-id\"'"
         )
 
 

@@ -55,7 +55,7 @@ json Author {
 - **Rust**: `pub type EpisodeTranslationsJson = std::collections::HashMap<i64, Vec<String>>;`
 - **JavaScript**: `/** @typedef {Record<number, string[]>} EpisodeTranslationsJson */`
 
-При рантайм-проекции (`ssc_json_project`) проверяется, что входные данные являются словарем (иначе генерируется `SscJsonSchemaError`), а значения рекурсивно ремаппятся, если `@value` ссылается на модель с алиасами.
+При рантайм-проекции (через сгенерированную функцию-проектор `_project_<schema>` / `_project<Schema>`) проверяется, что входные данные являются словарем (иначе генерируется `SscJsonSchemaError`), а значения рекурсивно проецируются через проектор вложенной схемы, если `@value` ссылается на модель `json`.
 
 ## Вложенные инлайн-схемы (Inline JSON Schemas)
 

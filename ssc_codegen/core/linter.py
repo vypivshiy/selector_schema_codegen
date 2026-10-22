@@ -144,86 +144,6 @@ _JSON_FIELD_NAME_RE = _re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\Z")
 _PORTABLE_IDENTIFIER_RE = _re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\Z")
 _EXTENSION_PLACEHOLDER_RE = _re.compile(r"\{\{([^{}]+)\}\}")
 _EXTENSION_PLACEHOLDERS = frozenset({"in", "in_type", "out", "out_type"})
-_JS_RESERVED = frozenset(
-    {
-        "await",
-        "break",
-        "case",
-        "catch",
-        "class",
-        "const",
-        "constructor",
-        "continue",
-        "debugger",
-        "default",
-        "delete",
-        "do",
-        "else",
-        "enum",
-        "export",
-        "extends",
-        "false",
-        "finally",
-        "for",
-        "function",
-        "if",
-        "implements",
-        "import",
-        "in",
-        "instanceof",
-        "interface",
-        "let",
-        "new",
-        "null",
-        "package",
-        "private",
-        "protected",
-        "public",
-        "return",
-        "static",
-        "super",
-        "switch",
-        "this",
-        "throw",
-        "true",
-        "try",
-        "typeof",
-        "var",
-        "void",
-        "while",
-        "with",
-        "yield",
-    }
-)
-_GO_RESERVED = frozenset(
-    {
-        "break",
-        "default",
-        "func",
-        "interface",
-        "select",
-        "case",
-        "defer",
-        "go",
-        "map",
-        "struct",
-        "chan",
-        "else",
-        "goto",
-        "package",
-        "switch",
-        "const",
-        "fallthrough",
-        "if",
-        "range",
-        "type",
-        "continue",
-        "for",
-        "import",
-        "return",
-        "var",
-    }
-)
 
 _NO_ARGS_OPS: frozenset[str] = frozenset(
     {
@@ -1234,7 +1154,7 @@ def _lint_json_children(
                 sanitized_name = _sanitize_json_field_name(clean_field_name)
                 hint = (
                     f"use a portable identifier with 'from', e.g. "
-                    f'\'{sanitized_name} {type_repr} from="{clean_field_name}"\''
+                    f"'{sanitized_name} {type_repr} from=\"{clean_field_name}\"'"
                 )
             diags.append(
                 _error(
@@ -3122,29 +3042,6 @@ def lint_pipeline_op(node: KdlNode, lint: LintContext) -> None:
     elif name == "nested":
         lint_require_args(node, lint, exact=1, example="nested MyStruct")
 
-    elif name == "self":
-        args = lint_require_args(node, lint, exact=1, example="self field-name")  # type: ignore[assignment]
-        if args and args[0] not in lint.init_fields:
-            lint.error(
-                node,
-                message=f"'self {args[0]}': field '{args[0]}' not found in @init block (deprecated syntax)",
-                code="E301",
-                hint=f"declare it in @init: @init {{ {args[0]} {{ ... }} }} or use new syntax: @{args[0]}",
-            )
-
-    elif name == "fallback":
-        children = list(node.children)
-        args = _node_args(node)
-        if not args and not children and len(node.children) == 0:
-            pass  # empty block fallback is ok (for lists)
-        elif not args and not children:
-            lint.error(
-                node,
-                message="'fallback' requires exactly 1 argument or a block",
-                code="E001",
-                hint='example: fallback ""  or  fallback 0  or  fallback #null  or  fallback {}',
-            )
-
     elif name in ("filter", "assert", "match"):
         if name == "assert":
             # assert accepts an optional string message arg:
@@ -3173,7 +3070,7 @@ def lint_pipeline_op(node: KdlNode, lint: LintContext) -> None:
                 code="E001",
                 hint=f"move expressions into the children block: {name} {{ ... }}",
             )
-        if not list(node.children) and len(node.children) == 0:
+        if not node.children:
             lint.error(
                 node,
                 message=f"'{name}' block must contain at least one predicate expression",
@@ -3189,33 +3086,12 @@ def lint_pipeline_op(node: KdlNode, lint: LintContext) -> None:
                 code="E001",
                 hint=f"move expressions into the children block: {name} {{ ... }}",
             )
-        if not list(node.children) and len(node.children) == 0:
+        if not node.children:
             lint.error(
                 node,
                 message=f"'{name}' block must contain at least one predicate expression",
                 code="E001",
                 hint=f'example: {name} {{ starts "foo" }}',
-            )
-
-    # @init reference validation
-    elif name.startswith("@") and name not in {
-        "@doc",
-        "@init",
-        "@pre-validate",
-        "@split-doc",
-        "@key",
-        "@value",
-        "@table",
-        "@rows",
-        "@match",
-    }:
-        field_name = name[1:]
-        if field_name not in lint.init_fields:
-            lint.error(
-                node,
-                message=f"'@{field_name}': field '{field_name}' not found in @init block",
-                code="E301",
-                hint=f"declare it in @init: @init {{ {field_name} {{ ... }} }}",
             )
 
 

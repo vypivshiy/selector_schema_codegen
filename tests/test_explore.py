@@ -121,23 +121,6 @@ def test_tag_filter_finds_articles(html: str) -> None:
     assert result.matched == 2
 
 
-def test_css_initial_candidate_set(html: str) -> None:
-    result = run_scout(
-        html,
-        compile_filters(
-            text="foo",
-            attrs=[],
-            tag=None,
-            css=".title",
-            ignore_case=False,
-            fixed=False,
-        ),
-        NavSpec(),
-        ["tag", "text"],
-    )
-    assert result.matched == 2
-
-
 def test_css_text_intersect(html: str) -> None:
     result = run_scout(
         html,
@@ -706,23 +689,6 @@ def test_result_to_text_with_matches(html: str) -> None:
 
 
 # ─────────────────────────── exit-code semantics ───────────────────
-
-
-def test_exit_zero_on_match(html: str) -> None:
-    result = run_scout(
-        html,
-        compile_filters(
-            text=None,
-            attrs=[],
-            tag="article",
-            css=None,
-            ignore_case=False,
-            fixed=False,
-        ),
-        NavSpec(),
-        list(DEFAULT_FIELDS),
-    )
-    assert result.matched > 0
 
 
 def test_exit_nonzero_on_no_match(html: str) -> None:

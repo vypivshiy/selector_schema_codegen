@@ -361,9 +361,7 @@ def _go_unmarshal_json(
                 lines.append(
                     f"\tif !{res_var}.Exists() || {res_var}.Type == gjson.Null {{"
                 )
-                lines.append(
-                    f"\t\treturn fmt.Errorf({missing_err_msg})"
-                )
+                lines.append(f"\t\treturn fmt.Errorf({missing_err_msg})")
                 lines.append("\t}")
                 lines.append(
                     f"\tif err := json.Unmarshal([]byte({res_var}.Raw), &res.{field_name}); err != nil {{"
@@ -401,9 +399,7 @@ def _go_unmarshal_json(
                     lines.append(
                         f"\tif !{res_var}.Exists() || {res_var}.Type == gjson.Null {{"
                     )
-                    lines.append(
-                        f"\t\treturn fmt.Errorf({missing_err_msg})"
-                    )
+                    lines.append(f"\t\treturn fmt.Errorf({missing_err_msg})")
                     lines.append("\t}")
                     lines.append(f"\tfor _, item := range {res_var}.Array() {{")
                     lines.append(f"\t\tvar child {child_type}")
@@ -436,9 +432,7 @@ def _go_unmarshal_json(
                     lines.append(
                         f"\tif !{res_var}.Exists() || {res_var}.Type == gjson.Null {{"
                     )
-                    lines.append(
-                        f"\t\treturn fmt.Errorf({missing_err_msg})"
-                    )
+                    lines.append(f"\t\treturn fmt.Errorf({missing_err_msg})")
                     lines.append("\t}")
                     lines.append(
                         f"\tif err := json.Unmarshal([]byte({res_var}.Raw), &res.{field_name}); err != nil {{"
@@ -480,9 +474,7 @@ def _go_unmarshal_json(
                 lines.append(
                     f"\tif !{res_var}.Exists() || {res_var}.Type == gjson.Null {{"
                 )
-                lines.append(
-                    f"\t\treturn fmt.Errorf({missing_err_msg})"
-                )
+                lines.append(f"\t\treturn fmt.Errorf({missing_err_msg})")
                 lines.append("\t}")
                 lines.append(f"\tfor _, item := range {res_var}.Array() {{")
                 lines.append(
@@ -504,9 +496,7 @@ def _go_unmarshal_json(
                 lines.append(
                     f"\tif !{res_var}.Exists() || {res_var}.Type == gjson.Null {{"
                 )
-                lines.append(
-                    f"\t\treturn fmt.Errorf({missing_err_msg})"
-                )
+                lines.append(f"\t\treturn fmt.Errorf({missing_err_msg})")
                 lines.append("\t}")
                 lines.append(f"\tres.{field_name} = {res_var}{getter}")
 
@@ -539,7 +529,6 @@ class GoVisitor(BaseWalker):
         OPTIONAL_TYPE_FMT: Pointer type formatting template for optional fields (``"*{}"``).
         DOCUMENT_TYPE: goquery selection pointer type (``"*goquery.Selection"``).
         DOCUMENT_ARRAY_TYPE: goquery selection collection pointer type.
-        STD_MODULE_NAME: Canonical runtime filename (``"sscgen_runtime"``).
         var_name: Base intermediate variable prefix (default: ``"v"``).
         indent: Indentation string (default: tab ``"\\t"``).
     """
@@ -560,7 +549,6 @@ class GoVisitor(BaseWalker):
     OPTIONAL_ON_OMITEMPTY = True
     DOCUMENT_TYPE = "*goquery.Selection"
     DOCUMENT_ARRAY_TYPE = "*goquery.Selection"
-    STD_MODULE_NAME = "sscgen_runtime"
 
     def __init__(self, var_name: str = "v", indent: str = "\t") -> None:
         """Initialize the Go visitor.

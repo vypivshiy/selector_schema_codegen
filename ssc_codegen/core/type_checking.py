@@ -293,9 +293,6 @@ def check_pipeline_types(
         if not op_name:
             continue
 
-        if op_name == "self":
-            continue
-
         if op_name.startswith("!"):
             definition = ctx.extensions.get(op_name[1:])
             if definition is None:

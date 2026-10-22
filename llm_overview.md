@@ -63,10 +63,10 @@ ssc_codegen/
 ├── traversal/             # Shared AST traversal core (language-agnostic)
 │   ├── context.py         # WalkContext — immutable context (index, depth, prv/nxt, advance/deeper/reset_index)
 │   ├── walker.py          # BaseWalker — dispatch table + walk/walk_children/walk_pipeline (no codegen logic)
-│   └── utils.py           # module_has_rest, module_is_rest_only, err_subclass_name, dict_needs_builder, find_predicate_container, dict_entry_placeholder, jsonify_path_to_segments
+│   └── utils.py           # module_has_rest, module_has_fetch, module_uses_http, module_has_html_struct, module_is_extension_only, err_subclass_name, find_predicate_container, find_enclosing_module, resolve_json_def, parse_gjson_path, is_malformed_gjson_path, classify_gjson_path
 ├── generation/            # Codegen data accumulator + runtime assembly
 │   ├── builder.py         # ModuleBuilder — pure data accumulator (imports, std defs). No rendering.
-│   └── runtime.py         # register_runtime_file, runtime_module_content, rest_runtime_lines, _BASE_UTILITY_LINES — `-R` support
+│   └── runtime.py         # register_runtime_file, runtime_module_content, _BASE_UTILITY_LINES — `-R` support
 ├── targets/               # Backend-specific code generators
 │   ├── __init__.py
 │   ├── spec.py            # TargetSpec — raw user input (lang, lib, http_client, separate_runtime)
@@ -75,7 +75,7 @@ ssc_codegen/
 │   ├── python/            # Python backend
 │   │   ├── __init__.py    # PY_BS4_CONVERTER, PY_LXML_CONVERTER, PY_PARSEL_CONVERTER, PY_SLAX_CONVERTER (pre-built instances)
 │   │   ├── visitor.py     # PythonVisitor(BaseWalker) — self-contained, accepts dom_spelling_cls in ctor
-│   │   ├── runtime.py     # Python-specific runtime helpers
+│   │   ├── rest.py        # Python REST/fetch codegen
 │   │   ├── html_libs/     # DomSpelling implementations (data + behavior per HTML library)
 │   │   │   ├── base.py    # DomSpelling(ABC) — expression methods return list[str], predicate methods return str
 │   │   │   ├── bs4.py     # Bs4DomSpelling — BeautifulSoup4

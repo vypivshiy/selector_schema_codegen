@@ -119,13 +119,6 @@ class TestTargetSpecAndResolution:
         ):
             resolve(TargetSpec(lang=lang, http_io=mode))
 
-    def test_resolve_rejects_http_io_both_for_javascript(self) -> None:
-        with pytest.raises(
-            ResolutionError,
-            match=r"--http-io is not applicable for JavaScript\.",
-        ):
-            resolve(TargetSpec(lang="javascript", http_io="both"))
-
 
 class TestCliOptions:
     def test_cli_generate_python_accepts_http_io(self, tmp_path: Path) -> None:

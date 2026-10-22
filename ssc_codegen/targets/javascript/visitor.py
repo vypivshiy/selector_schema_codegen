@@ -634,7 +634,6 @@ class JsVisitor(BaseWalker):
         OPTIONAL_TYPE_FMT: Optional type formatting template (``"{}|null"``).
         DOCUMENT_TYPE: JSDoc type for DOM documents/elements (``"Document|Element"``).
         DOCUMENT_ARRAY_TYPE: JSDoc type for collections of elements (``"Array<Element>"``).
-        STD_MODULE_NAME: Default module name for separate runtime exports (``"sscgen_runtime"``).
         var_name: Base prefix for pipeline intermediate variables (default: ``"v"``).
         indent: Indentation unit string (default: 2 spaces).
     """
@@ -655,7 +654,6 @@ class JsVisitor(BaseWalker):
     OPTIONAL_ON_OMITEMPTY = True
     DOCUMENT_TYPE = "Document|Element"
     DOCUMENT_ARRAY_TYPE = "Array<Element>"
-    STD_MODULE_NAME = "sscgen_runtime"
 
     _HTTP_STRATEGIES: dict[str, type[JsHttpLibStrategy]] = {
         "fetch": FetchStrategy,
@@ -1727,9 +1725,7 @@ class JsVisitor(BaseWalker):
                 "sscResolveDotpath", code=_JS_JSON_PROJECT_HELPER
             )
             proj_name = js_json_projector_name(node.schema_name)
-            return [
-                f"{ctx.indent}let {ctx.nxt} = {proj_name}({raw_expr});"
-            ]
+            return [f"{ctx.indent}let {ctx.nxt} = {proj_name}({raw_expr});"]
 
         return [f"{ctx.indent}let {ctx.nxt} = {raw_expr};"]
 
@@ -1809,10 +1805,6 @@ class JsVisitor(BaseWalker):
         if field_part:
             return f"{struct_name}.{field_part}" if struct_name else field_part
         return struct_name
-
-    def _resolve_assert_location(self, node: Assert) -> str:
-        """Back-compat shim; delegates to :meth:`_resolve_location`."""
-        return self._resolve_location(node)
 
     def _resolve_source_file(self, node) -> str:
         """Walk parent chain to Module; return ``Module.source_file`` basename."""

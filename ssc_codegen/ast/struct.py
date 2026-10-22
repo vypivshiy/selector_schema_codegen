@@ -103,18 +103,6 @@ class PlaceholderSpec:
         return parse_placeholder(m) if m else None
 
     @staticmethod
-    def find_all(text: str) -> list[PlaceholderSpec]:
-        """Return every placeholder found in text in order of appearance.
-
-        Args:
-            text: Input string to search for placeholders.
-
-        Returns:
-            List of parsed `PlaceholderSpec` objects.
-        """
-        return [parse_placeholder(m) for m in PLACEHOLDER_RE.finditer(text)]
-
-    @staticmethod
     def search(text: str) -> bool:
         """Check whether text contains at least one placeholder token.
 
@@ -162,36 +150,6 @@ class PlaceholderSpec:
                 lambda m: replacement(parse_placeholder(m)), text
             )
         return PLACEHOLDER_RE.sub(replacement, text)
-
-    @staticmethod
-    def rename(text: str, mapping: dict[str, str]) -> str:
-        """Rename placeholder identifiers in text while preserving all type/style modifiers.
-
-        Args:
-            text: String containing placeholders.
-            mapping: Map of old placeholder names to new placeholder names.
-
-        Returns:
-            String with remapped placeholder names.
-        """
-
-        def _repl(m: "_re.Match[str]") -> str:
-            new_name = mapping.get(m.group(1), m.group(1))
-            type_part = f":{m.group(2)}" if m.group(2) else ""
-            array_part = m.group(3) or ""
-            optional_part = m.group(4) or ""
-            style_part = f"|{m.group(5)}" if m.group(5) else ""
-            return (
-                "{{"
-                + new_name
-                + type_part
-                + array_part
-                + optional_part
-                + style_part
-                + "}}"
-            )
-
-        return PLACEHOLDER_RE.sub(_repl, text)
 
     def to_token(self) -> str:
         """Reconstruct the canonical source token representation."""

@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .base import Node
-from .types import TypeInfo, VariableType
+from .types import TypeInfo
 
 
 @dataclass
@@ -101,70 +101,3 @@ class JsonDef(Node):
     path: str = ""
     key_type_info: TypeInfo | None = None
     value_type_info: TypeInfo | None = None
-
-    @property
-    def has_alias_key(self) -> bool:
-        """Whether this definition or any nested JSON definitions contain aliased fields."""
-        if any(
-            field.alias
-            for field in self.body
-            if isinstance(field, JsonDefField)
-        ):
-            return True
-        module = self.parent
-        while module is not None and not hasattr(module, "body"):
-            module = module.parent
-        if module is None:
-            return False
-        definitions = {
-            node.name: node for node in module.body if isinstance(node, JsonDef)
-        }
-        return _has_nested_alias(self, definitions, ())
-
-
-def _has_nested_alias(
-    definition: JsonDef,
-    definitions: dict[str, JsonDef],
-    stack: tuple[str, ...],
-) -> bool:
-    """Recursively check whether a JSON definition or referenced schemas contain aliased fields."""
-    if definition.name in stack:
-        return False
-    if definition.is_dict:
-        val_info = definition.value_type_info
-        if val_info and val_info.base == VariableType.JSON and val_info.ref:
-            nested = definitions.get(val_info.ref)
-            if nested and _has_nested_alias(
-                nested, definitions, (*stack, definition.name)
-            ):
-                return True
-        return False
-    if any(
-        field.alias
-        for field in definition.body
-        if isinstance(field, JsonDefField)
-    ):
-        return True
-    next_stack = (*stack, definition.name)
-    for field in definition.body:
-        if not isinstance(field, JsonDefField):
-            continue
-        info = field.ret_type_info
-        if (field.is_dict or (info and info.is_dict)) and field.value_type_info:
-            val_info = field.value_type_info
-            if val_info.base == VariableType.JSON and val_info.ref:
-                nested = definitions.get(val_info.ref)
-                if nested and _has_nested_alias(
-                    nested, definitions, next_stack
-                ):
-                    return True
-            continue
-        ref = info.ref if info else None
-        nested = (
-            definitions.get(ref)
-            if ref and info and info.base == VariableType.JSON
-            else None
-        )
-        if nested and _has_nested_alias(nested, definitions, next_stack):
-            return True
-    return False

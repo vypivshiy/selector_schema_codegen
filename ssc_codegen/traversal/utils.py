@@ -20,8 +20,6 @@ from ssc_codegen.ast import (
     MethodFetch,
     Module,
     Node,
-    PlaceholderSpec,
-    PlaceholderTemplate,
     PreValidate,
     Struct,
     StructBase,
@@ -83,19 +81,6 @@ def module_uses_http(module: Module) -> bool:
     return False
 
 
-def module_is_rest_only(module: Module) -> bool:
-    """Check if all structs in the module are REST structs.
-
-    Args:
-        module: The AST `Module` to inspect.
-
-    Returns:
-        `True` if there are no non-REST structs in the module, `False` otherwise.
-    """
-    structs = [n for n in module.body if isinstance(n, StructBase)]
-    return len(structs) == 0 or all(isinstance(s, StructRest) for s in structs)
-
-
 def module_has_html_struct(module: Module) -> bool:
     """Check if the module has at least one HTML-parsing struct or function.
 
@@ -152,21 +137,6 @@ def err_subclass_name(struct_name: str, err: ErrorResponse) -> str:
     )
 
     return _impl(struct_name, err)
-
-
-def dict_entry_placeholder(
-    tmpl: PlaceholderTemplate,
-) -> PlaceholderSpec | None:
-    """Return the single `PlaceholderSpec` for a dictionary entry value template.
-
-    Args:
-        tmpl: The placeholder template to inspect.
-
-    Returns:
-        The `PlaceholderSpec` if the template contains exactly one placeholder,
-        or `None`.
-    """
-    return tmpl.single_placeholder()
 
 
 def find_predicate_container(node: Node) -> Node | None:
@@ -332,9 +302,7 @@ def parse_gjson_path(path: str) -> tuple[GjsonSegment, ...]:
             )
         elif not seg_has_escape and raw_seg.isdigit():
             segments.append(
-                GjsonSegment(
-                    kind="index", key=raw_seg, index=int(raw_seg)
-                )
+                GjsonSegment(kind="index", key=raw_seg, index=int(raw_seg))
             )
         else:
             segments.append(GjsonSegment(kind="key", key=unescaped_seg))
@@ -376,4 +344,3 @@ def classify_gjson_path(path: str) -> tuple[bool, str]:
     if len(segments) == 1 and segments[0].kind == "key":
         return True, segments[0].key
     return False, path
-

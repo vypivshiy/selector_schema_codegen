@@ -1,13 +1,12 @@
 """Go REST codegen — pure functions for MethodRest, MethodFetch,
 ResultVariantDef, ResultAliasDef, MatcherListDef AST nodes.
 
-Adapts the Python/JS REST pattern to Go idioms:
+Adapts the REST/fetch pattern to Go idioms:
 
-- Each REST method returns a marker interface (e.g. ``APIFetchResult``).
-- ``Ok`` variant holds the parsed schema value.
-- Each ``@error`` generates a struct implementing both ``error`` and the marker.
-- ``UnknownErr`` / ``TransportErr`` are generated per-struct (not runtime).
-- The runtime's ``sscRestCall`` returns ``sscResult``; the method converts.
+- Each REST method returns ``(*T, error)``, ``([]T, error)``, or ``(struct{}, error)``
+  by delegating to ``sscRestCallValue[T]``, ``sscRestCallSlice[T]``, or ``sscRestCallVoid``.
+- Each ``@error`` generates a struct implementing ``error``.
+- ``UnknownErr`` and ``TransportErr`` live in ``sscgen_runtime.go``.
 """
 
 from __future__ import annotations
@@ -335,41 +334,6 @@ def placeholder_params(spec: RequestHttp) -> str:
         name = to_camel_case(ph.name)
         parts.append(f"{name} {go_type}")
     return ", " + ", ".join(parts)
-
-
-# ===========================================================================
-# Result type names
-# ===========================================================================
-
-
-def result_interface_name(struct_name: str, method_name: str) -> str:
-    """Derive the PascalCase result interface name for a REST method.
-
-    Args:
-        struct_name (str): Name of the enclosing REST struct.
-        method_name (str): Name of the REST method (or `""` for default `fetch`).
-
-    Returns:
-        str: PascalCase result type identifier (e.g. `"APIFetchResult"`).
-    """
-    pascal = to_pascal_case(struct_name)
-    method_suffix = to_pascal_case(method_name) if method_name else "Fetch"
-    return f"{pascal}{method_suffix}Result"
-
-
-def ok_variant_name(struct_name: str, method_name: str) -> str:
-    """Derive the PascalCase `Ok` variant name for a REST method.
-
-    Args:
-        struct_name (str): Name of the enclosing REST struct.
-        method_name (str): Name of the REST method (or `""` for default `fetch`).
-
-    Returns:
-        str: PascalCase `Ok` variant identifier (e.g. `"APIFetchOk"`).
-    """
-    pascal = to_pascal_case(struct_name)
-    method_suffix = to_pascal_case(method_name) if method_name else "Fetch"
-    return f"{pascal}{method_suffix}Ok"
 
 
 # ===========================================================================

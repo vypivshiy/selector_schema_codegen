@@ -146,8 +146,8 @@ class PythonVisitor(BaseWalker):
 
 - Creates `self._dom` from spelling class in `_reset_state()`
 - 23 DOM delegation methods (`visit_css_select` → `self._dom.css_select`, etc.)
-- Class-level type resolution attrs: `TYPES`, `ARRAY_TYPE_FMT`, `OPTIONAL_TYPE_FMT`, `DEFAULT_TYPE`, `OPTIONAL_ON_OMITEMPTY`, `STD_MODULE_NAME`
-- `_HTTP_STRATEGIES` dict maps `"httpx"` → `HttpxStrategy()`, `"aiohttp"` → `AioHttpStrategy()`, `"requests"` → `RequestsStrategy()`
+- Class-level type resolution attrs: `TYPES`, `ARRAY_TYPE_FMT`, `OPTIONAL_TYPE_FMT`, `DEFAULT_TYPE`, `OPTIONAL_ON_OMITEMPTY`
+- `_HTTP_STRATEGIES` dict maps `"httpx"` → `HttpxStrategy`, `"httpx2"` → `Httpx2Strategy`, `"aiohttp"` → `AioHttpStrategy`, `"requests"` → `RequestsStrategy`
 - REST rendering delegated to `rest.py`: `rest.emit_method_fetch`, `rest.emit_method_rest`, `rest.emit_result_variant_def`, `rest.emit_result_alias_def`, `rest.emit_matcher_list_def`
 - Predicate formatting inlined: `prefix = "" if ctx.index == 0 else "and "` then `f"{ctx.indent}{prefix}{cond}"`
 
@@ -199,16 +199,21 @@ Strategy only determines which helper name generated methods delegate to.
 
 ## Shared utility functions (traversal/utils.py)
 
-Language-agnostic functions used by both backends:
+Language-agnostic functions used by all backends:
 
 ```python
 module_has_rest(module) -> bool
-module_is_rest_only(module) -> bool
+module_has_fetch(module) -> bool
+module_uses_http(module) -> bool
+module_has_html_struct(module) -> bool
+module_is_extension_only(module) -> bool
 err_subclass_name(struct_name, err) -> str
-dict_entry_placeholder(tmpl) -> PlaceholderSpec | None
-dict_needs_builder(d) -> bool
 find_predicate_container(node) -> Node | None
-jsonify_path_to_segments(path) -> list[str | tuple[str, bool]]
+find_enclosing_module(node) -> Module | None
+resolve_json_def(node, schema_name) -> JsonDef | None
+parse_gjson_path(path) -> tuple[GjsonSegment, ...]
+is_malformed_gjson_path(path) -> bool
+classify_gjson_path(path) -> tuple[bool, str]
 ```
 
 ## Runtime file (generation/runtime.py)
@@ -218,9 +223,8 @@ Flat module that assembles the separate runtime file emitted by `-R` /
 
 | Symbol | Role |
 |--------|------|
-| `_BASE_UTILITY_LINES` | Base text-helper source lines (repl_map, normalize_text, unescape_text, rm_prefix/suffix, UNMATCHED_TABLE_ROW) |
-| `rest_runtime_lines()` | REST runtime source lines (Ok/Err/UnknownErr/TransportErr/ErrMatcher/ssc_dispatch_err/ssc_rest_call[_async]) |
-| `runtime_module_content(module)` | Full runtime file source for one reference module |
+| `_BASE_UTILITY_LINES` | Base text-helper and JSON projection source lines (repl_map, normalize_text, unescape_text, rm_prefix/suffix, UNMATCHED_TABLE_ROW, PY_JSON_PROJECT_HELPER) |
+| `runtime_module_content(module)` | Full runtime file source for one reference module (delegates REST/fetch runtime lines to `HttpLibStrategy`) |
 | `register_runtime_file(converter, runtime_name, *, include_fallback)` | Registers a `@converter.file(...)` provider and returns a `generate_runtime(modules) -> str` callable |
 
 ## Target resolution (targets/)
@@ -256,8 +260,8 @@ emits native dict/list values, JavaScript uses `JSON.stringify`, and Go uses
 `encoding/json` via `stdJSONBody`.
 
 Renderers walk `Template.parts` instead of regex-parsing strings:
-- Python: `rest.render_value(Template)`, `rest.render_dict`, `rest.emit_dict_builder`, `rest.render_json_body`, `rest.render_body` in `targets/python/rest.py`
-- JS: `rest.render_value(Template)`, `rest.render_obj`, `rest.emit_obj_builder`, `rest.emit_params_builder`, `rest.render_json_body`, `rest.render_body` in `targets/javascript/rest.py`
+- Python: `rest.render_value(Template)`, `rest.render_dict`, `rest.render_json_body`, `rest.render_body` in `targets/python/rest.py`
+- JS: `rest.render_value(Template)`, `rest.render_obj`, `rest.render_json_body`, `rest.render_body` in `targets/javascript/rest.py`
 - `Template.map(on_ph, on_literal)` assembles a string from parts (used by JS template-literal rendering)
 - `Template.single_placeholder()` / `is_single_placeholder` — queries for dict-entry / bare-name cases
 
@@ -285,8 +289,8 @@ codegen. Visitors delegate to these via thin `visit_*` wrappers.
 
 | File | Key functions |
 |------|---------------|
-| `targets/python/rest.py` | `render_value`, `render_dict`, `emit_dict_builder`, `render_json_body`, `render_body`, `placeholder_params`, `emit_method_rest`, `emit_method_fetch`, `emit_result_variant_def`, `emit_result_alias_def`, `emit_matcher_list_def`, `runtime_export_names` |
-| `targets/javascript/rest.py` | `render_value`, `render_obj`, `emit_obj_builder`, `emit_params_builder`, `render_json_body`, `render_body`, `emit_method_rest`, `emit_method_fetch`, `emit_result_variant_def`, `emit_result_alias_def`, `emit_matcher_list_def`, `REST_SHARED` |
+| `targets/python/rest.py` | `render_value`, `render_dict`, `render_json_body`, `render_body`, `placeholder_params`, `emit_method_rest`, `emit_method_fetch`, `emit_result_variant_def`, `emit_result_alias_def`, `emit_matcher_list_def`, `runtime_export_names` |
+| `targets/javascript/rest.py` | `render_value`, `render_obj`, `render_json_body`, `render_body`, `emit_method_rest`, `emit_method_fetch`, `emit_result_variant_def`, `emit_result_alias_def`, `emit_matcher_list_def`, `HTTP_SHARED`, `REST_SHARED` |
 | `targets/golang/rest.py` | `render_url`, `render_url_values`, `render_body_json`, `emit_method_rest`, `emit_method_fetch`, `emit_result_variant_def`, `emit_matcher_list_def` |
 
 All `emit_*` functions accept `(node, ctx, http)` where `http` is the
@@ -352,14 +356,9 @@ runtime-internal subset only.
 Returns the exact list of names the parser file imports from the runtime.
 Conditional selection:
 
-- **REST-only module** (`module_is_rest_only == True`): REST names only.
-  `ssc_dispatch_err` is omitted — it is internal to `ssc_rest_call`.
-- **Module with HTML structs** (`module_is_rest_only == False`): table
-  markers (`UNMATCHED_TABLE_ROW`, `_UnmatchedTableRow`) are always
-  imported; `FALLBACK_HTML_STR` is added when `need_fallback=True`
-  (caller passes `any("FALLBACK_HTML_STR" in l for l in self._dom.extra_utilities)`).
-- **Module with REST structs** (`module_has_rest == True`): REST names
-  appended on top.
+- **Module without HTML structs** (`module_has_html_struct == False`): omits HTML table/fallback helpers. `ssc_dispatch_err` is omitted — it is internal to `ssc_rest_call`.
+- **Module with HTML structs** (`module_has_html_struct == True`): table markers (`UNMATCHED_TABLE_ROW`, `UnmatchedTableRow`) are imported; `FALLBACK_HTML_STR` is added when `need_fallback=True` (caller passes `any("FALLBACK_HTML_STR" in l for l in self._dom.extra_utilities)`).
+- **Module with HTTP/REST/fetch** (`module_uses_http` / `module_has_rest` / `module_has_fetch`): `ssc_merge_kwargs`, REST names, and fetch helpers appended on top.
 
 This replaces the previous greedy export list that pulled every HTML
 helper even into REST-only modules.

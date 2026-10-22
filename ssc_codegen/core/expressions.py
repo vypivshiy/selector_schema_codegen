@@ -210,27 +210,6 @@ def resolve_define_references(value: str, ctx: ParseContext) -> str:
     return _DEFINE_REF_RE.sub(_replacer, value)
 
 
-_VAR_TYPE_MAP: dict[str, VariableType] = {
-    "STRING": VariableType.STRING,
-    "INT": VariableType.INT,
-    "FLOAT": VariableType.FLOAT,
-    "BOOL": VariableType.BOOL,
-    "NULL": VariableType.NULL,
-    "DOCUMENT": VariableType.DOCUMENT,
-    "NESTED": VariableType.NESTED,
-    "JSON": VariableType.JSON,
-    # LIST_*/OPT_* aliases — map to base scalar types
-    "LIST_STRING": VariableType.STRING,
-    "LIST_INT": VariableType.INT,
-    "LIST_FLOAT": VariableType.FLOAT,
-    "LIST_DOCUMENT": VariableType.DOCUMENT,
-    "LIST_AUTO": VariableType.AUTO,
-    "OPT_STRING": VariableType.STRING,
-    "OPT_INT": VariableType.INT,
-    "OPT_FLOAT": VariableType.FLOAT,
-}
-
-
 def resolve_index_types(
     parent: FieldLikeNode,
 ) -> tuple[TypeInfo, TypeInfo, bool]:
@@ -273,10 +252,7 @@ def resolve_jsonify_type(
     Returns:
         A tuple of `(base_type, is_array)`.
     """
-    ja = json_def.is_array
-    if not path:
-        return VariableType.JSON, ja
-    return VariableType.JSON, ja
+    return VariableType.JSON, json_def.is_array
 
 
 # ── Typedef builder ──────────────────────────────────────────────────────────────
@@ -319,69 +295,6 @@ def typedef_from_struct(struct: StructBase, parent: Module) -> TypeDef:
 
 
 # ── Expression dispatch ──────────────────────────────────────────────────────────
-
-
-def _build_expression(
-    node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
-) -> AstNode:
-    name = node.name
-
-    # block define inlining
-    if name in ctx.children_defines:
-        for child in ctx.children_defines[name]:
-            _build_expression(child, parent, ctx, lint)
-        return parent.body[-1] if parent.body else parent
-
-    # @<name> references
-    if name.startswith("@") and name not in {
-        "@doc",
-        "@init",
-        "@pre-validate",
-        "@split-doc",
-        "@key",
-        "@value",
-        "@table",
-        "@rows",
-        "@match",
-    }:
-        field_name = name[1:]
-        struct = parent.parent
-        if not isinstance(struct, Struct):
-            raise BuildTimeError(f"@{field_name} outside of struct context")
-        init_field = next(
-            (
-                i
-                for i in struct.body
-                if isinstance(i, InitField) and i.name == field_name
-            ),
-            None,
-        )
-        if init_field is None:
-            raise BuildTimeError(
-                f"Unknown @init reference '@{field_name}' in {type(parent).__name__}"
-            )
-        prev_ti = init_field.ret_type_info
-        return Self(
-            parent=parent,
-            accept_type_info=prev_ti,
-            ret_type_info=prev_ti,
-            name=field_name,
-        )
-
-    if name == "self":
-        ref_name = str(node.args[0].value) if node.args else "<name>"
-        raise BuildTimeError(
-            f"'self {ref_name}' syntax is no longer supported; use '@{ref_name}' instead"
-        )
-
-    if name.startswith("!"):
-        return _expr_extension(node, parent, ctx, lint)
-
-    # dispatch
-    handler = _EXPRESSION_HANDLERS.get(name)
-    if handler is None:
-        raise BuildTimeError(f"Unknown expression: {name}")
-    return handler(node, parent, ctx, lint)
 
 
 def parse_expressions(

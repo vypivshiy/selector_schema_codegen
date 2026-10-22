@@ -3,13 +3,9 @@ import traceback
 
 import pytest
 
+from ssc_codegen.ast import Module
 from ssc_codegen.core import parse_module
-from ssc_codegen.generation.runtime import (
-    SscJsonFieldMissingError,
-    SscJsonPathError,
-    SscJsonSchemaError,
-    ssc_resolve_dotpath,
-)
+from ssc_codegen.generation.runtime import runtime_module_content
 from ssc_codegen.targets.python import PY_BS4_CONVERTER
 
 
@@ -23,7 +19,15 @@ def _compile_and_exec(src: str) -> tuple[str, dict]:
     return code, ns
 
 
+def _exec_runtime() -> dict:
+    ns: dict = {}
+    exec(compile(runtime_module_content(Module()), "<runtime>", "exec"), ns)
+    return ns
+
+
 def test_ssc_resolve_dotpath_valid():
+    rt = _exec_runtime()
+    ssc_resolve_dotpath = rt["ssc_resolve_dotpath"]
     data = {
         "user": {
             "name": "Alice",
@@ -48,18 +52,17 @@ def test_ssc_resolve_dotpath_valid():
     assert (
         ssc_resolve_dotpath(data, r"a\\b", is_optional=False) == "backslash_val"
     )
-    assert (
-        ssc_resolve_dotpath(data, r"\#", is_optional=False) == "hash_key_val"
-    )
-    assert (
-        ssc_resolve_dotpath(data, "user.badges.#", is_optional=False) == 2
-    )
+    assert ssc_resolve_dotpath(data, r"\#", is_optional=False) == "hash_key_val"
+    assert ssc_resolve_dotpath(data, "user.badges.#", is_optional=False) == 2
     assert ssc_resolve_dotpath(
         data, "user.badges.#.icon", is_optional=False
     ) == ["star", "shield"]
 
 
 def test_ssc_resolve_dotpath_errors():
+    rt = _exec_runtime()
+    ssc_resolve_dotpath = rt["ssc_resolve_dotpath"]
+    SscJsonPathError = rt["SscJsonPathError"]
     data = {"user": {"name": "Alice", "tags": "not-a-list"}}
 
     # Missing key
@@ -129,9 +132,6 @@ json UserProfile {
 """
     code, ns = _compile_and_exec(src)
     assert "def _project_user_profile(data: Any) -> UserProfileJson:" in code
-    assert "JSON_DESCRIPTOR_" not in code
-    assert "ssc_json_project" not in code
-    assert "ssc_remap_json_keys" not in code
 
     payload = """{
         "id": "u1",
@@ -239,7 +239,8 @@ json CdnVideoHubResponse {
     )
 
     frame_names = [
-        frame.name for frame in traceback.extract_tb(exc_info.value.__traceback__)
+        frame.name
+        for frame in traceback.extract_tb(exc_info.value.__traceback__)
     ]
     assert "_project_cdn_video_hub_response" in frame_names
     assert "_project_vast" in frame_names
@@ -271,14 +272,8 @@ json ReleaseInfo {
 """
     code, ns = _compile_and_exec(src)
     # Direct key with escaped dot should be unescaped at compile time for O(1) lookup
-    assert (
-        "ssc_json_req(_d, 'os.version', 'ReleaseInfo.os_version')"
-        in code
-    )
-    assert (
-        "ssc_json_req(_d, 'a\\\\b', 'ReleaseInfo.backslash_key')"
-        in code
-    )
+    assert "ssc_json_req(_d, 'os.version', 'ReleaseInfo.os_version')" in code
+    assert "ssc_json_req(_d, 'a\\\\b', 'ReleaseInfo.backslash_key')" in code
 
     payload = r"""{
         "payload.data": {
@@ -338,8 +333,6 @@ json CatalogItem {
     assert "_project_geo_location(_v)" in code
     assert "_project_author_detail(" in code
     assert "_project_catalog_item(json.loads(v))" in code
-    assert "JSON_DESCRIPTOR_" not in code
-    assert "ssc_json_project" not in code
 
     input_json = """
     {
@@ -389,7 +382,6 @@ def test_top_level_dict_json_codegen_and_execution():
     code, ns = _compile_and_exec(src)
     assert "TranslationsJson = Dict[int, List[str]]" in code
     assert "def _project_translations(data: Any) -> TranslationsJson:" in code
-    assert "JSON_DESCRIPTOR_" not in code
     payload = '{"1": ["jap", "eng"], "10": ["rus"]}'
     res = ns["Scraper"](payload).parse()
     assert res["translations"] == {"1": ["jap", "eng"], "10": ["rus"]}
@@ -418,7 +410,6 @@ json Episode {
     assert "def _project_episode(data: Any) -> EpisodeJson:" in code
     assert "def _project_episode_map(data: Any) -> EpisodeMapJson:" in code
     assert "_project_episode(_v)" in code
-    assert "JSON_DESCRIPTOR_" not in code
     payload = """{
         "ep_1": {"id": 1, "episode_title": "Pilot", "extra": "drop"},
         "ep_2": {"id": 2, "episode_title": "Finale", "extra": "drop"}
@@ -450,7 +441,6 @@ json AnimeInfo {
     assert "'translations': Dict[str, List[str]]" in code
     assert "def _project_anime_info(data: Any) -> AnimeInfoJson:" in code
     assert "ssc_expect_dict(" in code
-    assert "JSON_DESCRIPTOR_" not in code
     payload = """{
         "id": 123,
         "translations": {
@@ -558,10 +548,11 @@ json AnimeResponse {
     assert 'LinksJson = TypedDict("LinksJson"' in code
     assert "'links': List[LinksJson]" in code
     assert "def _project_links(data: Any) -> LinksJson:" in code
-    assert "def _project_anime_response(data: Any) -> AnimeResponseJson:" in code
+    assert (
+        "def _project_anime_response(data: Any) -> AnimeResponseJson:" in code
+    )
     assert "[_project_links(_x) for _x in ssc_expect_list(" in code
     assert "_project_anime_response(json.loads(v))" in code
-    assert "JSON_DESCRIPTOR_" not in code
     payload = """{
         "id": "a3",
         "links": [
@@ -683,17 +674,13 @@ json User {
 """
     _, ns_top = _compile_and_exec(top_src)
     ErrTop = ns_top["SscJsonSchemaError"]
-    with pytest.raises(
-        ErrTop, match="Translations: Expected dict, got list"
-    ):
+    with pytest.raises(ErrTop, match="Translations: Expected dict, got list"):
         ns_top["TopScraper"]("[1, 2, 3]").parse()
     with pytest.raises(
         ErrTop, match="Translations: Expected dict, got NoneType"
     ):
         ns_top["TopScraper"]("null").parse()
-    with pytest.raises(
-        ErrTop, match="Translations: Expected list, got str"
-    ):
+    with pytest.raises(ErrTop, match="Translations: Expected list, got str"):
         ns_top["TopScraper"]('{"1": "not_a_list"}').parse()
 
     # 3. Inline dict field execution error
@@ -741,13 +728,9 @@ json MediaItem {
 """
     _, ns_arr = _compile_and_exec(arr_src)
     ErrArr = ns_arr["SscJsonSchemaError"]
-    with pytest.raises(
-        ErrArr, match="ItemList: Expected list, got dict"
-    ):
+    with pytest.raises(ErrArr, match="ItemList: Expected list, got dict"):
         ns_arr["ArrScraper"]('{"id": 1}').parse()
-    with pytest.raises(
-        ErrArr, match="ItemList: Expected dict, got str"
-    ):
+    with pytest.raises(ErrArr, match="ItemList: Expected dict, got str"):
         ns_arr["ArrScraper"]('["not_a_dict"]').parse()
 
 
@@ -805,7 +788,6 @@ json AnimeResponse {
     )
     assert "_project_episode_value(_dv)" in code
     assert "_project_translation_value(_dv)" in code
-    assert "JSON_DESCRIPTOR_" not in code
 
     # 3. Execute projection against realistic nested dictionary payload
     payload = """{
@@ -1028,7 +1010,6 @@ def test_top_level_dict_json_with_inline_value_block_projection():
     )
     assert "def _project_translations(data: Any) -> TranslationsJson:" in code
     assert "_project_translations_value(_v)" in code
-    assert "JSON_DESCRIPTOR_" not in code
 
     payload = """{
         "en": {
@@ -1091,7 +1072,6 @@ json PlaylistLibrary {
     )
     assert "[_project_playlist_item(_x) for _x in ssc_expect_list(" in code
     assert "_project_playlist_library(json.loads(v))" in code
-    assert "JSON_DESCRIPTOR_" not in code
 
     payload = """{
         "categories": {

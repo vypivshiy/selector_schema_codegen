@@ -147,18 +147,11 @@ def _run_js_schema(
     return _WORKER.execute(code, class_name, html)
 
 
-# ── Smoke: each schema × js-pure generates valid JS that runs ────────────────
+# ── Smoke: schemas without dedicated value-check classes below ───────────────
 
 _SMOKES = [
-    ("01_strings_basic.kdl", "StringsBasic"),
-    ("02_arrays_and_conversions.kdl", "ArraysAndConversions"),
     ("03_filters_and_predicates.kdl", "FiltersAndPredicates"),
     ("05_flat.kdl", "FlatCoverage"),
-    ("06_dict.kdl", "MetaDict"),
-    ("06_dict.kdl", "MetaAliasDict"),
-    ("06_dict.kdl", "DictRoot"),
-    ("07_table.kdl", "TableCoverage"),
-    ("18_json_basic.kdl", "JsonBasic"),
     ("19_json_mixed.kdl", "JsonMixed"),
 ]
 
@@ -175,26 +168,15 @@ def test_js_codegen_runs_without_error(schema_file, struct_name):
 
 
 class TestJsStringsBasic:
-    def test_returns_list_of_2(self):
+    def test_strings_basic_extraction(self):
         r = _run_js_schema(SCHEMAS_DIR / "01_strings_basic.kdl", "StringsBasic")
         assert isinstance(r, list) and len(r) == 2
-
-    def test_fields_present(self):
-        r = _run_js_schema(SCHEMAS_DIR / "01_strings_basic.kdl", "StringsBasic")
         for item in r:
             assert all(
                 k in item for k in ("title", "link", "slug", "activeFlag")
             )
-
-    def test_field_types(self):
-        r = _run_js_schema(SCHEMAS_DIR / "01_strings_basic.kdl", "StringsBasic")
-        item = r[0]
-        assert isinstance(item["title"], str)
-        assert isinstance(item["activeFlag"], bool)
-
-    def test_raw_inner_excludes_own_tag(self):
-        r = _run_js_schema(SCHEMAS_DIR / "01_strings_basic.kdl", "StringsBasic")
-        for item in r:
+            assert isinstance(item["title"], str)
+            assert isinstance(item["activeFlag"], bool)
             inner = item["innerHtml"]
             outer = item["cleanHtml"]
             assert isinstance(inner, str)
@@ -251,19 +233,13 @@ class TestJsTable:
 
 
 class TestJsJsonBasic:
-    def test_full_payload(self):
+    def test_json_basic_extraction(self):
         r = _run_js_schema(SCHEMAS_DIR / "18_json_basic.kdl", "JsonBasic")
         assert isinstance(r["fullPayload"], list)
         assert len(r["fullPayload"]) == 2
-
-    def test_item_shape(self):
-        r = _run_js_schema(SCHEMAS_DIR / "18_json_basic.kdl", "JsonBasic")
         item = r["fullPayload"][0]
         assert item["text"] == "Quote one"
         assert item["score"] == 7
-
-    def test_path_access(self):
-        r = _run_js_schema(SCHEMAS_DIR / "18_json_basic.kdl", "JsonBasic")
         assert r["firstAuthor"] == {"name": "Author One", "slug": "author-one"}
         assert r["secondAuthor"] == {
             "name": "Author Two",
@@ -645,7 +621,6 @@ class TestJsJsonDictAndInlineSchemas:
         code = _convert_kdl(kdl_src)
         assert "* @typedef {Record<string, string[]>} TranslationsJson" in code
         assert "function _projectTranslations(data)" in code
-        assert "JSON_DESCRIPTOR_" not in code
         assert "class SscJsonSchemaError extends SscJsonError" in code
 
         raw_payload = json.dumps(
@@ -661,9 +636,7 @@ class TestJsJsonDictAndInlineSchemas:
         }
 
         # Passing non-object throws SscJsonSchemaError
-        with pytest.raises(
-            RuntimeError, match="Translations: Expected object"
-        ):
+        with pytest.raises(RuntimeError, match="Translations: Expected object"):
             _run_js_src(
                 kdl_src, "TranslationsParser", input_text='["invalid", "array"]'
             )
@@ -690,7 +663,6 @@ json Author {
         assert "* @typedef {Record<string, AuthorJson>} AuthorMapJson" in code
         assert "function _projectAuthorMap(data)" in code
         assert "_projectAuthor(" in code
-        assert "JSON_DESCRIPTOR_" not in code
 
         raw_payload = json.dumps(
             {
@@ -1121,7 +1093,6 @@ json AnimeResponse {
         )
         assert "function _projectTranslations(data)" in code
         assert "_projectTranslationValue(" in code
-        assert "JSON_DESCRIPTOR_" not in code
 
         raw_payload = json.dumps(
             {
@@ -1357,9 +1328,6 @@ json Parent {
         assert "function _projectChild(data)" in code
         assert "function _projectParent(data)" in code
         assert "_projectParent(JSON.parse(v))" in code
-        assert "JSON_DESCRIPTOR_" not in code
-        assert "sscJsonProject" not in code
-        assert "sscRemapJsonKeys" not in code
 
         payload = json.dumps(
             {
@@ -1419,10 +1387,6 @@ json ApiError {
             "factory: (_s, _h, _b) => ({ isOk: false, status: _s, headers: _h, value: _projectApiError(_b) })"
             in code
         )
-
-        assert "JSON_DESCRIPTOR_" not in code
-        assert "sscJsonProject" not in code
-        assert "sscRemapJsonKeys" not in code
 
         node_eval = subprocess.run(
             [
@@ -1838,4 +1802,3 @@ json User {
             check=True,
         )
         assert res_axios.returncode == 0
-

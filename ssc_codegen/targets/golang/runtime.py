@@ -482,16 +482,6 @@ func stdJsonify[T any](jsonStr, path string, target *T) {
 \t}
 }""",
     ),
-    "stdJsonifyValue": (
-        ['"github.com/tidwall/gjson"'],
-        """\
-func stdJsonifyValue(jsonStr, path string) any {
-\tif path != "" {
-\t\treturn gjson.Get(jsonStr, path).Value()
-\t}
-\treturn gjson.Parse(jsonStr).Value()
-}""",
-    ),
 }
 
 
