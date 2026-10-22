@@ -417,22 +417,7 @@ where
     E: From<reqwest::Error>,
     M: FnOnce(u16, &Value, &str) -> Option<E>,
 {
-    let resp = req.send().await?;
-    let status = resp.status().as_u16();
-    let body_text = resp.text().await?;
-    let body_val: Value = serde_json::from_str(&body_text).unwrap_or(Value::Null);
-    if let Some(err) = match_err(status, &body_val, &body_text) {
-        return Err(err);
-    }
-    if status >= 400 {
-        let unknown_val = if body_val.is_null() {
-            Value::String(body_text)
-        } else {
-            body_val
-        };
-        return Err(unknown_err(status, unknown_val));
-    }
-    Ok(())
+    rest_call(req, "", None, match_err, |_| Ok(()), unknown_err).await
 }
 """
 

@@ -1829,8 +1829,11 @@ fn main() {
     assert "GJSON_RUST_PASSED" in result.stdout
 
 
-def test_rust_runtime_http_delegation_and_multiline_docs() -> None:
-    """Verify Rust multi-line @doc emission and rt::rest_call / rt::fetch_html delegation."""
+def test_rust_runtime_http_delegation_and_multiline_docs(
+    tmp_path: Path,
+) -> None:
+    """Verify Rust multi-line @doc emission and execute rt::rest_call / rt::fetch_html
+    and JSON body null serialization against a local mock HTTP server."""
     schema = '''
 @doc """
     Rust module docstring.
@@ -1849,8 +1852,7 @@ struct Page {
         Line two.
         """
     @request """
-    GET /page HTTP/1.1
-    Host: example.com
+    GET http://127.0.0.1:{{port:int}}/page HTTP/1.1
     """
     title { css "h1"; text }
 }
@@ -1864,8 +1866,7 @@ struct Page {
         Update user endpoint doc.
         Line two.
         """ """
-    POST /users?tag={{tag:str}}&filter={{filter:str?}} HTTP/1.1
-    Host: api.example.com
+    POST http://127.0.0.1:{{port:int}}/users?tag={{tag:str}}&filter={{filter:str?}} HTTP/1.1
     Content-Type: application/json
 
     {"name": "{{name:str}}", "nickname": {{nickname:str?}}}
@@ -1889,5 +1890,123 @@ struct Page {
     assert "pub async fn fetch_html(" in runtime
     assert "pub async fn rest_call<" in runtime
     assert "pub async fn rest_call_void<" in runtime
+
+    source_dir = _write_cargo_project(tmp_path)
+    (tmp_path / "Cargo.toml").write_text(
+        """[package]
+name = "sscgen_rust_delegation_test"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dom_query = "0.28"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+""",
+        encoding="utf-8",
+    )
+    (source_dir / "parser.rs").write_text(code, encoding="utf-8")
+    (source_dir / "sscgen_runtime.rs").write_text(runtime, encoding="utf-8")
+    (source_dir / "main.rs").write_text(
+        r"""mod sscgen_runtime;
+mod parser;
+
+use std::io::{Read, Write};
+use std::net::TcpListener;
+use std::thread;
+
+#[tokio::main]
+async fn main() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    thread::spawn(move || {
+        for _ in 0..3 {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 4096];
+            let n = stream.read(&mut buf).unwrap();
+            let req_str = String::from_utf8_lossy(&buf[..n]);
+            if req_str.starts_with("GET /page ") {
+                let body = "<html><body><h1>Delegated Page</h1></body></html>";
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                stream.write_all(resp.as_bytes()).unwrap();
+            } else if req_str.starts_with("POST /users") {
+                let req_line = req_str.lines().next().unwrap_or("");
+                let body_part = req_str.split("\r\n\r\n").nth(1).unwrap_or("{}");
+                let parsed: serde_json::Value = serde_json::from_str(body_part).unwrap();
+                if req_line.contains("filter=") {
+                    assert!(req_line.contains("tag=v1") && req_line.contains("filter=active"));
+                    assert_eq!(parsed["name"], serde_json::Value::String("Alice".to_string()));
+                    assert_eq!(parsed["nickname"], serde_json::Value::String("ally".to_string()));
+                    let resp_body = r#"{"id":2,"name":"Alice","nickname":"ally"}"#;
+                    let resp = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        resp_body.len(),
+                        resp_body
+                    );
+                    stream.write_all(resp.as_bytes()).unwrap();
+                } else {
+                    assert!(req_line.contains("tag=v1") && !req_line.contains("filter"));
+                    assert_eq!(parsed["name"], serde_json::Value::String("Alice".to_string()));
+                    assert!(parsed["nickname"].is_null());
+                    let resp_body = r#"{"id":1,"name":"Alice","nickname":null}"#;
+                    let resp = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        resp_body.len(),
+                        resp_body
+                    );
+                    stream.write_all(resp.as_bytes()).unwrap();
+                }
+            }
+        }
+    });
+
+    let client = reqwest::Client::new();
+    let mut page = parser::PageParser::fetch(&client, port as i64).await.unwrap();
+    let parsed_page = page.parse().unwrap();
+    assert_eq!(parsed_page.title, "Delegated Page");
+
+    let user1 = parser::UserAPI::update_user(&client, port as i64, "v1", "Alice", None, None)
+        .await
+        .unwrap();
+    assert_eq!(user1.id, 1);
+    assert_eq!(user1.name, "Alice");
+    assert_eq!(user1.nickname, None);
+
+    let user2 = parser::UserAPI::update_user(
+        &client,
+        port as i64,
+        "v1",
+        "Alice",
+        Some("active"),
+        Some("ally"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(user2.id, 2);
+    assert_eq!(user2.nickname.as_deref(), Some("ally"));
+
+    println!("RUST_DELEGATION_OK");
+}
+""",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ["cargo", "run", "--quiet"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env=_cargo_env(),
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "RUST_DELEGATION_OK" in result.stdout
 
 

@@ -33,27 +33,11 @@ from ssc_codegen.targets.python.http_libs.base import HttpLibStrategy
 from ssc_codegen.traversal.context import WalkContext
 from ssc_codegen.traversal.utils import (
     find_enclosing_module,
+    module_has_fetch,
     module_has_html_struct,
     module_has_rest,
     module_uses_http,
 )
-
-
-def module_has_fetch(module: Module) -> bool:
-    """Check if the module contains at least one struct with a `MethodFetch` node.
-
-    Args:
-        module (Module): The AST `Module` to inspect.
-
-    Returns:
-        bool: `True` if any struct in the module body declares a `MethodFetch`.
-    """
-    for node in module.body:
-        if isinstance(node, StructBase):
-            for child in node.body:
-                if isinstance(child, MethodFetch):
-                    return True
-    return False
 
 
 def format_docstring(doc: str, indent: str = "") -> list[str]:
@@ -71,14 +55,18 @@ def format_docstring(doc: str, indent: str = "") -> list[str]:
         return []
     escaped = cleaned.replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
     if "\n" not in escaped:
-        if escaped.endswith('"'):
+        if escaped.endswith('"') and not escaped.endswith('\\"'):
             escaped = escaped[:-1] + '\\"'
         return [f'{indent}"""{escaped}"""']
+    raw_lines = escaped.splitlines()
+    if raw_lines[-1].endswith('"') and not raw_lines[-1].endswith('\\"'):
+        raw_lines[-1] = raw_lines[-1][:-1] + '\\"'
     lines = [f'{indent}"""']
-    for line in escaped.splitlines():
+    for line in raw_lines:
         lines.append(f"{indent}{line}" if line else "")
     lines.append(f'{indent}"""')
     return lines
+
 
 # ===========================================================================
 # Placeholder / Template rendering (pure functions)
@@ -90,6 +78,14 @@ PH_PY_TYPES = {"str": "str", "int": "int", "float": "float", "bool": "bool"}
 
 
 def _escape_fstring(tmpl: PlaceholderTemplate) -> str:
+    """Escape literal braces and interpolate placeholders as a Python f-string body.
+
+    Args:
+        tmpl (PlaceholderTemplate): Parsed template containing literal segments and placeholders.
+
+    Returns:
+        str: Unquoted f-string body with `{}` doubled and placeholders interpolated.
+    """
     result: list[str] = []
     for part in tmpl.parts:
         if isinstance(part, PlaceholderSpec):
@@ -101,6 +97,14 @@ def _escape_fstring(tmpl: PlaceholderTemplate) -> str:
 
 
 def render_value(tmpl: PlaceholderTemplate) -> str:
+    """Render a `PlaceholderTemplate` as a Python expression.
+
+    Args:
+        tmpl (PlaceholderTemplate): Template to render.
+
+    Returns:
+        str: Python expression string representing the template value.
+    """
     if ph := tmpl.single_placeholder():
         if ph.is_array and ph.style in ("csv", "pipe", "space"):
             sep = _STYLE_SEPARATOR[ph.style or "csv"]
@@ -115,6 +119,14 @@ def render_value(tmpl: PlaceholderTemplate) -> str:
 
 
 def render_dict(d: dict[str, PlaceholderTemplate]) -> str:
+    """Render a mapping of `PlaceholderTemplate` values as a Python dict literal.
+
+    Args:
+        d (dict[str, PlaceholderTemplate]): Key-to-template mapping (headers, cookies, or params).
+
+    Returns:
+        str: Python dictionary literal expression.
+    """
     if not d:
         return "{}"
     items: list[str] = []
@@ -130,6 +142,14 @@ def render_dict(d: dict[str, PlaceholderTemplate]) -> str:
 
 
 def render_json_body(tmpl: PlaceholderTemplate) -> str:
+    """Render a JSON body template as a structured Python literal expression.
+
+    Args:
+        tmpl (PlaceholderTemplate): JSON body template with optional placeholders.
+
+    Returns:
+        str: Python dict/list/scalar expression suitable for the `json=` request keyword.
+    """
     def _emit(v: object) -> str:
         if isinstance(v, PlaceholderSpec):
             return v.name
@@ -155,6 +175,15 @@ def render_json_body(tmpl: PlaceholderTemplate) -> str:
 
 
 def render_body(spec: RequestHttp) -> tuple[str, str] | None:
+    """Render the request body option for a `RequestHttp` specification.
+
+    Args:
+        spec (RequestHttp): HTTP request specification AST node.
+
+    Returns:
+        tuple[str, str] | None: `(keyword_name, value_expr)` pair (`"json"` or `"data"`),
+        or `None` when the request has no body.
+    """
     if spec.body_kind == "empty" or spec.payload is None:
         return None
     if spec.body_kind == "json":
@@ -173,6 +202,15 @@ def render_body(spec: RequestHttp) -> tuple[str, str] | None:
 
 
 def _py_path_expr(body_var: str, path: str) -> str:
+    """Build a Python dictionary/index traversal expression for a dot-path.
+
+    Args:
+        body_var (str): Variable name holding the parsed response body.
+        path (str): Dot-separated path string.
+
+    Returns:
+        str: Python expression accessing the nested path on `body_var`.
+    """
     expr = body_var
     for seg in path.split("."):
         if seg.isdigit():
@@ -185,6 +223,15 @@ def _py_path_expr(body_var: str, path: str) -> str:
 def render_py_condition_lambda(
     required_keys: list[str], conditions: dict[str, object]
 ) -> str | None:
+    """Render an error-matcher predicate lambda checking required keys and field values.
+
+    Args:
+        required_keys (list[str]): Top-level keys that must exist in the JSON body.
+        conditions (dict[str, object]): Dot-paths mapped to expected literal values.
+
+    Returns:
+        str | None: Python `lambda _b: ...` expression, or `None` if no checks apply.
+    """
     parts: list[str] = []
     for key in required_keys:
         parts.append(f"{key!r} in _b")
@@ -313,6 +360,14 @@ def runtime_export_names(
 
 
 def placeholder_params(http: RequestHttp) -> str:
+    """Format keyword-only parameter declarations for request placeholders.
+
+    Args:
+        http (RequestHttp): HTTP request specification containing placeholders.
+
+    Returns:
+        str: Leading `, *, ...` parameter signature fragment, or `""` if none.
+    """
     if not http.placeholders:
         return ""
     parts: list[str] = []
@@ -329,17 +384,26 @@ def placeholder_params(http: RequestHttp) -> str:
 
 
 def placeholder_args(http: RequestHttp) -> str:
-    """Keyword-forwarding string for delegating between fetch variants.
+    """Build a keyword-argument forwarding string for delegating between fetch variants.
 
-    Produces ``"id=id, tags=tags"`` so a caller can forward its own keyword
-    params (``fetch`` declares them keyword-only via ``*``). Used by
-    ``async_fetch`` executor wrappers (requests strategy).
+    Args:
+        http (RequestHttp): HTTP request specification containing placeholders.
+
+    Returns:
+        str: Comma-separated `name=name` pairs for all request placeholders.
     """
     return ", ".join(f"{ph.name}={ph.name}" for ph in http.placeholders)
 
 
 def _render_dsl_kw(spec: RequestHttp) -> str:
-    """Render keyword argument unpacking expression for DSL request options."""
+    """Render keyword argument unpacking expression for DSL request options.
+
+    Args:
+        spec (RequestHttp): HTTP request specification AST node.
+
+    Returns:
+        str: Unpacked keyword argument expression (`**kwargs` or `**ssc_merge_kwargs(...)`).
+    """
     entries: list[str] = []
     for attr in ("headers", "cookies", "params"):
         d = getattr(spec, attr)
@@ -361,6 +425,16 @@ def _render_dsl_kw(spec: RequestHttp) -> str:
 def emit_method_fetch(
     node: MethodFetch, ctx: WalkContext, http: HttpLibStrategy
 ) -> list[str]:
+    """Emit Python `fetch` and/or `async_fetch` classmethods for a `MethodFetch` node.
+
+    Args:
+        node (MethodFetch): AST node describing the document fetch request.
+        ctx (WalkContext): Traversal context providing indentation and metadata.
+        http (HttpLibStrategy): Active Python HTTP transport strategy.
+
+    Returns:
+        list[str]: Generated Python method lines.
+    """
     spec = node.http_request.with_renamed_placeholders(to_snake_case)
     assert node.parent is not None
     struct_name = to_pascal_case(cast(StructBase, node.parent).name)
@@ -447,6 +521,16 @@ def emit_method_fetch(
 def emit_method_rest(
     node: MethodRest, ctx: WalkContext, http: HttpLibStrategy
 ) -> list[str]:
+    """Emit Python sync and/or async REST endpoint classmethods for a `MethodRest` node.
+
+    Args:
+        node (MethodRest): AST node describing the REST endpoint request.
+        ctx (WalkContext): Traversal context providing indentation and metadata.
+        http (HttpLibStrategy): Active Python HTTP transport strategy.
+
+    Returns:
+        list[str]: Generated Python method lines.
+    """
     spec = node.http_request.with_renamed_placeholders(to_snake_case)
     struct = node.parent
     assert isinstance(struct, StructBase)
@@ -519,6 +603,14 @@ def emit_method_rest(
 
 
 def emit_result_variant_def(node: ResultVariantDef) -> list[str]:
+    """Emit a frozen `@dataclass` error subclass for a `ResultVariantDef` node.
+
+    Args:
+        node (ResultVariantDef): Error variant AST node.
+
+    Returns:
+        list[str]: Generated Python class definition lines.
+    """
     if node.schema_name:
         base = f"{to_pascal_case(node.schema_name)}Json"
         value_type = f"List[{base}]" if node.schema_is_array else base
@@ -533,6 +625,14 @@ def emit_result_variant_def(node: ResultVariantDef) -> list[str]:
 
 
 def emit_result_alias_def(node: ResultAliasDef) -> list[str]:
+    """Emit a `Union[Ok[...], ...]` type alias for a `ResultAliasDef` node.
+
+    Args:
+        node (ResultAliasDef): Result union alias AST node.
+
+    Returns:
+        list[str]: Generated Python type alias lines.
+    """
     if node.response_schema:
         base = f"{to_pascal_case(node.response_schema)}Json"
         ok_type = f"List[{base}]" if node.response_is_array else base
@@ -548,6 +648,14 @@ def emit_result_alias_def(node: ResultAliasDef) -> list[str]:
 
 
 def emit_matcher_list_def(node: MatcherListDef) -> list[str]:
+    """Emit the `<STRUCT>_MATCHERS` list of `ErrMatcher` entries for a REST struct.
+
+    Args:
+        node (MatcherListDef): Matcher list AST node.
+
+    Returns:
+        list[str]: Generated Python matcher list definition lines.
+    """
     var = f"{to_snake_case(node.struct_name).upper()}_MATCHERS"
     lines = [f"{var}: List[ErrMatcher] = ["]
     module = find_enclosing_module(node)

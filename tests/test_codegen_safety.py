@@ -99,6 +99,31 @@ def test_kdl_multiline_docs_cleandoc_and_python_docstrings() -> None:
     )
 
 
+def test_python_docs_trailing_quotes_single_and_multiline() -> None:
+    suffixes = ('"', '""', '"""')
+    for suffix in suffixes:
+        single_doc = f"Single-line doc ending with {suffix}"
+        multi_doc = f"Multi-line doc line 1\nLine 2 ending with {suffix}"
+
+        mod_single = Module(doc=single_doc)
+        mod_single.body.append(
+            Struct(parent=mod_single, name="SingleStruct", doc=single_doc)
+        )
+        ns_single: dict = {}
+        exec(PY_BS4_CONVERTER.convert(mod_single), ns_single)
+        assert inspect.cleandoc(ns_single["__doc__"]) == single_doc
+        assert inspect.cleandoc(ns_single["SingleStruct"].__doc__) == single_doc
+
+        mod_multi = Module(doc=multi_doc)
+        mod_multi.body.append(
+            Struct(parent=mod_multi, name="MultiStruct", doc=multi_doc)
+        )
+        ns_multi: dict = {}
+        exec(PY_BS4_CONVERTER.convert(mod_multi), ns_multi)
+        assert inspect.cleandoc(ns_multi["__doc__"]) == multi_doc
+        assert inspect.cleandoc(ns_multi["MultiStruct"].__doc__) == multi_doc
+
+
 def test_javascript_docs_escape_comment_terminator() -> None:
     module = Module(doc="safe */ globalThis.PWNED = true; /*")
 

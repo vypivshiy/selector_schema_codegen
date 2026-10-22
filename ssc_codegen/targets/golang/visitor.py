@@ -2372,6 +2372,8 @@ class GoVisitor(BaseWalker):
         if spec.body_kind == "json":
             self._require("stdJSONBody")
         self._builder.require_import('"' + self._http.import_path + '"')
+        for pkg in sorted(rest.go_method_imports(spec)):
+            self._builder.require_import(f'"{pkg}"')
         struct = node.parent
         name = (
             to_pascal_case(struct.name)
@@ -2379,15 +2381,7 @@ class GoVisitor(BaseWalker):
             else "X"
         )
         rcv = _receiver(name)
-        lines = rest.emit_method_rest(node, ctx, self._http, rcv)
-        joined = "\n".join(lines)
-        if "fmt." in joined:
-            self._builder.require_import('"fmt"')
-        if "url.Values" in joined:
-            self._builder.require_import('"net/url"')
-        if "strings." in joined:
-            self._builder.require_import('"strings"')
-        return lines
+        return rest.emit_method_rest(node, ctx, self._http, rcv)
 
     def visit_method_fetch(
         self, node: MethodFetch, ctx: WalkContext
@@ -2398,12 +2392,6 @@ class GoVisitor(BaseWalker):
         spec = node.http_request
         if spec.body_kind == "json":
             self._require("stdJSONBody")
-        lines = rest.emit_method_fetch(node, ctx, self._http)
-        joined = "\n".join(lines)
-        if "fmt." in joined:
-            self._builder.require_import('"fmt"')
-        if "url.Values" in joined:
-            self._builder.require_import('"net/url"')
-        if "strings." in joined:
-            self._builder.require_import('"strings"')
-        return lines
+        for pkg in sorted(rest.go_method_imports(spec)):
+            self._builder.require_import(f'"{pkg}"')
+        return rest.emit_method_fetch(node, ctx, self._http)

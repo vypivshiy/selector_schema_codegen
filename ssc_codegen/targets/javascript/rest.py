@@ -186,6 +186,14 @@ _JS_PRIM_JSDOC = {
 
 
 def _js_array_join(ph: PlaceholderSpec) -> str:
+    """Render a JavaScript array join expression for a delimited array placeholder.
+
+    Args:
+        ph (PlaceholderSpec): Array placeholder metadata specification.
+
+    Returns:
+        str: JavaScript `.map(String).join(...)` expression (null-guarded if optional).
+    """
     sep = _JS_STYLE_SEP[ph.style or "csv"]
     joined = f"{ph.name}.map(String).join({sep!r})"
     if ph.is_optional:
@@ -194,6 +202,14 @@ def _js_array_join(ph: PlaceholderSpec) -> str:
 
 
 def render_value(tmpl: PlaceholderTemplate) -> str:
+    """Render a `PlaceholderTemplate` as a JavaScript expression.
+
+    Args:
+        tmpl (PlaceholderTemplate): Template containing literal parts and/or placeholders.
+
+    Returns:
+        str: JavaScript expression string representing the template value.
+    """
     if ph := tmpl.single_placeholder():
         if ph.is_array and ph.style in ("csv", "pipe", "space"):
             return _js_array_join(ph)
@@ -208,6 +224,14 @@ def render_value(tmpl: PlaceholderTemplate) -> str:
 
 
 def render_obj(d: dict[str, PlaceholderTemplate]) -> str:
+    """Render a dictionary of `PlaceholderTemplate` values as a JavaScript object literal.
+
+    Args:
+        d (dict[str, PlaceholderTemplate]): Key-to-template mapping for params, headers, or form fields.
+
+    Returns:
+        str: JavaScript object literal expression.
+    """
     if not d:
         return "{}"
     parts: list[str] = []
@@ -223,6 +247,14 @@ def render_obj(d: dict[str, PlaceholderTemplate]) -> str:
 
 
 def render_json_body(tmpl: PlaceholderTemplate) -> str:
+    """Render a JSON body template as a `JSON.stringify(...)` JavaScript expression.
+
+    Args:
+        tmpl (PlaceholderTemplate): JSON body template with optional placeholders.
+
+    Returns:
+        str: JavaScript `JSON.stringify(...)` expression.
+    """
     def emit(value: object) -> str:
         if isinstance(value, PlaceholderSpec):
             return value.name
@@ -252,6 +284,14 @@ def render_json_body(tmpl: PlaceholderTemplate) -> str:
 
 
 def render_body(spec: RequestHttp) -> tuple[str, str] | None:
+    """Render the request body option for a `RequestHttp` specification.
+
+    Args:
+        spec (RequestHttp): HTTP request specification AST node.
+
+    Returns:
+        tuple[str, str] | None: `("body", value_expr)` pair, or `None` when empty.
+    """
     if spec.body_kind == "empty" or spec.payload is None:
         return None
     if spec.body_kind == "json":
@@ -270,6 +310,15 @@ def render_body(spec: RequestHttp) -> tuple[str, str] | None:
 
 
 def _resolve_path_expr(body_var: str, path: str) -> str:
+    """Build a JavaScript property/index access expression for a dot-path.
+
+    Args:
+        body_var (str): Identifier of the parsed JSON body variable.
+        path (str): Dot-separated property path.
+
+    Returns:
+        str: JavaScript bracket-access expression.
+    """
     expr = body_var
     for seg in path.split("."):
         if seg.isdigit():
@@ -282,6 +331,15 @@ def _resolve_path_expr(body_var: str, path: str) -> str:
 def render_js_condition_check(
     required_keys: list[str], conditions: dict[str, object]
 ) -> str | None:
+    """Render an arrow function checking required keys and field conditions on `_b`.
+
+    Args:
+        required_keys (list[str]): Top-level keys that must exist in `_b`.
+        conditions (dict[str, object]): Dot-paths mapped to expected literal values.
+
+    Returns:
+        str | None: JavaScript `(_b) => ...` predicate expression, or `None` if no checks apply.
+    """
     parts: list[str] = []
     for key in required_keys:
         parts.append(f"{key!r} in _b")
@@ -306,10 +364,26 @@ def render_js_condition_check(
 
 
 def js_name(name: str) -> str:
+    """Convert a DSL identifier into a camelCase JavaScript identifier.
+
+    Args:
+        name (str): Raw DSL identifier string.
+
+    Returns:
+        str: camelCase JavaScript identifier.
+    """
     return to_camel_case(to_snake_case(name))
 
 
 def ok_payload_type(node: MethodRest) -> str:
+    """Resolve the JSDoc type expression for the `Ok<T>` payload of a `MethodRest` node.
+
+    Args:
+        node (MethodRest): REST endpoint method AST node.
+
+    Returns:
+        str: JSDoc type string for the successful response value.
+    """
     if not node.response_schema:
         return "null"
     module = find_enclosing_module(node)
@@ -334,6 +408,16 @@ def _render_dsl_opts(
     response_path: str = "",
     response_join: str = "",
 ) -> str:
+    """Render the JavaScript DSL request options object literal passed to runtime helpers.
+
+    Args:
+        spec (RequestHttp): HTTP request specification AST node.
+        response_path (str): Optional dot-path to extract from the response body.
+        response_join (str): Optional delimiter used to join array fragments.
+
+    Returns:
+        str: JavaScript object literal expression (e.g. `"{params: ..., headers: ...}"` or `"{}"`).
+    """
     opts_parts: list[str] = []
     if spec.params:
         opts_parts.append(f"params: {render_obj(spec.params)}")
@@ -350,6 +434,14 @@ def _render_dsl_opts(
 
 
 def _placeholder_param(spec: RequestHttp) -> str:
+    """Format the destructured placeholder parameter declaration for a JS request method.
+
+    Args:
+        spec (RequestHttp): HTTP request specification containing placeholders.
+
+    Returns:
+        str: Leading `, {a, b}` parameter fragment, or `""` if there are no placeholders.
+    """
     if not spec.placeholders:
         return ""
     ordered = [
@@ -366,6 +458,16 @@ def _placeholder_param(spec: RequestHttp) -> str:
 def emit_method_rest(
     node: MethodRest, ctx: WalkContext, http: JsHttpLibStrategy
 ) -> list[str]:
+    """Emit a static async JavaScript REST endpoint method for a `MethodRest` node.
+
+    Args:
+        node (MethodRest): AST node describing the REST endpoint request.
+        ctx (WalkContext): Traversal context providing indentation and metadata.
+        http (JsHttpLibStrategy): Active JavaScript HTTP transport strategy.
+
+    Returns:
+        list[str]: Generated JavaScript JSDoc and method lines.
+    """
     spec = node.http_request.with_renamed_placeholders(js_name)
     ind = ctx.indent_char
     i1, i2 = ctx.indent, ctx.indent + ind
@@ -457,6 +559,16 @@ def emit_method_rest(
 def emit_method_fetch(
     node: MethodFetch, ctx: WalkContext, http: JsHttpLibStrategy
 ) -> list[str]:
+    """Emit a static async JavaScript document `fetch` method for a `MethodFetch` node.
+
+    Args:
+        node (MethodFetch): AST node describing the document fetch request.
+        ctx (WalkContext): Traversal context providing indentation and metadata.
+        http (JsHttpLibStrategy): Active JavaScript HTTP transport strategy.
+
+    Returns:
+        list[str]: Generated JavaScript JSDoc and method lines.
+    """
     spec = node.http_request.with_renamed_placeholders(js_name)
     ind = ctx.indent_char
     i1, i2 = ctx.indent, ctx.indent + ind
@@ -494,6 +606,14 @@ def emit_method_fetch(
 
 
 def emit_result_variant_def(node: ResultVariantDef) -> list[str]:
+    """Emit a JSDoc `@typedef` block for a `ResultVariantDef` error variant.
+
+    Args:
+        node (ResultVariantDef): Error variant AST node.
+
+    Returns:
+        list[str]: Generated JSDoc `@typedef` comment lines.
+    """
     if node.schema_name:
         base = f"{to_pascal_case(node.schema_name)}Json"
         value_type = f"Array<{base}>" if node.schema_is_array else base
@@ -512,10 +632,26 @@ def emit_result_variant_def(node: ResultVariantDef) -> list[str]:
 
 
 def emit_result_alias_def(node: ResultAliasDef) -> list[str]:
+    """Emit a `ResultAliasDef` node (no-op in JavaScript, which inlines return unions).
+
+    Args:
+        node (ResultAliasDef): Result alias AST node.
+
+    Returns:
+        list[str]: Empty list.
+    """
     return []
 
 
 def emit_matcher_list_def(node: MatcherListDef) -> list[str]:
+    """Emit the `const _<struct>Matchers = [...]` array for a REST struct.
+
+    Args:
+        node (MatcherListDef): Matcher list AST node.
+
+    Returns:
+        list[str]: Generated JavaScript matcher array lines.
+    """
     var = f"_{to_snake_case(node.struct_name)}Matchers"
     lines = [f"const {var} = ["]
     module = find_enclosing_module(node)

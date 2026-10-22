@@ -17,6 +17,7 @@ from ssc_codegen.ast import (
     JsonDef,
     Match,
     MethodBase,
+    MethodFetch,
     Module,
     Node,
     PlaceholderSpec,
@@ -33,12 +34,30 @@ def module_has_rest(module: Module) -> bool:
     """Check if the module contains at least one REST struct.
 
     Args:
-        module: The AST `Module` to inspect.
+        module (Module): The AST `Module` to inspect.
 
     Returns:
-        `True` if any node in the module body is a `StructRest`, `False` otherwise.
+        bool: `True` if any node in the module body is a `StructRest`, `False` otherwise.
     """
     return any(isinstance(n, StructRest) for n in module.body)
+
+
+def module_has_fetch(module: Module) -> bool:
+    """Check if the module contains at least one struct with a `MethodFetch` node.
+
+    Args:
+        module (Module): The AST `Module` to inspect.
+
+    Returns:
+        bool: `True` if any struct in the module body declares a `MethodFetch`,
+        `False` otherwise.
+    """
+    for node in module.body:
+        if isinstance(node, StructBase):
+            for child in node.body:
+                if isinstance(child, MethodFetch):
+                    return True
+    return False
 
 
 def module_uses_http(module: Module) -> bool:

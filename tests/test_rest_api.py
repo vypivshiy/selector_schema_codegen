@@ -1897,8 +1897,9 @@ struct ApiClient type=rest {
             'sscRestCallValue[UserJson](client, apiMatchers, "GET", "https://api.example.com/me", "data.user", nil, opts...)'
             in code
         )
-        # gjson.GetBytes(body, responsePath).Raw narrows body before Unmarshal in runtime
-        assert "gjson.GetBytes(body, responsePath).Raw" in runtime
+        # sscExtractJSONSlice narrows raw body via gjson.GetBytes(raw, responsePath).Raw before Unmarshal
+        assert "sscExtractJSONSlice" in runtime
+        assert "gjson.GetBytes(raw, responsePath).Raw" in runtime
 
     def test_go_renamed_body_var_no_underscore_prefix(self):
         """Patch B also renamed Go locals: _body → body, _err → err,
@@ -2119,7 +2120,7 @@ class TestAiohttpContentTypeBypass:
     disable the check on every aiohttp JSON path.
 
     Affects:
-    - ``fetch_body_lines`` (MethodFetch with response-path)
+    - ``fetch_runtime_lines`` (``ssc_fetch_async`` for MethodFetch with response-path)
     - ``ssc_rest_call`` and ``ssc_rest_call_async`` (REST runtime)
 
     httpx/requests are unaffected — their ``.json()`` ignores Content-Type.
@@ -2137,22 +2138,14 @@ class TestAiohttpContentTypeBypass:
             "}\n"
         )
 
-    def test_aiohttp_fetch_body_lines_bypass_content_type(self):
-        """fetch path with response-path must pass content_type=None."""
+    def test_aiohttp_fetch_runtime_lines_bypass_content_type(self):
+        """fetch runtime with response-path must pass content_type=None."""
         from ssc_codegen.targets.python.http_libs.aiohttp import (
             AioHttpStrategy,
         )
 
         strategy = AioHttpStrategy()
-        lines = strategy.fetch_body_lines(
-            is_async=True,
-            request_call="async with client.request(",
-            kwargs_lines=[],
-            response_path="data",
-            response_join="",
-            i2="    ",
-            i3="        ",
-        )
+        lines = strategy.fetch_runtime_lines()
         joined = "\n".join(lines)
         assert "await _resp.json(content_type=None)" in joined
 

@@ -33,24 +33,52 @@ _RUST_KEYWORDS = RUST_RESERVED
 
 
 def _str(value: object) -> str:
-    """Render a Rust string literal."""
+    """Render a Python value as an escaped Rust string literal.
+
+    Args:
+        value (object): Value to convert and quote as a Rust string literal.
+
+    Returns:
+        str: Double-quoted Rust string literal.
+    """
     return json.dumps(str(value), ensure_ascii=False)
 
 
 def _ident(value: str) -> str:
-    """Render a DSL identifier as a valid Rust identifier."""
+    """Render a DSL identifier as a valid snake_case Rust identifier.
+
+    Args:
+        value (str): Raw DSL identifier string.
+
+    Returns:
+        str: Valid Rust snake_case identifier, escaped with `r#` if reserved.
+    """
     name = to_snake_case(value).replace("-", "_") or "value"
     return f"r#{name}" if name in _RUST_KEYWORDS else name
 
 
 def _pascal(value: str) -> str:
-    """Render a generated Rust type name."""
+    """Render a DSL identifier as a PascalCase Rust type name.
+
+    Args:
+        value (str): Raw DSL identifier string.
+
+    Returns:
+        str: Valid PascalCase Rust type name.
+    """
     name = to_pascal_case(value).replace("-", "") or "Value"
     return f"R#{name}" if name in _RUST_KEYWORDS else name
 
 
 def rust_ph_type(ph: PlaceholderSpec) -> str:
-    """Map a `PlaceholderSpec` to its idiomatic Rust parameter type."""
+    """Map a `PlaceholderSpec` to its idiomatic Rust parameter type annotation.
+
+    Args:
+        ph (PlaceholderSpec): Placeholder metadata specification.
+
+    Returns:
+        str: Rust parameter type string (e.g. `"&str"`, `"i64"`, `"Option<&str>"`).
+    """
     if ph.is_array:
         if ph.type_name == "int":
             elem = "i64"
@@ -82,7 +110,14 @@ def rust_ph_type(ph: PlaceholderSpec) -> str:
 
 
 def render_template(tmpl: PlaceholderTemplate) -> str:
-    """Render a `PlaceholderTemplate` as a Rust string expression."""
+    """Render a `PlaceholderTemplate` as a Rust string or `format!(...)` expression.
+
+    Args:
+        tmpl (PlaceholderTemplate): Template containing literal parts and/or placeholders.
+
+    Returns:
+        str: Rust string literal or `format!(...)` expression.
+    """
     if not tmpl.has_placeholders:
         return _str(tmpl.source)
 
@@ -91,14 +126,34 @@ def render_template(tmpl: PlaceholderTemplate) -> str:
     for part in tmpl.parts:
         if isinstance(part, PlaceholderSpec):
             fmt_str += "{}"
-            args.append(_ident(part.name))
+            ident = _ident(part.name)
+            if part.is_optional:
+                if part.type_name == "str" and not part.is_array:
+                    args.append(f"{ident}.unwrap_or_default()")
+                else:
+                    args.append(
+                        f"{ident}.map(|v| v.to_string()).unwrap_or_default()"
+                    )
+            else:
+                args.append(ident)
         else:
             fmt_str += part.replace("{", "{{").replace("}", "}}")
     return f"format!({_str(fmt_str)}, {', '.join(args)})"
 
 
 def render_json_body(tmpl: PlaceholderTemplate) -> str:
-    """Render a structured JSON request payload using serde_json::json!."""
+    """Render a structured JSON request payload using `serde_json::json!`.
+
+    Optional placeholders (`Option<T>`) are emitted as parenthesized variable
+    expressions `(ident)` inside `serde_json::json!(...)`, so `None` serializes
+    as JSON `null` and `Some(v)` serializes as the typed value.
+
+    Args:
+        tmpl (PlaceholderTemplate): JSON body template with optional placeholders.
+
+    Returns:
+        str: Rust `serde_json::json!(...)` macro invocation expression.
+    """
 
     def _emit(v: object) -> str:
         if isinstance(v, PlaceholderSpec):
@@ -134,7 +189,16 @@ def _emit_kv_pairs(
     pairs: dict[str, PlaceholderTemplate],
     indent: str,
 ) -> list[str]:
-    """Emit code populating a `Vec<(&str, String)>` from placeholder templates."""
+    """Emit Rust statements populating a `Vec<(&str, String)>` from placeholder templates.
+
+    Args:
+        var_name (str): Name of the mutable `Vec<(&str, String)>` variable to push into.
+        pairs (dict[str, PlaceholderTemplate]): Key-to-template mapping for query or form parameters.
+        indent (str): Indentation prefix for emitted lines.
+
+    Returns:
+        list[str]: Generated Rust statements populating `var_name`.
+    """
     lines: list[str] = []
     for key, tmpl in pairs.items():
         ph = tmpl.single_placeholder()
@@ -202,7 +266,15 @@ def _emit_kv_pairs(
 
 
 def rust_variant_name(struct_name: str, factory_name: str) -> str:
-    """Derive idiomatic enum variant name from factory name."""
+    """Derive an idiomatic Rust enum variant name from an error factory name.
+
+    Args:
+        struct_name (str): Enclosing REST struct name.
+        factory_name (str): Synthesized error factory/class name.
+
+    Returns:
+        str: Stripped PascalCase enum variant identifier.
+    """
     pascal = _pascal(struct_name)
     if factory_name.startswith(pascal):
         tail = factory_name[len(pascal) :]
@@ -212,7 +284,14 @@ def rust_variant_name(struct_name: str, factory_name: str) -> str:
 
 
 def placeholder_params(spec: RequestHttp) -> list[str]:
-    """Emit the client and placeholder parameter signatures for reqwest methods."""
+    """Emit the `client` and placeholder parameter declarations for `reqwest` methods.
+
+    Args:
+        spec (RequestHttp): HTTP request specification containing placeholders.
+
+    Returns:
+        list[str]: Ordered list of Rust `<name>: <type>` parameter declarations.
+    """
     ordered_phs = sorted(spec.placeholders, key=lambda p: p.is_optional)
     params = ["client: &reqwest::Client"]
     for ph in ordered_phs:
@@ -221,7 +300,15 @@ def placeholder_params(spec: RequestHttp) -> list[str]:
 
 
 def render_rust_condition(path: str, val: Any) -> str:
-    """Render a condition check against a serde_json::Value."""
+    """Render a boolean condition check against a `serde_json::Value` body.
+
+    Args:
+        path (str): GJSON dot-path to inspect in `_body_val`.
+        val (Any): Expected literal value (`None`, `bool`, `int`, `float`, or `str`).
+
+    Returns:
+        str: Rust boolean expression evaluating the condition.
+    """
     path_lit = _str(path)
     if val is None:
         return (
@@ -243,7 +330,16 @@ def _emit_request_builder(
     indent: str,
     context: str = "",
 ) -> list[str]:
-    """Emit code building a reqwest::RequestBuilder into `let mut req`."""
+    """Emit Rust statements building a `reqwest::RequestBuilder` bound to `req`.
+
+    Args:
+        spec (RequestHttp): HTTP request specification AST node.
+        indent (str): Indentation prefix for emitted statements.
+        context (str): Error context label used when propagating custom method parse errors.
+
+    Returns:
+        list[str]: Generated Rust statements constructing and configuring `req`.
+    """
     url_expr = render_template(spec.url)
     method_upper = spec.method.upper()
     if method_upper in (
@@ -368,7 +464,15 @@ def emit_method_fetch(
     node: MethodFetch,
     ctx: WalkContext,
 ) -> list[str]:
-    """Emit an asynchronous `fetch` associated method for an HTML/raw parser struct."""
+    """Emit an asynchronous `fetch` associated method for an HTML/raw parser struct.
+
+    Args:
+        node (MethodFetch): AST node describing the document fetch request.
+        ctx (WalkContext): Traversal context.
+
+    Returns:
+        list[str]: Generated Rust method lines.
+    """
     spec: RequestHttp = node.http_request.with_renamed_placeholders(
         to_snake_case
     )
@@ -409,7 +513,14 @@ def emit_method_fetch(
 
 
 def emit_result_variant_def(node: ResultVariantDef) -> list[str]:
-    """Emit ResultVariantDef - variant items are synthesized into EndpointError enum."""
+    """Emit `ResultVariantDef` (no-op as variants are synthesized into the error enum).
+
+    Args:
+        node (ResultVariantDef): Error variant AST node.
+
+    Returns:
+        list[str]: Empty list.
+    """
     return []
 
 
@@ -417,7 +528,16 @@ def resolve_struct_name_for_alias(
     node: ResultAliasDef,
     result_variants: dict[str, ResultVariantDef] | None = None,
 ) -> str:
-    """Determine the enclosing struct name for a synthesized ResultAliasDef."""
+    """Determine the enclosing REST struct name for a synthesized `ResultAliasDef`.
+
+    Args:
+        node (ResultAliasDef): Result alias AST node.
+        result_variants (dict[str, ResultVariantDef] | None): Optional map of known
+            result variant nodes by name.
+
+    Returns:
+        str: Name of the owning REST struct.
+    """
     parent = node.parent
     if isinstance(parent, StructBase):
         return parent.name
@@ -449,7 +569,17 @@ def emit_result_alias_def(
     emitted_aliases: set[str] | None = None,
     result_variants: dict[str, ResultVariantDef] | None = None,
 ) -> list[str]:
-    """Emit the type alias for a REST endpoint result."""
+    """Emit the `pub type ... = Result<..., ...>;` alias for a REST endpoint result.
+
+    Args:
+        node (ResultAliasDef): Result alias AST node.
+        struct_name (str): Optional explicit owning REST struct name.
+        emitted_aliases (set[str] | None): Set tracking already-emitted type alias names.
+        result_variants (dict[str, ResultVariantDef] | None): Optional map of error variant nodes.
+
+    Returns:
+        list[str]: Generated Rust type alias lines.
+    """
     effective_struct = struct_name or resolve_struct_name_for_alias(
         node, result_variants
     )
@@ -483,7 +613,16 @@ def emit_matcher_list_def(
     variants_by_name: dict[str, ResultVariantDef],
     is_single_rest: bool = True,
 ) -> list[str]:
-    """Emit the EndpointError enum, its trait implementations, and dispatcher function."""
+    """Emit the `<Struct>Error` enum, trait implementations, and error matcher function.
+
+    Args:
+        node (MatcherListDef): Matcher list AST node for the REST struct.
+        variants_by_name (dict[str, ResultVariantDef]): Mapping of variant names to AST nodes.
+        is_single_rest (bool): Whether this is the only REST struct in the module.
+
+    Returns:
+        list[str]: Generated Rust error enum and matcher function lines.
+    """
     struct_name = node.struct_name
     struct_pascal = _pascal(struct_name)
     struct_snake = to_snake_case(struct_name)
@@ -648,7 +787,15 @@ def emit_method_rest(
     node: MethodRest,
     ctx: WalkContext,
 ) -> list[str]:
-    """Emit an asynchronous REST endpoint associated method returning Result<T, EndpointError>."""
+    """Emit an asynchronous REST endpoint associated method returning `Result<T, <Struct>Error>`.
+
+    Args:
+        node (MethodRest): AST node describing the REST endpoint request.
+        ctx (WalkContext): Traversal context.
+
+    Returns:
+        list[str]: Generated Rust associated method lines.
+    """
     spec: RequestHttp = node.http_request.with_renamed_placeholders(
         to_snake_case
     )
@@ -718,7 +865,16 @@ def emit_struct_rest(
     ctx: WalkContext,
     walk_fn: Any,
 ) -> list[str]:
-    """Emit the REST API struct container with associated endpoint methods."""
+    """Emit the REST API struct container and its `impl` block with endpoint methods.
+
+    Args:
+        node (StructRest): REST struct AST node.
+        ctx (WalkContext): Traversal context.
+        walk_fn (Any): Callback used to walk child AST nodes of `node`.
+
+    Returns:
+        list[str]: Generated Rust struct and `impl` block lines.
+    """
     name = _pascal(node.name)
     lines: list[str] = []
     if node.doc:
