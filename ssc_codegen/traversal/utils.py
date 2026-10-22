@@ -150,28 +150,6 @@ def dict_entry_placeholder(
     return tmpl.single_placeholder()
 
 
-def dict_needs_builder(d: dict[str, PlaceholderTemplate]) -> bool:
-    """Check if any dictionary entry requires dynamic query/body builder logic.
-
-    Returns `True` if any entry has an optional placeholder or bracket-style array.
-
-    Args:
-        d: Mapping from key names to `PlaceholderTemplate` values.
-
-    Returns:
-        `True` if runtime dictionary assembly helper is required, `False` otherwise.
-    """
-    for tmpl in d.values():
-        ph = tmpl.single_placeholder()
-        if ph is None:
-            continue
-        if ph.is_optional:
-            return True
-        if ph.is_array and ph.style == "bracket":
-            return True
-    return False
-
-
 def find_predicate_container(node: Node) -> Node | None:
     """Walk up the parent chain to find enclosing Filter, Assert, Match, or PreValidate.
 

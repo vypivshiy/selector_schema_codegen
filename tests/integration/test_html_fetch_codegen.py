@@ -340,3 +340,47 @@ class TestQueryPlaceholderRuntime:
 
         assert route.called
         assert page.exists() is True
+
+
+class TestHtmlFetchMergeKwargsAndSeparateRuntime:
+    """Verify MethodFetch delegates to ssc_fetch/ssc_fetch_async + ssc_merge_kwargs,
+    filtering None optional params/headers and shallow-merging caller kwargs."""
+
+    _SCHEMA = '''
+struct SearchPage {
+    @request """
+    GET /search?q={{q:str}}&lang={{lang:str?}} HTTP/1.1
+    Host: example.com
+    X-Static: 1
+    X-Opt: {{opt_hdr:str?}}
+    """
+    title { css "h1"; text }
+}
+'''
+
+    def test_fetch_filters_none_and_merges_caller_kwargs(self):
+        import httpx
+        import respx
+
+        ns = _exec(self._SCHEMA, http_client="httpx")
+        SearchPage = ns["SearchPage"]
+
+        with respx.mock as mock:
+            route = mock.get("https://example.com/search").respond(
+                status_code=200, text=HTML_BODY
+            )
+            with httpx.Client() as client:
+                page = SearchPage.fetch(
+                    client,
+                    q="rust",
+                    headers={"X-Caller": "2"},
+                    params={"page": "3"},
+                )
+
+            assert page.parse()["title"] == "Hello World"
+            sent = route.calls.last.request
+            assert dict(sent.url.params) == {"q": "rust", "page": "3"}
+            assert sent.headers["x-static"] == "1"
+            assert sent.headers["x-caller"] == "2"
+            assert "x-opt" not in sent.headers
+

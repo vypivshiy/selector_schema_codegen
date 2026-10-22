@@ -1674,3 +1674,100 @@ json ApiErr {
             "is_alive": True,
             "available_api_endpoints": ["/app/status"],
         }
+
+
+class TestRuntimeHttpDelegationAndMerge:
+    """Verify runtime HTTP delegation:
+    - JSON body optional placeholders set to None serialize as JSON null.
+    - Optional query params, headers, and cookies set to None are omitted.
+    - Caller **kwargs shallow-merge headers and params on top of DSL entries.
+    """
+
+    _DELEGATION_SCHEMA = '''
+json User {
+    id int
+    name str
+    nickname str?
+}
+
+(rest)struct UserAPI {
+    @request name=update-user response=User """
+    POST /users?tag={{tag:str}}&filter={{filter:str?}} HTTP/1.1
+    Host: api.example.com
+    Content-Type: application/json
+    X-App: ssc-client
+    X-Trace: {{trace:str?}}
+    Cookie: sid={{sid:str}}; pref={{pref:str?}}
+
+    {"name": "{{name:str}}", "nickname": {{nickname:str?}}}
+    """
+}
+'''
+
+    def test_json_body_preserves_null_while_none_params_headers_cookies_omitted(
+        self,
+    ):
+        import json as _json
+
+        ns = _generate(self._DELEGATION_SCHEMA, http_client="httpx")
+        API = ns["UserAPI"]
+
+        with respx.mock as mock:
+            route = mock.post("https://api.example.com/users").respond(
+                json={"id": 1, "name": "Alice", "nickname": None},
+                status_code=200,
+            )
+            client = httpx.Client()
+            res = API.update_user(
+                client,
+                tag="v1",
+                sid="s123",
+                name="Alice",
+                # filter, trace, pref, nickname all default to None
+            )
+
+            assert res.is_ok is True
+            assert res.value == {"id": 1, "name": "Alice", "nickname": None}
+
+            sent_req = route.calls.last.request
+            # Optional query param 'filter' must be omitted, not sent as 'None'
+            assert dict(sent_req.url.params) == {"tag": "v1"}
+            # Static header preserved; optional 'X-Trace' omitted
+            assert sent_req.headers["x-app"] == "ssc-client"
+            assert "x-trace" not in sent_req.headers
+            # Cookie 'sid' preserved; optional 'pref' omitted
+            cookie_hdr = sent_req.headers.get("cookie", "")
+            assert "sid=s123" in cookie_hdr
+            assert "pref" not in cookie_hdr
+            # JSON body preserves "nickname": null
+            body_data = _json.loads(sent_req.content.decode("utf-8"))
+            assert body_data == {"name": "Alice", "nickname": None}
+
+    def test_per_call_kwargs_shallow_merges_headers_and_params(self):
+        ns = _generate(self._DELEGATION_SCHEMA, http_client="httpx")
+        API = ns["UserAPI"]
+
+        with respx.mock as mock:
+            route = mock.post("https://api.example.com/users").respond(
+                json={"id": 2, "name": "Bob", "nickname": "Bobby"},
+                status_code=200,
+            )
+            client = httpx.Client()
+            res = API.update_user(
+                client,
+                tag="v1",
+                sid="s123",
+                name="Bob",
+                nickname="Bobby",
+                headers={"X-Custom": "from-caller"},
+                params={"extra": "yes"},
+            )
+
+            assert res.is_ok is True
+            sent_req = route.calls.last.request
+            # Both DSL 'X-App' and caller 'X-Custom' are present
+            assert sent_req.headers["x-app"] == "ssc-client"
+            assert sent_req.headers["x-custom"] == "from-caller"
+            # Both DSL 'tag' and caller 'extra' query params are present
+            assert dict(sent_req.url.params) == {"tag": "v1", "extra": "yes"}
+
