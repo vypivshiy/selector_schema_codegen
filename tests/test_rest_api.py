@@ -358,7 +358,7 @@ class TestRestPyConverter:
         )
         module = _parse(src)
         code = CONVERTER.convert(module, http_client="httpx")
-        assert "_kw[\"json\"] = {'name': name, 'active': active}" in code
+        assert "'json': {'name': name, 'active': active}" in code
         # And no leftover f-string style
         assert 'json=f"' not in code
         assert "json=f'" not in code
@@ -403,8 +403,10 @@ class TestRestPyConverter:
         from ssc_codegen.targets.golang import GO_CONVERTER
 
         code = GO_CONVERTER.convert(module)
+        runtime = GO_CONVERTER.emit_runtime("main")
 
-        assert 'strings.NewReader(fmt.Sprintf("raw=%s", value))' in code
+        assert 'Body: fmt.Sprintf("raw=%s", value)' in code
+        assert "strings.NewReader(" in runtime
 
     def test_py_required_keys_dispatch(self):
         from ssc_codegen.targets.python import (
@@ -687,7 +689,7 @@ class TestTypedPlaceholdersPyCodegen:
         # with repeat style (default) httpx accepts a list directly:
         # params={'tags': tags}  → ?tags=1&tags=2
         code = self._gen("GET /u?tags={{tags:int[]?}} HTTP/1.1")
-        assert "_params['tags'] = tags" in code
+        assert "'params': {'tags': tags}" in code
 
     def test_csv_style_joins_with_comma(self):
         code = self._gen("GET /u?tags={{tags:int[]?|csv}} HTTP/1.1")
@@ -695,8 +697,8 @@ class TestTypedPlaceholdersPyCodegen:
 
     def test_optional_builds_params_conditionally(self):
         code = self._gen("GET /u?q={{q:str?}} HTTP/1.1")
-        assert "if q is not None:" in code
-        assert "_params['q'] = q" in code
+        assert "'params': {'q': q}" in code
+        assert "ssc_merge_kwargs" in code
 
     def test_required_first_optional_last(self):
         # required 'id' must come before optional 'q' in the signature
@@ -740,13 +742,13 @@ class TestTypedPlaceholdersJsCodegen:
 
     def test_urlsearchparams_repeat_via_append(self):
         code = self._gen("GET /u?tags={{tags:int[]?}} HTTP/1.1")
-        assert "for (const _v of tags)" in code
-        assert "_params.append('tags', String(_v))" in code
+        assert "params: {'tags': tags}" in code
+        assert "sp.append(k, String(_v))" in code
 
     def test_required_repeat_array_also_uses_append(self):
         code = self._gen("GET /u?tags={{tags:int[]}} HTTP/1.1")
-        assert "for (const _v of tags)" in code
-        assert "_params.append('tags', String(_v))" in code
+        assert "params: {'tags': tags}" in code
+        assert "sp.append(k, String(_v))" in code
 
     def test_urlsearchparams_csv_via_join(self):
         code = self._gen("GET /u?tags={{tags:int[]?|csv}} HTTP/1.1")
@@ -754,17 +756,19 @@ class TestTypedPlaceholdersJsCodegen:
 
     def test_bracket_style_rewrites_key(self):
         code = self._gen("GET /u?tags={{tags:int[]|bracket}} HTTP/1.1")
-        assert "_params.append('tags[]', String(_v))" in code
+        assert "'tags[]': tags" in code
 
     def test_optional_conditional_set(self):
         code = self._gen("GET /u?q={{q:str?}} HTTP/1.1")
-        assert "if (q !== undefined && q !== null)" in code
+        assert "params: {'q': q}" in code
+        assert "if (v !== undefined && v !== null)" in code
 
     def test_legacy_untyped_stays_simple(self):
         code = self._gen("GET /u/{{id}} HTTP/1.1")
-        # No URLSearchParams-builder needed for the simple path placeholder
-        assert "new URLSearchParams();" not in code
-        assert "${id}" in code  # inline template substitution
+        cls_section = code[code.find("class API") :]
+        # No params object needed for the simple path placeholder
+        assert "params:" not in cls_section
+        assert "${id}" in cls_section  # inline template substitution
 
 
 # ---------------------------------------------------------------------------
@@ -1888,19 +1892,26 @@ struct ApiClient type=rest {
 
         module = _parse(self._rest_path_src())
         code = GO_CONVERTER.convert(module)
-        # gjson.GetBytes(body, "data.user").Raw narrows body before Unmarshal
-        assert 'gjson.GetBytes(body, "data.user").Raw' in code
+        runtime = GO_CONVERTER.emit_runtime("main")
+        assert (
+            'sscRestCallValue[UserJson](client, apiMatchers, "GET", "https://api.example.com/me", "data.user", nil, opts...)'
+            in code
+        )
+        # gjson.GetBytes(body, responsePath).Raw narrows body before Unmarshal in runtime
+        assert "gjson.GetBytes(body, responsePath).Raw" in runtime
 
     def test_go_renamed_body_var_no_underscore_prefix(self):
         """Patch B also renamed Go locals: _body → body, _err → err,
-        _val → val, _perr → perr inside emit_method_rest."""
+        _val → val, _perr → perr inside REST response decoding."""
         from ssc_codegen.targets.golang import GO_CONVERTER
 
         module = _parse(self._rest_path_src())
         code = GO_CONVERTER.convert(module)
-        assert "var val " in code  # was: var _val
-        assert "if perr := json.Unmarshal(body, &val)" in code
-        assert "if err != nil" in code
+        runtime = GO_CONVERTER.emit_runtime("main")
+        assert "sscRestCallValue[UserJson]" in code
+        assert "var val T" in runtime  # was: var _val
+        assert "if perr := json.Unmarshal(body, &val)" in runtime
+        assert "if err != nil" in runtime
         # Old underscore-prefixed names must be gone from rest methods.
         # REST methods are receiver methods on the marker struct; match
         # the receiver-prefixed signature (e.g. "func (a API) Fetch(").
@@ -1916,9 +1927,11 @@ struct ApiClient type=rest {
 
         module = _parse(self._rest_path_src())
         code = GO_CONVERTER.convert(module)
+        runtime = GO_CONVERTER.emit_runtime("main")
         assert "opts ...sscReqOpt" in code
-        assert "for _, o := range opts {" in code
-        assert "o(_opts)" in code
+        assert "opts...)" in code
+        assert "for _, o := range opts {" in runtime
+        assert "o(_opts)" in runtime
 
     def test_go_rest_namespaces_via_receiver_and_factory(self):
         """Go REST codegen: empty struct + New<Name>() factory +
@@ -2065,7 +2078,8 @@ struct ApiClient type=rest {
         """Go HTML @request with query params + cookies in the same struct.
 
         Params are rendered as ``url.Values{...}.Encode()`` appended to the
-        URL. Cookies are applied inline via ``req.AddCookie`` per cookie.
+        URL. Cookies are passed via ``sscReqOpts.Cookies`` and applied in
+        the runtime via ``req.AddCookie``.
         Placeholders in cookie values interpolate via ``fmt.Sprintf``.
         """
         from ssc_codegen.targets.golang import GO_CONVERTER
@@ -2082,17 +2096,13 @@ struct ApiClient type=rest {
         )
         module = _parse(src)
         code = GO_CONVERTER.convert(module)
+        runtime = GO_CONVERTER.emit_runtime("main")
         # Query string built via url.Values.
         assert 'url.Values{"id": []string{fmt.Sprintf("%d", id)}' in code
-        # Plain cookie literal.
-        assert (
-            'req.AddCookie(&http.Cookie{Name: "session", Value: "abc"})' in code
-        )
-        # Placeholder cookie value interpolated.
-        assert (
-            'req.AddCookie(&http.Cookie{Name: "tracking", Value: fmt.Sprintf("%s", tid)})'
-            in code
-        )
+        # Plain cookie literal and placeholder cookie in sscReqOpts.Cookies.
+        assert '"session": []string{"abc"}' in code
+        assert '"tracking": []string{fmt.Sprintf("%s", tid)}' in code
+        assert "req.AddCookie(&http.Cookie{Name: name, Value: v})" in runtime
         # net/url import required for url.Values.
         assert '"net/url"' in code
 
@@ -2183,3 +2193,158 @@ class TestAiohttpContentTypeBypass:
         runtime = "\n".join(RequestsStrategy().rest_runtime_lines())
         assert "content_type=None" not in runtime
         assert "resp.json()" in runtime
+
+
+# ---------------------------------------------------------------------------
+# Multi-line @doc cleandoc normalization and cross-target docstring emission
+# ---------------------------------------------------------------------------
+
+
+class TestMultilineDocstringNormalization:
+    """Verify multi-line @doc and @request doc= strings are normalized with
+    inspect.cleandoc at parse time and emitted cleanly across Python, JS,
+    Go, and Rust without raw KDL indentation or escaped '\\n' literals."""
+
+    _DOC_SCHEMA = '''
+@doc """
+    Multi-line module docstring.
+    Describes the API and HTML parsers.
+    """
+
+(raw)fn clean-text {
+    @doc """
+        Clean and normalize text.
+        Second line of fn doc.
+        """
+    trim
+}
+
+json User {
+    id int doc="""
+        Unique user identifier.
+        Must be positive.
+        """
+    name str
+}
+
+struct Page {
+    @doc """
+        HTML page parser struct.
+        Extracts heading text.
+        """
+    title { css "h1"; text }
+}
+
+(rest)struct UserAPI {
+    @doc """
+        User REST API client.
+        Provides user lookup endpoints.
+        """
+    @request name=get-user response=User doc="""
+        Fetch a single user by ID.
+        Returns User payload on 200 OK.
+        """ """
+    GET /users/{{id:int}} HTTP/1.1
+    Host: api.example.com
+    """
+}
+'''
+
+    def test_ast_doc_fields_normalized_via_cleandoc(self):
+        from ssc_codegen.ast import FunctionDef, JsonDef, MethodRest, Struct, StructRest
+
+        module = _parse(self._DOC_SCHEMA)
+        assert module.doc == (
+            "Multi-line module docstring.\nDescribes the API and HTML parsers."
+        )
+
+        fn_node = next(n for n in module.body if isinstance(n, FunctionDef))
+        assert fn_node.doc == (
+            "Clean and normalize text.\nSecond line of fn doc."
+        )
+
+        json_node = next(n for n in module.body if isinstance(n, JsonDef))
+        assert json_node.body[0].doc == (
+            "Unique user identifier.\nMust be positive."
+        )
+
+        page_node = next(n for n in module.body if isinstance(n, Struct))
+        assert page_node.doc == (
+            "HTML page parser struct.\nExtracts heading text."
+        )
+
+        rest_node = next(n for n in module.body if isinstance(n, StructRest))
+        assert rest_node.doc == (
+            "User REST API client.\nProvides user lookup endpoints."
+        )
+        method_node = next(
+            c for c in rest_node.body if isinstance(c, MethodRest)
+        )
+        assert method_node.doc == (
+            "Fetch a single user by ID.\nReturns User payload on 200 OK."
+        )
+
+    def test_python_multiline_docstrings_valid_ast_and_runtime_dunder_doc(self):
+        import inspect
+        from ssc_codegen.targets.python import PY_BS4_CONVERTER
+
+        module = _parse(self._DOC_SCHEMA)
+        code = PY_BS4_CONVERTER.convert(module, http_client="httpx")
+
+        # Must be valid Python syntax and use triple-quoted multi-line docstrings
+        pyast.parse(code)
+        assert "'\\n    " not in code
+        assert '"""\nMulti-line module docstring.\nDescribes the API and HTML parsers.\n"""' in code
+
+        ns: dict = {}
+        exec(code, ns)  # noqa: S102
+
+        assert inspect.cleandoc(ns["__doc__"]) == (
+            "Multi-line module docstring.\nDescribes the API and HTML parsers."
+        )
+        assert inspect.cleandoc(ns["Page"].__doc__) == (
+            "HTML page parser struct.\nExtracts heading text."
+        )
+        assert inspect.cleandoc(ns["UserAPI"].__doc__) == (
+            "User REST API client.\nProvides user lookup endpoints."
+        )
+        assert inspect.cleandoc(ns["UserAPI"].get_user.__doc__) == (
+            "Fetch a single user by ID.\nReturns User payload on 200 OK."
+        )
+        assert inspect.cleandoc(ns["UserAPI"].async_get_user.__doc__) == (
+            "Fetch a single user by ID.\nReturns User payload on 200 OK."
+        )
+        assert inspect.cleandoc(ns["clean_text"].__doc__) == (
+            "Clean and normalize text.\nSecond line of fn doc."
+        )
+
+    def test_js_go_rust_multiline_doc_comments_cleanly_formatted(self):
+        from ssc_codegen.targets.golang import GO_CONVERTER
+        from ssc_codegen.targets.javascript import JS_CONVERTER
+        from ssc_codegen.targets.rust import RUST_CONVERTER
+
+        module = _parse(self._DOC_SCHEMA)
+        js_code = JS_CONVERTER.convert(module, http_client="fetch")
+        go_code = GO_CONVERTER.convert(module)
+        rust_code = RUST_CONVERTER.convert(module)
+
+        # JavaScript JSDoc comments have no raw 8-space KDL indentation
+        assert " * Multi-line module docstring.\n * Describes the API and HTML parsers." in js_code
+        assert " * HTML page parser struct.\n * Extracts heading text." in js_code
+        assert " * User REST API client.\n * Provides user lookup endpoints." in js_code
+        assert "   * Fetch a single user by ID.\n   * Returns User payload on 200 OK." in js_code
+
+        # Go comments
+        assert "// Multi-line module docstring.\n// Describes the API and HTML parsers." in go_code
+        assert "// HTML page parser struct.\n// Extracts heading text." in go_code
+        assert "// User REST API client.\n// Provides user lookup endpoints." in go_code
+        assert "// Fetch a single user by ID.\n// Returns User payload on 200 OK." in go_code
+        assert "// Clean and normalize text.\n// Second line of fn doc." in go_code
+
+        # Rust comments
+        assert "// Multi-line module docstring.\n// Describes the API and HTML parsers." in rust_code
+        assert "/// HTML page parser struct.\n/// Extracts heading text." in rust_code
+        assert "// User REST API client.\n// Provides user lookup endpoints." in rust_code
+        assert "    // Fetch a single user by ID.\n    // Returns User payload on 200 OK." in rust_code
+        assert "/// Clean and normalize text.\n/// Second line of fn doc." in rust_code
+

@@ -1142,3 +1142,132 @@ func TestGjsonPathSubsetUnmarshal(t *testing.T) {
         f"go test failed:\n{test_run.stderr}\n{test_run.stdout}"
     )
 
+
+def test_go_runtime_http_delegation_docstrings_and_null_body(go_module):
+    """Verify Go multi-line @doc comments, sscRestCallValue delegation,
+    JSON body null preservation, and sscReqOpt merge."""
+    src = '''
+@doc """
+    Go delegation test module.
+    Second line of module doc.
+    """
+
+json User {
+    id int
+    name str
+    nickname str?
+}
+
+(rest)struct DelegatedAPI {
+    @doc """
+        DelegatedAPI client struct.
+        Handles user updates.
+        """
+    @request name=update-user response=User doc="""
+        Update user via POST.
+        Preserves null nickname in JSON body.
+        """ """
+    POST {{base_url}}/users?tag={{tag:str}} HTTP/1.1
+    Content-Type: application/json
+    X-App: ssc-go
+
+    {"name": "{{name:str}}", "nickname": null}
+    """
+}
+'''
+    module_ast, diagnostics = parse_module(src)
+    errors = [d for d in diagnostics if d.severity == Severity.ERROR]
+    assert not errors
+
+    code = GO_CONVERTER.convert(module_ast, package="sscgen_test")
+    assert "// Go delegation test module.\n// Second line of module doc." in code
+    assert "// DelegatedAPI client struct.\n// Handles user updates." in code
+    assert "// Update user via POST.\n// Preserves null nickname in JSON body." in code
+    assert "sscRestCallValue[UserJson]" in code
+
+    out = go_module / "delegated_api.go"
+    out.write_bytes(code.encode("utf-8"))
+
+    runtime = go_module / "sscgen_runtime.go"
+    runtime.write_bytes(
+        GO_CONVERTER.emit_runtime("sscgen_test").encode("utf-8")
+    )
+
+    fmt = subprocess.run(
+        ["gofmt", "-l", str(out), str(runtime)],
+        capture_output=True,
+        text=True,
+    )
+    assert fmt.returncode == 0
+    assert not fmt.stdout.strip()
+
+    test_go = go_module / "delegated_api_test.go"
+    test_go.write_text(
+        """package sscgen_test
+
+import (
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
+
+func TestGoDelegatedRestNullBodyAndOptsMerge(t *testing.T) {
+	var gotQuery string
+	var gotAppHdr string
+	var gotCustomHdr string
+	var gotBody map[string]any
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		gotAppHdr = r.Header.Get("X-App")
+		gotCustomHdr = r.Header.Get("X-Custom")
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id": 1, "name": "Alice", "nickname": null}`))
+	}))
+	defer srv.Close()
+
+	api := NewDelegatedAPI()
+	withCustom := func(o *sscReqOpts) {
+		if o.Headers == nil {
+			o.Headers = sscHeaders{}
+		}
+		o.Headers["X-Custom"] = []string{"caller-opt"}
+	}
+
+	user, err := api.UpdateUser(srv.Client(), srv.URL, "v1", "Alice", withCustom)
+	if err != nil {
+		t.Fatalf("UpdateUser failed: %v", err)
+	}
+	if user.Id != 1 || user.Name != "Alice" || user.Nickname != nil {
+		t.Fatalf("unexpected user: %+v", user)
+	}
+	if gotQuery != "tag=v1" {
+		t.Errorf("expected query 'tag=v1', got %q", gotQuery)
+	}
+	if gotAppHdr != "ssc-go" || gotCustomHdr != "caller-opt" {
+		t.Errorf("expected merged headers X-App=ssc-go & X-Custom=caller-opt, got %q / %q", gotAppHdr, gotCustomHdr)
+	}
+	nickVal, hasNick := gotBody["nickname"]
+	if !hasNick || nickVal != nil {
+		t.Errorf("expected JSON body to preserve nickname: null, got %+v", gotBody)
+	}
+}
+""",
+        encoding="utf-8",
+    )
+
+    test_run = subprocess.run(
+        ["go", "test", "-v", "-run", "TestGoDelegatedRestNullBodyAndOptsMerge", "./..."],
+        cwd=go_module,
+        capture_output=True,
+        text=True,
+    )
+    assert test_run.returncode == 0, (
+        f"go test failed:\n{test_run.stderr}\n{test_run.stdout}"
+    )
+
+

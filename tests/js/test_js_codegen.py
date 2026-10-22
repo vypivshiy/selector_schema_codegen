@@ -1700,3 +1700,142 @@ json CdnVideoHubResponse {
             check=True,
         )
         assert node_eval.returncode == 0
+
+    def test_js_runtime_http_delegation_null_body_and_opts_merge(self):
+        kdl_src = '''
+@doc """
+    Multi-line JS module doc.
+    Line two.
+    """
+
+json User {
+    id int
+    name str
+    nickname str?
+}
+
+(rest)struct UserClient {
+    @doc """
+        UserClient REST struct doc.
+        Line two.
+        """
+    @request name=update-user response=User doc="""
+        Update user endpoint doc.
+        Line two.
+        """ """
+    POST /users?tag={{tag:str}}&filter={{filter:str?}} HTTP/1.1
+    Host: api.example.com
+    Content-Type: application/json
+    X-App: ssc-js
+    X-Trace: {{trace:str?}}
+
+    {"name": "{{name:str}}", "nickname": {{nickname:str?}}}
+    """
+}
+'''
+        module, diags = parse_module(kdl_src)
+        assert not [d for d in diags if d.severity == Severity.ERROR]
+
+        fetch_code = JS_CONVERTER.convert(module, http_client="fetch")
+        axios_code = JS_CONVERTER.convert(module, http_client="axios")
+
+        assert " * Multi-line JS module doc.\n * Line two." in fetch_code
+        assert " * UserClient REST struct doc.\n * Line two." in fetch_code
+        assert "   * Update user endpoint doc.\n   * Line two." in fetch_code
+
+        fetch_script = (
+            fetch_code
+            + """
+(async () => {
+  let capturedUrl = null;
+  let capturedOpts = null;
+  const mockFetch = async (url, opts) => {
+    capturedUrl = url;
+    capturedOpts = opts;
+    return {
+      status: 200,
+      headers: new Map(),
+      json: async () => ({ id: 1, name: 'Alice', nickname: null }),
+    };
+  };
+
+  const res = await UserClient.updateUser(
+    mockFetch,
+    { tag: 'v1', name: 'Alice', nickname: null },
+    { headers: { 'X-Custom': 'caller' }, params: { extra: 'yes' } }
+  );
+  if (!res.isOk || res.value.name !== 'Alice' || res.value.nickname !== null) {
+    throw new Error('Unexpected response: ' + JSON.stringify(res));
+  }
+  if (capturedUrl !== 'https://api.example.com/users?tag=v1&extra=yes') {
+    throw new Error('Unexpected URL (filter should be omitted, extra merged): ' + capturedUrl);
+  }
+  if (capturedOpts.headers['X-App'] !== 'ssc-js' || capturedOpts.headers['X-Custom'] !== 'caller') {
+    throw new Error('Headers not shallow-merged: ' + JSON.stringify(capturedOpts.headers));
+  }
+  if ('X-Trace' in capturedOpts.headers) {
+    throw new Error('Optional undefined X-Trace header should be omitted');
+  }
+  const parsedBody = JSON.parse(capturedOpts.body);
+  if (parsedBody.name !== 'Alice' || parsedBody.nickname !== null || !('nickname' in parsedBody)) {
+    throw new Error('JSON body did not preserve nickname: null: ' + capturedOpts.body);
+  }
+})().catch(e => { console.error(e); process.exit(1); });
+"""
+        )
+        res_fetch = subprocess.run(
+            ["node", "-e", fetch_script],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert res_fetch.returncode == 0
+
+        axios_script = (
+            axios_code
+            + """
+(async () => {
+  let capturedCfg = null;
+  const mockAxios = {
+    request: async (cfg) => {
+      capturedCfg = cfg;
+      return {
+        status: 200,
+        headers: {},
+        data: { id: 2, name: 'Bob', nickname: null },
+      };
+    },
+  };
+
+  const res = await UserClient.updateUser(
+    mockAxios,
+    { tag: 'v2', name: 'Bob', nickname: null },
+    { headers: { 'X-Custom': 'axios-caller' }, params: { extra: '1' } }
+  );
+  if (!res.isOk || res.value.name !== 'Bob') {
+    throw new Error('Unexpected axios response: ' + JSON.stringify(res));
+  }
+  if (capturedCfg.params.toString() !== 'tag=v2&extra=1') {
+    throw new Error('Unexpected axios params: ' + capturedCfg.params.toString());
+  }
+  if (capturedCfg.headers['X-App'] !== 'ssc-js' || capturedCfg.headers['X-Custom'] !== 'axios-caller') {
+    throw new Error('Axios headers not merged: ' + JSON.stringify(capturedCfg.headers));
+  }
+  if ('X-Trace' in capturedCfg.headers) {
+    throw new Error('Optional X-Trace should be omitted in axios');
+  }
+  const parsedBody = JSON.parse(capturedCfg.data);
+  if (parsedBody.name !== 'Bob' || parsedBody.nickname !== null || !('nickname' in parsedBody)) {
+    throw new Error('Axios JSON body did not preserve nickname: null: ' + capturedCfg.data);
+  }
+})().catch(e => { console.error(e); process.exit(1); });
+"""
+        )
+        res_axios = subprocess.run(
+            ["node", "-e", axios_script],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert res_axios.returncode == 0
+

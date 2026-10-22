@@ -1828,3 +1828,66 @@ fn main() {
     assert result.returncode == 0, result.stderr
     assert "GJSON_RUST_PASSED" in result.stdout
 
+
+def test_rust_runtime_http_delegation_and_multiline_docs() -> None:
+    """Verify Rust multi-line @doc emission and rt::rest_call / rt::fetch_html delegation."""
+    schema = '''
+@doc """
+    Rust module docstring.
+    Line two.
+    """
+
+json User {
+    id int
+    name str
+    nickname str?
+}
+
+struct Page {
+    @doc """
+        HTML page struct doc.
+        Line two.
+        """
+    @request """
+    GET /page HTTP/1.1
+    Host: example.com
+    """
+    title { css "h1"; text }
+}
+
+(rest)struct UserAPI {
+    @doc """
+        UserAPI REST client doc.
+        Line two.
+        """
+    @request name=update-user response=User doc="""
+        Update user endpoint doc.
+        Line two.
+        """ """
+    POST /users?tag={{tag:str}}&filter={{filter:str?}} HTTP/1.1
+    Host: api.example.com
+    Content-Type: application/json
+
+    {"name": "{{name:str}}", "nickname": {{nickname:str?}}}
+    """
+}
+'''
+    module, diagnostics = parse_module(schema)
+    assert not [d for d in diagnostics if d.severity.name == "ERROR"]
+
+    converter = RustVisitor()
+    code = converter.convert(module)
+    runtime = converter.emit_runtime()
+
+    assert "// Rust module docstring.\n// Line two." in code
+    assert "/// HTML page struct doc.\n/// Line two." in code
+    assert "// UserAPI REST client doc.\n// Line two." in code
+    assert "    // Update user endpoint doc.\n    // Line two." in code
+
+    assert "rt::fetch_html(req," in code
+    assert "rt::rest_call(\n            req," in code
+    assert "pub async fn fetch_html(" in runtime
+    assert "pub async fn rest_call<" in runtime
+    assert "pub async fn rest_call_void<" in runtime
+
+
