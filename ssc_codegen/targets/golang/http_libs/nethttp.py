@@ -33,10 +33,10 @@ class NetHttpStrategy(GoHttpLibStrategy):
 
 _NETHTTP_REST_RUNTIME: list[str] = inspect.cleandoc(
     """
-    func sscRestCall(client *http.Client, matchers []sscErrMatcher, method, url string, dslOpts *sscReqOpts, opts ...sscReqOpt) ([]byte, error) {
-    	req, err := http.NewRequest(method, url, nil)
+    func sscDoRequest(ctx context.Context, client *http.Client, method, reqURL string, dslOpts *sscReqOpts, opts ...sscReqOpt) (*http.Response, []byte, error) {
+    	req, err := http.NewRequestWithContext(ctx, method, reqURL, nil)
     	if err != nil {
-    		return nil, &TransportErr{Cause: err.Error()}
+    		return nil, nil, err
     	}
     	_opts := dslOpts
     	if _opts == nil {
@@ -64,10 +64,28 @@ _NETHTTP_REST_RUNTIME: list[str] = inspect.cleandoc(
     	}
     	resp, err := client.Do(req)
     	if err != nil {
-    		return nil, &TransportErr{Cause: err.Error()}
+    		return nil, nil, err
     	}
     	defer resp.Body.Close()
-    	bodyBytes, _ := io.ReadAll(resp.Body)
+    	body, err := io.ReadAll(resp.Body)
+    	if err != nil {
+    		return resp, nil, err
+    	}
+    	return resp, body, nil
+    }
+
+    func sscExtractJSONSlice(raw []byte, responsePath string) []byte {
+    	if responsePath != "" {
+    		return []byte(gjson.GetBytes(raw, responsePath).Raw)
+    	}
+    	return raw
+    }
+
+    func sscRestCall(client *http.Client, matchers []sscErrMatcher, method, url string, dslOpts *sscReqOpts, opts ...sscReqOpt) ([]byte, error) {
+    	resp, bodyBytes, err := sscDoRequest(context.Background(), client, method, url, dslOpts, opts...)
+    	if err != nil {
+    		return nil, &TransportErr{Cause: err.Error()}
+    	}
     	headers := sscHeaders{}
     	for k, vs := range resp.Header {
     		headers[k] = vs
@@ -86,9 +104,7 @@ _NETHTTP_REST_RUNTIME: list[str] = inspect.cleandoc(
     	if err != nil {
     		return nil, err
     	}
-    	if responsePath != "" {
-    		body = []byte(gjson.GetBytes(body, responsePath).Raw)
-    	}
+    	body = sscExtractJSONSlice(body, responsePath)
     	var val T
     	if perr := json.Unmarshal(body, &val); perr != nil {
     		return nil, fmt.Errorf("ssc-gen: parse %T: %w", val, perr)
@@ -101,9 +117,7 @@ _NETHTTP_REST_RUNTIME: list[str] = inspect.cleandoc(
     	if err != nil {
     		return nil, err
     	}
-    	if responsePath != "" {
-    		body = []byte(gjson.GetBytes(body, responsePath).Raw)
-    	}
+    	body = sscExtractJSONSlice(body, responsePath)
     	var val []T
     	if perr := json.Unmarshal(body, &val); perr != nil {
     		return nil, fmt.Errorf("ssc-gen: parse %T: %w", val, perr)
@@ -120,40 +134,7 @@ _NETHTTP_REST_RUNTIME: list[str] = inspect.cleandoc(
     }
 
     func sscFetchHTML(ctx context.Context, client *http.Client, structName, method, url, responsePath, responseJoin string, dslOpts *sscReqOpts, opts ...sscReqOpt) (string, error) {
-    	req, err := http.NewRequestWithContext(ctx, method, url, nil)
-    	if err != nil {
-    		return "", err
-    	}
-    	_opts := dslOpts
-    	if _opts == nil {
-    		_opts = &sscReqOpts{}
-    	}
-    	for _, o := range opts {
-    		o(_opts)
-    	}
-    	if len(_opts.Headers) > 0 {
-    		for k, vs := range _opts.Headers {
-    			for _, v := range vs {
-    				req.Header.Add(k, v)
-    			}
-    		}
-    	}
-    	if len(_opts.Cookies) > 0 {
-    		for name, vs := range _opts.Cookies {
-    			for _, v := range vs {
-    				req.AddCookie(&http.Cookie{Name: name, Value: v})
-    			}
-    		}
-    	}
-    	if _opts.Body != "" {
-    		req.Body = io.NopCloser(strings.NewReader(_opts.Body))
-    	}
-    	resp, err := client.Do(req)
-    	if err != nil {
-    		return "", err
-    	}
-    	defer resp.Body.Close()
-    	body, err := io.ReadAll(resp.Body)
+    	resp, body, err := sscDoRequest(ctx, client, method, url, dslOpts, opts...)
     	if err != nil {
     		return "", err
     	}

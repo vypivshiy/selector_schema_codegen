@@ -67,45 +67,6 @@ class AioHttpStrategy(HttpLibStrategy):
             lines.append("")
         return lines
 
-    def fetch_body_lines(
-        self,
-        *,
-        is_async: bool,
-        request_call: str,
-        kwargs_lines: list[str],
-        response_path: str,
-        response_join: str,
-        i2: str,
-        i3: str,
-    ) -> list[str]:
-        """aiohttp semantics: ``async with client.request(...) as _resp:``.
-
-        ``ClientSession.request`` is an async context manager;
-        ``text()`` / ``json()`` are coroutines (need ``await``);
-        ``raise_for_status()`` is a regular sync method in aiohttp.
-        ``is_async`` is ignored — aiohttp only ever emits the async path
-        (caller guarantees ``supports_sync_fetch=False``).
-        """
-        lines = [
-            f"{i2}async with client.request(",
-            *kwargs_lines,
-            f"{i2}) as _resp:",
-        ]
-        lines.append(f"{i3}_resp.raise_for_status()")
-        if response_path:
-            accessor = "".join(f"[{p!r}]" for p in response_path.split("."))
-            lines.append(f"{i3}_data = await _resp.json(content_type=None)")
-            if response_join:
-                lines.append(
-                    f"{i3}_body = {response_join!r}.join(_data{accessor})"
-                )
-            else:
-                lines.append(f"{i3}_body = _data{accessor}")
-        else:
-            lines.append(f"{i3}_body = await _resp.text()")
-        lines.append(f"{i3}return cls(_body)")
-        return lines
-
     def rest_runtime_lines(self, http_io: str = "both") -> list[str]:
         """Generate REST runtime source lines with aiohttp transport exception handling.
 

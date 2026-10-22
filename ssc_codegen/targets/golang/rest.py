@@ -46,7 +46,14 @@ _GO_PH_TYPES = {
 
 
 def _go_fmt_placeholder(ph: PlaceholderSpec) -> str:
-    """Go format verb for a placeholder."""
+    """Return the `fmt.Sprintf` format verb for a placeholder specification.
+
+    Args:
+        ph (PlaceholderSpec): Placeholder metadata to inspect.
+
+    Returns:
+        str: Go `fmt.Sprintf` verb (`"%d"`, `"%f"`, `"%t"`, or `"%s"`).
+    """
     if ph.type_name == "int":
         return "%d"
     if ph.type_name == "float":
@@ -57,7 +64,14 @@ def _go_fmt_placeholder(ph: PlaceholderSpec) -> str:
 
 
 def render_url(tmpl: PlaceholderTemplate) -> str:
-    """Render URL template as a Go expression (fmt.Sprintf or string literal)."""
+    """Render a `PlaceholderTemplate` as a Go string expression.
+
+    Args:
+        tmpl (PlaceholderTemplate): Template containing literal text and/or placeholders.
+
+    Returns:
+        str: Go string literal or `fmt.Sprintf(...)` expression.
+    """
     if not tmpl.has_placeholders:
         return _go_str(tmpl.source)
 
@@ -73,7 +87,14 @@ def render_url(tmpl: PlaceholderTemplate) -> str:
 
 
 def render_body_json(tmpl: PlaceholderTemplate) -> str:
-    """Render JSON body through encoding/json for correct escaping."""
+    """Render a JSON body template through `stdJSONBody` for structured serialization.
+
+    Args:
+        tmpl (PlaceholderTemplate): JSON body template with optional placeholders.
+
+    Returns:
+        str: Go `stdJSONBody(...)` invocation expression.
+    """
 
     def emit(value: object) -> str:
         if isinstance(value, PlaceholderSpec):
@@ -104,12 +125,13 @@ def render_body_json(tmpl: PlaceholderTemplate) -> str:
 
 
 def render_url_values(d: dict[str, PlaceholderTemplate]) -> str:
-    """Render a ``dict[str, PlaceholderTemplate]`` as ``url.Values{...}.Encode()``.
+    """Render a dictionary of templates as a Go `url.Values{...}.Encode()` expression.
 
-    Shared by form-body and query-string rendering. Keys are literal
-    strings; values may contain placeholders (rendered via ``fmt.Sprintf``
-    through ``render_url``). ``url.Values`` properly escapes both keys
-    and values per RFC 3986. Empty dict → ``'""'``.
+    Args:
+        d (dict[str, PlaceholderTemplate]): Key-value template mapping for query params or form fields.
+
+    Returns:
+        str: Go expression evaluating to an RFC 3986 URL-encoded string.
     """
     if not d:
         return '""'
@@ -159,15 +181,25 @@ def render_url_values(d: dict[str, PlaceholderTemplate]) -> str:
 
 
 def render_form_body(body: dict[str, PlaceholderTemplate]) -> str:
-    """Form-urlencoded body via ``url.Values.Encode()``."""
+    """Render an `application/x-www-form-urlencoded` body via `url.Values.Encode()`.
+
+    Args:
+        body (dict[str, PlaceholderTemplate]): Form field templates keyed by field name.
+
+    Returns:
+        str: Go expression encoding the form fields.
+    """
     return render_url_values(body)
 
 
 def render_full_url(spec: RequestHttp) -> str:
-    """URL with query string from ``spec.params`` appended.
+    """Render the request URL expression with encoded query parameters appended.
 
-    When params is empty, returns ``render_url(spec.url)`` unchanged.
-    Otherwise appends ``+ "?" + <url.Values.Encode()>`` to the base URL.
+    Args:
+        spec (RequestHttp): HTTP request specification AST node.
+
+    Returns:
+        str: Go string expression for the full request URL.
     """
     base = render_url(spec.url)
     if not spec.params:
@@ -178,12 +210,13 @@ def render_full_url(spec: RequestHttp) -> str:
 def _render_cookie_pairs(
     spec: RequestHttp,
 ) -> list[tuple[str, str]]:
-    """Render each cookie as ``(key_expr, value_expr)`` pair.
+    """Render each request cookie as a `(key_expr, value_expr)` pair of Go expressions.
 
-    Value uses ``fmt.Sprintf`` if it contains placeholders (via ``render_url``),
-    otherwise a plain string literal. Returns ``[]`` when ``spec.cookies`` is
-    empty. Used by both the inline HTML-@request path (``req.AddCookie``) and
-    the REST path (``sscReqOpts.Cookies``).
+    Args:
+        spec (RequestHttp): HTTP request specification AST node.
+
+    Returns:
+        list[tuple[str, str]]: Ordered list of Go key and value expression pairs.
     """
     pairs: list[tuple[str, str]] = []
     for k, tmpl in spec.cookies.items():
@@ -195,13 +228,103 @@ def _render_cookie_pairs(
     return pairs
 
 
+def _url_values_imports(d: dict[str, PlaceholderTemplate]) -> set[str]:
+    """Determine Go standard library imports required by `render_url_values(d)`.
+
+    Args:
+        d (dict[str, PlaceholderTemplate]): Key-value template mapping for query or form values.
+
+    Returns:
+        set[str]: Subset of `{"fmt", "net/url", "strings"}` required by `render_url_values`.
+    """
+    if not d:
+        return set()
+    imports: set[str] = {"net/url"}
+    has_array = any(
+        (ph := tmpl.single_placeholder()) is not None and ph.is_array
+        for tmpl in d.values()
+    )
+    if has_array:
+        imports.add("fmt")
+        for tmpl in d.values():
+            ph = tmpl.single_placeholder()
+            if (
+                ph is not None
+                and ph.is_array
+                and ph.style in ("csv", "pipe", "space")
+            ):
+                imports.add("strings")
+    elif any(tmpl.has_placeholders for tmpl in d.values()):
+        imports.add("fmt")
+    return imports
+
+
+def _json_tree_uses_fmt(value: object) -> bool:
+    """Check whether a parsed JSON template tree requires `fmt.Sprintf`.
+
+    Args:
+        value (object): Parsed JSON template node from `parse_json_template`.
+
+    Returns:
+        bool: `True` if any descendant is a composite `PlaceholderTemplate` with placeholders.
+    """
+    if isinstance(value, PlaceholderTemplate):
+        return value.has_placeholders
+    if isinstance(value, list):
+        return any(_json_tree_uses_fmt(item) for item in value)
+    if isinstance(value, dict):
+        return any(_json_tree_uses_fmt(item) for item in value.values())
+    return False
+
+
+def go_method_imports(spec: RequestHttp) -> set[str]:
+    """Determine Go standard library imports required by a generated HTTP method.
+
+    Args:
+        spec (RequestHttp): HTTP request specification AST node.
+
+    Returns:
+        set[str]: Required Go standard library package paths (subset of
+        `{"fmt", "net/url", "strings"}`).
+    """
+    imports: set[str] = set()
+    if spec.url.has_placeholders:
+        imports.add("fmt")
+    if any(tmpl.has_placeholders for tmpl in spec.headers.values()):
+        imports.add("fmt")
+    if any(tmpl.has_placeholders for tmpl in spec.cookies.values()):
+        imports.add("fmt")
+    imports.update(_url_values_imports(spec.params))
+
+    has_body = (
+        spec.body_kind not in ("empty", None) and spec.payload is not None
+    )
+    if has_body:
+        if isinstance(spec.payload, dict):
+            imports.update(_url_values_imports(spec.payload))
+        elif isinstance(spec.payload, PlaceholderTemplate):
+            if spec.body_kind == "json":
+                if _json_tree_uses_fmt(parse_json_template(spec.payload)):
+                    imports.add("fmt")
+            elif spec.payload.has_placeholders:
+                imports.add("fmt")
+    return imports
+
+
 # ===========================================================================
 # Placeholder parameter signature
 # ===========================================================================
 
 
 def placeholder_params(spec: RequestHttp) -> str:
-    """Generate Go function parameters for placeholders."""
+    """Generate Go function parameter declarations for request placeholders.
+
+    Args:
+        spec (RequestHttp): HTTP request specification containing placeholders.
+
+    Returns:
+        str: Leading `, <name> <type>...` parameter list fragment, or `""` if none.
+    """
     if not spec.placeholders:
         return ""
     parts: list[str] = []
@@ -220,13 +343,30 @@ def placeholder_params(spec: RequestHttp) -> str:
 
 
 def result_interface_name(struct_name: str, method_name: str) -> str:
-    """Name of the marker interface for a REST method result."""
+    """Derive the PascalCase result interface name for a REST method.
+
+    Args:
+        struct_name (str): Name of the enclosing REST struct.
+        method_name (str): Name of the REST method (or `""` for default `fetch`).
+
+    Returns:
+        str: PascalCase result type identifier (e.g. `"APIFetchResult"`).
+    """
     pascal = to_pascal_case(struct_name)
     method_suffix = to_pascal_case(method_name) if method_name else "Fetch"
     return f"{pascal}{method_suffix}Result"
 
 
 def ok_variant_name(struct_name: str, method_name: str) -> str:
+    """Derive the PascalCase `Ok` variant name for a REST method.
+
+    Args:
+        struct_name (str): Name of the enclosing REST struct.
+        method_name (str): Name of the REST method (or `""` for default `fetch`).
+
+    Returns:
+        str: PascalCase `Ok` variant identifier (e.g. `"APIFetchOk"`).
+    """
     pascal = to_pascal_case(struct_name)
     method_suffix = to_pascal_case(method_name) if method_name else "Fetch"
     return f"{pascal}{method_suffix}Ok"
@@ -238,7 +378,14 @@ def ok_variant_name(struct_name: str, method_name: str) -> str:
 
 
 def _build_opts_inline(spec: RequestHttp) -> str:
-    """Build inline sscReqOpts pointer expression (or ``nil``)."""
+    """Build an inline `&sscReqOpts{...}` pointer expression (or `"nil"`).
+
+    Args:
+        spec (RequestHttp): HTTP request specification AST node.
+
+    Returns:
+        str: Go expression for the `dslOpts` argument (`"&sscReqOpts{...}"` or `"nil"`).
+    """
     has_headers = bool(spec.headers)
     has_cookies = bool(spec.cookies)
     has_body = (
@@ -281,17 +428,18 @@ def emit_method_fetch(
     ctx: WalkContext,
     http: GoHttpLibStrategy,
 ) -> list[str]:
-    """Emit a Go HTTP-entry function for HTML-parser structs with ``@request``.
-
-    Signature: ``func New<Struct><Method>(ctx, client, <phs>, opts ...) (*Name, error)``
-
-    Free function (not a receiver method) — semantically a sibling of
-    ``New<Name>(input string)`` that fetches the input from HTTP instead.
-    Struct-name prefix guarantees uniqueness across schemas in the same
-    package (default ``New<Name>Fetch``; ``@request name=X`` → ``New<Name>X``).
+    """Emit a Go HTTP-entry constructor function for a `MethodFetch` node.
 
     Delegates HTTP execution, functional option merging, status checking, and
-    ``response_path`` / ``response_join`` extraction to ``sscFetchHTML``.
+    `response_path` / `response_join` extraction to `sscFetchHTML`.
+
+    Args:
+        node (MethodFetch): AST node describing the document fetch request.
+        ctx (WalkContext): Traversal context providing indentation and metadata.
+        http (GoHttpLibStrategy): Active Go HTTP transport strategy.
+
+    Returns:
+        list[str]: Generated Go function lines.
     """
     spec = node.http_request.with_renamed_placeholders(to_camel_case)
     struct = node.parent
@@ -343,19 +491,16 @@ def emit_method_rest(
     http: GoHttpLibStrategy,
     rcv: str,
 ) -> list[str]:
-    """Emit a Go REST method that delegates to generic runtime helpers.
+    """Emit a Go REST receiver method that delegates to generic runtime helpers.
 
-    Returns idiomatic ``(value, error)`` tuple:
-      - typed value  → ``(*SchemaJson, error)`` or ``([]SchemaJson, error)``
-      - void         → ``(struct{}, error)``
+    Args:
+        node (MethodRest): AST node describing the REST endpoint request.
+        ctx (WalkContext): Traversal context providing indentation and metadata.
+        http (GoHttpLibStrategy): Active Go HTTP transport strategy.
+        rcv (str): Receiver variable identifier for the enclosing struct.
 
-    Receiver method on the (empty) marker struct — namespaced by type so
-    multiple REST structs in one package don't collide. Caller writes
-    ``NewApiX().Fetch(client, opts...)`` (factory + receiver).
-
-    Errors propagate as typed structs: ``@error`` variants via matchers,
-    ``*UnknownErr`` for unmatched HTTP >= 400, ``*TransportErr`` for network.
-    Caller uses ``errors.As`` to discriminate.
+    Returns:
+        list[str]: Generated Go method lines.
     """
     spec = node.http_request.with_renamed_placeholders(to_camel_case)
     struct = node.parent
@@ -407,10 +552,13 @@ def emit_method_rest(
 
 
 def emit_result_variant_def(node: ResultVariantDef) -> list[str]:
-    """Emit a standalone ``@error`` variant as an ``error`` struct.
+    """Emit a standalone `@error` variant as a Go struct implementing `error`.
 
-    No interface wiring — variants implement ``error`` directly. Discriminated
-    by the caller via ``errors.As``.
+    Args:
+        node (ResultVariantDef): Error variant AST node.
+
+    Returns:
+        list[str]: Generated Go struct and `Error()` method lines.
     """
     lines: list[str] = []
     if node.schema_name:
@@ -438,10 +586,13 @@ def emit_result_variant_def(node: ResultVariantDef) -> list[str]:
 
 
 def emit_result_alias_def(node: ResultAliasDef) -> list[str]:
-    """Go backend uses ``(value, error)`` tuples — no marker interface needed.
+    """Emit a result alias node (no-op for Go, which returns `(value, error)` tuples).
 
-    Returns no lines. Kept as a hook so the visitor stays consistent with
-    Python/JS backends that do emit a result alias.
+    Args:
+        node (ResultAliasDef): Result alias AST node.
+
+    Returns:
+        list[str]: Empty list.
     """
     return []
 
@@ -449,7 +600,16 @@ def emit_result_alias_def(node: ResultAliasDef) -> list[str]:
 def emit_matcher_list_def(
     node: MatcherListDef, err_schema_map: dict[str, str] | None = None
 ) -> list[str]:
-    """Emit the matchers slice for a REST struct."""
+    """Emit the `[]sscErrMatcher` slice declaration for a REST struct.
+
+    Args:
+        node (MatcherListDef): Matcher list AST node.
+        err_schema_map (dict[str, str] | None): Optional mapping from error variant
+            names to JSON schema names.
+
+    Returns:
+        list[str]: Generated Go slice declaration lines.
+    """
     err_schema_map = err_schema_map or {}
     var = f"{to_snake_case(node.struct_name)}Matchers"
     lines = [f"var {var} = []sscErrMatcher{{"]

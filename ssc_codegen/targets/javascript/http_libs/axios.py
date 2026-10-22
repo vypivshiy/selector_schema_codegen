@@ -64,9 +64,17 @@ class AxiosStrategy(JsHttpLibStrategy):
     fetch_fn_name = "sscFetchAxios"
 
     def rest_call_lines(self) -> list[str]:
-        """Generate `sscRestCallAxios` helper source using `axios.request()`."""
+        """Generate `sscRestCallAxios` helper source using `axios.request()`.
+
+        Returns:
+            list[str]: JavaScript source lines defining `sscRestCallAxios`.
+        """
         return list(_AXIOS_REST_RUNTIME)
 
     def fetch_call_lines(self) -> list[str]:
-        """Generate `sscFetchAxios` helper source using `axios.request()`."""
+        """Generate `sscFetchAxios` helper source using `axios.request()`.
+
+        Returns:
+            list[str]: JavaScript source lines defining `sscFetchAxios`.
+        """
         return list(_AXIOS_HTML_RUNTIME)

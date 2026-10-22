@@ -152,6 +152,7 @@ from ssc_codegen.traversal.context import WalkContext
 from ssc_codegen.traversal.utils import (
     classify_gjson_path,
     find_enclosing_module,
+    module_has_fetch,
     module_has_html_struct,
     module_has_rest,
     module_uses_http,
@@ -825,7 +826,7 @@ class PythonVisitor(BaseWalker):
             lines.extend(self._http.merge_kwargs_lines())
         if isinstance(mod, Module) and module_has_rest(mod):
             lines.extend(self._http.rest_runtime_lines(http_io=http_io))
-        if isinstance(mod, Module) and rest.module_has_fetch(mod):
+        if isinstance(mod, Module) and module_has_fetch(mod):
             lines.extend(self._http.fetch_runtime_lines(http_io=http_io))
         lines.extend(self._render_std_section(ctx))
         return lines

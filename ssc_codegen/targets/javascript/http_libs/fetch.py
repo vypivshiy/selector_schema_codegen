@@ -65,9 +65,17 @@ class FetchStrategy(JsHttpLibStrategy):
     fetch_fn_name = "sscFetch"
 
     def rest_call_lines(self) -> list[str]:
-        """Generate `sscRestCall` helper source using standard `fetch()`."""
+        """Generate `sscRestCall` helper source using standard `fetch()`.
+
+        Returns:
+            list[str]: JavaScript source lines defining `sscRestCall`.
+        """
         return list(_FETCH_REST_RUNTIME)
 
     def fetch_call_lines(self) -> list[str]:
-        """Generate `sscFetch` helper source using standard `fetch()`."""
+        """Generate `sscFetch` helper source using standard `fetch()`.
+
+        Returns:
+            list[str]: JavaScript source lines defining `sscFetch`.
+        """
         return list(_FETCH_HTML_RUNTIME)
