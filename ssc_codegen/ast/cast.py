@@ -97,8 +97,8 @@ class Jsonify(Node):
 
     Examples:
         - KDL: `jsonify User`, `jsonify Article path="data.item"`
-        - Python: `v1 = json.loads(v)` + `ssc_remap_json_keys(v1, ...)`
-        - JavaScript: `const v1 = sscRemapJsonKeys(JSON.parse(v), ...);`
+        - Python: `v1 = _project_user(json.loads(v))`
+        - JavaScript: `let v1 = _projectUser(JSON.parse(v));`
         - Go: `var v1 UserJson; json.Unmarshal([]byte(v), &v1)`
     """
 

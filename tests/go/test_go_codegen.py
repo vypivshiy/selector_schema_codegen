@@ -1027,3 +1027,247 @@ func TestInlineDictAnonAndArrayUnmarshal(t *testing.T) {
     assert test_run.returncode == 0, (
         f"go test failed:\n{test_run.stderr}\n{test_run.stdout}"
     )
+
+
+def test_go_gjson_path_subset_escaped_dots_hash_len_and_projection(go_module):
+    """Verify Go codegen and runtime execution for GJSON path subset:
+    escaped dots (from="os\\.version"), array length (from="items.#"),
+    and array element projection (from="tags.#.name") via gjson.
+    """
+    src = r"""
+json ReleaseManifest {
+    os_version str from="os\\.version"
+    item_count int from="items.#"
+    tag_names (array)str from="tags.#.name"
+    first_tag str from="tags.0.name"
+}
+
+(raw)struct ManifestEnvelope {
+    manifest {
+        jsonify ReleaseManifest path="envelope\\.data"
+    }
+}
+"""
+    module_ast, diagnostics = parse_module(src)
+    errors = [d for d in diagnostics if d.severity == Severity.ERROR]
+    assert not errors
+
+    code = GO_CONVERTER.convert(module_ast, package="sscgen_test")
+    assert 'gjson.GetBytes(raw, "os\\\\.version")' in code
+    assert 'gjson.GetBytes(raw, "items.#")' in code
+    assert 'gjson.GetBytes(raw, "tags.#.name")' in code
+    assert 'gjson.GetBytes(raw, "tags.0.name")' in code
+
+    out = go_module / "gjson_subset.go"
+    out.write_bytes(code.encode("utf-8"))
+
+    runtime = go_module / "sscgen_runtime.go"
+    runtime.write_bytes(
+        GO_CONVERTER.emit_runtime("sscgen_test").encode("utf-8")
+    )
+
+    fmt = subprocess.run(
+        ["gofmt", "-l", str(out)], capture_output=True, text=True
+    )
+    assert fmt.returncode == 0
+    assert not fmt.stdout.strip()
+
+    vet = subprocess.run(
+        ["go", "vet", "./..."], cwd=go_module, capture_output=True, text=True
+    )
+    assert vet.returncode == 0, f"go vet failed:\n{vet.stderr}"
+
+    build = subprocess.run(
+        ["go", "build", "./..."], cwd=go_module, capture_output=True, text=True
+    )
+    assert build.returncode == 0, f"go build failed:\n{build.stderr}"
+
+    test_go = go_module / "gjson_subset_test.go"
+    test_go.write_text(
+        """package sscgen_test
+
+import (
+	"encoding/json"
+	"reflect"
+	"testing"
+)
+
+func TestGjsonPathSubsetUnmarshal(t *testing.T) {
+	raw := []byte(`{
+		"os.version": "24.04",
+		"items": ["a", "b", "c"],
+		"tags": [
+			{"name": "action", "id": 1},
+			{"other": "skipped"},
+			{"name": "sci-fi", "id": 2}
+		]
+	}`)
+	var manifest ReleaseManifestJson
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if manifest.OsVersion != "24.04" {
+		t.Errorf("expected OsVersion '24.04', got %q", manifest.OsVersion)
+	}
+	if manifest.ItemCount != 3 {
+		t.Errorf("expected ItemCount 3, got %d", manifest.ItemCount)
+	}
+	expectedTags := []string{"action", "sci-fi"}
+	if !reflect.DeepEqual(manifest.TagNames, expectedTags) {
+		t.Errorf("expected TagNames %v, got %v", expectedTags, manifest.TagNames)
+	}
+	if manifest.FirstTag != "action" {
+		t.Errorf("expected FirstTag 'action', got %q", manifest.FirstTag)
+	}
+
+	envelopeRaw := `{"envelope.data": {"os.version": "14.2.1", "items": [10, 20], "tags": [{"name": "drama"}]}}`
+	envRes := NewManifestEnvelope(envelopeRaw).Parse()
+	if envRes.Manifest.OsVersion != "14.2.1" || envRes.Manifest.ItemCount != 2 {
+		t.Errorf("unexpected envelope parse result: %+v", envRes.Manifest)
+	}
+	if !reflect.DeepEqual(envRes.Manifest.TagNames, []string{"drama"}) {
+		t.Errorf("unexpected envelope tag names: %v", envRes.Manifest.TagNames)
+	}
+}
+""",
+        encoding="utf-8",
+    )
+    test_run = subprocess.run(
+        ["go", "test", "-v", "./..."],
+        cwd=go_module,
+        capture_output=True,
+        text=True,
+    )
+    assert test_run.returncode == 0, (
+        f"go test failed:\n{test_run.stderr}\n{test_run.stdout}"
+    )
+
+
+def test_go_runtime_http_delegation_docstrings_and_null_body(go_module):
+    """Verify Go multi-line @doc comments, sscRestCallValue delegation,
+    JSON body null preservation, and sscReqOpt merge."""
+    src = '''
+@doc """
+    Go delegation test module.
+    Second line of module doc.
+    """
+
+json User {
+    id int
+    name str
+    nickname str?
+}
+
+(rest)struct DelegatedAPI {
+    @doc """
+        DelegatedAPI client struct.
+        Handles user updates.
+        """
+    @request name=update-user response=User doc="""
+        Update user via POST.
+        Preserves null nickname in JSON body.
+        """ """
+    POST {{base_url}}/users?tag={{tag:str}} HTTP/1.1
+    Content-Type: application/json
+    X-App: ssc-go
+
+    {"name": "{{name:str}}", "nickname": null}
+    """
+}
+'''
+    module_ast, diagnostics = parse_module(src)
+    errors = [d for d in diagnostics if d.severity == Severity.ERROR]
+    assert not errors
+
+    code = GO_CONVERTER.convert(module_ast, package="sscgen_test")
+    assert "// Go delegation test module.\n// Second line of module doc." in code
+    assert "// DelegatedAPI client struct.\n// Handles user updates." in code
+    assert "// Update user via POST.\n// Preserves null nickname in JSON body." in code
+    assert "sscRestCallValue[UserJson]" in code
+
+    out = go_module / "delegated_api.go"
+    out.write_bytes(code.encode("utf-8"))
+
+    runtime = go_module / "sscgen_runtime.go"
+    runtime.write_bytes(
+        GO_CONVERTER.emit_runtime("sscgen_test").encode("utf-8")
+    )
+
+    fmt = subprocess.run(
+        ["gofmt", "-l", str(out), str(runtime)],
+        capture_output=True,
+        text=True,
+    )
+    assert fmt.returncode == 0
+    assert not fmt.stdout.strip()
+
+    test_go = go_module / "delegated_api_test.go"
+    test_go.write_text(
+        """package sscgen_test
+
+import (
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
+
+func TestGoDelegatedRestNullBodyAndOptsMerge(t *testing.T) {
+	var gotQuery string
+	var gotAppHdr string
+	var gotCustomHdr string
+	var gotBody map[string]any
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		gotAppHdr = r.Header.Get("X-App")
+		gotCustomHdr = r.Header.Get("X-Custom")
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id": 1, "name": "Alice", "nickname": null}`))
+	}))
+	defer srv.Close()
+
+	api := NewDelegatedAPI()
+	withCustom := func(o *sscReqOpts) {
+		if o.Headers == nil {
+			o.Headers = sscHeaders{}
+		}
+		o.Headers["X-Custom"] = []string{"caller-opt"}
+	}
+
+	user, err := api.UpdateUser(srv.Client(), srv.URL, "v1", "Alice", withCustom)
+	if err != nil {
+		t.Fatalf("UpdateUser failed: %v", err)
+	}
+	if user.Id != 1 || user.Name != "Alice" || user.Nickname != nil {
+		t.Fatalf("unexpected user: %+v", user)
+	}
+	if gotQuery != "tag=v1" {
+		t.Errorf("expected query 'tag=v1', got %q", gotQuery)
+	}
+	if gotAppHdr != "ssc-go" || gotCustomHdr != "caller-opt" {
+		t.Errorf("expected merged headers X-App=ssc-go & X-Custom=caller-opt, got %q / %q", gotAppHdr, gotCustomHdr)
+	}
+	nickVal, hasNick := gotBody["nickname"]
+	if !hasNick || nickVal != nil {
+		t.Errorf("expected JSON body to preserve nickname: null, got %+v", gotBody)
+	}
+}
+""",
+        encoding="utf-8",
+    )
+
+    test_run = subprocess.run(
+        ["go", "test", "-v", "-run", "TestGoDelegatedRestNullBodyAndOptsMerge", "./..."],
+        cwd=go_module,
+        capture_output=True,
+        text=True,
+    )
+    assert test_run.returncode == 0, (
+        f"go test failed:\n{test_run.stderr}\n{test_run.stdout}"
+    )
+
+

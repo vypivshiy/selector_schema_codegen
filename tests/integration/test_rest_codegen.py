@@ -191,6 +191,40 @@ class TestRestSuccess:
         assert result.is_ok is True
         assert result.value is None
 
+    def test_200_null_or_primitive_or_invalid_body_raises_schema_error(
+        self, basic_ns
+    ):
+        API = basic_ns["API"]
+        SchemaErr = basic_ns["SscJsonSchemaError"]
+
+        with respx.mock:
+            respx.get("https://api.example.com/users/null").respond(
+                content=b"null",
+                headers={"Content-Type": "application/json"},
+                status_code=200,
+            )
+            respx.get("https://api.example.com/users/prim").respond(
+                json=12345, status_code=200
+            )
+            respx.get("https://api.example.com/users/bad").respond(
+                content=b"<html>not json</html>",
+                headers={"Content-Type": "text/html"},
+                status_code=200,
+            )
+            client = httpx.Client()
+            with pytest.raises(
+                SchemaErr, match="User: Expected dict, got NoneType"
+            ):
+                API.fetch(client, id="null")
+            with pytest.raises(
+                SchemaErr, match="User: Expected dict, got int"
+            ):
+                API.fetch(client, id="prim")
+            with pytest.raises(
+                SchemaErr, match="User: Expected dict, got NoneType"
+            ):
+                API.fetch(client, id="bad")
+
 
 # ---------------------------------------------------------------------------
 # 2. Error dispatch
@@ -1153,8 +1187,11 @@ struct ProfileAPI type=rest {
                 http_client="httpx",
             )
             assert f"from .{runtime_name} import" in code
-            assert "ssc_remap_json_keys" in code
-            assert "def ssc_remap_json_keys(" not in code
+            assert "ssc_resolve_dotpath" in code
+            assert "def ssc_resolve_dotpath(" not in code
+            assert "def _project_article_list(" in code
+            assert "ssc_json_project" not in code
+            assert "ssc_remap_json_keys" not in code
 
             exec(code, parser_mod.__dict__)
             API = parser_mod.ArticleAPI
@@ -1430,42 +1467,45 @@ json ApiErr {
         mod = _parse(self._NESTED_SCHEMA)
         py_code = PY_BS4_CONVERTER.convert_all(mod)[""]
 
-        # 1. Verify descriptor naming convention
-        assert "JSON_DESCRIPTOR_LEAF_IMAGE = " in py_code
-        assert "JSON_DESCRIPTOR_GENRE = " in py_code
-        assert "JSON_DESCRIPTOR_RELEASE = " in py_code
-        assert "JSON_DESCRIPTOR_CATALOG_RESPONSE = " in py_code
-        assert "JSON_DESCRIPTOR_API_ERR = " in py_code
-
-        # 2. Verify no old private descriptor constants
-        assert "_leaf_image_JSON_DESCRIPTORS" not in py_code
-        assert "_genre_JSON_DESCRIPTORS" not in py_code
-        assert "_release_JSON_DESCRIPTORS" not in py_code
-        assert "_catalog_response_JSON_DESCRIPTORS" not in py_code
-
-        # 3. Verify descriptor modularity: child schemas referenced by name, not duplicated inline
+        # 1. Verify projector function naming convention
+        assert "def _project_leaf_image(data: Any) -> LeafImageJson:" in py_code
+        assert "def _project_genre(data: Any) -> GenreJson:" in py_code
+        assert "def _project_release(data: Any) -> ReleaseJson:" in py_code
         assert (
-            "'icon': ('icon', False, False, JSON_DESCRIPTOR_LEAF_IMAGE)"
+            "def _project_catalog_response(data: Any) -> CatalogResponseJson:"
+            in py_code
+        )
+        assert "def _project_api_err(data: Any) -> ApiErrJson:" in py_code
+
+        # 2. Verify no descriptor constants or legacy helpers
+        assert "JSON_DESCRIPTOR_" not in py_code
+        assert "_JSON_DESCRIPTORS" not in py_code
+        assert "ssc_json_project" not in py_code
+        assert "ssc_remap_json_keys" not in py_code
+
+        # 3. Verify projector modularity: child schemas called directly by function name
+        assert (
+            "_project_leaf_image(ssc_json_req(_d, 'icon', 'Genre'))"
             in py_code
         )
         assert (
-            "'genres': ('genres', False, False, [JSON_DESCRIPTOR_GENRE])"
+            "[_project_genre(_x) for _x in ssc_expect_list(ssc_json_req(_d, 'genres', 'Release'), 'Release.genres') if _x is not None]"
             in py_code
         )
         assert (
-            "'items': ('items', False, False, [JSON_DESCRIPTOR_RELEASE])"
-            in py_code
-        )
-
-        # 4. Verify REST method uses descriptor constant reference
-        assert (
-            "value_fn=lambda _b: ssc_json_project(_b, JSON_DESCRIPTOR_CATALOG_RESPONSE)"
+            "[_project_release(_x) for _x in ssc_expect_list(ssc_json_req(_d, 'items', 'CatalogResponse'), 'CatalogResponse.items') if _x is not None]"
             in py_code
         )
 
-        # 5. Verify error matcher uses descriptor constant reference
+        # 4. Verify REST method calls projector function directly
         assert (
-            "value=ssc_json_project(value, JSON_DESCRIPTOR_API_ERR)" in py_code
+            "value_fn=lambda _b: _project_catalog_response(_b)"
+            in py_code
+        )
+
+        # 5. Verify error matcher calls projector function directly
+        assert (
+            "value=_project_api_err(value)" in py_code
         )
 
         # 6. Syntax validation
@@ -1473,15 +1513,15 @@ json ApiErr {
 
         # 7. JavaScript target alignment
         js_code = JS_CONVERTER.convert_all(mod)[""]
-        assert "const JSON_DESCRIPTOR_LEAF_IMAGE = " in js_code
-        assert "const JSON_DESCRIPTOR_CATALOG_RESPONSE = " in js_code
-        assert "JSON_DESCRIPTOR_CATALOG_RESPONSE" in js_code
-        assert "JSON_DESCRIPTOR_API_ERR" in js_code
-        assert (
-            "(_b) => sscJsonProject(_b, JSON_DESCRIPTOR_CATALOG_RESPONSE)"
-            in js_code
-        )
-        assert "value: sscJsonProject(_b, JSON_DESCRIPTOR_API_ERR)" in js_code
+        assert "function _projectLeafImage(data)" in js_code
+        assert "function _projectCatalogResponse(data)" in js_code
+        assert "_projectCatalogResponse" in js_code
+        assert "_projectApiErr" in js_code
+        assert "(_b) => _projectCatalogResponse(_b)" in js_code
+        assert "value: _projectApiErr(_b)" in js_code
+        assert "JSON_DESCRIPTOR_" not in js_code
+        assert "sscJsonProject" not in js_code
+        assert "sscRemapJsonKeys" not in js_code
 
         # 8. Execution test with respx (success + 404 error)
         ns: dict = {}
@@ -1563,27 +1603,34 @@ json ApiErr {
         py_code = PY_BS4_CONVERTER.convert_all(mod)[""]
         js_code = JS_CONVERTER.convert_all(mod)[""]
 
-        # Validate descriptor naming
-        py_desc_constants = [
-            line.split(" = ")[0]
+        # Validate projector function naming
+        py_projectors = [
+            line.split("(")[0]
             for line in py_code.splitlines()
-            if line.startswith("JSON_DESCRIPTOR_")
+            if line.startswith("def _project_")
         ]
-        assert len(py_desc_constants) >= 25
+        assert len(py_projectors) >= 25
+        assert "JSON_DESCRIPTOR_" not in py_code
         assert "_JSON_DESCRIPTORS" not in py_code
 
-        js_desc_constants = [
-            line.split(" = ")[0]
+        js_projectors = [
+            line.split("(")[0]
             for line in js_code.splitlines()
-            if line.startswith("const JSON_DESCRIPTOR_")
+            if line.startswith("function _project")
         ]
-        assert len(js_desc_constants) >= 25
+        assert len(js_projectors) >= 25
+        assert "JSON_DESCRIPTOR_" not in js_code
         assert "JsonDescriptors = " not in js_code
+        assert "sscJsonProject" not in js_code
+        assert "sscRemapJsonKeys" not in js_code
 
         # Validate reference usage in REST methods and matchers
-        assert "JSON_DESCRIPTOR_CATALOG_RELEASES_RESPONSE" in py_code
-        assert "JSON_DESCRIPTOR_API_ERROR" in py_code
-        assert "JSON_DESCRIPTOR_RELEASE_DETAIL" in py_code
+        assert "_project_catalog_releases_response" in py_code
+        assert "_project_api_error" in py_code
+        assert "_project_release_detail" in py_code
+        assert "_projectCatalogReleasesResponse" in js_code
+        assert "_projectApiError" in js_code
+        assert "_projectReleaseDetail" in js_code
 
         # Validate code size reduction: Python unformatted < 50,000 bytes (was 98,819 bytes)
         assert len(py_code.encode("utf-8")) < 50_000
@@ -1627,3 +1674,100 @@ json ApiErr {
             "is_alive": True,
             "available_api_endpoints": ["/app/status"],
         }
+
+
+class TestRuntimeHttpDelegationAndMerge:
+    """Verify runtime HTTP delegation:
+    - JSON body optional placeholders set to None serialize as JSON null.
+    - Optional query params, headers, and cookies set to None are omitted.
+    - Caller **kwargs shallow-merge headers and params on top of DSL entries.
+    """
+
+    _DELEGATION_SCHEMA = '''
+json User {
+    id int
+    name str
+    nickname str?
+}
+
+(rest)struct UserAPI {
+    @request name=update-user response=User """
+    POST /users?tag={{tag:str}}&filter={{filter:str?}} HTTP/1.1
+    Host: api.example.com
+    Content-Type: application/json
+    X-App: ssc-client
+    X-Trace: {{trace:str?}}
+    Cookie: sid={{sid:str}}; pref={{pref:str?}}
+
+    {"name": "{{name:str}}", "nickname": {{nickname:str?}}}
+    """
+}
+'''
+
+    def test_json_body_preserves_null_while_none_params_headers_cookies_omitted(
+        self,
+    ):
+        import json as _json
+
+        ns = _generate(self._DELEGATION_SCHEMA, http_client="httpx")
+        API = ns["UserAPI"]
+
+        with respx.mock as mock:
+            route = mock.post("https://api.example.com/users").respond(
+                json={"id": 1, "name": "Alice", "nickname": None},
+                status_code=200,
+            )
+            client = httpx.Client()
+            res = API.update_user(
+                client,
+                tag="v1",
+                sid="s123",
+                name="Alice",
+                # filter, trace, pref, nickname all default to None
+            )
+
+            assert res.is_ok is True
+            assert res.value == {"id": 1, "name": "Alice", "nickname": None}
+
+            sent_req = route.calls.last.request
+            # Optional query param 'filter' must be omitted, not sent as 'None'
+            assert dict(sent_req.url.params) == {"tag": "v1"}
+            # Static header preserved; optional 'X-Trace' omitted
+            assert sent_req.headers["x-app"] == "ssc-client"
+            assert "x-trace" not in sent_req.headers
+            # Cookie 'sid' preserved; optional 'pref' omitted
+            cookie_hdr = sent_req.headers.get("cookie", "")
+            assert "sid=s123" in cookie_hdr
+            assert "pref" not in cookie_hdr
+            # JSON body preserves "nickname": null
+            body_data = _json.loads(sent_req.content.decode("utf-8"))
+            assert body_data == {"name": "Alice", "nickname": None}
+
+    def test_per_call_kwargs_shallow_merges_headers_and_params(self):
+        ns = _generate(self._DELEGATION_SCHEMA, http_client="httpx")
+        API = ns["UserAPI"]
+
+        with respx.mock as mock:
+            route = mock.post("https://api.example.com/users").respond(
+                json={"id": 2, "name": "Bob", "nickname": "Bobby"},
+                status_code=200,
+            )
+            client = httpx.Client()
+            res = API.update_user(
+                client,
+                tag="v1",
+                sid="s123",
+                name="Bob",
+                nickname="Bobby",
+                headers={"X-Custom": "from-caller"},
+                params={"extra": "yes"},
+            )
+
+            assert res.is_ok is True
+            sent_req = route.calls.last.request
+            # Both DSL 'X-App' and caller 'X-Custom' are present
+            assert sent_req.headers["x-app"] == "ssc-client"
+            assert sent_req.headers["x-custom"] == "from-caller"
+            # Both DSL 'tag' and caller 'extra' query params are present
+            assert dict(sent_req.url.params) == {"tag": "v1", "extra": "yes"}
+

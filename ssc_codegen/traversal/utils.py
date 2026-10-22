@@ -7,6 +7,7 @@ predicates, and placeholder templates used by converters during code generation.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 from ssc_codegen.ast import (
     Assert,
@@ -14,9 +15,9 @@ from ssc_codegen.ast import (
     Filter,
     FunctionDef,
     JsonDef,
-    JsonDefField,
     Match,
     MethodBase,
+    MethodFetch,
     Module,
     Node,
     PlaceholderSpec,
@@ -26,27 +27,37 @@ from ssc_codegen.ast import (
     StructBase,
     StructRest,
     StructType,
-    VariableType,
 )
-
-
-@dataclass(frozen=True)
-class DescriptorRef:
-    """Symbolic reference to another JSON schema descriptor constant."""
-
-    schema_name: str
 
 
 def module_has_rest(module: Module) -> bool:
     """Check if the module contains at least one REST struct.
 
     Args:
-        module: The AST `Module` to inspect.
+        module (Module): The AST `Module` to inspect.
 
     Returns:
-        `True` if any node in the module body is a `StructRest`, `False` otherwise.
+        bool: `True` if any node in the module body is a `StructRest`, `False` otherwise.
     """
     return any(isinstance(n, StructRest) for n in module.body)
+
+
+def module_has_fetch(module: Module) -> bool:
+    """Check if the module contains at least one struct with a `MethodFetch` node.
+
+    Args:
+        module (Module): The AST `Module` to inspect.
+
+    Returns:
+        bool: `True` if any struct in the module body declares a `MethodFetch`,
+        `False` otherwise.
+    """
+    for node in module.body:
+        if isinstance(node, StructBase):
+            for child in node.body:
+                if isinstance(child, MethodFetch):
+                    return True
+    return False
 
 
 def module_uses_http(module: Module) -> bool:
@@ -158,28 +169,6 @@ def dict_entry_placeholder(
     return tmpl.single_placeholder()
 
 
-def dict_needs_builder(d: dict[str, PlaceholderTemplate]) -> bool:
-    """Check if any dictionary entry requires dynamic query/body builder logic.
-
-    Returns `True` if any entry has an optional placeholder or bracket-style array.
-
-    Args:
-        d: Mapping from key names to `PlaceholderTemplate` values.
-
-    Returns:
-        `True` if runtime dictionary assembly helper is required, `False` otherwise.
-    """
-    for tmpl in d.values():
-        ph = tmpl.single_placeholder()
-        if ph is None:
-            continue
-        if ph.is_optional:
-            return True
-        if ph.is_array and ph.style == "bracket":
-            return True
-    return False
-
-
 def find_predicate_container(node: Node) -> Node | None:
     """Walk up the parent chain to find enclosing Filter, Assert, Match, or PreValidate.
 
@@ -235,156 +224,156 @@ def resolve_json_def(node: Node, schema_name: str) -> JsonDef | None:
     return None
 
 
-def jsonify_path_to_segments(query: str) -> list[str]:
-    """Split a dot-notation query path into segments, quoting string keys.
+@dataclass(frozen=True, slots=True)
+class GjsonSegment:
+    """Single parsed segment of a GJSON path expression."""
 
-    For example, ``"foo.0.bar"`` becomes ``["'foo'", "0", "'bar'"]``.
+    kind: Literal["key", "index", "hash"]
+    key: str = ""
+    index: int | None = None
+
+
+def parse_gjson_path(path: str) -> tuple[GjsonSegment, ...]:
+    """Parse and validate a filter-free GJSON path expression into segments.
 
     Args:
-        query: Dot-separated JSON path string.
+        path (str): Raw GJSON path expression string.
 
     Returns:
-        List of formatted path segment expressions.
+        tuple[GjsonSegment, ...]: Ordered tuple of parsed key, index, or hash segments.
+
+    Raises:
+        ValueError: If the path is empty, contains empty segments, has an invalid
+            or trailing escape sequence, uses negative array indices, or includes
+            unsupported filter expressions.
     """
-    if not query:
-        return []
-    parts: list[str] = []
-    for part in query.split("."):
-        if part.isdigit():
-            parts.append(part)
+    if not path:
+        raise ValueError("Empty GJSON path expression")
+
+    raw_chars: list[str] = []
+    unescaped_chars: list[str] = []
+    has_escape = False
+    has_unescaped_hash = False
+    raw_segments: list[tuple[str, str, bool, bool]] = []
+
+    i = 0
+    n = len(path)
+    while i < n:
+        ch = path[i]
+        if ch == "\\":
+            if i + 1 >= n:
+                raise ValueError(
+                    f"Trailing unescaped backslash in GJSON path '{path}'"
+                )
+            nxt = path[i + 1]
+            if nxt not in (".", "\\", "#"):
+                raise ValueError(
+                    f"Invalid escape sequence '\\{nxt}' in GJSON path '{path}'"
+                )
+            raw_chars.append(ch)
+            raw_chars.append(nxt)
+            unescaped_chars.append(nxt)
+            has_escape = True
+            i += 2
+        elif ch == ".":
+            if not raw_chars:
+                raise ValueError(f"Empty segment in GJSON path '{path}'")
+            raw_segments.append(
+                (
+                    "".join(raw_chars),
+                    "".join(unescaped_chars),
+                    has_escape,
+                    has_unescaped_hash,
+                )
+            )
+            raw_chars = []
+            unescaped_chars = []
+            has_escape = False
+            has_unescaped_hash = False
+            i += 1
         else:
-            parts.append(repr(part))
-    return parts
+            if ch == "#":
+                has_unescaped_hash = True
+            raw_chars.append(ch)
+            unescaped_chars.append(ch)
+            i += 1
 
+    if not raw_chars:
+        raise ValueError(f"Empty trailing segment in GJSON path '{path}'")
+    raw_segments.append(
+        (
+            "".join(raw_chars),
+            "".join(unescaped_chars),
+            has_escape,
+            has_unescaped_hash,
+        )
+    )
 
-def json_def_needs_remap(
-    definition: JsonDef,
-    definitions: dict[str, JsonDef],
-    stack: tuple[str, ...] = (),
-) -> bool:
-    """Check whether a JSON definition or any nested definition uses field aliases.
-
-    Args:
-        definition: The `JsonDef` node to check.
-        definitions: Mapping of all available `JsonDef` schemas in the module.
-        stack: Cycle-prevention stack of visited schema names.
-
-    Returns:
-        `True` if field alias remapping is required, `False` otherwise.
-    """
-    if definition.name in stack:
-        return False
-    if definition.has_alias_key:
-        return True
-    next_stack = (*stack, definition.name)
-    for field in definition.body:
-        if not isinstance(field, JsonDefField):
-            continue
-        info = field.ret_type_info
-        if info.base == VariableType.JSON and info.ref:
-            nested = definitions.get(info.ref)
-            if nested and json_def_needs_remap(nested, definitions, next_stack):
-                return True
-    return False
-
-
-def json_def_descriptors(
-    definition: JsonDef,
-    definitions: dict[str, JsonDef] | None = None,
-    stack: tuple[str, ...] = (),
-) -> dict[str, tuple[str, bool, bool, object]]:
-    """Build dictionary of field descriptors for strict JSON allowlist projection.
-
-    Args:
-        definition: The root `JsonDef` node.
-        definitions: Optional mapping of all available `JsonDef` schemas in the module.
-        stack: Cycle-prevention stack of visited schema names.
-
-    Returns:
-        Dictionary mapping canonical field names to a tuple of
-        ``(wire_path, is_optional, is_omitempty, nested_descriptors)``.
-    """
-    if definition.name in stack:
-        return {}
-    if definition.is_dict:
-        val_desc: object = None
-        val_info = definition.value_type_info
-        if val_info and val_info.base == VariableType.JSON and val_info.ref:
-            ref = DescriptorRef(val_info.ref)
-            val_desc = [ref] if val_info.is_array else ref
-        return {"__dict__": True, "__value__": val_desc}  # type: ignore[return-value, dict-item]
-    descriptors: dict[str, tuple[str, bool, bool, object]] = {}
-    for field in definition.body:
-        if not isinstance(field, JsonDefField) or (
-            field.ret_type_info and field.ret_type_info.skip
+    segments: list[GjsonSegment] = []
+    for (
+        raw_seg,
+        unescaped_seg,
+        seg_has_escape,
+        seg_has_hash,
+    ) in raw_segments:
+        if raw_seg == "#":
+            segments.append(GjsonSegment(kind="hash", key="#"))
+        elif seg_has_hash:
+            raise ValueError(
+                f"Unsupported GJSON filter or hash expression '{raw_seg}' in '{path}'"
+            )
+        elif (
+            not seg_has_escape
+            and raw_seg.startswith("-")
+            and raw_seg[1:].isdigit()
         ):
-            continue
-        wire_path = field.alias if field.alias else field.name
-        info = field.ret_type_info
-        is_optional = info.is_optional if info else False
-        is_omitempty = info.omitempty if info else False
-        nested_desc: object = None
-        if field.is_dict or (info and info.is_dict):
-            f_val_desc: object = None
-            f_val_info = field.value_type_info or (
-                info.value_type_info if info else None
+            raise ValueError(
+                f"Negative array index '{raw_seg}' is not supported in GJSON path '{path}'"
             )
-            if (
-                f_val_info
-                and f_val_info.base == VariableType.JSON
-                and f_val_info.ref
-            ):
-                ref = DescriptorRef(f_val_info.ref)
-                f_val_desc = [ref] if f_val_info.is_array else ref
-            nested_desc = {"__dict__": True, "__value__": f_val_desc}
-        elif info and info.base == VariableType.JSON and info.ref:
-            ref = DescriptorRef(info.ref)
-            nested_desc = [ref] if info.is_array else ref
-        descriptors[field.name] = (
-            wire_path,
-            is_optional,
-            is_omitempty,
-            nested_desc,
-        )
-    return descriptors
-
-
-def json_def_mapping(
-    definition: JsonDef,
-    definitions: dict[str, JsonDef],
-    stack: tuple[str, ...] = (),
-) -> dict[str, object]:
-    """Build complete wire-to-canonical key mapping tree for JSON dictionaries.
-
-    Args:
-        definition: The root `JsonDef` node.
-        definitions: Mapping of all available `JsonDef` schemas in the module.
-        stack: Cycle-prevention stack of visited schema names.
-
-    Returns:
-        Dictionary mapping wire keys to canonical names or nested mapping tuples.
-    """
-    if definition.name in stack:
-        return {}
-    next_stack = (*stack, definition.name)
-    mapping: dict[str, object] = {}
-    for field in definition.body:
-        if not isinstance(field, JsonDefField) or field.ret_type_info.skip:
-            continue
-        source = field.alias or field.name
-        output = field.name
-        info = field.ret_type_info
-        nested = (
-            definitions.get(info.ref)
-            if info.base == VariableType.JSON and info.ref
-            else None
-        )
-        if nested and json_def_needs_remap(nested, definitions, next_stack):
-            nested_mapping = json_def_mapping(nested, definitions, next_stack)
-            mapping[source] = (
-                output,
-                [nested_mapping] if info.is_array else nested_mapping,
+        elif not seg_has_escape and raw_seg.isdigit():
+            segments.append(
+                GjsonSegment(
+                    kind="index", key=raw_seg, index=int(raw_seg)
+                )
             )
         else:
-            mapping[source] = output
-    return mapping
+            segments.append(GjsonSegment(kind="key", key=unescaped_seg))
+
+    return tuple(segments)
+
+
+def is_malformed_gjson_path(path: str) -> bool:
+    """Check whether a GJSON path expression violates the supported subset grammar.
+
+    Args:
+        path (str): Raw GJSON path expression string to validate.
+
+    Returns:
+        bool: ``True`` if the path is malformed, ``False`` if valid.
+    """
+    try:
+        parse_gjson_path(path)
+        return False
+    except ValueError:
+        return True
+
+
+def classify_gjson_path(path: str) -> tuple[bool, str]:
+    """Classify a GJSON path into a direct O(1) dictionary key or a path query.
+
+    Args:
+        path (str): GJSON path expression string.
+
+    Returns:
+        tuple[bool, str]: ``(True, unescaped_key)`` when the expression resolves
+        to a single flat object key, or ``(False, path)`` when it requires
+        multi-segment, index, or array projection evaluation.
+    """
+    try:
+        segments = parse_gjson_path(path)
+    except ValueError:
+        return False, path
+    if len(segments) == 1 and segments[0].kind == "key":
+        return True, segments[0].key
+    return False, path
+

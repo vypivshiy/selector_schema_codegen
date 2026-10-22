@@ -1,0 +1,7 @@
+# Runtime HTTP Delegation Over Template Engines in Code Generation
+
+Status: accepted
+
+Target code generators (`python`, `javascript`, `go`, `rust`) must not use external template engines (such as `jinja2`) or multi-slot template renderers to emit AST nodes or HTTP **Request** methods (`MethodRest` and `MethodFetch`). For AST pipelines and predicates (`BaseWalker`), handlers perform fine-grained 1–5 line transformations coupled with conditional `ModuleBuilder` import/helper registrations that lose static typing and locality when split into template files. For HTTP **Request** methods, method body bulk is eliminated at the root by delegating request option preparation (filtering `None`/`undefined` from DSL `params`/`headers`/`cookies` while preserving `null` in JSON bodies, shallow-merging caller `kwargs`/`opts`), `response_path`/`response_join` extraction, and typed response decoding into target runtime helpers (`ssc_rest_call`, `sscRestCall`, `sscRestCallValue[T]`, `rt::rest_call`, `rt::fetch_html`), reducing every generated method to a 3–5 line thin delegation.
+
+Static multi-line runtime blocks in target converters and **HttpLibStrategy** implementations must be authored as triple-quoted strings normalized via `inspect.cleandoc("""...""").splitlines()` rather than `list[str]` line arrays, and all `@doc` / `doc="..."` strings must be normalized with `inspect.cleandoc` at KDL parse time so target converters emit clean multi-line docstrings and doc comments without raw KDL indentation or escaped `\n` literals.

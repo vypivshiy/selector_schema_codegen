@@ -2241,3 +2241,223 @@ struct MyScraper {
         assert any(
             d.hint == REQUEST_LINE_CONTINUATION_HINT for d in diags_header
         )
+
+
+class TestJsonFieldNameValidationE403:
+    """Tests for strict portable JSON field identifiers and E403 hints."""
+
+    def test_colon_in_json_field_name_emits_e403_with_space_hint(self) -> None:
+        src = """
+json Article {
+    url: str
+}
+"""
+        _, diags = parse_module(src)
+        e403 = [d for d in diags if d.code == "E403"]
+        assert len(e403) == 1
+        assert (
+            e403[0].hint
+            == 'in KDL field name and type are separated by space (\'url str\'); if the JSON key ends with \':\', use \'url str from="url:"\''
+        )
+
+    def test_at_prefix_in_json_field_name_emits_e403_with_from_hint(
+        self,
+    ) -> None:
+        src = """
+json JsonLd {
+    @type str
+    @context str
+}
+"""
+        _, diags = parse_module(src)
+        e403 = [d for d in diags if d.code == "E403"]
+        assert len(e403) == 2
+        assert (
+            e403[0].hint
+            == 'use a portable identifier with \'from\', e.g. \'type str from="@type"\''
+        )
+        assert (
+            e403[1].hint
+            == 'use a portable identifier with \'from\', e.g. \'context str from="@context"\''
+        )
+
+        # Valid portable names with explicit from="..." pass without errors
+        src_ok = """
+json JsonLd {
+    item_type str from="@type"
+    context str from="@context"
+}
+"""
+        _, diags_ok = parse_module(src_ok)
+        assert not [d for d in diags_ok if d.severity == Severity.ERROR]
+
+    def test_target_reserved_words_in_json_fields_emit_e403(self) -> None:
+        src = """
+json Payload {
+    class str
+    def int
+    function bool
+    self str
+}
+"""
+        _, diags = parse_module(src)
+        e403 = [d for d in diags if d.code == "E403"]
+        messages = [d.message for d in e403]
+        assert any("invalid python identifier 'class'" in m for m in messages)
+        assert any(
+            "invalid javascript identifier 'class'" in m for m in messages
+        )
+        assert any("invalid python identifier 'def'" in m for m in messages)
+        assert any(
+            "invalid javascript identifier 'function'" in m for m in messages
+        )
+        assert any("invalid rust identifier 'self'" in m for m in messages)
+
+        # 'type' is valid across all targets (Type in Go, r#type in Rust)
+        _, diags_type = parse_module("json Payload { type str }")
+        assert not [d for d in diags_type if d.severity == Severity.ERROR]
+
+    def test_e403_in_inline_json_fields_and_inline_value_blocks(self) -> None:
+        src = """
+json Root {
+    nested_obj {
+        url: str
+        class int
+    }
+    translations (dict) {
+        @key str
+        @value {
+            @type str
+            function str
+            self int
+        }
+    }
+}
+(dict)json TopDict {
+    @key str
+    @value {
+        @context str
+        def bool
+    }
+}
+"""
+        _, diags = parse_module(src)
+        e403 = [d for d in diags if d.code == "E403"]
+        hints = [d.hint for d in e403]
+        messages = [d.message for d in e403]
+
+        assert any("separated by space ('url str')" in h for h in hints)
+        assert any('\'type str from="@type"\'' in h for h in hints)
+        assert any('\'context str from="@context"\'' in h for h in hints)
+        assert any("invalid python identifier 'class'" in m for m in messages)
+        assert any(
+            "invalid javascript identifier 'function'" in m for m in messages
+        )
+        assert any("invalid rust identifier 'self'" in m for m in messages)
+        assert any("invalid python identifier 'def'" in m for m in messages)
+
+
+class TestGjsonPathValidationE040:
+    """Tests for GJSON path expression validation (E040) and classification."""
+
+    @pytest.mark.parametrize(
+        "valid_path",
+        [
+            r"os\.version",
+            r"a\\b",
+            r"\#",
+            "#",
+            "items.#",
+            "items.#.name",
+            "items.#.tags.#.id",
+            "0.author.name",
+            "@context",
+            "data-version",
+        ],
+    )
+    def test_valid_gjson_paths_pass_lint(self, valid_path: str) -> None:
+        escaped = valid_path.replace("\\", "\\\\")
+        src = f"""
+json Item path="{escaped}" {{
+    val str from="{escaped}"
+}}
+struct Scraper {{
+    f {{
+        css "script"
+        text
+        jsonify Item path="{escaped}"
+    }}
+}}
+"""
+        _, diags = parse_module(src)
+        errors = [d for d in diags if d.severity == Severity.ERROR]
+        assert not errors, (
+            f"Unexpected errors for {valid_path!r}: {[(e.code, e.message) for e in errors]}"
+        )
+
+    @pytest.mark.parametrize(
+        "bad_path",
+        [
+            "",
+            ".a",
+            "a.",
+            "..",
+            "a..b",
+            "a.-1",
+            "-1",
+            "a\\",
+            "\\",
+            r"\0",
+            r"\-1",
+            "a.#[x==1]",
+            "a.#(x==1)",
+            "#[x==1]",
+        ],
+    )
+    def test_malformed_gjson_paths_emit_e040(self, bad_path: str) -> None:
+        from ssc_codegen.traversal.utils import is_malformed_gjson_path
+
+        assert is_malformed_gjson_path(bad_path) is True
+
+        escaped = bad_path.replace("\\", "\\\\")
+        src_from = f"""
+json Item {{
+    val str from="{escaped}"
+}}
+"""
+        _, diags_from = parse_module(src_from)
+        assert any(d.code == "E040" for d in diags_from), (
+            f"Expected E040 on from={bad_path!r}, got {[(d.code, d.message) for d in diags_from]}"
+        )
+
+        src_jsonify = f"""
+json Item {{
+    val str
+}}
+struct Scraper {{
+    f {{
+        css "script"
+        text
+        jsonify Item path="{escaped}"
+    }}
+}}
+"""
+        _, diags_jsonify = parse_module(src_jsonify)
+        assert any(d.code == "E040" for d in diags_jsonify), (
+            f"Expected E040 on jsonify path={bad_path!r}, got {[(d.code, d.message) for d in diags_jsonify]}"
+        )
+
+    def test_classify_gjson_path_direct_key_vs_query(self) -> None:
+        from ssc_codegen.traversal.utils import classify_gjson_path
+
+        assert classify_gjson_path("id") == (True, "id")
+        assert classify_gjson_path("@context") == (True, "@context")
+        assert classify_gjson_path(r"os\.version") == (True, "os.version")
+        assert classify_gjson_path(r"a\\b") == (True, r"a\b")
+        assert classify_gjson_path(r"\#") == (True, "#")
+
+        assert classify_gjson_path("a.b") == (False, "a.b")
+        assert classify_gjson_path("0") == (False, "0")
+        assert classify_gjson_path("#") == (False, "#")
+        assert classify_gjson_path("items.#") == (False, "items.#")
+        assert classify_gjson_path("items.#.name") == (False, "items.#.name")

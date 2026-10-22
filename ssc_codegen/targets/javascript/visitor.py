@@ -134,7 +134,7 @@ from ssc_codegen.ast import (
 from ssc_codegen.exceptions import BuildTimeError
 from ssc_codegen.generation.builder import ModuleBuilder
 from ssc_codegen.naming import (
-    json_descriptor_var_name,
+    js_json_projector_name,
     to_camel_case,
     to_pascal_case,
 )
@@ -144,187 +144,392 @@ from ssc_codegen.targets.javascript.http_libs.base import JsHttpLibStrategy
 from ssc_codegen.targets.javascript.http_libs.fetch import FetchStrategy
 from ssc_codegen.traversal.context import WalkContext
 from ssc_codegen.traversal.utils import (
-    DescriptorRef,
+    classify_gjson_path,
     find_enclosing_module,
     find_predicate_container,
-    json_def_descriptors,
-    jsonify_path_to_segments,
     module_has_rest,
+    module_uses_http,
     resolve_json_def,
 )
 from ssc_codegen.traversal.walker import BaseWalker
 
 _JS_JSON_PROJECT_HELPER = """class SscJsonError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = 'SscJsonError';
-  }
+  constructor(message) { super(message); this.name = 'SscJsonError'; }
 }
 class SscJsonPathError extends SscJsonError {
-  constructor(message) {
-    super(message);
-    this.name = 'SscJsonPathError';
-  }
+  constructor(message) { super(message); this.name = 'SscJsonPathError'; }
 }
 class SscJsonFieldMissingError extends SscJsonError {
-  constructor(message) {
-    super(message);
-    this.name = 'SscJsonFieldMissingError';
-  }
+  constructor(message) { super(message); this.name = 'SscJsonFieldMissingError'; }
 }
 class SscJsonSchemaError extends SscJsonError {
-  constructor(message) {
-    super(message);
-    this.name = 'SscJsonSchemaError';
-  }
+  constructor(message) { super(message); this.name = 'SscJsonSchemaError'; }
 }
 
-function sscResolveDotpath(data, path, isOptional) {
+function _sscTypeName(v) {
+  return v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v;
+}
+
+function sscExpectObject(data, target = '') {
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+    const prefix = target ? `${target}: ` : '';
+    throw new SscJsonSchemaError(`${prefix}Expected object, got ${_sscTypeName(data)}`);
+  }
+  return data;
+}
+
+function sscExpectArray(data, target = '') {
+  if (!Array.isArray(data)) {
+    const prefix = target ? `${target}: ` : '';
+    throw new SscJsonSchemaError(`${prefix}Expected array, got ${_sscTypeName(data)}`);
+  }
+  return data;
+}
+
+function _sscSplitGjsonPath(path) {
+  const segs = [];
+  let raw = '';
+  let key = '';
+  let escaped = false;
+  for (let i = 0; i < path.length; i++) {
+    const ch = path[i];
+    if (ch === '\\\\' && i + 1 < path.length && (path[i + 1] === '.' || path[i + 1] === '\\\\' || path[i + 1] === '#')) {
+      raw += ch + path[i + 1];
+      key += path[i + 1];
+      escaped = true;
+      i++;
+    } else if (ch === '.') {
+      segs.push({ raw, key, escaped });
+      raw = '';
+      key = '';
+      escaped = false;
+    } else {
+      raw += ch;
+      key += ch;
+    }
+  }
+  segs.push({ raw, key, escaped });
+  return segs;
+}
+
+function sscResolveDotpath(data, path, isOptional = false, target = '') {
+  const prefix = target ? `${target}: ` : '';
   let current = data;
-  const parts = path.split('.');
-  for (const seg of parts) {
+  const segs = _sscSplitGjsonPath(path);
+  for (let i = 0; i < segs.length; i++) {
+    const seg = segs[i];
     if (current == null) {
       if (isOptional) return null;
-      throw new SscJsonPathError(`Cannot traverse segment '${seg}' on null object in path '${path}'`);
+      throw new SscJsonPathError(`${prefix}Cannot traverse segment '${seg.key}' on null object in path '${path}'`);
     }
-    if (/^\\d+$/.test(seg)) {
-      const idx = parseInt(seg, 10);
+    if (!seg.escaped && seg.raw === '#') {
       if (!Array.isArray(current)) {
         if (isOptional) return null;
-        throw new SscJsonPathError(`Expected list for index '${idx}' in path '${path}', got ${typeof current}`);
+        throw new SscJsonPathError(`${prefix}Expected list for '#' in path '${path}', got ${_sscTypeName(current)}`);
+      }
+      if (i === segs.length - 1) return current.length;
+      const subpath = segs.slice(i + 1).map(s => s.raw).join('.');
+      const out = [];
+      for (const item of current) {
+        const v = sscResolveDotpath(item, subpath, true, target);
+        if (v != null) out.push(v);
+      }
+      return out;
+    }
+    if (!seg.escaped && /^\\d+$/.test(seg.raw)) {
+      const idx = parseInt(seg.raw, 10);
+      if (!Array.isArray(current)) {
+        if (isOptional) return null;
+        throw new SscJsonPathError(`${prefix}Expected list for index '${idx}' in path '${path}', got ${_sscTypeName(current)}`);
       }
       if (idx < 0 || idx >= current.length) {
         if (isOptional) return null;
-        throw new SscJsonPathError(`Index ${idx} out of bounds (len=${current.length}) in path '${path}'`);
+        throw new SscJsonPathError(`${prefix}Index ${idx} out of bounds (len=${current.length}) in path '${path}'`);
       }
       current = current[idx];
-    } else if (typeof current === 'object') {
-      if (!(seg in current)) {
+    } else if (typeof current === 'object' && !Array.isArray(current)) {
+      if (!Object.prototype.hasOwnProperty.call(current, seg.key)) {
         if (isOptional) return null;
-        throw new SscJsonPathError(`Missing key '${seg}' in path '${path}'`);
+        throw new SscJsonPathError(`${prefix}Missing key '${seg.key}' in path '${path}'`);
       }
-      current = current[seg];
+      current = current[seg.key];
     } else {
       if (isOptional) return null;
-      throw new SscJsonPathError(`Cannot access key '${seg}' on non-dict ${typeof current} in path '${path}'`);
+      throw new SscJsonPathError(`${prefix}Cannot access key '${seg.key}' on non-dict ${_sscTypeName(current)} in path '${path}'`);
     }
   }
   return current;
 }
 
-function sscJsonProject(data, descriptors) {
-  if (descriptors && descriptors.__dict__) {
-    if (typeof data !== 'object' || data === null || Array.isArray(data)) {
-      throw new SscJsonSchemaError(`Expected object for dict schema, got ${data === null ? 'null' : Array.isArray(data) ? 'array' : typeof data}`);
-    }
-    const valDesc = descriptors.__value__;
-    if (valDesc == null) return data;
-    const result = {};
-    for (const [k, v] of Object.entries(data)) {
-      if (Array.isArray(valDesc) && valDesc.length > 0) {
-        result[k] = Array.isArray(v)
-          ? v.map(x => (x != null ? sscJsonProject(x, valDesc[0]) : x))
-          : sscJsonProject(v, valDesc[0]);
-      } else {
-        result[k] = sscJsonProject(v, valDesc);
-      }
-    }
-    return result;
+function sscJsonField(data, key, target, isOptional = false, isOmitempty = false) {
+  if (!Object.prototype.hasOwnProperty.call(data, key)) {
+    if (isOmitempty) return undefined;
+    if (isOptional) return null;
+    const canonical = target.includes('.') ? target.slice(target.indexOf('.') + 1) : key;
+    const qual = target.includes('.') ? target : `${target}.${canonical}`;
+    throw new SscJsonFieldMissingError(`${qual}: Required JSON field '${key}' (mapped to '${canonical}') is missing`);
   }
-  if (Array.isArray(data)) {
-    return data.map(item => sscJsonProject(item, descriptors));
+  const val = data[key];
+  if (val == null) {
+    if (isOmitempty) return undefined;
+    if (isOptional) return null;
+    const canonical = target.includes('.') ? target.slice(target.indexOf('.') + 1) : key;
+    const qual = target.includes('.') ? target : `${target}.${canonical}`;
+    throw new SscJsonFieldMissingError(`${qual}: Field '${key}' is null, but '${canonical}' is not nullable`);
   }
-  if (data == null || typeof data !== 'object') return data;
-
-  const result = {};
-  for (const [canonical, [wirePath, isOptional, isOmitempty, nested]] of Object.entries(descriptors)) {
-    let val;
-    if (wirePath.includes('.') || /^\\d+$/.test(wirePath)) {
-      val = sscResolveDotpath(data, wirePath, isOptional || isOmitempty);
-    } else {
-      if (!(wirePath in data)) {
-        if (isOmitempty || isOptional) {
-          val = null;
-        } else {
-          throw new SscJsonFieldMissingError(`Required JSON field '${wirePath}' (mapped to '${canonical}') is missing`);
-        }
-      } else {
-        val = data[wirePath];
-      }
-    }
-
-    if (val === null || val === undefined) {
-      if (isOmitempty) continue;
-      if (!isOptional) {
-        throw new SscJsonFieldMissingError(`Field '${wirePath}' is null, but '${canonical}' is not nullable`);
-      }
-      result[canonical] = null;
-      continue;
-    }
-
-    if (nested) {
-      if (typeof nested === 'object' && nested.__dict__) {
-        val = sscJsonProject(val, nested);
-      } else {
-        val = Array.isArray(nested)
-          ? (Array.isArray(val) ? val.map(x => sscJsonProject(x, nested[0])) : sscJsonProject(val, nested[0]))
-          : sscJsonProject(val, nested);
-      }
-    }
-
-    result[canonical] = val;
-  }
-  return result;
+  return val;
 }
 
-function sscRemapJsonKeys(value, mapping) {
-  if (Array.isArray(value)) return value.map(item => sscRemapJsonKeys(item, mapping));
-  if (value === null || typeof value !== 'object') return value;
-  const result = {};
-  for (const [source, spec] of Object.entries(mapping)) {
-    if (!Object.prototype.hasOwnProperty.call(value, source)) continue;
-    const output = Array.isArray(spec) ? spec[0] : spec;
-    const nested = Array.isArray(spec) ? spec[1] : null;
-    let item = value[source];
-    if (Array.isArray(nested)) item = item.map(x => sscRemapJsonKeys(x, nested[0]));
-    else if (nested !== null) item = sscRemapJsonKeys(item, nested);
-    result[output] = item;
+function sscJsonPath(data, path, target, isOptional = false, isOmitempty = false) {
+  const val = sscResolveDotpath(data, path, isOptional || isOmitempty, target);
+  if (val == null) {
+    if (isOmitempty) return undefined;
+    if (isOptional) return null;
+    const canonical = target.slice(target.indexOf('.') + 1);
+    throw new SscJsonFieldMissingError(`${target}: Field '${path}' is null, but '${canonical}' is not nullable`);
   }
-  return result;
+  return val;
 }"""
 
 
-def _js_json_descriptors(
+def _js_transform_value_expr(
+    val_expr: str,
+    field: JsonDefField,
+    target: str,
+    definitions: dict[str, JsonDef],
+) -> str:
+    """Build a JavaScript expression that validates and projects a non-null JSON field value.
+
+    Args:
+        val_expr (str): Source JavaScript expression yielding the raw non-null field value.
+        field (JsonDefField): The JSON schema field AST node.
+        target (str): Qualified `<SchemaName>.<field_name>` error context string.
+        definitions (dict[str, JsonDef]): Map of schema names to `JsonDef` nodes in the module.
+
+    Returns:
+        str: JavaScript expression returning the projected and container-validated value.
+    """
+    info = field.ret_type_info
+    target_lit = json.dumps(target)
+    if field.is_dict or (info and info.is_dict):
+        f_val_info = field.value_type_info or (
+            info.value_type_info if info else None
+        )
+        if f_val_info and f_val_info.base == VT.JSON and f_val_info.ref:
+            child_proj = js_json_projector_name(f_val_info.ref)
+            child_def = definitions.get(f_val_info.ref)
+            if f_val_info.is_array and not (child_def and child_def.is_array):
+                return (
+                    f"Object.fromEntries(Object.entries(sscExpectObject({val_expr}, {target_lit}))"
+                    f".map(([k, v]) => [k, v != null ? "
+                    f"sscExpectArray(v, {target_lit}).filter(x => x != null).map(x => {child_proj}(x)) : null]))"
+                )
+            return (
+                f"Object.fromEntries(Object.entries(sscExpectObject({val_expr}, {target_lit}))"
+                f".map(([k, v]) => [k, v != null ? {child_proj}(v) : null]))"
+            )
+        if f_val_info and f_val_info.is_array:
+            return (
+                f"Object.fromEntries(Object.entries(sscExpectObject({val_expr}, {target_lit}))"
+                f".map(([k, v]) => [k, v != null ? sscExpectArray(v, {target_lit}) : null]))"
+            )
+        return f"{{ ...sscExpectObject({val_expr}, {target_lit}) }}"
+    if info and info.base == VT.JSON and info.ref:
+        child_proj = js_json_projector_name(info.ref)
+        child_def = definitions.get(info.ref)
+        if info.is_array and not (child_def and child_def.is_array):
+            return (
+                f"sscExpectArray({val_expr}, {target_lit})"
+                f".filter(x => x != null)"
+                f".map(x => {child_proj}(x))"
+            )
+        return f"{child_proj}({val_expr})"
+    if info and info.is_array:
+        return f"sscExpectArray({val_expr}, {target_lit})"
+    return val_expr
+
+
+def _js_json_projector(
     node: JsonDef, definitions: dict[str, JsonDef]
 ) -> list[str]:
-    descriptors = json_def_descriptors(node, definitions)
+    """Emit a dedicated JavaScript JSON projector function for a `JsonDef` schema.
 
-    def render(value: object) -> str:
-        if isinstance(value, DescriptorRef):
-            return json_descriptor_var_name(value.schema_name)
-        if value is None:
-            return "null"
-        if isinstance(value, bool):
-            return "true" if value else "false"
-        if isinstance(value, str):
-            return json.dumps(value)
-        if isinstance(value, tuple):
-            return "[" + ", ".join(render(x) for x in value) + "]"
-        if isinstance(value, list):
-            return "[" + ", ".join(render(item) for item in value) + "]"
-        if isinstance(value, dict):
-            return (
-                "{"
-                + ", ".join(
-                    f"{json.dumps(key)}: {render(item)}"
-                    for key, item in value.items()
+    Args:
+        node (JsonDef): The JSON schema definition AST node.
+        definitions (dict[str, JsonDef]): Map of schema names to `JsonDef` nodes in the module.
+
+    Returns:
+        list[str]: Generated JavaScript source lines defining `_project<Schema>`.
+    """
+    fn_name = js_json_projector_name(node.name)
+    schema_title = to_pascal_case(node.name)
+    schema_lit = json.dumps(schema_title)
+
+    if node.is_dict:
+        val_info = node.value_type_info
+        if val_info and val_info.base == VT.JSON and val_info.ref:
+            child_proj = js_json_projector_name(val_info.ref)
+            child_def = definitions.get(val_info.ref)
+            if val_info.is_array and not (child_def and child_def.is_array):
+                body_line = (
+                    f"  return Object.fromEntries(Object.entries(sscExpectObject(data, {schema_lit}))"
+                    f".map(([k, v]) => [k, v != null ? "
+                    f"sscExpectArray(v, {schema_lit}).filter(x => x != null).map(x => {child_proj}(x)) : null]));"
                 )
-                + "}"
+            else:
+                body_line = (
+                    f"  return Object.fromEntries(Object.entries(sscExpectObject(data, {schema_lit}))"
+                    f".map(([k, v]) => [k, v != null ? {child_proj}(v) : null]));"
+                )
+        elif val_info and val_info.is_array:
+            body_line = (
+                f"  return Object.fromEntries(Object.entries(sscExpectObject(data, {schema_lit}))"
+                f".map(([k, v]) => [k, v != null ? sscExpectArray(v, {schema_lit}) : null]));"
             )
-        raise TypeError(f"unsupported JSON descriptor value: {value!r}")
+        else:
+            body_line = (
+                f"  return {{ ...sscExpectObject(data, {schema_lit}) }};"
+            )
+        return [
+            f"function {fn_name}(data) {{",
+            body_line,
+            "}",
+            "",
+        ]
+
+    ind = "    " if node.is_array else "  "
+    active_fields = [
+        field
+        for field in node.body
+        if isinstance(field, JsonDefField)
+        and not (field.ret_type_info and field.ret_type_info.skip)
+    ]
+    has_omitempty = any(
+        bool(f.ret_type_info and f.ret_type_info.omitempty)
+        for f in active_fields
+    )
+    needs_temp_var = any(
+        bool(f.ret_type_info and f.ret_type_info.omitempty)
+        or (
+            bool(f.ret_type_info and f.ret_type_info.is_optional)
+            and bool(
+                (f.is_dict or (f.ret_type_info and f.ret_type_info.is_dict))
+                or (
+                    f.ret_type_info
+                    and f.ret_type_info.base == VT.JSON
+                    and f.ret_type_info.ref
+                )
+                or (f.ret_type_info and f.ret_type_info.is_array)
+            )
+        )
+        for f in active_fields
+    )
+
+    field_lines: list[str] = [f"{ind}sscExpectObject(data, {schema_lit});"]
+    if needs_temp_var:
+        field_lines.append(f"{ind}let _v;")
+
+    obj_entries: list[str] = []
+    omitempty_lines: list[str] = []
+
+    for field in active_fields:
+        canonical = field.name
+        wire_path = field.alias if field.alias else field.name
+        info = field.ret_type_info
+        is_optional = bool(info.is_optional) if info else False
+        is_omitempty = bool(info.omitempty) if info else False
+        target = f"{schema_title}.{canonical}"
+        is_direct_key, unescaped_key = classify_gjson_path(wire_path)
+        if is_omitempty:
+            flags_suffix = f", {'true' if is_optional else 'false'}, true"
+        elif is_optional:
+            flags_suffix = ", true"
+        else:
+            flags_suffix = ""
+        if is_direct_key:
+            field_target = (
+                schema_title if unescaped_key == canonical else target
+            )
+            extract_expr = (
+                f"sscJsonField(data, {json.dumps(unescaped_key)}, "
+                f"{json.dumps(field_target)}{flags_suffix})"
+            )
+        else:
+            extract_expr = (
+                f"sscJsonPath(data, {json.dumps(wire_path)}, "
+                f"{json.dumps(target)}{flags_suffix})"
+            )
+
+        needs_transform = bool(
+            (field.is_dict or (info and info.is_dict))
+            or (info and info.base == VT.JSON and info.ref)
+            or (info and info.is_array)
+        )
+        is_ident = bool(_re.match(r"^[A-Za-z_$][A-Za-z0-9_$]*$", canonical))
+        obj_key = canonical if is_ident else json.dumps(canonical)
+        prop_target = (
+            f"result.{canonical}"
+            if is_ident
+            else f"result[{json.dumps(canonical)}]"
+        )
+
+        if is_omitempty:
+            val_expr = (
+                _js_transform_value_expr("_v", field, target, definitions)
+                if needs_transform
+                else "_v"
+            )
+            omitempty_lines.append(
+                f"{ind}if ((_v = {extract_expr}) !== undefined) {prop_target} = {val_expr};"
+            )
+        elif is_optional and needs_transform:
+            val_expr = _js_transform_value_expr(
+                "_v", field, target, definitions
+            )
+            obj_entries.append(
+                f"{ind}  {obj_key}: (_v = {extract_expr}) != null ? {val_expr} : null,"
+            )
+        else:
+            val_expr = (
+                _js_transform_value_expr(
+                    extract_expr, field, target, definitions
+                )
+                if needs_transform
+                else extract_expr
+            )
+            obj_entries.append(f"{ind}  {obj_key}: {val_expr},")
+
+    if has_omitempty:
+        if obj_entries:
+            field_lines.append(f"{ind}const result = {{")
+            field_lines.extend(obj_entries)
+            field_lines.append(f"{ind}}};")
+        else:
+            field_lines.append(f"{ind}const result = {{}};")
+        field_lines.extend(omitempty_lines)
+        field_lines.append(f"{ind}return result;")
+    else:
+        if obj_entries:
+            field_lines.append(f"{ind}return {{")
+            field_lines.extend(obj_entries)
+            field_lines.append(f"{ind}}};")
+        else:
+            field_lines.append(f"{ind}return {{}};")
+
+    if node.is_array:
+        return [
+            f"function {fn_name}(items) {{",
+            f"  return sscExpectArray(items, {schema_lit}).map(data => {{",
+            *field_lines,
+            "  });",
+            "}",
+            "",
+        ]
 
     return [
-        f"const {json_descriptor_var_name(node.name)} = {render(descriptors)};",
+        f"function {fn_name}(data) {{",
+        *field_lines,
+        "}",
         "",
     ]
 
@@ -628,12 +833,16 @@ class JsVisitor(BaseWalker):
             ]
         )
         mod = node.parent
+        if isinstance(mod, Module) and module_uses_http(mod):
+            lines.extend(rest.HTTP_SHARED)
+            lines.extend(FetchStrategy().fetch_call_lines())
+            lines.extend(AxiosStrategy().fetch_call_lines())
         if isinstance(mod, Module) and module_has_rest(mod):
             lines.extend(rest.REST_SHARED)
             lines.extend(FetchStrategy().rest_call_lines())
             lines.extend(AxiosStrategy().rest_call_lines())
             self._builder.require_std(
-                "sscJsonProject", code=_JS_JSON_PROJECT_HELPER
+                "sscResolveDotpath", code=_JS_JSON_PROJECT_HELPER
             )
         lines.extend(self._render_std_section(ctx))
         return lines
@@ -684,6 +893,15 @@ class JsVisitor(BaseWalker):
     # === TYPES ===
 
     def visit_jsondef(self, node: JsonDef, ctx: WalkContext) -> list[str]:
+        """Emit JSDoc `@typedef` block and JavaScript JSON projector function for a `JsonDef` schema.
+
+        Args:
+            node (JsonDef): The JSON schema definition AST node.
+            ctx (WalkContext): Traversal state context.
+
+        Returns:
+            list[str]: Generated JSDoc comment and projector function lines.
+        """
         name = to_pascal_case(node.name)
         if node.is_dict:
             key_map = {
@@ -706,28 +924,19 @@ class JsVisitor(BaseWalker):
                 f" * @typedef {{Record<{key_type}, {val_type}>}} {name}Json",
                 " */",
             ]
-            module = find_enclosing_module(node)
-            if isinstance(module, Module):
-                definitions = {
-                    n.name: n for n in module.body if isinstance(n, JsonDef)
-                }
-                lines.extend(_js_json_descriptors(node, definitions))
-                self._builder.require_std(
-                    "sscJsonProject", code=_JS_JSON_PROJECT_HELPER
-                )
-            return lines
+        else:
+            lines = ["/**", f" * @typedef {{Object}} {name}Json"]
+            lines.extend(self.walk_children(node, ctx))
+            lines.append(" */")
 
-        lines = ["/**", f" * @typedef {{Object}} {name}Json"]
-        lines.extend(self.walk_children(node, ctx))
-        lines.append(" */")
         module = find_enclosing_module(node)
         if isinstance(module, Module):
             definitions = {
                 n.name: n for n in module.body if isinstance(n, JsonDef)
             }
-            lines.extend(_js_json_descriptors(node, definitions))
+            lines.extend(_js_json_projector(node, definitions))
             self._builder.require_std(
-                "sscJsonProject", code=_JS_JSON_PROJECT_HELPER
+                "sscResolveDotpath", code=_JS_JSON_PROJECT_HELPER
             )
         return lines
 
@@ -1492,21 +1701,34 @@ class JsVisitor(BaseWalker):
         return [f"{ctx.indent}let {ctx.nxt} = Boolean({ctx.prv});"]
 
     def visit_jsonify(self, node: Jsonify, ctx: WalkContext) -> list[str]:
+        """Emit JavaScript statements that parse JSON, optionally resolve a GJSON path, and project into a schema.
+
+        Args:
+            node (Jsonify): The `jsonify` pipeline operation AST node.
+            ctx (WalkContext): Traversal state context.
+
+        Returns:
+            list[str]: Generated JavaScript pipeline statement lines.
+        """
         if node.path:
-            parts = jsonify_path_to_segments(node.path)
-            path = "".join(f"[{p}]" for p in parts)
-            raw_expr = f"JSON.parse({ctx.prv}){path}"
+            self._builder.require_std(
+                "sscResolveDotpath", code=_JS_JSON_PROJECT_HELPER
+            )
+            raw_expr = (
+                f"sscResolveDotpath(JSON.parse({ctx.prv}), "
+                f"{json.dumps(node.path)}, false)"
+            )
         else:
             raw_expr = f"JSON.parse({ctx.prv})"
 
         json_def = resolve_json_def(node, node.schema_name)
         if json_def:
             self._builder.require_std(
-                "sscJsonProject", code=_JS_JSON_PROJECT_HELPER
+                "sscResolveDotpath", code=_JS_JSON_PROJECT_HELPER
             )
-            desc_name = json_descriptor_var_name(node.schema_name)
+            proj_name = js_json_projector_name(node.schema_name)
             return [
-                f"{ctx.indent}let {ctx.nxt} = sscJsonProject({raw_expr}, {desc_name});"
+                f"{ctx.indent}let {ctx.nxt} = {proj_name}({raw_expr});"
             ]
 
         return [f"{ctx.indent}let {ctx.nxt} = {raw_expr};"]

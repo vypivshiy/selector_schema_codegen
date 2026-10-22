@@ -52,7 +52,7 @@ KDL schema -> kdlquery -> core/reader -> Module AST -> BaseWalker -> output sour
     2. **Pipeline** (`Field`, `FunctionDef`, `InitField`, `PreValidate`, `CheckMethod`, `SplitDoc`, `Key`, `Value`, `Table*`): делегирует в `walk_pipeline` с инкрементом индекса (`ctx.advance()`) после каждого шага.
     3. **Predicate** (`Filter`, `Assert`, `Match`, `Logic*`): `depth + 1`, `index = 0`, индекс инкрементируется между предикатными условиями.
   - Специальная обработка `Fallback`: узел `Fallback` самостоятельно обходит свое тело через `walk_pipeline`, а внешний контекст сдвигается на количество узлов тела на глубине `depth + 1` для синхронизации нумерации переменных.
-- `utils.py` — утилиты анализа AST: `module_has_rest`, `module_uses_http`, `module_is_rest_only`, `module_has_html_struct`, `module_is_extension_only`, `err_subclass_name`, `dict_needs_builder`, `find_predicate_container`, `find_enclosing_module`, `resolve_json_def`, `jsonify_path_to_segments`, `json_def_descriptors`, `json_def_mapping`.
+- `utils.py` — утилиты анализа AST: `module_has_rest`, `module_uses_http`, `module_is_rest_only`, `module_has_html_struct`, `module_is_extension_only`, `err_subclass_name`, `dict_needs_builder`, `find_predicate_container`, `find_enclosing_module`, `resolve_json_def`, `parse_gjson_path`, `is_malformed_gjson_path`, `classify_gjson_path`.
 
 `ssc_codegen/generation/`:
 - `builder.py` — `ModuleBuilder` (чистый аккумулятор данных):

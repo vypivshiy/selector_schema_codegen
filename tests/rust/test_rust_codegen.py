@@ -852,7 +852,7 @@ json Document {
     )
     assert "pub translations: TranslationsJson," in code
     assert (
-        'rt::decode::<TranslationsJson>(raw.clone(), "jsonify.translations")?'
+        'rt::decode::<TranslationsJson>(raw.clone(), "Document.translations")?'
         in code
     )
 
@@ -890,8 +890,8 @@ json AnimeResponse {
     )
     assert "std::collections::HashMap<String, Vec<String>>" in code
     assert "rt::decode::<std::collections::HashMap<i64, f64>>(" in code
-    assert '"jsonify.translations"' in code
-    assert '"jsonify.optional_rates"' in code
+    assert '"AnimeResponse.translations"' in code
+    assert '"AnimeResponse.optional_rates"' in code
 
 
 def test_rust_parent_struct_with_hoisted_inline_blocks_codegen() -> None:
@@ -1329,9 +1329,6 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
     )
 
     converter = RustVisitor()
-    (source_dir / "sscgen_runtime.rs").write_text(
-        converter.emit_runtime(), encoding="utf-8"
-    )
 
     modules: list[str] = ["mod sscgen_runtime;"]
     for schema_file in schemas:
@@ -1347,6 +1344,9 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
         )
         modules.append(f"mod {mod_name};")
 
+    (source_dir / "sscgen_runtime.rs").write_text(
+        converter.emit_runtime(), encoding="utf-8"
+    )
     modules.append("fn main() {}")
     (source_dir / "main.rs").write_text("\n".join(modules), encoding="utf-8")
 
@@ -1384,9 +1384,6 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
         encoding="utf-8",
     )
     converter = RustVisitor()
-    (source_dir / "sscgen_runtime.rs").write_text(
-        converter.emit_runtime(), encoding="utf-8"
-    )
 
     # 1. HTML fetch
     s1 = """
@@ -1482,6 +1479,9 @@ struct ApiUser type=rest {
     assert not [item for item in d5 if item.severity.name == "ERROR"]
     (source_dir / "p_rest_void_path.rs").write_text(
         converter.convert(m5), encoding="utf-8"
+    )
+    (source_dir / "sscgen_runtime.rs").write_text(
+        converter.emit_runtime(), encoding="utf-8"
     )
 
     (source_dir / "main.rs").write_text(
@@ -1723,3 +1723,290 @@ async fn main() {
     )
     assert result.returncode == 0, result.stderr
     assert "ALL_REST_PASSED" in result.stdout
+
+
+def test_rust_gjson_paths_and_error_contexts_execute(tmp_path: Path) -> None:
+    """Verify GJSON path subset (escaped dots, array length, array projection) and schema-qualified error contexts in Rust."""
+    source_dir = _write_cargo_project(tmp_path)
+    converter = RustVisitor()
+    (source_dir / "sscgen_runtime.rs").write_text(
+        converter.emit_runtime(), encoding="utf-8"
+    )
+
+    schema = r"""
+json ReleaseSummary {
+    os_version str from="os\\.version"
+    item_count int from="items.#"
+    tag_names (array)str from="tags.#.name"
+    first_tag str from="tags.0.name"
+    literal_hash str from="\\#"
+}
+
+(raw)struct ReleaseEnvelope {
+    summary { jsonify ReleaseSummary path="meta\\.data.release" }
+}
+"""
+    module, diagnostics = parse_module(schema)
+    assert not [d for d in diagnostics if d.severity.name == "ERROR"]
+    code = converter.convert(module)
+
+    # Direct escaped keys emit unescaped serde alias; path queries omit serde alias
+    assert '#[serde(alias = "os.version")]' in code
+    assert '#[serde(alias = "#")]' in code
+    assert 'alias = "items.#"' not in code
+    assert 'alias = "tags.#.name"' not in code
+    assert '"ReleaseSummary.os_version"' in code
+    assert '"ReleaseSummary.item_count"' in code
+    assert '"ReleaseSummary.tag_names"' in code
+
+    (source_dir / "parser.rs").write_text(code, encoding="utf-8")
+    (source_dir / "main.rs").write_text(
+        r"""
+mod sscgen_runtime;
+mod parser;
+
+use parser::{ReleaseEnvelopeParser, ReleaseSummaryJson};
+
+fn main() {
+    let payload = r##"{
+        "meta.data": {
+            "release": {
+                "os.version": "14.2.1",
+                "items": [10, 20, 30],
+                "tags": [
+                    {"name": "action"},
+                    {"name": null},
+                    {"other": "ignored"},
+                    {"name": "sci-fi"}
+                ],
+                "#": "hash-val"
+            }
+        }
+    }"##;
+
+    let mut parser = ReleaseEnvelopeParser::new(payload).expect("init failed");
+    let parsed = parser.parse().expect("parse failed");
+    assert_eq!(parsed.summary.os_version, "14.2.1");
+    assert_eq!(parsed.summary.item_count, 3);
+    assert_eq!(
+        parsed.summary.tag_names,
+        vec!["action".to_string(), "sci-fi".to_string()]
+    );
+    assert_eq!(parsed.summary.first_tag, "action");
+    assert_eq!(parsed.summary.literal_hash, "hash-val");
+
+    // Verify integer index segment requires an array and does not fall back to object key lookup
+    let obj_with_digit_key: serde_json::Value = serde_json::from_str(r#"{"0": "not-an-array"}"#).unwrap();
+    assert!(sscgen_runtime::json_opt(&obj_with_digit_key, "0").is_none());
+    assert!(sscgen_runtime::json_path(&obj_with_digit_key, "0", "ctx").is_err());
+
+    // Verify schema-qualified error context on missing field
+    let bad_val: serde_json::Value = serde_json::from_str(r#"{"os.version": "1.0"}"#).unwrap();
+    let err = ReleaseSummaryJson::from_value(bad_val).unwrap_err();
+    assert_eq!(err.context, "ReleaseSummary.item_count");
+    assert!(err.to_string().contains("ReleaseSummary.item_count"));
+
+    // Verify schema-qualified error context on non-object input
+    let non_obj: serde_json::Value = serde_json::from_str("null").unwrap();
+    let err_obj = ReleaseSummaryJson::from_value(non_obj).unwrap_err();
+    assert_eq!(err_obj.context, "ReleaseSummary");
+
+    println!("GJSON_RUST_PASSED");
+}
+""",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ["cargo", "run", "--quiet"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env=_cargo_env(),
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "GJSON_RUST_PASSED" in result.stdout
+
+
+def test_rust_runtime_http_delegation_and_multiline_docs(
+    tmp_path: Path,
+) -> None:
+    """Verify Rust multi-line @doc emission and execute rt::rest_call / rt::fetch_html
+    and JSON body null serialization against a local mock HTTP server."""
+    schema = '''
+@doc """
+    Rust module docstring.
+    Line two.
+    """
+
+json User {
+    id int
+    name str
+    nickname str?
+}
+
+struct Page {
+    @doc """
+        HTML page struct doc.
+        Line two.
+        """
+    @request """
+    GET http://127.0.0.1:{{port:int}}/page HTTP/1.1
+    """
+    title { css "h1"; text }
+}
+
+(rest)struct UserAPI {
+    @doc """
+        UserAPI REST client doc.
+        Line two.
+        """
+    @request name=update-user response=User doc="""
+        Update user endpoint doc.
+        Line two.
+        """ """
+    POST http://127.0.0.1:{{port:int}}/users?tag={{tag:str}}&filter={{filter:str?}} HTTP/1.1
+    Content-Type: application/json
+
+    {"name": "{{name:str}}", "nickname": {{nickname:str?}}}
+    """
+}
+'''
+    module, diagnostics = parse_module(schema)
+    assert not [d for d in diagnostics if d.severity.name == "ERROR"]
+
+    converter = RustVisitor()
+    code = converter.convert(module)
+    runtime = converter.emit_runtime()
+
+    assert "// Rust module docstring.\n// Line two." in code
+    assert "/// HTML page struct doc.\n/// Line two." in code
+    assert "// UserAPI REST client doc.\n// Line two." in code
+    assert "    // Update user endpoint doc.\n    // Line two." in code
+
+    assert "rt::fetch_html(req," in code
+    assert "rt::rest_call(\n            req," in code
+    assert "pub async fn fetch_html(" in runtime
+    assert "pub async fn rest_call<" in runtime
+    assert "pub async fn rest_call_void<" in runtime
+
+    source_dir = _write_cargo_project(tmp_path)
+    (tmp_path / "Cargo.toml").write_text(
+        """[package]
+name = "sscgen_rust_delegation_test"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dom_query = "0.28"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+""",
+        encoding="utf-8",
+    )
+    (source_dir / "parser.rs").write_text(code, encoding="utf-8")
+    (source_dir / "sscgen_runtime.rs").write_text(runtime, encoding="utf-8")
+    (source_dir / "main.rs").write_text(
+        r"""mod sscgen_runtime;
+mod parser;
+
+use std::io::{Read, Write};
+use std::net::TcpListener;
+use std::thread;
+
+#[tokio::main]
+async fn main() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    thread::spawn(move || {
+        for _ in 0..3 {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 4096];
+            let n = stream.read(&mut buf).unwrap();
+            let req_str = String::from_utf8_lossy(&buf[..n]);
+            if req_str.starts_with("GET /page ") {
+                let body = "<html><body><h1>Delegated Page</h1></body></html>";
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                stream.write_all(resp.as_bytes()).unwrap();
+            } else if req_str.starts_with("POST /users") {
+                let req_line = req_str.lines().next().unwrap_or("");
+                let body_part = req_str.split("\r\n\r\n").nth(1).unwrap_or("{}");
+                let parsed: serde_json::Value = serde_json::from_str(body_part).unwrap();
+                if req_line.contains("filter=") {
+                    assert!(req_line.contains("tag=v1") && req_line.contains("filter=active"));
+                    assert_eq!(parsed["name"], serde_json::Value::String("Alice".to_string()));
+                    assert_eq!(parsed["nickname"], serde_json::Value::String("ally".to_string()));
+                    let resp_body = r#"{"id":2,"name":"Alice","nickname":"ally"}"#;
+                    let resp = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        resp_body.len(),
+                        resp_body
+                    );
+                    stream.write_all(resp.as_bytes()).unwrap();
+                } else {
+                    assert!(req_line.contains("tag=v1") && !req_line.contains("filter"));
+                    assert_eq!(parsed["name"], serde_json::Value::String("Alice".to_string()));
+                    assert!(parsed["nickname"].is_null());
+                    let resp_body = r#"{"id":1,"name":"Alice","nickname":null}"#;
+                    let resp = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        resp_body.len(),
+                        resp_body
+                    );
+                    stream.write_all(resp.as_bytes()).unwrap();
+                }
+            }
+        }
+    });
+
+    let client = reqwest::Client::new();
+    let mut page = parser::PageParser::fetch(&client, port as i64).await.unwrap();
+    let parsed_page = page.parse().unwrap();
+    assert_eq!(parsed_page.title, "Delegated Page");
+
+    let user1 = parser::UserAPI::update_user(&client, port as i64, "v1", "Alice", None, None)
+        .await
+        .unwrap();
+    assert_eq!(user1.id, 1);
+    assert_eq!(user1.name, "Alice");
+    assert_eq!(user1.nickname, None);
+
+    let user2 = parser::UserAPI::update_user(
+        &client,
+        port as i64,
+        "v1",
+        "Alice",
+        Some("active"),
+        Some("ally"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(user2.id, 2);
+    assert_eq!(user2.nickname.as_deref(), Some("ally"));
+
+    println!("RUST_DELEGATION_OK");
+}
+""",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ["cargo", "run", "--quiet"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env=_cargo_env(),
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "RUST_DELEGATION_OK" in result.stdout
+
+

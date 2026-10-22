@@ -1,4 +1,5 @@
 import re
+import traceback
 
 import pytest
 
@@ -7,10 +8,19 @@ from ssc_codegen.generation.runtime import (
     SscJsonFieldMissingError,
     SscJsonPathError,
     SscJsonSchemaError,
-    ssc_json_project,
     ssc_resolve_dotpath,
 )
 from ssc_codegen.targets.python import PY_BS4_CONVERTER
+
+
+def _compile_and_exec(src: str) -> tuple[str, dict]:
+    module, diags = parse_module(src)
+    errors = [d for d in diags if d.severity.name == "ERROR"]
+    assert not errors, f"Unexpected lint errors: {errors}"
+    code = PY_BS4_CONVERTER.convert(module)
+    ns: dict = {}
+    exec(compile(code, "<test>", "exec"), ns)
+    return code, ns
 
 
 def test_ssc_resolve_dotpath_valid():
@@ -18,7 +28,10 @@ def test_ssc_resolve_dotpath_valid():
         "user": {
             "name": "Alice",
             "badges": [{"icon": "star"}, {"icon": "shield"}],
-        }
+        },
+        "os.version": "1.2.3",
+        "a\\b": "backslash_val",
+        "#": "hash_key_val",
     }
     assert ssc_resolve_dotpath(data, "user.name", is_optional=False) == "Alice"
     assert (
@@ -29,6 +42,21 @@ def test_ssc_resolve_dotpath_valid():
         ssc_resolve_dotpath(data, "user.badges.1.icon", is_optional=False)
         == "shield"
     )
+    assert (
+        ssc_resolve_dotpath(data, r"os\.version", is_optional=False) == "1.2.3"
+    )
+    assert (
+        ssc_resolve_dotpath(data, r"a\\b", is_optional=False) == "backslash_val"
+    )
+    assert (
+        ssc_resolve_dotpath(data, r"\#", is_optional=False) == "hash_key_val"
+    )
+    assert (
+        ssc_resolve_dotpath(data, "user.badges.#", is_optional=False) == 2
+    )
+    assert ssc_resolve_dotpath(
+        data, "user.badges.#.icon", is_optional=False
+    ) == ["star", "shield"]
 
 
 def test_ssc_resolve_dotpath_errors():
@@ -36,18 +64,33 @@ def test_ssc_resolve_dotpath_errors():
 
     # Missing key
     with pytest.raises(
-        SscJsonPathError, match="Missing key 'age' in path 'user.age'"
+        SscJsonPathError,
+        match=r"User\.age: Missing key 'age' in path 'user\.age'",
     ):
-        ssc_resolve_dotpath(data, "user.age", is_optional=False)
+        ssc_resolve_dotpath(
+            data, "user.age", is_optional=False, target="User.age"
+        )
     assert ssc_resolve_dotpath(data, "user.age", is_optional=True) is None
 
-    # Expected list
+    # Expected list for index
     with pytest.raises(
         SscJsonPathError,
-        match="Expected list for index '0' in path 'user.tags.0'",
+        match=r"User\.tag: Expected list for index '0' in path 'user\.tags\.0'",
     ):
-        ssc_resolve_dotpath(data, "user.tags.0", is_optional=False)
+        ssc_resolve_dotpath(
+            data, "user.tags.0", is_optional=False, target="User.tag"
+        )
     assert ssc_resolve_dotpath(data, "user.tags.0", is_optional=True) is None
+
+    # Expected list for '#'
+    with pytest.raises(
+        SscJsonPathError,
+        match=r"User\.tag_count: Expected list for '#' in path 'user\.tags\.#'",
+    ):
+        ssc_resolve_dotpath(
+            data, "user.tags.#", is_optional=False, target="User.tag_count"
+        )
+    assert ssc_resolve_dotpath(data, "user.tags.#", is_optional=True) is None
 
     # Index out of bounds
     data_list = {"items": ["only_one"]}
@@ -68,28 +111,39 @@ def test_ssc_resolve_dotpath_errors():
     )
 
 
-def test_ssc_json_project_strict_allowlist():
-    data = {
+def test_strict_allowlist_and_field_modifiers_projection():
+    src = """
+json UserProfile {
+    id str
+    name str from="display_name"
+    avatar_url str? from="profile.avatar.url"
+    top_badge str? from="badges.0.icon"
+    legacy_id int @omitempty from="meta.legacy_id"
+}
+
+(raw)struct Scraper {
+    user {
+        jsonify UserProfile
+    }
+}
+"""
+    code, ns = _compile_and_exec(src)
+    assert "def _project_user_profile(data: Any) -> UserProfileJson:" in code
+    assert "JSON_DESCRIPTOR_" not in code
+    assert "ssc_json_project" not in code
+    assert "ssc_remap_json_keys" not in code
+
+    payload = """{
         "id": "u1",
         "display_name": "Alice",
         "unmodeled_secret": "drop_me",
         "profile": {
-            "avatar": {"url": "https://example.com/a.png", "width": 100},
+            "avatar": {"url": "https://example.com/a.png", "width": 100}
         },
         "badges": [{"icon": "gold", "level": 99}],
-        "extra_info": 12345,
-    }
-
-    # Descriptors format: canonical_name: (wire_path, is_optional, is_omitempty, nested_desc)
-    descriptors = {
-        "id": ("id", False, False, None),
-        "name": ("display_name", False, False, None),
-        "avatar_url": ("profile.avatar.url", True, False, None),
-        "top_badge": ("badges.0.icon", True, False, None),
-        "legacy_id": ("meta.legacy_id", False, True, None),
-    }
-
-    projected = ssc_json_project(data, descriptors)
+        "extra_info": 12345
+    }"""
+    projected = ns["Scraper"](payload).parse()["user"]
     assert projected == {
         "id": "u1",
         "name": "Alice",
@@ -101,61 +155,153 @@ def test_ssc_json_project_strict_allowlist():
     assert "legacy_id" not in projected
 
 
-def test_ssc_json_project_missing_required_fields():
-    data = {"display_name": "Alice"}
-    descriptors = {
-        "id": ("id", False, False, None),
-        "name": ("display_name", False, False, None),
+def test_missing_required_and_null_non_nullable_errors_include_schema_field():
+    src = """
+json UserAccount {
+    id str
+    name str from="display_name"
+    avatar_url str from="profile.avatar.url"
+}
+
+(raw)struct Scraper {
+    user {
+        jsonify UserAccount
     }
+}
+"""
+    _, ns = _compile_and_exec(src)
+    ErrMissing = ns["SscJsonFieldMissingError"]
+
     with pytest.raises(
-        SscJsonFieldMissingError, match="Required JSON field 'id'"
+        ErrMissing,
+        match=r"UserAccount\.id: Required JSON field 'id' \(mapped to 'id'\) is missing",
     ):
-        ssc_json_project(data, descriptors)
+        ns["Scraper"](
+            '{"display_name": "Alice", "profile": {"avatar": {"url": "http://x"}}}'
+        ).parse()
 
-
-def test_ssc_json_project_null_on_non_nullable():
-    data = {"id": None, "display_name": "Alice"}
-    descriptors = {
-        "id": ("id", False, False, None),
-        "name": ("display_name", False, False, None),
-    }
     with pytest.raises(
-        SscJsonFieldMissingError,
-        match="Field 'id' is null, but 'id' is not nullable",
+        ErrMissing,
+        match=r"UserAccount\.id: Field 'id' is null, but 'id' is not nullable",
     ):
-        ssc_json_project(data, descriptors)
+        ns["Scraper"](
+            '{"id": null, "display_name": "Alice", "profile": {"avatar": {"url": "http://x"}}}'
+        ).parse()
 
-    # Required field via dot-path with explicit null on wire
-    data_dot_null = {"profile": {"avatar": {"url": None}}}
-    descriptors_dot = {
-        "avatar_url": ("profile.avatar.url", False, False, None),
-    }
     with pytest.raises(
-        SscJsonFieldMissingError,
-        match="Field 'profile.avatar.url' is null, but 'avatar_url' is not nullable",
+        ErrMissing,
+        match=r"UserAccount\.avatar_url: Field 'profile\.avatar\.url' is null, but 'avatar_url' is not nullable",
     ):
-        ssc_json_project(data_dot_null, descriptors_dot)
+        ns["Scraper"](
+            '{"id": "1", "display_name": "Alice", "profile": {"avatar": {"url": null}}}'
+        ).parse()
 
 
-def test_ssc_json_project_nested_schema():
-    geo_desc = {
-        "latitude": ("lat", False, False, None),
-        "longitude": ("lng", False, False, None),
-    }
-    user_desc = {
-        "name": ("name", False, False, None),
-        "location": ("geo", True, False, geo_desc),
-    }
+def test_nested_projector_call_stack_and_qualified_error_context():
+    src = """
+json Preroll {
+    vast_url str from="url"
+    skip_offset int
+}
 
-    data_with_geo = {
-        "name": "Bob",
-        "geo": {"lat": 12.34, "lng": 56.78, "extra": "drop"},
-        "extra_parent": True,
+json Vast {
+    preroll Preroll
+}
+
+json CdnVideoHubResponse {
+    vast Vast
+}
+
+(raw)struct PlayerScraper {
+    hub {
+        jsonify CdnVideoHubResponse
     }
-    res = ssc_json_project(data_with_geo, user_desc)
+}
+"""
+    code, ns = _compile_and_exec(src)
+    assert "def _project_preroll(data: Any) -> PrerollJson:" in code
+    assert "def _project_vast(data: Any) -> VastJson:" in code
+    assert (
+        "def _project_cdn_video_hub_response(data: Any) -> CdnVideoHubResponseJson:"
+        in code
+    )
+
+    ErrMissing = ns["SscJsonFieldMissingError"]
+    bad_payload = '{"vast": {"preroll": {"url": "https://ads.example/v.xml"}}}'
+
+    with pytest.raises(ErrMissing) as exc_info:
+        ns["PlayerScraper"](bad_payload).parse()
+
+    assert "Preroll.skip_offset" in str(exc_info.value)
+    assert (
+        "Required JSON field 'skip_offset' (mapped to 'skip_offset') is missing"
+        in str(exc_info.value)
+    )
+
+    frame_names = [
+        frame.name for frame in traceback.extract_tb(exc_info.value.__traceback__)
+    ]
+    assert "_project_cdn_video_hub_response" in frame_names
+    assert "_project_vast" in frame_names
+    assert "_project_preroll" in frame_names
+    assert (
+        frame_names.index("_project_cdn_video_hub_response")
+        < frame_names.index("_project_vast")
+        < frame_names.index("_project_preroll")
+    )
+
+
+def test_gjson_escaped_dots_array_length_and_projection_end_to_end():
+    src = r"""
+json ReleaseInfo {
+    os_version str from="os\\.version"
+    nested_dot str from="meta.build\\.number"
+    backslash_key str from="a\\\\b"
+    tag_names (array)str from="tags.#.name"
+    tag_count int from="tags.#"
+    missing_count int? from="missing_arr.#"
+    missing_proj (array)str? from="missing_arr.#.name"
+}
+
+(raw)struct ReleaseScraper {
+    info {
+        jsonify ReleaseInfo path="payload\\.data"
+    }
+}
+"""
+    code, ns = _compile_and_exec(src)
+    # Direct key with escaped dot should be unescaped at compile time for O(1) lookup
+    assert (
+        "ssc_json_req(_d, 'os.version', 'ReleaseInfo.os_version')"
+        in code
+    )
+    assert (
+        "ssc_json_req(_d, 'a\\\\b', 'ReleaseInfo.backslash_key')"
+        in code
+    )
+
+    payload = r"""{
+        "payload.data": {
+            "os.version": "24.04",
+            "meta": {"build.number": "b-900"},
+            "a\\b": "slash-ok",
+            "tags": [
+                {"name": "action", "id": 1},
+                {"id": 2},
+                {"name": null, "id": 3},
+                {"name": "sci-fi", "id": 4}
+            ]
+        }
+    }"""
+    res = ns["ReleaseScraper"](payload).parse()["info"]
     assert res == {
-        "name": "Bob",
-        "location": {"latitude": 12.34, "longitude": 56.78},
+        "os_version": "24.04",
+        "nested_dot": "b-900",
+        "backslash_key": "slash-ok",
+        "tag_names": ["action", "sci-fi"],
+        "tag_count": 4,
+        "missing_count": None,
+        "missing_proj": None,
     }
 
 
@@ -185,26 +331,15 @@ json CatalogItem {
     }
 }
 """
-    module, diags = parse_module(src)
-    assert not any(d.severity.name == "ERROR" for d in diags)
-
-    code = PY_BS4_CONVERTER.convert(module)
-    assert "JSON_DESCRIPTOR_GEO_LOCATION" in code
-    assert "JSON_DESCRIPTOR_AUTHOR_DETAIL" in code
-    assert "JSON_DESCRIPTOR_CATALOG_ITEM" in code
-    assert (
-        "'location': ('location', True, False, JSON_DESCRIPTOR_GEO_LOCATION)"
-        in code
-    )
-    assert (
-        "'author': ('author', False, False, JSON_DESCRIPTOR_AUTHOR_DETAIL)"
-        in code
-    )
-    assert (
-        "ssc_json_project(json.loads(v), JSON_DESCRIPTOR_CATALOG_ITEM)" in code
-    )
-    ns = {}
-    exec(compile(code, "<test>", "exec"), ns)
+    code, ns = _compile_and_exec(src)
+    assert "def _project_geo_location(data: Any) -> GeoLocationJson:" in code
+    assert "def _project_author_detail(data: Any) -> AuthorDetailJson:" in code
+    assert "def _project_catalog_item(data: Any) -> CatalogItemJson:" in code
+    assert "_project_geo_location(_v)" in code
+    assert "_project_author_detail(" in code
+    assert "_project_catalog_item(json.loads(v))" in code
+    assert "JSON_DESCRIPTOR_" not in code
+    assert "ssc_json_project" not in code
 
     input_json = """
     {
@@ -251,16 +386,10 @@ def test_top_level_dict_json_codegen_and_execution():
     }
 }
 """
-    module, diags = parse_module(src)
-    assert not any(d.severity.name == "ERROR" for d in diags)
-    code = PY_BS4_CONVERTER.convert(module)
+    code, ns = _compile_and_exec(src)
     assert "TranslationsJson = Dict[int, List[str]]" in code
-    assert (
-        "JSON_DESCRIPTOR_TRANSLATIONS = {'__dict__': True, '__value__': None}"
-        in code
-    )
-    ns = {}
-    exec(compile(code, "<test>", "exec"), ns)
+    assert "def _project_translations(data: Any) -> TranslationsJson:" in code
+    assert "JSON_DESCRIPTOR_" not in code
     payload = '{"1": ["jap", "eng"], "10": ["rus"]}'
     res = ns["Scraper"](payload).parse()
     assert res["translations"] == {"1": ["jap", "eng"], "10": ["rus"]}
@@ -284,20 +413,12 @@ json Episode {
     }
 }
 """
-    module, diags = parse_module(src)
-    assert not any(d.severity.name == "ERROR" for d in diags)
-    code = PY_BS4_CONVERTER.convert(module)
+    code, ns = _compile_and_exec(src)
     assert "EpisodeMapJson = Dict[str, EpisodeJson]" in code
-    assert (
-        "JSON_DESCRIPTOR_EPISODE = {'id': ('id', False, False, None), 'title': ('episode_title', False, False, None)}"
-        in code
-    )
-    assert (
-        "JSON_DESCRIPTOR_EPISODE_MAP = {'__dict__': True, '__value__': JSON_DESCRIPTOR_EPISODE}"
-        in code
-    )
-    ns = {}
-    exec(compile(code, "<test>", "exec"), ns)
+    assert "def _project_episode(data: Any) -> EpisodeJson:" in code
+    assert "def _project_episode_map(data: Any) -> EpisodeMapJson:" in code
+    assert "_project_episode(_v)" in code
+    assert "JSON_DESCRIPTOR_" not in code
     payload = """{
         "ep_1": {"id": 1, "episode_title": "Pilot", "extra": "drop"},
         "ep_2": {"id": 2, "episode_title": "Finale", "extra": "drop"}
@@ -325,16 +446,11 @@ json AnimeInfo {
     }
 }
 """
-    module, diags = parse_module(src)
-    assert not any(d.severity.name == "ERROR" for d in diags)
-    code = PY_BS4_CONVERTER.convert(module)
+    code, ns = _compile_and_exec(src)
     assert "'translations': Dict[str, List[str]]" in code
-    assert (
-        "'translations': ('translations', False, False, {'__dict__': True, '__value__': None})"
-        in code
-    )
-    ns = {}
-    exec(compile(code, "<test>", "exec"), ns)
+    assert "def _project_anime_info(data: Any) -> AnimeInfoJson:" in code
+    assert "ssc_expect_dict(" in code
+    assert "JSON_DESCRIPTOR_" not in code
     payload = """{
         "id": 123,
         "translations": {
@@ -366,13 +482,10 @@ json AnimeResponse {
     }
 }
 """
-    module, diags = parse_module(src)
-    assert not any(d.severity.name == "ERROR" for d in diags)
-    code = PY_BS4_CONVERTER.convert(module)
+    code, ns = _compile_and_exec(src)
     assert "AnimeResponseMaterialDataJson = TypedDict" in code
     assert "'material_data': AnimeResponseMaterialDataJson" in code
-    ns = {}
-    exec(compile(code, "<test>", "exec"), ns)
+    assert "def _project_anime_response_material_data(" in code
     payload = """{
         "id": "a1",
         "material_data": {
@@ -405,13 +518,10 @@ json AnimeResponse {
     }
 }
 """
-    module, diags = parse_module(src)
-    assert not any(d.severity.name == "ERROR" for d in diags)
-    code = PY_BS4_CONVERTER.convert(module)
+    code, ns = _compile_and_exec(src)
     assert 'FranchiseJson = TypedDict("FranchiseJson"' in code
     assert "'franchise': FranchiseJson" in code
-    ns = {}
-    exec(compile(code, "<test>", "exec"), ns)
+    assert "def _project_franchise(data: Any) -> FranchiseJson:" in code
     payload = """{
         "id": "a2",
         "franchise": {
@@ -444,20 +554,14 @@ json AnimeResponse {
     }
 }
 """
-    module, diags = parse_module(src)
-    assert not any(d.severity.name == "ERROR" for d in diags)
-    code = PY_BS4_CONVERTER.convert(module)
+    code, ns = _compile_and_exec(src)
     assert 'LinksJson = TypedDict("LinksJson"' in code
     assert "'links': List[LinksJson]" in code
-    assert "JSON_DESCRIPTOR_LINKS" in code
-    assert "JSON_DESCRIPTOR_ANIME_RESPONSE" in code
-    assert "'links': ('links', False, False, [JSON_DESCRIPTOR_LINKS])" in code
-    assert (
-        "ssc_json_project(json.loads(v), JSON_DESCRIPTOR_ANIME_RESPONSE)"
-        in code
-    )
-    ns = {}
-    exec(compile(code, "<test>", "exec"), ns)
+    assert "def _project_links(data: Any) -> LinksJson:" in code
+    assert "def _project_anime_response(data: Any) -> AnimeResponseJson:" in code
+    assert "[_project_links(_x) for _x in ssc_expect_list(" in code
+    assert "_project_anime_response(json.loads(v))" in code
+    assert "JSON_DESCRIPTOR_" not in code
     payload = """{
         "id": "a3",
         "links": [
@@ -511,11 +615,7 @@ json AnimeComplete {
     }
 }
 """
-    module, diags = parse_module(src)
-    assert not any(d.severity.name == "ERROR" for d in diags)
-    code = PY_BS4_CONVERTER.convert(module)
-    ns = {}
-    exec(compile(code, "<test>", "exec"), ns)
+    _, ns = _compile_and_exec(src)
     payload = """{
         "id": "c1",
         "franchise": {"id": "fr1", "extra": 1},
@@ -541,15 +641,32 @@ json AnimeComplete {
     }
 
 
-def test_ssc_json_schema_error_on_non_dict_payload():
-    # 1. Direct ssc_json_project unit tests
-    dict_desc = {"__dict__": True, "__value__": None}
-    with pytest.raises(SscJsonSchemaError, match="Expected dict, got list"):
-        ssc_json_project(["item1", "item2"], dict_desc)
-    with pytest.raises(SscJsonSchemaError, match="Expected dict, got int"):
-        ssc_json_project(12345, dict_desc)
-    with pytest.raises(SscJsonSchemaError, match="Expected dict, got str"):
-        ssc_json_project("string_payload", dict_desc)
+def test_ssc_json_schema_error_on_invalid_container_shapes():
+    # 1. Object schema receiving non-dict (None, list, int, str, bool)
+    obj_src = """
+json User {
+    id int
+}
+
+(raw)struct ObjScraper {
+    user {
+        jsonify User
+    }
+}
+"""
+    _, ns_obj = _compile_and_exec(obj_src)
+    ErrObj = ns_obj["SscJsonSchemaError"]
+    for raw_json, expected_type in [
+        ("null", "NoneType"),
+        ("[1, 2]", "list"),
+        ("12345", "int"),
+        ('"string_payload"', "str"),
+        ("true", "bool"),
+    ]:
+        with pytest.raises(
+            ErrObj, match=f"User: Expected dict, got {expected_type}"
+        ):
+            ns_obj["ObjScraper"](raw_json).parse()
 
     # 2. Top-level dict schema execution error
     top_src = """
@@ -564,13 +681,20 @@ def test_ssc_json_schema_error_on_non_dict_payload():
     }
 }
 """
-    m_top, _ = parse_module(top_src)
-    code_top = PY_BS4_CONVERTER.convert(m_top)
-    ns_top = {}
-    exec(compile(code_top, "<test>", "exec"), ns_top)
+    _, ns_top = _compile_and_exec(top_src)
     ErrTop = ns_top["SscJsonSchemaError"]
-    with pytest.raises(ErrTop, match="Expected dict, got list"):
+    with pytest.raises(
+        ErrTop, match="Translations: Expected dict, got list"
+    ):
         ns_top["TopScraper"]("[1, 2, 3]").parse()
+    with pytest.raises(
+        ErrTop, match="Translations: Expected dict, got NoneType"
+    ):
+        ns_top["TopScraper"]("null").parse()
+    with pytest.raises(
+        ErrTop, match="Translations: Expected list, got str"
+    ):
+        ns_top["TopScraper"]('{"1": "not_a_list"}').parse()
 
     # 3. Inline dict field execution error
     inline_src = """
@@ -588,15 +712,43 @@ json MediaItem {
     }
 }
 """
-    m_inline, _ = parse_module(inline_src)
-    code_inline = PY_BS4_CONVERTER.convert(m_inline)
-    ns_inline = {}
-    exec(compile(code_inline, "<test>", "exec"), ns_inline)
+    _, ns_inline = _compile_and_exec(inline_src)
     ErrInline = ns_inline["SscJsonSchemaError"]
-    with pytest.raises(ErrInline, match="Expected dict, got list"):
+    with pytest.raises(
+        ErrInline, match=r"MediaItem\.translations: Expected dict, got list"
+    ):
         ns_inline["InlineScraper"](
             '{"id": 1, "translations": ["not", "a", "dict"]}'
         ).parse()
+    with pytest.raises(
+        ErrInline, match=r"MediaItem\.translations: Expected list, got int"
+    ):
+        ns_inline["InlineScraper"](
+            '{"id": 1, "translations": {"en": 123}}'
+        ).parse()
+
+    # 4. Top-level array schema receiving non-list or non-dict element
+    arr_src = """
+(array)json ItemList {
+    id int
+}
+
+(raw)struct ArrScraper {
+    items {
+        jsonify ItemList
+    }
+}
+"""
+    _, ns_arr = _compile_and_exec(arr_src)
+    ErrArr = ns_arr["SscJsonSchemaError"]
+    with pytest.raises(
+        ErrArr, match="ItemList: Expected list, got dict"
+    ):
+        ns_arr["ArrScraper"]('{"id": 1}').parse()
+    with pytest.raises(
+        ErrArr, match="ItemList: Expected dict, got str"
+    ):
+        ns_arr["ArrScraper"]('["not_a_dict"]').parse()
 
 
 def test_anime_response_nested_dict_hierarchy_runtime_projection():
@@ -627,10 +779,7 @@ json AnimeResponse {
     }
 }
 """
-    module, diags = parse_module(src)
-    assert not any(d.severity.name == "ERROR" for d in diags)
-
-    code = PY_BS4_CONVERTER.convert(module)
+    code, ns = _compile_and_exec(src)
 
     # 1. Verify topological dependency order of emitted TypedDicts
     ep_pos = code.find('EpisodeValueJson = TypedDict("EpisodeValueJson"')
@@ -645,22 +794,20 @@ json AnimeResponse {
         "Hoisted schemas must be emitted in post-order dependency sequence"
     )
 
-    # 2. Verify nested descriptor structure
-    assert "JSON_DESCRIPTOR_EPISODE_VALUE" in code
-    assert "JSON_DESCRIPTOR_TRANSLATION_VALUE" in code
-    assert "JSON_DESCRIPTOR_ANIME_RESPONSE" in code
+    # 2. Verify generated projector functions
+    assert "def _project_episode_value(data: Any) -> EpisodeValueJson:" in code
     assert (
-        "'episodes': ('episodes', False, False, {'__dict__': True, '__value__': JSON_DESCRIPTOR_EPISODE_VALUE})"
+        "def _project_translation_value(data: Any) -> TranslationValueJson:"
         in code
     )
     assert (
-        "'translations': ('translations', False, False, {'__dict__': True, '__value__': JSON_DESCRIPTOR_TRANSLATION_VALUE})"
-        in code
+        "def _project_anime_response(data: Any) -> AnimeResponseJson:" in code
     )
+    assert "_project_episode_value(_dv)" in code
+    assert "_project_translation_value(_dv)" in code
+    assert "JSON_DESCRIPTOR_" not in code
 
     # 3. Execute projection against realistic nested dictionary payload
-    ns: dict = {}
-    exec(compile(code, "<test>", "exec"), ns)
     payload = """{
         "translations": {
             "sub_ru": {
@@ -715,7 +862,6 @@ json AnimeResponse {
         "1": {"link": "https://stream.example/ep1.mp4"},
         "2": {"link": "https://stream.example/ep2.mp4"},
     }
-    # Screenshots was @skip and fps was unmodeled - neither should be present
     assert "screenshots" not in sub_ru["episodes"]["1"]
     assert "fps" not in sub_ru["episodes"]["1"]
 
@@ -759,12 +905,7 @@ json StreamCatalog {
     }
 }
 """
-    module, diags = parse_module(src)
-    assert not any(d.severity.name == "ERROR" for d in diags)
-
-    code = PY_BS4_CONVERTER.convert(module)
-    ns: dict = {}
-    exec(compile(code, "<test>", "exec"), ns)
+    _, ns = _compile_and_exec(src)
 
     payload = """{
         "channels": {
@@ -797,7 +938,6 @@ json StreamCatalog {
     res = ns["Scraper"](payload).parse()
     channels = res["catalog"]["channels"]
 
-    # Channel 1 assertions
     ch_main = channels["ch_main"]
     assert ch_main["display_title"] == "Main Channel"
     assert ch_main["backup_stream"] == "https://backup.example/stream"
@@ -817,7 +957,6 @@ json StreamCatalog {
     }
     assert "extra_tag" not in ch_main["bitrates"]["1080"]
 
-    # Channel 2 assertions (@omitempty, missing optional dotpaths)
     ch_alt = channels["ch_alt"]
     assert ch_alt["display_title"] == "Alternative Channel"
     assert ch_alt["backup_stream"] is None
@@ -838,7 +977,7 @@ json StreamCatalog {
     with pytest.raises(
         Err,
         match=re.escape(
-            "Required JSON field 'channel_title' (mapped to 'display_title') is missing"
+            "StreamCatalogChannelsValue.display_title: Required JSON field 'channel_title' (mapped to 'display_title') is missing"
         ),
     ):
         ns["Scraper"](missing_required_payload).parse()
@@ -854,7 +993,7 @@ json StreamCatalog {
     with pytest.raises(
         Err,
         match=re.escape(
-            "Field 'channel_title' is null, but 'display_title' is not nullable"
+            "StreamCatalogChannelsValue.display_title: Field 'channel_title' is null, but 'display_title' is not nullable"
         ),
     ):
         ns["Scraper"](null_non_nullable_payload).parse()
@@ -879,29 +1018,18 @@ def test_top_level_dict_json_with_inline_value_block_projection():
     }
 }
 """
-    module, diags = parse_module(src)
-    assert not any(d.severity.name == "ERROR" for d in diags)
-
-    code = PY_BS4_CONVERTER.convert(module)
+    code, ns = _compile_and_exec(src)
     assert code.find(
         'TranslationsValueJson = TypedDict("TranslationsValueJson"'
     ) < code.find("TranslationsJson = Dict[str, TranslationsValueJson]")
     assert (
-        "JSON_DESCRIPTOR_TRANSLATIONS = {'__dict__': True, '__value__': JSON_DESCRIPTOR_TRANSLATIONS_VALUE}"
+        "def _project_translations_value(data: Any) -> TranslationsValueJson:"
         in code
     )
+    assert "def _project_translations(data: Any) -> TranslationsJson:" in code
+    assert "_project_translations_value(_v)" in code
+    assert "JSON_DESCRIPTOR_" not in code
 
-    ns: dict = {}
-    exec(compile(code, "<test>", "exec"), ns)
-    assert ns["JSON_DESCRIPTOR_TRANSLATIONS"] == {
-        "__dict__": True,
-        "__value__": {
-            "title": ("wire_name", False, False, None),
-            "active": ("active", False, False, None),
-            "description": ("description", True, False, None),
-            "badge": ("meta.badge", False, True, None),
-        },
-    }
     payload = """{
         "en": {
             "wire_name": "English",
@@ -953,25 +1081,18 @@ json PlaylistLibrary {
     }
 }
 """
-    module, diags = parse_module(src)
-    assert not any(d.severity.name == "ERROR" for d in diags)
-
-    code = PY_BS4_CONVERTER.convert(module)
+    code, ns = _compile_and_exec(src)
     assert 'PlaylistItemJson = TypedDict("PlaylistItemJson"' in code
     assert "'categories': Dict[str, List[PlaylistItemJson]]" in code
-    assert "JSON_DESCRIPTOR_PLAYLIST_ITEM" in code
-    assert "JSON_DESCRIPTOR_PLAYLIST_LIBRARY" in code
+    assert "def _project_playlist_item(data: Any) -> PlaylistItemJson:" in code
     assert (
-        "'categories': ('categories', False, False, {'__dict__': True, '__value__': [JSON_DESCRIPTOR_PLAYLIST_ITEM]})"
+        "def _project_playlist_library(data: Any) -> PlaylistLibraryJson:"
         in code
     )
-    assert (
-        "ssc_json_project(json.loads(v), JSON_DESCRIPTOR_PLAYLIST_LIBRARY)"
-        in code
-    )
+    assert "[_project_playlist_item(_x) for _x in ssc_expect_list(" in code
+    assert "_project_playlist_library(json.loads(v))" in code
+    assert "JSON_DESCRIPTOR_" not in code
 
-    ns: dict = {}
-    exec(compile(code, "<test>", "exec"), ns)
     payload = """{
         "categories": {
             "rock": [
@@ -1014,12 +1135,7 @@ json MediaHub {
     }
 }
 """
-    module, diags = parse_module(src)
-    assert not any(d.severity.name == "ERROR" for d in diags)
-
-    code = PY_BS4_CONVERTER.convert(module)
-    ns: dict = {}
-    exec(compile(code, "<test>", "exec"), ns)
+    _, ns = _compile_and_exec(src)
 
     payload = """{
         "seasons": {

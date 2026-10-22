@@ -7,6 +7,7 @@ Called by PythonVisitor via thin delegate methods.  The HTTP library strategy
 
 from __future__ import annotations
 
+import inspect
 from typing import cast
 
 from ssc_codegen.ast import (
@@ -23,7 +24,7 @@ from ssc_codegen.ast import (
 )
 from ssc_codegen.ast.struct import RequestHttp
 from ssc_codegen.naming import (
-    json_descriptor_var_name,
+    python_json_projector_name,
     to_pascal_case,
     to_snake_case,
 )
@@ -31,11 +32,41 @@ from ssc_codegen.request_spec import parse_json_template
 from ssc_codegen.targets.python.http_libs.base import HttpLibStrategy
 from ssc_codegen.traversal.context import WalkContext
 from ssc_codegen.traversal.utils import (
-    dict_needs_builder,
     find_enclosing_module,
+    module_has_fetch,
     module_has_html_struct,
     module_has_rest,
+    module_uses_http,
 )
+
+
+def format_docstring(doc: str, indent: str = "") -> list[str]:
+    """Format a docstring as an indented triple-quoted Python string literal.
+
+    Args:
+        doc (str): Raw or cleaned docstring text.
+        indent (str): Indentation prefix for each emitted line.
+
+    Returns:
+        list[str]: Formatted Python docstring lines, or an empty list if `doc` is empty.
+    """
+    cleaned = inspect.cleandoc(doc)
+    if not cleaned:
+        return []
+    escaped = cleaned.replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
+    if "\n" not in escaped:
+        if escaped.endswith('"') and not escaped.endswith('\\"'):
+            escaped = escaped[:-1] + '\\"'
+        return [f'{indent}"""{escaped}"""']
+    raw_lines = escaped.splitlines()
+    if raw_lines[-1].endswith('"') and not raw_lines[-1].endswith('\\"'):
+        raw_lines[-1] = raw_lines[-1][:-1] + '\\"'
+    lines = [f'{indent}"""']
+    for line in raw_lines:
+        lines.append(f"{indent}{line}" if line else "")
+    lines.append(f'{indent}"""')
+    return lines
+
 
 # ===========================================================================
 # Placeholder / Template rendering (pure functions)
@@ -47,6 +78,14 @@ PH_PY_TYPES = {"str": "str", "int": "int", "float": "float", "bool": "bool"}
 
 
 def _escape_fstring(tmpl: PlaceholderTemplate) -> str:
+    """Escape literal braces and interpolate placeholders as a Python f-string body.
+
+    Args:
+        tmpl (PlaceholderTemplate): Parsed template containing literal segments and placeholders.
+
+    Returns:
+        str: Unquoted f-string body with `{}` doubled and placeholders interpolated.
+    """
     result: list[str] = []
     for part in tmpl.parts:
         if isinstance(part, PlaceholderSpec):
@@ -58,10 +97,21 @@ def _escape_fstring(tmpl: PlaceholderTemplate) -> str:
 
 
 def render_value(tmpl: PlaceholderTemplate) -> str:
+    """Render a `PlaceholderTemplate` as a Python expression.
+
+    Args:
+        tmpl (PlaceholderTemplate): Template to render.
+
+    Returns:
+        str: Python expression string representing the template value.
+    """
     if ph := tmpl.single_placeholder():
         if ph.is_array and ph.style in ("csv", "pipe", "space"):
             sep = _STYLE_SEPARATOR[ph.style or "csv"]
-            return f"{sep!r}.join(str(_x) for _x in {ph.name})"
+            join_expr = f"{sep!r}.join(str(_x) for _x in {ph.name})"
+            if ph.is_optional:
+                return f"({join_expr} if {ph.name} is not None else None)"
+            return join_expr
         return ph.name
     if tmpl.has_placeholders:
         return f'f"{_escape_fstring(tmpl)}"'
@@ -69,34 +119,37 @@ def render_value(tmpl: PlaceholderTemplate) -> str:
 
 
 def render_dict(d: dict[str, PlaceholderTemplate]) -> str:
+    """Render a mapping of `PlaceholderTemplate` values as a Python dict literal.
+
+    Args:
+        d (dict[str, PlaceholderTemplate]): Key-to-template mapping (headers, cookies, or params).
+
+    Returns:
+        str: Python dictionary literal expression.
+    """
     if not d:
         return "{}"
-    inner = ", ".join(f"{k!r}: {render_value(v)}" for k, v in d.items())
-    return "{" + inner + "}"
-
-
-def emit_dict_builder(
-    varname: str, d: dict[str, PlaceholderTemplate], indent: str
-) -> list[str]:
-    lines: list[str] = [f"{indent}{varname}: dict = {{}}"]
-    for key, tmpl in d.items():
-        ph = tmpl.single_placeholder()
-        if ph is None:
-            lines.append(f"{indent}{varname}[{key!r}] = {render_value(tmpl)}")
-            continue
+    items: list[str] = []
+    for k, v in d.items():
+        ph = v.single_placeholder()
         effective_key = (
-            f"{key}[]" if (ph.is_array and ph.style == "bracket") else key
+            f"{k}[]"
+            if (ph is not None and ph.is_array and ph.style == "bracket")
+            else k
         )
-        expr = render_value(tmpl)
-        if ph.is_optional:
-            lines.append(f"{indent}if {ph.name} is not None:")
-            lines.append(f"{indent}    {varname}[{effective_key!r}] = {expr}")
-        else:
-            lines.append(f"{indent}{varname}[{effective_key!r}] = {expr}")
-    return lines
+        items.append(f"{effective_key!r}: {render_value(v)}")
+    return "{" + ", ".join(items) + "}"
 
 
 def render_json_body(tmpl: PlaceholderTemplate) -> str:
+    """Render a JSON body template as a structured Python literal expression.
+
+    Args:
+        tmpl (PlaceholderTemplate): JSON body template with optional placeholders.
+
+    Returns:
+        str: Python dict/list/scalar expression suitable for the `json=` request keyword.
+    """
     def _emit(v: object) -> str:
         if isinstance(v, PlaceholderSpec):
             return v.name
@@ -122,6 +175,15 @@ def render_json_body(tmpl: PlaceholderTemplate) -> str:
 
 
 def render_body(spec: RequestHttp) -> tuple[str, str] | None:
+    """Render the request body option for a `RequestHttp` specification.
+
+    Args:
+        spec (RequestHttp): HTTP request specification AST node.
+
+    Returns:
+        tuple[str, str] | None: `(keyword_name, value_expr)` pair (`"json"` or `"data"`),
+        or `None` when the request has no body.
+    """
     if spec.body_kind == "empty" or spec.payload is None:
         return None
     if spec.body_kind == "json":
@@ -140,6 +202,15 @@ def render_body(spec: RequestHttp) -> tuple[str, str] | None:
 
 
 def _py_path_expr(body_var: str, path: str) -> str:
+    """Build a Python dictionary/index traversal expression for a dot-path.
+
+    Args:
+        body_var (str): Variable name holding the parsed response body.
+        path (str): Dot-separated path string.
+
+    Returns:
+        str: Python expression accessing the nested path on `body_var`.
+    """
     expr = body_var
     for seg in path.split("."):
         if seg.isdigit():
@@ -152,6 +223,15 @@ def _py_path_expr(body_var: str, path: str) -> str:
 def render_py_condition_lambda(
     required_keys: list[str], conditions: dict[str, object]
 ) -> str | None:
+    """Render an error-matcher predicate lambda checking required keys and field values.
+
+    Args:
+        required_keys (list[str]): Top-level keys that must exist in the JSON body.
+        conditions (dict[str, object]): Dot-paths mapped to expected literal values.
+
+    Returns:
+        str | None: Python `lambda _b: ...` expression, or `None` if no checks apply.
+    """
     parts: list[str] = []
     for key in required_keys:
         parts.append(f"{key!r} in _b")
@@ -194,9 +274,11 @@ _RUNTIME_JSON_EXPORT_NAMES: list[str] = [
     "SscJsonPathError",
     "SscJsonFieldMissingError",
     "SscJsonSchemaError",
+    "ssc_expect_dict",
+    "ssc_expect_list",
     "ssc_resolve_dotpath",
-    "ssc_json_project",
-    "ssc_remap_json_keys",
+    "ssc_json_req",
+    "ssc_json_req_path",
 ]
 
 # Always exported regardless of module type so consumer code can
@@ -211,33 +293,32 @@ _RUNTIME_ALWAYS_EXPORT_NAMES: list[str] = [
 
 
 def runtime_export_names(
-    module: Module, *, need_fallback: bool = False, http_io: str = "both"
+    module: Module,
+    *,
+    need_fallback: bool = False,
+    http_io: str = "both",
+    http_strategy: HttpLibStrategy | None = None,
 ) -> list[str]:
     """Compute the list of names the parser file must import from the runtime.
 
-    Selection rules:
-    - REST-only module: just REST names (``ssc_dispatch_err`` is internal to
-      ``ssc_rest_call`` — never imported by the parser).
-    - HTML module (has any non-rest struct): table markers are always
-      imported (cheap, may be referenced by visit_field/visit_match).
-    - HTML module whose DomSpelling declares ``FALLBACK_HTML_STR`` in
-      ``extra_utilities``: also import that constant.
-    - Module with REST structs: also import REST names filtered by http_io mode.
-
     Args:
-        module: AST module being processed.
-        need_fallback: Whether fallback HTML parsing constants are required.
-        http_io: HTTP method generation mode ("both", "sync", "async").
+        module (Module): AST module being processed.
+        need_fallback (bool): Whether fallback HTML parsing constants are required.
+        http_io (str): HTTP method generation mode ("both", "sync", "async").
             Defaults to "both".
+        http_strategy (HttpLibStrategy | None): Optional HTTP transport strategy
+            used to filter fetch helper exports (`ssc_fetch`, `ssc_fetch_async`).
 
     Returns:
-        List of symbol names to import from the shared runtime module.
+        list[str]: List of symbol names to import from the shared runtime module.
     """
     names: list[str] = list(_RUNTIME_ALWAYS_EXPORT_NAMES)
     if module_has_html_struct(module):
         names.extend(_RUNTIME_HTML_EXPORT_NAMES)
         if need_fallback:
             names.append("FALLBACK_HTML_STR")
+    if module_uses_http(module):
+        names.append("ssc_merge_kwargs")
     if module_has_rest(module):
         rest_names = [
             "Ok",
@@ -251,6 +332,23 @@ def runtime_export_names(
         if http_io in ("both", "async"):
             rest_names.append("ssc_rest_call_async")
         names.extend(rest_names)
+    if module_has_fetch(module):
+        if http_strategy is not None:
+            if http_strategy.async_fetch_delegates_to_sync:
+                names.append("ssc_fetch")
+            else:
+                if (
+                    http_io in ("both", "sync")
+                    and http_strategy.supports_sync_fetch
+                ):
+                    names.append("ssc_fetch")
+                if http_io in ("both", "async"):
+                    names.append("ssc_fetch_async")
+        else:
+            if http_io in ("both", "sync"):
+                names.append("ssc_fetch")
+            if http_io in ("both", "async"):
+                names.append("ssc_fetch_async")
     if any(isinstance(n, JsonDef) for n in module.body):
         names.extend(_RUNTIME_JSON_EXPORT_NAMES)
     return names
@@ -260,14 +358,16 @@ def runtime_export_names(
 # Placeholder parameter signature
 # ===========================================================================
 
-_DICT_KWARGS = (
-    ("headers", "_headers"),
-    ("cookies", "_cookies"),
-    ("params", "_params"),
-)
-
 
 def placeholder_params(http: RequestHttp) -> str:
+    """Format keyword-only parameter declarations for request placeholders.
+
+    Args:
+        http (RequestHttp): HTTP request specification containing placeholders.
+
+    Returns:
+        str: Leading `, *, ...` parameter signature fragment, or `""` if none.
+    """
     if not http.placeholders:
         return ""
     parts: list[str] = []
@@ -284,58 +384,37 @@ def placeholder_params(http: RequestHttp) -> str:
 
 
 def placeholder_args(http: RequestHttp) -> str:
-    """Keyword-forwarding string for delegating between fetch variants.
+    """Build a keyword-argument forwarding string for delegating between fetch variants.
 
-    Produces ``"id=id, tags=tags"`` so a caller can forward its own keyword
-    params (``fetch`` declares them keyword-only via ``*``). Used by
-    ``async_fetch`` executor wrappers (requests strategy).
+    Args:
+        http (RequestHttp): HTTP request specification containing placeholders.
+
+    Returns:
+        str: Comma-separated `name=name` pairs for all request placeholders.
     """
     return ", ".join(f"{ph.name}={ph.name}" for ph in http.placeholders)
 
 
-# ===========================================================================
-# Shared kwargs builder
-# ===========================================================================
+def _render_dsl_kw(spec: RequestHttp) -> str:
+    """Render keyword argument unpacking expression for DSL request options.
 
+    Args:
+        spec (RequestHttp): HTTP request specification AST node.
 
-def _build_kw_dict(
-    spec: RequestHttp, i2: str, i3: str
-) -> tuple[list[str], list[str]]:
-    """Build (pre_lines, kw_assign_lines) for ``_kw`` dict construction.
-
-    Produces ``_kw["headers"] = {...}`` style assignments so caller kwargs
-    can be shallow-merged into the same dict before passing ``**_kw`` to
-    ``client.request()`` / ``ssc_rest_call()``.
-
-    pre_lines:   builder helper code (complex dicts needing intermediate vars).
-    kw_lines:    ``_kw["key"] = value`` assignment lines (at i2 indent).
+    Returns:
+        str: Unpacked keyword argument expression (`**kwargs` or `**ssc_merge_kwargs(...)`).
     """
-    pre_lines: list[str] = []
-    kw_lines: list[str] = []
-    for attr, varname in _DICT_KWARGS:
+    entries: list[str] = []
+    for attr in ("headers", "cookies", "params"):
         d = getattr(spec, attr)
-        if not d:
-            continue
-        if dict_needs_builder(d):
-            pre_lines.extend(emit_dict_builder(varname, d, i2))
-            kw_lines.append(f'{i2}_kw["{attr}"] = {varname}')
-        else:
-            kw_lines.append(f'{i2}_kw["{attr}"] = {render_dict(d)}')
+        if d:
+            entries.append(f"{attr!r}: {render_dict(d)}")
     body_result = render_body(spec)
     if body_result:
-        kw_lines.append(f'{i2}_kw["{body_result[0]}"] = {body_result[1]}')
-    return pre_lines, kw_lines
-
-
-def _merge_loop_lines(i2: str) -> list[str]:
-    """Shallow-merge user kwargs into _kw (dict keys merged key-by-key)."""
-    return [
-        f"{i2}for _k, _v in kwargs.items():",
-        f"{i2}    if isinstance(_kw.get(_k), dict) and isinstance(_v, dict):",
-        f"{i2}        _kw[_k] = {{**_kw[_k], **_v}}",
-        f"{i2}    else:",
-        f"{i2}        _kw[_k] = _v",
-    ]
+        entries.append(f"{body_result[0]!r}: {body_result[1]}")
+    if not entries:
+        return "**kwargs"
+    return f"**ssc_merge_kwargs({{{', '.join(entries)}}}, kwargs)"
 
 
 # ===========================================================================
@@ -346,6 +425,16 @@ def _merge_loop_lines(i2: str) -> list[str]:
 def emit_method_fetch(
     node: MethodFetch, ctx: WalkContext, http: HttpLibStrategy
 ) -> list[str]:
+    """Emit Python `fetch` and/or `async_fetch` classmethods for a `MethodFetch` node.
+
+    Args:
+        node (MethodFetch): AST node describing the document fetch request.
+        ctx (WalkContext): Traversal context providing indentation and metadata.
+        http (HttpLibStrategy): Active Python HTTP transport strategy.
+
+    Returns:
+        list[str]: Generated Python method lines.
+    """
     spec = node.http_request.with_renamed_placeholders(to_snake_case)
     assert node.parent is not None
     struct_name = to_pascal_case(cast(StructBase, node.parent).name)
@@ -358,41 +447,26 @@ def emit_method_fetch(
     i2 = i1 + ctx.indent_char
     i3 = i2 + ctx.indent_char
 
-    pre_lines, kw_lines = _build_kw_dict(spec, i2, i3)
+    doc_lines = format_docstring(node.doc, i2) if node.doc else []
+    kw_expr = _render_dsl_kw(spec)
 
-    # kwargs_lines for fetch_body_lines: method, url, **_kw
-    fetch_kwargs = [
-        f"{i3}{spec.method!r},",
-        f"{i3}{render_value(spec.url)},",
-        f"{i3}**_kw,",
-    ]
-
-    def _kw_setup() -> list[str]:
-        """Lines to build _kw dict + merge user kwargs before the request."""
-        setup: list[str] = [f"{i2}_kw: Dict[str, Any] = {{}}"]
-        setup.extend(pre_lines)
-        setup.extend(kw_lines)
-        setup.extend(_merge_loop_lines(i2))
-        return setup
+    extra_call_args: list[str] = []
+    if node.response_path:
+        extra_call_args.append(f"{i3}response_path={node.response_path!r},")
+    if node.response_join:
+        extra_call_args.append(f"{i3}response_join={node.response_join!r},")
 
     def _sync_fetch_lines(fn_name: str) -> list[str]:
-        res: list[str] = [
+        return [
             f"{i1}@classmethod",
             f'{i1}def {fn_name}{suffix}(cls, client: {http.sync_client_type}{ph_params}, **kwargs: Any) -> "{struct_name}":',
+            *doc_lines,
+            f"{i2}return cls(ssc_fetch(",
+            f"{i3}client, {spec.method!r}, {render_value(spec.url)},",
+            *extra_call_args,
+            f"{i3}{kw_expr},",
+            f"{i2}))",
         ]
-        res.extend(_kw_setup())
-        res.extend(
-            http.fetch_body_lines(
-                is_async=False,
-                request_call=f"{i2}_resp = client.request(",
-                kwargs_lines=fetch_kwargs,
-                response_path=node.response_path,
-                response_join=node.response_join,
-                i2=i2,
-                i3=i3,
-            )
-        )
-        return res
 
     lines: list[str] = []
 
@@ -417,6 +491,7 @@ def emit_method_fetch(
         lines.append(
             f'{i1}async def async_fetch{suffix}(cls, client: {http.async_client_type}{ph_params}, **kwargs: Any) -> "{struct_name}":'
         )
+        lines.extend(doc_lines)
         if http.async_fetch_delegates_to_sync:
             # requests: no native async — run the sync fetch in a worker thread
             # via asyncio.to_thread (non-blocking, yields control to the loop).
@@ -431,17 +506,14 @@ def emit_method_fetch(
                 f"{target_method}{suffix}, {to_thread_args})"
             )
         else:
-            lines.extend(_kw_setup())
             lines.extend(
-                http.fetch_body_lines(
-                    is_async=True,
-                    request_call=f"{i2}_resp = await client.request(",
-                    kwargs_lines=fetch_kwargs,
-                    response_path=node.response_path,
-                    response_join=node.response_join,
-                    i2=i2,
-                    i3=i3,
-                )
+                [
+                    f"{i2}return cls(await ssc_fetch_async(",
+                    f"{i3}client, {spec.method!r}, {render_value(spec.url)},",
+                    *extra_call_args,
+                    f"{i3}{kw_expr},",
+                    f"{i2}))",
+                ]
             )
     return lines
 
@@ -449,6 +521,16 @@ def emit_method_fetch(
 def emit_method_rest(
     node: MethodRest, ctx: WalkContext, http: HttpLibStrategy
 ) -> list[str]:
+    """Emit Python sync and/or async REST endpoint classmethods for a `MethodRest` node.
+
+    Args:
+        node (MethodRest): AST node describing the REST endpoint request.
+        ctx (WalkContext): Traversal context providing indentation and metadata.
+        http (HttpLibStrategy): Active Python HTTP transport strategy.
+
+    Returns:
+        list[str]: Generated Python method lines.
+    """
     spec = node.http_request.with_renamed_placeholders(to_snake_case)
     struct = node.parent
     assert isinstance(struct, StructBase)
@@ -462,9 +544,8 @@ def emit_method_rest(
     i2 = i1 + ctx.indent_char
     i3 = i2 + ctx.indent_char
 
-    doc_line = f"{i2}{node.doc!r}" if node.doc else None
-
-    pre_lines, kw_lines = _build_kw_dict(spec, i2, i3)
+    doc_lines = format_docstring(node.doc, i2) if node.doc else []
+    kw_expr = _render_dsl_kw(spec)
 
     value_kwarg: list[str] = []
     module = find_enclosing_module(node)
@@ -479,7 +560,7 @@ def emit_method_rest(
         accessor = "".join(f"[{p!r}]" for p in node.response_path.split("."))
         if has_response_schema:
             value_kwarg = [
-                f"{i3}value_fn=lambda _b: ssc_json_project(_b{accessor}, {json_descriptor_var_name(node.response_schema)}),"
+                f"{i3}value_fn=lambda _b: {python_json_projector_name(node.response_schema)}(_b{accessor}),"
             ]
         else:
             value_kwarg = [f"{i3}value_fn=lambda _b: _b{accessor},"]
@@ -487,24 +568,18 @@ def emit_method_rest(
         value_kwarg = [f"{i3}value_fn=lambda _: None,"]
     elif has_response_schema:
         value_kwarg = [
-            f"{i3}value_fn=lambda _b: ssc_json_project(_b, {json_descriptor_var_name(node.response_schema)}),"
+            f"{i3}value_fn=lambda _b: {python_json_projector_name(node.response_schema)}(_b),"
         ]
 
     def _body(fn_name: str, await_kw: str) -> list[str]:
-        body: list[str] = []
-        if doc_line:
-            body.append(doc_line)
-        body.append(f"{i2}_kw: Dict[str, Any] = {{}}")
-        body.extend(pre_lines)
-        body.extend(kw_lines)
-        body.extend(_merge_loop_lines(i2))
+        body: list[str] = list(doc_lines)
         body.append(f"{i2}return cast({ret_type}, {await_kw}{fn_name}(")
         body.append(
             f"{i3}client, {matchers_var}, {spec.method!r},"
             f" {render_value(spec.url)},"
         )
         body.extend(value_kwarg)
-        body.append(f"{i3}**_kw,")
+        body.append(f"{i3}{kw_expr},")
         body.append(f"{i2}))")
         return body
 
@@ -528,6 +603,14 @@ def emit_method_rest(
 
 
 def emit_result_variant_def(node: ResultVariantDef) -> list[str]:
+    """Emit a frozen `@dataclass` error subclass for a `ResultVariantDef` node.
+
+    Args:
+        node (ResultVariantDef): Error variant AST node.
+
+    Returns:
+        list[str]: Generated Python class definition lines.
+    """
     if node.schema_name:
         base = f"{to_pascal_case(node.schema_name)}Json"
         value_type = f"List[{base}]" if node.schema_is_array else base
@@ -542,6 +625,14 @@ def emit_result_variant_def(node: ResultVariantDef) -> list[str]:
 
 
 def emit_result_alias_def(node: ResultAliasDef) -> list[str]:
+    """Emit a `Union[Ok[...], ...]` type alias for a `ResultAliasDef` node.
+
+    Args:
+        node (ResultAliasDef): Result union alias AST node.
+
+    Returns:
+        list[str]: Generated Python type alias lines.
+    """
     if node.response_schema:
         base = f"{to_pascal_case(node.response_schema)}Json"
         ok_type = f"List[{base}]" if node.response_is_array else base
@@ -557,6 +648,14 @@ def emit_result_alias_def(node: ResultAliasDef) -> list[str]:
 
 
 def emit_matcher_list_def(node: MatcherListDef) -> list[str]:
+    """Emit the `<STRUCT>_MATCHERS` list of `ErrMatcher` entries for a REST struct.
+
+    Args:
+        node (MatcherListDef): Matcher list AST node.
+
+    Returns:
+        list[str]: Generated Python matcher list definition lines.
+    """
     var = f"{to_snake_case(node.struct_name).upper()}_MATCHERS"
     lines = [f"{var}: List[ErrMatcher] = ["]
     module = find_enclosing_module(node)
@@ -572,7 +671,7 @@ def emit_matcher_list_def(node: MatcherListDef) -> list[str]:
         if e.error_schema and e.error_schema in definitions:
             factory = (
                 f"lambda headers, value: {e.factory_name}(headers=headers, "
-                f"value=ssc_json_project(value, {json_descriptor_var_name(e.error_schema)}))"
+                f"value={python_json_projector_name(e.error_schema)}(value))"
             )
         lines.append(f"    ErrMatcher({e.status}, {check_arg}, {factory}),")
     lines.append("]")

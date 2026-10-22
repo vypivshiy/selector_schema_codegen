@@ -130,8 +130,11 @@ from ssc_codegen.ast import (
 )
 from ssc_codegen.exceptions import BuildTimeError
 from ssc_codegen.generation.builder import ModuleBuilder
+from ssc_codegen.generation.runtime import (
+    PY_JSON_PROJECT_HELPER as _PY_JSON_PROJECT_HELPER,
+)
 from ssc_codegen.naming import (
-    json_descriptor_var_name,
+    python_json_projector_name,
     to_pascal_case,
     to_snake_case,
 )
@@ -147,10 +150,9 @@ from ssc_codegen.targets.python.http_libs.httpx import (
 from ssc_codegen.targets.python.http_libs.requests import RequestsStrategy
 from ssc_codegen.traversal.context import WalkContext
 from ssc_codegen.traversal.utils import (
-    DescriptorRef,
+    classify_gjson_path,
     find_enclosing_module,
-    json_def_descriptors,
-    jsonify_path_to_segments,
+    module_has_fetch,
     module_has_html_struct,
     module_has_rest,
     module_uses_http,
@@ -158,145 +160,228 @@ from ssc_codegen.traversal.utils import (
 )
 from ssc_codegen.traversal.walker import BaseWalker
 
-_PY_JSON_PROJECT_HELPER = """
-class SscJsonError(Exception):
-    pass
 
-class SscJsonPathError(SscJsonError):
-    pass
+def _needs_field_transform(
+    field: JsonDefField, info: TypeInfo | None
+) -> bool:
+    """Check whether a JSON field requires non-trivial projection when non-null.
 
-class SscJsonFieldMissingError(SscJsonError):
-    pass
+    Args:
+        field (JsonDefField): The JSON schema field AST node.
+        info (TypeInfo | None): Resolved return type metadata for the field.
 
-class SscJsonSchemaError(SscJsonError):
-    pass
-
-def ssc_resolve_dotpath(data: Any, path: str, is_optional: bool) -> Any:
-    current = data
-    for seg in path.split('.'):
-        if current is None:
-            if is_optional:
-                return None
-            raise SscJsonPathError(f"Cannot traverse segment '{seg}' on null object in path '{path}'")
-        if seg.isdigit():
-            idx = int(seg)
-            if not isinstance(current, list):
-                if is_optional:
-                    return None
-                raise SscJsonPathError(f"Expected list for index '{idx}' in path '{path}', got {type(current).__name__}")
-            if not (0 <= idx < len(current)):
-                if is_optional:
-                    return None
-                raise SscJsonPathError(f"Index {idx} out of bounds (len={len(current)}) in path '{path}'")
-            current = current[idx]
-        elif isinstance(current, dict):
-            if seg not in current:
-                if is_optional:
-                    return None
-                raise SscJsonPathError(f"Missing key '{seg}' in path '{path}'")
-            current = current[seg]
-        else:
-            if is_optional:
-                return None
-            raise SscJsonPathError(f"Cannot access key '{seg}' on non-dict {type(current).__name__} in path '{path}'")
-    return current
-
-def ssc_json_project(data: Any, field_descriptors: Any) -> Any:
-    if isinstance(field_descriptors, dict) and field_descriptors.get('__dict__'):
-        if not isinstance(data, dict):
-            raise SscJsonSchemaError(f"Expected dict, got {type(data).__name__}")
-        val_desc = field_descriptors.get('__value__')
-        if val_desc is None:
-            return data
-        if isinstance(val_desc, list) and val_desc:
-            return {k: [ssc_json_project(x, val_desc[0]) for x in v if x is not None] if isinstance(v, list) else (ssc_json_project(v, val_desc[0]) if v is not None else None) for k, v in data.items()}
-        return {k: (ssc_json_project(v, val_desc) if v is not None else None) for k, v in data.items()}
-    if isinstance(data, list):
-        return [ssc_json_project(item, field_descriptors) for item in data]
-    if not isinstance(data, dict):
-        return data
-    result: Dict[str, Any] = {}
-    for canonical_name, (wire_path, is_optional, is_omitempty, nested_desc) in field_descriptors.items():
-        if '.' in wire_path or wire_path.isdigit():
-            val = ssc_resolve_dotpath(data, wire_path, is_optional=is_optional or is_omitempty)
-        else:
-            if wire_path not in data:
-                if is_omitempty or is_optional:
-                    val = None
-                else:
-                    raise SscJsonFieldMissingError(f"Required JSON field '{wire_path}' (mapped to '{canonical_name}') is missing")
-            else:
-                val = data[wire_path]
-        if val is None:
-            if is_omitempty:
-                continue
-            if not is_optional:
-                raise SscJsonFieldMissingError(f"Field '{wire_path}' is null, but '{canonical_name}' is not nullable")
-            result[canonical_name] = None
-            continue
-        if nested_desc is not None:
-            if isinstance(nested_desc, dict) and nested_desc.get('__dict__'):
-                val = ssc_json_project(val, nested_desc)
-            elif isinstance(nested_desc, list) and nested_desc:
-                val = [ssc_json_project(x, nested_desc[0]) for x in val if x is not None] if isinstance(val, list) else ssc_json_project(val, nested_desc[0])
-            else:
-                val = ssc_json_project(val, nested_desc)
-        result[canonical_name] = val
-    return result
-
-def ssc_remap_json_keys(value: Any, mapping: Dict[str, Any]) -> Any:
-    if isinstance(value, list):
-        return [ssc_remap_json_keys(item, mapping) for item in value]
-    if not isinstance(value, dict):
-        return value
-    result: Dict[str, Any] = {}
-    for source, spec in mapping.items():
-        if source not in value:
-            continue
-        output, nested = (spec, None)
-        if isinstance(spec, tuple):
-            output, nested = spec
-        item = value[source]
-        if isinstance(nested, list) and nested:
-            item = [ssc_remap_json_keys(x, nested[0]) for x in item]
-        elif isinstance(nested, dict):
-            item = ssc_remap_json_keys(item, nested)
-        result[output] = item
-    return result
-"""
+    Returns:
+        bool: `True` if the field is a dictionary, nested JSON schema, or array.
+    """
+    if field.is_dict or (info and info.is_dict):
+        return True
+    if info and info.base == VT.JSON and info.ref:
+        return True
+    if info and info.is_array:
+        return True
+    return False
 
 
-def _python_json_descriptors(
+def _transform_field_value(
+    v_expr: str,
+    field: JsonDefField,
+    target: str,
+    definitions: dict[str, JsonDef],
+) -> str:
+    """Build a Python expression that validates and projects a non-null JSON field value.
+
+    Args:
+        v_expr (str): Source Python expression yielding the raw non-null field value.
+        field (JsonDefField): The JSON schema field AST node.
+        target (str): Qualified `<SchemaName>.<field_name>` error context string.
+        definitions (dict[str, JsonDef]): Map of schema names to `JsonDef` nodes in the module.
+
+    Returns:
+        str: Python expression returning the projected and container-validated value.
+    """
+    info = field.ret_type_info
+    if field.is_dict or (info and info.is_dict):
+        f_val_info = field.value_type_info or (
+            info.value_type_info if info else None
+        )
+        if (
+            f_val_info
+            and f_val_info.base == VT.JSON
+            and f_val_info.ref
+        ):
+            child_proj = python_json_projector_name(f_val_info.ref)
+            if f_val_info.is_array:
+                return (
+                    f"{{_k: ([{child_proj}(_x) for _x in ssc_expect_list(_dv, {target!r}) if _x is not None] if _dv is not None else None) "
+                    f"for _k, _dv in ssc_expect_dict({v_expr}, {target!r}).items()}}"
+                )
+            return (
+                f"{{_k: ({child_proj}(_dv) if _dv is not None else None) "
+                f"for _k, _dv in ssc_expect_dict({v_expr}, {target!r}).items()}}"
+            )
+        if f_val_info and f_val_info.is_array:
+            return (
+                f"{{_k: (ssc_expect_list(_dv, {target!r}) if _dv is not None else None) "
+                f"for _k, _dv in ssc_expect_dict({v_expr}, {target!r}).items()}}"
+            )
+        return f"dict(ssc_expect_dict({v_expr}, {target!r}))"
+
+    if info and info.base == VT.JSON and info.ref:
+        child_proj = python_json_projector_name(info.ref)
+        child_def = definitions.get(info.ref)
+        if info.is_array and not (child_def and child_def.is_array):
+            return f"[{child_proj}(_x) for _x in ssc_expect_list({v_expr}, {target!r}) if _x is not None]"
+        return f"{child_proj}({v_expr})"
+
+    if info and info.is_array:
+        return f"ssc_expect_list({v_expr}, {target!r})"
+
+    return v_expr
+
+
+def _python_json_projector(
     node: JsonDef, definitions: dict[str, JsonDef]
 ) -> list[str]:
-    descriptors = json_def_descriptors(node, definitions)
+    """Emit a dedicated Python JSON projector function for a `JsonDef` schema.
 
-    def render(value: object) -> str:
-        if value is None:
-            return "None"
-        if isinstance(value, bool):
-            return "True" if value else "False"
-        if isinstance(value, str):
-            return repr(value)
-        if isinstance(value, DescriptorRef):
-            return json_descriptor_var_name(value.schema_name)
-        if isinstance(value, tuple):
-            return "(" + ", ".join(render(x) for x in value) + ")"
-        if isinstance(value, list):
-            return "[" + ", ".join(render(item) for item in value) + "]"
-        if isinstance(value, dict):
-            return (
-                "{"
-                + ", ".join(
-                    f"{key!r}: {render(item)}" for key, item in value.items()
+    Args:
+        node (JsonDef): The JSON schema definition AST node.
+        definitions (dict[str, JsonDef]): Map of schema names to `JsonDef` nodes in the module.
+
+    Returns:
+        list[str]: Generated Python source lines defining `_project_<schema>`.
+    """
+    fn_name = python_json_projector_name(node.name)
+    schema_name = to_pascal_case(node.name)
+    if node.is_dict:
+        ret_type = f"{schema_name}Json"
+        val_info = node.value_type_info
+        lines = [
+            f"def {fn_name}(data: Any) -> {ret_type}:",
+            f"    _d = ssc_expect_dict(data, {schema_name!r})",
+        ]
+        if val_info and val_info.base == VT.JSON and val_info.ref:
+            child_proj = python_json_projector_name(val_info.ref)
+            if val_info.is_array:
+                lines.append(
+                    f"    return {{_k: ([{child_proj}(_x) for _x in ssc_expect_list(_v, {schema_name!r}) if _x is not None] if _v is not None else None) for _k, _v in _d.items()}}  # type: ignore[return-value]"
                 )
-                + "}"
+            else:
+                lines.append(
+                    f"    return {{_k: ({child_proj}(_v) if _v is not None else None) for _k, _v in _d.items()}}  # type: ignore[return-value]"
+                )
+        elif val_info and val_info.is_array:
+            lines.append(
+                f"    return {{_k: (ssc_expect_list(_v, {schema_name!r}) if _v is not None else None) for _k, _v in _d.items()}}  # type: ignore[return-value]"
             )
-        raise TypeError(f"unsupported JSON descriptor value: {value!r}")
+        else:
+            lines.append("    return dict(_d)  # type: ignore[return-value]")
+        lines.append("")
+        return lines
 
-    var_name = json_descriptor_var_name(node.name)
+    ind = "        " if node.is_array else "    "
+    d_var = "_d"
+    dict_entries: list[str] = []
+    omitempty_lines: list[str] = []
+    for field in node.body:
+        if not isinstance(field, JsonDefField) or (
+            field.ret_type_info and field.ret_type_info.skip
+        ):
+            continue
+        fname = field.name
+        wire_path = field.alias if field.alias else field.name
+        info = field.ret_type_info
+        is_optional = info.is_optional if info else False
+        is_omitempty = info.omitempty if info else False
+        target = f"{schema_name}.{fname}"
+        is_direct, unescaped_key = classify_gjson_path(wire_path)
+
+        if not is_optional and not is_omitempty:
+            if is_direct:
+                req_target = (
+                    schema_name if unescaped_key == fname else target
+                )
+                raw_expr = (
+                    f"ssc_json_req({d_var}, {unescaped_key!r}, {req_target!r})"
+                )
+            else:
+                raw_expr = (
+                    f"ssc_json_req_path({d_var}, {wire_path!r}, {target!r})"
+                )
+            val_expr = _transform_field_value(
+                raw_expr, field, target, definitions
+            )
+            dict_entries.append(f"{ind}    {fname!r}: {val_expr},")
+        elif is_omitempty:
+            if is_direct:
+                raw_expr = f"{d_var}.get({unescaped_key!r})"
+            else:
+                raw_expr = f"ssc_resolve_dotpath({d_var}, {wire_path!r}, True, {target!r})"
+            val_expr = _transform_field_value(
+                "_v", field, target, definitions
+            )
+            omitempty_lines.append(f"{ind}if (_v := {raw_expr}) is not None:")
+            omitempty_lines.append(f"{ind}    _res[{fname!r}] = {val_expr}")
+        else:
+            if is_direct:
+                raw_expr = f"{d_var}.get({unescaped_key!r})"
+            else:
+                raw_expr = f"ssc_resolve_dotpath({d_var}, {wire_path!r}, True, {target!r})"
+            if not _needs_field_transform(field, info):
+                dict_entries.append(f"{ind}    {fname!r}: {raw_expr},")
+            else:
+                val_expr = _transform_field_value(
+                    "_v", field, target, definitions
+                )
+                dict_entries.append(
+                    f"{ind}    {fname!r}: {val_expr} if (_v := {raw_expr}) is not None else None,"
+                )
+
+    if omitempty_lines:
+        body_lines = [
+            f"{ind}_res: Dict[str, Any] = {{",
+            *dict_entries,
+            f"{ind}}}",
+            *omitempty_lines,
+        ]
+        if node.is_array:
+            return [
+                f"def {fn_name}(data: Any) -> List[{schema_name}Json]:",
+                f"    _out: List[{schema_name}Json] = []",
+                f"    for _item in ssc_expect_list(data, {schema_name!r}):",
+                f"        _d = ssc_expect_dict(_item, {schema_name!r})",
+                *body_lines,
+                "        _out.append(_res)  # type: ignore[arg-type]",
+                "    return _out",
+                "",
+            ]
+        return [
+            f"def {fn_name}(data: Any) -> {schema_name}Json:",
+            f"    _d = ssc_expect_dict(data, {schema_name!r})",
+            *body_lines,
+            "    return _res  # type: ignore[return-value]",
+            "",
+        ]
+
+    if node.is_array:
+        return [
+            f"def {fn_name}(data: Any) -> List[{schema_name}Json]:",
+            f"    _out: List[{schema_name}Json] = []",
+            f"    for _item in ssc_expect_list(data, {schema_name!r}):",
+            f"        _d = ssc_expect_dict(_item, {schema_name!r})",
+            "        _out.append({  # type: ignore[arg-type]",
+            *dict_entries,
+            "        })",
+            "    return _out",
+            "",
+        ]
+
     return [
-        f"{var_name} = {render(descriptors)}",
+        f"def {fn_name}(data: Any) -> {schema_name}Json:",
+        f"    _d = ssc_expect_dict(data, {schema_name!r})",
+        "    return {  # type: ignore[return-value]",
+        *dict_entries,
+        "    }",
         "",
     ]
 
@@ -335,12 +420,15 @@ class PythonVisitor(BaseWalker):
         "std_unescape_text",
         "std_assert",
         "std_re_search",
-        "ssc_json_project",
+        "ssc_expect_dict",
+        "ssc_expect_list",
         "ssc_resolve_dotpath",
+        "ssc_json_req",
+        "ssc_json_req_path",
         "SscJsonError",
         "SscJsonPathError",
         "SscJsonFieldMissingError",
-        "ssc_remap_json_keys",
+        "SscJsonSchemaError",
     }
 
     # --- type resolution spelling ---
@@ -634,7 +722,7 @@ class PythonVisitor(BaseWalker):
     def visit_module(self, node: Module, ctx: WalkContext) -> list[str]:
         lines: list[str] = ["# autogenerated by ssc-gen. DO NOT EDIT"]
         if node.doc:
-            lines.append(repr(node.doc))
+            lines.extend(rest.format_docstring(node.doc))
         has_rest = module_has_rest(node)
         uses_http = module_uses_http(node)
         has_html = module_has_html_struct(node)
@@ -702,7 +790,10 @@ class PythonVisitor(BaseWalker):
                 need_fallback = False
             names = (
                 rest.runtime_export_names(
-                    mod, need_fallback=need_fallback, http_io=http_io
+                    mod,
+                    need_fallback=need_fallback,
+                    http_io=http_io,
+                    http_strategy=self._http,
                 )
                 if isinstance(mod, Module)
                 else []
@@ -731,8 +822,12 @@ class PythonVisitor(BaseWalker):
             )
             for line in self._dom.extra_utilities:
                 lines.append(line)
+        if isinstance(mod, Module) and module_uses_http(mod):
+            lines.extend(self._http.merge_kwargs_lines())
         if isinstance(mod, Module) and module_has_rest(mod):
             lines.extend(self._http.rest_runtime_lines(http_io=http_io))
+        if isinstance(mod, Module) and module_has_fetch(mod):
+            lines.extend(self._http.fetch_runtime_lines(http_io=http_io))
         lines.extend(self._render_std_section(ctx))
         return lines
 
@@ -782,8 +877,17 @@ class PythonVisitor(BaseWalker):
     # === TYPES ===
 
     def visit_jsondef(self, node: JsonDef, ctx: WalkContext) -> list[str]:
+        """Emit Python `TypedDict` or `Dict` alias and JSON projector function for a `JsonDef` schema.
+
+        Args:
+            node (JsonDef): The JSON schema definition AST node.
+            ctx (WalkContext): Traversal state context.
+
+        Returns:
+            list[str]: Generated Python type declaration and projector function lines.
+        """
+        name = to_pascal_case(node.name)
         if node.is_dict:
-            name = to_pascal_case(node.name)
             key_map = {
                 VT.STRING: "str",
                 VT.INT: "int",
@@ -796,31 +900,19 @@ class PythonVisitor(BaseWalker):
             val_type = self._resolve_type(node.value_type_info)
             lines = [f"{name}Json = Dict[{key_type}, {val_type}]", ""]
             self._builder.require_import("from typing import Dict")
-            module = find_enclosing_module(node)
-            if isinstance(module, Module):
-                definitions = {
-                    n.name: n for n in module.body if isinstance(n, JsonDef)
-                }
-                lines.extend(_python_json_descriptors(node, definitions))
-                self._builder.require_std(
-                    "ssc_json_project",
-                    code=_PY_JSON_PROJECT_HELPER,
-                    imports=[],
-                )
-            return lines
+        else:
+            lines = [f'{name}Json = TypedDict("{name}Json", {{']
+            lines.extend(self.walk_children(node, ctx))
+            lines.append("})")
 
-        name = to_pascal_case(node.name)
-        lines = [f'{name}Json = TypedDict("{name}Json", {{']
-        lines.extend(self.walk_children(node, ctx))
-        lines.append("})")
         module = find_enclosing_module(node)
         if isinstance(module, Module):
             definitions = {
                 n.name: n for n in module.body if isinstance(n, JsonDef)
             }
-            lines.extend(_python_json_descriptors(node, definitions))
+            lines.extend(_python_json_projector(node, definitions))
             self._builder.require_std(
-                "ssc_json_project",
+                "ssc_resolve_dotpath",
                 code=_PY_JSON_PROJECT_HELPER,
                 imports=[],
             )
@@ -874,8 +966,7 @@ class PythonVisitor(BaseWalker):
         name = to_pascal_case(node.name)
         lines = [f"class {name}:"]
         if node.doc:
-            i = ctx.deeper().indent
-            lines.append(f"{i}{node.doc!r}")
+            lines.extend(rest.format_docstring(node.doc, ctx.deeper().indent))
         lines.extend(self.walk_children(node, ctx))
         return lines
 
@@ -885,8 +976,7 @@ class PythonVisitor(BaseWalker):
         name = to_pascal_case(node.name)
         lines = [f"class {name}:"]
         if node.doc:
-            i = ctx.deeper().indent
-            lines.append(f"{i}{node.doc!r}")
+            lines.extend(rest.format_docstring(node.doc, ctx.deeper().indent))
         lines.extend(self.walk_children(node, ctx))
         return lines
 
@@ -1028,7 +1118,7 @@ class PythonVisitor(BaseWalker):
                 f"{ctx.indent}def {name}(document: str{self._dom.fn_extra_params}) -> {t_ret}:"
             ]
         if node.doc:
-            lines.append(f"{inner.indent}{node.doc!r}")
+            lines.extend(rest.format_docstring(node.doc, inner.indent))
         if node.is_raw:
             lines.append(f"{inner.indent}{inner.var_name} = document")
         else:
@@ -1480,24 +1570,34 @@ class PythonVisitor(BaseWalker):
         return [f"{ctx.indent}{ctx.nxt} = float({ctx.prv})"]
 
     def visit_jsonify(self, node: Jsonify, ctx: WalkContext) -> list[str]:
+        """Emit Python statements that parse JSON, optionally resolve a GJSON path, and project into a schema.
+
+        Args:
+            node (Jsonify): The `jsonify` pipeline operation AST node.
+            ctx (WalkContext): Traversal state context.
+
+        Returns:
+            list[str]: Generated Python pipeline statement lines.
+        """
         if node.path:
-            parts = jsonify_path_to_segments(node.path)
-            path = "".join(f"[{part}]" for part in parts)
-            raw_expr = f"json.loads({ctx.prv}){path}"
+            self._builder.require_std(
+                "ssc_resolve_dotpath",
+                code=_PY_JSON_PROJECT_HELPER,
+                imports=[],
+            )
+            raw_expr = f"ssc_resolve_dotpath(json.loads({ctx.prv}), {node.path!r}, is_optional=False)"
         else:
             raw_expr = f"json.loads({ctx.prv})"
 
         json_def = resolve_json_def(node, node.schema_name)
         if json_def:
             self._builder.require_std(
-                "ssc_json_project",
+                "ssc_resolve_dotpath",
                 code=_PY_JSON_PROJECT_HELPER,
                 imports=[],
             )
-            desc_name = json_descriptor_var_name(node.schema_name)
-            return [
-                f"{ctx.indent}{ctx.nxt} = ssc_json_project({raw_expr}, {desc_name})"
-            ]
+            proj_name = python_json_projector_name(node.schema_name)
+            return [f"{ctx.indent}{ctx.nxt} = {proj_name}({raw_expr})"]
 
         return [f"{ctx.indent}{ctx.nxt} = {raw_expr}"]
 

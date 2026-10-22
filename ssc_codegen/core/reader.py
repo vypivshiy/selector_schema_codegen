@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import re
 from collections.abc import Iterable
 from pathlib import Path
@@ -142,7 +143,7 @@ def parse_module(
             lint.push(node.name)
             if node.name == "@doc":
                 if node.args:
-                    module.doc = str(node.args[0].value)
+                    module.doc = inspect.cleandoc(str(node.args[0].value))
                 else:
                     lint.error(
                         node,

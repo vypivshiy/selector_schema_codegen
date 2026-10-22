@@ -264,8 +264,11 @@ class TestJsJsonBasic:
 
     def test_path_access(self):
         r = _run_js_schema(SCHEMAS_DIR / "18_json_basic.kdl", "JsonBasic")
-        assert r["firstAuthorName"] == "Author One"
-        assert r["firstTags"] == ["alpha", "beta"]
+        assert r["firstAuthor"] == {"name": "Author One", "slug": "author-one"}
+        assert r["secondAuthor"] == {
+            "name": "Author Two",
+            "slug": "author-two",
+        }
 
 
 def _run_js_src(
@@ -319,9 +322,9 @@ struct JsonAliasedScraper {
         jsonify QuoteSchema
     }
 
-    first-author-name {
+    first-author {
         @raw-json
-        jsonify QuoteSchema path="0.author.name"
+        jsonify AuthorSchema path="0.author"
     }
 }
 """
@@ -336,7 +339,10 @@ struct JsonAliasedScraper {
         assert "text" not in first
         assert "score" not in first
         assert "name" not in first["author"]
-        assert r["firstAuthorName"] == "Author One"
+        assert r["firstAuthor"] == {
+            "author_name": "Author One",
+            "author_slug": "author-one",
+        }
 
     def test_json_alias_special_characters(self):
         kdl_src = """
@@ -638,10 +644,8 @@ class TestJsJsonDictAndInlineSchemas:
 """
         code = _convert_kdl(kdl_src)
         assert "* @typedef {Record<string, string[]>} TranslationsJson" in code
-        assert (
-            'const JSON_DESCRIPTOR_TRANSLATIONS = {"__dict__": true, "__value__": null};'
-            in code
-        )
+        assert "function _projectTranslations(data)" in code
+        assert "JSON_DESCRIPTOR_" not in code
         assert "class SscJsonSchemaError extends SscJsonError" in code
 
         raw_payload = json.dumps(
@@ -658,7 +662,7 @@ class TestJsJsonDictAndInlineSchemas:
 
         # Passing non-object throws SscJsonSchemaError
         with pytest.raises(
-            RuntimeError, match="Expected object for dict schema"
+            RuntimeError, match="Translations: Expected object"
         ):
             _run_js_src(
                 kdl_src, "TranslationsParser", input_text='["invalid", "array"]'
@@ -684,10 +688,9 @@ json Author {
 """
         code = _convert_kdl(kdl_src)
         assert "* @typedef {Record<string, AuthorJson>} AuthorMapJson" in code
-        assert (
-            'const JSON_DESCRIPTOR_AUTHOR_MAP = {"__dict__": true, "__value__": JSON_DESCRIPTOR_AUTHOR};'
-            in code
-        )
+        assert "function _projectAuthorMap(data)" in code
+        assert "_projectAuthor(" in code
+        assert "JSON_DESCRIPTOR_" not in code
 
         raw_payload = json.dumps(
             {
@@ -756,7 +759,7 @@ json AnimeResponse {
 
         # Non-dict child throws error
         with pytest.raises(
-            RuntimeError, match="Expected object for dict schema"
+            RuntimeError, match=r"AnimeResponse\.translations: Expected object"
         ):
             _run_js_src(
                 kdl_src,
@@ -1116,10 +1119,9 @@ json AnimeResponse {
             "* @typedef {Record<string, TranslationValueJson>} TranslationsJson"
             in code
         )
-        assert (
-            'const JSON_DESCRIPTOR_TRANSLATIONS = {"__dict__": true, "__value__": JSON_DESCRIPTOR_TRANSLATION_VALUE};'
-            in code
-        )
+        assert "function _projectTranslations(data)" in code
+        assert "_projectTranslationValue(" in code
+        assert "JSON_DESCRIPTOR_" not in code
 
         raw_payload = json.dumps(
             {
@@ -1352,15 +1354,12 @@ json Parent {
 }
 """
         code = _convert_kdl(kdl_src)
-        assert (
-            'const JSON_DESCRIPTOR_CHILD = {"id": ["id", false, false, null], "name": ["name", false, false, null]};'
-            in code
-        )
-        assert (
-            'const JSON_DESCRIPTOR_PARENT = {"child": ["child", false, false, JSON_DESCRIPTOR_CHILD], "children": ["children", false, false, [JSON_DESCRIPTOR_CHILD]], "child_map": ["child_map", false, false, {"__dict__": true, "__value__": JSON_DESCRIPTOR_CHILD}]};'
-            in code
-        )
-        assert "sscJsonProject(JSON.parse(v), JSON_DESCRIPTOR_PARENT)" in code
+        assert "function _projectChild(data)" in code
+        assert "function _projectParent(data)" in code
+        assert "_projectParent(JSON.parse(v))" in code
+        assert "JSON_DESCRIPTOR_" not in code
+        assert "sscJsonProject" not in code
+        assert "sscRemapJsonKeys" not in code
 
         payload = json.dumps(
             {
@@ -1409,29 +1408,21 @@ json ApiError {
 '''
         code = _convert_kdl(kdl_src)
 
-        assert (
-            'const JSON_DESCRIPTOR_USER = {"id": ["id", false, false, null], "name": ["name", false, false, null]};'
-            in code
-        )
-        assert (
-            'const JSON_DESCRIPTOR_API_ERROR = {"code": ["code", false, false, null], "message": ["message", false, false, null]};'
-            in code
-        )
+        assert "function _projectUser(data)" in code
+        assert "function _projectApiError(data)" in code
 
-        assert "(_b) => sscJsonProject(_b, JSON_DESCRIPTOR_USER)" in code
-        assert (
-            '(_b) => sscJsonProject(_b["data"]["user"], JSON_DESCRIPTOR_USER)'
-            in code
-        )
+        assert "(_b) => _projectUser(_b)" in code
+        assert '(_b) => _projectUser(_b["data"]["user"])' in code
         assert "(_b) => null" in code
 
         assert (
-            "factory: (_s, _h, _b) => ({ isOk: false, status: _s, headers: _h, value: sscJsonProject(_b, JSON_DESCRIPTOR_API_ERROR) })"
+            "factory: (_s, _h, _b) => ({ isOk: false, status: _s, headers: _h, value: _projectApiError(_b) })"
             in code
         )
 
-        assert 'sscJsonProject(_b, {"code"' not in code
-        assert 'sscJsonProject(_b, {"id"' not in code
+        assert "JSON_DESCRIPTOR_" not in code
+        assert "sscJsonProject" not in code
+        assert "sscRemapJsonKeys" not in code
 
         node_eval = subprocess.run(
             [
@@ -1445,3 +1436,406 @@ json ApiError {
             check=True,
         )
         assert node_eval.returncode == 0
+
+    def test_gjson_path_subset_escaped_dots_hash_len_and_projection(self):
+        kdl_src = r"""
+json ReleaseManifest {
+    os_version str from="os\\.version"
+    nested_version str from="meta.os\\.version"
+    backslash_key str from="meta.path\\\\dir"
+    hash_key str from="meta.\\#"
+    item_count int from="items.#"
+    opt_count int? from="missing.#"
+    tag_names (array)str from="tags.#.name"
+    deep_ids (array)int from="groups.#.meta.id"
+}
+
+(raw)struct ManifestParser {
+    manifest {
+        jsonify ReleaseManifest path="envelope\\.data"
+    }
+}
+"""
+        code = _convert_kdl(kdl_src)
+        # Escaped flat key uses direct O(1) lookup with unescaped key "os.version"
+        assert (
+            'sscJsonField(data, "os.version", "ReleaseManifest.os_version")'
+            in code
+        )
+        # Multi-segment and # paths use sscJsonPath
+        assert (
+            'sscJsonPath(data, "meta.os\\\\.version", "ReleaseManifest.nested_version")'
+            in code
+        )
+        assert (
+            'sscJsonPath(data, "items.#", "ReleaseManifest.item_count")' in code
+        )
+        assert (
+            'sscJsonPath(data, "tags.#.name", "ReleaseManifest.tag_names")'
+            in code
+        )
+
+        payload = json.dumps(
+            {
+                "envelope.data": {
+                    "os.version": "24.04",
+                    "meta": {
+                        "os.version": "6.8.0-generic",
+                        "path\\dir": "C:\\bin",
+                        "#": "pound_val",
+                    },
+                    "items": ["a", "b", "c"],
+                    "tags": [
+                        {"name": "action", "id": 1},
+                        {"name": "sci-fi", "id": 2},
+                        {"other": "skipped"},
+                    ],
+                    "groups": [
+                        {"meta": {"id": 10}},
+                        {"meta": {"id": 20}},
+                    ],
+                }
+            }
+        )
+        r = _run_js_src(kdl_src, "ManifestParser", input_text=payload)
+        assert r["manifest"] == {
+            "os_version": "24.04",
+            "nested_version": "6.8.0-generic",
+            "backslash_key": "C:\\bin",
+            "hash_key": "pound_val",
+            "item_count": 3,
+            "opt_count": None,
+            "tag_names": ["action", "sci-fi"],
+            "deep_ids": [10, 20],
+        }
+
+        # Non-array on terminal # raises SscJsonPathError with Schema.field context
+        bad_payload = json.dumps(
+            {
+                "envelope.data": {
+                    "os.version": "24.04",
+                    "meta": {
+                        "os.version": "6.8.0-generic",
+                        "path\\dir": "C:\\bin",
+                        "#": "pound_val",
+                    },
+                    "items": "not_an_array",
+                    "tags": [],
+                    "groups": [],
+                }
+            }
+        )
+        with pytest.raises(
+            RuntimeError,
+            match=r"SscJsonPathError: ReleaseManifest\.item_count: Expected list for '#'",
+        ):
+            _run_js_src(kdl_src, "ManifestParser", input_text=bad_payload)
+
+    def test_schema_error_on_null_or_primitive_and_qualified_field_errors(self):
+        kdl_src = """
+json user_profile {
+    id int
+    username str from="user_name"
+    city str from="address.city"
+    tags (array)str?
+    translations (dict)? {
+        @key str
+        @value (array)str
+    }
+}
+
+(raw)struct ProfileParser {
+    profile {
+        jsonify user_profile
+    }
+}
+"""
+        # Null root throws SscJsonSchemaError with PascalCase SchemaName
+        with pytest.raises(
+            RuntimeError,
+            match=r"SscJsonSchemaError: UserProfile: Expected object, got null",
+        ):
+            _run_js_src(kdl_src, "ProfileParser", input_text="null")
+
+        # Primitive root throws SscJsonSchemaError with SchemaName
+        with pytest.raises(
+            RuntimeError,
+            match=r"SscJsonSchemaError: UserProfile: Expected object, got number",
+        ):
+            _run_js_src(kdl_src, "ProfileParser", input_text="42")
+
+        # Array root when object expected throws SscJsonSchemaError
+        with pytest.raises(
+            RuntimeError,
+            match=r"SscJsonSchemaError: UserProfile: Expected object, got array",
+        ):
+            _run_js_src(kdl_src, "ProfileParser", input_text="[1, 2]")
+
+        # Missing required direct field includes UserProfile.username
+        with pytest.raises(
+            RuntimeError,
+            match=r"SscJsonFieldMissingError: UserProfile\.username: Required JSON field 'user_name' \(mapped to 'username'\) is missing",
+        ):
+            _run_js_src(
+                kdl_src,
+                "ProfileParser",
+                input_text='{"id": 1, "address": {"city": "NY"}}',
+            )
+
+        # Null non-nullable field includes UserProfile.username
+        with pytest.raises(
+            RuntimeError,
+            match=r"SscJsonFieldMissingError: UserProfile\.username: Field 'user_name' is null, but 'username' is not nullable",
+        ):
+            _run_js_src(
+                kdl_src,
+                "ProfileParser",
+                input_text='{"id": 1, "user_name": null, "address": {"city": "NY"}}',
+            )
+
+        # Missing path segment includes UserProfile.city
+        with pytest.raises(
+            RuntimeError,
+            match=r"SscJsonPathError: UserProfile\.city: Missing key 'city' in path 'address\.city'",
+        ):
+            _run_js_src(
+                kdl_src,
+                "ProfileParser",
+                input_text='{"id": 1, "user_name": "alice", "address": {}}',
+            )
+
+        # Non-array on scalar array field throws SscJsonSchemaError with UserProfile.tags
+        with pytest.raises(
+            RuntimeError,
+            match=r"SscJsonSchemaError: UserProfile\.tags: Expected array, got string",
+        ):
+            _run_js_src(
+                kdl_src,
+                "ProfileParser",
+                input_text='{"id": 1, "user_name": "alice", "address": {"city": "NY"}, "tags": "not_an_array"}',
+            )
+
+        # Non-array value in (dict) with @value (array)str throws SscJsonSchemaError
+        with pytest.raises(
+            RuntimeError,
+            match=r"SscJsonSchemaError: UserProfile\.translations: Expected array, got string",
+        ):
+            _run_js_src(
+                kdl_src,
+                "ProfileParser",
+                input_text='{"id": 1, "user_name": "alice", "address": {"city": "NY"}, "translations": {"en": "not_an_array"}}',
+            )
+
+    def test_nested_projector_call_stack_and_rest_null_body_error(self):
+        kdl_src = '''
+json Preroll {
+    stream_url str from="url"
+}
+
+json Vast {
+    preroll Preroll
+}
+
+json CdnVideoHubResponse {
+    vast Vast
+}
+
+(rest)struct VideoClient {
+    @request name=get-video response=CdnVideoHubResponse """
+    GET /video HTTP/1.1
+    Host: api.example.com
+    """
+}
+'''
+        code = _convert_kdl(kdl_src)
+        script = (
+            code
+            + """
+(async () => {
+  // 1. Verify nested projector stack frames (_projectCdnVideoHubResponse -> _projectVast -> _projectPreroll)
+  let caughtNested = null;
+  try {
+    _projectCdnVideoHubResponse({ vast: { preroll: {} } });
+  } catch (err) {
+    caughtNested = err;
+  }
+  if (!caughtNested || caughtNested.name !== 'SscJsonFieldMissingError') {
+    throw new Error('Expected SscJsonFieldMissingError');
+  }
+  if (!caughtNested.message.includes('Preroll.stream_url')) {
+    throw new Error('Missing Preroll.stream_url in message: ' + caughtNested.message);
+  }
+  const stack = String(caughtNested.stack || '');
+  for (const fn of ['_projectPreroll', '_projectVast', '_projectCdnVideoHubResponse']) {
+    if (!stack.includes(fn)) {
+      throw new Error(`Missing ${fn} in stack:\\n${stack}`);
+    }
+  }
+
+  // 2. Verify REST 2xx response with null body throws SscJsonSchemaError instead of returning Ok(null)
+  const fakeNullClient = async () => ({
+    status: 200,
+    headers: new Map(),
+    json: async () => null,
+  });
+  let caughtRest = null;
+  try {
+    await VideoClient.getVideo(fakeNullClient);
+  } catch (err) {
+    caughtRest = err;
+  }
+  if (!caughtRest || caughtRest.name !== 'SscJsonSchemaError') {
+    throw new Error('Expected SscJsonSchemaError on null 2xx body');
+  }
+  if (!caughtRest.message.includes('CdnVideoHubResponse')) {
+    throw new Error('Missing CdnVideoHubResponse in error: ' + caughtRest.message);
+  }
+})().catch(e => { console.error(e); process.exit(1); });
+"""
+        )
+        node_eval = subprocess.run(
+            ["node", "-e", script],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert node_eval.returncode == 0
+
+    def test_js_runtime_http_delegation_null_body_and_opts_merge(self):
+        kdl_src = '''
+@doc """
+    Multi-line JS module doc.
+    Line two.
+    """
+
+json User {
+    id int
+    name str
+    nickname str?
+}
+
+(rest)struct UserClient {
+    @doc """
+        UserClient REST struct doc.
+        Line two.
+        """
+    @request name=update-user response=User doc="""
+        Update user endpoint doc.
+        Line two.
+        """ """
+    POST /users?tag={{tag:str}}&filter={{filter:str?}} HTTP/1.1
+    Host: api.example.com
+    Content-Type: application/json
+    X-App: ssc-js
+    X-Trace: {{trace:str?}}
+
+    {"name": "{{name:str}}", "nickname": {{nickname:str?}}}
+    """
+}
+'''
+        module, diags = parse_module(kdl_src)
+        assert not [d for d in diags if d.severity == Severity.ERROR]
+
+        fetch_code = JS_CONVERTER.convert(module, http_client="fetch")
+        axios_code = JS_CONVERTER.convert(module, http_client="axios")
+
+        assert " * Multi-line JS module doc.\n * Line two." in fetch_code
+        assert " * UserClient REST struct doc.\n * Line two." in fetch_code
+        assert "   * Update user endpoint doc.\n   * Line two." in fetch_code
+
+        fetch_script = (
+            fetch_code
+            + """
+(async () => {
+  let capturedUrl = null;
+  let capturedOpts = null;
+  const mockFetch = async (url, opts) => {
+    capturedUrl = url;
+    capturedOpts = opts;
+    return {
+      status: 200,
+      headers: new Map(),
+      json: async () => ({ id: 1, name: 'Alice', nickname: null }),
+    };
+  };
+
+  const res = await UserClient.updateUser(
+    mockFetch,
+    { tag: 'v1', name: 'Alice', nickname: null },
+    { headers: { 'X-Custom': 'caller' }, params: { extra: 'yes' } }
+  );
+  if (!res.isOk || res.value.name !== 'Alice' || res.value.nickname !== null) {
+    throw new Error('Unexpected response: ' + JSON.stringify(res));
+  }
+  if (capturedUrl !== 'https://api.example.com/users?tag=v1&extra=yes') {
+    throw new Error('Unexpected URL (filter should be omitted, extra merged): ' + capturedUrl);
+  }
+  if (capturedOpts.headers['X-App'] !== 'ssc-js' || capturedOpts.headers['X-Custom'] !== 'caller') {
+    throw new Error('Headers not shallow-merged: ' + JSON.stringify(capturedOpts.headers));
+  }
+  if ('X-Trace' in capturedOpts.headers) {
+    throw new Error('Optional undefined X-Trace header should be omitted');
+  }
+  const parsedBody = JSON.parse(capturedOpts.body);
+  if (parsedBody.name !== 'Alice' || parsedBody.nickname !== null || !('nickname' in parsedBody)) {
+    throw new Error('JSON body did not preserve nickname: null: ' + capturedOpts.body);
+  }
+})().catch(e => { console.error(e); process.exit(1); });
+"""
+        )
+        res_fetch = subprocess.run(
+            ["node", "-e", fetch_script],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert res_fetch.returncode == 0
+
+        axios_script = (
+            axios_code
+            + """
+(async () => {
+  let capturedCfg = null;
+  const mockAxios = {
+    request: async (cfg) => {
+      capturedCfg = cfg;
+      return {
+        status: 200,
+        headers: {},
+        data: { id: 2, name: 'Bob', nickname: null },
+      };
+    },
+  };
+
+  const res = await UserClient.updateUser(
+    mockAxios,
+    { tag: 'v2', name: 'Bob', nickname: null },
+    { headers: { 'X-Custom': 'axios-caller' }, params: { extra: '1' } }
+  );
+  if (!res.isOk || res.value.name !== 'Bob') {
+    throw new Error('Unexpected axios response: ' + JSON.stringify(res));
+  }
+  if (capturedCfg.params.toString() !== 'tag=v2&extra=1') {
+    throw new Error('Unexpected axios params: ' + capturedCfg.params.toString());
+  }
+  if (capturedCfg.headers['X-App'] !== 'ssc-js' || capturedCfg.headers['X-Custom'] !== 'axios-caller') {
+    throw new Error('Axios headers not merged: ' + JSON.stringify(capturedCfg.headers));
+  }
+  if ('X-Trace' in capturedCfg.headers) {
+    throw new Error('Optional X-Trace should be omitted in axios');
+  }
+  const parsedBody = JSON.parse(capturedCfg.data);
+  if (parsedBody.name !== 'Bob' || parsedBody.nickname !== null || !('nickname' in parsedBody)) {
+    throw new Error('Axios JSON body did not preserve nickname: null: ' + capturedCfg.data);
+  }
+})().catch(e => { console.error(e); process.exit(1); });
+"""
+        )
+        res_axios = subprocess.run(
+            ["node", "-e", axios_script],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert res_axios.returncode == 0
+

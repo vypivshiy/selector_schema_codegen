@@ -22,21 +22,29 @@ def to_snake_case(s: str) -> str:
     return s.lower()
 
 
-def json_descriptor_var_name(name: str) -> str:
-    """Format canonical module-level JSON descriptor constant identifier.
+def python_json_projector_name(name: str) -> str:
+    """Format canonical Python JSON projector function identifier.
 
     Args:
-        name: Struct, type, or response schema name to format.
+        name (str): Struct, type, or JSON schema name to format.
 
     Returns:
-        Canonical uppercase identifier prefixed with ``JSON_DESCRIPTOR_``.
-
-    Examples:
-        'Episode'                 -> 'JSON_DESCRIPTOR_EPISODE'
-        'CatalogReleasesResponse' -> 'JSON_DESCRIPTOR_CATALOG_RELEASES_RESPONSE'
+        str: Snake-case function identifier prefixed with ``_project_``.
     """
-    clean_name = to_snake_case(name).lstrip("_").upper()
-    return f"JSON_DESCRIPTOR_{clean_name}"
+    clean_name = to_snake_case(name).lstrip("_")
+    return f"_project_{clean_name}"
+
+
+def js_json_projector_name(name: str) -> str:
+    """Format canonical JavaScript JSON projector function identifier.
+
+    Args:
+        name (str): Struct, type, or JSON schema name to format.
+
+    Returns:
+        str: Pascal-suffixed function identifier prefixed with ``_project``.
+    """
+    return f"_project{to_pascal_case(name)}"
 
 
 def to_pascal_case(s: str) -> str:

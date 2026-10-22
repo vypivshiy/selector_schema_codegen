@@ -138,6 +138,7 @@ from ssc_codegen.naming import (
     to_snake_case,
 )
 from ssc_codegen.traversal.utils import (
+    classify_gjson_path,
     find_predicate_container,
     module_has_html_struct,
     module_uses_http,
@@ -309,6 +310,7 @@ def _go_unmarshal_json(
         field_name = to_pascal_case(field.name)
         wire_path = field.alias if field.alias else _json_tag(field.name)
         go_wire_path = _go_str(wire_path)
+        missing_err_msg = _go_str(f"required JSON field '{wire_path}' missing")
         info = field.ret_type_info
         is_optional = info.is_optional if info else False
         is_omitempty = info.omitempty if info else False
@@ -360,7 +362,7 @@ def _go_unmarshal_json(
                     f"\tif !{res_var}.Exists() || {res_var}.Type == gjson.Null {{"
                 )
                 lines.append(
-                    f"\t\treturn fmt.Errorf(\"required JSON field '{wire_path}' missing\")"
+                    f"\t\treturn fmt.Errorf({missing_err_msg})"
                 )
                 lines.append("\t}")
                 lines.append(
@@ -400,7 +402,7 @@ def _go_unmarshal_json(
                         f"\tif !{res_var}.Exists() || {res_var}.Type == gjson.Null {{"
                     )
                     lines.append(
-                        f"\t\treturn fmt.Errorf(\"required JSON field '{wire_path}' missing\")"
+                        f"\t\treturn fmt.Errorf({missing_err_msg})"
                     )
                     lines.append("\t}")
                     lines.append(f"\tfor _, item := range {res_var}.Array() {{")
@@ -435,7 +437,7 @@ def _go_unmarshal_json(
                         f"\tif !{res_var}.Exists() || {res_var}.Type == gjson.Null {{"
                     )
                     lines.append(
-                        f"\t\treturn fmt.Errorf(\"required JSON field '{wire_path}' missing\")"
+                        f"\t\treturn fmt.Errorf({missing_err_msg})"
                     )
                     lines.append("\t}")
                     lines.append(
@@ -479,7 +481,7 @@ def _go_unmarshal_json(
                     f"\tif !{res_var}.Exists() || {res_var}.Type == gjson.Null {{"
                 )
                 lines.append(
-                    f"\t\treturn fmt.Errorf(\"required JSON field '{wire_path}' missing\")"
+                    f"\t\treturn fmt.Errorf({missing_err_msg})"
                 )
                 lines.append("\t}")
                 lines.append(f"\tfor _, item := range {res_var}.Array() {{")
@@ -503,7 +505,7 @@ def _go_unmarshal_json(
                     f"\tif !{res_var}.Exists() || {res_var}.Type == gjson.Null {{"
                 )
                 lines.append(
-                    f"\t\treturn fmt.Errorf(\"required JSON field '{wire_path}' missing\")"
+                    f"\t\treturn fmt.Errorf({missing_err_msg})"
                 )
                 lines.append("\t}")
                 lines.append(f"\tres.{field_name} = {res_var}{getter}")
@@ -689,10 +691,13 @@ class GoVisitor(BaseWalker):
             lines.append("")
 
         lines.extend(BASE_RUNTIME)
+        lines.append("")
 
         if self._has_rest:
             lines.extend(BASE_REST_RUNTIME)
+            lines.append("")
             lines.extend(self._http.rest_runtime_lines())
+            lines.append("")
 
         for _imps, code in self._all_std_defs.values():
             # GO_RUNTIME entries are pre-formatted with literal tabs — do NOT
@@ -915,11 +920,25 @@ class GoVisitor(BaseWalker):
     def visit_jsondef_field(
         self, node: JsonDefField, ctx: WalkContext
     ) -> list[str]:
+        """Emit a Go struct field declaration with JSON struct tag for a `JsonDefField`.
+
+        Args:
+            node (JsonDefField): The JSON schema field AST node.
+            ctx (WalkContext): Traversal state context.
+
+        Returns:
+            list[str]: Generated Go struct field declaration line, or empty list if skipped.
+        """
         if node.ret_type_info and node.ret_type_info.skip:
             return []
         field_name = to_pascal_case(node.name)
         go_type = self._resolve_type(node.ret_type_info)
-        tag = node.alias if node.alias else _json_tag(node.name)
+        if node.alias:
+            is_direct, unescaped_key = classify_gjson_path(node.alias)
+            raw_tag = unescaped_key if is_direct else node.alias
+        else:
+            raw_tag = _json_tag(node.name)
+        tag = raw_tag.replace("\\", "\\\\").replace('"', '\\"')
         omitempty = (
             ",omitempty"
             if node.ret_type_info and node.ret_type_info.omitempty
@@ -1290,7 +1309,7 @@ class GoVisitor(BaseWalker):
         lines: list[str] = []
         if node.doc:
             for doc_line in node.doc.splitlines():
-                lines.append(f"// {doc_line}")
+                lines.append(f"// {doc_line}" if doc_line else "//")
         lines.append(f"func {name}(document string) {t_ret} {{")
         if node.is_raw:
             lines.append(f"{inner.indent}{inner.var_name} := document")
@@ -2349,29 +2368,12 @@ class GoVisitor(BaseWalker):
     def visit_method_rest(
         self, node: MethodRest, ctx: WalkContext
     ) -> list[str]:
-        self._builder.require_import('"fmt"')
-        if node.response_schema:
-            self._builder.require_import('"encoding/json"')
-        if node.response_path:
-            self._builder.require_import('"github.com/tidwall/gjson"')
         spec = node.http_request
         if spec.body_kind == "json":
             self._require("stdJSONBody")
-        if spec.body_kind == "form" and isinstance(spec.payload, dict):
-            self._builder.require_import('"net/url"')
-        if spec.params:
-            self._builder.require_import('"net/url"')
-        joined_templates = list(spec.params.values())
-        if spec.body_kind == "form" and isinstance(spec.payload, dict):
-            joined_templates.extend(spec.payload.values())
-        if any(
-            (ph := tmpl.single_placeholder()) is not None
-            and ph.is_array
-            and ph.style in ("csv", "pipe", "space")
-            for tmpl in joined_templates
-        ):
-            self._builder.require_import('"strings"')
         self._builder.require_import('"' + self._http.import_path + '"')
+        for pkg in sorted(rest.go_method_imports(spec)):
+            self._builder.require_import(f'"{pkg}"')
         struct = node.parent
         name = (
             to_pascal_case(struct.name)
@@ -2386,17 +2388,10 @@ class GoVisitor(BaseWalker):
     ) -> list[str]:
         # Free function Fetch(ctx, client, ...) (*Name, error) for HTML structs.
         self._builder.require_import('"context"')
-        self._builder.require_import('"fmt"')
-        self._builder.require_import('"io"')
-        self._builder.require_import('"net/http"')
-        self._builder.require_import('"strings"')
+        self._builder.require_import('"' + self._http.import_path + '"')
         spec = node.http_request
         if spec.body_kind == "json":
             self._require("stdJSONBody")
-        if spec.body_kind == "form" and isinstance(spec.payload, dict):
-            self._builder.require_import('"net/url"')
-        if spec.params:
-            self._builder.require_import('"net/url"')
-        if node.response_path:
-            self._builder.require_import('"github.com/tidwall/gjson"')
+        for pkg in sorted(rest.go_method_imports(spec)):
+            self._builder.require_import(f'"{pkg}"')
         return rest.emit_method_fetch(node, ctx, self._http)
