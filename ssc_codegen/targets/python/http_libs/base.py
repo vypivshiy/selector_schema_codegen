@@ -71,10 +71,15 @@ _REST_SHARED_RUNTIME = inspect.cleandoc(
         ) -> Optional[Err]:
             if status != self.status:
                 return None
+            if body is None or not isinstance(body, (dict, list)):
+                return None
             if self.check is not None:
                 if not isinstance(body, dict) or not self.check(body):
                     return None
-            return self.factory(headers=headers, value=body)
+            try:
+                return self.factory(headers=headers, value=body)
+            except Exception:
+                return None
 
 
     def ssc_dispatch_err(

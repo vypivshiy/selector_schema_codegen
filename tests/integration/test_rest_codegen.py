@@ -1745,3 +1745,283 @@ json User {
             assert sent_req.headers["x-custom"] == "from-caller"
             # Both DSL 'tag' and caller 'extra' query params are present
             assert dict(sent_req.url.params) == {"tag": "v1", "extra": "yes"}
+
+
+# ---------------------------------------------------------------------------
+# 11. Ticket 02: Dot-path positional key checks & safe ErrMatcher fallthrough
+# ---------------------------------------------------------------------------
+
+
+class TestRestDotPathAndSafeFallthrough:
+    """Verify nested positional dot-path matching, safe fallback to UnknownErr on
+    HTML 404 (body=None) or schema-mismatching JSON, and ordered fallthrough
+    between multiple @error 404 rules across httpx, requests, and aiohttp.
+    """
+
+    _SCHEMA = """
+json User {
+    id int
+    name str
+}
+
+json ApiError {
+    code int from="error.code"
+    message str from="error.message"
+}
+
+json SpecificError {
+    error str
+    code int
+}
+
+json GenericError {
+    message str
+}
+
+(rest)struct SearchAPI {
+    @error 200 ApiError "error.code"
+    @error:not-found 404 SpecificError error="Ничего не найдено"
+    @error 404 GenericError
+
+    @request response=User \"\"\"
+    GET /search HTTP/1.1
+    Host: api.example.com
+    \"\"\"
+}
+"""
+
+    def test_httpx_dotpath_and_ordered_fallthrough_sync_and_async(self):
+        ns = _generate(self._SCHEMA, http_client="httpx")
+        API = ns["SearchAPI"]
+
+        # 1. Nested positional key "error.code" matches 200 error payload
+        with respx.mock:
+            respx.get("https://api.example.com/search").respond(
+                json={"error": {"code": 1001, "message": "Quota exceeded"}},
+                status_code=200,
+            )
+            client = httpx.Client()
+            r_err200 = API.fetch(client)
+
+        assert r_err200.is_ok is False
+        assert isinstance(r_err200, ns["SearchAPIErr200Code"])
+        assert r_err200.value == {"code": 1001, "message": "Quota exceeded"}
+
+        # 2. Nested positional key "error.code" rejects {"error": {}} and {} on 200 -> Ok
+        for ok_payload in (
+            {"id": 1, "name": "Alice", "error": {}},
+            {"id": 2, "name": "Bob"},
+        ):
+            with respx.mock:
+                respx.get("https://api.example.com/search").respond(
+                    json=ok_payload,
+                    status_code=200,
+                )
+                client = httpx.Client()
+                r_ok = API.fetch(client)
+            assert r_ok.is_ok is True
+            assert r_ok.value == {
+                "id": ok_payload["id"],
+                "name": ok_payload["name"],
+            }
+
+        # 3. Specific @error:not-found 404 matches when condition and schema both succeed
+        with respx.mock:
+            respx.get("https://api.example.com/search").respond(
+                json={"error": "Ничего не найдено", "code": 404},
+                status_code=404,
+            )
+            client = httpx.Client()
+            r_spec = API.fetch(client)
+
+        assert r_spec.is_ok is False
+        assert isinstance(r_spec, ns["SearchAPIErr404NotFound"])
+        assert r_spec.value == {"error": "Ничего не найдено", "code": 404}
+
+        # 4. Condition matches SpecificError, but projection fails (missing 'code') -> falls through to GenericError
+        with respx.mock:
+            respx.get("https://api.example.com/search").respond(
+                json={
+                    "error": "Ничего не найдено",
+                    "message": "Fallback generic message",
+                },
+                status_code=404,
+            )
+            client = httpx.Client()
+            r_fallthrough = API.fetch(client)
+
+        assert r_fallthrough.is_ok is False
+        assert isinstance(r_fallthrough, ns["SearchAPIErr404"])
+        assert r_fallthrough.value == {"message": "Fallback generic message"}
+
+        # 5. Schema-mismatching JSON `{}` fails both 404 matchers -> falls through to UnknownErr
+        with respx.mock:
+            respx.get("https://api.example.com/search").respond(
+                json={},
+                status_code=404,
+            )
+            client = httpx.Client()
+            r_empty = API.fetch(client)
+
+        assert r_empty.is_ok is False
+        assert isinstance(r_empty, ns["UnknownErr"])
+        assert r_empty.status == 404
+        assert r_empty.value == {}
+
+        # 6. HTML 404 page (body=None) -> falls through to UnknownErr without raising SscJsonError
+        with respx.mock:
+            respx.get("https://api.example.com/search").respond(
+                content=b"<html><body>404 Not Found</body></html>",
+                headers={"Content-Type": "text/html"},
+                status_code=404,
+            )
+            client = httpx.Client()
+            r_html = API.fetch(client)
+
+        assert r_html.is_ok is False
+        assert isinstance(r_html, ns["UnknownErr"])
+        assert r_html.status == 404
+        assert r_html.value is None
+
+        # 7. Async httpx verification for HTML 404 and fallthrough
+        with respx.mock:
+
+            async def _run_async():
+                respx.get("https://api.example.com/search").respond(
+                    content=b"<html>404</html>",
+                    headers={"Content-Type": "text/html"},
+                    status_code=404,
+                )
+                async with httpx.AsyncClient() as aclient:
+                    return await API.async_fetch(aclient)
+
+            r_async_html = asyncio.run(_run_async())
+
+        assert isinstance(r_async_html, ns["UnknownErr"])
+        assert r_async_html.status == 404
+        assert r_async_html.value is None
+
+    def test_requests_dotpath_and_ordered_fallthrough(self):
+        import requests
+        from responses import RequestsMock
+
+        ns = _generate(self._SCHEMA, http_client="requests")
+        API = ns["SearchAPI"]
+
+        # 1. Nested positional key "error.code" matches
+        with RequestsMock() as rsps:
+            rsps.add(
+                rsps.GET,
+                "https://api.example.com/search",
+                json={"error": {"code": 55, "message": "Bad query"}},
+                status=200,
+            )
+            with requests.Session() as session:
+                r_err200 = API.fetch(session)
+
+        assert isinstance(r_err200, ns["SearchAPIErr200Code"])
+        assert r_err200.value == {"code": 55, "message": "Bad query"}
+
+        # 2. SpecificError projection fails -> falls through to GenericError
+        with RequestsMock() as rsps:
+            rsps.add(
+                rsps.GET,
+                "https://api.example.com/search",
+                json={
+                    "error": "Ничего не найдено",
+                    "message": "Handled by GenericError",
+                },
+                status=404,
+            )
+            with requests.Session() as session:
+                r_gen = API.fetch(session)
+
+        assert isinstance(r_gen, ns["SearchAPIErr404"])
+        assert r_gen.value == {"message": "Handled by GenericError"}
+
+        # 3. HTML 404 and empty JSON `{}` fall through to UnknownErr
+        with RequestsMock() as rsps:
+            rsps.add(
+                rsps.GET,
+                "https://api.example.com/search",
+                body="<html>nginx 404</html>",
+                content_type="text/html",
+                status=404,
+            )
+            rsps.add(
+                rsps.GET,
+                "https://api.example.com/search",
+                json={},
+                status=404,
+            )
+            with requests.Session() as session:
+                r_html = API.fetch(session)
+                r_empty = API.fetch(session)
+
+        assert isinstance(r_html, ns["UnknownErr"])
+        assert r_html.status == 404
+        assert r_html.value is None
+
+        assert isinstance(r_empty, ns["UnknownErr"])
+        assert r_empty.status == 404
+        assert r_empty.value == {}
+
+    def test_aiohttp_dotpath_and_ordered_fallthrough(self):
+        aiohttp = pytest.importorskip("aiohttp")
+        aioresponses = pytest.importorskip("aioresponses")
+
+        ns = _generate(self._SCHEMA, http_client="aiohttp")
+        API = ns["SearchAPI"]
+
+        async def _run():
+            with aioresponses.aioresponses() as mocked:
+                # 1. Nested positional key "error.code" matches
+                mocked.get(
+                    "https://api.example.com/search",
+                    payload={"error": {"code": 77, "message": "Aio error"}},
+                    status=200,
+                )
+                # 2. SpecificError fails projection -> falls through to GenericError
+                mocked.get(
+                    "https://api.example.com/search",
+                    payload={
+                        "error": "Ничего не найдено",
+                        "message": "Aio generic fallback",
+                    },
+                    status=404,
+                )
+                # 3. Empty JSON `{}` -> falls through to UnknownErr
+                mocked.get(
+                    "https://api.example.com/search",
+                    payload={},
+                    status=404,
+                )
+                # 4. HTML 404 -> falls through to UnknownErr
+                mocked.get(
+                    "https://api.example.com/search",
+                    body=b"<html>404 Not Found</html>",
+                    headers={"Content-Type": "text/html"},
+                    status=404,
+                )
+                async with aiohttp.ClientSession() as session:
+                    r1 = await API.async_fetch(session)
+                    r2 = await API.async_fetch(session)
+                    r3 = await API.async_fetch(session)
+                    r4 = await API.async_fetch(session)
+                    return r1, r2, r3, r4
+
+        r_err200, r_gen, r_empty, r_html = asyncio.run(_run())
+
+        assert isinstance(r_err200, ns["SearchAPIErr200Code"])
+        assert r_err200.value == {"code": 77, "message": "Aio error"}
+
+        assert isinstance(r_gen, ns["SearchAPIErr404"])
+        assert r_gen.value == {"message": "Aio generic fallback"}
+
+        assert isinstance(r_empty, ns["UnknownErr"])
+        assert r_empty.status == 404
+        assert r_empty.value == {}
+
+        assert isinstance(r_html, ns["UnknownErr"])
+        assert r_html.status == 404
+        assert r_html.value is None

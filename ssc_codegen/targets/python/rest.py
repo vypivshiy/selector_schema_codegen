@@ -150,6 +150,7 @@ def render_json_body(tmpl: PlaceholderTemplate) -> str:
     Returns:
         str: Python dict/list/scalar expression suitable for the `json=` request keyword.
     """
+
     def _emit(v: object) -> str:
         if isinstance(v, PlaceholderSpec):
             return v.name
@@ -202,21 +203,30 @@ def render_body(spec: RequestHttp) -> tuple[str, str] | None:
 
 
 def _py_path_expr(body_var: str, path: str) -> str:
-    """Build a Python dictionary/index traversal expression for a dot-path.
+    """Build a safe Python dictionary/index traversal expression for a dot-path.
 
     Args:
         body_var (str): Variable name holding the parsed response body.
         path (str): Dot-separated path string.
 
     Returns:
-        str: Python expression accessing the nested path on `body_var`.
+        str: Python expression accessing the nested path on `body_var`, evaluating
+        to `None` if any intermediate segment is missing or has the wrong container type.
     """
+    segs = path.split(".")
+    if len(segs) == 1 and not segs[0].isdigit():
+        return f"{body_var}.get({segs[0]!r})"
     expr = body_var
-    for seg in path.split("."):
+    for i, seg in enumerate(segs):
         if seg.isdigit():
-            expr += f"[{seg}]"
+            idx = int(seg)
+            expr = f"(_v{i}[{idx}] if isinstance(_v{i} := {expr}, list) and 0 <= {idx} < len(_v{i}) else None)"
+        elif i == 0:
+            expr = (
+                f"({expr}.get({seg!r}) if isinstance({expr}, dict) else None)"
+            )
         else:
-            expr += f".get({seg!r})"
+            expr = f"(_v{i}.get({seg!r}) if isinstance(_v{i} := {expr}, dict) else None)"
     return expr
 
 
@@ -226,7 +236,7 @@ def render_py_condition_lambda(
     """Render an error-matcher predicate lambda checking required keys and field values.
 
     Args:
-        required_keys (list[str]): Top-level keys that must exist in the JSON body.
+        required_keys (list[str]): Top-level or dot-path keys that must exist in the JSON body.
         conditions (dict[str, object]): Dot-paths mapped to expected literal values.
 
     Returns:
@@ -234,7 +244,10 @@ def render_py_condition_lambda(
     """
     parts: list[str] = []
     for key in required_keys:
-        parts.append(f"{key!r} in _b")
+        if "." in key:
+            parts.append(f"{_py_path_expr('_b', key)} is not None")
+        else:
+            parts.append(f"{key!r} in _b")
     for path, value in conditions.items():
         lhs = _py_path_expr("_b", path)
         if isinstance(value, bool):
