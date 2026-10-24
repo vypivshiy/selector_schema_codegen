@@ -888,11 +888,6 @@ class ErrorResponse(Node):
     conditions: dict[str, Any] = field(default_factory=dict)
     suffix: str = ""
 
-    @property
-    def alias(self) -> str:
-        """Explicit error variant suffix alias."""
-        return self.suffix
-
 
 @dataclass
 class Field(Node):

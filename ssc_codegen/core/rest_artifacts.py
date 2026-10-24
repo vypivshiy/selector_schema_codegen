@@ -44,17 +44,14 @@ def _leaf_key_pascal(path: str) -> str:
 
 
 def err_subclass_name(struct_name: str, err: ErrorResponse) -> str:
-    """Generate a deterministic error variant subclass name for an HTTP error mapping.
-
-    Uses the explicit `@error:<suffix>` when present, or appends at most the first
-    two leaf non-numeric dot-path segments from `required_keys` and `conditions`.
+    """Return the canonical error variant class name for an `ErrorResponse` in a REST struct.
 
     Args:
-        struct_name (str): Base name of the enclosing REST struct.
-        err (ErrorResponse): The `ErrorResponse` AST node containing status, suffix, and condition keys.
+        struct_name (str): Name of the enclosing REST struct.
+        err (ErrorResponse): Error response mapping node.
 
     Returns:
-        str: The deterministic subclass name (e.g. `UserClientErr404NotFound`).
+        str: Canonical PascalCase error variant class name (e.g. `UserClientErr404NotFound`).
     """
     base = f"{to_pascal_case(struct_name)}Err{err.status}"
     if err.suffix:

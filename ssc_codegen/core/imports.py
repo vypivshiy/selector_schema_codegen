@@ -11,6 +11,7 @@ from kdlquery import KDLParseError, KdlNode, ReadDiagnostic, Severity
 from kdlquery import parse as kdl_parse
 
 from ssc_codegen.core.contexts import ParseContext
+from ssc_codegen.core.linter import is_error_directive
 
 IMPORT_KINDS = frozenset({"define", "extension", "fn", "json", "struct"})
 _JSON_PRIMITIVES = frozenset({"bool", "float", "int", "nil", "null", "str"})
@@ -440,9 +441,7 @@ class _Resolver:
                             label="@request",
                         )
                     )
-            if (
-                current.name == "@error" or current.name.startswith("@error:")
-            ) and len(current.args) >= 2:
+            if is_error_directive(current.name) and len(current.args) >= 2:
                 name = str(current.args[1].value)
                 add(self._lookup(unit, "json", name, current, label="@error"))
 
