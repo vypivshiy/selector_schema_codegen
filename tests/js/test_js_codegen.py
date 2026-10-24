@@ -1802,3 +1802,164 @@ json User {
             check=True,
         )
         assert res_axios.returncode == 0
+
+    def test_js_rest_dotpath_keys_and_safe_errmatcher_fallthrough_fetch_and_axios(
+        self,
+    ):
+        kdl_src = '''
+json User {
+    id int
+    name str
+}
+
+json ApiError {
+    code int from="error.code"
+    message str from="error.message"
+}
+
+json SpecificError {
+    error str
+    code int
+}
+
+json GenericError {
+    message str
+}
+
+(rest)struct SearchClient {
+    @error 200 ApiError "error.code"
+    @error:not-found 404 SpecificError error="Ничего не найдено"
+    @error 404 GenericError
+
+    @request name=search response=User """
+    GET /search HTTP/1.1
+    Host: api.example.com
+    """
+}
+'''
+        module, diags = parse_module(kdl_src)
+        assert not [d for d in diags if d.severity == Severity.ERROR]
+
+        fetch_code = JS_CONVERTER.convert(module, http_client="fetch")
+        axios_code = JS_CONVERTER.convert(module, http_client="axios")
+
+        fetch_script = (
+            fetch_code
+            + """
+(async () => {
+  const makeFetch = (status, body, isJson = true) => async () => ({
+    status,
+    headers: new Map([['content-type', isJson ? 'application/json' : 'text/html']]),
+    json: async () => {
+      if (!isJson) throw new SyntaxError('Unexpected token < in JSON');
+      return body;
+    },
+  });
+
+  // 1. Nested positional key "error.code" matches {"error": {"code": 123, "message": "bad"}}
+  const r1 = await SearchClient.search(
+    makeFetch(200, { error: { code: 123, message: 'bad' } })
+  );
+  if (r1.isOk !== false || r1.status !== 200 || r1.value.code !== 123 || r1.value.message !== 'bad') {
+    throw new Error('Expected 200 ApiError match: ' + JSON.stringify(r1));
+  }
+
+  // 2. Nested positional key "error.code" rejects {"error": {}} and {} -> Ok
+  const r2 = await SearchClient.search(
+    makeFetch(200, { id: 1, name: 'Alice', error: {} })
+  );
+  if (r2.isOk !== true || r2.value.id !== 1 || r2.value.name !== 'Alice') {
+    throw new Error('Expected 200 Ok when error.code is missing: ' + JSON.stringify(r2));
+  }
+
+  // 3. SpecificError matches on 404 when both condition and schema match
+  const r3 = await SearchClient.search(
+    makeFetch(404, { error: 'Ничего не найдено', code: 404, extra: 'ignored' })
+  );
+  if (r3.isOk !== false || r3.status !== 404 || r3.value.error !== 'Ничего не найдено' || r3.value.code !== 404 || 'extra' in r3.value) {
+    throw new Error('Expected SpecificError match: ' + JSON.stringify(r3));
+  }
+
+  // 4. SpecificError condition matches, but projection throws (missing 'code') -> falls through to GenericError
+  const r4 = await SearchClient.search(
+    makeFetch(404, { error: 'Ничего не найдено', message: 'Fallback generic', extra: 1 })
+  );
+  if (r4.isOk !== false || r4.status !== 404 || r4.value.message !== 'Fallback generic' || 'extra' in r4.value) {
+    throw new Error('Expected fallthrough to GenericError: ' + JSON.stringify(r4));
+  }
+
+  // 5. Empty JSON `{}` fails both 404 matchers -> falls through to UnknownErr without throwing
+  const r5 = await SearchClient.search(makeFetch(404, {}));
+  if (r5.isOk !== false || r5.status !== 404 || JSON.stringify(r5.value) !== '{}') {
+    throw new Error('Expected UnknownErr with {} value: ' + JSON.stringify(r5));
+  }
+
+  // 6. HTML 404 response (body is null) -> falls through to UnknownErr without throwing
+  const r6 = await SearchClient.search(makeFetch(404, null, false));
+  if (r6.isOk !== false || r6.status !== 404 || r6.value !== null) {
+    throw new Error('Expected UnknownErr with null value on HTML 404: ' + JSON.stringify(r6));
+  }
+})().catch(e => { console.error(e); process.exit(1); });
+"""
+        )
+        res_fetch = subprocess.run(
+            ["node", "-e", fetch_script],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert res_fetch.returncode == 0
+
+        axios_script = (
+            axios_code
+            + """
+(async () => {
+  const makeAxios = (status, data) => ({
+    request: async () => ({
+      status,
+      headers: { 'content-type': 'application/json' },
+      data,
+    }),
+  });
+
+  // 1. Nested positional key "error.code" matches
+  const r1 = await SearchClient.search(
+    makeAxios(200, { error: { code: 321, message: 'axios err' } })
+  );
+  if (r1.isOk !== false || r1.status !== 200 || r1.value.code !== 321) {
+    throw new Error('Axios expected 200 ApiError match: ' + JSON.stringify(r1));
+  }
+
+  // 2. SpecificError condition matches, projection fails -> falls through to GenericError
+  const r2 = await SearchClient.search(
+    makeAxios(404, { error: 'Ничего не найдено', message: 'Axios generic fallback' })
+  );
+  if (r2.isOk !== false || r2.status !== 404 || r2.value.message !== 'Axios generic fallback') {
+    throw new Error('Axios expected fallthrough to GenericError: ' + JSON.stringify(r2));
+  }
+
+  // 3. Schema-mismatching JSON `{}` -> falls through to UnknownErr
+  const r3 = await SearchClient.search(makeAxios(404, {}));
+  if (r3.isOk !== false || r3.status !== 404 || JSON.stringify(r3.value) !== '{}') {
+    throw new Error('Axios expected UnknownErr on {}: ' + JSON.stringify(r3));
+  }
+
+  // 4. Non-JSON HTML string or null data in axios -> falls through to UnknownErr
+  const r4 = await SearchClient.search(makeAxios(404, '<html>404 Not Found</html>'));
+  if (r4.isOk !== false || r4.status !== 404 || r4.value !== '<html>404 Not Found</html>') {
+    throw new Error('Axios expected UnknownErr on HTML string: ' + JSON.stringify(r4));
+  }
+  const r5 = await SearchClient.search(makeAxios(404, null));
+  if (r5.isOk !== false || r5.status !== 404 || r5.value !== null) {
+    throw new Error('Axios expected UnknownErr on null: ' + JSON.stringify(r5));
+  }
+})().catch(e => { console.error(e); process.exit(1); });
+"""
+        )
+        res_axios = subprocess.run(
+            ["node", "-e", axios_script],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert res_axios.returncode == 0

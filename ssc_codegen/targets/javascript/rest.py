@@ -158,10 +158,15 @@ REST_SHARED: list[str] = [
         function sscDispatchErr(_matchers, _status, _headers, _body) {
             for (const _m of _matchers) {
                 if (_m.status !== _status) continue;
+                if (_body === null || typeof _body !== 'object') continue;
                 if (_m.check !== null) {
-                    if (!(_body instanceof Object) || !_m.check(_body)) continue;
+                    if (Array.isArray(_body) || !_m.check(_body)) continue;
                 }
-                return _m.factory(_status, _headers, _body);
+                try {
+                    return _m.factory(_status, _headers, _body);
+                } catch (_e) {
+                    continue;
+                }
             }
             if (_status >= 200 && _status < 300) return null;
             return { isOk: false, status: _status, headers: _headers, value: _body };
@@ -255,6 +260,7 @@ def render_json_body(tmpl: PlaceholderTemplate) -> str:
     Returns:
         str: JavaScript `JSON.stringify(...)` expression.
     """
+
     def emit(value: object) -> str:
         if isinstance(value, PlaceholderSpec):
             return value.name
@@ -309,23 +315,26 @@ def render_body(spec: RequestHttp) -> tuple[str, str] | None:
 # ===========================================================================
 
 
-def _resolve_path_expr(body_var: str, path: str) -> str:
-    """Build a JavaScript property/index access expression for a dot-path.
+def _js_path_expr(body_var: str, path: str) -> str:
+    """Build a safe JavaScript optional-chaining access expression for a dot-path.
 
     Args:
         body_var (str): Identifier of the parsed JSON body variable.
         path (str): Dot-separated property path.
 
     Returns:
-        str: JavaScript bracket-access expression.
+        str: JavaScript optional-chaining bracket-access expression.
     """
     expr = body_var
     for seg in path.split("."):
         if seg.isdigit():
-            expr += f"[{seg}]"
+            expr += f"?.[{seg}]"
         else:
-            expr += f"[{seg!r}]"
+            expr += f"?.[{seg!r}]"
     return expr
+
+
+_resolve_path_expr = _js_path_expr
 
 
 def render_js_condition_check(
@@ -334,7 +343,7 @@ def render_js_condition_check(
     """Render an arrow function checking required keys and field conditions on `_b`.
 
     Args:
-        required_keys (list[str]): Top-level keys that must exist in `_b`.
+        required_keys (list[str]): Top-level or dot-path keys that must exist in `_b`.
         conditions (dict[str, object]): Dot-paths mapped to expected literal values.
 
     Returns:
@@ -342,9 +351,12 @@ def render_js_condition_check(
     """
     parts: list[str] = []
     for key in required_keys:
-        parts.append(f"{key!r} in _b")
+        if "." in key:
+            parts.append(f"{_js_path_expr('_b', key)} !== undefined")
+        else:
+            parts.append(f"{key!r} in _b")
     for path, value in conditions.items():
-        lhs = _resolve_path_expr("_b", path)
+        lhs = _js_path_expr("_b", path)
         if isinstance(value, bool):
             parts.append(f"{lhs} === {str(value).lower()}")
         elif value is None:
@@ -356,6 +368,9 @@ def render_js_condition_check(
     if not parts:
         return None
     return f"(_b) => {' && '.join(parts)}"
+
+
+render_js_condition_arrow = render_js_condition_check
 
 
 # ===========================================================================
