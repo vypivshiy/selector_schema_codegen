@@ -1,742 +1,484 @@
-# ssc_codegen — KDL Schema DSL v2.1 Reference for LLMs
+# ssc_codegen — KDL Schema DSL v2.1 Reference (v0.44.0)
 
-ssc_codegen is a code generator for web scraping parsers.
-Input: .kdl schema files describing HTML extraction rules.
-Output: parser code for Python (bs4, lxml, parsel, selectolax), JavaScript (DOM API), and Go (goquery).
+## 1. Header & Compiler Pipeline
 
-Pipeline: .kdl schema -> kdl parser -> AST -> linter -> converter -> output code
+`ssc_codegen` compiles `.kdl` (KDL 2.0) scraping and REST API schemas into standalone, zero-framework parsers and typed HTTP clients.
 
-## File structure
+- **Compiler Pipeline**: `.kdl schema -> kdlquery CST -> 5-pass core (import resolution -> structural lint -> cross-ref lint -> AST build -> pipeline type check) -> target visitor -> generated code`
+- **Top-Level Nodes**: `@doc "..."`, `import`, `define`, `extension`, `json`, `(array)json`, `(dict)json`, `struct`, `(item|list|dict|table|flat|rest|raw)struct`, `fn`, `(raw)fn`.
+- **Declaration Order Invariant**:
+  - **Intra-file (Top-Down)**: Local `struct` and `json` definitions referenced via `nested`, `jsonify`, or schema fields must be declared **above** their callers (`E302`).
+  - **Inter-file (`import`)**: Explicitly imported symbols and their private transitive dependency closure are topologically sorted automatically.
 
-A .kdl file contains module-level declarations and struct definitions.
+| Target | CLI Subcommand | HTML / DOM Backend | JSON Strategy | HTTP Client (`--http-client`) | Runtime & I/O Options |
+|---|---|---|---|---|---|
+| **Python** | `generate python` | `bs4` (default; `--bs4-parser lxml\|html.parser\|html5lib`), `lxml`, `parsel`, `slax` | `TypedDict` + allowlist projectors | `httpx`, `httpx2` (auto-fallback to `httpx`), `aiohttp`, `requests` | `--http-io both\|sync\|async`; optional `-R` (`--separate-runtime`) + `-rn <name>` |
+| **JavaScript** | `generate js` | Vanilla DOM API (`querySelector`, `document.evaluate`) | JSDoc `@typedef` + allowlist projectors | `fetch`, `axios` | ESM module + `.d.ts` |
+| **Go** | `generate go` | `goquery` | `struct` + `gjson` allowlist projectors | `net/http` (stdlib) | Emits shared `sscgen_runtime.go` |
+| **Rust** | `generate rust` | `dom_query` | `serde` / `serde_json` + allowlist projectors | `reqwest` (async) | Emits shared `sscgen_runtime.rs` |
 
-Module-level: import, define, extension, json, struct, fn.
+---
 
-## import
+## 2. Module Declarations (`import`, `define`, `extension`)
+
+### 2.1 `import`
+
+Syntax: `import "<relative_path.kdl>" { (<kind>)<SymbolName>; ... }`
+
+- Block is **mandatory and non-empty** (`E003`). Path-only and bare-name imports are forbidden (`E003`).
+- Every symbol requires a kind tag: `(extension)`, `(struct)`, `(json)`, `(define)`, or `(fn)` (`E003`).
+- Paths resolve relative to the importing file. Imports are **private** (never implicitly re-exported) and automatically pull their private dependency closure into codegen. Cyclic imports (`E003`/`E300`) and symbol collisions (`E003`) are errors.
 
 ```kdl
 import "./shared.kdl" {
     (extension)Utils
     (struct)Book
-    (json)Response
-    (define)PRICE-FORMAT
-    (fn)parse-title
+    (json)ApiResponse
+    (define)PRICE-REGEX
+    (fn)clean-title
 }
 ```
 
-Import block is mandatory and non-empty. Every symbol requires a kind annotation:
-extension, struct, json, define, or fn. Path-only and bare-name imports are errors.
-Path is relative to current file. Imports are private and not re-exported.
-Selected symbols pull their private dependency closure into codegen. Cyclic imports
-and symbol conflicts are forbidden.
+### 2.2 `define`
 
-## extension
+- **Naming**: Must be `UPPER_CASE` matching `^[A-Z_][A-Z0-9_-]*$` (`E002`).
+- **Scalar define**: `define KEY="value" [KEY2="value2" ...]` — substituted when `KEY` is passed as an operation argument or `@request` argument. Scalar defines may interpolate earlier defines via `{{UPPER_NAME}}`; lowercase `{{param}}` inside a define string is preserved untouched as a runtime `@request` placeholder (note: `{{UPPER_NAME}}` is not interpolated directly inside `@request "..."` literals — compose the URL in a `define` first, `E002`).
+- **Block define**: `define NAME { <pipeline ops or json fields> }` — spliced inline into field pipelines or `json` schemas by writing the bare identifier `NAME`.
 
-Typed target-specific pipeline operations:
+### 2.3 `extension`
+
+Defines typed, target-specific custom pipeline operations. Direct children of `extension <Namespace>` are operation names (no `op` keyword).
+
+- **Call Syntax**: Mandatory `!` prefix in pipelines: `!<Namespace>.<op>` (`E300` if undeclared, `E100` on type mismatch).
+- **Signature**: `sig <InType> <OutType>` where types are `doc | str | int | float | bool`, modifiers `(array)` prefix and `?` suffix, or whole-`TypeInfo` generic `T` (`sig T T` preserves exact input `TypeInfo`; `sig T bool` accepts any input and returns `BOOL`). No implicit array mapping.
+- **Target Blocks**: `py`, `js`, `go`, `rust`.
+- **Target Directives**:
+  - `import "<stmt>"` — emitted at parser module top when operation is referenced.
+  - `helper <name> { [import "<stmt>";] source #"<code...>"# }` — lazy, deduplicated helper function (emitted into shared runtime for Python `-R`, Go, and Rust; inlined in module utilities for single-file Python and JS).
+  - `emit #"<template>"#` — inline code template using placeholders `{{in}}`, `{{out}}`, `{{in_type}}`, `{{out_type}}`.
+- **Lazy Emission**: Unreferenced extensions emit nothing; extension-only `.kdl` files are linted but skipped during parser file generation.
 
 ```kdl
+define BASE-URL="https://example.com"
+define EXTRACT-HREF { css "a"; attr "href"; trim }
+
 extension Utils {
-    to-base64 {
+    slugify {
         sig str str
         py {
-            import "from base64 import b64encode"
-            emit #"{{out}} = b64encode({{in}}.encode("utf-8")).decode("ascii")"#
+            helper _slug {
+                import "import re"
+                source #"def _slug(s: str) -> str:\n    return re.sub(r'[^a-z0-9]+', '-', s.lower()).strip('-')"#
+            }
+            emit #"{{out}} = _slug({{in}})"#
         }
-        js { emit #"const {{out}} = btoa({{in}});"# }
+        js { emit #"const {{out}} = {{in}}.toLowerCase().replace(/[^a-z0-9]+/g, '-');"# }
         go {
-            import "encoding/base64"
-            emit #"{{out}} := base64.StdEncoding.EncodeToString([]byte({{in}}))"#
+            import "strings"
+            emit #"{{out}} := strings.ToLower({{in}})"#
         }
+        rust { emit #"let {{out}}: String = {{in}}.to_lowercase();"# }
     }
 }
-```
 
-Call with mandatory `!` prefix: `!Utils.to-base64`. Each direct extension child
-is an operation; there is no `op` node. Signatures support doc/str/int/float/bool,
-`(array)`, `?`, and whole-TypeInfo generic `T`. `sig T T` preserves the input type;
-`sig T bool` accepts any input and returns bool. No implicit array mapping.
-
-Emit placeholders: `{{in}}`, `{{out}}`, `{{in_type}}`, `{{out_type}}`.
-Target-level imports go to the generated parser module. Optional helper syntax:
-
-```kdl
-py {
-    helper normalize_value {
-        import "import re"
-        source #"def normalize_value(value: str) -> str:\n    return re.sub(r'\\s+', ' ', value)"#
-    }
-    emit #"{{out}} = normalize_value({{in}})"#
+struct NavLink {
+    url { EXTRACT-HREF; fmt "{{BASE-URL}}{{}}" }
+    slug { css "a"; text; !Utils.slugify }
 }
 ```
 
-Helpers are lazy and deduplicated. Python `-R` and Go place them in shared runtime;
-Python without `-R` and JavaScript inline them in utility sections. Extension-only
-files are linted but do not produce generated parser files.
+---
 
-## define
+## 3. Structs & Functions (`struct`, `fn`)
 
-Names must be UPPER_CASE: `[A-Z_][A-Z0-9_-]*`.
+### 3.1 Struct Types (`(kind)struct Name { ... }`)
 
-Scalar (substituted into arguments):
-```kdl
-define BASE-URL="https://example.com/{{}}"
-define RE-PRICE=#"(\d+(?:\.\d+)?)"#
-```
+Prefix annotation `(kind)struct` is canonical (legacy `struct Name type="kind"` is accepted).
 
-Scalar define values can reference other defines via `{{NAME}}` (UPPER_CASE).
-Lowercase `{{name}}` in define values are left as-is — they become @request placeholders.
+| Struct Tag | Output Type | Required Directives (`E401`) | Rules & Constraints |
+|---|---|---|---|
+| `struct` / `(item)struct` | Object / `dict` / `struct` | *(none)* | Default struct type; requires 1+ regular fields |
+| `(list)struct` | `list[Item]` | `@split-doc` | Splits document via `@split-doc`; runs field pipelines per item |
+| `(dict)struct` | `dict[str, V]` | `@split-doc`, `@key`, `@value` | No regular fields allowed (`E203`) |
+| `(table)struct` | Object / `dict` / `struct` | `@table`, `@rows`, `@match`, `@value` | Every regular field **must** begin with `match { ... }` (`E203`) |
+| `(flat)struct` | `list[str]` | *(none)* | Optional `keep-order=#true` prop; fields must return `STR` or `STR[]` |
+| `(rest)struct` | REST API client | 1+ `@request` (`name=` & `response=`) | Body allows **only** `@doc`, `@request`, `@error[:<suffix>]` (`E203`) |
+| `(raw)struct` | Object or `list[Item]` | *(none)* (`@split-doc` optional) | Plain-text `STR` input (no HTML parser). HTML ops (`css*`, `xpath*`, `text`, `attr`, `raw`) forbidden (`E203`). Auto-selects `LIST` if `@split-doc` present, else `ITEM`. |
 
-Block (expanded as pipeline operations):
-```kdl
-define EXTRACT-HREF {
-    css "a"
-    attr "href"
-}
-```
+### 3.2 Struct Directives
 
-## struct
-
-```kdl
-struct Name { ... }                    # item (default)
-(list)struct Name { ... }              # list
-(dict)struct Name { ... }              # dict
-(table)struct Name { ... }             # table
-(flat)struct Name { ... }              # flat
-(rest)struct Name { ... }              # rest (API client)
-(raw)struct Name { ... }               # raw (plain-text, no HTML parser)
-```
-
-The old property syntax `struct Name type=list { ... }` still works but prefer the prefix form.
-
-### Struct types
-
-- item (default) -> dict. No required special fields.
-- list -> list[dict]. Requires: @split-doc.
-- dict -> dict[str, any]. Requires: @split-doc, @key, @value.
-- table -> dict. Requires: @table, @rows, @match, @value.
-- flat -> list[str]. No required special fields. Optional: keep-order=#true.
-- rest -> typed REST client class. Body allows ONLY @doc, @request, @error. Requires: at least one @request with name= and response=.
-- raw -> plain-text parser. No HTML backend. The document is a plain `str`; fields accept STRING directly. HTML operations (css, xpath, text, attr, raw) are forbidden. Auto-detects ITEM vs LIST from `@split-doc` presence. Supports `@request`/`fetch()`, `@init`, `@pre-validate`, `@check`.
-
-### Special fields
-
-- @doc — documentation string
-- @request — optional HTTP constructor (see section below)
-- @pre-validate — validate document before parsing; raises error on failure
-- @init — pre-compute and cache values; referenced via @name in fields
-- @split-doc — split document into items (list, dict, raw with auto-LIST)
-- @key — key extraction for dict
-- @value — value extraction for dict and table
-- @table — table element selector
-- @rows — table rows selector
-- @match — extract key from row for comparison
-
-### @request and per-call kwargs
-
-Generated methods (`fetch`, `async_fetch`, REST methods) accept extra
-per-call parameters for headers, cookies, timeout, etc. Everything is
-applied **only to the request** — the client object is never mutated.
-
-| Language | Param | Example |
+| Directive | Allowed In | Formal Syntax & Semantics |
 |---|---|---|
-| Python | `**kwargs: Any` | `API.fetch(client, id="42", headers={"Referer": "..."})` |
-| JS | `opts = {}` | `API.fetch(client, {id}, {headers: {Referer: "..."}})` |
-| Go | `opts ...sscReqOpt` | `NewAPI().Fetch(client, "42", WithHeader("Referer", "..."))` |
+| `@doc` | module, `struct`, `fn` | `@doc "<text>"` — emits module/class/function docstring |
+| `@init` | `item`, `list`, `dict`, `table`, `flat`, `raw` | `@init { <name> { <pipeline> }; ... }` — precomputes & caches values on instance; referenced as first op in fields via `@<name>` (`self <name>` deprecated) |
+| `@pre-validate` | `item`, `list`, `dict`, `table`, `flat`, `raw` | `@pre-validate { assert ["<msg>"] { <predicates> } }` — validates input before `parse()`; raises `SscAssertionError` on failure |
+| `@check` | `item`, `list`, `dict`, `table`, `flat`, `raw` | `@check <name> { <pipeline>; to-bool; [fallback #false] }` — emits public boolean method (`is_main(self) -> bool` in Python, `isMain()` in JS, `IsMain()` in Go, `is_main(&self) -> bool` in Rust); pipeline must contain `to-bool` |
+| `@split-doc` | `list`, `dict`, `raw` | `@split-doc { <pipeline -> DOC[] \| STR[]> }` — splits input into item nodes/strings |
+| `@key` | `dict` | `@key { <pipeline -> STR> }` — extracts dictionary key per split item |
+| `@value` | `dict`, `table` | `@value { <pipeline> }` — extracts dict value or table cell value |
+| `@table` | `table` | `@table { <pipeline -> DOC> }` — locates `<table>` element |
+| `@rows` | `table` | `@rows { <pipeline -> DOC[]> }` — selects row elements from `@table` |
+| `@match` | `table` | `@match { <pipeline -> STR> }` — extracts header key from row for `match { ... }` |
+| `@request` | all `struct` types | `@request [props] "<curl_or_http>"` — emits HTTP `fetch` / endpoint methods |
+| `@error[:<suffix>]` | `rest` only | `@error[:<suffix>] <status> <Schema> [keys...] [k=v ...]` — typed error response rule |
 
-Go method naming: REST struct gets an empty marker type + `New<Name>()`
-factory + receiver methods (`NewAPI().Fetch(...)`,
-`NewAPI().GetUsers(...)` when `@request name=get-users`). HTML+`@request`
-emits a free function `New<Struct>Fetch(...)` (or `New<Struct><X>` when
-`name=X`) — a sibling constructor to `New<Struct>(input)`. This keeps
-multiple schemas in one Go package collision-free.
+### 3.3 Module-Level Functions (`fn`, `(raw)fn`)
 
-Shallow-merge: if DSL specifies `headers` and user passes `headers`, they
-merge (user keys override DSL keys). Non-dict kwargs (`timeout`, `verify`)
-replace entirely.
-
-- @check <name> — boolean check method; runs pipeline on document, returns bool
-  Pipeline must contain `to-bool`. Use `fallback` for error recovery.
-  ```kdl
-  @check is-main {
-      assert { css ".main" }
-      to-bool
-      fallback #false
-  }
-  ```
-  Generated as a public method: `is_main(self) -> bool` (Python), `isMain()` (JS).
-  Called manually before `parse()` to check if the document matches expected structure.
-
-### Regular fields
+- **Syntax**: `fn <name> { [@doc "..."] <pipeline> }` or `(raw)fn <name> { [@doc "..."] <pipeline> }`
+- **Contract**: Emits a standalone function (`snake_case` in Python/Rust, `camelCase` in JS, `PascalCase` in Go) accepting a document/string and returning the inferred pipeline type. Struct directives (`@init`, `@pre-validate`, `@check`, `@split-doc`, `@request`, `@error`) are forbidden (`E203`). `(raw)fn` starts with `STR` and forbids HTML ops (`E203`).
 
 ```kdl
-title { css "h1"; text; trim }
-link { css "a"; attr "href" }
-books { nested Book }
-```
-
-### (raw)struct — plain-text parsing
-
-For documents that are NOT HTML (JS files, URL strings, text data).
-No HTML parser backend — the document is a plain `str`.
-
-```kdl
-// Extract URL from a <script> tag's JS content
-(raw)struct PlayerScript {
-    playlist_url {
-        re #"file:\s*[\"']([^\"']+)[\"']"#
-    }
+struct BookItem {
+    @init { card { css ".card" } }
+    @pre-validate { assert { css ".card" } }
+    @check has-price { css ".price"; to-bool; fallback #false }
+    title { @card; css "h2"; text; trim }
 }
 
-// Parse URL query params via composed string ops
-(raw)struct AnimeParams {
-    dubbing_code {
-        split "?"
-        index 1
-        split "&"
-        filter { starts "dubbing_code=" }
-        index 0
-        rm-prefix "dubbing_code="
-    }
+(list)struct Catalog {
+    @split-doc { css-all ".book-row" }
+    item { nested BookItem }
 }
 
-// Split text into lines (auto-LIST via @split-doc)
+(dict)struct MetaMap {
+    @split-doc { css-all "meta[name]" }
+    @key { attr "name" }
+    @value { attr "content"; fallback #null }
+}
+
+(table)struct SpecsTable {
+    @table { css "table.specs" }
+    @rows { css-all "tr" }
+    @match { css "th"; text; trim }
+    @value { css "td"; text; trim }
+    weight { match { eq "Weight" } }
+}
+
+(flat)struct TagLinks keep-order=#true {
+    tags { css-all "a.tag"; attr "href" }
+}
+
 (raw)struct PlaylistLines {
     @split-doc { split "\n" }
-    url { trim }
+    line { trim }
 }
 
-// Fetch a JS file, parse as raw text
-(raw)struct RemoteScript {
-    @request "curl {{script_url}}"
-    file_path {
-        re #"file:\s*[\"']([^\"']+)[\"']"#
+fn page-title { @doc "Extract H1"; css "h1"; text; trim }
+(raw)fn extract-version { re #"version=([0-9.]+)"# }
+```
+
+---
+
+## 4. Pipeline Operations, Type System & Predicates
+
+### 4.1 Unified `TypeInfo` Model
+
+- **Scalar Base Types (`VariableType`)**: `DOCUMENT` (`DOC`), `STRING` (`STR`), `INT` (64-bit), `FLOAT` (64-bit), `BOOL`, `NULL`, `NESTED` (terminal), `JSON` (terminal), `AUTO` (internal inference).
+- **`TypeInfo` Modifiers** (replaces legacy `LIST_*` / `OPT_*` types):
+  - `array` (`is_array=True`, written `T[]`)
+  - `optional` (`is_optional=True`, written `T?`; produced by `fallback #null` in pipelines or `?` in `json`)
+  - `dict` (`is_dict=True`, written `dict[K, V]` in `json`, carrying `key_type_info` and `value_type_info`)
+- **Initial Pipeline Input**: `DOC` in HTML structs/`fn`; `STR` in `(raw)struct`/`(raw)fn`; or `TypeOf(name)` when starting with `@<name>`.
+
+### 4.2 Pipeline Operations Reference
+
+Format: `op <arg> [opt] : InType -> OutType | rules`
+
+| Category | Formal Syntax Signature (`InType -> OutType`) | Rules, Map Semantics & Exceptions |
+|---|---|---|
+| **Selectors** | `css "<q>" \| css { "<q1>"; "<q2>"; ... } : DOC -> DOC` | Block pattern-match requires $\ge 2$ queries (no positional arg); tries in order, returns first match |
+| | `css-all "<q>" \| css-all { "<q1>"; "<q2>"; ... } : DOC -> DOC[]` | Block pattern-match ($\ge 2$ queries) returns first non-empty element list |
+| | `css-remove "<q>" : DOC -> DOC` | Mutates DOM in-place; single positional arg only (no block form) |
+| | `xpath "<q>" \| xpath { "<q1>"; "<q2>"; ... } : DOC -> DOC` | Block form $\ge 2$ queries; forbidden in `slax`; JS uses `document.evaluate` |
+| | `xpath-all "<q>" \| xpath-all { "<q1>"; "<q2>"; ... } : DOC -> DOC[]` | Block form $\ge 2$ queries; forbidden in `slax` |
+| | `xpath-remove "<q>" : DOC -> DOC` | Mutates DOM in-place; single arg only |
+| **Extract** | `text : DOC -> STR, DOC[] -> STR[]` | Extracts element text content |
+| | `raw [outer\|inner] : DOC -> STR, DOC[] -> STR[]` | Default `outer` (includes element tag); `inner` extracts inner HTML only |
+| | `attr "<k>" : DOC -> STR, DOC[] -> STR[]` | Extracts single attribute value |
+| | `attr "<k1>" "<k2>" ... : DOC -> STR[], DOC[] -> STR[]` | Multi-attribute extraction ($\ge 2$ args always returns `STR[]`) |
+| **String** *(map over `STR` & `STR[]`)* | `trim ["<chars>"] \| ltrim ["<chars>"] \| rtrim ["<chars>"] : STR -> STR, STR[] -> STR[]` | Strips whitespace or custom character set |
+| | `normalize-space : STR -> STR, STR[] -> STR[]` | Collapses consecutive whitespace to a single space and trims |
+| | `fmt "<template>" : STR -> STR, STR[] -> STR[]` | Replaces `{{}}` placeholder with current string value |
+| | `repl "<old>" "<new>" \| repl { "<k1>" "<v1>"; ... } : STR -> STR, STR[] -> STR[]` | Single substring replacement or multi-pair replacement block |
+| | `lower \| upper \| unescape : STR -> STR, STR[] -> STR[]` | Case conversion / HTML entity unescaping |
+| | `rm-prefix "<s>" \| rm-suffix "<s>" \| rm-prefix-suffix "<s>" : STR -> STR, STR[] -> STR[]` | Strips literal prefix and/or suffix |
+| | `split "<sep>" : STR -> STR[]` | Scalar `STR` input only |
+| | `join "<sep>" : STR[] -> STR` | Array `STR[]` input only |
+| **Regex** | `re "<pattern>" : STR -> STR, STR[] -> STR[]` | Requires **exactly 1** capture group (`E002`). Raises `SscRegexError` on no-match (`<file>:<line>:<col> re-match failed at <Struct>.<field> pattern=<pat>`), caught by `fallback` |
+| | `re-all "<pattern>" : STR -> STR[]` | Scalar `STR` only; requires **exactly 1** capture group (`E002`) |
+| | `re-sub "<pattern>" "<repl>" : STR -> STR, STR[] -> STR[]` | Regex substitution |
+| **Array** | `index <i:int> \| first \| last : T[] -> T` | Supports negative indices (`first` = `0`, `last` = `-1`) |
+| | `slice <start:int> <end:int> : T[] -> T[]` | Sub-list slice; supports negative bounds |
+| | `len : T[] -> INT` | Returns array length |
+| | `unique : STR[] -> STR[]` | Deduplicates string list (preserves order when `keep-order=#true`) |
+| **Conversions** | `to-int : STR -> INT, STR[] -> INT[]` | Parses 64-bit integer |
+| | `to-float : STR -> FLOAT, STR[] -> FLOAT[]` | Parses 64-bit float |
+| | `to-bool : Any -> BOOL` | Converts scalar truthiness to `BOOL` (mandatory in `@check`) |
+| **Structured** | `nested <StructName> : DOC -> NESTED, DOC[] -> NESTED[], STR -> NESTED` | **Terminal op** (pipeline ends here). Target struct must be declared above caller (`E302`). `STR` input valid only when target is `(raw)struct` |
+| | `jsonify <SchemaName> [path="<gjson>"] : STR -> JSON, STR[] -> JSON[]` | **Terminal op** (pipeline ends here). Parses & projects JSON via `<SchemaName>` (declared above caller, `E302`) |
+| **Control** | `filter { <predicates> } : T[] -> T[]` | Retains list elements matching all top-level predicates (implicit `AND`) |
+| | `assert ["<msg>"] { <predicates> } : T -> T` | Validates value without changing type; raises `SscAssertionError` on failure (never stripped by `python -O`; default msg `<file>:<line>:<col> assertion failed at <Struct>.<field>`; caught by `fallback`) |
+| | `match { <predicates> } : DOC -> DOC` | **Must be first op** in `(table)struct` fields (`E203`); matches `@match` key and extracts `@value` |
+| | `fallback <literal \| #null \| {}> : T -> T \| T?` | **Must be last op**. `<literal>` must match pipeline type (`E100`); `#null` marks scalar `STR`/`INT`/`FLOAT` optional (`T?`, `E100` on other types); `{}` requires `T[]` (`E100`) |
+| | `@<name> : -> TypeOf(name)` | **Must be first op** (`self <name>` deprecated); reads cached `@init` field (`E301` if undeclared) |
+| | `!<Namespace>.<op> : sig In -> Out` | Invokes typed user extension (`E300` if unknown, `E100` on type mismatch) |
+
+### 4.3 Central Parser Guards (`core/expressions.py`)
+
+- **`E100` ("requires a preceding operation")**: Emitted when an operation that reads `parent.body[-1]` is placed at the start of an empty pipeline (`trim`, `ltrim`, `rtrim`, `normalize-space`, `fmt`, `repl`, `lower`, `upper`, `rm-prefix`, `rm-suffix`, `rm-prefix-suffix`, `unescape`, `re`, `re-sub`, `re-all`, `to-bool`, `to-int`, `to-float`, `split`, `join`, `fallback`).
+- **`E001` ("requires N argument(s), got M")**: Enforced centrally before per-op handlers (`css-remove`, `xpath-remove`, `attr`, `fmt`, `rm-prefix`, `rm-suffix`, `rm-prefix-suffix`, `split`, `join`, `re`, `re-all`, `re-sub`, `index`, `slice`, `jsonify`, `nested`). Block-form selectors (`css`, `css-all`, `xpath`, `xpath-all`) and `repl { ... }` map blocks accept either 1 positional arg OR a children block.
+
+### 4.4 Predicates & Logic Combinators
+
+- **Logic Combinators**: `not { <predicates> }`, `and { <predicates> }`, `or { <predicates> }`. Top-level children of `filter`, `assert`, `match`, `and`, and `not` combine via implicit `AND`; children of `or` combine via `OR`. Multi-value args inside a single predicate (`eq "a" "b"`) match if **any** value matches.
+
+| Category | Predicate Signatures | Allowed Containers | Input Type Requirement |
+|---|---|---|---|
+| **String** | `eq <v...>`, `ne <v...>`, `starts <v...>`, `ends <v...>`, `contains <v...>`, `in <v...>`, `re "<pat>"` | `filter`, `assert`, `match` | `STR` (`eq`/`ne` also accept `INT`/`FLOAT`) |
+| **Attribute** | `has-attr <a...>`, `attr-eq <a> <v...>`, `attr-ne <a> <v...>`, `attr-starts <a> <v...>`, `attr-ends <a> <v...>`, `attr-contains <a> <v...>`, `attr-re <a> "<pat>"` | `filter`, `assert` *(forbidden in `match`)* | `DOC` / `DOC[]` |
+| **Text** | `text-starts <v...>`, `text-ends <v...>`, `text-contains <v...>`, `text-re "<pat>"` | `filter`, `assert` *(forbidden in `match`)* | `DOC` / `DOC[]` |
+| **Document** | `css "<sel>"`, `xpath "<sel>"` | `filter`, `assert` *(forbidden in `match`)* | `DOC` / `DOC[]` |
+| **Length** | `len-eq <n...>`, `len-ne <n...>`, `len-gt <n>`, `len-lt <n>`, `len-ge <n>`, `len-le <n>`, `len-range <min> <max>` | `assert` **only** (`E203` elsewhere) | `STR` or `T[]` |
+| **Regex List** | `re-any "<pat>"`, `re-all "<pat>"` | `assert` **only** (`E203` elsewhere) | `STR[]` |
+| **Numeric** | `gt <n>`, `lt <n>`, `ge <n>`, `le <n>` | `assert` **only** (`E203` elsewhere) | `INT`, `FLOAT`, `STR`, or `T[]` |
+
+```kdl
+json OfferPayload {
+    sku str
+    in_stock bool
+}
+
+struct ProductPage {
+    title {
+        css { "h1.product-title"; "h1" }
+        text
+        normalize-space
+        assert "Title too short" { len-ge 3 }
+    }
+    price {
+        css ".price"
+        text
+        re #"(\d+\.\d{2})"#
+        to-float
+        assert { ne 0.0 }
+        fallback #null
+    }
+    gallery_urls {
+        css-all "img.gallery"
+        filter {
+            has-attr "src"
+            not { attr-contains "src" "placeholder" "spacer" }
+        }
+        attr "src"
+        unique
+        fallback {}
+    }
+    offer {
+        css "script#offer-json"
+        text
+        jsonify OfferPayload path="data.offer"
     }
 }
 ```
 
-Rules:
-- Fields accept STRING directly (document is already a string).
-- HTML operations (css, css-all, xpath, xpath-remove, text, attr, raw) are **forbidden** — lint error.
-- ITEM/LIST auto-detected: `@split-doc` present → LIST, absent → ITEM.
-- String ops (`re`, `re-all`, `split`, `fmt`, `trim`, `filter`, etc.) work as first operation.
+---
 
-### fn / (raw)fn — module-level single-value extraction
+## 5. JSON Schemas (`json`, `(array)json`, `(dict)json`)
 
-Standalone function instead of a class. Generates `fn_name(document) -> <inferred type>`.
+### 5.1 Declarations, Field Modifiers & GJSON Paths
 
-```kdl
-// HTML document → extract title
-fn page_title {
-    @doc "Extract the <h1> text"
-    css "h1"
-    text
-}
+- **Top-Level Kinds**:
+  - `json <Name> { <fields...> }` — JSON object schema.
+  - `(array)json <Name> { <fields...> }` — top-level JSON array of objects.
+  - `(dict)json <Name> { [@key <ScalarType>;] @value <ValueType>; }` — homogeneous map with dynamic keys (`Python: Dict[K, V]`, `JS: Record<K, V>`, `Go: map[K]V`, `Rust: HashMap<K, V>`; `@key` defaults to `str`).
+- **Field Syntax**: `<field_name> <type>[?] [from="<gjson_path>"] [@omitempty] [@skip]`
+  - `<type>`: `str | int | float | bool | null | <SchemaRef> | (array)<type> | (dict)[DictName]`
+  - `?`: Nullable (`None` / `null` / pointer / `Option<T>`).
+  - `@omitempty`: Key may be absent from wire payload (defaults to `None`/zero-value when missing).
+  - `@skip`: Validated on wire but omitted from generated output type and projector.
+  - `from="<gjson_path>"` (**JSON key alias**): Maps wire key or nested **GJSON path expression** to `<field_name>`. (`path="..."` is accepted with warning `W041`; legacy positional string alias emits `W011`; leading/trailing whitespace in `from=` emits `W040`; malformed dot-path emits `E040`; duplicate field/wire key emits `E041`).
+- **GJSON Path Grammar**:
+  - Dot-separated object keys (`a.b.c`), escaped literal dot (`\.` for wire key `"a.b"`, written `from=#"a\.b"#` or `from="a\\.b"` in KDL), non-negative array index (`items.0.name`), array count (`items.#` $\to$ `int`), and array element projection (`items.#.name` $\to$ `(array)str`). Filters (`#[...]`), wildcards (`*`), and negative indices are forbidden (`E040`).
 
-// Raw text → extract version string
-(raw)fn extract_version {
-    re { #"version=([0-9.]+)"# }
-}
-```
+### 5.2 Inline JSON Schemas, Inline `@value` Blocks & Synthesized Schema Names
 
-Rules:
-- Body is a pipeline (same ops as a struct field).
-- `@doc` supported — generates docstring/comment.
-- Struct-level directives (@init, @check, @pre-validate, @split-doc, @request, @error) are **forbidden**.
-- `(raw)fn` — document is a plain string, HTML operations forbidden.
-- Return type inferred from pipeline.
-- Unlimited fns per module.
-- Name converted per language convention: Python `snake_case`, JS `camelCase`, Go `PascalCase`.
+Nested object blocks and dictionary `@value` blocks are recursively hoisted post-order (innermost leaves first) into top-level `JsonDef` nodes ahead of their parent schema.
 
-## Pipeline operations
+| Inline Declaration Form | Synthesized `JsonDef` Name | Rules & Validation |
+|---|---|---|
+| `field { ... }` | `{Parent}{FieldPascal}` | Anonymous inline object (e.g. `User` + `address` $\to$ `UserAddress`) |
+| `field ModelName { ... }` | `ModelName` | Explicitly named inline object |
+| `field (array)ItemModel { ... }` | `ItemModel` | Inline object array; explicit `ItemModel` name is **mandatory** (anonymous `(array)` raises `E001`) |
+| `(dict)json DictSchema { @value { ... } }` | `{DictSchema}Value` | Top-level dict with anonymous inline value block (e.g. `TranslationsValue`) |
+| `field (dict)DictName { @value { ... } }` | `{DictName}Value` | Named inline dict field with anonymous `@value` block (e.g. `TranslationValue`) |
+| `field (dict) { @value { ... } }` or `(dict)field { @value { ... } }` | `{Parent}{FieldPascal}Value` | Anonymous inline dict field with anonymous `@value` block (e.g. `AnimeResponseTranslationsValue`) |
+| `@value ModelName { ... }` / `(ModelName)@value { ... }` | `ModelName` | Explicitly named `@value` object block |
+| `@value (array)ItemModel { ... }` / `(array)@value ItemModel { ... }` | `ItemModel` | Array of inline objects in `@value`; `ItemModel` name is **mandatory** (`E001`) |
 
-Pipeline is a chain of operations. Initial type is DOCUMENT (or STRING for raw structs, or @init value type).
-
-### Selectors
-
-- css <query>: DOCUMENT -> DOCUMENT
-- css-all <query>: DOCUMENT -> LIST_DOCUMENT
-- css-remove <query>: DOCUMENT -> DOCUMENT
-- xpath <query>: DOCUMENT -> DOCUMENT
-- xpath-all <query>: DOCUMENT -> LIST_DOCUMENT
-- xpath-remove <query>: DOCUMENT -> DOCUMENT
-
-Alternative selector form (pattern-match, ordered fallback):
-- css { <query1>; <query2>; ... } (or multiline children)
-- css-all { <query1>; <query2>; ... }
-- xpath { <query1>; <query2>; ... }
-- xpath-all { <query1>; <query2>; ... }
-
-Pattern-match rules:
-- Use either one argument or block children, not both.
-- Block form requires at least 2 selectors.
-- Try selectors in order; use first non-empty result.
-- If all selectors are empty, behavior is same as a failed single selector.
-- css-remove/xpath-remove do not support block pattern-match form.
-
-### Extract
-
-- text: DOCUMENT -> STRING, LIST_DOCUMENT -> LIST_STRING
-- raw [outer|inner]: DOCUMENT -> STRING, LIST_DOCUMENT -> LIST_STRING.
-  Default (no arg) = outer HTML (element tag included). `raw inner` extracts
-  inner HTML (children only). `raw outer` is explicit outer.
-- attr <name>: DOCUMENT -> STRING, LIST_DOCUMENT -> LIST_STRING
-- attr <name1> <name2> ...: DOCUMENT -> LIST_STRING, LIST_DOCUMENT -> LIST_STRING
-
-### String operations (support map semantics: STRING and LIST_STRING)
-
-- trim [chars]
-- ltrim [chars]
-- rtrim [chars]
-- normalize-space
-- fmt <template> (template contains {{}} placeholder or scalar define name)
-- repl <old> <new>
-- repl { <old1> <new1>; <old2> <new2> }
-- lower
-- upper
-- rm-prefix <substr>
-- rm-suffix <substr>
-- rm-prefix-suffix <substr>
-- unescape
-- split <sep>: STRING -> LIST_STRING
-- join <sep>: LIST_STRING -> STRING
-
-### Regex
-
-- re <pattern>: STRING -> STRING (requires exactly one capturing group)
-- re-all <pattern>: STRING -> LIST_STRING (requires exactly one capturing group)
-- re-sub <pattern> <repl>: STRING -> STRING
-
-Note: `re` emits a runtime helper (`std_re_search` in Python, `_stdReSearch` in JS) raising `SscRegexError` on no-match, with a default message of `<file.kdl>:<line>:<col> re-match failed at <Struct>.<field> pattern=<pattern>`. Consumer code can catch via `except SscRegexError` (Python) or `try { ... } catch (e) { if (e instanceof SscRegexError) ... }` (JS). Caught by `fallback` when present.
-
-### Array
-
-- index <i>: LIST_* -> scalar
-- first: LIST_* -> scalar (alias for index 0)
-- last: LIST_* -> scalar (alias for index -1)
-- slice <start> <end>: LIST_* -> LIST_*
-- len: LIST_* -> INT
-- unique: LIST_STRING -> LIST_STRING
-
-### Conversions
-
-- to-int: STRING -> INT, LIST_STRING -> LIST_INT
-- to-float: STRING -> FLOAT, LIST_STRING -> LIST_FLOAT
-- to-bool: any scalar -> BOOL
-
-### Structured
-
-- nested <StructName>: DOCUMENT -> NESTED (terminal type)
-- jsonify <SchemaName> [path="..."]: STRING -> JSON (terminal type)
-
-### Parser contract (pipeline ops)
-
-Pipeline operations emit ERROR diagnostics instead of raising exceptions when
-misused. Two guard classes are enforced centrally in `core/expressions.py`
-before the per-op handler runs:
-
-- **E100 "requires a preceding operation"** — when an op that reads
-  `parent.body[-1]` is used at the start of an empty pipeline. Covers:
-  `trim`, `ltrim`, `rtrim`, `normalize-space`, `fmt`, `repl`, `lower`,
-  `upper`, `rm-prefix`, `rm-suffix`, `rm-prefix-suffix`, `unescape`, `re`,
-  `re-sub`, `re-all`, `to-bool`, `to-int`, `to-float`, `split`, `join`,
-  `fallback`.
-- **E001 "requires N argument(s), got M"** — when an op is invoked with
-  fewer positional args than its handler reads without bounds-checking.
-  Covers: `css-remove`, `xpath-remove`, `attr`, `fmt`, `rm-prefix`,
-  `rm-suffix`, `rm-prefix-suffix`, `split`, `join`, `re`, `re-all`,
-  `re-sub`, `index`, `slice`, `jsonify`, `nested`.
-
-Block-form selectors (`css`, `css-all`, `xpath`, `xpath-all`) and the
-`repl` map form accept either a single arg OR a children block — the
-argument-count guard does not apply to them.
-
-### Control
-
-- filter { predicates... } — filter lists by predicates, LIST_* only
-- assert { predicates... } — validate without changing value; raises SscAssertionError on failure (caught by fallback if present)
-- assert "message" { predicates... } — assert with custom error message; default message is `<file.kdl>:<line>:<col> assertion failed at <Struct>.<field>` (or `<Struct>.@pre-validate` inside `@pre-validate`)
-- match { predicates... } — select table row, must be first op in table fields
-- fallback <value> — default value on error; fallback #null makes type optional
-- fallback {} — empty list fallback, LIST_* only
-- @name / self name — reference @init value (self is deprecated)
-
-Note: `assert` emits a runtime helper (`std_assert` in Python, `_stdAssert` in JS) raising `SscAssertionError`. Unlike Python's `assert` keyword, this is **not** stripped by `python -O`. Consumer code can catch via `except SscAssertionError` (Python) or `try { ... } catch (e) { if (e instanceof SscAssertionError) ... }` (JS).
-
-## Type system
-
-Scalar: DOCUMENT, STRING, INT, FLOAT, BOOL, NULL, NESTED, JSON
-List: LIST_DOCUMENT, LIST_STRING, LIST_INT, LIST_FLOAT
-Optional: OPT_STRING, OPT_INT, OPT_FLOAT
-Auto: AUTO, LIST_AUTO (internal, for type inference)
-
-NESTED and JSON are terminal — pipeline ends after nested/jsonify.
-fallback #null converts STRING->OPT_STRING, INT->OPT_INT, FLOAT->OPT_FLOAT.
-
-## Predicates
-
-Used inside filter, assert, match containers.
-Logic containers: not, and, or.
-
-### String predicates (filter, assert, match)
-
-- eq <value...> — equals any
-- ne <value...> — not equals any
-- starts <value...> — starts with any
-- ends <value...> — ends with any
-- contains <value...> — contains any
-- in <value...> — equals one of
-- re <pattern> — matches regex
-
-### Attribute predicates (filter, assert; not match)
-
-- has-attr <name...>
-- attr-eq <attr> <value...>
-- attr-ne <attr> <value...>
-- attr-starts <attr> <value...>
-- attr-ends <attr> <value...>
-- attr-contains <attr> <value...>
-- attr-re <attr> <pattern>
-
-### Text predicates (filter, assert; not match)
-
-- text-re <pattern>
-- text-starts <value...>
-- text-ends <value...>
-- text-contains <value...>
-
-### Document predicates (filter, assert; not match)
-
-- css <selector> — child element exists
-- xpath <selector> — child element exists (all backends; JS uses `document.evaluate`)
-
-### Length predicates (assert-only)
-
-- len-eq <value...>
-- len-ne <value...>
-- len-gt <value>
-- len-lt <value>
-- len-ge <value>
-- len-le <value>
-- len-range <start> <end>
-
-### Regex predicates (assert-only)
-
-- re-any <pattern> — at least one list element matches
-- re-all <pattern> — all list elements match
-
-### Numeric predicates (assert-only)
-
-- gt <value>
-- lt <value>
-- ge <value>
-- le <value>
-
-## JSON schemas
+- **`@value` Modifiers & Validation**: Supports nullable `?` (`@value Model? { ... }`, `(Model?)@value { ... }`, `@value ? { ... }`) and multi-level nested `(dict)` fields. Empty `{}` in `@value` raises `E001`; `@skip` on `@value` with a block raises `E002`; name collisions raise `E001`.
+- **Block `define` Expansion**: Bare `UPPER_CASE` block define names inside `json { ... }` expand their child fields inline.
+- **Strict Allowlist JSON Projectors**: Generated projectors (`_project_*` / `from_value`) validate container types, extract only declared fields, enforce required/nullable/`@omitempty` contracts, and strip all unmodeled wire keys.
+- **KDL Backslash Continuation Caveat**: A single-line `//` comment immediately after `\` consumes the newline and breaks line continuation; if HTTP request fragments (`curl`, `GET`, `POST`, `-H`, `http://`) leak as stray struct fields, the linter emits a continuation diagnostic hint.
 
 ```kdl
-json Author {
-    name str
-    slug str
-}
-
-(array)json Quote {
-    tags (array)str
-    author Author
-    text str
+define AUDIT-FIELDS {
+    created_at str @omitempty
+    internal_id str @skip
 }
 
 (dict)json Translations {
-    @key int
-    @value (array)str
+    @key str
+    @value {
+        title str
+        tags (array)str
+    }
+}
+
+json AnimeResponse {
+    AUDIT-FIELDS
+    id int from=#"meta.item\.id"#
+    tag_count int from="tags.#"
+    tag_names (array)str from="tags.#.name"
+    author {
+        name str
+        bio str? @omitempty
+    }
+    episodes (array)EpisodeItem {
+        num int
+        air_date str?
+    }
+    (dict)localized {
+        @key str
+        @value LocalizedEntry? {
+            label str
+        }
+    }
+    extra Translations
 }
 ```
 
-Field types: str, int, float, bool, null, <RefName>.
-Dictionary schemas:
-- Top-level: `(dict)json Name { @key <ScalarType>; @value <Type>; }` (@key defaults to str; @value supports scalar, (array)type, <RefName>, or an inline schema block `{ ... }`).
-- Inline dict fields: `field (dict)DictName { @key str; @value <Type>; }` or `(dict)field { @key str; @value <Type>; }`.
-- Inline `@value` schema blocks: `@value` directives in top-level `(dict)json` and inline `(dict)` fields accept child field blocks `{ ... }`:
-  - Explicit model name: `@value ModelName { ... }` or `(ModelName)@value { ... }`.
-  - Array of models: `@value (array)ItemModel { ... }` or `(array)@value ItemModel { ... }` (item model name is mandatory; anonymous array raises E001).
-  - Anonymous model synthesis: `@value { ... }` synthesizes PascalCase model names:
-    - In named inline dict `field (dict)DictName`: `{DictName}Value` (e.g. `TranslationValue`).
-    - In anonymous inline dict `field (dict)` under parent: `{Parent}{Field.to_pascal_case()}Value` (e.g. `AnimeResponseTranslationsValue`).
-    - In top-level `(dict)json DictName`: `{DictSchema}Value` (e.g. `TranslationsValue`).
-  - Multi-level nested dictionaries: `@value` blocks can contain nested `(dict)` fields with `@value` blocks, hoisted recursively post-order (innermost leaves hoisted first).
-  - Modifiers: fields inside `@value` support `from="..."`, `@omitempty`, `?` (nullable), `@skip`, and nested blocks. `@value` itself supports `?` for optional/nullable dictionary values (`@value Model? { ... }`, `(Model?)@value { ... }`, `@value? Model { ... }`, `@value? { ... }`).
-  - Validation: empty block `{}` in `@value` raises E001; `@skip` on `@value` with block raises E002; name collisions raise E001.
-- Target types: Python `Dict[K, V]`, Go `map[K]V`, Rust `HashMap<K, V>`, JS `Record<K, V>`.
+---
 
-Inline nested schemas (hoisted by compiler):
-- Anonymous object: `field { ... }` (synthesizes PascalCase `{Parent}{Field}`).
-- Explicitly named object: `field ModelName { ... }`.
-- Explicitly named array: `field (array)ItemModel { ... }`.
-- Dictionary value block: `@value ModelName { ... }` / `@value { ... }` (synthesized `{DictName}Value` / `{Parent}{Field}Value` / `{DictSchema}Value`).
-Modifiers: (array)type for arrays, type? for optional (nullable), @omitempty for keys that may be absent, @skip to exclude from output.
-Alias / Dot-Paths: `field-name type from="source.path.0.key"` (path="..." also accepted as synonym with W041 hint; supports dot-separated object keys and numeric array indices; positional `"source-key"` is deprecated: W011).
-Strict allowlist projection: generated parsers drop all unmodeled wire fields and validate required non-nullable fields.
-KDL line continuation caveat: single-line `//` comments after `\` continuations consume the newline and break the continuation; linter provides a protective diagnostic hint if broken request fragments become stray fields.
+## 6. HTTP & REST (`@request`, `@error[:<suffix>]`)
 
-Usage: jsonify <SchemaName> [path="dotted.path"]
+### 6.1 `@request` Directive
 
-Block defines can be used inside json blocks. A bare define name (no args) expands its children as json fields:
+- **Two Execution Modes**:
+  1. **HTML / `(raw)struct`**: Emits `fetch` / `async_fetch` constructors that execute the HTTP request, optionally extract `response-path` (joining `list[str]` via `response-join`), and return the parsed struct. Parser class remains transport-agnostic for direct HTML/string input.
+  2. **`(rest)struct`**: Every `@request` **requires** `name="<kebab-id>"` and `response="<SchemaName>"` (or `response=#null` for empty/204 responses) (`E001`/`E002`). Emits typed client methods returning monadic `Result` objects (`Ok` / `Err` variants; never throws on mapped errors).
+- **Formats**: POSIX `curl` command string, raw `HTTP/1.1` / `HTTP/2` request text, or a scalar `define` name.
+- **Properties**: `name="<kebab-id>"`, `response="<SchemaName>|#null"`, `doc="..."`, `response-path="<dot.path>"`, `response-join="<sep>"`.
+- **Typed Placeholders (`{{name[:type][[]][?][|style]}}`)**:
+  - `name`: lowercase `^[a-z][a-z0-9_-]*$` (`UPPER_CASE` `{{NAME}}` is resolved at compile time from `define`).
+  - `type`: `str` (default) | `int` | `float` | `bool`.
+  - `[]`: array parameter; `?`: optional parameter (`None` / `undefined` / `Option` omitted when unset).
+  - `style` (arrays only, default `repeat`): `repeat` (`?k=1&k=2`), `csv` (`?k=1,2`), `bracket` (`?k[]=1&k[]=2`), `pipe` (`?k=1|2`), `space` (`?k=1%202`).
+  - **Constraints**: `[]` and `?` are forbidden in URL path segments (`E002`); `|style` requires `[]` (`E002`).
+- **Per-Call Request Options** (applied per-request; headers shallow-merge, client is never mutated):
+
+| Target | Per-Call Option Parameter | Generated Method Naming |
+|---|---|---|
+| **Python** | `**kwargs: Any` | HTML: `Struct.fetch(client, ...)` / `Struct.async_fetch(client, ...)`; REST: `Api.<snake_name>(client, ...)` |
+| **JavaScript** | `opts = {}` | HTML: `Struct.fetch(client, params, opts)`; REST: `Api.<camelName>(client, params, opts)` |
+| **Go** | `opts ...sscReqOpt` | HTML: `New<Struct>Fetch(client, ...)`; REST: `New<Struct>().<PascalName>(client, ...)` |
+| **Rust** | `opts: Option<&SscRequestOpts>` | HTML: `<Struct>::fetch_with_opts(client, ..., opts)`; REST: `<Struct>::<snake_name>_with_opts(client, ..., opts)` |
+
+### 6.2 `@error[:<suffix>]` Directive (`(rest)struct` only)
+
+Syntax: `@error[:<suffix>] <status:100..599> <SchemaName> ["pos.key"...] [prop.key=val ...]`
+
+- **Explicit Suffix Naming (`@error:<suffix>`)**:
+  - `<suffix>` must match `^[A-Za-z_][A-Za-z0-9_-]*$` (`E002`).
+  - Emits variant `<PascalStruct>Err<Status><PascalSuffix>` in Python/JS/Go (e.g. `ApiErr404NotFound`) and `Err<Status><PascalSuffix>` on `<PascalStruct>Error` enum in Rust (`ApiError::Err404NotFound`).
+- **Automatic Naming (no `:suffix`)**:
+  - Extracts the last non-numeric leaf segment from each positional key and property key in declaration order, appending **at most the first 2 leaf keys** in PascalCase to `<PascalStruct>Err<Status>` (e.g. `"data.errors.0.detail"` $\to$ `ApiErr404Detail`; `"a.first" "b.second" third="x"` $\to$ `ApiErr400FirstSecond`).
+- **Collision & Duplicate Key Linting (`E400`)**:
+  - Duplicate resolved variant names within the same `(rest)struct` emit `E400` (disambiguate with `@error:<suffix>`).
+  - The same key must not appear in both positional args and property conditions on a single `@error` (`E400`).
+- **Nested Dot-Path Conditions**:
+  - Positional args check nested key/index existence (`"error.details.0.code"`).
+  - Property args check exact field values (`response.success=#false`, `data.0.type="err"`). All conditions combine via `AND` across Python, JS, Go, and Rust.
+- **Safe Runtime Fallthrough**:
+  - Matchers evaluate in declaration order (including `@error 200 ...` rules before 2xx success projection). If status and conditions match, but the body is non-JSON or fails `<SchemaName>` projection, the runtime catches the projection error and falls through to try the next `@error` rule, falling back to `UnknownErr` (`Unknown` in Rust) when status is outside `200..299`.
 
 ```kdl
-define PET-CORE {
+define API-HOST="https://api.example.com"
+define SEARCH-REQ="curl '{{API-HOST}}/items/{{id:int}}?q={{query:str?}}&tags={{tags:str[]?|csv}}'"
+define DELETE-REQ="curl -X DELETE '{{API-HOST}}/items/{{id:int}}'"
+
+struct AjaxSnippet {
+    @request response-path="payload.html" response-join="\n" """
+    POST /api/render HTTP/1.1
+    Host: example.com
+    Content-Type: application/json
+
+    {"page": {{page:int}}}
+    """
+    heading { css "h2"; text; trim }
+}
+
+json Item {
     id int
     name str
-    species str
 }
 
-json Pet {
-    PET-CORE
-    owner str?
+json ApiError {
+    error str? @omitempty
 }
 
-(array)json PetList {
-    PET-CORE
-    adopted bool
+json ActionError {
+    success bool
 }
-```
 
-## @request
-
-Optional struct-level directive. Two modes:
-
-1. **HTML-scraping struct** — single `@request` (no `name=`), parser takes the fetched HTML.
-2. **`(rest)struct`** — typed REST client with multiple methods. Each `@request` requires `name=<kebab-id>` and `response=<SchemaName>`. Returns Result values, never throws.
-
-Embeds a raw HTTP request or POSIX curl command. At codegen time the
-converter parses it and emits a `fetch()` classmethod. The parser module
-itself remains transport-agnostic — for HTML structs it still accepts one
-HTML page.
-
-### Formats
-
-curl:
-```kdl
-@request """
-curl 'https://example.com/{{slug}}'
-"""
-```
-
-Raw HTTP:
-```kdl
-@request """
-GET /catalogue/page-{{page-num}}.html HTTP/1.1
-Host: example.com
-Accept: text/html
-"""
-```
-
-### Placeholders
-
-`{{name}}` becomes a keyword-only parameter in `fetch()`, converted to snake_case.
-Placeholder names must be **lowercase**: `[a-z][a-z0-9_-]*`.
-UPPER_CASE `{{NAME}}` is reserved for define references (see `## define`).
-No placeholders → static request, `fetch(cls, client)` only.
-
-**Typed placeholders:** `{{name[:type][[]][?][|style]}}`
-- `name` must be lowercase `[a-z][a-z0-9_-]*`
-- `type` ∈ `str|int|float|bool` (default: str)
-- `[]` marks array; `?` marks optional (`T | None = None`)
-- `style` ∈ `repeat|csv|bracket|pipe|space` (arrays only; default: repeat)
-- Examples: `{{id:int}}`, `{{q:str?}}`, `{{tags:int[]?|csv}}`, `{{tags[]|bracket}}`
-- `[]` and `?` forbidden in URL path; style requires `[]`.
-
-### Optional properties
-
-- `name=<kebab-id>` — method name; required for `(rest)struct`, optional for HTML struct (only if multiple).
-- `response=<SchemaName>` — JSON schema for 2xx body; required for `(rest)struct`.
-- `doc="..."` — method docstring.
-- `response-path="a.b.c"` — dot-notation path into JSON response body to extract HTML string
-- `response-join="\n"` — join separator when response-path resolves to list[str]
-
-```kdl
-@request response-path="payload.html" """
-POST /api HTTP/1.1
-Host: example.com
-Content-Type: application/json
-
-{"id": "{{id}}"}
-"""
-```
-
-### define with @request
-
-Scalar define can be used as the @request argument:
-```kdl
-define BASE-URL="https://example.com"
-define MY-REQ="curl {{BASE-URL}}/search?q={{query}}"
-struct Foo {
-    @request MY-REQ
-    ...
+(rest)struct CatalogApi {
+    @doc "Catalog REST client"
+    @request name="search-items" response="Item" SEARCH-REQ
+    @request name="delete-item" response=#null DELETE-REQ
+    @error:not-found 404 ApiError error="not_found"
+    @error 404 ApiError "error.detail.0.code"
+    @error 200 ActionError success=#false "detail.reason"
 }
 ```
 
-Case convention separates define references from request parameters:
-- `{{BASE-URL}}` (UPPER) → resolved at parse time from define
-- `{{query}}` (lowercase) → becomes a runtime parameter in `fetch()`
+---
 
-### CLI flag
+## 7. CLI & Linter Diagnostic Reference
 
-`--http-client` selects the generated HTTP client:
-- Python targets: `httpx` (default; emits both `fetch()` and `async_fetch()`) | `aiohttp` (async-only) | `requests` (sync-only)
-- JS target: `fetch` (default) | `axios`
+### 7.1 CLI Command & Flag Matrix
 
-Without `--http-client`, `@request` is ignored and no `fetch` method is generated.
+| Command | Syntax & Flags | Purpose |
+|---|---|---|
+| `generate python` | `ssc-gen generate python <files...> -o <dir> [-L bs4\|lxml\|parsel\|slax] [--bs4-parser lxml\|html.parser\|html5lib] [--http-client httpx\|httpx2\|aiohttp\|requests] [--http-io both\|sync\|async] [-R/--separate-runtime] [-rn/--runtime-name <name>] [--package <pkg>] [--skip-lint] [-f text\|json]` | Generate Python parsers / REST clients |
+| `generate js` | `ssc-gen generate js <files...> -o <dir> [--http-client fetch\|axios] [--package <pkg>] [--skip-lint] [-f text\|json]` | Generate JavaScript ESM parsers / clients + `.d.ts` |
+| `generate go` | `ssc-gen generate go <files...> -o <dir> [--package <pkg>] [--skip-lint] [-f text\|json]` | Generate Go parsers / clients + `sscgen_runtime.go` |
+| `generate rust` | `ssc-gen generate rust <files...> -o <dir> [--http-client reqwest] [--skip-lint] [-f text\|json]` | Generate Rust parsers / clients + `sscgen_runtime.rs` |
+| `check` | `ssc-gen check <files...> [-t/--target python\|javascript\|go\|rust] [-f text\|json]` | Validate KDL syntax, types, imports & target reserved words (`exit 0` valid, `1` lint error) |
+| `run` | `ssc-gen run <schema.kdl:StructName> [-i <page.html>] [-L bs4\|lxml\|parsel\|slax] [--bs4-parser lxml\|html.parser\|html5lib] [-f text\|json]` | Execute struct against HTML/text input (or stdin) and print JSON output |
+| `health` | `ssc-gen health <schema.kdl:StructName> [-i <page.html>] [-f text\|json]` | Test every CSS/XPath selector in struct against sample HTML (`OK` / `EMPTY` / `FAIL`) |
+| `scout` | `ssc-gen scout [-i <page.html>] [--discover \| --text <re> --attr <k[=v\|=~re]> --tag <t> --css <sel> -I -F -v --up N --down N --next N --prev N --fields <csv> -c --limit 50 --offset 0 --snippet 200] [-f text\|json]` | HTML reconnaissance: `--discover` structural overview or regex/CSS/DOM-walk probing |
+| `json-to-kdl` | `ssc-gen json-to-kdl <sample.json> -o <schema.kdl> [--name <SchemaName>] [--force]` | Bootstrap hierarchical inline `json` KDL schema from a sample JSON payload |
+| `version` | `ssc-gen version` | Print `ssc-gen` version |
 
-## @error
+### 7.2 Canonical Linter `ErrorCode` Reference (`ssc-gen check -f json`)
 
-Error response mapping for `(rest)struct`. Supports optional `:suffix` for explicit error variant naming:
-
-```kdl
-(rest)struct Api {
-    @error:not-found 404 SearchError error="Ничего не найдено"
-    @error 404 ApiError
-    @error 404 ApiError "error.code"
-    @error 200 ActionResponse success=#false
-    @error 200 ApiError error detail="msg"
-}
-```
-
-### Variant naming and collision linting
-
-- Explicit suffix (`@error:<suffix> <status> <Schema> ...`, where `<suffix>` matches `^[A-Za-z_][A-Za-z0-9_-]*$` or emits `E002`): produces `<PascalStruct>Err<Status><PascalSuffix>` (e.g. `ApiErr404NotFound`, or `Err404NotFound` in Rust `enum`).
-- Automatic naming (no `:suffix`): extracts the last non-numeric leaf segment from each dot-path key across positional keys and property conditions, appending at most the first **2** leaf keys to `<PascalStruct>Err<Status>` (e.g. `"data.errors.0.detail"` -> `ApiErr404Detail`; `"a.first" "b.second" third="x"` -> `ApiErr400FirstSecond`).
-- Duplicate variant names within the same `(rest)struct` emit lint error `E400` (disambiguate with `@error:<name>`).
-
-### Arguments (positional, required)
-
-- `<status>` — HTTP status code [100..599]
-- `<SchemaName>` — json schema reference for deserialized error body
-
-### Key presence checks (positional, optional)
-
-Additional positional args after SchemaName check that keys or nested dot-paths (including numeric array indices) exist in the JSON body across Python, JS, Go, and Rust:
-
-```kdl
-@error 404 ApiError error "detail.code"
-```
-
-Triggers when status=404 AND `_body` contains `error` and nested path `detail.code`.
-
-### Value conditions (properties, optional)
-
-KDL properties after the positional args are field=value conditions checked against the parsed JSON body:
-
-- Keys are dot-paths (e.g. `response.success`, `data.0.type`)
-- All conditions must match (AND logic)
-- Covers the corner case where the same status code is used for normal and error responses
-
-### Mixing both
-
-Positional keys and property conditions can be combined:
-
-```kdl
-@error 404 ApiError error detail="msg"
-```
-
-Triggers when status=404 AND `'error' in _body` AND `_body.detail == "msg"`.
-
-A key must not appear in both positional args and properties (lint error `E400`).
-
-### Safe runtime fallthrough
-
-`@error` matchers are evaluated in declaration order. If a response matches a rule's status and conditions, but the body is non-JSON or fails `<SchemaName>` projection/deserialization, the matcher does not raise an unhandled schema error; instead it falls through to try the next `@error` rule, and falls back to `UnknownErr` (`Unknown` in Rust) if no rule matches and status is outside `200..299`.
-
-## CLI
-
-```bash
-# generate parser code
-ssc-gen generate python schema.kdl -L bs4 -o out/
-ssc-gen generate python schema.kdl -L lxml -o out/
-ssc-gen generate python schema.kdl -L parsel -o out/
-ssc-gen generate python schema.kdl -L slax -o out/
-ssc-gen generate js schema.kdl -o out/
-ssc-gen generate go schema.kdl -o out/
-
-# with @request support (REST/HTTP codegen)
-ssc-gen generate python schema.kdl -L bs4 -o out/ --http-client httpx
-
-# extract helpers into separate runtime module (-R), custom name (-rn)
-ssc-gen generate python schema.kdl -L bs4 -o out/ -R -rn my_runtime
-
-# lint/validate schema (text or JSON for LLM pipelines)
-ssc-gen check schema.kdl
-ssc-gen check schema.kdl -f json
-
-# run struct against HTML and print JSON
-ssc-gen run schema.kdl:StructName -i page.html -L bs4
-
-# verify selectors match elements
-ssc-gen health schema.kdl:StructName -i page.html
-
-# HTML reconnaissance (regex on text/attrs, CSS intersect, navigation, --discover)
-ssc-gen scout -i page.html --text '\$\d+\.\d{2}' -f json
-ssc-gen scout -i page.html --discover -f json
-
-# generate inline JSON schema from sample JSON payload
-ssc-gen json-to-kdl payload.json -o schema.kdl
-ssc-gen json-to-kdl payload.json -o schema.kdl --name ApiResponse --force
-
-# print version
-ssc-gen version
-```
-
-Languages: `generate python`, `generate js`, `generate go`.
-HTML libraries (`--lib / -L`, Python only): `bs4` (default), `lxml`, `parsel`, `slax`.
-HTTP clients (`--http-client`): Python — `httpx` (default) | `aiohttp` | `requests`; JS — `fetch` (default) | `axios`.
-
-### `json-to-kdl` — Bootstrap inline JSON schemas
-
-Automatically generates a modern hierarchical `.kdl` schema file from a sample JSON payload.
-Nested objects are emitted as anonymous inline blocks, object arrays as `(array)ItemModel`
-blocks with collision resolution, and raw keys use `from="..."`. Output is validated with
-`parse_module` before writing.
-
-```bash
-ssc-gen json-to-kdl example.json -o schema.kdl
-ssc-gen json-to-kdl example.json -o schema.kdl --name ResponseSchema --force
-```
-
-### `scout` — HTML reconnaissance
-
-Probe raw HTML with regex on text/attribute values (CSS alone cannot
-express this). Useful for picking selectors before writing a `.kdl` schema
-or for one-off extraction.
-
-```bash
-# regex on text — find prices
-ssc-gen scout -i page.html --text '\$\d+\.\d{2}' --fields path -f json
-
-# regex on attribute value — find product hrefs
-ssc-gen scout -i page.html --attr 'href=~^/product/\d+' -f json
-
-# CSS intersect + climb to parent container
-ssc-gen scout -i page.html --css ".price" --up 2 --fields path -f json
-
-# one-off extraction (no .kdl needed)
-ssc-gen scout -i page.html --css ".product-card" --fields attr.data-id,text -f json
-
-# pipe via stdin
-curl -s https://example.com | ssc-gen scout --attr 'class=~\bbtn\b' -f json
-
-# count only (exit 0 on match, 1 on no match, 2 on error)
-ssc-gen scout -i page.html --tag img --attr alt -v -c
-```
-
-Filters (AND-combine): `--text REGEX`, `--attr NAME[=VAL|=~REGEX]`, `--tag NAME`, `--css SEL`.
-Modifiers: `-I` ignore-case, `-F` fixed strings, `-v` invert.
-Navigation: `--up N`, `--down N`, `--next N`, `--prev N` (applied in order, deduped by tag identity).
-Output: `--fields path,tag,text,html,attrs,classes,index,line,attr.NAME` (default `path,tag,text`).
-Pagination: `--limit N` (default 50), `--offset N`, `--snippet LEN` (default 200).
-
-`--discover` — overview mode: returns tag/class/id stats, data-* attrs, and
-repeating containers (list-struct candidates with common_descendants field
-hints). Ignores all filters and navigation. Single-call replacement for
-blind selector probing.
-
-```bash
-ssc-gen scout -i page.html --discover -f json
-```
+| Code | Name | Cause | Canonical Fix |
+|---|---|---|---|
+| `E000` | `SYNTAX_ERROR` | Invalid KDL 2.0 syntax (unquoted strings, `true`/`null` without `#`, unclosed block, or `//` comment breaking `\` line continuation) | Quote all strings, use `#true`/`#false`/`#null`, and remove `//` comments after `\` continuations |
+| `E001` | `INVALID_ARGUMENT_COUNT` | Wrong positional argument count on op/directive, empty `{}` in selector/predicates/`@value`, anonymous `(array)` inline schema, or inline schema name collision | Supply required positional args; separate same-line ops with `;`; name array item model in `(array)ItemModel { ... }` |
+| `E002` | `INVALID_ARGUMENT_VALUE` | Regex in `re`/`re-all` lacks 1 capture group, invalid CSS/XPath, invalid HTTP status, `[]`/`?` in URL path placeholder, invalid `define` name, `@skip` on `@value` block, or invalid `@error:<suffix>` | Add one `(...)` capture group to `re`/`re-all`; move `[]`/`?` placeholders to query string; use `UPPER_CASE` for `define` |
+| `E003` | `INVALID_IMPORT` | Empty `import` block, missing `(kind)` tag on imported symbol, missing file, duplicate import path, symbol collision, or circular import | Prefix every imported symbol with `(struct)`, `(json)`, `(define)`, `(extension)`, or `(fn)` |
+| `E040` | `MALFORMED_DOTPATH` | Leading/trailing `.`, `..`, negative index, wildcard `*`, or `#[...]` filter in `from="..."` / `jsonify path="..."` | Use valid GJSON path (`a.b.0.c`, `a\.b`, `items.#`, `items.#.id`) |
+| `E041` | `DUPLICATE_JSON_KEY` | Duplicate field name or duplicate wire key (`from=`) in the same `json` schema | Rename duplicate field or disambiguate `from="..."` wire paths |
+| `E100` | `TYPE_MISMATCH` | Pipeline op input incompatible with previous step output, op requiring preceding step placed first (`trim` on `DOC`), or `fallback` literal type mismatch | Precede string ops with `css ...; text` in HTML structs; match `fallback` literal to pipeline output type (or use `fallback #null`) |
+| `E200` | `UNKNOWN_NODE` | Unrecognized top-level declaration, pipeline operation, or predicate keyword | Use a valid DSL keyword or prefix custom extension calls with `!Namespace.op` |
+| `E203` | `DISALLOWED_DIRECTIVE` | HTML op inside `(raw)struct`/`(raw)fn`, struct directive inside `fn`, regular field inside `(rest)struct`/`(dict)struct`, `(table)struct` field not starting with `match`, or `len-*`/`gt`/`re-any` outside `assert` | Use only string/regex ops in `(raw)` targets; keep `len-*`/`gt`/`re-any` inside `assert { ... }`; start `(table)struct` fields with `match { ... }` |
+| `E300` | `UNDEFINED_SYMBOL` | Reference to undeclared `struct`, `json`, `define`, `!Namespace.op` extension, or dependency cycle | Declare the referenced symbol or import it via `import "./file.kdl" { (kind)Name }` |
+| `E301` | `UNDEFINED_INIT_FIELD` | `@<name>` (`self <name>`) references a field not declared in the struct's `@init` block | Declare `<name> { ... }` inside `@init { ... }` |
+| `E302` | `INVALID_DECLARATION_ORDER` | Local `struct` or `json` referenced via `nested`, `jsonify`, or schema field before its declaration | Move helper `json` and `struct` definitions **above** the caller in the `.kdl` file |
+| `E400` | `INVALID_TYPE_DECLARATION` | Invalid struct/json type tag, invalid `extension` `sig`, colliding `@error` variant names in `(rest)struct`, or duplicate key in `@error` positional args and properties | Use valid `(item\|list\|dict\|table\|flat\|rest\|raw)struct`; disambiguate colliding `@error` rules with `@error:<suffix>` |
+| `E401` | `MISSING_REQUIRED_FIELD` | Struct missing required directives (`@split-doc` for `list`; `@split-doc`+`@key`+`@value` for `dict`; `@table`+`@rows`+`@match`+`@value` for `table`; `@request` for `rest`) | Add all required structural directives for the struct kind |
+| `E402` | `DUPLICATE_DECLARATION` | Duplicate top-level symbol name, duplicate field/init/check name, or case-folded identifier collision in target language | Rename colliding symbols, fields, or `@request name=` methods |
+| `E403` | `INVALID_IDENTIFIER` | Symbol or field name is not a valid identifier or collides with a target language reserved keyword (when checked with `--target`) | Rename identifier (for `json` fields, use a safe field name + `from="wire_key"`) |
+| `W011` | `DEPRECATED_JSON_ALIAS` | Deprecated positional string alias on `json` field (`field str "wire_key"`) | Replace positional alias with `from="wire_key"` |
+| `W040` | `WHITESPACE_IN_PATH` | Leading or trailing whitespace inside `from="..."` | Strip accidental spaces in `from="..."` |
+| `W041` | `PATH_SYNONYM_IN_JSON` | `path="..."` used on a `json` field | Replace `path="..."` with `from="..."` (`path=` is reserved for `jsonify`) |
