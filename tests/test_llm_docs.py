@@ -28,6 +28,11 @@ REMOVED_LEGACY_PATHS = (
     "docs/maintainers",
 )
 
+KDL_DOC_FILES = (
+    ("docs/llm.txt", 6),
+    ("llm_overview.md", 1),
+)
+
 _KDL_FENCE_RE = re.compile(r"```kdl\r?\n(.*?)```", re.DOTALL)
 
 
@@ -36,12 +41,17 @@ def _extract_kdl_blocks(doc_path: Path) -> list[str]:
     return [match.group(1).strip() for match in _KDL_FENCE_RE.finditer(text)]
 
 
-def _extract_self_contained_kdl_blocks(doc_path: Path) -> list[tuple[int, str]]:
-    return [
-        (idx, block)
-        for idx, block in enumerate(_extract_kdl_blocks(doc_path), start=1)
-        if 'import "./' not in block
-    ]
+def _extract_self_contained_kdl_blocks(
+    rel_paths: tuple[str, ...],
+) -> list[tuple[str, int, str]]:
+    items: list[tuple[str, int, str]] = []
+    for rel_path in rel_paths:
+        for idx, block in enumerate(
+            _extract_kdl_blocks(REPO_ROOT / rel_path), start=1
+        ):
+            if 'import "./' not in block:
+                items.append((rel_path, idx, block))
+    return items
 
 
 @pytest.mark.parametrize("rel_path", REQUIRED_LLM_DOCS)
@@ -61,21 +71,12 @@ def test_legacy_llm_and_maintainer_docs_removed(rel_path: str) -> None:
 
 def test_no_dangling_references_to_removed_docs() -> None:
     checked_files = (
-        REPO_ROOT / "AGENTS.md",
-        REPO_ROOT / "llm_overview.md",
-        REPO_ROOT / "docs" / "llm.txt",
+        *(REPO_ROOT / rel_path for rel_path in REQUIRED_LLM_DOCS),
         REPO_ROOT / "mkdocs.yml",
         REPO_ROOT / "docs" / "README.md",
+        REPO_ROOT / "docs" / "wayfinder" / "map.md",
     )
-    forbidden_refs = (
-        "CLAUDE.md",
-        "llm_types_ast.md",
-        "llm_core.md",
-        "llm_converters.md",
-        "llm_howto.md",
-        "docs/maintainers",
-        "maintainers/",
-    )
+    forbidden_refs = (*REMOVED_LEGACY_PATHS, "maintainers/")
     for file_path in checked_files:
         content = file_path.read_text(encoding="utf-8")
         for ref in forbidden_refs:
@@ -84,35 +85,42 @@ def test_no_dangling_references_to_removed_docs() -> None:
             )
 
 
-def test_llm_txt_all_kdl_blocks_pass_structural_lint() -> None:
-    blocks = _extract_kdl_blocks(REPO_ROOT / "docs" / "llm.txt")
-    assert len(blocks) >= 6
+@pytest.mark.parametrize(("rel_path", "min_blocks"), KDL_DOC_FILES)
+def test_llm_docs_all_kdl_blocks_pass_structural_lint(
+    rel_path: str,
+    min_blocks: int,
+) -> None:
+    blocks = _extract_kdl_blocks(REPO_ROOT / rel_path)
+    assert len(blocks) >= min_blocks
     for idx, block in enumerate(blocks, start=1):
         doc = parse_kdl(block)
         diagnostics = lint_module(
-            doc, f"docs/llm.txt#block-{idx}", source_text=block
+            doc, f"{rel_path}#block-{idx}", source_text=block
         )
         errors = [d for d in diagnostics if d.severity == Severity.ERROR]
         assert not errors, (
-            f"Structural lint error in docs/llm.txt block #{idx}:\n"
-            f"{format_diagnostics(errors, block, path=f'docs/llm.txt#block-{idx}')}"
+            f"Structural lint error in {rel_path} block #{idx}:\n"
+            f"{format_diagnostics(errors, block, filepath=f'{rel_path}#block-{idx}')}"
         )
 
 
 @pytest.mark.parametrize(
-    ("block_idx", "kdl_src"),
-    _extract_self_contained_kdl_blocks(REPO_ROOT / "docs" / "llm.txt"),
+    ("rel_path", "block_idx", "kdl_src"),
+    _extract_self_contained_kdl_blocks(
+        tuple(rel_path for rel_path, _ in KDL_DOC_FILES)
+    ),
 )
-def test_llm_txt_self_contained_kdl_blocks_pass_parse_module(
+def test_llm_docs_self_contained_kdl_blocks_pass_parse_module(
+    rel_path: str,
     block_idx: int,
     kdl_src: str,
 ) -> None:
     module, diagnostics = parse_module(kdl_src, targets=TARGETS)
     errors = [d for d in diagnostics if d.severity == Severity.ERROR]
     assert not errors, (
-        f"docs/llm.txt KDL block #{block_idx} failed schema validation:\n"
-        f"{format_diagnostics(errors, kdl_src, path=f'docs/llm.txt#block-{block_idx}')}"
+        f"{rel_path} KDL block #{block_idx} failed schema validation:\n"
+        f"{format_diagnostics(errors, kdl_src, filepath=f'{rel_path}#block-{block_idx}')}"
     )
     assert module.body or module.extensions, (
-        f"docs/llm.txt KDL block #{block_idx} produced an empty AST module"
+        f"{rel_path} KDL block #{block_idx} produced an empty AST module"
     )
