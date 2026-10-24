@@ -21,6 +21,8 @@ from ssc_codegen.ast import (
     ResultVariantDef,
     Struct,
     StructBase,
+)
+from ssc_codegen.ast import (
     StructType as ST,
 )
 from ssc_codegen.ast.struct import RequestHttp
@@ -617,9 +619,7 @@ def emit_matcher_list_def(
                 lines.append(
                     "\t\tif _err := json.Unmarshal(_b, &_body); _err != nil {"
                 )
-                lines.append(
-                    f'\t\t\treturn fmt.Errorf("ssc-gen: parse {body_type}: %w", _err)'
-                )
+                lines.append("\t\t\treturn nil")
                 lines.append("\t\t}")
                 lines.append(
                     f"\t\treturn &{e.factory_name}{{Status: _s, Body: _body}}"

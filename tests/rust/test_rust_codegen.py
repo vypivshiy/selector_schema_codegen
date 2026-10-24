@@ -2010,3 +2010,231 @@ async fn main() {
     assert "RUST_DELEGATION_OK" in result.stdout
 
 
+def test_rust_rest_error_matcher_fallthrough_and_suffix(
+    tmp_path: Path,
+) -> None:
+    """Verify Rust @error:<suffix>, 2-leaf-key auto-naming, dot-path key checks,
+    and safe runtime fallthrough on schema mismatch or non-JSON responses via cargo test."""
+    schema = '''
+json User {
+    id int
+    name str
+}
+
+json SearchError {
+    error str
+    reason str
+}
+
+json GenericError {
+    message str
+}
+
+json ApiError {
+    detail_code int
+}
+
+(rest)struct AnimeVostAPI {
+    @error:not-found 404 SearchError error="Ничего не найдено"
+    @error 404 GenericError
+    @error 400 GenericError "a.b.first" "c.d.second" third="x"
+    @error 200 ApiError "error.code"
+
+    @request name=get-user response=User """
+    GET http://127.0.0.1:{{port:int}}/users/{{id:int}} HTTP/1.1
+    """
+}
+'''
+    module, diagnostics = parse_module(schema)
+    assert not [d for d in diagnostics if d.severity.name == "ERROR"]
+
+    converter = RustVisitor()
+    code = converter.convert(module)
+    runtime = converter.emit_runtime()
+
+    assert "Err404NotFound(SearchErrorJson)," in code
+    assert "Err404(GenericErrorJson)," in code
+    assert "Err400FirstSecond(GenericErrorJson)," in code
+    assert "Err200Code(ApiErrorJson)," in code
+
+    source_dir = _write_cargo_project(tmp_path)
+    (tmp_path / "Cargo.toml").write_text(
+        """[package]
+name = "sscgen_rust_err_fallthrough_test"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dom_query = "0.28"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+""",
+        encoding="utf-8",
+    )
+    (source_dir / "parser.rs").write_text(code, encoding="utf-8")
+    (source_dir / "sscgen_runtime.rs").write_text(runtime, encoding="utf-8")
+    (source_dir / "main.rs").write_text(
+        r"""mod sscgen_runtime;
+mod parser;
+
+fn main() {}
+
+#[cfg(test)]
+mod tests {
+    use super::parser::{AnimeVostAPI, AnimeVostAPIError};
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+
+    #[tokio::test]
+    async fn test_error_matcher_fallthrough_and_suffix() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        thread::spawn(move || {
+            for _ in 0..8 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut buf = [0u8; 2048];
+                let n = stream.read(&mut buf).unwrap();
+                let req_str = String::from_utf8_lossy(&buf[..n]);
+                let (status_line, content_type, body) = if req_str.contains("/users/1 ") {
+                    (
+                        "HTTP/1.1 404 Not Found",
+                        "application/json",
+                        r#"{"error": "Ничего не найдено", "reason": "removed"}"#,
+                    )
+                } else if req_str.contains("/users/2 ") {
+                    // Matches first 404 condition (error="Ничего не найдено") but misses required "reason",
+                    // so SearchErrorJson::from_value fails and falls through to Err404(GenericErrorJson).
+                    (
+                        "HTTP/1.1 404 Not Found",
+                        "application/json",
+                        r#"{"error": "Ничего не найдено", "message": "fallback generic"}"#,
+                    )
+                } else if req_str.contains("/users/3 ") {
+                    // Empty JSON {} fails both 404 schemas -> falls through to Unknown(404, {}).
+                    ("HTTP/1.1 404 Not Found", "application/json", "{}")
+                } else if req_str.contains("/users/4 ") {
+                    // Non-JSON HTML 404 -> falls through to Unknown(404, Value::String(...)).
+                    (
+                        "HTTP/1.1 404 Not Found",
+                        "text/html",
+                        "<html>404 Not Found</html>",
+                    )
+                } else if req_str.contains("/users/5 ") {
+                    // 400 with 3 keys -> Err400FirstSecond
+                    (
+                        "HTTP/1.1 400 Bad Request",
+                        "application/json",
+                        r#"{"a": {"b": {"first": 1}}, "c": {"d": {"second": true}}, "third": "x", "message": "invalid params"}"#,
+                    )
+                } else if req_str.contains("/users/6 ") {
+                    // 200 with nested "error.code" and detail_code -> Err200Code
+                    (
+                        "HTTP/1.1 200 OK",
+                        "application/json",
+                        r#"{"error": {"code": 123}, "detail_code": 99}"#,
+                    )
+                } else if req_str.contains("/users/7 ") {
+                    // 200 with "error": {} -> does not match "error.code", returns Ok(UserJson)
+                    (
+                        "HTTP/1.1 200 OK",
+                        "application/json",
+                        r#"{"error": {}, "id": 7, "name": "Alice"}"#,
+                    )
+                } else {
+                    // 200 with "error.code" present, but missing "detail_code" -> falls through to Ok(UserJson)
+                    (
+                        "HTTP/1.1 200 OK",
+                        "application/json",
+                        r#"{"error": {"code": 123}, "id": 8, "name": "Bob"}"#,
+                    )
+                };
+                let resp = format!(
+                    "{}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    status_line,
+                    content_type,
+                    body.len(),
+                    body
+                );
+                stream.write_all(resp.as_bytes()).unwrap();
+            }
+        });
+
+        let client = reqwest::Client::new();
+
+        // 1. Explicit suffix @error:not-found
+        match AnimeVostAPI::get_user(&client, port as i64, 1).await {
+            Err(AnimeVostAPIError::Err404NotFound(e)) => {
+                assert_eq!(e.reason, "removed");
+            }
+            other => panic!("expected Err404NotFound, got {:?}", other),
+        }
+
+        // 2. Fallthrough from first 404 rule to second 404 rule on schema mismatch
+        match AnimeVostAPI::get_user(&client, port as i64, 2).await {
+            Err(AnimeVostAPIError::Err404(e)) => {
+                assert_eq!(e.message, "fallback generic");
+            }
+            other => panic!("expected fallthrough to Err404, got {:?}", other),
+        }
+
+        // 3. Fallthrough to Unknown on empty JSON {}
+        match AnimeVostAPI::get_user(&client, port as i64, 3).await {
+            Err(AnimeVostAPIError::Unknown(404, val)) => {
+                assert!(val.is_object() && val.as_object().unwrap().is_empty());
+            }
+            other => panic!("expected Unknown(404, {{}}), got {:?}", other),
+        }
+
+        // 4. Fallthrough to Unknown on non-JSON HTML 404
+        match AnimeVostAPI::get_user(&client, port as i64, 4).await {
+            Err(AnimeVostAPIError::Unknown(404, val)) => {
+                assert_eq!(val.as_str(), Some("<html>404 Not Found</html>"));
+            }
+            other => panic!("expected Unknown(404, html), got {:?}", other),
+        }
+
+        // 5. 2-leaf-key auto-naming cap on 400
+        match AnimeVostAPI::get_user(&client, port as i64, 5).await {
+            Err(AnimeVostAPIError::Err400FirstSecond(e)) => {
+                assert_eq!(e.message, "invalid params");
+            }
+            other => panic!("expected Err400FirstSecond, got {:?}", other),
+        }
+
+        // 6. Nested positional key "error.code" on 200 matches ApiErrorJson
+        match AnimeVostAPI::get_user(&client, port as i64, 6).await {
+            Err(AnimeVostAPIError::Err200Code(e)) => {
+                assert_eq!(e.detail_code, 99);
+            }
+            other => panic!("expected Err200Code, got {:?}", other),
+        }
+
+        // 7. Nested positional key "error.code" rejects {"error": {}}
+        let u7 = AnimeVostAPI::get_user(&client, port as i64, 7).await.unwrap();
+        assert_eq!(u7.id, 7);
+        assert_eq!(u7.name, "Alice");
+
+        // 8. 200 error matcher falls through when ApiErrorJson::from_value fails
+        let u8 = AnimeVostAPI::get_user(&client, port as i64, 8).await.unwrap();
+        assert_eq!(u8.id, 8);
+        assert_eq!(u8.name, "Bob");
+    }
+}
+""",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ["cargo", "test", "--quiet"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env=_cargo_env(),
+        timeout=180,
+        check=False,
+    )
+    assert result.returncode == 0, f"{result.stderr}\n{result.stdout}"
