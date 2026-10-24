@@ -1,247 +1,340 @@
-# ssc_codegen — Project Reference for LLMs
+# ssc_codegen — Internal Architecture Reference (v0.44.0)
 
-ssc_codegen is a code generator for web scraping parsers.
-Input: .kdl schema files describing HTML extraction rules.
-Output: parser code for Python (bs4, lxml, parsel, selectolax), JavaScript (DOM API), Go (goquery), and Rust (dom_query).
+KDL 2.0 Schema DSL v2.1 compiler and parser generator targeting Python (`bs4`, `lxml`, `parsel`, `slax`), JavaScript (DOM API), Go (`goquery` + `net/http` + `gjson`), and Rust (`dom_query` + `serde` + `reqwest`).
 
-Pipeline: .kdl schema → external `kdlquery` parser → core (AST + lint) → visitor → output code
-
-Version: 0.41.0
-Python: >=3.10
-CLI entry point: `ssc-gen` (ssc_codegen.main:main)
+- **Pipeline**: `.kdl schema -> kdlquery CST -> 5-pass core (imports + structural lint + cross-ref lint + AST build & type check) -> BaseWalker visitor -> target parser & runtime code`
+- **Runtime**: Python `>=3.10` | **CLI Entrypoint**: `ssc-gen` (`ssc_codegen.main:main`)
 
 ---
 
-## Project Structure
+## 1. Repository & Module Map
 
-```
-ssc_codegen/
-├── __init__.py            # re-exports parse_module
-├── main.py                # CLI (typer): generate, check, run, health — uses Lang/HtmlLib enums + resolve()
-├── _logging.py            # ANSI color logging setup
-├── exceptions.py          # ParseError, BuildTimeError
-├── regex_utils.py         # Regex flag handling, unverbosify
-├── naming.py              # Pure case-conversion helpers (to_pascal_case/to_snake_case/to_camel_case)
-├── request_spec.py        # parse_to_http (curl/raw HTTP → RequestHttp AST node), validate_json_body
-├── health.py              # Selector health check against real HTML
-├── explore.py             # HTML reconnaissance (regex on text/attrs, navigation) — backs `ssc-gen scout`
-├── ast/                   # AST node definitions
-│   ├── __init__.py        # Re-exports all node types
-│   ├── base.py            # Node abstract base class
-│   ├── types.py           # VariableType, StructType enums
-│   ├── module.py          # Module, Docstring (deprecated), Utilities, CodeStartHook, CodeEndHook
-│   ├── extension.py       # ExtensionDef/Target/Helper/Type + ExtensionCall
-│   ├── struct.py          # StructBase, Struct, StructRest, Field, Init, InitFieldCall, InitField, PreValidate, SplitDoc, Key, Value, TableConfig, TableMatchKey, TableRows, CheckMethod, StartParse, MethodBase, MethodFetch, MethodRest, RequestHttp, Template (tokenized literal/placeholder parts), PlaceholderSpec, ErrorResponse
-│   ├── rest.py            # ResultVariantDef, ResultAliasDef, MatcherEntry, MatcherListDef (synthesized REST result-artifact nodes)
-│   ├── selectors.py       # CssSelect, CssSelectAll, XpathSelect, XpathSelectAll, CssRemove, XpathRemove
-│   ├── extract.py         # Text, Raw, Attr
-│   ├── string.py          # Trim, Ltrim, Rtrim, NormalizeSpace, RmPrefix, RmSuffix, RmPrefixSuffix, Fmt, Repl, ReplMap, Lower, Upper, Split, Join, Unescape
-│   ├── regex.py           # Re, ReAll, ReSub
-│   ├── array.py           # Index, Slice, Len, Unique
-│   ├── cast.py            # ToInt, ToFloat, ToBool, Jsonify, Nested
-│   ├── control.py         # Fallback, Self, Return
-│   ├── predicate_containers.py  # Filter, Assert, Match
-│   ├── predicate_ops.py   # PredEq/Ne/Gt/Lt/Ge/Le/Range, PredStarts/Ends/Contains/In/Re/ReAny/ReAll, PredCss/Xpath/HasAttr, PredAttr*, PredText*, PredCount*, LogicNot/And/Or
-│   ├── typedef.py         # TypeDef, TypeDefField
-│   ├── jsondef.py         # JsonDef, JsonDefField
-│   ├── function.py        # module-level fn/(raw)fn AST node
-│   └── helpers.py         # AST utilities
-├── core/                  # Unified KDL → Module AST reader + integrated linting
-│   ├── __init__.py        # Exports parse_module + diagnostic formatting
-│   ├── reader.py          # orchestrates kdlquery parse, lint passes, AST build
-│   ├── contexts.py        # ParseContext, LintContext, WalkCtx
-│   ├── expressions.py     # Pipeline expression parsing, typedef_from_struct
-│   ├── rest_artifacts.py  # rest_artifacts_from_struct — synthesizes ResultVariantDef/ResultAliasDef/MatcherListDef from StructRest (mirrors typedef_from_struct); owns err_subclass_name
-│   ├── predicates.py      # Predicate expression parsing
-│   ├── struct_parser.py   # Struct body parsing
-│   ├── module_handler.py  # top-level handlers + import graph resolution
-│   ├── imports.py         # mandatory typed imports, private scopes, dependency closure
-│   ├── extensions.py      # extension declaration parsing + signature resolution
-│   ├── linter.py          # structural, symbol, CSS/XPath/regex linting
-│   ├── type_checking.py   # Pipeline type inference and mismatch detection
-│   └── format.py          # Diagnostic formatting (text + JSON)
-├── traversal/             # Shared AST traversal core (language-agnostic)
-│   ├── context.py         # WalkContext — immutable context (index, depth, prv/nxt, advance/deeper/reset_index)
-│   ├── walker.py          # BaseWalker — dispatch table + walk/walk_children/walk_pipeline (no codegen logic)
-│   └── utils.py           # module_has_rest, module_has_fetch, module_uses_http, module_has_html_struct, module_is_extension_only, err_subclass_name, find_predicate_container, find_enclosing_module, resolve_json_def, parse_gjson_path, is_malformed_gjson_path, classify_gjson_path
-├── generation/            # Codegen data accumulator + runtime assembly
-│   ├── builder.py         # ModuleBuilder — pure data accumulator (imports, std defs). No rendering.
-│   └── runtime.py         # register_runtime_file, runtime_module_content, _BASE_UTILITY_LINES — `-R` support
-├── targets/               # Backend-specific code generators
-│   ├── __init__.py
-│   ├── spec.py            # TargetSpec — raw user input (lang, lib, http_client, separate_runtime)
-│   ├── profile.py         # TargetProfile — resolved capabilities + create_converter factory
-│   ├── resolver.py        # resolve(TargetSpec) → TargetProfile. Validation + factory dispatch.
-│   ├── python/            # Python backend
-│   │   ├── __init__.py    # PY_BS4_CONVERTER, PY_LXML_CONVERTER, PY_PARSEL_CONVERTER, PY_SLAX_CONVERTER (pre-built instances)
-│   │   ├── visitor.py     # PythonVisitor(BaseWalker) — self-contained, accepts dom_spelling_cls in ctor
-│   │   ├── rest.py        # Python REST/fetch codegen
-│   │   ├── html_libs/     # DomSpelling implementations (data + behavior per HTML library)
-│   │   │   ├── base.py    # DomSpelling(ABC) — expression methods return list[str], predicate methods return str
-│   │   │   ├── bs4.py     # Bs4DomSpelling — BeautifulSoup4
-│   │   │   ├── lxml.py    # LxmlDomSpelling — lxml.html
-│   │   │   ├── parsel.py  # ParselDomSpelling — parsel (Scrapy)
-│   │   │   └── slax.py    # SlaxDomSpelling — selectolax
-│   │   └── http_libs/     # HTTP client strategies for REST codegen
-│   │       ├── base.py    # HttpLibStrategy(ABC) — import_line, sync/async_client_type, transport_exception, rest_runtime_lines()
-│   │       ├── httpx.py   # HttpxStrategy — httpx (sync + async native)
-│   │       ├── aiohttp.py # AioHttpStrategy — aiohttp (async-only, sync via asyncio.run + ThreadPoolExecutor fallback)
-│   │       └── requests.py# RequestsStrategy — requests (sync-only, async via run_in_executor)
-│   └── javascript/        # JavaScript backend
-│       ├── __init__.py    # JS_CONVERTER = JsVisitor() (pre-built instance)
-│       ├── visitor.py     # JsVisitor(BaseWalker) — vanilla DOM API, self-contained
-│       └── http_libs/     # HTTP client strategies for JS
-│           ├── base.py    # JsHttpLibStrategy(ABC) — fn_name, rest_call_lines()
-│           ├── fetch.py   # FetchStrategy — fetch API
-│           └── axios.py   # AxiosStrategy — axios
-│   └── golang/            # Go backend (goquery + net/http + gjson)
-│       ├── visitor.py     # GoVisitor + gofmt validation + runtime accumulation
-│       ├── rest.py        # REST/fetch codegen
-│       ├── runtime.py     # shared Go helper definitions
-│       └── http_libs/     # net/http strategy
-│   └── rust/               # Rust backend (dom_query + regex + serde)
-│       ├── visitor.py     # RustVisitor and owned parser lifecycle
-│       ├── runtime.py     # shared sscgen_runtime.rs source
-│       └── regex.py       # Rust regex compatibility checks
-├── parsers/               # HTTP transport parsing (consumed by visitors)
-│   ├── curl.py            # parse_curl_command() — POSIX curl → kwargs
-│   └── http.py            # parse_http_request() — raw HTTP/1.1|2 → kwargs
-tests/
-├── integration/
-│   ├── test_codegen_run.py     # End-to-end: KDL → generate → execute → verify JSON
-│   ├── test_rest_codegen.py    # REST API code generation tests (mocked HTTP)
-│   ├── schemas/                # Test .kdl files (00_full through 22_rest_response_path)
-│   └── fixtures/               # Test HTML fixtures
-├── js/
-│   └── test_js_codegen.py      # JS codegen tests (Node.js + jsdom)
-├── go/
-│   └── test_go_codegen.py      # gofmt/vet/build integration
-├── test_parser.py              # KDL parser tests
-├── test_imports.py             # Import/include tests
-├── test_cli.py                  # CLI output planning and JSON diagnostics
-└── test_rest_api.py            # REST/transport layer tests
+Format: `path :: exported/key symbols — role`
 
-examples/                       # Real-world .kdl schemas
-docs/
-├── maintainers/
-│   ├── ast_spec.md             # Complete AST node specification for codegen backends
-│   └── converters.md           # Converter architecture & how to write new backends
-├── llm.txt                     # KDL DSL v2.1 syntax reference
-└── learn/                      # Tutorial chapters (01-10)
-```
+### Top-Level Package (`ssc_codegen/`)
+- `ssc_codegen/__init__.py` :: `parse_module`, `format_diagnostic`, `format_diagnostics`, `ReadDiagnostic`, `ErrorCode`, `Module`, `Struct`, `StructRest`, `Field`, `JsonDef`, `TypeDef`, `VariableType`, `StructType`, `TypeInfo`, `TargetSpec`, `TargetProfile`, `ResolutionError`, `resolve`, `check_struct_health`, `HealthResult`, `SelectorCheck`, `run_scout`, `run_discover` — Public library facade.
+- `ssc_codegen/main.py` :: `app`, `gen_app`, `main`, `cli`, `get_click_app`, `HtmlLib`, `FmtType`, `_run_generate`, `_plan_output_files`, `generate_python`, `generate_js`, `generate_go`, `generate_rust`, `check`, `json_to_kdl_command`, `run`, `health`, `scout`, `version` — Typer CLI (`ssc-gen`).
+- `ssc_codegen/json_to_kdl.py` :: `json_to_kdl(value, *, name="JsonResponse") -> str`, `JsonToKdlError` — Bootstraps KDL v2.1 `json` / `(array)json` schemas with inline object/array blocks and `from="..."` aliases from a sample JSON value.
+- `ssc_codegen/symbols.py` :: `TARGET_LANGUAGES` (`("python", "javascript", "go", "rust")`), `SymbolCollision`, `InvalidSymbolIdentifier`, `normalize_targets`, `check_symbol_identifier`, `target_symbol_identifier`, `find_symbol_collisions` — Cross-target identifier validation (`E403`) and case-folded collision detection (`E402`).
+- `ssc_codegen/request_spec.py` :: `parse_to_http(raw_payload) -> RequestHttp`, `validate_json_body(raw_payload) -> str | None`, `parse_json_template(text) -> Any` — Normalizes POSIX `curl` or raw HTTP into `RequestHttp` AST with tokenized `PlaceholderTemplate` fields.
+- `ssc_codegen/health.py` :: `check_struct_health(struct, html, module=None) -> HealthResult`, `HealthResult`, `SelectorCheck` — Evaluates CSS/XPath selectors against live HTML without codegen.
+- `ssc_codegen/explore.py` :: `run_scout(html, filters, nav, fields, *, invert, limit, offset, snippet) -> ScoutResult`, `run_discover(html) -> DiscoverResult`, `compile_filters`, `NavSpec`, `ScoutResult`, `DiscoverResult`, `FilterError`, `DEFAULT_FIELDS` — HTML reconnaissance and single-call page discovery.
+- `ssc_codegen/naming.py` :: `to_pascal_case`, `to_snake_case`, `to_camel_case`, `to_screaming_snake_case` — Pure identifier case converters.
+- `ssc_codegen/regex_utils.py` :: `unverbosify_regex`, `extract_inline_flags` — Regex normalization and inline flag extraction across targets.
+- `ssc_codegen/exceptions.py` :: `ParseError`, `BuildTimeError` — Compiler exception hierarchy.
+- `ssc_codegen/_logging.py` :: `logger`, `setup_debug_logging` — ANSI debug logger.
+
+### AST Package (`ssc_codegen/ast/`)
+- `ssc_codegen/ast/__init__.py` :: Re-exports all AST node classes, `VariableType`, `StructType`, `TypeInfo`, `VT`, `Span`.
+- `ssc_codegen/ast/base.py` :: `Node(span, description, accept, ret, parent, body)` — Abstract dataclass base for all AST nodes.
+- `ssc_codegen/ast/types.py` :: `VariableType` (`VT`), `TypeInfo`, `StructType` — Unified type system and struct kind enums.
+- `ssc_codegen/ast/module.py` :: `Module(doc, body, source_file, extensions)`, `Utilities`, `CodeStartHook`, `CodeEndHook`, `Docstring` (deprecated) — Root module container and hooks.
+- `ssc_codegen/ast/extension.py` :: `ExtensionType`, `ExtensionImport`, `ExtensionHelper`, `ExtensionTarget`, `ExtensionDef`, `ExtensionCall` — Typed `!Namespace.op` extension definitions and call site node.
+- `ssc_codegen/ast/struct.py` :: `StructBase`, `Struct`, `StructRest`, `StructDocstring`, `Field`, `Init`, `InitFieldCall`, `InitField`, `PreValidate`, `CheckMethod`, `SplitDoc`, `Key`, `Value`, `TableConfig`, `TableRows`, `TableMatchKey`, `StartParse`, `MethodBase`, `MethodFetch`, `MethodRest`, `RequestHttp`, `PlaceholderTemplate` (`Template`), `PlaceholderSpec`, `ErrorResponse` — Structs, directives, and HTTP request AST nodes.
+- `ssc_codegen/ast/rest.py` :: `ResultVariantDef`, `ResultAliasDef`, `MatcherEntry`, `MatcherListDef` — Synthesized REST error variant, result union alias, and runtime matcher table AST nodes.
+- `ssc_codegen/ast/function.py` :: `FunctionDef(name, is_raw, doc)` — Module-level `fn` and `(raw)fn` pipeline node.
+- `ssc_codegen/ast/typedef.py` :: `TypeDef`, `TypeDefField` — Synthesized typed output contract for HTML/raw structs.
+- `ssc_codegen/ast/jsondef.py` :: `JsonDef`, `JsonDefField` — Top-level and hoisted `json`, `(array)json`, and `(dict)json` schema nodes.
+- `ssc_codegen/ast/selectors.py` :: `CssSelect`, `CssSelectAll`, `XpathSelect`, `XpathSelectAll`, `CssRemove`, `XpathRemove` — DOM query and mutation ops.
+- `ssc_codegen/ast/extract.py` :: `Text`, `Raw`, `Attr` — DOM node to string extraction ops.
+- `ssc_codegen/ast/string.py` :: `Trim`, `Ltrim`, `Rtrim`, `NormalizeSpace`, `RmPrefix`, `RmSuffix`, `RmPrefixSuffix`, `Fmt`, `Repl`, `ReplMap`, `Lower`, `Upper`, `Split`, `Join`, `Unescape` — String and list-mapped string ops.
+- `ssc_codegen/ast/regex.py` :: `Re`, `ReAll`, `ReSub` — Regular expression ops.
+- `ssc_codegen/ast/array.py` :: `Index`, `Slice`, `Len`, `Unique` — Array indexing, slicing, length, and deduplication ops (`first`/`last` lower to `Index(0)`/`Index(-1)`).
+- `ssc_codegen/ast/cast.py` :: `ToInt`, `ToFloat`, `ToBool`, `Jsonify`, `Nested` — Scalar type conversions and terminal struct/JSON projections.
+- `ssc_codegen/ast/control.py` :: `Fallback`, `Self`, `Return` — Error recovery, `@init` reference (`@name`), and terminal return wrapper.
+- `ssc_codegen/ast/predicate_containers.py` :: `Filter`, `Assert`, `Match` — Predicate block containers.
+- `ssc_codegen/ast/predicate_ops.py` :: `PredEq`, `PredNe`, `PredStarts`, `PredEnds`, `PredContains`, `PredRe`, `PredReAny`, `PredReAll`, `PredCss`, `PredXpath`, `PredHasAttr`, `PredAttrEq`, `PredAttrNe`, `PredAttrStarts`, `PredAttrEnds`, `PredAttrContains`, `PredAttrRe`, `PredTextStarts`, `PredTextEnds`, `PredTextContains`, `PredTextRe`, `PredCountEq`, `PredCountNe`, `PredCountGt`, `PredCountLt`, `PredCountGe`, `PredCountLe`, `PredCountRange`, `LogicNot`, `LogicAnd`, `LogicOr` — Condition and boolean combinator nodes (`in` lowers to `PredEq`, `gt/lt/ge/le` lower to `PredCount*`).
+- `ssc_codegen/ast/helpers.py` :: AST inspection helpers.
+
+### Compiler Core (`ssc_codegen/core/`)
+- `ssc_codegen/core/__init__.py` :: `parse_module`, `format_diagnostic`, `format_diagnostics`, `ReadDiagnostic`, `Severity`, `Span`, `Position`, `ErrorCode` — Core package exports.
+- `ssc_codegen/core/reader.py` :: `parse_module(src, source_path=None, *, targets=None, skip_lint=False) -> tuple[Module, list[ReadDiagnostic]]` — 5-pass compiler orchestrator and `Module.body` assembler.
+- `ssc_codegen/core/contexts.py` :: `WalkCtx`, `ErrorCode`, `DefineKind`, `DefineInfo`, `ParseContext`, `LintContext` — Compiler state, scope tracking, and diagnostic emission.
+- `ssc_codegen/core/imports.py` :: `SymbolId(path, kind, name)`, `SourceUnit`, `resolve_imports` — Mandatory typed imports, private per-file scopes, cycle detection, and topological dependency closure.
+- `ssc_codegen/core/linter.py` :: `lint_module`, `lint_cross_refs`, `lint_pipeline_op`, `lint_predicate_op`, `lint_validate_regex`, `lint_validate_css`, `lint_validate_xpath` — CST structural, semantic, selector, regex, and cross-ref linter rules.
+- `ssc_codegen/core/type_checking.py` :: `OpSig`, `OP_TYPES`, `check_pipeline_types`, `infer_pipeline_type` — Pipeline type inference and compatibility validator.
+- `ssc_codegen/core/expressions.py` :: `parse_expression_body`, `typedef_from_struct` — Pipeline operation parser (with central `E001`/`E100` guards) and `TypeDef` synthesizer.
+- `ssc_codegen/core/predicates.py` :: `parse_predicate_body` — Predicate container and combinator parser.
+- `ssc_codegen/core/struct_parser.py` :: `parse_struct_body`, `parse_json_fields` — Struct directives, fields, inline JSON schema hoisting, and block `define` expansion.
+- `ssc_codegen/core/module_handler.py` :: `handle_define`, `handle_json`, `handle_struct`, `handle_function`, `register_node_sources` — Top-level KDL node handlers.
+- `ssc_codegen/core/extensions.py` :: `handle_extension`, `lint_extension_node`, `resolve_extension_sig` — `extension` block parser and generic `T` type binder.
+- `ssc_codegen/core/rest_artifacts.py` :: `rest_artifacts_from_struct`, `err_subclass_name` — Synthesizes `ResultVariantDef`, `ResultAliasDef`, and `MatcherListDef` from `StructRest`.
+- `ssc_codegen/core/format.py` :: `format_diagnostic`, `format_diagnostics` — Rust-style text and JSON diagnostic formatter.
+
+### Traversal, Generation, Parsers & Targets (`ssc_codegen/`)
+- `ssc_codegen/traversal/context.py` :: `WalkContext` — Immutable traversal state (`index`, `depth`, `var_name`, `indent_char`, `meta`, `.prv`, `.nxt`, `.indent`).
+- `ssc_codegen/traversal/walker.py` :: `BaseWalker` — Dispatch table (`_DISPATCH`) and 3-mode body traversal (`walk`, `walk_children`, `walk_pipeline`, `walk_predicates`).
+- `ssc_codegen/traversal/utils.py` :: `module_has_rest`, `module_has_fetch`, `module_uses_http`, `module_has_html_struct`, `module_is_extension_only`, `err_subclass_name`, `find_predicate_container`, `find_enclosing_module`, `resolve_json_def`, `parse_gjson_path`, `is_malformed_gjson_path`, `classify_gjson_path` — Shared cross-backend helpers and GJSON path parser.
+- `ssc_codegen/generation/builder.py` :: `ModuleBuilder` — Idempotent accumulator for `require_import`, `require_std`, `require_runtime`.
+- `ssc_codegen/generation/runtime.py` :: `register_runtime_file`, `runtime_module_content`, `_BASE_UTILITY_LINES` — Standalone Python runtime module (`-R`) assembler.
+- `ssc_codegen/parsers/curl.py` :: `parse_curl_command` — Low-level POSIX `curl` command parser.
+- `ssc_codegen/parsers/http.py` :: `parse_http_request` — Low-level raw HTTP/1.1|2 request parser.
+- `ssc_codegen/targets/spec.py` :: `TargetSpec(lang, lib, http_client, separate_runtime, bs4_parser, http_io)` — Raw user target configuration.
+- `ssc_codegen/targets/profile.py` :: `TargetProfile(language, file_extension, create_converter, http_clients, supports_separate_runtime, runtime_include_fallback)` — Validated capability descriptor and converter factory.
+- `ssc_codegen/targets/resolver.py` :: `resolve(spec) -> TargetProfile`, `ResolutionError` — Target capability validation and converter factory resolution.
+- `ssc_codegen/targets/python/` :: `PythonVisitor` (`visitor.py`), `rest.py`, `html_libs/` (`DomSpelling`, `Bs4DomSpelling`, `LxmlDomSpelling`, `ParselDomSpelling`, `SlaxDomSpelling`), `http_libs/` (`HttpLibStrategy`, `HttpxStrategy`, `Httpx2Strategy`, `AioHttpStrategy`, `RequestsStrategy`), pre-built `PY_BS4_CONVERTER`, `PY_LXML_CONVERTER`, `PY_PARSEL_CONVERTER`, `PY_SLAX_CONVERTER` (`__init__.py`).
+- `ssc_codegen/targets/javascript/` :: `JsVisitor` (`visitor.py`), `rest.py`, `http_libs/` (`JsHttpLibStrategy`, `FetchStrategy`, `AxiosStrategy`), pre-built `JS_CONVERTER` (`__init__.py`).
+- `ssc_codegen/targets/golang/` :: `GoVisitor`, `validate_go_package_name` (`visitor.py`), `rest.py`, `runtime.py`, `literals.py` (`go_str`, `go_literal`, `go_str_array`, `go_str_map`), `regex.py` (`py_re_to_go_raw`), `http_libs/` (`NetHttpStrategy`), pre-built `GO_CONVERTER` (`__init__.py`).
+- `ssc_codegen/targets/rust/` :: `RustVisitor` (`visitor.py`), `rest.py`, `runtime.py` (`sscgen_runtime.rs` emitter), `regex.py` (Rust regex compatibility checker), `http_libs/` (`ReqwestStrategy`), pre-built `RUST_CONVERTER` (`__init__.py`).
+
+### Tests & Documentation (`tests/`, `docs/`)
+- `tests/` :: `test_parser.py`, `test_imports.py`, `test_symbols.py`, `test_extensions.py`, `test_fn.py`, `test_raw_struct.py`, `test_json_projection.py`, `test_json_to_kdl.py`, `test_rest_api.py`, `test_http_io.py`, `test_bs4_parser.py`, `test_assert.py`, `test_re_search.py`, `test_explore.py`, `test_cli.py`, `test_resolver.py`, `test_builder.py`, `test_codegen_safety.py`, `test_fuzz_expressions.py`, `integration/` (`test_codegen_run.py`, `test_rest_codegen.py`, `schemas/`, `fixtures/`), `js/` (`test_js_codegen.py`), `go/` (`test_go_codegen.py`), `rust/` (Rust cargo/codegen tests) — Unit, property, and cross-target integration test suite.
+- `docs/` :: `llm.txt` (external KDL Schema DSL v2.1 reference), `README.md`, `guide.md`, `syntax.md`, `types.md`, `operations.md`, `predicates.md`, `json.md`, `extensions.md`, `learn/` (user tutorials), `adr/` (Architecture Decision Records), `api/` (Griffe API reference), `agents/` (`issue-tracker.md`, `triage-labels.md`, `domain.md`), `wayfinder/` (`map.md`) — Documentation site, ADRs, and agent workflow guides.
 
 ---
 
-## CLI Commands
+## 2. CLI Command & Flag Matrix
 
-```bash
-ssc-gen generate python schema.kdl -L bs4 -o out/                     # generate Python+bs4 parser
-ssc-gen generate python schema.kdl -L lxml -o out/                    # Python + lxml
-ssc-gen generate python schema.kdl -L parsel -o out/                  # Python + parsel
-ssc-gen generate python schema.kdl -L slax -o out/                    # Python + selectolax
-ssc-gen generate js schema.kdl -o out/                                # JavaScript (vanilla DOM)
-ssc-gen generate go schema.kdl -o out/                                # Go (goquery + net/http)
-ssc-gen generate rust schema.kdl -o out/                              # Rust (dom_query + serde)
-ssc-gen generate python schema.kdl -L bs4 -o out/ --http-client httpx # with @request support
-ssc-gen generate python schema.kdl -L bs4 -o out/ -R                  # separate runtime module
-ssc-gen generate python schema.kdl -L bs4 -o out/ -R -rn my_runtime   # custom runtime name
-ssc-gen generate python schema.kdl -L bs4 -o out/ --skip-lint         # skip linting
-ssc-gen generate python schema.kdl -L bs4 -o out/ --package mymod     # package name for generated code
-ssc-gen generate python schema.kdl -L bs4 -o out/ -f json             # JSON output format
-ssc-gen check schema.kdl                                              # lint only (text output)
-ssc-gen check schema.kdl -f json                                      # lint only (JSON for automation)
-ssc-gen run schema.kdl:StructName -i page.html -L bs4                 # generate + execute + output JSON
-ssc-gen health schema.kdl:StructName -i page.html -L bs4              # check selectors against HTML
-ssc-gen scout -i page.html --text '\$\d+\.\d{2}' -f json              # HTML recon: regex on text/attrs
-ssc-gen json-to-kdl payload.json -o schema.kdl                         # generate inline JSON schema from JSON sample
-ssc-gen json-to-kdl payload.json -o schema.kdl --name ApiResponse -f   # custom root schema name, overwrite
-```
+### Subcommands (`ssc-gen`)
 
-**Commands:**
-- `generate python <files>`: Generate Python parser code
-- `generate js <files>`: Generate JavaScript parser code
-- `generate go <files>`: Generate Go parser code (goquery + net/http)
-- `generate rust <files>`: Generate Rust parser modules (dom_query + serde)
-- `check <files>`: Lint and validate .kdl schemas
-- `run <schema:struct>`: Generate and run parser, output JSON
-- `health <schema:struct>`: Check selector health against HTML
-- `scout`: HTML reconnaissance (regex on text/attrs)
-- `json-to-kdl <file> -o <out>`: Bootstrap inline JSON schema definitions from a JSON example
+| Command | Signature | Purpose |
+|---|---|---|
+| `generate python` | `ssc-gen generate python <files...> [-o DIR] [-L bs4\|lxml\|parsel\|slax] [--bs4-parser lxml\|html.parser\|html5lib] [--http-client httpx\|httpx2\|aiohttp\|requests] [--http-io both\|sync\|async] [-R] [-rn NAME] [--package NAME] [--skip-lint] [-f text\|json] [-v]` | Compile `.kdl` schemas to Python parsers |
+| `generate js` | `ssc-gen generate js <files...> [-o DIR] [--http-client fetch\|axios] [--package NAME] [--skip-lint] [-f text\|json] [-v]` | Compile `.kdl` schemas to JavaScript (ESM + JSDoc) parsers |
+| `generate go` | `ssc-gen generate go <files...> [-o DIR] [--package NAME] [--skip-lint] [-f text\|json] [-v]` | Compile `.kdl` schemas to Go (`goquery` + `net/http` + `gjson`) + `sscgen_runtime.go` |
+| `generate rust` | `ssc-gen generate rust <files...> [-o DIR] [--http-client reqwest] [--skip-lint] [-f text\|json] [-v]` | Compile `.kdl` schemas to Rust (`dom_query` + `serde` + `reqwest`) + `sscgen_runtime.rs` |
+| `check` | `ssc-gen check <files...> [-t/--target python\|javascript\|go\|rust] [-f text\|json] [-v]` | Lint & type-check schemas (plus cross-target or single-target symbol validation) |
+| `run` | `ssc-gen run <path.kdl:StructName> [-i FILE] [-L bs4\|lxml\|parsel\|slax] [--bs4-parser lxml\|html.parser\|html5lib] [-f text\|json] [-v]` | Generate Python parser in-memory, run against HTML file/stdin, print JSON |
+| `health` | `ssc-gen health <path.kdl:StructName> [-i FILE] [-f text\|json] [-v]` | Check selector match counts against real HTML without codegen |
+| `scout` | `ssc-gen scout [-i FILE] [--discover] [--text REGEX] [--attr SPEC...] [--tag TAG] [--css SEL] [-I] [-F] [-v] [--up N] [--down N] [--next N] [--prev N] [--fields LIST] [-c] [--limit 50] [--offset 0] [--snippet 200] [-f text\|json]` | HTML reconnaissance via regex/CSS filters, DOM navigation, or `--discover` page overview |
+| `json-to-kdl` | `ssc-gen json-to-kdl <input.json> -o <output.kdl> [--name JsonResponse] [--force]` | Bootstrap inline KDL `json` schema from sample JSON payload |
+| `version` | `ssc-gen version` | Print `ssc_codegen` package version |
 
-**Flags:**
-- `--lib / -L`: HTML library (Python only) — `bs4` (default) | `lxml` | `parsel` | `slax`
-- `--http-client`: HTTP client for `@request` codegen — Python: `httpx` (default) | `aiohttp` | `requests`; JS: `fetch` (default) | `axios`
-- `--separate-runtime / -R`: Extract helpers into separate module (default: `sscgen_runtime`)
-- `--runtime-name / -rn`: Custom runtime module name
-- `--skip-lint`: Skip linting pass
-- `--package`: Package/module name; Go defaults to `main`
-- `--format / -f`: Output format — `text` | `json`
+### Key Options
+
+| Flag | Scope | Values / Default | Behavior |
+|---|---|---|---|
+| `-L, --lib` | `generate python`, `run` | `bs4` (default), `lxml`, `parsel`, `slax` | Selects Python `DomSpelling` implementation |
+| `--bs4-parser` | `generate python` (`-L bs4`), `run` | `lxml` (default), `html.parser`, `html5lib` | Sets `BS4_FEATURES` parser engine passed to `BeautifulSoup(doc, BS4_FEATURES)` |
+| `--http-client` | `generate python\|js\|rust` | Python: `httpx` (default), `httpx2`, `aiohttp`, `requests`; JS: `fetch` (default), `axios`; Rust: `reqwest` (default) | Selects HTTP transport strategy (`Go` uses `net/http` exclusively) |
+| `--http-io` | `generate python` | `both` (default), `sync`, `async` | Emits sync, async, or both HTTP method pairs (`aiohttp` rejects `sync`) |
+| `-R, --separate-runtime` | `generate python` | `bool` (`False`) | Extracts runtime helpers into `<runtime_name>.py` (`Go` and `Rust` always emit `sscgen_runtime.go` / `sscgen_runtime.rs`) |
+| `-rn, --runtime-name` | `generate python -R` | `sscgen_runtime` (default) | Module name for standalone Python runtime file |
+| `--package` | `generate python\|js\|go` | `None` (`main` for Go) | Package/namespace identifier for generated files |
+| `-t, --target` | `check` | `python`, `javascript` (`js`), `go`, `rust` (repeatable; default: all 4) | Restricts `E402`/`E403` symbol validation to selected target languages |
+| `--discover` | `scout` | `bool` (`False`) | Runs single-call `run_discover(html)` page structure analysis |
+| `-f, --format` | All commands | `text` (default), `json` | Selects human-readable text or structured JSON output |
 
 ---
 
-## Key Architectural Patterns
+## 3. Compiler Core, Linter & `kdlquery` Selector Reference
 
-1. **BaseWalker + composition**: `BaseWalker` (traversal/walker.py) — dispatch table maps AST node types to `visit_*` methods via `walk()`. Body traversal split into three modes (container/pipeline/predicate). No codegen logic in BaseWalker.
-2. **DomSpelling composition**: `PythonVisitor` accepts `dom_spelling_cls` in constructor. Each DomSpelling subclass (bs4/lxml/parsel/slax) provides HTML-specific expression codegen (returns `list[str]`) and predicate formatting (returns `str`). No subclassing of the visitor needed.
-3. **ModuleBuilder**: Pure data accumulator (generation/builder.py) — replaces old hidden signal pools. Stores imports + std-helper definitions. Registration is idempotent. Target-specific code decides rendering format.
-4. **Two-pass codegen**: `convert_all` runs `_walk_module` twice — pass 1 collects std/import registrations, pass 2 emits output.
-5. **HttpLibStrategy**: REST transport is pluggable per HTTP library. Python: httpx/aiohttp/requests. JS: fetch/axios. Each owns its import line, client types, transport exception, and REST runtime source.
-6. **Dynamic resolver**: `resolve(TargetSpec)` → `TargetProfile`. Validates user input, returns capabilities + `create_converter` factory for Python, JavaScript, or Go.
-7. **Integrated linting**: parsing and linting happen in one pass via `core/`.
-8. **Type-tagged containers**: VariableType/StructType enums enforce strict typing at AST level.
-9. **Recursive nesting**: `Nested` node resolves via struct_map with cycle detection.
-10. **Transport layer**: `request_spec.parse_to_http` normalises curl/HTTP into `RequestHttp`. String fields are tokenized `PlaceholderTemplate` values; request content lives in `RequestHttp.payload` while inherited `Node.body` remains the AST-child list. JSON templates are parsed structurally before target rendering. Visitors call `with_renamed_placeholders(transform)` for target naming.
-11. **Runtime separation**: `--separate-runtime` extracts helper functions into a standalone module; generated parsers import from it instead of inlining.
-12. **Explicit imports**: `import "./x.kdl" { (struct)X }` is mandatory; imports are private and selected symbols pull source-scoped dependency closure.
-13. **User extensions**: `extension Utils { op-name { sig ...; py/js/go { ... } } }` defines typed custom pipeline operations called as `!Utils.op-name`. Used imports/helpers are registered lazily.
+### 3.1 5-Pass Execution Model (`core/reader.py:parse_module`)
+
+`parse_module(src: str, source_path: Path | str | None = None, *, targets: Sequence[str] | None = None, skip_lint: bool = False) -> tuple[Module, list[ReadDiagnostic]]`
+
+1. **Pass 1 — KDL Parse**: `kdlquery.parse(src)` -> mutable `KdlDocument` / `KdlNode` CST with `Span`. Syntax errors return immediately as `ErrorCode.SYNTAX_ERROR` (`E000`).
+2. **Pass 2 — Import Resolution (`core/imports.py:resolve_imports`)**: Parses mandatory typed `import "./x.kdl" { (kind)Name }` blocks (`kind` in `define | extension | fn | json | struct`). Tracks symbols via `SymbolId(path, kind, name)` in private per-file scopes, diagnoses cycles/missing symbols (`E003`/`E300`), and prepends the topologically sorted private dependency closure ahead of local declarations.
+3. **Pass 3 — Structural Lint (`core/linter.py:lint_module`)**: Validates top-level nodes, struct bodies, required directives (`E401`), disallowed directives (`E203`), argument counts/values (`E001`/`E002`), CSS/XPath/regex syntax, JSON dot-paths (`E040`/`E041`/`W011`/`W040`/`W041`), `@request` placeholders, and **Top-Down Local Declaration Order** (`E302`).
+4. **Pass 4 — Cross-Reference & Target Symbol Lint (`core/linter.py:lint_cross_refs` + `symbols.py`)**: Validates references to `define`, `json`, `struct`, `extension`, and `@init` fields (`E300`/`E301`), detects recursive struct/json cycles, and checks target identifier validity (`E403`) and case-folded collisions (`E402`) across `targets` (defaults to all 4 targets: Python, JavaScript, Go, Rust). Fatal structural diagnostics halt before Pass 5.
+5. **Pass 5 — AST Build & Pipeline Type Checking**: Executes `handle_define` / `handle_extension` -> `handle_json` (with recursive compiler hoisting of inline JSON and `@value` schemas in post-order into `ctx.json_defs`) -> `handle_struct` (synthesizing `TypeDef` via `typedef_from_struct` and REST artifacts `ResultVariantDef` / `ResultAliasDef` / `MatcherListDef` via `rest_artifacts_from_struct`) -> `handle_function`. Runs `check_pipeline_types` (`E100`) per pipeline.
+
+**`Module.body` Assembly Invariant**: Handlers never append `json` or `struct` nodes directly to `module.body` during iteration; `parse_module` performs a single final extend in strict order:
+`json_defs -> typedefs -> REST artifacts & structs -> functions`
+
+### 3.2 Dual Type-Resolution Invariant
+
+- **Top-Down Declaration Order (Intra-file)**: Within a single `.kdl` file, referenced `struct` and `json` declarations must appear strictly **above** any `struct`, `json`, or `fn` that references them (`E302` `INVALID_DECLARATION_ORDER`).
+- **Topological Dependency Closure (Inter-file)**: Across `import` boundaries, `core/imports.py` builds a directed symbol dependency graph keyed by `SymbolId(path, kind, name)` and topologically sorts imported symbols plus their transitive private dependencies before AST construction. Diamond imports deduplicate by `SymbolId`.
+
+### 3.3 `kdlquery` CST API & CSS3 Selector Cheat-Sheet
+
+- **CST API**: `from kdlquery import parse, KdlDocument, KdlNode, ReadDiagnostic, Severity` and `from kdlquery.types import Span, Position`.
+- **Navigation & Query Methods**: `doc.select(q)`, `doc.select_one(q)`, `node.select(q)` (descendants only), `node.select_one(q)`, `node.matches(q)`, `node.closest(q)`, `node.parent`, `node.root`, `node.depth()`, `node.index()`, `node.siblings()`, `node.parents()`.
+
+| Category | Selector Syntax | Semantics |
+|---|---|---|
+| **Node & Tag** | `name`, `*`, `(type)`, `(type)name` | Match by node name, wildcard, KDL type annotation, or both |
+| **Properties** | `[key]`, `[key=val]`, `[key^=val]`, `[key$=val]`, `[key~=val]`, `[(type)key=val]` | Property presence, exact, prefix, suffix, substring, or typed property match |
+| **Positional Args** | `[N]`, `[N=val]`, `[N^=val]`, `[N$=val]`, `[N~=val]`, `[(type)N]`, `[*=val]` | Argument at 0-based index `N` (or any positional arg `*`) match |
+| **Combinators** | `A B`, `A > B`, `A + B`, `A ~ B`, `A, B` | Descendant, direct child, adjacent sibling, general sibling, deduplicated union |
+| **Pseudo-classes** | `:root`, `:first-child`, `:last-child`, `:nth-child(an+b)`, `:only-child`, `:empty`, `:not(compound)`, `:has(complex)`, `:has(> complex)` | `:root` matches top-level `KdlDocument` nodes only (never matches on `KdlNode.select()`) |
+
+### 3.4 `ErrorCode` Summary Table (`core/contexts.py` & `core/linter.py`)
+
+| Code | `ErrorCode` Member | Severity | Summary |
+|---|---|---|---|
+| `E000` | `SYNTAX_ERROR` | ERROR | KDL 2.0 syntax parse error or unhandled build exception |
+| `E001` | `INVALID_ARGUMENT_COUNT` | ERROR | Wrong number of positional arguments, empty block, or inline schema name collision |
+| `E002` | `INVALID_ARGUMENT_VALUE` | ERROR | Invalid argument value/type, malformed regex/CSS/XPath, invalid HTTP status, or invalid `@error:<suffix>` |
+| `E003` | `INVALID_IMPORT` | ERROR | Missing import block/kind annotation, missing file, cyclic import, or duplicate import |
+| `E040` | `MALFORMED_DOTPATH` | ERROR | Malformed GJSON dot-path in `from=`/`path=`/`jsonify` (leading/trailing dot, `..`, invalid filter) |
+| `E041` | `DUPLICATE_JSON_KEY` | ERROR | Duplicate JSON field name or duplicate source key in `json` schema |
+| `E100` | `TYPE_MISMATCH` | ERROR | Pipeline input/output type mismatch, missing preceding op, or incompatible `fallback` type |
+| `E200` | `UNKNOWN_NODE` | ERROR | Unknown top-level declaration, pipeline operation, or predicate |
+| `E203` | `DISALLOWED_DIRECTIVE` | ERROR | Directive or HTML op used in forbidden context (e.g., HTML op in `(raw)struct`, `@init` in `fn`, field in `(rest)struct`) |
+| `E300` | `UNDEFINED_SYMBOL` | ERROR | Reference to undeclared `struct`, `json`, `define`, or `extension` |
+| `E301` | `UNDEFINED_INIT_FIELD` | ERROR | `@name` (`Self`) references an undeclared `@init` field |
+| `E302` | `INVALID_DECLARATION_ORDER` | ERROR | Local `struct` or `json` referenced before its declaration in the same file |
+| `E400` | `INVALID_TYPE_DECLARATION` | ERROR | Invalid struct/json type, invalid `extension` signature, duplicate `@error` variant name, or duplicate key in `@error` args+props |
+| `E401` | `MISSING_REQUIRED_FIELD` | ERROR | Struct missing required directives (`@split-doc`, `@key`, `@value`, `@table`, `@rows`, `@match`, `@request`) |
+| `E402` | `DUPLICATE_DECLARATION` | ERROR | Duplicate symbol declaration or case-folded target identifier collision |
+| `E403` | `INVALID_IDENTIFIER` | ERROR | Symbol name cannot form a valid identifier or collides with a reserved keyword in target language |
+| `W011` | `DEPRECATED_JSON_ALIAS` | WARNING | Deprecated positional JSON key alias (`field str "wire_key"`); use `from="wire_key"` |
+| `W040` | `WHITESPACE_IN_PATH` | WARNING | Leading or trailing whitespace in `from="..."` path |
+| `W041` | *(literal `"W041"` in `linter.py`)* | WARNING | `path="..."` used on a `json` field instead of canonical `from="..."` |
 
 ---
 
-## Health Check (health.py)
+## 4. Type System & AST Node Catalog
 
-```python
-check_struct_health(struct, html, module=None) → HealthResult
-```
+### 4.1 `VariableType`, `TypeInfo` & `StructType` (`ast/types.py`)
 
-Verifies selectors match elements in real HTML without code generation.
-- Single selectors (css, xpath): fail if 0 matches
-- Multi selectors (css-all, xpath-all): fail if 0 matches
-- Remove selectors: warn if 0 matches
-- Fallback downgrades fail → warn
-- Recurses into nested structs (with cycle detection)
+- **`VariableType(IntEnum)` (`VT`)**: `AUTO` (internal inference), `DOCUMENT`, `STRING`, `INT` (64-bit signed), `FLOAT` (64-bit IEEE 754), `BOOL`, `NULL`, `NESTED` (terminal), `JSON` (terminal).
+- **`TypeInfo` (frozen dataclass)**:
+
+| Field / Property | Type | Meaning |
+|---|---|---|
+| `base` | `VariableType` | Scalar base type (`DOCUMENT`, `STRING`, `INT`, `FLOAT`, `BOOL`, `NULL`, `NESTED`, `JSON`, `AUTO`) |
+| `is_array` / `.is_list` | `bool` | List/array modifier (`False` default) |
+| `is_optional` | `bool` | Nullable/optional modifier (set by `?` suffix or `fallback #null`) |
+| `ref` / `.is_ref` | `str \| None` / `bool` | Target `Struct` or `JsonDef` name (`is_ref` is `True` when `base in (NESTED, JSON)` and `ref is not None`) |
+| `omitempty` | `bool` | `@omitempty` — key may be absent from JSON wire object |
+| `skip` | `bool` | `@skip` — field is parsed/ignored and excluded from projected output |
+| `is_dict` | `bool` | Dictionary container modifier (`(dict)json` or inline `(dict)` JSON field) |
+| `key_type_info` | `TypeInfo \| None` | Dictionary key type (defaults to `STRING`) |
+| `value_type_info` | `TypeInfo \| None` | Dictionary value type (`TypeInfo` for scalar, array, or referenced `JsonDef`) |
+
+- **`StructType(IntEnum)`**:
+  - `ITEM`: single object extraction -> struct/dict (`parse() -> <Name>Type`).
+  - `LIST`: repeating elements -> `list[<Name>Item]`; requires `@split-doc`.
+  - `DICT`: key-value map -> `dict[str, V]`; requires `@split-doc`, `@key`, `@value`.
+  - `TABLE`: HTML table -> `dict`; requires `@table`, `@rows`, `@match`, `@value`.
+  - `FLAT`: deduplicated string list -> `list[str]`.
+  - `REST`: HTTP/JSON API client (`StructRest`); requires `@request`, optional `@error[:<suffix>]`.
+  - `RAW`: plain-text (`STRING`-input) struct (`(raw)struct`, `Struct.is_raw = True`); forbids DOM operations.
+
+### 4.2 Complete AST Node Catalog (`ssc_codegen/ast/`)
+
+All nodes inherit `Node(span: Span | None, description: str, accept: VariableType, ret: VariableType, parent: Node | None, body: list[Any])`.
+
+| Layer | AST Node Class | Key Fields & Contract |
+|---|---|---|
+| **Module** | `Module` | `doc: str \| None`, `body: list[Node]`, `source_file: str \| None`, `extensions: dict[str, ExtensionDef]` |
+| | `Utilities`, `CodeStartHook`, `CodeEndHook`, `Docstring` | Hook/marker nodes in `Module.body` (`Docstring` is deprecated; module docstring lives in `Module.doc`) |
+| **Extension** | `ExtensionDef` | `namespace: str`, `name: str`, `accept: ExtensionType`, `ret: ExtensionType`, `targets: dict[str, ExtensionTarget]` |
+| | `ExtensionType` | `base: VariableType`, `is_array: bool`, `is_optional: bool`, `is_generic: bool` (`T` binds full input `TypeInfo`) |
+| | `ExtensionTarget` | `lang: str` (`py\|js\|go\|rust`), `imports: tuple[ExtensionImport, ...]`, `helpers: tuple[ExtensionHelper, ...]`, `emit: str` |
+| | `ExtensionHelper`, `ExtensionImport` | `name: str`, `source: str`, `imports: tuple[str, ...]` / `line: str` |
+| | `ExtensionCall` | `key: str` (`Namespace.op`), `defn: ExtensionDef`, `input_type: TypeInfo`, `output_type: TypeInfo` |
+| **Struct & Function** | `StructBase` | `name: str`, `struct_type: StructType`, `keep_order: bool`, `doc: str \| None`, `is_raw: bool` |
+| | `Struct(StructBase)` | HTML or `(raw)struct` parser container (`is_raw=True` for `StructType.RAW`) |
+| | `StructRest(StructBase)` | `errors: list[ErrorResponse]` — `(rest)struct` HTTP/JSON API client container |
+| | `FunctionDef` | `name: str`, `is_raw: bool`, `doc: str \| None` — module-level `fn` (`DOCUMENT` input) or `(raw)fn` (`STRING` input) |
+| | `Field` | `name: str`, `ret: VariableType`, `is_array: bool`, `is_optional: bool`, `ref: str \| None`, `type_info: TypeInfo` |
+| | `Init`, `InitFieldCall`, `InitField` | `@init` container, constructor call marker (`name: str`), and cached method (`name: str`, `type_info: TypeInfo`) |
+| | `PreValidate`, `CheckMethod` | `@pre-validate` assert block and `@check <name>` boolean method (`name: str`, pipeline ends in `to-bool`) |
+| | `SplitDoc`, `Key`, `Value` | `@split-doc`, `@key`, `@value` directive pipelines |
+| | `TableConfig`, `TableRows`, `TableMatchKey` | `@table`, `@rows`, `@match` directive pipelines for `StructType.TABLE` |
+| | `StartParse`, `StructDocstring` | Entrypoint dispatch node (`struct_type: StructType`) and docstring marker |
+| **REST & Transport** | `MethodBase` | `name: str`, `doc: str \| None`, `http_request: RequestHttp` |
+| | `MethodFetch(MethodBase)` | `response_path: str \| None`, `response_join: str \| None`, `is_raw: bool` — HTML/raw `@request` fetch method |
+| | `MethodRest(MethodBase)` | `response_schema: str \| None`, `response_is_array: bool`, `result_alias_name: str` — REST endpoint method |
+| | `RequestHttp` | `method: str`, `url: PlaceholderTemplate`, `headers: dict[str, PlaceholderTemplate]`, `cookies: dict[str, PlaceholderTemplate]`, `params: dict[str, PlaceholderTemplate \| list[PlaceholderTemplate]]`, `body_kind: str`, `payload: PlaceholderTemplate`, `placeholders: tuple[PlaceholderSpec, ...]` |
+| | `PlaceholderTemplate` (`Template`), `PlaceholderSpec` | `parts: tuple[str \| PlaceholderSpec, ...]` / `name: str`, `type_name: str`, `is_array: bool`, `is_optional: bool`, `style: str` |
+| | `ErrorResponse` | `status: int`, `schema_name: str`, `conditions: dict[str, Any]`, `required_keys: tuple[str, ...]`, `suffix: str \| None` (`@error:<suffix>`) |
+| | `ResultVariantDef` | `name: str`, `status: int`, `schema_name: str`, `schema_is_array: bool`, `struct_name: str` |
+| | `ResultAliasDef` | `name: str`, `response_schema: str \| None`, `response_is_array: bool`, `err_variants: list[str]`, `method_node: MethodRest \| None`, `struct_name: str` |
+| | `MatcherEntry`, `MatcherListDef` | `variant_name: str`, `status: int`, `schema_name: str`, `schema_is_array: bool`, `required_keys: tuple[str, ...]`, `conditions: dict[str, Any]` / `struct_name: str`, `entries: list[MatcherEntry]` |
+| **Pipeline Ops** | `CssSelect`, `CssSelectAll`, `XpathSelect`, `XpathSelectAll`, `CssRemove`, `XpathRemove` | `query: str`, `queries: list[str]` (pattern-match fallback block when `len(queries) >= 2`) |
+| | `Text`, `Raw`, `Attr` | `Text()`, `Raw(inner: bool = False)`, `Attr(keys: list[str])` |
+| | `Trim`, `Ltrim`, `Rtrim`, `NormalizeSpace`, `RmPrefix`, `RmSuffix`, `RmPrefixSuffix`, `Fmt`, `Repl`, `ReplMap`, `Lower`, `Upper`, `Split`, `Join`, `Unescape` | `chars: str`, `substr: str`, `template: str` (`Fmt`), `old: str`, `new: str` (`Repl`), `replacements: dict[str, str]` (`ReplMap`), `sep: str` (`Split`/`Join`) |
+| | `Re`, `ReAll`, `ReSub` | `pattern: str`, `repl: str` (`ReSub`), `location: str` (`Re` diagnostic context for `SscRegexError`) |
+| | `Index`, `Slice`, `Len`, `Unique` | `Index(i: int)`, `Slice(start: int, end: int)`, `Len()`, `Unique()` |
+| | `ToInt`, `ToFloat`, `ToBool`, `Jsonify`, `Nested` | `Jsonify(schema_name: str, path: str \| None, is_array: bool)`, `Nested(struct_name: str, struct_type: StructType, is_raw: bool)` |
+| | `Fallback`, `Self`, `Return` | `Fallback(value: Any)`, `Self(name: str)` (`@name`), `Return(struct_type: StructType, keep_order: bool, type_info: TypeInfo)` |
+| **Predicates** | `Filter`, `Assert`, `Match` | Containers (`Assert` carries `message: str`, `location: str` for `SscAssertionError`) |
+| | `PredEq`, `PredNe`, `PredStarts`, `PredEnds`, `PredContains`, `PredRe`, `PredReAny`, `PredReAll`, `PredCss`, `PredXpath`, `PredHasAttr`, `PredAttrEq`, `PredAttrNe`, `PredAttrStarts`, `PredAttrEnds`, `PredAttrContains`, `PredAttrRe`, `PredTextStarts`, `PredTextEnds`, `PredTextContains`, `PredTextRe`, `PredCountEq`, `PredCountNe`, `PredCountGt`, `PredCountLt`, `PredCountGe`, `PredCountLe`, `PredCountRange`, `LogicNot`, `LogicAnd`, `LogicOr` | `values: list[str \| int \| float]`, `pattern: str`, `attr_name: str`, `query: str`, `start: int`, `end: int` |
+| **Type & JSON Defs** | `TypeDef`, `TypeDefField` | `name: str`, `struct_type: StructType`, `fields: list[TypeDefField]`, `value_type: TypeInfo \| None`, `is_raw: bool` / `name: str`, `type_info: TypeInfo` |
+| | `JsonDef`, `JsonDefField` | `name: str`, `is_array: bool`, `is_dict: bool`, `key_type: TypeInfo \| None`, `value_type: TypeInfo \| None`, `fields: list[JsonDefField]` / `name: str`, `alias: str \| None`, `type_info: TypeInfo` |
 
 ---
 
-## Scout (explore.py)
+## 5. Codegen Architecture & Target Backends
 
-```python
-run_scout(html, filters, nav, fields, *, invert, limit, offset, snippet) → ScoutResult
-run_discover(html) → DiscoverResult
-```
+### 5.1 `BaseWalker`, `WalkContext` & `ModuleBuilder` Two-Pass Codegen
 
-HTML reconnaissance — regex on text/attribute values (CSS cannot express
-this) plus optional CSS intersect and relative navigation (parent/child/
-sibling). Auxiliary tool for picking selectors before writing `.kdl`,
-or for one-off data extraction. Pure functions, no AST/codegen coupling.
+- **`BaseWalker` (`traversal/walker.py`)**: Dispatches AST node classes via `_DISPATCH` to `visit_<node>(self, node, ctx) -> list[str] | str | None` (`""` emits a blank line). Three body traversal modes:
+  1. **Container (`walk_children`)**: `depth + 1`, `index = 0`, no index advance between children (`JsonDef`, `TypeDef`, `StructBase`, `Init`).
+  2. **Pipeline (`walk_pipeline`)**: `ctx.advance()` (`index + 1`) after each operation (`Field`, `FunctionDef`, `InitField`, `PreValidate`, `CheckMethod`, `SplitDoc`, `Key`, `Value`, `Table*`). Special-cases trailing `Fallback` by wrapping preceding steps in a target try/catch/recovery block.
+  3. **Predicate (`walk_predicates`)**: `depth + 1`, `index = 0`, `ctx.advance()` between sibling conditions (`Filter`, `Assert`, `Match`, `LogicNot`, `LogicAnd`, `LogicOr`).
+- **`WalkContext` (`traversal/context.py`)**: Frozen dataclass with `index: int = 0`, `depth: int = 0`, `var_name: str = "v"`, `indent_char: str = "    "`, `meta: dict[str, Any]`.
+  - Properties: `.prv -> str` (`v` when `index == 0` else `v{index - 1}`), `.nxt -> str` (`v{index}`), `.indent -> str` (`indent_char * depth`).
+  - State transitions: `.advance() -> WalkContext` (`index + 1`), `.advance_n(n) -> WalkContext`, `.deeper() -> WalkContext` (`depth + 1`), `.reset_index() -> WalkContext` (`index = 0`).
+- **`ModuleBuilder` (`generation/builder.py`)**: Idempotent accumulator with `require_import(line)`, `require_std(name, *, code, imports=())`, `require_runtime(name, *, code, imports=())`, and `reset()`.
+- **Two-Pass Codegen**: Visitors execute `_walk_module` twice — Pass 1 populates `ModuleBuilder` (`imports`, `std_defs`, `runtime_defs`); Pass 2 emits the final source with exact imports and helper definitions.
 
-- **Filters** (AND-combine): `--text REGEX`, `--attr NAME[=VAL|=~REGEX]`, `--tag NAME`, `--css SEL`
-- **Modifiers**: `-I` ignore-case, `-F` fixed (escape regex), `-v` invert
-- **Navigation**: `--up/down/next/prev N` (post-filter, pre-output, deduped by `id(tag)`)
-- **Output fields**: `path,tag,text,html,attrs,classes,index,line,attr.NAME` (default `path,tag,text`)
-- **Exit codes**: 0 on match, 1 on no match, 2 on error
+### 5.2 Python `DomSpelling` & `HttpLibStrategy`
 
-Reuses bs4+lxml from health.py. `path` field returns copy-pasteable CSS
-selector for direct use in `.kdl` schemas.
+- **`DomSpelling` (`targets/python/html_libs/base.py`)**: Passed to `PythonVisitor(dom_spelling_cls=..., bs4_parser=..., http_io=...)`.
+  - Subclasses: `Bs4DomSpelling` (emits `BS4_FEATURES = "lxml" | "html.parser" | "html5lib"` from `--bs4-parser`), `LxmlDomSpelling` (uses `FALLBACK_HTML_STR`), `ParselDomSpelling`, `SlaxDomSpelling`.
+  - Contract: 10 expression methods (`css_select`, `css_select_all`, `css_remove`, `xpath_select`, `xpath_select_all`, `xpath_remove`, `text`, `raw`, `attr`, `to_bool`) return `list[str]`; 14 predicate methods (`pred_css`, `pred_xpath`, `pred_has_attr`, `pred_attr_*`, `pred_text_*`) return `str`.
+- **`HttpLibStrategy` (`targets/python/http_libs/base.py`)**:
+  - `HttpxStrategy` (`httpx`): native sync (`httpx.Client`) and async (`httpx.AsyncClient`).
+  - `Httpx2Strategy` (`httpx2`): emits **HTTP fallback import** (`try:\n    import httpx2 as httpx\nexcept ImportError:\n    import httpx`) and reuses `httpx.Client` / `httpx.AsyncClient` types.
+  - `AioHttpStrategy` (`aiohttp`): async-native (`aiohttp.ClientSession`); sync wrapper via `asyncio.run` + `ThreadPoolExecutor` fallback (rejects `--http-io sync`).
+  - `RequestsStrategy` (`requests`): sync-native (`requests.Session`); async wrapper via `loop.run_in_executor`.
+  - **HTTP I/O Mode (`--http-io both|sync|async`)**: Controls whether sync (`fetch` / `<endpoint>`), async (`async_fetch` / `async_<endpoint>`), or both method pairs and client imports are emitted.
 
-`run_discover` (v2) — single-call page overview for LLM selector design.
-Returns `DiscoverResult` with: `tag_stats`, `class_stats`, `id_stats`,
-`data_attrs`, `repeat_containers` (each with `item_selector` anchored
-on rare `#id`/class ≤5 occurrences, ≤3 hops; 3 boolean flags
-`single_link_item`/`has_th_row`/`single_label_child`; `common_descendants`
-with `sample`/`sample_tail` lists), `table_candidates` (`<table>` +
-row keys from `<th>` or first `<td>`), `json_signals` (with
-`top_level_keys` when body parses as JSON), `page_summary`
-(`has_table`, `has_embedded_json`, `container_count_estimate`),
-`sample_normalized` global flag (always `true` — samples are
-whitespace-collapsed). `selector_stability: "fragile"` emitted only
-when item_selector path is unreliable.
+### 5.3 4-Target Backend Capability Matrix
+
+| Feature | Python (`PythonVisitor`) | JavaScript (`JsVisitor`) | Go (`GoVisitor`) | Rust (`RustVisitor`) |
+|---|---|---|---|---|
+| **HTML Backend** | `bs4` (`lxml`/`html.parser`/`html5lib`), `lxml`, `parsel`, `slax` | Vanilla DOM (`DOMParser` / `document`) | `PuerkitoBio/goquery` | `dom_query` (`Document`, `Selection`) |
+| **HTTP Clients** | `httpx` (default), `httpx2`, `aiohttp`, `requests` | `fetch` (default), `axios` | `net/http` (`*http.Client`) | `reqwest` (`reqwest::Client`, async) |
+| **JSON Projection** | `_project_<Schema>` allowlist projectors + `TypedDict` | `_project<Schema>` allowlist projectors + JSDoc `@typedef` | `project<Schema>` via `tidwall/gjson` + Go `struct` | `#[derive(Deserialize)]` structs + `serde_json::Value` GJSON projector `project_<schema>` |
+| **REST Result Type** | `Union[Ok[T], <Struct>Err<Status>..., UnknownErr, TransportErr]` | `{ok: true, value} \| {ok: false, kind, status, error}` | `<Method>Result` struct (`IsOk()`, `As<Err>()`) | `Result<T, <Struct>Error>` enum (`Err<Status><Suffix>`, `Unknown`, `Transport`) |
+| **Per-Call Request Opts** | `**kwargs: Any` (`ssc_merge_kwargs`) | `opts = {}` (`_sscMergeOpts`) | `opts ...sscReqOpt` (`WithHeader`, `WithCookie`, `WithTimeout`) | `opts: Option<&SscRequestOpts>` |
+| **Runtime Output** | Inlined by default; `-R` emits `<runtime_name>.py` | Inlined per `.js` file | Always emits shared `sscgen_runtime.go` | Always emits shared `sscgen_runtime.rs` |
+
+### 5.4 JSON Projectors, Runtime HTTP Delegation & Separate Runtime (`-R`)
+
+- **JSON Projectors**: Strict allowlist functions (`_project_<Schema>` in Python/JS/Rust, `project<Schema>` in Go) that extract declared fields (and GJSON paths via `from="..."`), enforce required/nullable/`@omitempty` contracts, drop unmodeled wire keys, and raise schema-qualified errors on contract mismatch (enabling safe runtime matcher fallthrough in `@error` evaluation).
+- **Runtime HTTP Delegation**: Generated `MethodFetch` and `MethodRest` emit only a typed method signature and a single call to `ssc_rest_call` / `ssc_fetch_html` (or target equivalent), keeping option merging, `response_path` extraction, and `@error` matcher dispatch inside the runtime helper.
+- **Separate Runtime (`-R`, Python)**: `generation/runtime.py:register_runtime_file` writes helpers (`_BASE_UTILITY_LINES`, `PY_JSON_PROJECT_HELPER`, `rest_runtime_lines`, user extension `runtime_defs`) to `<runtime_name>.py`. The parser file keeps `TypedDict`, `@dataclass` error variant subclasses, and client type annotations, while `targets/python/rest.py:runtime_export_names(module, *, need_fallback)` imports only the runtime symbols required by that module.
+
+---
+
+## 6. Extension Checklists & Health/Scout APIs
+
+### 6.1 Step-by-Step Extension Checklists
+
+#### 1. Add a New Pipeline Operation
+1. Define the AST dataclass in `ssc_codegen/ast/<category>.py` (inherit `Node`, set `accept`/`ret` defaults) and re-export in `ssc_codegen/ast/__init__.py`.
+2. Add argument and context lint validation in `ssc_codegen/core/linter.py` (`lint_pipeline_op`).
+3. Register the operation type signature `OpSig` in `ssc_codegen/core/type_checking.py` (`OP_TYPES`).
+4. Add the KDL node parser in `ssc_codegen/core/expressions.py` (update central `E001`/`E100` guard sets if applicable).
+5. Register `NodeClass: "visit_<op>"` in `ssc_codegen/traversal/walker.py` (`_DISPATCH`).
+6. Implement `visit_<op>(self, node, ctx)` in `PythonVisitor`, `JsVisitor`, `GoVisitor`, and `RustVisitor` (plus `DomSpelling` ABC and `bs4`/`lxml`/`parsel`/`slax` subclasses if DOM-specific).
+
+*(Note: For project-specific operations, prefer DSL `extension Namespace { op { sig ...; py/js/go/rust { ... } } }`, which lowers to `ExtensionCall` without compiler changes.)*
+
+#### 2. Add a New Struct Directive
+1. Define the AST node in `ssc_codegen/ast/struct.py` (inherit `Node`) and re-export in `ssc_codegen/ast/__init__.py`.
+2. Add structural validation in `ssc_codegen/core/linter.py` (`_lint_single_struct` and allowed directive sets).
+3. Parse the directive in `ssc_codegen/core/struct_parser.py` (`parse_struct_body`).
+4. Register in `ssc_codegen/traversal/walker.py` (`_DISPATCH`) and implement `visit_<directive>` across `PythonVisitor`, `JsVisitor`, `GoVisitor`, and `RustVisitor`.
+
+#### 3. Add a New Python `DomSpelling` Backend
+1. Subclass `DomSpelling` in `ssc_codegen/targets/python/html_libs/<lib>.py`: set `parser_imports`, `document_type`, `document_array_type`, `init_arg_type`, `init_from_str_expr`, `extra_utilities`, `supports_xpath`; implement all 10 expression methods (`-> list[str]`) and 14 predicate methods (`-> str`).
+2. Re-export in `ssc_codegen/targets/python/html_libs/__init__.py` and instantiate `PY_<LIB>_CONVERTER` in `ssc_codegen/targets/python/__init__.py`.
+3. Register the spelling class in `ssc_codegen/targets/resolver.py` (`_resolve_python`) and `ssc_codegen/main.py` (`HtmlLib` enum).
+
+#### 4. Add a New Python `HttpLibStrategy`
+1. Subclass `HttpLibStrategy` in `ssc_codegen/targets/python/http_libs/<client>.py`: set `import_line`, `sync_client_type`, `async_client_type`, `transport_exception`, and implement `rest_runtime_lines() -> list[str]`.
+2. Export in `ssc_codegen/targets/python/http_libs/__init__.py` and register in `PythonVisitor._HTTP_STRATEGIES` (`ssc_codegen/targets/python/visitor.py`).
+3. Add the client name to valid Python HTTP clients in `ssc_codegen/targets/resolver.py` (`_resolve_python`).
+
+#### 5. Add a New Target Language Backend (`Schema converter`)
+1. Create `ssc_codegen/targets/<lang>/` with `visitor.py` (`<Lang>Visitor(BaseWalker)` implementing all `_DISPATCH` handlers), `rest.py`, and `runtime.py`.
+2. Register target identifier rules and reserved keywords in `ssc_codegen/symbols.py` (`TARGET_LANGUAGES`, case transforms, keyword sets).
+3. Add the target block key to `extension` validation in `ssc_codegen/core/extensions.py`.
+4. Add `_resolve_<lang>(spec)` in `ssc_codegen/targets/resolver.py` and wire the CLI subcommand in `ssc_codegen/main.py`.
+
+### 6.2 Health & Scout Programmatic APIs
+
+| Function | Signature (`In -> Out`) | Behavior Summary |
+|---|---|---|
+| `check_struct_health` (`ssc_codegen/health.py`) | `(struct: StructBase, html: str, module: Module \| None = None) -> HealthResult` | Evaluates CSS/XPath selectors against `html` (`bs4` + `lxml`) without codegen. Single/multi selectors fail on `0` matches; remove selectors warn on `0` matches; trailing `fallback` downgrades fail to warn; recurses into `nested` structs with cycle detection. |
+| `run_scout` (`ssc_codegen/explore.py`) | `(html: str, filters: CompiledFilters, nav: NavSpec, fields: list[str], *, invert: bool = False, limit: int = 50, offset: int = 0, snippet: int = 200) -> ScoutResult` | Pure HTML reconnaissance: applies AND-combined regex/text/attr/tag/CSS filters, performs post-filter DOM navigation (`up`/`down`/`next`/`prev` deduplicated by element identity), and returns copy-pasteable CSS `path` selectors. |
+| `run_discover` (`ssc_codegen/explore.py`) | `(html: str) -> DiscoverResult` | Single-call page structure analysis for LLM selector design: returns `tag_stats`, `class_stats`, `id_stats`, `data_attrs`, `repeat_containers` (with anchored `item_selector`, stability flag, and `common_descendants`), `table_candidates`, `json_signals`, and `page_summary`. |
