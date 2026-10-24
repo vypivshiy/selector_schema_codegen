@@ -48,7 +48,7 @@ from kdlquery import KdlNode
 
 from ssc_codegen.core.contexts import LintContext, ParseContext, WalkCtx
 from ssc_codegen.core.expressions import parse_expressions
-from ssc_codegen.core.linter import is_http_status
+from ssc_codegen.core.linter import _ERROR_SUFFIX_RE, is_http_status
 from ssc_codegen.core.type_checking import check_pipeline_types
 
 # AST node types forbidden in (raw)struct — they require a DOM document.
@@ -271,7 +271,12 @@ def parse_struct(
                 http.parent = fetch_method
                 fetch_method.body.append(http)
                 parent.body.append(fetch_method)
-        elif node.name == "@error":
+        elif node.name == "@error" or node.name.startswith("@error:"):
+            raw_suffix = node.name.split(":", 1)[1] if ":" in node.name else ""
+            if ":" in node.name and (
+                not raw_suffix or not _ERROR_SUFFIX_RE.fullmatch(raw_suffix)
+            ):
+                continue
             if not node.args or len(node.args) < 2:
                 lint.error(
                     node,
@@ -293,6 +298,11 @@ def parse_struct(
                 # Structural lint owns the diagnostic. This only prevents
                 # malformed statuses from producing a partial AST.
                 continue
+            suffix = (
+                str(ctx.property_defines.get(raw_suffix, raw_suffix))
+                if raw_suffix
+                else ""
+            )
             schema_name = str(
                 ctx.property_defines.get(node.args[1].value, node.args[1].value)
             )
@@ -315,6 +325,7 @@ def parse_struct(
                 schema_name=schema_name,
                 required_keys=required_keys,
                 conditions=conditions,
+                suffix=suffix,
             )
             parent.body.append(err)
         else:

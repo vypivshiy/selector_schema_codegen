@@ -12,6 +12,8 @@ syntax, JSDoc, dataclass layout) is the converter's job.
 
 from __future__ import annotations
 
+import re
+
 from ssc_codegen.ast import (
     JsonDef,
     MatcherEntry,
@@ -25,25 +27,41 @@ from ssc_codegen.ast.module import Module
 from ssc_codegen.ast.struct import ErrorResponse
 from ssc_codegen.naming import to_pascal_case
 
+_UNESCAPED_DOT_RE = re.compile(r"(?<!\\)\.")
+
+
+def _leaf_key_pascal(path: str) -> str:
+    """Extract the leaf non-numeric segment of a dot-path in PascalCase."""
+    raw_segs = _UNESCAPED_DOT_RE.split(path)
+    segs = [
+        seg.replace(r"\.", ".").replace(r"\\", "\\") for seg in raw_segs if seg
+    ]
+    if not segs:
+        return ""
+    non_numeric = [seg for seg in segs if not seg.isdigit()]
+    leaf = non_numeric[-1] if non_numeric else segs[-1]
+    return to_pascal_case(leaf.replace(".", "_").replace("-", "_"))
+
 
 def err_subclass_name(struct_name: str, err: ErrorResponse) -> str:
     """Generate a deterministic error variant subclass name for an HTTP error mapping.
 
-    Concatenates `PascalCase(struct) + "Err" + status + PascalCase(required_keys) + PascalCase(conditions)`.
+    Uses the explicit `@error:<suffix>` when present, or appends at most the first
+    two leaf non-numeric dot-path segments from `required_keys` and `conditions`.
 
     Args:
-        struct_name: Base name of the enclosing REST struct.
-        err: The `ErrorResponse` AST node containing status and condition keys.
+        struct_name (str): Base name of the enclosing REST struct.
+        err (ErrorResponse): The `ErrorResponse` AST node containing status, suffix, and condition keys.
 
     Returns:
-        The deterministic subclass name (e.g. `UserClientErr404NotFound`).
+        str: The deterministic subclass name (e.g. `UserClientErr404NotFound`).
     """
     base = f"{to_pascal_case(struct_name)}Err{err.status}"
-    for key in err.required_keys:
-        base += to_pascal_case(key.replace(".", "_").replace("-", "_"))
-    if err.conditions:
-        for key in err.conditions:
-            base += to_pascal_case(key.replace(".", "_").replace("-", "_"))
+    if err.suffix:
+        return f"{base}{to_pascal_case(err.suffix.replace('-', '_'))}"
+    all_keys = [*err.required_keys, *err.conditions.keys()]
+    for key in all_keys[:2]:
+        base += _leaf_key_pascal(key)
     return base
 
 

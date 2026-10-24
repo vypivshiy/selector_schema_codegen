@@ -871,15 +871,14 @@ class ErrorResponse(Node):
     Attributes:
         status: HTTP status code constraint (100–599, e.g. `404`, `500`).
         schema_name: Identifier of the JSON schema model used for error payload deserialization.
-        required_keys: Top-level keys required to exist in the error response body.
+        required_keys: Keys or dot-paths required to exist in the error response body.
         conditions: Map of dot-path property checks against the error JSON body.
+        suffix: Optional explicit variant name suffix from `@error:<suffix>`.
 
     Examples:
         - KDL:
             ```kdl
-            @error 404 schema=NotFoundJson {
-                body-matches "code" "RESOURCE_NOT_FOUND"
-            }
+            @error:not-found 404 ResponseError error="Not found"
             ```
     """
 
@@ -887,6 +886,12 @@ class ErrorResponse(Node):
     schema_name: str = ""
     required_keys: list[str] = field(default_factory=list)
     conditions: dict[str, Any] = field(default_factory=dict)
+    suffix: str = ""
+
+    @property
+    def alias(self) -> str:
+        """Explicit error variant suffix alias."""
+        return self.suffix
 
 
 @dataclass

@@ -2217,3 +2217,219 @@ struct Page {
             "/// Clean and normalize text.\n/// Second line of fn doc."
             in rust_code
         )
+
+
+# ---------------------------------------------------------------------------
+# Ticket 01: @error:<suffix> variant naming, leaf-key auto-naming cap, E400
+# ---------------------------------------------------------------------------
+
+
+class TestErrorSuffixNamingAndCollisionLint:
+    """Tests for `@error:<suffix>`, leaf-key auto-naming cap, and `E400` collision lint."""
+
+    def test_explicit_error_suffix_parses_and_generates_across_all_targets(
+        self,
+    ):
+        from ssc_codegen.targets.golang import GO_CONVERTER
+        from ssc_codegen.targets.javascript import JS_CONVERTER
+        from ssc_codegen.targets.python import PY_BS4_CONVERTER
+        from ssc_codegen.targets.rust import RUST_CONVERTER
+
+        src = (
+            "json User { id int }\n"
+            "json ResponseError { error str }\n"
+            "struct AnimeVostAPI type=rest {\n"
+            '    @error:not-found 404 ResponseError error="Ничего не найдено" extra="ignored"\n'
+            '    @error 404 ResponseError "error"\n'
+            '    @request name=get-user response=User """\n'
+            "    GET /users/{{id:int}} HTTP/1.1\n"
+            "    Host: api.example.com\n"
+            '    """\n'
+            "}\n"
+        )
+        module, diags = parse_module(src)
+        assert not any(d.severity == Severity.ERROR for d in diags), diags
+
+        struct = next(n for n in module.body if isinstance(n, StructRest))
+        errors = struct.errors
+        assert len(errors) == 2
+        assert errors[0].suffix == "not-found"
+        assert errors[0].alias == "not-found"
+        assert errors[1].suffix == ""
+
+        py_code = PY_BS4_CONVERTER.convert(module, http_client="httpx")
+        assert (
+            "class AnimeVostAPIErr404NotFound(Err[ResponseErrorJson]):"
+            in py_code
+        )
+        assert (
+            "class AnimeVostAPIErr404Error(Err[ResponseErrorJson]):" in py_code
+        )
+        assert "AnimeVostAPIErr404NotFound, AnimeVostAPIErr404Error" in py_code
+
+        js_code = JS_CONVERTER.convert(module, http_client="fetch")
+        assert "@typedef {Object} AnimeVostAPIErr404NotFound" in js_code
+        assert "@typedef {Object} AnimeVostAPIErr404Error" in js_code
+        assert (
+            "Ok<UserJson> | AnimeVostAPIErr404NotFound | AnimeVostAPIErr404Error"
+            in js_code
+        )
+
+        go_code = GO_CONVERTER.convert(module)
+        assert "type AnimeVostAPIErr404NotFound struct {" in go_code
+        assert "type AnimeVostAPIErr404Error struct {" in go_code
+
+        rust_code = RUST_CONVERTER.convert(module)
+        assert "Err404NotFound(ResponseErrorJson)," in rust_code
+        assert "Err404Error(ResponseErrorJson)," in rust_code
+        assert (
+            "pub type AnimeVostAPIErr404NotFound = ResponseErrorJson;"
+            in rust_code
+        )
+        assert (
+            "pub type AnimeVostAPIErr404Error = ResponseErrorJson;" in rust_code
+        )
+
+    def test_auto_naming_extracts_leaf_non_numeric_segment_and_caps_at_two_keys(
+        self,
+    ):
+        from ssc_codegen.targets.golang import GO_CONVERTER
+        from ssc_codegen.targets.javascript import JS_CONVERTER
+        from ssc_codegen.targets.python import PY_BS4_CONVERTER
+        from ssc_codegen.targets.rust import RUST_CONVERTER
+
+        src = _rest_src(
+            errors=(
+                '    @error 404 Err "data.response.errors.0.detail"\n'
+                '    @error 400 Err "a.b.first" second="x" third="y"\n'
+                '    @error 422 Err "data.errors.0"\n'
+            )
+        )
+        module = _parse(src)
+
+        py_code = PY_BS4_CONVERTER.convert(module, http_client="httpx")
+        assert "class APIErr404Detail(Err[ErrJson]):" in py_code
+        assert "class APIErr400FirstSecond(Err[ErrJson]):" in py_code
+        assert "APIErr400FirstSecondThird" not in py_code
+        assert "class APIErr422Errors(Err[ErrJson]):" in py_code
+
+        js_code = JS_CONVERTER.convert(module, http_client="fetch")
+        assert "@typedef {Object} APIErr404Detail" in js_code
+        assert "@typedef {Object} APIErr400FirstSecond" in js_code
+        assert "APIErr400FirstSecondThird" not in js_code
+
+        go_code = GO_CONVERTER.convert(module)
+        assert "type APIErr404Detail struct {" in go_code
+        assert "type APIErr400FirstSecond struct {" in go_code
+
+        rust_code = RUST_CONVERTER.convert(module)
+        assert "Err404Detail(ErrJson)," in rust_code
+        assert "Err400FirstSecond(ErrJson)," in rust_code
+
+    @pytest.mark.parametrize(
+        "directive",
+        [
+            "@error:",
+            "@error:123bad",
+            "@error:-bad",
+            "@error:bad.name",
+        ],
+    )
+    def test_malformed_error_suffix_emits_e002(self, directive: str):
+        _, diags = parse_module(_rest_src(errors=f"    {directive} 404 Err\n"))
+        errs = [d for d in diags if d.severity == Severity.ERROR]
+        assert any(
+            d.code == "E002"
+            and "@error:<name> <status> <Schema>" in (d.hint or "")
+            for d in errs
+        ), errs
+
+    def test_suffixed_error_enforces_struct_type_args_status_duplicates_and_e300(
+        self,
+    ):
+        # 1. Forbidden outside (rest)struct -> E203
+        _, diags_item = parse_module(
+            'json Err { code int }\nstruct Page {\n    @error:not-found 404 Err\n    title { css "h1"; text }\n}\n'
+        )
+        assert any(d.code == "E203" for d in diags_item), diags_item
+
+        # 2. Missing arguments -> E001
+        _, diags_args = parse_module(
+            _rest_src(errors="    @error:not-found 404\n")
+        )
+        assert any(d.code == "E001" for d in diags_args), diags_args
+
+        # 3. Invalid HTTP status range -> E002
+        _, diags_status = parse_module(
+            _rest_src(errors="    @error:not-found 999 Err\n")
+        )
+        assert any(
+            d.code == "E002" and "100..599" in d.message for d in diags_status
+        ), diags_status
+
+        # 4. Duplicate positional & property keys -> E400
+        _, diags_dup_key = parse_module(
+            _rest_src(errors='    @error:not-found 404 Err code code="x"\n')
+        )
+        assert any(
+            d.code == "E400" and "duplicate keys" in d.message
+            for d in diags_dup_key
+        ), diags_dup_key
+
+        # 5. Undefined schema -> E300
+        _, diags_e300 = parse_module(
+            _rest_src(errors="    @error:not-found 404 MissingSchema\n")
+        )
+        assert any(
+            d.code == "E300" and "MissingSchema" in d.message
+            for d in diags_e300
+        ), diags_e300
+
+    def test_suffixed_error_resolves_cross_file_schema_import(self, tmp_path):
+        shared = tmp_path / "shared.kdl"
+        shared.write_text("json SharedErr { message str }\n", encoding="utf-8")
+        main = tmp_path / "main.kdl"
+        main_src = (
+            'import "./shared.kdl" { (json)SharedErr }\n'
+            "json User { id int }\n"
+            "struct API type=rest {\n"
+            "    @error:not-found 404 SharedErr\n"
+            '    @request name=get-user response=User """\n'
+            "    GET /users/{{id:int}} HTTP/1.1\n"
+            "    Host: api.example.com\n"
+            '    """\n'
+            "}\n"
+        )
+        main.write_text(main_src, encoding="utf-8")
+        module, diags = parse_module(main_src, source_path=main)
+        assert not any(d.severity == Severity.ERROR for d in diags), diags
+        struct = next(n for n in module.body if isinstance(n, StructRest))
+        assert len(struct.errors) == 1
+        assert struct.errors[0].suffix == "not-found"
+        assert struct.errors[0].schema_name == "SharedErr"
+
+    def test_duplicate_error_variant_name_collision_emits_e400(self):
+        src = _rest_src(
+            errors=(
+                '    @error 404 Err error="Ничего не найдено"\n'
+                '    @error 404 Err "error"\n'
+            )
+        )
+        _, diags = parse_module(src)
+        errs = [d for d in diags if d.severity == Severity.ERROR]
+        assert len(errs) == 1
+        assert errs[0].code == "E400"
+        assert "APIErr404Error" in errs[0].message
+        assert "@error:<name> <status> <Schema>" in (errs[0].hint or "")
+
+        # Collision from 2-key cap also emits E400
+        src_cap = _rest_src(
+            errors=(
+                '    @error 400 Err a b c="1"\n    @error 400 Err a b d="2"\n'
+            )
+        )
+        _, diags_cap = parse_module(src_cap)
+        errs_cap = [d for d in diags_cap if d.severity == Severity.ERROR]
+        assert len(errs_cap) == 1
+        assert errs_cap[0].code == "E400"
+        assert "APIErr400AB" in errs_cap[0].message
