@@ -20,6 +20,3 @@
 - [@request — встроенный HTTP конструктор + `(rest)struct`](learn/10-request.md)
 - [Scout — разведка HTML](learn/08-scout.md)
 - [LLM-компактная справка](llm.txt) — полная спецификация DSL в одном файле для контекста LLM
-- Для мейнтейнеров: [Правила линтера](maintainers/linter.md)
-- Для мейнтейнеров: [Как писать конвертеры](maintainers/converters.md)
-- Для мейнтейнеров: [kdlquery — CSS3-селекторы для KDL AST](maintainers/kdlquery.md)
