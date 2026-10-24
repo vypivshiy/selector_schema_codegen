@@ -26,11 +26,11 @@ Format: `path :: exported/key symbols — role`
 
 ### AST Package (`ssc_codegen/ast/`)
 - `ssc_codegen/ast/__init__.py` :: Re-exports all AST node classes, `VariableType`, `StructType`, `TypeInfo`, `VT`, `Span`.
-- `ssc_codegen/ast/base.py` :: `Node(span, description, accept, ret, parent, body)` — Abstract dataclass base for all AST nodes.
+- `ssc_codegen/ast/base.py` :: `Node(ret_type_info, accept_type_info, parent, body, span)` — Abstract dataclass base for all AST nodes (with deprecated `.ret`, `.accept`, `.type_info` backward-compatibility properties).
 - `ssc_codegen/ast/types.py` :: `VariableType` (`VT`), `TypeInfo`, `StructType` — Unified type system and struct kind enums.
-- `ssc_codegen/ast/module.py` :: `Module(doc, body, source_file, extensions)`, `Utilities`, `CodeStartHook`, `CodeEndHook`, `Docstring` (deprecated) — Root module container and hooks.
+- `ssc_codegen/ast/module.py` :: `Module(doc, source_file, extensions, body)`, `Utilities`, `CodeStartHook`, `CodeEndHook`, `Docstring` (deprecated) — Root module container and hooks.
 - `ssc_codegen/ast/extension.py` :: `ExtensionType`, `ExtensionImport`, `ExtensionHelper`, `ExtensionTarget`, `ExtensionDef`, `ExtensionCall` — Typed `!Namespace.op` extension definitions and call site node.
-- `ssc_codegen/ast/struct.py` :: `StructBase`, `Struct`, `StructRest`, `StructDocstring`, `Field`, `Init`, `InitFieldCall`, `InitField`, `PreValidate`, `CheckMethod`, `SplitDoc`, `Key`, `Value`, `TableConfig`, `TableRows`, `TableMatchKey`, `StartParse`, `MethodBase`, `MethodFetch`, `MethodRest`, `RequestHttp`, `PlaceholderTemplate` (`Template`), `PlaceholderSpec`, `ErrorResponse` — Structs, directives, and HTTP request AST nodes.
+- `ssc_codegen/ast/struct.py` :: `StructBase`, `Struct`, `StructRest`, `StructDocstring`, `Field`, `Init`, `InitFieldCall`, `InitField`, `PreValidate`, `CheckMethod`, `SplitDoc`, `Key`, `Value`, `TableConfig`, `TableRows`, `TableMatchKey`, `StartParse`, `MethodBase`, `MethodFetch`, `MethodRest`, `RequestHttp`, `PlaceholderTemplate`, `PlaceholderSpec`, `ErrorResponse` — Structs, directives, and HTTP request AST nodes.
 - `ssc_codegen/ast/rest.py` :: `ResultVariantDef`, `ResultAliasDef`, `MatcherEntry`, `MatcherListDef` — Synthesized REST error variant, result union alias, and runtime matcher table AST nodes.
 - `ssc_codegen/ast/function.py` :: `FunctionDef(name, is_raw, doc)` — Module-level `fn` and `(raw)fn` pipeline node.
 - `ssc_codegen/ast/typedef.py` :: `TypeDef`, `TypeDefField` — Synthesized typed output contract for HTML/raw structs.
@@ -132,6 +132,22 @@ Format: `path :: exported/key symbols — role`
 **`Module.body` Assembly Invariant**: Handlers never append `json` or `struct` nodes directly to `module.body` during iteration; `parse_module` performs a single final extend in strict order:
 `json_defs -> typedefs -> REST artifacts & structs -> functions`
 
+```kdl
+define TRIM-TEXT { text; trim }
+
+json PriceTag {
+    amount float
+    currency str from="curr_code"
+}
+
+struct ProductCard {
+    title { css "h2.title"; TRIM-TEXT }
+    pricing { css "script.price-json"; text; jsonify PriceTag }
+}
+
+fn extract_heading { css "h1"; TRIM-TEXT }
+```
+
 ### 3.2 Dual Type-Resolution Invariant
 
 - **Top-Down Declaration Order (Intra-file)**: Within a single `.kdl` file, referenced `struct` and `json` declarations must appear strictly **above** any `struct`, `json`, or `fn` that references them (`E302` `INVALID_DECLARATION_ORDER`).
@@ -202,51 +218,51 @@ Format: `path :: exported/key symbols — role`
   - `TABLE`: HTML table -> `dict`; requires `@table`, `@rows`, `@match`, `@value`.
   - `FLAT`: deduplicated string list -> `list[str]`.
   - `REST`: HTTP/JSON API client (`StructRest`); requires `@request`, optional `@error[:<suffix>]`.
-  - `RAW`: plain-text (`STRING`-input) struct (`(raw)struct`, `Struct.is_raw = True`); forbids DOM operations.
+  - `RAW`: plain-text (`STRING`-input) struct (`(raw)struct`, `Struct.type == StructType.RAW`); forbids DOM operations.
 
 ### 4.2 Complete AST Node Catalog (`ssc_codegen/ast/`)
 
-All nodes inherit `Node(span: Span | None, description: str, accept: VariableType, ret: VariableType, parent: Node | None, body: list[Any])`.
+All AST nodes inherit `Node(ret_type_info: TypeInfo, accept_type_info: TypeInfo, parent: Node | None, body: list[Any], span: Span | None)` (note `.accept`, `.ret`, and `.type_info` are deprecated backward-compatibility properties; `description` does not exist on `Node`).
 
 | Layer | AST Node Class | Key Fields & Contract |
 |---|---|---|
-| **Module** | `Module` | `doc: str \| None`, `body: list[Node]`, `source_file: str \| None`, `extensions: dict[str, ExtensionDef]` |
-| | `Utilities`, `CodeStartHook`, `CodeEndHook`, `Docstring` | Hook/marker nodes in `Module.body` (`Docstring` is deprecated; module docstring lives in `Module.doc`) |
-| **Extension** | `ExtensionDef` | `namespace: str`, `name: str`, `accept: ExtensionType`, `ret: ExtensionType`, `targets: dict[str, ExtensionTarget]` |
-| | `ExtensionType` | `base: VariableType`, `is_array: bool`, `is_optional: bool`, `is_generic: bool` (`T` binds full input `TypeInfo`) |
-| | `ExtensionTarget` | `lang: str` (`py\|js\|go\|rust`), `imports: tuple[ExtensionImport, ...]`, `helpers: tuple[ExtensionHelper, ...]`, `emit: str` |
-| | `ExtensionHelper`, `ExtensionImport` | `name: str`, `source: str`, `imports: tuple[str, ...]` / `line: str` |
-| | `ExtensionCall` | `key: str` (`Namespace.op`), `defn: ExtensionDef`, `input_type: TypeInfo`, `output_type: TypeInfo` |
-| **Struct & Function** | `StructBase` | `name: str`, `struct_type: StructType`, `keep_order: bool`, `doc: str \| None`, `is_raw: bool` |
-| | `Struct(StructBase)` | HTML or `(raw)struct` parser container (`is_raw=True` for `StructType.RAW`) |
-| | `StructRest(StructBase)` | `errors: list[ErrorResponse]` — `(rest)struct` HTTP/JSON API client container |
-| | `FunctionDef` | `name: str`, `is_raw: bool`, `doc: str \| None` — module-level `fn` (`DOCUMENT` input) or `(raw)fn` (`STRING` input) |
-| | `Field` | `name: str`, `ret: VariableType`, `is_array: bool`, `is_optional: bool`, `ref: str \| None`, `type_info: TypeInfo` |
-| | `Init`, `InitFieldCall`, `InitField` | `@init` container, constructor call marker (`name: str`), and cached method (`name: str`, `type_info: TypeInfo`) |
-| | `PreValidate`, `CheckMethod` | `@pre-validate` assert block and `@check <name>` boolean method (`name: str`, pipeline ends in `to-bool`) |
-| | `SplitDoc`, `Key`, `Value` | `@split-doc`, `@key`, `@value` directive pipelines |
-| | `TableConfig`, `TableRows`, `TableMatchKey` | `@table`, `@rows`, `@match` directive pipelines for `StructType.TABLE` |
-| | `StartParse`, `StructDocstring` | Entrypoint dispatch node (`struct_type: StructType`) and docstring marker |
-| **REST & Transport** | `MethodBase` | `name: str`, `doc: str \| None`, `http_request: RequestHttp` |
-| | `MethodFetch(MethodBase)` | `response_path: str \| None`, `response_join: str \| None`, `is_raw: bool` — HTML/raw `@request` fetch method |
-| | `MethodRest(MethodBase)` | `response_schema: str \| None`, `response_is_array: bool`, `result_alias_name: str` — REST endpoint method |
-| | `RequestHttp` | `method: str`, `url: PlaceholderTemplate`, `headers: dict[str, PlaceholderTemplate]`, `cookies: dict[str, PlaceholderTemplate]`, `params: dict[str, PlaceholderTemplate \| list[PlaceholderTemplate]]`, `body_kind: str`, `payload: PlaceholderTemplate`, `placeholders: tuple[PlaceholderSpec, ...]` |
-| | `PlaceholderTemplate` (`Template`), `PlaceholderSpec` | `parts: tuple[str \| PlaceholderSpec, ...]` / `name: str`, `type_name: str`, `is_array: bool`, `is_optional: bool`, `style: str` |
-| | `ErrorResponse` | `status: int`, `schema_name: str`, `conditions: dict[str, Any]`, `required_keys: tuple[str, ...]`, `suffix: str \| None` (`@error:<suffix>`) |
-| | `ResultVariantDef` | `name: str`, `status: int`, `schema_name: str`, `schema_is_array: bool`, `struct_name: str` |
-| | `ResultAliasDef` | `name: str`, `response_schema: str \| None`, `response_is_array: bool`, `err_variants: list[str]`, `method_node: MethodRest \| None`, `struct_name: str` |
-| | `MatcherEntry`, `MatcherListDef` | `variant_name: str`, `status: int`, `schema_name: str`, `schema_is_array: bool`, `required_keys: tuple[str, ...]`, `conditions: dict[str, Any]` / `struct_name: str`, `entries: list[MatcherEntry]` |
-| **Pipeline Ops** | `CssSelect`, `CssSelectAll`, `XpathSelect`, `XpathSelectAll`, `CssRemove`, `XpathRemove` | `query: str`, `queries: list[str]` (pattern-match fallback block when `len(queries) >= 2`) |
-| | `Text`, `Raw`, `Attr` | `Text()`, `Raw(inner: bool = False)`, `Attr(keys: list[str])` |
-| | `Trim`, `Ltrim`, `Rtrim`, `NormalizeSpace`, `RmPrefix`, `RmSuffix`, `RmPrefixSuffix`, `Fmt`, `Repl`, `ReplMap`, `Lower`, `Upper`, `Split`, `Join`, `Unescape` | `chars: str`, `substr: str`, `template: str` (`Fmt`), `old: str`, `new: str` (`Repl`), `replacements: dict[str, str]` (`ReplMap`), `sep: str` (`Split`/`Join`) |
-| | `Re`, `ReAll`, `ReSub` | `pattern: str`, `repl: str` (`ReSub`), `location: str` (`Re` diagnostic context for `SscRegexError`) |
-| | `Index`, `Slice`, `Len`, `Unique` | `Index(i: int)`, `Slice(start: int, end: int)`, `Len()`, `Unique()` |
-| | `ToInt`, `ToFloat`, `ToBool`, `Jsonify`, `Nested` | `Jsonify(schema_name: str, path: str \| None, is_array: bool)`, `Nested(struct_name: str, struct_type: StructType, is_raw: bool)` |
-| | `Fallback`, `Self`, `Return` | `Fallback(value: Any)`, `Self(name: str)` (`@name`), `Return(struct_type: StructType, keep_order: bool, type_info: TypeInfo)` |
-| **Predicates** | `Filter`, `Assert`, `Match` | Containers (`Assert` carries `message: str`, `location: str` for `SscAssertionError`) |
-| | `PredEq`, `PredNe`, `PredStarts`, `PredEnds`, `PredContains`, `PredRe`, `PredReAny`, `PredReAll`, `PredCss`, `PredXpath`, `PredHasAttr`, `PredAttrEq`, `PredAttrNe`, `PredAttrStarts`, `PredAttrEnds`, `PredAttrContains`, `PredAttrRe`, `PredTextStarts`, `PredTextEnds`, `PredTextContains`, `PredTextRe`, `PredCountEq`, `PredCountNe`, `PredCountGt`, `PredCountLt`, `PredCountGe`, `PredCountLe`, `PredCountRange`, `LogicNot`, `LogicAnd`, `LogicOr` | `values: list[str \| int \| float]`, `pattern: str`, `attr_name: str`, `query: str`, `start: int`, `end: int` |
-| **Type & JSON Defs** | `TypeDef`, `TypeDefField` | `name: str`, `struct_type: StructType`, `fields: list[TypeDefField]`, `value_type: TypeInfo \| None`, `is_raw: bool` / `name: str`, `type_info: TypeInfo` |
-| | `JsonDef`, `JsonDefField` | `name: str`, `is_array: bool`, `is_dict: bool`, `key_type: TypeInfo \| None`, `value_type: TypeInfo \| None`, `fields: list[JsonDefField]` / `name: str`, `alias: str \| None`, `type_info: TypeInfo` |
+| **Module** | `Module` | `doc: str = ""`, `source_file: str = ""`, `extensions: dict[str, ExtensionDef]` (inherits `body: list[Node]`; properties `.utilities`, `.code_start`, deprecated `.docstring`) |
+| | `Utilities`, `CodeStartHook`, `CodeEndHook`, `Docstring` | Hook/marker nodes in `Module.body` (`Docstring(value: str = "")` is deprecated; module docstring lives in `Module.doc`) |
+| **Extension** | `ExtensionDef` | `namespace: str`, `name: str`, `accept: ExtensionType`, `ret: ExtensionType`, `targets: dict[str, ExtensionTarget]` (property `.qualified_name -> str`, method `resolve_return(input_type)`) |
+| | `ExtensionType` | `base: VariableType \| None = None`, `generic: str \| None = None`, `is_array: bool = False`, `is_optional: bool = False` (`generic="T"` binds full input `TypeInfo`) |
+| | `ExtensionTarget` | `language: Literal["py", "js", "go"] \| str`, `emit: str`, `imports: tuple[ExtensionImport, ...] = ()`, `helpers: tuple[ExtensionHelper, ...] = ()` |
+| | `ExtensionImport`, `ExtensionHelper` | `ExtensionImport(value: str, alias: str = "")` / `ExtensionHelper(name: str, source: str, imports: tuple[ExtensionImport, ...] = ())` |
+| | `ExtensionCall` | `qualified_name: str = ""` (`Namespace.op`), `definition: ExtensionDef \| None = None` (inherits `accept_type_info`, `ret_type_info` from `Node`) |
+| **Struct & Function** | `StructBase` | `type: StructType = StructType.ITEM`, `name: str = ""`, `keep_order: bool = False`, `doc: str = ""` (properties `.request_config`, `.request_configs`, `.use_request`, `.errors`, deprecated `.docstring`) |
+| | `Struct(StructBase)` | `type: StructType = StructType.ITEM` (`StructType.RAW` for `(raw)struct`; property `.init -> Init`) |
+| | `StructRest(StructBase)` | `type: StructType = StructType.REST` — `(rest)struct` HTTP/JSON API client container (inherits `.errors -> list[ErrorResponse]`) |
+| | `FunctionDef` | `name: str = ""`, `is_raw: bool = False`, `doc: str = ""` — module-level `fn` (`DOCUMENT` input) or `(raw)fn` (`STRING` input) |
+| | `Field` | `name: str = ""` (inherits `ret_type_info: TypeInfo`, `accept_type_info: TypeInfo`, `body: list[Node]` from `Node`; property `.struct -> Struct`) |
+| | `Init`, `InitFieldCall`, `InitField` | `Init()` (`@init` container), `InitFieldCall(name: str = "")` (constructor call marker), `InitField(name: str = "")` (cached method pipeline, inherits `accept_type_info`, `ret_type_info`, `body`) |
+| | `PreValidate`, `CheckMethod` | `PreValidate()` (`@pre-validate` assert block) and `CheckMethod(name: str = "")` (`@check <name>` boolean method ending in `to-bool`) |
+| | `SplitDoc`, `Key`, `Value` | `@split-doc`, `@key`, `@value` directive pipelines (inherit `accept_type_info`, `ret_type_info`, `body`) |
+| | `TableConfig`, `TableRows`, `TableMatchKey` | `@table`, `@rows`, `@match` directive pipelines for `StructType.TABLE` (inherit `accept_type_info`, `ret_type_info`, `body`) |
+| | `StartParse`, `StructDocstring` | `StartParse()` (entrypoint dispatch marker; properties `.struct`, `.use_split_doc`, `.use_pre_validate`, `.fields`) and `StructDocstring(value: str = "")` (deprecated) |
+| **REST & Transport** | `MethodBase` | `name: str = ""`, `doc: str = ""`, `response_path: str = ""`, `response_join: str = ""` (properties `.http_request -> RequestHttp`, `.placeholders -> list[PlaceholderSpec]`) |
+| | `MethodFetch(MethodBase)` | HTML/raw `@request` fetch method (inherits `name`, `doc`, `response_path`, `response_join`, `.http_request`, `.placeholders`) |
+| | `MethodRest(MethodBase)` | `doc: str = ""`, `response_schema: str = ""`, `result_alias_name: str = ""` (plus inherited `name`, `response_path`, `response_join`) — REST endpoint method |
+| | `RequestHttp` | `method: str = "GET"`, `url: PlaceholderTemplate`, `headers: dict[str, PlaceholderTemplate]`, `cookies: dict[str, PlaceholderTemplate]`, `params: dict[str, PlaceholderTemplate]`, `body_kind: str = "empty"`, `payload: PlaceholderTemplate \| dict[str, PlaceholderTemplate] \| None = None` (property `.placeholders -> list[PlaceholderSpec]`) |
+| | `PlaceholderTemplate`, `PlaceholderSpec` | `PlaceholderTemplate(parts: list[str \| PlaceholderSpec])` / `PlaceholderSpec(name: str = "", type_name: Literal["str", "int", "float", "bool"] = "str", is_array: bool = False, is_optional: bool = False, style: Literal["repeat", "csv", "bracket", "pipe", "space"] \| None = None)` |
+| | `ErrorResponse` | `status: int = 0`, `schema_name: str = ""`, `required_keys: list[str]`, `conditions: dict[str, Any]`, `suffix: str = ""` (`@error:<suffix>`) |
+| | `ResultVariantDef` | `name: str = ""`, `status: int = 0`, `schema_name: str = ""`, `schema_is_array: bool = False` |
+| | `ResultAliasDef` | `name: str = ""`, `response_schema: str = ""`, `response_is_array: bool = False`, `err_variants: list[str]` |
+| | `MatcherEntry`, `MatcherListDef` | `MatcherEntry(status: int, required_keys: list[str], conditions: dict[str, Any], factory_name: str, error_schema: str = "")` / `MatcherListDef(struct_name: str = "", entries: list[MatcherEntry])` |
+| **Pipeline Ops** | `CssSelect`, `CssSelectAll`, `XpathSelect`, `XpathSelectAll`, `CssRemove`, `XpathRemove` | `queries: list[str]` (plus deprecated `.query -> str` property) on `*Select*` (fallback block when `len(queries) >= 2`); `query: str = ""` on `*Remove` |
+| | `Text`, `Raw`, `Attr` | `Text()`, `Raw(mode: str = "outer")` (`"outer" \| "inner"`), `Attr(keys: tuple[str, ...])` |
+| | `Trim`, `Ltrim`, `Rtrim`, `NormalizeSpace`, `RmPrefix`, `RmSuffix`, `RmPrefixSuffix`, `Fmt`, `Repl`, `ReplMap`, `Lower`, `Upper`, `Split`, `Join`, `Unescape` | `substr: str = ""` (`Trim`/`Ltrim`/`Rtrim`/`Rm*`), `template: str = ""` (`Fmt`), `old: str = ""`, `new: str = ""` (`Repl`), `replacements: dict[str, str]` (`ReplMap`), `sep: str = ""` (`Split`/`Join`) |
+| | `Re`, `ReAll`, `ReSub` | `Re(pattern: str = "")`, `ReAll(pattern: str = "")`, `ReSub(pattern: str = "", repl: str = "")` |
+| | `Index`, `Slice`, `Len`, `Unique` | `Index(i: int = 0)`, `Slice(start: int = 0, end: int = 0)`, `Len()`, `Unique(keep_order: bool = False)` |
+| | `ToInt`, `ToFloat`, `ToBool`, `Jsonify`, `Nested` | `ToInt()`, `ToFloat()`, `ToBool()`, `Jsonify(schema_name: str = "", path: str \| None = None)`, `Nested(struct_name: str = "")` |
+| | `Fallback`, `Self`, `Return` | `Fallback(value: Any = None)`, `Self(name: str = "")` (`@name`), `Return()` (inherits `accept_type_info`, `ret_type_info` from `Node`) |
+| **Predicates** | `Filter`, `Assert`, `Match` | Containers (`Assert(message: str = "")`, `Filter()`, `Match()`; `body: list[Node]`) |
+| | `PredEq`, `PredNe`, `PredStarts`, `PredEnds`, `PredContains`, `PredRe`, `PredReAny`, `PredReAll`, `PredCss`, `PredXpath`, `PredHasAttr`, `PredAttrEq`, `PredAttrNe`, `PredAttrStarts`, `PredAttrEnds`, `PredAttrContains`, `PredAttrRe`, `PredTextStarts`, `PredTextEnds`, `PredTextContains`, `PredTextRe`, `PredCountEq`, `PredCountNe`, `PredCountGt`, `PredCountLt`, `PredCountGe`, `PredCountLe`, `PredCountRange`, `LogicNot`, `LogicAnd`, `LogicOr` | `values: tuple[str \| int, ...]` (`PredEq`/`PredNe`), `values: tuple[str, ...]`, `pattern: str = ""`, `attrs: tuple[str, ...]` (`PredHasAttr`), `name: str = ""` (`PredAttr*`), `query: str = ""` (`PredCss`/`PredXpath`), `value: int = 0` (`PredCount*`), `start: int = 0`, `end: int = 0` (`PredCountRange`) |
+| **Type & JSON Defs** | `TypeDef`, `TypeDefField` | `TypeDef(name: str = "", struct_type: StructType = StructType.ITEM)` (property `.fields -> list[TypeDefField]` wrapping `body`; `ret_type_info` from `Node`) / `TypeDefField(name: str = "")` (inherits `ret_type_info: TypeInfo`; property `.typedef -> TypeDef`) |
+| | `JsonDef`, `JsonDefField` | `JsonDef(name: str = "", is_array: bool = False, is_dict: bool = False, path: str = "", key_type_info: TypeInfo \| None = None, value_type_info: TypeInfo \| None = None)` (`body` holds `JsonDefField` children) / `JsonDefField(name: str = "", type_name: str = "", alias: str = "", doc: str = "", is_dict: bool = False, key_type_info: TypeInfo \| None = None, value_type_info: TypeInfo \| None = None)` (inherits `ret_type_info: TypeInfo`) |
 
 ---
 
@@ -282,14 +298,14 @@ All nodes inherit `Node(span: Span | None, description: str, accept: VariableTyp
 |---|---|---|---|---|
 | **HTML Backend** | `bs4` (`lxml`/`html.parser`/`html5lib`), `lxml`, `parsel`, `slax` | Vanilla DOM (`DOMParser` / `document`) | `PuerkitoBio/goquery` | `dom_query` (`Document`, `Selection`) |
 | **HTTP Clients** | `httpx` (default), `httpx2`, `aiohttp`, `requests` | `fetch` (default), `axios` | `net/http` (`*http.Client`) | `reqwest` (`reqwest::Client`, async) |
-| **JSON Projection** | `_project_<Schema>` allowlist projectors + `TypedDict` | `_project<Schema>` allowlist projectors + JSDoc `@typedef` | `project<Schema>` via `tidwall/gjson` + Go `struct` | `#[derive(Deserialize)]` structs + `serde_json::Value` GJSON projector `project_<schema>` |
+| **JSON Projection** | `_project_<schema>(data)` allowlist projector + `TypedDict` | `_project<Schema>(data)` allowlist projector + JSDoc `@typedef` | `UnmarshalJSON` on `<Schema>Json` (using `gjson.GetBytes`) / `json.Unmarshal` | `<Schema>Json::from_value(value: Value) -> Result<Self, rt::SscError>` + `#[derive(Deserialize)]` |
 | **REST Result Type** | `Union[Ok[T], <Struct>Err<Status>..., UnknownErr, TransportErr]` | `{ok: true, value} \| {ok: false, kind, status, error}` | `<Method>Result` struct (`IsOk()`, `As<Err>()`) | `Result<T, <Struct>Error>` enum (`Err<Status><Suffix>`, `Unknown`, `Transport`) |
 | **Per-Call Request Opts** | `**kwargs: Any` (`ssc_merge_kwargs`) | `opts = {}` (`_sscMergeOpts`) | `opts ...sscReqOpt` (`WithHeader`, `WithCookie`, `WithTimeout`) | `opts: Option<&SscRequestOpts>` |
 | **Runtime Output** | Inlined by default; `-R` emits `<runtime_name>.py` | Inlined per `.js` file | Always emits shared `sscgen_runtime.go` | Always emits shared `sscgen_runtime.rs` |
 
 ### 5.4 JSON Projectors, Runtime HTTP Delegation & Separate Runtime (`-R`)
 
-- **JSON Projectors**: Strict allowlist functions (`_project_<Schema>` in Python/JS/Rust, `project<Schema>` in Go) that extract declared fields (and GJSON paths via `from="..."`), enforce required/nullable/`@omitempty` contracts, drop unmodeled wire keys, and raise schema-qualified errors on contract mismatch (enabling safe runtime matcher fallthrough in `@error` evaluation).
+- **JSON Projectors (ADR-0005)**: Every `json` schema compiles into a strict allowlist projector — `_project_<schema>(data)` in Python, `_project<Schema>(data)` in JavaScript, `UnmarshalJSON` on `<Schema>Json` (using `gjson.GetBytes` / `json.Unmarshal`) in Go, and `<Schema>Json::from_value(value: Value) -> Result<Self, rt::SscError>` (plus `#[derive(Deserialize)]`) in Rust (replacing legacy `JSON_DESCRIPTOR_<SCHEMA>` tables) — that extracts declared fields (and GJSON paths via `from="..."`), enforces required/nullable/`@omitempty` contracts, drops unmodeled wire keys, and raises schema-qualified errors on contract mismatch (enabling safe runtime matcher fallthrough in `@error` evaluation).
 - **Runtime HTTP Delegation**: Generated `MethodFetch` and `MethodRest` emit only a typed method signature and a single call to `ssc_rest_call` / `ssc_fetch_html` (or target equivalent), keeping option merging, `response_path` extraction, and `@error` matcher dispatch inside the runtime helper.
 - **Separate Runtime (`-R`, Python)**: `generation/runtime.py:register_runtime_file` writes helpers (`_BASE_UTILITY_LINES`, `PY_JSON_PROJECT_HELPER`, `rest_runtime_lines`, user extension `runtime_defs`) to `<runtime_name>.py`. The parser file keeps `TypedDict`, `@dataclass` error variant subclasses, and client type annotations, while `targets/python/rest.py:runtime_export_names(module, *, need_fallback)` imports only the runtime symbols required by that module.
 
@@ -300,7 +316,7 @@ All nodes inherit `Node(span: Span | None, description: str, accept: VariableTyp
 ### 6.1 Step-by-Step Extension Checklists
 
 #### 1. Add a New Pipeline Operation
-1. Define the AST dataclass in `ssc_codegen/ast/<category>.py` (inherit `Node`, set `accept`/`ret` defaults) and re-export in `ssc_codegen/ast/__init__.py`.
+1. Define the AST dataclass in `ssc_codegen/ast/<category>.py` (inherit `Node`, set `accept_type_info`/`ret_type_info` defaults) and re-export in `ssc_codegen/ast/__init__.py`.
 2. Add argument and context lint validation in `ssc_codegen/core/linter.py` (`lint_pipeline_op`).
 3. Register the operation type signature `OpSig` in `ssc_codegen/core/type_checking.py` (`OP_TYPES`).
 4. Add the KDL node parser in `ssc_codegen/core/expressions.py` (update central `E001`/`E100` guard sets if applicable).
