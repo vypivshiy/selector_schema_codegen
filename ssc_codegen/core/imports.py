@@ -440,7 +440,9 @@ class _Resolver:
                             label="@request",
                         )
                     )
-            if current.name == "@error" and len(current.args) >= 2:
+            if (
+                current.name == "@error" or current.name.startswith("@error:")
+            ) and len(current.args) >= 2:
                 name = str(current.args[1].value)
                 add(self._lookup(unit, "json", name, current, label="@error"))
 

@@ -4,9 +4,18 @@ from __future__ import annotations
 
 import difflib as _difflib
 import re as _re
-from collections.abc import Iterable, Mapping
-from typing import Iterator
+from collections.abc import Iterable, Iterator, Mapping
+from typing import Any
 
+from kdlquery import KdlDocument, KdlNode, ReadDiagnostic, Severity
+
+from ssc_codegen.ast.struct import (
+    PLACEHOLDER_WIDE_RE,
+    ErrorResponse,
+    PlaceholderSpec,
+)
+from ssc_codegen.core.rest_artifacts import err_subclass_name
+from ssc_codegen.naming import to_pascal_case
 from ssc_codegen.symbols import (
     HTTP_REQUEST_SIGNATURES,
     REQUEST_LINE_CONTINUATION_HINT,
@@ -20,10 +29,7 @@ from ssc_codegen.symbols import (
     target_symbol_plan,
     top_symbol_names,
 )
-from ssc_codegen.naming import to_pascal_case
 from ssc_codegen.traversal.utils import is_malformed_gjson_path
-from ssc_codegen.ast.struct import PLACEHOLDER_WIDE_RE, PlaceholderSpec
-from kdlquery import KdlDocument, KdlNode, ReadDiagnostic, Severity
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -140,6 +146,7 @@ _VALID_IMPORT_KINDS = frozenset({"define", "extension", "fn", "json", "struct"})
 
 _DEFINE_NAME_RE = _re.compile(r"^[A-Z_][A-Z0-9_-]*\Z")
 _EXTENSION_NAME_RE = _re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*\Z")
+_ERROR_SUFFIX_RE = _re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*\Z")
 _JSON_FIELD_NAME_RE = _re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\Z")
 _PORTABLE_IDENTIFIER_RE = _re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\Z")
 _EXTENSION_PLACEHOLDER_RE = _re.compile(r"\{\{([^{}]+)\}\}")
@@ -243,12 +250,13 @@ def lint_module(
     """
     diags: list[ReadDiagnostic] = []
     children_defines: dict[str, list[KdlNode]] = {}
+    scalar_defines: dict[str, Any] = {}
     _lint_top_level(doc, source_path, diags)
     _lint_imports(doc, source_path, diags)
     _lint_extensions(doc, source_path, diags)
-    _lint_defines(doc, source_path, diags, children_defines)
+    _lint_defines(doc, source_path, diags, children_defines, scalar_defines)
     _lint_json_defs(doc, source_path, diags, children_defines, source_text)
-    _lint_structs(doc, source_path, diags, children_defines)
+    _lint_structs(doc, source_path, diags, children_defines, scalar_defines)
     _lint_fns(doc, source_path, diags)
     _lint_nested_topdown(doc, source_path, diags)
     _lint_json_refs_topdown(doc, source_path, diags, children_defines)
@@ -690,6 +698,7 @@ def _lint_defines(
     source_path: str,
     diags: list[ReadDiagnostic],
     children_defines: dict[str, list[KdlNode]],
+    scalar_defines: dict[str, Any] | None = None,
 ) -> None:
     for node in doc.select("define:root"):
         args = _node_args(node)
@@ -728,6 +737,9 @@ def _lint_defines(
                     code="E001",
                 )
             )
+        elif scalar_defines is not None:
+            for k, v in node.properties.items():
+                scalar_defines[k] = v.value
 
 
 def _sanitize_json_field_name(raw: str) -> str:
@@ -1466,6 +1478,7 @@ def _lint_structs(
     source_path: str,
     diags: list[ReadDiagnostic],
     children_defines: dict[str, list[KdlNode]],
+    scalar_defines: dict[str, Any] | None = None,
 ) -> None:
     seen_names: set[str] = set()
     for node in doc.select("struct:root"):
@@ -1482,7 +1495,9 @@ def _lint_structs(
             )
         if name:
             seen_names.add(name)
-        _lint_single_struct(node, source_path, diags, children_defines)
+        _lint_single_struct(
+            node, source_path, diags, children_defines, scalar_defines
+        )
 
 
 # Directives allowed inside ``fn`` / ``(raw)fn`` body.
@@ -1733,6 +1748,7 @@ def _lint_single_struct(
     source_path: str,
     diags: list[ReadDiagnostic],
     children_defines: dict[str, list[KdlNode]],
+    scalar_defines: dict[str, Any] | None = None,
 ) -> None:
     struct_name = _node_arg(node, 0)
     if not struct_name:
@@ -1777,6 +1793,7 @@ def _lint_single_struct(
             )
         )
 
+    seen_err_variants: set[str] = set()
     for field_node in node.children:
         field_name = field_node.name
         if not field_name:
@@ -1785,6 +1802,18 @@ def _lint_single_struct(
             _lint_reserved_field(
                 field_node, field_name, struct_type, source_path, diags
             )
+            if struct_type == "rest" and (
+                field_name == "@error" or field_name.startswith("@error:")
+            ):
+                _lint_error_variant_collision(
+                    field_node,
+                    field_name,
+                    struct_name,
+                    source_path,
+                    diags,
+                    seen_err_variants,
+                    scalar_defines,
+                )
         else:
             if struct_type == "rest":
                 hint = (
@@ -1812,6 +1841,62 @@ def _lint_single_struct(
                 )
 
 
+def _lint_error_variant_collision(
+    node: KdlNode,
+    field_name: str,
+    struct_name: str,
+    source_path: str,
+    diags: list[ReadDiagnostic],
+    seen_err_variants: set[str],
+    scalar_defines: dict[str, Any] | None = None,
+) -> None:
+    raw_suffix = (
+        field_name[len("@error:") :] if field_name.startswith("@error:") else ""
+    )
+    if field_name.startswith("@error:") and (
+        not raw_suffix or not _ERROR_SUFFIX_RE.fullmatch(raw_suffix)
+    ):
+        return
+    err_args = _node_args(node)
+    if len(err_args) < 2:
+        return
+    defines = scalar_defines or {}
+    status_raw = defines.get(err_args[0], err_args[0])
+    try:
+        status = int(status_raw)
+    except (TypeError, ValueError):
+        return
+    if not is_http_status(status):
+        return
+    suffix = str(defines.get(raw_suffix, raw_suffix)) if raw_suffix else ""
+    schema_name = str(defines.get(err_args[1], err_args[1]))
+    required_keys = [str(defines.get(k, k)) for k in err_args[2:]]
+    conditions = {
+        str(defines.get(k, k)): defines.get(v.value, v.value)
+        for k, v in node.properties.items()
+    }
+    err_obj = ErrorResponse(
+        status=status,
+        schema_name=schema_name,
+        required_keys=required_keys,
+        conditions=conditions,
+        suffix=suffix,
+    )
+    cls_name = err_subclass_name(struct_name, err_obj)
+    if cls_name in seen_err_variants:
+        diags.append(
+            _error(
+                node,
+                f"duplicate @error variant name '{cls_name}' in struct '{struct_name}'",
+                source_path,
+                code="E400",
+                hint="disambiguate duplicate @error variant name using '@error:<name> <status> <Schema> ...'",
+            )
+        )
+    else:
+        seen_err_variants.add(cls_name)
+
+
 def _lint_reserved_field(
     node: KdlNode,
     field_name: str,
@@ -1819,7 +1904,8 @@ def _lint_reserved_field(
     source_path: str,
     diags: list[ReadDiagnostic],
 ) -> None:
-    allowed = _RESERVED_ALLOWED.get(field_name)
+    base_name = "@error" if field_name.startswith("@error:") else field_name
+    allowed = _RESERVED_ALLOWED.get(base_name)
     if allowed is not None and struct_type not in allowed:
         diags.append(
             _error(
@@ -1878,7 +1964,19 @@ def _lint_reserved_field(
                     code="E001",
                 )
             )
-    elif field_name == "@error":
+    elif field_name == "@error" or field_name.startswith("@error:"):
+        if field_name.startswith("@error:"):
+            suffix = field_name[len("@error:") :]
+            if not suffix or not _ERROR_SUFFIX_RE.fullmatch(suffix):
+                diags.append(
+                    _error(
+                        node,
+                        f"invalid @error suffix '{suffix}'; suffix must match ^[A-Za-z_][A-Za-z0-9_-]*$",
+                        source_path,
+                        code="E002",
+                        hint="expected syntax: @error:<name> <status> <Schema> (ASCII identifier)",
+                    )
+                )
         err_args = _node_args(node)
         if len(err_args) < 2:
             diags.append(
@@ -2089,10 +2187,11 @@ def lint_cross_refs(
                 response = req.get_prop("response")
                 if response:
                     rest_response_refs.append((req, response))
-            for err in node.select("@error"):
-                schema = _node_arg(err, 1)
-                if schema:
-                    rest_error_refs.append((err, schema))
+            for err in node.children:
+                if err.name == "@error" or err.name.startswith("@error:"):
+                    schema = _node_arg(err, 1)
+                    if schema:
+                        rest_error_refs.append((err, schema))
 
     for req_node, schema_name in rest_response_refs:
         if schema_name not in json_names:
