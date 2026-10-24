@@ -9,6 +9,7 @@ from typing import Any
 
 from kdlquery import KdlDocument, KdlNode, ReadDiagnostic, Severity
 
+from ssc_codegen.ast.base import Node
 from ssc_codegen.ast.struct import (
     PLACEHOLDER_WIDE_RE,
     ErrorResponse,
@@ -96,12 +97,92 @@ def is_http_status(value: int) -> bool:
     """Validate whether an integer represents a valid HTTP status code (100..599).
 
     Args:
-        value: Numeric status code candidate.
+        value (int): Numeric status code candidate.
 
     Returns:
-        `True` if `100 <= value <= 599`, otherwise `False`.
+        bool: `True` if `100 <= value <= 599`, otherwise `False`.
     """
     return 100 <= value <= 599
+
+
+def is_error_directive(name: str) -> bool:
+    """Check whether a directive name is an `@error` or `@error:<suffix>` declaration.
+
+    Args:
+        name (str): KDL node name to inspect.
+
+    Returns:
+        bool: `True` if `name` is `"@error"` or starts with `"@error:"`, otherwise `False`.
+    """
+    return name == "@error" or name.startswith("@error:")
+
+
+def parse_error_node(
+    node: KdlNode,
+    defines: Mapping[str, Any] | None = None,
+    *,
+    parent: Node | None = None,
+    lint: LintContext | None = None,
+) -> ErrorResponse | None:
+    """Parse an `@error` or `@error:<suffix>` KDL node into an `ErrorResponse` AST node.
+
+    Args:
+        node (KdlNode): KDL node representing the `@error` directive.
+        defines (Mapping[str, Any] | None): Scalar `define` mapping for resolving argument and property values.
+        parent (Node | None): Optional parent AST node to attach to the constructed `ErrorResponse`.
+        lint (LintContext | None): Optional lint context for recording argument and status diagnostics.
+
+    Returns:
+        ErrorResponse | None: Constructed `ErrorResponse` node, or `None` if directive syntax or status is invalid.
+    """
+    raw_suffix = node.name.split(":", 1)[1] if ":" in node.name else ""
+    if ":" in node.name and (
+        not raw_suffix or not _ERROR_SUFFIX_RE.fullmatch(raw_suffix)
+    ):
+        return None
+    if not node.args or len(node.args) < 2:
+        if lint is not None:
+            lint.error(
+                node,
+                message="@error requires both status and schema name",
+                code="E001",
+            )
+        return None
+    resolved_defines = defines or {}
+    status_raw = resolved_defines.get(node.args[0].value, node.args[0].value)
+    try:
+        status_int = int(status_raw)
+    except (TypeError, ValueError):
+        if lint is not None:
+            lint.error(
+                node,
+                message=f"@error status must be integer, got {status_raw!r}",
+                code="E002",
+            )
+        return None
+    if not is_http_status(status_int):
+        return None
+    suffix = (
+        str(resolved_defines.get(raw_suffix, raw_suffix)) if raw_suffix else ""
+    )
+    schema_name = str(
+        resolved_defines.get(node.args[1].value, node.args[1].value)
+    )
+    required_keys = [
+        str(resolved_defines.get(arg.value, arg.value)) for arg in node.args[2:]
+    ]
+    conditions = {
+        str(resolved_defines.get(k, k)): resolved_defines.get(v.value, v.value)
+        for k, v in node.properties.items()
+    }
+    return ErrorResponse(
+        parent=parent,
+        status=status_int,
+        schema_name=schema_name,
+        required_keys=required_keys,
+        conditions=conditions,
+        suffix=suffix,
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1802,12 +1883,9 @@ def _lint_single_struct(
             _lint_reserved_field(
                 field_node, field_name, struct_type, source_path, diags
             )
-            if struct_type == "rest" and (
-                field_name == "@error" or field_name.startswith("@error:")
-            ):
+            if struct_type == "rest" and is_error_directive(field_name):
                 _lint_error_variant_collision(
                     field_node,
-                    field_name,
                     struct_name,
                     source_path,
                     diags,
@@ -1843,45 +1921,15 @@ def _lint_single_struct(
 
 def _lint_error_variant_collision(
     node: KdlNode,
-    field_name: str,
     struct_name: str,
     source_path: str,
     diags: list[ReadDiagnostic],
     seen_err_variants: set[str],
     scalar_defines: dict[str, Any] | None = None,
 ) -> None:
-    raw_suffix = (
-        field_name[len("@error:") :] if field_name.startswith("@error:") else ""
-    )
-    if field_name.startswith("@error:") and (
-        not raw_suffix or not _ERROR_SUFFIX_RE.fullmatch(raw_suffix)
-    ):
+    err_obj = parse_error_node(node, scalar_defines)
+    if err_obj is None:
         return
-    err_args = _node_args(node)
-    if len(err_args) < 2:
-        return
-    defines = scalar_defines or {}
-    status_raw = defines.get(err_args[0], err_args[0])
-    try:
-        status = int(status_raw)
-    except (TypeError, ValueError):
-        return
-    if not is_http_status(status):
-        return
-    suffix = str(defines.get(raw_suffix, raw_suffix)) if raw_suffix else ""
-    schema_name = str(defines.get(err_args[1], err_args[1]))
-    required_keys = [str(defines.get(k, k)) for k in err_args[2:]]
-    conditions = {
-        str(defines.get(k, k)): defines.get(v.value, v.value)
-        for k, v in node.properties.items()
-    }
-    err_obj = ErrorResponse(
-        status=status,
-        schema_name=schema_name,
-        required_keys=required_keys,
-        conditions=conditions,
-        suffix=suffix,
-    )
     cls_name = err_subclass_name(struct_name, err_obj)
     if cls_name in seen_err_variants:
         diags.append(
@@ -1904,7 +1952,7 @@ def _lint_reserved_field(
     source_path: str,
     diags: list[ReadDiagnostic],
 ) -> None:
-    base_name = "@error" if field_name.startswith("@error:") else field_name
+    base_name = "@error" if is_error_directive(field_name) else field_name
     allowed = _RESERVED_ALLOWED.get(base_name)
     if allowed is not None and struct_type not in allowed:
         diags.append(
@@ -1964,7 +2012,7 @@ def _lint_reserved_field(
                     code="E001",
                 )
             )
-    elif field_name == "@error" or field_name.startswith("@error:"):
+    elif is_error_directive(field_name):
         if field_name.startswith("@error:"):
             suffix = field_name[len("@error:") :]
             if not suffix or not _ERROR_SUFFIX_RE.fullmatch(suffix):
@@ -2188,7 +2236,7 @@ def lint_cross_refs(
                 if response:
                     rest_response_refs.append((req, response))
             for err in node.children:
-                if err.name == "@error" or err.name.startswith("@error:"):
+                if is_error_directive(err.name):
                     schema = _node_arg(err, 1)
                     if schema:
                         rest_error_refs.append((err, schema))

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Sequence
-from typing import Any
 
 from ssc_codegen.ast import (
     Attr,
@@ -48,7 +47,7 @@ from kdlquery import KdlNode
 
 from ssc_codegen.core.contexts import LintContext, ParseContext, WalkCtx
 from ssc_codegen.core.expressions import parse_expressions
-from ssc_codegen.core.linter import _ERROR_SUFFIX_RE, is_http_status
+from ssc_codegen.core.linter import is_error_directive, parse_error_node
 from ssc_codegen.core.type_checking import check_pipeline_types
 
 # AST node types forbidden in (raw)struct — they require a DOM document.
@@ -271,63 +270,12 @@ def parse_struct(
                 http.parent = fetch_method
                 fetch_method.body.append(http)
                 parent.body.append(fetch_method)
-        elif node.name == "@error" or node.name.startswith("@error:"):
-            raw_suffix = node.name.split(":", 1)[1] if ":" in node.name else ""
-            if ":" in node.name and (
-                not raw_suffix or not _ERROR_SUFFIX_RE.fullmatch(raw_suffix)
-            ):
-                continue
-            if not node.args or len(node.args) < 2:
-                lint.error(
-                    node,
-                    message="@error requires both status and schema name",
-                    code="E001",
-                )
-                continue
-            status_raw = node.args[0].value
-            try:
-                status_int = int(status_raw)
-            except (TypeError, ValueError):
-                lint.error(
-                    node,
-                    message=f"@error status must be integer, got {status_raw!r}",
-                    code="E002",
-                )
-                continue
-            if not is_http_status(status_int):
-                # Structural lint owns the diagnostic. This only prevents
-                # malformed statuses from producing a partial AST.
-                continue
-            suffix = (
-                str(ctx.property_defines.get(raw_suffix, raw_suffix))
-                if raw_suffix
-                else ""
+        elif is_error_directive(node.name):
+            err = parse_error_node(
+                node, ctx.property_defines, parent=parent, lint=lint
             )
-            schema_name = str(
-                ctx.property_defines.get(node.args[1].value, node.args[1].value)
-            )
-            required_keys: list[str] = []
-            for i in range(2, len(node.args)):
-                key = str(
-                    ctx.property_defines.get(
-                        node.args[i].value, node.args[i].value
-                    )
-                )
-                required_keys.append(key)
-            conditions: dict[str, Any] = {}
-            for k, v in node.properties.items():
-                key = str(ctx.property_defines.get(k, k))
-                val = ctx.property_defines.get(v.value, v.value)
-                conditions[key] = val
-            err = ErrorResponse(
-                parent=parent,
-                status=status_int,
-                schema_name=schema_name,
-                required_keys=required_keys,
-                conditions=conditions,
-                suffix=suffix,
-            )
-            parent.body.append(err)
+            if err is not None:
+                parent.body.append(err)
         else:
             is_raw = (
                 isinstance(parent, Struct) and parent.type == StructType.RAW

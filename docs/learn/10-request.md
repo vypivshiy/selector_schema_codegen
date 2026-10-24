@@ -56,9 +56,8 @@ Host: example.com
 
 ```python
 @classmethod
-def fetch(
-    cls, client: httpx.Client, *, query: str, page_num: str
-) -> "StructName": ...
+def fetch(cls, client: httpx.Client, *, query: str, page_num: str) -> "StructName":
+    ...
 ```
 
 Без placeholders — запрос статический, `fetch` принимает только `client`.
@@ -315,7 +314,7 @@ Rust) и сохраняет точную типизацию `@error`-схемы.
 ```python
 r = DummyJsonApi.get_product(session, id=1)
 if r.is_ok:
-    print(r.value["title"])  # value: ProductJson
+    print(r.value["title"])          # value: ProductJson
     print(r.headers.get("x-ratelimit-remaining"))
 elif isinstance(r, DummyJsonApiErr404):
     print("not found:", r.value["message"])  # value: ApiErrorJson

@@ -334,9 +334,6 @@ def _js_path_expr(body_var: str, path: str) -> str:
     return expr
 
 
-_resolve_path_expr = _js_path_expr
-
-
 def render_js_condition_check(
     required_keys: list[str], conditions: dict[str, object]
 ) -> str | None:
@@ -368,9 +365,6 @@ def render_js_condition_check(
     if not parts:
         return None
     return f"(_b) => {' && '.join(parts)}"
-
-
-render_js_condition_arrow = render_js_condition_check
 
 
 # ===========================================================================

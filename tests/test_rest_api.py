@@ -2254,7 +2254,6 @@ class TestErrorSuffixNamingAndCollisionLint:
         errors = struct.errors
         assert len(errors) == 2
         assert errors[0].suffix == "not-found"
-        assert errors[0].alias == "not-found"
         assert errors[1].suffix == ""
 
         py_code = PY_BS4_CONVERTER.convert(module, http_client="httpx")
@@ -2441,84 +2440,69 @@ class TestErrorSuffixNamingAndCollisionLint:
 
 
 class TestDotPathPositionalKeysAndSafeFallthroughCodegen:
-    """Unit tests for Python and JS dot-path positional key checks and safe fallthrough."""
+    """Tests for Python and JS dot-path positional key checks and safe fallthrough via public converters."""
 
     def test_py_dotpath_positional_key_codegen_and_safe_evaluation(self):
         from ssc_codegen.targets.python import PY_BS4_CONVERTER
-        from ssc_codegen.targets.python.rest import (
-            _py_path_expr,
-            render_py_condition_lambda,
+
+        src = _rest_src(
+            errors=(
+                '    @error 404 Err "error"\n'
+                '    @error 400 Err detail="msg"\n'
+                '    @error 200 Err "error.code"\n'
+                '    @error 422 Err "data.errors.0.detail"\n'
+            )
         )
-
-        # Flat key stays top-level `in _b`
-        flat_lambda_src = render_py_condition_lambda(["error"], {})
-        assert flat_lambda_src == "lambda _b: 'error' in _b"
-
-        # Single-segment condition stays `_b.get('detail')`
-        assert _py_path_expr("_b", "detail") == "_b.get('detail')"
-
-        # Dotted positional key uses `_py_path_expr('_b', key) is not None`
-        dotted_lambda_src = render_py_condition_lambda(["error.code"], {})
-        assert dotted_lambda_src is not None
-        assert (
-            dotted_lambda_src
-            == f"lambda _b: {_py_path_expr('_b', 'error.code')} is not None"
-        )
-
-        pred = eval(dotted_lambda_src)
-        assert pred({"error": {"code": 123}}) is True
-        assert pred({"error": {"code": 0}}) is True
-        assert pred({"error": {}}) is False
-        assert pred({}) is False
-        assert pred({"error": None}) is False
-        assert pred({"error": "scalar"}) is False
-        assert pred({"error": [1, 2]}) is False
-
-        # Deep dotted path with array index
-        deep_lambda_src = render_py_condition_lambda(
-            ["data.errors.0.detail"], {}
-        )
-        assert deep_lambda_src is not None
-        deep_pred = eval(deep_lambda_src)
-        assert deep_pred({"data": {"errors": [{"detail": "bad"}]}}) is True
-        assert deep_pred({"data": {"errors": [{}]}}) is False
-        assert deep_pred({"data": {"errors": []}}) is False
-        assert deep_pred({"data": {"errors": "not-a-list"}}) is False
-        assert deep_pred({"data": {"errors": [None]}}) is False
-        assert deep_pred({}) is False
-
-        # Full converter output
-        src = _rest_src(errors='    @error 200 Err "error.code"\n')
         code = PY_BS4_CONVERTER.convert(_parse(src), http_client="httpx")
-        assert f"{_py_path_expr('_b', 'error.code')} is not None" in code
+
+        assert "lambda _b: 'error' in _b" in code
+        assert "lambda _b: _b.get('detail') == 'msg'" in code
+        assert (
+            "lambda _b: (_v1.get('code') if isinstance(_v1 := (_b.get('error') if isinstance(_b, dict) else None), dict) else None) is not None"
+            in code
+        )
         assert "if body is None or not isinstance(body, (dict, list)):" in code
         assert "except Exception:\n            return None" in code
 
+        ns: dict = {}
+        exec(compile(code, "<py_dotpath>", "exec"), ns)
+        matchers = ns["API_MATCHERS"]
+        dot_check = next(m.check for m in matchers if m.status == 200)
+        assert dot_check is not None
+        assert dot_check({"error": {"code": 123}}) is True
+        assert dot_check({"error": {"code": 0}}) is True
+        assert dot_check({"error": {}}) is False
+        assert dot_check({}) is False
+        assert dot_check({"error": None}) is False
+        assert dot_check({"error": "scalar"}) is False
+        assert dot_check({"error": [1, 2]}) is False
+
+        deep_check = next(m.check for m in matchers if m.status == 422)
+        assert deep_check is not None
+        assert deep_check({"data": {"errors": [{"detail": "bad"}]}}) is True
+        assert deep_check({"data": {"errors": [{}]}}) is False
+        assert deep_check({"data": {"errors": []}}) is False
+        assert deep_check({"data": {"errors": "not-a-list"}}) is False
+        assert deep_check({"data": {"errors": [None]}}) is False
+        assert deep_check({}) is False
+
     def test_js_dotpath_positional_key_codegen(self):
         from ssc_codegen.targets.javascript import JS_CONVERTER
-        from ssc_codegen.targets.javascript.rest import (
-            _js_path_expr,
-            render_js_condition_arrow,
-            render_js_condition_check,
-        )
 
-        assert render_js_condition_arrow is render_js_condition_check
-        assert (
-            render_js_condition_check(["error"], {}) == "(_b) => 'error' in _b"
+        src = _rest_src(
+            errors=(
+                '    @error 404 Err "error"\n'
+                '    @error 200 Err "error.code"\n'
+                '    @error 422 Err "data.errors.0.detail"\n'
+            )
         )
-        assert _js_path_expr("_b", "error.code") == "_b?.['error']?.['code']"
-        assert (
-            _js_path_expr("_b", "data.errors.0.detail")
-            == "_b?.['data']?.['errors']?.[0]?.['detail']"
-        )
-        assert (
-            render_js_condition_check(["error.code"], {})
-            == "(_b) => _b?.['error']?.['code'] !== undefined"
-        )
-
-        src = _rest_src(errors='    @error 200 Err "error.code"\n')
         code = JS_CONVERTER.convert(_parse(src), http_client="fetch")
+        assert "(_b) => 'error' in _b" in code
         assert "(_b) => _b?.['error']?.['code'] !== undefined" in code
+        assert (
+            "(_b) => _b?.['data']?.['errors']?.[0]?.['detail'] !== undefined"
+            in code
+        )
         assert (
             "if (_body === null || typeof _body !== 'object') continue;" in code
         )
