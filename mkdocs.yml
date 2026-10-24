@@ -85,14 +85,13 @@ nav:
           - 10 Request: learn/10-request.md
           - 11 Filters: learn/11-filters.md
           - 12 Asserts: learn/12-asserts.md
-  - Maintainers & Architecture:
-      - AST Specification: maintainers/ast_spec.md
-      - Converters & Backends: maintainers/converters.md
-      - KdlQuery Integration: maintainers/kdlquery.md
-      - Linter: maintainers/linter.md
   - Architecture Decisions (ADR):
       - 0001 JSON Key Alias: adr/0001-json-key-alias-remapping.md
       - 0002 API Reference & Griffe: adr/0002-api-reference-mkdocs-griffe.md
+      - 0003 JSON Dict Schemas: adr/0003-json-dict-schemas.md
+      - 0004 Inline JSON Schemas: adr/0004-inline-json-schemas.md
+      - 0005 JSON Projectors & GJSON: adr/0005-generated-json-projectors-and-gjson-subset.md
+      - 0006 Runtime HTTP Delegation: adr/0006-runtime-http-delegation-and-no-template-engine.md
   - API Reference:
       - Public Facade: api/index.md
       - CLI Reference: api/cli.md
