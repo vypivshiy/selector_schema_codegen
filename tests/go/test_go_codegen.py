@@ -1180,9 +1180,14 @@ json User {
     assert not errors
 
     code = GO_CONVERTER.convert(module_ast, package="sscgen_test")
-    assert "// Go delegation test module.\n// Second line of module doc." in code
+    assert (
+        "// Go delegation test module.\n// Second line of module doc." in code
+    )
     assert "// DelegatedAPI client struct.\n// Handles user updates." in code
-    assert "// Update user via POST.\n// Preserves null nickname in JSON body." in code
+    assert (
+        "// Update user via POST.\n// Preserves null nickname in JSON body."
+        in code
+    )
     assert "sscRestCallValue[UserJson]" in code
 
     out = go_module / "delegated_api.go"
@@ -1261,7 +1266,14 @@ func TestGoDelegatedRestNullBodyAndOptsMerge(t *testing.T) {
     )
 
     test_run = subprocess.run(
-        ["go", "test", "-v", "-run", "TestGoDelegatedRestNullBodyAndOptsMerge", "./..."],
+        [
+            "go",
+            "test",
+            "-v",
+            "-run",
+            "TestGoDelegatedRestNullBodyAndOptsMerge",
+            "./...",
+        ],
         cwd=go_module,
         capture_output=True,
         text=True,
@@ -1271,3 +1283,222 @@ func TestGoDelegatedRestNullBodyAndOptsMerge(t *testing.T) {
     )
 
 
+def test_go_rest_error_matcher_fallthrough_and_suffix(go_module):
+    """Verify Go @error:<suffix>, 2-leaf-key auto-naming, dot-path key checks,
+    and safe runtime fallthrough on schema mismatch or non-JSON responses."""
+    src = '''
+json User {
+    id int
+    name str
+}
+
+json SearchError {
+    error str
+    reason str
+}
+
+json GenericError {
+    message str
+}
+
+json ApiError {
+    detail_code int
+}
+
+(rest)struct AnimeVostAPI {
+    @error:not-found 404 SearchError error="Ничего не найдено"
+    @error 404 GenericError
+    @error 400 GenericError "a.b.first" "c.d.second" third="x"
+    @error 200 ApiError "error.code"
+
+    @request name=get-user response=User """
+    GET {{base_url}}/users/{{id:int}} HTTP/1.1
+    """
+}
+'''
+    module_ast, diagnostics = parse_module(src)
+    errors = [d for d in diagnostics if d.severity == Severity.ERROR]
+    assert not errors
+
+    code = GO_CONVERTER.convert(module_ast, package="sscgen_test")
+    assert "type AnimeVostAPIErr404NotFound struct {" in code
+    assert "type AnimeVostAPIErr404 struct {" in code
+    assert "type AnimeVostAPIErr400FirstSecond struct {" in code
+    assert "type AnimeVostAPIErr200Code struct {" in code
+
+    out = go_module / "err_fallthrough.go"
+    out.write_bytes(code.encode("utf-8"))
+
+    runtime = go_module / "sscgen_runtime.go"
+    runtime.write_bytes(
+        GO_CONVERTER.emit_runtime("sscgen_test").encode("utf-8")
+    )
+
+    fmt = subprocess.run(
+        ["gofmt", "-l", str(out), str(runtime)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert fmt.returncode == 0
+    assert not fmt.stdout.strip()
+
+    test_go = go_module / "err_fallthrough_test.go"
+    test_go.write_text(
+        """package sscgen_test
+
+import (
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
+
+func TestGoRestErrorMatcherFallthrough(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/users/1":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error": "Ничего не найдено", "reason": "removed"}`))
+		case "/users/2":
+			// Matches first 404 condition (error="Ничего не найдено") but misses required "reason",
+			// so SearchErrorJson unmarshal fails and falls through to second 404 rule (GenericErrorJson).
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error": "Ничего не найдено", "message": "fallback generic"}`))
+		case "/users/3":
+			// Empty JSON object {} fails both 404 schemas -> falls through to UnknownErr.
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{}`))
+		case "/users/4":
+			// Non-JSON HTML 404 body -> falls through to UnknownErr.
+			w.Header().Set("Content-Type", "text/html")
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`<html>404 Not Found</html>`))
+		case "/users/5":
+			// Matches 400 rule with 3 keys (capped at 2 leaf segments: FirstSecond).
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"a": {"b": {"first": 1}}, "c": {"d": {"second": true}}, "third": "x", "message": "invalid params"}`))
+		case "/users/6":
+			// Matches 200 nested positional key "error.code" and ApiErrorJson.
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"error": {"code": 123}, "detail_code": 99}`))
+		case "/users/7":
+			// 200 with "error": {} (no "code") -> does not match @error 200, decodes UserJson.
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"error": {}, "id": 7, "name": "Alice"}`))
+		case "/users/8":
+			// 200 with "error.code" present, but missing "detail_code" for ApiErrorJson -> falls through to UserJson!
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"error": {"code": 123}, "id": 8, "name": "Bob"}`))
+		}
+	}))
+	defer srv.Close()
+
+	api := NewAnimeVostAPI()
+
+	// 1. Explicit suffix @error:not-found
+	_, err := api.GetUser(srv.Client(), srv.URL, 1)
+	var errNotFound *AnimeVostAPIErr404NotFound
+	if !errors.As(err, &errNotFound) {
+		t.Fatalf("expected *AnimeVostAPIErr404NotFound, got %T: %v", err, err)
+	}
+	if errNotFound.Body.Reason != "removed" {
+		t.Errorf("expected Reason 'removed', got %q", errNotFound.Body.Reason)
+	}
+
+	// 2. Fallthrough from first 404 rule to second 404 rule on schema mismatch
+	_, err = api.GetUser(srv.Client(), srv.URL, 2)
+	var errGeneric404 *AnimeVostAPIErr404
+	if !errors.As(err, &errGeneric404) {
+		t.Fatalf("expected fallthrough to *AnimeVostAPIErr404, got %T: %v", err, err)
+	}
+	if errGeneric404.Body.Message != "fallback generic" {
+		t.Errorf("expected Message 'fallback generic', got %q", errGeneric404.Body.Message)
+	}
+
+	// 3. Fallthrough to UnknownErr on empty JSON {}
+	_, err = api.GetUser(srv.Client(), srv.URL, 3)
+	var unknownErr *UnknownErr
+	if !errors.As(err, &unknownErr) {
+		t.Fatalf("expected *UnknownErr for empty JSON 404, got %T: %v", err, err)
+	}
+	if unknownErr.Status != 404 || unknownErr.Body != "{}" {
+		t.Errorf("unexpected UnknownErr: %+v", unknownErr)
+	}
+
+	// 4. Fallthrough to UnknownErr on HTML 404
+	_, err = api.GetUser(srv.Client(), srv.URL, 4)
+	unknownErr = nil
+	if !errors.As(err, &unknownErr) {
+		t.Fatalf("expected *UnknownErr for HTML 404, got %T: %v", err, err)
+	}
+	if unknownErr.Status != 404 || unknownErr.Body != "<html>404 Not Found</html>" {
+		t.Errorf("unexpected UnknownErr for HTML 404: %+v", unknownErr)
+	}
+
+	// 5. 2-leaf-key auto-naming cap on 400
+	_, err = api.GetUser(srv.Client(), srv.URL, 5)
+	var err400 *AnimeVostAPIErr400FirstSecond
+	if !errors.As(err, &err400) {
+		t.Fatalf("expected *AnimeVostAPIErr400FirstSecond, got %T: %v", err, err)
+	}
+	if err400.Body.Message != "invalid params" {
+		t.Errorf("expected Message 'invalid params', got %q", err400.Body.Message)
+	}
+
+	// 6. Nested positional key "error.code" on 200 matches ApiErrorJson
+	_, err = api.GetUser(srv.Client(), srv.URL, 6)
+	var err200 *AnimeVostAPIErr200Code
+	if !errors.As(err, &err200) {
+		t.Fatalf("expected *AnimeVostAPIErr200Code, got %T: %v", err, err)
+	}
+	if err200.Body.DetailCode != 99 {
+		t.Errorf("expected DetailCode 99, got %d", err200.Body.DetailCode)
+	}
+
+	// 7. Nested positional key "error.code" rejects {"error": {}}
+	u7, err := api.GetUser(srv.Client(), srv.URL, 7)
+	if err != nil {
+		t.Fatalf("expected nil error for user 7, got %v", err)
+	}
+	if u7.Id != 7 || u7.Name != "Alice" {
+		t.Errorf("unexpected user 7: %+v", u7)
+	}
+
+	// 8. 200 error matcher falls through when ApiErrorJson projection fails
+	u8, err := api.GetUser(srv.Client(), srv.URL, 8)
+	if err != nil {
+		t.Fatalf("expected nil error for user 8 after 200 matcher fallthrough, got %v", err)
+	}
+	if u8.Id != 8 || u8.Name != "Bob" {
+		t.Errorf("unexpected user 8: %+v", u8)
+	}
+}
+""",
+        encoding="utf-8",
+    )
+
+    test_run = subprocess.run(
+        [
+            "go",
+            "test",
+            "-v",
+            "-run",
+            "TestGoRestErrorMatcherFallthrough",
+            "./...",
+        ],
+        cwd=go_module,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert test_run.returncode == 0, (
+        f"go test failed:\n{test_run.stderr}\n{test_run.stdout}"
+    )

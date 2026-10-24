@@ -451,11 +451,14 @@ def _emit_request_builder(
             )
         )
         lines.append(f"{indent}req = req.form(&form_pairs);")
-    elif spec.body_kind == "raw" and spec.payload is not None:
-        if isinstance(spec.payload, PlaceholderTemplate):
-            lines.append(
-                f"{indent}req = req.body({render_template(spec.payload)});"
-            )
+    elif (
+        spec.body_kind == "raw"
+        and spec.payload is not None
+        and isinstance(spec.payload, PlaceholderTemplate)
+    ):
+        lines.append(
+            f"{indent}req = req.body({render_template(spec.payload)});"
+        )
 
     return lines
 
@@ -743,7 +746,6 @@ def emit_matcher_list_def(
 
         if entry.error_schema:
             s_pascal = f"{_pascal(entry.error_schema)}Json"
-            fallback_expr = f"let fallback = if _body_val.is_null() {{ serde_json::Value::String(_body_text.to_string()) }} else {{ _body_val.clone() }}; return Some({enum_name}::Unknown(_status, fallback));"
             if is_array:
                 lines.extend(
                     [
@@ -752,7 +754,6 @@ def emit_matcher_list_def(
                         f"{ind}        return Some({enum_name}::{v_name}(decoded));",
                         f"{ind}    }}",
                         f"{ind}}}",
-                        f"{ind}{fallback_expr}",
                     ]
                 )
             else:
@@ -761,7 +762,6 @@ def emit_matcher_list_def(
                         f"{ind}if let Ok(decoded) = {s_pascal}::from_value(_body_val.clone()) {{",
                         f"{ind}    return Some({enum_name}::{v_name}(decoded));",
                         f"{ind}}}",
-                        f"{ind}{fallback_expr}",
                     ]
                 )
         else:

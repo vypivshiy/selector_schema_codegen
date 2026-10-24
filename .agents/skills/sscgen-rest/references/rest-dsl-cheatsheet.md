@@ -123,17 +123,20 @@ not `{{id}}` and `{{id:int}}`).
 
 ## `@error` syntax and naming
 
-Class/typedef name: `<PascalStruct>Err<Status>[<FieldPascal>]`.
+Class/typedef name: `<PascalStruct>Err<Status>[<SuffixPascal> | <LeafKey1Pascal>[<LeafKey2Pascal>]]`.
 
 ### Syntax
 
 ```
-@error <status:int> <SchemaName> [keys...] [key=value ...]
+@error[:<suffix>] <status:int> <SchemaName> [keys...] [key=value ...]
 ```
 
-- Positional args after SchemaName → key **presence** check (`'key' in _body`)
-- KDL properties → value **equality** check (`_body.get('key') == value`)
-- Both can be mixed; same key in both is a lint error.
+- Optional `:<suffix>` (`^[A-Za-z_][A-Za-z0-9_-]*$`, `E002` if invalid) → explicit variant suffix `<PascalStruct>Err<Status><PascalSuffix>`
+- Without `:<suffix>` → auto-named from the leaf non-numeric segment of at most the first **2** keys (`required_keys` then `conditions`); collisions in the same struct emit `E400`
+- Positional args after SchemaName → key or nested dot-path **presence** check (`'key' in _body` / dot-path traversal across all 4 targets)
+- KDL properties → value **equality** check (`_body.get('key') == value` / dot-path traversal)
+- Both can be mixed; same key in both is a lint error (`E400`).
+- Safe runtime fallthrough: if `<SchemaName>` projection/deserialization fails (or body is non-JSON), the matcher falls through to the next `@error` rule before falling back to `UnknownErr` / `Unknown`.
 
 ### Examples
 
@@ -142,8 +145,11 @@ Class/typedef name: `<PascalStruct>Err<Status>[<FieldPascal>]`.
 | `@error 404 ApiError` | status-only | `DummyJsonApiErr404` |
 | `@error 500 ApiError` | status-only | `DummyJsonApiErr500` |
 | `@error 404 ApiError error` | key presence | `DummyJsonApiErr404Error` |
+| `@error 404 ApiError "data.errors.0.detail"` | dot-path key presence (leaf segment) | `DummyJsonApiErr404Detail` |
 | `@error 200 ApiError error_code=#true` | value equality | `DummyJsonApiErr200ErrorCode` |
 | `@error 404 ApiError error detail="msg"` | mixed | `DummyJsonApiErr404ErrorDetail` |
+| `@error 400 ApiError a b c="1"` | 3+ keys (capped at 2 leaves) | `DummyJsonApiErr400AB` |
+| `@error:not-found 404 ApiError error="missing"` | explicit `:suffix` | `DummyJsonApiErr404NotFound` |
 
 Universal variants (always emitted):
 - `Ok[T]` — generic 2xx wrapper, `value: T`
@@ -181,7 +187,7 @@ elif isinstance(r, ApiErr404):
     print("not found:", r.value["message"])
 elif isinstance(r, TransportErr):
     print("network:", r.cause)
-else:                       # UnknownErr — e.g. 503
+else:  # UnknownErr — e.g. 503
     print("unknown", r.status, r.value)
 ```
 

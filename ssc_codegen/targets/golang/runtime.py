@@ -523,7 +523,9 @@ BASE_REST_RUNTIME: list[str] = inspect.cleandoc(
     	for _, m := range matchers {
     		if m.Status == status {
     			if m.Check == nil || m.Check(body) {
-    				return m.Factory(status, body)
+    				if err := m.Factory(status, body); err != nil {
+    					return err
+    				}
     			}
     		}
     	}

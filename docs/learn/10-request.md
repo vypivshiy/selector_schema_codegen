@@ -56,8 +56,9 @@ Host: example.com
 
 ```python
 @classmethod
-def fetch(cls, client: httpx.Client, *, query: str, page_num: str) -> "StructName":
-    ...
+def fetch(
+    cls, client: httpx.Client, *, query: str, page_num: str
+) -> "StructName": ...
 ```
 
 Без placeholders — запрос статический, `fetch` принимает только `client`.
@@ -314,7 +315,7 @@ Rust) и сохраняет точную типизацию `@error`-схемы.
 ```python
 r = DummyJsonApi.get_product(session, id=1)
 if r.is_ok:
-    print(r.value["title"])          # value: ProductJson
+    print(r.value["title"])  # value: ProductJson
     print(r.headers.get("x-ratelimit-remaining"))
 elif isinstance(r, DummyJsonApiErr404):
     print("not found:", r.value["message"])  # value: ApiErrorJson
@@ -354,18 +355,24 @@ IDE narrow'ит через literal-поля `isOk: true/false` и `status: 404`.
 ### Именование Err-подклассов
 
 ```
-<PascalStructName>Err<Status>[<FieldPascal>]
+<PascalStructName>Err<Status>[<SuffixPascal> | <LeafKey1Pascal>[<LeafKey2Pascal>]]
 ```
 
-- `@error 404 ApiError` в struct `DummyJsonApi` → `DummyJsonApiErr404`
-- `@error 200 ApiError error_code=#true` → `DummyJsonApiErr200ErrorCode`
+- **Без суффикса** (`@error <status> <Schema> ...`): к `<PascalStructName>Err<Status>` добавляются листовые (последние нечисловые) сегменты dot-путей из первых **не более чем 2** ключей (сначала позиционные ключи наличия, затем свойства `key=value`):
+  - `@error 404 ApiError` в struct `DummyJsonApi` → `DummyJsonApiErr404`
+  - `@error 200 ApiError error_code=#true` → `DummyJsonApiErr200ErrorCode`
+  - `@error 404 ApiError "data.response.errors.0.detail"` → `DummyJsonApiErr404Detail`
+  - `@error 400 ApiError "a.b.first" "c.d.second" third="x"` → `DummyJsonApiErr400FirstSecond` (ограничение в 2 ключа)
+- **Явный суффикс** (`@error:<suffix> <status> <Schema> ...`): `<suffix>` — валидный ASCII-идентификатор (`^[A-Za-z_][A-Za-z0-9_-]*$`, иначе ошибка линтера `E002`). Имя варианта формируется как `<PascalStructName>Err<Status><PascalSuffix>` (или `Err<Status><PascalSuffix>` в Rust `enum`), независимо от числа и глубины ключей:
+  - `@error:not-found 404 ResponseError error="Ничего не найдено"` в `AnimeVostAPI` → `AnimeVostAPIErr404NotFound`
+- **Конфликты имён (`E400`)**: если два правила `@error` в одном `(rest)struct` порождают одинаковое имя класса ошибки (например, `@error 404 ResponseError error="Ничего не найдено"` и `@error 404 ResponseError "error"` оба дают `<Struct>Err404Error`), `ssc-gen check` выдаст ошибку `E400` с подсказкой использовать `@error:<name>`.
 
 ### `@error` — маппинг ошибочных ответов
 
-`@error` работает только в `(rest)struct`. Синтаксис:
+`@error` (или `@error:<suffix>`) работает только в `(rest)struct`. Синтаксис:
 
 ```kdl
-@error <status> <SchemaName> [key1 key2 ...] [key1=val1 key2=val2 ...]
+@error[:<suffix>] <status> <SchemaName> [key1 key2 ...] [key1=val1 key2=val2 ...]
 ```
 
 Аргументы:
@@ -374,11 +381,11 @@ IDE narrow'ит через literal-поля `isOk: true/false` и `status: 404`.
 
 Два режима проверки тела (можно комбинировать):
 
-1. **Наличие ключа** (позиционные аргументы после SchemaName):
+1. **Наличие ключа** (позиционные аргументы после SchemaName, поддерживают как плоские ключи, так и вложенные dot-пути с индексами массивов во всех 4 таргетах):
    ```kdl
-   @error 404 ApiError error detail
+   @error 404 ApiError error "detail.code"
    ```
-   Сработает при `status=404` И `_body` содержит ключи `error` и `detail`.
+   Сработает при `status=404` И `_body` содержит ключ `error` и вложенный путь `detail.code`.
 
 2. **Равенство значения** (KDL-свойства `key=value`):
    ```kdl
@@ -394,7 +401,11 @@ IDE narrow'ит через literal-поля `isOk: true/false` и `status: 404`.
    Сработает при `status=404` И `'error' in _body` И `_body.detail == "msg"`.
 
 Один и тот же ключ нельзя указать одновременно как позиционный аргумент
-и как свойство — линтер выдаст ошибку.
+и как свойство — линтер выдаст ошибку (`E400`).
+
+### Безопасный fallthrough при диспетчеризации `@error`
+
+Правила `@error` проверяются строго в порядке объявления в `(rest)struct`. Если HTTP-статус и условия (`required_keys` / `conditions`) правила совпали, но тело ответа не является валидным JSON-контейнером (например, сервер или прокси вернул HTML-страницу `404 Not Found`) или не прошло проекцию/десериализацию в `<SchemaName>` (`SscJsonError` в Python/JS, ошибка `json.Unmarshal` в Go, `from_value` `Err` в Rust), матчер **не выбрасывает необработанное исключение**, а переходит к проверке следующего правила `@error`. Если ни одно правило не подошло и статус вне `200..299`, возвращается `UnknownErr` (`Unknown` в Rust).
 
 Corner case: API возвращает 200 для успеха и ошибки:
 ```kdl

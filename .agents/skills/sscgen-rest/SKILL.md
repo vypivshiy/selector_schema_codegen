@@ -30,7 +30,7 @@ Generate `(rest)struct` schemas that become typed HTTP clients when run through
    no `@init`, no `nested`, no `css`/`xpath`.
 2. **At least one `@request`** per struct.
 3. **Multiple `@request` → every one needs `name=<kebab-id>`** (single may omit).
-4. **`@error <status> <Schema> [keys...] [key=value ...]`**: status ∈ [100..599]; positional args after Schema are key-presence checks; properties are value-equality checks; same key in both is a lint error.
+4. **`@error[:<suffix>] <status> <Schema> [keys...] [key=value ...]`**: status ∈ [100..599]; optional `:suffix` (`^[A-Za-z_][A-Za-z0-9_-]*$`, `E002` if invalid) names the variant `<PascalStruct>Err<Status><PascalSuffix>` (without `:suffix`, auto-naming uses the leaf non-numeric segment of at most the first 2 keys); duplicate variant names in the same struct emit `E400`; positional args after Schema are key/dot-path presence checks; properties are value-equality checks; same key in both is a lint error (`E400`). At runtime, if a matched rule fails `<Schema>` projection/deserialization or receives a non-JSON body, dispatch safely falls through to subsequent `@error` rules before falling back to `UnknownErr` / `Unknown`.
 5. **`@error` on 2xx requires field-conditions** (key presence or value equality) to avoid false positives.
 6. **Typed placeholders**: `[]` and `?` forbidden in URL path; `|style` requires `[]`;
    types: `str|int|float|bool`; same name = same full spec; no keyword collisions.

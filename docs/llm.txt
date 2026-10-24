@@ -588,16 +588,23 @@ Without `--http-client`, `@request` is ignored and no `fetch` method is generate
 
 ## @error
 
-Error response mapping for `(rest)struct`.
+Error response mapping for `(rest)struct`. Supports optional `:suffix` for explicit error variant naming:
 
 ```kdl
 (rest)struct Api {
+    @error:not-found 404 SearchError error="Ничего не найдено"
     @error 404 ApiError
-    @error 404 ApiError error
+    @error 404 ApiError "error.code"
     @error 200 ActionResponse success=#false
     @error 200 ApiError error detail="msg"
 }
 ```
+
+### Variant naming and collision linting
+
+- Explicit suffix (`@error:<suffix> <status> <Schema> ...`, where `<suffix>` matches `^[A-Za-z_][A-Za-z0-9_-]*$` or emits `E002`): produces `<PascalStruct>Err<Status><PascalSuffix>` (e.g. `ApiErr404NotFound`, or `Err404NotFound` in Rust `enum`).
+- Automatic naming (no `:suffix`): extracts the last non-numeric leaf segment from each dot-path key across positional keys and property conditions, appending at most the first **2** leaf keys to `<PascalStruct>Err<Status>` (e.g. `"data.errors.0.detail"` -> `ApiErr404Detail`; `"a.first" "b.second" third="x"` -> `ApiErr400FirstSecond`).
+- Duplicate variant names within the same `(rest)struct` emit lint error `E400` (disambiguate with `@error:<name>`).
 
 ### Arguments (positional, required)
 
@@ -606,13 +613,13 @@ Error response mapping for `(rest)struct`.
 
 ### Key presence checks (positional, optional)
 
-Additional positional args after SchemaName check that keys exist in the JSON body:
+Additional positional args after SchemaName check that keys or nested dot-paths (including numeric array indices) exist in the JSON body across Python, JS, Go, and Rust:
 
 ```kdl
-@error 404 ApiError error detail
+@error 404 ApiError error "detail.code"
 ```
 
-Triggers when status=404 AND `_body` contains both `error` and `detail` keys.
+Triggers when status=404 AND `_body` contains `error` and nested path `detail.code`.
 
 ### Value conditions (properties, optional)
 
@@ -632,7 +639,11 @@ Positional keys and property conditions can be combined:
 
 Triggers when status=404 AND `'error' in _body` AND `_body.detail == "msg"`.
 
-A key must not appear in both positional args and properties (lint error).
+A key must not appear in both positional args and properties (lint error `E400`).
+
+### Safe runtime fallthrough
+
+`@error` matchers are evaluated in declaration order. If a response matches a rule's status and conditions, but the body is non-JSON or fails `<SchemaName>` projection/deserialization, the matcher does not raise an unhandled schema error; instead it falls through to try the next `@error` rule, and falls back to `UnknownErr` (`Unknown` in Rust) if no rule matches and status is outside `200..299`.
 
 ## CLI
 
