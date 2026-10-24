@@ -201,8 +201,8 @@ Rust) и сохраняет точную типизацию `@error`-схемы.
 | Вариант | Когда | Поля |
 |---|---|---|
 | `Ok[T]` | HTTP 2xx | `is_ok=True`, `status`, `headers`, `value: T` |
-| `<Struct>Err<Status>` | объявленный `@error <status>` | `is_ok=False`, `status`, `headers`, `value: <Schema>Json` |
-| `UnknownErr` | статус вне списка `@error` | `is_ok=False`, `status`, `headers`, `value: Any` (raw JSON или None) |
+| `<Struct>Err<Status>[<Suffix>]` | объявленный `@error[:<suffix>] <status>` | `is_ok=False`, `status`, `headers`, `value: <Schema>Json` |
+| `UnknownErr` | статус вне списка `@error` (или все совпавшие правила не прошли проекцию) | `is_ok=False`, `status`, `headers`, `value: Any` (raw JSON или None) |
 | `TransportErr` | сеть/таймаут/DNS | `is_ok=False`, `status=0`, `headers={}`, `value=None`, `cause: str` |
 
 Все варианты имеют одинаковую структуру с полями `is_ok`/`status`/`headers`
@@ -310,17 +310,20 @@ json ActionResponse {
 }
 ```
 
-Генерируемый dispatch:
+Генерируемый список матчеров (`_ERR_MATCHERS` + `ssc_dispatch_err`):
 ```python
-@staticmethod
-def _dispatch_err(_status, _headers, _body):
-    if 200 <= _status < 300:
-        if isinstance(_body, dict):
-            if _status == 200 and _body.get('success') == False:
-                return ApiErr200Success(headers=_headers, value=_body)
-        return None
-    ...
+_ERR_MATCHERS: Tuple[ErrMatcher, ...] = (
+    ErrMatcher(
+        status=200,
+        check=lambda _b: _b.get('success') == False,
+        factory=lambda headers, value: ApiErr200Success(
+            headers=headers,
+            value=_project_action_response(value),
+        ),
+    ),
+)
 ```
+Если `value` не является `dict`/`list` или `_project_action_response(value)` выбрасывает `SscJsonError`, `ErrMatcher.match` перехватывает ошибку и возвращает `None`, переходя к следующему правилу в `_ERR_MATCHERS`.
 
 ### Делегирование HTTP-запросов в рантайм (Runtime HTTP Delegation)
 

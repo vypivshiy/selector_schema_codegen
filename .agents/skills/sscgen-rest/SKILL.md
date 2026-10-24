@@ -1,17 +1,19 @@
 ---
 name: sscgen-rest
-version: "2.3"
+version: "2.4"
 description: >
   Generate KDL Schema DSL configs for REST/JSON HTTP APIs ((rest)struct).
   Use this skill whenever the user wants to: design a `.kdl` schema for an HTTP/JSON
   API client, write `@request` blocks targeting REST endpoints, declare `json`
-  schemas for typed responses, define `@error <status>` mappings, work with typed
-  placeholders (`{{id:int}}`, `{{tags:str[]?|csv}}`), or fix linter errors in a
+  schemas for typed responses, define `@error` / `@error:<suffix>` status and
+  body-condition mappings, work with typed placeholders (`{{id:int}}`,
+  `{{tags:str[]?|csv}}`), or fix linter errors (`E400`, `E403`, `E040`) in a
   REST-style `.kdl`.
   Trigger on: "rest api", "rest schema", "(rest)struct", "@request", "@error",
-  "сгенерировать api клиент", "клиент для api", "json placeholder/dummyjson/reqres"-like
-  tasks. For HTML scraping (css/css-all/text/attr pipelines, (item)/(list)/(table)/
-  (flat)/(dict)struct) use the sibling skill `sscgen-dsl` instead — this skill is REST-only.
+  "@error:", "сгенерировать api клиент", "клиент для api",
+  "json placeholder/dummyjson/reqres"-like tasks. For HTML scraping
+  (css/css-all/text/attr pipelines, (item)/(list)/(table)/(flat)/(dict)struct)
+  use the sibling skill `sscgen-dsl` instead — this skill is REST-only.
 ---
 
 # sscgen-rest — Skill (REST/JSON API clients)
@@ -26,7 +28,7 @@ Generate `(rest)struct` schemas that become typed HTTP clients when run through
 
 ## Hard rules
 
-1. **`(rest)struct` body allows ONLY** `@request`, `@error`, `@doc`. No regular fields,
+1. **`(rest)struct` body allows ONLY** `@request`, `@error` / `@error:<suffix>`, `@doc`. No regular fields,
    no `@init`, no `nested`, no `css`/`xpath`.
 2. **At least one `@request`** per struct.
 3. **Multiple `@request` → every one needs `name=<kebab-id>`** (single may omit).
@@ -89,13 +91,13 @@ provides a swagger/OpenAPI file, read it first — it is the canonical contract.
 Things to determine for every endpoint:
 - **Envelope**: bare top-level array `[...]`, data wrapper `{"data":[...]}`, paginated
   `{"data":[...],"meta":{"pagination":{...}}}`, or flat object?
-- **Every field** in each response item — do NOT guess or skip fields.
-- **Nullability**: which fields can be `null`? Mark them `Type?`.
-- **Nested objects**: if a field is a dict, extract ALL its sub-fields into a
-  separate `json` schema. Do NOT flatten or skip nested structures.
+- **Target fields**: which response fields the client needs (generated JSON projectors silently ignore undeclared or commented-out keys in the wire JSON).
+- **Nullability**: which fields can be `null`? Mark them `Type?`. Upstream Swagger/OpenAPI specs often omit `nullable: true` on secondary metadata (counts, durations, timestamps, descriptions, avatars/previews) — verify across multiple real items (including new/incomplete records) and mark nullable metadata `Type?`.
+- **Nested objects**: if a modeled field is a dict, extract its sub-fields into a
+  separate `json` schema (or inline block).
 - **Numeric types**: swagger `type: number` with integer examples → `int`;
   fractional examples (e.g. `12.5`) → `float`.
-- **Error response shape**: grab a real 404/422/etc. if possible.
+- **Error response shape**: grab a real 404/422/etc. if possible. When an API returns multiple error shapes or conditions on the same status, order `@error` rules from most specific to most general and use `@error:<suffix>` to disambiguate colliding variant names.
 
 ### Step 2 — Design `json` schemas
 
@@ -105,7 +107,7 @@ Full syntax in `references/json.md`.
 > `ssc-gen json-to-kdl response.json -o schema.kdl --name ResponseName`
 > This generates a modern hierarchical inline schema (`field { ... }` and `(array)ItemModel { ... }`) with `from="..."` key aliasing and multi-sample `@omitempty` merging.
 
-For each object observed in the real API response (or defined in the swagger spec), create a `json` schema with **all** its fields — every single key from the actual JSON, with the correct type and nullability. You can write either hierarchical inline schemas or standalone schemas:
+For each object observed in the real API response (or defined in the swagger spec), create a `json` schema with its fields, types, and nullability. Generated projectors (`_project_<schema>`) only read fields declared in the `json` block and **silently skip any undeclared or commented-out (`//`) keys** in the raw JSON payload. You can write either hierarchical inline schemas or standalone schemas:
 
 ```kdl
 // Inline style (hierarchical, DSL v2.2+)
@@ -145,7 +147,7 @@ When to use which:
 - Real-world `null` values (e.g. `"name": null`) → `Type?`.
 - Optional keys that may be omitted entirely (e.g. pagination absent on first page) → `@omitempty`.
 - Both → combine.
-- Never needed by client code → `@skip` (don't pollute the typed surface).
+- Never needed by client code → omit/comment out (`// field Type`) or mark `@skip` (don't pollute the typed surface or enforce strict runtime checks on unused third-party metadata).
 
 Alias & GJSON path expressions (`from="..."`, validated by `E040`):
 - Direct key remap: `context str from="@context"` (for keys with `@`, `:`, `$`, spaces, or target reserved words; positional `"originalKey"` is deprecated with `W011`; `path="..."` is accepted with `W041`).
@@ -209,8 +211,7 @@ Rules for define in json:
 
 **Completeness checklist before proceeding:**
 
-1. Does every field from the real response appear in the schema? Compare
-   `sorted(response.keys())` against the schema fields.
+1. Does every field required by the consumer appear in the schema? (Undeclared or commented-out keys in the wire JSON are ignored at runtime by `_project_<schema>`.)
 2. Are nested objects extracted into their own `json` schemas (not flattened)?
 3. Are nullable fields (`"field": null` in real data) marked `Type?`?
 4. Are optional keys (absent in some responses, present in others) marked
@@ -219,10 +220,11 @@ Rules for define in json:
 5. Does the response envelope match? Bare array → `(array)json`; paginated →
    include `Meta`/`Pagination` schemas; data wrapper → envelope schema with
    `data` field.
-6. If a swagger is available: cross-reference every response schema
-   (`$ref` paths, `allOf` compositions, `properties`) and include all fields
-   the swagger defines, even if a single test request happened to have `null`
-   for some of them.
+6. If a swagger is available: cross-reference response schemas (`$ref` paths,
+   `allOf` compositions, `properties`), but verify nullability against real API
+   responses — upstream OpenAPI specs often omit `nullable: true` on fields that
+   return `null` in production. Comment out or `@skip` unused fields if you do
+   not want them validated at runtime.
 
 ### Step 3 — Write the struct
 
@@ -254,6 +256,7 @@ typed placeholders in `references/10-request.md`.
       -H 'Accept: application/json'
     """
 
+    @error:not-found 404 ApiError message="Post not found"
     @error 404 ApiError
     @error 500 ApiError
 }
@@ -261,6 +264,14 @@ typed placeholders in `references/10-request.md`.
 
 Method naming: `name=get-post` → `get_post()` (Py) / `getPost()` (JS).
 Single unnamed `@request` → `fetch()`.
+
+`@error` rules in `(rest)struct`:
+- Syntax: `@error[:<suffix>] <status> <Schema> [keys...] [key=value ...]`
+- Explicit suffix: `@error:not-found 404 ApiError ...` → `<Struct>Err404NotFound` (Rust `Err404NotFound`), ignoring condition keys for naming.
+- Automatic naming (no `:suffix`): appends the leaf non-numeric segment of at most the first **2** keys (`required_keys` then `conditions`), e.g. `"data.errors.0.detail"` → `<Struct>Err404Detail`.
+- Collision lint (`E400`): two `@error` rules in the same struct that resolve to the same variant name fail `ssc-gen check` — disambiguate with `@error:<suffix>`.
+- Positional keys support nested dot-paths (`"error.code"`) across Python, JS, Go, and Rust.
+- Runtime fallthrough: rules are evaluated in declaration order; if a response body is non-JSON (e.g. proxy HTML 404) or fails `<Schema>` projection, the matcher safely falls through to the next `@error` rule before falling back to `UnknownErr` / `Unknown`.
 
 ### Codegen contract for `@request`
 
@@ -379,7 +390,7 @@ spot-check field names and types against it.
 
 ## Reference files (self-contained)
 
-- `references/10-request.md` — @request syntax, typed placeholders, curl flags, Result type
+- `references/10-request.md` — `@request` and `@error[:<suffix>]` syntax, typed placeholders, curl flags, Result type & safe fallthrough
 - `references/json.md` — json schema syntax, aliases, (array)json
 - `references/example-dummyjson.kdl` — minimal working example (4 endpoints)
 - `references/example-restApiLike.kdl` — comprehensive example (6 endpoints)

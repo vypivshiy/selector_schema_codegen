@@ -67,9 +67,11 @@ json ActionResponse {
     {"title": "{{title}}", "price": {{price:float}}, "stock": {{stock:int}}}
     """
 
+    // Specific 404 variant named DummyJsonApiErr404NotFound via @error:<suffix>;
+    // falls through to generic @error 404 ApiError if message differs or fails projection.
+    @error:not-found 404 ApiError message="Product not found"
     @error 404 ApiError
 
     // @error 200 ActionResponse success=#false
-
-    // @error 400 ApiError error
+    // @error 400 ApiError "error.code"
 }

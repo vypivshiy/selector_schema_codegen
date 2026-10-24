@@ -41,6 +41,8 @@ Warning at line 8: 'fmt' template is missing the '{{}}' placeholder
 | `'raw' accepts at most 1 argument` | Multiple args after `raw` | Remove extra args: `raw` / `raw outer` / `raw inner` |
 | `E403: invalid json field name '...'` | Non-portable `json` field name (e.g. `url: str` with colon or `@context str`) or target reserved word | Use space-separated portable identifier (`url str`) and map special wire keys via `from="@context"` |
 | `E040: malformed GJSON path '...'` | Invalid `from="..."` or `jsonify path="..."` (empty segment `a..b`, leading/trailing `.`, negative index, or `#[...]` filter) | Use valid GJSON path subset: keys (`a.b`), escaped literal dots (`os\.version`), non-negative indices (`0`), array count (`items.#`), or array projection (`tags.#.name`) |
+| `E400: duplicate @error variant name '<Name>' in struct '<Struct>'` | Two `@error` rules in the same `(rest)struct` resolve to the same generated variant class name | Disambiguate colliding `@error` declarations using an explicit suffix: `@error:<name> <status> <Schema> ...` |
+| `E002: invalid @error suffix '...'` | Empty or non-identifier suffix after `@error:` (e.g. `@error: 404 Err` or `@error:123bad 404 Err`) | Use a valid ASCII identifier (`^[A-Za-z_][A-Za-z0-9_-]*$`): `@error:<name> <status> <Schema>` |
 
 ## Iterative lint algorithm
 
