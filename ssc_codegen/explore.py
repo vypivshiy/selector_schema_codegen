@@ -1,38 +1,377 @@
-"""HTML reconnaissance for selector discovery and ad-hoc extraction.
+"""HTML context distillation and structural reconnaissance engine for `ssc-gen scout`.
 
-Pure functions backing the `ssc-gen scout` CLI command. Lets users / LLMs
-probe raw HTML with regex on text/attribute values (which CSS alone
-cannot express), optional CSS selector scoping, and relative navigation
-(parent / child / sibling) — useful for picking selectors before writing
-a `.kdl` schema or for one-off data extraction.
+Provides pure functions and dataclasses that distill raw HTML documents into
+token-compact, DOM-verified structural digests for LLM and human KDL schema
+authoring. Includes three specialized reconnaissance engines:
+1. Embedded JSON Engine (`raw_decode` scanning and deep collection projection).
+2. Key-Value & Table Engine (`<table>`, `<dl>`, and two-column repeating rows).
+3. Repeating Lists & Folded DOM Skeleton Engine (Union Archetype folding).
 """
 
 from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Iterable, Literal
+from typing import Literal
 
-from bs4 import BeautifulSoup, NavigableString, Tag
+from bs4 import BeautifulSoup, Comment, NavigableString, Tag
+
+__all__ = [
+    "AttrFilter",
+    "DiscoverResult",
+    "FilterError",
+    "ScoutFilters",
+    "ScoutResult",
+    "compile_filters",
+    "run_discover",
+    "run_scout",
+]
 
 BS4_PARSER = "lxml"
-DEFAULT_LIMIT = 50
-DEFAULT_SNIPPET = 200
-DEFAULT_FIELDS = ("path", "tag", "text")
+
+# Default compression budgets (when full=False)
+MAX_REPEATING_LISTS = 7
+MAX_FIELDS_PER_LIST = 25
+MAX_SAMPLES_PER_FIELD = 3
+MAX_SAMPLE_LEN = 80
+MAX_KV_BLOCKS = 5
+MAX_KV_KEYS = 25
+MAX_JSON_SIGNALS = 5
+MAX_JSON_KEYS = 20
+
+MIN_REPEAT_COUNT = 3
+JSON_MAX_DEPTH = 8
+JSON_PARSE_MAX_BYTES = 512 * 1024
+
+STRIP_TAGS: frozenset[str] = frozenset({"svg", "style", "noscript", "template"})
+
+NOTABLE_ATTRS: tuple[str, ...] = (
+    "href",
+    "src",
+    "data-src",
+    "srcset",
+    "content",
+    "value",
+    "datetime",
+    "title",
+    "alt",
+    "itemprop",
+    "name",
+    "role",
+    "type",
+)
+
+ANCHOR_ATTRS: tuple[str, ...] = (
+    "data-testid",
+    "data-test",
+    "data-qa",
+    "data-cy",
+    "itemprop",
+    "name",
+    "role",
+)
+
+WRAPPER_TAGS: frozenset[str] = frozenset({"div", "span", "section"})
+
+SEMANTIC_CONTAINER_TAGS: frozenset[str] = frozenset(
+    {"main", "article", "section", "aside", "form", "table", "dl", "ul", "ol"}
+)
+
+NAV_CONTAINER_TAGS: frozenset[str] = frozenset({"nav", "header", "footer"})
+
+LABEL_TAGS: frozenset[str] = frozenset({"strong", "b", "dt", "label", "th"})
+
+JSON_MIME_TYPES: frozenset[str] = frozenset(
+    {"application/ld+json", "application/json"}
+)
+
+JSON_SKIP_ATTRS: frozenset[str] = frozenset(
+    {
+        "class",
+        "style",
+        "href",
+        "src",
+        "action",
+        "id",
+        "name",
+        "alt",
+        "title",
+        "srcset",
+    }
+)
 
 
-# ─────────────────────────── filter spec ────────────────────────────
+# ─────────────────────────── CSS class classifier ────────────────────────────
+
+_HASH_CLASS_RE = re.compile(
+    r"^(?:"
+    r"css-[a-z0-9]{4,}|"
+    r"sc-[a-zA-Z0-9_-]{4,}|"
+    r"svelte-[a-z0-9]{4,}|"
+    r"jsx-\d+|"
+    r"_[a-zA-Z0-9_-]+_[a-z0-9]{4,}|"
+    r"[a-zA-Z0-9_-]+__[a-zA-Z0-9_-]+___[a-zA-Z0-9]{4,}|"
+    r"styles_[a-zA-Z0-9_-]+__[a-zA-Z0-9]{4,}|"
+    r"emotion-[a-z0-9]+"
+    r")$"
+)
+
+_UTILITY_EXACT: frozenset[str] = frozenset(
+    {
+        # Transient UI states & modifiers
+        "active",
+        "selected",
+        "disabled",
+        "enabled",
+        "open",
+        "opened",
+        "closed",
+        "hidden",
+        "visible",
+        "invisible",
+        "show",
+        "hide",
+        "collapse",
+        "collapsed",
+        "expanded",
+        "first",
+        "last",
+        "odd",
+        "even",
+        "current",
+        "focused",
+        "checked",
+        "featured",
+        "highlighted",
+        "pinned",
+        "is-active",
+        "is-open",
+        "is-hidden",
+        "is-selected",
+        "is-disabled",
+        "has-error",
+        # Layout / Bootstrap / Tailwind exact tokens
+        "clearfix",
+        "container",
+        "container-fluid",
+        "row",
+        "col",
+        "flex",
+        "inline-flex",
+        "grid",
+        "inline-grid",
+        "block",
+        "inline-block",
+        "inline",
+        "table",
+        "table-row",
+        "table-cell",
+        "contents",
+        "flow-root",
+        "static",
+        "fixed",
+        "absolute",
+        "relative",
+        "sticky",
+        "truncate",
+        "uppercase",
+        "lowercase",
+        "capitalize",
+        "normal-case",
+        "italic",
+        "not-italic",
+        "underline",
+        "overline",
+        "line-through",
+        "no-underline",
+        "antialiased",
+        "subpixel-antialiased",
+        "border",
+        "rounded",
+        "shadow",
+        "ring",
+        "outline",
+        "blur",
+        "grayscale",
+        "invert",
+        "sepia",
+        "filter",
+        "backdrop-filter",
+        "transition",
+        "transform",
+        "sr-only",
+        "not-sr-only",
+        "d-none",
+        "d-inline",
+        "d-inline-block",
+        "d-block",
+        "d-table",
+        "d-flex",
+        "d-inline-flex",
+        "d-grid",
+        "w-full",
+        "h-full",
+        "w-screen",
+        "h-screen",
+        "w-auto",
+        "h-auto",
+        "mx-auto",
+        "my-auto",
+        "m-auto",
+        "ml-auto",
+        "mr-auto",
+        "mt-auto",
+        "mb-auto",
+        "btn",
+    }
+)
+
+_UTILITY_PREFIX_RE = re.compile(
+    r"^(?:"
+    r"-?(?:m|p)[xytblrse]?-(?:\d+|auto|px|\[\S+\])|"
+    r"space-[xy]-|"
+    r"gap-(?:\d+|x-|y-|px|\[\S+\])|"
+    r"(?:w|h|size)-(?:\d+|full|screen|min|max|fit|auto|px|\d+/\d+|\[\S+\])|"
+    r"(?:min|max)-(?:w|h)-|"
+    r"flex-(?:row|col|wrap|nowrap|1|auto|initial|none|grow|shrink)|"
+    r"(?:grow|shrink)(?:-\d+)?$|"
+    r"basis-|"
+    r"grid-(?:cols|rows|flow)-|"
+    r"(?:col|row)-(?:auto|span-|start-|end-|\d+|xs|sm|md|lg|xl|xxl)|"
+    r"offset-(?:xs|sm|md|lg|xl|xxl|\d+)|"
+    r"order-(?:\d+|first|last|none)|"
+    r"(?:items|justify|content|self|place)-(?:start|end|center|between|around|evenly|stretch|baseline|auto|normal)|"
+    r"text-(?:xs|sm|base|lg|xl|\d+xl|left|center|right|justify|start|end|wrap|nowrap|balance|pretty|ellipsis|clip|white|black|transparent|current|inherit|slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|muted|primary|secondary|success|danger|warning|info|light|dark|body|reset|truncate|uppercase|lowercase|capitalize|decoration-none|\[\S+\])|"
+    r"font-(?:thin|extralight|light|normal|medium|semibold|bold|extrabold|black|sans|serif|mono)|"
+    r"(?:leading|tracking|line-clamp)-|"
+    r"bg-(?:fixed|local|scroll|clip-|origin-|bottom|center|left|right|top|no-repeat|repeat|auto|cover|contain|none|gradient-|transparent|current|inherit|white|black|slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|primary|secondary|success|danger|warning|info|light|dark|body|opacity-|\[\S+\])|"
+    r"(?:from|via|to)-(?:transparent|current|black|white|slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|\d+)|"
+    r"border-(?:\d+|t|r|b|l|x|y|s|e|solid|dashed|dotted|double|hidden|none|collapse|separate|spacing-|transparent|current|inherit|white|black|slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|primary|secondary|success|danger|warning|info|light|dark|\[\S+\])|"
+    r"divide-[xy]-|"
+    r"rounded-(?:none|sm|md|lg|xl|2xl|3xl|full|t|r|b|l|tl|tr|br|bl|s|e|ss|se|ee|es|\d+|pill|circle)|"
+    r"shadow-(?:sm|md|lg|xl|2xl|inner|none)|"
+    r"ring-(?:\d+|inset|offset-|slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)|"
+    r"opacity-\d+|"
+    r"z-(?:\d+|auto)|"
+    r"-?(?:top|right|bottom|left|inset)-(?:\d+|auto|px|full|\d+/\d+|\[\S+\])|"
+    r"overflow-(?:auto|hidden|clip|visible|scroll|x-|y-)|"
+    r"overscroll-|"
+    r"object-(?:contain|cover|fill|none|scale-down|bottom|center|left|right|top)|"
+    r"aspect-(?:auto|square|video|\[\S+\])|"
+    r"cursor-(?:auto|default|pointer|wait|text|move|help|not-allowed|none)|"
+    r"select-(?:none|text|all|auto)|"
+    r"pointer-events-(?:none|auto)|"
+    r"transition-(?:none|all|colors|opacity|shadow|transform)|"
+    r"(?:duration|delay)-\d+|"
+    r"ease-(?:linear|in|out|in-out)|"
+    r"animate-(?:none|spin|ping|pulse|bounce)|"
+    r"-?(?:scale|rotate|translate|skew)-|"
+    r"origin-|"
+    r"align-(?:baseline|top|middle|bottom|text-top|text-bottom|sub|super)|"
+    r"float-(?:start|end|right|left|none)|"
+    r"clear-(?:start|end|left|right|both|none)|"
+    r"list-(?:none|disc|decimal|inside|outside|unstyled|inline)|"
+    r"appearance-none|"
+    r"outline-(?:none|0|\d+)|"
+    r"(?:fill|stroke)-(?:none|current|inherit|\w+-\d+)|"
+    r"d-(?:sm|md|lg|xl|xxl)-|"
+    r"g[xy]?-\d+|"
+    r"fs-\d+|"
+    r"fw-(?:light|lighter|normal|medium|semibold|bold|bolder)|"
+    r"lh-(?:1|sm|base|lg)"
+    r")"
+)
+
+
+def _looks_like_random_hash(token: str) -> bool:
+    """Check whether a class token has high mixed-case/digit entropy typical of CSS modules."""
+    if len(token) < 5:
+        return False
+    if ":" in token or "/" in token or "[" in token:
+        return False
+    # Tokens with both digits and mixed case letters like `a1B2c3D` or `x7f9q2`
+    has_digit = any(ch.isdigit() for ch in token)
+    has_upper = any(ch.isupper() for ch in token)
+    has_lower = any(ch.islower() for ch in token)
+    if has_digit and has_upper and has_lower and "-" not in token:
+        return True
+    # Short random-looking hex/alnum suffix after dash e.g. `box-3f8a9c`
+    if "-" in token:
+        _, _, suffix = token.rpartition("-")
+        if (
+            len(suffix) >= 5
+            and any(c.isdigit() for c in suffix)
+            and any(c.isalpha() for c in suffix)
+            and all(c in "0123456789abcdefABCDEF" for c in suffix)
+        ):
+            return True
+    # Pure random alphanumeric with >=2 digits mixed with letters and no semantic word structure
+    digit_count = sum(1 for ch in token if ch.isdigit())
+    if digit_count >= 2 and "-" not in token and "_" not in token:
+        # e.g. css1a2b3c
+        transitions = sum(
+            1
+            for i in range(1, len(token))
+            if token[i].isdigit() != token[i - 1].isdigit()
+        )
+        if transitions >= 3:
+            return True
+    return False
+
+
+def _classify_class_token(
+    token: str,
+) -> Literal["hash", "utility", "semantic"]:
+    """Classify a single CSS class token into hash, utility, or semantic."""
+    t = token.strip()
+    if not t:
+        return "utility"
+    # Tailwind responsive/state modifiers or arbitrary values (`sm:`, `hover:`, `[...]`, `!`)
+    if ":" in t or "[" in t or "]" in t or t.startswith("!") or "/" in t:
+        return "utility"
+    if _HASH_CLASS_RE.match(t) or _looks_like_random_hash(t):
+        return "hash"
+    low = t.lower()
+    if low in _UTILITY_EXACT or _UTILITY_PREFIX_RE.match(low):
+        return "utility"
+    return "semantic"
+
+
+def _get_raw_classes(tag: Tag) -> list[str]:
+    """Extract raw CSS class list from a Tag."""
+    raw = tag.get("class")
+    if isinstance(raw, list):
+        return [str(c).strip() for c in raw if str(c).strip()]
+    if isinstance(raw, str) and raw.strip():
+        return [c.strip() for c in raw.split() if c.strip()]
+    return []
+
+
+def _get_semantic_classes(tag: Tag) -> list[str]:
+    """Return semantic CSS classes on a Tag (preserving order, deduplicated)."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for cls in _get_raw_classes(tag):
+        if cls not in seen and _classify_class_token(cls) == "semantic":
+            seen.add(cls)
+            out.append(cls)
+    return out
+
+
+# ─────────────────────────── filter spec & compilation ───────────────────────
 
 
 @dataclass
 class AttrFilter:
-    """A single --attr filter.
+    """Single attribute filter specification for Zoom-in mode.
 
-    kind:
-      - "present" : attribute exists (NAME only)
-      - "exact"   : attribute equals VAL
-      - "regex"   : attribute matches REGEX
+    Attributes:
+        name: Attribute name to inspect.
+        kind: Matching mode (`"present"`, `"exact"`, or `"regex"`).
+        value: Expected attribute string or raw regular expression.
+        compiled: Compiled regular expression when `kind == "regex"`.
     """
 
     name: str
@@ -43,1596 +382,2574 @@ class AttrFilter:
 
 @dataclass
 class ScoutFilters:
-    """Compiled filter set applied to candidate tags."""
+    """Compiled filter criteria for Zoom-in mode.
+
+    Attributes:
+        text_regex: Compiled regex matched against normalized subtree text.
+        attrs: List of attribute filter criteria.
+        tag: Optional HTML tag name filter.
+        css: Optional CSS selector filter.
+    """
 
     text_regex: re.Pattern[str] | None = None
     attrs: list[AttrFilter] = field(default_factory=list)
     tag: str | None = None
     css: str | None = None
 
+    def is_active(self) -> bool:
+        """Check whether any Zoom-in filter criterion is active.
 
-@dataclass
-class NavSpec:
-    """Navigation instruction sequence.
-
-    Applied in declaration order: up → down → next → prev (each N steps).
-    """
-
-    up: int = 0
-    down: int = 0
-    next: int = 0
-    prev: int = 0
-
-    def is_noop(self) -> bool:
-        return not (self.up or self.down or self.next or self.prev)
-
-    def steps(self) -> list[tuple[Literal["up", "down", "next", "prev"], int]]:
-        return [
-            ("up", self.up),
-            ("down", self.down),
-            ("next", self.next),
-            ("prev", self.prev),
-        ]
-
-
-# ─────────────────────────── compilation ────────────────────────────
+        Returns:
+            bool: True if at least one filter criterion is set.
+        """
+        return bool(
+            self.text_regex is not None
+            or self.attrs
+            or self.tag is not None
+            or self.css is not None
+        )
 
 
 class FilterError(ValueError):
-    """Raised when a user-supplied filter cannot be compiled."""
+    """Raised when a user-supplied CSS selector or regex filter cannot be compiled."""
 
 
 def _compile_regex(
     pattern: str, ignore_case: bool, fixed: bool
 ) -> re.Pattern[str]:
-    """Compile a regex with optional case-folding or literal escaping."""
-    if fixed:
-        pattern = re.escape(pattern)
+    """Compile a regex pattern with optional case-folding or literal escaping."""
+    raw = re.escape(pattern) if fixed else pattern
     flags = re.IGNORECASE if ignore_case else 0
     try:
-        return re.compile(pattern, flags)
+        return re.compile(raw, flags)
     except re.error as exc:
         raise FilterError(f"invalid regex {pattern!r}: {exc}") from exc
 
 
-def parse_attr_flag(raw: str, ignore_case: bool, fixed: bool) -> AttrFilter:
-    """Parse `--attr NAME`, `--attr NAME=VAL`, `--attr NAME=~REGEX`."""
+def _parse_attr_flag(raw: str, ignore_case: bool, fixed: bool) -> AttrFilter:
+    """Parse `--attr NAME`, `--attr NAME=VAL`, or `--attr NAME=~REGEX`."""
+    if not raw or not raw.strip():
+        raise FilterError("invalid --attr '': missing attribute name")
     if "=" not in raw:
-        return AttrFilter(name=raw, kind="present")
+        return AttrFilter(name=raw.strip(), kind="present")
     name, _, value = raw.partition("=")
+    name = name.strip()
     if not name:
-        raise FilterError(f"invalid --attr {raw!r}: missing name")
+        raise FilterError(f"invalid --attr {raw!r}: missing attribute name")
     if value.startswith("~"):
         regex = _compile_regex(value[1:], ignore_case, fixed)
         return AttrFilter(
             name=name, kind="regex", value=value[1:], compiled=regex
         )
+    if ignore_case:
+        regex = _compile_regex(re.escape(value), ignore_case=True, fixed=False)
+        return AttrFilter(name=name, kind="regex", value=value, compiled=regex)
     return AttrFilter(name=name, kind="exact", value=value)
 
 
 def compile_filters(
     *,
-    text: str | None,
-    attrs: Iterable[str],
-    tag: str | None,
-    css: str | None,
-    ignore_case: bool,
-    fixed: bool,
+    text: str | None = None,
+    attrs: Iterable[str] = (),
+    tag: str | None = None,
+    css: str | None = None,
+    ignore_case: bool = False,
+    fixed: bool = False,
 ) -> ScoutFilters:
-    """Build ScoutFilters from raw CLI arguments."""
-    text_re = None
-    if text is not None:
-        text_re = _compile_regex(text, ignore_case, fixed)
+    """Compile raw CLI or keyword filter arguments into a `ScoutFilters` object.
+
+    Args:
+        text (str | None): Regex or literal string matched against normalized subtree text.
+        attrs (Iterable[str]): Attribute filter specifications (`NAME`, `NAME=VAL`, `NAME=~REGEX`).
+        tag (str | None): Tag name filter (e.g. `'div'`, `'a'`).
+        css (str | None): CSS selector scoping filter.
+        ignore_case (bool): Whether regex and attribute matching is case-insensitive.
+        fixed (bool): Whether to escape regex metacharacters and match literals.
+
+    Returns:
+        ScoutFilters: Validated and compiled filter set.
+
+    Raises:
+        FilterError: If any regex, attribute specification, or CSS selector is invalid.
+    """
+    text_re = (
+        _compile_regex(text, ignore_case, fixed) if text is not None else None
+    )
+    compiled_attrs = [
+        _parse_attr_flag(a, ignore_case=ignore_case, fixed=fixed) for a in attrs
+    ]
+    if css is not None:
+        if not css.strip():
+            raise FilterError("invalid CSS selector '': empty selector")
+        # Validate CSS syntax eagerly against an empty fragment
+        probe = BeautifulSoup("<div></div>", BS4_PARSER)
+        try:
+            probe.select(css)
+        except Exception as exc:
+            raise FilterError(f"invalid CSS selector {css!r}: {exc}") from exc
     return ScoutFilters(
         text_regex=text_re,
-        attrs=[
-            parse_attr_flag(a, ignore_case=ignore_case, fixed=fixed)
-            for a in attrs
-        ],
-        tag=tag,
+        attrs=compiled_attrs,
+        tag=tag.lower().strip() if tag else None,
         css=css,
     )
 
 
-# ─────────────────────────── matching ──────────────────────────────
-
-
-def parse_html(html: str) -> BeautifulSoup:
-    """Parse HTML string into a BeautifulSoup tree."""
-    return BeautifulSoup(html, BS4_PARSER)
-
-
-def _candidate_set(soup: BeautifulSoup, css: str | None) -> list[Tag]:
-    if css:
-        try:
-            return list(soup.select(css))
-        except Exception as exc:  # soupsieve raises various exceptions
-            raise FilterError(f"invalid CSS selector {css!r}: {exc}") from exc
-    return [t for t in soup.find_all(True)]
-
-
-def _matches_text_regex(tag: Tag, pattern: re.Pattern[str]) -> bool:
-    """True if any direct NavigableString child of `tag` matches `pattern`.
-
-    Direct children only (not descendants) — prevents every ancestor of
-    a matching text node from being reported.
-    """
-    for child in tag.children:
-        if isinstance(child, NavigableString) and pattern.search(str(child)):
-            return True
-    return False
-
-
-def _matches_attr(tag: Tag, flt: AttrFilter) -> bool:
-    if flt.kind == "present":
-        return tag.has_attr(flt.name)
-    if not tag.has_attr(flt.name):
-        return False
-    value = tag.get(flt.name)
-    if isinstance(value, list):  # class/multivalued attr
-        value = " ".join(value)
-    if flt.kind == "exact":
-        return value == flt.value
-    if flt.kind == "regex":
-        assert flt.compiled is not None
-        return flt.compiled.search(str(value)) is not None
-    return False
-
-
-def _tag_matches(tag: Tag, flt: ScoutFilters) -> bool:
-    if flt.tag is not None and tag.name != flt.tag:
-        return False
-    if flt.text_regex is not None and not _matches_text_regex(
-        tag, flt.text_regex
-    ):
-        return False
-    for attr_flt in flt.attrs:
-        if not _matches_attr(tag, attr_flt):
-            return False
-    return True
-
-
-def find_matches(
-    soup: BeautifulSoup, flt: ScoutFilters, invert: bool
-) -> list[Tag]:
-    """Return tags passing filters (or non-passing if `invert`)."""
-    candidates = _candidate_set(soup, flt.css)
-    if invert:
-        return [t for t in candidates if not _tag_matches(t, flt)]
-    return [t for t in candidates if _tag_matches(t, flt)]
-
-
-# ─────────────────────────── navigation ────────────────────────────
-
-
-def _first_child_tag(tag: Tag) -> Tag | None:
-    for child in tag.children:
-        if isinstance(child, Tag):
-            return child
-    return None
-
-
-def _nth_sibling(tag: Tag | None, count: int, forward: bool) -> Tag | None:
-    current = tag
-    remaining = count
-    while current is not None and remaining > 0:
-        if forward:
-            current = current.find_next_sibling()
-        else:
-            current = current.find_previous_sibling()
-        if current is None:
-            return None
-        remaining -= 1
-    return current
-
-
-def apply_navigation(tags: list[Tag], nav: NavSpec) -> list[Tag]:
-    """Walk each tag through nav steps, drop None, dedupe by identity."""
-    if nav.is_noop():
-        # Still dedupe in case duplicates slipped through filters.
-        seen: set[int] = set()
-        out: list[Tag] = []
-        for t in tags:
-            if id(t) not in seen:
-                seen.add(id(t))
-                out.append(t)
-        return out
-
-    result: list[Tag] = []
-    seen_ids: set[int] = set()
-    for tag in tags:
-        current: Tag | None = tag
-        for direction, count in nav.steps():
-            if count <= 0 or current is None:
-                continue
-            if direction == "up":
-                for _ in range(count):
-                    current = current.parent if current is not None else None
-                    if current is None:
-                        break
-            elif direction == "down":
-                for _ in range(count):
-                    current = (
-                        _first_child_tag(current)
-                        if current is not None
-                        else None
-                    )
-                    if current is None:
-                        break
-            elif direction == "next":
-                current = _nth_sibling(current, count, forward=True)
-            elif direction == "prev":
-                current = _nth_sibling(current, count, forward=False)
-            if current is None:
-                break
-        if current is not None and id(current) not in seen_ids:
-            seen_ids.add(id(current))
-            result.append(current)
-    return result
-
-
-# ─────────────────────────── field extraction ──────────────────────
-
-
-def compute_css_path(tag: Tag) -> str:
-    """Return a copy-pasteable CSS path from <html> down to `tag`."""
-    parts: list[str] = []
-    current: Tag | None = tag
-    while current is not None and current.name not in ("[document]", None):
-        name = current.name
-        raw_classes = current.get("class")
-        if isinstance(raw_classes, list):
-            classes: list[str] = [str(c) for c in raw_classes]
-        elif raw_classes is not None:
-            classes = [str(raw_classes)]
-        else:
-            classes = []
-        classes_str = ".".join(classes)
-        # Compute position among same-tag siblings.
-        same_tag_index = 1
-        sibling: Tag | None = current.find_previous_sibling(name)
-        while sibling is not None:
-            same_tag_index += 1
-            sibling = sibling.find_previous_sibling(name)
-        if same_tag_index > 1 or _has_same_tag_sibling(current, name):
-            segment = f"{name}:nth-of-type({same_tag_index})"
-        else:
-            segment = name
-        if classes_str:
-            segment_full = f"{name}.{'.'.join(classes)}"
-            if ":nth-of-type" in segment:
-                segment_full += f":nth-of-type({same_tag_index})"
-            segment = segment_full
-        parts.append(segment)
-        current = current.parent if isinstance(current.parent, Tag) else None
-    parts.reverse()
-    return " > ".join(parts) if parts else ""
-
-
-def _has_same_tag_sibling(tag: Tag, name: str) -> bool:
-    return tag.find_previous_sibling(name) is not None or (
-        tag.find_next_sibling(name) is not None
-    )
-
-
-def lookup_line(tag: Tag, lxml_tree: object) -> int | None:
-    """Look up source line via lxml `.sourceline`.
-
-    Builds a path of (name, index_among_siblings) for `tag` and walks
-    the lxml tree to the same position. Handles the case where lxml's
-    root element already matches the outermost path entry.
-    """
-    try:
-        from lxml import etree  # type: ignore[import-not-found]
-    except ImportError:
-        return None
-    if not isinstance(lxml_tree, etree._Element):
-        return None
-
-    # Build path bottom-up.
-    path_parts: list[tuple[str, int]] = []
-    current: Tag | None = tag
-    while current is not None and current.name not in ("[document]", None):
-        name = current.name
-        index = 1
-        sib: Tag | None = current.find_previous_sibling(name)
-        while sib is not None:
-            index += 1
-            sib = sib.find_previous_sibling(name)
-        path_parts.append((name, index))
-        parent = current.parent
-        current = parent if isinstance(parent, Tag) else None
-    path_parts.reverse()
-
-    node: object = lxml_tree
-    # If the lxml root element matches the outermost path entry, treat it
-    # as already-located and skip descent into that level.
-    if (
-        path_parts
-        and isinstance(node, etree._Element)
-        and node.tag == path_parts[0][0]
-    ):
-        path_parts = path_parts[1:]
-
-    for name, idx in path_parts:
-        if not isinstance(node, etree._Element):
-            return None
-        matching = [c for c in node if c.tag == name]
-        if idx - 1 >= len(matching):
-            return None
-        node = matching[idx - 1]
-
-    sourceline = getattr(node, "sourceline", None)
-    return int(sourceline) if sourceline else None
-
-
-def _truncate(value: str, limit: int) -> str:
-    if limit <= 0 or len(value) <= limit:
-        return value
-    return value[:limit] + "…"
-
-
-def extract_fields(
-    tag: Tag,
-    fields: list[str],
-    index: int,
-    snippet: int,
-    lxml_tree: object | None,
-) -> dict[str, object]:
-    """Extract requested fields from a tag."""
-    out: dict[str, object] = {}
-    for raw in fields:
-        key = raw.strip()
-        if key == "index":
-            out["index"] = index
-        elif key == "tag":
-            out["tag"] = tag.name
-        elif key == "text":
-            out["text"] = _truncate(tag.get_text(), snippet)
-        elif key == "html":
-            out["html"] = _truncate(str(tag), snippet)
-        elif key == "attrs":
-            attrs_d = {
-                k: (" ".join(v) if isinstance(v, list) else v)
-                for k, v in tag.attrs.items()
-            }
-            out["attrs"] = attrs_d
-        elif key == "classes":
-            raw_cls = tag.get("class")
-            if isinstance(raw_cls, list):
-                out["classes"] = raw_cls
-            elif raw_cls is not None:
-                out["classes"] = [raw_cls]
-            else:
-                out["classes"] = []
-        elif key == "path":
-            out["path"] = compute_css_path(tag)
-        elif key == "line":
-            out["line"] = (
-                lookup_line(tag, lxml_tree) if lxml_tree is not None else None
-            )
-        elif key.startswith("attr."):
-            attr_name = key[len("attr.") :]
-            if tag.has_attr(attr_name):
-                v = tag.get(attr_name)
-                out[f"attr.{attr_name}"] = (
-                    " ".join(v) if isinstance(v, list) else v
-                )
-            else:
-                out[f"attr.{attr_name}"] = None
-        else:
-            raise FilterError(f"unknown field {raw!r}")
-    return out
-
-
-# ─────────────────────────── result types ──────────────────────────
+# ─────────────────────────── ScoutResult ────────────────────────────
 
 
 @dataclass
 class ScoutResult:
-    """Aggregated output from an HTML reconnaissance scout execution.
+    """Unified HTML context distillation and reconnaissance result.
 
     Attributes:
-        matched: Total number of tags matching the filter and navigation criteria.
-        returned: Number of matched tags included in this page/result set.
-        limit: Maximum results limit specified for the query.
-        offset: Offset/pagination start index.
-        truncated: True if total matches exceeded `offset + limit`.
-        results: List of extracted attribute/tag dictionaries for matched elements.
-
-    Examples:
-        ```python
-        from ssc_codegen.explore import ScoutFilters, compile_filters, run_scout, NavSpec
-
-        filters = compile_filters(text=r"\\$\\d+\\.\\d{2}", attrs=[], tag=None, css=None)
-        result = run_scout("<div>$19.99</div>", filters, NavSpec(), ["path", "text"])
-        print(result.matched)  # 1
-        print(result.to_json())
-        ```
+        mode: Analysis mode (`"overview"` or `"zoom"`).
+        matched: Number of matched minimal DOM elements in zoom mode, or total discovered signals in overview mode.
+        sample_normalized: True indicating sample text has normalized whitespace.
+        page_summary: High-level document metadata and section counts.
+        embedded_json: Discovered RFC 8259 JSON payloads from `<script>` tags and attributes.
+        kv_blocks: Discovered key-value specification blocks and data tables.
+        repeating_lists: Ranked repeating item lists with folded Union Archetype fields.
+        navigation_lists: Collapsed navigation link lists.
+        zoom_matches: Enclosing container skeletons for Zoom-in mode matches.
     """
 
-    matched: int
-    returned: int
-    limit: int
-    offset: int
-    truncated: bool
-    results: list[dict[str, object]]
-
-    def to_json(self) -> str:
-        """Format the scout results as indented JSON.
-
-        Returns:
-            JSON-formatted string representation.
-        """
-        return json.dumps(
-            {
-                "matched": self.matched,
-                "returned": self.returned,
-                "limit": self.limit,
-                "offset": self.offset,
-                "truncated": self.truncated,
-                "results": self.results,
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-
-    def to_text(self) -> str:
-        """Format the scout results as tab-separated lines.
-
-        Returns:
-            Tabular text summary of matched paths, tags, and text.
-        """
-        if not self.results:
-            return "0 matches"
-        lines: list[str] = []
-        for r in self.results:
-            path = r.get("path", "")
-            tag = r.get("tag", "")
-            text = r.get("text", "")
-            text_str = str(text).replace("\n", " ")
-            lines.append(f"{path}\t{tag}\t{text_str}")
-        return "\n".join(lines)
-
-
-# ─────────────────────────── orchestrator ──────────────────────────
-
-
-def run_scout(
-    html: str,
-    filters: ScoutFilters,
-    nav: NavSpec,
-    fields: list[str],
-    *,
-    invert: bool = False,
-    limit: int = DEFAULT_LIMIT,
-    offset: int = 0,
-    snippet: int = DEFAULT_SNIPPET,
-) -> ScoutResult:
-    """Run HTML reconnaissance query with regex filters, CSS scoping, and navigation.
-
-    Parses the document, applies text and attribute regex filters and CSS intersection,
-    navigates relative DOM positions (up, down, next, prev), extracts requested
-    fields (including CSS selector paths), and returns paginated match statistics.
-
-    Args:
-        html: Raw HTML input content.
-        filters: Pre-compiled filter specifications for tag, text, and attributes.
-        nav: Navigation step instructions (parent, child, siblings).
-        fields: List of fields to extract (e.g. `["path", "tag", "text", "attrs"]`).
-        invert: If True, select elements that DO NOT match filter criteria.
-        limit: Maximum number of records to return.
-        offset: Number of initial records to skip.
-        snippet: Maximum string length for text and HTML previews before truncation.
-
-    Returns:
-        ScoutResult containing match count, pagination metadata, and extracted field rows.
-
-    Raises:
-        FilterError: If filter execution, field resolution, or line number tracking fails.
-
-    Examples:
-        ```python
-        from ssc_codegen.explore import compile_filters, run_scout, NavSpec
-
-        html_doc = '<section class="items"><div class="price">$42.00</div></section>'
-        filters = compile_filters(text=r"\\$\\d+", attrs=[], tag=None, css=None)
-        nav = NavSpec(up=1)  # climb to parent container
-
-        result = run_scout(html_doc, filters, nav, ["path", "tag", "text"])
-        print(f"Matched {result.matched} elements")
-        ```
-    """
-    soup = parse_html(html)
-    matched_tags = find_matches(soup, filters, invert=invert)
-    matched_tags = apply_navigation(matched_tags, nav)
-
-    total = len(matched_tags)
-    truncated = offset + limit < total
-    page = (
-        matched_tags[offset : offset + limit]
-        if limit > 0
-        else matched_tags[offset:]
-    )
-
-    needs_line = "line" in fields
-    lxml_tree: object | None = None
-    if needs_line:
-        try:
-            from lxml import etree  # type: ignore[import-not-found]
-
-            lxml_tree = etree.HTML(html)
-        except ImportError:
-            lxml_tree = None
-
-    results = [
-        extract_fields(
-            tag, fields, index=i, snippet=snippet, lxml_tree=lxml_tree
-        )
-        for i, tag in enumerate(page)
-    ]
-
-    return ScoutResult(
-        matched=total,
-        returned=len(results),
-        limit=limit,
-        offset=offset,
-        truncated=truncated,
-        results=results,
-    )
-
-
-# ─────────────────────────── discover mode ──────────────────────────
-
-
-# Limits for `run_discover` output. Tuned to give LLMs enough signal
-# for selector design without flooding context with noise.
-DISCOVER_TOP_TAGS = 15
-DISCOVER_TOP_CLASSES = 20
-DISCOVER_TOP_IDS = 10
-DISCOVER_TOP_CONTAINERS = 5
-DISCOVER_TOP_DESCENDANTS = 15
-# Minimum number of identical siblings required for a group to be
-# reported as a `repeat_container`. count==2 is usually noise (header/footer
-# pairs, etc.) — real repeating lists have ≥3 siblings.
-DISCOVER_MIN_REPEAT = 3
-
-# Sample text/attr truncated to this many characters when surfacing
-# per-descendant "what does this element actually contain?" signal.
-DISCOVER_SAMPLE_LEN = 80
-
-# Leaf tags prioritised in `common_descendants` sort — these typically carry
-# extractable data (text/attrs), so surfacing them first helps the LLM
-# design field pipelines without extra probes.
-LEAF_TAGS: frozenset[str] = frozenset(
-    {
-        "a",
-        "img",
-        "p",
-        "h1",
-        "h2",
-        "h3",
-        "h4",
-        "h5",
-        "h6",
-        "span",
-        "li",
-        "td",
-        "th",
-        "time",
-        "code",
-        "em",
-        "strong",
-        "b",
-        "i",
-    }
-)
-# Descendants present in at least this fraction of items (per container)
-# are surfaced as `common_descendants`.
-DISCOVER_DESCENDANT_THRESHOLD = 0.8
-
-# Embedded-JSON discovery (json_signals). Lax detection: this is a
-# reconnaissance tool, LLM is expected to inspect `snippet` and decide.
-DISCOVER_TOP_JSON_SCRIPT = 10
-DISCOVER_TOP_JSON_ATTR = 10
-DISCOVER_SNIPPET_LEN = 200
-JSON_MIME_TYPES: frozenset[str] = frozenset(
-    {"application/ld+json", "application/json"}
-)
-JSON_SKIP_ATTRS: frozenset[str] = frozenset(
-    {"class", "style", "href", "src", "action"}
-)
-JS_VAR_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"\b(?:var|let|const)\s+(\w+)\s*=\s*[\[{]"),
-    re.compile(r"\b(?:window|globalThis|self)\.(\w+)\s*=\s*[\[{]"),
-]
-
-# Discovery v2 — short `item_selector`, head+tail samples, table candidates.
-# A class occurring at most RARE_CLASS_MAX times in the document is treated
-# as a "rare anchor" when building short selectors (id anchor still wins).
-RARE_CLASS_MAX = 5
-# Maximum hops below an anchor when building `item_selector`. If the real
-# depth is greater we still emit the path (truncated to MAX_DEPTH) and mark
-# the selector as `fragile`.
-SELECTOR_MAX_DEPTH = 3
-DISCOVER_TOP_TABLES = 5
-SAMPLE_HEAD_N = 3
-SAMPLE_TAIL_N = 3
-# Skip JSON.parse on pathological scripts — reconnaissance, not validation.
-JSON_PARSE_MAX_BYTES = 256 * 1024
-# Tags that carry a label-like role inside list items (definition lists,
-# "label: value" patterns). Used by `_detect_single_label_child`.
-LABEL_TAGS: frozenset[str] = frozenset({"strong", "b", "dt", "label"})
-
-
-@dataclass
-class DiscoverResult:
-    """Aggregated structural overview and selector candidate summary for an HTML document.
-
-    Returned by `run_discover`. Designed as a single-call analysis tool for
-    discovering page structure (tag/class/id distributions, repeating sibling containers
-    with pre-computed common descendants, embedded JSON signals, table candidates,
-    and page-level summary metrics).
-
-    Attributes:
-        tag_stats: List of most frequent HTML tag names and counts.
-        class_stats: List of most frequent CSS class names and counts.
-        id_stats: List of id attributes and counts.
-        data_attrs: List of discovered `data-*` attribute names.
-        repeat_containers: Repeating sibling containers (list-struct candidates) with
-            suggested item selectors and descendant field patterns.
-        json_signals: Embedded JSON data blocks found in scripts or attributes.
-        table_candidates: Discovered table structures with column/row key headers.
-        page_summary: High-level document flags (`has_table`, `has_embedded_json`, `container_count_estimate`).
-        sample_normalized: True if sample values have normalized whitespace (collapsed).
-
-    Examples:
-        ```python
-        from ssc_codegen.explore import run_discover
-
-        html = '<ul class="items"><li>Item 1</li><li>Item 2</li></ul>'
-        overview = run_discover(html)
-        print(overview.page_summary)
-        print(overview.to_json())
-        ```
-    """
-
-    tag_stats: list[dict[str, object]]
-    class_stats: list[dict[str, object]]
-    id_stats: list[dict[str, object]]
-    data_attrs: list[str]
-    repeat_containers: list[dict[str, object]]
-    json_signals: list[dict[str, object]]
-    table_candidates: list[dict[str, object]] = field(default_factory=list)
-    page_summary: dict[str, object] = field(
-        default_factory=lambda: {
-            "has_table": False,
-            "has_embedded_json": False,
-            "container_count_estimate": 0,
-        }
-    )
-    # All samples in this result are whitespace-collapsed via
-    # `Tag.get_text(strip=True)` — NOT verbatim HTML. Surfaced once
-    # globally so the LLM does not write regex against raw whitespace.
+    mode: Literal["overview", "zoom"] = "overview"
+    matched: int = 0
     sample_normalized: bool = True
+    page_summary: dict[str, object] = field(default_factory=dict)
+    embedded_json: list[dict[str, object]] = field(default_factory=list)
+    kv_blocks: list[dict[str, object]] = field(default_factory=list)
+    repeating_lists: list[dict[str, object]] = field(default_factory=list)
+    navigation_lists: list[dict[str, object]] = field(default_factory=list)
+    zoom_matches: list[dict[str, object]] = field(default_factory=list)
 
     def to_json(self) -> str:
-        # Omit empty sections — saves tokens, signals absence by key
-        # missing rather than `key: []`. LLM treats missing = not present.
+        """Serialize the reconnaissance result as formatted JSON.
+
+        Returns:
+            str: Indented JSON string representation of the result.
+        """
         payload: dict[str, object] = {
-            "sample_normalized": self.sample_normalized
+            "mode": self.mode,
+            "matched": self.matched,
+            "sample_normalized": self.sample_normalized,
+            "page_summary": self.page_summary,
+            "embedded_json": self.embedded_json,
+            "kv_blocks": self.kv_blocks,
+            "repeating_lists": self.repeating_lists,
+            "navigation_lists": self.navigation_lists,
         }
-        for name in (
-            "tag_stats",
-            "class_stats",
-            "id_stats",
-            "data_attrs",
-            "repeat_containers",
-            "json_signals",
-            "table_candidates",
-            "page_summary",
-        ):
-            value = getattr(self, name)
-            if value:
-                payload[name] = value
+        if self.mode == "zoom" or self.zoom_matches:
+            payload["zoom_matches"] = self.zoom_matches
         return json.dumps(payload, ensure_ascii=False, indent=2)
 
     def to_text(self) -> str:
-        lines: list[str] = []
+        """Render the reconnaissance result as a token-compact text digest.
 
-        if self.sample_normalized:
-            lines.append(
-                "# sample_normalized: true (whitespace collapsed; not verbatim)"
-            )
-            lines.append("")
+        Returns:
+            str: Human- and LLM-readable structural digest.
+        """
+        lines: list[str] = [
+            "# sample_normalized: true (whitespace collapsed; not verbatim)"
+        ]
 
-        lines.append("== tag_stats ==")
-        for row in self.tag_stats:
-            lines.append(f"{row['tag']}\t{row['count']}")
+        # 1. PAGE SUMMARY
         lines.append("")
+        lines.append("=== PAGE SUMMARY ===")
+        title = self.page_summary.get("title")
+        h1 = self.page_summary.get("h1")
+        lines.append(f"mode: {self.mode} (matched={self.matched})")
+        if title:
+            lines.append(f"title: {title!r}")
+        if h1:
+            lines.append(f"h1: {h1!r}")
+        lines.append(
+            f"signals: embedded_json={len(self.embedded_json)}, "
+            f"kv_blocks={len(self.kv_blocks)}, "
+            f"repeating_lists={len(self.repeating_lists)}, "
+            f"navigation_lists={len(self.navigation_lists)}"
+        )
 
-        lines.append("== class_stats ==")
-        for row in self.class_stats:
-            lines.append(f".{row['class']}\t{row['count']}")
-        lines.append("")
-
-        if self.id_stats:
-            lines.append("== id_stats ==")
-            for row in self.id_stats:
-                lines.append(f"#{row['id']}\t{row['count']}")
+        # 2. EMBEDDED JSON
+        if self.embedded_json:
             lines.append("")
-
-        if self.data_attrs:
-            lines.append("== data_attrs ==")
-            lines.append(", ".join(self.data_attrs))
-            lines.append("")
-
-        lines.append("== repeat_containers ==")
-        for c in self.repeat_containers:
-            item_classes = c["item_classes"]
-            assert isinstance(item_classes, list)
-            cls = ".".join(str(x) for x in item_classes)
-            count = c["count"]
-            depth = c["depth"]
-            lines.append(f"{c['item_tag']}.{cls}\tcount={count}\tdepth={depth}")
-            lines.append(f"  parent: {c['parent_selector']}")
-            item_sel = c.get("item_selector", "")
-            if isinstance(item_sel, str) and item_sel:
-                stability = c.get("selector_stability", "stable")
-                lines.append(f"  item_selector: {item_sel}  [{stability}]")
-            # Cheap boolean flags (only print when true).
-            flag_bits: list[str] = []
-            for f in ("single_link_item", "has_th_row", "single_label_child"):
-                if c.get(f) is True:
-                    flag_bits.append(f)
-            if flag_bits:
-                lines.append(f"  flags: {', '.join(flag_bits)}")
-            descendants = c["common_descendants"]
-            assert isinstance(descendants, list)
-            for d in descendants:
-                assert isinstance(d, dict)
-                d_classes = d["classes"]
-                assert isinstance(d_classes, list)
-                dcls = ".".join(str(x) for x in d_classes) if d_classes else "_"
-                d_attrs = d.get("attrs", [])
-                assert isinstance(d_attrs, list)
-                attrs_str = f"  attrs=[{','.join(d_attrs)}]" if d_attrs else ""
-                mpi = d.get("max_per_item")
-                mpi_str = (
-                    f"  max_per_item={mpi}"
-                    if isinstance(mpi, int) and mpi > 1
-                    else ""
-                )
-                sample = d.get("sample")
-                sample_str = ""
-                if isinstance(sample, list) and sample:
-                    sample_str = f"  sample={sample!r}"
-                    tail = d.get("sample_tail")
-                    if isinstance(tail, list) and tail:
-                        sample_str += f"  sample_tail={tail!r}"
+            lines.append("=== EMBEDDED JSON ===")
+            for sig in self.embedded_json:
+                kind = sig.get("kind", "script")
+                subtype = sig.get("subtype", "")
+                sel = sig.get("selector", "")
+                size = sig.get("size", 0)
+                extra = ""
+                if sig.get("var_name"):
+                    extra = f" var={sig['var_name']!r}"
+                elif sig.get("attr"):
+                    extra = f" attr={sig['attr']!r}"
                 lines.append(
-                    f"  - {d['tag']}.{dcls}\tin={d['in_items']}/{count}{attrs_str}{mpi_str}{sample_str}"
+                    f"[{kind}:{subtype}]{extra} selector={sel!r} size={size}"
                 )
-        lines.append("")
+                hint = sig.get("kdl_hint")
+                if hint:
+                    lines.append(f"  kdl: {hint}")
+                collections = sig.get("collections", [])
+                if isinstance(collections, list):
+                    for col in collections:
+                        if not isinstance(col, dict):
+                            continue
+                        cpath = col.get("path", "")
+                        ckind = col.get("kind", "object")
+                        ccount = col.get("count", 0)
+                        path_label = (
+                            f'path="{cpath}"' if cpath else "path=(root)"
+                        )
+                        lines.append(
+                            f"  collection [{ckind} x{ccount}] {path_label}"
+                        )
+                        fields_list = col.get("fields", [])
+                        if isinstance(fields_list, list):
+                            for fld in fields_list:
+                                if not isinstance(fld, dict):
+                                    continue
+                                fname = fld.get("name", "")
+                                ftype = fld.get("type", "str")
+                                fsamples = fld.get("samples", [])
+                                lines.append(
+                                    f"    - {fname}: {ftype} = {fsamples!r}"
+                                )
 
-        if self.json_signals:
-            lines.append("== json_signals ==")
-            for sig in self.json_signals:
-                assert isinstance(sig, dict)
-                head = f"{sig['kind']}\t{sig['subtype']}"
-                if sig.get("subtype") == "js-var":
-                    head += f"\tvar={sig.get('var_name', '')}"
-                elif sig.get("kind") == "script":
-                    stype = sig.get("script_type", "")
-                    if isinstance(stype, str) and stype:
-                        head += f"\ttype={stype}"
-                    sid = sig.get("script_id", "")
-                    if isinstance(sid, str) and sid:
-                        head += f"\tid={sid}"
-                elif sig.get("kind") == "attr":
-                    head += f"\tattr={sig.get('attr', '')}"
-                head += f"\tkind={sig.get('container_kind', 'unknown')}"
-                head += f"\tsize={sig.get('size', 0)}"
-                lines.append(head)
-                lines.append(f"  selector: {sig['selector']}")
-                top_keys = sig.get("top_level_keys")
-                if isinstance(top_keys, list) and top_keys:
-                    lines.append(
-                        f"  top_level_keys: {','.join(str(k) for k in top_keys)}"
-                    )
-                snippet = str(sig.get("snippet", ""))
-                snippet = snippet.replace("\n", " ").replace("\r", "")
-                lines.append(f"  snippet: {snippet[:DISCOVER_SNIPPET_LEN]}")
+        # 3. KEY-VALUE & TABLES
+        if self.kv_blocks:
             lines.append("")
-
-        if self.table_candidates:
-            lines.append("== table_candidates ==")
-            for t in self.table_candidates:
-                assert isinstance(t, dict)
-                keys = t.get("keys", [])
-                assert isinstance(keys, list)
-                keys_str = ", ".join(str(k) for k in keys) if keys else "(none)"
+            lines.append("=== KEY-VALUE & TABLES ===")
+            for kv in self.kv_blocks:
+                kind = kv.get("kind", "kv_table")
+                csel = kv.get("container_selector", "")
+                rsel = kv.get("rows_selector", "")
+                rcount = kv.get("row_count", 0)
+                match_flag = " <-- MATCH" if kv.get("matched") else ""
                 lines.append(
-                    f"rows={t.get('row_count', 0)}\tselector: {t.get('selector', '')}"
+                    f"[{kind} rows={rcount}] container={csel!r} rows={rsel!r}{match_flag}"
                 )
-                lines.append(f"  keys: {keys_str}")
+                if kind == "table_list":
+                    headers = kv.get("headers", [])
+                    if headers:
+                        lines.append(f"  headers: {headers!r}")
+                    cols = kv.get("columns", [])
+                    if isinstance(cols, list):
+                        for col in cols:
+                            if not isinstance(col, dict):
+                                continue
+                            col_match = (
+                                " <-- MATCH" if col.get("matched") else ""
+                            )
+                            lines.append(
+                                f"    col {col.get('header', '')!r}: "
+                                f"css={col.get('css', '')!r} samples={col.get('samples', [])!r}{col_match}"
+                            )
+                else:
+                    ksel = kv.get("key_selector", "")
+                    vsel = kv.get("value_selector", "")
+                    lines.append(f"  key={ksel!r} value={vsel!r}")
+                    entries = kv.get("entries", [])
+                    if isinstance(entries, list):
+                        for ent in entries:
+                            if not isinstance(ent, dict):
+                                continue
+                            ent_match = (
+                                " <-- MATCH" if ent.get("matched") else ""
+                            )
+                            lines.append(
+                                f"    {ent.get('key', '')!r}: {ent.get('sample', '')!r}{ent_match}"
+                            )
+
+        # 4. REPEATING LISTS & DOM SKELETON
+        if self.repeating_lists or self.navigation_lists:
             lines.append("")
+            lines.append("=== REPEATING LISTS & DOM SKELETON ===")
+            for lst in self.repeating_lists:
+                sel = lst.get("selector", "")
+                psel = lst.get("parent_selector", "")
+                cnt = lst.get("count", 0)
+                score = lst.get("score", 0.0)
+                stab = lst.get("selector_stability", "stable")
+                match_flag = " <-- MATCH" if lst.get("matched") else ""
+                lines.append(
+                    f'[repeat x{cnt}] selector="{sel}" parent="{psel}" '
+                    f"[{stab}, score={score}]{match_flag}"
+                )
+                outliers = lst.get("outliers", [])
+                if isinstance(outliers, list) and outliers:
+                    out_parts: list[str] = []
+                    for o in outliers:
+                        if isinstance(o, dict):
+                            otag = o.get("tag", "")
+                            ocls = o.get("classes", [])
+                            ocnt = o.get("count", 1)
+                            cls_sfx = (
+                                "." + ".".join(str(x) for x in ocls)
+                                if isinstance(ocls, list) and ocls
+                                else ""
+                            )
+                            out_parts.append(f"{otag}{cls_sfx} (x{ocnt})")
+                    if out_parts:
+                        lines.append(f"  outliers: {', '.join(out_parts)}")
+                fields_list = lst.get("fields", [])
+                if isinstance(fields_list, list):
+                    for fld in fields_list:
+                        if not isinstance(fld, dict):
+                            continue
+                        lines.append(_format_field_line(fld))
+            for nav in self.navigation_lists:
+                nsel = nav.get("selector", "")
+                ncnt = nav.get("count", 0)
+                nsamples = nav.get("samples", [])
+                lines.append(f"<!-- nav-list x{ncnt}: {nsel} {nsamples!r} -->")
 
-        if self.page_summary:
-            lines.append("== page_summary ==")
-            for k, v in self.page_summary.items():
-                lines.append(f"{k}\t{v}")
+        # 5. ZOOM MATCHES
+        if self.zoom_matches:
             lines.append("")
+            lines.append("=== ZOOM MATCHES ===")
+            for zm in self.zoom_matches:
+                csel = zm.get("container_selector", "")
+                ctag = zm.get("container_tag", "")
+                msel = zm.get("match_selector", "")
+                mtext = zm.get("match_text", "")
+                lines.append(
+                    f'[zoom-container <{ctag}>] container="{csel}" match="{msel}" text={mtext!r}'
+                )
+                zfields = zm.get("fields", [])
+                if isinstance(zfields, list):
+                    for zf in zfields:
+                        if not isinstance(zf, dict):
+                            continue
+                        lines.append(_format_field_line(zf))
 
-        return "\n".join(lines).rstrip()
+        return "\n".join(lines)
 
 
-def _collect_tag_stats(
-    soup: BeautifulSoup,
-) -> tuple[
-    list[dict[str, object]],
-    list[dict[str, object]],
-    list[dict[str, object]],
-    list[str],
-    dict[str, int],
-]:
-    """Walk all tags; return (tag_stats, class_stats, id_stats, data_attrs,
-    class_count_full).
+DiscoverResult = ScoutResult
 
-    `class_count_full` is the **uncapped** class→occurrence-count lookup —
-    used downstream by `_build_short_selector` to detect rare anchor
-    classes. The capped `class_stats` list stays for output.
-    """
-    tag_counts: dict[str, int] = {}
-    class_counts: dict[str, int] = {}
-    id_counts: dict[str, int] = {}
-    data_attrs: set[str] = set()
 
-    for tag in soup.find_all(True):
-        name = tag.name
-        tag_counts[name] = tag_counts.get(name, 0) + 1
+def _format_field_line(fld: dict[str, object]) -> str:
+    """Format a single field entry inside a repeating list or zoom container."""
+    path = fld.get("path", "")
+    css = fld.get("css", "")
+    kind = fld.get("kind", "scalar")
+    present = fld.get("present", 1)
+    total = fld.get("total", 1)
+    optional = fld.get("optional", False)
+    cov = (
+        f"[{present}/{total}, optional]" if optional else f"[{present}/{total}]"
+    )
 
-        for cls in tag.get("class") or []:
-            class_counts[cls] = class_counts.get(cls, 0) + 1
+    if kind == "array":
+        arr_range = fld.get("array_range", [1, 1])
+        if isinstance(arr_range, list) and len(arr_range) == 2:
+            r_str = f"[array {arr_range[0]}..{arr_range[1]} items]"
+        else:
+            r_str = "[array]"
+        sel_str = f'css-all="{css}" {r_str}'
+    else:
+        sel_str = f'css="{css}"'
 
-        id_val = tag.get("id")
-        if isinstance(id_val, str) and id_val:
-            id_counts[id_val] = id_counts.get(id_val, 0) + 1
+    parts = [f"  - {path} {cov} {sel_str}"]
+    samples = fld.get("samples", [])
+    if isinstance(samples, list) and samples:
+        parts.append(f"text={samples!r}")
+    attr_samples = fld.get("attr_samples", {})
+    if isinstance(attr_samples, dict) and attr_samples:
+        for k, v in attr_samples.items():
+            parts.append(f"{k}={v!r}")
+    if fld.get("matched"):
+        parts.append("<-- MATCH")
+    return " ".join(parts)
 
-        for attr_name in tag.attrs:
-            if attr_name.startswith("data-"):
-                data_attrs.add(attr_name)
 
-    tag_stats = [
-        {"tag": t, "count": c}
-        for t, c in sorted(tag_counts.items(), key=lambda kv: (-kv[1], kv[0]))
-    ][:DISCOVER_TOP_TAGS]
-    class_stats = [
-        {"class": c, "count": n}
-        for c, n in sorted(class_counts.items(), key=lambda kv: (-kv[1], kv[0]))
-    ][:DISCOVER_TOP_CLASSES]
-    id_stats = [
-        {"id": i, "count": n}
-        for i, n in sorted(id_counts.items(), key=lambda kv: (-kv[1], kv[0]))
-    ][:DISCOVER_TOP_IDS]
-    return (
-        tag_stats,
-        class_stats,
-        id_stats,
-        sorted(data_attrs),
-        class_counts,
+# ─────────────────────────── DOM utilities & selectors ───────────────────────
+
+
+def _normalize_ws(text: str, max_len: int = MAX_SAMPLE_LEN) -> str:
+    """Collapse internal whitespace and truncate to `max_len`."""
+    collapsed = " ".join(text.split())
+    if max_len > 0 and len(collapsed) > max_len:
+        return collapsed[:max_len] + "…"
+    return collapsed
+
+
+def _safe_select(root: BeautifulSoup | Tag, selector: str) -> list[Tag]:
+    """Run `.select(selector)` safely, returning an empty list on any error."""
+    if not selector or not selector.strip():
+        return []
+    try:
+        return list(root.select(selector))
+    except Exception:  # noqa: BLE001
+        return []
+
+
+_CSS_SIMPLE_IDENT_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_-]*$")
+
+
+def _is_valid_css_ident(ident: str) -> bool:
+    """Return True if `ident` can be used directly in `.class` or `#id` selector."""
+    return bool(ident and _CSS_SIMPLE_IDENT_RE.match(ident))
+
+
+def _attr_selector_val(val: str) -> str:
+    """Escape a value for `[attr="val"]` CSS selector."""
+    escaped = val.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def _same_node_list(a: list[Tag], b: list[Tag]) -> bool:
+    """Check whether two lists of `Tag` contain the exact same DOM elements in order."""
+    return len(a) == len(b) and all(
+        id(x) == id(y) for x, y in zip(a, b, strict=True)
     )
 
 
-def _depth_of(tag: Tag) -> int:
-    """Depth from the document root (root = 1)."""
-    depth = 0
-    current: object = tag
-    while isinstance(current, Tag) and current.name not in ("[document]",):
-        depth += 1
-        parent = current.parent
-        current = parent
-    return depth
-
-
-def _signature(tag: Tag) -> tuple[str, frozenset[str]]:
-    """Stable identity for grouping siblings: (tag_name, class set)."""
-    raw_classes = tag.get("class")
-    if isinstance(raw_classes, list):
-        classes = frozenset(str(c) for c in raw_classes)
-    elif raw_classes is not None:
-        classes = frozenset([str(raw_classes)])
-    else:
-        classes = frozenset()
-    return (tag.name, classes)
-
-
-def _compute_common_descendants(
-    items: list[Tag],
-    *,
-    threshold: float = DISCOVER_DESCENDANT_THRESHOLD,
-    max_n: int = DISCOVER_TOP_DESCENDANTS,
-) -> list[dict[str, object]]:
-    """Find descendants that appear in >= `threshold` fraction of `items`.
-
-    Returns one entry per distinct (tag_name, class_set) signature, with:
-    - `attrs`: union of non-class attributes seen across matching descendants
-    - `sample`: first matching descendant's text (or first attr value when no
-      text) — truncated to DISCOVER_SAMPLE_LEN. Omitted when nothing useful.
-    - `max_per_item`: max occurrences of this signature within a single item.
-      When >1, the LLM knows to use `:nth-of-type(N)` or expect LIST output.
-
-    Sort: leaf-tag first (a/img/p/h/span/etc.), then coverage desc, then
-    alphabetical. Leaf tags carry extractable data and are typically the
-    fields the LLM needs to design — surfacing them ahead of intermediate
-    container <div>s prevents them being cut off by `max_n`.
-    """
-    n = len(items)
-    if n == 0:
-        return []
-    min_items = max(1, int(n * threshold))
-
-    # Per-item: track signatures seen, attribute unions, occurrence counts,
-    # and one sample element per signature (first encountered).
-    per_item_signatures: list[set[tuple[str, frozenset[str]]]] = []
-    per_item_attrs: list[dict[tuple[str, frozenset[str]], set[str]]] = []
-    per_item_counts: list[dict[tuple[str, frozenset[str]], int]] = []
-    per_item_samples: list[dict[tuple[str, frozenset[str]], Tag]] = []
-    for item in items:
-        seen: set[tuple[str, frozenset[str]]] = set()
-        attr_map: dict[tuple[str, frozenset[str]], set[str]] = {}
-        count_map: dict[tuple[str, frozenset[str]], int] = {}
-        sample_map: dict[tuple[str, frozenset[str]], Tag] = {}
-        for desc in item.find_all(True):
-            sig = _signature(desc)
-            seen.add(sig)
-            attrs = attr_map.setdefault(sig, set())
-            for k in desc.attrs:
-                if k != "class":
-                    attrs.add(k)
-            count_map[sig] = count_map.get(sig, 0) + 1
-            if sig not in sample_map:
-                sample_map[sig] = desc
-        per_item_signatures.append(seen)
-        per_item_attrs.append(attr_map)
-        per_item_counts.append(count_map)
-        per_item_samples.append(sample_map)
-
-    counts: dict[tuple[str, frozenset[str]], int] = {}
-    for seen in per_item_signatures:
-        for sig in seen:
-            counts[sig] = counts.get(sig, 0) + 1
-
-    common = [(sig, c) for sig, c in counts.items() if c >= min_items]
-
-    # Sort: leaf-tag first (leaves carry data, surface ahead of containers),
-    # then coverage desc, then alphabetical for determinism.
-    def _sort_key(
-        kv: tuple[tuple[str, frozenset[str]], int],
-    ) -> tuple[int, int, str, list[str]]:
-        sig, count = kv
-        tag_name, classes = sig
-        is_leaf = 0 if tag_name in LEAF_TAGS else 1
-        return (is_leaf, -count, tag_name, sorted(classes))
-
-    common.sort(key=_sort_key)
-
-    result: list[dict[str, object]] = []
-    for sig, count in common[:max_n]:
-        tag_name, classes = sig
-        # Union of attrs across all items for this signature.
-        attr_union: set[str] = set()
-        for attr_map in per_item_attrs:
-            attr_union.update(attr_map.get(sig, set()))
-        # Max occurrences within any single item — flags "appears N times
-        # per row" patterns (e.g. <p class="card-text"> year/country/mileage).
-        max_per_item = 1
-        for count_map in per_item_counts:
-            occ = count_map.get(sig, 0)
-            if occ > max_per_item:
-                max_per_item = occ
-        # Sample values: head + tail (deduped) for variety coverage.
-        samples = _extract_samples(per_item_samples, sig, attr_union)
-        entry: dict[str, object] = {
-            "tag": tag_name,
-            "classes": sorted(classes),
-            "in_items": count,
-        }
-        if attr_union:
-            entry["attrs"] = sorted(attr_union)
-        if max_per_item > 1:
-            entry["max_per_item"] = max_per_item
-        if samples["sample"]:
-            entry["sample"] = samples["sample"]
-            if "sample_tail" in samples:
-                entry["sample_tail"] = samples["sample_tail"]
-        result.append(entry)
-    return result
-
-
-def _extract_samples(
-    per_item_samples: list[dict[tuple[str, frozenset[str]], Tag]],
-    sig: tuple[str, frozenset[str]],
-    attr_union: set[str],
-    *,
-    head_n: int = SAMPLE_HEAD_N,
-    tail_n: int = SAMPLE_TAIL_N,
-) -> dict[str, list[str]]:
-    """Collect head+tail distinct sample values for a signature.
-
-    Walks `per_item_samples` in order, extracts a value (text or first attr)
-    from each item's stored sample Tag, deduplicates, and returns::
-
-        {"sample": [first head_n distinct], "sample_tail": [last tail_n
-         distinct not already in head]}
-
-    `sample_tail` is omitted (key absent) when the list is too short to
-    produce non-overlapping tail values. Values are whitespace-collapsed
-    via `Tag.get_text(strip=True)` — the caller surfaces a global
-    `sample_normalized: true` marker to flag this.
-    """
-    limit = DISCOVER_SAMPLE_LEN
-    priority = ["href", "src", "title", "alt", "content", "value"]
-
-    def _value_from(tag: Tag) -> str | None:
-        text = tag.get_text(strip=True)
-        if text:
-            return text[:limit]
-        for name in priority:
-            if name in attr_union:
-                val = tag.get(name)
-                if isinstance(val, str) and val:
-                    return val[:limit]
-        for name in sorted(attr_union):
-            val = tag.get(name)
-            if isinstance(val, str) and val:
-                return val[:limit]
-        return None
-
-    head: list[str] = []
-    seen: set[str] = set()
-    for sample_map in per_item_samples:
-        tag = sample_map.get(sig)
-        if tag is None:
-            continue
-        val = _value_from(tag)
-        if val is None or val in seen:
-            continue
-        seen.add(val)
-        head.append(val)
-        if len(head) >= head_n:
-            break
-
-    tail: list[str] = []
-    for sample_map in reversed(per_item_samples):
-        tag = sample_map.get(sig)
-        if tag is None:
-            continue
-        val = _value_from(tag)
-        if val is None or val in seen:
-            continue
-        seen.add(val)
-        tail.append(val)
-        if len(tail) >= tail_n:
-            break
-
-    result: dict[str, list[str]] = {"sample": head}
-    if tail:
-        result["sample_tail"] = tail
-    return result
-
-
-# ─────────────────── discover v2: flags + short selector ─────────────
-
-
-def _detect_single_link_item(items: list[Tag]) -> bool:
-    """True when every item is itself a bare `<a>` OR has exactly one direct
-    child Tag and it is `<a>`.
-
-    Signals a navigation list: each row is just a link (e.g. `<li><a>...
-    </a></li>` or a sequence of sibling `<a>` tags). The LLM can then prefer
-    `(list)struct` of single-field structs or skip the container entirely.
-    """
-    if not items:
+def _same_node_set(a: list[Tag], b: list[Tag]) -> bool:
+    """Check whether two lists of `Tag` contain the exact same set of DOM elements."""
+    if len(a) != len(b):
         return False
-    for item in items:
-        # Item itself is a bare link.
-        if item.name == "a":
-            continue
-        # Item wraps exactly one <a> child.
-        child_tags = [c for c in item.children if isinstance(c, Tag)]
-        if len(child_tags) != 1 or child_tags[0].name != "a":
-            return False
+    return {id(x) for x in a} == {id(y) for y in b}
+
+
+def compute_css_path(tag: Tag) -> str:
+    """Compute an exact, root-anchored CSS path from `<html>` down to `tag`."""
+    parts: list[str] = []
+    current: Tag | None = tag
+    while current is not None and current.name not in ("[document]", None):
+        name = current.name
+        sem_classes = [
+            c for c in _get_semantic_classes(current) if _is_valid_css_ident(c)
+        ]
+        same_tag_index = 1
+        sib: Tag | None = current.find_previous_sibling(name)
+        while sib is not None:
+            same_tag_index += 1
+            sib = sib.find_previous_sibling(name)
+        has_sib = (
+            current.find_previous_sibling(name) is not None
+            or current.find_next_sibling(name) is not None
+        )
+        cls_part = f".{'.'.join(sem_classes[:2])}" if sem_classes else ""
+        nth_part = (
+            f":nth-of-type({same_tag_index})"
+            if (same_tag_index > 1 or has_sib)
+            else ""
+        )
+        parts.append(f"{name}{cls_part}{nth_part}")
+        current = current.parent if isinstance(current.parent, Tag) else None
+    parts.reverse()
+    return " > ".join(parts)
+
+
+def _element_self_candidates(tag: Tag) -> list[str]:
+    """Generate short candidate selector segments for a single `tag`."""
+    cands: list[str] = []
+    name = tag.name
+    raw_id = tag.get("id")
+    if isinstance(raw_id, str) and raw_id.strip():
+        rid = raw_id.strip()
+        if _is_valid_css_ident(rid):
+            cands.append(f"#{rid}")
+            cands.append(f"{name}#{rid}")
+        else:
+            cands.append(f"{name}[id={_attr_selector_val(rid)}]")
+
+    for attr_name in ANCHOR_ATTRS:
+        val = tag.get(attr_name)
+        if isinstance(val, str) and val.strip():
+            cands.append(
+                f"{name}[{attr_name}={_attr_selector_val(val.strip())}]"
+            )
+
+    sem = [c for c in _get_semantic_classes(tag) if _is_valid_css_ident(c)]
+    if sem:
+        cands.append(f"{name}.{sem[0]}")
+        if len(sem) > 1:
+            cands.append(f"{name}.{'.'.join(sem[:2])}")
+        cands.append(f".{sem[0]}")
+
+    for k, v in tag.attrs.items():
+        if (
+            k.startswith("data-")
+            and isinstance(v, str)
+            and v.strip()
+            and len(v) <= 40
+        ):
+            cands.append(f"{name}[{k}={_attr_selector_val(v.strip())}]")
+        elif k.startswith("data-") and _is_valid_css_ident(k):
+            cands.append(f"{name}[{k}]")
+
+    cands.append(name)
+    return cands
+
+
+def _synthesize_unique_selector(
+    soup: BeautifulSoup, target: Tag
+) -> tuple[str, Literal["stable", "fragile"]]:
+    """Synthesize a DOM-verified CSS selector that uniquely selects `[target]` in `soup`."""
+    # 1. Try direct candidates on target itself
+    self_cands = _element_self_candidates(target)
+    for cand in self_cands:
+        if _same_node_list(_safe_select(soup, cand), [target]):
+            return cand, "stable"
+
+    # 2. Try combining with an ancestor anchor within <= 3 hops
+    ancestors: list[Tag] = []
+    curr = target.parent
+    while (
+        isinstance(curr, Tag)
+        and curr.name not in ("[document]", None)
+        and len(ancestors) < 4
+    ):
+        ancestors.append(curr)
+        curr = curr.parent
+
+    # Positional step on target within its direct parent
+    same_tag_index = 1
+    sib: Tag | None = target.find_previous_sibling(target.name)
+    while sib is not None:
+        same_tag_index += 1
+        sib = sib.find_previous_sibling(target.name)
+    nth_self = f"{target.name}:nth-of-type({same_tag_index})"
+
+    for depth_idx, anc in enumerate(ancestors):
+        anc_cands = _element_self_candidates(anc)
+        # Filter ancestor candidates that are reasonably selective
+        for ac in anc_cands:
+            for tc in self_cands:
+                sep = " > " if depth_idx == 0 else " "
+                comb = f"{ac}{sep}{tc}"
+                if _same_node_list(_safe_select(soup, comb), [target]):
+                    return comb, "stable"
+            if depth_idx == 0:
+                comb_nth = f"{ac} > {nth_self}"
+                if _same_node_list(_safe_select(soup, comb_nth), [target]):
+                    return comb_nth, "stable"
+
+    # 3. Fallback to full verified path
+    full_path = compute_css_path(target)
+    if _same_node_list(_safe_select(soup, full_path), [target]):
+        return full_path, "fragile"
+
+    return target.name, "fragile"
+
+
+def _synthesize_group_selector(
+    soup: BeautifulSoup, parent: Tag, items: list[Tag]
+) -> tuple[str, str, Literal["stable", "fragile"]]:
+    """Synthesize DOM-verified `(item_selector, parent_selector, stability)` for repeating `items`."""
+    parent_sel, parent_stab = _synthesize_unique_selector(soup, parent)
+    if not items:
+        return parent_sel, parent_sel, "fragile"
+
+    item_tag = items[0].name
+    # Shared semantic classes present on ALL items in the group
+    first_sem = [
+        c for c in _get_semantic_classes(items[0]) if _is_valid_css_ident(c)
+    ]
+    shared_sem = [
+        c
+        for c in first_sem
+        if all(c in _get_semantic_classes(it) for it in items[1:])
+    ]
+
+    # Shared data-* attribute presence across all items
+    shared_data_attrs: list[str] = []
+    for k in items[0].attrs:
+        if (
+            k.startswith("data-")
+            and _is_valid_css_ident(k)
+            and all(it.has_attr(k) for it in items[1:])
+        ):
+            shared_data_attrs.append(k)
+
+    item_specs: list[str] = []
+    if shared_sem:
+        item_specs.append(f".{shared_sem[0]}")
+        item_specs.append(f"{item_tag}.{shared_sem[0]}")
+        if len(shared_sem) > 1:
+            item_specs.append(f"{item_tag}.{'.'.join(shared_sem[:2])}")
+    for da in shared_data_attrs:
+        item_specs.append(f"{item_tag}[{da}]")
+    item_specs.append(item_tag)
+
+    # Check if there are same-tag outliers in parent that need exclusion
+    all_parent_children = [
+        c for c in parent.children if isinstance(c, Tag) and c.name == item_tag
+    ]
+    item_ids = {id(it) for it in items}
+    outlier_children = [c for c in all_parent_children if id(c) not in item_ids]
+    not_clauses: list[str] = []
+    if outlier_children:
+        outlier_sem: list[str] = []
+        for oc in outlier_children:
+            for c in _get_semantic_classes(oc):
+                if (
+                    _is_valid_css_ident(c)
+                    and c not in shared_sem
+                    and c not in outlier_sem
+                ):
+                    outlier_sem.append(c)
+        if outlier_sem and len(outlier_sem) <= 3:
+            not_sfx = "".join(f":not(.{c})" for c in outlier_sem)
+            not_clauses.append(f"{item_tag}{not_sfx}")
+
+    # 1. Try standalone item specs if shared_sem or shared_data_attrs is globally exact
+    for spec in item_specs:
+        if spec == item_tag:
+            continue  # Bare tag globally is rarely a good standalone selector unless verified with parent
+        if _same_node_set(_safe_select(soup, spec), items):
+            return spec, parent_sel, "stable"
+
+    # 2. Try parent_sel > spec and ancestor anchor > spec
+    ancestors: list[Tag] = []
+    curr: Tag | None = parent
+    while (
+        isinstance(curr, Tag)
+        and curr.name not in ("[document]", None)
+        and len(ancestors) < 3
+    ):
+        ancestors.append(curr)
+        curr = curr.parent if isinstance(curr.parent, Tag) else None
+
+    for depth_idx, anc in enumerate(ancestors):
+        anc_cands = _element_self_candidates(anc)
+        for ac in anc_cands:
+            for spec in item_specs + not_clauses:
+                if depth_idx == 0:
+                    cand_direct = f"{ac} > {spec}"
+                    if _same_node_set(_safe_select(soup, cand_direct), items):
+                        return cand_direct, parent_sel, "stable"
+                cand_desc = f"{ac} {spec}"
+                if _same_node_set(_safe_select(soup, cand_desc), items):
+                    return cand_desc, parent_sel, "stable"
+
+    # 3. Try parent_sel > spec
+    for spec in item_specs + not_clauses:
+        cand = f"{parent_sel} > {spec}"
+        if _same_node_set(_safe_select(soup, cand), items):
+            stab: Literal["stable", "fragile"] = (
+                "stable" if parent_stab == "stable" else "fragile"
+            )
+            return cand, parent_sel, stab
+
+    fallback = f"{parent_sel} > {item_tag}"
+    return fallback, parent_sel, "fragile"
+
+
+# ─────────────────────────── DOM Preprocessing ───────────────────────────────
+
+
+def _preprocess_dom(soup: BeautifulSoup) -> None:
+    """Strip non-content tags (`<svg>`, `<style>`, `<noscript>`, `<template>`) and HTML comments."""
+    for comment in soup.find_all(string=lambda text: isinstance(text, Comment)):
+        comment.extract()
+    for tag in soup.find_all(list(STRIP_TAGS)):
+        tag.decompose()
+
+
+def _strip_scripts(soup: BeautifulSoup) -> None:
+    """Remove `<script>` tags after Embedded JSON extraction is complete."""
+    for script in soup.find_all("script"):
+        script.decompose()
+
+
+# ─────────────────────────── 1. Embedded JSON Engine ─────────────────────────
+
+_JS_ASSIGN_RE = re.compile(
+    r"(?:"
+    r"\b(?:var|let|const)\s+([A-Za-z_$][\w$]*)"
+    r"|"
+    r"\b(?:window|globalThis|self)\.([A-Za-z_$][\w$]*)"
+    r"|"
+    r"\b(?:window|globalThis|self)\[\s*['\"]([^'\"]+)['\"]\s*\]"
+    r")\s*=\s*"
+)
+
+_JS_PUSH_RE = re.compile(r"\b([A-Za-z_$][\w$.]*)\.push\(\s*")
+
+_JSON_PARSE_CALL_RE = re.compile(r"""JSON\.parse\(\s*(['"])""")
+
+
+def _extract_js_string_literal(
+    text: str, quote_pos: int
+) -> tuple[str | None, int]:
+    """Extract and unescape a JS string literal starting at `quote_pos` (`'` or `"`)."""
+    quote = text[quote_pos]
+    i = quote_pos + 1
+    n = len(text)
+    chars: list[str] = []
+    while i < n:
+        ch = text[i]
+        if ch == "\\":
+            if i + 1 >= n:
+                return None, n
+            nxt = text[i + 1]
+            if nxt in ('"', "'", "\\", "/"):
+                chars.append(nxt)
+                i += 2
+            elif nxt == "n":
+                chars.append("\n")
+                i += 2
+            elif nxt == "r":
+                chars.append("\r")
+                i += 2
+            elif nxt == "t":
+                chars.append("\t")
+                i += 2
+            elif nxt == "b":
+                chars.append("\b")
+                i += 2
+            elif nxt == "f":
+                chars.append("\f")
+                i += 2
+            elif nxt == "u" and i + 5 < n:
+                hex_part = text[i + 2 : i + 6]
+                try:
+                    chars.append(chr(int(hex_part, 16)))
+                    i += 6
+                except ValueError:
+                    chars.append(nxt)
+                    i += 2
+            elif nxt == "x" and i + 3 < n:
+                hex_part = text[i + 2 : i + 4]
+                try:
+                    chars.append(chr(int(hex_part, 16)))
+                    i += 4
+                except ValueError:
+                    chars.append(nxt)
+                    i += 2
+            else:
+                chars.append(nxt)
+                i += 2
+        elif ch == quote:
+            return "".join(chars), i + 1
+        else:
+            chars.append(ch)
+            i += 1
+    return None, n
+
+
+def _is_trivial_json(val: object) -> bool:
+    """Return True if a parsed JSON value is a trivial object (<2 keys and no nested collections)."""
+    if isinstance(val, dict):
+        has_nested = any(
+            isinstance(v, (dict, list)) and bool(v) for v in val.values()
+        )
+        return bool(len(val) < 2 and not has_nested)
+    if isinstance(val, list):
+        if not val:
+            return True
+        return bool(
+            all(not isinstance(x, (dict, list)) for x in val) and len(val) < 2
+        )
     return True
 
 
-def _detect_has_th_row(parent: Tag, item_tag: str) -> bool:
-    """True when `item_tag == 'tr'` and the enclosing `<table>` contains
-    at least one `<th>` anywhere (typically in `<thead>`).
-
-    Marks the group as a table body — keys are available from `<th>`
-    cells (surfaced separately via `table_candidates`).
-    """
-    if item_tag != "tr":
-        return False
-    # Walk up from the items' parent to the nearest <table> ancestor —
-    # <th> may live in a sibling <thead>, not in the same parent as items.
-    table: Tag | None = parent
-    while table is not None and table.name != "table":
-        p = table.parent
-        table = p if isinstance(p, Tag) else None
-    if table is None:
-        return False
-    return table.find("th") is not None
-
-
-def _detect_single_label_child(items: list[Tag]) -> bool:
-    """True when at least one item has exactly one direct child Tag with
-    a label-like name (strong/b/dt/label) AND non-empty residual text
-    (i.e. item text ≠ label child text).
-
-    Signals "label: value" patterns typical of definition lists.
-    """
-    for item in items:
-        child_tags = [c for c in item.children if isinstance(c, Tag)]
-        if len(child_tags) != 1 or child_tags[0].name not in LABEL_TAGS:
-            continue
-        child = child_tags[0]
-        item_text = item.get_text(strip=True)
-        child_text = child.get_text(strip=True)
-        if item_text and item_text != child_text:
-            return True
-    return False
-
-
-def _build_short_selector(
-    item: Tag,
-    class_count: dict[str, int],
-) -> tuple[str, str]:
-    """Build a short, stable CSS selector for `item`.
-
-    Walks upward from `item.parent` looking for the nearest "anchor"
-    (item itself is never used as anchor — `item_selector` targets ALL
-    siblings, the item's own id/class would match only one):
-      1. ancestor with non-empty `id` → `#id`
-      2. ancestor with at least one class whose document frequency ≤
-         RARE_CLASS_MAX → `tag.rare-class`
-      3. no anchor found → fall back to `compute_css_path(item)`,
-         `selector_stability = "fragile"`
-
-    Below the anchor, builds a path of `tag` / `tag.class` segments down
-    to `item`, capped at SELECTOR_MAX_DEPTH. When the real depth exceeds
-    SELECTOR_MAX_DEPTH, the path is still truncated to MAX_DEPTH and
-    stability is forced to "fragile".
-
-    Returns `(selector, stability)`. Stability is `"stable"` only when
-    a real anchor was found and the path below fits within MAX_DEPTH.
-    """
-    # Step 1: walk up from item.parent looking for anchor.
-    anchor: Tag | None = None
-    anchor_segment: str = ""
-    current: Tag | None = item.parent if isinstance(item.parent, Tag) else None
-    while current is not None and current.name not in ("[document]", None):
-        # id anchor wins
-        raw_id = current.get("id")
-        if isinstance(raw_id, str) and raw_id:
-            anchor = current
-            anchor_segment = f"#{raw_id}"
-            break
-        # rare class anchor
-        raw_classes = current.get("class")
-        if isinstance(raw_classes, list):
-            cls_list = [str(c) for c in raw_classes]
-        elif raw_classes is not None:
-            cls_list = [str(raw_classes)]
+def _infer_json_type(values: list[object], total_count: int) -> str:
+    """Infer KDL JSON field type (`str`, `int`, `float`, `bool`, `array`, `object`, plus `?`)."""
+    non_null = [v for v in values if v is not None]
+    is_optional = len(non_null) < total_count
+    if not non_null:
+        return "str?"
+    types_seen: set[str] = set()
+    for v in non_null:
+        if isinstance(v, bool):
+            types_seen.add("bool")
+        elif isinstance(v, int):
+            types_seen.add("int")
+        elif isinstance(v, float):
+            types_seen.add("float")
+        elif isinstance(v, str):
+            types_seen.add("str")
+        elif isinstance(v, list):
+            types_seen.add("array")
+        elif isinstance(v, dict):
+            types_seen.add("object")
         else:
-            cls_list = []
-        rare = [c for c in cls_list if class_count.get(c, 0) <= RARE_CLASS_MAX]
-        if rare:
-            anchor = current
-            anchor_segment = f"{current.name}.{'.'.join(rare)}"
-            break
-        parent = current.parent
-        current = parent if isinstance(parent, Tag) else None
+            types_seen.add("str")
 
-    # No anchor — fragile fallback to full path.
-    if anchor is None or not anchor_segment:
-        return compute_css_path(item), "fragile"
-
-    # Step 2: build path from anchor down to item.
-    chain: list[Tag] = []
-    walker: Tag | None = item
-    while walker is not None and walker is not anchor:
-        chain.append(walker)
-        p = walker.parent
-        walker = p if isinstance(p, Tag) else None
-    chain.reverse()  # anchor-first → item-last
-
-    below_segments: list[str] = []
-    for tag in chain:
-        raw_classes = tag.get("class")
-        if isinstance(raw_classes, list):
-            cls_list = [str(c) for c in raw_classes]
-        elif raw_classes is not None:
-            cls_list = [str(raw_classes)]
-        else:
-            cls_list = []
-        # Keep only rare classes below anchor (avoid noise from common ones).
-        rare = [c for c in cls_list if class_count.get(c, 0) <= RARE_CLASS_MAX]
-        seg = f"{tag.name}.{'.'.join(rare)}" if rare else tag.name
-        below_segments.append(seg)
-
-    # Depth check: truncate path if too deep, force fragile.
-    over_depth = len(below_segments) > SELECTOR_MAX_DEPTH
-    if over_depth:
-        below_segments = below_segments[:SELECTOR_MAX_DEPTH]
-
-    parts = [anchor_segment, *below_segments]
-    selector = " > ".join(parts)
-    stability = "fragile" if over_depth else "stable"
-    return selector, stability
+    if types_seen == {"int", "float"}:
+        base = "float"
+    elif len(types_seen) == 1:
+        base = next(iter(types_seen))
+    else:
+        base = "str"
+    return f"{base}?" if is_optional else base
 
 
-def _try_top_level_keys(body: str) -> list[str] | None:
-    """Return up to 10 top-level keys when `body` parses as JSON object,
-    or as array whose first element is an object. None on any other case
-    (non-JSON, scalar JSON, oversized body, arrays of scalars).
-
-    Used to enrich `json_signals` so the LLM can match against schema
-    field names without re-parsing the snippet.
-    """
-    if len(body) > JSON_PARSE_MAX_BYTES:
-        return None
-    try:
-        parsed: object = json.loads(body)
-    except (ValueError, json.JSONDecodeError):
-        return None
-    if isinstance(parsed, dict):
-        keys = list(parsed.keys())
-        return keys[:10] if keys else None
-    if isinstance(parsed, list) and parsed:
-        first = parsed[0]
-        if isinstance(first, dict):
-            keys = list(first.keys())
-            return keys[:10] if keys else None
+def _sample_json_val(val: object) -> object:
+    """Produce a compact preview sample for a JSON field value."""
+    if isinstance(val, str):
+        return _normalize_ws(val, MAX_SAMPLE_LEN)
+    if isinstance(val, (int, float, bool)):
+        return val
+    if isinstance(val, list):
+        return f"[{len(val)} items]"
+    if isinstance(val, dict):
+        return f"{{{len(val)} keys}}"
     return None
 
 
-def _find_table_candidates(
-    soup: BeautifulSoup,
-    class_count: dict[str, int],
-    *,
-    max_tables: int = DISCOVER_TOP_TABLES,
-) -> list[dict[str, object]]:
-    """Collect `<table>` candidates with pre-computed row keys.
+def _escape_gjson_seg(key: str) -> str:
+    """Escape a single key segment for a GJSON path expression."""
+    escaped = (
+        key.replace("\\", "\\\\")
+        .replace(".", "\\.")
+        .replace("*", "\\*")
+        .replace("?", "\\?")
+    )
+    return escaped
 
-    For each table:
-      - `keys`: text content of `<th>` cells from the first row containing
-        them; if no row has `<th>`, falls back to first `<td>` of each row.
-      - `row_count`: number of `<tr>` rows (excluding thead-only rows when
-        keys come from `<th>`).
-      - `selector`: short selector via `_build_short_selector` on the
-        first `<tr>`.
-    Tables with zero rows are skipped.
+
+def _join_gjson_path(prefix: str, key: str) -> str:
+    seg = _escape_gjson_seg(key)
+    return f"{prefix}.{seg}" if prefix else seg
+
+
+def _discover_json_collections(
+    root_val: object, *, max_keys: int
+) -> list[dict[str, object]]:
+    """Recursively walk a parsed JSON payload up to depth 8 to discover object arrays and data dicts."""
+    collections: list[dict[str, object]] = []
+
+    def _walk(node: object, path: str, depth: int) -> None:
+        if depth > JSON_MAX_DEPTH:
+            return
+        if isinstance(node, list):
+            dict_items = [x for x in node if isinstance(x, dict)]
+            if len(dict_items) >= 2 and len(dict_items) >= len(node) * 0.5:
+                # Homogeneous array of objects!
+                all_keys: list[str] = []
+                seen_k: set[str] = set()
+                for d in dict_items:
+                    for k in d:
+                        ks = str(k)
+                        if ks not in seen_k:
+                            seen_k.add(ks)
+                            all_keys.append(ks)
+                fields_out: list[dict[str, object]] = []
+                for k in all_keys[:max_keys]:
+                    vals = [d.get(k) for d in dict_items if k in d]
+                    ftype = _infer_json_type(vals, len(dict_items))
+                    samples: list[object] = []
+                    for v in vals:
+                        if v is None:
+                            continue
+                        sv = _sample_json_val(v)
+                        if sv is not None and sv not in samples:
+                            samples.append(sv)
+                        if len(samples) >= 2:
+                            break
+                    fields_out.append(
+                        {"name": k, "type": ftype, "samples": samples}
+                    )
+                collections.append(
+                    {
+                        "path": path,
+                        "kind": "array",
+                        "count": len(dict_items),
+                        "fields": fields_out,
+                    }
+                )
+            # Also walk inside first few elements if they contain deeper collections
+            for idx, item in enumerate(node[:3]):
+                if isinstance(item, (dict, list)):
+                    sub_path = f"{path}.{idx}" if path else str(idx)
+                    _walk(item, sub_path, depth + 1)
+
+        elif isinstance(node, dict):
+            # Check if this dict itself is a meaningful data object
+            scalar_or_struct_keys = [str(k) for k in node]
+            # Record dict if it has >= 3 keys or is root with >= 2 keys
+            if len(scalar_or_struct_keys) >= 3 or (
+                path == "" and len(scalar_or_struct_keys) >= 2
+            ):
+                fields_out = []
+                for k in scalar_or_struct_keys[:max_keys]:
+                    v = node[k]
+                    ftype = _infer_json_type([v], 1)
+                    sv = _sample_json_val(v)
+                    samples = [sv] if sv is not None else []
+                    fields_out.append(
+                        {"name": k, "type": ftype, "samples": samples}
+                    )
+                collections.append(
+                    {
+                        "path": path,
+                        "kind": "object",
+                        "count": len(scalar_or_struct_keys),
+                        "fields": fields_out,
+                    }
+                )
+            for k, v in node.items():
+                if isinstance(v, (dict, list)):
+                    _walk(v, _join_gjson_path(path, str(k)), depth + 1)
+
+    _walk(root_val, "", 0)
+
+    def _col_key(c: dict[str, object]) -> tuple[int, int]:
+        cnt = c.get("count")
+        return (
+            0 if c.get("kind") == "array" else 1,
+            -(cnt if isinstance(cnt, int) else 0),
+        )
+
+    collections.sort(key=_col_key)
+    return collections
+
+
+def _scan_script_json_payloads(
+    body: str, decoder: json.JSONDecoder
+) -> list[tuple[str, str | None, object, int]]:
+    """Scan a `<script>` body using `raw_decode` for all embedded JSON payloads.
+
+    Returns list of `(subtype, var_name, parsed_value, raw_byte_size)`.
     """
-    candidates: list[dict[str, object]] = []
+    results: list[tuple[str, str | None, object, int]] = []
+    consumed_spans: list[tuple[int, int]] = []
+
+    def _is_consumed(pos: int) -> bool:
+        return any(start <= pos < end for start, end in consumed_spans)
+
+    # 1. Scan JSON.parse("...") calls first
+    for m in _JSON_PARSE_CALL_RE.finditer(body):
+        quote_pos = m.end() - 1
+        unescaped, end_pos = _extract_js_string_literal(body, quote_pos)
+        if unescaped:
+            ustr = unescaped.strip()
+            if ustr and ustr[0] in "{[":
+                try:
+                    parsed, _ = decoder.raw_decode(ustr)
+                    consumed_spans.append((m.start(), end_pos))
+                    results.append(("json-parse", None, parsed, len(ustr)))
+                except (ValueError, json.JSONDecodeError):
+                    pass
+
+    # 2. Scan var/let/const/window assignments
+    for m in _JS_ASSIGN_RE.finditer(body):
+        if _is_consumed(m.start()):
+            continue
+        var_name = m.group(1) or m.group(2) or m.group(3)
+        rhs_start = m.end()
+        # Check if RHS is JSON.parse(...)
+        jp_match = _JSON_PARSE_CALL_RE.match(body, rhs_start)
+        if jp_match is not None:
+            quote_pos = jp_match.end() - 1
+            unescaped, end_pos = _extract_js_string_literal(body, quote_pos)
+            if unescaped:
+                ustr = unescaped.strip()
+                if ustr and ustr[0] in "{[":
+                    try:
+                        parsed, _ = decoder.raw_decode(ustr)
+                        consumed_spans.append((m.start(), end_pos))
+                        results.append(
+                            ("json-parse", var_name, parsed, len(ustr))
+                        )
+                        continue
+                    except (ValueError, json.JSONDecodeError):
+                        pass
+        # Otherwise check if RHS starts with `{` or `[`
+        if rhs_start < len(body) and body[rhs_start] in "{[":
+            try:
+                parsed, end_offset = decoder.raw_decode(body, rhs_start)
+                consumed_spans.append((m.start(), end_offset))
+                results.append(
+                    ("js-var", var_name, parsed, end_offset - rhs_start)
+                )
+            except (ValueError, json.JSONDecodeError):
+                pass
+
+    # 3. Scan .push({...}) or .push([...]) calls
+    for m in _JS_PUSH_RE.finditer(body):
+        if _is_consumed(m.start()):
+            continue
+        var_name = m.group(1)
+        arg_start = m.end()
+        if arg_start < len(body) and body[arg_start] in "{[":
+            try:
+                parsed, end_offset = decoder.raw_decode(body, arg_start)
+                consumed_spans.append((m.start(), end_offset))
+                results.append(
+                    ("js-push", var_name, parsed, end_offset - arg_start)
+                )
+            except (ValueError, json.JSONDecodeError):
+                pass
+
+    # 4. If bare JSON script (starts with `{` or `[`), try raw_decode at start
+    stripped = body.lstrip()
+    lead_ws = len(body) - len(stripped)
+    if stripped and stripped[0] in "{[" and not _is_consumed(lead_ws):
+        try:
+            parsed, end_offset = decoder.raw_decode(body, lead_ws)
+            consumed_spans.append((lead_ws, end_offset))
+            results.append(("bare-json", None, parsed, end_offset - lead_ws))
+        except (ValueError, json.JSONDecodeError):
+            pass
+
+    return results
+
+
+def _extract_embedded_json(
+    soup: BeautifulSoup, *, full: bool
+) -> list[dict[str, object]]:
+    """Run the Embedded JSON reconnaissance engine across all scripts and attributes."""
+    decoder = json.JSONDecoder()
+    max_keys = 1000 if full else MAX_JSON_KEYS
+    signals: list[dict[str, object]] = []
+
+    for script in soup.find_all("script"):
+        body = script.string or script.get_text() or ""
+        if not body or not body.strip() or len(body) > JSON_PARSE_MAX_BYTES:
+            continue
+        sel, _ = _synthesize_unique_selector(soup, script)
+        raw_type = script.get("type")
+        stype = raw_type.strip().lower() if isinstance(raw_type, str) else ""
+
+        if stype in JSON_MIME_TYPES:
+            s_trimmed = body.lstrip()
+            lead = len(body) - len(s_trimmed)
+            if not s_trimmed:
+                continue
+            try:
+                parsed, end_off = decoder.raw_decode(body, lead)
+            except (ValueError, json.JSONDecodeError):
+                continue
+            if _is_trivial_json(parsed):
+                continue
+            subtype = (
+                "json-ld" if stype == "application/ld+json" else "json-mime"
+            )
+            cols = _discover_json_collections(parsed, max_keys=max_keys)
+            if not cols:
+                continue
+            top_col = cols[0]
+            path_sfx = (
+                f' path="{top_col["path"]}"' if top_col.get("path") else ""
+            )
+            hint = f'css "{sel}"; raw inner; jsonify Schema{path_sfx}'
+            signals.append(
+                {
+                    "kind": "script",
+                    "subtype": subtype,
+                    "selector": sel,
+                    "kdl_hint": hint,
+                    "size": end_off - lead,
+                    "collections": cols,
+                }
+            )
+            continue
+
+        # Standard JS script block: scan for multiple payloads
+        payloads = _scan_script_json_payloads(body, decoder)
+        for subtype, var_name, parsed, byte_size in payloads:
+            if _is_trivial_json(parsed):
+                continue
+            cols = _discover_json_collections(parsed, max_keys=max_keys)
+            if not cols:
+                continue
+            top_col = cols[0]
+            path_sfx = (
+                f' path="{top_col["path"]}"' if top_col.get("path") else ""
+            )
+            if subtype == "bare-json":
+                hint = f'css "{sel}"; raw inner; jsonify Schema{path_sfx}'
+            elif subtype == "json-parse":
+                hint = (
+                    f'css "{sel}"; raw inner; '
+                    f're "JSON\\\\.parse\\\\([\'\\"](.+?)[\'\\"]\\\\)"; '
+                    f"unescape; jsonify Schema{path_sfx}"
+                )
+            elif var_name:
+                escaped_var = re.escape(var_name)
+                hint = (
+                    f'css "{sel}"; raw inner; '
+                    f're "{escaped_var}\\\\s*=\\\\s*(\\\\{{.+\\\\}}|\\\\[.+\\\\])"; '
+                    f"jsonify Schema{path_sfx}"
+                )
+            else:
+                hint = f'css "{sel}"; raw inner; jsonify Schema{path_sfx}'
+
+            entry: dict[str, object] = {
+                "kind": "script",
+                "subtype": subtype,
+                "selector": sel,
+                "kdl_hint": hint,
+                "size": byte_size,
+                "collections": cols,
+            }
+            if var_name:
+                entry["var_name"] = var_name
+            signals.append(entry)
+
+    # Scan HTML attributes for JSON objects/arrays
+    for tag in soup.find_all(True):
+        if tag.name == "script":
+            continue
+        for attr_name, raw_val in tag.attrs.items():
+            if attr_name in JSON_SKIP_ATTRS or not isinstance(raw_val, str):
+                continue
+            val = raw_val.strip()
+            if len(val) < 2 or val[0] not in "{[":
+                continue
+            try:
+                parsed, end_off = decoder.raw_decode(val)
+            except (ValueError, json.JSONDecodeError):
+                continue
+            if _is_trivial_json(parsed):
+                continue
+            cols = _discover_json_collections(parsed, max_keys=max_keys)
+            if not cols:
+                continue
+            sel, _ = _synthesize_unique_selector(soup, tag)
+            top_col = cols[0]
+            path_sfx = (
+                f' path="{top_col["path"]}"' if top_col.get("path") else ""
+            )
+            hint = f'css "{sel}"; attr "{attr_name}"; jsonify Schema{path_sfx}'
+            signals.append(
+                {
+                    "kind": "attr",
+                    "subtype": "attr-json",
+                    "selector": sel,
+                    "attr": attr_name,
+                    "kdl_hint": hint,
+                    "size": end_off,
+                    "collections": cols,
+                }
+            )
+
+    if not full:
+        return signals[:MAX_JSON_SIGNALS]
+    return signals
+
+
+# ─────────────────────────── 2. Key-Value & Table Engine ─────────────────────
+
+_NUMERIC_ONLY_RE = re.compile(r"^[\d\s.,+$€£¥₽%-]+$")
+
+
+def _looks_like_kv_key(text: str) -> bool:
+    """Check whether a string looks like a specification label/key."""
+    t = text.strip().rstrip(":").strip()
+    if not t or len(t) > 50:
+        return False
+    return not _NUMERIC_ONLY_RE.match(t)
+
+
+def _extract_kv_and_tables(
+    soup: BeautifulSoup, *, full: bool
+) -> tuple[list[dict[str, object]], set[int]]:
+    """Detect `<table>`, `<dl>`, and two-column repeating KV rows.
+
+    Returns `(kv_blocks, claimed_parent_ids)` so repeating KV containers are
+    not redundantly duplicated if already surfaced, or can be cross-referenced.
+    """
+    max_keys = 1000 if full else MAX_KV_KEYS
+    blocks: list[dict[str, object]] = []
+    claimed_parents: set[int] = set()
+
+    # 1. Inspect <table> elements
     for table in soup.find_all("table"):
         rows = table.find_all("tr")
         if not rows:
             continue
-        keys: list[str] = []
-        for row in rows:
-            th_cells = row.find_all("th")
-            if th_cells:
-                keys = [
-                    (c.get_text(strip=True) or "")[:DISCOVER_SAMPLE_LEN]
-                    for c in th_cells
+        container_sel, _ = _synthesize_unique_selector(soup, table)
+        # Check for horizontal headers in <thead> or first row of <th>
+        header_row: Tag | None = None
+        headers: list[str] = []
+        thead = table.find("thead")
+        if isinstance(thead, Tag):
+            hr = thead.find("tr")
+            if isinstance(hr, Tag):
+                ths = hr.find_all(["th", "td"], recursive=False)
+                if len(ths) >= 2:
+                    header_row = hr
+                    headers = [
+                        _normalize_ws(c.get_text(" ", strip=True), 50)
+                        for c in ths
+                    ]
+        if not headers:
+            first_ths = rows[0].find_all("th", recursive=False)
+            if len(first_ths) >= 2:
+                header_row = rows[0]
+                headers = [
+                    _normalize_ws(c.get_text(" ", strip=True), 50)
+                    for c in first_ths
                 ]
-                # Filter out empty strings — they carry no signal.
-                keys = [k for k in keys if k]
-                if keys:
+
+        data_rows = [
+            r
+            for r in rows
+            if r is not header_row
+            and len(r.find_all("td", recursive=False)) >= 2
+        ]
+
+        # Decide rows selector (verified against soup)
+        tbody = table.find("tbody")
+        if (
+            isinstance(tbody, Tag)
+            and header_row is not None
+            and header_row.parent is not tbody
+        ):
+            cand_rows_sel = f"{container_sel} tbody tr"
+            if not _safe_select(soup, cand_rows_sel):
+                cand_rows_sel = f"{container_sel} tr"
+        else:
+            cand_rows_sel = f"{container_sel} tr"
+
+        # A. Horizontal-header table (`table_list`)
+        if len(headers) >= 2 and len(data_rows) >= 1:
+            columns: list[dict[str, object]] = []
+            for idx, h_text in enumerate(headers[:max_keys], start=1):
+                col_css = f"td:nth-of-type({idx})"
+                col_samples: list[str] = []
+                for dr in data_rows:
+                    cells = _safe_select(dr, col_css)
+                    if cells:
+                        val = _normalize_ws(cells[0].get_text(" ", strip=True))
+                        if val and val not in col_samples:
+                            col_samples.append(val)
+                        if len(col_samples) >= MAX_SAMPLES_PER_FIELD:
+                            break
+                columns.append(
+                    {
+                        "header": h_text or f"col_{idx}",
+                        "css": col_css,
+                        "samples": col_samples,
+                    }
+                )
+            blocks.append(
+                {
+                    "kind": "table_list",
+                    "container_selector": container_sel,
+                    "rows_selector": cand_rows_sel,
+                    "row_count": len(data_rows),
+                    "headers": headers[:max_keys],
+                    "columns": columns,
+                    "_node": table,
+                }
+            )
+            if tbody is not None:
+                claimed_parents.add(id(tbody))
+            claimed_parents.add(id(table))
+
+        # B. 2-column Key-Value table (`kv_table`)
+        kv_rows_cands = [
+            r
+            for r in rows
+            if r is not header_row
+            and len(r.find_all(["th", "td"], recursive=False)) == 2
+        ]
+        if len(kv_rows_cands) >= 2:
+            pairs: list[tuple[str, str, Tag]] = []
+            key_tags: set[str] = set()
+            val_tags: set[str] = set()
+            for r in kv_rows_cands:
+                cells = r.find_all(["th", "td"], recursive=False)
+                k_txt = (
+                    _normalize_ws(cells[0].get_text(" ", strip=True), 50)
+                    .rstrip(":")
+                    .strip()
+                )
+                v_txt = _normalize_ws(cells[1].get_text(" ", strip=True))
+                if _looks_like_kv_key(k_txt):
+                    pairs.append((k_txt, v_txt, r))
+                    key_tags.add(cells[0].name)
+                    val_tags.add(cells[1].name)
+
+            unique_keys = {p[0] for p in pairs}
+            if len(pairs) >= 2 and len(unique_keys) >= len(pairs) * 0.8:
+                if key_tags == {"th"} and val_tags == {"td"}:
+                    key_sel = "th"
+                    val_sel = "td"
+                else:
+                    key_sel = "td:nth-of-type(1)"
+                    val_sel = "td:nth-of-type(2)"
+                entries = [
+                    {"key": k, "sample": v, "_row_node": r_node}
+                    for k, v, r_node in pairs[:max_keys]
+                ]
+                blocks.append(
+                    {
+                        "kind": "kv_table",
+                        "container_selector": container_sel,
+                        "rows_selector": cand_rows_sel,
+                        "key_selector": key_sel,
+                        "value_selector": val_sel,
+                        "row_count": len(pairs),
+                        "entries": entries,
+                        "_node": table,
+                    }
+                )
+                if tbody is not None:
+                    claimed_parents.add(id(tbody))
+                claimed_parents.add(id(table))
+
+    # 2. Inspect <dl> definition lists
+    for dl in soup.find_all("dl"):
+        container_sel, _ = _synthesize_unique_selector(soup, dl)
+        dts = dl.find_all("dt")
+        dds = dl.find_all("dd")
+        if len(dts) < 2 or len(dds) < 2:
+            continue
+        # Check if wrapped in row divs (e.g. <dl><div class="row"><dt/><dd/></div></dl>)
+        direct_children = [c for c in dl.children if isinstance(c, Tag)]
+        wrapper_rows = [
+            c
+            for c in direct_children
+            if c.name not in ("dt", "dd") and c.find("dt") and c.find("dd")
+        ]
+        dl_entries: list[dict[str, object]] = []
+        if len(wrapper_rows) >= 2:
+            rows_sel, _, _ = _synthesize_group_selector(soup, dl, wrapper_rows)
+            for r in wrapper_rows[:max_keys]:
+                dt = r.find("dt")
+                dd = r.find("dd")
+                if dt and dd:
+                    k = (
+                        _normalize_ws(dt.get_text(" ", strip=True), 50)
+                        .rstrip(":")
+                        .strip()
+                    )
+                    v = _normalize_ws(dd.get_text(" ", strip=True))
+                    if k:
+                        dl_entries.append(
+                            {"key": k, "sample": v, "_row_node": r}
+                        )
+        else:
+            rows_sel = f"{container_sel} > dt"
+            if not _safe_select(soup, rows_sel):
+                rows_sel = f"{container_sel} dt"
+            for dt in dts[:max_keys]:
+                dd = dt.find_next_sibling("dd")
+                if dd is not None:
+                    k = (
+                        _normalize_ws(dt.get_text(" ", strip=True), 50)
+                        .rstrip(":")
+                        .strip()
+                    )
+                    v = _normalize_ws(dd.get_text(" ", strip=True))
+                    if k:
+                        dl_entries.append(
+                            {"key": k, "sample": v, "_row_node": dt}
+                        )
+
+        if len(dl_entries) >= 2:
+            blocks.append(
+                {
+                    "kind": "dl",
+                    "container_selector": container_sel,
+                    "rows_selector": rows_sel,
+                    "key_selector": "dt",
+                    "value_selector": "dd",
+                    "row_count": len(dl_entries),
+                    "entries": dl_entries,
+                    "_node": dl,
+                }
+            )
+            claimed_parents.add(id(dl))
+
+    # 3. Inspect repeating 2-column div/li label-value rows
+    for parent in soup.find_all(True):
+        if id(parent) in claimed_parents or parent.name in (
+            "head",
+            "table",
+            "tbody",
+            "thead",
+            "tr",
+            "dl",
+            "nav",
+        ):
+            continue
+        children = [
+            c
+            for c in parent.children
+            if isinstance(c, Tag) and c.name in ("div", "li", "p")
+        ]
+        if len(children) < MIN_REPEAT_COUNT:
+            continue
+
+        # Check if children have consistent 2-child key/value structure
+        kv_rows: list[tuple[Tag, Tag, Tag, str, str]] = []
+        for ch in children:
+            sub_tags = [s for s in ch.children if isinstance(s, Tag)]
+            if len(sub_tags) != 2:
+                continue
+            left, right = sub_tags[0], sub_tags[1]
+            # Neither should be a complex multi-field card or link list
+            if left.find_all(True) or len(right.find_all(True)) > 2:
+                continue
+            if left.name == "a" and right.name == "a":
+                continue
+            k_raw = _normalize_ws(left.get_text(" ", strip=True), 50)
+            v_raw = _normalize_ws(right.get_text(" ", strip=True))
+            # Check if left has a semantic key/label class or ends with ':' or is a label tag
+            left_sem = " ".join(_get_semantic_classes(left)).lower()
+            parent_sem = (
+                " ".join(_get_semantic_classes(parent)).lower()
+                + " "
+                + str(parent.get("id") or "").lower()
+            )
+            is_label_hint = (
+                left.name in LABEL_TAGS
+                or k_raw.endswith(":")
+                or any(
+                    w in left_sem
+                    for w in (
+                        "label",
+                        "key",
+                        "spec",
+                        "attr",
+                        "term",
+                        "prop",
+                        "param",
+                    )
+                )
+                or any(
+                    w in parent_sem
+                    for w in ("spec", "kv", "detail", "attr", "param", "prop")
+                )
+            )
+            k_clean = k_raw.rstrip(":").strip()
+            if _looks_like_kv_key(k_clean) and v_raw and is_label_hint:
+                kv_rows.append((ch, left, right, k_clean, v_raw))
+
+        if len(kv_rows) >= MIN_REPEAT_COUNT:
+            unique_k = {r[3] for r in kv_rows}
+            if len(unique_k) >= len(kv_rows) * 0.8:
+                row_tags = [r[0] for r in kv_rows]
+                rows_sel, container_sel, _ = _synthesize_group_selector(
+                    soup, parent, row_tags
+                )
+                first_left = kv_rows[0][1]
+                first_right = kv_rows[0][2]
+                l_sem = [
+                    c
+                    for c in _get_semantic_classes(first_left)
+                    if _is_valid_css_ident(c)
+                ]
+                r_sem = [
+                    c
+                    for c in _get_semantic_classes(first_right)
+                    if _is_valid_css_ident(c)
+                ]
+                if l_sem and all(
+                    l_sem[0] in _get_semantic_classes(r[1]) for r in kv_rows
+                ):
+                    key_sel = f"{first_left.name}.{l_sem[0]}"
+                elif first_left.name != first_right.name:
+                    key_sel = first_left.name
+                else:
+                    key_sel = f"{first_left.name}:nth-of-type(1)"
+
+                if r_sem and all(
+                    r_sem[0] in _get_semantic_classes(r[2]) for r in kv_rows
+                ):
+                    val_sel = f"{first_right.name}.{r_sem[0]}"
+                elif first_left.name != first_right.name:
+                    val_sel = first_right.name
+                else:
+                    val_sel = f"{first_right.name}:nth-of-type(2)"
+
+                entries = [
+                    {"key": k, "sample": v, "_row_node": r_tag}
+                    for r_tag, _, _, k, v in kv_rows[:max_keys]
+                ]
+                blocks.append(
+                    {
+                        "kind": "kv_rows",
+                        "container_selector": container_sel,
+                        "rows_selector": rows_sel,
+                        "key_selector": key_sel,
+                        "value_selector": val_sel,
+                        "row_count": len(kv_rows),
+                        "entries": entries,
+                        "_node": parent,
+                    }
+                )
+                claimed_parents.add(id(parent))
+
+    if not full:
+        return blocks[:MAX_KV_BLOCKS], claimed_parents
+    return blocks, claimed_parents
+
+
+# ─────────────────── 3. Repeating Lists & Folded DOM Skeleton ────────────────
+
+
+def _descendant_tag_set(tag: Tag) -> set[str]:
+    """Return the set of descendant tag/class step signatures inside `tag`."""
+    return {_node_step_label(d) for d in tag.find_all(True)}
+
+
+def _jaccard_similarity(a: set[str], b: set[str]) -> float:
+    """Compute Jaccard similarity between two sets."""
+    if not a and not b:
+        return 1.0
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
+def _are_siblings_compatible(a: Tag, b: Tag) -> bool:
+    """Return True if sibling tags `a` and `b` belong to the same repeating cluster."""
+    if a.name != b.name:
+        return False
+    sem_a = set(_get_semantic_classes(a))
+    sem_b = set(_get_semantic_classes(b))
+    if sem_a and sem_b:
+        return bool(sem_a & sem_b)
+    # Classless page sections with distinct IDs (e.g. <section id="sec-1">, <section id="sec-2">)
+    # are distinct containers, not repeating items.
+    if (
+        not sem_a
+        and not sem_b
+        and a.name in ("section", "div", "main", "aside", "ul", "ol")
+        and a.get("id")
+        and b.get("id")
+        and a.get("id") != b.get("id")
+    ):
+        return False
+    # When at least one lacks semantic classes, compare descendant structure
+    desc_a = _descendant_tag_set(a)
+    desc_b = _descendant_tag_set(b)
+    if not desc_a and not desc_b:
+        # Both are leaf tags of the same name (only cluster if neither has distinct semantic classes)
+        return not sem_a and not sem_b
+    return _jaccard_similarity(desc_a, desc_b) >= 0.5
+
+
+def _cluster_parent_children(
+    soup: BeautifulSoup, parent: Tag
+) -> list[tuple[list[Tag], list[dict[str, object]]]]:
+    """Cluster direct child tags of `parent` into repeating groups (>= 3 items) and outliers."""
+    children = [c for c in parent.children if isinstance(c, Tag)]
+    if len(children) < MIN_REPEAT_COUNT:
+        return []
+
+    clusters: list[list[Tag]] = []
+    cluster_indices: list[list[int]] = []
+
+    for idx, child in enumerate(children):
+        placed = False
+        for c_idx, cluster in enumerate(clusters):
+            # Check compatibility with the cluster's first or majority elements
+            if _are_siblings_compatible(cluster[0], child) or (
+                len(cluster) > 1
+                and _are_siblings_compatible(cluster[-1], child)
+            ):
+                cluster.append(child)
+                cluster_indices[c_idx].append(idx)
+                placed = True
+                break
+        if not placed:
+            clusters.append([child])
+            cluster_indices.append([idx])
+
+    valid_results: list[tuple[list[Tag], list[dict[str, object]]]] = []
+    for c_idx, cluster in enumerate(clusters):
+        if len(cluster) < MIN_REPEAT_COUNT:
+            continue
+        indices = cluster_indices[c_idx]
+        first_pos, last_pos = indices[0], indices[-1]
+        in_cluster = set(indices)
+
+        # Find outliers (< 3 items) that sit inside the span of this cluster or in the same parent
+        outlier_groups: dict[tuple[str, tuple[str, ...]], list[Tag]] = {}
+        for o_idx, other_cluster in enumerate(clusters):
+            if o_idx == c_idx or len(other_cluster) >= MIN_REPEAT_COUNT:
+                continue
+            o_positions = cluster_indices[o_idx]
+            # Check if any element of other_cluster sits between cluster items or is a sibling
+            if (
+                any(first_pos < p < last_pos for p in o_positions)
+                or len(clusters) == 2
+            ):
+                for o_tag in other_cluster:
+                    if id(o_tag) not in in_cluster:
+                        key = (o_tag.name, tuple(_get_semantic_classes(o_tag)))
+                        outlier_groups.setdefault(key, []).append(o_tag)
+
+        outliers_out: list[dict[str, object]] = []
+        for (otag, oclasses), otags in outlier_groups.items():
+            osel, _ = _synthesize_unique_selector(soup, otags[0])
+            outliers_out.append(
+                {
+                    "tag": otag,
+                    "classes": list(oclasses),
+                    "count": len(otags),
+                    "selector": osel,
+                }
+            )
+        valid_results.append((cluster, outliers_out))
+
+    return valid_results
+
+
+def _is_navigation_cluster(parent: Tag, items: list[Tag]) -> bool:
+    """Detect whether a repeating cluster is a navigation or boilerplate link list."""
+    # Check if inside <nav>, <header>, or <footer>
+    curr: Tag | None = parent
+    while isinstance(curr, Tag) and curr.name not in ("[document]", None):
+        if curr.name in NAV_CONTAINER_TAGS:
+            return True
+        sem_str = " ".join(_get_semantic_classes(curr)).lower()
+        if any(
+            nav_word in sem_str
+            for nav_word in (
+                "nav",
+                "navbar",
+                "menu",
+                "breadcrumb",
+                "pagination",
+                "footer",
+                "header",
+            )
+        ):
+            return True
+        curr = curr.parent if isinstance(curr.parent, Tag) else None
+
+    # Check if every item is a bare <a> or wraps a single <a> with no secondary data fields
+    for item in items:
+        if item.name == "a":
+            if len(item.find_all(True)) == 0:
+                continue
+            return False
+        desc_tags = item.find_all(True)
+        if len(desc_tags) == 1 and desc_tags[0].name == "a":
+            # Ensure item has no extra text outside the <a>
+            item_txt = _normalize_ws(item.get_text(" ", strip=True))
+            a_txt = _normalize_ws(desc_tags[0].get_text(" ", strip=True))
+            if item_txt == a_txt:
+                continue
+        return False
+    return True
+
+
+def _has_direct_text(tag: Tag) -> bool:
+    """Check whether `tag` has non-whitespace direct `NavigableString` children."""
+    for ch in tag.children:
+        if (
+            isinstance(ch, NavigableString)
+            and not isinstance(ch, Comment)
+            and str(ch).strip()
+        ):
+            return True
+    return False
+
+
+def _has_notable_attrs(tag: Tag) -> bool:
+    """Check whether `tag` carries extractable data attributes (`href`, `src`, `data-*`, etc.)."""
+    for attr in NOTABLE_ATTRS:
+        if tag.has_attr(attr):
+            return True
+    return any(k.startswith("data-") for k in tag.attrs)
+
+
+def _is_elidable_wrapper(
+    tag: Tag, multi_child_sigs: set[tuple[str, tuple[str, ...]]]
+) -> bool:
+    """Return True if `tag` is a pure single-child layout wrapper across all items."""
+    if tag.name not in WRAPPER_TAGS:
+        return False
+    if _has_direct_text(tag) or _has_notable_attrs(tag):
+        return False
+    sig = (tag.name, tuple(_get_semantic_classes(tag)))
+    if sig in multi_child_sigs:
+        return False
+    child_tags = [c for c in tag.children if isinstance(c, Tag)]
+    return len(child_tags) == 1
+
+
+def _node_step_label(tag: Tag) -> str:
+    """Format a single tag step (`tag.sem_class`) for relative path construction."""
+    sem = [c for c in _get_semantic_classes(tag) if _is_valid_css_ident(c)]
+    if sem:
+        return f"{tag.name}.{sem[0]}"
+    for attr_name in ("itemprop", "name"):
+        val = tag.get(attr_name)
+        if isinstance(val, str) and _is_valid_css_ident(val.strip()):
+            return f'{tag.name}[{attr_name}="{val.strip()}"]'
+    return tag.name
+
+
+def _collect_item_field_nodes(
+    item: Tag,
+    multi_child_sigs: set[tuple[str, tuple[str, ...]]] | None = None,
+) -> list[tuple[tuple[str, ...], Tag]]:
+    """Walk `item` and return `(collapsed_steps_tuple, target_tag)` for extractable descendant nodes."""
+    results: list[tuple[tuple[str, ...], Tag]] = []
+    mc_sigs = multi_child_sigs or set()
+
+    def _walk(curr: Tag, steps: tuple[str, ...]) -> None:
+        child_tags = [c for c in curr.children if isinstance(c, Tag)]
+        # Elide pure layout wrappers
+        if _is_elidable_wrapper(curr, mc_sigs):
+            _walk(child_tags[0], steps)
+            return
+
+        step = _node_step_label(curr)
+        new_steps = (*steps, step)
+
+        # If single child and curr has no direct text of its own (e.g., h3 > a)
+        sig = (curr.name, tuple(_get_semantic_classes(curr)))
+        if (
+            len(child_tags) == 1
+            and sig not in mc_sigs
+            and not _has_direct_text(curr)
+            and not _has_notable_attrs(curr)
+        ):
+            _walk(child_tags[0], new_steps)
+            return
+
+        # Record curr if it is a leaf with text/attrs, or has direct text/notable attrs
+        is_leaf = len(child_tags) == 0
+        has_text = bool(_normalize_ws(curr.get_text(" ", strip=True)))
+        has_attrs = _has_notable_attrs(curr)
+
+        if (
+            (is_leaf and (has_text or has_attrs))
+            or _has_direct_text(curr)
+            or has_attrs
+        ):
+            results.append((new_steps, curr))
+
+        for ch in child_tags:
+            _walk(ch, new_steps)
+
+    top_children = [c for c in item.children if isinstance(c, Tag)]
+    if not top_children:
+        # Item itself is a leaf tag (e.g. <li class="item">text</li>)
+        if _normalize_ws(item.get_text(" ", strip=True)) or _has_notable_attrs(
+            item
+        ):
+            results.append(((_node_step_label(item),), item))
+        return results
+
+    for ch in top_children:
+        _walk(ch, ())
+    return results
+
+
+def _synthesize_relative_selector(
+    items: list[Tag],
+    steps: tuple[str, ...],
+    sample_nodes: list[Tag],
+    *,
+    positional_idx: int | None = None,
+) -> str:
+    """Synthesize and verify a relative CSS selector within `items` for `sample_nodes`."""
+    if not sample_nodes:
+        return " > ".join(steps)
+    target0 = sample_nodes[0]
+    if target0 in items:
+        return ":scope"
+
+    last_step = steps[-1] if steps else _node_step_label(target0)
+    if positional_idx is not None:
+        base_tag = target0.name
+        sem = [
+            c for c in _get_semantic_classes(target0) if _is_valid_css_ident(c)
+        ]
+        last_with_nth = (
+            f"{base_tag}.{sem[0]}:nth-of-type({positional_idx})"
+            if sem
+            else f"{base_tag}:nth-of-type({positional_idx})"
+        )
+        cands: list[str] = []
+        if len(steps) > 1:
+            prefix = " > ".join(steps[:-1])
+            cands.append(f"{prefix} > {last_with_nth}")
+            cands.append(f"{steps[-2]} > {last_with_nth}")
+        cands.append(last_with_nth)
+        cands.append(f"{base_tag}:nth-of-type({positional_idx})")
+    else:
+        cands = []
+        # 1. Try shortest unique leaf step (e.g. `.price`, `h3.title`, `a.url`)
+        sem = [
+            c for c in _get_semantic_classes(target0) if _is_valid_css_ident(c)
+        ]
+        if sem:
+            cands.append(f".{sem[0]}")
+            cands.append(f"{target0.name}.{sem[0]}")
+        for attr_name in ANCHOR_ATTRS:
+            val = target0.get(attr_name)
+            if isinstance(val, str) and val.strip():
+                cands.append(
+                    f"{target0.name}[{attr_name}={_attr_selector_val(val.strip())}]"
+                )
+        if len(steps) > 1:
+            cands.append(" > ".join(steps[-2:]))
+        cands.append(" > ".join(steps))
+        cands.append(last_step)
+
+    target_ids = {id(n) for n in sample_nodes}
+    items_with_target = {
+        id(it)
+        for it in items
+        if any(id(d) in target_ids for d in it.find_all(True))
+        or id(it) in target_ids
+    }
+    for cand in cands:
+        matched_ok = True
+        found_any = False
+        for it in items:
+            sel_nodes = _safe_select(it, cand)
+            expect_match = id(it) in items_with_target
+            if expect_match:
+                if not sel_nodes or any(
+                    id(n) not in target_ids for n in sel_nodes
+                ):
+                    matched_ok = False
                     break
-        if not keys:
-            # No <th>: take first cell of each row.
-            for row in rows:
-                first_td = row.find("td")
-                if first_td is None:
+                found_any = True
+            else:
+                if sel_nodes:
+                    matched_ok = False
+                    break
+        if matched_ok and found_any:
+            return cand
+
+    return cands[-1] if cands else target0.name
+
+
+def _extract_node_samples(
+    nodes: list[Tag],
+) -> tuple[list[str], list[str], dict[str, list[str]]]:
+    """Extract `(text_samples, attr_names, attr_samples)` across `nodes`."""
+    text_samples: list[str] = []
+    seen_texts: set[str] = set()
+    attr_names_set: set[str] = set()
+    attr_samples: dict[str, list[str]] = {}
+
+    for node in nodes:
+        txt = _normalize_ws(node.get_text(" ", strip=True), MAX_SAMPLE_LEN)
+        if (
+            txt
+            and txt not in seen_texts
+            and len(text_samples) < MAX_SAMPLES_PER_FIELD
+        ):
+            seen_texts.add(txt)
+            text_samples.append(txt)
+
+        for k, v in node.attrs.items():
+            if k in ("class", "style", "id"):
+                continue
+            attr_names_set.add(k)
+            if k in NOTABLE_ATTRS or k.startswith("data-"):
+                val_str = " ".join(v) if isinstance(v, list) else str(v)
+                val_norm = _normalize_ws(val_str, MAX_SAMPLE_LEN)
+                if val_norm:
+                    bucket = attr_samples.setdefault(k, [])
+                    if (
+                        val_norm not in bucket
+                        and len(bucket) < MAX_SAMPLES_PER_FIELD
+                    ):
+                        bucket.append(val_norm)
+
+    return text_samples, sorted(attr_names_set), attr_samples
+
+
+def _build_union_archetype_fields(
+    items: list[Tag], *, full: bool
+) -> list[dict[str, object]]:
+    """Fold `items` into a Union Archetype of field definitions."""
+    total_items = len(items)
+    if total_items == 0:
+        return []
+
+    # Identify tags that ever have >1 child tag across items so they are never elided as single-child wrappers
+    multi_child_sigs: set[tuple[str, tuple[str, ...]]] = set()
+    for item in items:
+        for d in item.find_all(True):
+            ch_tags = [c for c in d.children if isinstance(c, Tag)]
+            if len(ch_tags) > 1:
+                multi_child_sigs.add((d.name, tuple(_get_semantic_classes(d))))
+
+    # Per item, group nodes by their collapsed step signature `steps: tuple[str, ...]`
+    sig_order: list[tuple[str, ...]] = []
+    sig_seen: set[tuple[str, ...]] = set()
+    per_item_by_sig: list[dict[tuple[str, ...], list[Tag]]] = []
+
+    for item in items:
+        item_map: dict[tuple[str, ...], list[Tag]] = {}
+        for steps, node in _collect_item_field_nodes(item, multi_child_sigs):
+            if steps not in sig_seen:
+                sig_seen.add(steps)
+                sig_order.append(steps)
+            item_map.setdefault(steps, []).append(node)
+        per_item_by_sig.append(item_map)
+
+    fields_out: list[dict[str, object]] = []
+
+    for steps in sig_order:
+        counts_per_item = [
+            len(imap.get(steps, []))
+            for imap in per_item_by_sig
+            if steps in imap
+        ]
+        if not counts_per_item:
+            continue
+        present_items = len(counts_per_item)
+        max_per_item = max(counts_per_item)
+        min_per_item = min(counts_per_item)
+
+        if max_per_item == 1:
+            # Scalar field
+            all_nodes = [
+                imap[steps][0] for imap in per_item_by_sig if steps in imap
+            ]
+            rel_css = _synthesize_relative_selector(items, steps, all_nodes)
+            samples, attrs, attr_samples = _extract_node_samples(all_nodes)
+            if not samples and not attr_samples:
+                continue
+            fields_out.append(
+                {
+                    "path": " > ".join(steps),
+                    "css": rel_css,
+                    "kind": "scalar",
+                    "present": present_items,
+                    "total": total_items,
+                    "optional": present_items < total_items,
+                    "attrs": attrs,
+                    "samples": samples,
+                    "attr_samples": attr_samples,
+                    "_nodes": all_nodes,
+                }
+            )
+        else:
+            # Multiple occurrences per item: decide Positional Slots vs Array
+            # Consistent count across >= 80% of items containing this signature AND max_per_item <= 6
+            mode_count = max(set(counts_per_item), key=counts_per_item.count)
+            consistent_ratio = sum(
+                1 for c in counts_per_item if c == mode_count
+            ) / len(counts_per_item)
+            if consistent_ratio >= 0.8 and max_per_item <= 6 and mode_count > 1:
+                for slot_idx in range(1, max_per_item + 1):
+                    slot_nodes = [
+                        imap[steps][slot_idx - 1]
+                        for imap in per_item_by_sig
+                        if steps in imap and len(imap[steps]) >= slot_idx
+                    ]
+                    if not slot_nodes:
+                        continue
+                    slot_present = len(slot_nodes)
+                    slot_steps = (
+                        *steps[:-1],
+                        f"{steps[-1]}:nth-of-type({slot_idx})",
+                    )
+                    rel_css = _synthesize_relative_selector(
+                        items,
+                        steps,
+                        slot_nodes,
+                        positional_idx=slot_idx,
+                    )
+                    samples, attrs, attr_samples = _extract_node_samples(
+                        slot_nodes
+                    )
+                    if not samples and not attr_samples:
+                        continue
+                    fields_out.append(
+                        {
+                            "path": " > ".join(slot_steps),
+                            "css": rel_css,
+                            "kind": "positional",
+                            "present": slot_present,
+                            "total": total_items,
+                            "optional": slot_present < total_items,
+                            "attrs": attrs,
+                            "samples": samples,
+                            "attr_samples": attr_samples,
+                            "_nodes": slot_nodes,
+                        }
+                    )
+            else:
+                # Nested array (`css-all`)
+                all_nodes = [
+                    n
+                    for imap in per_item_by_sig
+                    if steps in imap
+                    for n in imap[steps]
+                ]
+                rel_css = _synthesize_relative_selector(items, steps, all_nodes)
+                samples, attrs, attr_samples = _extract_node_samples(all_nodes)
+                if not samples and not attr_samples:
                     continue
-                text = first_td.get_text(strip=True)
-                if text:
-                    keys.append(text[:DISCOVER_SAMPLE_LEN])
-            keys = keys[:DISCOVER_TOP_DESCENDANTS]
-        selector, _ = _build_short_selector(rows[0], class_count)
-        candidates.append(
+                fields_out.append(
+                    {
+                        "path": " > ".join(steps),
+                        "css": rel_css,
+                        "kind": "array",
+                        "present": present_items,
+                        "total": total_items,
+                        "optional": present_items < total_items,
+                        "array_range": [min_per_item, max_per_item],
+                        "attrs": attrs,
+                        "samples": samples,
+                        "attr_samples": attr_samples,
+                        "_nodes": all_nodes,
+                    }
+                )
+
+    max_f = 1000 if full else MAX_FIELDS_PER_LIST
+    return fields_out[:max_f]
+
+
+def _score_repeating_list(
+    items: list[Tag], fields: list[dict[str, object]]
+) -> float:
+    """Compute information density score for a repeating list candidate."""
+    count = len(items)
+    unique_leaf_fields = len(fields)
+    distinct_samples: set[str] = set()
+    for f in fields:
+        for s in f.get("samples", []):  # type: ignore[attr-defined]
+            if isinstance(s, str):
+                distinct_samples.add(s)
+    text_diversity_bonus = min(10.0, len(distinct_samples) * 0.5)
+    score = count * (1.0 + 2.0 * unique_leaf_fields + text_diversity_bonus)
+    return round(score, 1)
+
+
+def _extract_repeating_and_nav_lists(
+    soup: BeautifulSoup,
+    claimed_kv_parents: set[int],
+    *,
+    full: bool,
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """Discover repeating item lists and navigation lists across `soup`."""
+    repeating_lists: list[dict[str, object]] = []
+    navigation_lists: list[dict[str, object]] = []
+    claimed_subtrees: set[int] = set(claimed_kv_parents)
+
+    for parent in soup.find_all(True):
+        if parent.name in (
+            "head",
+            "table",
+            "thead",
+            "tbody",
+            "tr",
+            "dl",
+            "select",
+        ):
+            continue
+        if id(parent) in claimed_subtrees:
+            continue
+
+        clusters = _cluster_parent_children(soup, parent)
+        for items, outliers in clusters:
+            item_sel, parent_sel, stability = _synthesize_group_selector(
+                soup, parent, items
+            )
+            if _is_navigation_cluster(parent, items) and not full:
+                for it in items:
+                    claimed_subtrees.add(id(it))
+                    for d in it.find_all(True):
+                        claimed_subtrees.add(id(d))
+                nav_samples: list[str] = []
+                for it in items:
+                    txt = _normalize_ws(
+                        it.get_text(" ", strip=True), MAX_SAMPLE_LEN
+                    )
+                    if txt and txt not in nav_samples:
+                        nav_samples.append(txt)
+                    if len(nav_samples) >= MAX_SAMPLES_PER_FIELD:
+                        break
+                navigation_lists.append(
+                    {
+                        "selector": item_sel,
+                        "count": len(items),
+                        "samples": nav_samples,
+                    }
+                )
+                continue
+
+            fields = _build_union_archetype_fields(items, full=full)
+            if not fields:
+                continue
+            for it in items:
+                claimed_subtrees.add(id(it))
+                for d in it.find_all(True):
+                    claimed_subtrees.add(id(d))
+            score = _score_repeating_list(items, fields)
+            first_sem = _get_semantic_classes(items[0])
+            shared_sem = [
+                c
+                for c in first_sem
+                if all(c in _get_semantic_classes(it) for it in items[1:])
+            ]
+            repeating_lists.append(
+                {
+                    "selector": item_sel,
+                    "parent_selector": parent_sel,
+                    "item_tag": items[0].name,
+                    "item_classes": shared_sem if shared_sem else first_sem,
+                    "count": len(items),
+                    "score": score,
+                    "selector_stability": stability,
+                    "outliers": outliers,
+                    "fields": fields,
+                    "_items": items,
+                    "_parent": parent,
+                }
+            )
+
+    def _list_key(r: dict[str, object]) -> float:
+        sc = r.get("score")
+        return -(float(sc) if isinstance(sc, (int, float)) else 0.0)
+
+    repeating_lists.sort(key=_list_key)
+
+    if not full and len(repeating_lists) > MAX_REPEATING_LISTS:
+        overflow = repeating_lists[MAX_REPEATING_LISTS:]
+        repeating_lists = repeating_lists[:MAX_REPEATING_LISTS]
+        for ov in overflow:
+            ov_samples: list[str] = []
+            ov_fields = ov.get("fields", [])
+            if isinstance(ov_fields, list) and ov_fields:
+                first_f = ov_fields[0]
+                if isinstance(first_f, dict):
+                    s_list = first_f.get("samples", [])
+                    if isinstance(s_list, list):
+                        ov_samples = [str(x) for x in s_list[:3]]
+            ov_cnt = ov.get("count", 0)
+            navigation_lists.append(
+                {
+                    "selector": str(ov.get("selector", "")),
+                    "count": ov_cnt if isinstance(ov_cnt, int) else 0,
+                    "samples": ov_samples,
+                }
+            )
+
+    return repeating_lists, navigation_lists
+
+
+# ─────────────────────────── 4. Zoom-in Mode Engine ──────────────────────────
+
+
+def _matches_attr_filter(tag: Tag, flt: AttrFilter) -> bool:
+    """Check whether `tag` satisfies a single `AttrFilter`."""
+    if flt.kind == "present":
+        return tag.has_attr(flt.name)
+    if not tag.has_attr(flt.name):
+        return False
+    raw_val = tag.get(flt.name)
+    val = (
+        " ".join(str(x) for x in raw_val)
+        if isinstance(raw_val, list)
+        else str(raw_val or "")
+    )
+    if flt.kind == "exact":
+        return val == flt.value
+    if flt.kind == "regex" and flt.compiled is not None:
+        return flt.compiled.search(val) is not None
+    return False
+
+
+def _find_minimal_matching_tags(
+    soup: BeautifulSoup, filters: ScoutFilters
+) -> list[Tag]:
+    """Find the deepest minimal DOM tags matching `filters` (including normalized subtree text)."""
+    if filters.css is not None:
+        try:
+            candidates = [
+                t
+                for t in soup.select(filters.css)
+                if isinstance(t, Tag) and t.name not in ("html", "body", "head")
+            ]
+        except Exception as exc:
+            raise FilterError(
+                f"invalid CSS selector {filters.css!r}: {exc}"
+            ) from exc
+    else:
+        candidates = [
+            t
+            for t in soup.find_all(True)
+            if t.name not in ("html", "body", "head")
+        ]
+
+    matched: list[Tag] = []
+    for tag in candidates:
+        if filters.tag is not None and tag.name != filters.tag:
+            continue
+        if filters.text_regex is not None:
+            norm_text = _normalize_ws(tag.get_text(" ", strip=True), max_len=0)
+            if not norm_text or filters.text_regex.search(norm_text) is None:
+                continue
+        if any(not _matches_attr_filter(tag, af) for af in filters.attrs):
+            continue
+        matched.append(tag)
+
+    # When text_regex is active (and css/tag didn't specifically ask for an outer container),
+    # retain only the deepest minimal matching tags (no descendant also in `matched`).
+    if filters.text_regex is not None and len(matched) > 1:
+        matched_ids = {id(t) for t in matched}
+        minimal: list[Tag] = []
+        for t in matched:
+            has_matching_descendant = any(
+                id(d) in matched_ids for d in t.find_all(True)
+            )
+            if not has_matching_descendant:
+                minimal.append(t)
+        return minimal
+
+    return matched
+
+
+def _climb_to_semantic_container(tag: Tag) -> Tag:
+    """Climb up to 3 parent levels to find an enclosing semantic container for `tag`."""
+    curr = tag
+    for _ in range(3):
+        parent = curr.parent
+        if not isinstance(parent, Tag) or parent.name in (
+            "body",
+            "html",
+            "[document]",
+        ):
+            break
+        curr = parent
+        if (
+            curr.name in SEMANTIC_CONTAINER_TAGS
+            or curr.get("id")
+            or _get_semantic_classes(curr)
+        ):
+            break
+    return curr
+
+
+def _apply_zoom_mode(
+    soup: BeautifulSoup,
+    minimal_matches: list[Tag],
+    repeating_lists: list[dict[str, object]],
+    kv_blocks: list[dict[str, object]],
+    *,
+    full: bool,
+) -> tuple[
+    list[dict[str, object]],
+    list[dict[str, object]],
+    list[dict[str, object]],
+]:
+    """Highlight matched nodes in `repeating_lists` / `kv_blocks` and build `zoom_matches`."""
+    if not minimal_matches:
+        return [], [], []
+
+    match_ids = {id(m) for m in minimal_matches}
+
+    def _overlaps_match(node: Tag) -> bool:
+        if id(node) in match_ids:
+            return True
+        for d in node.find_all(True):
+            if id(d) in match_ids:
+                return True
+        for m in minimal_matches:
+            if node in m.parents or m in node.parents:
+                return True
+        return False
+
+    # 1. Check repeating_lists for matches
+    kept_lists: list[dict[str, object]] = []
+    covered_match_ids: set[int] = set()
+
+    for lst in repeating_lists:
+        items: list[Tag] = lst.get("_items", [])  # type: ignore[assignment]
+        list_matched = False
+        for m in minimal_matches:
+            if any(id(m) == id(it) or it in m.parents for it in items):
+                list_matched = True
+                covered_match_ids.add(id(m))
+
+        if list_matched:
+            lst["matched"] = True
+            fields_list = lst.get("fields", [])
+            if isinstance(fields_list, list):
+                for fld in fields_list:
+                    if not isinstance(fld, dict):
+                        continue
+                    fnodes: list[Tag] = fld.get("_nodes", [])  # type: ignore[assignment]
+                    if any(
+                        id(n) in match_ids
+                        or any(id(d) in match_ids for d in n.find_all(True))
+                        for n in fnodes
+                    ):
+                        fld["matched"] = True
+            kept_lists.append(lst)
+
+    # 2. Check kv_blocks for matches
+    kept_kvs: list[dict[str, object]] = []
+    for kv in kv_blocks:
+        kv_node = kv.get("_node")
+        if not isinstance(kv_node, Tag):
+            continue
+        kv_matched = False
+        for m in minimal_matches:
+            if id(m) == id(kv_node) or kv_node in m.parents:
+                kv_matched = True
+                covered_match_ids.add(id(m))
+        if kv_matched:
+            kv["matched"] = True
+            entries = kv.get("entries", [])
+            if isinstance(entries, list):
+                for ent in entries:
+                    if not isinstance(ent, dict):
+                        continue
+                    r_node = ent.get("_row_node")
+                    if isinstance(r_node, Tag) and _overlaps_match(r_node):
+                        ent["matched"] = True
+            kept_kvs.append(kv)
+
+    # 3. Build standalone zoom_matches for matches outside repeating_lists and kv_blocks
+    # (or for all unique container expansions so zoom_matches is always informative)
+    zoom_matches: list[dict[str, object]] = []
+    seen_containers: set[int] = set()
+
+    for m in minimal_matches:
+        if id(m) in covered_match_ids:
+            continue
+        container = _climb_to_semantic_container(m)
+        if id(container) in seen_containers:
+            continue
+        seen_containers.add(id(container))
+
+        m_sel, _ = _synthesize_unique_selector(soup, m)
+        c_sel, _ = _synthesize_unique_selector(soup, container)
+        c_fields = _build_union_archetype_fields([container], full=full)
+        any_field_marked = False
+        for cf in c_fields:
+            fnodes = cf.get("_nodes", [])  # type: ignore[assignment]
+            if any(
+                id(n) in match_ids
+                or any(id(d) in match_ids for d in n.find_all(True))
+                for n in fnodes
+            ):
+                cf["matched"] = True
+                any_field_marked = True
+            cf.pop("_nodes", None)
+
+        if not any_field_marked:
+            # Ensure the matched element itself is present in fields with matched=True
+            samples, attrs, attr_samples = _extract_node_samples([m])
+            rel_css = _synthesize_relative_selector(
+                [container], (_node_step_label(m),), [m]
+            )
+            c_fields.append(
+                {
+                    "path": _node_step_label(m),
+                    "css": rel_css,
+                    "kind": "scalar",
+                    "present": 1,
+                    "total": 1,
+                    "optional": False,
+                    "attrs": attrs,
+                    "samples": samples,
+                    "attr_samples": attr_samples,
+                    "matched": True,
+                }
+            )
+
+        zoom_matches.append(
             {
-                "selector": selector,
-                "row_count": len(rows),
-                "keys": keys,
+                "match_selector": m_sel,
+                "match_tag": m.name,
+                "match_text": _normalize_ws(m.get_text(" ", strip=True)),
+                "container_selector": c_sel,
+                "container_tag": container.name,
+                "fields": c_fields,
             }
         )
-        if len(candidates) >= max_tables:
-            break
 
-    def _sort_key(c: dict[str, object]) -> int:
-        rc = c["row_count"]
-        assert isinstance(rc, int)
-        return -rc
-
-    candidates.sort(key=_sort_key)
-    return candidates
+    return kept_lists, kept_kvs, zoom_matches
 
 
-def _build_page_summary(
-    soup: BeautifulSoup,
-    repeat_containers: list[dict[str, object]],
-    json_signals: list[dict[str, object]],
-) -> dict[str, object]:
-    """Cheap aggregate flags: table presence, embedded JSON presence,
-    repeat-container count estimate. Derived purely from existing data —
-    no extra tree walk beyond a single `find('table')` lookup.
-    """
-    return {
-        "has_table": soup.find("table") is not None,
-        "has_embedded_json": bool(json_signals),
-        "container_count_estimate": len(repeat_containers),
-    }
+def _strip_internal_keys(
+    repeating_lists: list[dict[str, object]],
+    kv_blocks: list[dict[str, object]],
+) -> None:
+    """Remove private `_`-prefixed Tag references before returning `ScoutResult`."""
+    for lst in repeating_lists:
+        lst.pop("_items", None)
+        lst.pop("_parent", None)
+        fields_list = lst.get("fields", [])
+        if isinstance(fields_list, list):
+            for fld in fields_list:
+                if isinstance(fld, dict):
+                    fld.pop("_nodes", None)
+
+    for kv in kv_blocks:
+        kv.pop("_node", None)
+        entries = kv.get("entries", [])
+        if isinstance(entries, list):
+            for ent in entries:
+                if isinstance(ent, dict):
+                    ent.pop("_row_node", None)
 
 
-def _find_repeat_containers(
-    soup: BeautifulSoup,
-    class_count: dict[str, int],
+# ─────────────────────────── Public Entrypoints ──────────────────────────────
+
+
+def run_scout(
+    html: str,
+    filters: ScoutFilters | None = None,
     *,
-    max_containers: int = DISCOVER_TOP_CONTAINERS,
-) -> list[dict[str, object]]:
-    """Find groups of ≥2 siblings sharing the same (tag, classes) signature.
+    text: str | None = None,
+    attrs: Iterable[str] = (),
+    tag: str | None = None,
+    css: str | None = None,
+    ignore_case: bool = False,
+    fixed: bool = False,
+    full: bool = False,
+) -> ScoutResult:
+    """Run HTML context distillation and structural reconnaissance on an HTML document.
 
-    For each group, computes `common_descendants` — descendants that
-    appear in ≥80% of items — so the caller gets a ready-made field list
-    for list-struct schemas. Also emits a short `item_selector` (anchored
-    on a rare id/class when possible), optional `selector_stability:
-    "fragile"` marker when the path is unreliable, and three cheap
-    boolean flags (`single_link_item`, `has_th_row`, `single_label_child`)
-    that help the LLM pick the right struct shape.
-    """
-    # Group by (parent_css_path, signature). Using parent_css_path as
-    # the key keeps grouping stable across re-parses of the same HTML.
-    groups: dict[
-        tuple[str, tuple[str, frozenset[str]]], tuple[Tag, list[Tag]]
-    ] = {}
-    for tag in soup.find_all(True):
-        parent = tag.parent
-        if not isinstance(parent, Tag):
-            continue
-        sig = _signature(tag)
-        parent_path = compute_css_path(parent)
-        key = (parent_path, sig)
-        entry = groups.get(key)
-        if entry is None:
-            groups[key] = (parent, [tag])
-        else:
-            entry[1].append(tag)
-
-    containers: list[dict[str, object]] = []
-    for (parent_path, (tag_name, classes)), (parent, tags) in groups.items():
-        if len(tags) < DISCOVER_MIN_REPEAT:
-            continue
-        # Skip page boilerplate — head metadata (link/meta/script/style in <head>)
-        # is never a list-struct candidate, but frequently dominates by count.
-        if " > head" in parent_path or parent_path.endswith(" head"):
-            continue
-        descendants = _compute_common_descendants(tags)
-        item_selector, stability = _build_short_selector(tags[0], class_count)
-        entry_dict: dict[str, object] = {
-            "parent_selector": parent_path,
-            "item_selector": item_selector,
-            "item_tag": tag_name,
-            "item_classes": sorted(classes),
-            "count": len(tags),
-            "depth": _depth_of(tags[0]),
-            "common_descendants": descendants,
-            "single_link_item": _detect_single_link_item(tags),
-            "has_th_row": _detect_has_th_row(parent, tag_name),
-            "single_label_child": _detect_single_label_child(tags),
-        }
-        # Emit stability marker only when fragile — saves tokens, signals
-        # the LLM to prefer `table_candidates` / more precise selectors.
-        if stability == "fragile":
-            entry_dict["selector_stability"] = "fragile"
-        containers.append(entry_dict)
-
-    # Sort by count desc, then depth asc (closer to leaves first on ties).
-    def _sort_key(c: dict[str, object]) -> tuple[int, int]:
-        count = c["count"]
-        depth = c["depth"]
-        assert isinstance(count, int)
-        assert isinstance(depth, int)
-        return (-count, depth)
-
-    containers.sort(key=_sort_key)
-    return containers[:max_containers]
-
-
-def run_discover(html: str) -> DiscoverResult:
-    """Build a comprehensive `DiscoverResult` structural overview for the given HTML document.
-
-    Performs static analysis on HTML to discover repeating containers for list structs,
-    table schemas, embedded JSON payloads in `<script>` tags, and CSS class/tag frequency
-    distributions without requiring prior knowledge of the document's structure.
+    When called without filter arguments, performs full-page overview distillation
+    across embedded JSON, key-value/table blocks, and repeating item archetypes.
+    When called with filter criteria (`filters`, `text`, `attrs`, `tag`, or `css`),
+    operates in Zoom-in mode: locates the deepest minimal matching DOM elements,
+    climbs to their enclosing repeating list, table, or semantic container, and
+    highlights matched fields with `matched=True` (`<-- MATCH`).
 
     Args:
-        html: Raw HTML string representing page content.
+        html (str): Raw HTML document string to analyze.
+        filters (ScoutFilters | None): Pre-compiled filter set for Zoom-in mode.
+        text (str | None): Regex or literal string matched against normalized subtree text.
+        attrs (Iterable[str]): Attribute filter specifications (`NAME`, `NAME=VAL`, `NAME=~REGEX`).
+        tag (str | None): HTML tag name filter.
+        css (str | None): CSS selector scoping filter.
+        ignore_case (bool): Case-insensitive regex matching.
+        fixed (bool): Escape regex metacharacters for literal matching.
+        full (bool): Disable default compression budgets and emit all discovered items.
 
     Returns:
-        DiscoverResult containing structural statistics, list container candidates,
-        table candidates, and embedded JSON signals.
+        ScoutResult: Structured reconnaissance digest with `.to_text()` and `.to_json()`.
 
-    Examples:
-        ```python
-        from ssc_codegen.explore import run_discover
-
-        html = '''
-        <table>
-            <tr><th>Name</th><th>Price</th></tr>
-            <tr><td>Widget</td><td>$10</td></tr>
-        </table>
-        '''
-        discovery = run_discover(html)
-        print(f"Discovered {len(discovery.table_candidates)} table candidate(s)")
-        ```
+    Raises:
+        FilterError: If any CSS selector, regex pattern, or attribute filter is invalid.
     """
-    soup = parse_html(html)
-    tag_stats, class_stats, id_stats, data_attrs, class_count = (
-        _collect_tag_stats(soup)
+    attrs_list = list(attrs)
+    if filters is None and (
+        text is not None or attrs_list or tag is not None or css is not None
+    ):
+        filters = compile_filters(
+            text=text,
+            attrs=attrs_list,
+            tag=tag,
+            css=css,
+            ignore_case=ignore_case,
+            fixed=fixed,
+        )
+    elif filters is None:
+        filters = ScoutFilters()
+
+    soup = BeautifulSoup(html, BS4_PARSER)
+    _preprocess_dom(soup)
+
+    # Extract title and h1 before stripping scripts
+    title_tag = soup.find("title")
+    h1_tag = soup.find("h1")
+    title_str = (
+        _normalize_ws(title_tag.get_text(" ", strip=True))
+        if isinstance(title_tag, Tag)
+        else None
     )
-    # `class_count` is uncapped — used by `_build_short_selector` to detect
-    # rare anchor classes (count ≤ RARE_CLASS_MAX) anywhere in the document.
-    repeat_containers = _find_repeat_containers(soup, class_count)
-    json_signals = _find_json_signals(soup)
-    table_candidates = _find_table_candidates(soup, class_count)
-    page_summary = _build_page_summary(soup, repeat_containers, json_signals)
-    return DiscoverResult(
-        tag_stats=tag_stats,
-        class_stats=class_stats,
-        id_stats=id_stats,
-        data_attrs=data_attrs,
-        repeat_containers=repeat_containers,
-        json_signals=json_signals,
-        table_candidates=table_candidates,
+    h1_str = (
+        _normalize_ws(h1_tag.get_text(" ", strip=True))
+        if isinstance(h1_tag, Tag)
+        else None
+    )
+
+    # 1. Embedded JSON Engine (runs while <script> tags are present)
+    embedded_json = _extract_embedded_json(soup, full=full)
+
+    # Remove <script> tags so they do not pollute DOM skeleton or text search
+    _strip_scripts(soup)
+
+    # 2. Key-Value & Table Engine
+    kv_blocks, claimed_kv_parents = _extract_kv_and_tables(soup, full=full)
+
+    # 3. Repeating Lists & Folded DOM Skeleton Engine
+    repeating_lists, navigation_lists = _extract_repeating_and_nav_lists(
+        soup, claimed_kv_parents, full=full
+    )
+
+    # 4. Check Zoom-in Mode vs Overview Mode
+    if filters.is_active():
+        minimal_matches = _find_minimal_matching_tags(soup, filters)
+        kept_lists, kept_kvs, zoom_matches = _apply_zoom_mode(
+            soup,
+            minimal_matches,
+            repeating_lists,
+            kv_blocks,
+            full=full,
+        )
+        _strip_internal_keys(kept_lists, kept_kvs)
+        page_summary: dict[str, object] = {
+            "title": title_str or None,
+            "h1": h1_str or None,
+            "has_embedded_json": bool(embedded_json),
+            "has_kv_blocks": bool(kept_kvs),
+            "repeating_list_count": len(kept_lists),
+            "navigation_list_count": 0,
+        }
+        return ScoutResult(
+            mode="zoom",
+            matched=len(minimal_matches),
+            sample_normalized=True,
+            page_summary=page_summary,
+            embedded_json=[],
+            kv_blocks=kept_kvs,
+            repeating_lists=kept_lists,
+            navigation_lists=[],
+            zoom_matches=zoom_matches,
+        )
+
+    _strip_internal_keys(repeating_lists, kv_blocks)
+    page_summary = {
+        "title": title_str or None,
+        "h1": h1_str or None,
+        "has_embedded_json": bool(embedded_json),
+        "has_kv_blocks": bool(kv_blocks),
+        "repeating_list_count": len(repeating_lists),
+        "navigation_list_count": len(navigation_lists),
+    }
+    total_signals = (
+        len(embedded_json)
+        + len(kv_blocks)
+        + len(repeating_lists)
+        + len(navigation_lists)
+    )
+    if total_signals == 0 and (
+        title_str or h1_str or soup.find(True) is not None
+    ):
+        total_signals = 1
+
+    return ScoutResult(
+        mode="overview",
+        matched=total_signals,
+        sample_normalized=True,
         page_summary=page_summary,
+        embedded_json=embedded_json,
+        kv_blocks=kv_blocks,
+        repeating_lists=repeating_lists,
+        navigation_lists=navigation_lists,
+        zoom_matches=[],
     )
 
 
-def _detect_container_kind(snippet: str) -> str:
-    """Return 'object' | 'array' | 'unknown' based on first non-ws char."""
-    s = snippet.lstrip()
-    if not s:
-        return "unknown"
-    if s[0] == "{":
-        return "object"
-    if s[0] == "[":
-        return "array"
-    return "unknown"
-
-
-def _find_json_signals(
-    soup: BeautifulSoup,
+def run_discover(
+    html: str,
     *,
-    max_scripts: int = DISCOVER_TOP_JSON_SCRIPT,
-    max_attrs: int = DISCOVER_TOP_JSON_ATTR,
-    snippet_len: int = DISCOVER_SNIPPET_LEN,
-) -> list[dict[str, object]]:
-    """Detect embedded JSON containers in the document.
+    full: bool = False,
+) -> ScoutResult:
+    """Compatibility alias forwarding to `run_scout(html, full=full)`.
 
-    Returns signals in **document order** (no priority sort). Detection
-    is intentionally lax: this is a reconnaissance tool, the LLM is
-    expected to inspect `snippet` and decide what to extract.
+    Args:
+        html (str): Raw HTML document string to analyze.
+        full (bool): Disable default compression budgets and emit all discovered items.
 
-    Covers four `<script>` cases:
-      - `type` ∈ {application/ld+json, application/json} → typed JSON
-      - `var/let/const X = ...` or `window.X = ...` → js-var (first match only)
-      - body starting with `{` or `[` → bare-json candidate
-      - empty body → skipped
-
-    Plus attributes whose value starts with `{` or `[` (excluding
-    `class`, `style`, `href`, `src`, `action`).
+    Returns:
+        ScoutResult: Full-page reconnaissance result.
     """
-    script_signals: list[dict[str, object]] = []
-
-    for script in soup.find_all("script"):
-        body = (script.get_text() or "").strip()
-        if not body:
-            continue
-
-        raw_type = script.get("type", "")
-        if isinstance(raw_type, list):
-            script_type = raw_type[0] if raw_type else ""
-        else:
-            script_type = str(raw_type)
-
-        signal: dict[str, object] | None = None
-        # Substring of `body` that holds the actual JSON payload (for
-        # `_try_top_level_keys`). Same as `body` for typed/bare-json;
-        # narrows to the bracket-onwards for js-var signals.
-        json_source: str = body
-
-        if script_type in JSON_MIME_TYPES:
-            signal = {
-                "kind": "script",
-                "subtype": (
-                    "json-ld"
-                    if script_type == "application/ld+json"
-                    else "json-mime"
-                ),
-                "script_type": script_type,
-                "snippet": body[:snippet_len],
-            }
-        else:
-            for pat in JS_VAR_PATTERNS:
-                m = pat.search(body)
-                if m is None:
-                    continue
-                # m.end() points just past the opening bracket (regex
-                # consumes one char of `[{`). Snippet starts there.
-                snippet_from = m.end() - 1
-                json_source = body[snippet_from:]
-                signal = {
-                    "kind": "script",
-                    "subtype": "js-var",
-                    "var_name": m.group(1),
-                    "snippet": body[snippet_from : snippet_from + snippet_len],
-                }
-                break
-            if signal is None and body[0] in "{[":
-                signal = {
-                    "kind": "script",
-                    "subtype": "bare-json",
-                    "snippet": body[:snippet_len],
-                }
-
-        if signal is None:
-            continue
-
-        signal["selector"] = compute_css_path(script)
-        sid = script.get("id")
-        if isinstance(sid, str) and sid:
-            signal["script_id"] = sid
-        snippet_val = str(signal.get("snippet", ""))
-        signal["container_kind"] = _detect_container_kind(snippet_val)
-        signal["size"] = len(body)
-        top_keys = _try_top_level_keys(json_source)
-        if top_keys:
-            signal["top_level_keys"] = top_keys
-        script_signals.append(signal)
-
-        if len(script_signals) >= max_scripts:
-            break
-
-    attr_signals: list[dict[str, object]] = []
-    for tag in soup.find_all(True):
-        for attr_name, raw_val in list(tag.attrs.items()):
-            if attr_name in JSON_SKIP_ATTRS:
-                continue
-            if not isinstance(raw_val, str):
-                continue
-            v = raw_val.strip()
-            if len(v) < 2 or v[0] not in "{[":
-                continue
-            attr_signal: dict[str, object] = {
-                "kind": "attr",
-                "subtype": "attr-json",
-                "selector": compute_css_path(tag),
-                "attr": attr_name,
-                "container_kind": _detect_container_kind(v),
-                "snippet": v[:snippet_len],
-                "size": len(v),
-            }
-            top_keys = _try_top_level_keys(v)
-            if top_keys:
-                attr_signal["top_level_keys"] = top_keys
-            attr_signals.append(attr_signal)
-            if len(attr_signals) >= max_attrs:
-                break
-        if len(attr_signals) >= max_attrs:
-            break
-
-    return script_signals + attr_signals
+    return run_scout(html, full=full)
