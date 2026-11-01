@@ -7,20 +7,19 @@ import json
 import keyword
 import traceback
 from pathlib import Path
-from typing import Annotated, List, Literal, Optional
+from typing import Annotated, Literal
 
 import typer
-
-from ssc_codegen._logging import logger, setup_debug_logging
-from ssc_codegen.core import parse_module, format_diagnostics, ReadDiagnostic
-from ssc_codegen.exceptions import BuildTimeError
 from kdlquery import Severity
 from kdlquery.types import Position, Span
+
+from ssc_codegen._logging import logger, setup_debug_logging
+from ssc_codegen.core import ReadDiagnostic, format_diagnostics, parse_module
+from ssc_codegen.exceptions import BuildTimeError
+from ssc_codegen.json_to_kdl import JsonToKdlError, json_to_kdl
+from ssc_codegen.targets.profile import TargetProfile
 from ssc_codegen.targets.resolver import ResolutionError, resolve
 from ssc_codegen.targets.spec import TargetSpec
-from ssc_codegen.targets.profile import TargetProfile
-from ssc_codegen.json_to_kdl import JsonToKdlError, json_to_kdl
-
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -142,18 +141,18 @@ def _exception_diagnostic(path: Path, exc: Exception) -> ReadDiagnostic:
 
 def _run_generate(
     profile: TargetProfile,
-    files: List[Path],
+    files: list[Path],
     output: Path,
     *,
-    package: Optional[str] = None,
-    http_client: Optional[str] = None,
+    package: str | None = None,
+    http_client: str | None = None,
     separate_runtime: bool = False,
-    runtime_name: Optional[str] = None,
+    runtime_name: str | None = None,
     skip_lint: bool = False,
     verbose: bool = False,
     fmt: FmtType = FmtType.TEXT,
-    bs4_parser: Optional[str] = None,
-    http_io: Optional[str] = None,
+    bs4_parser: str | None = None,
+    http_io: str | None = None,
 ) -> None:
     """Execute the shared compilation pipeline for all code generator subcommands.
 
@@ -262,7 +261,7 @@ def _run_generate(
                     continue
             logger.debug("AST built for %s", kdl_file)
             parsed.append((kdl_file, ast))
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             if verbose:
                 typer.echo(f"ERROR {kdl_file}:", err=True)
                 typer.echo(traceback.format_exc(), err=True)
@@ -328,7 +327,7 @@ def _run_generate(
                 "code generated for %s (%d chars)", kdl_file, len(code)
             )
             typer.echo(f"  {kdl_file} -> {out_file}")
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             if verbose:
                 typer.echo(f"ERROR {kdl_file}:", err=True)
                 typer.echo(traceback.format_exc(), err=True)
@@ -363,7 +362,7 @@ def _run_generate(
 @gen_app.command("python")
 def generate_python(
     files: Annotated[
-        List[Path],
+        list[Path],
         typer.Argument(
             help="One or more .kdl schema files or directories containing .kdl files to compile.",
             exists=True,
@@ -384,7 +383,7 @@ def generate_python(
         ),
     ] = Path("."),
     lib: Annotated[
-        Optional[HtmlLib],
+        HtmlLib | None,
         typer.Option(
             "--lib",
             "-L",
@@ -392,7 +391,7 @@ def generate_python(
         ),
     ] = None,
     bs4_parser: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--bs4-parser",
             help=(
@@ -417,14 +416,14 @@ def generate_python(
         ),
     ] = False,
     package: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--package",
             help="Package/module name for generated code. Default: output directory name.",
         ),
     ] = None,
     http_client: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--http-client",
             help=(
@@ -434,7 +433,7 @@ def generate_python(
         ),
     ] = None,
     http_io: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--http-io",
             help="HTTP I/O mode for generated methods: both (default) | sync | async.",
@@ -449,7 +448,7 @@ def generate_python(
         ),
     ] = False,
     runtime_name: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--runtime-name",
             "-rn",
@@ -507,7 +506,7 @@ def generate_python(
 @gen_app.command("js")
 def generate_js(
     files: Annotated[
-        List[Path],
+        list[Path],
         typer.Argument(
             help="One or more .kdl schema files or directories containing .kdl files to compile.",
             exists=True,
@@ -528,7 +527,7 @@ def generate_js(
         ),
     ] = Path("."),
     http_client: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--http-client",
             help="HTTP client for @request codegen: fetch (default) | axios.",
@@ -549,7 +548,7 @@ def generate_js(
         ),
     ] = False,
     package: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--package",
             help="Module name for generated code. Default: output directory name.",
@@ -590,7 +589,7 @@ def generate_js(
 @gen_app.command("go")
 def generate_go(
     files: Annotated[
-        List[Path],
+        list[Path],
         typer.Argument(
             help="One or more .kdl schema files or directories containing .kdl files to compile.",
             exists=True,
@@ -625,7 +624,7 @@ def generate_go(
         ),
     ] = False,
     package: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--package",
             help="Go package name for generated code. Default: main.",
@@ -665,7 +664,7 @@ def generate_go(
 @gen_app.command("rust")
 def generate_rust(
     files: Annotated[
-        List[Path],
+        list[Path],
         typer.Argument(
             help="One or more .kdl schema files or directories containing .kdl files to compile.",
             exists=True,
@@ -686,7 +685,7 @@ def generate_rust(
         ),
     ] = Path("."),
     http_client: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--http-client",
             help="HTTP client library for @request codegen: 'reqwest' (default).",
@@ -735,7 +734,7 @@ def generate_rust(
 @app.command()
 def check(
     files: Annotated[
-        List[Path],
+        list[Path],
         typer.Argument(
             help="One or more .kdl schema files or directories containing .kdl files to check.",
             exists=True,
@@ -745,7 +744,7 @@ def check(
         ),
     ],
     target: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--target",
             "-t",
@@ -811,7 +810,7 @@ def check(
                 source_path=kdl_file,
                 targets=(target,) if target else None,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             if verbose:
                 typer.echo(f"ERROR {kdl_file}:", err=True)
                 typer.echo(traceback.format_exc(), err=True)
@@ -906,7 +905,7 @@ def run(
         ),
     ],
     lib: Annotated[
-        Optional[HtmlLib],
+        HtmlLib | None,
         typer.Option(
             "--lib",
             "-L",
@@ -914,7 +913,7 @@ def run(
         ),
     ] = None,
     bs4_parser: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--bs4-parser",
             help=(
@@ -997,7 +996,7 @@ def run(
                 typer.echo(output, err=True)
             raise typer.Exit(1)
 
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         if verbose:
             typer.echo(traceback.format_exc(), err=True)
         else:
@@ -1053,7 +1052,7 @@ def run(
     namespace: dict = {}
     try:
         exec(code, namespace)  # noqa: S102
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         if verbose:
             typer.echo(traceback.format_exc(), err=True)
         else:
@@ -1072,7 +1071,7 @@ def run(
 
     try:
         result = cls(html).parse()
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         if verbose:
             typer.echo(traceback.format_exc(), err=True)
         else:
@@ -1155,7 +1154,7 @@ def health(
             source_path=kdl_path,
             targets=("python",),
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         if verbose:
             typer.echo(traceback.format_exc(), err=True)
         else:
@@ -1216,45 +1215,37 @@ def scout(
             readable=True,
         ),
     ] = None,
+    css: Annotated[
+        str | None,
+        typer.Option(
+            "--css",
+            help="CSS selector filter for Zoom-in mode.",
+        ),
+    ] = None,
     text: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--text",
-            help="Regex matched against descendant text content of each tag.",
+            help="Regex (or literal with -F) matched against normalized subtree text for Zoom-in mode.",
         ),
     ] = None,
     attr: Annotated[
-        Optional[List[str]],
+        list[str] | None,
         typer.Option(
             "--attr",
             help=(
-                "Attribute filter. Forms: 'NAME' (presence), 'NAME=VAL' "
-                "(exact), 'NAME=~REGEX' (regex on value). Repeatable."
+                "Attribute filter for Zoom-in mode: 'NAME' (presence), "
+                "'NAME=VAL' (exact), or 'NAME=~REGEX' (regex). Repeatable."
             ),
         ),
     ] = None,
     tag: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "--tag",
-            help="Filter by tag name (e.g. 'a', 'div').",
+            help="Tag name filter for Zoom-in mode (e.g. 'a', 'div').",
         ),
     ] = None,
-    css: Annotated[
-        Optional[str],
-        typer.Option(
-            "--css",
-            help="CSS selector used as initial candidate set (intersect with other filters).",
-        ),
-    ] = None,
-    invert: Annotated[
-        bool,
-        typer.Option(
-            "--invert",
-            "-v",
-            help="Invert match (return tags NOT matching filters).",
-        ),
-    ] = False,
     ignore_case: Annotated[
         bool,
         typer.Option(
@@ -1268,77 +1259,22 @@ def scout(
         typer.Option(
             "--fixed",
             "-F",
-            help="Treat text/attr patterns as literal strings (escape regex).",
+            help="Treat text/attr patterns as literal strings (escape regex metacharacters).",
         ),
     ] = False,
-    up: Annotated[
-        int,
-        typer.Option("--up", help="Climb N parent levels after match."),
-    ] = 0,
-    down: Annotated[
-        int,
-        typer.Option(
-            "--down", help="Descend N first-child levels after match."
-        ),
-    ] = 0,
-    next_: Annotated[
-        int,
-        typer.Option(
-            "--next",
-            help="Move N siblings forward after up/down/prev steps.",
-        ),
-    ] = 0,
-    prev: Annotated[
-        int,
-        typer.Option(
-            "--prev", help="Move N siblings backward after up/down/next."
-        ),
-    ] = 0,
-    fields: Annotated[
-        Optional[str],
-        typer.Option(
-            "--fields",
-            help=(
-                "Comma-separated fields to extract. Available: "
-                "path, tag, text, html, attrs, classes, index, line, attr.NAME. "
-                "Default: 'path,tag,text'."
-            ),
-        ),
-    ] = None,
-    count: Annotated[
+    full: Annotated[
         bool,
         typer.Option(
-            "--count",
-            "-c",
-            help="Print only match count.",
+            "--full",
+            help="Disable default compression limits and render all discovered containers, fields, and keys.",
         ),
     ] = False,
-    limit: Annotated[
-        int,
-        typer.Option("--limit", help="Max results to return (default 50)."),
-    ] = 50,
-    offset: Annotated[
-        int,
-        typer.Option("--offset", help="Skip first N matches (pagination)."),
-    ] = 0,
-    snippet: Annotated[
-        int,
-        typer.Option(
-            "--snippet",
-            help="Truncate text/html fields to N chars (default 200).",
-        ),
-    ] = 200,
     discover: Annotated[
         bool,
         typer.Option(
             "--discover",
-            help=(
-                "Overview mode: return tag/class/id stats, data-* attrs, "
-                "and repeating containers (list-struct candidates with "
-                "common_descendants field hints). Ignores all filters "
-                "and navigation. Single-call replacement for blind "
-                "selector probing."
-            ),
+            hidden=True,
+            help="Deprecated no-op alias (overview mode is now the default).",
         ),
     ] = False,
     fmt: Annotated[
@@ -1346,47 +1282,40 @@ def scout(
         typer.Option(
             "--format",
             "-f",
-            help="Output format: 'text' (tabular) or 'json'.",
+            help="Output format: 'text' (default digest) or 'json'.",
         ),
     ] = FmtType.TEXT,
 ) -> None:
-    """Probe raw HTML with regex on text/attributes to discover selectors.
+    """Distill raw HTML into a structural digest or zoom into matching containers.
 
-    Auxiliary tool for HTML reconnaissance before writing a .kdl schema.
-    Supports regex on text/attribute values (which CSS selectors cannot
-    express), optional CSS selector scoping, relative navigation
-    (parent/child/sibling), and a `--discover` overview mode.
+    Running `ssc-gen scout` with no filter flags performs full-page structural
+    distillation across embedded JSON, key-value/table blocks, and repeating item
+    lists. Passing any filter flag (`--css`, `--text`, `--attr`, `--tag`) activates
+    Zoom-in mode: locates the deepest minimal matching DOM nodes, climbs to their
+    enclosing repeating list, table, or semantic container, and highlights matched
+    fields with `<-- MATCH`.
 
-    \b
-    Examples:
-        # FIRST CALL — page overview (replaces blind selector guessing)
-        ssc-gen scout -i page.html --discover -f json
+    Args:
+        input_file (Path | None): HTML file path (reads from stdin when omitted).
+        css (Optional[str]): CSS selector filter for Zoom-in mode.
+        text (Optional[str]): Regex or literal matched against normalized subtree text.
+        attr (Optional[List[str]]): Repeatable attribute filter (`NAME`, `NAME=VAL`, `NAME=~REGEX`).
+        tag (Optional[str]): HTML tag name filter for Zoom-in mode.
+        ignore_case (bool): Case-insensitive regex matching.
+        fixed (bool): Literal string matching (escapes regex metacharacters).
+        full (bool): Disable default output caps.
+        discover (bool): Deprecated no-op flag retained for backward compatibility.
+        fmt (FmtType): Output serialization format (`text` or `json`).
 
-        # discover selectors via regex
-        ssc-gen scout -i page.html --text '\\$\\d+\\.\\d{2}' --fields path -f json
-
-        # find hrefs matching a pattern
-        ssc-gen scout -i page.html --attr 'href=~^/product/\\d+' -f json
-
-        # CSS + text regex intersect, climb to parent container
-        ssc-gen scout -i page.html --css ".price" --up 2 --fields path -f json
-
-        # one-off extraction (no .kdl needed)
-        ssc-gen scout -i page.html --css ".product-card" --fields attr.data-id,text -f json
-
-        # pipe HTML via stdin
-        curl -s https://example.com | ssc-gen scout --attr 'class=~\\bbtn\\b' -f json
+    Raises:
+        typer.Exit: With code 1 if Zoom-in filters match zero elements, or code 2 on
+            empty HTML input or invalid filter syntax.
     """
     import sys
 
-    from ssc_codegen.explore import (
-        DEFAULT_FIELDS,
-        FilterError,
-        NavSpec,
-        compile_filters,
-        run_discover,
-        run_scout,
-    )
+    from ssc_codegen.explore import FilterError, compile_filters, run_scout
+
+    _ = discover  # silent no-op alias for legacy callers
 
     if input_file is not None:
         html = input_file.read_text(encoding="utf-8")
@@ -1402,51 +1331,26 @@ def scout(
         typer.echo("ERROR: empty HTML input", err=True)
         raise typer.Exit(code=2)
 
-    if discover:
-        discover_result = run_discover(html)
-        if fmt == FmtType.JSON:
-            typer.echo(discover_result.to_json())
-        else:
-            typer.echo(discover_result.to_text())
-        return
-
-    field_list = (
-        [f.strip() for f in fields.split(",") if f.strip()]
-        if fields
-        else list(DEFAULT_FIELDS)
-    )
-
     try:
         filters = compile_filters(
             text=text,
-            attrs=attr or [],
+            attrs=attr or (),
             tag=tag,
             css=css,
             ignore_case=ignore_case,
             fixed=fixed,
         )
-        result = run_scout(
-            html,
-            filters,
-            NavSpec(up=up, down=down, next=next_, prev=prev),
-            field_list,
-            invert=invert,
-            limit=limit,
-            offset=offset,
-            snippet=snippet,
-        )
+        result = run_scout(html, filters, full=full)
     except FilterError as exc:
         typer.echo(f"ERROR: {exc}", err=True)
         raise typer.Exit(code=2)
 
-    if count:
-        typer.echo(result.matched)
-    elif fmt == FmtType.JSON:
+    if fmt == FmtType.JSON:
         typer.echo(result.to_json())
     else:
         typer.echo(result.to_text())
 
-    if result.matched == 0:
+    if filters.is_active() and result.matched == 0:
         raise typer.Exit(code=1)
 
 
@@ -1456,6 +1360,8 @@ def version() -> None:
     try:
         from importlib.metadata import (
             PackageNotFoundError,
+        )
+        from importlib.metadata import (
             version as pkg_version,
         )
 
