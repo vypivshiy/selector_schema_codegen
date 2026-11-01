@@ -3,13 +3,16 @@
 ## 1. `@request` Formats & Properties
 
 `@request` accepts a raw `HTTP/1.1` / `HTTP/2` string, a POSIX `curl` command, or a scalar `define` name.
+- **On HTML / `(raw)struct`**: emits `fetch` / `async_fetch` constructors that execute the HTTP request, optionally extract `response-path` (joining `list[str]` via `response-join`), and parse the resulting HTML/text into the struct.
+- **On `(rest)struct`**: emits typed endpoint methods returning monadic `Result` objects (`Ok` / typed `Err` / `UnknownErr` / `TransportErr`).
 
-| Property | Required in `(rest)struct` | Semantics |
-|---|---|---|
-| `name="<kebab-id>"` | Required if $>1$ `@request` | Emits `snake_case` (Py/Rust), `camelCase` (JS), `PascalCase` (Go). Single unnamed `@request` $\to$ `fetch`. |
-| `response=<Schema>\|#null` | Required (or omit for void) | 2xx JSON schema (`Ok[<Schema>Json]`), or `#null`/omitted for empty 204 (`Ok[None]`). |
-| `doc="<text>"` | Optional | Method docstring (normalized via `inspect.cleandoc`). |
-| `response-path="<dot.path>"` | Optional | Extracts nested ASCII dot-path (e.g. `"data.items"`) from JSON body before projecting `<Schema>`. (`response-join` is **forbidden** on `(rest)struct`, `E001`.) |
+| Property | In `(rest)struct` | In HTML / `(raw)struct` | Semantics |
+|---|---|---|---|
+| `name="<kebab-id>"` | Required if $>1$ `@request` | Optional (default `fetch`) | Emits `snake_case` (Py/Rust), `camelCase` (JS), `PascalCase` (Go) |
+| `response=<Schema>\|#null` | Required (or omit for void) | Forbidden | 2xx JSON schema (`Ok[<Schema>Json]`), or `#null`/omitted for empty 204 (`Ok[None]`) |
+| `doc="<text>"` | Optional | Optional | Method docstring (normalized via `inspect.cleandoc`) |
+| `response-path="<dot.path>"` | Optional | Optional | Extracts nested ASCII dot-path (e.g. `"data.items"`) from JSON response body |
+| `response-join="<sep>"` | **Forbidden (`E001`)** | Optional (requires `response-path`) | Joins `list[str]` extracted by `response-path` into a single string |
 
 Supported `curl` flags: `-X/--request`, `-H/--header`, `-d/--data/--data-raw`, `--json`, `-u/--user`, `-F/--form`, `--data-urlencode`, `--compressed` (ignored).
 
@@ -40,7 +43,7 @@ Supported `curl` flags: `-X/--request`, `-H/--header`, `-d/--data/--data-raw`, `
 
 ---
 
-## 3. `@error[:<suffix>]` Dispatch & Safe Fallthrough
+## 3. `@error[:<suffix>]` Dispatch & Safe Fallthrough (`(rest)struct` only)
 
 Syntax: `@error[:<suffix>] <status:100..599> <SchemaName> ["pos.key"...] [prop.key=val ...]`
 

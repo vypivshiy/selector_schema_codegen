@@ -125,12 +125,9 @@ linter feedback loop.
 
 ### In AI-powered IDEs (Claude Code, Cursor, opencode, etc.)
 
-Project works through `agents + skills`. Use skills under [.agents/skills/](.agents/skills/):
+Project works through `agents + skills`. Use the unified skill under [.agents/skills/sscgen-dsl/](.agents/skills/sscgen-dsl/):
 
-- **`sscgen-dsl`** — HTML scraping schemas (`css`, `text`, `(item)struct`,
-  `(list)struct`, `(table)struct`, predicates, `jsonify`).
-- **`sscgen-rest`** — REST/JSON API clients (`(rest)struct`, `@request`,
-  `@error`, typed placeholders).
+- **`sscgen-dsl`** — unified KDL Schema DSL v2.1 skill covering HTML scraping (`(item|list|table|dict|flat)struct`, `fn`, `css`/`xpath`, `jsonify`, `ssc-gen scout`), plain-text parsing (`(raw)struct`, `(raw)fn`), and typed REST/JSON HTTP API clients (`(rest)struct`, `json`/`(array)json`/`(dict)json`, `@request`, `@error[:<suffix>]`, typed placeholders, `ssc-gen json-to-kdl`), including hybrid multi-stage `.kdl` schemas in a single file.
 
 ## Development
 

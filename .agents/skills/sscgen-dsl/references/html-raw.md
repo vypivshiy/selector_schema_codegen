@@ -1,10 +1,15 @@
-# KDL Operations, Patterns & Codegen Reference (DSL v2.1)
+# HTML & Plain-Text (`(raw)struct`) Reference (DSL v2.1)
 
-## 1. Unified `TypeInfo` Model
+## 1. Unified `TypeInfo` Model & Directives
 
 - **Scalar Base Types**: `DOC` (`DOCUMENT`), `STR` (`STRING`), `INT` (64-bit), `FLOAT` (64-bit), `BOOL`, `NULL`, `NESTED` (terminal), `JSON` (terminal).
 - **Modifiers**: `T[]` (`is_array=True`), `T?` (`is_optional=True`, produced by `fallback #null` on `STR`/`INT`/`FLOAT` or `?` in `json`), `dict[K, V]` (in `json`).
 - **Pipeline Start Type**: `DOC` in HTML structs/`fn`; `STR` in `(raw)struct`/`(raw)fn`; or `TypeOf(name)` when starting with `@<name>`.
+- **Struct Directives** (for `item`, `list`, `table`, `dict`, `flat`, `raw`):
+  - `@init { <name> { <pipeline> }; ... }` — precomputes & caches values on instance; referenced as **first op** in fields via `@<name>` (`E301` if undeclared; `self <name>` is deprecated).
+  - `@pre-validate { assert ["<msg>"] { <predicates> } }` — validates input before `parse()`; raises `SscAssertionError`.
+  - `@check <name> { <pipeline>; to-bool; [fallback #false] }` — emits public boolean method (`is_ok()` / `isOk()` / `IsOk()`); pipeline must end in `BOOL` (`E100`).
+  - `@request [response-path="..."] [response-join="\n"] "<curl_or_http>"` — emits `fetch` / `async_fetch` constructor (requires `--http-client` at `generate`).
 
 ---
 
@@ -30,9 +35,9 @@
 | | `rm-prefix "<s>" \| rm-suffix "<s>" \| rm-prefix-suffix "<s>" : STR -> STR, STR[] -> STR[]` | Strips literal prefix and/or suffix |
 | | `split "<sep>" : STR -> STR[]` | Scalar `STR` input only |
 | | `join "<sep>" : STR[] -> STR` | Array `STR[]` input only |
-| **Regex** | `re "<pattern>" : STR -> STR, STR[] -> STR[]` | Requires **exactly 1** capture group (`E002`). Raises `SscRegexError` on no-match (caught by `fallback`) |
+| **Regex** | `re "<pattern>" : STR -> STR, STR[] -> STR[]` | Requires **exactly 1** capture group (`E002`). Raises `SscRegexError` on no-match (caught by `fallback`). Portable flags: `(?i)`, `(?m)`, `(?s)`, `(?x)`, `(?xs)` |
 | | `re-all "<pattern>" : STR -> STR[]` | Scalar `STR` only; requires **exactly 1** capture group (`E002`) |
-| | `re-sub "<pattern>" "<repl>" : STR -> STR, STR[] -> STR[]` | Regex substitution (no capture group requirement) |
+| | `re-sub "<pattern>" "<repl>" : STR -> STR, STR[] -> STR[]` | Regex substitution (0+ capture groups) |
 | **Array** | `index <i:int> \| first \| last : T[] -> T` | Supports negative indices (`first` = `0`, `last` = `-1`) |
 | | `slice <start:int> <end:int> : T[] -> T[]` | Sub-list slice; supports negative bounds |
 | | `len : T[] \| STR -> INT` | Array or string length |
@@ -51,28 +56,32 @@
 
 ---
 
-## 3. Structural Recipes (`(raw)struct`, Non-Table `(table)struct`, `json_signals`)
+## 3. Predicates & Dual-Purpose Keywords (`match {}` vs `filter {}` vs `assert {}`)
 
-### 3.1 `(raw)struct` — Plain-Text Parsing (JS, URLs, m3u8, CSV)
+Top-level children of `filter`, `assert`, `match`, `and`, and `not` combine via implicit `AND`; children of `or` combine via `OR`. Multi-value args (`eq "a" "b"`) match if **any** value matches.
+
+| Category | Predicate Signatures | `match {}` | `filter {}` | `assert {}` | Input Type |
+|---|---|:---:|:---:|:---:|---|
+| **String** | `eq <v...>`, `ne <v...>`, `starts <v...>`, `ends <v...>`, `contains <v...>`, `in <v...>`, `re "<pat>"` (0 groups required) | ✓ | ✓ | ✓ | `STR` (`eq`/`ne` also `INT`/`FLOAT`) |
+| **Attribute** | `has-attr <a...>`, `attr-eq <a> <v...>`, `attr-ne <a> <v...>`, `attr-starts <a> <v...>`, `attr-ends <a> <v...>`, `attr-contains <a> <v...>`, `attr-re <a> "<pat>"` | ✗ | ✓ | ✓ | `DOC` / `DOC[]` |
+| **Text / DOM** | `text-starts <v...>`, `text-ends <v...>`, `text-contains <v...>`, `text-re "<pat>"`, `css "<sel>"`, `xpath "<sel>"` | ✗ | ✓ | ✓ | `DOC` / `DOC[]` |
+| **Length** | `len-eq <n...>`, `len-ne <n...>`, `len-gt <n>`, `len-lt <n>`, `len-ge <n>`, `len-le <n>`, `len-range <min> <max>` | ✗ | ✗ | ✓ (`E203` elsewhere) | `STR` or `T[]` |
+| **Numeric** | `gt <n>`, `lt <n>`, `ge <n>`, `le <n>` | ✗ | ✗ | ✓ (`E203` elsewhere) | `INT`, `FLOAT`, `STR`, or `T[]` |
+| **List Regex** | `re-any "<pat>"` (at least one item matches), `re-all "<pat>"` (every item matches) | ✗ | ✗ | ✓ (`E203` elsewhere) | `STR[]` |
+
+---
+
+## 4. Structural Recipes (`(raw)struct`, Non-Table `(table)struct`, `json_signals`)
+
+### 4.1 `(raw)struct` — Plain-Text Parsing (JS, URLs, m3u8, CSV)
 Starts with `STR` (HTML ops forbidden, `E203`). Auto-selects `LIST` when `@split-doc` is present, else `ITEM`.
 
 ```kdl
-// Extract stream URL from inline/remote JS script
 (raw)struct PlayerScript {
     @request "curl '{{script_url}}'"
     stream_url { re #"file:\s*[\"']([^\"']+)[\"']"# }
 }
 
-// Parse URL query parameter
-(raw)struct QueryParams {
-    dubbing_code {
-        split "?"; index 1; split "&"
-        filter { starts "dubbing_code=" }
-        first; rm-prefix "dubbing_code="
-    }
-}
-
-// Split text into lines + cache row columns via @init (auto-LIST)
 (raw)struct CsvRows {
     @split-doc { split "\n" }
     @init { cols { split "," } }
@@ -81,7 +90,7 @@ Starts with `STR` (HTML ops forbidden, `E203`). Auto-selects `LIST` when `@split
 }
 ```
 
-### 3.2 `(table)struct` on Non-Table Label+Value Containers
+### 4.2 `(table)struct` on Non-Table Label+Value Containers
 For repeated `<div><strong>Label:</strong> Value</div>` rows, extract the label in `@match` and strip the prefix in `@value`:
 
 ```kdl
@@ -96,7 +105,7 @@ For repeated `<div><strong>Label:</strong> Value</div>` rows, extract the label 
 }
 ```
 
-### 3.3 Extracting `json_signals` from `scout --discover`
+### 4.3 Extracting `json_signals` from `ssc-gen scout --discover`
 
 | `subtype` | Source Pattern | Extraction Pipeline |
 |---|---|---|
@@ -105,21 +114,12 @@ For repeated `<div><strong>Label:</strong> Value</div>` rows, extract the label 
 | `js-var` | `var data = [...];` inside `<script>` | `raw; re #"(?xs)var\s+data\s*=\s*(\[.*?\]);"#; jsonify SchemaName` |
 | `attr-json` | `<div id="app" data-state="{...}">` | `css "#app"; attr "data-state"; unescape; jsonify SchemaName` |
 
-> Bootstrap complex embedded JSON payloads via `ssc-gen json-to-kdl sample.json -o schema.kdl --name SchemaName --force`. Prefer inline `json` blocks (`field { ... }`, `field (array)ItemModel { ... }`, `field (dict) { @key str; @value ... }`) and GJSON `from="..."` paths (`a.b.0`, `#"a\.b"#`, `items.#`, `tags.#.name`).
-
 ---
 
-## 4. Module Declarations (`import`, `define`, `extension`)
+## 5. Module Declarations (`import`, `define`, `extension`) & CSS Selectors
 
 ```kdl
-import "./shared.kdl" {
-    (extension)Utils
-    (struct)BookCard
-    (json)OfferPayload
-    (define)BASE-URL
-    (fn)clean-title
-}
-
+import "./shared.kdl" { (extension)Utils; (struct)BookCard; (json)OfferPayload; (define)BASE-URL; (fn)clean-title }
 define BASE-URL="https://example.com"
 define EXTRACT-HREF { css "a"; attr "href"; trim }
 
@@ -134,31 +134,5 @@ extension Utils {
 }
 ```
 
----
-
-## 5. CSS3 & CSS4 Selector Reference
-
-- **Attribute**: `[attr]`, `[attr=val]`, `[attr^=val]` (starts), `[attr$=val]` (ends), `[attr*=val]` (contains), `[attr~=word]`, `[attr|=prefix]`.
-- **Combinators**: `A B` (descendant), `A > B` (direct child), `A + B` (adjacent sibling), `A ~ B` (following sibling), `A, B` (union).
-- **CSS3 Structural**: `:first-child`, `:last-child`, `:only-child`, `:nth-child(n)`, `:nth-last-child(n)`, `:first-of-type`, `:last-of-type`, `:nth-of-type(n)`, `:empty`.
-- **CSS4 (opt-in only)**: `:not(...)`, `:is(...)`, `:where(...)`, `:has(...)` (supported in `bs4`/`lxml`/`parsel`; partial in JS DOM / `slax` — prefer CSS3 `[attr^=...]` or pipeline `filter {}` when portable).
-
----
-
-## 6. CLI & Codegen Targets
-
-```bash
-# Check CLI version (subcommand `version`, NEVER `--version`)
-ssc-gen version
-
-# Lint, run, and check selector health
-ssc-gen check schema.kdl -f json
-ssc-gen run schema.kdl:StructName -L bs4 -i page.html
-ssc-gen health schema.kdl:StructName -i page.html -f json
-
-# Generate standalone parser code
-ssc-gen generate python schema.kdl -L bs4 -o out/   # -L bs4|lxml|parsel|slax [--bs4-parser lxml|html.parser|html5lib] [-R] [--http-client httpx|httpx2|requests|aiohttp]
-ssc-gen generate js     schema.kdl -o out/          # [--http-client fetch|axios]
-ssc-gen generate go     schema.kdl -o out/          # emits schema.go + sscgen_runtime.go
-ssc-gen generate rust   schema.kdl -o out/          # emits schema.rs + sscgen_runtime.rs [--http-client reqwest]
-```
+- **CSS3 (default)**: `[attr]`, `[attr=val]`, `[attr^=val]`, `[attr$=val]`, `[attr*=val]`, `[attr~=word]`, `A > B`, `A + B`, `A ~ B`, `:first-child`, `:last-child`, `:nth-child(n)`, `:nth-of-type(n)`, `:empty`.
+- **CSS4 (opt-in only)**: `:not(...)`, `:is(...)`, `:where(...)`, `:has(...)` (prefer CSS3 `[attr^=...]` or pipeline `filter {}` when portable across `slax` / JS DOM).

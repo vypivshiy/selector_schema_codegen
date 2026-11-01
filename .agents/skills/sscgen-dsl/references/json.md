@@ -1,5 +1,7 @@
 # `json` Schemas, Inline Hoisting, `(dict)json` & GJSON Paths (DSL v2.1)
 
+Used for both REST endpoint responses (`@request response=<Schema>`, `@error <status> <Schema>`) and HTML/raw JSON extraction (`jsonify <Schema> [path="<gjson>"]`).
+
 ## 1. Top-Level & Inline `json` Declarations
 
 - `json <Name> { <fields...> }` — JSON object schema.
@@ -72,21 +74,16 @@ Syntax: `<field_name> <type>[?] [from="<gjson_path>"] [@omitempty] [@skip]`
 
 ---
 
-## 3. Portable Field Names (`E403`) & GJSON `from="..."` (`E040`, `E041`)
+## 3. Portable Field Names (`E403`) & GJSON `from="..."` / `jsonify path="..."` (`E040`, `E041`)
 
 - Every `json` field name (after stripping `?`) must match `^[A-Za-z_][A-Za-z0-9_]*$` and avoid target language reserved words (`from`, `type`, `class`, `in`, `return`, etc.) (`E403`).
-- `from="<gjson_path>"` maps a wire key or nested deterministic GJSON path to the field:
+- `from="<gjson_path>"` on `json` fields and `path="<gjson_path>"` on `jsonify` evaluate a deterministic GJSON path subset:
   - Direct wire key remap: `sender str from="from"`, `track_id str from="track-id"`, `ctx str from="@context"`.
   - Escaped literal dot in flat wire key: `os_ver str from=#"os\.version"#` (or `from="os\\.version"`).
   - Nested object path & non-negative array index: `author_name str from="data.authors.0.name"`.
   - Array count (`#` $\to$ `int`): `total_items int from="items.#"`.
   - Array element projection (`#.subpath` $\to$ `(array)T`): `tag_names (array)str from="tags.#.name"`.
-- **Diagnostics**:
-  - `E040`: malformed GJSON path (leading/trailing `.`, `..`, negative index, wildcard `*`, or `#[...]` filter).
-  - `E041`: duplicate field name or duplicate wire key (`from=`) in the same `json` schema.
-  - `W011`: deprecated positional alias (`field str "wire_key"` $\to$ use `from="wire_key"`).
-  - `W040`: leading or trailing whitespace in `from="..."`.
-  - `W041`: `path="..."` used on a `json` field (`path=` is reserved for `jsonify`; use `from=` on `json` fields).
+- **Diagnostics**: `E040` (malformed path, `*`, `#[...]`, negative index, `..`), `E041` (duplicate field or wire key), `W011` (deprecated positional alias), `W040` (whitespace in `from=`), `W041` (`path=` used on a `json` field instead of `from=`).
 
 ---
 

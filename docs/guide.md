@@ -81,11 +81,11 @@ LLM-агент (Claude, ChatGPT и др.) может генерировать и
    ```
 
 Проект работает через связку `agents + skills`. В IDE с поддержкой агентов
-(Claude Code, Cursor, opencode и т.д.) этот цикл может быть автоматизирован
-через skills из `.agents/skills/`:
-`sscgen-dsl` (HTML scraping) and `sscgen-rest` (REST API). OpenAPI/Swagger can
-serve as external API contract information, but CLI does not convert it
-automatically; describe resulting KDL manually with `sscgen-rest`.
+(Claude Code, Cursor, opencode и т.д.) этот цикл автоматизирован через единый
+скилл `sscgen-dsl` из `.agents/skills/sscgen-dsl/`, который объединяет HTML-скрапинг,
+парсинг сырого текста (`(raw)struct`) и REST/JSON API клиенты (`(rest)struct`).
+OpenAPI/Swagger можно использовать как внешний источник информации о контракте API,
+описывая итоговый KDL через `sscgen-dsl`.
 
 ## Где смотреть живые примеры
 
