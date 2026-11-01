@@ -6,15 +6,19 @@ All public symbols are re-exported directly from the top-level `ssc_codegen` pac
 
 ```python
 from ssc_codegen import (
+    AttrFilter,
     BuildTimeError,
     DiscoverResult,
+    FilterError,
     HealthResult,
     ParseError,
     ResolutionError,
+    ScoutFilters,
     ScoutResult,
     TargetProfile,
     TargetSpec,
     check_struct_health,
+    compile_filters,
     format_diagnostics,
     parse_module,
     resolve,
@@ -65,10 +69,18 @@ from ssc_codegen import (
 
 ## HTML Reconnaissance & Discovery
 
+`DiscoverResult` is re-exported as a backward-compatible alias for `ScoutResult`.
+
 ::: ssc_codegen.explore.run_scout
 
 ::: ssc_codegen.explore.ScoutResult
 
-::: ssc_codegen.explore.run_discover
+::: ssc_codegen.explore.compile_filters
 
-::: ssc_codegen.explore.DiscoverResult
+::: ssc_codegen.explore.ScoutFilters
+
+::: ssc_codegen.explore.AttrFilter
+
+::: ssc_codegen.explore.FilterError
+
+::: ssc_codegen.explore.run_discover

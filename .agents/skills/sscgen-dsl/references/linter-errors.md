@@ -7,10 +7,11 @@
 ssc-gen version
 
 # HTML reconnaissance (ALWAYS first step on HTML sources; never Read raw .html)
-ssc-gen scout -i page.html --discover -f json
-ssc-gen scout -i page.html --text '\$\d+\.\d{2}' --fields path -f json
-ssc-gen scout -i page.html --attr 'href=~^/product/\d+' --fields path -f json
-ssc-gen scout -i page.html --css ".price" --up 2 --fields path,text -f json
+ssc-gen scout -i page.html                                       # 3-engine overview digest (text)
+ssc-gen scout -i page.html -f json [--full]                      # structured JSON (page_summary, embedded_json, kv_blocks, repeating_lists)
+ssc-gen scout -i page.html --text '\$\d+\.\d{2}'                 # Zoom-in mode: deepest match + auto-expanded container with <-- MATCH
+ssc-gen scout -i page.html --attr 'href=~^/product/\d+' -f json  # Zoom-in by attribute regex
+ssc-gen scout -i page.html --css ".price" --tag span -I -F       # Zoom-in combining CSS, tag, case-insensitive & literal flags
 
 # Bootstrap hierarchical inline json schema from a sample JSON file
 ssc-gen json-to-kdl sample.json -o schema.kdl --name ResponseName --force

@@ -16,7 +16,7 @@ Compile `.kdl` schemas into standalone HTML/text parsers and typed REST HTTP cli
 ## Hard Rules (Always Apply)
 
 1. **CLI version check**: run `ssc-gen version` (subcommand). Never run `ssc-gen --version` (flag does not exist and exits with an error).
-2. **HTML inspection contract**: never use `Read` on raw `.html` files. When an HTML file or URL is available, your **first** tool call must be `ssc-gen scout -i <page.html> --discover -f json` (after `curl -sL <URL> -o <page.html>` if given a URL).
+2. **HTML inspection contract**: never use `Read` on raw `.html` files. When an HTML file or URL is available, your **first** tool call must be `ssc-gen scout -i <page.html>` (or `ssc-gen scout -i <page.html> -f json [--full]`; after `curl -sL <URL> -o <page.html>` if given a URL). Overview mode runs by default (no `--discover` needed); pass `--text`, `--attr`, `--css`, or `--tag` (with `-I`/`-F`) for Zoom-in mode, which matches the deepest minimal DOM node across inline tags, auto-expands the enclosing container, and marks matched fields with `<-- MATCH` (legacy `--up`/`--down`/`--next`/`--prev`/`--fields` flags are removed).
 3. **Top-down declaration order (`E302`)**: declare helper `struct` and `json` schemas **above** any struct, `json` field, `nested`, or `jsonify` that references them.
 4. **Inline `json` schemas by default**: nest single-use child objects (`field { ... }` / `field Model { ... }`), object arrays (`field (array)ItemModel { ... }` — `ItemModel` name is mandatory, `E001`), and maps (`field (dict) { @key str; @value ... }`) **inline** inside their parent `json` schema. Declare a standalone top-level `json` schema **only** when referenced directly by `@request response=`, `@error`, or `jsonify`, OR when shared across 2+ schemas (declared above callers, `E302`).
 5. **Portable `json` field names (`E403`) & GJSON `from="..."` (`E040`, `E041`)**: `json` field names (after stripping `?`) must match `^[A-Za-z_][A-Za-z0-9_]*$` (`snake_case`/`camelCase`; no `kebab-case`, no colons `url: str`, no target keywords like `from`, `type`, `class`, `in`). Map special/reserved wire keys or nested GJSON paths via `from="..."` (e.g. `sender str from="from"`, `tag_names (array)str from="tags.#.name"`). Duplicate field or wire keys in one schema emit `E041`.
@@ -37,16 +37,16 @@ Compile `.kdl` schemas into standalone HTML/text parsers and typed REST HTTP cli
 
 ### Step 1 — Auto-Detect Source & Choose Construct(s)
 
-Inspect the target (HTTP response `Content-Type` / body root, HAR/cURL captures, or `ssc-gen scout -i page.html --discover -f json`) and select the matching construct(s). Combine multiple structs in one `.kdl` file when a workflow spans HTML + JS/text + REST API:
+Inspect the target (HTTP response `Content-Type` / body root, HAR/cURL captures, or `ssc-gen scout -i page.html` / `ssc-gen scout -i page.html -f json`) and select the matching construct(s). Combine multiple structs in one `.kdl` file when a workflow spans HTML + JS/text + REST API:
 
 | Source Signal | Construct in `.kdl` | Required Directives / Key Rules | Reference to Load |
 |---|---|---|---|
 | **JSON HTTP endpoint** (`application/json`, root `{` or `[`, cURL/HAR API) | `(rest)struct Name` + `json` schemas | 1+ `@request` (`name=` if $>1$, `response=<Schema>\|#null`); `@error[:<suffix>] <status> <Schema> [keys...] [k=v ...]` | `references/rest.md` + `references/json.md` |
-| **HTML with embedded JSON** (`scout` reports `json_signals`: `ld+json`, `__NEXT_DATA__`, JS var, `data-*`) | `struct Name` + `json` schemas | Extract via `css ...; raw inner` (or `attr ...; unescape` / `re`) $\to$ `jsonify <Schema> [path="<gjson>"]` | `references/html-raw.md` + `references/json.md` |
-| **HTML single object** | `struct Name` / `(item)struct` | 1+ regular fields starting with `css`/`css-all` or `@<init_field>` | `references/html-raw.md` |
-| **HTML repeating cards / rows** (`scout` `repeat_containers`) | `(list)struct Name` | `@split-doc { css-all "<item_selector>" }` + item fields | `references/html-raw.md` |
-| **HTML key-value table / label-value rows** (`scout` `table_candidates`) | `(table)struct Name` | `@table`, `@rows`, `@match`, `@value`; every field starts with `match { eq\|starts\|contains\|re ... }` | `references/html-raw.md` |
-| **HTML dynamic map** (`<meta>` tags, dynamic attrs) | `(dict)struct Name` | `@split-doc`, `@key`, `@value` (no regular fields) | `references/html-raw.md` |
+| **HTML with embedded JSON** (`scout` `embedded_json` / `=== EMBEDDED JSON ===`: `json-ld`, `json-mime`, `js-var`, `json-parse`, `js-push`, `attr-json`) | `struct Name` + `json` schemas | Use `kdl_hint` (`css ...; raw inner` / `attr ...; unescape` / `re`) $\to$ `jsonify <Schema> [path="<gjson>"]` | `references/html-raw.md` + `references/json.md` |
+| **HTML single object** (`scout` `zoom_matches` / `=== ZOOM MATCHES ===` or detail block) | `struct Name` / `(item)struct` / `struct Name type=item` | 1+ regular fields starting with `css`/`css-all` or `@<init_field>` | `references/html-raw.md` |
+| **HTML repeating cards / rows** (`scout` `repeating_lists` / `=== REPEATING LISTS & DOM SKELETON ===` or `kv_blocks` `table_list`) | `(list)struct Name` | `@split-doc { css-all "<selector>" }` + item fields (`optional: true` / `[k/N, optional]` $\to$ `fallback #null`; `kind="array"` $\to$ `css-all`) | `references/html-raw.md` |
+| **HTML key-value table / label-value rows** (`scout` `kv_blocks` / `=== KEY-VALUE & TABLES ===`: `kv_table\|dl\|kv_rows`) | `(table)struct Name` | `@table { css "<container_selector>" }`, `@rows { css-all "<rows_selector>" }`, `@match { css "<key_selector>"; ... }`, `@value { css "<value_selector>"; ... }`; every field starts with `match { eq\|starts\|contains\|re ... }` | `references/html-raw.md` |
+| **HTML dynamic map** (`<meta>` tags, dynamic attrs, or `scout` `kv_blocks` with open-ended keys) | `(dict)struct Name` | `@split-doc`, `@key`, `@value` (no regular fields) | `references/html-raw.md` |
 | **HTML flat string list** | `(flat)struct Name [keep-order=#true]` | Fields must return `STR` or `STR[]` | `references/html-raw.md` |
 | **Plain text** (JS file, URL query, m3u8 playlist, CSV) | `(raw)struct Name` | Starts with `STR`; optional `@split-doc` auto-switches output from `dict` to `list[dict]`; HTML ops forbidden | `references/html-raw.md` |
 | **Single extracted value** | `fn name` / `(raw)fn name` | Standalone function; only `@doc` + pipeline ops allowed | `references/html-raw.md` |
@@ -150,7 +150,7 @@ ssc-gen health schema.kdl:CatalogPage -i page.html -f json
 
 ## Reference Pointers (Load on Demand)
 
-- **HTML/Raw pipelines, `scout --discover` anatomy, predicate context matrix, CSS3/CSS4, `(raw)struct`, `(table)struct`, `import`/`define`/`extension`** $\to$ read `references/html-raw.md`
+- **HTML/Raw pipelines, `ssc-gen scout` (`embedded_json`, `kv_blocks`, `repeating_lists`, `zoom_matches`) mapping, predicate context matrix, CSS3/CSS4, `(raw)struct`, `(table)struct`, `import`/`define`/`extension`** $\to$ read `references/html-raw.md`
 - **REST `@request` flags, `define` URL composition, typed placeholder matrix, `@error[:<suffix>]` fallthrough, `Result` types & `ssc-gen generate` targets** $\to$ read `references/rest.md`
 - **Deep `json` / `(dict)json` / inline `@value` hoisting rules, GJSON path grammar, and `ssc-gen json-to-kdl`** $\to$ read `references/json.md`
 - **Linter `ErrorCode` (`E000`–`E403`, `W011`–`W041`) fix table, CLI cheat sheet, and safe repair loop** $\to$ read `references/linter-errors.md`

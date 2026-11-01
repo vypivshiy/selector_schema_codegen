@@ -71,9 +71,24 @@ Top-level children of `filter`, `assert`, `match`, `and`, and `not` combine via 
 
 ---
 
-## 4. Structural Recipes (`(raw)struct`, Non-Table `(table)struct`, `json_signals`)
+## 4. `ssc-gen scout` Workflow & Structural Recipes (`(list)struct`, `(table)struct`, `(dict)struct`, `struct type=item`, `jsonify`, `(raw)struct`)
 
-### 4.1 `(raw)struct` — Plain-Text Parsing (JS, URLs, m3u8, CSV)
+### 4.1 Mapping `ssc-gen scout` Output to KDL Constructs
+
+Run `ssc-gen scout -i page.html` (or `-f json`; add `--full` to disable default truncation limits; `--discover` is a deprecated no-op alias). To probe specific text or attributes, pass `--text`, `--attr`, `--css`, or `--tag` (with `-I` / `-F`): `scout` enters **Zoom-in Mode**, matches the deepest minimal DOM node (including text split across inline tags), auto-expands the enclosing container, and marks matched fields with `<-- MATCH` (`"matched": true` in JSON). Never pass removed legacy flags (`--up`, `--down`, `--next`, `--prev`, `--fields`).
+
+All `samples` in `scout` output are whitespace-normalized (`sample_normalized: true`); never write regexes expecting raw newlines or multi-space runs from a sample.
+
+| `scout` Section (`json` key / `text` header) | Target KDL Construct | How to Map Verified Selectors & Signals |
+|---|---|---|
+| `repeating_lists` (`=== REPEATING LISTS & DOM SKELETON ===`) | `(list)struct Name` | Copy `selector` into `@split-doc { css-all "<selector>" }`. For each entry in `fields`: use `css` as the relative selector (`kind="scalar"` or `kind="positional"` with `:nth-of-type(k)`), or `css-all "<css>"` when `kind="array"` (`[array min..max items]`). When `optional: true` (`[k/N, optional]`), append `fallback #null`. Ignore `outliers` (inline ad banners) and `navigation_lists`. |
+| `kv_blocks` (`=== KEY-VALUE & TABLES ===`) with `kind` in `kv_table \| dl \| kv_rows` (fixed keys) | `(table)struct Name` | Populate `@table { css "<container_selector>" }`, `@rows { css-all "<rows_selector>" }`, `@match { css "<key_selector>"; text; trim; lower }`, `@value { css "<value_selector>"; text; trim }`, and map `entries[].key` to fields starting with `match { eq "<key>" }` (or `starts`/`contains`). |
+| `kv_blocks` (`=== KEY-VALUE & TABLES ===`) with dynamic/open-ended keys | `(dict)struct Name` | Populate `@split-doc { css-all "<container_selector> <rows_selector>" }`, `@key { css "<key_selector>"; text; trim }`, `@value { css "<value_selector>"; text; trim }` (no regular fields). |
+| `kv_blocks` with `kind == "table_list"` (horizontal `<th>` headers) | `(list)struct Name` | Populate `@split-doc { css-all "<container_selector> <rows_selector>" }` and extract each column via `columns[i].css` (`css "td:nth-of-type(k)"; text; trim`). |
+| `zoom_matches` (`=== ZOOM MATCHES ===`) | `struct Name` (`(item)struct` / `struct Name type=item`) | Single-item detail block expanded around `<-- MATCH` (`"matched": true`). Use `match_selector` directly from document root, or scope via `@init` to `container_selector` and use relative `fields[].css` paths. |
+| `embedded_json` (`=== EMBEDDED JSON ===`) | `struct Name` + `json Schema` (`jsonify`) | Copy `kdl_hint` into the field pipeline and pass `collections[i].path` as `jsonify Schema path="<path>"` (omit `path=` when `path == ""`). Define `json Schema` above the struct using `collections[i].fields` (`name`, inferred `type`, and `samples`). |
+
+### 4.2 `(raw)struct` — Plain-Text Parsing (JS, URLs, m3u8, CSV)
 Starts with `STR` (HTML ops forbidden, `E203`). Auto-selects `LIST` when `@split-doc` is present, else `ITEM`.
 
 ```kdl
@@ -90,8 +105,8 @@ Starts with `STR` (HTML ops forbidden, `E203`). Auto-selects `LIST` when `@split
 }
 ```
 
-### 4.2 `(table)struct` on Non-Table Label+Value Containers
-For repeated `<div><strong>Label:</strong> Value</div>` rows, extract the label in `@match` and strip the prefix in `@value`:
+### 4.3 `(table)struct` on Non-Table Label+Value Containers (`kv_rows` / `dl`)
+For `kv_blocks` (`kv_table`, `dl`, `kv_rows`), use the reported `container_selector`, `rows_selector`, `key_selector`, and `value_selector` (or strip inline label prefixes when key and value share a container):
 
 ```kdl
 (table)struct ProfileInfo {
@@ -105,14 +120,16 @@ For repeated `<div><strong>Label:</strong> Value</div>` rows, extract the label 
 }
 ```
 
-### 4.3 Extracting `json_signals` from `ssc-gen scout --discover`
+### 4.4 Extracting `embedded_json` from `ssc-gen scout`
 
-| `subtype` | Source Pattern | Extraction Pipeline |
+Each entry in `embedded_json` (`=== EMBEDDED JSON ===`) provides a verified `selector`, `kdl_hint`, and `collections` (with GJSON `path`, `kind`, `count`, and typed `fields`):
+
+| `subtype` | Source Pattern | Extraction Pipeline (`kdl_hint` + `collections[].path`) |
 |---|---|---|
 | `json-ld` | `<script type="application/ld+json">` | `css "script[type='application/ld+json']"; raw inner; jsonify SchemaName` |
-| `json-mime` | `<script id="__NEXT_DATA__" type="application/json">` | `css "script#__NEXT_DATA__"; raw inner; jsonify SchemaName path="props.pageProps"` |
-| `js-var` | `var data = [...];` inside `<script>` | `raw; re #"(?xs)var\s+data\s*=\s*(\[.*?\]);"#; jsonify SchemaName` |
-| `attr-json` | `<div id="app" data-state="{...}">` | `css "#app"; attr "data-state"; unescape; jsonify SchemaName` |
+| `json-mime` | `<script id="__NEXT_DATA__" type="application/json">` | `css "script#__NEXT_DATA__"; raw inner; jsonify SchemaName path="props.pageProps.items"` |
+| `js-var` / `js-push` / `json-parse` | `var data = {...};` / `.push({...})` / `JSON.parse("...")` in `<script>` | `css "script..."; raw inner; re #"(?s)..."#; [unescape;] jsonify SchemaName [path="..."]` |
+| `attr-json` | `<div id="app" data-state="{...}">` | `css "#app"; attr "data-state"; unescape; jsonify SchemaName [path="..."]` |
 
 ---
 

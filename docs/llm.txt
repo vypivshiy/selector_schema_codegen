@@ -455,7 +455,7 @@ json ActionError {
 | `check` | `ssc-gen check <files...> [-t/--target python\|javascript\|go\|rust] [-f text\|json]` | Validate KDL syntax, types, imports & target reserved words (`exit 0` valid, `1` lint error) |
 | `run` | `ssc-gen run <schema.kdl:StructName> [-i <page.html>] [-L bs4\|lxml\|parsel\|slax] [--bs4-parser lxml\|html.parser\|html5lib] [-f text\|json]` | Execute struct against HTML/text input (or stdin) and print JSON output |
 | `health` | `ssc-gen health <schema.kdl:StructName> [-i <page.html>] [-f text\|json]` | Test every CSS/XPath selector in struct against sample HTML (`OK` / `EMPTY` / `FAIL`) |
-| `scout` | `ssc-gen scout [-i <page.html>] [--discover \| --text <re> --attr <k[=v\|=~re]> --tag <t> --css <sel> -I -F -v --up N --down N --next N --prev N --fields <csv> -c --limit 50 --offset 0 --snippet 200] [-f text\|json]` | HTML reconnaissance: `--discover` structural overview or regex/CSS/DOM-walk probing |
+| `scout` | `ssc-gen scout [-i <page.html>] [--text <re>] [--attr <k[=v\|=~re]>...] [--tag <t>] [--css <sel>] [-I/--ignore-case] [-F/--fixed] [--full] [--discover] [-f text\|json]` | HTML reconnaissance: single-call 3-engine overview by default (`page_summary`, `embedded_json`, `kv_blocks`, `repeating_lists`, `navigation_lists`), or auto-expanding Zoom-in mode (`zoom_matches` with `<-- MATCH`) when `--text`/`--attr`/`--tag`/`--css` filters are set (`--discover` is a deprecated no-op alias; `exit 0` match/overview, `1` zero zoom matches, `2` empty/invalid filter) |
 | `json-to-kdl` | `ssc-gen json-to-kdl <sample.json> -o <schema.kdl> [--name <SchemaName>] [--force]` | Bootstrap hierarchical inline `json` KDL schema from a sample JSON payload |
 | `version` | `ssc-gen version` | Print `ssc-gen` version |
 
