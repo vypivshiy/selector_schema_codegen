@@ -20,10 +20,6 @@ Key API symbols:
     run_discover: Compatibility alias for full-page reconnaissance via `run_scout`.
     ScoutResult: Unified reconnaissance output from `run_scout`.
     DiscoverResult: Alias for `ScoutResult`.
-    ScoutFilters: Compiled filter criteria for `run_scout` Zoom-in mode.
-    AttrFilter: Single attribute filter specification for Zoom-in mode.
-    FilterError: Raised when a user-supplied filter cannot be compiled.
-    compile_filters: Compile raw filter arguments into a `ScoutFilters` instance.
 """
 
 from __future__ import annotations
@@ -32,12 +28,8 @@ from ssc_codegen.core.format import format_diagnostics
 from ssc_codegen.core.reader import parse_module
 from ssc_codegen.exceptions import BuildTimeError, ParseError
 from ssc_codegen.explore import (
-    AttrFilter,
     DiscoverResult,
-    FilterError,
-    ScoutFilters,
     ScoutResult,
-    compile_filters,
     run_discover,
     run_scout,
 )
@@ -47,19 +39,15 @@ from ssc_codegen.targets.resolver import ResolutionError, resolve
 from ssc_codegen.targets.spec import TargetSpec
 
 __all__ = [
-    "AttrFilter",
     "BuildTimeError",
     "DiscoverResult",
-    "FilterError",
     "HealthResult",
     "ParseError",
     "ResolutionError",
-    "ScoutFilters",
     "ScoutResult",
     "TargetProfile",
     "TargetSpec",
     "check_struct_health",
-    "compile_filters",
     "format_diagnostics",
     "parse_module",
     "resolve",

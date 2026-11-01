@@ -39,6 +39,7 @@ MAX_SAMPLE_LEN = 80
 MAX_KV_BLOCKS = 5
 MAX_KV_KEYS = 25
 MAX_JSON_SIGNALS = 5
+MAX_JSON_COLLECTIONS = 5
 MAX_JSON_KEYS = 20
 
 MIN_REPEAT_COUNT = 3
@@ -815,7 +816,14 @@ def _same_node_set(a: list[Tag], b: list[Tag]) -> bool:
 
 
 def compute_css_path(tag: Tag) -> str:
-    """Compute an exact, root-anchored CSS path from `<html>` down to `tag`."""
+    """Compute an exact, root-anchored CSS path from `<html>` down to `tag`.
+
+    Args:
+        tag (Tag): Target BeautifulSoup DOM element.
+
+    Returns:
+        str: Root-anchored CSS selector path with `:nth-of-type(...)` disambiguation.
+    """
     parts: list[str] = []
     current: Tag | None = tag
     while current is not None and current.name not in ("[document]", None):
@@ -844,7 +852,33 @@ def compute_css_path(tag: Tag) -> str:
     return " > ".join(parts)
 
 
-def _element_self_candidates(tag: Tag) -> list[str]:
+def _is_safe_selector_attr(attr_name: str) -> bool:
+    """Return True if `attr_name` is a stable semantic/testing attribute (`data-*`, `aria-*`, etc.)."""
+    return attr_name in ANCHOR_ATTRS or attr_name.startswith(("data-", "aria-"))
+
+
+def _rank_semantic_classes(
+    classes: list[str],
+    root: BeautifulSoup | Tag | None,
+    target_count: int = 1,
+) -> list[str]:
+    """Order semantic classes by proximity of their document frequency to `target_count`."""
+    if len(classes) <= 1 or root is None:
+        return classes
+
+    def _freq_key(cls: str) -> tuple[int, int]:
+        freq = len(_safe_select(root, f".{cls}"))
+        return (abs(freq - target_count), freq)
+
+    return sorted(classes, key=_freq_key)
+
+
+def _element_self_candidates(
+    tag: Tag,
+    *,
+    root: BeautifulSoup | Tag | None = None,
+    target_count: int = 1,
+) -> list[str]:
     """Generate short candidate selector segments for a single `tag`."""
     cands: list[str] = []
     name = tag.name
@@ -864,22 +898,25 @@ def _element_self_candidates(tag: Tag) -> list[str]:
                 f"{name}[{attr_name}={_attr_selector_val(val.strip())}]"
             )
 
-    sem = [c for c in _get_semantic_classes(tag) if _is_valid_css_ident(c)]
+    sem = _rank_semantic_classes(
+        [c for c in _get_semantic_classes(tag) if _is_valid_css_ident(c)],
+        root,
+        target_count=target_count,
+    )
     if sem:
-        cands.append(f"{name}.{sem[0]}")
+        for sc in sem:
+            cands.append(f"{name}.{sc}")
         if len(sem) > 1:
             cands.append(f"{name}.{'.'.join(sem[:2])}")
-        cands.append(f".{sem[0]}")
+        for sc in sem:
+            cands.append(f".{sc}")
 
     for k, v in tag.attrs.items():
-        if (
-            k.startswith("data-")
-            and isinstance(v, str)
-            and v.strip()
-            and len(v) <= 40
-        ):
+        if not k.startswith(("data-", "aria-")):
+            continue
+        if isinstance(v, str) and v.strip() and len(v.strip()) <= 40:
             cands.append(f"{name}[{k}={_attr_selector_val(v.strip())}]")
-        elif k.startswith("data-") and _is_valid_css_ident(k):
+        elif _is_valid_css_ident(k):
             cands.append(f"{name}[{k}]")
 
     cands.append(name)
@@ -891,7 +928,7 @@ def _synthesize_unique_selector(
 ) -> tuple[str, Literal["stable", "fragile"]]:
     """Synthesize a DOM-verified CSS selector that uniquely selects `[target]` in `soup`."""
     # 1. Try direct candidates on target itself
-    self_cands = _element_self_candidates(target)
+    self_cands = _element_self_candidates(target, root=soup, target_count=1)
     for cand in self_cands:
         if _same_node_list(_safe_select(soup, cand), [target]):
             return cand, "stable"
@@ -916,7 +953,7 @@ def _synthesize_unique_selector(
     nth_self = f"{target.name}:nth-of-type({same_tag_index})"
 
     for depth_idx, anc in enumerate(ancestors):
-        anc_cands = _element_self_candidates(anc)
+        anc_cands = _element_self_candidates(anc, root=soup, target_count=1)
         # Filter ancestor candidates that are reasonably selective
         for ac in anc_cands:
             for tc in self_cands:
@@ -946,34 +983,49 @@ def _synthesize_group_selector(
         return parent_sel, parent_sel, "fragile"
 
     item_tag = items[0].name
-    # Shared semantic classes present on ALL items in the group
+    # Shared semantic classes present on ALL items in the group, ranked by correlation with item count
     first_sem = [
         c for c in _get_semantic_classes(items[0]) if _is_valid_css_ident(c)
     ]
-    shared_sem = [
-        c
-        for c in first_sem
-        if all(c in _get_semantic_classes(it) for it in items[1:])
-    ]
+    shared_sem = _rank_semantic_classes(
+        [
+            c
+            for c in first_sem
+            if all(c in _get_semantic_classes(it) for it in items[1:])
+        ],
+        soup,
+        target_count=len(items),
+    )
 
-    # Shared data-* attribute presence across all items
-    shared_data_attrs: list[str] = []
+    # Shared data-*, aria-*, and anchor attributes across all items
+    shared_attr_specs: list[str] = []
     for k in items[0].attrs:
         if (
-            k.startswith("data-")
+            _is_safe_selector_attr(k)
             and _is_valid_css_ident(k)
             and all(it.has_attr(k) for it in items[1:])
         ):
-            shared_data_attrs.append(k)
+            v0 = items[0].get(k)
+            if (
+                isinstance(v0, str)
+                and v0.strip()
+                and len(v0.strip()) <= 40
+                and all(it.get(k) == v0 for it in items[1:])
+            ):
+                shared_attr_specs.append(
+                    f"{item_tag}[{k}={_attr_selector_val(v0.strip())}]"
+                )
+            if k.startswith(("data-", "aria-")):
+                shared_attr_specs.append(f"{item_tag}[{k}]")
 
     item_specs: list[str] = []
     if shared_sem:
-        item_specs.append(f".{shared_sem[0]}")
-        item_specs.append(f"{item_tag}.{shared_sem[0]}")
+        for sc in shared_sem:
+            item_specs.append(f".{sc}")
+            item_specs.append(f"{item_tag}.{sc}")
         if len(shared_sem) > 1:
             item_specs.append(f"{item_tag}.{'.'.join(shared_sem[:2])}")
-    for da in shared_data_attrs:
-        item_specs.append(f"{item_tag}[{da}]")
+    item_specs.extend(shared_attr_specs)
     item_specs.append(item_tag)
 
     # Check if there are same-tag outliers in parent that need exclusion
@@ -997,7 +1049,7 @@ def _synthesize_group_selector(
             not_sfx = "".join(f":not(.{c})" for c in outlier_sem)
             not_clauses.append(f"{item_tag}{not_sfx}")
 
-    # 1. Try standalone item specs if shared_sem or shared_data_attrs is globally exact
+    # 1. Try standalone item specs if shared_sem or shared_attr_specs is globally exact
     for spec in item_specs:
         if spec == item_tag:
             continue  # Bare tag globally is rarely a good standalone selector unless verified with parent
@@ -1016,7 +1068,7 @@ def _synthesize_group_selector(
         curr = curr.parent if isinstance(curr.parent, Tag) else None
 
     for depth_idx, anc in enumerate(ancestors):
-        anc_cands = _element_self_candidates(anc)
+        anc_cands = _element_self_candidates(anc, root=soup, target_count=1)
         for ac in anc_cands:
             for spec in item_specs + not_clauses:
                 if depth_idx == 0:
@@ -1066,12 +1118,18 @@ _JS_ASSIGN_RE = re.compile(
     r"\b(?:window|globalThis|self)\.([A-Za-z_$][\w$]*)"
     r"|"
     r"\b(?:window|globalThis|self)\[\s*['\"]([^'\"]+)['\"]\s*\]"
+    r"|"
+    r"\b([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+)"
     r")\s*=\s*"
 )
 
 _JS_PUSH_RE = re.compile(r"\b([A-Za-z_$][\w$.]*)\.push\(\s*")
 
 _JSON_PARSE_CALL_RE = re.compile(r"""JSON\.parse\(\s*(['"])""")
+
+_GENERIC_JSON_SLICE_RE = re.compile(
+    r"(?:['\"]?([A-Za-z_$][\w$.-]*)['\"]?\s*)?(?:(?<![=!<>])=(?!=)|:)\s*(?=[\[{])"
+)
 
 
 def _extract_js_string_literal(
@@ -1211,7 +1269,7 @@ def _join_gjson_path(prefix: str, key: str) -> str:
 
 
 def _discover_json_collections(
-    root_val: object, *, max_keys: int
+    root_val: object, *, max_keys: int, max_collections: int | None = None
 ) -> list[dict[str, object]]:
     """Recursively walk a parsed JSON payload up to depth 8 to discover object arrays and data dicts."""
     collections: list[dict[str, object]] = []
@@ -1299,7 +1357,48 @@ def _discover_json_collections(
         )
 
     collections.sort(key=_col_key)
+    if max_collections is not None:
+        return collections[:max_collections]
     return collections
+
+
+def _try_decode_json_parse(
+    body: str, match: re.Match[str], decoder: json.JSONDecoder
+) -> tuple[object, int, int] | None:
+    """Extract and `raw_decode` the string literal argument of a `JSON.parse(` match.
+
+    Returns `(parsed_value, raw_byte_size, end_pos)` or `None`.
+    """
+    quote_pos = match.end() - 1
+    unescaped, end_pos = _extract_js_string_literal(body, quote_pos)
+    if not unescaped:
+        return None
+    ustr = unescaped.strip()
+    if not ustr or ustr[0] not in "{[":
+        return None
+    try:
+        parsed, _ = decoder.raw_decode(ustr)
+    except (ValueError, json.JSONDecodeError):
+        return None
+    return parsed, len(ustr), end_pos
+
+
+def _prepare_json_signal_collections(
+    parsed: object, *, full: bool
+) -> tuple[list[dict[str, object]], str] | None:
+    """Validate non-triviality and extract collections + GJSON `path_sfx` for a parsed JSON value."""
+    if _is_trivial_json(parsed):
+        return None
+    max_keys = 1000 if full else MAX_JSON_KEYS
+    max_cols = None if full else MAX_JSON_COLLECTIONS
+    cols = _discover_json_collections(
+        parsed, max_keys=max_keys, max_collections=max_cols
+    )
+    if not cols:
+        return None
+    top_col = cols[0]
+    path_sfx = f' path="{top_col["path"]}"' if top_col.get("path") else ""
+    return cols, path_sfx
 
 
 def _scan_script_json_payloads(
@@ -1315,43 +1414,21 @@ def _scan_script_json_payloads(
     def _is_consumed(pos: int) -> bool:
         return any(start <= pos < end for start, end in consumed_spans)
 
-    # 1. Scan JSON.parse("...") calls first
-    for m in _JSON_PARSE_CALL_RE.finditer(body):
-        quote_pos = m.end() - 1
-        unescaped, end_pos = _extract_js_string_literal(body, quote_pos)
-        if unescaped:
-            ustr = unescaped.strip()
-            if ustr and ustr[0] in "{[":
-                try:
-                    parsed, _ = decoder.raw_decode(ustr)
-                    consumed_spans.append((m.start(), end_pos))
-                    results.append(("json-parse", None, parsed, len(ustr)))
-                except (ValueError, json.JSONDecodeError):
-                    pass
-
-    # 2. Scan var/let/const/window assignments
+    # 1. Scan var/let/const/window and dotted property assignments first
     for m in _JS_ASSIGN_RE.finditer(body):
-        if _is_consumed(m.start()):
-            continue
-        var_name = m.group(1) or m.group(2) or m.group(3)
         rhs_start = m.end()
+        if _is_consumed(m.start()) or _is_consumed(rhs_start):
+            continue
+        var_name = next((g for g in m.groups() if g is not None), None)
         # Check if RHS is JSON.parse(...)
         jp_match = _JSON_PARSE_CALL_RE.match(body, rhs_start)
         if jp_match is not None:
-            quote_pos = jp_match.end() - 1
-            unescaped, end_pos = _extract_js_string_literal(body, quote_pos)
-            if unescaped:
-                ustr = unescaped.strip()
-                if ustr and ustr[0] in "{[":
-                    try:
-                        parsed, _ = decoder.raw_decode(ustr)
-                        consumed_spans.append((m.start(), end_pos))
-                        results.append(
-                            ("json-parse", var_name, parsed, len(ustr))
-                        )
-                        continue
-                    except (ValueError, json.JSONDecodeError):
-                        pass
+            decoded = _try_decode_json_parse(body, jp_match, decoder)
+            if decoded is not None:
+                parsed, str_len, end_pos = decoded
+                consumed_spans.append((m.start(), end_pos))
+                results.append(("json-parse", var_name, parsed, str_len))
+                continue
         # Otherwise check if RHS starts with `{` or `[`
         if rhs_start < len(body) and body[rhs_start] in "{[":
             try:
@@ -1363,12 +1440,22 @@ def _scan_script_json_payloads(
             except (ValueError, json.JSONDecodeError):
                 pass
 
-    # 3. Scan .push({...}) or .push([...]) calls
-    for m in _JS_PUSH_RE.finditer(body):
+    # 2. Scan standalone JSON.parse("...") calls outside already-consumed assignments
+    for m in _JSON_PARSE_CALL_RE.finditer(body):
         if _is_consumed(m.start()):
             continue
-        var_name = m.group(1)
+        decoded = _try_decode_json_parse(body, m, decoder)
+        if decoded is not None:
+            parsed, str_len, end_pos = decoded
+            consumed_spans.append((m.start(), end_pos))
+            results.append(("json-parse", None, parsed, str_len))
+
+    # 3. Scan .push({...}) or .push([...]) calls
+    for m in _JS_PUSH_RE.finditer(body):
         arg_start = m.end()
+        if _is_consumed(m.start()) or _is_consumed(arg_start):
+            continue
+        var_name = m.group(1)
         if arg_start < len(body) and body[arg_start] in "{[":
             try:
                 parsed, end_offset = decoder.raw_decode(body, arg_start)
@@ -1390,6 +1477,22 @@ def _scan_script_json_payloads(
         except (ValueError, json.JSONDecodeError):
             pass
 
+    # 5. Scan any remaining `{` or `[` following `=` or `:` outside consumed spans
+    for m in _GENERIC_JSON_SLICE_RE.finditer(body):
+        slice_start = m.end()
+        if _is_consumed(m.start()) or _is_consumed(slice_start):
+            continue
+        if slice_start < len(body) and body[slice_start] in "{[":
+            try:
+                parsed, end_offset = decoder.raw_decode(body, slice_start)
+                consumed_spans.append((m.start(), end_offset))
+                key_name = m.group(1)
+                results.append(
+                    ("js-var", key_name, parsed, end_offset - slice_start)
+                )
+            except (ValueError, json.JSONDecodeError):
+                pass
+
     return results
 
 
@@ -1398,7 +1501,6 @@ def _extract_embedded_json(
 ) -> list[dict[str, object]]:
     """Run the Embedded JSON reconnaissance engine across all scripts and attributes."""
     decoder = json.JSONDecoder()
-    max_keys = 1000 if full else MAX_JSON_KEYS
     signals: list[dict[str, object]] = []
 
     for script in soup.find_all("script"):
@@ -1418,17 +1520,12 @@ def _extract_embedded_json(
                 parsed, end_off = decoder.raw_decode(body, lead)
             except (ValueError, json.JSONDecodeError):
                 continue
-            if _is_trivial_json(parsed):
+            prep = _prepare_json_signal_collections(parsed, full=full)
+            if prep is None:
                 continue
+            cols, path_sfx = prep
             subtype = (
                 "json-ld" if stype == "application/ld+json" else "json-mime"
-            )
-            cols = _discover_json_collections(parsed, max_keys=max_keys)
-            if not cols:
-                continue
-            top_col = cols[0]
-            path_sfx = (
-                f' path="{top_col["path"]}"' if top_col.get("path") else ""
             )
             hint = f'css "{sel}"; raw inner; jsonify Schema{path_sfx}'
             signals.append(
@@ -1446,15 +1543,10 @@ def _extract_embedded_json(
         # Standard JS script block: scan for multiple payloads
         payloads = _scan_script_json_payloads(body, decoder)
         for subtype, var_name, parsed, byte_size in payloads:
-            if _is_trivial_json(parsed):
+            prep = _prepare_json_signal_collections(parsed, full=full)
+            if prep is None:
                 continue
-            cols = _discover_json_collections(parsed, max_keys=max_keys)
-            if not cols:
-                continue
-            top_col = cols[0]
-            path_sfx = (
-                f' path="{top_col["path"]}"' if top_col.get("path") else ""
-            )
+            cols, path_sfx = prep
             if subtype == "bare-json":
                 hint = f'css "{sel}"; raw inner; jsonify Schema{path_sfx}'
             elif subtype == "json-parse":
@@ -1467,7 +1559,7 @@ def _extract_embedded_json(
                 escaped_var = re.escape(var_name)
                 hint = (
                     f'css "{sel}"; raw inner; '
-                    f're "{escaped_var}\\\\s*=\\\\s*(\\\\{{.+\\\\}}|\\\\[.+\\\\])"; '
+                    f're "{escaped_var}\\\\s*[:=]\\\\s*(\\\\{{.+\\\\}}|\\\\[.+\\\\])"; '
                     f"jsonify Schema{path_sfx}"
                 )
             else:
@@ -1499,17 +1591,15 @@ def _extract_embedded_json(
                 parsed, end_off = decoder.raw_decode(val)
             except (ValueError, json.JSONDecodeError):
                 continue
-            if _is_trivial_json(parsed):
+            prep = _prepare_json_signal_collections(parsed, full=full)
+            if prep is None:
                 continue
-            cols = _discover_json_collections(parsed, max_keys=max_keys)
-            if not cols:
-                continue
+            cols, path_sfx = prep
             sel, _ = _synthesize_unique_selector(soup, tag)
-            top_col = cols[0]
-            path_sfx = (
-                f' path="{top_col["path"]}"' if top_col.get("path") else ""
+            hint = (
+                f'css "{sel}"; attr "{attr_name}"; '
+                f"unescape; jsonify Schema{path_sfx}"
             )
-            hint = f'css "{sel}"; attr "{attr_name}"; jsonify Schema{path_sfx}'
             signals.append(
                 {
                     "kind": "attr",
@@ -1532,6 +1622,17 @@ def _extract_embedded_json(
 _NUMERIC_ONLY_RE = re.compile(r"^[\d\s.,+$€£¥₽%-]+$")
 
 
+@dataclass
+class _DomNodeMap:
+    """Side-table mapping output dictionary `id(...)` keys to live BS4 `Tag` nodes for Zoom-in mode."""
+
+    list_items: dict[int, list[Tag]] = field(default_factory=dict)
+    field_nodes: dict[int, list[Tag]] = field(default_factory=dict)
+    kv_nodes: dict[int, Tag] = field(default_factory=dict)
+    kv_entry_nodes: dict[int, list[Tag]] = field(default_factory=dict)
+    kv_col_nodes: dict[int, list[Tag]] = field(default_factory=dict)
+
+
 def _looks_like_kv_key(text: str) -> bool:
     """Check whether a string looks like a specification label/key."""
     t = text.strip().rstrip(":").strip()
@@ -1540,8 +1641,23 @@ def _looks_like_kv_key(text: str) -> bool:
     return not _NUMERIC_ONLY_RE.match(t)
 
 
+def _extract_direct_residual_text(row: Tag) -> str:
+    """Extract normalized direct text children of `row` (excluding child `Tag` subtrees)."""
+    parts = [
+        str(node).strip()
+        for node in row.children
+        if isinstance(node, NavigableString)
+        and not isinstance(node, Comment)
+        and str(node).strip()
+    ]
+    return _normalize_ws(" ".join(parts).lstrip(":").strip())
+
+
 def _extract_kv_and_tables(
-    soup: BeautifulSoup, *, full: bool
+    soup: BeautifulSoup,
+    *,
+    full: bool,
+    node_map: _DomNodeMap | None = None,
 ) -> tuple[list[dict[str, object]], set[int]]:
     """Detect `<table>`, `<dl>`, and two-column repeating KV rows.
 
@@ -1607,32 +1723,37 @@ def _extract_kv_and_tables(
             for idx, h_text in enumerate(headers[:max_keys], start=1):
                 col_css = f"td:nth-of-type({idx})"
                 col_samples: list[str] = []
+                col_cells: list[Tag] = []
                 for dr in data_rows:
                     cells = _safe_select(dr, col_css)
                     if cells:
+                        col_cells.extend(cells)
                         val = _normalize_ws(cells[0].get_text(" ", strip=True))
-                        if val and val not in col_samples:
+                        if (
+                            val
+                            and val not in col_samples
+                            and len(col_samples) < MAX_SAMPLES_PER_FIELD
+                        ):
                             col_samples.append(val)
-                        if len(col_samples) >= MAX_SAMPLES_PER_FIELD:
-                            break
-                columns.append(
-                    {
-                        "header": h_text or f"col_{idx}",
-                        "css": col_css,
-                        "samples": col_samples,
-                    }
-                )
-            blocks.append(
-                {
-                    "kind": "table_list",
-                    "container_selector": container_sel,
-                    "rows_selector": cand_rows_sel,
-                    "row_count": len(data_rows),
-                    "headers": headers[:max_keys],
-                    "columns": columns,
-                    "_node": table,
+                col_entry: dict[str, object] = {
+                    "header": h_text or f"col_{idx}",
+                    "css": col_css,
+                    "samples": col_samples,
                 }
-            )
+                if node_map is not None:
+                    node_map.kv_col_nodes[id(col_entry)] = col_cells
+                columns.append(col_entry)
+            tbl_block: dict[str, object] = {
+                "kind": "table_list",
+                "container_selector": container_sel,
+                "rows_selector": cand_rows_sel,
+                "row_count": len(data_rows),
+                "headers": headers[:max_keys],
+                "columns": columns,
+            }
+            if node_map is not None:
+                node_map.kv_nodes[id(tbl_block)] = table
+            blocks.append(tbl_block)
             if tbody is not None:
                 claimed_parents.add(id(tbody))
             claimed_parents.add(id(table))
@@ -1669,12 +1790,16 @@ def _extract_kv_and_tables(
                 else:
                     key_sel = "td:nth-of-type(1)"
                     val_sel = "td:nth-of-type(2)"
-                entries = [
-                    {"key": k, "sample": v, "_row_node": r_node}
-                    for k, v, r_node in pairs[:max_keys]
-                ]
-                blocks.append(
-                    {
+                if _safe_select(table, key_sel) and _safe_select(
+                    table, val_sel
+                ):
+                    entries: list[dict[str, object]] = []
+                    for k, v, r_node in pairs[:max_keys]:
+                        ent_dict: dict[str, object] = {"key": k, "sample": v}
+                        if node_map is not None:
+                            node_map.kv_entry_nodes[id(ent_dict)] = [r_node]
+                        entries.append(ent_dict)
+                    kv_tbl_block: dict[str, object] = {
                         "kind": "kv_table",
                         "container_selector": container_sel,
                         "rows_selector": cand_rows_sel,
@@ -1682,12 +1807,13 @@ def _extract_kv_and_tables(
                         "value_selector": val_sel,
                         "row_count": len(pairs),
                         "entries": entries,
-                        "_node": table,
                     }
-                )
-                if tbody is not None:
-                    claimed_parents.add(id(tbody))
-                claimed_parents.add(id(table))
+                    if node_map is not None:
+                        node_map.kv_nodes[id(kv_tbl_block)] = table
+                    blocks.append(kv_tbl_block)
+                    if tbody is not None:
+                        claimed_parents.add(id(tbody))
+                    claimed_parents.add(id(table))
 
     # 2. Inspect <dl> definition lists
     for dl in soup.find_all("dl"):
@@ -1717,9 +1843,10 @@ def _extract_kv_and_tables(
                     )
                     v = _normalize_ws(dd.get_text(" ", strip=True))
                     if k:
-                        dl_entries.append(
-                            {"key": k, "sample": v, "_row_node": r}
-                        )
+                        ent_dict = {"key": k, "sample": v}
+                        if node_map is not None:
+                            node_map.kv_entry_nodes[id(ent_dict)] = [r]
+                        dl_entries.append(ent_dict)
         else:
             rows_sel = f"{container_sel} > dt"
             if not _safe_select(soup, rows_sel):
@@ -1734,26 +1861,33 @@ def _extract_kv_and_tables(
                     )
                     v = _normalize_ws(dd.get_text(" ", strip=True))
                     if k:
-                        dl_entries.append(
-                            {"key": k, "sample": v, "_row_node": dt}
-                        )
+                        ent_dict = {"key": k, "sample": v}
+                        if node_map is not None:
+                            node_map.kv_entry_nodes[id(ent_dict)] = [dt, dd]
+                        dl_entries.append(ent_dict)
 
-        if len(dl_entries) >= 2:
-            blocks.append(
-                {
-                    "kind": "dl",
-                    "container_selector": container_sel,
-                    "rows_selector": rows_sel,
-                    "key_selector": "dt",
-                    "value_selector": "dd",
-                    "row_count": len(dl_entries),
-                    "entries": dl_entries,
-                    "_node": dl,
-                }
-            )
+        key_sel = "dt"
+        val_sel = "dd" if _safe_select(dl, "dd") else "dt + dd"
+        if (
+            len(dl_entries) >= 2
+            and _safe_select(dl, key_sel)
+            and _safe_select(dl, val_sel)
+        ):
+            dl_block: dict[str, object] = {
+                "kind": "dl",
+                "container_selector": container_sel,
+                "rows_selector": rows_sel,
+                "key_selector": key_sel,
+                "value_selector": val_sel,
+                "row_count": len(dl_entries),
+                "entries": dl_entries,
+            }
+            if node_map is not None:
+                node_map.kv_nodes[id(dl_block)] = dl
+            blocks.append(dl_block)
             claimed_parents.add(id(dl))
 
-    # 3. Inspect repeating 2-column div/li label-value rows
+    # 3. Inspect repeating 2-column div/li label-value rows (or single label tag + residual text)
     for parent in soup.find_all(True):
         if id(parent) in claimed_parents or parent.name in (
             "head",
@@ -1773,54 +1907,43 @@ def _extract_kv_and_tables(
         if len(children) < MIN_REPEAT_COUNT:
             continue
 
-        # Check if children have consistent 2-child key/value structure
-        kv_rows: list[tuple[Tag, Tag, Tag, str, str]] = []
+        # Check if children have consistent 2-child key/value or label-tag + residual text structure
+        kv_rows: list[tuple[Tag, Tag, Tag | None, str, str]] = []
         for ch in children:
             sub_tags = [s for s in ch.children if isinstance(s, Tag)]
-            if len(sub_tags) != 2:
-                continue
-            left, right = sub_tags[0], sub_tags[1]
-            # Neither should be a complex multi-field card or link list
-            if left.find_all(True) or len(right.find_all(True)) > 2:
-                continue
-            if left.name == "a" and right.name == "a":
-                continue
-            k_raw = _normalize_ws(left.get_text(" ", strip=True), 50)
-            v_raw = _normalize_ws(right.get_text(" ", strip=True))
-            # Check if left has a semantic key/label class or ends with ':' or is a label tag
-            left_sem = " ".join(_get_semantic_classes(left)).lower()
-            parent_sem = (
-                " ".join(_get_semantic_classes(parent)).lower()
-                + " "
-                + str(parent.get("id") or "").lower()
-            )
-            is_label_hint = (
-                left.name in LABEL_TAGS
-                or k_raw.endswith(":")
-                or any(
-                    w in left_sem
-                    for w in (
-                        "label",
-                        "key",
-                        "spec",
-                        "attr",
-                        "term",
-                        "prop",
-                        "param",
-                    )
-                )
-                or any(
-                    w in parent_sem
-                    for w in ("spec", "kv", "detail", "attr", "param", "prop")
-                )
-            )
-            k_clean = k_raw.rstrip(":").strip()
-            if _looks_like_kv_key(k_clean) and v_raw and is_label_hint:
-                kv_rows.append((ch, left, right, k_clean, v_raw))
+            if len(sub_tags) == 2:
+                left, right = sub_tags[0], sub_tags[1]
+                # Neither should be a complex multi-field card, heading, or link list
+                if (
+                    left.find_all(True)
+                    or len(right.find_all(True)) > 2
+                    or left.name
+                    in ("h1", "h2", "h3", "h4", "h5", "h6", "img", "figure")
+                    or (left.name == "a" and right.name == "a")
+                ):
+                    continue
+                k_full = " ".join(left.get_text(" ", strip=True).split())
+                k_clean = k_full.rstrip(":").strip()
+                v_raw = _normalize_ws(right.get_text(" ", strip=True))
+                if _looks_like_kv_key(k_clean) and v_raw:
+                    kv_rows.append((ch, left, right, k_clean, v_raw))
+            elif len(sub_tags) == 1 and sub_tags[0].name in LABEL_TAGS:
+                label_tag = sub_tags[0]
+                if label_tag.find_all(True):
+                    continue
+                k_full = " ".join(label_tag.get_text(" ", strip=True).split())
+                k_clean = k_full.rstrip(":").strip()
+                v_raw = _extract_direct_residual_text(ch)
+                if _looks_like_kv_key(k_clean) and v_raw:
+                    kv_rows.append((ch, label_tag, None, k_clean, v_raw))
 
         if len(kv_rows) >= MIN_REPEAT_COUNT:
             unique_k = {r[3] for r in kv_rows}
-            if len(unique_k) >= len(kv_rows) * 0.8:
+            # Require >=80% unique keys and ensure keys are not all numbered item titles (e.g. "Item 0-0")
+            has_non_numbered_key = not all(
+                any(ch.isdigit() for ch in k) for k in unique_k
+            )
+            if len(unique_k) >= len(kv_rows) * 0.8 and has_non_numbered_key:
                 row_tags = [r[0] for r in kv_rows]
                 rows_sel, container_sel, _ = _synthesize_group_selector(
                     soup, parent, row_tags
@@ -1832,35 +1955,44 @@ def _extract_kv_and_tables(
                     for c in _get_semantic_classes(first_left)
                     if _is_valid_css_ident(c)
                 ]
-                r_sem = [
-                    c
-                    for c in _get_semantic_classes(first_right)
-                    if _is_valid_css_ident(c)
-                ]
                 if l_sem and all(
                     l_sem[0] in _get_semantic_classes(r[1]) for r in kv_rows
                 ):
                     key_sel = f"{first_left.name}.{l_sem[0]}"
-                elif first_left.name != first_right.name:
+                elif first_right is None or first_left.name != first_right.name:
                     key_sel = first_left.name
                 else:
                     key_sel = f"{first_left.name}:nth-of-type(1)"
 
-                if r_sem and all(
-                    r_sem[0] in _get_semantic_classes(r[2]) for r in kv_rows
-                ):
-                    val_sel = f"{first_right.name}.{r_sem[0]}"
-                elif first_left.name != first_right.name:
-                    val_sel = first_right.name
+                if first_right is None or any(r[2] is None for r in kv_rows):
+                    val_sel = ":scope"
                 else:
-                    val_sel = f"{first_right.name}:nth-of-type(2)"
+                    r_sem = [
+                        c
+                        for c in _get_semantic_classes(first_right)
+                        if _is_valid_css_ident(c)
+                    ]
+                    if r_sem and all(
+                        r[2] is not None
+                        and r_sem[0] in _get_semantic_classes(r[2])
+                        for r in kv_rows
+                    ):
+                        val_sel = f"{first_right.name}.{r_sem[0]}"
+                    elif first_left.name != first_right.name:
+                        val_sel = first_right.name
+                    else:
+                        val_sel = f"{first_right.name}:nth-of-type(2)"
 
-                entries = [
-                    {"key": k, "sample": v, "_row_node": r_tag}
-                    for r_tag, _, _, k, v in kv_rows[:max_keys]
-                ]
-                blocks.append(
-                    {
+                if _safe_select(parent, key_sel) and (
+                    val_sel == ":scope" or _safe_select(parent, val_sel)
+                ):
+                    entries = []
+                    for r_tag, _, _, k, v in kv_rows[:max_keys]:
+                        ent_dict = {"key": k, "sample": v}
+                        if node_map is not None:
+                            node_map.kv_entry_nodes[id(ent_dict)] = [r_tag]
+                        entries.append(ent_dict)
+                    kv_row_block: dict[str, object] = {
                         "kind": "kv_rows",
                         "container_selector": container_sel,
                         "rows_selector": rows_sel,
@@ -1868,10 +2000,11 @@ def _extract_kv_and_tables(
                         "value_selector": val_sel,
                         "row_count": len(kv_rows),
                         "entries": entries,
-                        "_node": parent,
                     }
-                )
-                claimed_parents.add(id(parent))
+                    if node_map is not None:
+                        node_map.kv_nodes[id(kv_row_block)] = parent
+                    blocks.append(kv_row_block)
+                    claimed_parents.add(id(parent))
 
     if not full:
         return blocks[:MAX_KV_BLOCKS], claimed_parents
@@ -1882,8 +2015,8 @@ def _extract_kv_and_tables(
 
 
 def _descendant_tag_set(tag: Tag) -> set[str]:
-    """Return the set of descendant tag/class step signatures inside `tag`."""
-    return {_node_step_label(d) for d in tag.find_all(True)}
+    """Return the set of descendant HTML tag names inside `tag`."""
+    return {d.name for d in tag.find_all(True) if isinstance(d, Tag)}
 
 
 def _jaccard_similarity(a: set[str], b: set[str]) -> float:
@@ -2047,7 +2180,7 @@ def _has_notable_attrs(tag: Tag) -> bool:
     for attr in NOTABLE_ATTRS:
         if tag.has_attr(attr):
             return True
-    return any(k.startswith("data-") for k in tag.attrs)
+    return any(k.startswith(("data-", "aria-")) for k in tag.attrs)
 
 
 def _is_elidable_wrapper(
@@ -2070,10 +2203,10 @@ def _node_step_label(tag: Tag) -> str:
     sem = [c for c in _get_semantic_classes(tag) if _is_valid_css_ident(c)]
     if sem:
         return f"{tag.name}.{sem[0]}"
-    for attr_name in ("itemprop", "name"):
+    for attr_name in (*ANCHOR_ATTRS, "aria-label"):
         val = tag.get(attr_name)
-        if isinstance(val, str) and _is_valid_css_ident(val.strip()):
-            return f'{tag.name}[{attr_name}="{val.strip()}"]'
+        if isinstance(val, str) and val.strip() and len(val.strip()) <= 40:
+            return f"{tag.name}[{attr_name}={_attr_selector_val(val.strip())}]"
     return tag.name
 
 
@@ -2174,11 +2307,13 @@ def _synthesize_relative_selector(
             c for c in _get_semantic_classes(target0) if _is_valid_css_ident(c)
         ]
         if sem:
-            cands.append(f".{sem[0]}")
-            cands.append(f"{target0.name}.{sem[0]}")
-        for attr_name in ANCHOR_ATTRS:
-            val = target0.get(attr_name)
-            if isinstance(val, str) and val.strip():
+            for sc in sem:
+                cands.append(f".{sc}")
+                cands.append(f"{target0.name}.{sc}")
+        for attr_name, val in target0.attrs.items():
+            if not _is_safe_selector_attr(attr_name):
+                continue
+            if isinstance(val, str) and val.strip() and len(val.strip()) <= 40:
                 cands.append(
                     f"{target0.name}[{attr_name}={_attr_selector_val(val.strip())}]"
                 )
@@ -2240,7 +2375,7 @@ def _extract_node_samples(
             if k in ("class", "style", "id"):
                 continue
             attr_names_set.add(k)
-            if k in NOTABLE_ATTRS or k.startswith("data-"):
+            if k in NOTABLE_ATTRS or k.startswith(("data-", "aria-")):
                 val_str = " ".join(v) if isinstance(v, list) else str(v)
                 val_norm = _normalize_ws(val_str, MAX_SAMPLE_LEN)
                 if val_norm:
@@ -2255,7 +2390,10 @@ def _extract_node_samples(
 
 
 def _build_union_archetype_fields(
-    items: list[Tag], *, full: bool
+    items: list[Tag],
+    *,
+    full: bool,
+    node_map: _DomNodeMap | None = None,
 ) -> list[dict[str, object]]:
     """Fold `items` into a Union Archetype of field definitions."""
     total_items = len(items)
@@ -2307,20 +2445,20 @@ def _build_union_archetype_fields(
             samples, attrs, attr_samples = _extract_node_samples(all_nodes)
             if not samples and not attr_samples:
                 continue
-            fields_out.append(
-                {
-                    "path": " > ".join(steps),
-                    "css": rel_css,
-                    "kind": "scalar",
-                    "present": present_items,
-                    "total": total_items,
-                    "optional": present_items < total_items,
-                    "attrs": attrs,
-                    "samples": samples,
-                    "attr_samples": attr_samples,
-                    "_nodes": all_nodes,
-                }
-            )
+            fld_dict: dict[str, object] = {
+                "path": " > ".join(steps),
+                "css": rel_css,
+                "kind": "scalar",
+                "present": present_items,
+                "total": total_items,
+                "optional": present_items < total_items,
+                "attrs": attrs,
+                "samples": samples,
+                "attr_samples": attr_samples,
+            }
+            if node_map is not None:
+                node_map.field_nodes[id(fld_dict)] = all_nodes
+            fields_out.append(fld_dict)
         else:
             # Multiple occurrences per item: decide Positional Slots vs Array
             # Consistent count across >= 80% of items containing this signature AND max_per_item <= 6
@@ -2353,20 +2491,20 @@ def _build_union_archetype_fields(
                     )
                     if not samples and not attr_samples:
                         continue
-                    fields_out.append(
-                        {
-                            "path": " > ".join(slot_steps),
-                            "css": rel_css,
-                            "kind": "positional",
-                            "present": slot_present,
-                            "total": total_items,
-                            "optional": slot_present < total_items,
-                            "attrs": attrs,
-                            "samples": samples,
-                            "attr_samples": attr_samples,
-                            "_nodes": slot_nodes,
-                        }
-                    )
+                    pos_dict: dict[str, object] = {
+                        "path": " > ".join(slot_steps),
+                        "css": rel_css,
+                        "kind": "positional",
+                        "present": slot_present,
+                        "total": total_items,
+                        "optional": slot_present < total_items,
+                        "attrs": attrs,
+                        "samples": samples,
+                        "attr_samples": attr_samples,
+                    }
+                    if node_map is not None:
+                        node_map.field_nodes[id(pos_dict)] = slot_nodes
+                    fields_out.append(pos_dict)
             else:
                 # Nested array (`css-all`)
                 all_nodes = [
@@ -2379,21 +2517,22 @@ def _build_union_archetype_fields(
                 samples, attrs, attr_samples = _extract_node_samples(all_nodes)
                 if not samples and not attr_samples:
                     continue
-                fields_out.append(
-                    {
-                        "path": " > ".join(steps),
-                        "css": rel_css,
-                        "kind": "array",
-                        "present": present_items,
-                        "total": total_items,
-                        "optional": present_items < total_items,
-                        "array_range": [min_per_item, max_per_item],
-                        "attrs": attrs,
-                        "samples": samples,
-                        "attr_samples": attr_samples,
-                        "_nodes": all_nodes,
-                    }
-                )
+                arr_dict: dict[str, object] = {
+                    "path": " > ".join(steps),
+                    "css": rel_css,
+                    "kind": "array",
+                    "is_array": True,
+                    "present": present_items,
+                    "total": total_items,
+                    "optional": present_items < total_items,
+                    "array_range": [min_per_item, max_per_item],
+                    "attrs": attrs,
+                    "samples": samples,
+                    "attr_samples": attr_samples,
+                }
+                if node_map is not None:
+                    node_map.field_nodes[id(arr_dict)] = all_nodes
+                fields_out.append(arr_dict)
 
     max_f = 1000 if full else MAX_FIELDS_PER_LIST
     return fields_out[:max_f]
@@ -2407,9 +2546,11 @@ def _score_repeating_list(
     unique_leaf_fields = len(fields)
     distinct_samples: set[str] = set()
     for f in fields:
-        for s in f.get("samples", []):  # type: ignore[attr-defined]
-            if isinstance(s, str):
-                distinct_samples.add(s)
+        samples = f.get("samples")
+        if isinstance(samples, list):
+            for s in samples:
+                if isinstance(s, str):
+                    distinct_samples.add(s)
     text_diversity_bonus = min(10.0, len(distinct_samples) * 0.5)
     score = count * (1.0 + 2.0 * unique_leaf_fields + text_diversity_bonus)
     return round(score, 1)
@@ -2420,6 +2561,7 @@ def _extract_repeating_and_nav_lists(
     claimed_kv_parents: set[int],
     *,
     full: bool,
+    node_map: _DomNodeMap | None = None,
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     """Discover repeating item lists and navigation lists across `soup`."""
     repeating_lists: list[dict[str, object]] = []
@@ -2468,7 +2610,9 @@ def _extract_repeating_and_nav_lists(
                 )
                 continue
 
-            fields = _build_union_archetype_fields(items, full=full)
+            fields = _build_union_archetype_fields(
+                items, full=full, node_map=node_map
+            )
             if not fields:
                 continue
             for it in items:
@@ -2477,26 +2621,29 @@ def _extract_repeating_and_nav_lists(
                     claimed_subtrees.add(id(d))
             score = _score_repeating_list(items, fields)
             first_sem = _get_semantic_classes(items[0])
-            shared_sem = [
-                c
-                for c in first_sem
-                if all(c in _get_semantic_classes(it) for it in items[1:])
-            ]
-            repeating_lists.append(
-                {
-                    "selector": item_sel,
-                    "parent_selector": parent_sel,
-                    "item_tag": items[0].name,
-                    "item_classes": shared_sem if shared_sem else first_sem,
-                    "count": len(items),
-                    "score": score,
-                    "selector_stability": stability,
-                    "outliers": outliers,
-                    "fields": fields,
-                    "_items": items,
-                    "_parent": parent,
-                }
+            shared_sem = _rank_semantic_classes(
+                [
+                    c
+                    for c in first_sem
+                    if all(c in _get_semantic_classes(it) for it in items[1:])
+                ],
+                soup,
+                target_count=len(items),
             )
+            lst_dict: dict[str, object] = {
+                "selector": item_sel,
+                "parent_selector": parent_sel,
+                "item_tag": items[0].name,
+                "item_classes": shared_sem if shared_sem else first_sem,
+                "count": len(items),
+                "score": score,
+                "selector_stability": stability,
+                "outliers": outliers,
+                "fields": fields,
+            }
+            if node_map is not None:
+                node_map.list_items[id(lst_dict)] = items
+            repeating_lists.append(lst_dict)
 
     def _list_key(r: dict[str, object]) -> float:
         sc = r.get("score")
@@ -2554,9 +2701,14 @@ def _find_minimal_matching_tags(
     soup: BeautifulSoup, filters: ScoutFilters
 ) -> list[Tag]:
     """Find the deepest minimal DOM tags matching `filters` (including normalized subtree text)."""
+    has_secondary_filter = bool(
+        filters.text_regex is not None
+        or filters.attrs
+        or filters.tag is not None
+    )
     if filters.css is not None:
         try:
-            candidates = [
+            css_roots = [
                 t
                 for t in soup.select(filters.css)
                 if isinstance(t, Tag) and t.name not in ("html", "body", "head")
@@ -2565,6 +2717,19 @@ def _find_minimal_matching_tags(
             raise FilterError(
                 f"invalid CSS selector {filters.css!r}: {exc}"
             ) from exc
+        if has_secondary_filter:
+            seen_ids: set[int] = set()
+            candidates: list[Tag] = []
+            for root in css_roots:
+                if id(root) not in seen_ids:
+                    seen_ids.add(id(root))
+                    candidates.append(root)
+                for desc in root.find_all(True):
+                    if isinstance(desc, Tag) and id(desc) not in seen_ids:
+                        seen_ids.add(id(desc))
+                        candidates.append(desc)
+        else:
+            candidates = css_roots
     else:
         candidates = [
             t
@@ -2626,6 +2791,7 @@ def _apply_zoom_mode(
     minimal_matches: list[Tag],
     repeating_lists: list[dict[str, object]],
     kv_blocks: list[dict[str, object]],
+    node_map: _DomNodeMap,
     *,
     full: bool,
 ) -> tuple[
@@ -2655,7 +2821,7 @@ def _apply_zoom_mode(
     covered_match_ids: set[int] = set()
 
     for lst in repeating_lists:
-        items: list[Tag] = lst.get("_items", [])  # type: ignore[assignment]
+        items = node_map.list_items.get(id(lst), [])
         list_matched = False
         for m in minimal_matches:
             if any(id(m) == id(it) or it in m.parents for it in items):
@@ -2669,7 +2835,7 @@ def _apply_zoom_mode(
                 for fld in fields_list:
                     if not isinstance(fld, dict):
                         continue
-                    fnodes: list[Tag] = fld.get("_nodes", [])  # type: ignore[assignment]
+                    fnodes = node_map.field_nodes.get(id(fld), [])
                     if any(
                         id(n) in match_ids
                         or any(id(d) in match_ids for d in n.find_all(True))
@@ -2681,7 +2847,7 @@ def _apply_zoom_mode(
     # 2. Check kv_blocks for matches
     kept_kvs: list[dict[str, object]] = []
     for kv in kv_blocks:
-        kv_node = kv.get("_node")
+        kv_node = node_map.kv_nodes.get(id(kv))
         if not isinstance(kv_node, Tag):
             continue
         kv_matched = False
@@ -2696,13 +2862,20 @@ def _apply_zoom_mode(
                 for ent in entries:
                     if not isinstance(ent, dict):
                         continue
-                    r_node = ent.get("_row_node")
-                    if isinstance(r_node, Tag) and _overlaps_match(r_node):
+                    r_nodes = node_map.kv_entry_nodes.get(id(ent), [])
+                    if any(_overlaps_match(rn) for rn in r_nodes):
                         ent["matched"] = True
+            cols = kv.get("columns", [])
+            if isinstance(cols, list):
+                for col in cols:
+                    if not isinstance(col, dict):
+                        continue
+                    c_nodes = node_map.kv_col_nodes.get(id(col), [])
+                    if any(_overlaps_match(cn) for cn in c_nodes):
+                        col["matched"] = True
             kept_kvs.append(kv)
 
     # 3. Build standalone zoom_matches for matches outside repeating_lists and kv_blocks
-    # (or for all unique container expansions so zoom_matches is always informative)
     zoom_matches: list[dict[str, object]] = []
     seen_containers: set[int] = set()
 
@@ -2716,10 +2889,12 @@ def _apply_zoom_mode(
 
         m_sel, _ = _synthesize_unique_selector(soup, m)
         c_sel, _ = _synthesize_unique_selector(soup, container)
-        c_fields = _build_union_archetype_fields([container], full=full)
+        c_fields = _build_union_archetype_fields(
+            [container], full=full, node_map=node_map
+        )
         any_field_marked = False
         for cf in c_fields:
-            fnodes = cf.get("_nodes", [])  # type: ignore[assignment]
+            fnodes = node_map.field_nodes.get(id(cf), [])
             if any(
                 id(n) in match_ids
                 or any(id(d) in match_ids for d in n.find_all(True))
@@ -2727,7 +2902,6 @@ def _apply_zoom_mode(
             ):
                 cf["matched"] = True
                 any_field_marked = True
-            cf.pop("_nodes", None)
 
         if not any_field_marked:
             # Ensure the matched element itself is present in fields with matched=True
@@ -2762,29 +2936,6 @@ def _apply_zoom_mode(
         )
 
     return kept_lists, kept_kvs, zoom_matches
-
-
-def _strip_internal_keys(
-    repeating_lists: list[dict[str, object]],
-    kv_blocks: list[dict[str, object]],
-) -> None:
-    """Remove private `_`-prefixed Tag references before returning `ScoutResult`."""
-    for lst in repeating_lists:
-        lst.pop("_items", None)
-        lst.pop("_parent", None)
-        fields_list = lst.get("fields", [])
-        if isinstance(fields_list, list):
-            for fld in fields_list:
-                if isinstance(fld, dict):
-                    fld.pop("_nodes", None)
-
-    for kv in kv_blocks:
-        kv.pop("_node", None)
-        entries = kv.get("entries", [])
-        if isinstance(entries, list):
-            for ent in entries:
-                if isinstance(ent, dict):
-                    ent.pop("_row_node", None)
 
 
 # ─────────────────────────── Public Entrypoints ──────────────────────────────
@@ -2866,25 +3017,31 @@ def run_scout(
     # Remove <script> tags so they do not pollute DOM skeleton or text search
     _strip_scripts(soup)
 
+    node_map: _DomNodeMap | None = (
+        _DomNodeMap() if filters.is_active() else None
+    )
+
     # 2. Key-Value & Table Engine
-    kv_blocks, claimed_kv_parents = _extract_kv_and_tables(soup, full=full)
+    kv_blocks, claimed_kv_parents = _extract_kv_and_tables(
+        soup, full=full, node_map=node_map
+    )
 
     # 3. Repeating Lists & Folded DOM Skeleton Engine
     repeating_lists, navigation_lists = _extract_repeating_and_nav_lists(
-        soup, claimed_kv_parents, full=full
+        soup, claimed_kv_parents, full=full, node_map=node_map
     )
 
     # 4. Check Zoom-in Mode vs Overview Mode
-    if filters.is_active():
+    if filters.is_active() and node_map is not None:
         minimal_matches = _find_minimal_matching_tags(soup, filters)
         kept_lists, kept_kvs, zoom_matches = _apply_zoom_mode(
             soup,
             minimal_matches,
             repeating_lists,
             kv_blocks,
+            node_map,
             full=full,
         )
-        _strip_internal_keys(kept_lists, kept_kvs)
         page_summary: dict[str, object] = {
             "title": title_str or None,
             "h1": h1_str or None,
@@ -2905,7 +3062,6 @@ def run_scout(
             zoom_matches=zoom_matches,
         )
 
-    _strip_internal_keys(repeating_lists, kv_blocks)
     page_summary = {
         "title": title_str or None,
         "h1": h1_str or None,

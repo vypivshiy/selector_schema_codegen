@@ -6,19 +6,15 @@ All public symbols are re-exported directly from the top-level `ssc_codegen` pac
 
 ```python
 from ssc_codegen import (
-    AttrFilter,
     BuildTimeError,
     DiscoverResult,
-    FilterError,
     HealthResult,
     ParseError,
     ResolutionError,
-    ScoutFilters,
     ScoutResult,
     TargetProfile,
     TargetSpec,
     check_struct_health,
-    compile_filters,
     format_diagnostics,
     parse_module,
     resolve,

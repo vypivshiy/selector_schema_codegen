@@ -17,13 +17,15 @@ from bs4 import BeautifulSoup
 from typer.testing import CliRunner
 
 from ssc_codegen import (
-    AttrFilter,
     DiscoverResult,
-    ScoutFilters,
     ScoutResult,
-    compile_filters,
     run_discover,
     run_scout,
+)
+from ssc_codegen.explore import (
+    AttrFilter,
+    ScoutFilters,
+    compile_filters,
 )
 from ssc_codegen.main import app
 
@@ -441,10 +443,11 @@ def test_union_archetype_inline_chains_optional_fields_positional_and_arrays() -
     assert "2.0L Turbo" in pos_fields[1]["samples"]  # type: ignore[operator]
     assert "AWD" in pos_fields[2]["samples"]  # type: ignore[operator]
 
-    # US-16: Variable 1..5 `<span class="tag-pill">` per card reported as `kind == "array"` with `array_range == [1, 5]`
+    # US-16: Variable 1..5 `<span class="tag-pill">` per card reported as `kind == "array"` with `array_range == [1, 5]` and `is_array is True`
     arr_fields = [f for f in fields if f["kind"] == "array"]
     assert len(arr_fields) == 1
     tag_arr = arr_fields[0]
+    assert tag_arr["is_array"] is True
     assert tag_arr["array_range"] == [1, 5]
     assert "[array 1..5 items]" in res.to_text()
 
@@ -477,10 +480,15 @@ def test_kv_and_table_engine_all_representations() -> None:
     assert "Material" in tbl_keys
     assert "Country of Origin" in tbl_keys
 
-    # Check dl entries
+    # Check dl entries and verify key_selector / value_selector against container
     dl_blk = kinds["dl"]
     assert dl_blk["key_selector"] == "dt"
     assert dl_blk["value_selector"] == "dd"
+    soup = BeautifulSoup(CATALOG_HTML, "lxml")
+    dl_tag = soup.select_one(str(dl_blk["container_selector"]))
+    assert dl_tag is not None
+    assert len(dl_tag.select(str(dl_blk["key_selector"]))) == 3
+    assert len(dl_tag.select(str(dl_blk["value_selector"]))) == 3
     dl_keys = [e["key"] for e in dl_blk["entries"]]  # type: ignore[index]
     assert "Carrier" in dl_keys
 
@@ -512,6 +520,19 @@ def test_embedded_json_engine_raw_decode_gjson_paths_and_trivial_filtering() -> 
     var_names = [sig.get("var_name") for sig in res.embedded_json]
     assert "__ENV__" not in var_names
     assert "APP_CONFIG" in var_names
+
+    # Ensure `const CATALOG_META = JSON.parse(...)` is emitted once (not duplicated)
+    json_parse_sigs = [
+        sig for sig in res.embedded_json if sig["subtype"] == "json-parse"
+    ]
+    assert len(json_parse_sigs) == 1
+    assert json_parse_sigs[0].get("var_name") == "CATALOG_META"
+
+    # Attribute JSON hint includes `unescape; jsonify Schema`
+    attr_sig = next(
+        sig for sig in res.embedded_json if sig["subtype"] == "attr-json"
+    )
+    assert "unescape; jsonify Schema" in str(attr_sig["kdl_hint"])
 
     # US-20: Deeply nested array in `__NEXT_DATA__` discovered at `props.pageProps.items`
     next_sig = next(
@@ -766,3 +787,169 @@ def test_compile_filters_and_attr_filter_modes() -> None:
     res = run_scout(CATALOG_HTML, flt)
     assert res.mode == "zoom"
     assert res.matched == 1
+
+
+def test_aria_attrs_and_frequency_correlated_semantic_classes() -> None:
+    """US-4, US-5, US-6: `aria-*` attributes are used in selector synthesis and semantic classes correlating with item count are prioritized."""
+    html = """
+    <html><body>
+      <!-- `.box` appears 6 times on the page (3 sidebars + 3 product items), whereas `.catalog-entry` appears 3 times -->
+      <aside>
+        <div class="box"><p>Promo A</p></div>
+        <div class="box"><p>Promo B</p></div>
+        <div class="box"><p>Promo C</p></div>
+      </aside>
+      <section aria-label="Main Deals">
+        <div class="box catalog-entry"><span aria-label="Deal Title">Item 1</span><span aria-label="Deal Price">$10</span></div>
+        <div class="box catalog-entry"><span aria-label="Deal Title">Item 2</span><span aria-label="Deal Price">$20</span></div>
+        <div class="box catalog-entry"><span aria-label="Deal Title">Item 3</span><span aria-label="Deal Price">$30</span></div>
+      </section>
+    </body></html>
+    """
+    res = run_scout(html)
+    deal_list = next(
+        lst
+        for lst in res.repeating_lists
+        if "catalog-entry" in lst["item_classes"]  # type: ignore[operator]
+    )
+    # `.catalog-entry` (doc freq 3 == item count 3) ranks ahead of `.box` (doc freq 6)
+    assert deal_list["item_classes"][0] == "catalog-entry"  # type: ignore[index]
+    assert "catalog-entry" in str(deal_list["selector"])
+    assert (
+        _verify_selector(html, str(deal_list["selector"]), min_matches=3) == 3
+    )
+    assert "aria-label" in str(deal_list["parent_selector"])
+    assert (
+        _verify_selector(html, str(deal_list["parent_selector"]), min_matches=1)
+        == 1
+    )
+
+    soup = BeautifulSoup(html, "lxml")
+    items = soup.select(str(deal_list["selector"]))
+    for fld in deal_list["fields"]:  # type: ignore[union-attr]
+        assert isinstance(fld, dict)
+        rel_css = str(fld["css"])
+        assert "aria-label" in rel_css
+        assert sum(1 for it in items if it.select(rel_css)) == 3
+
+
+def test_script_json_slices_after_colon_and_generic_equals_and_collection_cap() -> (
+    None
+):
+    """US-19, US-20, US-25: Scan `{`/`[` slices after `:` and generic `=`, and cap collections per signal to 5 unless `full=True`."""
+    seven_arrays = {
+        f"arr_{i}": [{"id": 1, "v": f"a{i}"}, {"id": 2, "v": f"b{i}"}]
+        for i in range(7)
+    }
+    html = f"""
+    <html><body>
+      <script>
+        app.state = {json.dumps(seven_arrays)};
+        window.boot({{
+          unquotedKey: function() {{}},
+          catalogData: [{{"sku": "X1", "price": 10}}, {{"sku": "X2", "price": 20}}]
+        }});
+      </script>
+    </body></html>
+    """
+    res_capped = run_scout(html, full=False)
+    assert len(res_capped.embedded_json) == 2
+    state_sig = next(
+        s for s in res_capped.embedded_json if s.get("var_name") == "app.state"
+    )
+    assert len(state_sig["collections"]) == 5  # type: ignore[arg-type]
+
+    colon_sig = next(
+        s
+        for s in res_capped.embedded_json
+        if s.get("var_name") == "catalogData"
+    )
+    assert colon_sig["collections"][0]["count"] == 2  # type: ignore[index]
+
+    res_full = run_scout(html, full=True)
+    state_sig_full = next(
+        s for s in res_full.embedded_json if s.get("var_name") == "app.state"
+    )
+    # 7 arrays + 1 root object = 8 collections when full=True
+    assert len(state_sig_full["collections"]) >= 7  # type: ignore[arg-type]
+
+
+def test_kv_rows_label_tag_residual_text_and_unhinted_two_column() -> None:
+    """US-17 & US-18: Detect `<li><strong>Label:</strong> Value</li>` residual-text rows and unhinted 2-column rows."""
+    html = """
+    <html><body>
+      <ul id="residual-kv">
+        <li><strong>Brand:</strong> Bosch</li>
+        <li><strong>Part Number:</strong> 0280158117</li>
+        <li><strong>Flow Rate:</strong> 550 cc/min</li>
+      </ul>
+      <div id="plain-kv">
+        <div><span>Производитель</span><span>Германия</span></div>
+        <div><span>Материал</span><span>Титан</span></div>
+        <div><span>Гарантия</span><span>2 года</span></div>
+      </div>
+    </body></html>
+    """
+    res = run_scout(html)
+    assert len(res.kv_blocks) == 2
+    by_container = {str(kv["container_selector"]): kv for kv in res.kv_blocks}
+
+    res_kv = by_container["#residual-kv"]
+    assert res_kv["key_selector"] == "strong"
+    assert res_kv["value_selector"] == ":scope"
+    assert res_kv["entries"][0] == {"key": "Brand", "sample": "Bosch"}  # type: ignore[index]
+
+    plain_kv = by_container["#plain-kv"]
+    assert plain_kv["key_selector"] == "span:nth-of-type(1)"
+    assert plain_kv["value_selector"] == "span:nth-of-type(2)"
+    assert plain_kv["entries"][0] == {  # type: ignore[index]
+        "key": "Производитель",
+        "sample": "Германия",
+    }
+
+
+def test_jaccard_clustering_ignores_item_specific_descendant_classes() -> None:
+    """US-8: Classless siblings cluster by descendant tag-name Jaccard >= 0.5 even when child classes differ per item."""
+    html = """
+    <html><body>
+      <section id="feed">
+        <article><h3 class="t-1">Post 1</h3><p class="b-1">Body 1</p><time class="d-1">10:00</time></article>
+        <article><h3 class="t-2">Post 2</h3><p class="b-2">Body 2</p><time class="d-2">11:00</time></article>
+        <article><h3 class="t-3">Post 3</h3><p class="b-3">Body 3</p><time class="d-3">12:00</time></article>
+      </section>
+    </body></html>
+    """
+    res = run_scout(html)
+    assert len(res.repeating_lists) == 1
+    assert res.repeating_lists[0]["count"] == 3
+
+
+def test_zoom_in_css_descendant_scoping_and_table_list_column_match() -> None:
+    """US-23 & US-24: `--css` combined with `--text` scopes to descendants, and `table_list` marks matched columns."""
+    # 1. `--css "#product-grid" --text "890"` scopes inside `#product-grid` descendants
+    res_scoped = run_scout(
+        CATALOG_HTML, css="#product-grid", text="890", fixed=True
+    )
+    assert res_scoped.mode == "zoom"
+    assert res_scoped.matched == 1
+    assert len(res_scoped.repeating_lists) == 1
+    assert res_scoped.repeating_lists[0].get("matched") is True
+
+    # 2. Zooming into a cell of horizontal `table_list` (`#compat-table`) marks the matching column
+    res_tbl = run_scout(
+        CATALOG_HTML, css="#compat-table", text="RS4", fixed=True
+    )
+    assert res_tbl.mode == "zoom"
+    assert res_tbl.matched == 1
+    assert len(res_tbl.kv_blocks) == 1
+    tbl_blk = res_tbl.kv_blocks[0]
+    assert tbl_blk["kind"] == "table_list"
+    assert tbl_blk.get("matched") is True
+    matched_cols = [
+        c
+        for c in tbl_blk["columns"]  # type: ignore[union-attr]
+        if isinstance(c, dict) and c.get("matched")
+    ]
+    assert len(matched_cols) == 1
+    assert matched_cols[0]["header"] == "Model"
+    assert "<-- MATCH" in res_tbl.to_text()
