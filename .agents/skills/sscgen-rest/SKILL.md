@@ -1,396 +1,132 @@
 ---
 name: sscgen-rest
-version: "2.4"
+version: "2.6"
+dsl_version: "2.1"
 description: >
-  Generate KDL Schema DSL configs for REST/JSON HTTP APIs ((rest)struct).
-  Use this skill whenever the user wants to: design a `.kdl` schema for an HTTP/JSON
-  API client, write `@request` blocks targeting REST endpoints, declare `json`
-  schemas for typed responses, define `@error` / `@error:<suffix>` status and
-  body-condition mappings, work with typed placeholders (`{{id:int}}`,
-  `{{tags:str[]?|csv}}`), or fix linter errors (`E400`, `E403`, `E040`) in a
-  REST-style `.kdl`.
-  Trigger on: "rest api", "rest schema", "(rest)struct", "@request", "@error",
-  "@error:", "сгенерировать api клиент", "клиент для api",
-  "json placeholder/dummyjson/reqres"-like tasks. For HTML scraping
-  (css/css-all/text/attr pipelines, (item)/(list)/(table)/(flat)/(dict)struct)
-  use the sibling skill `sscgen-dsl` instead — this skill is REST-only.
+  Generate KDL Schema DSL (v2.1) REST/JSON API client configs (`(rest)struct`, `json`, `(array)json`, `(dict)json`, `@request`, `@error[:<suffix>]`, typed placeholders `{{id:int}}`, `ssc-gen json-to-kdl`).
+  Use when designing or fixing `.kdl` schemas for HTTP/JSON endpoints, mapping status/body errors, or resolving REST linter diagnostics (`E400`, `E403`, `E040`, `E041`).
+  For HTML DOM or plain-text scraping (`(item|list|table|flat|dict|raw)struct`, `css`, `xpath`, `re`), use `sscgen-dsl`.
 ---
 
-# sscgen-rest — Skill (REST/JSON API clients)
+# sscgen-rest — REST/JSON API Schemas (DSL v2.1)
 
-Generate `(rest)struct` schemas that become typed HTTP clients when run through
-`ssc-gen generate python|js|go|rust ...`.
+Compile `.kdl` REST schemas into standalone typed HTTP clients via `ssc-gen generate python|js|go|rust`.
 
-> **REST only.** This skill handles `json` schemas + `@request` + `@error`.
-> For HTML scraping (`css`, `text`, `attr`, `nested`, `(item)struct / (list)struct / …`) → `sscgen-dsl`.
+## Hard Rules
 
----
-
-## Hard rules
-
-1. **`(rest)struct` body allows ONLY** `@request`, `@error` / `@error:<suffix>`, `@doc`. No regular fields,
-   no `@init`, no `nested`, no `css`/`xpath`.
-2. **At least one `@request`** per struct.
-3. **Multiple `@request` → every one needs `name=<kebab-id>`** (single may omit).
-4. **`@error[:<suffix>] <status> <Schema> [keys...] [key=value ...]`**: status ∈ [100..599]; optional `:suffix` (`^[A-Za-z_][A-Za-z0-9_-]*$`, `E002` if invalid) names the variant `<PascalStruct>Err<Status><PascalSuffix>` (without `:suffix`, auto-naming uses the leaf non-numeric segment of at most the first 2 keys); duplicate variant names in the same struct emit `E400`; positional args after Schema are key/dot-path presence checks; properties are value-equality checks; same key in both is a lint error (`E400`). At runtime, if a matched rule fails `<Schema>` projection/deserialization or receives a non-JSON body, dispatch safely falls through to subsequent `@error` rules before falling back to `UnknownErr` / `Unknown`.
-5. **`@error` on 2xx requires field-conditions** (key presence or value equality) to avoid false positives.
-6. **Typed placeholders**: `[]` and `?` forbidden in URL path; `|style` requires `[]`;
-   types: `str|int|float|bool`; same name = same full spec; no keyword collisions.
-7. **Portable `json` field identifiers (`E403`)**: every `json` field name (after stripping `?`) must match `^[A-Za-z_][A-Za-z0-9_]*$` (`snake_case` or `camelCase`; `kebab-case` is forbidden in `json` fields) and avoid target reserved words. Separate field name and type with a space (`url str`, never `url: str`); map wire keys containing `-`, `@`, `:`, or `.` via `from="..."` (e.g. `track_id str from="track-id"`).
-8. **`@doc` describes the API semantically** (purpose, auth, base URL, rate limits).
-   Multi-line `@doc """..."""` blocks are auto-dedented (`cleandoc`) at parse time.
-   Do NOT list generated method signatures — they are derived from `name=` and
-   placeholders and will rot as the schema evolves.
-
-These are DSL/CLI constraints. Generation preferences for weaker models are in
-`references/model-friendly.md`.
-
-## Source evidence and API mapping
-
-Build schemas from request-response records, HAR dumps, raw HTTP records, or a
-safe request made by the agent to an accessible URL. Prose is a fallback. An
-OpenAPI/Swagger document is external contract information only: `ssc-gen` does
-not convert it automatically. Extract endpoints, response fields, nullability,
-envelopes, and errors, then write KDL manually.
-
-The `vkru.kdl` pattern is useful: multi-step token preparation, separate REST
-structs, response envelopes, pagination, nullable nested fields, and APIs that
-return errors in HTTP 200 bodies. Model body conditions with `@error`.
-Never copy credentials, cookies, tokens, or confidential responses into schemas,
-references, logs, or examples.
+1. **CLI version check**: run `ssc-gen version` (subcommand). Never run `ssc-gen --version` (flag does not exist and errors out).
+2. **`(rest)struct` body**: allows **only** `@doc`, `@request`, and `@error[:<suffix>]` (`E203`). Requires $\ge 1$ `@request` (`E401`).
+3. **`@request` contract**: multiple `@request` blocks require unique `name=<kebab-id>` (single block may omit `name=`, defaulting to `fetch`). Specify `response=<Schema>` for 2xx JSON bodies, or `response=#null` (or omit `response=`) for empty/204 responses. `response-join` is **forbidden** on `(rest)struct` (`E001`; use `response-path="<dot.path>"` alone).
+4. **KDL `\` line continuation (`E000`/`E203`)**: never place a `//` comment immediately after `\` in `@request` headers — `//` consumes the newline and breaks continuation, leaking HTTP lines (`GET`, `POST`, `curl`, `-H`) as stray struct fields.
+5. **Inline `json` schemas by default**: nest single-use child objects (`field { ... }` / `field Model { ... }`), object arrays (`field (array)ItemModel { ... }` — `ItemModel` name is mandatory, `E001`), and maps (`field (dict) { @key str; @value ... }`) **inline** inside their parent `json` schema. Declare a standalone top-level `json` schema **only** when referenced directly by `response=` / `@error` OR shared across 2+ schemas/endpoints (declared **above** callers, `E302`).
+6. **Portable `json` field names (`E403`) & GJSON `from="..."` (`E040`, `E041`)**: field names (after stripping `?`) must match `^[A-Za-z_][A-Za-z0-9_]*$` (`snake_case`/`camelCase`; no `kebab-case`, no colons `url: str`, no target keywords like `from`, `type`, `class`, `in`). Map special/reserved wire keys or nested GJSON paths via `from="..."` (e.g. `sender str from="from"`, `tag_names (array)str from="tags.#.name"`). Duplicate field or wire keys in one schema emit `E041`.
+7. **`@error[:<suffix>] <status:100..599> <Schema> ["pos.key"...] [prop.key=val ...]`**:
+   - Prefer explicit `:suffix` (`^[A-Za-z_][A-Za-z0-9_-]*$`, `E002`) for semantic variant names (`@error:rate-limit 429 RateLimitError` → `<Struct>Err429RateLimit` / Rust `Err429RateLimit`) and to prevent variant collisions (`E400`).
+   - Without `:suffix`, auto-naming appends the leaf non-numeric segment of at most the first **2** keys (`required_keys` then `conditions`).
+   - Positional args check nested key/index presence (`"error.details.0.code"`); properties check value equality (`upgrade_required=#true`, `status=#false`); same key in both emits `E400`.
+   - `@error` on `2xx` requires at least one condition. Runtime matchers evaluate in declaration order and safely fall through on non-JSON bodies or failed `<Schema>` projection before falling back to `UnknownErr` / `Unknown`.
+8. **Typed placeholders (`{{name[:type][[]][?][|style]}}`)**: `name` must be **lowercase** `^[a-z][a-z0-9_-]*$` (`E002`). Uppercase `{{UPPER_NAME}}` is resolved only inside top-level `define` strings and is **forbidden** inside inline `@request """..."""` literals (`E002`). `[]` and `?` are forbidden in URL path (`E002`); `|style` (`repeat|csv|bracket|pipe|space`) requires `[]` (`E002`); repeated names in one `@request` must repeat the identical spec (`E402`).
+9. **`@doc` semantics**: document base URL, auth, rate limits, and domain constants (auto-dedented via `cleandoc`). Never list generated method signatures.
 
 ---
 
-## Input modes
+## Workflow
 
-### Mode 1 — Generate from scratch
-request-response/HAR/raw HTTP/accessible URL → `json` schemas → `(rest)struct` → lint → emit file.
+### Step 1 — Capture API Evidence
+Inspect real HTTP responses, HAR dumps, raw HTTP captures, or OpenAPI contracts (verify real payloads for unannotated `null` values). Never copy live tokens, cookies, or secrets into `.kdl` files.
+- If sample JSON files exist on disk, bootstrap inline schemas via:
+  `ssc-gen json-to-kdl sample.json -o schema.kdl --name ResponseName [--force]`
 
-### Mode 2 — Add methods to existing struct
-Append `@request name=<unique>` blocks. Add `@error` only for uncovered statuses. Re-lint.
+### Step 2 — Declare `json` Schemas
+Generated allowlist projectors (`_project_<schema>`) validate container types, extract only declared fields, and **silently ignore undeclared or commented-out (`//`) wire keys**.
 
-### Mode 3 — Fix linter errors
-`ssc-gen check <file> -f json` → filter errors by line → fix top-to-bottom → re-emit full file.
+| Construct | Syntax | Notes & Target Types (`Py / Go / Rust / JS`) |
+|---|---|---|
+| Scalar field | `name str\|int\|float\|bool\|null` | Space-separated (`name str`, never `name: str`) |
+| Nullable (`?`) | `name str?` (`field? { ... }`) | Key present, value may be `null` (`Optional[T]` / `*T` / `Option<T>` / `T\|null`) |
+| Absent key | `name str @omitempty` | Key may be omitted from JSON (`NotRequired[T]` / `*T,omitempty` / `#[serde(default)]`) |
+| Nullable + absent | `name str? @omitempty` | Key may be absent OR `null` |
+| Ignored wire key | `name [Type] @skip` | Validated by linter, omitted from types & projector (`Type` defaults to `str`) |
+| Array field | `tags (array)str` | `List[T]` / `[]T` / `Vec<T>` / `Array<T>` |
+| Inline object | `author [ModelName][?] { ... }` | Anonymous synthesizes `{Parent}{FieldPascal}`; hoisted ahead of parent |
+| Inline object array | `items (array)ItemModel[?] { ... }` | Explicit `ItemModel` name is **mandatory** (`E001` if omitted) |
+| Top-level array | `(array)json ItemList { ... }` | Root JSON payload is `[ {...}, ... ]` |
+| Dict (top / inline) | `(dict)json Map { [@key int;] @value ... }` / `field (dict)[Name] { ... }` | `@key`: `str` (default) \| `int` \| `float` \| `bool`. `@value`: type or inline `[Model] { ... }` (`{Dict}Value` / `{Parent}{Field}Value`) |
+| Key alias / GJSON | `val str from="<gjson_path>"` | `a.b.0.c`, escaped dot `#"a\.b"#`, count `items.#` (`int`), projection `tags.#.name` (`(array)T`). No `*`, `#[...]`, or negative index (`E040`) |
+| Shared field block | `define CORE-FIELDS { ... }` | Bare `CORE-FIELDS` inside `json` expands inline (use when $\ge 3$ schemas share $\ge 4$ fields; max 30 fields) |
 
----
-
-## Generation workflow
-
-### Step 1 — Map the API surface
-
-```
-METHOD path?query  →  body?  →  2xx response shape  →  error statuses
-```
-
-Group endpoints sharing host/auth into one struct. Different APIs → separate structs.
-
-**Mandatory: capture actual response shapes.** For each endpoint, make a real HTTP
-request (`curl`, `Invoke-WebRequest`, etc.) and inspect the JSON. If the user
-provides a swagger/OpenAPI file, read it first — it is the canonical contract.
-
-Things to determine for every endpoint:
-- **Envelope**: bare top-level array `[...]`, data wrapper `{"data":[...]}`, paginated
-  `{"data":[...],"meta":{"pagination":{...}}}`, or flat object?
-- **Target fields**: which response fields the client needs (generated JSON projectors silently ignore undeclared or commented-out keys in the wire JSON).
-- **Nullability**: which fields can be `null`? Mark them `Type?`. Upstream Swagger/OpenAPI specs often omit `nullable: true` on secondary metadata (counts, durations, timestamps, descriptions, avatars/previews) — verify across multiple real items (including new/incomplete records) and mark nullable metadata `Type?`.
-- **Nested objects**: if a modeled field is a dict, extract its sub-fields into a
-  separate `json` schema (or inline block).
-- **Numeric types**: swagger `type: number` with integer examples → `int`;
-  fractional examples (e.g. `12.5`) → `float`.
-- **Error response shape**: grab a real 404/422/etc. if possible. When an API returns multiple error shapes or conditions on the same status, order `@error` rules from most specific to most general and use `@error:<suffix>` to disambiguate colliding variant names.
-
-### Step 2 — Design `json` schemas
-
-Full syntax in `references/json.md`.
-
-> **CLI Bootstrapping:** If you have sample JSON response files (e.g. from `curl` or DevTools), you can bootstrap the schema via:
-> `ssc-gen json-to-kdl response.json -o schema.kdl --name ResponseName`
-> This generates a modern hierarchical inline schema (`field { ... }` and `(array)ItemModel { ... }`) with `from="..."` key aliasing and multi-sample `@omitempty` merging.
-
-For each object observed in the real API response (or defined in the swagger spec), create a `json` schema with its fields, types, and nullability. Generated projectors (`_project_<schema>`) only read fields declared in the `json` block and **silently skip any undeclared or commented-out (`//`) keys** in the raw JSON payload. You can write either hierarchical inline schemas or standalone schemas:
+### Step 3 — Declare `(rest)struct`
 
 ```kdl
-// Inline style (hierarchical, DSL v2.2+)
-json Post {
-    id int
-    title str
-    author {
-        id int
-        name str
+@doc """
+Emailnator temporary email REST API (https://api.emailnator.com).
+Auth: Public or optional header `x-revenuecat-app-user-id` on HTTP client.
+"""
+
+define API-HOST="https://api.emailnator.com"
+define DELETE-REQ="curl -X DELETE '{{API-HOST}}/api/email/{{email}}'"
+
+json InboxResponse {
+    status str
+    messages (array)InboxMessageItem {
+        id str
+        sender str from="from"
+        subject str
+        timestamp int
+    }
+    message_count int from="messages.#"
+}
+
+json ValidationError {
+    message str
+    errors (dict) {
+        @key str
+        @value (array)str
     }
 }
 
-// Or standalone style
-json Author { id int; name str }
-json Post   { id int; title str; author Author }
-json PostList { posts (array)Post; total int }
 json ApiError { message str }
-```
 
-Field types: `str | int | float | bool | null | <RefName>`.
+(rest)struct EmailnatorApi {
+    @doc "Disposable email generation and inbox client."
 
-Modifiers (combinable; order-independent):
-
-| Modifier | Meaning | Python | Go | JS |
-|---|---|---|---|---|
-| `(array)Type` | Array field | `List[T]` | `[]T` | `Array<T>` |
-| `Type?` | Nullable value (key present, value may be `null`) | `Optional[T]` | `*T` (no `,omitempty`) | `T\|null` |
-| `@omitempty` | Key may be **absent** from JSON entirely (distinct from `?`) | `NotRequired[T]` | `*T` + `json:"name,omitempty"` | `T (OMITEMPTY)` JSDoc marker |
-| `@skip` | Field is parsed by linter but **excluded from generated types**. Type optional (defaults to `str` when omitted). | dropped from TypedDict | dropped from struct | dropped from JSDoc |
-
-Combinations:
-- `inner Inner? @omitempty` — nullable AND may be absent.
-- `debug str? @skip` — parsed-and-discarded (e.g. response echoes back the request; you don't model it).
-- `legacy @skip` — type defaults to `str`; field is dropped from output.
-
-When to use which:
-- Real-world `null` values (e.g. `"name": null`) → `Type?`.
-- Optional keys that may be omitted entirely (e.g. pagination absent on first page) → `@omitempty`.
-- Both → combine.
-- Never needed by client code → omit/comment out (`// field Type`) or mark `@skip` (don't pollute the typed surface or enforce strict runtime checks on unused third-party metadata).
-
-Alias & GJSON path expressions (`from="..."`, validated by `E040`):
-- Direct key remap: `context str from="@context"` (for keys with `@`, `:`, `$`, spaces, or target reserved words; positional `"originalKey"` is deprecated with `W011`; `path="..."` is accepted with `W041`).
-- Literal dot in key: `os_version str from="os\\.version"` (escape literal `.` with `\.` and `\` with `\\`).
-- Nested path & array index: `author_name str from="data.authors.0.name"`.
-- Array length (`#`): `count int from="items.#"` (extracts integer length of array).
-- Array element projection (`#.subpath`): `tag_names (array)str from="tags.#.name"` (projects `.name` from every element of `tags` into a flat array without an intermediate `json` schema).
-
-Top-level array: `(array)json Tags { name str }`.
-
-**Dictionary schemas (`(dict)json` & inline `(dict)`):**
-For JSON objects with dynamic, numeric, or arbitrary keys and homogeneous values (e.g. `{"1": ["jap", "dub"], "2": ["jap"]}`):
-- Top-level: `(dict)json Translations { @key int; @value (array)str; }` (Python `Dict[int, List[str]]`, Go `map[int64][]string`, Rust `HashMap<i64, Vec<String>>`, JS `Record<number, string[]>`).
-- Inline dict: `translations (dict)Translations { @key str; @value (array)str; }` or `(dict)translations { @key str; @value (array)str; }`.
-- `@key` defaults to `str` if omitted. Supported scalar key types: `str`, `int`, `float`, `bool`.
-- `@value` can be a scalar, `(array)Type`, reference to another `json` schema, or an inline schema block `{ ... }`.
-- Inline `@value` blocks: `@value Model { ... }`, `(Model)@value { ... }`, `@value (array)ItemModel { ... }`, or anonymous `@value { ... }` (synthesizes `{DictName}Value`, `{Parent}{Field}Value`, or `{DictSchema}Value`). Hoisted recursively post-order before enclosing schema.
-
-**Inline nested schemas (compiler hoisting):**
-Instead of polluting the module with dozens of small top-level helper schemas, define them directly inside the parent schema:
-- Anonymous inline object: `material_data { anime_title str; year int; }` (synthesizes `{Parent}{Field}` in PascalCase, e.g. `AnimeResponseMaterialDataJson`).
-- Explicitly named inline object: `franchise Franchise { id str; shikimori_id str; }` (emits `FranchiseJson`).
-- Explicitly named inline array: `links (array)Links { id int; relation str; }` (emits `LinksJson`).
-- Inline `@value` dictionary block: `@value Model { ... }` or `@value { ... }`.
-Inline blocks support full modifier symmetry: `from="..."`, `@omitempty`, `?` (nullable). The compiler hoists them ahead of the parent in topological dependency order.
-
-**Deduplication with `define`.** When multiple `json` schemas share the same set
-of base fields, extract them into a block define and reference it as a bare name
-(no args) inside the json block:
-
-```kdl
-define PET-CORE {
-    id int
-    name str
-    species str
-    breed str?
-    vaccinated bool
-}
-
-json PetSummary {
-    PET-CORE
-    photo_url str?
-}
-
-json PetDetail {
-    PET-CORE
-    photo_url str?
-    owner Owner?
-    vet_records (array)VetRecord
-}
-```
-
-Rules for define in json:
-- A bare child node (no args) whose name matches a block define → expanded inline.
-- Normal fields always have a type arg (`name str`), so there is no ambiguity.
-- Expansion is recursive: a define can reference another define.
-- **When to use**: when ≥3 json schemas share ≥4 identical fields.
-  Do NOT use for 1–2 shared fields or 2 schemas — the define overhead is not justified.
-- **Max define body size**: 30 fields. Larger defines become hard to scan;
-  split into multiple focused defines instead.
-
-**Completeness checklist before proceeding:**
-
-1. Does every field required by the consumer appear in the schema? (Undeclared or commented-out keys in the wire JSON are ignored at runtime by `_project_<schema>`.)
-2. Are nested objects extracted into their own `json` schemas (not flattened)?
-3. Are nullable fields (`"field": null` in real data) marked `Type?`?
-4. Are optional keys (absent in some responses, present in others) marked
-   `@omitempty`? Distinguish from `?` — a key that is present-with-`null`
-   needs `?`, not `@omitempty`. Combine both when both states occur.
-5. Does the response envelope match? Bare array → `(array)json`; paginated →
-   include `Meta`/`Pagination` schemas; data wrapper → envelope schema with
-   `data` field.
-6. If a swagger is available: cross-reference response schemas (`$ref` paths,
-   `allOf` compositions, `properties`), but verify nullability against real API
-   responses — upstream OpenAPI specs often omit `nullable: true` on fields that
-   return `null` in production. Comment out or `@skip` unused fields if you do
-   not want them validated at runtime.
-
-### Step 3 — Write the struct
-
-`@request` body: raw HTTP **or** POSIX curl (interchangeable). Full syntax and
-typed placeholders in `references/10-request.md`.
-
-```kdl
-(rest)struct ApiName {
-    @doc """
-    Example API — posts and comments.
-    Base URL: api.example.com
-    Auth: Bearer token (passed via client headers).
-    """
-
-    @request name=get-post \
-        doc="Fetch one post by id." \
-        response=Post \
+    @request name=get-inbox \
+        doc="Fetch inbox messages for an email address." \
+        response=InboxResponse \
         """
-    GET /posts/{{id:int}} HTTP/1.1
-    Host: api.example.com
+    POST /api/email/inbox HTTP/1.1
+    Host: api.emailnator.com
+    Content-Type: application/json
     Accept: application/json
+
+    {"email": "{{email}}"}
     """
 
-    @request name=list-posts \
-        doc="Paginated list." \
-        response=PostList \
-        """
-    curl 'https://api.example.com/posts?limit={{limit:int?}}&skip={{skip:int?}}' \
-      -H 'Accept: application/json'
-    """
+    @request name=delete-inbox \
+        doc="Delete disposable inbox (empty 204 response)." \
+        response=#null \
+        DELETE-REQ
 
-    @error:not-found 404 ApiError message="Post not found"
-    @error 404 ApiError
-    @error 500 ApiError
+    @error:validation 422 ValidationError "errors"
+    @error:rate-limit 429 ApiError
+    @error:bad-request 400 ApiError
 }
 ```
 
-Method naming: `name=get-post` → `get_post()` (Py) / `getPost()` (JS).
-Single unnamed `@request` → `fetch()`.
+### Step 4 — Lint & Emit
+Run `ssc-gen check <file.kdl> -f json` and fix diagnostics top-to-bottom until exit 0 (`[]`). Cap at 5 iterations on the same line.
 
-`@error` rules in `(rest)struct`:
-- Syntax: `@error[:<suffix>] <status> <Schema> [keys...] [key=value ...]`
-- Explicit suffix: `@error:not-found 404 ApiError ...` → `<Struct>Err404NotFound` (Rust `Err404NotFound`), ignoring condition keys for naming.
-- Automatic naming (no `:suffix`): appends the leaf non-numeric segment of at most the first **2** keys (`required_keys` then `conditions`), e.g. `"data.errors.0.detail"` → `<Struct>Err404Detail`.
-- Collision lint (`E400`): two `@error` rules in the same struct that resolve to the same variant name fail `ssc-gen check` — disambiguate with `@error:<suffix>`.
-- Positional keys support nested dot-paths (`"error.code"`) across Python, JS, Go, and Rust.
-- Runtime fallthrough: rules are evaluated in declaration order; if a response body is non-JSON (e.g. proxy HTML 404) or fails `<Schema>` projection, the matcher safely falls through to the next `@error` rule before falling back to `UnknownErr` / `Unknown`.
-
-### Codegen contract for `@request`
-
-Each `@request` block generates a **classmethod-like constructor** on the
-parent struct. Caller passes an HTTP client + method parameters, gets back
-the typed response (or `@error`-mapped error). The schema is the single
-source of truth — no need to remember URLs, headers, or query-string formats
-at call sites.
-
-**Generated signatures & runtime HTTP delegation:**
-
-| Backend | Signature |
-|---------|-----------|
-| Python (`httpx` / `httpx2`, default) | `@classmethod def fetch(cls, client: httpx.Client, *, ..., **kwargs) -> Result[Response, Error]` + `async_fetch(client, *, ..., **kwargs)` (filtered by `--http-io both\|sync\|async`) |
-| Python (`requests`) | `@classmethod def fetch(cls, client: requests.Session, *, ..., **kwargs) -> Result[...]` (+ `async_fetch` via `asyncio.to_thread` when `--http-io both\|async`) |
-| Python (`aiohttp`, async only) | `@classmethod async def async_fetch(cls, client: aiohttp.ClientSession, *, ..., **kwargs) -> Result[...]` |
-| JS (`fetch` or `axios`) | `static async fetch(client, params = {}, opts = {}) -> Promise<Result<Response, Error>>` |
-| Go (`net/http`) | `func (Struct) Fetch(client *http.Client, ..., opts ...sscReqOpt) (*ResponseJson, error)` |
-| Rust (`reqwest`) | `pub async fn fetch(client: &reqwest::Client, ...) -> Result<ResponseJson, EndpointError>` |
-
-All targets delegate request preparation and response projection to shared runtime helpers (`ssc_rest_call` + `ssc_merge_kwargs` in Python, `sscRestCall` + `sscPrepareReq` in JS, `sscRestCallValue[T]` / `sscRestCallSlice[T]` / `sscRestCallVoid` in Go, `rt::rest_call` / `rt::rest_call_void` in Rust):
-- Optional placeholders (`?`) set to `None` / `null` / `undefined` in `params`, `headers`, and `cookies` are omitted automatically.
-- Optional placeholders (`?`) set to `None` / `null` inside a JSON request body are preserved as JSON `null` (`"key": null`).
-- Per-call `**kwargs` (Python), `opts` (JS), or `sscReqOpt` (Go) shallow-merge `headers`, `params`, and `cookies` on top of schema defaults.
-
-Call site:
-```python
-client = httpx.Client(headers={"Authorization": "Bearer ..."})
-result = ApiName.get_post(client, id=42)
-if isinstance(result, Ok):
-    post = result.value
-```
-```js
-const client = axios.create({ headers: { Authorization: "Bearer ..." } });
-const result = await ApiName.getPost(client, { id: 42 });
-```
-
-`@request` properties:
-
-| Property | Required | Purpose |
-|----------|----------|---------|
-| `name=<kebab-id>` | required when multiple `@request` blocks exist; otherwise optional | Method name. `name=get-post` → `get_post()` (Py) / `getPost()` (JS). Single unnamed `@request` → `fetch()`. |
-| `response=<Schema>` | optional | JSON schema for 2xx response body. Omit → method returns void. |
-| `doc="<text>"` | optional | Per-method docstring shown in generated code. Brief semantic description, not signature duplication. |
-| `response-path="<dotted>"` | optional | Dot-path into JSON body to extract response (e.g. `"data.items"`). |
-| `response-join="<sep>"` | optional | When `response-path` resolves to `list[str]`, join with this separator. |
-
-### Step 4 — Lint until clean
-
-```bash
-ssc-gen check schema.kdl -f json
-```
-
-Loop until exit 0. Cap 5 iterations on same line; then explain conflict.
-
-### Step 5 — Generate code (optional)
-
-```bash
-# Python — sync + async (httpx default; falls back from httpx2 to httpx)
-ssc-gen generate python schema.kdl -L bs4 --http-client httpx -o out/
-ssc-gen generate python schema.kdl -L bs4 --http-client httpx2 --http-io async -o out/
-ssc-gen generate python schema.kdl -L lxml --http-client requests --http-io sync -o out/
-ssc-gen generate python schema.kdl -L lxml --http-client aiohttp -o out/    # async only
-
-# JavaScript
-ssc-gen generate js schema.kdl --http-client fetch -o out/
-ssc-gen generate js schema.kdl --http-client axios -o out/
-
-# Go (goquery + net/http; emits schema.go + sscgen_runtime.go)
-ssc-gen generate go schema.kdl -o out/
-
-# Rust (scraper + reqwest; emits schema.rs + sscgen_runtime.rs)
-ssc-gen generate rust schema.kdl --http-client reqwest -o out/
-```
-
-> Python libs (`-L`): `bs4` (default, `--bs4-parser lxml|html.parser|html5lib`) | `lxml` | `parsel` | `slax`.
-> HTTP clients: Python — `httpx` (default, `httpx2` fallback import) | `httpx2` (strict `import httpx2`) | `aiohttp` (async only) | `requests`; JS — `fetch` (default) | `axios`; Go — `net/http` (built-in); Rust — `reqwest` (default).
-> Python `--http-io`: `both` (default) | `sync` | `async`. Python `-R` / `--separate-runtime` extracts runtime helpers into `sscgen_runtime.py`.
-
-Without `--http-client` in Python/JS, `@request` is silently ignored.
+**Completion criteria before returning `.kdl`:**
+1. `ssc-gen check` exits 0 with zero errors.
+2. Module order: `@doc` → optional `import`/`define` → shared top-level `json` (above callers, `E302`) → endpoint `json` (with single-use nested objects/arrays/dicts inlined) → error `json` → `(rest)struct`.
+3. Every multi-status or domain-specific error uses `@error:<suffix>` without `E400` collisions.
 
 ---
 
-## Output format
+## Reference Pointers (Load on Demand)
 
-Always emit complete, lintable `.kdl` in this order:
-
-1. `@doc` module docstring (base URL, auth, purpose — no method listings)
-2. Leaf `json` schemas (innermost first — primitives, enums, small objects)
-3. Mid-level `json` schemas (domain objects referencing leaves)
-4. Envelope `json` schemas (paginated responses, wrappers, top-level arrays)
-5. Error-body `json` schema(s)
-6. `(rest)struct ApiName { ... }`
-
-Fixing lint errors → emit **full corrected file**, not patches.
-
-**Post-lint validation:** after `ssc-gen check` passes, re-verify that every
-`json` schema matches the actual API response shape. If a swagger was provided,
-spot-check field names and types against it.
-
----
-
-## When not to use this skill
-
-- **HTML scraping** (css/text/attr, `(item)/(list)/(table)/(flat)/(dict)struct`) → `sscgen-dsl`
-- **Fetch page + parse HTML** → also `sscgen-dsl`
-- **Binary / non-JSON HTTP API** → `(rest)struct` requires `json` response schema; ask user
-
----
-
-## See also
-
-- **`sscgen-dsl`** — for HTML scraping (`(item)/(list)/(table)/(flat)/(dict)struct`, css/text/attr pipelines).
-
----
-
-## Reference files (self-contained)
-
-- `references/10-request.md` — `@request` and `@error[:<suffix>]` syntax, typed placeholders, curl flags, Result type & safe fallthrough
-- `references/json.md` — json schema syntax, aliases, (array)json
-- `references/example-dummyjson.kdl` — minimal working example (4 endpoints)
-- `references/example-restApiLike.kdl` — comprehensive example (6 endpoints)
+- **Complex `json` / `(dict)json` / inline `@value` hoisting / GJSON paths** → read `references/json.md`
+- **`@request` curl flags, `define` composition, `Result` types, or running `ssc-gen generate python|js|go|rust`** → read `references/10-request.md`
+- **Linter error codes (`E000`–`E403`, `W011`–`W041`), CLI cheat sheet, and placeholder matrix** → read `references/rest-dsl-cheatsheet.md`
+- **Repeated lint failures / safe incremental mode** → read `references/model-friendly.md`
+- **Full working `.kdl` examples** → read `references/example-dummyjson.kdl` and `references/example-restApiLike.kdl`

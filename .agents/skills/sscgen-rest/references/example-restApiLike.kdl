@@ -16,30 +16,12 @@ Equivalent alternatives you can retarget by swapping host/paths:
 """
 
 
-// ── JSON schemas ──────────────────────────────────────────────────────────────
-// camelCase JSON keys are bound to snake_case fields via from="..." alias.
-// See references/json.md for full reference.
-
-json Dimensions {
-    width float
-    height float
-    depth float
-}
-
-json Meta {
-    created_at str from="createdAt"
-    updated_at str from="updatedAt"
-    barcode str
-    qr_code str from="qrCode"
-}
-
-json Review {
-    rating int
-    comment str
-    date str
-    reviewer_name str from="reviewerName"
-    reviewer_email str from="reviewerEmail"
-}
+/* === JSON schemas ===
+Product is reused across get-product, create-product, and ProductList, so it
+is declared at top level above ProductList (E302). Single-use nested objects
+(dimensions, meta) and object arrays (reviews) are declared inline inside
+Product and hoisted automatically by the compiler.
+*/ 
 
 json Product {
     id int
@@ -54,14 +36,29 @@ json Product {
     brand str?
     sku str
     weight float
-    dimensions Dimensions
+    dimensions {
+        width float
+        height float
+        depth float
+    }
     warranty_information str from="warrantyInformation"
     shipping_information str from="shippingInformation"
     availability_status str from="availabilityStatus"
-    reviews (array)Review
+    reviews (array)Review {
+        rating int
+        comment str
+        date str
+        reviewer_name str from="reviewerName"
+        reviewer_email str from="reviewerEmail"
+    }
     return_policy str from="returnPolicy"
     minimum_order_quantity int from="minimumOrderQuantity"
-    meta Meta
+    meta {
+        created_at str from="createdAt"
+        updated_at str from="updatedAt"
+        barcode str
+        qr_code str from="qrCode"
+    }
     images (array)str
     thumbnail str
 }
@@ -75,7 +72,7 @@ json ProductList {
     limit int
 }
 
-json CategoryInfo {
+(array)json CategoryList {
     slug str
     name str
     url str
@@ -88,7 +85,7 @@ json ApiError {
 }
 
 
-// ── REST struct ───────────────────────────────────────────────────────────────
+// === REST struct ===
 
 (rest)struct DummyJsonApi {
     @doc """
@@ -137,7 +134,7 @@ json ApiError {
 
     @request name=list-categories \
         doc="All available category slugs with metadata." \
-        response=CategoryInfo \
+        response=CategoryList \
         """
     GET /products/categories HTTP/1.1
     Host: dummyjson.com
@@ -157,5 +154,5 @@ json ApiError {
     """
 
     // 404 for unknown id or unknown category slug — body: {"message": "..."}
-    @error 404 ApiError
+    @error:not-found 404 ApiError
 }

@@ -5,11 +5,12 @@ Use this mode for models likely to confuse KDL syntax or omit response fields.
 ## Safe Syntax
 
 - Build one small `(rest)struct` first.
-- Use ordinary quoted strings and one property per line.
-- Declare leaf `json` schemas before nested schemas, then envelopes, then errors.
+- Use ordinary quoted strings and one property per line (never place a `//` comment immediately after a `\` line continuation).
+- Nest single-use child objects (`field { ... }`), object arrays (`field (array)ItemModel { ... }`), and dictionaries (`field (dict) { @key str; @value ... }`) **inline** inside their parent `json` schema; only declare a standalone top-level `json` schema when shared across 2+ schemas/endpoints (declared above callers, `E302`) or referenced directly in `response=` / `@error`.
 - Start with one `@request`; add `name=` when adding more.
-- Use simple placeholders (`{{id:int}}`) before optional, array, CSV, or custom forms.
-- Treat `define`, polymorphic JSON, complex typed placeholders, `response-path`, `response-join`, and conditional `@error` rules as advanced syntax.
+- Use simple lowercase placeholders (`{{id:int}}`) before optional, array, CSV, or custom forms.
+- Name error variants semantically with `@error:<suffix>` (e.g. `@error:not-found 404 ApiError`, `@error:bad-request 400 BadRequestError`).
+- Treat `define`, polymorphic JSON, complex typed placeholders, `response-path`, and conditional `@error` rules as advanced syntax.
 
 ## Source Evidence
 
@@ -21,15 +22,16 @@ Describe schema from strongest available evidence, in this order:
 4. request made by agent when URL is accessible and safe;
 5. prose API description as fallback.
 
-Compare every response key, nested object, array, nullable value, envelope, and error shape. OpenAPI/Swagger may be used as external contract information, but CLI does not convert it automatically. Manually describe resulting KDL.
+Compare every response key, nested object, array, nullable value, envelope, and error shape. If a sample JSON file is available, bootstrap with `ssc-gen json-to-kdl sample.json -o schema.kdl --name ResponseName`. OpenAPI/Swagger may be used as external contract information, but CLI does not convert it automatically.
 
 For authenticated sources, document request preparation and never copy credentials, cookies, or tokens into schema, examples, or logs.
 
 ## Validation
 
-1. Run `ssc-gen check schema.kdl` after each structural change.
-2. Run `ssc-gen generate` only when user names target/backend or asks for code-generation validation.
-3. Do not require live, fixture, or raw-source testing. User chooses source testing method.
+1. Check CLI version if needed via `ssc-gen version` (subcommand — NEVER `ssc-gen --version`).
+2. Run `ssc-gen check schema.kdl -f json` after each structural change.
+3. Run `ssc-gen generate` only when user names target/backend or asks for code-generation validation.
+4. Do not require live, fixture, or raw-source testing. User chooses source testing method.
 
 ## Repair Mode
 

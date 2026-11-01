@@ -1,347 +1,78 @@
-# 10. @request — встроенный HTTP конструктор
+# `@request`, `@error[:<suffix>]`, `Result` & Codegen Targets (DSL v2.1)
 
-**Версия DSL:** 2.1  
-**Последнее обновление:** 2026-04-17
+## 1. `@request` Formats & Properties
 
-`@request` — необязательная директива внутри `struct`. Описывает HTTP-запрос,
-который нужно выполнить, чтобы получить HTML для этого парсера. Генератор
-добавляет на класс метод `fetch()` с нужными параметрами.
+`@request` accepts a raw `HTTP/1.1` / `HTTP/2` string, a POSIX `curl` command, or a scalar `define` name.
 
-Это **syntax sugar**: вместо `@request` можно всегда сделать запрос вручную и
-передать HTML в конструктор. Парсер не знает о транспорте — он по-прежнему
-получает одну HTML-страницу.
-
-## Два формата записи
-
-### POSIX curl
-
-```kdl
-struct ProductPage {
-    @request """
-    curl 'https://books.toscrape.com/catalogue/{{slug}}/index.html'
-    """
-    title { css "h1"; text }
-}
-```
-
-### Сырой HTTP
-
-```kdl
-struct MainCatalogue {
-    @request """
-    GET /catalogue/page-{{page-num}}.html HTTP/1.1
-    Host: books.toscrape.com
-    Accept: text/html
-    """
-    title { css "h1"; text }
-}
-```
-
-Оба формата эквивалентны: генератор нормализует их в одно представление.
-
-## Placeholders
-
-`{{name}}` — это параметры, которые передаются в `fetch()` при вызове.
-Имена преобразуются в snake_case.
-
-```kdl
-@request """
-GET /search?q={{query}}&page={{page-num}} HTTP/1.1
-Host: example.com
-"""
-```
-
-Генерирует (Python, httpx):
-
-```python
-@classmethod
-def fetch(cls, client: httpx.Client, *, query: str, page_num: str) -> "StructName":
-    ...
-```
-
-Без placeholders — запрос статический, `fetch` принимает только `client`.
-
-### Типизированные плейсхолдеры
-
-По умолчанию каждый `{{name}}` — обязательный `str`. Расширенный синтаксис задаёт тип, массив, опциональность и способ сериализации массива:
-
-```
-{{ NAME [:PRIM] [[]] [?] [|STYLE] }}
-
-NAME   = [A-Za-z][A-Za-z0-9_-]*        первый символ — буква; `-` автоконвертируется
-PRIM   = str | int | float | bool       default: str
-STYLE  = repeat | csv | bracket | pipe | space   только при []; default: repeat
-```
-
-| Плейсхолдер | Python signature | URL (при `tags=[1,2]`) |
+| Property | Required in `(rest)struct` | Semantics |
 |---|---|---|
-| `{{id}}` | `id: str` | `.../{id}` |
-| `{{id:int}}` | `id: int` | `.../{id}` |
-| `{{q:str?}}` | `q: str \| None = None` | опущен если `None` |
-| `{{tags:int[]}}` | `tags: list[int]` | `?tags=1&tags=2` (repeat) |
-| `{{tags:int[]?\|csv}}` | `tags: list[int] \| None = None` | `?tags=1,2` |
-| `{{tags:int[]\|bracket}}` | `tags: list[int]` | `?tags[]=1&tags[]=2` |
+| `name="<kebab-id>"` | Required if $>1$ `@request` | Emits `snake_case` (Py/Rust), `camelCase` (JS), `PascalCase` (Go). Single unnamed `@request` $\to$ `fetch`. |
+| `response=<Schema>\|#null` | Required (or omit for void) | 2xx JSON schema (`Ok[<Schema>Json]`), or `#null`/omitted for empty 204 (`Ok[None]`). |
+| `doc="<text>"` | Optional | Method docstring (normalized via `inspect.cleandoc`). |
+| `response-path="<dot.path>"` | Optional | Extracts nested ASCII dot-path (e.g. `"data.items"`) from JSON body before projecting `<Schema>`. (`response-join` is **forbidden** on `(rest)struct`, `E001`.) |
 
-Порядок параметров: required — первыми, optional (с `?`) — последними (PEP 3102 keyword-only).
+Supported `curl` flags: `-X/--request`, `-H/--header`, `-d/--data/--data-raw`, `--json`, `-u/--user`, `-F/--form`, `--data-urlencode`, `--compressed` (ignored).
 
-**Ограничения** (проверяются линтером):
-- `[]` и `?` запрещены в URL path — только query/headers/body
-- style `|...` требует `[]`
-- все повторные вхождения одного `NAME` должны иметь идентичную полную спецификацию
-- имя не должно совпадать с ключевыми словами Python/JS (`class`, `return`, …)
+### Scalar `define` Composition & Line Continuation Rules
+- Scalar defines may interpolate earlier scalar defines via `{{UPPER_NAME}}` while keeping lowercase `{{param}}` as runtime parameters:
+  ```kdl
+  define API-HOST="https://api.example.com"
+  define GET-USER="curl '{{API-HOST}}/users/{{id:int}}?fields={{fields:str[]?|csv}}'"
+  ```
+- **`E002` rule**: Uppercase `{{UPPER_NAME}}` is **forbidden** directly inside inline `@request """..."""` string literals — compose in a top-level `define` first and pass the define identifier to `@request`.
+- **`E000`/`E203` rule**: Never place a `//` single-line comment immediately after `\` in a multi-line `@request` header — `//` consumes the newline and breaks line continuation.
 
-## Генерация: выбор HTTP клиента
+---
 
-Флаг `--http-client` при генерации:
+## 2. Typed Placeholders (`{{name[:type][[]][?][|style]}}`)
 
-```bash
-# Python: httpx (sync + async)
-ssc-gen generate python schema.kdl -L bs4 -o out/ --http-client httpx
+- `name`: lowercase `^[a-z][a-z0-9_-]*$` (`-` converts to `_` in Py/Rust and camelCase in JS).
+- `type`: `str` (default) | `int` | `float` | `bool`.
+- `[]`: array parameter (forbidden in URL path, `E002`).
+- `?`: optional parameter, defaults to `None`/`undefined`/`Option::None` (forbidden in URL path, `E002`).
+- `|style` (arrays only, requires `[]`, `E002`; default `repeat`):
+  - `repeat`: `?k=1&k=2`
+  - `csv`: `?k=1,2`
+  - `bracket`: `?k[]=1&k[]=2`
+  - `pipe`: `?k=1|2`
+  - `space`: `?k=1%202`
+- Repeated occurrences of the same `name` in one `@request` must repeat the **exact same full spec** (`E402`), and must not collide with target language keywords (`E403`).
 
-# JS: fetch (по умолчанию)
-ssc-gen generate js schema.kdl -o out/
+---
 
-# JS: axios
-ssc-gen generate js schema.kdl -o out/ --http-client axios
-```
+## 3. `@error[:<suffix>]` Dispatch & Safe Fallthrough
 
-При `--http-client httpx` генерируются два метода: `fetch()` и `async_fetch()`.
+Syntax: `@error[:<suffix>] <status:100..599> <SchemaName> ["pos.key"...] [prop.key=val ...]`
 
-Без `--http-client` методы `fetch` не генерируются, `@request` игнорируется.
+- **Explicit suffix (`@error:<suffix>`)**: `<suffix>` must match `^[A-Za-z_][A-Za-z0-9_-]*$` (`E002`). Generates `<PascalStruct>Err<Status><PascalSuffix>` in Python/JS/Go and `Err<Status><PascalSuffix>` on `<PascalStruct>Error` in Rust. Use `:suffix` for semantic variant names (`@error:premium-required 403 PremiumError`, `@error:rate-limit 429 RateLimitError`) and to disambiguate multiple rules on the same status.
+- **Auto-naming (no `:suffix`)**: extracts the last non-numeric leaf segment from at most the first **2** keys (`required_keys` then `conditions`), e.g. `"data.errors.0.detail"` $\to$ `<Struct>Err404Detail`.
+- **Collision & duplicate key lint (`E400`)**: duplicate resolved variant names in the same `(rest)struct` or repeating the same key in both positional args and properties fails `ssc-gen check` with `E400`.
+- **Conditions & fallthrough**: positional args check key/dot-path existence; properties check value equality (`AND`-combined). Rules run in declaration order (including `@error 200 ...` before 2xx projection). If a matched response is non-JSON (e.g. CDN HTML 403/502) or fails `<SchemaName>` projection, the runtime catches `SscJsonError` and falls through to the next `@error` rule before falling back to `UnknownErr` / `Unknown`.
 
-## response-path и response-join
+---
 
-Если ответ сервера — JSON с HTML внутри, можно указать путь до нужного поля:
+## 4. Monadic `Result` Contract & Target Codegen
 
-```kdl
-@request response-path="payload.html" """
-POST /api/page HTTP/1.1
-Host: example.com
-Content-Type: application/json
+REST methods never throw on HTTP or projection errors; they return a union `Result`:
 
-{"id": "{{id}}"}
-"""
-```
-
-Если путь разрешается в список строк:
-
-```kdl
-@request response-path="chunks" response-join="\n" """
-GET /api/doc/{{id}} HTTP/1.1
-Host: example.com
-"""
-```
-
-## define для @request
-
-Длинный запрос можно вынести в `define`:
-
-```kdl
-define HNEWS-REQ="""
-GET /?p={{page-num}} HTTP/1.1
-Host: news.ycombinator.com
-Accept: text/html
-"""
-
-struct MainPage {
-    @request HNEWS-REQ
-    news { css-all ".athing"; text }
-}
-```
-
-Правило то же, что и для остальных скалярных define: это подстановка строки в аргумент.
-Placeholders (`{{...}}`) внутри работают как обычно.
-
-## Несколько struct с @request в одном файле
-
-Каждый `struct` независим. `@request` задаётся на уровне struct, не модуля:
-
-```kdl
-struct ListPage {
-    @request """
-    GET /catalogue/page-{{page-num}}.html HTTP/1.1
-    Host: books.toscrape.com
-    """
-    books { nested BookCard }
-}
-
-(list)struct BookCard {
-    @split-doc { css-all ".product_pod" }
-    title { css "h3 a"; attr "title" }
-}
-```
-
-`BookCard` не имеет `@request` — он получает HTML через `nested` из `ListPage`,
-а не по отдельному запросу.
-
-## Тип возврата для `(rest)struct`
-
->[!note] О swagger openapi
-> OpenAPI отличный стандарт, когда **автор API сам документирует свой
-> backend**: на входе известная схема, на выходе формальный контракт.
-> Reverse-engineering идёт в обратную сторону — на входе пара curl-запросов
-> из DevTools и пример JSON-ответа, и из этого нужен типизированный клиент.
-> Готового спека для скрапинг-таргета обычно нет, а писать его вручную —
-> лишний слой работы поверх тех же данных.
->
-> Поэтому реализован минимальный синтаксис, принимающий ровно то, что есть
-> после открытия Network-вкладки: raw HTTP / curl + json-схема ответа.
->
-> Если endpoint'ов десятки и нужен формальный контракт —
-> снимите трафик через [mitmproxy2swagger](https://github.com/alufers/mitmproxy2swagger)
-> и сгенерируйте клиент любым openapi-generator'ом
-> (опционально с LLM-помощью для разметки схем).
-
-REST-методы возвращают **Result-значение** вместо того чтобы бросать
-исключение. Это единообразно для всех target-языков (Python/JS/будущие Go,
-Rust) и сохраняет точную типизацию `@error`-схемы.
-
-### Форма Result
-
-| Вариант | Когда | Поля |
+| Variant | Condition | Fields (`is_ok` / `isOk` on all variants) |
 |---|---|---|
-| `Ok[T]` | HTTP 2xx | `is_ok=True`, `status`, `headers`, `value: T` |
-| `<Struct>Err<Status>[<Suffix>]` | объявленный `@error[:<suffix>] <status>` | `is_ok=False`, `status`, `headers`, `value: <Schema>Json` |
-| `UnknownErr` | статус вне списка `@error` (или все совпавшие правила не прошли проекцию) | `is_ok=False`, `status`, `headers`, `value: Any` (raw JSON или None) |
-| `TransportErr` | сеть/таймаут/DNS | `is_ok=False`, `status=0`, `headers={}`, `value=None`, `cause: str` |
+| `Ok[T]` | HTTP 2xx (and no `@error 200` matched) | `is_ok=True`, `status: int`, `headers: Mapping[str, str]`, `value: T` |
+| `<Struct>Err<Status>[<Suffix>]` | Matched `@error[:<suffix>]` | `is_ok=False`, `status: int`, `headers`, `value: <Schema>Json` |
+| `UnknownErr` (Rust `Unknown`) | Unmapped non-2xx or all matched `@error` rules failed projection | `is_ok=False`, `status: int`, `headers`, `value: Any` (raw JSON or `None`) |
+| `TransportErr` (Rust `Transport`) | Network / timeout / DNS exception | `is_ok=False`, `status=0`, `headers={}`, `value=None`, `cause: str` |
 
-Все варианты имеют одинаковую структуру с полями `is_ok`/`status`/`headers`
-/`value` — дизайн специально сделан портируемым на любой target.
+### Target Signatures & Runtime HTTP Delegation
 
-### Python
+| Target | CLI Command | Generated Method Signature |
+|---|---|---|
+| **Python** (`httpx`/`httpx2`/`requests`/`aiohttp`) | `ssc-gen generate python schema.kdl --http-client httpx [-L bs4] [--http-io both\|sync\|async] [-R] -o out/` | `@classmethod def <name>(cls, client, *, ..., **kwargs) -> <Method>Result` (+ `async_<name>`) |
+| **JavaScript** (`fetch`/`axios`) | `ssc-gen generate js schema.kdl --http-client fetch -o out/` | `static async <camelName>(client, params = {}, opts = {}) -> Promise<<Method>Result>` |
+| **Go** (`net/http` + `gjson`) | `ssc-gen generate go schema.kdl -o out/` | `func (<Struct>) <PascalName>(client *http.Client, ..., opts ...sscReqOpt) (*<Schema>Json, error)` |
+| **Rust** (`reqwest` + `serde`) | `ssc-gen generate rust schema.kdl --http-client reqwest -o out/` | `pub async fn <snake_name>(client: &reqwest::Client, ...) -> Result<<Schema>, <Struct>Error>` (+ `_with_opts`) |
 
-```python
-r = DummyJsonApi.get_product(session, id=1)
-if r.is_ok:
-    print(r.value["title"])          # value: ProductJson
-    print(r.headers.get("x-ratelimit-remaining"))
-elif isinstance(r, DummyJsonApiErr404):
-    print("not found:", r.value["message"])  # value: ApiErrorJson
-elif isinstance(r, TransportErr):
-    print("network failed:", r.cause)
-else:  # UnknownErr — напр. 503
-    print("unexpected status", r.status, r.value)
-```
-
-Метод **никогда не бросает** — все HTTP-, парсинг- и транспортные ошибки
-попадают в соответствующий Err-вариант.
-
-### JS/TS
-
-```js
-const r = await DummyJsonApi.getProduct(fetch, {id: 1});
-if (r.isOk) {
-    console.log(r.value.title);
-    console.log(r.headers['x-ratelimit-remaining']);
-} else if (r.status === 404) {
-    console.log('not found:', r.value.message);  // ApiErrorJson
-} else if (r.status === 0) {
-    console.log('transport:', r.cause);
-} else {
-    console.log('unknown', r.status, r.value);
-}
-```
-
-IDE narrow'ит через literal-поля `isOk: true/false` и `status: 404`.
-
-### Headers
-
-- Ключи всегда в lowercase (нормализуется на стороне клиента), значения — str.
-- Multi-value headers (напр. `Set-Cookie`) — last-wins. Для REST-API
-  крайне редкий случай.
-
-### Именование Err-подклассов
-
-```
-<PascalStructName>Err<Status>[<SuffixPascal> | <LeafKey1Pascal>[<LeafKey2Pascal>]]
-```
-
-- **Без суффикса** (`@error <status> <Schema> ...`): берутся листовые (последние нечисловые) сегменты dot-путей из первых **не более чем 2** ключей (`required_keys` затем `conditions`):
-  - `@error 404 ApiError` в struct `DummyJsonApi` → `DummyJsonApiErr404`
-  - `@error 200 ApiError error_code=#true` → `DummyJsonApiErr200ErrorCode`
-  - `@error 404 ApiError "data.response.errors.0.detail"` → `DummyJsonApiErr404Detail`
-  - `@error 400 ApiError "a.b.first" "c.d.second" third="x"` → `DummyJsonApiErr400FirstSecond`
-- **Явный суффикс** (`@error:<suffix> <status> <Schema> ...`, где `<suffix>` соответствует `^[A-Za-z_][A-Za-z0-9_-]*$`, иначе `E002`): генерирует `<PascalStructName>Err<Status><PascalSuffix>` (в Rust `Err<Status><PascalSuffix>`):
-  - `@error:not-found 404 ResponseError error="Ничего не найдено"` в `AnimeVostAPI` → `AnimeVostAPIErr404NotFound`
-- **Коллизии имён (`E400`)**: если два `@error` в одном `(rest)struct` дают одинаковое имя варианта, линтер выдаёт `E400` с подсказкой указать `@error:<name>`.
-
-### Field-conditions и безопасный fallthrough
-
-`@error[:<suffix>]` поддерживает два режима проверки тела ответа:
-
-1. **Наличие ключа / dot-пути** (позиционные аргументы после SchemaName):
-```kdl
-@error 404 ApiError error "detail.code"
-```
-Сработает при status=404 И `_body` содержит ключ `error` и вложенный путь `detail.code` (поддерживается во всех 4 таргетах).
-
-2. **Равенство значения** (KDL-свойства):
-```kdl
-@error 200 ActionResponse success=#false
-```
-Сработает при status=200 И `_body.success == False`.
-
-3. **Комбинация** обоих режимов:
-```kdl
-@error 404 ApiError error detail="msg"
-```
-Сработает при status=404 И `'error' in _body` И `_body.detail == "msg"`.
-
-Один и тот же ключ нельзя указать одновременно как позиционный аргумент
-и как свойство — линтер выдаст ошибку (`E400`).
-
-**Безопасный рантайм-fallthrough**: правила проверяются в порядке объявления. Если статус и условия совпали, но тело ответа не является JSON-объектом/массивом или не проходит проекцию/десериализацию в `<SchemaName>`, матчер не выбрасывает исключение, а переходит к следующему правилу `@error` (и далее к `UnknownErr` / `Unknown` для не-2xx статусов).
-
-Пример corner case: API возвращает 200 для успеха и ошибки:
-```kdl
-json ActionResponse {
-    success bool
-    message str
-}
-
-(rest)struct Api {
-    @request response=Product """
-    GET /items/{{id:int}} HTTP/1.1
-    Host: api.example.com
-    """
-
-    // 200 с success=#false — ошибка
-    @error 200 ActionResponse success=#false
-}
-```
-
-Генерируемый список матчеров (`_ERR_MATCHERS` + `ssc_dispatch_err`):
-```python
-_ERR_MATCHERS: Tuple[ErrMatcher, ...] = (
-    ErrMatcher(
-        status=200,
-        check=lambda _b: _b.get('success') == False,
-        factory=lambda headers, value: ApiErr200Success(
-            headers=headers,
-            value=_project_action_response(value),
-        ),
-    ),
-)
-```
-Если `value` не является `dict`/`list` или `_project_action_response(value)` выбрасывает `SscJsonError`, `ErrMatcher.match` перехватывает ошибку и возвращает `None`, переходя к следующему правилу в `_ERR_MATCHERS`.
-
-### Делегирование HTTP-запросов в рантайм (Runtime HTTP Delegation)
-
-Сгенерированные методы `@request` (`MethodRest` и `MethodFetch`) во всех четырёх таргетах состоят из сигнатуры, нормализованного через `cleandoc` докстринга и одного `return`-вызова рантайм-хелпера:
-- **Python**: `ssc_rest_call` / `ssc_rest_call_async`, `ssc_fetch` / `ssc_fetch_async` и `ssc_merge_kwargs`.
-- **JavaScript**: `sscRestCall` / `sscRestCallAxios`, `sscFetch` / `sscFetchAxios`, `sscPrepareReq` и `sscBuildParams`.
-- **Go**: `sscRestCallValue[T]`, `sscRestCallSlice[T]`, `sscRestCallVoid` и `sscFetchHTML` в `sscgen_runtime.go`.
-- **Rust**: `rt::rest_call`, `rt::rest_call_void` и `rt::fetch_html` в `sscgen_runtime.rs`.
-
-Рантайм-хелперы автоматически:
-1. Отфильтровывают `None` / `null` / `undefined` значения опциональных плейсхолдеров (`?`) из `params`, `headers` и `cookies`.
-2. Сохраняют `None` / `null` внутри JSON-тела запроса (`"key": null`).
-3. Выполняют поверхностное слияние (`shallow merge`) пользовательских `**kwargs` / `opts` / `sscReqOpt` поверх словарей `headers`, `params`, `cookies` из схемы.
-4. Извлекают `response-path` / `response-join` и проецируют ответ через функцию-проектор схемы (`_project_<schema>` / `_project<Schema>`).
-
-## Что @request не делает
-
-- Не управляет пагинацией — это задача вызывающего кода.
-- Не задаёт ретраи, таймауты, куки сессии — конфигурируйте клиент снаружи.
-- Не привязывает модуль к конкретному HTTP-клиенту на уровне импортов.
-  Импорты в generated module минимальны.
+Runtime helpers (`ssc_rest_call`, `sscRestCall`, `sscRestCallValue[T]`, `rt::rest_call`) automatically:
+1. Omit optional placeholders (`?`) set to `None`/`null`/`undefined` from `params`, `headers`, and `cookies`.
+2. Preserve `None`/`null` inside JSON request bodies as `"key": null`.
+3. Shallow-merge per-call `**kwargs` / `opts` / `sscReqOpt` / `SscRequestOpts` over schema defaults without mutating the client.
+4. Without `--http-client` in Python/JS, `@request` methods are not emitted.

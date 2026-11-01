@@ -1,228 +1,47 @@
-# REST DSL — Quick Reference
+# REST Linter Diagnostics & CLI Cheat Sheet (DSL v2.1)
 
-## `json` field modifiers
-
-| Declaration | Meaning | Py | Go | JS |
-|---|---|---|---|---|
-| `name str` | required | `str` | `string` | `string` |
-| `name str?` | nullable (value may be `null`) | `Optional[str]` | `*string` | `string\|null` |
-| `name str @omitempty` | key may be absent | `NotRequired[str]` | `*string` + `,omitempty` | `string (OMITEMPTY)` |
-| `name str? @omitempty` | nullable AND may be absent | `NotRequired[Optional[str]]` | `*string` + `,omitempty` | `string\|null (OMITEMPTY)` |
-| `name (array)str` | array | `List[str]` | `[]string` | `Array<string>` |
-| `name str @skip` | parsed, dropped from output types | — | — | — |
-| `name @skip` | type defaults to `str`, dropped from output | — | — | — |
-
-Combine freely: `inner Inner? @omitempty @skip` is valid (parsed-and-discarded).
-
-## `@request` body — two interchangeable formats
-
-Both produce identical generated code. Pick whichever you have at hand.
-
-| Raw HTTP | POSIX curl |
-|---|---|
-| `GET /users/{{id:int}} HTTP/1.1`<br>`Host: api.example.com` | `curl 'https://api.example.com/users/{{id:int}}'` |
-
-Curl is especially convenient for **DevTools → Network → Copy as cURL (POSIX)**
-paste-ins. Supported flags: `-X/--request`, `-H/--header`, `-d/--data/--data-raw`,
-`--json`, `-u/--user`, `-F/--form`, `--data-urlencode`, `--compressed` (ignored).
-Unsupported flags raise a parse error — strip them or rewrite as raw HTTP.
-
-## `(rest)struct` — minimal vs full
-
-### Minimal (single endpoint, no errors)
-
-Raw HTTP form:
-```kdl
-json User { id int; name str }
-
-(rest)struct Api {
-    @request response=User """
-    GET /users/{{id:int}} HTTP/1.1
-    Host: api.example.com
-    """
-}
-```
-
-Equivalent curl form:
-```kdl
-(rest)struct Api {
-    @request response=User """
-    curl 'https://api.example.com/users/{{id:int}}'
-    """
-}
-```
-Both generate `Api.fetch(client, *, id: int) -> Ok[UserJson] | UnknownErr | TransportErr`.
-
-### Full (multiple endpoints + errors + envelope unwrap)
-```kdl
-json User { id int; name str }
-json UserList { users (array)User; total int }
-json ApiError { message str }
-
-(rest)struct Api {
-    @doc "Users API — CRUD + pagination."
-
-    @request name=get-user \
-        response=User \
-        doc="Fetch one user." \
-        """
-    GET /users/{{id:int}} HTTP/1.1
-    Host: api.example.com
-    Accept: application/json
-    """
-
-    @request name=list-users \
-        response=UserList \
-        doc="Paginated." \
-        """
-    GET /users?limit={{limit:int?}}&skip={{skip:int?}} HTTP/1.1
-    Host: api.example.com
-    Accept: application/json
-    """
-
-    @error 404 ApiError
-    @error 500 ApiError
-}
-```
-
----
-
-## Typed placeholders — full matrix
-
-Syntax: `{{ NAME [:TYPE] [[]] [?] [|STYLE] }}`
-
-- `NAME`  — `[A-Za-z][A-Za-z0-9_-]*`. `-` auto-converts (`page-num` → `page_num` / `pageNum`).
-- `TYPE`  — `str | int | float | bool`. Default: `str`.
-- `[]`    — array. Forbidden in URL path.
-- `?`     — optional (generates `T | None = None`). Forbidden in URL path.
-- `|STYLE`— `repeat | csv | bracket | pipe | space`. Requires `[]`. Default: `repeat`.
-
-| Placeholder | Python signature | Sample URL |
-|---|---|---|
-| `{{id}}` | `id: str` | `.../{id}` |
-| `{{id:int}}` | `id: int` | `.../{id}` |
-| `{{flag:bool}}` | `flag: bool` | `?flag=true` |
-| `{{q:str?}}` | `q: str \| None = None` | omitted if `None` |
-| `{{page:int?}}` | `page: int \| None = None` | omitted if `None` |
-| `{{tags:int[]}}` | `tags: list[int]` | `?tags=1&tags=2` |
-| `{{tags:int[]\|csv}}` | `tags: list[int]` | `?tags=1,2` |
-| `{{tags:int[]?\|csv}}` | `tags: list[int] \| None = None` | `?tags=1,2` or omitted |
-| `{{tags:str[]\|bracket}}` | `tags: list[str]` | `?tags[]=a&tags[]=b` |
-| `{{tags:str[]\|pipe}}` | `tags: list[str]` | `?tags=a\|b` |
-| `{{tags:str[]\|space}}` | `tags: list[str]` | `?tags=a%20b` |
-
-Parameter ordering in generated method:
-- positional: `client` only
-- keyword-only: required first, optional (`?`) last (PEP 3102 keyword-only).
-
-Reuse rule: if the same `NAME` appears multiple times in one `@request`, every
-occurrence must repeat the **identical full spec** (`{{id:int}}` and `{{id:int}}`,
-not `{{id}}` and `{{id:int}}`).
-
----
-
-## `@error` syntax and naming
-
-Class/typedef name: `<PascalStruct>Err<Status>[<SuffixPascal> | <LeafKey1Pascal>[<LeafKey2Pascal>]]`.
-
-### Syntax
-
-```
-@error[:<suffix>] <status:int> <SchemaName> [keys...] [key=value ...]
-```
-
-- Optional `:<suffix>` (`^[A-Za-z_][A-Za-z0-9_-]*$`, `E002` if invalid) → explicit variant suffix `<PascalStruct>Err<Status><PascalSuffix>`
-- Without `:<suffix>` → auto-named from the leaf non-numeric segment of at most the first **2** keys (`required_keys` then `conditions`); collisions in the same struct emit `E400`
-- Positional args after SchemaName → key or nested dot-path **presence** check (`'key' in _body` / dot-path traversal across all 4 targets)
-- KDL properties → value **equality** check (`_body.get('key') == value` / dot-path traversal)
-- Both can be mixed; same key in both is a lint error (`E400`).
-- Safe runtime fallthrough: if `<SchemaName>` projection/deserialization fails (or body is non-JSON), the matcher falls through to the next `@error` rule before falling back to `UnknownErr` / `Unknown`.
-
-### Examples
-
-| `@error` declaration in `struct DummyJsonApi` | Mode | Generated class |
-|---|---|---|
-| `@error 404 ApiError` | status-only | `DummyJsonApiErr404` |
-| `@error 500 ApiError` | status-only | `DummyJsonApiErr500` |
-| `@error 404 ApiError error` | key presence | `DummyJsonApiErr404Error` |
-| `@error 404 ApiError "data.errors.0.detail"` | dot-path key presence (leaf segment) | `DummyJsonApiErr404Detail` |
-| `@error 200 ApiError error_code=#true` | value equality | `DummyJsonApiErr200ErrorCode` |
-| `@error 404 ApiError error detail="msg"` | mixed | `DummyJsonApiErr404ErrorDetail` |
-| `@error 400 ApiError a b c="1"` | 3+ keys (capped at 2 leaves) | `DummyJsonApiErr400AB` |
-| `@error:not-found 404 ApiError error="missing"` | explicit `:suffix` | `DummyJsonApiErr404NotFound` |
-
-Universal variants (always emitted):
-- `Ok[T]` — generic 2xx wrapper, `value: T`
-- `UnknownErr` — undocumented status, `value: Any` (raw JSON or None)
-- `TransportErr` — network/timeout/DNS, `status=0`, `value=None`, `cause: str`
-
-Method return type:
-```
-Ok[<ResponseSchema>Json] | <Struct>Err<N1> | <Struct>Err<N2> | ... | UnknownErr | TransportErr
-```
-
----
-
-## Result variant fields
-
-All variants share the same shape (portable across Python / JS / future Go-Rust):
-
-| Field | Type | Ok | typed `<Struct>Err<N>` | UnknownErr | TransportErr |
-|---|---|---|---|---|---|
-| `is_ok` / `isOk` | bool | `True` | `False` | `False` | `False` |
-| `status` | int | 2xx | declared status | the actual status | `0` |
-| `headers` | `Mapping[str,str]` (lowercased) | yes | yes | yes | `{}` |
-| `value` | `T` / `<Schema>Json` / `Any` / `None` | response | parsed error body | raw body | `None` |
-| `cause` | str | — | — | — | repr of exception |
-
-Header keys are always lowercase. Multi-value headers (e.g. `Set-Cookie`) are
-last-wins — rare for REST APIs.
-
-### Python usage
-```python
-r = Api.get_user(session, id=1)
-if r.is_ok:
-    print(r.value["name"])
-elif isinstance(r, ApiErr404):
-    print("not found:", r.value["message"])
-elif isinstance(r, TransportErr):
-    print("network:", r.cause)
-else:  # UnknownErr — e.g. 503
-    print("unknown", r.status, r.value)
-```
-
-### JS usage
-```js
-const r = await Api.getUser(fetch, {id: 1});
-if (r.isOk)            console.log(r.value.name);
-else if (r.status === 404) console.log('nf:', r.value.message);
-else if (r.status === 0)   console.log('transport:', r.cause);
-else                       console.log('unknown', r.status, r.value);
-```
-
----
-
-## CLI reference
+## 1. CLI Commands
 
 ```bash
-# lint (always run after every edit)
-ssc-gen check schema.kdl                  # text output (validates all 4 targets)
-ssc-gen check schema.kdl -f json          # JSON for automated fixing
-ssc-gen check schema.kdl -t python        # target-specific symbol check
+# Check CLI version (ALWAYS use subcommand `version`, NEVER `--version`)
+ssc-gen version
 
-# generate code
-ssc-gen generate python schema.kdl -L bs4 --http-client httpx -o out/  # sync + async_fetch
+# Bootstrap hierarchical inline json schema from a sample JSON file
+ssc-gen json-to-kdl sample.json -o schema.kdl --name ResponseName --force
+
+# Lint schema (validates KDL 2.0 syntax, types, imports & reserved words across all 4 targets)
+ssc-gen check schema.kdl -f json
+ssc-gen check schema.kdl -t python
+
+# Generate typed HTTP client code
+ssc-gen generate python schema.kdl -L bs4 --http-client httpx -o out/
 ssc-gen generate python schema.kdl -L bs4 --http-client httpx2 --http-io async -R -o out/
 ssc-gen generate js     schema.kdl --http-client fetch -o out/
 ssc-gen generate js     schema.kdl --http-client axios -o out/
-ssc-gen generate go     schema.kdl -o out/                             # schema.go + sscgen_runtime.go
-ssc-gen generate rust   schema.kdl --http-client reqwest -o out/       # schema.rs + sscgen_runtime.rs
+ssc-gen generate go     schema.kdl -o out/
+ssc-gen generate rust   schema.kdl --http-client reqwest -o out/
 ```
 
-Languages: `python`, `js`, `go`, `rust`.
-Python libs (`-L`): `bs4` (default, `--bs4-parser lxml|html.parser|html5lib`) | `lxml` | `parsel` | `slax`.
-HTTP clients: Python — `httpx` (default, `httpx2` fallback import) | `httpx2` | `aiohttp` (async only) | `requests`; JS — `fetch` (default) | `axios`; Go — `net/http` (built-in); Rust — `reqwest` (default).
-Python `--http-io`: `both` (default) | `sync` | `async`. Python `-R` / `--separate-runtime` extracts runtime helpers into `sscgen_runtime.py`.
+---
 
-Without `--http-client` in Python/JS the generator silently ignores `@request` — the resulting
-file will not contain any HTTP methods.
+## 2. Canonical Linter `ErrorCode` Fixes (`ssc-gen check -f json`)
+
+| Code | Name | Common Cause in REST Schemas | Canonical Fix |
+|---|---|---|---|
+| `E000` | `SYNTAX_ERROR` | Unquoted string, `true`/`null` without `#`, unclosed `{`, or `//` comment immediately after `\` continuation | Quote strings, use `#true`/`#false`/`#null`, remove `//` comments after `\` |
+| `E001` | `INVALID_ARGUMENT_COUNT` | Missing `response` / status / schema arg, empty `{}` in inline block or `@value`, anonymous `field (array) { ... }`, colliding inline model name, or `response-join` on `(rest)struct` | Name array item model `field (array)ItemModel { ... }`; remove `response-join` from `(rest)struct`; populate or remove empty `{}` |
+| `E002` | `INVALID_ARGUMENT_VALUE` | HTTP status outside `100..599`, `[]`/`?` in URL path placeholder, `\|style` without `[]`, uppercase `{{NAME}}` in `@request` literal, `@skip` on inline/`@value` block, or invalid `@error:<suffix>` | Use lowercase runtime placeholders (`{{id:int}}`); compose `{{UPPER_NAME}}` in a `define` first; move `[]`/`?` to query string; use valid ASCII `:suffix` |
+| `E003` | `INVALID_IMPORT` | Empty `import` block, missing `(kind)` tag (`(json)`, `(struct)`, `(define)`), missing file, or circular import | Use `import "./shared.kdl" { (json)ModelName; (define)CONST-NAME }` |
+| `E040` | `MALFORMED_DOTPATH` | Leading/trailing `.`, `..`, negative index, `*`, or `#[...]` filter in `from="..."` | Use valid GJSON path (`a.b.0.c`, `#"a\.b"#`, `items.#`, `tags.#.name`) |
+| `E041` | `DUPLICATE_JSON_KEY` | Duplicate field name or duplicate wire key (`from=`) in the same `json` schema | Rename duplicate field or disambiguate `from="..."` wire paths |
+| `E200` | `UNKNOWN_NODE` | Unrecognized top-level declaration or directive | Use valid top-level `json`, `(array)json`, `(dict)json`, `define`, `import`, `(rest)struct` |
+| `E203` | `DISALLOWED_DIRECTIVE` | Regular field, `@init`, or HTML op inside `(rest)struct` (often caused by broken `\` continuation in `@request`) | Keep only `@doc`, `@request`, `@error[:<suffix>]` in `(rest)struct`; check `\` continuations |
+| `E300` | `UNDEFINED_SYMBOL` | `response=<Schema>`, `@error <status> <Schema>`, or `json` field references an undeclared schema or forms a cycle | Declare the referenced `json` schema or import it |
+| `E302` | `INVALID_DECLARATION_ORDER` | Top-level `json` schema references another top-level `json` schema declared below it | Move shared/referenced `json` schemas **above** their callers (or inline single-use schemas) |
+| `E400` | `INVALID_TYPE_DECLARATION` | Duplicate resolved `@error` variant names in the same `(rest)struct`, or same key in `@error` positional args and properties | Disambiguate with explicit `@error:<suffix> <status> <Schema>`; use each condition key once |
+| `E401` | `MISSING_REQUIRED_FIELD` | `(rest)struct` has no `@request` block | Add at least one `@request` directive |
+| `E402` | `DUPLICATE_DECLARATION` | Duplicate symbol/field/`@request name=`, or conflicting specs for the same placeholder in one `@request` | Rename colliding symbols/methods; use identical spec for repeated `{{param:type}}` |
+| `E403` | `INVALID_IDENTIFIER` | `json` field name has `-` (`kebab-case`), trailing colon (`url: str`), `@`/`$`, or collides with a target reserved word (`from`, `type`, `class`, `in`) | Use a portable `snake_case` identifier + `from="wire-key"` (e.g. `sender str from="from"`) |
+| `W011` | `DEPRECATED_JSON_ALIAS` | Positional string alias `field str "wire_key"` | Replace with `field str from="wire_key"` |
+| `W040` | `WHITESPACE_IN_PATH` | Leading/trailing spaces in `from=" ... "` | Strip accidental whitespace in `from="..."` |
+| `W041` | `PATH_SYNONYM_IN_JSON` | `path="..."` used on a `json` field | Replace `path="..."` with `from="..."` |

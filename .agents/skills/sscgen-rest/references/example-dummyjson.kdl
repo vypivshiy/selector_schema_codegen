@@ -10,6 +10,11 @@ json Product {
     brand str?
     sku str
     thumbnail str
+    dimensions @omitempty {
+        width float
+        height float
+        depth float
+    }
 }
 
 json ProductList {

@@ -1,59 +1,25 @@
-# Linter Errors — Canonical Fix Mapping
+# Linter `ErrorCode` Reference & Fix Table (`ssc-gen check -f json`)
 
-Complete reference of `ssc-gen check` error messages, their cause, and the fix.
-The linter runs automatically before `generate`; `check` runs it standalone.
+Filter `"severity": "error"`, sort by line ascending, and fix top-to-bottom. Never return a `.kdl` file until `ssc-gen check` exits `0`.
 
-## Output formats
-
-### Text format
-```
-Error at line 12: type mismatch: expected STRING, got LIST_STRING
-Warning at line 8: 'fmt' template is missing the '{{}}' placeholder
-```
-→ Map line numbers to the current file, fix errors (warnings are optional).
-
-### JSON format
-```json
-[
-  { "line": 12, "col": 4, "level": "error", "message": "type mismatch: expected STRING, got LIST_STRING" },
-  { "line": 8,  "col": 1, "level": "warning", "message": "'fmt' template is missing the '{{}}' placeholder" }
-]
-```
-→ Filter `"level": "error"`, sort by line ascending, fix top-to-bottom (avoids line-number drift).
-
-## Common errors and fixes
-
-| Error message | Cause | Fix |
-|---------------|-------|-----|
-| `type mismatch: expected STRING, got LIST_STRING` | `css-all` feeds into op that needs single value | Switch to `css "selector:nth-of-type(N)"`, or use `first` / `last` after selector |
-| `type mismatch: expected DOCUMENT, got STRING` | Selector used after `text`/`attr` | Reorder — selector must come before extract ops |
-| `type mismatch: expected STRING, got INT` | e.g. `re` after `to-int` | Apply `re` before `to-int` |
-| `unknown operation '...'` | Unknown op name or typo | Check spelling against operations list |
-| `missing @split-doc` | `(list)struct` or `(dict)struct` without split | Add `@split-doc { css-all "..." }` |
-| `missing match{}` | `(table)struct` field has no predicate | Add `match { eq "key" }` as first statement in field |
-| `fallback value type mismatch` | `to-int` then `fallback "x"` | Use typed fallback: INT→`0`, FLOAT→`0.0`, BOOL→`#false`, any→`#null` |
-| `filter requires list type` | `filter` used on scalar | Use `assert` instead, or ensure pipeline produces LIST_* |
-| `match must be first operation` | `match {}` not at start of table field | Move `match { ... }` to first position |
-| `'re' must have exactly 1 capture group` | Regex has 0 or 2+ groups | Ensure pattern has exactly one `(...)` group |
-| `'re-all' must have exactly 1 capture group` | re-all pattern has 0 or 2+ groups | Add exactly one `(...)` group; use `(?:...)` for grouping without capturing |
-| `'fmt' template missing '{{}}' placeholder` | fmt value lacks `{{}}` | Add `{{}}` where the value should be inserted |
-| `invalid 'raw' mode '...' — expected 'outer' or 'inner'` | Typo or non-keyword arg after `raw` | Use bare `raw`, `raw outer`, or `raw inner` |
-| `'raw' accepts at most 1 argument` | Multiple args after `raw` | Remove extra args: `raw` / `raw outer` / `raw inner` |
-| `E403: invalid json field name '...'` | Non-portable `json` field name (e.g. `url: str` with colon or `@context str`) or target reserved word | Use space-separated portable identifier (`url str`) and map special wire keys via `from="@context"` |
-| `E040: malformed GJSON path '...'` | Invalid `from="..."` or `jsonify path="..."` (empty segment `a..b`, leading/trailing `.`, negative index, or `#[...]` filter) | Use valid GJSON path subset: keys (`a.b`), escaped literal dots (`os\.version`), non-negative indices (`0`), array count (`items.#`), or array projection (`tags.#.name`) |
-| `E400: duplicate @error variant name '<Name>' in struct '<Struct>'` | Two `@error` rules in the same `(rest)struct` resolve to the same generated variant class name | Disambiguate colliding `@error` declarations using an explicit suffix: `@error:<name> <status> <Schema> ...` |
-| `E002: invalid @error suffix '...'` | Empty or non-identifier suffix after `@error:` (e.g. `@error: 404 Err` or `@error:123bad 404 Err`) | Use a valid ASCII identifier (`^[A-Za-z_][A-Za-z0-9_-]*$`): `@error:<name> <status> <Schema>` |
-
-## Iterative lint algorithm
-
-```
-1. Write/update the .kdl file
-2. Run: ssc-gen check -f json <file>
-3. If output is empty / exit 0 → DONE
-4. If errors present → fix all errors → go to step 2
-5. Repeat until no errors remain
-```
-
-**Never present the .kdl to the user until the linter reports zero errors.**
-If after 5 iterations errors persist in the same location, explain the issue to
-the user and ask for clarification.
+| Code | Name | Cause | Canonical Fix |
+|---|---|---|---|
+| `E000` | `SYNTAX_ERROR` | Invalid KDL 2.0 syntax (unquoted strings, `true`/`null` without `#`, unclosed `{`, or `//` comment breaking `\` line continuation) | Quote strings, use `#true`/`#false`/`#null`, and remove `//` comments after `\` |
+| `E001` | `INVALID_ARGUMENT_COUNT` | Wrong positional arg count on op/directive, empty `{}` in selector/predicates/`@value`, anonymous `field (array) { ... }`, or missing `match` at start of `(table)struct` field | Supply required args; separate same-line ops with `;`; name item model in `(array)ItemModel { ... }`; start `(table)struct` fields with `match { ... }` |
+| `E002` | `INVALID_ARGUMENT_VALUE` | `re`/`re-all` lacks 1 capture group, invalid CSS/XPath, `fmt` missing `{{}}`, invalid `raw` mode, `[]`/`?` in URL path placeholder, uppercase `{{NAME}}` in `@request` literal, or invalid `define` name | Add exactly one `(...)` group to `re`/`re-all` (use `(?:...)` for non-capturing); include `{{}}` in `fmt`; use `UPPER_CASE` for `define` |
+| `E003` | `INVALID_IMPORT` | Empty `import` block, missing `(kind)` tag, missing file, duplicate import path, or circular import | Prefix every imported symbol with `(struct)`, `(json)`, `(define)`, `(extension)`, or `(fn)` |
+| `E040` | `MALFORMED_DOTPATH` | Leading/trailing `.`, `..`, negative index, `*`, or `#[...]` filter in `from="..."` or `jsonify path="..."` | Use valid GJSON path (`a.b.0.c`, `#"a\.b"#`, `items.#`, `tags.#.name`) |
+| `E041` | `DUPLICATE_JSON_KEY` | Duplicate field name or duplicate wire key (`from=`) in the same `json` schema | Rename duplicate field or disambiguate `from="..."` wire paths |
+| `E100` | `TYPE_MISMATCH` | Op input incompatible with previous step (`css-all` into scalar op without extract, `trim` on `DOC`, `re` after `to-int`), `@check` not ending in `BOOL`, or `fallback` literal mismatch | Add `text`/`attr` after `css`/`css-all`; use `css` or `first`/`last` when scalar needed; match `fallback` literal to pipeline type (or `#null` / `{}`) |
+| `E200` | `UNKNOWN_NODE` | Unrecognized top-level declaration, pipeline op (e.g. non-existent `transform`), or predicate | Use valid DSL keywords or prefix custom extension calls with `!Namespace.op` |
+| `E203` | `DISALLOWED_DIRECTIVE` | HTML op inside `(raw)struct`/`(raw)fn`, struct directive inside `fn`, regular field in `(dict)struct`, `has-attr`/`css` inside `match {}`, or `len-*`/`gt`/`re-any` outside `assert {}` | Use only string/regex ops in `(raw)`; keep `match {}` to string predicates (`eq`, `starts`, `contains`, `re`); keep `len-*`/`gt`/`re-any` inside `assert {}` |
+| `E300` | `UNDEFINED_SYMBOL` | Reference to undeclared `struct`, `json`, `define`, `!Namespace.op`, or circular reference | Declare the referenced symbol or import it |
+| `E301` | `UNDEFINED_INIT_FIELD` | `@<name>` references a field not declared in the struct's `@init` block | Declare `<name> { ... }` inside `@init { ... }` |
+| `E302` | `INVALID_DECLARATION_ORDER` | Local `struct` or `json` referenced via `nested`, `jsonify`, or schema field before its declaration | Move helper `json` and `struct` definitions **above** the caller |
+| `E400` | `INVALID_TYPE_DECLARATION` | Invalid struct/json/fn type annotation, invalid `extension` `sig`, or colliding `@error` variants | Use valid `(item\|list\|dict\|table\|flat\|rest\|raw)struct` or `(raw)fn` |
+| `E401` | `MISSING_REQUIRED_FIELD` | Missing `@split-doc` (`list`), `@split-doc`+`@key`+`@value` (`dict`), or `@table`+`@rows`+`@match`+`@value` (`table`) | Add all required structural directives for the struct kind |
+| `E402` | `DUPLICATE_DECLARATION` | Duplicate top-level symbol, field, `@init`, `@check`, or case-folded target collision | Rename colliding symbols or fields |
+| `E403` | `INVALID_IDENTIFIER` | Symbol or `json` field name is not a valid portable identifier (`kebab-case` in `json`, `url: str`) or collides with a target reserved word (`from`, `type`, `class`) | Rename identifier (for `json` fields, use `snake_case` + `from="wire-key"`) |
+| `W011` | `DEPRECATED_JSON_ALIAS` | Positional string alias on `json` field (`field str "wire_key"`) | Replace with `from="wire_key"` |
+| `W040` | `WHITESPACE_IN_PATH` | Leading/trailing whitespace in `from="..."` | Strip accidental spaces |
+| `W041` | `PATH_SYNONYM_IN_JSON` | `path="..."` used on a `json` field | Replace `path="..."` with `from="..."` (`path=` is for `jsonify`) |

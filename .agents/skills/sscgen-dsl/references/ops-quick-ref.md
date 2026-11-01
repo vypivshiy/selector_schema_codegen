@@ -1,397 +1,164 @@
-# KDL Operations — Quick Reference
+# KDL Operations, Patterns & Codegen Reference (DSL v2.1)
 
-> Scoped to the **sscgen-dsl** skill (HTML scraping + raw text). Operations banned by
-> skill constraints (`transform`, `css-remove`, `xpath`, `xpath-all`,
-> `xpath-remove`) are intentionally omitted. For critical inline rules
-> (regex capture-group requirement, predicate context matrix, `index` bug,
-> CSS4 opt-in rule) → see `../SKILL.md`.
+## 1. Unified `TypeInfo` Model
 
-> **Pipeline start type:** HTML structs start with `DOCUMENT` (DOM element).
-> `(raw)struct` starts with `STRING` — the document is already a string, so
-> any STRING op (`re`, `split`, `fmt`, etc.) can be the first operation.
-
-## Type System
-
-| Type | Description |
-|------|-------------|
-| `DOCUMENT` | HTML element node |
-| `LIST_DOCUMENT` | List of HTML nodes |
-| `STRING` | String value |
-| `LIST_STRING` | List of strings |
-| `INT` | Integer |
-| `LIST_INT` | List of integers |
-| `FLOAT` | Float |
-| `LIST_FLOAT` | List of floats |
-| `BOOL` | Boolean |
-| `OPT_STRING` | STRING \| null (via `fallback #null`) |
-| `OPT_INT` | INT \| null |
-| `OPT_FLOAT` | FLOAT \| null |
-| `NESTED` | Nested struct result (terminal) |
-| `JSON` | JSON deserialized result (terminal) |
-
-`NESTED` and `JSON` are terminal — pipeline ends after `nested`/`jsonify`.
-`fallback #null` converts `STRING`→`OPT_STRING`, `INT`→`OPT_INT`,
-`FLOAT`→`OPT_FLOAT`.
+- **Scalar Base Types**: `DOC` (`DOCUMENT`), `STR` (`STRING`), `INT` (64-bit), `FLOAT` (64-bit), `BOOL`, `NULL`, `NESTED` (terminal), `JSON` (terminal).
+- **Modifiers**: `T[]` (`is_array=True`), `T?` (`is_optional=True`, produced by `fallback #null` on `STR`/`INT`/`FLOAT` or `?` in `json`), `dict[K, V]` (in `json`).
+- **Pipeline Start Type**: `DOC` in HTML structs/`fn`; `STR` in `(raw)struct`/`(raw)fn`; or `TypeOf(name)` when starting with `@<name>`.
 
 ---
 
-## Operations
+## 2. Complete Pipeline Operations Reference
 
-Format: `| Operation | Accept | Return | Notes |`.
-String ops have **map semantics**: same op applied to each element of
-`LIST_STRING`, returning `LIST_STRING`.
-
-### Selectors
-
-| Operation | Accept | Return | Notes |
-|-----------|--------|--------|-------|
-| `css "sel"` | DOCUMENT | DOCUMENT | CSS3 selector; first match |
-| `css-all "sel"` | DOCUMENT | LIST_DOCUMENT | All matches |
-| `css { "q1"; "q2"; ... }` | DOCUMENT | DOCUMENT | Pattern-match: 2+ selectors, try in order, first non-empty wins |
-| `css-all { "q1"; "q2"; ... }` | DOCUMENT | LIST_DOCUMENT | Pattern-match form of `css-all` |
-| `css { "q1"\n"q2"\n... }` | DOCUMENT | DOCUMENT | Block form, newline-separated children also OK |
-
-Pattern-match rules:
-- Either single argument OR block children — never both.
-- Block requires **≥ 2 selectors**.
-- If all selectors return empty → behaves like a failed single selector
-  (error caught by `fallback` if present).
-
-### Extract
-
-| Operation | Accept | Return | Notes |
-|-----------|--------|--------|-------|
-| `text` | DOCUMENT | STRING | Direct text content |
-| `text` | LIST_DOCUMENT | LIST_STRING | Map over list |
-| `raw` | DOCUMENT | STRING | Outer HTML — element tag included (default) |
-| `raw outer` | DOCUMENT | STRING | Explicit outer HTML, same as bare `raw` |
-| `raw inner` | DOCUMENT | STRING | Inner HTML — children only, own tag excluded |
-| `raw` | LIST_DOCUMENT | LIST_STRING | Map over list (mode applies per element) |
-| `raw inner` | LIST_DOCUMENT | LIST_STRING | Map over list |
-| `attr "name"` | DOCUMENT | STRING | Single attribute; multi-value attrs like `class` joined with space |
-| `attr "name"` | LIST_DOCUMENT | LIST_STRING | Map over list |
-| `attr "n1" "n2" ...` | DOCUMENT | LIST_STRING | Multi-key: returns list, missing attrs skipped |
-| `attr "n1" "n2" ...` | LIST_DOCUMENT | LIST_STRING | Map over list |
-
-### String ops (STRING → STRING, LIST_STRING → LIST_STRING)
-
-| Operation | Notes |
-|-----------|-------|
-| `trim [chars]` | Whitespace (or `chars`) from both ends |
-| `ltrim [chars]` | Left side only |
-| `rtrim [chars]` | Right side only |
-| `normalize-space` | Collapse whitespace runs to single space, strip ends |
-| `lower` | ASCII lowercase |
-| `upper` | ASCII uppercase |
-| `rm-prefix "substr"` | Remove `substr` if at start |
-| `rm-suffix "substr"` | Remove `substr` if at end |
-| `rm-prefix-suffix "substr"` | Both ends, same `substr` |
-| `fmt "template"` | Substitute `{{}}` placeholder or define-name into template |
-| `unescape` | Decode HTML entities (`&amp;` → `&`, etc.) |
-| `split "sep"` | STRING → LIST_STRING (split by separator) |
-| `join "sep"` | LIST_STRING → STRING (join with separator) |
-
-`fmt` requires `{{}}` placeholder in template (or scalar define containing one).
-
-### Regex ops
-
-| Operation | Accept | Return | Notes |
-|-----------|--------|--------|-------|
-| `re #"(group)"#` | STRING | STRING | Extract first match of single capturing group |
-| `re #"(group)"#` | LIST_STRING | LIST_STRING | Map over list |
-| `re-all #"(group)"#` | STRING | LIST_STRING | All matches of single capturing group |
-| `re-sub #"pattern"# "replacement"` | STRING | STRING | Substitute all matches; no group requirement |
-| `re-sub #"pattern"# "replacement"` | LIST_STRING | LIST_STRING | Map over list |
-
-⚠️ **`re` / `re-all` require exactly one capturing group** — linter rejects
-0 or 2+ groups. Full regex rules (inline flags, no-match `SscRegexError`,
-multiline `(?xs)` patterns, predicate-vs-op duality) → `../SKILL.md`
-"Regex — critical rules".
-
-### Replacements
-
-| Operation | Accept | Return | Notes |
-|-----------|--------|--------|-------|
-| `repl "from" "to"` | STRING | STRING | Replace all occurrences of `from` with `to` |
-| `repl "from" "to"` | LIST_STRING | LIST_STRING | Map over list |
-| `repl { "f1" "t1"; "f2" "t2"; ... }` | STRING | STRING | Multiple replacements applied in order |
-| `repl { ... }` | LIST_STRING | LIST_STRING | Map over list |
-
-### Type conversions
-
-| Operation | Accept | Return | Notes |
-|-----------|--------|--------|-------|
-| `to-int` | STRING | INT | Parse integer |
-| `to-int` | LIST_STRING | LIST_INT | Map over list |
-| `to-float` | STRING | FLOAT | Parse float |
-| `to-float` | LIST_STRING | LIST_FLOAT | Map over list |
-| `to-bool` | any scalar | BOOL | Truthiness conversion |
-
-### Array ops
-
-| Operation | Accept | Return | Notes |
-|-----------|--------|--------|-------|
-| `first` | LIST_* | scalar | First element (alias for `index 0`) |
-| `last` | LIST_* | scalar | Last element (alias for `index -1`) |
-| `index N` | LIST_* | scalar | Nth element (0-based, negative from end) |
-| `slice N M` | LIST_* | LIST_* | Sublist from N (inclusive) to M (exclusive) |
-| `len` | LIST_* | INT | Element count |
-| `len` | STRING | INT | String length |
-| `unique` | LIST_STRING | LIST_STRING | Deduplicate preserving order |
-
-⚠️ **`css-all "..." ; index N` is unreliable for N > 0** — known ssc-gen bug
-where values beyond index 0 may silently fall back to the first element.
-Prefer `css "selector:nth-of-type(N)"`. Full note → `../SKILL.md` Constraints.
-
-### Structured
-
-| Operation | Accept | Return | Notes |
-|-----------|--------|--------|-------|
-| `nested StructName` | DOCUMENT | NESTED | Recurse into another struct; terminal |
-| `jsonify SchemaName [path="..."]` | STRING | JSON | Deserialize JSON into typed schema (`json`, `(array)json`, or `(dict)json`); terminal |
-
-`jsonify` `path` accepts the deterministic GJSON path subset (validated by `E040`):
-- `""` — apply schema to whole value
-- `"0"` — non-negative array index
-- `"field"` — object key (`"os\\.version"` escapes literal dot in key)
-- `"0.author"` — combined path selecting the JSON fragment passed to the target schema's projector
-- `"items.#"` — array length (`int`)
-- `"items.#.name"` — array element projection
-(Note: `jsonify <Schema> path="..."` always projects the selected JSON fragment through `<Schema>`'s projector — `<Schema>` must match the shape of the fragment at `path`).
-
-### Control
-
-| Operation | Accept | Return | Notes |
-|-----------|--------|--------|-------|
-| `fallback <val>` | any | same / OPT_* | Default value on error; `#null` makes type optional |
-| `fallback {}` | LIST_* | LIST_* | Empty list fallback |
-| `filter { pred... }` | LIST_* | LIST_* (same) | Drop elements not matching predicates (AND) |
-| `assert [msg] { pred... }` | any | same | Pass-through; raises `SscAssertionError` on failure |
-| `match { pred... }` | DOCUMENT | (table field) | Select table row by key match; **first op in table field only** |
-
-`assert` is caught by `fallback` when present. Implementation: `std_assert`
-in Python, `_stdAssert` in JS — not Python's `assert` keyword, survives
-`python -O`. Full assert guidance → `../SKILL.md` "Predicate context table".
+| Category | Signature (`InType -> OutType`) | Rules & Map Semantics |
+|---|---|---|
+| **Selectors** | `css "<q>" \| css { "<q1>"; "<q2>"; ... } : DOC -> DOC` | Block form requires $\ge 2$ queries (no positional arg); returns first match |
+| | `css-all "<q>" \| css-all { "<q1>"; "<q2>"; ... } : DOC -> DOC[]` | Block form ($\ge 2$ queries) returns first non-empty element list |
+| | `css-remove "<q>" : DOC -> DOC` | Mutates DOM in-place; single positional arg only |
+| | `xpath "<q>" \| xpath { "<q1>"; "<q2>"; ... } : DOC -> DOC` | Block form $\ge 2$ queries; forbidden in `slax` |
+| | `xpath-all "<q>" \| xpath-all { "<q1>"; "<q2>"; ... } : DOC -> DOC[]` | Block form $\ge 2$ queries; forbidden in `slax` |
+| | `xpath-remove "<q>" : DOC -> DOC` | Mutates DOM in-place; single arg only |
+| **Extract** | `text : DOC -> STR, DOC[] -> STR[]` | Element text content |
+| | `raw [outer\|inner] : DOC -> STR, DOC[] -> STR[]` | Default `outer` (includes element tag); `inner` extracts inner HTML only |
+| | `attr "<k>" : DOC -> STR, DOC[] -> STR[]` | Single attribute value |
+| | `attr "<k1>" "<k2>" ... : DOC -> STR[], DOC[] -> STR[]` | Multi-attribute extraction ($\ge 2$ args always returns `STR[]`) |
+| **String** *(map over `STR` & `STR[]`)* | `trim ["<chars>"] \| ltrim ["<chars>"] \| rtrim ["<chars>"] : STR -> STR, STR[] -> STR[]` | Strips whitespace or custom character set |
+| | `normalize-space : STR -> STR, STR[] -> STR[]` | Collapses whitespace runs to single space and trims |
+| | `fmt "<template>" : STR -> STR, STR[] -> STR[]` | Replaces `{{}}` placeholder with current string (or `{{DEFINE_NAME}}`) |
+| | `repl "<old>" "<new>" \| repl { "<k1>" "<v1>"; ... } : STR -> STR, STR[] -> STR[]` | Single replacement or ordered multi-pair replacement block |
+| | `lower \| upper \| unescape : STR -> STR, STR[] -> STR[]` | ASCII case conversion / HTML entity decoding |
+| | `rm-prefix "<s>" \| rm-suffix "<s>" \| rm-prefix-suffix "<s>" : STR -> STR, STR[] -> STR[]` | Strips literal prefix and/or suffix |
+| | `split "<sep>" : STR -> STR[]` | Scalar `STR` input only |
+| | `join "<sep>" : STR[] -> STR` | Array `STR[]` input only |
+| **Regex** | `re "<pattern>" : STR -> STR, STR[] -> STR[]` | Requires **exactly 1** capture group (`E002`). Raises `SscRegexError` on no-match (caught by `fallback`) |
+| | `re-all "<pattern>" : STR -> STR[]` | Scalar `STR` only; requires **exactly 1** capture group (`E002`) |
+| | `re-sub "<pattern>" "<repl>" : STR -> STR, STR[] -> STR[]` | Regex substitution (no capture group requirement) |
+| **Array** | `index <i:int> \| first \| last : T[] -> T` | Supports negative indices (`first` = `0`, `last` = `-1`) |
+| | `slice <start:int> <end:int> : T[] -> T[]` | Sub-list slice; supports negative bounds |
+| | `len : T[] \| STR -> INT` | Array or string length |
+| | `unique [keep-order=#true] : STR[] -> STR[]` | Deduplicates string list |
+| **Conversions** | `to-int : STR -> INT, STR[] -> INT[]` | 64-bit integer |
+| | `to-float : STR -> FLOAT, STR[] -> FLOAT[]` | 64-bit float |
+| | `to-bool : Any -> BOOL` | Scalar truthiness (mandatory in `@check`) |
+| **Structured** | `nested <StructName> : DOC -> NESTED, DOC[] -> NESTED[], STR -> NESTED` | Terminal op. Target must be declared above caller (`E302`). `STR` input valid only when target is `(raw)struct` |
+| | `jsonify <SchemaName> [path="<gjson>"] : STR -> JSON, STR[] -> JSON[]` | Terminal op. Projects JSON via `<SchemaName>` (declared above caller, `E302`) |
+| **Control** | `filter { <predicates> } : T[] -> T[]` | Retains elements matching all predicates (implicit `AND`) |
+| | `assert ["<msg>"] { <predicates> } : T -> T` | Raises `SscAssertionError` on failure (survives `python -O`; caught by `fallback`) |
+| | `match { <predicates> } : DOC -> STR` | **Must be first op** in `(table)struct` fields (`E203`) |
+| | `fallback <literal \| #null \| {}> : T -> T \| T?` | **Must be last op**. `#null` marks scalar `STR`/`INT`/`FLOAT` optional (`T?`); `{}` requires `T[]` |
+| | `@<name> : -> TypeOf(name)` | **Must be first op**; reads cached `@init` field (`E301` if undeclared) |
+| | `!<Namespace>.<op> : sig In -> Out` | Invokes typed user extension (`E300` if unknown, `E100` on type mismatch) |
 
 ---
 
-## Predicates
+## 3. Structural Recipes (`(raw)struct`, Non-Table `(table)struct`, `json_signals`)
 
-Used inside `filter { }`, `assert { }`, `match { }`. Multiple predicates
-inside one container combine with **AND**. Use `not` / `and` / `or` for
-explicit grouping.
-
-> **Predicate context matrix** (which predicates are valid in `match` vs
-> `filter` vs `assert`) lives in `../SKILL.md` — included there because
-> wrong-context usage is a common `E000` pitfall. The list below is the
-> full predicate inventory without context restrictions.
-
-### String predicates
-
-```
-eq "val" [val2 ...]              ne "val" [val2 ...]
-starts "val" [val2 ...]          ends "val" [val2 ...]
-contains "val" [val2 ...]        in "val" [val2 ...]
-re #"pattern"#
-```
-
-Multi-argument forms (`eq "a" "b"`) test against **any** of the values (OR semantics).
-
-### Attribute predicates
-
-```
-has-attr "name" [name2 ...]
-attr-eq "name" "val" [val2 ...]
-attr-ne "name" "val" [val2 ...]
-attr-starts "name" "val" [val2 ...]
-attr-ends "name" "val" [val2 ...]
-attr-contains "name" "val" [val2 ...]
-attr-re "name" #"pattern"#
-```
-
-### Text predicates
-
-```
-text-starts "val" [val2 ...]
-text-ends "val" [val2 ...]
-text-contains "val" [val2 ...]
-text-re #"pattern"#
-```
-
-### Element predicates
-
-```
-css ".selector"                   (element has child matching CSS)
-```
-
-### Numeric predicates (assert only)
-
-```
-gt N    lt N    ge N    le N
-```
-
-### Length predicates (assert only)
-
-```
-len-eq N [N2 ...]                 len-ne N [N2 ...]
-len-gt N                          len-lt N
-len-ge N                          len-le N
-len-range MIN MAX
-```
-
-All arguments must be non-negative integers.
-
-### Regex predicates (assert only)
-
-```
-re-any #"pattern"#                (at least one list element matches)
-re-all #"pattern"#                (all list elements match)
-```
-
-### Logic containers
-
-```
-not { ... }                       negation
-and { ... }                       conjunction
-or { ... }                        disjunction
-```
-
----
-
-## Struct Special Fields
-
-| Field | Used in | Purpose |
-|-------|---------|---------|
-| `@doc "..."` | all | Documentation string |
-| `@split-doc { ... }` | list, dict | Split document into items |
-| `@pre-validate { ... }` | all | Assert before parsing |
-| `@check <name> { ... }` | all | Boolean check method; pipeline must contain `to-bool` |
-| `@init { ... }` | all | Pre-compute values once, reference via `@name` in fields |
-| `@table { ... }` | table | Select the table element |
-| `@rows { ... }` | table | Select rows |
-| `@match { ... }` | table | Pipeline for key extraction |
-| `@value { ... }` | table, dict | Pipeline for value extraction |
-| `@key { ... }` | dict | Key extraction pipeline |
-| `@request """..."""` | all | HTTP transport template (classmethod-like constructor; requires `--http-client` at generate) |
-
----
-
-## Fallback Values
+### 3.1 `(raw)struct` — Plain-Text Parsing (JS, URLs, m3u8, CSV)
+Starts with `STR` (HTML ops forbidden, `E203`). Auto-selects `LIST` when `@split-doc` is present, else `ITEM`.
 
 ```kdl
-fallback #null    // None / null -> makes type OPT_*
-fallback #true    // True / true
-fallback #false   // False / false
-fallback 0        // integer zero
-fallback 0.0      // float zero
-fallback ""       // empty string
-fallback {}       // empty list (for LIST_* types)
+// Extract stream URL from inline/remote JS script
+(raw)struct PlayerScript {
+    @request "curl '{{script_url}}'"
+    stream_url { re #"file:\s*[\"']([^\"']+)[\"']"# }
+}
+
+// Parse URL query parameter
+(raw)struct QueryParams {
+    dubbing_code {
+        split "?"; index 1; split "&"
+        filter { starts "dubbing_code=" }
+        first; rm-prefix "dubbing_code="
+    }
+}
+
+// Split text into lines + cache row columns via @init (auto-LIST)
+(raw)struct CsvRows {
+    @split-doc { split "\n" }
+    @init { cols { split "," } }
+    col_0 { @cols; index 0 }
+    col_1 { @cols; index 1 }
+}
+```
+
+### 3.2 `(table)struct` on Non-Table Label+Value Containers
+For repeated `<div><strong>Label:</strong> Value</div>` rows, extract the label in `@match` and strip the prefix in `@value`:
+
+```kdl
+(table)struct ProfileInfo {
+    @table { css ".profile-data" }
+    @rows  { css-all ".info-row" }
+    @match { css "strong"; text; trim; lower }
+    @value { text; re-sub #"^[^:]+:\s*"# ""; trim }
+
+    registered   { match { starts "registered" } }
+    publications { match { starts "publications" }; re #"(\d+)"#; to-int; fallback 0 }
+}
+```
+
+### 3.3 Extracting `json_signals` from `scout --discover`
+
+| `subtype` | Source Pattern | Extraction Pipeline |
+|---|---|---|
+| `json-ld` | `<script type="application/ld+json">` | `css "script[type='application/ld+json']"; raw inner; jsonify SchemaName` |
+| `json-mime` | `<script id="__NEXT_DATA__" type="application/json">` | `css "script#__NEXT_DATA__"; raw inner; jsonify SchemaName path="props.pageProps"` |
+| `js-var` | `var data = [...];` inside `<script>` | `raw; re #"(?xs)var\s+data\s*=\s*(\[.*?\]);"#; jsonify SchemaName` |
+| `attr-json` | `<div id="app" data-state="{...}">` | `css "#app"; attr "data-state"; unescape; jsonify SchemaName` |
+
+> Bootstrap complex embedded JSON payloads via `ssc-gen json-to-kdl sample.json -o schema.kdl --name SchemaName --force`. Prefer inline `json` blocks (`field { ... }`, `field (array)ItemModel { ... }`, `field (dict) { @key str; @value ... }`) and GJSON `from="..."` paths (`a.b.0`, `#"a\.b"#`, `items.#`, `tags.#.name`).
+
+---
+
+## 4. Module Declarations (`import`, `define`, `extension`)
+
+```kdl
+import "./shared.kdl" {
+    (extension)Utils
+    (struct)BookCard
+    (json)OfferPayload
+    (define)BASE-URL
+    (fn)clean-title
+}
+
+define BASE-URL="https://example.com"
+define EXTRACT-HREF { css "a"; attr "href"; trim }
+
+extension Utils {
+    slugify {
+        sig str str
+        py { emit #"{{out}} = {{in}}.lower().replace(' ', '-')"# }
+        js { emit #"const {{out}} = {{in}}.toLowerCase().replace(/ /g, '-');"# }
+        go { import "strings"; emit #"{{out}} := strings.ToLower({{in}})"# }
+        rust { emit #"let {{out}}: String = {{in}}.to_lowercase();"# }
+    }
+}
 ```
 
 ---
 
-## CSS Selector Syntax Reference
+## 5. CSS3 & CSS4 Selector Reference
 
-Default target: **CSS3** (universal across bs4 / lxml / parsel / slax / native JS DOMParser).
-Prefer a more precise selector over adding pipeline operations —
-`[attr^=...]` at selection stage beats `re-sub` later in the pipeline.
-
-> **CSS4** (`:not()`, `:is()`, `:where()`, `:has()`) is **opt-in only** —
-> requires explicit user's prompt "CSS4 allowed". Backend support matrix
-> at end of this section. Full rule + fallback strategy → `../SKILL.md`
-> Constraints.
-
-### Attribute selectors
-
-| Selector | Meaning |
-|----------|---------|
-| `[attr]` | Has attribute `attr` |
-| `[attr=val]` | Attribute equals `val` exactly |
-| `[attr^=val]` | Attribute starts with `val` |
-| `[attr$=val]` | Attribute ends with `val` |
-| `[attr~=val]` | Attribute contains `val` as whitespace-separated word |
-| `[attr\|=val]` | Attribute equals `val` or starts with `val-` (locale codes) |
-| `[attr!=val]` | Attribute is not `val` (CSS4 / jQuery extension — backend support varies) |
-| `[attr1][attr2]` | Multiple attribute filters (AND) |
-
-Quote values when they contain whitespace or special chars:
-`[href^="https://"]`, `[class~="active"]`.
-
-### Combinators
-
-| Combinator | Syntax | Meaning |
-|------------|--------|---------|
-| Descendant | `A B` | Any `B` inside `A` at any depth |
-| Child | `A > B` | `B` is direct child of `A` |
-| Adjacent sibling | `A + B` | `B` immediately follows `A` (same parent) |
-| General sibling | `A ~ B` | `B` follows `A` somewhere (same parent) |
-| Union | `A, B` | Matches `A` or `B` (deduped) |
-
-### Structural pseudo-classes (CSS3)
-
-| Pseudo-class | Meaning |
-|--------------|---------|
-| `:first-child` | First child of its parent |
-| `:last-child` | Last child of its parent |
-| `:only-child` | Only child of its parent |
-| `:nth-child(n)` | Nth child (1-indexed); accepts `odd`, `even`, `2n`, `2n+1` |
-| `:nth-last-child(n)` | Nth child counting from the end |
-| `:first-of-type` | First child of its tag type among siblings |
-| `:last-of-type` | Last child of its tag type among siblings |
-| `:only-of-type` | Only child of its tag type among siblings |
-| `:nth-of-type(n)` | Nth child of its tag type |
-| `:nth-last-of-type(n)` | Nth of type, from end |
-| `:empty` | No children (text nodes count as children) |
-| `:root` | Document root (rarely needed in scraping) |
-
-### CSS4 pseudo-classes (opt-in, backend-dependent)
-
-| Pseudo-class | bs4 | lxml | parsel | slax | JS DOMParser |
-|--------------|:---:|:----:|:------:|:----:|:------------:|
-| `:not(simple)` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `:not(complex)` | ✓ | ✓ | ✓ | ✓ | partial |
-| `:is(...)` / `:where(...)` | ✓ | ✓ | ✓ | ✓ | partial |
-| `:has(> child)` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `:has(descendant)` | ✓ | ✓ | ✓ | ✓ | ✓ |
-
-**When in doubt under CSS4**: use `[attr^=...]` filters, `filter {}` predicate,
-or split into multiple `css { ... }` pattern-match selectors — all CSS3-only.
-
-### Common patterns
-
-```css
-/* attribute prefix match — typical for pagination links */
-a[href^="/page/"]
-a[href^="https://example.com/"]
-
-/* nth card in a list (avoids `index N` bug) */
-.product-card:nth-of-type(3)
-
-/* direct child vs descendant */
-div.listing > .item          /* only direct children */
-div.listing .item            /* any depth */
-
-/* class contains word (CSS3, safer than `*=` for class matching) */
-div[class~="active"]
-a[rel~="next"]
-
-/* empty text filter — useful for `:empty` checks */
-span:empty
-```
+- **Attribute**: `[attr]`, `[attr=val]`, `[attr^=val]` (starts), `[attr$=val]` (ends), `[attr*=val]` (contains), `[attr~=word]`, `[attr|=prefix]`.
+- **Combinators**: `A B` (descendant), `A > B` (direct child), `A + B` (adjacent sibling), `A ~ B` (following sibling), `A, B` (union).
+- **CSS3 Structural**: `:first-child`, `:last-child`, `:only-child`, `:nth-child(n)`, `:nth-last-child(n)`, `:first-of-type`, `:last-of-type`, `:nth-of-type(n)`, `:empty`.
+- **CSS4 (opt-in only)**: `:not(...)`, `:is(...)`, `:where(...)`, `:has(...)` (supported in `bs4`/`lxml`/`parsel`; partial in JS DOM / `slax` — prefer CSS3 `[attr^=...]` or pipeline `filter {}` when portable).
 
 ---
 
-## See also
+## 6. CLI & Codegen Targets
 
-- **`../SKILL.md`** — critical inline rules (regex capture-group, predicate
-  context matrix, `index` bug, CSS4 opt-in, no-transform/no-xpath constraints),
-  workflow, struct types reference, linter loop.
-- **`predicate-vs-op.md`** — disambiguating dual-meaning keywords (`re`, `css`)
-  between pipeline ops (value transforms) and predicates (boolean checks).
-- **`linter-errors.md`** — canonical linter error → fix mapping.
-- **`examples/`** — full `.kdl` schemas for reference:
-  - `booksToScrape.kdl` — `(list)struct`, price regex, `fallback`, URL `fmt`
-  - `hackernews.kdl` — `(list)struct` with `@doc`, multi-struct composition
-  - `imdbcom.kdl` — search results, `nested` composition, `css-all` field
-  - `quotesToScrape.kdl` — `json` schema + `jsonify`, multiline `(?xs)` regex
-  - `regexFallback.kdl` — `re` no-match + `fallback`, `re-all`, `@pre-validate`
+```bash
+# Check CLI version (subcommand `version`, NEVER `--version`)
+ssc-gen version
+
+# Lint, run, and check selector health
+ssc-gen check schema.kdl -f json
+ssc-gen run schema.kdl:StructName -L bs4 -i page.html
+ssc-gen health schema.kdl:StructName -i page.html -f json
+
+# Generate standalone parser code
+ssc-gen generate python schema.kdl -L bs4 -o out/   # -L bs4|lxml|parsel|slax [--bs4-parser lxml|html.parser|html5lib] [-R] [--http-client httpx|httpx2|requests|aiohttp]
+ssc-gen generate js     schema.kdl -o out/          # [--http-client fetch|axios]
+ssc-gen generate go     schema.kdl -o out/          # emits schema.go + sscgen_runtime.go
+ssc-gen generate rust   schema.kdl -o out/          # emits schema.rs + sscgen_runtime.rs [--http-client reqwest]
+```
