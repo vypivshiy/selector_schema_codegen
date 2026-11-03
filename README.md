@@ -6,13 +6,15 @@ Code generator for web scraping parsers. Describe HTML extraction rules in a dec
 .kdl schema --> [kdl parser] --> AST --> [linter] --> [converter] --> output code
 ```
 
+> **[Interactive Web Playground](https://vypivshiy.github.io/selector_schema_codegen/)** — write KDL 2.0 schemas with live linting, preview generated Python / JavaScript / Go / Rust code, and test selectors against HTML directly in the browser (powered by Pyodide/WebAssembly, no installation required).
+
 ## Features
 
 - Declarative DSL based on KDL 2.0 syntax
 - Static type checking and linting before code generation
-- Multiple output targets: Python (bs4, lxml, parsel, selectolax), JavaScript (DOM API), Go (goquery)
+- Multiple output targets: Python (bs4, lxml, parsel, selectolax), JavaScript (DOM API), Go (goquery), Rust (dom_query + serde + reqwest)
 - Typed user extensions with lazy target imports and runtime helpers
-- Struct types: `item`, `list`, `dict`, `table`, `flat`
+- Struct types: `item`, `list`, `dict`, `table`, `flat`, `raw`, `rest`
 - LLM-friendly: system prompt + linter loop for AI-assisted schema generation
 
 ## Install
@@ -66,9 +68,12 @@ ssc-gen generate python schema.kdl -L bs4 -o ./out --http-client httpx
 
 # extract helper functions into a separate runtime module
 ssc-gen generate python schema.kdl -L bs4 -o ./out -R
+
+# Rust (dom_query + serde + reqwest)
+ssc-gen generate rust schema.kdl -o ./output
 ```
 
-Languages: `generate python`, `generate js`, `generate go`.
+Languages: `generate python`, `generate js`, `generate go`, `generate rust`.
 HTML libraries (`--lib / -L`, Python only): `bs4` (default), `lxml`, `parsel`, `slax`.
 
 ### Lint schemas
@@ -108,6 +113,7 @@ curl https://books.toscrape.com/ | ssc-gen health examples/booksToScrape.kdl:Mai
 
 ## Documentation
 
+- **[Interactive Web Playground](https://vypivshiy.github.io/selector_schema_codegen/)**
 - [Quick start](docs/guide.md)
 - [Syntax and file structure](docs/syntax.md)
 - [Type system](docs/types.md)
@@ -163,4 +169,13 @@ Integration smoke tests for external compilers are skipped automatically if thei
 - **JavaScript**: Requires Node.js in PATH and `npm install` (`jsdom` in `package.json`).
 - **Go**: Requires `go` in PATH.
 - **Rust**: Requires `cargo` in PATH.
+
+### Web Playground
+
+```bash
+npm --prefix playground install
+npm --prefix playground run dev
+
+# Build and publish playground/dist to gh-pages branch
+./scripts/deploy_pages.ps1
 ```
