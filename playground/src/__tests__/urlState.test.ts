@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { formatHtml, minifyHtmlForShare } from "../htmlFormat";
 import {
   DEFAULT_PRESET,
   findMatchingPresetId,
@@ -231,5 +232,79 @@ describe("localStorage draft persistence & URL hash precedence", () => {
     expect(resolvedDefault.source).toBe("default");
     expect(resolvedDefault.state.kdl).toBe(DEFAULT_PRESET.kdl);
     expect(resolvedDefault.state.html).toBe(DEFAULT_PRESET.html);
+  });
+
+  it("produces compact schema-only URLs and auto-formats minified HTML on decode", async () => {
+    const noisyHtml = `<!DOCTYPE html>
+<html>
+  <head>
+    <title>Books to Scrape</title>
+    <style>.card { color: red; }</style>
+    <script>console.log("analytics");</script>
+  </head>
+  <body>
+    <!-- catalog comment -->
+    <svg viewBox="0 0 10 10"><path d="M0 0"/></svg>
+    <div class="col-lg-3">
+      <h3><a href="book1.html">Book One</a></h3>
+      <p class="price_color">£51.77</p>
+    </div>
+  </body>
+</html>`;
+
+    const state: WorkspaceState = {
+      kdl: '(list)struct Book { @split-doc { css-all ".col-lg-3" }; title { css "h3 a"; text } }',
+      html: noisyHtml,
+      target: DEFAULT_TARGET_CONFIG,
+    };
+
+    const fullHash = await encodeWorkspaceToHash(state, {
+      includeHtml: true,
+      minifyHtml: false,
+    });
+    const minifiedHash = await encodeWorkspaceToHash(state, {
+      includeHtml: true,
+      minifyHtml: true,
+      minifyOptions: {
+        stripScriptsAndStyles: true,
+        stripSvg: true,
+        stripHead: true,
+        stripComments: true,
+        collapseWhitespace: true,
+      },
+    });
+    const schemaOnlyHash = await encodeWorkspaceToHash(state, {
+      includeHtml: false,
+    });
+
+    expect(minifiedHash.length).toBeLessThan(fullHash.length);
+    expect(schemaOnlyHash.length).toBeLessThan(minifiedHash.length);
+
+    // Decoding minifiedHash automatically pretty-prints the HTML across multiple lines
+    const decodedMinified = await decodeWorkspaceFromHash(minifiedHash);
+    expect(decodedMinified).not.toBeNull();
+    expect(decodedMinified!.kdl).toBe(state.kdl);
+    expect(decodedMinified!.html).not.toContain("<script>");
+    expect(decodedMinified!.html).not.toContain("<style>");
+    expect(decodedMinified!.html).not.toContain("<svg");
+    expect(decodedMinified!.html).not.toContain("<!--");
+    expect(decodedMinified!.html).toContain("\n  <div class=\"col-lg-3\">");
+    expect(decodedMinified!.html).toContain("Book One");
+  });
+
+  it("minifies and pretty-prints HTML via minifyHtmlForShare and formatHtml", () => {
+    const raw =
+      '<div><!-- comment --><script>alert(1)</script><svg><circle/></svg>  <section>  <h1>  Hello World  </h1>  <p>Text</p>  </section></div>';
+    const minified = minifyHtmlForShare(raw);
+    expect(minified).toBe(
+      "<div><section><h1> Hello World </h1><p>Text</p></section></div>",
+    );
+
+    const formatted = formatHtml(minified);
+    expect(formatted).toBe(
+      ["<div>", "  <section>", "    <h1>Hello World</h1>", "    <p>Text</p>", "  </section>", "</div>"].join(
+        "\n",
+      ),
+    );
   });
 });

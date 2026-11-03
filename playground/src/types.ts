@@ -31,8 +31,10 @@ export type StructKind =
 
 export interface StructInfo {
   name: string;
+  class_name?: string;
   type: StructKind | string;
   is_rest: boolean;
+  referenced_by?: string[];
 }
 
 export type TargetLang = "python" | "js" | "go" | "rust";
@@ -226,10 +228,40 @@ export function getMonacoLanguageForFile(
 }
 
 /**
+ * Return the generated PascalCase class name for a struct descriptor.
+ */
+export function getStructClassName(struct: StructInfo): string {
+  if (struct.class_name && struct.class_name.trim()) {
+    return struct.class_name.trim();
+  }
+  return struct.name
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join("");
+}
+
+/**
+ * Format a clear entrypoint label for the Struct dropdown showing the class name,
+ * struct type, and whether it is a root entrypoint or nested inside another struct.
+ */
+export function formatStructOptionLabel(struct: StructInfo): string {
+  const clsName = getStructClassName(struct);
+  if (struct.is_rest) {
+    return `${clsName} — (${struct.type} · REST client)`;
+  }
+  const refs = struct.referenced_by ?? [];
+  if (refs.length > 0) {
+    return `${clsName}.parse() — (${struct.type} · nested in ${refs.join(", ")})`;
+  }
+  return `${clsName}.parse() — (${struct.type} · root entrypoint)`;
+}
+
+/**
  * Select the active struct name for the HTML Test & Health pane.
  * Preserves `currentStructName` when it exists in `structs`; otherwise
- * auto-selects the primary (last) non-REST struct, falling back to the last
- * declared struct if the schema only contains REST structs.
+ * auto-selects the primary (last) root non-REST struct, falling back to the
+ * last non-REST struct or last declared struct.
  */
 export function selectDefaultStructName(
   structs: StructInfo[],
@@ -246,6 +278,12 @@ export function selectDefaultStructName(
   }
   const nonRest = structs.filter((s) => !s.is_rest);
   if (nonRest.length > 0) {
+    const rootNonRest = nonRest.filter(
+      (s) => !s.referenced_by || s.referenced_by.length === 0,
+    );
+    if (rootNonRest.length > 0) {
+      return rootNonRest[rootNonRest.length - 1].name;
+    }
     return nonRest[nonRest.length - 1].name;
   }
   return structs[structs.length - 1].name;

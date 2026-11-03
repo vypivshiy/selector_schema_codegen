@@ -2,6 +2,10 @@ import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "rea
 import { CodeOutputPane } from "./components/CodeOutputPane";
 import { HtmlTestPane } from "./components/HtmlTestPane";
 import { KdlEditorPane } from "./components/KdlEditorPane";
+import {
+  DEFAULT_HTML_MINIFY_OPTIONS,
+  type HtmlMinifyOptions,
+} from "./htmlFormat";
 import { useCopyFeedback } from "./hooks/useCopyFeedback";
 import {
   DEFAULT_PRESET,
@@ -47,6 +51,11 @@ export function App() {
   const [theme, setTheme] = useState<"vs-dark" | "light">("vs-dark");
   const [compileResult, setCompileResult] =
     useState<CompileAndLintResult | null>(null);
+  const [shareIncludeHtml, setShareIncludeHtml] = useState<boolean>(false);
+  const [shareMinifyOptions, setShareMinifyOptions] =
+    useState<HtmlMinifyOptions>(() => ({ ...DEFAULT_HTML_MINIFY_OPTIONS }));
+  const [showShareOptions, setShowShareOptions] = useState<boolean>(false);
+  const [lastShareLength, setLastShareLength] = useState<number | null>(null);
   const {
     copied: shareCopied,
     copyText: copyShareText,
@@ -173,25 +182,49 @@ export function App() {
   );
 
   const handleShareUrl = useCallback(async () => {
-    const hash = await encodeWorkspaceToHash({
-      kdl: kdlSrc,
-      html: htmlSrc,
-      target,
-    });
+    const hash = await encodeWorkspaceToHash(
+      {
+        kdl: kdlSrc,
+        html: htmlSrc,
+        target,
+      },
+      {
+        includeHtml: shareIncludeHtml,
+        minifyHtml: true,
+        minifyOptions: shareMinifyOptions,
+      },
+    );
     if (typeof window !== "undefined") {
       window.history.replaceState(
         null,
         "",
         `${window.location.pathname}${window.location.search}${hash}`,
       );
+      setLastShareLength(window.location.href.length);
       const copiedOk = await copyShareText(window.location.href);
       if (!copiedOk) {
         triggerShareCopied();
       }
     } else {
+      setLastShareLength(hash.length);
       triggerShareCopied();
     }
-  }, [kdlSrc, htmlSrc, target, copyShareText, triggerShareCopied]);
+  }, [
+    kdlSrc,
+    htmlSrc,
+    target,
+    shareIncludeHtml,
+    shareMinifyOptions,
+    copyShareText,
+    triggerShareCopied,
+  ]);
+
+  const toggleMinifyFlag = useCallback((key: keyof HtmlMinifyOptions) => {
+    setShareMinifyOptions((prev) => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
+  }, []);
 
   const diagnostics = compileResult?.diagnostics ?? [];
   const structs = compileResult?.structs ?? [];
@@ -233,15 +266,29 @@ export function App() {
         </div>
 
         <div className="topbar-structs">
-          {structs.map((s) => (
-            <span
-              key={s.name}
-              className={`struct-pill ${s.is_rest ? "struct-rest" : "struct-html"}`}
-              title={`Struct ${s.name} (${s.type})`}
-            >
-              ({s.type}) {s.name}
-            </span>
-          ))}
+          {structs.map((s) => {
+            const isNested = (s.referenced_by?.length ?? 0) > 0;
+            const roleLabel = s.is_rest
+              ? "REST client"
+              : isNested
+                ? `nested in ${s.referenced_by?.join(", ")}`
+                : "root entrypoint";
+            return (
+              <span
+                key={s.name}
+                className={`struct-pill ${
+                  s.is_rest
+                    ? "struct-rest"
+                    : isNested
+                      ? "struct-nested"
+                      : "struct-html"
+                }`}
+                title={`(${s.type}) ${s.name} — ${roleLabel}`}
+              >
+                {s.is_rest ? "⇄ " : isNested ? "↳ " : "★ "}({s.type}) {s.name}
+              </span>
+            );
+          })}
         </div>
 
         <div className="topbar-actions">
@@ -263,15 +310,110 @@ export function App() {
             )}
           </div>
 
-          <button
-            type="button"
-            className={`share-url-btn ${shareCopied ? "share-copied" : ""}`}
-            data-testid="share-url-btn"
-            title="Compress workspace into URL #state=... and copy shareable link"
-            onClick={() => void handleShareUrl()}
-          >
-            {shareCopied ? "✓ Link Copied!" : "🔗 Share URL"}
-          </button>
+          <div className="share-control-group">
+            <select
+              className="share-mode-select"
+              data-testid="share-mode-select"
+              value={shareIncludeHtml ? "schema+html" : "schema"}
+              title="Choose whether Share URL encodes only the KDL schema or also the minified HTML"
+              onChange={(e) => {
+                const nextInclude = e.target.value === "schema+html";
+                setShareIncludeHtml(nextInclude);
+                if (!nextInclude) {
+                  setShowShareOptions(false);
+                }
+              }}
+            >
+              <option value="schema">Share: Schema only</option>
+              <option value="schema+html">Share: Schema + Minified HTML</option>
+            </select>
+
+            {shareIncludeHtml && (
+              <button
+                type="button"
+                className={`share-settings-btn ${showShareOptions ? "active" : ""}`}
+                data-testid="share-options-toggle-btn"
+                title="Choose which HTML elements to strip when minifying HTML for URL sharing"
+                onClick={() => setShowShareOptions((prev) => !prev)}
+              >
+                ⚙ Strip
+              </button>
+            )}
+
+            <button
+              type="button"
+              className={`share-url-btn ${shareCopied ? "share-copied" : ""}`}
+              data-testid="share-url-btn"
+              title="Compress workspace into URL #state=... and copy shareable link"
+              onClick={() => void handleShareUrl()}
+            >
+              {shareCopied
+                ? `✓ Copied (${lastShareLength ?? 0} chars)`
+                : "🔗 Share URL"}
+            </button>
+
+            {showShareOptions && shareIncludeHtml && (
+              <div
+                className="share-options-popover"
+                data-testid="share-options-popover"
+              >
+                <div className="share-options-title">
+                  HTML Minification for URL
+                </div>
+                <label className="share-option-check">
+                  <input
+                    type="checkbox"
+                    checked={shareMinifyOptions.stripScriptsAndStyles}
+                    onChange={() => toggleMinifyFlag("stripScriptsAndStyles")}
+                  />
+                  <span>
+                    Strip <code>&lt;script&gt;</code>, <code>&lt;style&gt;</code>,{" "}
+                    <code>&lt;noscript&gt;</code>
+                  </span>
+                </label>
+                <label className="share-option-check">
+                  <input
+                    type="checkbox"
+                    checked={shareMinifyOptions.stripSvg}
+                    onChange={() => toggleMinifyFlag("stripSvg")}
+                  />
+                  <span>
+                    Strip <code>&lt;svg&gt;</code> icons &amp; vectors
+                  </span>
+                </label>
+                <label className="share-option-check">
+                  <input
+                    type="checkbox"
+                    checked={shareMinifyOptions.stripHead}
+                    onChange={() => toggleMinifyFlag("stripHead")}
+                  />
+                  <span>
+                    Strip <code>&lt;head&gt;</code> block
+                  </span>
+                </label>
+                <label className="share-option-check">
+                  <input
+                    type="checkbox"
+                    checked={shareMinifyOptions.stripComments}
+                    onChange={() => toggleMinifyFlag("stripComments")}
+                  />
+                  <span>
+                    Strip HTML comments <code>&lt;!-- ... --&gt;</code>
+                  </span>
+                </label>
+                <label className="share-option-check">
+                  <input
+                    type="checkbox"
+                    checked={shareMinifyOptions.collapseWhitespace}
+                    onChange={() => toggleMinifyFlag("collapseWhitespace")}
+                  />
+                  <span>
+                    Collapse whitespace (auto-formats on open)
+                  </span>
+                </label>
+              </div>
+            )}
+          </div>
 
           <button
             type="button"

@@ -1,4 +1,10 @@
-import { DEFAULT_PRESET } from "./presets";
+import {
+  DEFAULT_HTML_MINIFY_OPTIONS,
+  formatHtml,
+  minifyHtmlForShare,
+  type HtmlMinifyOptions,
+} from "./htmlFormat";
+import { DEFAULT_PRESET, getPresetById, PLAYGROUND_PRESETS } from "./presets";
 import {
   DEFAULT_TARGET_CONFIG,
   normalizeTargetConfig as normalizeTypedTargetConfig,
@@ -114,20 +120,95 @@ export function normalizeTargetConfig(raw: unknown): TargetConfig {
   });
 }
 
-function parseWorkspacePayload(rawJson: string): WorkspaceState | null {
+function encodeCompactTarget(
+  target: TargetConfig,
+): Partial<TargetConfig> | undefined {
+  const norm = normalizeTargetConfig(target);
+  const delta: Partial<TargetConfig> = {};
+  let hasDiff = false;
+
+  if (norm.lang !== DEFAULT_TARGET_CONFIG.lang) {
+    delta.lang = norm.lang;
+    hasDiff = true;
+  }
+  if (norm.lib !== DEFAULT_TARGET_CONFIG.lib) {
+    delta.lib = norm.lib;
+    hasDiff = true;
+  }
+  if (norm.bs4_parser !== DEFAULT_TARGET_CONFIG.bs4_parser) {
+    delta.bs4_parser = norm.bs4_parser;
+    hasDiff = true;
+  }
+  if (norm.py_http_client !== DEFAULT_TARGET_CONFIG.py_http_client) {
+    delta.py_http_client = norm.py_http_client;
+    hasDiff = true;
+  }
+  if (norm.js_http_client !== DEFAULT_TARGET_CONFIG.js_http_client) {
+    delta.js_http_client = norm.js_http_client;
+    hasDiff = true;
+  }
+  if (norm.http_io !== DEFAULT_TARGET_CONFIG.http_io) {
+    delta.http_io = norm.http_io;
+    hasDiff = true;
+  }
+  if (norm.separate_runtime !== DEFAULT_TARGET_CONFIG.separate_runtime) {
+    delta.separate_runtime = norm.separate_runtime;
+    hasDiff = true;
+  }
+
+  return hasDiff ? delta : undefined;
+}
+
+function parseWorkspacePayload(
+  rawJson: string,
+  autoFormatMinifiedHtml = true,
+): WorkspaceState | null {
   try {
     const parsed: unknown = JSON.parse(rawJson);
     if (!parsed || typeof parsed !== "object") {
       return null;
     }
     const record = parsed as Record<string, unknown>;
-    if (typeof record.kdl !== "string" || typeof record.html !== "string") {
+
+    // Legacy v1 format (`{ kdl, html, target }`)
+    if (typeof record.kdl === "string" && typeof record.html === "string") {
+      return {
+        kdl: record.kdl,
+        html: record.html,
+        target: normalizeTargetConfig(record.target),
+      };
+    }
+
+    // Compact v2 format (`{ p?, k?, h?, t?, f? }`)
+    const preset =
+      typeof record.p === "string" ? getPresetById(record.p) : undefined;
+    const kdl =
+      typeof record.k === "string"
+        ? record.k
+        : preset
+          ? preset.kdl
+          : null;
+    if (kdl === null) {
       return null;
     }
+
+    let html = "";
+    if (typeof record.h === "string") {
+      html =
+        autoFormatMinifiedHtml && record.f === 1
+          ? formatHtml(record.h)
+          : record.h;
+    } else if (preset) {
+      html = preset.html;
+    } else {
+      const kdlMatch = PLAYGROUND_PRESETS.find((pr) => pr.kdl === kdl);
+      html = kdlMatch ? kdlMatch.html : "";
+    }
+
     return {
-      kdl: record.kdl,
-      html: record.html,
-      target: normalizeTargetConfig(record.target),
+      kdl,
+      html,
+      target: normalizeTargetConfig(record.t),
     };
   } catch {
     return null;
@@ -213,21 +294,62 @@ async function runTransformStream(
 export interface EncodeHashOptions {
   /** Force uncompressed base64url encoding (for fallback testing). */
   forceUncompressed?: boolean;
+  /** Whether to include the HTML input in the URL hash (default: `true`). */
+  includeHtml?: boolean;
+  /** Whether to minify the HTML input before encoding (default: `false`). */
+  minifyHtml?: boolean;
+  /** Fine-grained HTML minification flags when `minifyHtml` is `true`. */
+  minifyOptions?: Partial<HtmlMinifyOptions>;
 }
 
 /**
  * Compress and encode a `WorkspaceState` into `#state=<base64url>` using
- * `CompressionStream("deflate-raw")` with an uncompressed base64url fallback.
+ * compact v2 keys (`p`, `k`, `h`, `t`, `f`) and `CompressionStream("deflate-raw")`
+ * with an uncompressed base64url fallback.
  */
 export async function encodeWorkspaceToHash(
   state: WorkspaceState,
   options?: EncodeHashOptions,
 ): Promise<string> {
-  const payload = JSON.stringify({
-    kdl: state.kdl,
-    html: state.html,
-    target: normalizeTargetConfig(state.target),
-  });
+  const includeHtml = options?.includeHtml ?? true;
+  const shouldMinify = Boolean(options?.minifyHtml);
+  const minifyOpts: HtmlMinifyOptions = {
+    ...DEFAULT_HTML_MINIFY_OPTIONS,
+    ...options?.minifyOptions,
+  };
+
+  const matchedPreset = PLAYGROUND_PRESETS.find((p) => p.kdl === state.kdl);
+  const compactRecord: Record<string, unknown> = {};
+
+  if (matchedPreset) {
+    compactRecord.p = matchedPreset.id;
+  } else {
+    compactRecord.k = state.kdl;
+  }
+
+  if (includeHtml) {
+    const rawHtml = shouldMinify
+      ? minifyHtmlForShare(state.html, minifyOpts)
+      : state.html;
+    if (!matchedPreset || rawHtml !== matchedPreset.html) {
+      compactRecord.h = rawHtml;
+      if (shouldMinify && minifyOpts.collapseWhitespace) {
+        compactRecord.f = 1;
+      }
+    }
+  } else if (matchedPreset) {
+    // Explicitly mark empty HTML when user shares schema-only of a preset with cleared HTML
+    if (!state.html) {
+      compactRecord.h = "";
+    }
+  }
+
+  const compactTarget = encodeCompactTarget(state.target);
+  if (compactTarget) {
+    compactRecord.t = compactTarget;
+  }
+
+  const payload = JSON.stringify(compactRecord);
   const utf8Bytes = new TextEncoder().encode(payload);
 
   if (
@@ -270,6 +392,11 @@ function extractStateTokenFromHash(hash: string): string | null {
   }
 }
 
+export interface DecodeHashOptions {
+  /** Automatically pretty-print HTML that was minified with `f: 1` (default: `true`). */
+  autoFormatMinifiedHtml?: boolean;
+}
+
 /**
  * Decode a `#state=<base64url>` hash string back into a `WorkspaceState`.
  * Supports both `DecompressionStream("deflate-raw")` payloads and uncompressed
@@ -277,7 +404,9 @@ function extractStateTokenFromHash(hash: string): string | null {
  */
 export async function decodeWorkspaceFromHash(
   hash: string,
+  options?: DecodeHashOptions,
 ): Promise<WorkspaceState | null> {
+  const autoFormat = options?.autoFormatMinifiedHtml ?? true;
   const token = extractStateTokenFromHash(hash);
   if (!token) {
     return null;
@@ -290,7 +419,7 @@ export async function decodeWorkspaceFromHash(
   // Fast-path check if payload is uncompressed UTF-8 JSON (`{...}`)
   if (bytes[0] === 0x7b && bytes[bytes.length - 1] === 0x7d) {
     const directText = new TextDecoder().decode(bytes);
-    const directState = parseWorkspacePayload(directText);
+    const directState = parseWorkspacePayload(directText, autoFormat);
     if (directState) {
       return directState;
     }
@@ -303,7 +432,7 @@ export async function decodeWorkspaceFromHash(
         new DecompressionStream("deflate-raw"),
       );
       const text = new TextDecoder().decode(decompressed);
-      const state = parseWorkspacePayload(text);
+      const state = parseWorkspacePayload(text, autoFormat);
       if (state) {
         return state;
       }
@@ -314,7 +443,7 @@ export async function decodeWorkspaceFromHash(
 
   try {
     const fallbackText = new TextDecoder().decode(bytes);
-    return parseWorkspacePayload(fallbackText);
+    return parseWorkspacePayload(fallbackText, autoFormat);
   } catch {
     return null;
   }

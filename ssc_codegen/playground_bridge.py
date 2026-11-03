@@ -19,7 +19,7 @@ from kdlquery import KdlNode, KDLParseError, ReadDiagnostic, Severity
 from kdlquery import parse as kdl_parse
 from kdlquery.types import Position, Span
 
-from ssc_codegen.ast import StructBase, StructRest, StructType
+from ssc_codegen.ast import Nested, StructBase, StructRest, StructType
 from ssc_codegen.core.format import diagnostic_to_dict
 from ssc_codegen.core.reader import parse_module
 from ssc_codegen.exceptions import BuildTimeError, ParseError
@@ -124,6 +124,20 @@ def _extract_cst_structs(nodes: list[KdlNode]) -> list[dict[str, Any]]:
     """Extract declared struct descriptors from top-level CST nodes as a fallback."""
     structs: list[dict[str, Any]] = []
     seen: set[str] = set()
+    ref_map: dict[str, list[str]] = {}
+    for node in nodes:
+        if node.name != "struct" or not node.args:
+            continue
+        parent_name = str(node.args[0].value)
+        if not parent_name:
+            continue
+        for desc in node.iter_descendants():
+            if desc.name == "nested" and desc.args:
+                target_name = str(desc.args[0].value)
+                parents = ref_map.setdefault(target_name, [])
+                if parent_name not in parents:
+                    parents.append(parent_name)
+
     for node in nodes:
         if node.name != "struct" or not node.args:
             continue
@@ -140,11 +154,34 @@ def _extract_cst_structs(nodes: list[KdlNode]) -> list[dict[str, Any]]:
         structs.append(
             {
                 "name": name,
+                "class_name": to_pascal_case(name),
                 "type": struct_type,
                 "is_rest": struct_type == "rest",
+                "referenced_by": ref_map.get(name, []),
             }
         )
     return structs
+
+
+def _collect_ast_nested_refs(
+    struct_nodes: list[StructBase],
+) -> dict[str, list[str]]:
+    """Map each struct name to the list of parent struct names that reference it via `nested`."""
+    ref_map: dict[str, list[str]] = {}
+
+    def _walk_body(parent_name: str, body: list[Any]) -> None:
+        for item in body:
+            if isinstance(item, Nested) and item.struct_name:
+                parents = ref_map.setdefault(item.struct_name, [])
+                if parent_name not in parents:
+                    parents.append(parent_name)
+            child_body = getattr(item, "body", None)
+            if isinstance(child_body, list):
+                _walk_body(parent_name, child_body)
+
+    for s in struct_nodes:
+        _walk_body(s.name, list(getattr(s, "body", [])))
+    return ref_map
 
 
 def _serialize_diagnostic(diag: ReadDiagnostic) -> dict[str, Any]:
@@ -365,14 +402,17 @@ def compile_and_lint(
     all_diagnostics = [*deduped_extra, *module_diagnostics]
     diag_dicts = [_serialize_diagnostic(d) for d in all_diagnostics]
 
+    ast_structs = [s for s in ast_mod.body if isinstance(s, StructBase)]
+    nested_ref_map = _collect_ast_nested_refs(ast_structs)
     structs = [
         {
             "name": s.name,
+            "class_name": to_pascal_case(s.name),
             "type": s.type.name.lower(),
             "is_rest": _is_rest_struct(s),
+            "referenced_by": nested_ref_map.get(s.name, []),
         }
-        for s in ast_mod.body
-        if isinstance(s, StructBase)
+        for s in ast_structs
     ]
     if not structs and fallback_structs:
         structs = fallback_structs

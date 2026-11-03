@@ -1,8 +1,11 @@
 import { useCallback, useMemo, useRef, useState, type ChangeEvent } from "react";
 import Editor from "@monaco-editor/react";
+import { formatHtml } from "../htmlFormat";
 import { useCopyFeedback } from "../hooks/useCopyFeedback";
 import {
+  formatStructOptionLabel,
   getHtmlTestActionState,
+  getStructClassName,
   selectDefaultStructName,
   summarizeHealthReport,
   type StructInfo,
@@ -107,6 +110,21 @@ export function HtmlTestPane({
     [actionState, kdlSrc, htmlSrc, onRunTestHtml],
   );
 
+  const activeClassName = useMemo(
+    () =>
+      actionState.activeStruct
+        ? getStructClassName(actionState.activeStruct)
+        : "",
+    [actionState.activeStruct],
+  );
+
+  const handleFormatHtml = useCallback(() => {
+    if (!htmlSrc.trim()) {
+      return;
+    }
+    onChangeHtml(formatHtml(htmlSrc));
+  }, [htmlSrc, onChangeHtml]);
+
   const handleFileChange = useCallback(
     (event: ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0];
@@ -129,8 +147,12 @@ export function HtmlTestPane({
     <div className="html-test-pane" data-testid="html-test-tab-slot">
       <div className="html-test-controls-bar">
         <div className="html-test-controls-left">
-          <label className="target-option-label" htmlFor="test-struct-select">
-            <span>Struct</span>
+          <label
+            className="target-option-label"
+            htmlFor="test-struct-select"
+            title="Select which generated struct class to instantiate and call .parse() on"
+          >
+            <span>Entrypoint</span>
             <select
               id="test-struct-select"
               data-testid="struct-select"
@@ -143,7 +165,7 @@ export function HtmlTestPane({
               ) : (
                 structs.map((s) => (
                   <option key={s.name} value={s.name}>
-                    ({s.type}) {s.name}
+                    {formatStructOptionLabel(s)}
                   </option>
                 ))
               )}
@@ -157,7 +179,11 @@ export function HtmlTestPane({
             disabled={!actionState.canRun}
             onClick={() => void handleExecute("json")}
           >
-            {isTesting && resultTab === "json" ? "Running…" : "▶ Run Parser"}
+            {isTesting && resultTab === "json"
+              ? "Running…"
+              : activeClassName
+                ? `▶ Run ${activeClassName}.parse()`
+                : "▶ Run Parser"}
           </button>
 
           <button
@@ -169,7 +195,9 @@ export function HtmlTestPane({
           >
             {isTesting && resultTab === "health"
               ? "Checking…"
-              : "✓ Check Health"}
+              : activeClassName
+                ? `✓ Health (${activeClassName})`
+                : "✓ Check Health"}
           </button>
         </div>
 
@@ -182,6 +210,16 @@ export function HtmlTestPane({
               📄 {uploadedFileName}
             </span>
           )}
+          <button
+            type="button"
+            className="upload-html-btn"
+            data-testid="format-html-btn"
+            disabled={!htmlSrc.trim() || actionState.activeStruct?.type === "raw"}
+            title="Pretty-print and indent HTML across lines"
+            onClick={handleFormatHtml}
+          >
+            ✨ Format HTML
+          </button>
           <input
             ref={fileInputRef}
             type="file"
