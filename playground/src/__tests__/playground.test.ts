@@ -179,8 +179,9 @@ describe("diagnosticsToMarkers", () => {
 describe("Pyodide worker bridge bundle", () => {
   it("bundles ssc_codegen/playground_bridge.py with compile_and_lint", () => {
     expect(playgroundBridgeSource).toContain("def compile_and_lint(");
+    expect(workerSource).toContain('await micropip.install("kdlquery>=1.7.0")');
     expect(workerSource).toContain(
-      'micropip.install(["kdlquery>=1.7.0", "ssc-codegen>=0.45.0"], deps=False)',
+      'await micropip.install("ssc-codegen>=0.45.0", deps=False)',
     );
   });
 });

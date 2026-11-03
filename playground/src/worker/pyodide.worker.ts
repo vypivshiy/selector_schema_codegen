@@ -15,7 +15,7 @@ interface PyodideInstance {
   };
 }
 
-const PYODIDE_INDEX_URL = "https://cdn.jsdelivr.net/pyodide/v0.27.3/full/";
+const PYODIDE_INDEX_URL = "https://cdn.jsdelivr.net/pyodide/v0.29.5/full/";
 const PYODIDE_MODULE_URL = `${PYODIDE_INDEX_URL}pyodide.mjs`;
 
 let pyodideReadyPromise: Promise<PyodideInstance> | null = null;
@@ -38,8 +38,33 @@ async function initPyodideRuntime(): Promise<PyodideInstance> {
   ]);
 
   await pyodide.runPythonAsync(`
+import io
+import sysconfig
+import zipfile
 import micropip
-await micropip.install(["kdlquery>=1.7.0", "ssc-codegen>=0.45.0"], deps=False)
+from pyodide.http import pyfetch
+
+async def _install_pure_wheel_from_pypi(pkg_name: str) -> None:
+    resp = await pyfetch(f"https://pypi.org/pypi/{pkg_name}/json")
+    data = await resp.json()
+    urls = data.get("urls", [])
+    wheel_url = next(
+        (u["url"] for u in urls if u.get("filename", "").endswith("-py3-none-any.whl")),
+        None,
+    )
+    if not wheel_url:
+        raise RuntimeError(f"No pure-Python wheel found on PyPI for {pkg_name}")
+    wheel_resp = await pyfetch(wheel_url)
+    wheel_bytes = await wheel_resp.bytes()
+    purelib = sysconfig.get_path("purelib")
+    with zipfile.ZipFile(io.BytesIO(wheel_bytes)) as zf:
+        zf.extractall(purelib)
+
+await micropip.install("kdlquery>=1.7.0")
+try:
+    await micropip.install("ssc-codegen>=0.45.0", deps=False)
+except Exception:
+    await _install_pure_wheel_from_pypi("ssc-codegen")
 `);
 
   pyodide.runPython(playgroundBridgeSource);
@@ -75,6 +100,7 @@ def _worker_test_html(kdl_src: str, html_src: str, struct_name: str = "") -> str
 function ensurePyodide(): Promise<PyodideInstance> {
   if (!pyodideReadyPromise) {
     pyodideReadyPromise = initPyodideRuntime().catch((err: unknown) => {
+      pyodideReadyPromise = null;
       const message = err instanceof Error ? err.message : String(err);
       const errMsg: WorkerResponse = { type: "init_error", error: message };
       self.postMessage(errMsg);
