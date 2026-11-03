@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import type * as Monaco from "monaco-editor";
+import { registerKdl2Completions } from "../editor/kdl2Completion";
+import {
+  KDL2_DARK_THEME,
+  KDL2_LANGUAGE_ID,
+  KDL2_LIGHT_THEME,
+  registerKdl2Language,
+} from "../editor/kdl2Monarch";
 import { applyDiagnosticsToModel } from "../editor/linterMarkers";
 import type { SscDiagnostic } from "../types";
 
@@ -29,12 +36,8 @@ export function KdlEditorPane({
   ).length;
 
   const handleBeforeMount = useCallback((monacoInstance: typeof Monaco) => {
-    const existing = monacoInstance.languages
-      .getLanguages()
-      .some((l) => l.id === "kdl2");
-    if (!existing) {
-      monacoInstance.languages.register({ id: "kdl2", extensions: [".kdl"] });
-    }
+    registerKdl2Language(monacoInstance);
+    registerKdl2Completions(monacoInstance);
   }, []);
 
   const handleMount: OnMount = useCallback(
@@ -99,8 +102,8 @@ export function KdlEditorPane({
       <div className="editor-container">
         <Editor
           height="100%"
-          language="kdl2"
-          theme={theme}
+          language={KDL2_LANGUAGE_ID}
+          theme={theme === "vs-dark" ? KDL2_DARK_THEME : KDL2_LIGHT_THEME}
           value={value}
           beforeMount={handleBeforeMount}
           onMount={handleMount}
