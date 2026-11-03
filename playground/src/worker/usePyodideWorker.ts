@@ -92,6 +92,7 @@ export function usePyodideWorker(): PyodideWorkerHandle {
         if (pending) {
           pendingMap.delete(msg.id);
           syncBusyFlags();
+          setWorkerError(null);
           if (
             msg.action === "compile_and_lint" &&
             pending.action === "compile_and_lint"
@@ -108,6 +109,7 @@ export function usePyodideWorker(): PyodideWorkerHandle {
       }
 
       if (msg.type === "error") {
+        setWorkerError(msg.error);
         const pending = pendingMap.get(msg.id);
         if (pending) {
           pendingMap.delete(msg.id);

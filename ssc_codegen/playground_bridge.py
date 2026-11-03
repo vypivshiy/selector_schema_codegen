@@ -34,9 +34,7 @@ from ssc_codegen.targets.spec import TargetSpec
 
 __all__ = ["compile_and_lint", "test_html"]
 
-_DICT_ANNOTATION_RE = re.compile(
-    r"(?<!\(dict\))(\b[a-zA-Z_][\w-]*)\s+\(dict\)(\??)(?=\s*(?:\{|from|path|@))"
-)
+_TOP_IMPORT_LINE_RE = re.compile(r"^(\s*)(imports?)(?=\s|\{|$)")
 
 _VALID_STRUCT_TYPES: frozenset[str] = frozenset(
     {"item", "list", "table", "dict", "flat", "raw", "rest"}
@@ -129,17 +127,57 @@ def _is_rest_struct(struct: StructBase) -> bool:
     return isinstance(struct, StructRest) or struct.type == StructType.REST
 
 
+def _scan_fallback_import_warnings(kdl_src: str) -> list[ReadDiagnostic]:
+    """Scan raw source lines for top-level `import`/`imports` when CST parsing fails."""
+    warnings: list[ReadDiagnostic] = []
+    offset = 0
+    for line_no, raw_line in enumerate(
+        kdl_src.splitlines(keepends=True), start=1
+    ):
+        match = _TOP_IMPORT_LINE_RE.match(raw_line)
+        if match is not None:
+            indent, keyword = match.group(1), match.group(2)
+            col_start = len(indent) + 1
+            line_body = raw_line.rstrip("\r\n")
+            col_end = max(len(line_body) + 1, col_start + len(keyword))
+            start_pos = Position(
+                offset=offset + len(indent),
+                line=line_no,
+                column=col_start,
+            )
+            end_pos = Position(
+                offset=offset + len(line_body),
+                line=line_no,
+                column=col_end,
+            )
+            warnings.append(
+                ReadDiagnostic(
+                    message=(
+                        f"External file imports ('{keyword}') are not supported "
+                        "in the single-buffer browser playground."
+                    ),
+                    severity=Severity.WARNING,
+                    span=Span(start=start_pos, end=end_pos),
+                    path="",
+                    hint="Inline shared definitions directly into the active schema buffer.",
+                    code="W003",
+                    label="unsupported in single-buffer playground",
+                )
+            )
+        offset += len(raw_line)
+    return warnings
+
+
 def _prepare_source_for_parse(
     kdl_src: str,
 ) -> tuple[str, list[ReadDiagnostic], list[dict[str, Any]]]:
-    """Normalize `(dict)` annotations and mask external `import`/`imports` nodes."""
-    normalized_src = _DICT_ANNOTATION_RE.sub(r"(dict)\1\2", kdl_src)
-    source_for_parse = normalized_src
+    """Mask external `import`/`imports` nodes and collect `W003` warnings."""
+    source_for_parse = kdl_src
     import_warnings: list[ReadDiagnostic] = []
     fallback_structs: list[dict[str, Any]] = []
 
     try:
-        doc = kdl_parse(normalized_src)
+        doc = kdl_parse(kdl_src)
         top_nodes = list(doc.nodes)
         fallback_structs = _extract_cst_structs(top_nodes)
         for node in top_nodes:
@@ -165,6 +203,7 @@ def _prepare_source_for_parse(
                 )
     except KDLParseError:
         source_for_parse = kdl_src
+        import_warnings = _scan_fallback_import_warnings(kdl_src)
 
     return source_for_parse, import_warnings, fallback_structs
 
@@ -307,13 +346,19 @@ def compile_and_lint(
             ):
                 files["sscgen_runtime.rs"] = converter.emit_runtime()
 
-    except (BuildTimeError, ParseError, ValueError) as exc:
+    except (BuildTimeError, ParseError, ValueError, NotImplementedError) as exc:
+        err_msg = str(exc) or (
+            f"XPath selectors are not supported by target "
+            f"'{profile.language}' ({spec.lib or 'default'})."
+            if isinstance(exc, NotImplementedError)
+            else type(exc).__name__
+        )
         return {
             "ok": False,
             "diagnostics": diag_dicts,
             "structs": structs,
             "files": {},
-            "target_error": str(exc),
+            "target_error": err_msg,
         }
 
     return {

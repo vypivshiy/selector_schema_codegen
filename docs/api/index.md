@@ -80,3 +80,11 @@ from ssc_codegen import (
 ::: ssc_codegen.explore.FilterError
 
 ::: ssc_codegen.explore.run_discover
+
+---
+
+## Browser Playground Bridge
+
+JSON-serializable handlers used by the Pyodide WebWorker in `/playground/` for single-buffer schema validation, multi-target code generation, live HTML parser execution, and selector health verification.
+
+::: ssc_codegen.playground_bridge

@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { CodeOutputPane } from "./components/CodeOutputPane";
 import { HtmlTestPane } from "./components/HtmlTestPane";
 import { KdlEditorPane } from "./components/KdlEditorPane";
+import { useCopyFeedback } from "./hooks/useCopyFeedback";
 import {
   DEFAULT_PRESET,
   findMatchingPresetId,
@@ -46,8 +47,11 @@ export function App() {
   const [theme, setTheme] = useState<"vs-dark" | "light">("vs-dark");
   const [compileResult, setCompileResult] =
     useState<CompileAndLintResult | null>(null);
-  const [shareCopied, setShareCopied] = useState<boolean>(false);
-  const shareTimerRef = useRef<number | null>(null);
+  const {
+    copied: shareCopied,
+    copyText: copyShareText,
+    triggerCopied: triggerShareCopied,
+  } = useCopyFeedback(2000);
 
   const {
     status,
@@ -119,8 +123,17 @@ export function App() {
             setCompileResult(res);
           }
         })
-        .catch(() => {
-          // Worker errors are surfaced via workerError state
+        .catch((err: unknown) => {
+          if (!cancelled) {
+            const message = err instanceof Error ? err.message : String(err);
+            setCompileResult({
+              ok: false,
+              diagnostics: [],
+              structs: [],
+              files: {},
+              target_error: message,
+            });
+          }
         });
     }, 180);
 
@@ -171,20 +184,14 @@ export function App() {
         "",
         `${window.location.pathname}${window.location.search}${hash}`,
       );
-      try {
-        await navigator.clipboard.writeText(window.location.href);
-      } catch {
-        // Clipboard permission may be unavailable in restricted contexts
+      const copiedOk = await copyShareText(window.location.href);
+      if (!copiedOk) {
+        triggerShareCopied();
       }
+    } else {
+      triggerShareCopied();
     }
-    setShareCopied(true);
-    if (shareTimerRef.current !== null) {
-      window.clearTimeout(shareTimerRef.current);
-    }
-    shareTimerRef.current = window.setTimeout(() => {
-      setShareCopied(false);
-    }, 2000);
-  }, [kdlSrc, htmlSrc, target]);
+  }, [kdlSrc, htmlSrc, target, copyShareText, triggerShareCopied]);
 
   const diagnostics = compileResult?.diagnostics ?? [];
   const structs = compileResult?.structs ?? [];
@@ -239,17 +246,17 @@ export function App() {
 
         <div className="topbar-actions">
           <div
-            className={`worker-status-badge status-${status}`}
+            className={`worker-status-badge status-${workerError ? "error" : status}`}
             data-testid="worker-status-badge"
           >
             <span className="status-dot" />
-            {status === "loading" && (
+            {status === "loading" && !workerError && (
               <span>Loading Pyodide &amp; ssc-codegen…</span>
             )}
-            {status === "ready" && (
+            {status === "ready" && !workerError && (
               <span>Ready · ssc-codegen v{version ?? "0.45.0"}</span>
             )}
-            {status === "error" && (
+            {(status === "error" || Boolean(workerError)) && (
               <span title={workerError ?? undefined}>
                 Runtime Error{workerError ? `: ${workerError}` : ""}
               </span>

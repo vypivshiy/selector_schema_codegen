@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Editor from "@monaco-editor/react";
+import { useCopyFeedback } from "../hooks/useCopyFeedback";
 import {
   getMonacoLanguageForFile,
+  normalizeTargetConfig,
   type Bs4ParserEngine,
   type CompileAndLintResult,
   type HttpIoMode,
@@ -38,7 +40,7 @@ export function CodeOutputPane({
   );
 
   const [selectedFile, setSelectedFile] = useState<string>("");
-  const [copied, setCopied] = useState<boolean>(false);
+  const { copied, copyText } = useCopyFeedback(1500);
 
   useEffect(() => {
     if (fileNames.length === 0) {
@@ -58,26 +60,11 @@ export function CodeOutputPane({
     activeFileName && result?.files ? (result.files[activeFileName] ?? "") : "";
   const monacoLanguage = getMonacoLanguageForFile(activeFileName, target.lang);
 
-  const handleCopy = useCallback(async () => {
-    if (!activeCode) return;
-    try {
-      await navigator.clipboard.writeText(activeCode);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // Clipboard API may be unavailable in restricted contexts
-    }
-  }, [activeCode]);
-
   const updateTarget = <K extends keyof TargetConfig>(
     key: K,
     value: TargetConfig[K],
   ) => {
-    const next = { ...target, [key]: value };
-    if (next.py_http_client === "aiohttp" && next.http_io === "sync") {
-      next.http_io = "async";
-    }
-    onChangeTarget(next);
+    onChangeTarget(normalizeTargetConfig({ ...target, [key]: value }));
   };
 
   return (
@@ -101,7 +88,7 @@ export function CodeOutputPane({
         {target.lang === "python" && (
           <div className="target-options-group" data-testid="python-target-options">
             <label className="target-option-label">
-              <span>HTML Lib</span>
+              <span>HTML Backend</span>
               <select
                 value={target.lib}
                 onChange={(e) =>
@@ -117,7 +104,7 @@ export function CodeOutputPane({
 
             {target.lib === "bs4" && (
               <label className="target-option-label">
-                <span>BS4 Engine</span>
+                <span>BS4 Parser Engine</span>
                 <select
                   value={target.bs4_parser}
                   onChange={(e) =>
@@ -223,7 +210,7 @@ export function CodeOutputPane({
         <button
           type="button"
           className="copy-code-btn"
-          onClick={handleCopy}
+          onClick={() => void copyText(activeCode)}
           disabled={!activeCode}
         >
           {copied ? "Copied!" : "Copy"}

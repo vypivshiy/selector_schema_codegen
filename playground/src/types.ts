@@ -156,6 +156,21 @@ export const DEFAULT_TARGET_CONFIG: TargetConfig = {
 };
 
 /**
+ * Normalize a `TargetConfig`, coercing unsupported option combinations
+ * (such as `aiohttp` with `sync` I/O mode -> `async`) in one place.
+ */
+export function normalizeTargetConfig(config: TargetConfig): TargetConfig {
+  const http_io: HttpIoMode =
+    config.py_http_client === "aiohttp" && config.http_io === "sync"
+      ? "async"
+      : config.http_io;
+  return {
+    ...config,
+    http_io,
+  };
+}
+
+/**
  * Convert UI `TargetConfig` state into the contextual `TargetSpecPayload`
  * sent to `compile_and_lint`, omitting language-specific options that do not
  * apply to the active target language.
@@ -163,26 +178,22 @@ export const DEFAULT_TARGET_CONFIG: TargetConfig = {
 export function buildTargetSpecPayload(
   config: TargetConfig,
 ): TargetSpecPayload {
-  switch (config.lang) {
-    case "python": {
-      const effectiveHttpIo: HttpIoMode =
-        config.py_http_client === "aiohttp" && config.http_io === "sync"
-          ? "async"
-          : config.http_io;
+  const normalized = normalizeTargetConfig(config);
+  switch (normalized.lang) {
+    case "python":
       return {
         lang: "python",
-        lib: config.lib,
-        bs4_parser: config.lib === "bs4" ? config.bs4_parser : null,
-        http_client: config.py_http_client,
-        http_io: effectiveHttpIo,
-        separate_runtime: config.separate_runtime,
+        lib: normalized.lib,
+        bs4_parser: normalized.lib === "bs4" ? normalized.bs4_parser : null,
+        http_client: normalized.py_http_client,
+        http_io: normalized.http_io,
+        separate_runtime: normalized.separate_runtime,
         emit_runtime: true,
       };
-    }
     case "js":
       return {
         lang: "js",
-        http_client: config.js_http_client,
+        http_client: normalized.js_http_client,
         emit_runtime: true,
       };
     case "go":

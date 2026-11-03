@@ -6,9 +6,30 @@ import {
   buildTargetSpecPayload,
   DEFAULT_TARGET_CONFIG,
   getMonacoLanguageForFile,
+  normalizeTargetConfig,
   type SscDiagnostic,
   type TargetConfig,
 } from "../types";
+
+describe("normalizeTargetConfig", () => {
+  it("coerces aiohttp + sync to async while preserving other options", () => {
+    expect(
+      normalizeTargetConfig({
+        ...DEFAULT_TARGET_CONFIG,
+        py_http_client: "aiohttp",
+        http_io: "sync",
+      }).http_io,
+    ).toBe("async");
+
+    expect(
+      normalizeTargetConfig({
+        ...DEFAULT_TARGET_CONFIG,
+        py_http_client: "httpx",
+        http_io: "sync",
+      }).http_io,
+    ).toBe("sync");
+  });
+});
 
 describe("buildTargetSpecPayload", () => {
   it("includes Python-specific options when lang is python", () => {

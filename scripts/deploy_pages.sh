@@ -20,7 +20,7 @@ done
 
 set -x
 
-uv run --group docs mkdocs build --clean
+uv run --group docs mkdocs build --clean --strict
 npm --prefix playground install
 npm --prefix playground run build -- --outDir ../site/playground --emptyOutDir
 

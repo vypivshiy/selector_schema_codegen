@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef, useState, type ChangeEvent } from "react";
 import Editor from "@monaco-editor/react";
+import { useCopyFeedback } from "../hooks/useCopyFeedback";
 import {
   getHtmlTestActionState,
   selectDefaultStructName,
@@ -43,7 +44,7 @@ export function HtmlTestPane({
   const [resultTab, setResultTab] = useState<HtmlTestResultTab>("json");
   const [testResult, setTestResult] = useState<TestHtmlResult | null>(null);
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
-  const [copiedJson, setCopiedJson] = useState<boolean>(false);
+  const { copied: copiedJson, copyText: copyJsonText } = useCopyFeedback(1500);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const activeStructName = useMemo(
@@ -123,17 +124,6 @@ export function HtmlTestPane({
     },
     [onChangeHtml],
   );
-
-  const handleCopyJson = useCallback(async () => {
-    if (!formattedJson) return;
-    try {
-      await navigator.clipboard.writeText(formattedJson);
-      setCopiedJson(true);
-      setTimeout(() => setCopiedJson(false), 1500);
-    } catch {
-      // Clipboard API may be unavailable in restricted contexts
-    }
-  }, [formattedJson]);
 
   return (
     <div className="html-test-pane" data-testid="html-test-tab-slot">
@@ -315,7 +305,7 @@ export function HtmlTestPane({
                 <button
                   type="button"
                   className="copy-code-btn"
-                  onClick={() => void handleCopyJson()}
+                  onClick={() => void copyJsonText(formattedJson)}
                   disabled={!formattedJson}
                 >
                   {copiedJson ? "Copied!" : "Copy JSON"}

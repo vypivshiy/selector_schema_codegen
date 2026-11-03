@@ -1,6 +1,7 @@
 import { DEFAULT_PRESET } from "./presets";
 import {
   DEFAULT_TARGET_CONFIG,
+  normalizeTargetConfig as normalizeTypedTargetConfig,
   type Bs4ParserEngine,
   type HttpIoMode,
   type JsHttpClient,
@@ -94,18 +95,15 @@ export function normalizeTargetConfig(raw: unknown): TargetConfig {
   )
     ? (obj.js_http_client as JsHttpClient)
     : DEFAULT_TARGET_CONFIG.js_http_client;
-  let http_io = VALID_HTTP_IO_MODES.has(obj.http_io as HttpIoMode)
+  const http_io = VALID_HTTP_IO_MODES.has(obj.http_io as HttpIoMode)
     ? (obj.http_io as HttpIoMode)
     : DEFAULT_TARGET_CONFIG.http_io;
-  if (py_http_client === "aiohttp" && http_io === "sync") {
-    http_io = "async";
-  }
   const separate_runtime =
     typeof obj.separate_runtime === "boolean"
       ? obj.separate_runtime
       : DEFAULT_TARGET_CONFIG.separate_runtime;
 
-  return {
+  return normalizeTypedTargetConfig({
     lang,
     lib,
     bs4_parser,
@@ -113,7 +111,7 @@ export function normalizeTargetConfig(raw: unknown): TargetConfig {
     js_http_client,
     http_io,
     separate_runtime,
-  };
+  });
 }
 
 function parseWorkspacePayload(rawJson: string): WorkspaceState | null {

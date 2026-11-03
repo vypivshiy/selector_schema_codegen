@@ -253,6 +253,26 @@ imports {
         err = next(d for d in result["diagnostics"] if d["severity"] == "error")
         assert err["span"]["start"]["line"] == 5
 
+    def test_imports_warning_preserved_alongside_kdl_syntax_error(
+        self,
+    ) -> None:
+        schema = """\
+import "./shared.kdl" { (struct)Shared }
+
+(item)struct Broken {
+    title { css "h1"
+"""
+        result = compile_and_lint(schema, {"lang": "python"})
+        assert result["ok"] is False
+        assert result["files"] == {}
+        codes = [d["code"] for d in result["diagnostics"]]
+        assert "W003" in codes
+        assert "E000" in codes
+        warning = next(d for d in result["diagnostics"] if d["code"] == "W003")
+        assert warning["severity"] == "warning"
+        assert warning["span"]["start"]["line"] == 1
+        assert warning["span"]["start"]["column"] == 1
+
 
 class TestCompileAndLintTargets:
     """Verify multi-target codegen across Python, JavaScript, Go, and Rust."""
@@ -363,6 +383,23 @@ class TestCompileAndLintTargets:
         assert result["structs"] == [
             {"name": "UserApi", "type": "rest", "is_rest": True},
         ]
+
+    def test_xpath_with_unsupported_backend_returns_target_error(self) -> None:
+        xpath_schema = """\
+(item)struct XpathArticle {
+    heading { xpath "//h1"; text }
+}
+"""
+        result = compile_and_lint(
+            xpath_schema,
+            {"lang": "python", "lib": "bs4"},
+        )
+        assert result["ok"] is False
+        assert result["files"] == {}
+        assert result["diagnostics"] == []
+        assert result["target_error"] is not None
+        assert len(result["target_error"]) > 0
+        assert "xpath" in result["target_error"].lower()
 
 
 class TestTestHtml:

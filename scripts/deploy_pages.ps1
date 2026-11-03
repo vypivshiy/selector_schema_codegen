@@ -14,7 +14,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 Write-Host "1/3 Building MkDocs documentation into site/..." -ForegroundColor Cyan
-uv run --group docs mkdocs build --clean
+uv run --group docs mkdocs build --clean --strict
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host "2/3 Installing dependencies & building Web Playground into site/playground/..." -ForegroundColor Cyan
