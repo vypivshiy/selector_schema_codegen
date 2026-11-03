@@ -940,9 +940,12 @@ wheels = [
 
 [[package]]
 name = "kdlquery"
-version = "1.6.0"
+version = "1.7.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/2f/dd/ce10a390557baba965da8bfafb4be6d486b32adad71db9287895203ea7c0/kdlquery-1.6.0.tar.gz", hash = "sha256:a3edb44f3bcdfa5a4aee24c322b8a38bbfa6742aa460329ce729c5283a1e0c0c", size = 256170, upload-time = "2026-10-02T23:29:58.459Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/64/c6/604a61fc05d53300e265daa57aa6c4e0e5eea8870073321ce87286be9b79/kdlquery-1.7.0.tar.gz", hash = "sha256:c373a86be751d957b53b80605db01f2f45e3ad5ae048f47c141dcaf452d032dd", size = 160011, upload-time = "2026-11-03T09:10:56.012Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6a/0c/d889f251664bedc36e8bfe2e06f66b4baa654855e85ae6b17adfd947f3b3/kdlquery-1.7.0-py3-none-any.whl", hash = "sha256:4034bd6381fa2dc4c70d42fad61e8172617a444a2d23b1fcd704168f33d8479d", size = 45495, upload-time = "2026-11-03T09:10:54.59Z" },
+]
 
 [[package]]
 name = "librt"
@@ -2392,7 +2395,7 @@ requires-dist = [
     { name = "colorama", marker = "sys_platform == 'win32'", specifier = ">=0.4.6" },
     { name = "cssselect", specifier = ">=1.2.0" },
     { name = "httpx", specifier = ">=0.28.1" },
-    { name = "kdlquery", specifier = ">=1.3.0" },
+    { name = "kdlquery", specifier = ">=1.7.0" },
     { name = "lxml", specifier = ">=5.3.0" },
     { name = "soupsieve", specifier = ">=2.6" },
     { name = "typer", specifier = ">0.26" },
