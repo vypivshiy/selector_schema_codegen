@@ -4,7 +4,7 @@ import {
   minifyHtmlForShare,
   type HtmlMinifyOptions,
 } from "./htmlFormat";
-import { DEFAULT_PRESET, getPresetById, PLAYGROUND_PRESETS } from "./presets";
+import { DEFAULT_PRESET, getPresetById, PRESETS } from "./presets";
 import {
   DEFAULT_TARGET_CONFIG,
   normalizeTargetConfig as normalizeTypedTargetConfig,
@@ -201,7 +201,7 @@ function parseWorkspacePayload(
     } else if (preset) {
       html = preset.html;
     } else {
-      const kdlMatch = PLAYGROUND_PRESETS.find((pr) => pr.kdl === kdl);
+      const kdlMatch = PRESETS.find((pr) => pr.kdl === kdl);
       html = kdlMatch ? kdlMatch.html : "";
     }
 
@@ -318,7 +318,7 @@ export async function encodeWorkspaceToHash(
     ...options?.minifyOptions,
   };
 
-  const matchedPreset = PLAYGROUND_PRESETS.find((p) => p.kdl === state.kdl);
+  const matchedPreset = PRESETS.find((p) => p.kdl === state.kdl);
   const compactRecord: Record<string, unknown> = {};
 
   if (matchedPreset) {

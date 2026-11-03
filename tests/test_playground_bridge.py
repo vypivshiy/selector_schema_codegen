@@ -123,8 +123,20 @@ class TestCompileAndLintSchemas:
         assert result["target_error"] is None
         assert result["diagnostics"] == []
         assert result["structs"] == [
-            {"name": "QuoteItem", "type": "item", "is_rest": False},
-            {"name": "QuoteCatalogue", "type": "list", "is_rest": False},
+            {
+                "name": "QuoteItem",
+                "class_name": "QuoteItem",
+                "type": "item",
+                "is_rest": False,
+                "referenced_by": ["QuoteCatalogue"],
+            },
+            {
+                "name": "QuoteCatalogue",
+                "class_name": "QuoteCatalogue",
+                "type": "list",
+                "is_rest": False,
+                "referenced_by": [],
+            },
         ]
         assert "parser.py" in result["files"]
         assert "class QuoteCatalogue:" in result["files"]["parser.py"]
@@ -136,12 +148,48 @@ class TestCompileAndLintSchemas:
         result = compile_and_lint(ALL_STRUCT_TYPES_SCHEMA)
         assert result["ok"] is True
         assert result["structs"] == [
-            {"name": "ItemModel", "type": "item", "is_rest": False},
-            {"name": "ListModel", "type": "list", "is_rest": False},
-            {"name": "TableModel", "type": "table", "is_rest": False},
-            {"name": "DictModel", "type": "dict", "is_rest": False},
-            {"name": "FlatModel", "type": "flat", "is_rest": False},
-            {"name": "RawModel", "type": "raw", "is_rest": False},
+            {
+                "name": "ItemModel",
+                "class_name": "ItemModel",
+                "type": "item",
+                "is_rest": False,
+                "referenced_by": [],
+            },
+            {
+                "name": "ListModel",
+                "class_name": "ListModel",
+                "type": "list",
+                "is_rest": False,
+                "referenced_by": [],
+            },
+            {
+                "name": "TableModel",
+                "class_name": "TableModel",
+                "type": "table",
+                "is_rest": False,
+                "referenced_by": [],
+            },
+            {
+                "name": "DictModel",
+                "class_name": "DictModel",
+                "type": "dict",
+                "is_rest": False,
+                "referenced_by": [],
+            },
+            {
+                "name": "FlatModel",
+                "class_name": "FlatModel",
+                "type": "flat",
+                "is_rest": False,
+                "referenced_by": [],
+            },
+            {
+                "name": "RawModel",
+                "class_name": "RawModel",
+                "type": "raw",
+                "is_rest": False,
+                "referenced_by": [],
+            },
         ]
 
     def test_rest_schema_valid(self) -> None:
@@ -153,7 +201,13 @@ class TestCompileAndLintSchemas:
         assert result["target_error"] is None
         assert result["diagnostics"] == []
         assert result["structs"] == [
-            {"name": "UserApi", "type": "rest", "is_rest": True},
+            {
+                "name": "UserApi",
+                "class_name": "UserApi",
+                "type": "rest",
+                "is_rest": True,
+                "referenced_by": [],
+            },
         ]
         assert "parser.py" in result["files"]
         assert "class UserApi:" in result["files"]["parser.py"]
@@ -381,7 +435,13 @@ class TestCompileAndLintTargets:
         assert result["target_error"] is not None
         assert "aiohttp" in result["target_error"]
         assert result["structs"] == [
-            {"name": "UserApi", "type": "rest", "is_rest": True},
+            {
+                "name": "UserApi",
+                "class_name": "UserApi",
+                "type": "rest",
+                "is_rest": True,
+                "referenced_by": [],
+            },
         ]
 
     def test_xpath_with_unsupported_backend_returns_target_error(self) -> None:
