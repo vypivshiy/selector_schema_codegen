@@ -20,17 +20,17 @@ done
 
 set -x
 
-uv run --group docs mkdocs build --clean --strict
 npm --prefix playground install
-npm --prefix playground run build -- --outDir ../site/playground --emptyOutDir
+npm --prefix playground run build -- --emptyOutDir
+: > playground/dist/.nojekyll
 
 if [ "$BUILD_ONLY" -eq 1 ]; then
-    echo "Build complete (site/ and site/playground/). Skipping gh-pages update (--build-only)."
+    echo "Build complete (playground/dist/). Skipping gh-pages update (--build-only)."
     exit 0
 fi
 
 if [ "$NO_PUSH" -eq 1 ]; then
-    uv run --group docs ghp-import -n -f site
+    uv run --with ghp-import ghp-import -n -f playground/dist
 else
-    uv run --group docs ghp-import -n -p -f site
+    uv run --with ghp-import ghp-import -n -p -f playground/dist
 fi
