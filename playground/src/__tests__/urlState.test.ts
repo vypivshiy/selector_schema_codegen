@@ -288,7 +288,7 @@ describe("localStorage draft persistence & URL hash precedence", () => {
     expect(decodedMinified!.html).not.toContain("<style>");
     expect(decodedMinified!.html).not.toContain("<svg");
     expect(decodedMinified!.html).not.toContain("<!--");
-    expect(decodedMinified!.html).toContain("\n  <div class=\"col-lg-3\">");
+    expect(decodedMinified!.html).toContain('\n    <div class="col-lg-3">');
     expect(decodedMinified!.html).toContain("Book One");
   });
 
