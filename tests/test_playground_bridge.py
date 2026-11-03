@@ -1,8 +1,10 @@
-"""Tests for the Web Playground worker bridge (`ssc_codegen.playground_bridge`)."""
+"""Tests for the Web Playground worker bridge (`playground/src/worker/playground_bridge.py`)."""
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +12,24 @@ import pytest
 
 from ssc_codegen.core.format import diagnostic_to_dict
 from ssc_codegen.core.reader import parse_module
-from ssc_codegen.playground_bridge import compile_and_lint, test_html
+
+_BRIDGE_PATH = (
+    Path(__file__).resolve().parent.parent
+    / "playground"
+    / "src"
+    / "worker"
+    / "playground_bridge.py"
+)
+_BRIDGE_SPEC = importlib.util.spec_from_file_location(
+    "playground_bridge", _BRIDGE_PATH
+)
+assert _BRIDGE_SPEC is not None and _BRIDGE_SPEC.loader is not None
+_BRIDGE_MOD = importlib.util.module_from_spec(_BRIDGE_SPEC)
+sys.modules["playground_bridge"] = _BRIDGE_MOD
+_BRIDGE_SPEC.loader.exec_module(_BRIDGE_MOD)
+
+compile_and_lint = _BRIDGE_MOD.compile_and_lint
+test_html = _BRIDGE_MOD.test_html
 
 PRESETS_JSON_PATH = (
     Path(__file__).resolve().parent.parent

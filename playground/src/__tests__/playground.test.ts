@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import playgroundBridgeSource from "../../../ssc_codegen/playground_bridge.py?raw";
+import playgroundBridgeSource from "../worker/playground_bridge.py?raw";
 import workerSource from "../worker/pyodide.worker.ts?raw";
 import { diagnosticsToMarkers } from "../editor/linterMarkers";
 import {

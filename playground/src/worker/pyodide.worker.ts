@@ -1,4 +1,4 @@
-import playgroundBridgeSource from "../../../ssc_codegen/playground_bridge.py?raw";
+import playgroundBridgeSource from "./playground_bridge.py?raw";
 import type {
   CompileAndLintResult,
   TestHtmlResult,
