@@ -8,7 +8,27 @@ import pytest
 
 from ssc_codegen.core.format import diagnostic_to_dict
 from ssc_codegen.core.reader import parse_module
-from ssc_codegen.playground_bridge import compile_and_lint
+from ssc_codegen.playground_bridge import compile_and_lint, test_html
+
+SAMPLE_QUOTES_HTML = """\
+<div class="catalogue">
+  <div class="quote">
+    <span class="text">Simplicity is prerequisite for reliability.</span>
+    <span class="author">Edsger W. Dijkstra</span>
+    <div class="tags">
+      <a class="tag">cs</a>
+      <a class="tag">reliability</a>
+    </div>
+  </div>
+  <div class="quote">
+    <span class="text">Programs must be written for people to read.</span>
+    <span class="author">Harold Abelson</span>
+    <div class="tags">
+      <a class="tag">programming</a>
+    </div>
+  </div>
+</div>
+"""
 
 HTML_SCHEMA = """\
 (item)struct QuoteItem {
@@ -17,7 +37,7 @@ HTML_SCHEMA = """\
 }
 
 (list)struct QuoteCatalogue {
-    @split-doc ".quote"
+    @split-doc { css-all ".quote" }
     text { css ".text"; text }
     details { nested QuoteItem }
 }
@@ -29,20 +49,20 @@ ALL_STRUCT_TYPES_SCHEMA = """\
 }
 
 (list)struct ListModel {
-    @split-doc "li"
+    @split-doc { css-all "li" }
     label { css "span"; text }
 }
 
 (table)struct TableModel {
-    @table "table.specs"
-    @rows "tr"
-    @match "th" { text }
-    @value "td" { text }
+    @table { css "table.specs" }
+    @rows { css-all "tr" }
+    @match { css "th"; text }
+    @value { css "td"; text }
     brand { match { eq "Brand" } }
 }
 
 (dict)struct DictModel {
-    @split-doc "dl > div"
+    @split-doc { css-all "dl > div" }
     @key { css "dt"; text }
     @value { css "dd"; text }
 }
@@ -329,3 +349,169 @@ class TestCompileAndLintTargets:
         assert result["structs"] == [
             {"name": "UserApi", "type": "rest", "is_rest": True},
         ]
+
+
+class TestTestHtml:
+    """Verify `test_html` parser execution, struct selection, and selector health."""
+
+    def test_auto_selects_primary_non_rest_struct_and_extracts_list(
+        self,
+    ) -> None:
+        result = test_html(HTML_SCHEMA, SAMPLE_QUOTES_HTML)
+        assert result["ok"] is True
+        assert result["struct_name"] == "QuoteCatalogue"
+        assert result["run_error"] is None
+        assert isinstance(result["elapsed_ms"], float)
+        assert result["elapsed_ms"] >= 0.0
+        assert result["run_result"] == [
+            {
+                "text": "Simplicity is prerequisite for reliability.",
+                "details": {
+                    "author": "Edsger W. Dijkstra",
+                    "tags": ["cs", "reliability"],
+                },
+            },
+            {
+                "text": "Programs must be written for people to read.",
+                "details": {
+                    "author": "Harold Abelson",
+                    "tags": ["programming"],
+                },
+            },
+        ]
+        health = result["health"]
+        assert health is not None
+        assert health["struct_name"] == "QuoteCatalogue"
+        assert health["passed"] is True
+        checks_by_path = {c["path"]: c for c in health["checks"]}
+        assert checks_by_path["QuoteCatalogue.@split-doc"] == {
+            "path": "QuoteCatalogue.@split-doc",
+            "selector_type": "css-all",
+            "query": ".quote",
+            "matches": 2,
+            "status": "ok",
+            "message": "(2 matches)",
+        }
+        assert checks_by_path["QuoteCatalogue.text"]["status"] == "ok"
+        assert (
+            checks_by_path["QuoteCatalogue.details[QuoteItem].author"]["status"]
+            == "ok"
+        )
+        assert (
+            checks_by_path["QuoteCatalogue.details[QuoteItem].tags"]["matches"]
+            == 3
+        )
+        assert isinstance(json.dumps(result), str)
+
+    def test_nested_struct_selection_in_isolation(self) -> None:
+        result = test_html(
+            HTML_SCHEMA,
+            SAMPLE_QUOTES_HTML,
+            struct_name="QuoteItem",
+        )
+        assert result["ok"] is True
+        assert result["struct_name"] == "QuoteItem"
+        assert result["run_error"] is None
+        assert result["run_result"] == {
+            "author": "Edsger W. Dijkstra",
+            "tags": ["cs", "reliability", "programming"],
+        }
+        health = result["health"]
+        assert health is not None
+        assert health["struct_name"] == "QuoteItem"
+        assert health["passed"] is True
+        assert [c["path"] for c in health["checks"]] == [
+            "QuoteItem.author",
+            "QuoteItem.tags",
+        ]
+
+    def test_broken_selector_reports_health_failure(self) -> None:
+        schema_with_broken = """\
+(item)struct ProductCard {
+    title { css "h1.title"; text }
+    badges { css-all ".nonexistent-badge"; text }
+    discount { css ".missing-discount"; text; fallback "0%" }
+}
+"""
+        sample_html = '<div class="card"><h1 class="title">Keyboard</h1></div>'
+        result = test_html(schema_with_broken, sample_html)
+        assert result["ok"] is True
+        assert result["struct_name"] == "ProductCard"
+        assert result["run_result"] == {
+            "title": "Keyboard",
+            "badges": [],
+            "discount": "0%",
+        }
+        health = result["health"]
+        assert health is not None
+        assert health["struct_name"] == "ProductCard"
+        assert health["passed"] is False
+        checks = {c["path"]: c for c in health["checks"]}
+        assert checks["ProductCard.title"]["status"] == "ok"
+        assert checks["ProductCard.title"]["matches"] == 1
+        assert checks["ProductCard.badges"] == {
+            "path": "ProductCard.badges",
+            "selector_type": "css-all",
+            "query": ".nonexistent-badge",
+            "matches": 0,
+            "status": "fail",
+            "message": "(0 matches)",
+        }
+        assert checks["ProductCard.discount"]["status"] == "warn"
+        assert checks["ProductCard.discount"]["matches"] == 0
+
+    def test_raw_struct_extraction_and_health(self) -> None:
+        raw_text = "Release bundle v2.45 (build 901)"
+        result = test_html(
+            ALL_STRUCT_TYPES_SCHEMA,
+            raw_text,
+            struct_name="RawModel",
+        )
+        assert result["ok"] is True
+        assert result["struct_name"] == "RawModel"
+        assert result["run_error"] is None
+        assert result["run_result"] == {"version": "2.45"}
+        health = result["health"]
+        assert health is not None
+        assert health["struct_name"] == "RawModel"
+        assert health["passed"] is True
+        assert len(health["checks"]) == 1
+        assert health["checks"][0]["selector_type"] == "raw"
+        assert health["checks"][0]["status"] == "warn"
+
+    @pytest.mark.parametrize("explicit_struct", ["UserApi", None])
+    def test_rejects_rest_struct_gracefully(
+        self, explicit_struct: str | None
+    ) -> None:
+        result = test_html(
+            REST_SCHEMA,
+            "<html><body>ignored</body></html>",
+            struct_name=explicit_struct,
+        )
+        assert result["ok"] is False
+        assert result["struct_name"] == "UserApi"
+        assert result["run_result"] is None
+        assert result["health"] is None
+        assert result["run_error"] is not None
+        assert "(rest)struct" in result["run_error"]
+
+    def test_unknown_struct_and_invalid_schema_errors(self) -> None:
+        unknown = test_html(
+            HTML_SCHEMA,
+            SAMPLE_QUOTES_HTML,
+            struct_name="MissingStruct",
+        )
+        assert unknown["ok"] is False
+        assert unknown["struct_name"] == "MissingStruct"
+        assert unknown["run_result"] is None
+        assert unknown["health"] is None
+        assert "MissingStruct" in (unknown["run_error"] or "")
+
+        invalid = test_html(
+            '(item)struct Broken { field { css "h1"; to-int } }',
+            SAMPLE_QUOTES_HTML,
+        )
+        assert invalid["ok"] is False
+        assert invalid["run_result"] is None
+        assert invalid["health"] is None
+        assert invalid["run_error"] is not None

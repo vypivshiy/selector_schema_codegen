@@ -1,6 +1,7 @@
 import playgroundBridgeSource from "../../../ssc_codegen/playground_bridge.py?raw";
 import type {
   CompileAndLintResult,
+  TestHtmlResult,
   WorkerRequest,
   WorkerResponse,
 } from "../types";
@@ -56,6 +57,11 @@ def _worker_compile_and_lint(kdl_src: str, target_json: str) -> str:
     target_dict = json.loads(target_json) if target_json else {}
     res = compile_and_lint(kdl_src, target_dict)
     return json.dumps(res, ensure_ascii=False)
+
+def _worker_test_html(kdl_src: str, html_src: str, struct_name: str = "") -> str:
+    resolved_struct = struct_name if struct_name else None
+    res = test_html(kdl_src, html_src, resolved_struct)
+    return json.dumps(res, ensure_ascii=False)
 `);
 
   const getVersion = pyodide.globals.get("_worker_get_version");
@@ -99,6 +105,23 @@ self.addEventListener("message", async (event: MessageEvent<WorkerRequest>) => {
         type: "result",
         id: msg.id,
         action: "compile_and_lint",
+        result,
+      };
+      self.postMessage(response);
+    } else if (msg.action === "test_html") {
+      const fn = pyodide.globals.get("_worker_test_html");
+      const rawJson = String(
+        fn(
+          msg.payload.kdlSrc,
+          msg.payload.htmlSrc,
+          msg.payload.structName ?? "",
+        ),
+      );
+      const result = JSON.parse(rawJson) as TestHtmlResult;
+      const response: WorkerResponse = {
+        type: "result",
+        id: msg.id,
+        action: "test_html",
         result,
       };
       self.postMessage(response);

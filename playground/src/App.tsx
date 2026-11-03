@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { CodeOutputPane } from "./components/CodeOutputPane";
+import { HtmlTestPane } from "./components/HtmlTestPane";
 import { KdlEditorPane } from "./components/KdlEditorPane";
 import {
   buildTargetSpecPayload,
@@ -17,24 +18,52 @@ export const DEFAULT_KDL_SCHEMA = `// KDL 2.0 Schema DSL (v2.1) — HTML Catalog
 }
 
 (list)struct QuoteCatalogue {
-    @split-doc ".quote"
+    @split-doc { css-all ".quote" }
     quote_text { css ".text"; text; trim }
     author_info { nested QuoteAuthor }
 }
+`;
+
+export const DEFAULT_SAMPLE_HTML = `<div class="catalogue">
+  <article class="quote">
+    <p class="text">"Simplicity is prerequisite for reliability."</p>
+    <span class="author">Edsger W. Dijkstra</span>
+    <div class="tags">
+      <span class="tag">computer-science</span>
+      <span class="tag">architecture</span>
+    </div>
+  </article>
+  <article class="quote">
+    <p class="text">"Programs must be written for people to read."</p>
+    <span class="author">Harold Abelson</span>
+    <div class="tags">
+      <span class="tag">programming</span>
+      <span class="tag">design</span>
+    </div>
+  </article>
+</div>
 `;
 
 export type RightColumnTab = "code" | "test";
 
 export function App() {
   const [kdlSrc, setKdlSrc] = useState<string>(DEFAULT_KDL_SCHEMA);
+  const [htmlSrc, setHtmlSrc] = useState<string>(DEFAULT_SAMPLE_HTML);
   const [target, setTarget] = useState<TargetConfig>(DEFAULT_TARGET_CONFIG);
   const [activeTab, setActiveTab] = useState<RightColumnTab>("code");
   const [theme, setTheme] = useState<"vs-dark" | "light">("vs-dark");
   const [compileResult, setCompileResult] =
     useState<CompileAndLintResult | null>(null);
 
-  const { status, version, workerError, isCompiling, compileAndLint } =
-    usePyodideWorker();
+  const {
+    status,
+    version,
+    workerError,
+    isCompiling,
+    isTestingHtml,
+    compileAndLint,
+    testHtml,
+  } = usePyodideWorker();
 
   useEffect(() => {
     if (status !== "ready") {
@@ -62,6 +91,7 @@ export function App() {
 
   const diagnostics = compileResult?.diagnostics ?? [];
   const structs = compileResult?.structs ?? [];
+  const hasSchemaErrors = diagnostics.some((d) => d.severity === "error");
 
   return (
     <div className={`app-shell ${theme === "light" ? "theme-light" : "theme-dark"}`}>
@@ -156,16 +186,17 @@ export function App() {
                 theme={theme}
               />
             ) : (
-              <div
-                className="html-test-placeholder"
-                data-testid="html-test-tab-slot"
-              >
-                <h3>Test &amp; Health (HTML)</h3>
-                <p>
-                  Interactive HTML / Raw schema parser execution and selector
-                  health check workspace.
-                </p>
-              </div>
+              <HtmlTestPane
+                kdlSrc={kdlSrc}
+                htmlSrc={htmlSrc}
+                onChangeHtml={setHtmlSrc}
+                structs={structs}
+                hasSchemaErrors={hasSchemaErrors}
+                workerReady={status === "ready"}
+                isTesting={isTestingHtml}
+                onRunTestHtml={testHtml}
+                theme={theme}
+              />
             )}
           </div>
         </section>
