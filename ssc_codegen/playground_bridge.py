@@ -7,7 +7,11 @@ across Python, JavaScript, Go, and Rust.
 
 from __future__ import annotations
 
+import json
 import re
+import sys
+import time
+import types
 from collections.abc import Mapping
 from typing import Any
 
@@ -20,13 +24,15 @@ from ssc_codegen.core.format import diagnostic_to_dict
 from ssc_codegen.core.reader import parse_module
 from ssc_codegen.exceptions import BuildTimeError, ParseError
 from ssc_codegen.generation.runtime import register_runtime_file
+from ssc_codegen.health import check_struct_health
+from ssc_codegen.naming import to_pascal_case
 from ssc_codegen.targets.golang.visitor import GoVisitor
 from ssc_codegen.targets.python.visitor import PythonVisitor
 from ssc_codegen.targets.resolver import ResolutionError, resolve
 from ssc_codegen.targets.rust.visitor import RustVisitor
 from ssc_codegen.targets.spec import TargetSpec
 
-__all__ = ["compile_and_lint"]
+__all__ = ["compile_and_lint", "test_html"]
 
 _DICT_ANNOTATION_RE = re.compile(
     r"(?<!\(dict\))(\b[a-zA-Z_][\w-]*)\s+\(dict\)(\??)(?=\s*(?:\{|from|path|@))"
@@ -118,6 +124,65 @@ def _resolve_lint_targets(
     return (mapped,) if mapped is not None else None
 
 
+def _is_rest_struct(struct: StructBase) -> bool:
+    """Return True if the struct is a `(rest)struct`."""
+    return isinstance(struct, StructRest) or struct.type == StructType.REST
+
+
+def _prepare_source_for_parse(
+    kdl_src: str,
+) -> tuple[str, list[ReadDiagnostic], list[dict[str, Any]]]:
+    """Normalize `(dict)` annotations and mask external `import`/`imports` nodes."""
+    normalized_src = _DICT_ANNOTATION_RE.sub(r"(dict)\1\2", kdl_src)
+    source_for_parse = normalized_src
+    import_warnings: list[ReadDiagnostic] = []
+    fallback_structs: list[dict[str, Any]] = []
+
+    try:
+        doc = kdl_parse(normalized_src)
+        top_nodes = list(doc.nodes)
+        fallback_structs = _extract_cst_structs(top_nodes)
+        for node in top_nodes:
+            if node.name in ("import", "imports"):
+                import_warnings.append(
+                    ReadDiagnostic(
+                        message=(
+                            f"External file imports ('{node.name}') are not supported "
+                            "in the single-buffer browser playground."
+                        ),
+                        severity=Severity.WARNING,
+                        span=node.span,
+                        path="",
+                        hint="Inline shared definitions directly into the active schema buffer.",
+                        code="W003",
+                        label="unsupported in single-buffer playground",
+                    )
+                )
+                source_for_parse = _mask_span(
+                    source_for_parse,
+                    node.span.start.offset,
+                    node.span.end.offset,
+                )
+    except KDLParseError:
+        source_for_parse = kdl_src
+
+    return source_for_parse, import_warnings, fallback_structs
+
+
+def _ensure_httpx_stub() -> None:
+    """Install a lightweight `httpx` stub in `sys.modules` if `httpx` is absent."""
+    if "httpx" in sys.modules:
+        return
+    try:
+        import httpx  # noqa: F401
+    except ImportError:
+        stub = types.ModuleType("httpx")
+        stub.Client = object  # type: ignore[attr-defined]
+        stub.AsyncClient = object  # type: ignore[attr-defined]
+        stub.HTTPError = Exception  # type: ignore[attr-defined]
+        sys.modules["httpx"] = stub
+
+
 def compile_and_lint(
     kdl_src: str,
     target: Mapping[str, Any] | None = None,
@@ -165,38 +230,9 @@ def compile_and_lint(
     except ResolutionError as exc:
         target_error = str(exc)
 
-    normalized_src = _DICT_ANNOTATION_RE.sub(r"(dict)\1\2", kdl_src)
-    source_for_parse = normalized_src
-    import_warnings: list[ReadDiagnostic] = []
-    fallback_structs: list[dict[str, Any]] = []
-
-    try:
-        doc = kdl_parse(normalized_src)
-        top_nodes = list(doc.nodes)
-        fallback_structs = _extract_cst_structs(top_nodes)
-        for node in top_nodes:
-            if node.name in ("import", "imports"):
-                import_warnings.append(
-                    ReadDiagnostic(
-                        message=(
-                            f"External file imports ('{node.name}') are not supported "
-                            "in the single-buffer browser playground."
-                        ),
-                        severity=Severity.WARNING,
-                        span=node.span,
-                        path="",
-                        hint="Inline shared definitions directly into the active schema buffer.",
-                        code="W003",
-                        label="unsupported in single-buffer playground",
-                    )
-                )
-                source_for_parse = _mask_span(
-                    source_for_parse,
-                    node.span.start.offset,
-                    node.span.end.offset,
-                )
-    except KDLParseError:
-        source_for_parse = kdl_src
+    source_for_parse, import_warnings, fallback_structs = (
+        _prepare_source_for_parse(kdl_src)
+    )
 
     lint_targets = _resolve_lint_targets(
         raw_lang, profile.language if profile is not None else None
@@ -213,7 +249,7 @@ def compile_and_lint(
         {
             "name": s.name,
             "type": s.type.name.lower(),
-            "is_rest": isinstance(s, StructRest) or s.type == StructType.REST,
+            "is_rest": _is_rest_struct(s),
         }
         for s in ast_mod.body
         if isinstance(s, StructBase)
@@ -287,3 +323,170 @@ def compile_and_lint(
         "files": files,
         "target_error": None,
     }
+
+
+def test_html(
+    kdl_src: str,
+    html_src: str,
+    struct_name: str | None = None,
+) -> dict[str, Any]:
+    """Execute a generated Python parser and selector health check against HTML or text.
+
+    Selects the requested struct (or auto-selects the primary non-REST struct when
+    `struct_name` is `None`), rejects `(rest)struct` definitions, evaluates selector
+    health via `check_struct_health`, and runs the compiled Python parser against
+    `html_src` while measuring execution latency.
+
+    Args:
+        kdl_src (str): KDL 2.0 schema source text defining the target struct.
+        html_src (str): Sample HTML document or plain text input to parse and check.
+        struct_name (str | None): Optional target struct name; defaults to the
+            primary (last) non-REST struct in the module when `None`.
+
+    Returns:
+        dict[str, Any]: JSON-serializable dictionary containing `ok`, `struct_name`,
+            `run_result`, `run_error`, `elapsed_ms`, and `health`.
+    """
+    requested_name = (
+        struct_name.strip() if struct_name and struct_name.strip() else None
+    )
+    source_for_parse, _, _ = _prepare_source_for_parse(kdl_src)
+    ast_mod, module_diagnostics = parse_module(
+        source_for_parse,
+        targets=("python",),
+    )
+
+    errors = [d for d in module_diagnostics if d.severity == Severity.ERROR]
+    if errors:
+        error_msg = "; ".join(
+            f"{d.code}: {d.message}" if d.code else d.message for d in errors
+        )
+        return {
+            "ok": False,
+            "struct_name": requested_name,
+            "run_result": None,
+            "run_error": error_msg,
+            "elapsed_ms": 0.0,
+            "health": None,
+        }
+
+    structs = [s for s in ast_mod.body if isinstance(s, StructBase)]
+    if not structs:
+        return {
+            "ok": False,
+            "struct_name": requested_name,
+            "run_result": None,
+            "run_error": "No structs declared in schema.",
+            "elapsed_ms": 0.0,
+            "health": None,
+        }
+
+    target_struct: StructBase | None = None
+    if requested_name is not None:
+        for s in structs:
+            if s.name == requested_name:
+                target_struct = s
+                break
+        if target_struct is None:
+            available = ", ".join(s.name for s in structs)
+            return {
+                "ok": False,
+                "struct_name": requested_name,
+                "run_result": None,
+                "run_error": (
+                    f"Struct '{requested_name}' not found in schema. "
+                    f"Available: {available}"
+                ),
+                "elapsed_ms": 0.0,
+                "health": None,
+            }
+    else:
+        non_rest = [s for s in structs if not _is_rest_struct(s)]
+        target_struct = non_rest[-1] if non_rest else structs[-1]
+
+    if _is_rest_struct(target_struct):
+        return {
+            "ok": False,
+            "struct_name": target_struct.name,
+            "run_result": None,
+            "run_error": (
+                f"Struct '{target_struct.name}' is a (rest)struct. "
+                "REST schemas support linting and code generation only; "
+                "HTML parser execution and selector health checks are not supported."
+            ),
+            "elapsed_ms": 0.0,
+            "health": None,
+        }
+
+    health_report = check_struct_health(target_struct, html_src, module=ast_mod)
+    health_dict: dict[str, Any] = {
+        "struct_name": health_report.struct_name,
+        "passed": not health_report.has_failures(),
+        "checks": [
+            {
+                "path": c.path,
+                "selector_type": c.selector_type,
+                "query": c.query,
+                "matches": c.matches,
+                "status": c.status,
+                "message": c.message,
+            }
+            for c in health_report.checks
+        ],
+    }
+
+    t0 = time.perf_counter()
+    try:
+        profile = resolve(
+            TargetSpec(lang="python", lib="bs4", bs4_parser="lxml")
+        )
+        converter = profile.create_converter()
+        try:
+            code = converter.convert(ast_mod, bs4_parser="lxml")
+        except NotImplementedError:
+            lxml_profile = resolve(TargetSpec(lang="python", lib="lxml"))
+            code = lxml_profile.create_converter().convert(ast_mod)
+
+        _ensure_httpx_stub()
+        namespace: dict[str, Any] = {}
+        exec(code, namespace)  # noqa: S102
+        class_name = to_pascal_case(target_struct.name)
+        parser_cls = namespace.get(class_name)
+        if parser_cls is None:
+            elapsed_ms = round((time.perf_counter() - t0) * 1000.0, 3)
+            return {
+                "ok": False,
+                "struct_name": target_struct.name,
+                "run_result": None,
+                "run_error": (
+                    f"Generated parser class '{class_name}' not found."
+                ),
+                "elapsed_ms": elapsed_ms,
+                "health": health_dict,
+            }
+
+        raw_result = parser_cls(html_src).parse()
+        run_result = json.loads(json.dumps(raw_result, default=str))
+        elapsed_ms = round((time.perf_counter() - t0) * 1000.0, 3)
+    except Exception as exc:  # noqa: BLE001
+        elapsed_ms = round((time.perf_counter() - t0) * 1000.0, 3)
+        return {
+            "ok": False,
+            "struct_name": target_struct.name,
+            "run_result": None,
+            "run_error": f"{type(exc).__name__}: {exc}",
+            "elapsed_ms": elapsed_ms,
+            "health": health_dict,
+        }
+
+    return {
+        "ok": True,
+        "struct_name": target_struct.name,
+        "run_result": run_result,
+        "run_error": None,
+        "elapsed_ms": elapsed_ms,
+        "health": health_dict,
+    }
+
+
+test_html.__test__ = False  # type: ignore[attr-defined]
