@@ -147,9 +147,11 @@ graphify-out/
 .idea/inspectionProfiles/Project_Default.xml
 .idea/libraries/Dart_SDK.xml
 
-# Node.js
+# Node.js / Playground
 node_modules/
 package-lock.json
+playground/node_modules/
+playground/dist/
 
 # Go (test/research scratch)
 go.work

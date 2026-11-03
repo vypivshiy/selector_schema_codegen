@@ -1,0 +1,164 @@
+import playgroundBridgeSource from "./playground_bridge.py?raw";
+import type {
+  CompileAndLintResult,
+  TestHtmlResult,
+  WorkerRequest,
+  WorkerResponse,
+} from "../types";
+
+interface PyodideInstance {
+  loadPackage(packages: string[]): Promise<void>;
+  runPython(code: string): unknown;
+  runPythonAsync(code: string): Promise<unknown>;
+  globals: {
+    get(name: string): (...args: unknown[]) => unknown;
+  };
+}
+
+const PYODIDE_INDEX_URL = "https://cdn.jsdelivr.net/pyodide/v0.29.5/full/";
+const PYODIDE_MODULE_URL = `${PYODIDE_INDEX_URL}pyodide.mjs`;
+
+let pyodideReadyPromise: Promise<PyodideInstance> | null = null;
+
+async function initPyodideRuntime(): Promise<PyodideInstance> {
+  const { loadPyodide } = (await import(
+    /* @vite-ignore */ PYODIDE_MODULE_URL
+  )) as {
+    loadPyodide: (options: { indexURL: string }) => Promise<PyodideInstance>;
+  };
+
+  const pyodide = await loadPyodide({ indexURL: PYODIDE_INDEX_URL });
+
+  await pyodide.loadPackage([
+    "micropip",
+    "lxml",
+    "beautifulsoup4",
+    "soupsieve",
+    "cssselect",
+  ]);
+
+  await pyodide.runPythonAsync(`
+import io
+import sysconfig
+import zipfile
+import micropip
+from pyodide.http import pyfetch
+
+async def _install_pure_wheel_from_pypi(pkg_name: str) -> None:
+    resp = await pyfetch(f"https://pypi.org/pypi/{pkg_name}/json")
+    data = await resp.json()
+    urls = data.get("urls", [])
+    wheel_url = next(
+        (u["url"] for u in urls if u.get("filename", "").endswith("-py3-none-any.whl")),
+        None,
+    )
+    if not wheel_url:
+        raise RuntimeError(f"No pure-Python wheel found on PyPI for {pkg_name}")
+    wheel_resp = await pyfetch(wheel_url)
+    wheel_bytes = await wheel_resp.bytes()
+    purelib = sysconfig.get_path("purelib")
+    with zipfile.ZipFile(io.BytesIO(wheel_bytes)) as zf:
+        zf.extractall(purelib)
+
+await micropip.install("kdlquery>=1.7.0")
+try:
+    await micropip.install("ssc-codegen>=0.45.0", deps=False)
+except Exception:
+    await _install_pure_wheel_from_pypi("ssc-codegen")
+`);
+
+  pyodide.runPython(playgroundBridgeSource);
+  pyodide.runPython(`
+import importlib.metadata
+import json
+
+def _worker_get_version() -> str:
+    try:
+        return importlib.metadata.version("ssc-codegen")
+    except Exception:
+        return "0.45.0"
+
+def _worker_compile_and_lint(kdl_src: str, target_json: str) -> str:
+    target_dict = json.loads(target_json) if target_json else {}
+    res = compile_and_lint(kdl_src, target_dict)
+    return json.dumps(res, ensure_ascii=False)
+
+def _worker_test_html(kdl_src: str, html_src: str, struct_name: str = "") -> str:
+    resolved_struct = struct_name if struct_name else None
+    res = test_html(kdl_src, html_src, resolved_struct)
+    return json.dumps(res, ensure_ascii=False)
+`);
+
+  const getVersion = pyodide.globals.get("_worker_get_version");
+  const version = String(getVersion());
+  const readyMsg: WorkerResponse = { type: "ready", version };
+  self.postMessage(readyMsg);
+
+  return pyodide;
+}
+
+function ensurePyodide(): Promise<PyodideInstance> {
+  if (!pyodideReadyPromise) {
+    pyodideReadyPromise = initPyodideRuntime().catch((err: unknown) => {
+      pyodideReadyPromise = null;
+      const message = err instanceof Error ? err.message : String(err);
+      const errMsg: WorkerResponse = { type: "init_error", error: message };
+      self.postMessage(errMsg);
+      throw err;
+    });
+  }
+  return pyodideReadyPromise;
+}
+
+// Start initializing Pyodide immediately when the worker spawns.
+void ensurePyodide();
+
+self.addEventListener("message", async (event: MessageEvent<WorkerRequest>) => {
+  const msg = event.data;
+  if (!msg || typeof msg.id !== "number") {
+    return;
+  }
+
+  try {
+    const pyodide = await ensurePyodide();
+    if (msg.action === "compile_and_lint") {
+      const fn = pyodide.globals.get("_worker_compile_and_lint");
+      const rawJson = String(
+        fn(msg.payload.kdlSrc, JSON.stringify(msg.payload.target)),
+      );
+      const result = JSON.parse(rawJson) as CompileAndLintResult;
+      const response: WorkerResponse = {
+        type: "result",
+        id: msg.id,
+        action: "compile_and_lint",
+        result,
+      };
+      self.postMessage(response);
+    } else if (msg.action === "test_html") {
+      const fn = pyodide.globals.get("_worker_test_html");
+      const rawJson = String(
+        fn(
+          msg.payload.kdlSrc,
+          msg.payload.htmlSrc,
+          msg.payload.structName ?? "",
+        ),
+      );
+      const result = JSON.parse(rawJson) as TestHtmlResult;
+      const response: WorkerResponse = {
+        type: "result",
+        id: msg.id,
+        action: "test_html",
+        result,
+      };
+      self.postMessage(response);
+    }
+  } catch (err: unknown) {
+    const errorText = err instanceof Error ? err.message : String(err);
+    const response: WorkerResponse = {
+      type: "error",
+      id: msg.id,
+      error: errorText,
+    };
+    self.postMessage(response);
+  }
+});
