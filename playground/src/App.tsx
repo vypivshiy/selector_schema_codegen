@@ -1,59 +1,53 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { CodeOutputPane } from "./components/CodeOutputPane";
 import { HtmlTestPane } from "./components/HtmlTestPane";
 import { KdlEditorPane } from "./components/KdlEditorPane";
+import {
+  DEFAULT_PRESET,
+  findMatchingPresetId,
+  getPresetById,
+  PRESETS,
+} from "./presets";
 import {
   buildTargetSpecPayload,
   DEFAULT_TARGET_CONFIG,
   type CompileAndLintResult,
   type TargetConfig,
 } from "./types";
+import {
+  decodeWorkspaceFromHash,
+  encodeWorkspaceToHash,
+  loadDraftFromStorage,
+  resolveInitialWorkspaceState,
+  saveDraftToStorage,
+} from "./urlState";
 import { usePyodideWorker } from "./worker/usePyodideWorker";
 import "./App.css";
 
-export const DEFAULT_KDL_SCHEMA = `// KDL 2.0 Schema DSL (v2.1) — HTML Catalogue Example
-(item)struct QuoteAuthor {
-    name { css ".author"; text; trim }
-    tags { css-all ".tag"; text }
-}
-
-(list)struct QuoteCatalogue {
-    @split-doc { css-all ".quote" }
-    quote_text { css ".text"; text; trim }
-    author_info { nested QuoteAuthor }
-}
-`;
-
-export const DEFAULT_SAMPLE_HTML = `<div class="catalogue">
-  <article class="quote">
-    <p class="text">"Simplicity is prerequisite for reliability."</p>
-    <span class="author">Edsger W. Dijkstra</span>
-    <div class="tags">
-      <span class="tag">computer-science</span>
-      <span class="tag">architecture</span>
-    </div>
-  </article>
-  <article class="quote">
-    <p class="text">"Programs must be written for people to read."</p>
-    <span class="author">Harold Abelson</span>
-    <div class="tags">
-      <span class="tag">programming</span>
-      <span class="tag">design</span>
-    </div>
-  </article>
-</div>
-`;
+export const DEFAULT_KDL_SCHEMA = DEFAULT_PRESET.kdl;
+export const DEFAULT_SAMPLE_HTML = DEFAULT_PRESET.html;
 
 export type RightColumnTab = "code" | "test";
 
 export function App() {
-  const [kdlSrc, setKdlSrc] = useState<string>(DEFAULT_KDL_SCHEMA);
-  const [htmlSrc, setHtmlSrc] = useState<string>(DEFAULT_SAMPLE_HTML);
-  const [target, setTarget] = useState<TargetConfig>(DEFAULT_TARGET_CONFIG);
+  const initialDraft = useMemo(() => loadDraftFromStorage(), []);
+
+  const [kdlSrc, setKdlSrc] = useState<string>(
+    () => initialDraft?.kdl ?? DEFAULT_KDL_SCHEMA,
+  );
+  const [htmlSrc, setHtmlSrc] = useState<string>(
+    () => initialDraft?.html ?? DEFAULT_SAMPLE_HTML,
+  );
+  const [target, setTarget] = useState<TargetConfig>(
+    () => initialDraft?.target ?? DEFAULT_TARGET_CONFIG,
+  );
+  const [isHydrated, setIsHydrated] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<RightColumnTab>("code");
   const [theme, setTheme] = useState<"vs-dark" | "light">("vs-dark");
   const [compileResult, setCompileResult] =
     useState<CompileAndLintResult | null>(null);
+  const [shareCopied, setShareCopied] = useState<boolean>(false);
+  const shareTimerRef = useRef<number | null>(null);
 
   const {
     status,
@@ -64,6 +58,53 @@ export function App() {
     compileAndLint,
     testHtml,
   } = usePyodideWorker();
+
+  // Restore workspace from URL #state=... hash (or localStorage fallback) on startup
+  useEffect(() => {
+    let cancelled = false;
+    resolveInitialWorkspaceState()
+      .then((resolved) => {
+        if (cancelled) return;
+        setKdlSrc(resolved.state.kdl);
+        setHtmlSrc(resolved.state.html);
+        setTarget(resolved.state.target);
+        setIsHydrated(true);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setIsHydrated(true);
+        }
+      });
+
+    const handleHashChange = () => {
+      if (!window.location.hash) return;
+      void decodeWorkspaceFromHash(window.location.hash).then((decoded) => {
+        if (decoded && !cancelled) {
+          setKdlSrc(decoded.kdl);
+          setHtmlSrc(decoded.html);
+          setTarget(decoded.target);
+        }
+      });
+    };
+
+    window.addEventListener("hashchange", handleHashChange);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("hashchange", handleHashChange);
+    };
+  }, []);
+
+  // Automatically persist workspace edits to localStorage once initial state is hydrated
+  useEffect(() => {
+    if (!isHydrated) {
+      return;
+    }
+    saveDraftToStorage({
+      kdl: kdlSrc,
+      html: htmlSrc,
+      target,
+    });
+  }, [isHydrated, kdlSrc, htmlSrc, target]);
 
   useEffect(() => {
     if (status !== "ready") {
@@ -89,16 +130,99 @@ export function App() {
     };
   }, [status, kdlSrc, target, compileAndLint]);
 
+  const activePresetId = useMemo(
+    () => findMatchingPresetId(kdlSrc, htmlSrc) ?? "",
+    [kdlSrc, htmlSrc],
+  );
+
+  const activePreset = useMemo(
+    () => (activePresetId ? getPresetById(activePresetId) : undefined),
+    [activePresetId],
+  );
+
+  const handlePresetChange = useCallback(
+    (event: ChangeEvent<HTMLSelectElement>) => {
+      const preset = getPresetById(event.target.value);
+      if (!preset) {
+        return;
+      }
+      setKdlSrc(preset.kdl);
+      setHtmlSrc(preset.html);
+      if (typeof window !== "undefined" && window.location.hash) {
+        window.history.replaceState(
+          null,
+          "",
+          `${window.location.pathname}${window.location.search}`,
+        );
+      }
+    },
+    [],
+  );
+
+  const handleShareUrl = useCallback(async () => {
+    const hash = await encodeWorkspaceToHash({
+      kdl: kdlSrc,
+      html: htmlSrc,
+      target,
+    });
+    if (typeof window !== "undefined") {
+      window.history.replaceState(
+        null,
+        "",
+        `${window.location.pathname}${window.location.search}${hash}`,
+      );
+      try {
+        await navigator.clipboard.writeText(window.location.href);
+      } catch {
+        // Clipboard permission may be unavailable in restricted contexts
+      }
+    }
+    setShareCopied(true);
+    if (shareTimerRef.current !== null) {
+      window.clearTimeout(shareTimerRef.current);
+    }
+    shareTimerRef.current = window.setTimeout(() => {
+      setShareCopied(false);
+    }, 2000);
+  }, [kdlSrc, htmlSrc, target]);
+
   const diagnostics = compileResult?.diagnostics ?? [];
   const structs = compileResult?.structs ?? [];
   const hasSchemaErrors = diagnostics.some((d) => d.severity === "error");
 
   return (
-    <div className={`app-shell ${theme === "light" ? "theme-light" : "theme-dark"}`}>
+    <div
+      className={`app-shell ${theme === "light" ? "theme-light" : "theme-dark"}`}
+    >
       <header className="topbar">
-        <div className="topbar-brand">
-          <span className="brand-title">ssc-gen Playground</span>
-          <span className="brand-tag">KDL 2.0 Schema DSL v2.1</span>
+        <div className="topbar-left">
+          <div className="topbar-brand">
+            <span className="brand-title">ssc-gen Playground</span>
+            <span className="brand-tag">KDL 2.0 Schema DSL v2.1</span>
+          </div>
+
+          <label className="topbar-preset-label" htmlFor="preset-select">
+            <span className="topbar-preset-caption">Examples</span>
+            <select
+              id="preset-select"
+              className="topbar-preset-select"
+              data-testid="preset-select"
+              value={activePresetId}
+              title={activePreset?.description ?? "Select a curated KDL + HTML example"}
+              onChange={handlePresetChange}
+            >
+              {activePresetId === "" && (
+                <option value="" disabled>
+                  Custom / Edited Workspace
+                </option>
+              )}
+              {PRESETS.map((preset) => (
+                <option key={preset.id} value={preset.id}>
+                  {preset.title}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
 
         <div className="topbar-structs">
@@ -131,6 +255,16 @@ export function App() {
               </span>
             )}
           </div>
+
+          <button
+            type="button"
+            className={`share-url-btn ${shareCopied ? "share-copied" : ""}`}
+            data-testid="share-url-btn"
+            title="Compress workspace into URL #state=... and copy shareable link"
+            onClick={() => void handleShareUrl()}
+          >
+            {shareCopied ? "✓ Link Copied!" : "🔗 Share URL"}
+          </button>
 
           <button
             type="button"

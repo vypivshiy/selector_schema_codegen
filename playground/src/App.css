@@ -64,10 +64,39 @@ body,
   min-height: 48px;
 }
 
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
 .topbar-brand {
   display: flex;
   align-items: baseline;
   gap: 10px;
+}
+
+.topbar-preset-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.topbar-preset-caption {
+  font-weight: 600;
+}
+
+.topbar-preset-select {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
 }
 
 .brand-title {
@@ -138,6 +167,7 @@ body,
   background: var(--error-color);
 }
 
+.share-url-btn,
 .theme-toggle-btn {
   background: var(--bg-tertiary);
   color: var(--text-primary);
@@ -146,6 +176,16 @@ body,
   padding: 5px 10px;
   font-size: 12px;
   cursor: pointer;
+}
+
+.share-url-btn:hover,
+.theme-toggle-btn:hover {
+  border-color: var(--accent);
+}
+
+.share-url-btn.share-copied {
+  border-color: var(--ok-color);
+  color: var(--ok-color);
 }
 
 .workspace-grid {

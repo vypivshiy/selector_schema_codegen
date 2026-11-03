@@ -3,12 +3,26 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+from typing import Any
 
 import pytest
 
 from ssc_codegen.core.format import diagnostic_to_dict
 from ssc_codegen.core.reader import parse_module
 from ssc_codegen.playground_bridge import compile_and_lint, test_html
+
+PRESETS_JSON_PATH = (
+    Path(__file__).resolve().parent.parent
+    / "playground"
+    / "src"
+    / "presets.json"
+)
+
+
+def _load_playground_presets() -> list[dict[str, Any]]:
+    return json.loads(PRESETS_JSON_PATH.read_text(encoding="utf-8"))
+
 
 SAMPLE_QUOTES_HTML = """\
 <div class="catalogue">
@@ -515,3 +529,69 @@ class TestTestHtml:
         assert invalid["run_result"] is None
         assert invalid["health"] is None
         assert invalid["run_error"] is not None
+
+
+class TestCuratedPresets:
+    """Verify every curated preset in `playground/src/presets.json`."""
+
+    def test_presets_collection_covers_required_categories(self) -> None:
+        presets = _load_playground_presets()
+        assert 5 <= len(presets) <= 6
+        categories = {p["category"] for p in presets}
+        assert {"html", "table", "raw", "rest"}.issubset(categories)
+
+    @pytest.mark.parametrize(
+        "preset",
+        _load_playground_presets(),
+        ids=lambda p: str(p["id"]),
+    )
+    @pytest.mark.parametrize("lang", ["python", "js", "go", "rust"])
+    def test_every_preset_compiles_cleanly_across_targets(
+        self, preset: dict[str, Any], lang: str
+    ) -> None:
+        result = compile_and_lint(preset["kdl"], {"lang": lang})
+        errors = [d for d in result["diagnostics"] if d["severity"] == "error"]
+        assert result["ok"] is True, (
+            f"Preset {preset['id']} failed on {lang}: "
+            f"diagnostics={result['diagnostics']}, target_error={result['target_error']}"
+        )
+        assert errors == []
+        assert result["target_error"] is None
+        assert len(result["structs"]) >= 1
+        assert len(result["files"]) >= 1
+
+    @pytest.mark.parametrize(
+        "preset",
+        [p for p in _load_playground_presets() if p["category"] != "rest"],
+        ids=lambda p: str(p["id"]),
+    )
+    def test_non_rest_presets_pass_test_html_and_health(
+        self, preset: dict[str, Any]
+    ) -> None:
+        result = test_html(preset["kdl"], preset["html"])
+        assert result["ok"] is True, (
+            f"Preset {preset['id']} failed test_html: {result['run_error']}"
+        )
+        assert result["run_error"] is None
+        assert result["run_result"] is not None
+        assert bool(result["run_result"]) is True
+        health = result["health"]
+        assert health is not None
+        assert health["passed"] is True, (
+            f"Preset {preset['id']} failed health check: {health['checks']}"
+        )
+
+        # Also verify every individual non-REST struct in the preset
+        compiled = compile_and_lint(preset["kdl"])
+        for struct_info in compiled["structs"]:
+            if struct_info["is_rest"]:
+                continue
+            sub_res = test_html(
+                preset["kdl"],
+                preset["html"],
+                struct_name=struct_info["name"],
+            )
+            assert sub_res["ok"] is True
+            assert bool(sub_res["run_result"]) is True
+            assert sub_res["health"] is not None
+            assert sub_res["health"]["passed"] is True

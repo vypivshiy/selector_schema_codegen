@@ -99,3 +99,4 @@ nav:
       - Compiler Core: api/core.md
       - Traversal Engine: api/traversal.md
       - Target Converters: api/targets.md
+  - Playground: playground/index.html
