@@ -40,6 +40,76 @@ _VALID_STRUCT_TYPES: frozenset[str] = frozenset(
     {"item", "list", "table", "dict", "flat", "raw", "rest"}
 )
 
+_STRING_ARG_OPS: dict[str, str] = {
+    "trim": 'example: trim  or  trim "chars"',
+    "ltrim": 'example: ltrim  or  ltrim "chars"',
+    "rtrim": 'example: rtrim  or  rtrim "chars"',
+    "rm-prefix": 'example: rm-prefix "substring"',
+    "rm-suffix": 'example: rm-suffix "substring"',
+    "rm-prefix-suffix": 'example: rm-prefix-suffix "substring"',
+    "fmt": 'example: fmt "prefix-{{}}-suffix"',
+    "repl": 'example: repl "old" "new"',
+    "split": 'example: split " "',
+    "join": 'example: join " "',
+    "re": 'example: re #"(\\d+)"#',
+    "re-all": 'example: re-all #"(\\d+)"#',
+    "re-sub": 'example: re-sub #"\\D"# ""',
+    "attr": 'example: attr "href"',
+    "css": 'example: css ".selector"',
+    "css-all": 'example: css-all ".selector"',
+    "css-remove": 'example: css-remove ".selector"',
+    "xpath": 'example: xpath "//div"',
+    "xpath-all": 'example: xpath-all "//div"',
+    "xpath-remove": 'example: xpath-remove "//div"',
+    "starts": 'example: starts "value"',
+    "ends": 'example: ends "value"',
+    "contains": 'example: contains "value"',
+    "has-attr": 'example: has-attr "href"',
+    "attr-starts": 'example: attr-starts "href" "value"',
+    "attr-ends": 'example: attr-ends "href" "value"',
+    "attr-contains": 'example: attr-contains "href" "value"',
+    "attr-re": 'example: attr-re "href" #".*\\.com$"#',
+    "text-re": 'example: text-re #"\\d+"#',
+    "text-starts": 'example: text-starts "value"',
+    "text-ends": 'example: text-ends "value"',
+    "text-contains": 'example: text-contains "value"',
+    "re-any": 'example: re-any #"\\d+"#',
+}
+
+
+def _scan_non_string_op_arg_errors(
+    nodes: list[KdlNode],
+) -> list[ReadDiagnostic]:
+    """Detect non-string arguments passed to string pipeline/predicate ops in the CST."""
+    errors: list[ReadDiagnostic] = []
+    for top in nodes:
+        if top.name not in ("struct", "fn", "define"):
+            continue
+        for desc in top.iter_descendants():
+            hint = _STRING_ARG_OPS.get(desc.name)
+            if hint is None or not desc.args:
+                continue
+            for arg in desc.args:
+                val = arg.value
+                if not isinstance(val, str):
+                    val_type = "null" if val is None else type(val).__name__
+                    errors.append(
+                        ReadDiagnostic(
+                            message=(
+                                f"'{desc.name}' argument must be a string, "
+                                f"got {val_type}"
+                            ),
+                            severity=Severity.ERROR,
+                            span=desc.span,
+                            path="",
+                            hint=hint,
+                            code="E001",
+                            label="invalid argument type",
+                        )
+                    )
+                    break
+    return errors
+
 
 def _mask_span(text: str, start_offset: int, end_offset: int) -> str:
     """Replace characters in `[start_offset, end_offset)` with spaces while keeping newlines."""
@@ -171,9 +241,9 @@ def _scan_fallback_import_warnings(kdl_src: str) -> list[ReadDiagnostic]:
 def _prepare_source_for_parse(
     kdl_src: str,
 ) -> tuple[str, list[ReadDiagnostic], list[dict[str, Any]]]:
-    """Mask external `import`/`imports` nodes and collect `W003` warnings."""
+    """Mask external `import`/`imports` nodes and collect pre-parse CST diagnostics."""
     source_for_parse = kdl_src
-    import_warnings: list[ReadDiagnostic] = []
+    extra_diagnostics: list[ReadDiagnostic] = []
     fallback_structs: list[dict[str, Any]] = []
 
     try:
@@ -182,7 +252,7 @@ def _prepare_source_for_parse(
         fallback_structs = _extract_cst_structs(top_nodes)
         for node in top_nodes:
             if node.name in ("import", "imports"):
-                import_warnings.append(
+                extra_diagnostics.append(
                     ReadDiagnostic(
                         message=(
                             f"External file imports ('{node.name}') are not supported "
@@ -201,11 +271,12 @@ def _prepare_source_for_parse(
                     node.span.start.offset,
                     node.span.end.offset,
                 )
+        extra_diagnostics.extend(_scan_non_string_op_arg_errors(top_nodes))
     except KDLParseError:
         source_for_parse = kdl_src
-        import_warnings = _scan_fallback_import_warnings(kdl_src)
+        extra_diagnostics = _scan_fallback_import_warnings(kdl_src)
 
-    return source_for_parse, import_warnings, fallback_structs
+    return source_for_parse, extra_diagnostics, fallback_structs
 
 
 def _ensure_httpx_stub() -> None:
@@ -281,7 +352,17 @@ def compile_and_lint(
         targets=lint_targets,
     )
 
-    all_diagnostics = [*import_warnings, *module_diagnostics]
+    existing_keys = {
+        (d.code, d.span.start.line, d.span.start.column, d.message)
+        for d in module_diagnostics
+    }
+    deduped_extra = [
+        d
+        for d in import_warnings
+        if (d.code, d.span.start.line, d.span.start.column, d.message)
+        not in existing_keys
+    ]
+    all_diagnostics = [*deduped_extra, *module_diagnostics]
     diag_dicts = [_serialize_diagnostic(d) for d in all_diagnostics]
 
     structs = [
@@ -346,7 +427,16 @@ def compile_and_lint(
             ):
                 files["sscgen_runtime.rs"] = converter.emit_runtime()
 
-    except (BuildTimeError, ParseError, ValueError, NotImplementedError) as exc:
+    except (
+        BuildTimeError,
+        ParseError,
+        ValueError,
+        NotImplementedError,
+        TypeError,
+        AttributeError,
+        KeyError,
+        RuntimeError,
+    ) as exc:
         err_msg = str(exc) or (
             f"XPath selectors are not supported by target "
             f"'{profile.language}' ({spec.lib or 'default'})."

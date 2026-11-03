@@ -632,3 +632,33 @@ class TestCuratedPresets:
             assert bool(sub_res["run_result"]) is True
             assert sub_res["health"] is not None
             assert sub_res["health"]["passed"] is True
+
+    @pytest.mark.parametrize("lang", ["python", "js", "go", "rust"])
+    @pytest.mark.parametrize(
+        "bad_op,expected_msg",
+        [
+            ("trim 1", "'trim' argument must be a string, got int"),
+            ("ltrim #true", "'ltrim' argument must be a string, got bool"),
+            ("rm-prefix 42", "'rm-prefix' argument must be a string, got int"),
+            ("split 1", "'split' argument must be a string, got int"),
+        ],
+    )
+    def test_non_string_arg_on_string_ops_reports_e001_without_crash(
+        self, lang: str, bad_op: str, expected_msg: str
+    ) -> None:
+        kdl = f"""\
+(item)struct Item {{
+    title {{
+        css "h1"
+        text
+        {bad_op}
+    }}
+}}
+"""
+        result = compile_and_lint(kdl, {"lang": lang})
+        assert result["ok"] is False
+        assert result["target_error"] is None
+        errors = [d for d in result["diagnostics"] if d["severity"] == "error"]
+        assert any(
+            d["code"] == "E001" and expected_msg in d["message"] for d in errors
+        )

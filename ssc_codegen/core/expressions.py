@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import ast as _py_ast
 import re as _re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from types import SimpleNamespace
-from typing import Any, Callable, TypeAlias
+from typing import Any, TypeAlias
+
+from kdlquery import KdlNode
 
 from ssc_codegen.ast import (
     Assert,
@@ -16,17 +18,17 @@ from ssc_codegen.ast import (
     CssRemove,
     CssSelect,
     CssSelectAll,
-    Fallback,
     ExtensionCall,
+    Fallback,
     Field,
     Filter,
     Fmt,
     FunctionDef,
     Index,
     InitField,
+    Join,
     JsonDef,
     Jsonify,
-    Join,
     Key,
     Len,
     Lower,
@@ -34,15 +36,14 @@ from ssc_codegen.ast import (
     Match,
     Module,
     Nested,
-    Node as AstNode,
     NormalizeSpace,
     PreValidate,
     Raw,
     Re,
     ReAll,
-    ReSub,
     Repl,
     ReplMap,
+    ReSub,
     Return,
     RmPrefix,
     RmPrefixSuffix,
@@ -75,11 +76,9 @@ from ssc_codegen.ast import (
     XpathSelect,
     XpathSelectAll,
 )
-from ssc_codegen.exceptions import BuildTimeError
-from kdlquery import KdlNode
-from ssc_codegen.regex_utils import normalize_regex_pattern
-from typing import cast
-
+from ssc_codegen.ast import (
+    Node as AstNode,
+)
 from ssc_codegen.core.contexts import LintContext, ParseContext, WalkCtx
 from ssc_codegen.core.extensions import resolve_extension_call
 from ssc_codegen.core.linter import (
@@ -93,6 +92,8 @@ from ssc_codegen.core.predicates import (
     parse_filter_expr,
     parse_match_expr,
 )
+from ssc_codegen.exceptions import BuildTimeError
+from ssc_codegen.regex_utils import normalize_regex_pattern
 
 # ── Registration tables ─────────────────────────────────────────────────────────
 
@@ -115,9 +116,7 @@ FieldLikeNode: TypeAlias = (
 # ── AST builder helpers ─────────────────────────────────────────────────────────
 
 
-def resolve_selector_arg(
-    query: str | int | float | bool, ctx: ParseContext
-) -> str:
+def resolve_selector_arg(query: str | float | bool, ctx: ParseContext) -> str:
     """Resolve a selector argument against registered scalar defines.
 
     Args:
@@ -701,18 +700,18 @@ def _expr_xpath_all(
 def _expr_css_remove(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    query = ctx.property_defines.get(node.args[0].value, node.args[0].value)
-    lint_validate_css(node, lint, cast(str, query))
-    return CssRemove(parent=parent, query=cast(str, query))
+    query = resolve_selector_arg(node.args[0].value, ctx)
+    lint_validate_css(node, lint, query)
+    return CssRemove(parent=parent, query=query)
 
 
 @_reg_expr("xpath-remove")
 def _expr_xpath_remove(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    query = ctx.property_defines.get(node.args[0].value, node.args[0].value)
-    lint_validate_xpath(node, lint, cast(str, query))
-    return XpathRemove(parent=parent, query=cast(str, query))
+    query = resolve_selector_arg(node.args[0].value, ctx)
+    lint_validate_xpath(node, lint, query)
+    return XpathRemove(parent=parent, query=query)
 
 
 # -- extract --------------------------------------------------------------------
@@ -789,7 +788,7 @@ def _expr_attr(
         parent=parent,
         accept_type_info=accept_ti,
         ret_type_info=TypeInfo(base=VariableType.STRING, is_array=is_arr),
-        keys=tuple(a.value for a in node.args),
+        keys=tuple(resolve_selector_arg(a.value, ctx) for a in node.args),
     )
 
 
@@ -800,14 +799,7 @@ def _expr_attr(
 def _expr_trim(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    substr = (
-        cast(
-            str,
-            ctx.property_defines.get(node.args[0].value, node.args[0].value),
-        )
-        if node.args
-        else ""
-    )
+    substr = resolve_selector_arg(node.args[0].value, ctx) if node.args else ""
     prev = _prev_type_info(parent)
     return Trim(
         parent=parent,
@@ -821,14 +813,7 @@ def _expr_trim(
 def _expr_ltrim(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    substr = (
-        cast(
-            str,
-            ctx.property_defines.get(node.args[0].value, node.args[0].value),
-        )
-        if node.args
-        else ""
-    )
+    substr = resolve_selector_arg(node.args[0].value, ctx) if node.args else ""
     prev = _prev_type_info(parent)
     return Ltrim(
         parent=parent,
@@ -842,14 +827,7 @@ def _expr_ltrim(
 def _expr_rtrim(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    substr = (
-        cast(
-            str,
-            ctx.property_defines.get(node.args[0].value, node.args[0].value),
-        )
-        if node.args
-        else ""
-    )
+    substr = resolve_selector_arg(node.args[0].value, ctx) if node.args else ""
     prev = _prev_type_info(parent)
     return Rtrim(
         parent=parent,
@@ -875,13 +853,13 @@ def _expr_norm_space(
 def _expr_rm_prefix(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    substr = ctx.property_defines.get(node.args[0].value, node.args[0].value)
+    substr = resolve_selector_arg(node.args[0].value, ctx)
     prev = _prev_type_info(parent)
     return RmPrefix(
         parent=parent,
         accept_type_info=prev.ret_type_info,
         ret_type_info=prev.ret_type_info,
-        substr=cast(str, substr),
+        substr=substr,
     )
 
 
@@ -889,13 +867,13 @@ def _expr_rm_prefix(
 def _expr_rm_suffix(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    substr = ctx.property_defines.get(node.args[0].value, node.args[0].value)
+    substr = resolve_selector_arg(node.args[0].value, ctx)
     prev = _prev_type_info(parent)
     return RmSuffix(
         parent=parent,
         accept_type_info=prev.ret_type_info,
         ret_type_info=prev.ret_type_info,
-        substr=cast(str, substr),
+        substr=substr,
     )
 
 
@@ -903,13 +881,13 @@ def _expr_rm_suffix(
 def _expr_rm_prefix_suffix(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    substr = ctx.property_defines.get(node.args[0].value, node.args[0].value)
+    substr = resolve_selector_arg(node.args[0].value, ctx)
     prev = _prev_type_info(parent)
     return RmPrefixSuffix(
         parent=parent,
         accept_type_info=prev.ret_type_info,
         ret_type_info=prev.ret_type_info,
-        substr=cast(str, substr),
+        substr=substr,
     )
 
 
@@ -917,13 +895,13 @@ def _expr_rm_prefix_suffix(
 def _expr_fmt(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    tmpl = ctx.property_defines.get(node.args[0].value, node.args[0].value)
+    tmpl = resolve_selector_arg(node.args[0].value, ctx)
     prev = _prev_type_info(parent)
     return Fmt(
         parent=parent,
         accept_type_info=prev.ret_type_info,
         ret_type_info=prev.ret_type_info,
-        template=cast(str, tmpl),
+        template=tmpl,
     )
 
 
@@ -942,12 +920,8 @@ def _expr_repl(
             ret_type_info=prev.ret_type_info,
             replacements=items,
         )
-    old = cast(
-        str, ctx.property_defines.get(node.args[0].value, node.args[0].value)
-    )
-    new = cast(
-        str, ctx.property_defines.get(node.args[1].value, node.args[1].value)
-    )
+    old = resolve_selector_arg(node.args[0].value, ctx)
+    new = resolve_selector_arg(node.args[1].value, ctx)
     return Repl(
         parent=parent,
         accept_type_info=prev.ret_type_info,
@@ -985,9 +959,7 @@ def _expr_upper(
 def _expr_split(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    sep = cast(
-        str, ctx.property_defines.get(node.args[0].value, node.args[0].value)
-    )
+    sep = resolve_selector_arg(node.args[0].value, ctx)
     return Split(parent=parent, sep=sep)
 
 
@@ -995,9 +967,7 @@ def _expr_split(
 def _expr_join(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    sep = cast(
-        str, ctx.property_defines.get(node.args[0].value, node.args[0].value)
-    )
+    sep = resolve_selector_arg(node.args[0].value, ctx)
     return Join(parent=parent, sep=sep)
 
 
@@ -1020,7 +990,7 @@ def _expr_unescape(
 def _expr_re(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    raw = ctx.property_defines.get(node.args[0].value, node.args[0].value)
+    raw = resolve_selector_arg(node.args[0].value, ctx)
     pattern = normalize_regex_pattern(raw)
     prev = _prev_type_info(parent)
     return Re(
@@ -1036,7 +1006,7 @@ def _expr_re(
 def _expr_re_all(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    raw = ctx.property_defines.get(node.args[0].value, node.args[0].value)
+    raw = resolve_selector_arg(node.args[0].value, ctx)
     pattern = normalize_regex_pattern(raw)
     return ReAll(parent=parent, pattern=pattern)
 
@@ -1046,11 +1016,9 @@ def _expr_re_sub(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
     prev = _prev_type_info(parent)
-    raw = ctx.property_defines.get(node.args[0].value, node.args[0].value)
+    raw = resolve_selector_arg(node.args[0].value, ctx)
     pattern = normalize_regex_pattern(raw)
-    repl = cast(
-        str, ctx.property_defines.get(node.args[1].value, node.args[1].value)
-    )
+    repl = resolve_selector_arg(node.args[1].value, ctx)
     return ReSub(
         parent=parent,
         accept_type_info=prev.ret_type_info,

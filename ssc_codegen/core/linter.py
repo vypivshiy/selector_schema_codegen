@@ -32,7 +32,6 @@ from ssc_codegen.symbols import (
 )
 from ssc_codegen.traversal.utils import is_malformed_gjson_path
 
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Helpers
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1816,10 +1815,8 @@ def _iter_json_field_type_refs(
             break
         if not type_:
             continue
-        if type_.startswith("(array)"):
-            type_ = type_[len("(array)") :]
-        if type_.endswith("?"):
-            type_ = type_[:-1]
+        type_ = type_.removeprefix("(array)")
+        type_ = type_.removesuffix("?")
         if type_ and type_ not in _VALID_JSON_TYPES:
             yield field_node, type_
 
@@ -2720,10 +2717,8 @@ def _collect_json_field_refs(
         type_args = [arg for arg in args if not arg.startswith("@")]
         if type_args:
             raw_type = type_args[0]
-            if raw_type.startswith("(array)"):
-                raw_type = raw_type[len("(array)") :]
-            if raw_type.endswith("?"):
-                raw_type = raw_type[:-1]
+            raw_type = raw_type.removeprefix("(array)")
+            raw_type = raw_type.removesuffix("?")
             child_schema_name = raw_type
         else:
             clean_field = field_name.rstrip("?")
@@ -2752,10 +2747,8 @@ def _collect_json_field_refs(
             break
         type_found = True
         raw_type = val
-        if raw_type.startswith("(array)"):
-            raw_type = raw_type[len("(array)") :]
-        if raw_type.endswith("?"):
-            raw_type = raw_type[:-1]
+        raw_type = raw_type.removeprefix("(array)")
+        raw_type = raw_type.removesuffix("?")
         if raw_type and raw_type not in _VALID_JSON_TYPES:
             refs.append((field_node, field_name, raw_type, parent_json_name))
 
@@ -2867,6 +2860,34 @@ def lint_require_int_args(
                 message=f"'{name}' arguments must be integers, got '{arg}'",
                 code="E001",
                 hint=f"example: {name} 0",
+            )
+            return False
+    return True
+
+
+def lint_require_str_args(
+    node: KdlNode, lint: LintContext, *, example: str = ""
+) -> bool:
+    """Validate that all provided positional arguments on a KDL node are strings.
+
+    Args:
+        node: The node being checked.
+        lint: Lint context for reporting errors (`E001`).
+        example: Optional usage example shown in diagnostic hints.
+
+    Returns:
+        `True` if all positional arguments are strings, otherwise `False`.
+    """
+    name = node.name
+    for arg in node.args:
+        val = arg.value
+        if not isinstance(val, str):
+            val_type = "null" if val is None else type(val).__name__
+            lint.error(
+                node,
+                message=f"'{name}' argument must be a string, got {val_type}",
+                code="E001",
+                hint=example or f'example: {name} "..."',
             )
             return False
     return True
@@ -3020,7 +3041,19 @@ def lint_pipeline_op(node: KdlNode, lint: LintContext) -> None:
         return
 
     if name == "attr":
-        lint_require_args(node, lint, min_count=1, example='attr "href"')
+        if lint_require_args(node, lint, min_count=1, example='attr "href"'):
+            lint_require_str_args(node, lint, example='example: attr "href"')
+
+    elif name in (
+        "css",
+        "css-all",
+        "css-remove",
+        "xpath",
+        "xpath-all",
+        "xpath-remove",
+    ):
+        if node.args:
+            lint_require_str_args(node, lint, example=f'example: {name} "..."')
 
     elif name == "raw":
         args = _node_args(node)
@@ -3051,15 +3084,30 @@ def lint_pipeline_op(node: KdlNode, lint: LintContext) -> None:
                 code="E001",
                 hint=f'example: {name}  or  {name} "chars"',
             )
+        elif node.args:
+            lint_require_str_args(
+                node, lint, example=f'example: {name}  or  {name} "chars"'
+            )
 
     elif name in _RM_OPS:
-        lint_require_args(node, lint, exact=1, example=f'{name} "substring"')
+        if lint_require_args(
+            node, lint, exact=1, example=f'{name} "substring"'
+        ):
+            lint_require_str_args(
+                node, lint, example=f'example: {name} "substring"'
+            )
 
     elif name == "fmt":
         args = lint_require_args(  # type: ignore[assignment]
             node, lint, exact=1, example='fmt "prefix-{{}}-suffix"'
         )
-        if args and not (args[0].isupper() or "{{}}" in args[0]):
+        if (
+            args
+            and lint_require_str_args(
+                node, lint, example='example: fmt "prefix-{{}}-suffix"'
+            )
+            and not (args[0].isupper() or "{{}}" in args[0])
+        ):
             lint.error(
                 node,
                 message="'fmt' template is missing the '{{}}' placeholder",
@@ -3077,18 +3125,25 @@ def lint_pipeline_op(node: KdlNode, lint: LintContext) -> None:
                 code="E001",
                 hint='example: repl "old" "new"  or  repl { "old" "new"; "foo" "bar" }',
             )
-        elif args:
-            lint_require_args(node, lint, exact=2, example='repl "old" "new"')
+        elif args and lint_require_args(
+            node, lint, exact=2, example='repl "old" "new"'
+        ):
+            lint_require_str_args(
+                node, lint, example='example: repl "old" "new"'
+            )
 
     elif name in ("split", "join"):
-        lint_require_args(node, lint, exact=1, example=f'{name} " "')
+        if lint_require_args(node, lint, exact=1, example=f'{name} " "'):
+            lint_require_str_args(node, lint, example=f'example: {name} " "')
 
     elif name == "re":
         raw_args = node.args
         args = lint_require_args(  # type: ignore[assignment]
             node, lint, exact=1, example=f'{name} #"(\\d+)"#'
         )
-        if args:
+        if args and lint_require_str_args(
+            node, lint, example=f'example: {name} #"(\\d+)"#'
+        ):
             pattern = args[0]
             if raw_args and _DEFINE_NAME_RE.match(str(raw_args[0].value)):
                 resolved = lint.resolve_scalar_arg(pattern)
@@ -3122,7 +3177,9 @@ def lint_pipeline_op(node: KdlNode, lint: LintContext) -> None:
         args = lint_require_args(  # type: ignore[assignment]
             node, lint, exact=1, example='re-all #"(\\d+)"#'
         )
-        if args:
+        if args and lint_require_str_args(
+            node, lint, example='example: re-all #"(\\d+)"#'
+        ):
             pattern = args[0]
             if raw_args and _DEFINE_NAME_RE.match(str(raw_args[0].value)):
                 resolved = lint.resolve_scalar_arg(pattern)
@@ -3153,7 +3210,9 @@ def lint_pipeline_op(node: KdlNode, lint: LintContext) -> None:
         args = lint_require_args(  # type: ignore[assignment]
             node, lint, exact=2, example='re-sub #"\\D"# ""'
         )
-        if args:
+        if args and lint_require_str_args(
+            node, lint, example='example: re-sub #"\\D"# ""'
+        ):
             lint_validate_regex(node, lint, args[0])
 
     elif name == "index":
@@ -3251,12 +3310,7 @@ def lint_predicate_op(node: KdlNode, lint: LintContext) -> None:
     """
     name = node.name
 
-    if name in ("eq", "ne"):
-        if not lint_require_predicate_ctx(node, lint):
-            return
-        lint_require_args(node, lint, min_count=1, example=f'{name} "value"')
-
-    elif name in ("starts", "ends", "contains"):
+    if name in ("eq", "ne") or name in ("starts", "ends", "contains"):
         if not lint_require_predicate_ctx(node, lint):
             return
         lint_require_args(node, lint, min_count=1, example=f'{name} "value"')
@@ -3445,7 +3499,7 @@ def lint_wildcard_op(
 
 
 # lazy imports for forward refs
-from ssc_codegen.core.contexts import (  # noqa: E402
+from ssc_codegen.core.contexts import (
     DefineKind,
     LintContext,
     ParseContext,
