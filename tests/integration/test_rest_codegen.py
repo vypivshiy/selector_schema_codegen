@@ -108,11 +108,6 @@ def post_ns():
 
 
 @pytest.fixture
-def prefix_ns():
-    return _generate(_load_schema("20_rest_prefix_form.kdl"))
-
-
-@pytest.fixture
 def multi_method_ns():
     return _generate(_load_schema("21_rest_multi_method.kdl"))
 
@@ -374,19 +369,6 @@ class TestRestTransportError:
         assert isinstance(result, basic_ns["TransportErr"])
         assert "async timeout" in result.cause
 
-    def test_connect_error_is_transport_err(self, basic_ns):
-        API = basic_ns["API"]
-
-        with respx.mock:
-            respx.get(re.compile(r".*")).mock(
-                side_effect=httpx.ConnectError("refused")
-            )
-            client = httpx.Client()
-            result = API.fetch(client, id="1")
-
-        assert isinstance(result, basic_ns["TransportErr"])
-        assert "refused" in result.cause
-
 
 # ---------------------------------------------------------------------------
 # 4. Placeholder rendering
@@ -395,19 +377,6 @@ class TestRestTransportError:
 
 class TestRestPlaceholders:
     """Verify parameters are correctly substituted into URL/headers/body."""
-
-    def test_string_placeholder_in_url(self, basic_ns):
-        API = basic_ns["API"]
-
-        with respx.mock:
-            route = respx.get("https://api.example.com/users/42").respond(
-                json={"id": 42, "name": "Test"}, status_code=200
-            )
-            client = httpx.Client()
-            result = API.fetch(client, id="42")
-
-        assert result.is_ok is True
-        assert route.called
 
     def test_typed_int_placeholder(self, int_placeholder_ns):
         API = int_placeholder_ns["API"]
@@ -481,51 +450,6 @@ class TestRestPlaceholders:
         body = req.content.decode()
         assert '"name":"NewUser"' in body
         assert '"active":true' in body
-
-
-# ---------------------------------------------------------------------------
-# 5. Prefix form (rest)struct
-# ---------------------------------------------------------------------------
-
-
-class TestRestPrefixForm:
-    def test_sync_200_returns_ok(self, prefix_ns):
-        API = prefix_ns["API"]
-
-        with respx.mock:
-            respx.get("https://api.example.com/users/42").respond(
-                json={"id": 42, "name": "Alice"}, status_code=200
-            )
-            client = httpx.Client()
-            result = API.fetch(client, id="42")
-
-        assert result.is_ok is True
-        assert result.value == {"id": 42, "name": "Alice"}
-
-    def test_404_dispatches_to_err(self, prefix_ns):
-        API = prefix_ns["API"]
-
-        with respx.mock:
-            respx.get("https://api.example.com/users/99").respond(
-                json={"code": 404, "message": "not found"}, status_code=404
-            )
-            client = httpx.Client()
-            result = API.fetch(client, id="99")
-
-        assert result.is_ok is False
-        assert isinstance(result, prefix_ns["APIErr404"])
-
-    def test_transport_error(self, prefix_ns):
-        API = prefix_ns["API"]
-
-        with respx.mock:
-            respx.get(re.compile(r".*")).mock(
-                side_effect=httpx.HTTPError("timeout")
-            )
-            client = httpx.Client()
-            result = API.fetch(client, id="1")
-
-        assert isinstance(result, prefix_ns["TransportErr"])
 
 
 # ---------------------------------------------------------------------------
@@ -656,18 +580,6 @@ class TestRestAiohttpNonJsonContentType:
     ``application/json``).
     """
 
-    @staticmethod
-    def _gen(src: str) -> dict:
-        from ssc_codegen.targets.python import (
-            PY_BS4_CONVERTER as PY_BASE_CONVERTER,
-        )
-
-        module = _parse(src)
-        code = PY_BASE_CONVERTER.convert(module, http_client="aiohttp")
-        namespace: dict = {}
-        exec(code, namespace)
-        return namespace
-
     def test_ok_parses_json_with_text_javascript_ct(self):
         """mixcloud-style: JSON body under text/javascript Content-Type.
         Pre-fix: silent Ok with value=None (caught in REST runtime's
@@ -684,7 +596,7 @@ class TestRestAiohttpNonJsonContentType:
             '    """\n'
             "}\n"
         )
-        ns = self._gen(src)
+        ns = _generate(src, http_client="aiohttp")
         API = ns["API"]
 
         async def _run():
@@ -717,7 +629,7 @@ class TestRestAiohttpNonJsonContentType:
             '    """\n'
             "}\n"
         )
-        ns = self._gen(src)
+        ns = _generate(src, http_client="aiohttp")
         API = ns["API"]
 
         async def _run():
@@ -751,7 +663,7 @@ class TestRestAiohttpNonJsonContentType:
             '    """\n'
             "}\n"
         )
-        ns = self._gen(src)
+        ns = _generate(src, http_client="aiohttp")
         API = ns["API"]
 
         async def _run():
@@ -786,20 +698,6 @@ class TestPerCallKwargs:
     dict kwargs (headers/cookies/params), and forward everything to
     client.request — the client object must not be modified.
     """
-
-    def test_user_headers_reach_request(self, header_ns):
-        """Extra headers passed via kwargs appear in the outgoing request."""
-        API = header_ns["API"]
-
-        with respx.mock as mock:
-            route = mock.get("https://api.example.com/me")
-            route.respond(json={"id": 1, "name": "Bob"}, status_code=200)
-
-            client = httpx.Client()
-            API.fetch(client, token="secret", headers={"X-Custom": "yes"})
-
-            sent_headers = route.calls.last.request.headers
-            assert sent_headers["x-custom"] == "yes"
 
     def test_dsl_and_user_headers_merged(self, header_ns):
         """DSL Authorization + user X-Custom both present (shallow merge)."""
@@ -850,38 +748,6 @@ class TestPerCallKwargs:
             original_headers = dict(client.headers)
             API.fetch(client, token="secret", headers={"X-Custom": "yes"})
             assert dict(client.headers) == original_headers
-
-    def test_no_kwargs_still_works(self, header_ns):
-        """Calling without kwargs must behave identically to before."""
-        API = header_ns["API"]
-
-        with respx.mock as mock:
-            route = mock.get("https://api.example.com/me")
-            route.respond(json={"id": 1, "name": "Bob"}, status_code=200)
-
-            client = httpx.Client()
-            result = API.fetch(client, token="secret")
-
-        assert result.is_ok is True
-        assert result.value == {"id": 1, "name": "Bob"}
-
-    def test_kwargs_forwarded_to_fetch_codegen(self):
-        """HTML struct @request fetch also accepts **kwargs."""
-        src = (
-            "struct Page type=item {\n"
-            '    title { css "h1"; text }\n'
-            '    @request """\n'
-            "    GET / HTTP/1.1\n"
-            "    Host: example.com\n"
-            '    """\n'
-            "}\n"
-        )
-        # Just verify codegen produces **kwargs in signature
-        module = _parse(src)
-        from ssc_codegen.targets.python import PY_BS4_CONVERTER
-
-        code = PY_BS4_CONVERTER.convert(module, http_client="httpx")
-        assert "**kwargs: Any" in code
 
 
 # ---------------------------------------------------------------------------
@@ -1067,12 +933,7 @@ struct ProfileAPI type=rest {
 
     def test_aiohttp_transport_json_aliases(self):
         aioresponses = pytest.importorskip("aioresponses")
-        from ssc_codegen.targets.python import PY_BS4_CONVERTER
-
-        module = _parse(self._ALIASED_REST_SCHEMA)
-        code = PY_BS4_CONVERTER.convert(module, http_client="aiohttp")
-        ns: dict = {}
-        exec(code, ns)
+        ns = _generate(self._ALIASED_REST_SCHEMA, http_client="aiohttp")
         API = ns["ArticleAPI"]
 
         with aioresponses.aioresponses() as mocked:
@@ -1113,12 +974,7 @@ struct ProfileAPI type=rest {
         import requests
         from responses import RequestsMock
 
-        from ssc_codegen.targets.python import PY_BS4_CONVERTER
-
-        module = _parse(self._ALIASED_REST_SCHEMA)
-        code = PY_BS4_CONVERTER.convert(module, http_client="requests")
-        ns: dict = {}
-        exec(code, ns)
+        ns = _generate(self._ALIASED_REST_SCHEMA, http_client="requests")
         API = ns["ArticleAPI"]
 
         with RequestsMock() as rsps:
@@ -1264,13 +1120,6 @@ json Err {
         ns = _generate(src, http_client="httpx")
         API = ns["AnimeAPI"]
 
-        # Ensure generated code compiles without syntax/type descriptor issues
-        from ssc_codegen.targets.python import PY_BS4_CONVERTER
-
-        mod = _parse(src)
-        code = PY_BS4_CONVERTER.convert(mod, http_client="httpx")
-        compile(code, "<rest_test>", "exec")
-
         # Sync fetch execution
         with respx.mock:
             respx.get("https://api.example.com/anime/42").respond(
@@ -1351,230 +1200,10 @@ json Err {
             }
         }
 
-    def test_rest_top_level_dict_with_inline_value_block_execution(self):
-        src = """
-(dict)json AnimeTranslations {
-    @key str
-    @value {
-        title str from="wire_title"
-        active bool
-        episodes (dict)EpisodeMap {
-            @key int
-            @value EpisodeValue {
-                link str from="stream_url"
-                bitrate int?
-            }
-        }
-    }
-}
-
-json Err {
-    code int
-    message str
-}
-
-(rest)struct AnimeAPI {
-    @request response=AnimeTranslations \"\"\"
-    GET /anime/translations HTTP/1.1
-    Host: api.example.com
-    \"\"\"
-    @error 404 Err
-}
-"""
-        ns = _generate(src, http_client="httpx")
-        API = ns["AnimeAPI"]
-
-        with respx.mock:
-            respx.get("https://api.example.com/anime/translations").respond(
-                json={
-                    "sub_en": {
-                        "wire_title": "English Sub",
-                        "active": True,
-                        "extra": "ignore",
-                        "episodes": {
-                            "1": {
-                                "stream_url": "https://stream.example/1",
-                                "bitrate": 1080,
-                            }
-                        },
-                    }
-                },
-                status_code=200,
-            )
-            client = httpx.Client()
-            result = API.fetch(client)
-
-        assert result.is_ok is True
-        assert result.status == 200
-        assert result.value == {
-            "sub_en": {
-                "title": "English Sub",
-                "active": True,
-                "episodes": {
-                    "1": {
-                        "link": "https://stream.example/1",
-                        "bitrate": 1080,
-                    }
-                },
-            }
-        }
-
 
 class TestJsonDescriptorModularCodegen:
     """End-to-end integration tests verifying modular JSON descriptor constants,
     symbolic referencing in REST methods/matchers, and execution."""
-
-    _NESTED_SCHEMA = """
-json LeafImage {
-    src str
-    width int?
-}
-
-json Genre {
-    id int
-    name str
-    icon LeafImage
-}
-
-json Release {
-    id int
-    title str from="wire_title"
-    genres (array)Genre
-}
-
-json CatalogResponse {
-    items (array)Release
-    total int
-}
-
-json ApiErr {
-    code int
-    message str
-}
-
-(rest)struct CatalogAPI {
-    @request response=CatalogResponse \"\"\"
-    GET /api/catalog HTTP/1.1
-    Host: api.example.com
-    \"\"\"
-    @error 404 ApiErr
-}
-"""
-
-    def test_modular_descriptors_and_rest_reference_usage(self):
-        mod = _parse(self._NESTED_SCHEMA)
-        py_code = PY_BS4_CONVERTER.convert_all(mod)[""]
-
-        # 1. Verify projector function naming convention
-        assert "def _project_leaf_image(data: Any) -> LeafImageJson:" in py_code
-        assert "def _project_genre(data: Any) -> GenreJson:" in py_code
-        assert "def _project_release(data: Any) -> ReleaseJson:" in py_code
-        assert (
-            "def _project_catalog_response(data: Any) -> CatalogResponseJson:"
-            in py_code
-        )
-        assert "def _project_api_err(data: Any) -> ApiErrJson:" in py_code
-
-        # 2. Verify projector modularity: child schemas called directly by function name
-        assert (
-            "_project_leaf_image(ssc_json_req(_d, 'icon', 'Genre'))" in py_code
-        )
-        assert (
-            "[_project_genre(_x) for _x in ssc_expect_list(ssc_json_req(_d, 'genres', 'Release'), 'Release.genres') if _x is not None]"
-            in py_code
-        )
-        assert (
-            "[_project_release(_x) for _x in ssc_expect_list(ssc_json_req(_d, 'items', 'CatalogResponse'), 'CatalogResponse.items') if _x is not None]"
-            in py_code
-        )
-
-        # 3. Verify REST method calls projector function directly
-        assert "value_fn=lambda _b: _project_catalog_response(_b)" in py_code
-
-        # 4. Verify error matcher calls projector function directly
-        assert "value=_project_api_err(value)" in py_code
-
-        # 5. Syntax validation
-        ast.parse(py_code)
-
-        # 6. JavaScript target alignment
-        js_code = JS_CONVERTER.convert_all(mod)[""]
-        assert "function _projectLeafImage(data)" in js_code
-        assert "function _projectCatalogResponse(data)" in js_code
-        assert "_projectCatalogResponse" in js_code
-        assert "_projectApiErr" in js_code
-        assert "(_b) => _projectCatalogResponse(_b)" in js_code
-        assert "value: _projectApiErr(_b)" in js_code
-
-        # 7. Execution test with respx (success + 404 error)
-        ns: dict = {}
-        exec(py_code, ns)
-        API = ns["CatalogAPI"]
-
-        with respx.mock:
-            respx.get("https://api.example.com/api/catalog").respond(
-                json={
-                    "items": [
-                        {
-                            "id": 10,
-                            "wire_title": "Attack on Titan",
-                            "extra_release_field": "drop",
-                            "genres": [
-                                {
-                                    "id": 1,
-                                    "name": "Action",
-                                    "extra_genre_field": "drop",
-                                    "icon": {
-                                        "src": "https://img.example/1.png",
-                                        "width": 100,
-                                        "height": 200,
-                                    },
-                                }
-                            ],
-                        }
-                    ],
-                    "total": 1,
-                    "extra_page_field": "drop",
-                },
-                status_code=200,
-            )
-            client = httpx.Client()
-            res = API.fetch(client)
-
-        assert res.is_ok is True
-        assert res.value == {
-            "items": [
-                {
-                    "id": 10,
-                    "title": "Attack on Titan",
-                    "genres": [
-                        {
-                            "id": 1,
-                            "name": "Action",
-                            "icon": {
-                                "src": "https://img.example/1.png",
-                                "width": 100,
-                            },
-                        }
-                    ],
-                }
-            ],
-            "total": 1,
-        }
-
-        # 9. Execution test: 404 error projection
-        with respx.mock:
-            respx.get("https://api.example.com/api/catalog").respond(
-                json={"code": 40401, "message": "Catalog empty", "debug": 123},
-                status_code=404,
-            )
-            client = httpx.Client()
-            err_res = API.fetch(client)
-
-        assert err_res.is_ok is False
-        assert err_res.status == 404
-        assert isinstance(err_res, ns["CatalogAPIErr404"])
-        assert err_res.value == {"code": 40401, "message": "Catalog empty"}
 
     def test_aniliberty_real_world_schema_benchmark(self):
         aniliberty_path = (

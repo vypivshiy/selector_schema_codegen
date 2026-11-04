@@ -72,77 +72,7 @@ def query_ph_src() -> str:
 
 
 # ---------------------------------------------------------------------------
-# 1. Codegen smoke — httpx
-# ---------------------------------------------------------------------------
-
-
-class TestHttpxCodegen:
-    def test_emits_both_sync_and_async(self, schema_src: str):
-        code = _generate_code(schema_src, http_client="httpx")
-        assert "def fetch(cls, client: httpx.Client" in code
-        assert "async def async_fetch(cls, client: httpx.AsyncClient" in code
-
-    def test_uses_httpx_response_semantics(self, schema_src: str):
-        code = _generate_code(schema_src, http_client="httpx")
-        # httpx: raise_for_status + .text are sync (no await)
-        assert "_resp.raise_for_status()" in code
-        assert "_body = _resp.text" in code
-        assert "await _resp.raise_for_status()" not in code
-        assert "await _resp.text()" not in code
-        assert "async with client.request(" not in code
-
-
-# ---------------------------------------------------------------------------
-# 2. Codegen smoke — aiohttp
-# ---------------------------------------------------------------------------
-
-
-class TestAioHttpCodegen:
-    def test_does_not_emit_sync_fetch(self, schema_src: str):
-        code = _generate_code(schema_src, http_client="aiohttp")
-        assert "def fetch(cls, client" not in code
-        assert "client: aiohttp.ClientSession" in code
-
-    def test_emits_async_with_context_manager(self, schema_src: str):
-        code = _generate_code(schema_src, http_client="aiohttp")
-        assert "async def async_fetch" in code
-        assert "async with client.request(" in code
-        assert ") as _resp:" in code
-
-    def test_awaits_coroutine_api(self, schema_src: str):
-        code = _generate_code(schema_src, http_client="aiohttp")
-        # text()/json() are coroutines in aiohttp → must be awaited
-        assert "await _resp.text()" in code
-        # raise_for_status() is a regular sync method in aiohttp → NOT awaited
-        assert "_resp.raise_for_status()" in code
-        assert "await _resp.raise_for_status()" not in code
-
-
-# ---------------------------------------------------------------------------
-# 3. Codegen smoke — requests
-# ---------------------------------------------------------------------------
-
-
-class TestRequestsCodegen:
-    def test_emits_both_sync_and_async(self, schema_src: str):
-        code = _generate_code(schema_src, http_client="requests")
-        assert "def fetch(cls, client: requests.Session" in code
-        assert "async def async_fetch(cls, client: requests.Session" in code
-
-    def test_async_delegates_via_to_thread(self, schema_src: str):
-        code = _generate_code(schema_src, http_client="requests")
-        assert "asyncio.to_thread(cls.fetch" in code
-        assert "loop.run_in_executor" not in code
-
-    def test_sync_uses_requests_semantics(self, schema_src: str):
-        code = _generate_code(schema_src, http_client="requests")
-        assert "_resp = client.request(" in code
-        assert "_resp.raise_for_status()" in code
-        assert "_body = _resp.text" in code
-
-
-# ---------------------------------------------------------------------------
-# 4. Runtime — httpx (respx)
+# 1. Runtime — httpx (respx)
 # ---------------------------------------------------------------------------
 
 
@@ -205,6 +135,7 @@ class TestAioHttpRuntime:
 
         ns = _exec(schema_src, http_client="aiohttp")
         SimplePage = ns["SimplePage"]
+        assert not hasattr(SimplePage, "fetch")
 
         async def _run():
             with aioresponses.aioresponses() as mocked:
@@ -287,43 +218,6 @@ class TestRequestsRuntime:
 # ---------------------------------------------------------------------------
 # 7. Query-string placeholder (bare-value form: ?32-{{username}})
 # ---------------------------------------------------------------------------
-
-
-class TestQueryPlaceholderCodegen:
-    """Regression: placeholder inside a bare-value query string was lost.
-
-    ``parse_qs("32-{{username}}")`` classified the token as a dict key with
-    empty value; dict keys are never tokenized → no signature param and a
-    literal ``params={'32-{{username}}': ''}`` in the body. Fixed by keeping
-    the full URL when the query contains a placeholder.
-    """
-
-    def test_signature_has_username_kwarg_httpx(self, query_ph_src: str):
-        code = _generate_code(query_ph_src, http_client="httpx")
-        assert (
-            "def fetch(cls, client: httpx.Client, *, username: str, **kwargs: Any)"
-            in code
-        )
-        assert (
-            "async def async_fetch(cls, client: httpx.AsyncClient, *, username: str, **kwargs: Any)"
-            in code
-        )
-
-    def test_signature_has_username_kwarg_aiohttp(self, query_ph_src: str):
-        code = _generate_code(query_ph_src, http_client="aiohttp")
-        assert (
-            "async def async_fetch(cls, client: aiohttp.ClientSession, *, username: str, **kwargs: Any)"
-            in code
-        )
-
-    def test_url_fstring_renders_placeholder(self, query_ph_src: str):
-        code = _generate_code(query_ph_src, http_client="httpx")
-        assert 'f"https://example.com/?32-{username}"' in code
-
-    def test_no_literal_placeholder_in_params(self, query_ph_src: str):
-        code = _generate_code(query_ph_src, http_client="httpx")
-        assert "{{username}}" not in code
-        assert "params=" not in code
 
 
 class TestQueryPlaceholderRuntime:

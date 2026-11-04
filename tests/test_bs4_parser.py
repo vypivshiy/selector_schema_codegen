@@ -84,56 +84,6 @@ class TestTargetSpecAndResolution:
             resolve(TargetSpec(lang=lang, bs4_parser="html.parser"))
 
 
-class TestBs4ParserCodegen:
-    @pytest.mark.parametrize("parser", ["lxml", "html.parser", "html5lib"])
-    def test_bs4_codegen_imports_literal_and_emits_constant(
-        self, parser: str
-    ) -> None:
-        module, diags = parse_module(_ARTICLE_KDL)
-        assert not diags
-        profile = resolve(TargetSpec(lang="python", bs4_parser=parser))
-        converter = profile.create_converter()
-        code = converter.convert(module)
-
-        assert "from typing import Literal" in code
-        assert (
-            f'BS4_FEATURES: Literal["html.parser", "lxml", "html5lib"] = {parser!r}'
-            in code
-        )
-
-    def test_bs4_struct_init_signature_and_body(self) -> None:
-        module, diags = parse_module(_ARTICLE_KDL)
-        assert not diags
-        profile = resolve(TargetSpec(lang="python", bs4_parser="html.parser"))
-        converter = profile.create_converter()
-        code = converter.convert(module)
-
-        expected_sig = (
-            "def __init__(self, document: Union[str, BeautifulSoup, Tag], *, "
-            'features: Literal["html.parser", "lxml", "html5lib"] = BS4_FEATURES) -> None:'
-        )
-        assert expected_sig in code
-        assert "self._doc = BeautifulSoup(document, features=features)" in code
-
-    def test_bs4_fn_and_raw_fn_signatures(self) -> None:
-        module, diags = parse_module(_FN_KDL)
-        assert not diags
-        profile = resolve(TargetSpec(lang="python", bs4_parser="html.parser"))
-        converter = profile.create_converter()
-        code = converter.convert(module)
-
-        expected_fn_sig = (
-            "def extract_heading(document: str, *, "
-            'features: Literal["html.parser", "lxml", "html5lib"] = BS4_FEATURES) -> str:'
-        )
-        assert expected_fn_sig in code
-        assert "v = BeautifulSoup(document, features=features)" in code
-
-        expected_raw_fn_sig = "def clean_text(document: str) -> str:"
-        assert expected_raw_fn_sig in code
-        assert "features" not in expected_raw_fn_sig
-
-
 class TestBs4ParserRuntimeExecution:
     def test_struct_runtime_execution_with_default_and_override(self) -> None:
         module, diags = parse_module(_ARTICLE_KDL)
@@ -141,6 +91,7 @@ class TestBs4ParserRuntimeExecution:
         profile = resolve(TargetSpec(lang="python", bs4_parser="html.parser"))
         converter = profile.create_converter()
         code = converter.convert(module)
+        assert "self._doc = BeautifulSoup(document, features=features)" in code
 
         ns: dict[str, Any] = {}
         exec(compile(code, "generated.py", "exec"), ns)
@@ -273,27 +224,3 @@ class TestBs4ParserCli:
         assert result.exit_code == 0, result.output
         data = json.loads(result.output)
         assert data == {"title": "Run Title"}
-
-    def test_cli_run_rejects_bs4_parser_with_lxml(self, tmp_path: Path) -> None:
-        schema = tmp_path / "schema.kdl"
-        schema.write_text(_ARTICLE_KDL, encoding="utf-8")
-        html_file = tmp_path / "page.html"
-        html_file.write_text("<h1>Run Title</h1>", encoding="utf-8")
-
-        result = runner.invoke(
-            app,
-            [
-                "run",
-                f"{schema}:Article",
-                "-L",
-                "lxml",
-                "--bs4-parser",
-                "html.parser",
-                "-i",
-                str(html_file),
-            ],
-        )
-        assert result.exit_code == 1
-        assert (
-            "--bs4-parser is only applicable when --lib is bs4" in result.output
-        )

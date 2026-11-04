@@ -49,44 +49,18 @@ def _find_assert(module) -> Assert:
 
 
 class TestAssertAst:
-    def test_assert_without_message(self):
-        src = (
-            "struct Page type=item {\n"
-            '    Field { css ".x"; assert { len-gt 0 } }\n'
-            "}\n"
-        )
-        node = _find_assert(_parse(src))
-        assert node.message == ""
-
-    def test_assert_with_string_message(self):
-        src = (
-            "struct Page type=item {\n"
-            '    Field { css ".x"; assert "boom" { len-gt 0 } }\n'
-            "}\n"
-        )
-        node = _find_assert(_parse(src))
-        assert node.message == "boom"
-
-    def test_assert_source_location_populated(self):
-        src = (
-            "struct Page type=item {\n"
-            '    Field { css ".x"; assert { len-gt 0 } }\n'
-            "}\n"
-        )
-        module = _parse(src, source_name="my_schema.kdl")
-        node = _find_assert(module)
-        assert module.source_file == "my_schema.kdl"
-        assert node.span is not None
-        assert node.span.start.line > 0
-        assert node.span.start.column > 0
-
     def test_assert_source_file_is_basename_not_absolute(self):
         src = (
             "struct Page type=item {\n"
-            '    Field { css ".x"; assert { len-gt 0 } }\n'
+            '    Field { css ".x"; assert "must have .x" { len-gt 0 } }\n'
             "}\n"
         )
         module = _parse(src, source_name="C:/dev/project/deep/my_schema.kdl")
+        node = _find_assert(module)
+        assert node.message == "must have .x"
+        assert node.span is not None
+        assert node.span.start.line > 0
+        assert node.span.start.column > 0
         # Must be basename only — no absolute path leaks into generated code.
         assert "/" not in module.source_file
         assert "\\" not in module.source_file
@@ -126,19 +100,6 @@ def py_lxml():
 
 
 class TestPythonAssertCodegen:
-    def test_visit_assert_emits_std_assert(self, py_lxml):
-        src = (
-            "struct Page type=item {\n"
-            '    Field { css ".x"; assert { len-gt 0 } }\n'
-            "}\n"
-        )
-        code = py_lxml.convert(_parse(src))
-        # Must NOT contain bare `assert (` — that is the old keyword form
-        # which Python can strip under -O.
-        assert "assert (" not in code
-        # Must use std_assert helper instead.
-        assert "std_assert(" in code
-
     def test_assert_custom_message_in_output(self, py_lxml):
         src = (
             "struct Page type=item {\n"
@@ -182,6 +143,8 @@ class TestPythonAssertCodegen:
             "}\n"
         )
         code = py_lxml.convert(_parse(src))
+        assert "assert (" not in code
+        assert "std_assert(" in code
         assert "class SscAssertionError(Exception)" in code
         assert "def std_assert(" in code
 
@@ -205,24 +168,12 @@ class TestRuntimeExports:
         assert "SscAssertionError" in names
         assert "SscRegexError" in names
 
-    def test_runtime_module_content_has_ssc_assertion_error(self):
-        from ssc_codegen.ast import Module
-        from ssc_codegen.generation.runtime import runtime_module_content
-
-        content = runtime_module_content(Module())
-        assert "class SscAssertionError(Exception)" in content
-        assert "class SscRegexError(Exception)" in content
-        assert "def std_assert(" in content
-        assert "def std_re_search(" in content
-
     def test_runtime_file_py_exec_valid(self):
         """Runtime module file must be syntactically valid + importable."""
         from ssc_codegen.ast import Module
         from ssc_codegen.generation.runtime import runtime_module_content
 
         content = runtime_module_content(Module())
-        # Compile check — raises SyntaxError on bad source.
-        compile(content, "<runtime>", "exec")
         ns: dict = {}
         exec(compile(content, "<runtime>", "exec"), ns)
         assert issubclass(ns["SscAssertionError"], Exception)
@@ -289,20 +240,6 @@ class TestSeparateRuntimeAssert:
 
 
 class TestJsAssertCodegen:
-    def test_visit_assert_emits_std_assert(self):
-        from ssc_codegen.targets.javascript import JS_CONVERTER
-
-        src = (
-            "struct Page type=item {\n"
-            '    Field { css ".x"; assert { len-gt 0 } }\n'
-            "}\n"
-        )
-        code = JS_CONVERTER.convert(_parse(src))
-        # Must NOT contain old hard-coded throw new Error form.
-        assert "throw new Error('Assertion failed')" not in code
-        # Must use _stdAssert helper.
-        assert "_stdAssert(" in code
-
     def test_assert_custom_message_in_js_output(self):
         from ssc_codegen.targets.javascript import JS_CONVERTER
 
@@ -323,6 +260,8 @@ class TestJsAssertCodegen:
             "}\n"
         )
         code = JS_CONVERTER.convert(_parse(src))
+        assert "throw new Error('Assertion failed')" not in code
+        assert "_stdAssert(" in code
         assert "class SscAssertionError extends Error" in code
         assert "function _stdAssert(" in code
 

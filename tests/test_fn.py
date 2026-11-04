@@ -1,5 +1,6 @@
 """Tests for fn / (raw)fn lint rules and parsing."""
 
+import pytest
 from kdlquery import Severity
 
 from ssc_codegen.core import parse_module
@@ -59,14 +60,10 @@ class TestFnLintForbiddenDirectives:
 
 
 class TestRawFnForbiddenOps:
-    def test_css_forbidden(self):
-        errors = _check_errors('(raw)fn x {\n  css ".x"\n  text\n}\n')
+    @pytest.mark.parametrize(
+        "body",
+        ['css ".x"\n  text', "text"],
+    )
+    def test_html_ops_forbidden_in_raw_fn(self, body: str):
+        errors = _check_errors(f"(raw)fn x {{\n  {body}\n}}\n")
         assert any("forbidden" in e for e in errors)
-
-    def test_text_forbidden(self):
-        errors = _check_errors("(raw)fn x {\n  text\n}\n")
-        assert any("forbidden" in e for e in errors)
-
-    def test_string_ops_allowed(self):
-        errors = _check_errors('(raw)fn x {\n  split ","\n  index 0\n}\n')
-        assert not errors

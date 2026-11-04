@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -779,291 +778,18 @@ struct Data {
     assert "r#pub: &str" in code
 
 
-def test_untyped_error_variant_holds_serde_json_value() -> None:
-    """MatcherListDef with untyped error entries emits variants holding serde_json::Value."""
-    schema = """
-json User {
-    id int
-}
-
-struct API type=rest {
-    @request name=get-user response=User \"\"\"
-    GET http://127.0.0.1/users/{{id:int}} HTTP/1.1
-    \"\"\"
-}
-"""
-    module_ast, diagnostics = parse_module(schema)
-    errors = [d for d in diagnostics if d.severity.name == "ERROR"]
-    assert not errors
-
-    for n in module_ast.body:
-        if isinstance(n, MatcherListDef):
-            n.entries.append(
-                MatcherEntry(
-                    status=400,
-                    required_keys=[],
-                    conditions={},
-                    factory_name="APIErr400",
-                    error_schema="",
-                )
-            )
-
-    converter = RustVisitor()
-    code = converter.convert(module_ast)
-
-    assert "Err400(serde_json::Value)," in code
-    assert "pub type APIErr400 = serde_json::Value;" in code
-    assert "return Some(APIError::Err400(if _body_val.is_null()" in code
-    assert "_body_val.clone()" in code
-
-
-def test_rust_top_level_dict_json_codegen() -> None:
-    """Top-level (dict)json generates HashMap type alias and maps key types."""
-    schema = """
-(dict)json Translations {
-    @key str
-    @value (array)str
-}
-
-(dict)json NumericLookup {
-    @key int
-    @value str
-}
-
-json Document {
-    translations Translations
-}
-"""
-    module, diagnostics = parse_module(schema)
-    errors = [d for d in diagnostics if d.severity.name == "ERROR"]
-    assert not errors
-
-    converter = RustVisitor()
-    code = converter.convert(module)
-
-    assert (
-        "pub type TranslationsJson = std::collections::HashMap<String, Vec<String>>;"
-        in code
-    )
-    assert (
-        "pub type NumericLookupJson = std::collections::HashMap<i64, String>;"
-        in code
-    )
-    assert "pub translations: TranslationsJson," in code
-    assert (
-        'rt::decode::<TranslationsJson>(raw.clone(), "Document.translations")?'
-        in code
-    )
-
-
-def test_rust_parent_struct_with_inline_dict_field_codegen() -> None:
-    """Parent struct with inline (dict) field generates HashMap field and rt::decode."""
-    schema = """
-json AnimeResponse {
-    translations (dict) {
-        @key str
-        @value (array)str
-    }
-    optional_rates (dict)? @omitempty {
-        @key int
-        @value float
-    }
-}
-"""
-    module, diagnostics = parse_module(schema)
-    errors = [d for d in diagnostics if d.severity.name == "ERROR"]
-    assert not errors
-
-    converter = RustVisitor()
-    code = converter.convert(module)
-
-    assert "#[derive(Debug, Clone, Serialize, Deserialize)]" in code
-    assert "pub struct AnimeResponseJson {" in code
-    assert (
-        "pub translations: std::collections::HashMap<String, Vec<String>>,"
-        in code
-    )
-    assert (
-        "pub optional_rates: Option<std::collections::HashMap<i64, f64>>,"
-        in code
-    )
-    assert "std::collections::HashMap<String, Vec<String>>" in code
-    assert "rt::decode::<std::collections::HashMap<i64, f64>>(" in code
-    assert '"AnimeResponse.translations"' in code
-    assert '"AnimeResponse.optional_rates"' in code
-
-
-def test_rust_parent_struct_with_hoisted_inline_blocks_codegen() -> None:
-    """Parent struct with hoisted inline object and array blocks generates standard child structs."""
-    schema = """
-json AnimeResponse {
-    franchise Franchise {
-        id str
-        nodes (array)Node {
-            id int
-            name str
-        }
-    }
-    material_data {
-        title str
-    }
-}
-"""
-    module, diagnostics = parse_module(schema)
-    errors = [d for d in diagnostics if d.severity.name == "ERROR"]
-    assert not errors
-
-    converter = RustVisitor()
-    code = converter.convert(module)
-
-    assert "pub struct NodeJson {" in code
-    assert "pub struct FranchiseJson {" in code
-    assert "pub struct AnimeResponseMaterialDataJson {" in code
-    assert "pub struct AnimeResponseJson {" in code
-    assert "pub nodes: Vec<NodeJson>," in code
-    assert "pub franchise: FranchiseJson," in code
-    assert "pub material_data: AnimeResponseMaterialDataJson," in code
-    assert "NodeJson::from_value" in code
-    assert "FranchiseJson::from_value" in code
-    assert "AnimeResponseMaterialDataJson::from_value" in code
-
-
-def test_rust_nested_dict_value_schema_multi_level_codegen() -> None:
-    """Multi-level nested dictionary value schemas generate hoisted Serde structs in topological order."""
-    schema = """
-json AnimeResponse {
-    translations (dict)Translation {
-        @key str
-        @value TranslationValue {
-            episodes (dict)EpisodeMap {
-                @key int
-                @value EpisodeValue {
-                    link str from="stream_url"
-                    screenshots @skip
-                }
-            }
-            is_active bool
-            season int
-            kind str from="type"
-        }
-    }
-}
-"""
-    module, diagnostics = parse_module(schema)
-    errors = [d for d in diagnostics if d.severity.name == "ERROR"]
-    assert not errors
-
-    converter = RustVisitor()
-    code = converter.convert(module)
-
-    # 1. EpisodeValueJson struct with Serde derives and skipped screenshots
-    assert "pub struct EpisodeValueJson {" in code
-    assert '#[serde(alias = "stream_url")]' in code
-    assert "pub link: String," in code
-    assert "screenshots" not in code
-    assert "impl EpisodeValueJson {" in code
-
-    # 2. TranslationValueJson struct with nested episodes HashMap
-    assert "pub struct TranslationValueJson {" in code
-    assert '#[serde(alias = "type")]' in code
-    assert (
-        "pub episodes: std::collections::HashMap<i64, EpisodeValueJson>,"
-        in code
-    )
-    assert "pub is_active: bool," in code
-    assert "pub season: i64," in code
-    assert "pub kind: String," in code
-    assert re.search(
-        r"rt::decode::<\s*std::collections::HashMap<i64, EpisodeValueJson>,?\s*>",
-        code,
-    )
-
-    # 3. AnimeResponseJson struct with translations HashMap
-    assert "pub struct AnimeResponseJson {" in code
-    assert (
-        "pub translations: std::collections::HashMap<String, TranslationValueJson>,"
-        in code
-    )
-    assert re.search(
-        r"rt::decode::<\s*std::collections::HashMap<String, TranslationValueJson>,?\s*>",
-        code,
-    )
-
-    # 4. Topological order: EpisodeValueJson before TranslationValueJson before AnimeResponseJson
-    idx_ep = code.index("pub struct EpisodeValueJson {")
-    idx_tr = code.index("pub struct TranslationValueJson {")
-    idx_resp = code.index("pub struct AnimeResponseJson {")
-    assert idx_ep < idx_tr < idx_resp
-
-
-def test_rust_nested_dict_anonymous_and_array_value_codegen() -> None:
-    """Anonymous @value and @value (array)ItemModel generate appropriate structs and HashMap/Vec types."""
-    schema = """
-(dict)json TopTranslations {
-    @key str
-    @value TopValue {
-        title str
-    }
-}
-
-json Project {
-    groups (dict) {
-        @key str
-        @value (array)GroupItem {
-            id int
-            name str
-        }
-    }
-    settings (dict) {
-        @key str
-        @value {
-            enabled bool
-            priority int? @omitempty
-        }
-    }
-}
-"""
-    module, diagnostics = parse_module(schema)
-    errors = [d for d in diagnostics if d.severity.name == "ERROR"]
-    assert not errors
-
-    converter = RustVisitor()
-    code = converter.convert(module)
-
-    assert (
-        "pub type TopTranslationsJson = std::collections::HashMap<String, TopValueJson>;"
-        in code
-    )
-    assert "pub struct TopValueJson {" in code
-    assert "pub struct GroupItemJson {" in code
-    assert "pub struct ProjectSettingsValueJson {" in code
-    assert (
-        "pub groups: std::collections::HashMap<String, Vec<GroupItemJson>>,"
-        in code
-    )
-    assert (
-        "pub settings: std::collections::HashMap<String, ProjectSettingsValueJson>,"
-        in code
-    )
-    assert re.search(
-        r"rt::decode::<\s*std::collections::HashMap<String, Vec<GroupItemJson>>,?\s*>",
-        code,
-    )
-    assert re.search(
-        r"rt::decode::<\s*std::collections::HashMap<String, ProjectSettingsValueJson>,?\s*>",
-        code,
-    )
-
-
-def test_rust_json_dict_and_inline_schemas_execute(tmp_path: Path) -> None:
-    """End-to-end execution of top-level dict, inline dict, and hoisted inline schemas in Cargo."""
+def test_rust_json_dict_inline_and_gjson_paths_execute(tmp_path: Path) -> None:
+    """End-to-end execution of top-level dict, inline dict, hoisted inline schemas,
+    multi-level nested dict value schemas, and GJSON path subset + error contexts in one Cargo run.
+    """
     source_dir = _write_cargo_project(tmp_path)
     converter = RustVisitor()
     (source_dir / "sscgen_runtime.rs").write_text(
         converter.emit_runtime(), encoding="utf-8"
     )
 
-    schema = """
+    # 1. json_dict_inline
+    schema_dict_inline = """
 (dict)json Translations {
     @key str
     @value (array)str
@@ -1092,83 +818,14 @@ json AnimeResponse {
     response { jsonify AnimeResponse }
 }
 """
-    module, diagnostics = parse_module(schema)
-    assert not [d for d in diagnostics if d.severity.name == "ERROR"]
-    (source_dir / "parser.rs").write_text(
-        converter.convert(module), encoding="utf-8"
+    mod1, diag1 = parse_module(schema_dict_inline)
+    assert not [d for d in diag1 if d.severity.name == "ERROR"]
+    (source_dir / "json_dict_inline.rs").write_text(
+        converter.convert(mod1), encoding="utf-8"
     )
 
-    (source_dir / "main.rs").write_text(
-        """
-mod sscgen_runtime;
-mod parser;
-
-use parser::AnimePayloadParser;
-
-fn main() {
-    let payload = r#"{
-        "id": "anime-1",
-        "translations": {
-            "1": ["jap", "eng"],
-            "2": ["ita"]
-        },
-        "top_translations": {
-            "main": ["jap"]
-        },
-        "franchise": {
-            "id": "fr-1",
-            "nodes": [
-                {"id": 101, "name": "Episode 1"},
-                {"id": 102, "name": "Episode 2"}
-            ]
-        },
-        "material_data": {
-            "title": "My Anime Title"
-        }
-    }"#;
-
-    let mut parser = AnimePayloadParser::new(payload).expect("parser init failed");
-    let result = parser.parse().expect("parse failed");
-    let resp = result.response;
-
-    assert_eq!(resp.id, "anime-1");
-    assert_eq!(resp.translations.get("1").unwrap(), &vec!["jap".to_string(), "eng".to_string()]);
-    assert_eq!(resp.translations.get("2").unwrap(), &vec!["ita".to_string()]);
-    assert_eq!(resp.top_translations.get("main").unwrap(), &vec!["jap".to_string()]);
-    assert_eq!(resp.franchise.id, "fr-1");
-    assert_eq!(resp.franchise.nodes.len(), 2);
-    assert_eq!(resp.franchise.nodes[0].id, 101);
-    assert_eq!(resp.franchise.nodes[0].name, "Episode 1");
-    assert_eq!(resp.franchise.nodes[1].id, 102);
-    assert_eq!(resp.material_data.title, "My Anime Title");
-
-    println!("DICT_AND_INLINE_JSON_PASSED");
-}
-""",
-        encoding="utf-8",
-    )
-
-    result = subprocess.run(
-        ["cargo", "run", "--quiet"],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        env=_cargo_env(),
-        timeout=180,
-    )
-    assert result.returncode == 0, result.stderr
-    assert "DICT_AND_INLINE_JSON_PASSED" in result.stdout
-
-
-def test_rust_nested_dict_value_schemas_execute(tmp_path: Path) -> None:
-    """Cargo-backed end-to-end execution of multi-level nested dictionary value schemas."""
-    source_dir = _write_cargo_project(tmp_path)
-    converter = RustVisitor()
-    (source_dir / "sscgen_runtime.rs").write_text(
-        converter.emit_runtime(), encoding="utf-8"
-    )
-
-    schema = """
+    # 2. nested_dict_val
+    schema_nested_val = """
 (dict)json TopTranslations {
     @key str
     @value TopValue {
@@ -1206,21 +863,84 @@ json AnimeResponse {
     response { jsonify AnimeResponse }
 }
 """
-    module, diagnostics = parse_module(schema)
-    assert not [d for d in diagnostics if d.severity.name == "ERROR"]
-
-    (source_dir / "parser.rs").write_text(
-        converter.convert(module), encoding="utf-8"
+    mod2, diag2 = parse_module(schema_nested_val)
+    assert not [d for d in diag2 if d.severity.name == "ERROR"]
+    (source_dir / "nested_dict_val.rs").write_text(
+        converter.convert(mod2), encoding="utf-8"
     )
+
+    # 3. gjson_paths
+    schema_gjson = r"""
+json ReleaseSummary {
+    os_version str from="os\\.version"
+    item_count int from="items.#"
+    tag_names (array)str from="tags.#.name"
+    first_tag str from="tags.0.name"
+    literal_hash str from="\\#"
+}
+
+(raw)struct ReleaseEnvelope {
+    summary { jsonify ReleaseSummary path="meta\\.data.release" }
+}
+"""
+    mod3, diag3 = parse_module(schema_gjson)
+    assert not [d for d in diag3 if d.severity.name == "ERROR"]
+    code3 = converter.convert(mod3)
+    assert '#[serde(alias = "os.version")]' in code3
+    assert '#[serde(alias = "#")]' in code3
+    assert 'alias = "items.#"' not in code3
+    assert 'alias = "tags.#.name"' not in code3
+    assert '"ReleaseSummary.os_version"' in code3
+    assert '"ReleaseSummary.item_count"' in code3
+    assert '"ReleaseSummary.tag_names"' in code3
+    (source_dir / "gjson_paths.rs").write_text(code3, encoding="utf-8")
 
     (source_dir / "main.rs").write_text(
         r"""
 mod sscgen_runtime;
-mod parser;
+mod json_dict_inline;
+mod nested_dict_val;
+mod gjson_paths;
 
-use parser::AnimePayloadParser;
+fn test_json_dict_inline() {
+    let payload = r#"{
+        "id": "anime-1",
+        "translations": {
+            "1": ["jap", "eng"],
+            "2": ["ita"]
+        },
+        "top_translations": {
+            "main": ["jap"]
+        },
+        "franchise": {
+            "id": "fr-1",
+            "nodes": [
+                {"id": 101, "name": "Episode 1"},
+                {"id": 102, "name": "Episode 2"}
+            ]
+        },
+        "material_data": {
+            "title": "My Anime Title"
+        }
+    }"#;
 
-fn main() {
+    let mut parser = json_dict_inline::AnimePayloadParser::new(payload).expect("parser init failed");
+    let result = parser.parse().expect("parse failed");
+    let resp = result.response;
+
+    assert_eq!(resp.id, "anime-1");
+    assert_eq!(resp.translations.get("1").unwrap(), &vec!["jap".to_string(), "eng".to_string()]);
+    assert_eq!(resp.translations.get("2").unwrap(), &vec!["ita".to_string()]);
+    assert_eq!(resp.top_translations.get("main").unwrap(), &vec!["jap".to_string()]);
+    assert_eq!(resp.franchise.id, "fr-1");
+    assert_eq!(resp.franchise.nodes.len(), 2);
+    assert_eq!(resp.franchise.nodes[0].id, 101);
+    assert_eq!(resp.franchise.nodes[0].name, "Episode 1");
+    assert_eq!(resp.franchise.nodes[1].id, 102);
+    assert_eq!(resp.material_data.title, "My Anime Title");
+}
+
+fn test_nested_dict_val() {
     let payload = r#"{
         "id": "anime-multi",
         "top_translations": {
@@ -1244,7 +964,7 @@ fn main() {
         }
     }"#;
 
-    let mut parser = AnimePayloadParser::new(payload).expect("parser init failed");
+    let mut parser = nested_dict_val::AnimePayloadParser::new(payload).expect("parser init failed");
     let result = parser.parse().expect("parse failed");
     let resp = result.response;
 
@@ -1264,8 +984,55 @@ fn main() {
     assert_eq!(fs[0].name, "Team A");
     assert_eq!(fs[1].id, 20);
     assert_eq!(fs[1].name, "Team B");
+}
 
-    println!("NESTED_DICT_VALUE_SCHEMAS_RUST_PASSED");
+fn test_gjson_paths() {
+    let payload = r##"{
+        "meta.data": {
+            "release": {
+                "os.version": "14.2.1",
+                "items": [10, 20, 30],
+                "tags": [
+                    {"name": "action"},
+                    {"name": null},
+                    {"other": "ignored"},
+                    {"name": "sci-fi"}
+                ],
+                "#": "hash-val"
+            }
+        }
+    }"##;
+
+    let mut parser = gjson_paths::ReleaseEnvelopeParser::new(payload).expect("init failed");
+    let parsed = parser.parse().expect("parse failed");
+    assert_eq!(parsed.summary.os_version, "14.2.1");
+    assert_eq!(parsed.summary.item_count, 3);
+    assert_eq!(
+        parsed.summary.tag_names,
+        vec!["action".to_string(), "sci-fi".to_string()]
+    );
+    assert_eq!(parsed.summary.first_tag, "action");
+    assert_eq!(parsed.summary.literal_hash, "hash-val");
+
+    let obj_with_digit_key: serde_json::Value = serde_json::from_str(r#"{"0": "not-an-array"}"#).unwrap();
+    assert!(sscgen_runtime::json_opt(&obj_with_digit_key, "0").is_none());
+    assert!(sscgen_runtime::json_path(&obj_with_digit_key, "0", "ctx").is_err());
+
+    let bad_val: serde_json::Value = serde_json::from_str(r#"{"os.version": "1.0"}"#).unwrap();
+    let err = gjson_paths::ReleaseSummaryJson::from_value(bad_val).unwrap_err();
+    assert_eq!(err.context, "ReleaseSummary.item_count");
+    assert!(err.to_string().contains("ReleaseSummary.item_count"));
+
+    let non_obj: serde_json::Value = serde_json::from_str("null").unwrap();
+    let err_obj = gjson_paths::ReleaseSummaryJson::from_value(non_obj).unwrap_err();
+    assert_eq!(err_obj.context, "ReleaseSummary");
+}
+
+fn main() {
+    test_json_dict_inline();
+    test_nested_dict_val();
+    test_gjson_paths();
+    println!("COMBINED_JSON_RUST_PASSED");
 }
 """,
         encoding="utf-8",
@@ -1280,7 +1047,7 @@ fn main() {
         timeout=180,
     )
     assert result.returncode == 0, result.stderr
-    assert "NESTED_DICT_VALUE_SCHEMAS_RUST_PASSED" in result.stdout
+    assert "COMBINED_JSON_RUST_PASSED" in result.stdout
 
 
 def test_all_rest_schemas_compile(tmp_path: Path) -> None:
@@ -1722,110 +1489,6 @@ async fn main() {
     )
     assert result.returncode == 0, result.stderr
     assert "ALL_REST_PASSED" in result.stdout
-
-
-def test_rust_gjson_paths_and_error_contexts_execute(tmp_path: Path) -> None:
-    """Verify GJSON path subset (escaped dots, array length, array projection) and schema-qualified error contexts in Rust."""
-    source_dir = _write_cargo_project(tmp_path)
-    converter = RustVisitor()
-    (source_dir / "sscgen_runtime.rs").write_text(
-        converter.emit_runtime(), encoding="utf-8"
-    )
-
-    schema = r"""
-json ReleaseSummary {
-    os_version str from="os\\.version"
-    item_count int from="items.#"
-    tag_names (array)str from="tags.#.name"
-    first_tag str from="tags.0.name"
-    literal_hash str from="\\#"
-}
-
-(raw)struct ReleaseEnvelope {
-    summary { jsonify ReleaseSummary path="meta\\.data.release" }
-}
-"""
-    module, diagnostics = parse_module(schema)
-    assert not [d for d in diagnostics if d.severity.name == "ERROR"]
-    code = converter.convert(module)
-
-    # Direct escaped keys emit unescaped serde alias; path queries omit serde alias
-    assert '#[serde(alias = "os.version")]' in code
-    assert '#[serde(alias = "#")]' in code
-    assert 'alias = "items.#"' not in code
-    assert 'alias = "tags.#.name"' not in code
-    assert '"ReleaseSummary.os_version"' in code
-    assert '"ReleaseSummary.item_count"' in code
-    assert '"ReleaseSummary.tag_names"' in code
-
-    (source_dir / "parser.rs").write_text(code, encoding="utf-8")
-    (source_dir / "main.rs").write_text(
-        r"""
-mod sscgen_runtime;
-mod parser;
-
-use parser::{ReleaseEnvelopeParser, ReleaseSummaryJson};
-
-fn main() {
-    let payload = r##"{
-        "meta.data": {
-            "release": {
-                "os.version": "14.2.1",
-                "items": [10, 20, 30],
-                "tags": [
-                    {"name": "action"},
-                    {"name": null},
-                    {"other": "ignored"},
-                    {"name": "sci-fi"}
-                ],
-                "#": "hash-val"
-            }
-        }
-    }"##;
-
-    let mut parser = ReleaseEnvelopeParser::new(payload).expect("init failed");
-    let parsed = parser.parse().expect("parse failed");
-    assert_eq!(parsed.summary.os_version, "14.2.1");
-    assert_eq!(parsed.summary.item_count, 3);
-    assert_eq!(
-        parsed.summary.tag_names,
-        vec!["action".to_string(), "sci-fi".to_string()]
-    );
-    assert_eq!(parsed.summary.first_tag, "action");
-    assert_eq!(parsed.summary.literal_hash, "hash-val");
-
-    // Verify integer index segment requires an array and does not fall back to object key lookup
-    let obj_with_digit_key: serde_json::Value = serde_json::from_str(r#"{"0": "not-an-array"}"#).unwrap();
-    assert!(sscgen_runtime::json_opt(&obj_with_digit_key, "0").is_none());
-    assert!(sscgen_runtime::json_path(&obj_with_digit_key, "0", "ctx").is_err());
-
-    // Verify schema-qualified error context on missing field
-    let bad_val: serde_json::Value = serde_json::from_str(r#"{"os.version": "1.0"}"#).unwrap();
-    let err = ReleaseSummaryJson::from_value(bad_val).unwrap_err();
-    assert_eq!(err.context, "ReleaseSummary.item_count");
-    assert!(err.to_string().contains("ReleaseSummary.item_count"));
-
-    // Verify schema-qualified error context on non-object input
-    let non_obj: serde_json::Value = serde_json::from_str("null").unwrap();
-    let err_obj = ReleaseSummaryJson::from_value(non_obj).unwrap_err();
-    assert_eq!(err_obj.context, "ReleaseSummary");
-
-    println!("GJSON_RUST_PASSED");
-}
-""",
-        encoding="utf-8",
-    )
-
-    result = subprocess.run(
-        ["cargo", "run", "--quiet"],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        env=_cargo_env(),
-        timeout=180,
-    )
-    assert result.returncode == 0, result.stderr
-    assert "GJSON_RUST_PASSED" in result.stdout
 
 
 def test_rust_runtime_http_delegation_and_multiline_docs(

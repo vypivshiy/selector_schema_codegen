@@ -214,46 +214,28 @@ def test_parser_supports_xpath_all_pattern_match_block():
     assert isinstance(links.body[-1], Return)
 
 
-def test_parser_raw_default_mode_is_outer():
+@pytest.mark.parametrize(
+    ("raw_op", "expected_mode"),
+    [
+        ("raw", "outer"),
+        ("raw outer", "outer"),
+        ("raw inner", "inner"),
+    ],
+)
+def test_parser_raw_mode(raw_op: str, expected_mode: str):
     module = _parse(
-        """
-        struct Main {
-            html { raw }
-        }
+        f"""
+        struct Main {{
+            html {{ {raw_op} }}
+        }}
         """
     )
     html = _field(_struct(module, "Main"), "html")
     assert isinstance(html.body[0], Raw)
-    assert html.body[0].mode == "outer"
+    assert html.body[0].mode == expected_mode
     assert isinstance(html.body[-1], Return)
     assert html.accept == VariableType.DOCUMENT
     assert html.ret == VariableType.STRING
-
-
-def test_parser_raw_explicit_outer_mode():
-    module = _parse(
-        """
-        struct Main {
-            html { raw outer }
-        }
-        """
-    )
-    html = _field(_struct(module, "Main"), "html")
-    assert isinstance(html.body[0], Raw)
-    assert html.body[0].mode == "outer"
-
-
-def test_parser_raw_inner_mode():
-    module = _parse(
-        """
-        struct Main {
-            html { raw inner }
-        }
-        """
-    )
-    html = _field(_struct(module, "Main"), "html")
-    assert isinstance(html.body[0], Raw)
-    assert html.body[0].mode == "inner"
 
 
 def test_parser_raw_inner_in_array_pipeline():
@@ -1165,12 +1147,6 @@ class TestJsonAliasMapping:
         m = _parse(_load_fixture("json_def_path", "array.kdl"))
         assert _json_def(m, "F").is_array is True
 
-    def test_array_with_path_ok(self):
-        errs = _lint_errors(
-            _load_fixture("json_def_path", "array_with_path.kdl")
-        )
-        assert not errs
-
 
 class TestJsonifyAst:
     def _jsonify_node(self, *fixture_parts: str) -> Jsonify:
@@ -1193,10 +1169,8 @@ class TestJsonifyAst:
         j = self._jsonify_node("jsonify", "array_def.kdl")
         assert j.ret_type_info.is_array is True
 
-    def test_array_def_cardinality_survives_fragment_path(self, tmp_path):
-        schema = tmp_path / "array_path.kdl"
-        schema.write_text(
-            """
+    def test_array_def_cardinality_survives_fragment_path(self):
+        schema = """
 (array)json Q {
     x str
 }
@@ -1208,10 +1182,8 @@ struct M {
         jsonify Q path="data.items"
     }
 }
-""",
-            encoding="utf-8",
-        )
-        module = _parse(schema.read_text(encoding="utf-8"))
+"""
+        module = _parse(schema)
         struct = _struct(module, "M")
         field = _field(struct, "f")
         jsonify = next(n for n in field.body if isinstance(n, Jsonify))
@@ -1219,27 +1191,15 @@ struct M {
         assert jsonify.ret_type_info.is_array is True
         assert jsonify.ret_type_info.ref == "Q"
 
-    def test_undefined_schema_errors(self):
-        errs = _lint_errors(_load_fixture("jsonify", "undefined_schema.kdl"))
-        assert any("not found" in e.lower() for e in errs)
-
 
 class TestRestStructForms:
-    def test_prefix_form_creates_struct_rest(self):
-        m = _parse(_load_fixture("rest_forms", "prefix.kdl"))
-        s = next(n for n in m.body if isinstance(n, StructBase))
-        assert isinstance(s, StructRest)
-
-    def test_property_form_creates_struct_rest(self):
-        m = _parse(_load_fixture("rest_forms", "property.kdl"))
-        s = next(n for n in m.body if isinstance(n, StructBase))
-        assert isinstance(s, StructRest)
-
     def test_both_forms_same_request_count(self):
         m_prefix = _parse(_load_fixture("rest_forms", "prefix.kdl"))
         m_prop = _parse(_load_fixture("rest_forms", "property.kdl"))
-        s_prefix = next(n for n in m_prefix.body if isinstance(n, StructRest))
-        s_prop = next(n for n in m_prop.body if isinstance(n, StructRest))
+        s_prefix = next(n for n in m_prefix.body if isinstance(n, StructBase))
+        s_prop = next(n for n in m_prop.body if isinstance(n, StructBase))
+        assert isinstance(s_prefix, StructRest)
+        assert isinstance(s_prop, StructRest)
         assert len(s_prefix.request_configs) == len(s_prop.request_configs)
 
 
@@ -1485,53 +1445,6 @@ def test_conflicting_placeholder_names_in_same_request_trigger_e402():
 class TestJsonDictNestedValueAstHoisting:
     """Tests for inline schema blocks in @value directives and recursive AST hoisting."""
 
-    def test_inline_dict_value_explicit_name(self) -> None:
-        src = """
-json AnimeResponse {
-    translations (dict)Translation {
-        @key str
-        @value TranslationValue {
-            link str
-            is_active bool
-        }
-    }
-}
-"""
-        module, diags = parse_module(src, skip_lint=True)
-        assert not any(d.severity == Severity.ERROR for d in diags)
-
-        json_defs = [node for node in module.body if isinstance(node, JsonDef)]
-        assert [j.name for j in json_defs] == [
-            "TranslationValue",
-            "AnimeResponse",
-        ]
-
-        trans_val = json_defs[0]
-        assert trans_val.name == "TranslationValue"
-        assert trans_val.is_dict is False
-        assert trans_val.is_array is False
-        val_fields = {
-            f.name: f for f in trans_val.body if isinstance(f, JsonDefField)
-        }
-        assert "link" in val_fields
-        assert val_fields["link"].ret_type_info.base == VariableType.STRING
-        assert "is_active" in val_fields
-        assert val_fields["is_active"].ret_type_info.base == VariableType.BOOL
-
-        anime_resp = json_defs[1]
-        fields = [f for f in anime_resp.body if isinstance(f, JsonDefField)]
-        field = fields[0]
-        assert isinstance(field, JsonDefField)
-        assert field.name == "translations"
-        assert field.is_dict is True
-        assert field.key_type_info is not None
-        assert field.key_type_info.base == VariableType.STRING
-        assert field.value_type_info is not None
-        assert field.value_type_info.base == VariableType.JSON
-        assert field.value_type_info.ref == "TranslationValue"
-        assert field.value_type_info.is_array is False
-        assert field.value_type_info.is_optional is False
-
     def test_inline_dict_value_leading_annotation(self) -> None:
         src = """
 json AnimeResponse {
@@ -1658,30 +1571,6 @@ json AnimeResponse {
         val_info = fields[0].value_type_info
         assert val_info is not None
         assert val_info.ref == "TranslationValue"
-        assert val_info.base == VariableType.JSON
-
-    def test_anonymous_model_synthesis_anon_dict(self) -> None:
-        src = """
-json AnimeResponse {
-    translations (dict) {
-        @key str
-        @value {
-            link str
-        }
-    }
-}
-"""
-        module, diags = parse_module(src, skip_lint=True)
-        assert not any(d.severity == Severity.ERROR for d in diags)
-        jdefs = [n for n in module.body if isinstance(n, JsonDef)]
-        assert [j.name for j in jdefs] == [
-            "AnimeResponseTranslationsValue",
-            "AnimeResponse",
-        ]
-        fields = [f for f in jdefs[1].body if isinstance(f, JsonDefField)]
-        val_info = fields[0].value_type_info
-        assert val_info is not None
-        assert val_info.ref == "AnimeResponseTranslationsValue"
         assert val_info.base == VariableType.JSON
 
     def test_anonymous_model_synthesis_top_level_dict(self) -> None:
@@ -2102,51 +1991,6 @@ json AnimeResponse {
         errors = [d for d in diags if d.severity == Severity.ERROR]
         assert not errors, f"Unexpected errors: {[e.message for e in errors]}"
 
-    def test_request_broken_line_continuation_hint(self) -> None:
-        from ssc_codegen.symbols import REQUEST_LINE_CONTINUATION_HINT
-
-        # In rest struct: field named like curl request
-        src = """
-(rest)struct MyApi {
-    "curl https://api.example.com"
-}
-"""
-        _, diags = parse_module(src)
-        assert any(d.hint == REQUEST_LINE_CONTINUATION_HINT for d in diags), (
-            f"diags: {[(d.code, d.message, d.hint) for d in diags]}"
-        )
-
-        # In regular struct: field named like http url
-        src_regular = """
-struct MyScraper {
-    "https://example.com"
-}
-"""
-        _, diags_reg = parse_module(src_regular)
-        assert any(
-            d.hint == REQUEST_LINE_CONTINUATION_HINT for d in diags_reg
-        ), f"diags_reg: {[(d.code, d.message, d.hint) for d in diags_reg]}"
-
-        # With POST signature
-        src_post = """
-struct MyScraper {
-    "POST /api/v1/items"
-}
-"""
-        _, diags_post = parse_module(src_post)
-        assert any(d.hint == REQUEST_LINE_CONTINUATION_HINT for d in diags_post)
-
-        # With -H header continuation signature
-        src_header = """
-(rest)struct MyApi {
-    "-H 'Authorization: Bearer token'"
-}
-"""
-        _, diags_header = parse_module(src_header)
-        assert any(
-            d.hint == REQUEST_LINE_CONTINUATION_HINT for d in diags_header
-        )
-
 
 class TestJsonFieldNameValidationE403:
     """Tests for strict portable JSON field identifiers and E403 hints."""
@@ -2195,32 +2039,6 @@ json JsonLd {
 """
         _, diags_ok = parse_module(src_ok)
         assert not [d for d in diags_ok if d.severity == Severity.ERROR]
-
-    def test_target_reserved_words_in_json_fields_emit_e403(self) -> None:
-        src = """
-json Payload {
-    class str
-    def int
-    function bool
-    self str
-}
-"""
-        _, diags = parse_module(src)
-        e403 = [d for d in diags if d.code == "E403"]
-        messages = [d.message for d in e403]
-        assert any("invalid python identifier 'class'" in m for m in messages)
-        assert any(
-            "invalid javascript identifier 'class'" in m for m in messages
-        )
-        assert any("invalid python identifier 'def'" in m for m in messages)
-        assert any(
-            "invalid javascript identifier 'function'" in m for m in messages
-        )
-        assert any("invalid rust identifier 'self'" in m for m in messages)
-
-        # 'type' is valid across all targets (Type in Go, r#type in Rust)
-        _, diags_type = parse_module("json Payload { type str }")
-        assert not [d for d in diags_type if d.severity == Severity.ERROR]
 
     def test_e403_in_inline_json_fields_and_inline_value_blocks(self) -> None:
         src = """

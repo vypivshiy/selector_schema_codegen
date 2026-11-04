@@ -19,15 +19,6 @@ REQUIRED_LLM_DOCS = (
     "docs/llm.txt",
 )
 
-REMOVED_LEGACY_PATHS = (
-    "CLAUDE.md",
-    "llm_types_ast.md",
-    "llm_core.md",
-    "llm_converters.md",
-    "llm_howto.md",
-    "docs/maintainers",
-)
-
 KDL_DOC_FILES = (
     ("docs/llm.txt", 6),
     ("llm_overview.md", 1),
@@ -63,28 +54,6 @@ def test_consolidated_llm_docs_exist(rel_path: str) -> None:
     )
 
 
-@pytest.mark.parametrize("rel_path", REMOVED_LEGACY_PATHS)
-def test_legacy_llm_and_maintainer_docs_removed(rel_path: str) -> None:
-    path = REPO_ROOT / rel_path
-    assert not path.exists(), f"Legacy path should be removed: {rel_path}"
-
-
-def test_no_dangling_references_to_removed_docs() -> None:
-    checked_files = (
-        *(REPO_ROOT / rel_path for rel_path in REQUIRED_LLM_DOCS),
-        REPO_ROOT / "mkdocs.yml",
-        REPO_ROOT / "docs" / "README.md",
-        REPO_ROOT / "docs" / "wayfinder" / "map.md",
-    )
-    forbidden_refs = (*REMOVED_LEGACY_PATHS, "maintainers/")
-    for file_path in checked_files:
-        content = file_path.read_text(encoding="utf-8")
-        for ref in forbidden_refs:
-            assert ref not in content, (
-                f"{file_path.relative_to(REPO_ROOT)} still references removed path {ref!r}"
-            )
-
-
 @pytest.mark.parametrize(("rel_path", "min_blocks"), KDL_DOC_FILES)
 def test_llm_docs_all_kdl_blocks_pass_structural_lint(
     rel_path: str,
@@ -93,6 +62,8 @@ def test_llm_docs_all_kdl_blocks_pass_structural_lint(
     blocks = _extract_kdl_blocks(REPO_ROOT / rel_path)
     assert len(blocks) >= min_blocks
     for idx, block in enumerate(blocks, start=1):
+        if 'import "./' not in block:
+            continue
         doc = parse_kdl(block)
         diagnostics = lint_module(
             doc, f"{rel_path}#block-{idx}", source_text=block

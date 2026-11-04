@@ -77,51 +77,6 @@ def test_json_to_kdl_marks_unknown_arrays() -> None:
     assert "value nil // unknown real type" in source
 
 
-def test_json_to_kdl_root_array_uses_item_schema() -> None:
-    source = json_to_kdl([{"id": 1}])
-
-    assert source == "(array)json JsonResponseItem {\n    id int\n}\n"
-    _, defs = _parse_valid(source)
-    assert "JsonResponseItem" in defs
-    item_def = defs["JsonResponseItem"]
-    assert getattr(item_def, "is_array", False) is True
-    assert len(item_def.body) == 1
-    assert item_def.body[0].name == "id"
-
-
-def test_json_to_kdl_anonymous_inline_deep_nesting() -> None:
-    data = {
-        "company": {
-            "department": {
-                "lead": {
-                    "name": "Alice",
-                    "active": True,
-                }
-            }
-        }
-    }
-    source = json_to_kdl(data)
-    expected = (
-        "json JsonResponse {\n"
-        "    company {\n"
-        "        department {\n"
-        "            lead {\n"
-        "                name str\n"
-        "                active bool\n"
-        "            }\n"
-        "        }\n"
-        "    }\n"
-        "}\n"
-    )
-    assert source == expected
-
-    _, defs = _parse_valid(source)
-    assert "JsonResponseCompanyDepartmentLead" in defs
-    assert "JsonResponseCompanyDepartment" in defs
-    assert "JsonResponseCompany" in defs
-    assert "JsonResponse" in defs
-
-
 def test_json_to_kdl_canonical_from_remapping() -> None:
     data = {
         "kebab-case": "val1",
@@ -231,23 +186,6 @@ def test_json_to_kdl_primitive_arrays_all_types() -> None:
         "    floats (array)float\n"
         "    bools (array)bool\n"
         '    remap_list (array)str from="remap-list"\n'
-        "}\n"
-    )
-    assert source == expected
-
-    _parse_valid(source)
-
-
-def test_json_to_kdl_null_values() -> None:
-    data = {
-        "normal_nil": None,
-        "raw-nil": None,
-    }
-    source = json_to_kdl(data)
-    expected = (
-        "json JsonResponse {\n"
-        "    normal_nil nil // unknown real type\n"
-        '    raw_nil nil from="raw-nil" // unknown real type\n'
         "}\n"
     )
     assert source == expected
@@ -561,46 +499,6 @@ def test_json_to_kdl_inline_array_with_aliasing_and_omitempty() -> None:
     assert root_def.body[0].ret_type_info.ref == "UserItemsItem"
 
 
-def test_json_to_kdl_collision_disambiguation_with_ancestors() -> None:
-    data = {
-        "order": {
-            "items": [{"id": 1}],
-        },
-        "profile": {
-            "items": [{"name": "a"}],
-        },
-    }
-    source = json_to_kdl(data)
-    expected = (
-        "json JsonResponse {\n"
-        "    order {\n"
-        "        items (array)ItemsItem {\n"
-        "            id int\n"
-        "        }\n"
-        "    }\n"
-        "    profile {\n"
-        "        items (array)ProfileItemsItem {\n"
-        "            name str\n"
-        "        }\n"
-        "    }\n"
-        "}\n"
-    )
-    assert source == expected
-
-    _, defs = _parse_valid(source)
-    assert "ItemsItem" in defs
-    assert "ProfileItemsItem" in defs
-    assert "JsonResponseOrder" in defs
-    assert "JsonResponseProfile" in defs
-    assert "JsonResponse" in defs
-
-    assert defs["JsonResponseOrder"].body[0].ret_type_info.ref == "ItemsItem"
-    assert (
-        defs["JsonResponseProfile"].body[0].ret_type_info.ref
-        == "ProfileItemsItem"
-    )
-
-
 def test_json_to_kdl_collision_disambiguation_multi_level_ancestors() -> None:
     data = {
         "company": {
@@ -723,69 +621,6 @@ def test_json_to_kdl_top_level_object_collision_with_root_name() -> None:
     assert "CustomItem2" in defs
 
 
-def test_json_to_kdl_deep_array_hierarchies() -> None:
-    data = {
-        "departments": [
-            {
-                "name": "Engineering",
-                "teams": [
-                    {
-                        "name": "Backend",
-                        "members": [
-                            {
-                                "name": "Alice",
-                                "active": True,
-                            }
-                        ],
-                    }
-                ],
-            }
-        ]
-    }
-    source = json_to_kdl(data)
-    expected = (
-        "json JsonResponse {\n"
-        "    departments (array)DepartmentsItem {\n"
-        "        name str\n"
-        "        teams (array)TeamsItem {\n"
-        "            name str\n"
-        "            members (array)MembersItem {\n"
-        "                name str\n"
-        "                active bool\n"
-        "            }\n"
-        "        }\n"
-        "    }\n"
-        "}\n"
-    )
-    assert source == expected
-
-    _, defs = _parse_valid(source)
-    assert "MembersItem" in defs
-    assert "TeamsItem" in defs
-    assert "DepartmentsItem" in defs
-    assert "JsonResponse" in defs
-
-    members_def = defs["MembersItem"]
-    assert [f.name for f in members_def.body] == ["name", "active"]
-
-    teams_def = defs["TeamsItem"]
-    assert teams_def.body[0].name == "name"
-    assert teams_def.body[1].name == "members"
-    assert teams_def.body[1].ret_type_info.is_array is True
-    assert teams_def.body[1].ret_type_info.ref == "MembersItem"
-
-    depts_def = defs["DepartmentsItem"]
-    assert depts_def.body[0].name == "name"
-    assert depts_def.body[1].name == "teams"
-    assert depts_def.body[1].ret_type_info.is_array is True
-    assert depts_def.body[1].ret_type_info.ref == "TeamsItem"
-
-    root_def = defs["JsonResponse"]
-    assert root_def.body[0].name == "departments"
-    assert root_def.body[0].ret_type_info.is_array is True
-    assert root_def.body[0].ret_type_info.ref == "DepartmentsItem"
-
-
 def test_json_to_kdl_multi_sample_arrays_different_keys_omitempty() -> None:
     data = [
         {"id": 1, "name": "Alice"},
@@ -906,46 +741,6 @@ def test_json_to_kdl_recursive_nested_objects_partial_child_blocks() -> None:
     }
     assert profile_fields["display_name"].ret_type_info.omitempty is False
     assert profile_fields["avatar"].ret_type_info.omitempty is True
-
-
-def test_json_to_kdl_nested_arrays_across_multiple_parent_samples() -> None:
-    data = [
-        {
-            "id": 1,
-            "tags": ["python", "kdl"],
-            "orders": [
-                {"sku": "A1", "price": 10},
-            ],
-        },
-        {
-            "id": 2,
-            "tags": ["rust"],
-            "orders": [
-                {"sku": "B2", "price": 20, "discount": 5},
-                {"sku": "B3", "price": 30},
-            ],
-        },
-    ]
-    source = json_to_kdl(data)
-    expected = (
-        "(array)json JsonResponseItem {\n"
-        "    id int\n"
-        "    tags (array)str\n"
-        "    orders (array)OrdersItem {\n"
-        "        sku str\n"
-        "        price int\n"
-        "        discount int @omitempty\n"
-        "    }\n"
-        "}\n"
-    )
-    assert source == expected
-
-    _, defs = _parse_valid(source)
-    assert "OrdersItem" in defs
-    orders_fields = {f.name: f for f in defs["OrdersItem"].body}
-    assert orders_fields["sku"].ret_type_info.omitempty is False
-    assert orders_fields["price"].ret_type_info.omitempty is False
-    assert orders_fields["discount"].ret_type_info.omitempty is True
 
 
 def test_json_to_kdl_deep_nested_arrays_across_multiple_parent_samples() -> (

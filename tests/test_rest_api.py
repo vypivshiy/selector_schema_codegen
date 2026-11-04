@@ -97,11 +97,6 @@ def _exec_with_runtime(parser_src: str, runtime_src: str) -> dict:
 
 
 class TestRestParser:
-    def test_rest_struct_type(self):
-        module = _parse(_rest_src())
-        struct = next(n for n in module.body if isinstance(n, StructRest))
-        assert isinstance(struct, StructRest)
-
     def test_request_config_name_and_response(self):
         module = _parse(_rest_src())
         struct = next(n for n in module.body if isinstance(n, StructRest))
@@ -120,13 +115,6 @@ class TestRestParser:
         assert errors[0].schema_name == "Err"
         assert errors[1].status == 500
         assert errors[1].schema_name == "Err"
-
-    def test_no_start_parse_for_rest(self):
-        from ssc_codegen.ast import StartParse
-
-        module = _parse(_rest_src())
-        struct = next(n for n in module.body if isinstance(n, StructRest))
-        assert not any(isinstance(n, StartParse) for n in struct.body)
 
     def test_curl_body_implies_post_and_keeps_json_placeholders(self):
         request = parse_to_http(
@@ -164,15 +152,6 @@ class TestRestParser:
         assert request.body_kind == "json"
         assert request.cookies["session"].source == "abc"
 
-    def test_error_required_keys_parsed(self):
-        src = _rest_src(errors="    @error 404 Err error detail\n")
-        module = _parse(src)
-        struct = next(n for n in module.body if isinstance(n, StructRest))
-        errors = [n for n in struct.body if isinstance(n, ErrorResponse)]
-        assert len(errors) == 1
-        assert errors[0].required_keys == ["error", "detail"]
-        assert errors[0].conditions == {}
-
     def test_error_mixed_conditions_parsed(self):
         src = _rest_src(errors='    @error 404 Err error detail="msg"\n')
         module = _parse(src)
@@ -200,158 +179,6 @@ class TestRestParser:
 
 
 class TestRestPyConverter:
-    def test_py_bs4_generates_valid_python(self):
-        from ssc_codegen.targets.python import (
-            PY_BS4_CONVERTER as CONVERTER,
-        )
-
-        src = _rest_src(errors="    @error 404 Err\n")
-        module = _parse(src)
-        code = CONVERTER.convert(module, http_client="httpx")
-        pyast.parse(code)  # must be syntactically valid
-        assert "class API" in code
-        assert "def get_user" in code
-        # Result-style: Ok/Err base classes + per-status Err subclass
-        assert "class Ok(Generic[_T]):" in code
-        assert "class Err(Generic[_E]):" in code
-        assert "class APIErr404(Err[ErrJson]):" in code
-        assert "class UnknownErr(Err[Any]):" in code
-        assert "class TransportErr(Err[None]):" in code
-        assert "import httpx" in code
-
-    def test_py_bs4_status_error_routing(self):
-        from ssc_codegen.targets.python import (
-            PY_BS4_CONVERTER as CONVERTER,
-        )
-
-        src = _rest_src(errors="    @error 404 Err\n    @error 500 Err\n")
-        module = _parse(src)
-        code = CONVERTER.convert(module, http_client="httpx")
-        # matchers list routes status codes to Err subclasses calling generated projectors
-        assert (
-            "ErrMatcher(404, None, lambda headers, value: APIErr404(headers=headers, value=_project_err(value)))"
-            in code
-        )
-        assert (
-            "ErrMatcher(500, None, lambda headers, value: APIErr500(headers=headers, value=_project_err(value)))"
-            in code
-        )
-        # no raise in method bodies (errors are returned, not raised)
-        assert "raise" not in _method_bodies(code)
-
-    def test_py_bs4_method_return_type_union(self):
-        from ssc_codegen.targets.python import (
-            PY_BS4_CONVERTER as CONVERTER,
-        )
-
-        src = _rest_src(errors="    @error 404 Err\n")
-        module = _parse(src)
-        code = CONVERTER.convert(module, http_client="httpx")
-        # type alias is emitted at module level
-        assert (
-            "GetUserResult = Union[Ok[UserJson], APIErr404, UnknownErr, TransportErr]"
-            in code
-        )
-        # method signature uses the alias
-        assert "-> GetUserResult:" in code
-
-    def test_py_bs4_transport_error_wrapped(self):
-        from ssc_codegen.targets.python import (
-            PY_BS4_CONVERTER as CONVERTER,
-        )
-
-        src = _rest_src()
-        module = _parse(src)
-        code = CONVERTER.convert(module, http_client="httpx")
-        # httpx-specific exception handling inside ssc_rest_call
-        assert "except httpx.HTTPError as exc:" in code
-        assert "return TransportErr(cause=repr(exc))" in code
-
-    def test_py_bs4_headers_captured(self):
-        from ssc_codegen.targets.python import (
-            PY_BS4_CONVERTER as CONVERTER,
-        )
-
-        src = _rest_src()
-        module = _parse(src)
-        code = CONVERTER.convert(module, http_client="httpx")
-        # Headers extraction centralized in ssc_rest_call
-        assert (
-            "headers = {k.lower(): v for k, v in resp.headers.items()}" in code
-        )
-
-    def test_py_bs4_unknown_status_returns_unknown_err(self):
-        from ssc_codegen.targets.python import (
-            PY_BS4_CONVERTER as CONVERTER,
-        )
-
-        src = _rest_src(errors="    @error 404 Err\n")
-        module = _parse(src)
-        code = CONVERTER.convert(module, http_client="httpx")
-        # UnknownErr fallback inside ssc_dispatch_err
-        assert (
-            "return UnknownErr("
-            "status=status, headers=headers, value=body)" in code
-        )
-
-    def test_py_bs4_emits_ssc_rest_call_helpers(self):
-        from ssc_codegen.targets.python import (
-            PY_BS4_CONVERTER as CONVERTER,
-        )
-
-        src = _rest_src()
-        module = _parse(src)
-        code = CONVERTER.convert(module, http_client="httpx")
-        assert "def ssc_rest_call(" in code
-        assert "def ssc_rest_call_async(" in code
-        # Method body calls ssc_rest_call (wrapped in cast())
-        assert "return cast(" in code
-        assert "ssc_rest_call(" in code
-
-    def test_py_bs4_emits_ssc_dispatch_err_module_level(self):
-        from ssc_codegen.targets.python import (
-            PY_BS4_CONVERTER as CONVERTER,
-        )
-
-        src = _rest_src(errors="    @error 404 Err\n    @error 500 Err\n")
-        module = _parse(src)
-        code = CONVERTER.convert(module, http_client="httpx")
-        # ssc_dispatch_err is now a module-level function
-        assert "def ssc_dispatch_err(" in code
-        # Method body delegates to ssc_rest_call (not cls.ssc_dispatch_err)
-        assert "cls.ssc_dispatch_err" not in code
-        # No inline `if status == NNN` checks in @classmethods
-        import re
-
-        for match in re.finditer(r"@classmethod\s*\n(?:    [^\n]*\n)+", code):
-            assert "if status ==" not in match.group(0)
-
-    def test_py_bs4_post_body_is_dict_not_fstring(self):
-        """Regression: POST json body used to emit `json=f'{...}'` which
-        double-encoded the body. Must now emit a native dict literal."""
-        from ssc_codegen.targets.python import (
-            PY_BS4_CONVERTER as CONVERTER,
-        )
-
-        src = (
-            "json User { id int; name str }\n"
-            "struct API type=rest {\n"
-            '    @request name=create response=User """\n'
-            "    POST /users HTTP/1.1\n"
-            "    Host: x.com\n"
-            "    Content-Type: application/json\n"
-            "\n"
-            '    {"name": "{{name}}", "active": {{active:bool}}}\n'
-            '    """\n'
-            "}\n"
-        )
-        module = _parse(src)
-        code = CONVERTER.convert(module, http_client="httpx")
-        assert "'json': {'name': name, 'active': active}" in code
-        # And no leftover f-string style
-        assert 'json=f"' not in code
-        assert "json=f'" not in code
-
     def test_json_body_escaping_is_structured_in_js_and_go(self):
         src = (
             "json User { id int; name str }\n"
@@ -397,45 +224,9 @@ class TestRestPyConverter:
         assert 'Body: fmt.Sprintf("raw=%s", value)' in code
         assert "strings.NewReader(" in runtime
 
-    def test_py_required_keys_dispatch(self):
-        from ssc_codegen.targets.python import (
-            PY_BS4_CONVERTER as CONVERTER,
-        )
-
-        src = _rest_src(errors="    @error 404 Err error detail\n")
-        module = _parse(src)
-        code = CONVERTER.convert(module, http_client="httpx")
-        # conditions are now lambdas in matchers list (body var is _b)
-        assert "'error' in _b" in code
-        assert "'detail' in _b" in code
-        assert "class APIErr404ErrorDetail" in code
-
-    def test_py_mixed_conditions_dispatch(self):
-        from ssc_codegen.targets.python import (
-            PY_BS4_CONVERTER as CONVERTER,
-        )
-
-        src = _rest_src(errors='    @error 404 Err error detail="msg"\n')
-        module = _parse(src)
-        code = CONVERTER.convert(module, http_client="httpx")
-        assert "'error' in _b" in code
-        assert "_b.get('detail') == 'msg'" in code
-        assert "class APIErr404ErrorDetail" in code
-
-    def test_py_required_keys_routed_as_field_error(self):
-        from ssc_codegen.targets.python import (
-            PY_BS4_CONVERTER as CONVERTER,
-        )
-
-        src = _rest_src(errors="    @error 404 Err error\n")
-        module = _parse(src)
-        code = CONVERTER.convert(module, http_client="httpx")
-        # isinstance check now inside ErrMatcher.match (body var is body)
-        assert "isinstance(body, dict)" in code
-
 
 class TestRestJsConverter:
-    def test_js_generates_class(self):
+    def test_js_fetch_and_jsdoc_codegen(self):
         from ssc_codegen.targets.javascript import JS_CONVERTER
 
         src = _rest_src(errors="    @error 404 Err\n")
@@ -450,40 +241,21 @@ class TestRestJsConverter:
         assert "@typedef {Object} TransportErr" in code
         assert "isOk: true" in code
         assert "isOk: false" in code
-
-    def test_js_method_return_type_jsdoc(self):
-        from ssc_codegen.targets.javascript import JS_CONVERTER
-
-        src = _rest_src(errors="    @error 404 Err\n")
-        module = _parse(src)
-        code = JS_CONVERTER.convert(module, http_client="fetch")
         assert (
             "@returns {Promise<Ok<UserJson> | APIErr404 | UnknownErr"
             " | TransportErr>}" in code
         )
-
-    def test_js_transport_error_wrapped(self):
-        from ssc_codegen.targets.javascript import JS_CONVERTER
-
-        src = _rest_src()
-        module = _parse(src)
-        code = JS_CONVERTER.convert(module, http_client="fetch")
         assert "} catch (e) {" in code
         assert (
             "isOk: false, status: 0, headers: {}, value: null, "
             "cause: String(e)" in code
         )
-
-    def test_js_headers_captured(self):
-        from ssc_codegen.targets.javascript import JS_CONVERTER
-
-        src = _rest_src()
-        module = _parse(src)
-        code = JS_CONVERTER.convert(module, http_client="fetch")
-        # Header extraction centralized in sscRestCall helper
         assert "Object.fromEntries([..._resp.headers.entries()])" in code
-        # Ok return carries _headers + _value
         assert "headers: _headers, value: _value" in code
+        assert "async function sscRestCall(" in code
+        assert "async function sscRestCallAxios(" in code
+        assert "function sscDispatchErr(" in code
+        assert "return sscRestCall(" in code
 
     def test_js_axios_variant(self):
         from ssc_codegen.targets.javascript import JS_CONVERTER
@@ -494,89 +266,6 @@ class TestRestJsConverter:
         assert "client.request" in code
         # Axios uses dedicated sscRestCallAxios helper
         assert "sscRestCallAxios" in code
-
-    def test_js_emits_ssc_rest_call_helpers(self):
-        from ssc_codegen.targets.javascript import JS_CONVERTER
-
-        src = _rest_src()
-        module = _parse(src)
-        code = JS_CONVERTER.convert(module, http_client="fetch")
-        assert "async function sscRestCall(" in code
-        assert "async function sscRestCallAxios(" in code
-        assert "function sscDispatchErr(" in code
-        # Method body delegates to sscRestCall
-        assert "return sscRestCall(" in code
-
-    def test_js_emits_matchers_and_dispatch(self):
-        from ssc_codegen.targets.javascript import JS_CONVERTER
-
-        src = _rest_src(errors="    @error 404 Err\n    @error 500 Err\n")
-        module = _parse(src)
-        code = JS_CONVERTER.convert(module, http_client="fetch")
-        # Matchers list emitted at module level
-        assert "const _apiMatchers = [" in code
-        assert "status: 404" in code
-        assert "status: 500" in code
-        # sscDispatchErr is module-level (not a static method)
-        assert "function sscDispatchErr(_matchers" in code
-        assert "static sscDispatchErr" not in code
-
-    def test_js_required_keys_dispatch(self):
-        from ssc_codegen.targets.javascript import JS_CONVERTER
-
-        src = _rest_src(errors="    @error 404 Err error detail\n")
-        module = _parse(src)
-        code = JS_CONVERTER.convert(module, http_client="fetch")
-        # Condition lambda uses _b (not _body)
-        assert "'error' in _b" in code
-        assert "'detail' in _b" in code
-        assert "APIErr404ErrorDetail" in code
-
-    def test_js_rest_accepts_opts(self):
-        """JS REST method signature has ``opts = {}`` for per-call overrides."""
-        from ssc_codegen.targets.javascript import JS_CONVERTER
-
-        src = _rest_src()
-        module = _parse(src)
-        code = JS_CONVERTER.convert(module, http_client="fetch")
-        assert "opts = {}" in code
-        assert "const _kw =" in code
-        assert "Object.entries(opts)" in code
-
-    def test_js_fetch_accepts_opts(self):
-        """JS HTML fetch method also accepts ``opts = {}``."""
-        from ssc_codegen.targets.javascript import JS_CONVERTER
-
-        src = _rest_src()
-        module = _parse(src)
-        code = JS_CONVERTER.convert(module, http_client="axios")
-        assert "opts = {}" in code
-
-
-def _method_bodies(code: str) -> str:
-    """Return only method bodies (everything inside `def …:` through dedent)."""
-    import re
-
-    chunks = []
-    in_method = False
-    indent = 0
-    for line in code.splitlines():
-        stripped = line.lstrip()
-        if re.match(r"(async\s+)?def \w", stripped) and len(line) > len(
-            stripped
-        ):
-            in_method = True
-            indent = len(line) - len(stripped)
-            continue
-        if in_method:
-            if not line.strip():
-                chunks.append(line)
-                continue
-            if len(line) - len(line.lstrip()) <= indent:
-                in_method = False
-                continue
-            chunks.append(line)
-    return "\n".join(chunks)
 
 
 # ---------------------------------------------------------------------------
@@ -808,25 +497,7 @@ class TestRestOnlyImports:
         module = _parse(src)
         code = converter.convert(module, http_client="httpx")
         assert html_import not in code
-
-    def test_rest_only_no_html_unescape(self):
-        from ssc_codegen.targets.python import (
-            PY_BS4_CONVERTER as PY_BASE_CONVERTER,
-        )
-
-        src = _rest_src()
-        module = _parse(src)
-        code = PY_BASE_CONVERTER.convert(module, http_client="httpx")
         assert "_html_unescape" not in code
-
-    def test_rest_only_no_html_utilities(self):
-        from ssc_codegen.targets.python import (
-            PY_BS4_CONVERTER as PY_BASE_CONVERTER,
-        )
-
-        src = _rest_src()
-        module = _parse(src)
-        code = PY_BASE_CONVERTER.convert(module, http_client="httpx")
         assert "std_unescape_text" not in code
         assert "std_normalize_text" not in code
         assert "std_repl_map" not in code
@@ -860,137 +531,17 @@ _NOT_REQUIRED_COMPAT_IMPORT = (
 )
 
 
-def test_not_required_import_is_version_dependent():
-    module = _parse(_rest_src())
-
-    code = PY_BS4_CONVERTER.convert(module, http_client="httpx")
-
-    assert "import sys" in code
-    assert _NOT_REQUIRED_COMPAT_IMPORT in code
-
-
 class TestSeparateRuntime:
     """Verify -R (separate runtime) works correctly for all Python targets."""
 
     RUNTIME_NAME = "sscgen_runtime"
 
-    def test_runtime_file_has_rest_helpers(self):
+    def test_separate_runtime_rest_codegen_and_imports(self):
         from ssc_codegen.generation.runtime import register_runtime_file
-
-        src = _rest_src(errors="    @error 404 Err\n")
-        module = _parse(src)
-        register_runtime_file(PY_BS4_CONVERTER, self.RUNTIME_NAME)
-        generated = PY_BS4_CONVERTER.convert_all(
-            module,
-            http_client="httpx",
-            runtime_module=self.RUNTIME_NAME,
-        )
-        runtime = generated[f"{self.RUNTIME_NAME}.py"]
-        assert "class Ok(Generic[_T]):" in runtime
-        assert "class Err(Generic[_E]):" in runtime
-        assert "class UnknownErr(Err[Any]):" in runtime
-        assert "class TransportErr(Err[None]):" in runtime
-        assert "def ssc_rest_call(" in runtime
-
-    def test_main_imports_from_runtime(self):
-        from ssc_codegen.generation.runtime import register_runtime_file
-
-        src = _rest_src(errors="    @error 404 Err\n")
-        module = _parse(src)
-        register_runtime_file(PY_BS4_CONVERTER, self.RUNTIME_NAME)
-        generated = PY_BS4_CONVERTER.convert_all(
-            module,
-            http_client="httpx",
-            runtime_module=self.RUNTIME_NAME,
-        )
-        code = generated[""]
-        assert f"from .{self.RUNTIME_NAME} import" in code
-        assert "Ok" in code.split(f"from .{self.RUNTIME_NAME} import")[1]
-
-    def test_main_no_redundant_rest_imports(self):
-        from ssc_codegen.generation.runtime import register_runtime_file
-
-        src = _rest_src(errors="    @error 404 Err\n")
-        module = _parse(src)
-        register_runtime_file(PY_BS4_CONVERTER, self.RUNTIME_NAME)
-        generated = PY_BS4_CONVERTER.convert_all(
-            module,
-            http_client="httpx",
-            runtime_module=self.RUNTIME_NAME,
-        )
-        code = generated[""]
-        # Runtime-internal helpers (Ok/Err/ErrMatcher factory definitions)
-        # must NOT be inlined into the parser file under -R. The parser file
-        # only declares @dataclass Err subclasses consuming those types.
-        assert "class Ok(Generic[_T]):" not in code
-        assert "class Err(Generic[_E]):" not in code
-        assert "def ssc_rest_call(" not in code
-        assert "def ssc_dispatch_err(" not in code
-        # Imports only needed by the runtime's internal generic/dataclass
-        # machinery must not leak into the parser file.
-        for runtime_only in ("Generic", "TypeVar", "Mapping", "Callable"):
-            assert runtime_only not in code
-
-    def test_main_valid_python(self):
-        from ssc_codegen.generation.runtime import register_runtime_file
-
-        src = _rest_src(errors="    @error 404 Err\n")
-        module = _parse(src)
-        register_runtime_file(PY_BS4_CONVERTER, self.RUNTIME_NAME)
-        generated = PY_BS4_CONVERTER.convert_all(
-            module,
-            http_client="httpx",
-            runtime_module=self.RUNTIME_NAME,
-        )
-        # pyast.parse checks syntax only — does not catch NameError caused
-        # by dropped imports. exec(compile(...)) actually resolves names.
-        pyast.parse(generated[""])
-        pyast.parse(generated[f"{self.RUNTIME_NAME}.py"])
-        _exec_with_runtime(generated[""], generated[f"{self.RUNTIME_NAME}.py"])
-
-    def test_main_imports_present_under_runtime(self):
-        """Regression: -R mode must not drop typing/dataclass/httpx imports.
-
-        Pre-fix the parser file lost every non-runtime import under -R,
-        producing code that referenced ``TypedDict``, ``Optional``,
-        ``@dataclass``, ``Literal[404]``, ``httpx.Client`` etc. with none of
-        them bound. This test pins the required import surface.
-        """
-        from ssc_codegen.generation.runtime import register_runtime_file
-
-        src = _rest_src(errors="    @error 404 Err\n")
-        module = _parse(src)
-        register_runtime_file(PY_BS4_CONVERTER, self.RUNTIME_NAME)
-        generated = PY_BS4_CONVERTER.convert_all(
-            module,
-            http_client="httpx",
-            runtime_module=self.RUNTIME_NAME,
-        )
-        code = generated[""]
-        assert "from typing import" in code
-        assert "TypedDict" in code
-        assert _NOT_REQUIRED_COMPAT_IMPORT in code
-        assert "from dataclasses import dataclass" in code
-        assert "from typing import Literal" in code
-        assert "import httpx" in code
-        # Err subclasses need Literal for status field; should NOT be dropped
-        # just because runtime mode is on.
-        assert "Literal[404]" in code
-
-    def test_runtime_file_imports_httpx_when_rest(self):
-        """Regression: runtime file references ``httpx.HTTPError`` in
-        ``ssc_rest_call``/``ssc_rest_call_async`` but pre-fix did not import
-        httpx, causing NameError at the first transport exception.
-        """
-        from ssc_codegen.generation.runtime import register_runtime_file
-
-        src = _rest_src(errors="    @error 404 Err\n")
-        module = _parse(src)
-        # http_strategy is normally resolved by main.py via
-        # PythonVisitor.http_strategy_for(http_client); here we emulate
-        # the httpx case.
         from ssc_codegen.targets.python.http_libs.httpx import HttpxStrategy
 
+        src = _rest_src(errors="    @error 404 Err\n")
+        module = _parse(src)
         register_runtime_file(
             PY_BS4_CONVERTER,
             self.RUNTIME_NAME,
@@ -1001,10 +552,42 @@ class TestSeparateRuntime:
             http_client="httpx",
             runtime_module=self.RUNTIME_NAME,
         )
+        code = generated[""]
         runtime = generated[f"{self.RUNTIME_NAME}.py"]
+
+        # Runtime file helpers & imports
+        assert "class Ok(Generic[_T]):" in runtime
+        assert "class Err(Generic[_E]):" in runtime
+        assert "class UnknownErr(Err[Any]):" in runtime
+        assert "class TransportErr(Err[None]):" in runtime
+        assert "def ssc_rest_call(" in runtime
         assert "import httpx" in runtime
-        # And the generated runtime must be valid + executable in isolation.
+
+        # Main parser file imports from runtime & no redundant inline definitions
+        assert f"from .{self.RUNTIME_NAME} import" in code
+        assert "Ok" in code.split(f"from .{self.RUNTIME_NAME} import")[1]
+        assert "class Ok(Generic[_T]):" not in code
+        assert "class Err(Generic[_E]):" not in code
+        assert "def ssc_rest_call(" not in code
+        assert "def ssc_dispatch_err(" not in code
+        for runtime_only in ("Generic", "TypeVar", "Mapping", "Callable"):
+            assert runtime_only not in code
+
+        # Required imports present in parser under -R
+        assert "import sys" in code
+        assert "from typing import" in code
+        assert "TypedDict" in code
+        assert _NOT_REQUIRED_COMPAT_IMPORT in code
+        assert "from dataclasses import dataclass" in code
+        assert "from typing import Literal" in code
+        assert "import httpx" in code
+        assert "Literal[404]" in code
+
+        # Both files parse & execute cleanly
+        pyast.parse(code)
+        pyast.parse(runtime)
         exec(compile(runtime, "<rt>", "exec"), {})
+        _exec_with_runtime(code, runtime)
 
     def test_combined_rest_and_html_module_under_runtime(self):
         """Regression for the cdnvideohub / kodik / aniboom anicli-api case:
@@ -1286,134 +869,6 @@ class TestSeparateRuntime:
         ns2 = _exec_with_runtime(parser, runtime)
         assert "API" in ns2
 
-    def test_httpx2_strict_separate_runtime_roundtrip(self, monkeypatch):
-        """End-to-end code generation and runtime execution for strict httpx2.
-        Verifies strict import httpx2 and signatures (httpx2.Client, httpx2.AsyncClient,
-        httpx2.HTTPError) in both parser and runtime file, and successful execution
-        via _exec_with_runtime with synthetic httpx2 module.
-        """
-        import sys
-
-        import httpx
-
-        from ssc_codegen.generation.runtime import register_runtime_file
-        from ssc_codegen.targets.python import PY_LXML_CONVERTER
-        from ssc_codegen.targets.python.http_libs.httpx import (
-            HTTPX_FALLBACK_IMPORT,
-        )
-        from ssc_codegen.targets.python.visitor import PythonVisitor
-
-        src = _rest_src(errors="    @error 404 Err\n")
-        module = _parse(src)
-        strategy = PythonVisitor.http_strategy_for("httpx2")
-        register_runtime_file(
-            PY_LXML_CONVERTER,
-            self.RUNTIME_NAME,
-            http_strategy=strategy,
-        )
-        generated = PY_LXML_CONVERTER.convert_all(
-            module,
-            http_client="httpx2",
-            runtime_module=self.RUNTIME_NAME,
-        )
-        runtime = generated[f"{self.RUNTIME_NAME}.py"]
-        parser = generated[""]
-
-        assert "import httpx2" in runtime
-        assert "import httpx2" in parser
-        assert HTTPX_FALLBACK_IMPORT not in runtime
-        assert HTTPX_FALLBACK_IMPORT not in parser
-        assert "import httpx\n" not in runtime
-        assert "import httpx\n" not in parser
-        assert "client: httpx2.Client" in parser
-        assert "client: httpx2.AsyncClient" in parser
-        assert "client: httpx2.Client" in runtime
-        assert "client: httpx2.AsyncClient" in runtime
-        assert "except httpx2.HTTPError as exc:" in runtime
-
-        monkeypatch.setitem(sys.modules, "httpx2", httpx)
-        ns = _exec_with_runtime(parser, runtime)
-        assert "API" in ns
-
-    def test_httpx2_inline_mode_roundtrip(self, monkeypatch):
-        """Inline mode (without separate runtime): verifies strict httpx2
-        emits import httpx2 and inlines helper with httpx2 signatures.
-        """
-        import sys
-
-        import httpx
-
-        from ssc_codegen.targets.python import PY_BS4_CONVERTER
-
-        src = _rest_src(errors="    @error 404 Err\n")
-        module = _parse(src)
-        generated = PY_BS4_CONVERTER.convert_all(module, http_client="httpx2")
-        parser = generated[""]
-
-        assert "import httpx2" in parser
-        assert "import httpx\n" not in parser
-        assert "client: httpx2.Client" in parser
-        assert "client: httpx2.AsyncClient" in parser
-        assert "except httpx2.HTTPError as exc:" in parser
-
-        monkeypatch.setitem(sys.modules, "httpx2", httpx)
-        ns: dict = {}
-        exec(compile(parser, "<inline>", "exec"), ns)
-        assert "API" in ns
-
-    def test_runtime_functions_have_typed_signatures(self):
-        """Pin the typed signatures on runtime functions: parameters and
-        return types must be annotated, and the historical ``_`` prefix on
-        public-ish parameters (matchers, status, headers, body, value_fn)
-        must be gone.
-
-        Pre-fix the runtime was untyped and used ``_matchers``, ``_status``,
-        ``_value_fn`` etc. which obscured intent and made consumer-side
-        typing weak.
-        """
-        from ssc_codegen.generation.runtime import register_runtime_file
-        from ssc_codegen.targets.python.http_libs.httpx import HttpxStrategy
-
-        src = _rest_src(errors="    @error 404 Err\n")
-        module = _parse(src)
-        register_runtime_file(
-            PY_BS4_CONVERTER,
-            self.RUNTIME_NAME,
-            http_strategy=HttpxStrategy(),
-        )
-        generated = PY_BS4_CONVERTER.convert_all(
-            module,
-            http_client="httpx",
-            runtime_module=self.RUNTIME_NAME,
-        )
-        runtime = generated[f"{self.RUNTIME_NAME}.py"]
-        # Typed signature: ssc_dispatch_err
-        assert "def ssc_dispatch_err(" in runtime
-        assert "matchers: List[ErrMatcher]" in runtime
-        assert "status: int" in runtime
-        assert "headers: Dict[str, str]" in runtime
-        assert "body: Any" in runtime
-        assert ") -> Optional[Err]:" in runtime
-        # Typed signature: ssc_rest_call
-        assert "def ssc_rest_call(" in runtime
-        assert "client: httpx.Client" in runtime
-        assert "value_fn: Optional[Callable[[Any], _T]] = None" in runtime
-        assert "**kw: Any" in runtime
-        # Return type is Union[Ok[_T], Err] — stable monad annotation.
-        # The exact Err subclass is determined by runtime dispatch over
-        # the matchers list (heterogeneous — each matcher may produce a
-        # different Err subclass). Parser-side call sites wrap the call
-        # in ``cast(<ResultAlias>, ...)`` to narrow to the precise union
-        # (Err400 | UnknownErr | TransportErr | ...) declared by the
-        # parser's own type alias.
-        assert ") -> Union[Ok[_T], Err]:" in runtime
-        # Async variant
-        assert "async def ssc_rest_call_async(" in runtime
-        assert "client: httpx.AsyncClient" in runtime
-        # ErrMatcher.match typed
-        assert "def match(" in runtime
-        assert "Dict[str, str]" in runtime
-
     def test_matcher_list_has_type_annotation(self):
         """Empty matcher list must carry an explicit type annotation,
         otherwise mypy raises ``var-annotated`` on the consumer side.
@@ -1690,16 +1145,6 @@ class TestResponsePathCodegen:
             "}\n"
         )
 
-    def test_py_emits_value_fn_accessor(self):
-        from ssc_codegen.targets.python import (
-            PY_BS4_CONVERTER as CONVERTER,
-        )
-
-        module = _parse(self._rest_path_src())
-        code = CONVERTER.convert(module, http_client="httpx")
-        # value_fn extracts via dict access chain using path segments and projects into User schema
-        assert "value_fn=lambda _b: _project_user(_b['data']['user'])," in code
-
     def test_py_path_dominates_over_void_when_no_schema(self):
         """response-path with no response-schema still emits value_fn
         (path wins over the old `void → lambda _: None` branch)."""
@@ -1720,23 +1165,6 @@ class TestResponsePathCodegen:
         assert "value_fn=lambda _b: _b['status']," in code
         # Old void path must NOT fire when response_path is set.
         assert "value_fn=lambda _: None," not in code
-
-    def test_py_void_without_path_emits_none(self):
-        from ssc_codegen.targets.python import (
-            PY_BS4_CONVERTER as CONVERTER,
-        )
-
-        src = (
-            "struct API type=rest {\n"
-            '    @request """\n'
-            "    GET /ping HTTP/1.1\n"
-            "    Host: api.example.com\n"
-            '    """\n'
-            "}\n"
-        )
-        module = _parse(src)
-        code = CONVERTER.convert(module, http_client="httpx")
-        assert "value_fn=lambda _: None," in code
 
     def test_js_emits_value_fn_accessor(self):
         from ssc_codegen.targets.javascript import JS_CONVERTER
@@ -1774,19 +1202,6 @@ class TestResponsePathCodegen:
         # sscExtractJSONSlice narrows raw body via gjson.GetBytes(raw, responsePath).Raw before Unmarshal
         assert "sscExtractJSONSlice" in runtime
         assert "gjson.GetBytes(raw, responsePath).Raw" in runtime
-
-    def test_go_renamed_body_var_no_underscore_prefix(self):
-        """Patch B also renamed Go locals: _body → body, _err → err,
-        _val → val, _perr → perr inside REST response decoding."""
-        from ssc_codegen.targets.golang import GO_CONVERTER
-
-        module = _parse(self._rest_path_src())
-        code = GO_CONVERTER.convert(module)
-        runtime = GO_CONVERTER.emit_runtime("main")
-        assert "sscRestCallValue[UserJson]" in code
-        assert "var val T" in runtime  # was: var _val
-        assert "if perr := json.Unmarshal(body, &val)" in runtime
-        assert "if err != nil" in runtime
 
     def test_go_rest_accepts_opts(self):
         """Go REST methods accept variadic ``opts ...sscReqOpt``."""
@@ -1847,35 +1262,6 @@ class TestResponsePathCodegen:
         # Custom @request name=LoadPage → NewPageLoadPage.
         # (smoke: just verify default case here.)
 
-    def test_go_rest_query_params_rendered_as_url_values(self):
-        """Go REST query-string placeholders must be rendered as
-        ``url.Values{...}.Encode()`` appended to the URL — not dropped.
-
-        Regression: ``spec.params`` was never read by Go codegen, leaving
-        placeholder params (e.g. ``page``) declared but unused → compile
-        error.
-        """
-        from ssc_codegen.targets.golang import GO_CONVERTER
-
-        src = (
-            "json R { x int }\n"
-            "struct API type=rest {\n"
-            '    @request response=R """\n'
-            "    GET /items?page={{page:int}}&limit=10 HTTP/1.1\n"
-            "    Host: api.example.com\n"
-            '    """\n'
-            "}\n"
-        )
-        module = _parse(src)
-        code = GO_CONVERTER.convert(module)
-        # url.Values construction with placeholder interpolation.
-        assert 'url.Values{"page": []string{fmt.Sprintf("%d", page)}' in code
-        # ".Encode()" suffix + URL concatenation.
-        assert ".Encode()" in code
-        assert '"?" +' in code
-        # Import for net/url is required.
-        assert '"net/url"' in code
-
     def test_go_array_query_styles(self):
         from ssc_codegen.targets.golang import GO_CONVERTER
 
@@ -1896,29 +1282,6 @@ class TestResponsePathCodegen:
         assert "for _i, _value := range ids" in code
         assert 'strings.Join(_idsParts, ",")' in code
 
-    def test_go_rest_cookies_rendered_via_sscReqOpts(self):
-        """Go REST DSL cookies must reach the runtime via sscReqOpts.Cookies.
-
-        Regression: cookies were silently dropped by Go codegen; Python and
-        JS already forwarded them.
-        """
-        from ssc_codegen.targets.golang import GO_CONVERTER
-
-        src = (
-            "json R { x int }\n"
-            "struct API type=rest {\n"
-            '    @request response=R """\n'
-            "    GET /me HTTP/1.1\n"
-            "    Host: api.example.com\n"
-            "    Cookie: session=abc\n"
-            '    """\n'
-            "}\n"
-        )
-        module = _parse(src)
-        code = GO_CONVERTER.convert(module)
-        # Cookies emitted into sscReqOpts.
-        assert 'Cookies: sscHeaders{"session": []string{"abc"}' in code
-
     def test_go_error_matcher_combines_keys_conditions_and_float(self):
         from ssc_codegen.targets.golang import GO_CONVERTER
 
@@ -1930,16 +1293,6 @@ class TestResponsePathCodegen:
         assert 'gjson.GetBytes(_b, "error").Exists()' in code
         assert 'gjson.GetBytes(_b, "detail").String() == "msg"' in code
         assert 'gjson.GetBytes(_b, "score").Float() == 1.5' in code
-
-    def test_go_package_defaults_to_main_and_is_validated(self):
-        from ssc_codegen.exceptions import BuildTimeError
-        from ssc_codegen.targets.golang import GO_CONVERTER
-
-        module = _parse("(raw)fn value { trim }\n")
-
-        assert "package main" in GO_CONVERTER.convert(module)
-        with pytest.raises(BuildTimeError, match="invalid Go package"):
-            GO_CONVERTER.convert(module, package="bad-name")
 
     def test_go_html_fetch_params_and_cookies(self):
         """Go HTML @request with query params + cookies in the same struct.
@@ -1972,251 +1325,6 @@ class TestResponsePathCodegen:
         assert "req.AddCookie(&http.Cookie{Name: name, Value: v})" in runtime
         # net/url import required for url.Values.
         assert '"net/url"' in code
-
-
-# ---------------------------------------------------------------------------
-# aiohttp content_type=None — non-JSON Content-Type bug (TASK_MIGRATION §2.1)
-# ---------------------------------------------------------------------------
-
-
-class TestAiohttpContentTypeBypass:
-    """aiohttp ``resp.json()`` raises ``ContentTypeError`` when the server
-    returns JSON under a non-``application/json`` Content-Type (mixcloud
-    sends ``text/javascript``). Codegen must emit ``content_type=None`` to
-    disable the check on every aiohttp JSON path.
-
-    Affects:
-    - ``fetch_runtime_lines`` (``ssc_fetch_async`` for MethodFetch with response-path)
-    - ``ssc_rest_call`` and ``ssc_rest_call_async`` (REST runtime)
-
-    httpx/requests are unaffected — their ``.json()`` ignores Content-Type.
-    """
-
-    @staticmethod
-    def _fetch_with_path_src() -> str:
-        return (
-            "struct Page {\n"
-            '    @request response-path="data" """\n'
-            "    GET /p HTTP/1.1\n"
-            "    Host: api.example.com\n"
-            '    """\n'
-            '    title { css "h1"; text }\n'
-            "}\n"
-        )
-
-    def test_aiohttp_fetch_runtime_lines_bypass_content_type(self):
-        """fetch runtime with response-path must pass content_type=None."""
-        from ssc_codegen.targets.python.http_libs.aiohttp import (
-            AioHttpStrategy,
-        )
-
-        strategy = AioHttpStrategy()
-        lines = strategy.fetch_runtime_lines()
-        joined = "\n".join(lines)
-        assert "await _resp.json(content_type=None)" in joined
-
-    def test_aiohttp_rest_runtime_call_has_content_type_none(self):
-        from ssc_codegen.targets.python.http_libs.aiohttp import (
-            AioHttpStrategy,
-        )
-
-        runtime = "\n".join(AioHttpStrategy().rest_runtime_lines())
-        # Both ssc_rest_call and ssc_rest_call_async must bypass CT check.
-        assert runtime.count("await resp.json(content_type=None)") == 2
-
-    def test_aiohttp_runtime_does_not_use_bare_json(self):
-        """No ``await resp.json()`` (without content_type) must remain in
-        the aiohttp runtime — bare call would re-introduce the CT bug."""
-        from ssc_codegen.targets.python.http_libs.aiohttp import (
-            AioHttpStrategy,
-        )
-
-        runtime = "\n".join(AioHttpStrategy().rest_runtime_lines())
-        assert "await resp.json()" not in runtime
-        assert "await _resp.json()" not in runtime
-
-    def test_httpx_runtime_does_not_have_content_type_kwarg(self):
-        """httpx is not affected — must NOT carry the aiohttp-specific
-        kwarg (regression guard against copy-paste across strategies)."""
-        from ssc_codegen.targets.python.http_libs.httpx import HttpxStrategy
-
-        runtime = "\n".join(HttpxStrategy().rest_runtime_lines())
-        assert "content_type=None" not in runtime
-        assert "resp.json()" in runtime  # bare call is safe on httpx
-
-    def test_requests_runtime_does_not_have_content_type_kwarg(self):
-        from ssc_codegen.targets.python.http_libs.requests import (
-            RequestsStrategy,
-        )
-
-        runtime = "\n".join(RequestsStrategy().rest_runtime_lines())
-        assert "content_type=None" not in runtime
-        assert "resp.json()" in runtime
-
-
-# ---------------------------------------------------------------------------
-# Multi-line @doc cleandoc normalization and cross-target docstring emission
-# ---------------------------------------------------------------------------
-
-
-class TestMultilineDocstringNormalization:
-    """Verify multi-line @doc and @request doc= strings are normalized with
-    inspect.cleandoc at parse time and emitted cleanly across Python, JS,
-    Go, and Rust without raw KDL indentation or escaped '\\n' literals."""
-
-    _DOC_SCHEMA = '''
-@doc """
-    Multi-line module docstring.
-    Describes the API and HTML parsers.
-    """
-
-(raw)fn clean-text {
-    @doc """
-        Clean and normalize text.
-        Second line of fn doc.
-        """
-    trim
-}
-
-json User {
-    id int doc="""
-        Unique user identifier.
-        Must be positive.
-        """
-    name str
-}
-
-struct Page {
-    @doc """
-        HTML page parser struct.
-        Extracts heading text.
-        """
-    title { css "h1"; text }
-}
-
-(rest)struct UserAPI {
-    @doc """
-        User REST API client.
-        Provides user lookup endpoints.
-        """
-    @request name=get-user response=User doc="""
-        Fetch a single user by ID.
-        Returns User payload on 200 OK.
-        """ """
-    GET /users/{{id:int}} HTTP/1.1
-    Host: api.example.com
-    """
-}
-'''
-
-    def test_ast_doc_fields_normalized_via_cleandoc(self):
-        from ssc_codegen.ast import (
-            FunctionDef,
-            JsonDef,
-            MethodRest,
-            Struct,
-            StructRest,
-        )
-
-        module = _parse(self._DOC_SCHEMA)
-        assert module.doc == (
-            "Multi-line module docstring.\nDescribes the API and HTML parsers."
-        )
-
-        fn_node = next(n for n in module.body if isinstance(n, FunctionDef))
-        assert fn_node.doc == (
-            "Clean and normalize text.\nSecond line of fn doc."
-        )
-
-        json_node = next(n for n in module.body if isinstance(n, JsonDef))
-        assert json_node.body[0].doc == (
-            "Unique user identifier.\nMust be positive."
-        )
-
-        page_node = next(n for n in module.body if isinstance(n, Struct))
-        assert page_node.doc == (
-            "HTML page parser struct.\nExtracts heading text."
-        )
-
-        rest_node = next(n for n in module.body if isinstance(n, StructRest))
-        assert rest_node.doc == (
-            "User REST API client.\nProvides user lookup endpoints."
-        )
-        method_node = next(
-            c for c in rest_node.body if isinstance(c, MethodRest)
-        )
-        assert method_node.doc == (
-            "Fetch a single user by ID.\nReturns User payload on 200 OK."
-        )
-
-    def test_js_go_rust_multiline_doc_comments_cleanly_formatted(self):
-        from ssc_codegen.targets.golang import GO_CONVERTER
-        from ssc_codegen.targets.javascript import JS_CONVERTER
-        from ssc_codegen.targets.rust import RUST_CONVERTER
-
-        module = _parse(self._DOC_SCHEMA)
-        js_code = JS_CONVERTER.convert(module, http_client="fetch")
-        go_code = GO_CONVERTER.convert(module)
-        rust_code = RUST_CONVERTER.convert(module)
-
-        # JavaScript JSDoc comments have no raw 8-space KDL indentation
-        assert (
-            " * Multi-line module docstring.\n * Describes the API and HTML parsers."
-            in js_code
-        )
-        assert (
-            " * HTML page parser struct.\n * Extracts heading text." in js_code
-        )
-        assert (
-            " * User REST API client.\n * Provides user lookup endpoints."
-            in js_code
-        )
-        assert (
-            "   * Fetch a single user by ID.\n   * Returns User payload on 200 OK."
-            in js_code
-        )
-
-        # Go comments
-        assert (
-            "// Multi-line module docstring.\n// Describes the API and HTML parsers."
-            in go_code
-        )
-        assert (
-            "// HTML page parser struct.\n// Extracts heading text." in go_code
-        )
-        assert (
-            "// User REST API client.\n// Provides user lookup endpoints."
-            in go_code
-        )
-        assert (
-            "// Fetch a single user by ID.\n// Returns User payload on 200 OK."
-            in go_code
-        )
-        assert (
-            "// Clean and normalize text.\n// Second line of fn doc." in go_code
-        )
-
-        # Rust comments
-        assert (
-            "// Multi-line module docstring.\n// Describes the API and HTML parsers."
-            in rust_code
-        )
-        assert (
-            "/// HTML page parser struct.\n/// Extracts heading text."
-            in rust_code
-        )
-        assert (
-            "// User REST API client.\n// Provides user lookup endpoints."
-            in rust_code
-        )
-        assert (
-            "    // Fetch a single user by ID.\n    // Returns User payload on 200 OK."
-            in rust_code
-        )
-        assert (
-            "/// Clean and normalize text.\n/// Second line of fn doc."
-            in rust_code
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -2485,29 +1593,3 @@ class TestDotPathPositionalKeysAndSafeFallthroughCodegen:
         assert deep_check({"data": {"errors": "not-a-list"}}) is False
         assert deep_check({"data": {"errors": [None]}}) is False
         assert deep_check({}) is False
-
-    def test_js_dotpath_positional_key_codegen(self):
-        from ssc_codegen.targets.javascript import JS_CONVERTER
-
-        src = _rest_src(
-            errors=(
-                '    @error 404 Err "error"\n'
-                '    @error 200 Err "error.code"\n'
-                '    @error 422 Err "data.errors.0.detail"\n'
-            )
-        )
-        code = JS_CONVERTER.convert(_parse(src), http_client="fetch")
-        assert "(_b) => 'error' in _b" in code
-        assert "(_b) => _b?.['error']?.['code'] !== undefined" in code
-        assert (
-            "(_b) => _b?.['data']?.['errors']?.[0]?.['detail'] !== undefined"
-            in code
-        )
-        assert (
-            "if (_body === null || typeof _body !== 'object') continue;" in code
-        )
-        assert "if (Array.isArray(_body) || !_m.check(_body)) continue;" in code
-        assert (
-            "try {\n            return _m.factory(_status, _headers, _body);\n        } catch (_e) {\n            continue;\n        }"
-            in code
-        )

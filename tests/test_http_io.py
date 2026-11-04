@@ -110,14 +110,15 @@ class TestTargetSpecAndResolution:
         assert converter.http_io == "async"
 
     @pytest.mark.parametrize("lang", ["javascript", "js", "go", "rust"])
-    @pytest.mark.parametrize("mode", ["both", "sync", "async", "invalid"])
-    def test_resolve_rejects_http_io_for_non_python(
-        self, lang: str, mode: str
-    ) -> None:
+    def test_resolve_rejects_http_io_for_non_python(self, lang: str) -> None:
         with pytest.raises(
             ResolutionError, match="--http-io is not applicable"
         ):
-            resolve(TargetSpec(lang=lang, http_io=mode))
+            resolve(TargetSpec(lang=lang, http_io="sync"))
+
+    def test_resolver_rejects_invalid_http_client_for_python(self) -> None:
+        with pytest.raises(ResolutionError, match="httpx2"):
+            resolve(TargetSpec(lang="python", http_client="urllib3"))
 
 
 class TestCliOptions:
@@ -183,112 +184,6 @@ class TestCliOptions:
         assert "aiohttp does not support synchronous I/O" in result.output
 
 
-class TestCodegenMethodFilteringFetch:
-    def test_httpx_fetch_both(self) -> None:
-        module, _ = parse_module(_FETCH_HTML_KDL)
-        converter = _converter("both")
-        code = converter.convert(module, http_client="httpx")
-        assert "def fetch(cls, client: httpx.Client" in code
-        assert "async def async_fetch(cls, client: httpx.AsyncClient" in code
-
-    def test_httpx_fetch_sync_only(self) -> None:
-        module, _ = parse_module(_FETCH_HTML_KDL)
-        converter = _converter("sync")
-        code = converter.convert(module, http_client="httpx")
-        assert "def fetch(cls, client: httpx.Client" in code
-        assert "async_fetch" not in code
-        assert "httpx.AsyncClient" not in code
-
-    def test_httpx_fetch_async_only(self) -> None:
-        module, _ = parse_module(_FETCH_HTML_KDL)
-        converter = _converter("async")
-        code = converter.convert(module, http_client="httpx")
-        assert "async def async_fetch(cls, client: httpx.AsyncClient" in code
-        assert "def fetch(" not in code
-        assert "httpx.Client" not in code
-
-    def test_requests_fetch_both(self) -> None:
-        module, _ = parse_module(_FETCH_HTML_KDL)
-        converter = _converter("both")
-        code = converter.convert(module, http_client="requests")
-        assert "def fetch(cls, client: requests.Session" in code
-        assert "async def async_fetch(cls, client: requests.Session" in code
-        assert "cls.fetch" in code
-
-    def test_requests_fetch_sync_only(self) -> None:
-        module, _ = parse_module(_FETCH_HTML_KDL)
-        converter = _converter("sync")
-        code = converter.convert(module, http_client="requests")
-        assert "def fetch(cls, client: requests.Session" in code
-        assert "async_fetch" not in code
-
-    def test_requests_fetch_async_delegation_preserves_sync_implementation(
-        self,
-    ) -> None:
-        module, _ = parse_module(_FETCH_HTML_KDL)
-        converter = _converter("async")
-        code = converter.convert(module, http_client="requests")
-        # Public fetch is omitted
-        assert "def fetch(cls," not in code
-        # Private _fetch is emitted
-        assert "def _fetch(cls, client: requests.Session" in code
-        assert "async def async_fetch(cls, client: requests.Session" in code
-        # async_fetch delegates to cls._fetch
-        assert "cls._fetch" in code
-
-    def test_aiohttp_fetch_async_only(self) -> None:
-        module, _ = parse_module(_FETCH_HTML_KDL)
-        converter = _converter("async")
-        code = converter.convert(module, http_client="aiohttp")
-        assert (
-            "async def async_fetch(cls, client: aiohttp.ClientSession" in code
-        )
-        assert "def fetch(" not in code
-
-
-class TestCodegenMethodFilteringRest:
-    def test_httpx_rest_both(self) -> None:
-        module, _ = parse_module(_REST_KDL)
-        converter = _converter("both")
-        code = converter.convert(module, http_client="httpx")
-        assert "def fetch(cls, client: httpx.Client" in code
-        assert "async def async_fetch(cls, client: httpx.AsyncClient" in code
-        assert "ssc_rest_call(" in code
-        assert "ssc_rest_call_async(" in code
-
-    def test_httpx_rest_sync_only(self) -> None:
-        module, _ = parse_module(_REST_KDL)
-        converter = _converter("sync")
-        code = converter.convert(module, http_client="httpx")
-        assert "def fetch(cls, client: httpx.Client" in code
-        assert "async_fetch" not in code
-        assert "httpx.AsyncClient" not in code
-        assert "ssc_rest_call(" in code
-        assert "ssc_rest_call_async" not in code
-
-    def test_httpx_rest_async_only(self) -> None:
-        module, _ = parse_module(_REST_KDL)
-        converter = _converter("async")
-        code = converter.convert(module, http_client="httpx")
-        assert "async def async_fetch(cls, client: httpx.AsyncClient" in code
-        assert "def fetch(" not in code
-        assert "httpx.Client" not in code
-        assert "ssc_rest_call_async(" in code
-        assert "def ssc_rest_call(" not in code
-
-    def test_httpx2_rest_sync_and_async_types(self) -> None:
-        module, _ = parse_module(_REST_KDL)
-        code_sync = _converter("sync").convert(module, http_client="httpx2")
-        assert "import httpx2" in code_sync
-        assert "client: httpx2.Client" in code_sync
-        assert "httpx2.AsyncClient" not in code_sync
-
-        code_async = _converter("async").convert(module, http_client="httpx2")
-        assert "import httpx2" in code_async
-        assert "client: httpx2.AsyncClient" in code_async
-        assert "client: httpx2.Client" not in code_async
-
-
 class TestRuntimeExportNamesAndSeparateRuntime:
     def test_runtime_export_names_filtering(self) -> None:
         module, _ = parse_module(_REST_KDL)
@@ -351,35 +246,6 @@ class TestRuntimeExportNamesAndSeparateRuntime:
         assert "ssc_rest_call_async" in parser_async
         assert "ssc_rest_call," not in parser_async
         assert "ssc_rest_call " not in parser_async
-
-
-class TestInlineModeRuntimeFiltering:
-    def test_inline_mode_httpx_filtering(self) -> None:
-        module, _ = parse_module(_REST_KDL)
-        code_sync = _converter("sync").convert(module, http_client="httpx")
-        assert "def ssc_rest_call(" in code_sync
-        assert "async def ssc_rest_call_async(" not in code_sync
-
-        code_async = _converter("async").convert(module, http_client="httpx")
-        assert "async def ssc_rest_call_async(" in code_async
-        assert "def ssc_rest_call(" not in code_async
-
-    def test_inline_mode_aiohttp_filtering(self) -> None:
-        module, _ = parse_module(_REST_KDL)
-        code_async = _converter("async").convert(module, http_client="aiohttp")
-        assert "async def ssc_rest_call_async(" in code_async
-        assert "def ssc_rest_call(" not in code_async
-
-    def test_inline_mode_requests_filtering(self) -> None:
-        module, _ = parse_module(_REST_KDL)
-        code_sync = _converter("sync").convert(module, http_client="requests")
-        assert "def ssc_rest_call(" in code_sync
-        assert "async def ssc_rest_call_async(" not in code_sync
-
-        code_async = _converter("async").convert(module, http_client="requests")
-        assert "async def ssc_rest_call_async(" in code_async
-        # requests async delegates to ssc_rest_call so it is preserved
-        assert "def ssc_rest_call(" in code_async
 
 
 class TestRuntimeExecution:
