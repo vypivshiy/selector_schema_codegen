@@ -14,11 +14,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from kdlquery import Severity
 
 from ssc_codegen.ast import Assert
 from ssc_codegen.core import parse_module
-from kdlquery import Severity
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -197,8 +196,8 @@ class TestRuntimeExports:
         """Even modules without assert{} must export SscAssertionError so
         consumer code can ``except SscAssertionError`` unconditionally.
         """
-        from ssc_codegen.targets.python.rest import runtime_export_names
         from ssc_codegen.ast import Module
+        from ssc_codegen.targets.python.rest import runtime_export_names
 
         # Empty HTML module — no asserts.
         mod = Module()

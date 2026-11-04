@@ -14,12 +14,12 @@ import re
 import shlex
 from base64 import b64encode
 from typing import Any
-from urllib.parse import urlparse, unquote_plus, urlunparse
+from urllib.parse import unquote_plus, urlparse, urlunparse
 
 from ssc_codegen.ast.struct import (
     PlaceholderSpec,
-    RequestHttp,
     PlaceholderTemplate,
+    RequestHttp,
 )
 from ssc_codegen.parsers.curl import parse_curl_command
 from ssc_codegen.parsers.http import parse_http_request

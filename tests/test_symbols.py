@@ -235,9 +235,19 @@ def test_json_field_symbol_mappings_and_reserved_words():
         assert is_valid_symbol(target, sym) is True
 
     # Target reserved words are rejected for their respective targets
-    assert is_valid_symbol("python", json_field_symbol("class", "python")) is False
-    assert is_valid_symbol("javascript", json_field_symbol("class", "javascript")) is False
-    assert is_valid_symbol("javascript", json_field_symbol("function", "javascript")) is False
+    assert (
+        is_valid_symbol("python", json_field_symbol("class", "python")) is False
+    )
+    assert (
+        is_valid_symbol("javascript", json_field_symbol("class", "javascript"))
+        is False
+    )
+    assert (
+        is_valid_symbol(
+            "javascript", json_field_symbol("function", "javascript")
+        )
+        is False
+    )
     assert is_valid_symbol("rust", json_field_symbol("self", "rust")) is False
     assert is_valid_symbol("rust", json_field_symbol("super", "rust")) is False
     assert is_valid_symbol("rust", json_field_symbol("crate", "rust")) is False

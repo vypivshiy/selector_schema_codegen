@@ -6,7 +6,6 @@ import re
 
 from ssc_codegen.exceptions import BuildTimeError
 
-
 _UNSUPPORTED = re.compile(
     r"\(\?[=!<]|\\[1-9]|\(\?P=[a-zA-Z_]\w*\)|\\k<[a-zA-Z_]\w*>|\\k'[a-zA-Z_]\w*'"
 )
@@ -55,9 +54,7 @@ def rust_replacement(replacement: str) -> str:
             parts.append(f"${bs_group}")
         elif dollar_group:
             parts.append(f"${dollar_group}")
-        elif double_dollar:
-            parts.append("$$")
-        elif single_dollar:
+        elif double_dollar or single_dollar:
             parts.append("$$")
         cursor = match.end()
     parts.append(replacement[cursor:])

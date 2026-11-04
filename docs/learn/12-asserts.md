@@ -123,9 +123,7 @@ Python:
 v1 = el.select_one(".isbn").get_text()
 v2 = v1.strip()
 i = v2
-assert (
-    bool(re.search(r"\d{3}-\d{1,5}-\d{1,7}-\d{1,7}-\d{1}", i))
-)
+assert bool(re.search(r"\d{3}-\d{1,5}-\d{1,7}-\d{1,7}-\d{1}", i))
 v3 = v2  # pass-through, значение не изменилось
 ```
 

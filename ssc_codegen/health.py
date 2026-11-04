@@ -317,7 +317,7 @@ def _check_css(html_soup, query: str) -> int:
     """Run CSS selector and return match count."""
     try:
         return len(html_soup.select(query))
-    except Exception:
+    except Exception:  # noqa: BLE001
         return -1
 
 
@@ -328,7 +328,7 @@ def _check_xpath(html_tree, query: str) -> int:
         if isinstance(result, list):
             return len(result)
         return 1 if result else 0
-    except Exception:
+    except Exception:  # noqa: BLE001
         return -1
 
 

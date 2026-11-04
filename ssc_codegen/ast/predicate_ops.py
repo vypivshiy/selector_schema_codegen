@@ -9,10 +9,10 @@ This module defines predicate operations evaluated inside `Filter`, `Assert`, `M
 """
 
 from __future__ import annotations
+
 from dataclasses import dataclass, field
 
 from .base import Node
-
 
 # =============================================================================
 # Comparison
@@ -370,18 +370,12 @@ class PredCountRange(Node):
 class LogicNot(Node):
     """Inverts the boolean evaluation result of wrapped predicate conditions."""
 
-    pass
-
 
 @dataclass
 class LogicAnd(Node):
     """Explicit conjunction grouping (`AND`) of inner predicate conditions."""
 
-    pass
-
 
 @dataclass
 class LogicOr(Node):
     """Disjunction grouping (`OR`) of inner predicate conditions."""
-
-    pass

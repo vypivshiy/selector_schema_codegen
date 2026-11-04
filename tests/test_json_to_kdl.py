@@ -1,5 +1,6 @@
 import json
 from typing import Any
+
 import pytest
 from typer.testing import CliRunner
 
@@ -7,8 +8,8 @@ from ssc_codegen.ast.types import VariableType
 from ssc_codegen.core import parse_module
 from ssc_codegen.json_to_kdl import (
     JsonToKdlError,
-    json_to_kdl,
     json_text_to_kdl,
+    json_to_kdl,
 )
 from ssc_codegen.main import app
 

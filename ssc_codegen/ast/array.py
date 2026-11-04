@@ -8,6 +8,7 @@ This module defines nodes operating on lists of elements (`is_array=True`):
 """
 
 from __future__ import annotations
+
 from dataclasses import dataclass, field
 
 from .base import Node

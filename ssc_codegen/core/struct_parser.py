@@ -5,6 +5,8 @@ from __future__ import annotations
 import inspect
 from collections.abc import Sequence
 
+from kdlquery import KdlNode
+
 from ssc_codegen.ast import (
     Attr,
     CheckMethod,
@@ -26,9 +28,9 @@ from ssc_codegen.ast import (
     Raw,
     SplitDoc,
     StartParse,
+    Struct,
     StructBase,
     StructRest,
-    Struct,
     StructType,
     TableConfig,
     TableMatchKey,
@@ -41,14 +43,12 @@ from ssc_codegen.ast import (
     XpathSelect,
     XpathSelectAll,
 )
-from ssc_codegen.naming import to_pascal_case
-from ssc_codegen.request_spec import parse_to_http
-from kdlquery import KdlNode
-
 from ssc_codegen.core.contexts import LintContext, ParseContext, WalkCtx
 from ssc_codegen.core.expressions import parse_expressions
 from ssc_codegen.core.linter import is_error_directive, parse_error_node
 from ssc_codegen.core.type_checking import check_pipeline_types
+from ssc_codegen.naming import to_pascal_case
+from ssc_codegen.request_spec import parse_to_http
 
 # AST node types forbidden in (raw)struct — they require a DOM document.
 _RAW_FORBIDDEN_OPS = (
@@ -280,13 +280,11 @@ def parse_struct(
             is_raw = (
                 isinstance(parent, Struct) and parent.type == StructType.RAW
             )
-            if isinstance(parent, Struct) and parent.type == StructType.TABLE:
-                expr = Field(
-                    parent=parent,
-                    name=node.name,
-                    accept_type_info=TypeInfo(base=VariableType.STRING),
-                )
-            elif is_raw:
+            if (
+                isinstance(parent, Struct)
+                and parent.type == StructType.TABLE
+                or is_raw
+            ):
                 expr = Field(
                     parent=parent,
                     name=node.name,

@@ -8,9 +8,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from kdlquery import Severity
 
 from ssc_codegen.core import parse_module
-from kdlquery import Severity
 from ssc_codegen.naming import to_pascal_case
 
 SCHEMAS_DIR = Path(__file__).parent / "schemas"
@@ -61,7 +61,7 @@ def _run_schema(
     code = converter.convert(module_ast)
 
     namespace: dict = {}
-    exec(code, namespace)  # noqa: S102
+    exec(code, namespace)
 
     cls = namespace[class_name]
     return cls(html).parse()
@@ -679,6 +679,7 @@ json ConfigPayload {
     def test_json_alias_separate_runtime_execution(self, html):
         import sys
         import types
+
         from ssc_codegen.generation.runtime import runtime_module_content
 
         kdl_src = """
@@ -850,7 +851,7 @@ def _run_fn(
     converter = _get_converter(target)
     code = converter.convert(module_ast)
     namespace: dict = {}
-    exec(code, namespace)  # noqa: S102
+    exec(code, namespace)
     fn = namespace[snake_name]
     return fn(input_text)
 

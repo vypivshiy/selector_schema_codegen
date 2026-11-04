@@ -953,3 +953,46 @@ def test_zoom_in_css_descendant_scoping_and_table_list_column_match() -> None:
     assert len(matched_cols) == 1
     assert matched_cols[0]["header"] == "Model"
     assert "<-- MATCH" in res_tbl.to_text()
+
+
+def test_cli_scout_windows_legacy_encoding_and_stdio_reconfigure(
+    tmp_path: Path,
+) -> None:
+    """Ensure `ssc-gen scout` decodes non-UTF-8 (e.g. cp1251) HTML files and reconfigures stdio to UTF-8."""
+    import io
+
+    cp1251_html = (
+        '<html><head><meta charset="windows-1251"><title>Каталог запчастей</title></head>'
+        "<body>"
+        '<div class="items">'
+        '<div class="card"><span class="name">Турбина</span><span class="price">1 299 руб.</span></div>'
+        '<div class="card"><span class="name">Тормоза</span><span class="price">890 руб.</span></div>'
+        '<div class="card"><span class="name">Подвеска</span><span class="price">3 100 руб.</span></div>'
+        "</div>"
+        "</body></html>"
+    )
+    html_file = tmp_path / "cp1251.html"
+    html_file.write_bytes(cp1251_html.encode("cp1251"))
+
+    res = runner.invoke(app, ["scout", "-i", str(html_file)])
+    assert res.exit_code == 0, res.output
+    assert "Каталог запчастей" in res.output
+    assert "Турбина" in res.output
+
+    # Simulate a Windows legacy cp1251 stdin stream containing UTF-8 bytes (e.g. byte 0x98 invalid in cp1251)
+    from ssc_codegen.main import _read_html_input
+
+    utf8_bytes = (
+        "<html><body><h1>Привет — мир \u0498</h1></body></html>".encode("utf-8")
+    )
+    raw_buf = io.BytesIO(utf8_bytes)
+    legacy_stdin = io.TextIOWrapper(raw_buf, encoding="cp1251", errors="strict")
+    import sys
+
+    old_stdin = sys.stdin
+    try:
+        sys.stdin = legacy_stdin
+        decoded = _read_html_input(None)
+    finally:
+        sys.stdin = old_stdin
+    assert "Привет — мир \u0498" in decoded

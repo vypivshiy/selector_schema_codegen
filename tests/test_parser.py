@@ -1,13 +1,13 @@
 from pathlib import Path
 
 import pytest
+from kdlquery import Severity
 
 from ssc_codegen.ast import (
     Assert,
     Attr,
     CssSelect,
     CssSelectAll,
-    XpathSelectAll,
     Filter,
     Fmt,
     InitField,
@@ -34,12 +34,11 @@ from ssc_codegen.ast import (
     Text,
     TypeDef,
     Value,
+    XpathSelectAll,
 )
 from ssc_codegen.ast.predicate_ops import LogicNot, PredContains, PredEq
 from ssc_codegen.ast.types import TypeInfo, VariableType
 from ssc_codegen.core import parse_module
-from kdlquery import Severity
-
 
 EXAMPLES = [
     Path("examples/booksToScrape.kdl"),
@@ -1350,14 +1349,15 @@ def test_request_placeholder_spec_conflict_is_rejected():
 
 def test_ast_deprecated_properties_emit_warnings():
     import pytest
+
     from ssc_codegen.ast.base import Node
+    from ssc_codegen.ast.module import Docstring, Module
     from ssc_codegen.ast.selectors import (
         CssSelect,
         CssSelectAll,
         XpathSelect,
         XpathSelectAll,
     )
-    from ssc_codegen.ast.module import Module, Docstring
     from ssc_codegen.ast.struct import Struct, StructDocstring
 
     node = Node()

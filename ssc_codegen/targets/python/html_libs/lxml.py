@@ -27,8 +27,8 @@ from ssc_codegen.ast.selectors import (
     XpathSelect,
     XpathSelectAll,
 )
-from ssc_codegen.traversal.context import WalkContext as ConverterContext
 from ssc_codegen.targets.python.html_libs.base import DomSpelling
+from ssc_codegen.traversal.context import WalkContext as ConverterContext
 
 
 class LxmlDomSpelling(DomSpelling):

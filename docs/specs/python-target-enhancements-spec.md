@@ -54,12 +54,17 @@ Extend the Python code generation target with three modular capabilities:
   - Parameterize `Bs4DomSpelling` with the chosen `bs4_parser` (default `"lxml"`).
   - Emit typed module constant:
     ```python
-    BS4_FEATURES: Literal["html.parser", "lxml", "html5lib"] = '{bs4_parser}'
+    BS4_FEATURES: Literal["html.parser", "lxml", "html5lib"] = "{bs4_parser}"
     ```
   - In `visit_module`, ensure `from typing import Literal` is required when generating BS4 code.
   - In `visit_init`, generate:
     ```python
-    def __init__(self, document: Union[str, BeautifulSoup, Tag], *, features: Literal["html.parser", "lxml", "html5lib"] = BS4_FEATURES) -> None:
+    def __init__(
+        self,
+        document: Union[str, BeautifulSoup, Tag],
+        *,
+        features: Literal["html.parser", "lxml", "html5lib"] = BS4_FEATURES,
+    ) -> None:
         if isinstance(document, str):
             self._doc = BeautifulSoup(document, features=features)
         else:

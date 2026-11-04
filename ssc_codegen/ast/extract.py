@@ -7,6 +7,7 @@ This module defines nodes that extract strings and attributes from DOM document 
 """
 
 from __future__ import annotations
+
 from dataclasses import dataclass, field
 
 from .base import Node

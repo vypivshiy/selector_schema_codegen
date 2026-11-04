@@ -7,6 +7,7 @@ This module defines top-level predicate containers used in field pipelines:
 """
 
 from __future__ import annotations
+
 from dataclasses import dataclass, field
 
 from .base import Node
@@ -34,6 +35,7 @@ class Filter(Node):
             base=VariableType.STRING, is_array=True
         )
     )
+    _local_name: str = field(default="i", init=False, repr=False, compare=False)
 
 
 @dataclass
@@ -60,6 +62,7 @@ class Assert(Node):
     ret_type_info: TypeInfo = field(
         default_factory=lambda: TypeInfo(base=VariableType.AUTO)
     )
+    _local_name: str = field(default="i", init=False, repr=False, compare=False)
 
 
 @dataclass
@@ -80,3 +83,4 @@ class Match(Node):
     ret_type_info: TypeInfo = field(
         default_factory=lambda: TypeInfo(base=VariableType.STRING)
     )
+    _local_name: str = field(default="i", init=False, repr=False, compare=False)

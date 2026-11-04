@@ -10,9 +10,9 @@ structural child markers:
 """
 
 from __future__ import annotations
+
 import warnings
-from dataclasses import dataclass
-from dataclasses import field
+from dataclasses import dataclass, field
 
 from .base import Node
 
@@ -32,7 +32,7 @@ class Module(Node):
 
     doc: str = ""
     source_file: str = ""
-    extensions: dict[str, "ExtensionDef"] = field(default_factory=dict)
+    extensions: dict[str, ExtensionDef] = field(default_factory=dict)
 
     def __post_init__(self):
         self.body.extend(
@@ -57,7 +57,7 @@ class Module(Node):
         return Docstring(parent=self, value=self.doc)
 
     @docstring.setter
-    def docstring(self, value: "Docstring | str") -> None:
+    def docstring(self, value: Docstring | str) -> None:
         warnings.warn(
             "Module.docstring is deprecated; use the Module.doc field instead.",
             DeprecationWarning,
@@ -84,8 +84,6 @@ class CodeStartHook(Node):
         body: Ordered list of custom user-injected code nodes.
     """
 
-    pass
-
 
 @dataclass
 class CodeEndHook(Node):
@@ -94,8 +92,6 @@ class CodeEndHook(Node):
     Attributes:
         body: Ordered list of custom user-injected code nodes.
     """
-
-    pass
 
 
 @dataclass
@@ -122,7 +118,5 @@ class Docstring(Node):
 class Utilities(Node):
     """Technical AST node serving as the insertion point for standard helpers."""
 
-    pass
 
-
-from .extension import ExtensionDef  # noqa: E402
+from .extension import ExtensionDef

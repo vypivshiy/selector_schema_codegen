@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from typing import NamedTuple
 
-from ssc_codegen.ast import TypeInfo, VariableType
 from kdlquery import KdlNode
 
+from ssc_codegen.ast import TypeInfo, VariableType
 from ssc_codegen.core.contexts import DefineKind, LintContext, ParseContext
-
 
 # ── Op signature ─────────────────────────────────────────────────────────────
 
@@ -134,9 +133,7 @@ def _vt_compatible(
         return True
     if got_base == expected:
         return True
-    if got_base == VariableType.AUTO or expected == VariableType.AUTO:
-        return True
-    return False
+    return got_base == VariableType.AUTO or expected == VariableType.AUTO
 
 
 def _resolve_op_ret(

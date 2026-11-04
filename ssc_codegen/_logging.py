@@ -44,7 +44,7 @@ class _ColorFormatter(logging.Formatter):
 
     _FMT = "[{color}{bold}{level}{reset}] {name}: {message}"
 
-    def format(self, record: logging.LogRecord) -> str:  # noqa: A003
+    def format(self, record: logging.LogRecord) -> str:
         color = _COLORS.get(record.levelno, "")
         level = record.levelname
         name = record.name

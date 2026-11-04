@@ -96,12 +96,10 @@ def module_has_html_struct(module: Module) -> bool:
     for n in module.body:
         if isinstance(n, StructRest):
             continue
-        if isinstance(n, Struct):
-            if n.type != StructType.RAW:
-                return True
-        if isinstance(n, FunctionDef):
-            if not n.is_raw:
-                return True
+        if isinstance(n, Struct) and n.type != StructType.RAW:
+            return True
+        if isinstance(n, FunctionDef) and not n.is_raw:
+            return True
     return False
 
 

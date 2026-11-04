@@ -20,11 +20,11 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
-from typing import Any
+from typing import Any, ClassVar
 
 from ssc_codegen.ast import (
-    Attr,
     Assert,
+    Attr,
     CheckMethod,
     CodeEndHook,
     CodeStartHook,
@@ -38,14 +38,14 @@ from ssc_codegen.ast import (
     Filter,
     Fmt,
     FunctionDef,
+    Index,
     Init,
     InitField,
     InitFieldCall,
-    Index,
+    Join,
     JsonDef,
     JsonDefField,
     Jsonify,
-    Join,
     Key,
     Len,
     LogicAnd,
@@ -54,12 +54,12 @@ from ssc_codegen.ast import (
     Lower,
     Ltrim,
     Match,
+    MatcherListDef,
     MethodFetch,
     MethodRest,
     Module,
     Nested,
     NormalizeSpace,
-    PreValidate,
     PredAttrContains,
     PredAttrEnds,
     PredAttrEq,
@@ -88,15 +88,15 @@ from ssc_codegen.ast import (
     PredTextRe,
     PredTextStarts,
     PredXpath,
+    PreValidate,
     Raw,
     Re,
     ReAll,
-    ReSub,
     Repl,
     ReplMap,
+    ReSub,
     ResultAliasDef,
     ResultVariantDef,
-    MatcherListDef,
     Return,
     RmPrefix,
     RmPrefixSuffix,
@@ -110,7 +110,6 @@ from ssc_codegen.ast import (
     Struct,
     StructBase,
     StructRest,
-    StructType as ST,
     TableConfig,
     TableMatchKey,
     TableRows,
@@ -122,32 +121,38 @@ from ssc_codegen.ast import (
     TypeDef,
     TypeDefField,
     TypeInfo,
-    Unique,
     Unescape,
+    Unique,
     Upper,
     Utilities,
     Value,
-    VariableType as VT,
     XpathRemove,
     XpathSelect,
     XpathSelectAll,
 )
+from ssc_codegen.ast import (
+    StructType as ST,
+)
+from ssc_codegen.ast import (
+    VariableType as VT,
+)
+from ssc_codegen.exceptions import BuildTimeError
+from ssc_codegen.generation.builder import ModuleBuilder
 from ssc_codegen.naming import (
     to_camel_case,
     to_pascal_case,
     to_snake_case,
 )
-from ssc_codegen.traversal.utils import (
-    classify_gjson_path,
-    find_predicate_container,
-    module_has_html_struct,
-    module_uses_http,
-)
-from ssc_codegen.generation.builder import ModuleBuilder
-from ssc_codegen.exceptions import BuildTimeError
+from ssc_codegen.targets.golang import rest
+from ssc_codegen.targets.golang.http_libs.base import GoHttpLibStrategy
+from ssc_codegen.targets.golang.http_libs.nethttp import NetHttpStrategy
 from ssc_codegen.targets.golang.literals import (
     go_str as _go_str,
+)
+from ssc_codegen.targets.golang.literals import (
     go_str_array as _go_str_array,
+)
+from ssc_codegen.targets.golang.literals import (
     go_str_map as _go_str_map,
 )
 from ssc_codegen.targets.golang.regex import py_re_to_go_raw
@@ -156,12 +161,14 @@ from ssc_codegen.targets.golang.runtime import (
     BASE_RUNTIME,
     GO_RUNTIME,
 )
-from ssc_codegen.targets.golang import rest
-from ssc_codegen.targets.golang.http_libs.base import GoHttpLibStrategy
-from ssc_codegen.targets.golang.http_libs.nethttp import NetHttpStrategy
 from ssc_codegen.traversal.context import WalkContext
+from ssc_codegen.traversal.utils import (
+    classify_gjson_path,
+    find_predicate_container,
+    module_has_html_struct,
+    module_uses_http,
+)
 from ssc_codegen.traversal.walker import BaseWalker
-
 
 # ===========================================================================
 # Naming helpers
@@ -244,6 +251,7 @@ def _gofmt(source: str) -> str:
             input=source.encode("utf-8"),
             capture_output=True,
             timeout=10,
+            check=False,
         )
         if proc.returncode != 0:
             detail = proc.stderr.decode("utf-8", errors="replace").strip()
@@ -533,7 +541,7 @@ class GoVisitor(BaseWalker):
         indent: Indentation string (default: tab ``"\\t"``).
     """
 
-    TYPES: dict[VT, str] = {
+    TYPES: ClassVar[dict[VT, str]] = {
         VT.STRING: "string",
         VT.BOOL: "bool",
         VT.INT: "int64",
@@ -2043,9 +2051,9 @@ class GoVisitor(BaseWalker):
         self._require("stdAssert")
         expr = self._cond_expr(node, ctx)
         if isinstance(node.parent, PreValidate):
-            setattr(node, "_local_name", "v")
+            node._local_name = "v"
             return [f"{ctx.indent}stdAssert({expr}, {_go_str(msg)})"]
-        setattr(node, "_local_name", ctx.prv)
+        node._local_name = ctx.prv
         return [
             f"{ctx.indent}stdAssert({expr}, {_go_str(msg)})",
             f"{ctx.indent}{ctx.nxt} := {ctx.prv}",
@@ -2054,7 +2062,7 @@ class GoVisitor(BaseWalker):
     def visit_match(self, node: Match, ctx: WalkContext) -> list[str]:
         struct = self._enclosing_struct_name(node)
         rcv = _receiver(struct)
-        setattr(node, "_local_name", "_key")
+        node._local_name = "_key"
         expr = self._cond_expr(node, ctx)
         i1, i2 = ctx.indent, ctx.deeper().indent
         # Match lives inside a TABLE field body wrapped in an IIFE that

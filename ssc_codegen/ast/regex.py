@@ -7,6 +7,7 @@ This module defines pattern-matching nodes using a portable PCRE-compatible rege
 """
 
 from __future__ import annotations
+
 from dataclasses import dataclass, field
 
 from .base import Node

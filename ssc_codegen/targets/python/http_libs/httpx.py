@@ -5,8 +5,8 @@ from __future__ import annotations
 import inspect
 
 from ssc_codegen.targets.python.http_libs.base import (
-    HttpLibStrategy,
     _REST_SHARED_RUNTIME,
+    HttpLibStrategy,
 )
 
 HTTPX_FALLBACK_IMPORT = """try:

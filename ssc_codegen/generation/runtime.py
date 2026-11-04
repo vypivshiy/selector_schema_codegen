@@ -135,9 +135,13 @@ def ssc_json_req_path(data: Any, path: str, target: str = '') -> Any:
     return val
 """
 
-from ssc_codegen.targets.python.http_libs.base import HttpLibStrategy  # noqa: E402
-from ssc_codegen.targets.python.http_libs.httpx import HttpxStrategy  # noqa: E402
-from ssc_codegen.traversal.utils import (  # noqa: E402
+from ssc_codegen.targets.python.http_libs.base import (
+    HttpLibStrategy,
+)
+from ssc_codegen.targets.python.http_libs.httpx import (
+    HttpxStrategy,
+)
+from ssc_codegen.traversal.utils import (
     module_has_rest,
     module_uses_http,
 )

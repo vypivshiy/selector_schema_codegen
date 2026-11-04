@@ -160,7 +160,13 @@ def _decode_scalar(text: str) -> Any:
     if text.startswith('"') and text.endswith('"'):
         try:
             return _py_ast.literal_eval(text)
-        except Exception:
+        except (
+            ValueError,
+            SyntaxError,
+            TypeError,
+            MemoryError,
+            RecursionError,
+        ):
             return text[1:-1]
     if _INTEGER_RE.fullmatch(text):
         return int(text.replace("_", ""), 10)
@@ -1193,16 +1199,20 @@ def _expr_nested(
         StructType.LIST,
     )
     prev = _prev_type_info(parent)
-    if isinstance(struct, Struct) and struct.type == StructType.RAW:
-        if prev.ret_type_info.base not in (
+    if (
+        isinstance(struct, Struct)
+        and struct.type == StructType.RAW
+        and prev.ret_type_info.base
+        not in (
             VariableType.STRING,
             VariableType.AUTO,
-        ):
-            lint.error(
-                node,
-                message=f"'nested {struct_name}': target is a (raw)struct and requires STRING input, got {prev.ret_type_info.base.name}",
-                code="E100",
-            )
+        )
+    ):
+        lint.error(
+            node,
+            message=f"'nested {struct_name}': target is a (raw)struct and requires STRING input, got {prev.ret_type_info.base.name}",
+            code="E100",
+        )
     return Nested(
         parent=parent,
         struct_name=struct_name,

@@ -4,24 +4,23 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from kdlquery import KdlNode
+from kdlquery.reader import ReadDiagnostic
+
 from ssc_codegen.ast import (
     FunctionDef,
     JsonDef,
     Module,
-    StructBase,
     Struct,
+    StructBase,
     StructRest,
     StructType,
-    VariableType,
     TypeInfo,
+    VariableType,
 )
-from ssc_codegen.exceptions import BuildTimeError
-from kdlquery import KdlNode
-from kdlquery.reader import ReadDiagnostic
-
 from ssc_codegen.core.contexts import (
-    DefineKind,
     DefineInfo,
+    DefineKind,
     LintContext,
     ParseContext,
 )
@@ -32,6 +31,7 @@ from ssc_codegen.core.struct_parser import (
     parse_json_fields,
     parse_struct,
 )
+from ssc_codegen.exceptions import BuildTimeError
 
 
 def register_node_sources(

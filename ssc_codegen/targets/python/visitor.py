@@ -11,7 +11,7 @@ REST/fetch method generation is delegated to ``rest.py``.
 from __future__ import annotations
 
 import inspect
-from typing import Any
+from typing import Any, ClassVar
 
 from ssc_codegen.ast import (
     Assert,
@@ -175,9 +175,7 @@ def _needs_field_transform(field: JsonDefField, info: TypeInfo | None) -> bool:
         return True
     if info and info.base == VT.JSON and info.ref:
         return True
-    if info and info.is_array:
-        return True
-    return False
+    return bool(info and info.is_array)
 
 
 def _transform_field_value(
@@ -402,7 +400,7 @@ class PythonVisitor(BaseWalker):
     # Library-specific helpers (std_select_first, std_xpath_remove, etc.)
     # are NOT here — they depend on the chosen HTML library and must stay
     # inlined in the parser file.
-    _RUNTIME_HELPERS: set[str] = {
+    _RUNTIME_HELPERS: ClassVar[set[str]] = {
         "std_repl_map",
         "std_unescape_text",
         "std_assert",
@@ -420,7 +418,7 @@ class PythonVisitor(BaseWalker):
 
     # --- type resolution spelling ---
     DEFAULT_TYPE: str = "Any"
-    TYPES: dict[VT, str] = {
+    TYPES: ClassVar[dict[VT, str]] = {
         VT.STRING: "str",
         VT.BOOL: "bool",
         VT.INT: "int",
@@ -434,7 +432,7 @@ class PythonVisitor(BaseWalker):
     OPTIONAL_TYPE_FMT: str = "Optional[{}]"
     OPTIONAL_ON_OMITEMPTY: bool = False
 
-    _HTTP_STRATEGIES: dict[str, type[HttpLibStrategy]] = {
+    _HTTP_STRATEGIES: ClassVar[dict[str, type[HttpLibStrategy]]] = {
         "httpx": HttpxStrategy,
         "httpx2": Httpx2Strategy,
         "aiohttp": AioHttpStrategy,
@@ -782,8 +780,7 @@ class PythonVisitor(BaseWalker):
                     "",
                 ]
             )
-            for line in self._dom.extra_utilities:
-                lines.append(line)
+            lines.extend(self._dom.extra_utilities)
         if isinstance(mod, Module) and module_uses_http(mod):
             lines.extend(self._http.merge_kwargs_lines())
         if isinstance(mod, Module) and module_has_rest(mod):
@@ -906,7 +903,9 @@ class PythonVisitor(BaseWalker):
                 lines.append("})")
                 return lines
             case _:
-                raise Exception
+                raise NotImplementedError(
+                    f"Unsupported struct type: {node.struct_type}"
+                )
 
     def visit_typedef_field(
         self, node: TypeDefField, ctx: WalkContext

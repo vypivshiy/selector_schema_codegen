@@ -578,7 +578,7 @@ class TestRuntimeExecution:
         module, _ = parse_module(_FETCH_HTML_KDL)
         code = _converter("async").convert(module, http_client="requests")
         ns: dict[str, Any] = {}
-        exec(compile(code, "<inline>", "exec"), ns)  # noqa: S102
+        exec(compile(code, "<inline>", "exec"), ns)
         Page = ns["Page"]
         assert not hasattr(Page, "fetch")
         assert hasattr(Page, "_fetch")

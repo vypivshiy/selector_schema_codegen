@@ -1,11 +1,12 @@
+import json
 import re as _re
 import shlex
-import json
-from typing import Dict, Any, Iterable
-from urllib.parse import urlparse, parse_qs
+from collections.abc import Iterable
+from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 
-def parse_query_params(url: str) -> Dict[str, Any]:
+def parse_query_params(url: str) -> dict[str, Any]:
     """Parse query parameters from URL into a dict."""
     parsed = urlparse(url)
     if parsed.query:
@@ -14,7 +15,7 @@ def parse_query_params(url: str) -> Dict[str, Any]:
     return {}
 
 
-def parse_cookies(cookie_header: str) -> Dict[str, str]:
+def parse_cookies(cookie_header: str) -> dict[str, str]:
     """Parse a Cookie header string into a dict of name-value pairs."""
     cookies = {}
     for pair in cookie_header.split(";"):
@@ -27,7 +28,7 @@ def parse_cookies(cookie_header: str) -> Dict[str, str]:
 
 def parse_curl_command(
     curl_command: str, ignored_flags: Iterable[str] = ("--compressed",)
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Parse a POSIX curl command string into a generic kwargs dict.
 
@@ -65,9 +66,9 @@ def parse_curl_command(
     data = None
     json_data: Any = None
     auth = None
-    params: Dict[str, Any] = {}
-    form_data: Dict[str, str] = {}
-    urlencoded_data: Dict[str, str] = {}
+    params: dict[str, Any] = {}
+    form_data: dict[str, str] = {}
+    urlencoded_data: dict[str, str] = {}
 
     # Convert ignored_flags to set for fast lookup
     ignored_flags_set = set(ignored_flags)
@@ -173,7 +174,7 @@ def parse_curl_command(
             pass
 
     # Build kwargs dict
-    kwargs: Dict[str, Any] = {
+    kwargs: dict[str, Any] = {
         "method": method,
         "url": url,
     }

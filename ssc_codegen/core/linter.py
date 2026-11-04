@@ -1037,32 +1037,38 @@ def _lint_dict_json_block(
                     )
                 )
 
-            if (has_children or is_empty_block) and explicit_model_name:
-                if seen_json_names is not None:
-                    if explicit_model_name in seen_json_names:
-                        diags.append(
-                            _error(
-                                child,
-                                f"duplicate json definition '{explicit_model_name}'",
-                                source_path,
-                                code="E001",
-                                hint=f"rename inline schema '{explicit_model_name}' to avoid collision",
-                            )
-                        )
-                    else:
-                        seen_json_names.add(explicit_model_name)
-
-            if not has_children and not is_empty_block:
-                if not explicit_model_name:
+            if (
+                (has_children or is_empty_block)
+                and explicit_model_name
+                and seen_json_names is not None
+            ):
+                if explicit_model_name in seen_json_names:
                     diags.append(
                         _error(
                             child,
-                            "'@value' requires a type specification",
+                            f"duplicate json definition '{explicit_model_name}'",
                             source_path,
                             code="E001",
-                            hint="example: @value (array)str  or  @value Item",
+                            hint=f"rename inline schema '{explicit_model_name}' to avoid collision",
                         )
                     )
+                else:
+                    seen_json_names.add(explicit_model_name)
+
+            if (
+                not has_children
+                and not is_empty_block
+                and not explicit_model_name
+            ):
+                diags.append(
+                    _error(
+                        child,
+                        "'@value' requires a type specification",
+                        source_path,
+                        code="E001",
+                        hint="example: @value (array)str  or  @value Item",
+                    )
+                )
 
             if has_children:
                 sub_seen_fields: set[str] = set()
@@ -2126,16 +2132,15 @@ def _lint_regular_field_structural(
             )
         )
         return
-    if struct_type == "table":
-        if expanded[0].name != "match":
-            diags.append(
-                _error(
-                    field_node,
-                    f"table field '{field_name}' must start with 'match {{ ... }}'",
-                    source_path,
-                    code="E001",
-                )
+    if struct_type == "table" and expanded[0].name != "match":
+        diags.append(
+            _error(
+                field_node,
+                f"table field '{field_name}' must start with 'match {{ ... }}'",
+                source_path,
+                code="E001",
             )
+        )
 
 
 def _expand_defines(
@@ -2633,7 +2638,9 @@ def _collect_json_field_refs(
     )
 
     if field_node.name == "@value":
-        explicit_model_name, is_arr = _extract_value_model_and_array(field_node)
+        explicit_model_name, _is_arr = _extract_value_model_and_array(
+            field_node
+        )
         if field_node.children:
             child_schema_name = _synthesize_value_schema_name(
                 explicit_model_name,
@@ -2676,7 +2683,7 @@ def _collect_json_field_refs(
 
             for child in field_node.children:
                 if child.name == "@value":
-                    explicit_model_name, is_arr = (
+                    explicit_model_name, _is_arr = (
                         _extract_value_model_and_array(child)
                     )
                     if child.children:
@@ -2933,7 +2940,7 @@ def lint_validate_css(node: KdlNode, lint: LintContext, selector: str) -> bool:
 
         soupsieve.compile(selector)
         return True
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         msg = str(e).split("\n")[0] if str(e) else "invalid selector"
         lint.error(
             node,
@@ -2960,7 +2967,7 @@ def lint_validate_xpath(node: KdlNode, lint: LintContext, expr: str) -> bool:
 
         etree.XPath(expr)
         return True
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         msg = str(e).split("\n")[0] if str(e) else "invalid expression"
         lint.error(
             node,

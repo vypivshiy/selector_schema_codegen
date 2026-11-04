@@ -10,6 +10,7 @@ append the `Json` suffix to generated model names (e.g. `User` -> `UserJson`, `N
 """
 
 from __future__ import annotations
+
 from dataclasses import dataclass
 
 from .base import Node

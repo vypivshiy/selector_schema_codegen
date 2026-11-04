@@ -1,6 +1,6 @@
 [project]
 name = "ssc_codegen"
-version = "0.45.1"
+version = "0.45.2"
 description = "Python-dsl code converter to html parser for web scraping "
 readme = "README.md"
 requires-python = ">=3.10"
@@ -81,6 +81,9 @@ docs = [
 target-version = "py310"
 line-length = 80
 exclude = ["__init__.py"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["BLE001", "PLW1510", "S102", "S110"]
 
 [tool.mypy]
 python_version = "3.10"

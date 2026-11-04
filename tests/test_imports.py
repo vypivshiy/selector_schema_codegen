@@ -2,15 +2,15 @@
 
 from pathlib import Path
 
+from kdlquery import Severity
 
 from ssc_codegen.ast import (
-    StructBase,
-    TypeDef,
     Fmt,
     Nested,
+    StructBase,
+    TypeDef,
 )
 from ssc_codegen.core import parse_module
-from kdlquery import Severity
 
 FIXTURES = Path(__file__).parent / "fixtures" / "imports"
 

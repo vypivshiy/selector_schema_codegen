@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import enum
 import json
 import keyword
+import sys
 import traceback
 from pathlib import Path
 from typing import Annotated, Literal
@@ -20,6 +22,59 @@ from ssc_codegen.json_to_kdl import JsonToKdlError, json_to_kdl
 from ssc_codegen.targets.profile import TargetProfile
 from ssc_codegen.targets.resolver import ResolutionError, resolve
 from ssc_codegen.targets.spec import TargetSpec
+
+
+def _configure_stdio() -> None:
+    """Configure standard I/O streams to use UTF-8 with safe error handling.
+
+    On Windows, Python's default console/pipe encoding is often a legacy codepage
+    (e.g. cp1251 or cp1252). Reconfiguring `stdin`, `stdout`, and `stderr` to
+    UTF-8 prevents `UnicodeDecodeError` when reading piped HTML and
+    `UnicodeEncodeError` when emitting non-ASCII symbols (`…`, `—`, currency signs).
+    """
+    for stream, errors in (
+        (sys.stdin, "replace"),
+        (sys.stdout, "backslashreplace"),
+        (sys.stderr, "backslashreplace"),
+    ):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            with contextlib.suppress(Exception):
+                reconfigure(encoding="utf-8", errors=errors)
+
+
+def _read_html_input(input_file: Path | None) -> str:
+    """Read HTML content from a file or `sys.stdin` with UTF-8 fallback decoding.
+
+    Args:
+        input_file (Path | None): HTML file path, or None to read from `sys.stdin`.
+
+    Returns:
+        str: Decoded HTML string.
+    """
+    if input_file is not None:
+        raw = input_file.read_bytes()
+        try:
+            return raw.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            from bs4 import UnicodeDammit
+
+            dammit = UnicodeDammit(raw, is_html=True)
+            if dammit.unicode_markup is not None:
+                return dammit.unicode_markup
+            return raw.decode("utf-8", errors="replace")
+
+    if sys.stdin.isatty():
+        typer.echo(
+            "Reading HTML from stdin (Ctrl+D to end, or use -i <file>)...",
+            err=True,
+        )
+    reconfigure = getattr(sys.stdin, "reconfigure", None)
+    if callable(reconfigure):
+        with contextlib.suppress(Exception):
+            reconfigure(encoding="utf-8", errors="replace")
+    return sys.stdin.read()
+
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -963,7 +1018,6 @@ def run(
         ssc-gen run schema.kdl:Product -L lxml < page.html
     """
     import json
-    import sys
 
     from ssc_codegen.ast import StructBase
     from ssc_codegen.naming import to_pascal_case
@@ -1035,15 +1089,7 @@ def run(
         typer.echo(code, err=True)
         typer.echo("--- end generated code ---", err=True)
 
-    if input_file is not None:
-        html = input_file.read_text(encoding="utf-8")
-    else:
-        if sys.stdin.isatty():
-            typer.echo(
-                "Reading HTML from stdin (Ctrl+D to end, or use -i <file>)...",
-                err=True,
-            )
-        html = sys.stdin.read()
+    html = _read_html_input(input_file)
 
     if not html.strip():
         typer.echo("ERROR: empty HTML input", err=True)
@@ -1126,7 +1172,6 @@ def health(
         ssc-gen health schema.kdl:Product -i page.html
         ssc-gen health schema.kdl:Product -f json < page.html
     """
-    import sys
 
     from ssc_codegen import parse_module
     from ssc_codegen.ast import StructBase
@@ -1180,15 +1225,7 @@ def health(
 
     target_struct = next(s for s in structs if s.name == struct_name)
 
-    if input_file is not None:
-        html = input_file.read_text(encoding="utf-8")
-    else:
-        if sys.stdin.isatty():
-            typer.echo(
-                "Reading HTML from stdin (Ctrl+D to end, or use -i <file>)...",
-                err=True,
-            )
-        html = sys.stdin.read()
+    html = _read_html_input(input_file)
 
     if not html.strip():
         typer.echo("ERROR: empty HTML input", err=True)
@@ -1311,21 +1348,12 @@ def scout(
         typer.Exit: With code 1 if Zoom-in filters match zero elements, or code 2 on
             empty HTML input or invalid filter syntax.
     """
-    import sys
-
     from ssc_codegen.explore import FilterError, compile_filters, run_scout
 
     _ = discover  # silent no-op alias for legacy callers
 
-    if input_file is not None:
-        html = input_file.read_text(encoding="utf-8")
-    else:
-        if sys.stdin.isatty():
-            typer.echo(
-                "Reading HTML from stdin (Ctrl+D to end, or use -i <file>)...",
-                err=True,
-            )
-        html = sys.stdin.read()
+    _configure_stdio()
+    html = _read_html_input(input_file)
 
     if not html.strip():
         typer.echo("ERROR: empty HTML input", err=True)
@@ -1383,6 +1411,7 @@ cli = get_click_app()
 
 
 def main() -> None:
+    _configure_stdio()
     app()
 
 

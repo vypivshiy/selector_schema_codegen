@@ -6,9 +6,9 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
 
-from ssc_codegen.ast import ExtensionDef, StructBase, VariableType
 from kdlquery import KdlNode, ReadDiagnostic, Severity
 
+from ssc_codegen.ast import ExtensionDef, StructBase, VariableType
 
 # ── Walk context enum ──────────────────────────────────────────────────────────
 
@@ -301,6 +301,6 @@ class LintContext:
 
 
 # lazy imports for forward refs
-from ssc_codegen.ast import (  # noqa: E402
+from ssc_codegen.ast import (
     JsonDef,
 )

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import Any, Callable
+from collections.abc import Callable, Sequence
+from typing import Any, cast
+
+from kdlquery import KdlNode
 
 from ssc_codegen.ast import (
     Assert,
@@ -12,7 +14,6 @@ from ssc_codegen.ast import (
     LogicNot,
     LogicOr,
     Match,
-    Node as AstNode,
     PredAttrContains,
     PredAttrEnds,
     PredAttrEq,
@@ -43,14 +44,13 @@ from ssc_codegen.ast import (
     PredXpath,
     TypeInfo,
 )
-from ssc_codegen.exceptions import BuildTimeError
-from kdlquery import KdlNode
-from ssc_codegen.regex_utils import normalize_regex_pattern
-from typing import cast
-
+from ssc_codegen.ast import (
+    Node as AstNode,
+)
 from ssc_codegen.core.contexts import LintContext, ParseContext
 from ssc_codegen.core.linter import lint_predicate_op
-
+from ssc_codegen.exceptions import BuildTimeError
+from ssc_codegen.regex_utils import normalize_regex_pattern
 
 # ── Parse filter/assert/match expressions ──────────────────────────────────────
 

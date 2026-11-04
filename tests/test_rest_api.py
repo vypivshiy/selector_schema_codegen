@@ -11,6 +11,7 @@ import ast as pyast
 from base64 import b64encode
 
 import pytest
+from kdlquery import Severity
 
 from ssc_codegen.ast import (
     ErrorResponse,
@@ -20,8 +21,6 @@ from ssc_codegen.ast import (
 from ssc_codegen.core import parse_module
 from ssc_codegen.request_spec import parse_to_http
 from ssc_codegen.targets.python import PY_BS4_CONVERTER
-from kdlquery import Severity
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -853,13 +852,11 @@ class TestRestOnlyImports:
 # ---------------------------------------------------------------------------
 
 
-_NOT_REQUIRED_COMPAT_IMPORT = "\n".join(
-    (
-        "if sys.version_info >= (3, 11):",
-        "    from typing import NotRequired",
-        "else:",
-        "    from typing_extensions import NotRequired",
-    )
+_NOT_REQUIRED_COMPAT_IMPORT = (
+    "if sys.version_info >= (3, 11):\n"
+    "    from typing import NotRequired\n"
+    "else:\n"
+    "    from typing_extensions import NotRequired"
 )
 
 
@@ -1248,6 +1245,7 @@ class TestSeparateRuntime:
         import sys
 
         import httpx
+
         from ssc_codegen.generation.runtime import register_runtime_file
         from ssc_codegen.targets.python import PY_LXML_CONVERTER
         from ssc_codegen.targets.python.http_libs.httpx import (
@@ -1297,6 +1295,7 @@ class TestSeparateRuntime:
         import sys
 
         import httpx
+
         from ssc_codegen.generation.runtime import register_runtime_file
         from ssc_codegen.targets.python import PY_LXML_CONVERTER
         from ssc_codegen.targets.python.http_libs.httpx import (
@@ -1343,6 +1342,7 @@ class TestSeparateRuntime:
         import sys
 
         import httpx
+
         from ssc_codegen.targets.python import PY_BS4_CONVERTER
 
         src = _rest_src(errors="    @error 404 Err\n")

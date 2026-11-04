@@ -12,7 +12,6 @@ from ssc_codegen.targets.javascript.visitor import JsVisitor
 from ssc_codegen.targets.python.html_libs.bs4 import Bs4DomSpelling
 from ssc_codegen.targets.python.visitor import PythonVisitor
 
-
 EXTENSION = r"""
 extension Utils {
     to-base64 {

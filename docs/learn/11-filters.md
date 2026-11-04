@@ -118,8 +118,10 @@ Python:
 
 ```python
 v1 = [el for el in el.select_all("a[href]")]
-v2 = [i for i in v1 if
-    i.select_one(".icon")
+v2 = [
+    i
+    for i in v1
+    if i.select_one(".icon")
     and any(hasattr(i, n) and i[n] is not None for n in ("href", "data-kind"))
     and i.get("data-kind") in ("nav", "cta")
     and i.get("rel") not in ("nofollow", "sponsored")
@@ -166,10 +168,7 @@ Python:
 
 ```python
 v1 = [el.get_text() for el in el.select_all(".tag")]
-v2 = [i for i in v1 if
-    not (i == "deprecated")
-    and ("new-" in i or "beta" in i)
-]
+v2 = [i for i in v1 if not (i == "deprecated") and ("new-" in i or "beta" in i)]
 ```
 
 ### filter + fallback {}

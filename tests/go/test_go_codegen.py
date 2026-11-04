@@ -19,8 +19,8 @@ import subprocess
 from pathlib import Path
 
 import pytest
-
 from kdlquery import Severity
+
 from ssc_codegen.core import parse_module
 from ssc_codegen.exceptions import BuildTimeError
 from ssc_codegen.targets.golang import GO_CONVERTER

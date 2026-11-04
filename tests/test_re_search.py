@@ -16,11 +16,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from kdlquery import Severity
 
 from ssc_codegen.ast import Re
 from ssc_codegen.core import parse_module
-from kdlquery import Severity
-
 
 # ---------------------------------------------------------------------------
 # Helpers

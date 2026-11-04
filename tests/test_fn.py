@@ -1,7 +1,8 @@
 """Tests for fn / (raw)fn lint rules and parsing."""
 
-from ssc_codegen.core import parse_module
 from kdlquery import Severity
+
+from ssc_codegen.core import parse_module
 
 
 def _check_errors(src: str) -> list[str]:

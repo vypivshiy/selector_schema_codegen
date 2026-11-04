@@ -4,7 +4,6 @@ from typer.testing import CliRunner
 
 from ssc_codegen.main import app
 
-
 runner = CliRunner()
 
 

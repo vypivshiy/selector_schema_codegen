@@ -94,10 +94,10 @@ Build a static, client-side single-page Web Playground in `playground/` (Vite + 
                 },
             }
         ],
-        "structs": [
-            {"name": str, "type": str, "is_rest": bool}
-        ],
-        "files": dict[str, str],  # e.g. {"parser.py": "...", "sscgen_runtime.py": "..."}
+        "structs": [{"name": str, "type": str, "is_rest": bool}],
+        "files": dict[
+            str, str
+        ],  # e.g. {"parser.py": "...", "sscgen_runtime.py": "..."}
         "target_error": str | None,
     }
 
@@ -105,7 +105,7 @@ Build a static, client-side single-page Web Playground in `playground/` (Vite + 
     {
         "ok": bool,
         "struct_name": str | None,
-        "run_result": Any,        # JSON-serializable parsed output
+        "run_result": Any,  # JSON-serializable parsed output
         "run_error": str | None,
         "elapsed_ms": float,
         "health": {
@@ -121,7 +121,8 @@ Build a static, client-side single-page Web Playground in `playground/` (Vite + 
                     "message": str,
                 }
             ],
-        } | None,
+        }
+        | None,
     }
     ```
   - If the AST or CST contains an `imports` declaration, append a non-fatal warning diagnostic explaining that `imports` resolution across external files is not supported in the single-file browser playground.

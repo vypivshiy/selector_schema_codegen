@@ -28,8 +28,8 @@ from pathlib import Path
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-
 from kdlquery import KDLParseError, Severity
+
 from ssc_codegen.ast import VariableType
 from ssc_codegen.core import parse_module
 from ssc_codegen.core.type_checking import OP_TYPES, OpSig
@@ -40,7 +40,6 @@ from ssc_codegen.targets.python import (
     PY_PARSEL_CONVERTER,
     PY_SLAX_CONVERTER,
 )
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Catalog: pipeline op KDL forms
@@ -326,9 +325,7 @@ def _solo_cases() -> list[tuple[str, str]]:
     return cases
 
 
-@pytest.mark.parametrize(
-    "op_name,body", _solo_cases(), ids=lambda v: v if isinstance(v, str) else v
-)
+@pytest.mark.parametrize("op_name,body", _solo_cases(), ids=lambda v: v)
 @pytest.mark.parametrize(
     "target", list(_PY_CONVERTERS), ids=list(_PY_CONVERTERS)
 )
@@ -339,9 +336,7 @@ def test_solo_op_py(op_name: str, body: str, target: str) -> None:
     _assert_py_valid(_PY_CONVERTERS[target], mod)
 
 
-@pytest.mark.parametrize(
-    "op_name,body", _solo_cases(), ids=lambda v: v if isinstance(v, str) else v
-)
+@pytest.mark.parametrize("op_name,body", _solo_cases(), ids=lambda v: v)
 def test_solo_op_js(op_name: str, body: str) -> None:
     kdl = _wrap_item_struct(field_body=body)
     mod = _assert_ast_valid(kdl)

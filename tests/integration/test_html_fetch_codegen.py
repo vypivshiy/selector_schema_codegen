@@ -22,7 +22,6 @@ import asyncio
 from pathlib import Path
 
 import pytest
-
 from kdlquery import Severity
 
 from ssc_codegen.core import parse_module
@@ -58,7 +57,7 @@ def _generate_code(src: str, *, http_client: str) -> str:
 def _exec(src: str, *, http_client: str) -> dict:
     code = _generate_code(src, http_client=http_client)
     namespace: dict = {}
-    exec(code, namespace)  # noqa: S102
+    exec(code, namespace)
     return namespace
 
 
@@ -187,9 +186,11 @@ class TestHttpxRuntime:
 
         with respx.mock:
             respx.get(URL).respond(status_code=404, text="not found")
-            with httpx.Client() as client:
-                with pytest.raises(httpx.HTTPStatusError):
-                    SimplePage.fetch(client, id="1")
+            with (
+                httpx.Client() as client,
+                pytest.raises(httpx.HTTPStatusError),
+            ):
+                SimplePage.fetch(client, id="1")
 
 
 # ---------------------------------------------------------------------------
@@ -276,9 +277,11 @@ class TestRequestsRuntime:
 
         with RequestsMock() as rsps:
             rsps.add(rsps.GET, URL, body="not found", status=404)
-            with requests.Session() as session:
-                with pytest.raises(requests.HTTPError):
-                    SimplePage.fetch(session, id="1")
+            with (
+                requests.Session() as session,
+                pytest.raises(requests.HTTPError),
+            ):
+                SimplePage.fetch(session, id="1")
 
 
 # ---------------------------------------------------------------------------
@@ -383,4 +386,3 @@ struct SearchPage {
             assert sent.headers["x-static"] == "1"
             assert sent.headers["x-caller"] == "2"
             assert "x-opt" not in sent.headers
-

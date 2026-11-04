@@ -143,7 +143,7 @@ class TestBs4ParserRuntimeExecution:
         code = converter.convert(module)
 
         ns: dict[str, Any] = {}
-        exec(compile(code, "generated.py", "exec"), ns)  # noqa: S102
+        exec(compile(code, "generated.py", "exec"), ns)
         article_cls = ns["Article"]
 
         html = "<html><body><h1>Scraped Title</h1></body></html>"
@@ -167,7 +167,7 @@ class TestBs4ParserRuntimeExecution:
         code = converter.convert(module)
 
         ns: dict[str, Any] = {}
-        exec(compile(code, "generated.py", "exec"), ns)  # noqa: S102
+        exec(compile(code, "generated.py", "exec"), ns)
         extract_heading = ns["extract_heading"]
         clean_text = ns["clean_text"]
 

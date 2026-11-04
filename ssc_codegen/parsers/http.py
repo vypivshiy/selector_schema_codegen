@@ -1,6 +1,6 @@
 import json
-from typing import Dict, Any
-from urllib.parse import urlparse, parse_qs
+from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 
 def _find_header(headers: dict[str, str], name: str) -> tuple[str, str] | None:
@@ -10,7 +10,7 @@ def _find_header(headers: dict[str, str], name: str) -> tuple[str, str] | None:
     return None
 
 
-def parse_query_params(url: str) -> Dict[str, Any]:
+def parse_query_params(url: str) -> dict[str, Any]:
     """Parse query parameters from URL into a dict."""
     parsed = urlparse(url)
     if parsed.query:
@@ -19,7 +19,7 @@ def parse_query_params(url: str) -> Dict[str, Any]:
     return {}
 
 
-def parse_multipart(body: str, boundary: str) -> Dict[str, str]:
+def parse_multipart(body: str, boundary: str) -> dict[str, str]:
     """Parse multipart/form-data body into a dict of field names to values (text fields only)."""
     parts = body.split(f"--{boundary}")
     data = {}
@@ -51,7 +51,7 @@ def parse_multipart(body: str, boundary: str) -> Dict[str, str]:
     return data
 
 
-def parse_cookies(cookie_header: str) -> Dict[str, str]:
+def parse_cookies(cookie_header: str) -> dict[str, str]:
     """Parse a Cookie header string into a dict of name-value pairs."""
     cookies = {}
     for pair in cookie_header.split(";"):
@@ -62,7 +62,7 @@ def parse_cookies(cookie_header: str) -> Dict[str, str]:
     return cookies
 
 
-def parse_http_request(raw_http: str) -> Dict[str, Any]:
+def parse_http_request(raw_http: str) -> dict[str, Any]:
     """
     Parse a raw HTTP request string into a generic kwargs dict.
 
@@ -160,7 +160,7 @@ def parse_http_request(raw_http: str) -> Dict[str, Any]:
         headers.pop(host_entry[0], None)
 
     # Build kwargs
-    kwargs: Dict[str, Any] = {
+    kwargs: dict[str, Any] = {
         "method": method,
         "url": url,
     }

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import re as _re
 
-
 # https://stackoverflow.com/a/14919203
 _CM1_RX = r"(?m)(?<!\\)((\\{2})*)#.*$"
 _CM2_RX = r"(\\)?((\\{2})*)(#)"
@@ -37,7 +36,7 @@ def unverbosify_regex(pattern: str | _re.Pattern) -> str:
             return m.group(2) + m.group(4)
         raise ValueError("unexpected match in unverbosify")
 
-    if pattern.flags & _re.X:
+    if pattern.flags & _re.VERBOSE:
         return _re.sub(
             _WS_RX,
             _strip,

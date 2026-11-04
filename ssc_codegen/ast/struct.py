@@ -35,14 +35,15 @@ components, initialization caches, table configurations, and HTTP transport spec
 """
 
 from __future__ import annotations
+
 import re as _re
 import warnings
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable, Literal
-from typing import cast
+from typing import Any, Literal, cast
 
 from .base import Node
-from .types import TypeInfo, VariableType, StructType
+from .types import StructType, TypeInfo, VariableType
 
 # Typed placeholder grammar:
 #   {{ NAME ( : PRIM )? ( [] )? ( ? )? ( | STYLE )? }}
@@ -134,7 +135,7 @@ class PlaceholderSpec:
 
     @staticmethod
     def sub(
-        text: str, replacement: "str | Callable[[PlaceholderSpec], str]"
+        text: str, replacement: str | Callable[[PlaceholderSpec], str]
     ) -> str:
         """Replace every placeholder token in text with a substitute string.
 
@@ -165,7 +166,7 @@ class PlaceholderSpec:
         return s + "}}"
 
 
-def parse_placeholder(match: "_re.Match[str]") -> PlaceholderSpec:
+def parse_placeholder(match: _re.Match[str]) -> PlaceholderSpec:
     """Construct a `PlaceholderSpec` from a regex match object."""
     return PlaceholderSpec(
         name=match.group(1),
@@ -198,7 +199,7 @@ class PlaceholderTemplate:
     # ── construction ─────────────────────────────────────────────────────
 
     @classmethod
-    def parse(cls, raw: str) -> "PlaceholderTemplate":
+    def parse(cls, raw: str) -> PlaceholderTemplate:
         """Tokenize a raw string containing `{{...}}` tokens into parts.
 
         Args:
@@ -228,7 +229,7 @@ class PlaceholderTemplate:
         return cls(parts=parts)
 
     @classmethod
-    def literal(cls, text: str) -> "PlaceholderTemplate":
+    def literal(cls, text: str) -> PlaceholderTemplate:
         """Construct a template consisting of a single literal string segment.
 
         Args:
@@ -265,8 +266,8 @@ class PlaceholderTemplate:
 
     def map(
         self,
-        on_ph: "Callable[[PlaceholderSpec], str]",
-        on_literal: "Callable[[str], str] | None" = None,
+        on_ph: Callable[[PlaceholderSpec], str],
+        on_literal: Callable[[str], str] | None = None,
     ) -> str:
         """Assemble a string by transforming placeholders and literal segments.
 
@@ -292,7 +293,7 @@ class PlaceholderTemplate:
         """Reconstruct the original source string."""
         return self.map(lambda ph: ph.to_token())
 
-    def renamed(self, mapping: dict[str, str]) -> "PlaceholderTemplate":
+    def renamed(self, mapping: dict[str, str]) -> PlaceholderTemplate:
         """Return a new template with placeholder names remapped per mapping.
 
         Args:
@@ -363,7 +364,7 @@ class RequestHttp(Node):
 
     def with_renamed_placeholders(
         self, transform: Callable[[str], str]
-    ) -> "RequestHttp":
+    ) -> RequestHttp:
         """Return a copy with placeholder names passed through a transformation function.
 
         Args:
@@ -429,7 +430,7 @@ class MethodBase(Node):
     @property
     def http_request(self) -> RequestHttp:
         """The child `RequestHttp` configuration node."""
-        return [n for n in self.body if isinstance(n, RequestHttp)][0]
+        return next(n for n in self.body if isinstance(n, RequestHttp))
 
     @property
     def placeholders(self) -> list[PlaceholderSpec]:
@@ -489,7 +490,7 @@ class StructBase(Node):
         return StructDocstring(parent=self, value=self.doc)
 
     @docstring.setter
-    def docstring(self, value: "StructDocstring | str") -> None:
+    def docstring(self, value: StructDocstring | str) -> None:
         warnings.warn(
             "StructBase.docstring is deprecated; use the .doc field instead.",
             DeprecationWarning,
@@ -680,8 +681,6 @@ class Init(Node):
     Acts as the parent AST container node for all `InitField` computations declared
     inside `@init { ... }`.
     """
-
-    pass
 
 
 @dataclass

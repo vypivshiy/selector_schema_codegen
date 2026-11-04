@@ -8,6 +8,7 @@ This module defines operations transforming string data within field pipelines:
 """
 
 from __future__ import annotations
+
 from dataclasses import dataclass, field
 
 from .base import Node

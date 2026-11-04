@@ -13,6 +13,7 @@ When generating code, the parser class and its output data type must not collide
 """
 
 from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import cast
 
@@ -36,7 +37,7 @@ class TypeDefField(Node):
     name: str = ""
 
     @property
-    def typedef(self) -> "TypeDef":
+    def typedef(self) -> TypeDef:
         """Reference to the parent `TypeDef` AST node."""
         return self.parent  # type: ignore
 

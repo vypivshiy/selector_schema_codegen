@@ -7,16 +7,15 @@ import re
 from collections.abc import Iterable
 from pathlib import Path
 
-from ssc_codegen.ast import Module, StructRest
-from ssc_codegen.exceptions import BuildTimeError, ParseError
-from kdlquery import KDLParseError, parse as kdl_parse
-from kdlquery import ReadDiagnostic, Severity
+from kdlquery import KDLParseError, ReadDiagnostic, Severity
+from kdlquery import parse as kdl_parse
 from kdlquery.types import Position, Span
 
+from ssc_codegen.ast import Module, StructRest
 from ssc_codegen.core.contexts import LintContext, ParseContext
-from ssc_codegen.core.linter import lint_cross_refs, lint_module
 from ssc_codegen.core.expressions import typedef_from_struct
-from ssc_codegen.core.rest_artifacts import rest_artifacts_from_struct
+from ssc_codegen.core.extensions import handle_extension
+from ssc_codegen.core.linter import lint_cross_refs, lint_module
 from ssc_codegen.core.module_handler import (
     handle_define,
     handle_function,
@@ -25,7 +24,8 @@ from ssc_codegen.core.module_handler import (
     register_node_sources,
     resolve_imports,
 )
-from ssc_codegen.core.extensions import handle_extension
+from ssc_codegen.core.rest_artifacts import rest_artifacts_from_struct
+from ssc_codegen.exceptions import BuildTimeError, ParseError
 
 
 def parse_module(

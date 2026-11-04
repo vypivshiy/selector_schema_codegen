@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import pytest
-from ssc_codegen.core import parse_module
 from kdlquery import Severity
+
+from ssc_codegen.core import parse_module
 
 
 def _check_errors(src: str) -> list[str]:

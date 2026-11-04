@@ -17,7 +17,6 @@ from ssc_codegen.targets.resolver import ResolutionError, resolve
 from ssc_codegen.targets.rust import RustVisitor
 from ssc_codegen.targets.spec import TargetSpec
 
-
 pytestmark = [
     pytest.mark.skipif(
         shutil.which("cargo") is None,
@@ -203,7 +202,7 @@ struct ParentDoc {
     # 7. JSON fragment
     s7 = """
 (array)json ItemRecord {
-    item-id int from="nested.raw_id"
+    item_id int from="nested.raw_id"
     title str
     label str?
     extra str? @omitempty

@@ -27,8 +27,8 @@ from ssc_codegen.ast.selectors import (
     XpathSelect,
     XpathSelectAll,
 )
-from ssc_codegen.traversal.context import WalkContext as ConverterContext
 from ssc_codegen.targets.python.html_libs.base import DomSpelling
+from ssc_codegen.traversal.context import WalkContext as ConverterContext
 
 
 class SlaxDomSpelling(DomSpelling):
@@ -49,8 +49,10 @@ class SlaxDomSpelling(DomSpelling):
 
     # === DATA ===
     parser_imports = (
-        "from selectolax.lexbor import "
-        "LexborHTMLParser as HTMLParser, LexborNode as Node",
+        (
+            "from selectolax.lexbor import "
+            "LexborHTMLParser as HTMLParser, LexborNode as Node"
+        ),
     )
     document_type = "Node"
     document_array_type = "List[Node]"

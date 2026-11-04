@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import re as _re
-from typing import Any
+from typing import Any, ClassVar
 
 from ssc_codegen.ast import (
     Assert,
@@ -638,7 +638,7 @@ class JsVisitor(BaseWalker):
         indent: Indentation unit string (default: 2 spaces).
     """
 
-    TYPES = {
+    TYPES: ClassVar[dict[VT, str]] = {
         VT.STRING: "string",
         VT.BOOL: "boolean",
         VT.INT: "number",
@@ -655,7 +655,7 @@ class JsVisitor(BaseWalker):
     DOCUMENT_TYPE = "Document|Element"
     DOCUMENT_ARRAY_TYPE = "Array<Element>"
 
-    _HTTP_STRATEGIES: dict[str, type[JsHttpLibStrategy]] = {
+    _HTTP_STRATEGIES: ClassVar[dict[str, type[JsHttpLibStrategy]]] = {
         "fetch": FetchStrategy,
         "axios": AxiosStrategy,
     }
@@ -1840,11 +1840,11 @@ class JsVisitor(BaseWalker):
         if isinstance(node.parent, PreValidate):
             # pre-validate asserts operate on the incoming document (v);
             # no local var binding.
-            setattr(node, "_local_name", "v")
+            node._local_name = "v"
             lines.append(f"{ctx.indent}_stdAssert(")
         else:
             local = f"i{ctx.prv}"
-            setattr(node, "_local_name", local)
+            node._local_name = local
             lines.extend(
                 [
                     f"{ctx.indent}let {local} = {ctx.prv};",
@@ -1864,7 +1864,7 @@ class JsVisitor(BaseWalker):
 
     def visit_match(self, node: Match, ctx: WalkContext) -> list[str]:
         local = f"i{ctx.prv}"
-        setattr(node, "_local_name", local)
+        node._local_name = local
         lines = [
             f"{ctx.indent}let {local} = this._tableMatchKey({ctx.prv});",
             f"{ctx.indent}if (!(",

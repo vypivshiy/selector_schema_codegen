@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import keyword
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Iterable
+from typing import Any
 
 from ssc_codegen.naming import to_camel_case, to_pascal_case, to_snake_case
 
@@ -44,13 +45,138 @@ _ALIASES = {"py": "python", "js": "javascript"}
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\Z")
 PYTHON_RESERVED = frozenset(keyword.kwlist)
 JAVASCRIPT_RESERVED = frozenset(
-    "await break case catch class const constructor debugger default delete do else enum export extends false finally for function if implements import in instanceof interface let new null package private protected public return static super switch this throw true try typeof var void while with yield".split()
+    [
+        "await",
+        "break",
+        "case",
+        "catch",
+        "class",
+        "const",
+        "constructor",
+        "debugger",
+        "default",
+        "delete",
+        "do",
+        "else",
+        "enum",
+        "export",
+        "extends",
+        "false",
+        "finally",
+        "for",
+        "function",
+        "if",
+        "implements",
+        "import",
+        "in",
+        "instanceof",
+        "interface",
+        "let",
+        "new",
+        "null",
+        "package",
+        "private",
+        "protected",
+        "public",
+        "return",
+        "static",
+        "super",
+        "switch",
+        "this",
+        "throw",
+        "true",
+        "try",
+        "typeof",
+        "var",
+        "void",
+        "while",
+        "with",
+        "yield",
+    ]
 )
 GO_RESERVED = frozenset(
-    "break default func interface select case defer go map struct chan else goto package switch const fallthrough if range type continue for import return var".split()
+    [
+        "break",
+        "default",
+        "func",
+        "interface",
+        "select",
+        "case",
+        "defer",
+        "go",
+        "map",
+        "struct",
+        "chan",
+        "else",
+        "goto",
+        "package",
+        "switch",
+        "const",
+        "fallthrough",
+        "if",
+        "range",
+        "type",
+        "continue",
+        "for",
+        "import",
+        "return",
+        "var",
+    ]
 )
 RUST_RESERVED = frozenset(
-    "as break const continue crate else enum extern false fn for if impl in let loop match mod move mut pub ref return self Self static struct super trait true type unsafe use where while async await dyn abstract become box do final macro override priv typeof unsized virtual yield try".split()
+    [
+        "as",
+        "break",
+        "const",
+        "continue",
+        "crate",
+        "else",
+        "enum",
+        "extern",
+        "false",
+        "fn",
+        "for",
+        "if",
+        "impl",
+        "in",
+        "let",
+        "loop",
+        "match",
+        "mod",
+        "move",
+        "mut",
+        "pub",
+        "ref",
+        "return",
+        "self",
+        "Self",
+        "static",
+        "struct",
+        "super",
+        "trait",
+        "true",
+        "type",
+        "unsafe",
+        "use",
+        "where",
+        "while",
+        "async",
+        "await",
+        "dyn",
+        "abstract",
+        "become",
+        "box",
+        "do",
+        "final",
+        "macro",
+        "override",
+        "priv",
+        "typeof",
+        "unsized",
+        "virtual",
+        "yield",
+        "try",
+    ]
 )
 RUST_CANNOT_BE_RAW = frozenset({"crate", "self", "super", "Self", "_"})
 

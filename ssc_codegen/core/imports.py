@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from kdlquery import KDLParseError, KdlNode, ReadDiagnostic, Severity
+from kdlquery import KdlNode, KDLParseError, ReadDiagnostic, Severity
 from kdlquery import parse as kdl_parse
 
 from ssc_codegen.core.contexts import ParseContext

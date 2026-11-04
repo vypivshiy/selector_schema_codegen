@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
-from typing import Any
+from typing import Any, ClassVar
 
 from ssc_codegen.ast import (
     Assert,
@@ -23,14 +23,14 @@ from ssc_codegen.ast import (
     Filter,
     Fmt,
     FunctionDef,
+    Index,
     Init,
     InitField,
     InitFieldCall,
-    Index,
+    Join,
     JsonDef,
     JsonDefField,
     Jsonify,
-    Join,
     Key,
     Len,
     LogicAnd,
@@ -39,12 +39,12 @@ from ssc_codegen.ast import (
     Lower,
     Ltrim,
     Match,
+    MatcherListDef,
     MethodFetch,
     MethodRest,
     Module,
     Nested,
     NormalizeSpace,
-    PreValidate,
     PredAttrContains,
     PredAttrEnds,
     PredAttrEq,
@@ -67,21 +67,21 @@ from ssc_codegen.ast import (
     PredRe,
     PredReAll,
     PredReAny,
-    PredXpath,
     PredStarts,
     PredTextContains,
     PredTextEnds,
     PredTextRe,
     PredTextStarts,
+    PredXpath,
+    PreValidate,
     Raw,
     Re,
     ReAll,
-    ReSub,
     Repl,
     ReplMap,
+    ReSub,
     ResultAliasDef,
     ResultVariantDef,
-    MatcherListDef,
     Return,
     RmPrefix,
     RmPrefixSuffix,
@@ -95,7 +95,6 @@ from ssc_codegen.ast import (
     Struct,
     StructBase,
     StructRest,
-    StructType as ST,
     TableConfig,
     TableMatchKey,
     TableRows,
@@ -107,12 +106,17 @@ from ssc_codegen.ast import (
     TypeDef,
     TypeDefField,
     TypeInfo,
-    Unique,
     Unescape,
+    Unique,
     Upper,
     Utilities,
     Value,
     VariableType,
+)
+from ssc_codegen.ast import (
+    StructType as ST,
+)
+from ssc_codegen.ast import (
     VariableType as VT,
 )
 from ssc_codegen.exceptions import BuildTimeError
@@ -132,7 +136,6 @@ from ssc_codegen.traversal.utils import (
     module_uses_http,
 )
 from ssc_codegen.traversal.walker import BaseWalker
-
 
 _RUST_KEYWORDS = RUST_RESERVED
 
@@ -192,6 +195,7 @@ def _rustfmt(source: str) -> str:
             input=source.encode("utf-8"),
             capture_output=True,
             timeout=20,
+            check=False,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise BuildTimeError(f"failed to execute rustfmt: {exc}") from exc
@@ -212,7 +216,7 @@ class RustVisitor(BaseWalker):
     cached nodes and nested-parser identity.
     """
 
-    TYPES = {
+    TYPES: ClassVar[dict[VT, str]] = {
         VT.STRING: "String",
         VT.INT: "i64",
         VT.FLOAT: "f64",
@@ -1537,8 +1541,7 @@ class RustVisitor(BaseWalker):
         parts = []
         for line in self.walk_children(node, ctx):
             part = line.strip()
-            if part.startswith("&& "):
-                part = part[3:]
+            part = part.removeprefix("&& ")
             parts.append(part)
         return self._and(parts) if parts else "true"
 
@@ -1612,7 +1615,8 @@ class RustVisitor(BaseWalker):
 
     def visit_logic_or(self, node: LogicOr, ctx: WalkContext) -> list[str]:
         parts = [
-            line.strip().lstrip("&& ") for line in self.walk_children(node, ctx)
+            line.strip().removeprefix("&& ").lstrip()
+            for line in self.walk_children(node, ctx)
         ]
         return self._pred_line(f"({self._or(parts)})", ctx)
 

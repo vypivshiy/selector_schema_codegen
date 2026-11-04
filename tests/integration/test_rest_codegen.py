@@ -44,7 +44,7 @@ def _generate(src: str, *, http_client: str = "httpx") -> dict:
     module = _parse(src)
     code = PY_BASE_CONVERTER.convert(module, http_client=http_client)
     namespace: dict = {}
-    exec(code, namespace)  # noqa: S102
+    exec(code, namespace)
     return namespace
 
 
@@ -665,7 +665,7 @@ class TestRestAiohttpNonJsonContentType:
         module = _parse(src)
         code = PY_BASE_CONVERTER.convert(module, http_client="aiohttp")
         namespace: dict = {}
-        exec(code, namespace)  # noqa: S102
+        exec(code, namespace)
         return namespace
 
     def test_ok_parses_json_with_text_javascript_ct(self):
@@ -1110,8 +1110,9 @@ struct ProfileAPI type=rest {
         ]
 
     def test_requests_transport_json_aliases(self):
-        from responses import RequestsMock
         import requests
+        from responses import RequestsMock
+
         from ssc_codegen.targets.python import PY_BS4_CONVERTER
 
         module = _parse(self._ALIASED_REST_SCHEMA)
@@ -1153,6 +1154,7 @@ struct ProfileAPI type=rest {
     def test_rest_separate_runtime_execution(self):
         import sys
         import types
+
         from ssc_codegen.generation.runtime import runtime_module_content
         from ssc_codegen.targets.python.http_libs.httpx import HttpxStrategy
 
@@ -1173,7 +1175,7 @@ struct ProfileAPI type=rest {
         parser_mod = types.ModuleType(f"{pkg_name}.parser")
         parser_mod.__package__ = pkg_name
         sys.modules[f"{pkg_name}.parser"] = parser_mod
-        setattr(pkg_mod, "parser", parser_mod)
+        pkg_mod.parser = parser_mod
 
         try:
             from ssc_codegen.targets.python import PY_BS4_CONVERTER
