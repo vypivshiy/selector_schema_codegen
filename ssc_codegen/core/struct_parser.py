@@ -45,10 +45,17 @@ from ssc_codegen.ast import (
 )
 from ssc_codegen.core.contexts import LintContext, ParseContext, WalkCtx
 from ssc_codegen.core.expressions import parse_expressions
-from ssc_codegen.core.linter import is_error_directive, parse_error_node
+from ssc_codegen.core.linter import (
+    _extract_value_model_and_array,
+    _synthesize_value_schema_name,
+    is_dict_json_field,
+    is_error_directive,
+    parse_error_node,
+)
 from ssc_codegen.core.type_checking import check_pipeline_types
 from ssc_codegen.naming import to_pascal_case
 from ssc_codegen.request_spec import parse_to_http
+from ssc_codegen.traversal.utils import find_enclosing_module
 
 # AST node types forbidden in (raw)struct — they require a DOM document.
 _RAW_FORBIDDEN_OPS = (
@@ -389,57 +396,30 @@ def _parse_dict_type_directives(
                     base = VariableType.STRING
             key_info = TypeInfo(base=base, is_optional=is_opt)
         elif child.name.rstrip("?") == "@value":
-            is_opt = child.name.endswith("?")
-            is_arr = False
-            explicit_model_name = ""
-
-            raw_ann = (child.type_annotation or "").strip("()")
-            if raw_ann.endswith("?"):
-                is_opt = True
-                raw_ann = raw_ann.rstrip("?")
-            if raw_ann.lower() == "array":
-                is_arr = True
-            elif raw_ann:
-                explicit_model_name = raw_ann
-
-            for arg in child.args:
-                arg_ann = (arg.type_annotation or "").strip("()")
-                if arg_ann.lower() == "array":
-                    is_arr = True
-                val_str = str(arg.value)
-                if val_str.startswith("@"):
-                    continue
-                if val_str.endswith("?"):
-                    is_opt = True
-                    val_str = val_str.rstrip("?")
-                if val_str.lower() == "array":
-                    is_arr = True
-                elif not explicit_model_name and val_str:
-                    explicit_model_name = val_str
+            explicit_model_name, is_arr = _extract_value_model_and_array(child)
+            is_opt = (
+                child.name.endswith("?")
+                or (child.type_annotation or "").strip("()").endswith("?")
+                or any(
+                    not str(arg.value).startswith("@")
+                    and str(arg.value).endswith("?")
+                    for arg in child.args
+                )
+            )
 
             if child.children:
-                if explicit_model_name:
-                    child_schema_name = explicit_model_name
-                elif explicit_dict_name:
-                    child_schema_name = f"{explicit_dict_name}Value"
-                elif parent_def and parent_def.name and field_name:
-                    child_schema_name = (
-                        f"{parent_def.name}{to_pascal_case(field_name)}Value"
-                    )
-                elif parent_def and parent_def.name:
-                    child_schema_name = f"{parent_def.name}Value"
-                elif field_name:
-                    child_schema_name = f"{to_pascal_case(field_name)}Value"
-                else:
-                    child_schema_name = "Value"
+                child_schema_name = _synthesize_value_schema_name(
+                    explicit_model_name,
+                    explicit_dict_name,
+                    parent_def.name if parent_def else "",
+                    field_name,
+                )
 
                 module_owner = (
-                    parent_def.parent if parent_def is not None else None
+                    find_enclosing_module(parent_def)
+                    if parent_def is not None
+                    else None
                 )
-                while module_owner is not None and not hasattr(
-                    module_owner, "body"
-                ):
-                    module_owner = module_owner.parent
 
                 sub_json_def = JsonDef(
                     parent=module_owner
@@ -515,20 +495,8 @@ def parse_json_fields(
             )
             continue
 
-        raw_ann = node.type_annotation or ""
-        type_prop = node.get_prop("type") or ""
-        is_dict_field = (
-            raw_ann.strip("()") == "dict"
-            or type_prop == "dict"
-            or any(
-                (arg.type_annotation or "").strip("()") == "dict"
-                or str(arg.value) == "(dict)"
-                for arg in node.args
-            )
-        )
-
         # Inline (dict) field
-        if is_dict_field:
+        if is_dict_json_field(node):
             name = node.name
             is_optional = name.endswith("?")
             name = name.rstrip("?")
@@ -652,11 +620,7 @@ def parse_json_fields(
                 child_schema_name = f"{parent.name}{to_pascal_case(name)}"
 
             # Find module ancestor for parent
-            module_owner = parent.parent
-            while module_owner is not None and not hasattr(
-                module_owner, "body"
-            ):
-                module_owner = module_owner.parent
+            module_owner = find_enclosing_module(parent)
 
             sub_json_def = JsonDef(
                 parent=module_owner or parent.parent,
@@ -787,10 +751,8 @@ def _parse_init_fields(
             expr.accept_type_info = TypeInfo(base=VariableType.STRING)
         parse_expressions(node.children, expr, ctx, lint)
         if expr.body:
-            expr.ret_type_info = expr.body[-1].ret_type_info
             ops = list(node.children)
-            ret = check_pipeline_types(ops, ctx, lint, start_type=start_type)
-            lint.inferred_define_types[node.name] = (start_type, ret)
+            check_pipeline_types(ops, ctx, lint, start_type=start_type)
         if is_raw:
             _lint_raw_forbidden_ops(expr, lint)
         parent.body.append(expr)

@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from kdlquery import KdlNode
-from kdlquery.reader import ReadDiagnostic
 
 from ssc_codegen.ast import (
     FunctionDef,
@@ -207,27 +206,3 @@ def handle_define(node: KdlNode, ctx: ParseContext, lint: LintContext) -> None:
             lint.defines[k] = DefineInfo(
                 name=k, kind=DefineKind.SCALAR, value=str(value), node=node
             )
-
-
-def resolve_imports(
-    top_nodes: list[KdlNode],
-    source_path: Path | None,
-    ctx: ParseContext,
-    lint: LintContext,
-    diagnostics: list[ReadDiagnostic],
-) -> list[KdlNode]:
-    """Resolve cross-file imports and return a flattened dependency-ordered node list.
-
-    Args:
-        top_nodes: Initial top-level KDL nodes from the root document.
-        source_path: Path to the root document on disk.
-        ctx: Global parse context for node provenance tracking.
-        lint: Lint context.
-        diagnostics: List receiving import validation diagnostics.
-
-    Returns:
-        Flattened list of all required KDL nodes in topological dependency order.
-    """
-    from ssc_codegen.core.imports import resolve_explicit_imports
-
-    return resolve_explicit_imports(top_nodes, source_path, ctx, diagnostics)

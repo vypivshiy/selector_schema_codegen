@@ -12,6 +12,7 @@ from kdlquery import parse as kdl_parse
 
 from ssc_codegen.core.contexts import ParseContext
 from ssc_codegen.core.linter import is_error_directive
+from ssc_codegen.core.module_handler import register_node_sources
 
 IMPORT_KINDS = frozenset({"define", "extension", "fn", "json", "struct"})
 _JSON_PRIMITIVES = frozenset({"bool", "float", "int", "nil", "null", "str"})
@@ -71,16 +72,6 @@ def _diagnostic(
         hint=hint,
         code=code,
     )
-
-
-def _register_sources(
-    nodes: list[KdlNode], path: Path, ctx: ParseContext
-) -> None:
-    pending = list(nodes)
-    while pending:
-        node = pending.pop()
-        ctx.node_source_paths[id(node)] = path
-        pending.extend(node.children)
 
 
 def _node_symbols(node: KdlNode, path: Path) -> list[SymbolId]:
@@ -251,7 +242,7 @@ class _Resolver:
                     )
                 return None
             nodes = list(doc.nodes)
-            _register_sources(nodes, path, self.ctx)
+            register_node_sources(nodes, path, self.ctx)
             if lint_imported:
                 from ssc_codegen.core.linter import lint_module
 

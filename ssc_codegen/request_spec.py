@@ -22,19 +22,12 @@ from ssc_codegen.ast.struct import (
     RequestHttp,
 )
 from ssc_codegen.parsers.curl import parse_curl_command
-from ssc_codegen.parsers.http import parse_http_request
+from ssc_codegen.parsers.http import find_header, parse_http_request
 
 
 def _tmpl_dict(d: dict) -> dict[str, PlaceholderTemplate]:
     """Wrap every dict value in a Template."""
     return {k: PlaceholderTemplate.parse(str(v)) for k, v in d.items()}
-
-
-def _header_value(headers: dict, name: str) -> str:
-    for key, value in headers.items():
-        if key.lower() == name.lower():
-            return str(value)
-    return ""
 
 
 # ── Parser → RequestHttp ──────────────────────────────────────────────────────
@@ -95,13 +88,13 @@ def parse_to_http(payload: str) -> RequestHttp:
                 "use an Authorization header"
             )
         token = b64encode(f"{user}:{password}".encode()).decode()
-        if not _header_value(headers, "Authorization"):
+        if not find_header(headers, "Authorization"):
             headers["Authorization"] = f"Basic {token}"
 
     # ── body ─────────────────────────────────────────────────────────────────
     body_kind = "empty"
     body: PlaceholderTemplate | dict[str, PlaceholderTemplate] | None = None
-    content_type = _header_value(headers, "Content-Type").lower()
+    content_type = (find_header(headers, "Content-Type") or "").lower()
 
     if "json" in kwargs or (
         "data" in kwargs and "application/json" in content_type

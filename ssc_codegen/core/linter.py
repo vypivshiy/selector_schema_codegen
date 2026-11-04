@@ -116,6 +116,30 @@ def is_error_directive(name: str) -> bool:
     return name == "@error" or name.startswith("@error:")
 
 
+def is_dict_json_field(node: KdlNode) -> bool:
+    """Check whether a KDL JSON field node declares an inline `(dict)` schema.
+
+    Args:
+        node (KdlNode): KDL node representing a field inside a `json` block.
+
+    Returns:
+        bool: `True` if the field carries a `(dict)` annotation, `type="dict"` property,
+        or `(dict)` argument, otherwise `False`.
+    """
+    raw_ann = node.type_annotation or ""
+    type_prop = node.properties.get("type")
+    type_prop_val = str(type_prop.value) if type_prop is not None else ""
+    return (
+        raw_ann.strip("()").rstrip("?") == "dict"
+        or type_prop_val == "dict"
+        or any(
+            (arg.type_annotation or "").strip("()").rstrip("?") == "dict"
+            or str(arg.value).rstrip("?") == "(dict)"
+            for arg in node.args
+        )
+    )
+
+
 def parse_error_node(
     node: KdlNode,
     defines: Mapping[str, Any] | None = None,
@@ -599,7 +623,7 @@ def _lint_extension_target(
             if (
                 len(child.args) != 1
                 or not _PORTABLE_IDENTIFIER_RE.fullmatch(helper_name)
-                or not _is_valid_generated_identifier(target_name, helper_name)
+                or not is_valid_symbol(target_name, helper_name)
             ):
                 diags.append(
                     _error(
@@ -1276,18 +1300,7 @@ def _lint_json_children(
                 )
             )
 
-        raw_ann = field_node.type_annotation or ""
-        type_prop = field_node.properties.get("type")
-        type_prop_val = str(type_prop.value) if type_prop is not None else ""
-        is_dict_field = (
-            raw_ann.strip("()") == "dict"
-            or type_prop_val == "dict"
-            or any(
-                (arg.type_annotation or "").strip("()") == "dict"
-                or str(arg.value) == "(dict)"
-                for arg in field_node.args
-            )
-        )
+        is_dict_field = is_dict_json_field(field_node)
 
         has_type = False
         has_skip = False
@@ -1772,21 +1785,7 @@ def _iter_json_field_type_refs(
             continue
 
         if field_node.children:
-            raw_ann = field_node.type_annotation or ""
-            type_prop = field_node.properties.get("type")
-            type_prop_val = (
-                str(type_prop.value) if type_prop is not None else ""
-            )
-            is_dict = (
-                raw_ann.strip("()") == "dict"
-                or type_prop_val == "dict"
-                or any(
-                    (arg.type_annotation or "").strip("()") == "dict"
-                    or str(arg.value) == "(dict)"
-                    for arg in field_node.args
-                )
-            )
-            if is_dict:
+            if is_dict_json_field(field_node):
                 for c in field_node.children:
                     if c.name == "@value":
                         if c.children:
@@ -2321,10 +2320,6 @@ def lint_cross_refs(
     return diags
 
 
-def _is_valid_generated_identifier(target: str, name: str) -> bool:
-    return is_valid_symbol(target, name)
-
-
 def _lint_generated_symbols(
     nodes: list[KdlNode],
     diags: list[ReadDiagnostic],
@@ -2435,21 +2430,7 @@ def _collect_symbol_records(
                 visiting_defines.discard(field_name)
                 continue
 
-            raw_ann = field_node.type_annotation or ""
-            type_prop = field_node.properties.get("type")
-            type_prop_val = (
-                str(type_prop.value) if type_prop is not None else ""
-            )
-            is_dict_field = (
-                raw_ann.strip("()").rstrip("?") == "dict"
-                or type_prop_val == "dict"
-                or any(
-                    (arg.type_annotation or "").strip("()").rstrip("?")
-                    == "dict"
-                    or str(arg.value).rstrip("?") == "(dict)"
-                    for arg in field_node.args
-                )
-            )
+            is_dict_field = is_dict_json_field(field_node)
 
             if _JSON_FIELD_NAME_RE.fullmatch(clean_name):
                 for target in targets:
@@ -2624,18 +2605,7 @@ def _collect_json_field_refs(
     json_nodes: dict[str, KdlNode],
 ) -> None:
     field_name = field_node.name
-    raw_ann = field_node.type_annotation or ""
-    type_prop = field_node.properties.get("type")
-    type_prop_val = str(type_prop.value) if type_prop is not None else ""
-    is_dict = (
-        raw_ann.strip("()").rstrip("?") == "dict"
-        or type_prop_val == "dict"
-        or any(
-            (arg.type_annotation or "").strip("()").rstrip("?") == "dict"
-            or str(arg.value).rstrip("?") == "(dict)"
-            for arg in field_node.args
-        )
-    )
+    is_dict = is_dict_json_field(field_node)
 
     if field_node.name == "@value":
         explicit_model_name, _is_arr = _extract_value_model_and_array(
@@ -3143,49 +3113,19 @@ def lint_pipeline_op(node: KdlNode, lint: LintContext) -> None:
         if lint_require_args(node, lint, exact=1, example=f'{name} " "'):
             lint_require_str_args(node, lint, example=f'example: {name} " "')
 
-    elif name == "re":
+    elif name in ("re", "re-all"):
+        if (
+            name == "re-all"
+            and lint.in_predicate
+            and not lint_require_assert_ctx(node, lint)
+        ):
+            return
         raw_args = node.args
         args = lint_require_args(  # type: ignore[assignment]
             node, lint, exact=1, example=f'{name} #"(\\d+)"#'
         )
         if args and lint_require_str_args(
             node, lint, example=f'example: {name} #"(\\d+)"#'
-        ):
-            pattern = args[0]
-            if raw_args and _DEFINE_NAME_RE.match(str(raw_args[0].value)):
-                resolved = lint.resolve_scalar_arg(pattern)
-                if resolved is not None:
-                    pattern = resolved
-            normalized = pattern.lstrip()
-            if (
-                lint_validate_regex(node, lint, normalized)
-                and not lint.in_predicate
-            ):
-                groups = _re.compile(normalized).groups
-                if groups == 0:
-                    lint.error(
-                        node,
-                        message=f"'{name}' pattern must have exactly one capture group",
-                        code="E001",
-                        hint=f'wrap the match in a group: {name} #"({pattern})"#',
-                    )
-                elif groups > 1:
-                    lint.error(
-                        node,
-                        message=f"'{name}' pattern must have exactly one capture group, got {groups}",
-                        code="E001",
-                        hint="use a non-capturing group (?:...) for grouping without capturing",
-                    )
-
-    elif name == "re-all":
-        if lint.in_predicate and not lint_require_assert_ctx(node, lint):
-            return
-        raw_args = node.args
-        args = lint_require_args(  # type: ignore[assignment]
-            node, lint, exact=1, example='re-all #"(\\d+)"#'
-        )
-        if args and lint_require_str_args(
-            node, lint, example='example: re-all #"(\\d+)"#'
         ):
             pattern = args[0]
             if raw_args and _DEFINE_NAME_RE.match(str(raw_args[0].value)):

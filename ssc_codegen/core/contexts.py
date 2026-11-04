@@ -8,7 +8,7 @@ from pathlib import Path
 
 from kdlquery import KdlNode, ReadDiagnostic, Severity
 
-from ssc_codegen.ast import ExtensionDef, StructBase, VariableType
+from ssc_codegen.ast import ExtensionDef, StructBase
 
 # ── Walk context enum ──────────────────────────────────────────────────────────
 
@@ -149,16 +149,6 @@ class ParseContext:
     source_text: str = ""
     node_source_paths: dict[int, Path] = field(default_factory=dict)
 
-    def all_names(self) -> set[str]:
-        """Return the set of all declared symbol names across all categories."""
-        return (
-            set(self.property_defines)
-            | set(self.children_defines)
-            | set(self.structs)
-            | set(self.json_defs)
-            | set(self.extensions)
-        )
-
 
 # ── Lint context ───────────────────────────────────────────────────────────────
 
@@ -172,7 +162,6 @@ class LintContext:
         init_fields: Set of field names declared in the current struct's `@init` block.
         walk_context: Current structural scope enum (`WalkCtx`).
         diagnostics: Collected list of `ReadDiagnostic` warnings and errors.
-        inferred_define_types: Inferred `(input_type, output_type)` for block defines.
         node_source_paths: Mapping of KDL node object IDs to their originating file paths.
     """
 
@@ -181,9 +170,6 @@ class LintContext:
     walk_context: WalkCtx = WalkCtx.MODULE
     _path_segments: list[str] = field(default_factory=list)
     diagnostics: list[ReadDiagnostic] = field(default_factory=list)
-    inferred_define_types: dict[str, tuple[VariableType, VariableType]] = field(
-        default_factory=dict
-    )
     _predicate_depth: int = field(default=0)
     _predicate_context: str = ""
     node_source_paths: dict[int, Path] = field(default_factory=dict)

@@ -46,7 +46,7 @@ def test_plan_accepts_normalized_records_and_preserves_metadata():
             "fetch",
             "python",
             "fetch",
-            SymbolScope.REQUEST,
+            SymbolScope.METHOD,
             "schema.kdl",
             (3, 1),
         ),

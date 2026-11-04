@@ -1,7 +1,6 @@
 """Pure generated-symbol policy.
 
-The linter owns CST traversal.  This module only processes normalized records;
-the small duck-typed adapter at bottom exists for older public callers.
+The linter owns CST traversal.  This module only processes normalized records.
 """
 
 from __future__ import annotations
@@ -25,19 +24,13 @@ class SymbolKind(str, Enum):
     METHOD = "method"
     INIT = "init"
     PLACEHOLDER = "placeholder"
-    REST_VARIANT = "rest-variant"
-    REST_ALIAS = "rest-alias"
-    REST_MATCHERS = "rest-matchers"
-    RUNTIME_HELPER = "runtime-helper"
 
 
 class SymbolScope(str, Enum):
     MODULE = "module"
     STRUCT = "struct"
     METHOD = "method"
-    REQUEST = "request"
     PLACEHOLDER = "placeholder"
-    RUNTIME = "runtime"
 
 
 TARGETS = ("python", "javascript", "go", "rust")

@@ -3,15 +3,33 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 
-def _find_header(headers: dict[str, str], name: str) -> tuple[str, str] | None:
+def find_header(headers: dict[str, str], name: str) -> str | None:
+    """Look up an HTTP header value case-insensitively.
+
+    Args:
+        headers: Mapping of HTTP header names to values.
+        name: Header name to look up (case-insensitive).
+
+    Returns:
+        The matching header value if found, or `None` otherwise.
+    """
+    target = name.lower()
     for key, value in headers.items():
-        if key.lower() == name.lower():
-            return key, value
+        if key.lower() == target:
+            return value
     return None
 
 
 def parse_query_params(url: str) -> dict[str, Any]:
-    """Parse query parameters from URL into a dict."""
+    """Parse query parameters from a URL into a dictionary.
+
+    Args:
+        url: Full or relative URL string potentially containing a query component.
+
+    Returns:
+        Dictionary mapping query parameter names to single string values or lists
+        of strings when a parameter is repeated.
+    """
     parsed = urlparse(url)
     if parsed.query:
         params = parse_qs(parsed.query, keep_blank_values=True)
@@ -52,7 +70,14 @@ def parse_multipart(body: str, boundary: str) -> dict[str, str]:
 
 
 def parse_cookies(cookie_header: str) -> dict[str, str]:
-    """Parse a Cookie header string into a dict of name-value pairs."""
+    """Parse a Cookie header string into a dictionary of name-value pairs.
+
+    Args:
+        cookie_header: Raw `Cookie` header string (semicolon-separated `name=value` pairs).
+
+    Returns:
+        Dictionary mapping cookie names to cookie values.
+    """
     cookies = {}
     for pair in cookie_header.split(";"):
         pair = pair.strip()
@@ -106,8 +131,7 @@ def parse_http_request(raw_http: str) -> dict[str, Any]:
     body = "\n".join(lines[i:]) if i < len(lines) else ""
 
     # Construct URL
-    host_entry = _find_header(headers, "Host")
-    host = host_entry[1] if host_entry else None
+    host = find_header(headers, "Host")
     if host:
         url = f"https://{host}{path}"
     else:
@@ -120,8 +144,7 @@ def parse_http_request(raw_http: str) -> dict[str, Any]:
     json_data: Any = None
     data: dict[str, Any] | str | None = None
     if body:
-        content_type_entry = _find_header(headers, "Content-Type")
-        content_type_full = content_type_entry[1] if content_type_entry else ""
+        content_type_full = find_header(headers, "Content-Type") or ""
         content_type = content_type_full.lower()
         if "multipart/form-data" in content_type:
             # Extract boundary
@@ -150,14 +173,16 @@ def parse_http_request(raw_http: str) -> dict[str, Any]:
 
     # Parse cookies
     cookies = None
-    cookie_entry = _find_header(headers, "Cookie")
-    if cookie_entry:
-        cookies = parse_cookies(cookie_entry[1])
-        del headers[cookie_entry[0]]
+    cookie_header = find_header(headers, "Cookie")
+    if cookie_header is not None:
+        cookies = parse_cookies(cookie_header)
+        for k in [k for k in headers if k.lower() == "cookie"]:
+            del headers[k]
 
     # Host is auto-set by HTTP libraries from the URL
-    if host_entry:
-        headers.pop(host_entry[0], None)
+    if host is not None:
+        for k in [k for k in headers if k.lower() == "host"]:
+            del headers[k]
 
     # Build kwargs
     kwargs: dict[str, Any] = {
@@ -180,52 +205,3 @@ def parse_http_request(raw_http: str) -> dict[str, Any]:
         kwargs["params"] = params
 
     return kwargs
-
-
-# Example usage (for testing)
-if __name__ == "__main__":
-    raw_http = """POST /api/data HTTP/1.1
-Host: httpbin.org
-Content-Type: application/json
-Content-Length: 18
-Cookie: session_id=abc123; user=john
-
-{"key": "value"}"""
-
-    kwargs = parse_http_request(raw_http)
-    print(kwargs)
-
-    # Test multipart
-    raw_multipart = """POST /upload HTTP/1.1
-Host: httpbin.org
-Content-Type: multipart/form-data; boundary=WebKitFormBoundary7MA4YWxkTrZu0gW
-
---WebKitFormBoundary7MA4YWxkTrZu0gW
-Content-Disposition: form-data; name="name"
-
-John Doe
---WebKitFormBoundary7MA4YWxkTrZu0gW
-Content-Disposition: form-data; name="email"
-
-john@example.com
---WebKitFormBoundary7MA4YWxkTrZu0gW--"""
-
-    kwargs_multipart = parse_http_request(raw_multipart)
-    print(kwargs_multipart)
-
-    # Test form-urlencoded
-    raw_form = """POST /submit HTTP/1.1
-Host: example.com
-Content-Type: application/x-www-form-urlencoded
-
-name=John+Doe&email=john%40example.com"""
-
-    kwargs_form = parse_http_request(raw_form)
-    print(kwargs_form)
-
-    # Test query params
-    raw_query = """GET /search?q=test&page=1 HTTP/1.1
-Host: api.example.com"""
-
-    kwargs_query = parse_http_request(raw_query)
-    print(kwargs_query)

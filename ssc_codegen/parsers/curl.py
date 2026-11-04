@@ -3,27 +3,12 @@ import re as _re
 import shlex
 from collections.abc import Iterable
 from typing import Any
-from urllib.parse import parse_qs, urlparse
 
-
-def parse_query_params(url: str) -> dict[str, Any]:
-    """Parse query parameters from URL into a dict."""
-    parsed = urlparse(url)
-    if parsed.query:
-        params = parse_qs(parsed.query, keep_blank_values=True)
-        return {k: v[0] if len(v) == 1 else v for k, v in params.items()}
-    return {}
-
-
-def parse_cookies(cookie_header: str) -> dict[str, str]:
-    """Parse a Cookie header string into a dict of name-value pairs."""
-    cookies = {}
-    for pair in cookie_header.split(";"):
-        pair = pair.strip()
-        if "=" in pair:
-            name, value = pair.split("=", 1)
-            cookies[name.strip()] = value.strip()
-    return cookies
+from ssc_codegen.parsers.http import (
+    find_header,
+    parse_cookies,
+    parse_query_params,
+)
 
 
 def parse_curl_command(
@@ -183,10 +168,11 @@ def parse_curl_command(
         kwargs["headers"] = headers
 
     # Parse cookies from headers if present
-    cookie_key = next((k for k in headers if k.lower() == "cookie"), None)
-    if cookie_key is not None:
-        kwargs["cookies"] = parse_cookies(headers[cookie_key])
-        del headers[cookie_key]
+    cookie_header = find_header(headers, "Cookie")
+    if cookie_header is not None:
+        kwargs["cookies"] = parse_cookies(cookie_header)
+        for k in [k for k in headers if k.lower() == "cookie"]:
+            del headers[k]
         if not headers and "headers" in kwargs:
             del kwargs["headers"]
 
@@ -209,44 +195,3 @@ def parse_curl_command(
         kwargs["params"] = params
 
     return kwargs
-
-
-# Example usage (for testing)
-if __name__ == "__main__":
-    curl_cmd = 'curl -X POST -H "Content-Type: application/json" -d \'{"key": "value"}\' https://httpbin.org/post'
-    kwargs = parse_curl_command(curl_cmd)
-    print(kwargs)
-
-    # Test multipart form
-    curl_form = 'curl -F "name=John" -F "age=30" -F "file=@image.jpg" https://httpbin.org/post'
-    kwargs_form = parse_curl_command(curl_form)
-    print(kwargs_form)
-
-    # Test data-urlencode
-    curl_params = 'curl --data-urlencode "query=search term" --data-urlencode "page=1" https://api.example.com/search'
-    kwargs_params = parse_curl_command(curl_params)
-    print(kwargs_params)
-    cmd2 = """
-
-    
-    curl 'https://github.com/johndoe?tab=repositories' \
-  --compressed \
-  -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:149.0) Gecko/20100101 Firefox/149.0' \
-  -H 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' \
-  -H 'Accept-Language: en-US,en;q=0.9' \
-  -H 'Accept-Encoding: gzip, deflate, br, zstd' \
-  -H 'Referer: https://github.com/johndoe' \
-  -H 'Upgrade-Insecure-Requests: 1' \
-  -H 'Sec-Fetch-Dest: document' \
-  -H 'Sec-Fetch-Mode: navigate' \
-  -H 'Sec-Fetch-Site: same-origin' \
-  -H 'Connection: keep-alive' \
-  -H 'Cookie: _octo=GH1.1.841914157.1771153873; logged_in=yes; _device_id=3621fc0987958ac5f20fda83f00e0abc; tz=Europe%2FMoscow' \
-  -H 'If-None-Match: W/"69cf989dda53499a4315a1135c335c4b"' \
-  
-
-  -H 'Priority: u=0, i'
-
-  
-  """
-    print(parse_curl_command(cmd2))

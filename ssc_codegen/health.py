@@ -217,7 +217,14 @@ class _SelectorInfo:
     """Internal: a collected selector with its context."""
 
     path: str
-    node: AstNode
+    node: (
+        CssSelect
+        | CssSelectAll
+        | CssRemove
+        | XpathSelect
+        | XpathSelectAll
+        | XpathRemove
+    )
     fallback_value: str | None = None
 
 
@@ -424,8 +431,12 @@ def _check_struct_recursive(
 
     for info in selectors:
         sel_node = info.node
-        queries = getattr(sel_node, "queries", [])
-        query = queries[0] if queries else getattr(sel_node, "query", "")
+        if isinstance(sel_node, _REMOVE_SELECTORS):
+            queries: list[str] = []
+            query = sel_node.query
+        else:
+            queries = sel_node.queries
+            query = sel_node.queries[0] if sel_node.queries else ""
         report_query = query
         sel_type = _selector_type_name(sel_node)
 

@@ -42,7 +42,6 @@ from ssc_codegen.ast import (
     PredTextRe,
     PredTextStarts,
     PredXpath,
-    TypeInfo,
 )
 from ssc_codegen.ast import (
     Node as AstNode,
@@ -190,10 +189,6 @@ def _unknown_pred(
     raise BuildTimeError(f"Unknown predicate: {node.name}")
 
 
-def _pred_prev(node: KdlNode, parent: Any) -> TypeInfo:
-    return parent.ret_type_info
-
-
 # ── Predicate functions ────────────────────────────────────────────────────────
 
 
@@ -201,7 +196,7 @@ def _p_eq(node: KdlNode, parent: Filter, ctx: ParseContext, lint: LintContext):
     return PredEq(
         parent=parent,
         values=tuple(a.value for a in node.args),
-        accept_type_info=_pred_prev(node, parent),
+        accept_type_info=parent.ret_type_info,
         ret_type_info=parent.ret_type_info,
     )
 
@@ -210,7 +205,7 @@ def _p_ne(node: KdlNode, parent: Filter, ctx: ParseContext, lint: LintContext):
     return PredNe(
         parent=parent,
         values=tuple(a.value for a in node.args),
-        accept_type_info=_pred_prev(node, parent),
+        accept_type_info=parent.ret_type_info,
         ret_type_info=parent.ret_type_info,
     )
 
@@ -221,7 +216,7 @@ def _p_starts(
     return PredStarts(
         parent=parent,
         values=tuple(a.value for a in node.args),
-        accept_type_info=_pred_prev(node, parent),
+        accept_type_info=parent.ret_type_info,
         ret_type_info=parent.ret_type_info,
     )
 
@@ -232,7 +227,7 @@ def _p_ends(
     return PredEnds(
         parent=parent,
         values=tuple(a.value for a in node.args),
-        accept_type_info=_pred_prev(node, parent),
+        accept_type_info=parent.ret_type_info,
         ret_type_info=parent.ret_type_info,
     )
 
@@ -243,7 +238,7 @@ def _p_contains(
     return PredContains(
         parent=parent,
         values=tuple(a.value for a in node.args),
-        accept_type_info=_pred_prev(node, parent),
+        accept_type_info=parent.ret_type_info,
         ret_type_info=parent.ret_type_info,
     )
 
@@ -253,7 +248,7 @@ def _p_re(node: KdlNode, parent: Filter, ctx: ParseContext, lint: LintContext):
     return PredRe(
         parent=parent,
         pattern=normalize_regex_pattern(raw),
-        accept_type_info=_pred_prev(node, parent),
+        accept_type_info=parent.ret_type_info,
         ret_type_info=parent.ret_type_info,
     )
 
@@ -263,7 +258,7 @@ def _p_re_all(node: KdlNode, parent: Any, ctx: ParseContext, lint: LintContext):
     return PredReAll(
         parent=parent,
         pattern=normalize_regex_pattern(raw),
-        accept_type_info=_pred_prev(node, parent),
+        accept_type_info=parent.ret_type_info,
         ret_type_info=parent.ret_type_info,
     )
 
@@ -273,7 +268,7 @@ def _p_re_any(node: KdlNode, parent: Any, ctx: ParseContext, lint: LintContext):
     return PredReAny(
         parent=parent,
         pattern=normalize_regex_pattern(raw),
-        accept_type_info=_pred_prev(node, parent),
+        accept_type_info=parent.ret_type_info,
         ret_type_info=parent.ret_type_info,
     )
 
@@ -283,7 +278,7 @@ def _p_css(node: KdlNode, parent: Filter, ctx: ParseContext, lint: LintContext):
     return PredCss(
         parent=parent,
         query=cast(str, query),
-        accept_type_info=_pred_prev(node, parent),
+        accept_type_info=parent.ret_type_info,
         ret_type_info=parent.ret_type_info,
     )
 
@@ -295,7 +290,7 @@ def _p_xpath(
     return PredXpath(
         parent=parent,
         query=cast(str, query),
-        accept_type_info=_pred_prev(node, parent),
+        accept_type_info=parent.ret_type_info,
         ret_type_info=parent.ret_type_info,
     )
 
@@ -306,7 +301,7 @@ def _p_has_attr(
     return PredHasAttr(
         parent=parent,
         attrs=tuple(a.value for a in node.args),
-        accept_type_info=_pred_prev(node, parent),
+        accept_type_info=parent.ret_type_info,
         ret_type_info=parent.ret_type_info,
     )
 
@@ -316,7 +311,7 @@ def _p_attr_eq(
 ):
     return PredAttrEq(
         parent=parent,
-        accept_type_info=_pred_prev(node, parent),
+        accept_type_info=parent.ret_type_info,
         ret_type_info=parent.ret_type_info,
         values=tuple(a.value for a in node.args[1:]),
         name=node.args[0].value,
@@ -328,7 +323,7 @@ def _p_attr_ne(
 ):
     return PredAttrNe(
         parent=parent,
-        accept_type_info=_pred_prev(node, parent),
+        accept_type_info=parent.ret_type_info,
         ret_type_info=parent.ret_type_info,
         values=tuple(a.value for a in node.args[1:]),
         name=node.args[0].value,
@@ -340,7 +335,7 @@ def _p_attr_contains(
 ):
     return PredAttrContains(
         parent=parent,
-        accept_type_info=_pred_prev(node, parent),
+        accept_type_info=parent.ret_type_info,
         ret_type_info=parent.ret_type_info,
         values=tuple(a.value for a in node.args[1:]),
         name=node.args[0].value,
@@ -353,7 +348,7 @@ def _p_attr_re(
     raw = ctx.property_defines.get(node.args[1].value, node.args[1].value)
     return PredAttrRe(
         parent=parent,
-        accept_type_info=_pred_prev(node, parent),
+        accept_type_info=parent.ret_type_info,
         ret_type_info=parent.ret_type_info,
         pattern=normalize_regex_pattern(raw),
         name=node.args[0].value,
@@ -365,7 +360,7 @@ def _p_attr_starts(
 ):
     return PredAttrStarts(
         parent=parent,
-        accept_type_info=_pred_prev(node, parent),
+        accept_type_info=parent.ret_type_info,
         ret_type_info=parent.ret_type_info,
         values=tuple(a.value for a in node.args[1:]),
         name=node.args[0].value,
@@ -377,7 +372,7 @@ def _p_attr_ends(
 ):
     return PredAttrEnds(
         parent=parent,
-        accept_type_info=_pred_prev(node, parent),
+        accept_type_info=parent.ret_type_info,
         ret_type_info=parent.ret_type_info,
         values=tuple(a.value for a in node.args[1:]),
         name=node.args[0].value,
@@ -389,7 +384,7 @@ def _p_text_contains(
 ):
     return PredTextContains(
         parent=parent,
-        accept_type_info=_pred_prev(node, parent),
+        accept_type_info=parent.ret_type_info,
         ret_type_info=parent.ret_type_info,
         values=tuple(a.value for a in node.args),
     )
@@ -400,7 +395,7 @@ def _p_text_ends(
 ):
     return PredTextEnds(
         parent=parent,
-        accept_type_info=_pred_prev(node, parent),
+        accept_type_info=parent.ret_type_info,
         ret_type_info=parent.ret_type_info,
         values=tuple(a.value for a in node.args),
     )
@@ -411,7 +406,7 @@ def _p_text_starts(
 ):
     return PredTextStarts(
         parent=parent,
-        accept_type_info=_pred_prev(node, parent),
+        accept_type_info=parent.ret_type_info,
         ret_type_info=parent.ret_type_info,
         values=tuple(a.value for a in node.args),
     )
@@ -423,7 +418,7 @@ def _p_text_re(
     raw = ctx.property_defines.get(node.args[0].value, node.args[0].value)
     return PredTextRe(
         parent=parent,
-        accept_type_info=_pred_prev(node, parent),
+        accept_type_info=parent.ret_type_info,
         ret_type_info=parent.ret_type_info,
         pattern=normalize_regex_pattern(raw),
     )
@@ -433,7 +428,7 @@ def _p_text_re(
 def _p_len_eq(node: KdlNode, parent: Any, ctx: ParseContext, lint: LintContext):
     return PredCountEq(
         parent=parent,
-        accept_type_info=_pred_prev(node, parent),
+        accept_type_info=parent.ret_type_info,
         ret_type_info=parent.ret_type_info,
         value=int(node.args[0].value),
     )
@@ -442,7 +437,7 @@ def _p_len_eq(node: KdlNode, parent: Any, ctx: ParseContext, lint: LintContext):
 def _p_len_gt(node: KdlNode, parent: Any, ctx: ParseContext, lint: LintContext):
     return PredCountGt(
         parent=parent,
-        accept_type_info=_pred_prev(node, parent),
+        accept_type_info=parent.ret_type_info,
         ret_type_info=parent.ret_type_info,
         value=int(node.args[0].value),
     )
@@ -451,7 +446,7 @@ def _p_len_gt(node: KdlNode, parent: Any, ctx: ParseContext, lint: LintContext):
 def _p_len_lt(node: KdlNode, parent: Any, ctx: ParseContext, lint: LintContext):
     return PredCountLt(
         parent=parent,
-        accept_type_info=_pred_prev(node, parent),
+        accept_type_info=parent.ret_type_info,
         ret_type_info=parent.ret_type_info,
         value=int(node.args[0].value),
     )
@@ -460,7 +455,7 @@ def _p_len_lt(node: KdlNode, parent: Any, ctx: ParseContext, lint: LintContext):
 def _p_len_ne(node: KdlNode, parent: Any, ctx: ParseContext, lint: LintContext):
     return PredCountNe(
         parent=parent,
-        accept_type_info=_pred_prev(node, parent),
+        accept_type_info=parent.ret_type_info,
         ret_type_info=parent.ret_type_info,
         value=int(node.args[0].value),
     )
@@ -469,7 +464,7 @@ def _p_len_ne(node: KdlNode, parent: Any, ctx: ParseContext, lint: LintContext):
 def _p_len_ge(node: KdlNode, parent: Any, ctx: ParseContext, lint: LintContext):
     return PredCountGe(
         parent=parent,
-        accept_type_info=_pred_prev(node, parent),
+        accept_type_info=parent.ret_type_info,
         ret_type_info=parent.ret_type_info,
         value=int(node.args[0].value),
     )
@@ -478,7 +473,7 @@ def _p_len_ge(node: KdlNode, parent: Any, ctx: ParseContext, lint: LintContext):
 def _p_len_le(node: KdlNode, parent: Any, ctx: ParseContext, lint: LintContext):
     return PredCountLe(
         parent=parent,
-        accept_type_info=_pred_prev(node, parent),
+        accept_type_info=parent.ret_type_info,
         ret_type_info=parent.ret_type_info,
         value=int(node.args[0].value),
     )
@@ -489,7 +484,7 @@ def _p_len_range(
 ):
     return PredCountRange(
         parent=parent,
-        accept_type_info=_pred_prev(node, parent),
+        accept_type_info=parent.ret_type_info,
         ret_type_info=parent.ret_type_info,
         start=int(node.args[0].value),
         end=int(node.args[1].value),
@@ -499,7 +494,7 @@ def _p_len_range(
 def _p_and(node: KdlNode, parent: Any, ctx: ParseContext, lint: LintContext):
     return LogicAnd(
         parent=parent,
-        accept_type_info=_pred_prev(node, parent),
+        accept_type_info=parent.ret_type_info,
         ret_type_info=parent.ret_type_info,
     )
 
@@ -507,7 +502,7 @@ def _p_and(node: KdlNode, parent: Any, ctx: ParseContext, lint: LintContext):
 def _p_not(node: KdlNode, parent: Any, ctx: ParseContext, lint: LintContext):
     return LogicNot(
         parent=parent,
-        accept_type_info=_pred_prev(node, parent),
+        accept_type_info=parent.ret_type_info,
         ret_type_info=parent.ret_type_info,
     )
 
@@ -515,7 +510,7 @@ def _p_not(node: KdlNode, parent: Any, ctx: ParseContext, lint: LintContext):
 def _p_or(node: KdlNode, parent: Any, ctx: ParseContext, lint: LintContext):
     return LogicOr(
         parent=parent,
-        accept_type_info=_pred_prev(node, parent),
+        accept_type_info=parent.ret_type_info,
         ret_type_info=parent.ret_type_info,
     )
 

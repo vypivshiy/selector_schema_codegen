@@ -18,9 +18,6 @@ from .types import TypeInfo, VariableType
 # accept/ret are set by the builder from cursor type.
 #
 # ReAll is scalar-only: STRING → LIST_STRING.
-#
-# ignore_case / dotall are extracted from re.Pattern defines at parse time
-# and stored as explicit flags so codegen can emit them without inline (?i)(?s).
 
 
 @dataclass

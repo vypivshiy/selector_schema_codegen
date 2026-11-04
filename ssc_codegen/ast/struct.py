@@ -437,6 +437,11 @@ class MethodBase(Node):
         """List of all placeholders required by the underlying HTTP request."""
         return self.http_request.placeholders
 
+    @property
+    def struct(self) -> StructBase:
+        """Reference to the parent `StructBase` AST node."""
+        return cast(StructBase, self.parent)
+
 
 @dataclass
 class MethodFetch(MethodBase):
@@ -523,10 +528,6 @@ class StructBase(Node):
         """List of all `@error` response mapping nodes declared in this struct."""
         return [n for n in self.body if isinstance(n, ErrorResponse)]
 
-    @property
-    def _typedef_type(self) -> StructType:
-        return self.type
-
 
 # ── Concrete struct types ────────────────────────────────────────────────────
 
@@ -560,9 +561,6 @@ class StructRest(StructBase):
     """
 
     type: StructType = StructType.REST
-
-    def __post_init__(self):
-        pass
 
 
 # ── Struct child nodes ───────────────────────────────────────────────────────

@@ -15,6 +15,7 @@ from ssc_codegen.ast import Module, StructRest
 from ssc_codegen.core.contexts import LintContext, ParseContext
 from ssc_codegen.core.expressions import typedef_from_struct
 from ssc_codegen.core.extensions import handle_extension
+from ssc_codegen.core.imports import resolve_explicit_imports
 from ssc_codegen.core.linter import lint_cross_refs, lint_module
 from ssc_codegen.core.module_handler import (
     handle_define,
@@ -22,7 +23,6 @@ from ssc_codegen.core.module_handler import (
     handle_json,
     handle_struct,
     register_node_sources,
-    resolve_imports,
 )
 from ssc_codegen.core.rest_artifacts import rest_artifacts_from_struct
 from ssc_codegen.exceptions import BuildTimeError, ParseError
@@ -100,7 +100,9 @@ def parse_module(
     diagnostics: list[ReadDiagnostic] = []
 
     # pass 1 — resolve imports (returns flat list with imported nodes)
-    top_nodes = resolve_imports(top_nodes, source_path, ctx, lint, diagnostics)
+    top_nodes = resolve_explicit_imports(
+        top_nodes, source_path, ctx, diagnostics
+    )
 
     if not skip_lint:
         # pass 2 — structural linting on KdlDocument (current file only)

@@ -276,9 +276,7 @@ def typedef_from_struct(struct: StructBase, parent: Module) -> TypeDef:
     Returns:
         The synthesized `TypeDef` AST node.
     """
-    typedef = TypeDef(
-        parent=parent, name=struct.name, struct_type=struct._typedef_type
-    )
+    typedef = TypeDef(parent=parent, name=struct.name, struct_type=struct.type)
     for item in struct.body:
         if isinstance(item, (Field, Key, Value)):
             field_name = (
@@ -399,7 +397,7 @@ def parse_expressions(
         # UNLESS the parent starts with STRING (RAW struct fields), where
         # string ops are valid as the first operation.
         if not parent.body and node.name in _REQUIRES_PREV:
-            parent_accept = getattr(parent, "accept_type_info", None)
+            parent_accept = parent.accept_type_info
             if (
                 parent_accept is not None
                 and parent_accept.base == VariableType.STRING
@@ -752,25 +750,11 @@ def _expr_raw(
     else:
         accept_ti = TypeInfo(base=VariableType.DOCUMENT)
         is_arr = False
-    mode = "outer"
-    if len(node.args) > 1:
-        lint.error(
-            node,
-            message="'raw' accepts at most 1 argument",
-            code="E001",
-            hint="example: raw  or  raw outer  or  raw inner",
-        )
-    elif node.args:
-        val = str(node.args[0].value)
-        if val not in ("outer", "inner"):
-            lint.error(
-                node,
-                message=f"invalid 'raw' mode {val!r} — expected 'outer' or 'inner'",
-                code="E001",
-                hint="example: raw  or  raw outer  or  raw inner",
-            )
-        else:
-            mode = val
+    mode = (
+        str(node.args[0].value)
+        if node.args and isinstance(node.args[0].value, str)
+        else "outer"
+    )
     return Raw(
         parent=parent,
         accept_type_info=accept_ti,
@@ -1269,19 +1253,11 @@ def _expr_filter(
 def _expr_assert(
     node: KdlNode, parent: FieldLikeNode, ctx: ParseContext, lint: LintContext
 ):
-    # Optional message: assert "msg" { ... }. Validate type.
-    message = ""
-    if len(node.args) > 1:
-        raise BuildTimeError(
-            f"assert: expected 0 or 1 string argument, got {len(node.args)}"
-        )
-    if node.args:
-        arg_val = node.args[0].value
-        if not isinstance(arg_val, str):
-            raise BuildTimeError(
-                f"assert: message argument must be a string, got {type(arg_val).__name__}"
-            )
-        message = arg_val
+    message = (
+        node.args[0].value
+        if len(node.args) == 1 and isinstance(node.args[0].value, str)
+        else ""
+    )
 
     # Source location is carried in the inherited span field; filename is
     # resolved at codegen time via Module.source_file parent-walk.
