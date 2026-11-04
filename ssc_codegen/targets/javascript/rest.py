@@ -11,7 +11,6 @@ import inspect
 import json
 
 from ssc_codegen.ast import (
-    JsonDef,
     MatcherListDef,
     MethodFetch,
     MethodRest,
@@ -22,6 +21,7 @@ from ssc_codegen.ast import (
     StructBase,
 )
 from ssc_codegen.ast.struct import RequestHttp
+from ssc_codegen.core.rest_artifacts import err_subclass_name
 from ssc_codegen.naming import (
     js_json_projector_name,
     to_camel_case,
@@ -31,10 +31,7 @@ from ssc_codegen.naming import (
 from ssc_codegen.request_spec import parse_json_template
 from ssc_codegen.targets.javascript.http_libs.base import JsHttpLibStrategy
 from ssc_codegen.traversal.context import WalkContext
-from ssc_codegen.traversal.utils import (
-    err_subclass_name,
-    find_enclosing_module,
-)
+from ssc_codegen.traversal.utils import resolve_json_def
 
 # ===========================================================================
 # HTTP & REST shared runtime source
@@ -300,13 +297,10 @@ def render_body(spec: RequestHttp) -> tuple[str, str] | None:
     """
     if spec.body_kind == "empty" or spec.payload is None:
         return None
-    if spec.body_kind == "json":
-        assert isinstance(spec.payload, PlaceholderTemplate)
-        return ("body", render_json_body(spec.payload))
-    if spec.body_kind == "form":
-        assert isinstance(spec.payload, dict)
+    if isinstance(spec.payload, dict):
         return ("body", f"new URLSearchParams({render_obj(spec.payload)})")
-    assert isinstance(spec.payload, PlaceholderTemplate)
+    if spec.body_kind == "json":
+        return ("body", render_json_body(spec.payload))
     return ("body", render_value(spec.payload))
 
 
@@ -372,6 +366,26 @@ def render_js_condition_check(
 # ===========================================================================
 
 
+def format_jsdoc(doc: str, indent: str = "") -> list[str]:
+    """Format a docstring as an indented JSDoc comment block.
+
+    Args:
+        doc (str): Raw docstring text.
+        indent (str): Indentation prefix for each emitted line.
+
+    Returns:
+        list[str]: Formatted JSDoc comment lines, or an empty list if `doc` is empty.
+    """
+    if not doc:
+        return []
+    safe = [line.replace("*/", "*\\/") for line in doc.splitlines()]
+    return [
+        f"{indent}/**",
+        *(f"{indent} * {line}" if line else f"{indent} *" for line in safe),
+        f"{indent} */",
+    ]
+
+
 def js_name(name: str) -> str:
     """Convert a DSL identifier into a camelCase JavaScript identifier.
 
@@ -395,14 +409,10 @@ def ok_payload_type(node: MethodRest) -> str:
     """
     if not node.response_schema:
         return "null"
-    module = find_enclosing_module(node)
     schema_type = f"{to_pascal_case(node.response_schema)}Json"
-    if module is not None:
-        for n in module.body:
-            if isinstance(n, JsonDef) and n.name == node.response_schema:
-                if n.is_array:
-                    return f"Array<{schema_type}>"
-                break
+    json_def = resolve_json_def(node, node.response_schema)
+    if json_def is not None and json_def.is_array:
+        return f"Array<{schema_type}>"
     return schema_type
 
 
@@ -508,13 +518,9 @@ def emit_method_rest(
     )
 
     fn_name = http.fn_name
-    module = find_enclosing_module(node)
-    has_response_schema = False
-    if node.response_schema and module is not None:
-        has_response_schema = any(
-            isinstance(n, JsonDef) and n.name == node.response_schema
-            for n in module.body
-        )
+    has_response_schema = (
+        resolve_json_def(node, node.response_schema) is not None
+    )
 
     if node.response_path:
         accessor = "".join(
@@ -535,13 +541,7 @@ def emit_method_rest(
 
     lines: list[str] = []
     if node.doc:
-        lines.append(f"{i1}/**")
-        for doc_line in node.doc.splitlines():
-            safe_doc_line = doc_line.replace("*/", "*\\/")
-            lines.append(
-                f"{i1} * {safe_doc_line}" if safe_doc_line else f"{i1} *"
-            )
-        lines.append(f"{i1} */")
+        lines.extend(format_jsdoc(node.doc, i1))
     lines.append(f"{i1}/**")
     for p in sorted(spec.placeholders, key=lambda p: p.is_optional):
         t = _JS_PRIM_JSDOC[p.type_name]
@@ -595,15 +595,8 @@ def emit_method_fetch(
     fetch_fn = http.fetch_fn_name
 
     lines: list[str] = []
-    doc = getattr(node, "doc", "")
-    if doc:
-        lines.append(f"{i1}/**")
-        for doc_line in doc.splitlines():
-            safe_doc_line = doc_line.replace("*/", "*\\/")
-            lines.append(
-                f"{i1} * {safe_doc_line}" if safe_doc_line else f"{i1} *"
-            )
-        lines.append(f"{i1} */")
+    if node.doc:
+        lines.extend(format_jsdoc(node.doc, i1))
     lines.extend(
         [
             f"{i1}static async {method_name}(client{ph_param}, opts = {{}}) {{",
@@ -663,17 +656,11 @@ def emit_matcher_list_def(node: MatcherListDef) -> list[str]:
     """
     var = f"_{to_snake_case(node.struct_name)}Matchers"
     lines = [f"const {var} = ["]
-    module = find_enclosing_module(node)
-    definitions = (
-        {n.name: n for n in module.body if isinstance(n, JsonDef)}
-        if module is not None
-        else {}
-    )
     for e in node.entries:
         check = render_js_condition_check(e.required_keys, e.conditions)
         check_arg = check if check else "null"
         proj_fn = None
-        if e.error_schema and e.error_schema in definitions:
+        if resolve_json_def(node, e.error_schema) is not None:
             proj_fn = js_json_projector_name(e.error_schema)
         value_expr = f"{proj_fn}(_b)" if proj_fn is not None else "_b"
         lines.append(

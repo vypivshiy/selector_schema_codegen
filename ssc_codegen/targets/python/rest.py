@@ -8,7 +8,6 @@ Called by PythonVisitor via thin delegate methods.  The HTTP library strategy
 from __future__ import annotations
 
 import inspect
-from typing import cast
 
 from ssc_codegen.ast import (
     JsonDef,
@@ -20,7 +19,6 @@ from ssc_codegen.ast import (
     PlaceholderTemplate,
     ResultAliasDef,
     ResultVariantDef,
-    StructBase,
 )
 from ssc_codegen.ast.struct import RequestHttp
 from ssc_codegen.naming import (
@@ -32,11 +30,11 @@ from ssc_codegen.request_spec import parse_json_template
 from ssc_codegen.targets.python.http_libs.base import HttpLibStrategy
 from ssc_codegen.traversal.context import WalkContext
 from ssc_codegen.traversal.utils import (
-    find_enclosing_module,
     module_has_fetch,
     module_has_html_struct,
     module_has_rest,
     module_uses_http,
+    resolve_json_def,
 )
 
 
@@ -187,13 +185,10 @@ def render_body(spec: RequestHttp) -> tuple[str, str] | None:
     """
     if spec.body_kind == "empty" or spec.payload is None:
         return None
-    if spec.body_kind == "json":
-        assert isinstance(spec.payload, PlaceholderTemplate)
-        return ("json", render_json_body(spec.payload))
-    if spec.body_kind == "form":
-        assert isinstance(spec.payload, dict)
+    if isinstance(spec.payload, dict):
         return ("data", render_dict(spec.payload))
-    assert isinstance(spec.payload, PlaceholderTemplate)
+    if spec.body_kind == "json":
+        return ("json", render_json_body(spec.payload))
     return ("data", render_value(spec.payload))
 
 
@@ -270,16 +265,6 @@ def render_py_condition_lambda(
 _RUNTIME_HTML_EXPORT_NAMES: list[str] = [
     "UNMATCHED_TABLE_ROW",
     "UnmatchedTableRow",
-]
-
-_RUNTIME_REST_EXPORT_NAMES: list[str] = [
-    "Ok",
-    "Err",
-    "UnknownErr",
-    "TransportErr",
-    "ErrMatcher",
-    "ssc_rest_call",
-    "ssc_rest_call_async",
 ]
 
 _RUNTIME_JSON_EXPORT_NAMES: list[str] = [
@@ -418,8 +403,11 @@ def _render_dsl_kw(spec: RequestHttp) -> str:
         str: Unpacked keyword argument expression (`**kwargs` or `**ssc_merge_kwargs(...)`).
     """
     entries: list[str] = []
-    for attr in ("headers", "cookies", "params"):
-        d = getattr(spec, attr)
+    for attr, d in (
+        ("headers", spec.headers),
+        ("cookies", spec.cookies),
+        ("params", spec.params),
+    ):
         if d:
             entries.append(f"{attr!r}: {render_dict(d)}")
     body_result = render_body(spec)
@@ -449,8 +437,7 @@ def emit_method_fetch(
         list[str]: Generated Python method lines.
     """
     spec = node.http_request.with_renamed_placeholders(to_snake_case)
-    assert node.parent is not None
-    struct_name = to_pascal_case(cast(StructBase, node.parent).name)
+    struct_name = to_pascal_case(node.struct.name)
     suffix = ("_" + to_snake_case(node.name)) if node.name else ""
     ph_params = placeholder_params(spec)
     ph_kwargs = placeholder_args(spec)
@@ -545,8 +532,7 @@ def emit_method_rest(
         list[str]: Generated Python method lines.
     """
     spec = node.http_request.with_renamed_placeholders(to_snake_case)
-    struct = node.parent
-    assert isinstance(struct, StructBase)
+    struct = node.struct
     method_name = to_snake_case(node.name) if node.name else "fetch"
     ret_type = node.result_alias_name or "None"
     ph_params = placeholder_params(spec)
@@ -561,13 +547,9 @@ def emit_method_rest(
     kw_expr = _render_dsl_kw(spec)
 
     value_kwarg: list[str] = []
-    module = find_enclosing_module(node)
-    has_response_schema = False
-    if node.response_schema and isinstance(module, Module):
-        has_response_schema = any(
-            isinstance(n, JsonDef) and n.name == node.response_schema
-            for n in module.body
-        )
+    has_response_schema = (
+        resolve_json_def(node, node.response_schema) is not None
+    )
 
     if node.response_path:
         accessor = "".join(f"[{p!r}]" for p in node.response_path.split("."))
@@ -671,17 +653,11 @@ def emit_matcher_list_def(node: MatcherListDef) -> list[str]:
     """
     var = f"{to_snake_case(node.struct_name).upper()}_MATCHERS"
     lines = [f"{var}: List[ErrMatcher] = ["]
-    module = find_enclosing_module(node)
-    definitions = (
-        {n.name: n for n in module.body if isinstance(n, JsonDef)}
-        if isinstance(module, Module)
-        else {}
-    )
     for e in node.entries:
         check = render_py_condition_lambda(e.required_keys, e.conditions)
         check_arg = check if check else "None"
         factory = e.factory_name
-        if e.error_schema and e.error_schema in definitions:
+        if resolve_json_def(node, e.error_schema) is not None:
             factory = (
                 f"lambda headers, value: {e.factory_name}(headers=headers, "
                 f"value={python_json_projector_name(e.error_schema)}(value))"

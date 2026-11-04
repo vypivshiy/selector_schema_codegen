@@ -25,6 +25,7 @@ from ssc_codegen.naming import to_pascal_case, to_snake_case
 from ssc_codegen.request_spec import parse_json_template
 from ssc_codegen.symbols import RUST_RESERVED
 from ssc_codegen.traversal.context import WalkContext
+from ssc_codegen.traversal.utils import resolve_json_def
 
 if TYPE_CHECKING:
     from ssc_codegen.ast.struct import RequestHttp
@@ -479,8 +480,7 @@ def emit_method_fetch(
     spec: RequestHttp = node.http_request.with_renamed_placeholders(
         to_snake_case
     )
-    parent = node.parent
-    assert isinstance(parent, StructBase)
+    parent = node.struct
     struct_name = _pascal(parent.name)
     method_name = f"fetch_{to_snake_case(node.name)}" if node.name else "fetch"
     context = f"{struct_name}.{method_name}"
@@ -489,7 +489,7 @@ def emit_method_fetch(
     i1 = "    "
     i2 = "        "
     lines: list[str] = []
-    if getattr(node, "doc", ""):
+    if node.doc:
         for doc_line in node.doc.splitlines():
             lines.append(f"{i1}// {doc_line}" if doc_line else f"{i1}//")
     lines.append(
@@ -799,8 +799,7 @@ def emit_method_rest(
     spec: RequestHttp = node.http_request.with_renamed_placeholders(
         to_snake_case
     )
-    parent = node.parent
-    assert isinstance(parent, StructBase)
+    parent = node.struct
     struct_name = parent.name
     struct_pascal = _pascal(struct_name)
     struct_snake = to_snake_case(struct_name)
@@ -809,13 +808,11 @@ def emit_method_rest(
     context = f"{struct_pascal}.{method_name}"
     params = placeholder_params(spec)
 
+    json_def = resolve_json_def(node, node.response_schema)
+    is_array = json_def is not None and json_def.is_array
     if node.response_schema:
         s_pascal = f"{_pascal(node.response_schema)}Json"
-        ok_type = (
-            f"Vec<{s_pascal}>"
-            if getattr(node, "response_is_array", False)
-            else s_pascal
-        )
+        ok_type = f"Vec<{s_pascal}>" if is_array else s_pascal
     else:
         ok_type = "()"
 
@@ -837,7 +834,6 @@ def emit_method_rest(
         )
     else:
         s_pascal = f"{_pascal(node.response_schema)}Json"
-        is_array = getattr(node, "response_is_array", False)
         path_opt = (
             f"Some({_str(node.response_path)})"
             if node.response_path

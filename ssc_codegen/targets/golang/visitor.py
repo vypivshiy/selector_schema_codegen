@@ -59,6 +59,7 @@ from ssc_codegen.ast import (
     MethodRest,
     Module,
     Nested,
+    Node,
     NormalizeSpace,
     PredAttrContains,
     PredAttrEnds,
@@ -164,9 +165,13 @@ from ssc_codegen.targets.golang.runtime import (
 from ssc_codegen.traversal.context import WalkContext
 from ssc_codegen.traversal.utils import (
     classify_gjson_path,
+    find_enclosing_module,
     find_predicate_container,
+    is_return_after_fallback,
     module_has_html_struct,
     module_uses_http,
+    resolve_location,
+    resolve_source_file,
 )
 from ssc_codegen.traversal.walker import BaseWalker
 
@@ -216,19 +221,6 @@ def _go_zero(go_type: str) -> str:
         return "nil"
     # struct types — zero value via composite literal.
     return f"{go_type}{{}}"
-
-
-def _in_table_field(node) -> bool:
-    """True if ``node`` is inside a TABLE struct's field body."""
-    current = node.parent
-    seen_field = False
-    while current is not None:
-        if isinstance(current, Field):
-            seen_field = True
-        if seen_field and isinstance(current, StructBase):
-            return current.type == ST.TABLE
-        current = current.parent
-    return False
 
 
 def _gofmt(source: str) -> str:
@@ -567,7 +559,6 @@ class GoVisitor(BaseWalker):
         """
         self.var_name = var_name
         self.indent = indent
-        self._file_providers: dict[str, Any] = {}
         self._all_std_defs: dict[str, tuple[list[str], str]] = {}
         self._all_std_imports: list[str] = []
         self._has_rest: bool = False
@@ -585,17 +576,6 @@ class GoVisitor(BaseWalker):
         return WalkContext(
             var_name=self.var_name, indent_char=self.indent, meta=dict(meta)
         )
-
-    # === FILE PROVIDERS ===
-
-    def file(self, filename: str):
-        """Decorator for registering companion file generator functions."""
-
-        def decorator(fn):
-            self._file_providers[filename] = fn
-            return fn
-
-        return decorator
 
     # === PUBLIC API ===
 
@@ -640,10 +620,7 @@ class GoVisitor(BaseWalker):
                 self._all_std_imports.append(imp)
         if module_uses_http(module_ast):
             self._has_rest = True
-        out: dict[str, str] = {"": _gofmt("\n".join(lines))}
-        for fname, provider in self._file_providers.items():
-            out[fname] = provider(module_ast, ctx.meta)
-        return out
+        return {"": _gofmt("\n".join(lines))}
 
     def _walk_module(self, module_ast: Module, ctx: WalkContext) -> list[str]:
         lines: list[str] = list(self.visit_module(module_ast, ctx))
@@ -980,8 +957,6 @@ class GoVisitor(BaseWalker):
         if node.typedef.struct_type in (ST.DICT, ST.FLAT, ST.TABLE, ST.REST):
             return []
         field_name = _go_field_name(node.name)
-        if node.typedef.struct_type == ST.TABLE and field_name == "Value":
-            return []
         go_type = self._resolve_typedef_field_type(node)
         tag = _json_tag(node.name)
         omitempty = (
@@ -1006,21 +981,18 @@ class GoVisitor(BaseWalker):
 
     # === STRUCT ===
 
-    def _collect_init_fields(
-        self, node: StructBase
-    ) -> list[tuple[str, str, str]]:
-        """Return [(camelName, goType, jsonTag), ...] for init fields.
+    def _collect_init_fields(self, node: StructBase) -> list[tuple[str, str]]:
+        """Return [(camelName, goType), ...] for init fields.
 
         InitField nodes are siblings of Init in the struct body
         (Init.body only contains InitFieldCall assignments).
         """
-        result: list[tuple[str, str, str]] = []
+        result: list[tuple[str, str]] = []
         for child in node.body:
             if isinstance(child, InitField):
                 cn = to_camel_case(child.name)
                 gt = self._resolve_type(child.ret_type_info)
-                jt = _json_tag(child.name)
-                result.append((cn, gt, jt))
+                result.append((cn, gt))
         return result
 
     def visit_struct(self, node: Struct, ctx: WalkContext) -> list[str]:
@@ -1072,14 +1044,13 @@ class GoVisitor(BaseWalker):
         sel_type = "string" if is_raw else "*goquery.Selection"
         lines.append(f"\tsel {sel_type}")
         init_fields = self._collect_init_fields(node)
-        for cn, gt, _ in init_fields:
+        for cn, gt in init_fields:
             lines.append(f"\t{cn} {gt}")
         lines.append("}")
         lines.append("")
 
         # Constructor (HTML string → parsed struct)
-        if not isinstance(node, StructRest):
-            lines.extend(self._emit_constructor(name, rcv, node, ctx))
+        lines.extend(self._emit_constructor(name, rcv, node, ctx))
 
         return lines
 
@@ -1190,23 +1161,23 @@ class GoVisitor(BaseWalker):
         lines.append("")
         return lines
 
-    def _nested_struct_ret_type(self, struct_name: str, nested_node) -> str:
+    def _nested_struct_ret_type(
+        self, struct_name: str, nested_node: Node
+    ) -> str:
         """Resolve Go return type for a Nested call by looking up struct type."""
-        p = nested_node.parent
-        while p and not isinstance(p, Module):
-            p = p.parent
-        if isinstance(p, Module):
-            for child in p.body:
+        mod = find_enclosing_module(nested_node)
+        if mod is not None:
+            for child in mod.body:
                 if isinstance(child, StructBase) and child.name == struct_name:
                     gt = to_pascal_case(struct_name) + "Type"
-                    st = getattr(child, "type", None)
+                    st = child.type
                     if st == ST.FLAT:
                         return "[]string"
                     if st == ST.LIST:
                         return "[]" + gt
                     return gt
         gt = to_pascal_case(struct_name) + "Type"
-        bc_arr = getattr(nested_node, "is_array", False)
+        bc_arr = nested_node.ret_type_info.is_array
         return ("[]" + gt) if bc_arr else gt
 
     def _resolve_field_ret_type(self, node: Field) -> str:
@@ -1217,18 +1188,19 @@ class GoVisitor(BaseWalker):
         with concrete type info.
         """
         for child in reversed(node.body):
-            ti = getattr(child, "ret_type_info", None)
-            if ti and ti.base not in (VT.AUTO, VT.NULL):
+            ti = child.ret_type_info
+            if ti.base not in (VT.AUTO, VT.NULL):
                 if ti.base == VT.NESTED:
                     for bc in node.body:
-                        sn = ti.ref or getattr(bc, "struct_name", None)
+                        sn = ti.ref or (
+                            bc.struct_name if isinstance(bc, Nested) else None
+                        )
                         if sn:
                             return self._nested_struct_ret_type(sn, bc)
                 if ti.base == VT.JSON and not ti.ref:
                     for bc in node.body:
-                        sn = getattr(bc, "schema_name", None)
-                        if sn:
-                            gt = to_pascal_case(sn) + "Json"
+                        if isinstance(bc, Jsonify) and bc.schema_name:
+                            gt = to_pascal_case(bc.schema_name) + "Json"
                             return ("[]" + gt) if ti.is_array else gt
                 return self._resolve_type(ti)
         return self._resolve_type(node.ret_type_info)
@@ -1774,8 +1746,8 @@ class GoVisitor(BaseWalker):
     def visit_re(self, node: Re, ctx: WalkContext) -> list[str]:
         fn = "stdReSearchArr" if node.ret_type_info.is_array else "stdReSearch"
         self._require(fn)
-        location = self._resolve_location(node)
-        src_file = self._resolve_source_file(node)
+        location = resolve_location(node)
+        src_file = resolve_source_file(node)
         span = node.span
         src_line = span.start.line if span else 0
         src_col = span.start.column if span else 0
@@ -1904,12 +1876,7 @@ class GoVisitor(BaseWalker):
     def visit_return(self, node: Return, ctx: WalkContext) -> list[str]:
         if isinstance(node.parent, PreValidate):
             return [f"{ctx.indent}return"]
-        body = getattr(node.parent, "body", None) or []
-        try:
-            idx = body.index(node)
-        except ValueError:
-            idx = -1
-        if idx > 0 and isinstance(body[idx - 1], Fallback):
+        if is_return_after_fallback(node):
             return []
         return [f"{ctx.indent}return {ctx.prv}"]
 
@@ -1965,8 +1932,7 @@ class GoVisitor(BaseWalker):
     def visit_filter(self, node: Filter, ctx: WalkContext) -> list[str]:
         expr = self._cond_expr(node, ctx)
         i1, i2 = ctx.indent, ctx.deeper().indent
-        at = getattr(node, "accept_type_info", None)
-        if at and at.base == VT.DOCUMENT:
+        if node.accept_type_info.base == VT.DOCUMENT:
             return [
                 f"{i1}{ctx.nxt} := {ctx.prv}.FilterFunction(func(_ int, i *goquery.Selection) bool {{",
                 f"{i2}return {expr}",
@@ -1981,34 +1947,7 @@ class GoVisitor(BaseWalker):
             f"{i1}}}",
         ]
 
-    def _resolve_location(self, node) -> str:
-        struct_name = ""
-        field_part = ""
-        current = node.parent
-        while current is not None:
-            if isinstance(current, PreValidate) and not field_part:
-                field_part = "@pre-validate"
-            elif isinstance(current, (Field, Key, Value)) and not field_part:
-                field_part = getattr(current, "name", "") or (
-                    "value" if isinstance(current, Value) else "key"
-                )
-            if isinstance(current, StructBase):
-                struct_name = to_pascal_case(current.name)
-                break
-            current = current.parent
-        if field_part:
-            return f"{struct_name}.{field_part}" if struct_name else field_part
-        return struct_name
-
-    def _resolve_source_file(self, node) -> str:
-        current = node
-        while current is not None:
-            if isinstance(current, Module):
-                return current.source_file
-            current = current.parent
-        return ""
-
-    def _enclosing_struct_name(self, node) -> str:
+    def _enclosing_struct_name(self, node: Node) -> str:
         current = node.parent
         while current is not None:
             if isinstance(current, StructBase):
@@ -2016,19 +1955,18 @@ class GoVisitor(BaseWalker):
             current = current.parent
         return "X"
 
-    def _resolve_fallback_type(self, node) -> str:
+    def _resolve_fallback_type(self, node: Fallback) -> str:
         """Determine the Go return type for a Fallback closure.
 
         Prefers the inferred type from the fallback body's last operation.
         Falls back to the enclosing field's declared return type.
         """
-        if node.ret_type_info and node.ret_type_info.is_optional:
+        if node.ret_type_info.is_optional:
             return self._resolve_type(node.ret_type_info)
         if node.body:
             last = node.body[-1]
-            for attr in ("ret_type_info", "accept_type_info"):
-                ti = getattr(last, attr, None)
-                if ti and ti.base not in (VT.AUTO, VT.NULL):
+            for ti in (last.ret_type_info, last.accept_type_info):
+                if ti.base not in (VT.AUTO, VT.NULL):
                     return self._resolve_type(ti)
         current = node.parent
         while current is not None:
@@ -2038,12 +1976,12 @@ class GoVisitor(BaseWalker):
         return "string"
 
     def visit_assert(self, node: Assert, ctx: WalkContext) -> list[str]:
-        location = self._resolve_location(node)
+        location = resolve_location(node)
         if node.message:
             msg = node.message
         else:
             loc_str = f" at {location}" if location else ""
-            src_file = self._resolve_source_file(node)
+            src_file = resolve_source_file(node)
             span = node.span
             src_line = span.start.line if span else 0
             src_col = span.start.column if span else 0
@@ -2109,13 +2047,15 @@ class GoVisitor(BaseWalker):
             return getattr(container, "_local_name", "i")
         return "v"
 
-    def _pred_text_target(self, node, ctx: WalkContext) -> str:
+    def _pred_text_target(self, node: Node, ctx: WalkContext) -> str:
         target = self._pred_target(node)
         container = find_predicate_container(node)
-        if target == "i" and isinstance(container, Filter):
-            at = getattr(container, "accept_type_info", None)
-            if at and at.base == VT.DOCUMENT:
-                return "i.Text()"
+        if (
+            target == "i"
+            and isinstance(container, Filter)
+            and container.accept_type_info.base == VT.DOCUMENT
+        ):
+            return "i.Text()"
         return target
 
     def _any_of(self, fmt: str, target: str, values) -> str:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import shutil
 import subprocess
 from typing import Any, ClassVar
@@ -44,6 +43,7 @@ from ssc_codegen.ast import (
     MethodRest,
     Module,
     Nested,
+    Node,
     NormalizeSpace,
     PredAttrContains,
     PredAttrEnds,
@@ -121,40 +121,25 @@ from ssc_codegen.ast import (
 )
 from ssc_codegen.exceptions import BuildTimeError
 from ssc_codegen.generation.builder import ModuleBuilder
-from ssc_codegen.naming import to_pascal_case, to_snake_case
-from ssc_codegen.symbols import RUST_RESERVED
 from ssc_codegen.targets.rust import rest
 from ssc_codegen.targets.rust.regex import (
     rust_replacement,
     validate_rust_pattern,
+)
+from ssc_codegen.targets.rust.rest import (
+    _ident,
+    _pascal,
+    _str,
 )
 from ssc_codegen.targets.rust.runtime import rust_runtime_content
 from ssc_codegen.traversal.context import WalkContext
 from ssc_codegen.traversal.utils import (
     classify_gjson_path,
     find_predicate_container,
+    is_return_after_fallback,
     module_uses_http,
 )
 from ssc_codegen.traversal.walker import BaseWalker
-
-_RUST_KEYWORDS = RUST_RESERVED
-
-
-def _str(value: object) -> str:
-    """Render a Rust string literal."""
-    return json.dumps(str(value), ensure_ascii=False)
-
-
-def _ident(value: str) -> str:
-    """Render a DSL identifier as a valid Rust identifier."""
-    name = to_snake_case(value).replace("-", "_") or "value"
-    return f"r#{name}" if name in _RUST_KEYWORDS else name
-
-
-def _pascal(value: str) -> str:
-    """Render a generated Rust type name."""
-    name = to_pascal_case(value).replace("-", "") or "Value"
-    return f"R#{name}" if name in _RUST_KEYWORDS else name
 
 
 def _rust_key_type(info: TypeInfo | None) -> str:
@@ -229,8 +214,6 @@ class RustVisitor(BaseWalker):
     DOCUMENT_ARRAY_TYPE = "rt::Nodes"
     ARRAY_TYPE_FMT = "Vec<{}>"
     OPTIONAL_TYPE_FMT = "Option<{}>"
-    OPTIONAL_ON_OMITEMPTY = True
-    AND_OP = "&&"
 
     def __init__(self, var_name: str = "v", indent: str = "    ") -> None:
         """Initialize a Rust visitor."""
@@ -341,8 +324,8 @@ class RustVisitor(BaseWalker):
     def _line(self, ctx: WalkContext, expression: str) -> str:
         return f"{ctx.indent}{expression}"
 
-    def _context(self, node: Any) -> str:
-        current = node
+    def _context(self, node: Node) -> str:
+        current: Node | None = node
         field = ""
         struct = ""
         while current is not None:
@@ -350,29 +333,29 @@ class RustVisitor(BaseWalker):
                 isinstance(current, (Field, InitField, CheckMethod))
                 and not field
             ):
-                field = getattr(current, "name", "") or "check"
+                field = current.name or "check"
             if isinstance(current, FunctionDef):
                 return current.name or "fn"
             if isinstance(current, StructBase):
                 struct = current.name
                 break
-            current = getattr(current, "parent", None)
+            current = current.parent
         return f"{struct}.{field}" if struct and field else struct or "pipeline"
 
-    def _is_in_function(self, node: Any) -> bool:
-        current = node
+    def _is_in_function(self, node: Node) -> bool:
+        current: Node | None = node
         while current is not None:
             if isinstance(current, FunctionDef):
                 return True
             if isinstance(current, StructBase):
                 return False
-            current = getattr(current, "parent", None)
+            current = current.parent
         return False
 
-    def _dom_ref(self, node: Any) -> str:
+    def _dom_ref(self, node: Node) -> str:
         return "&dom" if self._is_in_function(node) else "&self.dom"
 
-    def _dom_clone(self, node: Any) -> str:
+    def _dom_clone(self, node: Node) -> str:
         return (
             "dom.clone()" if self._is_in_function(node) else "self.dom.clone()"
         )
@@ -417,27 +400,27 @@ class RustVisitor(BaseWalker):
     def _field_type(self, node: Field | TypeDefField) -> str:
         if isinstance(node, Field):
             for child in reversed(node.body):
-                info = getattr(child, "ret_type_info", None)
-                if info and info.base not in (VT.AUTO, VT.NULL):
+                info = child.ret_type_info
+                if info.base not in (VT.AUTO, VT.NULL):
                     return self._type(info, field=True)
         return self._type(node.ret_type_info, field=True)
 
-    def _enclosing_struct(self, node: Any) -> StructBase | None:
-        current = getattr(node, "parent", None)
+    def _enclosing_struct(self, node: Node) -> StructBase | None:
+        current = node.parent
         while current is not None:
             if isinstance(current, StructBase):
                 return current
-            current = getattr(current, "parent", None)
+            current = current.parent
         return None
 
-    def _is_raw(self, node: Any) -> bool:
-        current = node
+    def _is_raw(self, node: Node) -> bool:
+        current: Node | None = node
         while current is not None:
             if isinstance(current, StructBase):
                 return isinstance(current, Struct) and current.type == ST.RAW
             if isinstance(current, FunctionDef):
                 return current.is_raw
-            current = getattr(current, "parent", None)
+            current = current.parent
         return False
 
     # === module and declarations ==========================================
@@ -958,24 +941,17 @@ class RustVisitor(BaseWalker):
             remaining_nodes = [
                 n for n in node.body[1:] if not isinstance(n, Return)
             ]
-        elif (
-            node.body
-            and isinstance(node.body[0], Fallback)
-            and node.body[0].body
-            and isinstance(node.body[0].body[0], Match)
-        ):
-            fb_node = node.body[0]
-            first_child = fb_node.body[0]
-            assert isinstance(first_child, Match)
-            match_node = first_child
-            remaining_nodes = [
-                n for n in fb_node.body[1:] if not isinstance(n, Return)
-            ]
         elif node.body and isinstance(node.body[0], Fallback):
             fb_node = node.body[0]
-            remaining_nodes = [
-                n for n in fb_node.body if not isinstance(n, Return)
-            ]
+            if fb_node.body and isinstance(fb_node.body[0], Match):
+                match_node = fb_node.body[0]
+                remaining_nodes = [
+                    n for n in fb_node.body[1:] if not isinstance(n, Return)
+                ]
+            else:
+                remaining_nodes = [
+                    n for n in fb_node.body if not isinstance(n, Return)
+                ]
         else:
             remaining_nodes = [
                 n for n in node.body if not isinstance(n, Return)
@@ -1070,7 +1046,9 @@ class RustVisitor(BaseWalker):
     def visit_table_rows(self, node: TableRows, ctx: WalkContext) -> list[str]:
         return self._pipeline_fn(node, ctx, "table_rows")
 
-    def _pipeline_fn(self, node: Any, ctx: WalkContext, name: str) -> list[str]:
+    def _pipeline_fn(
+        self, node: Node, ctx: WalkContext, name: str
+    ) -> list[str]:
         arg = "String" if self._is_raw(node) else "rt::Nodes"
         lines = [
             f"    fn {name}(&mut self, v: {arg}) -> Result<{self._type(node.ret_type_info)}, rt::SscError> {{"
@@ -1086,12 +1064,7 @@ class RustVisitor(BaseWalker):
     def visit_return(self, node: Return, ctx: WalkContext) -> list[str]:
         if isinstance(node.parent, PreValidate):
             return [self._line(ctx, "return Ok(());")]
-        body = getattr(node.parent, "body", [])
-        try:
-            index = body.index(node)
-        except ValueError:
-            index = -1
-        if index > 0 and isinstance(body[index - 1], Fallback):
+        if is_return_after_fallback(node):
             return []
         return [self._line(ctx, f"return Ok({ctx.prv});")]
 
@@ -1206,7 +1179,7 @@ class RustVisitor(BaseWalker):
             self._line(ctx, f"let {ctx.nxt} = {ctx.prv}.clone();"),
         ]
 
-    def _xpath(self, node: Any, ctx: WalkContext) -> list[str]:
+    def _xpath(self, node: Node, ctx: WalkContext) -> list[str]:
         raise BuildTimeError(
             f"Rust target does not support XPath operation '{type(node).__name__}'; use CSS selectors"
         )
@@ -1265,7 +1238,7 @@ class RustVisitor(BaseWalker):
         ]
 
     def _string_call(
-        self, node: Any, ctx: WalkContext, function: str, *args: str
+        self, node: Node, ctx: WalkContext, function: str, *args: str
     ) -> list[str]:
         suffix = ", " + ", ".join(args) if args else ""
         if node.ret_type_info.is_array:
@@ -1506,13 +1479,13 @@ class RustVisitor(BaseWalker):
 
     # === predicates ========================================================
 
-    def _predicate_target(self, node: Any) -> str:
+    def _predicate_target(self, node: Node) -> str:
         container = find_predicate_container(node)
         local = self._predicate_locals.get(id(container))
         if local is not None:
             local_name, is_document = local
             return f"&{local_name}" if is_document else local_name
-        info = getattr(container, "accept_type_info", None)
+        info = container.accept_type_info if container is not None else None
         if isinstance(container, Filter):
             return (
                 "&i" if info is not None and info.base == VT.DOCUMENT else "i"
@@ -1537,7 +1510,7 @@ class RustVisitor(BaseWalker):
             else "(" + " && ".join(expressions) + ")"
         )
 
-    def _cond_expr(self, node: Any, ctx: WalkContext) -> str:
+    def _cond_expr(self, node: Node, ctx: WalkContext) -> str:
         parts = []
         for line in self.walk_children(node, ctx):
             part = line.strip()
@@ -1636,14 +1609,26 @@ class RustVisitor(BaseWalker):
         return self._xpath(node, ctx)
 
     def _attr_pred(
-        self, node: Any, ctx: WalkContext, operation: str
+        self,
+        node: (
+            PredAttrEq
+            | PredAttrNe
+            | PredAttrStarts
+            | PredAttrEnds
+            | PredAttrContains
+            | PredAttrRe
+        ),
+        ctx: WalkContext,
+        operation: str,
     ) -> list[str]:
-        if operation == "re":
-            validate_rust_pattern(node.pattern)
         target = self._predicate_target(node)
         dom = self._dom_ref(node)
         attr = f"rt::pred_attr({dom}, {target}, {_str(node.name)}).unwrap_or_default()"
-        values = [_str(value) for value in getattr(node, "values", ())]
+        if isinstance(node, PredAttrRe):
+            validate_rust_pattern(node.pattern)
+            expr = f"rt::regex_match(&{attr}, {_str(node.pattern)})"
+            return self._pred_line(expr, ctx)
+        values = [_str(value) for value in node.values]
         if operation == "eq":
             expr = self._or([f"{attr} == {value}" for value in values])
         elif operation == "ne":
@@ -1654,12 +1639,10 @@ class RustVisitor(BaseWalker):
             )
         elif operation == "ends":
             expr = self._or([f"rt::ends(&{attr}, {value})" for value in values])
-        elif operation == "contains":
+        else:
             expr = self._or(
                 [f"rt::contains(&{attr}, {value})" for value in values]
             )
-        else:
-            expr = f"rt::regex_match(&{attr}, {_str(node.pattern)})"
         return self._pred_line(expr, ctx)
 
     def visit_predicate_has_attr(
@@ -1706,21 +1689,31 @@ class RustVisitor(BaseWalker):
         return self._attr_pred(node, ctx, "re")
 
     def _text_pred(
-        self, node: Any, ctx: WalkContext, operation: str
+        self,
+        node: (
+            PredTextContains
+            | PredTextStarts
+            | PredTextEnds
+            | PredTextRe
+            | PredContains
+            | PredStarts
+            | PredEnds
+            | PredRe
+        ),
+        ctx: WalkContext,
+        operation: str,
     ) -> list[str]:
-        if operation == "re":
-            validate_rust_pattern(node.pattern)
         target = self._predicate_target(node)
         dom = self._dom_ref(node)
         if target.startswith("&"):
             value = f"rt::pred_text({dom}, {target})"
         else:
             value = target
-        values = (
-            [_str(item) for item in node.values]
-            if hasattr(node, "values")
-            else []
-        )
+        if isinstance(node, (PredTextRe, PredRe)):
+            validate_rust_pattern(node.pattern)
+            expr = f"rt::regex_match(&{value}, {_str(node.pattern)})"
+            return self._pred_line(expr, ctx)
+        values = [_str(item) for item in node.values]
         if operation == "contains":
             expr = self._or(
                 [f"rt::contains(&{value}, {item})" for item in values]
@@ -1729,10 +1722,8 @@ class RustVisitor(BaseWalker):
             expr = self._or(
                 [f"rt::starts(&{value}, {item})" for item in values]
             )
-        elif operation == "ends":
-            expr = self._or([f"rt::ends(&{value}, {item})" for item in values])
         else:
-            expr = f"rt::regex_match(&{value}, {_str(node.pattern)})"
+            expr = self._or([f"rt::ends(&{value}, {item})" for item in values])
         return self._pred_line(expr, ctx)
 
     def visit_predicate_text_contains(
@@ -1773,7 +1764,19 @@ class RustVisitor(BaseWalker):
     def visit_predicate_re(self, node: PredRe, ctx: WalkContext) -> list[str]:
         return self._text_pred(node, ctx, "re")
 
-    def _count_pred(self, node: Any, ctx: WalkContext, op: str) -> list[str]:
+    def _count_pred(
+        self,
+        node: (
+            PredCountEq
+            | PredCountGt
+            | PredCountLt
+            | PredCountNe
+            | PredCountGe
+            | PredCountLe
+        ),
+        ctx: WalkContext,
+        op: str,
+    ) -> list[str]:
         target = self._predicate_target(node)
         count = f"{target}.len()"
         return self._pred_line(f"{count} {op} {node.value}", ctx)

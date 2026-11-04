@@ -6,8 +6,6 @@ both ``visitor.py`` and ``rest.py``.
 
 from __future__ import annotations
 
-from typing import Any
-
 
 def go_str(s: str) -> str:
     """Go double-quoted string literal with proper escaping."""
@@ -19,19 +17,6 @@ def go_str(s: str) -> str:
         .replace("\r", "\\r")
     )
     return f'"{escaped}"'
-
-
-def go_literal(value: Any) -> str:
-    """Render a Python value as a Go literal."""
-    if value is None:
-        return "nil"
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, int):
-        return str(value)
-    if isinstance(value, float):
-        return repr(value)
-    return go_str(str(value))
 
 
 def go_str_array(values) -> str:

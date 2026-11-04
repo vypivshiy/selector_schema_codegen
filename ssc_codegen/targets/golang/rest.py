@@ -20,7 +20,6 @@ from ssc_codegen.ast import (
     ResultAliasDef,
     ResultVariantDef,
     Struct,
-    StructBase,
 )
 from ssc_codegen.ast import (
     StructType as ST,
@@ -31,6 +30,7 @@ from ssc_codegen.request_spec import parse_json_template
 from ssc_codegen.targets.golang.http_libs.base import GoHttpLibStrategy
 from ssc_codegen.targets.golang.literals import go_str as _go_str
 from ssc_codegen.traversal.context import WalkContext
+from ssc_codegen.traversal.utils import resolve_json_def
 
 # Go placeholder type mapping.
 _GO_PH_TYPES = {
@@ -179,18 +179,6 @@ def render_url_values(d: dict[str, PlaceholderTemplate]) -> str:
         )
         parts.append(f"{_go_str(k)}: []string{{{val}}}")
     return f"url.Values{{{', '.join(parts)}}}.Encode()"
-
-
-def render_form_body(body: dict[str, PlaceholderTemplate]) -> str:
-    """Render an `application/x-www-form-urlencoded` body via `url.Values.Encode()`.
-
-    Args:
-        body (dict[str, PlaceholderTemplate]): Form field templates keyed by field name.
-
-    Returns:
-        str: Go expression encoding the form fields.
-    """
-    return render_url_values(body)
 
 
 def render_full_url(spec: RequestHttp) -> str:
@@ -373,7 +361,7 @@ def _build_opts_inline(spec: RequestHttp) -> str:
             fields.append(f"Body: {body_expr}")
         elif isinstance(payload, dict):
             # form-urlencoded body — url.Values{...}.Encode()
-            fields.append(f"Body: {render_form_body(payload)}")
+            fields.append(f"Body: {render_url_values(payload)}")
     if has_headers:
         parts = []
         for k, tmpl in spec.headers.items():
@@ -408,8 +396,7 @@ def emit_method_fetch(
         list[str]: Generated Go function lines.
     """
     spec = node.http_request.with_renamed_placeholders(to_camel_case)
-    struct = node.parent
-    assert isinstance(struct, StructBase)
+    struct = node.struct
     name = to_pascal_case(struct.name)
     method_suffix = to_pascal_case(node.name) if node.name else "Fetch"
     func_name = f"New{name}{method_suffix}"
@@ -423,9 +410,8 @@ def emit_method_fetch(
     i2 = i1 + ctx.indent_char
 
     lines: list[str] = []
-    doc = getattr(node, "doc", "")
-    if doc:
-        for doc_line in doc.splitlines():
+    if node.doc:
+        for doc_line in node.doc.splitlines():
             lines.append(f"{i1}// {doc_line}" if doc_line else f"{i1}//")
 
     lines.extend(
@@ -469,8 +455,7 @@ def emit_method_rest(
         list[str]: Generated Go method lines.
     """
     spec = node.http_request.with_renamed_placeholders(to_camel_case)
-    struct = node.parent
-    assert isinstance(struct, StructBase)
+    struct = node.struct
     name = to_pascal_case(struct.name)
     method_name = to_pascal_case(node.name) if node.name else "Fetch"
     ph_params = placeholder_params(spec)
@@ -489,7 +474,8 @@ def emit_method_rest(
 
     if node.response_schema:
         schema_go = f"{to_pascal_case(node.response_schema)}Json"
-        if getattr(node, "response_is_array", False):
+        json_def = resolve_json_def(node, node.response_schema)
+        if json_def is not None and json_def.is_array:
             ret_type = f"[]{schema_go}"
             call_expr = (
                 f"sscRestCallSlice[{schema_go}](client, {matchers_var}, "

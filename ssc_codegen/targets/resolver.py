@@ -143,9 +143,6 @@ def _resolve_python(spec: TargetSpec) -> TargetProfile:
             "Use 'both', 'async', or a different HTTP client."
         )
 
-    if spec.separate_runtime and lib == "lxml":
-        pass  # supported, with fallback
-
     def _factory() -> PythonVisitor:
         return PythonVisitor(
             dom_spelling_cls=spelling_cls,

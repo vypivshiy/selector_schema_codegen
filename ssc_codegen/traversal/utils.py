@@ -11,21 +11,26 @@ from typing import Literal
 
 from ssc_codegen.ast import (
     Assert,
-    ErrorResponse,
+    Fallback,
+    Field,
     Filter,
     FunctionDef,
     JsonDef,
+    Key,
     Match,
     MethodBase,
     MethodFetch,
     Module,
     Node,
     PreValidate,
+    Return,
     Struct,
     StructBase,
     StructRest,
     StructType,
+    Value,
 )
+from ssc_codegen.naming import to_pascal_case
 
 
 def module_has_rest(module: Module) -> bool:
@@ -120,21 +125,67 @@ def module_is_extension_only(module: Module) -> bool:
     )
 
 
-def err_subclass_name(struct_name: str, err: ErrorResponse) -> str:
-    """Derive deterministic error-subclass name from struct name and error spec.
+def is_return_after_fallback(node: Return) -> bool:
+    """Check whether a `Return` node is immediately preceded by a `Fallback` sibling.
 
     Args:
-        struct_name: The name of the parent REST struct.
-        err: The `ErrorResponse` AST node specifying the HTTP status and type.
+        node: The `Return` AST node to inspect.
 
     Returns:
-        PascalCase error class name (e.g. ``"UserGetNotFoundError"``).
+        `True` if `node` sits in a parent `body` right after a `Fallback` node.
     """
-    from ssc_codegen.core.rest_artifacts import (
-        err_subclass_name as _impl,
-    )
+    if node.parent is None:
+        return False
+    body = node.parent.body
+    try:
+        idx = body.index(node)
+    except ValueError:
+        return False
+    return idx > 0 and isinstance(body[idx - 1], Fallback)
 
-    return _impl(struct_name, err)
+
+def resolve_location(node: Node) -> str:
+    """Walk the parent chain to build a ``{StructName}.{field_or_marker}`` label.
+
+    Args:
+        node: Starting AST node (such as `Assert` or `Re`).
+
+    Returns:
+        Language-agnostic location string used in default assertion and regex
+        error messages.
+    """
+    struct_name = ""
+    field_part = ""
+    current = node.parent
+    while current is not None:
+        if isinstance(current, PreValidate) and not field_part:
+            field_part = "@pre-validate"
+        elif isinstance(current, Field) and not field_part:
+            field_part = current.name or "key"
+        elif isinstance(current, Key) and not field_part:
+            field_part = "key"
+        elif isinstance(current, Value) and not field_part:
+            field_part = "value"
+        if isinstance(current, StructBase):
+            struct_name = to_pascal_case(current.name)
+            break
+        current = current.parent
+    if field_part:
+        return f"{struct_name}.{field_part}" if struct_name else field_part
+    return struct_name
+
+
+def resolve_source_file(node: Node) -> str:
+    """Walk the parent chain to the enclosing `Module` and return its `source_file`.
+
+    Args:
+        node: Starting AST node.
+
+    Returns:
+        The `source_file` string from the enclosing `Module`, or ``""``.
+    """
+    module = find_enclosing_module(node)
+    return module.source_file if module is not None else ""
 
 
 def find_predicate_container(node: Node) -> Node | None:

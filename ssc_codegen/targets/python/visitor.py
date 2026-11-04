@@ -50,7 +50,6 @@ from ssc_codegen.ast import (
     MethodRest,
     Module,
     Nested,
-    Node,
     NormalizeSpace,
     PredAttrContains,
     PredAttrEnds,
@@ -152,11 +151,14 @@ from ssc_codegen.traversal.context import WalkContext
 from ssc_codegen.traversal.utils import (
     classify_gjson_path,
     find_enclosing_module,
+    is_return_after_fallback,
     module_has_fetch,
     module_has_html_struct,
     module_has_rest,
     module_uses_http,
     resolve_json_def,
+    resolve_location,
+    resolve_source_file,
 )
 from ssc_codegen.traversal.walker import BaseWalker
 
@@ -476,7 +478,9 @@ class PythonVisitor(BaseWalker):
         """
         self.var_name = var_name
         self.indent = indent
-        self._dom_spelling_cls: type[DomSpelling] | None = dom_spelling_cls
+        self._dom_spelling_cls: type[DomSpelling] = (
+            dom_spelling_cls or Bs4DomSpelling
+        )
         self.bs4_parser = bs4_parser
         self.http_io = http_io
         self._file_providers: dict[str, Any] = {}
@@ -495,13 +499,12 @@ class PythonVisitor(BaseWalker):
             self.bs4_parser = bs4_parser
         if http_io is not None:
             self.http_io = http_io
-        if self._dom_spelling_cls is not None:
-            if issubclass(self._dom_spelling_cls, Bs4DomSpelling):
-                self._dom: DomSpelling = self._dom_spelling_cls(
-                    self._builder, parser=self.bs4_parser
-                )
-            else:
-                self._dom = self._dom_spelling_cls(self._builder)
+        if issubclass(self._dom_spelling_cls, Bs4DomSpelling):
+            self._dom: DomSpelling = self._dom_spelling_cls(
+                self._builder, parser=self.bs4_parser
+            )
+        else:
+            self._dom = self._dom_spelling_cls(self._builder)
 
     def _make_ctx(self, meta: dict) -> WalkContext:
         ctx_meta = dict(meta)
@@ -687,7 +690,7 @@ class PythonVisitor(BaseWalker):
         uses_http = module_uses_http(node)
         has_html = module_has_html_struct(node)
         runtime = ctx.meta.get("runtime_module")
-        if has_html:
+        if has_html and self._dom is not None:
             for line in self._dom.parser_imports:
                 self._builder.require_import(line)
         self._builder.require_import("import sys")
@@ -741,7 +744,7 @@ class PythonVisitor(BaseWalker):
             # All non-runtime imports must be emitted into the parser file.
             lines.extend(self._builder.imports)
             mod = node.parent
-            if isinstance(mod, Module) and hasattr(self, "_dom"):
+            if isinstance(mod, Module) and self._dom is not None:
                 need_fallback = any(
                     "FALLBACK_HTML_STR" in line
                     for line in self._dom.extra_utilities
@@ -760,7 +763,11 @@ class PythonVisitor(BaseWalker):
             )
             lines.append(f"from .{runtime} import " + ", ".join(names))
             lines.append("")
-            if isinstance(mod, Module) and module_has_html_struct(mod):
+            if (
+                isinstance(mod, Module)
+                and module_has_html_struct(mod)
+                and self._dom is not None
+            ):
                 for line in self._dom.extra_utilities:
                     if "FALLBACK_HTML_STR" not in line:
                         lines.append(line)
@@ -770,7 +777,7 @@ class PythonVisitor(BaseWalker):
         lines.append("")
         mod = node.parent
         has_html = isinstance(mod, Module) and module_has_html_struct(mod)
-        if has_html:
+        if has_html and self._dom is not None:
             lines.extend(
                 [
                     "class UnmatchedTableRow:",
@@ -1455,8 +1462,8 @@ class PythonVisitor(BaseWalker):
     # === REGEX ===
 
     def visit_re(self, node: Re, ctx: WalkContext) -> list[str]:
-        location = self._resolve_location(node)
-        src_file = self._resolve_source_file(node)
+        location = resolve_location(node)
+        src_file = resolve_source_file(node)
         span = node.span
         src_line = span.start.line if span else 0
         src_col = span.start.column if span else 0
@@ -1576,12 +1583,7 @@ class PythonVisitor(BaseWalker):
     def visit_return(self, node: Return, ctx: WalkContext) -> list[str]:
         if isinstance(node.parent, PreValidate):
             return [f"{ctx.indent}return"]
-        body = getattr(node.parent, "body", None) or []
-        try:
-            idx = body.index(node)
-        except ValueError:
-            idx = -1
-        if idx > 0 and isinstance(body[idx - 1], Fallback):
+        if is_return_after_fallback(node):
             return []
         return [f"{ctx.indent}return {ctx.prv}"]
 
@@ -1609,53 +1611,13 @@ class PythonVisitor(BaseWalker):
         lines.append(f"{ctx.indent}]")
         return lines
 
-    def _resolve_location(self, node: Node) -> str:
-        """Walk parent chain to find ``{StructName}.{field_or_marker}``.
-
-        Returns a language-agnostic location string used in default error
-        messages (Assert / Re). Reads raw KDL names (snake_case for fields,
-        pascal-case for struct class). For ``@pre-validate`` ancestors the
-        marker ``@pre-validate`` is used verbatim — matches the DSL syntax
-        and is stable across target languages.
-        """
-        from ssc_codegen.naming import to_pascal_case
-
-        struct_name = ""
-        field_part = ""
-        current = node.parent
-        # First pass: find immediate field-like ancestor (Field/Key/Value
-        # or PreValidate). Stop at first StructBase for struct name.
-        while current is not None:
-            if isinstance(current, PreValidate) and not field_part:
-                field_part = "@pre-validate"
-            elif isinstance(current, (Field, Key, Value)) and not field_part:
-                field_part = getattr(current, "name", "") or (
-                    "value" if isinstance(current, Value) else "key"
-                )
-            if isinstance(current, StructBase):
-                struct_name = to_pascal_case(current.name)
-                break
-            current = current.parent
-        if field_part:
-            return f"{struct_name}.{field_part}" if struct_name else field_part
-        return struct_name
-
-    def _resolve_source_file(self, node: Node) -> str:
-        """Walk parent chain to Module; return ``Module.source_file`` basename."""
-        current: Node | None = node
-        while current is not None:
-            if isinstance(current, Module):
-                return current.source_file
-            current = current.parent
-        return ""
-
     def visit_assert(self, node: Assert, ctx: WalkContext) -> list[str]:
-        location = self._resolve_location(node)
+        location = resolve_location(node)
         if node.message:
             msg = node.message
         else:
             loc_str = f" at {location}" if location else ""
-            src_file = self._resolve_source_file(node)
+            src_file = resolve_source_file(node)
             span = node.span
             src_line = span.start.line if span else 0
             src_col = span.start.column if span else 0
